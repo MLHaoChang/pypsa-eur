@@ -68,7 +68,7 @@ class WorkbookInputs:
     # The latest completed run's summary (`run_evidence.list_project_runs`), if any.
     run: dict | None = None
     # The base's sensitivity runs (`scenarios.gather_scenarios`), if it has any.
-    scenarios: Any = None
+    scenarios: scenarios.Scenarios | None = None
 
 
 @dataclass
@@ -78,7 +78,7 @@ class WorkbookContext:
     inputs: WorkbookInputs
     sheets: dict[str, list[str]] = field(default_factory=dict)
     # Every run, the base first (`scenarios.Run`).
-    runs: list = field(default_factory=list)
+    runs: list[scenarios.Run] = field(default_factory=list)
 
     def __getattr__(self, name):
         return getattr(self.inputs, name)

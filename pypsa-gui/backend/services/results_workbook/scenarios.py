@@ -28,7 +28,9 @@ from openpyxl.utils import get_column_letter
 
 from services.results_workbook import charts
 from services.results_workbook.cells import BOLD, formula, heading, put, width
-from services.results_workbook.overview import CASE_ROWS, OverviewFigures, overview_figures
+from services.results_workbook.overview import (
+    CASE_ROWS, RUN_THE_CASE, OverviewFigures, overview_figures,
+)
 
 __all__ = ["TITLE", "Run", "Scenarios", "gather_scenarios", "write_scenarios"]
 
@@ -59,10 +61,12 @@ class Scenarios:
     base_headline: dict | None = None
     # The open base differs from its saved run (the Compare-view rows read the saved one).
     base_unsaved: bool = False
+    # The base's own results are current (else no run is compared with it).
+    base_current: bool = True
 
 
-def _cases(base_project_id: str) -> tuple[list[tuple[Any, dict]], int]:
-    """([(case, spec)] the acting user may open, by name; count of the others)."""
+def _cases(base_project_id: str) -> tuple[Any, list[tuple[Any, dict]], int]:
+    """(base, [(case, spec)] the acting user may open, by name, count of the others)."""
     from fastapi import HTTPException
 
     from harness import sensitivity_comparison as sc
@@ -80,7 +84,7 @@ def _cases(base_project_id: str) -> tuple[list[tuple[Any, dict]], int]:
                 no_access += 1
                 continue
             cases.append((child, spec))
-    return sorted(cases, key=lambda pair: pair[0].name.lower()), no_access
+    return base, sorted(cases, key=lambda pair: pair[0].name.lower()), no_access
 
 
 def gather_scenarios(base_project_id: str, base_basis: dict, *,
@@ -93,7 +97,7 @@ def gather_scenarios(base_project_id: str, base_basis: dict, *,
     from harness import sensitivity_comparison as sc
     from services.finance.investment_case_runner import staleness
     from services.finance.report import load_ic_report
-    cases, no_access = _cases(base_project_id)
+    base, cases, no_access = _cases(base_project_id)
     if not cases and not no_access:
         return None
     shown, over_cap = cases[:sc.MAX_CASES], max(0, len(cases) - sc.MAX_CASES)
@@ -115,17 +119,11 @@ def gather_scenarios(base_project_id: str, base_basis: dict, *,
                 current, why = ic_key(ctx, result_df)
                 run.case_state = staleness(run.ic_report.model_dump(mode="json"), current, reason=why)
         runs.append(run)
-    base_read = sc._read(_base_project(base_project_id))
+    base_read = sc._read(base)
     return Scenarios(runs=runs, no_access=no_access, over_cap=over_cap,
                      base_headline=sc._values(base_read),
-                     base_unsaved=base_read["fingerprint"] != base_basis["fingerprint"])
-
-
-def _base_project(base_project_id: str):
-    from harness import sensitivity_comparison as sc
-    from services import chat_tools
-    with chat_tools._acting() as (db, user):
-        return sc._resolve(db, user, base_project_id)
+                     base_unsaved=base_read["fingerprint"] != base_basis["fingerprint"],
+                     base_current=bool(base_basis["ok"]))
 
 
 # ── the sheet ────────────────────────────────────────────────────────────
@@ -137,11 +135,17 @@ def _results_text(run: Run) -> str:
     return sc._not_comparable(run.name, run.reasons).split(": ", 1)[1]
 
 
+def _base_results_text(scen: Scenarios) -> str:
+    from harness import sensitivity_comparison as sc
+    return "current" if scen.base_current else (
+        f"{sc._BASE_REASONS['case_stale']}; no run is compared with it")
+
+
 def _case_text(run: Run) -> str:
     if run.reasons:
         return "not compared"
     if run.ic_report is None:
-        return "none: run the investment case"
+        return f"none: {RUN_THE_CASE}"
     st = run.case_state or {}
     if st.get("stale"):
         changed = ", ".join(st.get("changed") or []) or st.get("reason") or "?"
@@ -156,17 +160,17 @@ def _case_value(run: Run, reader) -> float | None:
         v = reader(run.ic_report)
     except (AttributeError, KeyError, TypeError):
         return None
-    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+    return v if _is_num(v) else None
 
 
-def _rows(base: Run, runs: list[Run], base_headline: dict | None) -> list[tuple[str, list]]:
-    """(label, [value per run, base first]) in sheet order: every Overview line
+def _rows(base: Run, runs: list[Run], base_headline: dict | None) -> list[tuple[str, str, list]]:
+    """(key, label, [value per run, base first]) in sheet order: every Overview line
     over the horizon then per period, LCOE by carrier, the investment case,
     then the Compare view's headline metrics."""
     from harness import sensitivity_comparison as sc
     every = [base, *runs]
     periods = base.figs.periods if base.figs else []
-    out: list[tuple[str, list]] = []
+    out: list[tuple[str, str, list]] = []
 
     def line_value(run: Run, key: str, period: str):
         if run.figs is None:
@@ -178,7 +182,7 @@ def _rows(base: Run, runs: list[Run], base_headline: dict | None) -> list[tuple[
 
     for period in [HORIZON, *periods]:
         for line in base.figs.lines if base.figs else []:
-            out.append((f"{line.label.strip()} ({line.unit}), {period}",
+            out.append((f"{line.key}@{period}", f"{line.label.strip()} ({line.unit}), {period}",
                         [line_value(r, line.key, period) for r in every]))
     carriers = sorted({c for r in every if r.figs for c in r.figs.lcoe_by_carrier})
     for period in [HORIZON, *periods]:
@@ -187,14 +191,14 @@ def _rows(base: Run, runs: list[Run], base_headline: dict | None) -> list[tuple[
             for r in every:
                 total, by = (r.figs.lcoe_by_carrier.get(carrier, (None, {})) if r.figs else (None, {}))
                 vals.append(total if period == HORIZON else by.get(period))
-            out.append((f"LCOE, {carrier} (EUR/MWh), {period}", vals))
-    for _key, label, unit, reader in CASE_ROWS:
-        out.append((f"{label} ({unit}), {HORIZON}", [_case_value(r, reader) for r in every]))
+            out.append((f"lcoe:{carrier}@{period}", f"LCOE, {carrier} (EUR/MWh), {period}", vals))
+    for key, label, unit, reader in CASE_ROWS:
+        out.append((f"case:{key}", f"{label} ({unit}), {HORIZON}", [_case_value(r, reader) for r in every]))
     for metric, (label, unit, *_rest) in sc.METRICS.items():
         vals = [None if (r is base and base_headline is None) else
                 ((base_headline if r is base else r.headline) or {}).get(metric, (None,))[0]
                 for r in every]
-        out.append((f"{label} ({unit}), {HORIZON}, Compare view", vals))
+        out.append((f"compare:{metric}", f"{label} ({unit}), {HORIZON}, Compare view", vals))
     return out
 
 
@@ -203,7 +207,7 @@ def _is_num(v) -> bool:
 
 
 def write_scenarios(ws, base: Run, scen: Scenarios) -> dict:
-    """Write the sheet; returns where things went (rows by label, columns)."""
+    """Write the sheet; returns where things went (rows by key, columns)."""
     ws.title = TITLE
     runs = scen.runs
     every = [base, *runs]
@@ -215,8 +219,9 @@ def write_scenarios(ws, base: Run, scen: Scenarios) -> dict:
     if scen.no_access:
         notes.append(f"{scen.no_access} scenario(s) not shown: no access")
     if scen.over_cap:
+        from harness import sensitivity_comparison as sc
         notes.append(f"{scen.over_cap} scenario(s) not shown: the sheet compares up to "
-                     f"{len(runs)} by name")
+                     f"{sc.MAX_CASES}, by name")
     if scen.base_unsaved:
         notes.append("The open base has unsaved changes: its Compare-view rows read its saved run.")
     for i, text in enumerate(notes):
@@ -224,16 +229,11 @@ def write_scenarios(ws, base: Run, scen: Scenarios) -> dict:
 
     r = 4 + len(notes)
     heading(ws, r, ["Run", "Results", "Investment case"])
-    run_rows = {}
     for i, run in enumerate(every):
         row = r + 1 + i
         put(ws, row, 1, f"{run.name} (base)" if run is base else run.name)
-        put(ws, row, 2, "current" if run is base else _results_text(run))
-        put(ws, row, 3, ("none: run the investment case" if base.ic_report is None else
-                         "out of date: its figures are not shown"
-                         if (base.case_state or {}).get("stale") else "current")
-                if run is base else _case_text(run))
-        run_rows[run.name] = row
+        put(ws, row, 2, _base_results_text(scen) if run is base else _results_text(run))
+        put(ws, row, 3, _case_text(run))
 
     header = r + len(every) + 3
     first_val, last_val = 2, 1 + len(every)
@@ -242,9 +242,9 @@ def write_scenarios(ws, base: Run, scen: Scenarios) -> dict:
                          *[f"Δ {run.name} − base" for run in runs]])
     rows = {}
     row = header
-    for label, vals in _rows(base, runs, scen.base_headline):
+    for key, label, vals in _rows(base, runs, scen.base_headline):
         row += 1
-        rows[label] = row
+        rows[key] = row
         put(ws, row, 1, label)
         for j, v in enumerate(vals):
             put(ws, row, first_val + j, v)
@@ -258,16 +258,13 @@ def write_scenarios(ws, base: Run, scen: Scenarios) -> dict:
 
     made = []
     anchor = f"{get_column_letter(first_delta + len(runs) + 1)}{header}"
-    cap = rows.get(next((k for k in rows if k.startswith("Capex, annualised")
-                         and k.endswith(f", {HORIZON}")), ""))
-    if cap is not None and rows.get(next((k for k in rows if k.startswith("Opex (")
-                                          and k.endswith(f", {HORIZON}")), "")) == cap + 1:
+    cap = rows.get(f"capex_annualised@{HORIZON}")
+    if cap is not None and rows.get(f"opex@{HORIZON}") == cap + 1:
         made.append(charts.bar(ws, title="Capex (annualised) and opex over the horizon, by run",
                                stacked=True, from_rows=True, data=(1, cap, last_val, cap + 1),
                                cats=(first_val, header, last_val, header), anchor=anchor,
                                y_title="M EUR"))
-    lcoe = rows.get(next((k for k in rows if k.startswith("System LCOE")
-                          and k.endswith(f", {HORIZON}")), ""))
+    lcoe = rows.get(f"system_lcoe@{HORIZON}")
     if lcoe is not None:
         made.append(charts.bar(ws, title="System LCOE over the horizon, by run", from_rows=True,
                                data=(1, lcoe, last_val, lcoe),
@@ -275,5 +272,5 @@ def write_scenarios(ws, base: Run, scen: Scenarios) -> dict:
                                anchor=f"{get_column_letter(first_delta + len(runs) + 1)}{header + 20}",
                                y_title="EUR/MWh"))
     width(ws, {"A": 60, "B": 22, "C": 40})
-    return {"header": header, "rows": rows, "run_rows": run_rows, "first_val": first_val,
+    return {"header": header, "rows": rows, "first_val": first_val,
             "first_delta": first_delta, "charts": len(made)}

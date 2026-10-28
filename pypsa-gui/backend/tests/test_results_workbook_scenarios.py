@@ -262,12 +262,16 @@ def test_per_run_case_staleness_and_a_not_established_delta(solved):
 
 
 def test_not_comparable_reasons_are_written_and_hidden_runs_counted(solved):
-    scen = S.Scenarios(runs=[S.Run(name="H", reasons=["horizon_differs"])], no_access=2, over_cap=1)
+    scen = S.Scenarios(runs=[S.Run(name="H", reasons=["baseline_unavailable", "horizon_differs"])],
+                       no_access=2, over_cap=1, base_current=False)
     ws = _sheet(_blob(solved, scen))[1]
     texts = _texts(ws)
+    base_row = next(r for r in range(1, ws.max_row + 1) if ws.cell(r, 1).value == "Base (base)")
+    assert ws.cell(base_row, 2).value.startswith(sc._BASE_REASONS["case_stale"])
+    assert f"1 scenario(s) not shown: the sheet compares up to {sc.MAX_CASES}, by name" in texts
     assert "2 scenario(s) not shown: no access" in texts
     assert any(t.startswith("1 scenario(s) not shown") for t in texts)
-    assert sc._REASONS["horizon_differs"] in texts
+    assert any(sc._REASONS["horizon_differs"] in t for t in texts)
     assert _assert_deltas_read_two_numbers(ws) == 0
 
 
