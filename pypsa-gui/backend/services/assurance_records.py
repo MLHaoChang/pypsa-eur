@@ -261,23 +261,32 @@ def pointer(*tokens):
     )
 
 
-def input_fingerprint(ctx):
-    """The active project's exact model-input fingerprint (the run/cache identity)."""
-    from services.workflow_tools import _network_input_fingerprint
+def page_source_digest(ctx, component_class):
+    """What a page asserts: the project, the class's rows and its INPUT_METRICS.
 
+    Call under network_guard. Milliseconds, unlike the whole-network input
+    fingerprint, so a checked page does not hold the network lock for seconds.
+    """
+    static = ctx.network.components[component_class].static
+    metrics = [m for m in INPUT_METRICS[component_class] if m in static.columns]
     return digest(
         {
             "project_id": ctx.project_uuid,
-            "input_fingerprint": _network_input_fingerprint(ctx, exact=True),
+            "component_class": component_class,
+            # repr keeps NaN, inf and float/int distinctions JSON would lose.
+            "rows": [
+                [str(name), *(repr(static.at[name, m]) for m in metrics)]
+                for name in static.index
+            ],
         }
     )
 
 
-def active_input_fingerprint():
+def active_page_source_digest(component_class):
     """Taken before list_components runs; capture keeps evidence only if unchanged."""
     ctx = PyPSAService.get_active_context()
     with network_guard():
-        return input_fingerprint(ctx)
+        return page_source_digest(ctx, component_class)
 
 
 def _certified(shown, raw):
@@ -296,18 +305,18 @@ def _certified(shown, raw):
     )
 
 
-def capture_input_page(owner, args, result, fingerprint_before):
+def capture_input_page(owner, args, result, digest_before):
     """Evidence for exactly the rows one list_components page showed.
 
-    Rows are identified by name, never by position. The model-input
-    fingerprint taken before the handler must equal the one read here, so the
-    handler's rows and the raw values come from one input state.
+    Rows are identified by name, never by position. The class source digest
+    taken before the handler must equal the one read here, so the handler's
+    rows and the raw values come from one input state.
     """
     ctx = PyPSAService.get_active_context()
     component_class = args.get("component_class")
     if (
         component_class not in INPUT_METRICS
-        or fingerprint_before is None
+        or digest_before is None
         or not isinstance(result, dict)
         or not ctx.project_uuid
     ):
@@ -322,7 +331,7 @@ def capture_input_page(owner, args, result, fingerprint_before):
     with network_guard():
         if ctx.solver_state.get("status") == "running":
             return None
-        if input_fingerprint(ctx) != fingerprint_before:
+        if page_source_digest(ctx, component_class) != digest_before:
             return None
         static = ctx.network.components[component_class].static
         if any(n not in static.index for n in names):
@@ -366,7 +375,7 @@ def capture_input_page(owner, args, result, fingerprint_before):
                 "has_more": result["has_more"],
             },
             "facts": facts,
-            "source_sha256": fingerprint_before,
+            "source_sha256": digest_before,
             "validity": {
                 "outcome": "completed",
                 "as_of": time.time(),
@@ -429,8 +438,12 @@ def evidence(owner, evidence_id):
             if ctx.solver_state.get("status") == "running":
                 unavailable("evidence_unavailable")
             if scope.get("kind") == "static_page":
-                # Any model-input edit, or another project, invalidates the page.
-                if input_fingerprint(ctx) != record["source_sha256"]:
+                # Any edit to the class's rows or inputs, or another project,
+                # invalidates the page.
+                if (
+                    page_source_digest(ctx, scope["component_class"])
+                    != record["source_sha256"]
+                ):
                     unavailable("evidence_unavailable")
                 return record
             if (

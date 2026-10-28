@@ -217,8 +217,8 @@ def test_offset_past_the_end_yields_no_evidence_and_no_claim(
 
 def test_input_edit_after_capture_invalidates_page_evidence(baseline, harness):
     evidence_id = page_evidence_ids(list_loads(harness, page_draft()))[0]
-    # Generator inputs are not on the page; the input fingerprint still moves.
-    PyPSAService.get_active_context().network.generators.at["G1", "p_nom"] = 30
+    # q_set is not the claimed fact; the class source digest still moves.
+    PyPSAService.get_active_context().network.loads.at["L1", "q_set"] = 0.5
     response = harness.client.get(f"/api/chat/evidence/{evidence_id}")
     assert response.status_code == 409
     assert response.json()["detail"]["error_kind"] == "evidence_unavailable"
@@ -239,7 +239,7 @@ def test_edit_between_handler_and_capture_yields_no_evidence(
     baseline, harness, monkeypatch
 ):
     def edit(result):
-        PyPSAService.get_active_context().network.generators.at["G1", "p_nom"] = 30
+        PyPSAService.get_active_context().network.loads.at["L1", "q_set"] = 0.5
 
     wrap_handler(monkeypatch, edit)
     frames = list_loads(harness, page_draft())
@@ -388,3 +388,18 @@ def test_page_evidence_is_owner_scoped(
             response = client.get(path)
             assert response.status_code == 404
             assert "L1" not in response.text and "p_set" not in response.text
+
+
+def test_page_evidence_does_not_compute_the_network_fingerprint(
+    baseline, harness, monkeypatch
+):
+    from services import workflow_tools
+
+    def slow(*args, **kwargs):
+        raise AssertionError("page evidence must not copy the whole network")
+
+    monkeypatch.setattr(workflow_tools, "_network_input_fingerprint", slow)
+    frames = list_loads(harness, page_draft())
+    assert approval(frames)["verdict"] == "passed"
+    evidence_id = page_evidence_ids(frames)[0]
+    assert harness.client.get(f"/api/chat/evidence/{evidence_id}").status_code == 200
