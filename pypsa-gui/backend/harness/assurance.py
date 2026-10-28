@@ -710,8 +710,8 @@ class Turn:
         if tool_name == "get_aggregate_load":
             if self.request_scope is not None:
                 return False
-            # Exact args only: the handler drops unknown names and counts a
-            # repeated one twice, so those never reach it.
+            # Exact args only: a padded, empty or repeated name is not one
+            # exact selection, so those turns stay unchecked.
             if records.aggregate_selector(args) is None:
                 return False
             source_digest, gap = records.active_aggregate_source(args)

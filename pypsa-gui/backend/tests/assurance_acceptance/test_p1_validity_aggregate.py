@@ -176,3 +176,15 @@ def test_numeric_string_upload_is_null_not_joined(read, monkeypatch):
     assert out["values"] == [None, None, None]
     assert "a step that is not a number" in out["gaps"]
     assert_blocked(out)
+
+
+def test_repeated_timestamp_is_a_gap_not_an_error(read, monkeypatch):
+    from routers import network_profiles
+
+    stamps = network().snapshots
+    twice = pd.Series(L2, index=[stamps[0], stamps[0], stamps[2]])
+    monkeypatch.setitem(network_profiles._user_ts, ("loads", "p_set", "L2"), twice)
+    out = read(names="L1,L2")
+    assert out["gaps"] == ["the loads do not share the network's snapshots"]
+    assert out["values"] == []
+    assert_blocked(out)

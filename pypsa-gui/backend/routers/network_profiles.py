@@ -274,6 +274,9 @@ def aggregate_load_profile(
         return out
     if any(not s.index.equals(n.snapshots) for s in series_list):
         gaps.append("the loads do not share the network's snapshots")
+        # A repeated timestamp cannot be aligned at all (concat would raise).
+        if any(s.index.has_duplicates for s in series_list):
+            return out
     # A bool or string member (a numeric-string upload) is not summed: every
     # step of it counts as missing, as aggregate_source refuses it.
     not_numbers = [s.name for s in series_list
