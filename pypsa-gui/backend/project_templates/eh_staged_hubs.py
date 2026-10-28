@@ -39,6 +39,7 @@ import copy
 import importlib.util
 import pathlib
 import sys
+import types
 
 import numpy as np
 
@@ -259,7 +260,10 @@ H2_ISLAND_ROWS = {
             "in)"}
 
 
-def _h2_commercial_and_finance(T, planning=None) -> dict:
+def _h2_blocks(n, finance: dict, planning=None) -> dict:
+    """An H2 hub's `commercial` and `finance` blocks on its network ``n``:
+    the grey-H2 reference purchase and the CO2 path, the synthetic tariff and
+    the single-owner value flows, stored as the routes store them."""
     from models.commercial import CommercialConfig
     from models.finance import FinanceInputs
     from services.commercial import value_flow_templates as VFT
@@ -267,10 +271,37 @@ def _h2_commercial_and_finance(T, planning=None) -> dict:
     base = CommercialConfig.model_validate(
         {"poc_link": "grid_import", "import_tariff": _tariff(planning), "timezone": "UTC",
          "reference_purchases": [GREY_H2], "co2_price": _co2_price(planning)})
-    vf = VFT.build("single_owner", build_eh_h2_hub_staged(T, planning), base).config
+    vf = VFT.build("single_owner", n, base).config
     commercial = base.model_copy(update={"value_flows": vf.model_dump(mode="json")})
     return {"commercial": commercial.model_dump(mode="json"),
-            "finance": FinanceInputs.model_validate(_h2_finance(planning)).model_dump(mode="json")}
+            "finance": FinanceInputs.model_validate(finance).model_dump(mode="json")}
+
+
+def _h2_commercial_and_finance(T, planning=None) -> dict:
+    return _h2_blocks(build_eh_h2_hub_staged(T, planning), _h2_finance(planning), planning)
+
+
+# ── Industrial Hydrogen Hub, single-year: its investment case ───────────────
+#: The single-year hub's candidates (``eh_templates.build_eh_h2_hub``); its
+#: existing rows are ``T.H2_HUB_EXISTING``.
+H2_HUB_CANDIDATES = ("wind_new", "solar_new", "bess_new", "fuel_cell")
+
+
+def _h2_single_finance(T, planning=None) -> dict:
+    """The staged hub's finance inputs for one period (study harness 19):
+    every asset's COD the start year (a single period has no stage), close a
+    year before it, the case to the end year (2045 natively)."""
+    p = planning or T.NATIVE_PLANNING["eh_h2_hub"]
+    first = f"{p.start_year}-01-01"
+    return {**_h2_finance(p),
+            "cod_by_asset": {a: first for a in (*T.H2_HUB_EXISTING, *H2_HUB_CANDIDATES)},
+            "degradation_by_asset": {"wind_farm": 0.0, "solar_park": 0.005, "site_battery": 0.0,
+                                     "wind_new": 0.0, "solar_new": 0.005, "bess_new": 0.0}}
+
+
+def _h2_single_commercial_and_finance(T, planning=None) -> dict:
+    return _h2_blocks(T.build_eh_h2_hub(planning=planning), _h2_single_finance(T, planning),
+                      planning)
 
 
 # ── Island Microgrid, staged ────────────────────────────────────────────────
@@ -504,6 +535,13 @@ def register(T) -> None:
         lambda planning=None: _h2_commercial_and_finance(T, planning)
     T._SOLVER_CONFIG_BUILT["eh_microgrid_staged"] = \
         lambda planning=None: _mg_commercial_and_finance(T, planning)
+    # The single-year hub's investment case (study harness 19): the same
+    # grey-H2 basis on its own network, for entered years too (E1d).
+    T._SOLVER_CONFIG_BUILT["eh_h2_hub"] = \
+        lambda planning=None: _h2_single_commercial_and_finance(T, planning)
+    T.TEMPLATE_META["eh_h2_hub"] = _h2_single_meta(T, T.TEMPLATE_META["eh_h2_hub"])
+    T._PLANNED_META["eh_h2_hub"] = \
+        lambda p, _spec: _h2_single_meta(T, T._single_year_meta("eh_h2_hub", p), p)
     T.ISLAND_CONFIG["eh_microgrid_staged"] = _mg_island(T)
     # Island data on, rows off (the template's solve is unchanged): the grid checks read it.
     T.ISLAND_CONFIG["eh_microgrid"] = _mg_island_single_year(T)
@@ -522,6 +560,75 @@ def register(T) -> None:
 def _h2_island(T, years=YEARS) -> dict:
     return T._h2_hub_island([f"bess_new_{y}" for y in years], [f"wind_new_{y}" for y in years],
                             [f"solar_new_{y}" for y in years])
+
+
+#: The H2 hubs' study note on the investment case.
+H2_CASE_NOTE = ("After a solve the investment case compares the plan with the hub as it stands "
+                "today, which buys grey H2 (synthetic demo price and CO2 path) whenever that is "
+                "cheaper than running its electrolyser.")
+
+
+def _h2_case_rows(y0: int) -> list[dict]:
+    """The H2 hubs' investment-case ledger rows (staged and single-year): the
+    basis, the grey-H2 reference purchase and the CO2 path, money of ``y0``."""
+    return [
+        {"item": "investment case",
+         "value": "compared with the hub as it stands today, buying grey H2 whenever "
+                  "that is cheaper than running its electrolyser",
+         "source": "assumed",
+         "note": "the investment-case route re-solves the hub without the candidates, "
+                 "with a grey-H2 supply at the reference price plus that period's CO2"},
+        {"item": "grey H2 reference price",
+         "value": "2 EUR/kg (LHV 33.33 kWh/kg), 0.010 t CO2/kg",
+         "source": "synthetic",
+         "note": f"synthetic demo value, in the case's base-year ({y0}) money, escalating "
+                 "2 %/yr as fuel; a real study uses the site's SMR supply contract and "
+                 "its certified carbon intensity"},
+        {"item": "CO2 price", "value": "80 EUR/t from 2027, 120 EUR/t from 2030",
+         "source": "synthetic",
+         "note": "synthetic demo path, real prices in 2020 money, converted at the "
+                 "case's 2 % inflation (the case is nominal); applied to the grey-H2 "
+                 "purchase only; a real study uses the ETS forward curve or a stated "
+                 "policy path"},
+        {"item": "grid CO2 intensity", "value": "not set",
+         "source": "assumed",
+         "note": "grid imports carry no CO2 cost, so the avoided CO2 is the grey-H2 "
+                 "purchase's alone"},
+    ]
+
+
+def _h2_single_meta(T, meta: dict, planning=None) -> dict:
+    """The single-year hub's ``meta`` (shipped, or built for entered years)
+    with its investment case: the staged hub's basis on one period."""
+    p = planning or T.NATIVE_PLANNING["eh_h2_hub"]
+    first, end = p.start_year, p.end_year
+    rows = [
+        *_h2_case_rows(first),
+        {"item": "import tariff", "value": f"{SYNTHETIC_TARIFF['id']}: 25 EUR/MWh 08-20 h, "
+                                           "15 EUR/MWh otherwise", "source": "synthetic",
+         "note": "the staged hub's: an illustrative network-use charge on top of the wholesale "
+                 "price; read in the case's money (2025)"},
+        {"item": "dates", "value": f"every COD {first}-01-01, financial close {first - 1}-01-01",
+         "source": "assumed",
+         "note": "a single period has no stage, so every asset shares one COD; close one year "
+                 "before it and capex paid then, as the staged templates"},
+        {"item": "existing hub", "value": ", ".join(T.H2_HUB_EXISTING)
+                                          + ": overnight cost 0, lifetime unlimited",
+         "source": "assumed",
+         "note": "in service and sunk: no capex in the case; the candidates the plan builds "
+                 "(the fuel cell above its 10 MW floor included) are the investments. The "
+                 "solve is unchanged"},
+        {"item": "finance inputs", "value": "the staged hub's: nominal EUR, escalation 2 %/yr, "
+                                            f"all equity at 7 %, close {first - 1}-01-01, "
+                                            f"to {end}",
+         "source": "assumed",
+         "note": f"pre-tax; the week weighs a year and stands for each of the {end - first} "
+                 f"operating years {first}-{end - 1}, so nothing is annualised"},
+        # _held_ledger reads only the first year and the entered planning.
+        *_held_ledger(types.SimpleNamespace(years=[first], planning=planning)),
+    ]
+    return {**meta, "ledger": [*meta["ledger"], *rows],
+            "study_notes": [*meta["study_notes"], H2_CASE_NOTE]}
 
 
 def _h2_meta(T, planning=None) -> dict:
@@ -570,37 +677,14 @@ def _h2_meta(T, planning=None) -> dict:
             {"item": "fuel cell", "value": "the existing 10 MW unit, no staged candidate",
              "source": "assumed",
              "note": "the pack's fuel cell lives 10 years: a staged one would retire before 2045"},
-            {"item": "investment case",
-             "value": "compared with the hub as it stands today, buying grey H2 whenever "
-                      "that is cheaper than running its electrolyser",
-             "source": "assumed",
-             "note": "the investment-case route re-solves the hub without the candidates, "
-                     "with a grey-H2 supply at the reference price plus that period's CO2"},
-            {"item": "grey H2 reference price",
-             "value": "2 EUR/kg (LHV 33.33 kWh/kg), 0.010 t CO2/kg",
-             "source": "synthetic",
-             "note": f"synthetic demo value, in the case's base-year ({y0}) money, escalating "
-                     "2 %/yr as fuel; a real study uses the site's SMR supply contract and "
-                     "its certified carbon intensity"},
-            {"item": "CO2 price", "value": "80 EUR/t from 2027, 120 EUR/t from 2030",
-             "source": "synthetic",
-             "note": "synthetic demo path, real prices in 2020 money, converted at the "
-                     "case's 2 % inflation (the case is nominal); applied to the grey-H2 "
-                     "purchase only; a real study uses the ETS forward curve or a stated "
-                     "policy path"},
-            {"item": "grid CO2 intensity", "value": "not set",
-             "source": "assumed",
-             "note": "grid imports carry no CO2 cost, so the avoided CO2 is the grey-H2 "
-                     "purchase's alone"},
+            *_h2_case_rows(y0),
             *T.H2_ISLAND_LEDGER, {**H2_ISLAND_ROWS, "note": _measured(H2_ISLAND_ROWS["note"], plan)},
         ],
         "study_notes": [
             "Each period is the same representative week, with the period's H2 offtake.",
             "Candidates are one row per period (build_year = the period): the plan says what "
             "to build when.",
-            "After a solve the investment case compares the plan with the hub as it stands "
-            "today, which buys grey H2 (synthetic demo price and CO2 path) whenever that is "
-            "cheaper than running its electrolyser.",
+            H2_CASE_NOTE,
             "The connection (200 MW) carries the grid-only site in every period.",
             H2_ISLAND_NOTE,
         ],

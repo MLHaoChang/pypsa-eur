@@ -921,6 +921,16 @@ Regressions: `tests/assurance_acceptance` 205 passed; `tests/test_*assur*.py` wi
 Remaining for P1: A1.4-RETAINED (retained scoped results are still certified by an unkeyed hash; a server-keyed MAC on the envelope closes it), A1.3 historical as-of runs, A1.5 complete-source aggregates, A1.6/A1.7 validity and masks, the other `read_unvalidated` families, frontend `assurance_state`, SERIES-WINDOW, REVOKE-KIND.
 
 
+### 2026-10-28 — P1 tracer: A1.3 a completed run, checked as of its finish (issue 02)
+
+Policy version 1. `get_run_evidence` with an exact `run_id` is the fourth checked read (`run_metric_evidence`, `run-metrics/1`). Facts are the run's recorded metrics (`/<metric>`, `entity_id` = run id). The scope (kind, mode, `finished_at`, `unsaved_inputs`) is rebuilt from the manifest on every lookup. Failed, running, missing, malformed or unverifiable runs are refused before the handler with `run_not_checkable` (manifest `pypsa-gui/tool-error-kinds.d/claude-assurance-02-run-as-of.json`).
+
+`test_p1_run_as_of.py`: 38 cases; on master 25 of the first 36 fail and 11 pass (refusals that must stay refusals); after the change 38 pass. GK B (6) NOT OK @e4446459: a running or interrupted run was refused as "corrupt" (shape checks ran before the status check); the refusal test now asserts the status each message names (failed, running, interrupted, not found, corrupt), red on e4446459 for 3 of 5. Mutants, each red: no manifest digest on lookup (2), no fact re-derivation (1), no scope rebuild (3), no capture digest (1), no manifest shape check (1).
+
+Regressions: `tests/assurance_acceptance` with run-evidence, reference ladder, lv08 tools, inventory, dispositions, kinds manifest and JSON fragments: 898 passed, 6 skipped. `tests/test_*assur*.py` and the checked-answer pilot: 282 passed. `ChatPanel.manifest.test.tsx`: 458 passed.
+
+Remaining for P1: A1.5 complete-source aggregates, A1.6/A1.7 validity and masks, the other `read_unvalidated` families (run sections, `compare_project_runs`), frontend `assurance_state`, SERIES-WINDOW, REVOKE-KIND.
+
 ### 2026-10-28 — P1 tracer: A1.4-RETAINED, a server-keyed record MAC (issue 02)
 
 Policy version 1. Every assurance record envelope carries `mac`: HMAC-SHA256 over the canonical `{id, record}`, keyed from `SECRET_KEY` and a 32-byte per-install key at `<app data>/assistant_assurance.key` (beside the record store, mode 0600). `load()` and `checked_charts.verify` read only through `unseal()`. `test_p1_retained_mac.py`: 8 cases; on the base 7 fail, 1 passes (a missing checksum was already refused); after the change 8 pass (`python -m pytest -q -o addopts='' tests/assurance_acceptance/test_p1_retained_mac.py`).
@@ -931,4 +941,4 @@ Tests that rewrite a record to reach the deeper checks re-seal it with `records.
 
 Not covered: replay of an older sealed version of a mutable record within 24 hours; pre-change unresolved operation reservations keep a quota slot. Records saved before this change, or after `SECRET_KEY` or the key file changes, read as unavailable.
 
-Remaining for P1: A1.3 historical as-of runs (live-voice 06 is done, so not blocked by it), A1.5 complete-source aggregates, A1.6/A1.7 validity and masks, the other `read_unvalidated` families, frontend `assurance_state`, SERIES-WINDOW, REVOKE-KIND.
+Remaining for P1: A1.6/A1.7 validity and masks, the other `read_unvalidated` families (run sections, `compare_project_runs`), frontend `assurance_state`, SERIES-WINDOW, REVOKE-KIND.

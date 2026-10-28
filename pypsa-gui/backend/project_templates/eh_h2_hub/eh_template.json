@@ -22,6 +22,54 @@
       "value": "off (island_constraints false)"
     },
     {
+      "item": "investment case",
+      "note": "the investment-case route re-solves the hub without the candidates, with a grey-H2 supply at the reference price plus that period's CO2",
+      "source": "assumed",
+      "value": "compared with the hub as it stands today, buying grey H2 whenever that is cheaper than running its electrolyser"
+    },
+    {
+      "item": "grey H2 reference price",
+      "note": "synthetic demo value, in the case's base-year (2030) money, escalating 2 %/yr as fuel; a real study uses the site's SMR supply contract and its certified carbon intensity",
+      "source": "synthetic",
+      "value": "2 EUR/kg (LHV 33.33 kWh/kg), 0.010 t CO2/kg"
+    },
+    {
+      "item": "CO2 price",
+      "note": "synthetic demo path, real prices in 2020 money, converted at the case's 2 % inflation (the case is nominal); applied to the grey-H2 purchase only; a real study uses the ETS forward curve or a stated policy path",
+      "source": "synthetic",
+      "value": "80 EUR/t from 2027, 120 EUR/t from 2030"
+    },
+    {
+      "item": "grid CO2 intensity",
+      "note": "grid imports carry no CO2 cost, so the avoided CO2 is the grey-H2 purchase's alone",
+      "source": "assumed",
+      "value": "not set"
+    },
+    {
+      "item": "import tariff",
+      "note": "the staged hub's: an illustrative network-use charge on top of the wholesale price; read in the case's money (2025)",
+      "source": "synthetic",
+      "value": "h2_hub_network_tariff_synthetic: 25 EUR/MWh 08-20 h, 15 EUR/MWh otherwise"
+    },
+    {
+      "item": "dates",
+      "note": "a single period has no stage, so every asset shares one COD; close one year before it and capex paid then, as the staged templates",
+      "source": "assumed",
+      "value": "every COD 2030-01-01, financial close 2029-01-01"
+    },
+    {
+      "item": "existing hub",
+      "note": "in service and sunk: no capex in the case; the candidates the plan builds (the fuel cell above its 10 MW floor included) are the investments. The solve is unchanged",
+      "source": "assumed",
+      "value": "wind_farm, solar_park, site_battery, electrolyser, h2_storage: overnight cost 0, lifetime unlimited"
+    },
+    {
+      "item": "finance inputs",
+      "note": "pre-tax; the week weighs a year and stands for each of the 15 operating years 2030-2044, so nothing is annualised",
+      "source": "assumed",
+      "value": "the staged hub's: nominal EUR, escalation 2 %/yr, all equity at 7 %, close 2029-01-01, to 2045"
+    },
+    {
       "component": "Link",
       "entity": "grid_import",
       "field": "connection_ramp",
@@ -82,6 +130,7 @@
   "study_notes": [
     "Electrolyser and fuel cell carry conversion roles and outage data: fmea_top ranks them, redundancy can add a spare.",
     "The frontier runs by default for strong_grid.",
-    "Island rows are off: the plan is not sized to island; the island checks report what islanding would need."
+    "Island rows are off: the plan is not sized to island; the island checks report what islanding would need.",
+    "After a solve the investment case compares the plan with the hub as it stands today, which buys grey H2 (synthetic demo price and CO2 path) whenever that is cheaper than running its electrolyser."
   ]
 }

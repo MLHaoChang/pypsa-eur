@@ -43,6 +43,7 @@ ISSUE_TITLES: dict[str, str] = {
     "uc_start_cost_unweighted": "Start-up cost not weighted by the snapshots",
     "safety_tier_off_critical_bus": "Safety-tier process unit not on a critical bus",
     "lost_production_value_below_buy_in": "Lost-production value at or below the buy-in price",
+    "inventory_cadence_needs_year": "Inventory delivered less often than the representative period holds",
     "p_max_pu_above_one": "Availability profile above 100 %",
     "curtailment_cost_on_thermal": "Curtailment cost on a non-renewable generator",
     "curtailment_cost_negative_prices": "Curtailment cost can create negative prices",

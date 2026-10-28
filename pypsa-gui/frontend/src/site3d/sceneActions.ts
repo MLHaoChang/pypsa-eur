@@ -4,7 +4,7 @@
 // sees; afterwards the cached sites document is replaced by the server's
 // projection and the Site is marked scene-managed (no legacy edits).
 import type { QueryClient } from '@tanstack/react-query'
-import { siteSceneApi, type Proposal, type ProposalAction, type ProposalInputs, type SiteScene } from '../api/siteScene'
+import { siteSceneApi, type BuildingsPreview, type Proposal, type ProposalAction, type ProposalInputs, type SiteScene } from '../api/siteScene'
 import { nk } from '../utils/queryKeys'
 import { adoptServerDocument, flushPendingSitesToServer, useSitesStore } from './sitesStore'
 import type { Site } from './types'
@@ -45,19 +45,19 @@ export async function createSite(qc: QueryClient, project: string, site: Site): 
   return adoptSite(qc, project, site.id)
 }
 
-/** Generate or edit: the proposal against the scene's current revision (adopting a legacy Site first). */
-export async function propose(qc: QueryClient, project: string, siteId: string, action: ProposalAction,
-  inputs: ProposalInputs): Promise<Proposal> {
+/** Generate, edit, attach or place: the proposal against the scene's current revision (adopting a legacy Site first). */
+export async function propose<P = BuildingsPreview>(qc: QueryClient, project: string, siteId: string, action: ProposalAction,
+  inputs: ProposalInputs): Promise<Proposal<P>> {
   const scene = await adoptSite(qc, project, siteId)
   if (scene.state !== 'enabled') throw new Error('unreachable: adoption returns an enabled scene')
-  return siteSceneApi.propose(project, siteId, action, scene.revision, inputs)
+  return siteSceneApi.propose<P>(project, siteId, action, scene.revision, inputs)
 }
 
-export async function applyProposal(qc: QueryClient, project: string, proposal: Proposal): Promise<void> {
+export async function applyProposal(qc: QueryClient, project: string, proposal: Proposal<unknown>): Promise<void> {
   await siteSceneApi.apply(project, proposal.site_id, proposal)
   await refreshAfterWrite(qc, project, proposal.site_id)
 }
 
-export async function discardProposal(project: string, proposal: Proposal): Promise<void> {
+export async function discardProposal(project: string, proposal: Proposal<unknown>): Promise<void> {
   await siteSceneApi.cancel(project, proposal.site_id, proposal.id)
 }

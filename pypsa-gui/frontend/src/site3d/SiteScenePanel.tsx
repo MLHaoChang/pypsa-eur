@@ -7,6 +7,8 @@
 //   Apply commits it (a new scene revision) or Discard cancels it.
 // - Correction: a selected accepted building gets numeric controls; "Preview
 //   change" is an `edit_buildings` proposal reviewed the same way.
+// - Model (SC-02b): attachments and placement in `AssociationPanel` once the
+//   scene is enabled and `assign_native` is available; its blocker otherwise.
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
@@ -16,9 +18,12 @@ import { sceneErrorCopy, sceneErrorDetail, sceneErrorWantsReload, type Greenfiel
 import type { SceneAction, SitePart } from '../api/flow'
 import { evaluateMutation } from '../utils/mutationGuard'
 import NumberField from './NumberField'
+import AssociationPanel from './AssociationPanel'
 import { useSitesStore } from './sitesStore'
 import { applyProposal, discardProposal, propose, SitesNotSaved } from './sceneActions'
-import { useSceneProposal, useSiteScene } from './useSiteScene'
+import { useModelProposal, useSceneProposal, useSiteScene } from './useSiteScene'
+import { KIND_WORDS } from './associations'
+import type { TargetClass } from '../api/siteScene'
 import { heightEvidenceWords, HEIGHT_MAX_M, greenfieldFromBuilding, osmSourcesInside } from './nativeSite'
 import { fromLocal } from './geo'
 import type { ContextBuilding, Site } from './types'
@@ -112,6 +117,13 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
   const proposal = useSceneProposal(s => s.proposal)
   const setProposal = useSceneProposal(s => s.setProposal)
   const qc = useQueryClient()
+  const setPlacementRebind = useModelProposal(s => s.setPlacementRebind)
+  const mode = useUIStore(s => s.uiMode)
+  /** A placed key in words: "pv · generator" in Guided, "pv · Generator" in Expert; never Class:name. */
+  const placedName = (key: string) => {
+    const i = key.indexOf(':'), cls = key.slice(0, i), name = key.slice(i + 1)
+    return `${name} · ${mode === 'guided' && cls in KIND_WORDS ? KIND_WORDS[cls as TargetClass] : cls}`
+  }
   const [drafts, setDrafts] = useState<GreenfieldInput[]>([])
   const [edit, setEdit] = useState<{ id: string; g: GreenfieldInput | null; height: number } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -186,6 +198,11 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
         ))}
       </div>
 
+      {/* The part's body scrolls inside itself, so the tabs (and the Site toolbar above the panel) stay in view
+          when the Model part grows (a preview, the Place form, the bottom table open); focusable so the
+          keyboard scrolls it. */}
+      <div role="tabpanel" tabIndex={0} aria-label={PARTS.find(p => p.id === part)?.label} data-testid="site-part-body"
+        className="flex flex-col gap-2 max-h-[40vh] overflow-y-auto overscroll-contain pr-1 focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent">
       {moved && (
         <div data-testid="site-anchor-moved" className="text-[11px] text-warn">
           Site coordinates moved over 1 km from this site: the site stays where it was created{' '}
@@ -202,7 +219,21 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
       )}
       {enabled?.unbound_keys && enabled.unbound_keys.length > 0 && (
         <div data-testid="site-unbound" className="text-[11px] text-warn">
-          {enabled.unbound_keys.length} placed {enabled.unbound_keys.length === 1 ? 'item names' : 'items name'} equipment no longer in the model: the scene keeps their place until it is updated
+          {enabled.unbound_keys.length === 1
+            ? '1 placed item is no longer in the model: the scene keeps its place until you attach it again'
+            : `${enabled.unbound_keys.length} placed items are no longer in the model: the scene keeps their places until you attach them again`}
+          {action('assign_native')?.available && canWrite && (
+            // One link per placed key: the user picks what it stands for now (rebind {placement}).
+            <ul className="mt-0.5">
+              {enabled.unbound_keys.map(key => (
+                <li key={key}>
+                  {placedName(key)}{' '}
+                  <button type="button" data-testid={`site-unbound-attach-${key}`} className="whitespace-nowrap text-accent hover:underline"
+                    onClick={() => { setPlacementRebind({ siteId: site.id, key }); setPart('model') }}>› Attach again</button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
       {blocked && <div className="text-[11px] text-muted">{blocked}</div>}
@@ -301,8 +332,9 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
 
       {part === 'model' && (
         <div className="flex flex-col gap-1" data-testid="site-part-model-body">
-          <span className="text-[11px] text-muted">Not available yet: mapping buildings to model elements comes in a later version</span>
-          <Blocker action={action('assign_native')} />
+          {enabled && action('assign_native')?.available
+            ? <AssociationPanel key={site.id} site={site} scene={enabled} canWrite={canWrite} blockedReason={blocked ?? (busy ? 'Working: wait for the current step to finish' : null)} />
+            : <Blocker action={action('assign_native')} />}
         </div>
       )}
       {part === 'results' && (
@@ -318,6 +350,7 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
           {error.snapshots && <> <SnapshotsLink /></>}
         </div>
       )}
+      </div>
     </div>
   )
 }

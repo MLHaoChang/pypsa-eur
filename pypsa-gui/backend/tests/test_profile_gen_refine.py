@@ -290,3 +290,22 @@ def test_replay_refuses_a_resolved_mw_that_is_not_the_recorded_fraction():
     ops = [{**first.meta["refinements"][0], "resolved_mw": 90.0}]
     with pytest.raises(RefineReplayError, match="op 0.*0.75 of the recorded"):
         replay(_ctx(), s, meta, ops, component_type="loads", attribute="p_set")
+
+
+# ── the peak as a share of the connection ───────────────────────────────────
+
+def test_refine_stats_carry_the_peak_as_a_share_of_the_connection():
+    _net(tz="Europe/Berlin", poc_mw=100.0)
+    s, meta = _load("industrial", {"timezone": "Europe/Berlin"})
+    st = _refine(s, meta, [{"op": "scale_peak_to", "mw": 80.0}]).stats[0]
+    assert st["peak_share_of_connection"] == pytest.approx(0.8)
+    assert st["connection_link"] == "poc"
+
+
+def test_no_share_without_a_connection_link_or_with_zero_p_nom():
+    _net(tz="Europe/Berlin", poc_mw=0.0)
+    s, meta = _load("industrial", {"timezone": "Europe/Berlin"})
+    assert "peak_share_of_connection" not in _refine(s, meta, [{"op": "scale_peak_to", "mw": 80.0}]).stats[0]
+    _ctx().solver_state["solver_config"].commercial = {"timezone": "Europe/Berlin"}
+    st = _refine(s, meta, [{"op": "scale_peak_to", "mw": 80.0}]).stats[0]
+    assert "peak_share_of_connection" not in st and "connection_link" not in st

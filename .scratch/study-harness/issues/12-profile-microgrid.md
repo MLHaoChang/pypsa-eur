@@ -16,7 +16,7 @@ Design: [design.md](../design.md) §9.3 "eh_microgrid"
 1. Profiles `eh_microgrid@1` and `eh_microgrid_staged@1`: scope `_MICROGRID`, archetype `off_grid`; `SINGLE_YEAR=True` handled at intake (end year after start year).
 2. Island facts by the verdicts of the scorecard's island rows (`sustained_h` from `gridspine/schema/island.py`, frequency judge), critical feeder served; no SCR rule on an island.
 3. Check the `campus_*` island tools on a microgrid project; where they do not fit, a native action over the island LP; record what was found in Comments.
-4. Diesel-fleet IC baseline: the engine already gives it (#302, owner M2e (a): `pypsa-gui/backend/services/results/baseline.py:4`, `finance_case.py:1376`; tested in `tests/test_eh_microgrid_case.py:97`). The rule is `warn`, `not_evaluated` with the reason until [issue 20](20-microgrid-diesel-ic-baseline.md) lands its fact (GK A).
+4. Diesel-fleet IC baseline: the engine gives it (#302, owner M2e (a): `pypsa-gui/backend/services/results/baseline.py:4`, `finance_case.py:1376`; tested in `tests/test_eh_microgrid_case.py:97`), and [issue 20](20-microgrid-diesel-ic-baseline.md) landed its facts (`services/ic_counterfactual.py`). Two investment rules, both `warn`: `ic.counterfactual` `eq` `established`, and `ic.baseline_keeps` `nonempty` (the owned existing assets the case's baseline keeps; `not_established` naming each `MG_EXISTING` asset it drops). Both are evaluated once the case reads `established` (a baseline that sheds at VoLL or relaxes the island rows stays established, its caveats quoted by `counterfactual_text`), and `not_evaluated` with the fact's reasons otherwise; the run is never blocked by them (GK A).
 
 ## Acceptance criteria
 
@@ -25,6 +25,7 @@ Design: [design.md](../design.md) §9.3 "eh_microgrid"
 - [ ] No SCR rule appears in the gate for an `off_grid` archetype.
 - [ ] On `off_grid`, the rows built from the PoC's S_k'' (TDD, rapid voltage change, flicker, unbalance, motor start) are excluded with the reason (test); the gate is the island rows.
 - [ ] The LOLE rule names its h/yr basis.
+- [ ] The investment rules `ic.counterfactual` (`eq established`) and `ic.baseline_keeps` (`nonempty`), both `warn`, are evaluated on a finished case on each template, and `not_evaluated` with the fact's reasons while either reads `not_established` or `not_run` (issue 20).
 
 ## Likely files
 

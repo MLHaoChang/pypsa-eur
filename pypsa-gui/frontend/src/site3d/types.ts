@@ -11,6 +11,8 @@ export interface Placement {
   y: number
   /** Degrees clockwise from north. */
   heading: number
+  /** SC-02a scene placements: on the ground (the default) or on a native building's roof. */
+  on?: 'ground' | `roof:${string}`
 }
 
 export interface Site {
@@ -31,6 +33,8 @@ export interface AssetFootprint {
   width_m: number
   depth_m: number
   height_m?: number
+  /** Set only for a source-verified catalogue record (exact size); absent, it is the user's entered envelope (#712 editor). */
+  source?: 'catalogue'
 }
 
 export interface SitesDocument {

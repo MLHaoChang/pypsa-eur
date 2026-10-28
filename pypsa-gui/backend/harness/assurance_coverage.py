@@ -29,6 +29,16 @@ ADAPTERS: dict[str, dict[str, str]] = {
         "validity": "exact captured steps of one configured time series, series source rechecked",
         "progress": "tool_result", "artifact": "none", "status": "checked",
     },
+    "run_metric_evidence": {
+        "effects": "none",
+        "validity": "recorded metrics of one completed run, manifest and sections rechecked, as of its finish",
+        "progress": "tool_result", "artifact": "none", "status": "checked",
+    },
+    "aggregate_load_evidence": {
+        "effects": "none",
+        "validity": "peak and mean of the complete summed load profile, every member source rechecked",
+        "progress": "tool_result", "artifact": "none", "status": "checked",
+    },
     "checked_input_effect": {
         "effects": "static input update", "validity": "operation contract and independent read-back",
         "progress": "operation outcome", "artifact": "none", "status": "checked",
@@ -89,6 +99,8 @@ CHECKED_TOOL_ADAPTERS = {
     "get_component": "static_input_evidence",
     "list_components": "static_input_page_evidence",
     "get_timeseries": "series_input_evidence",
+    "get_run_evidence": "run_metric_evidence",
+    "get_aggregate_load": "aggregate_load_evidence",
     "update_component": "checked_input_effect",
     "ui_open_panel": "navigation_ack",
 }

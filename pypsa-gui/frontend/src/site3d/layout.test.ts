@@ -538,3 +538,33 @@ describe('buildSiteLayout — placement rules (S2)', () => {
   })
 })
 
+
+describe('native scene buildings (SC-02)', () => {
+  const site: SiteInput = { ...empty, generators: [gen({ name: 'G1' }), gen({ name: 'SUN', carrier: 'solar', p_nom: 1 })], storageUnits: [su({ name: 'BESS' })] }
+
+  it('no buildings: the layout is exactly what it was', () => {
+    expect(buildSiteLayout({ ...site, buildings: [] }).objects).toEqual(buildSiteLayout(site).objects)
+  })
+
+  it('packed objects go around a building in their way', () => {
+    const before = buildSiteLayout(site).objects.find(o => o.name === 'BESS')!
+    const [x, y] = before.origin
+    const ring: [number, number][] = [[x - 20, y - 20], [x + 20, y - 20], [x + 20, y + 20], [x - 20, y + 20]]
+    const after = buildSiteLayout({ ...site, buildings: [{ id: 'b', label: 'Building 1', footprint: ring, height_m: 8 }] }).objects
+    for (const o of after.filter(o => o.type !== 'Bus')) {
+      expect(rectsOverlap(rectOf(o), { x0: x - 20, x1: x + 20, y0: y - 20, y1: y + 20 })).toBe(false)
+    }
+  })
+
+  it('a roof placement on a building without a height stays on the ground', () => {
+    const ring: [number, number][] = [[100, 100], [140, 100], [140, 140], [100, 140]]
+    const layout = buildSiteLayout({
+      ...site, buildings: [{ id: 'flat', label: 'Building 1', footprint: ring, height_m: 0 }],
+      placements: { 'Generator:SUN': { x: 120, y: 120, heading: 0, on: 'roof:flat' } },
+    })
+    const sun = layout.objects.find(o => o.name === 'SUN')!
+    expect(sun.roof).toBeUndefined()
+    expect(sun.elevation).toBeUndefined()
+    expect(objectKey(sun)).toBe('Generator:SUN')
+  })
+})

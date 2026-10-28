@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { AxiosError, AxiosHeaders } from 'axios'
-import { contextErrorMessage, contextFailureBacksOff } from './sites'
+import { client } from './client'
+import { contextErrorMessage, contextFailureBacksOff, sitesApi } from './sites'
 
 function axiosError(status?: number, detail?: unknown): AxiosError {
   const config = { headers: new AxiosHeaders() }
@@ -28,5 +29,14 @@ describe('contextErrorMessage', () => {
     expect(contextErrorMessage(axiosError(502, 'Overpass answered HTTP 429 (rate limited)'))).toBe('Overpass answered HTTP 429 (rate limited)')
     expect(contextErrorMessage(axiosError(409, { error_kind: 'project_locked' }))).toBe('the project is locked or a solve is running')
     expect(contextErrorMessage(new Error('boom'))).toBe('boom')
+  })
+})
+
+describe('fetchContext', () => {
+  it('is quiet: the 3D view words a failure itself, so the raw upstream message never reaches a toast', async () => {
+    const post = vi.spyOn(client, 'post').mockResolvedValue({ data: {} } as never)
+    await sitesApi.fetchContext('p', 'campus')
+    expect(post.mock.calls[0][2]).toMatchObject({ skipErrorToast: true })
+    post.mockRestore()
   })
 })

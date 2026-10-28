@@ -3,7 +3,7 @@
 
 # P1: authorized evidence identity and validity
 
-Status: in progress — list_components page evidence (A1.1, current-input part of A1.3, A1.5 page capture) in #806; A1.2 revocation cases executable (#813), REVOKE-TOCTOU closed (#818); get_timeseries steps (#826); A1.4 integrity cases executable (#840); A1.4-RETAINED closed by a record MAC on claude/assurance-02-retained-mac; rest of P1 open
+Status: in progress — list_components page evidence (A1.1, current-input part of A1.3, A1.5 page capture) in #806; A1.2 revocation cases executable (#813), REVOKE-TOCTOU closed (#818); get_timeseries steps (#826); A1.4 integrity cases executable (#840); A1.4-RETAINED closed by a record MAC (#850); A1.3 run as-of cases executable (#856); A1.5 complete-source load aggregate (#864); rest of P1 open (A1.6/A1.7 validity and masks, other read_unvalidated families, frontend assurance_state)
 Progress: Authorized retained evidence, ACL rechecks shipped; status says whole phase open, displayed-data revision proof pending
 Type: task
 Blocked by: 01; live-voice issue 06 for retained-run guarantees
@@ -99,6 +99,28 @@ Fixed here:
 **Still certified by a hash alone: retained scoped results (A1.4-RETAINED).** A `request_scope.retain` record carries its own `raw`; `evidence()` checks `digest(raw) == source_sha256` and that `scoped_calculate(raw)` gives the stored facts and slots, and the file envelope is an unkeyed `digest(record)`. A record whose `raw`, `source_sha256`, facts, slots and envelope are all rewritten together still reads as checked, without any write to the live project. A server-keyed MAC over the envelope (a key outside the record store) would close it; until then A1.4 is not closed for retained runs.
 
 Not covered: a real process restart (the in-process reload stands in), retention reclaim during a lookup, duplicate completion replayed through the stream (only `records.save` is driven), run and artifact APIs (A1.3, A4), and an attacker who rewrites both the record and the live project (out of scope: that is write access to the project).
+
+### 2026-10-28 — A1.3 a selected completed run, checked as of its finish
+
+`get_run_evidence` is the fourth checked read (`run_metric_evidence`, adapter `run-metrics/1`). `tests/assurance_acceptance/test_p1_run_as_of.py`: 38 cases; the 11 green there are refusals that must stay refusals (inexact args, claims off the recorded metric, non-number claims).
+
+- **Exact args only:** `run_id`. A `section`, any other arg, or a non-string id is refused before the handler; sections stay unchecked data.
+- **Only a completed run:** the guard reads the run through `run_evidence.checked_run_manifest`. Failed, running, interrupted or missing runs, malformed manifests (non-object `metrics` or `sections`, no `finished_at`), and runs whose recorded sections no longer verify (including sections pruned by retention) are refused with `run_not_checkable` (named in the stream) before the handler runs; the message names the run's status (failed, running, interrupted, not found, corrupt, unverified). The guard digests the manifest; capture re-reads it and certifies only metrics whose shown value and unit equal the recorded ones.
+- **Facts:** one per finite recorded metric, path `/<metric>`, `entity_id` = the run id. The scope names the run's kind, mode, `finished_at` and `unsaved_inputs`. Answers read "Run r (completed t): m = v unit (as of that run, not the current inputs)", adding "solved with unsaved inputs" when the run used them.
+- **As-of validity:** lookup re-reads the run's manifest, so editing the current inputs (which invalidates a `get_component` answer from the same moment) leaves it checked. A newer failed or running run neither replaces it nor can be checked. A changed manifest (metric, `finished_at`, `mode`, `status`), a corrupt section, another active project, a rewritten evidence fact or scope, or revoked access (404/401, like an unknown id) makes it unavailable. Metric names and units are escaped in the answer.
+
+Not covered: the run's `sections` and `compare_project_runs` deltas (unchecked reads still), the run manifest's own integrity beyond its digest at capture (it has no MAC, so an attacker who can write the project directory can publish a fake run; that is write access to the project), and runs from `retained_results`/scenario stores that are not in `run_evidence`.
+
+### 2026-10-28 — A1.5 a complete-source load aggregate
+
+`get_aggregate_load` is the fifth checked read (`aggregate_load_evidence`, adapter `aggregate-load/1`). `tests/assurance_acceptance/test_p1_aggregate.py`: 40 cases. GK B (7) plan GO with five conditions, all met.
+
+- **Exact args only:** none (every load), `section` (normalised as the handler does: lower case, stripped; `entity_id` is the normalised name) or `names` (a comma list with no padding, empty or repeated name). Both, any other arg, a null, empty or blank value, or a value over 1,024 characters (`MAX_AGGREGATE_ARG_CHARS`) are refused before the handler (`capability_unsupported`, like the earlier checked reads).
+- **Complete source or nothing:** the guard resolves the target loads itself and reads each member's raw series through `resolve_series`, the source the handler sums. It refuses with `aggregate_not_checkable` before the handler runs when the sum would not be complete, and the message names the gap: no matching loads, an unknown name, k of N loads with no profile, missing or non-finite steps, a non-numeric (for example numeric-string) profile, or a member whose index is not the network's snapshots (an upload on an older snapshot set would otherwise sum "completely" over the wrong steps). The handler fills a missing step with 0, drops unknown names and counts a repeated one twice, so none of those cases reaches it on a checked turn.
+- **Facts:** `/peak` and `/mean` (MW), computed over every step and every load from the raw source, so they are the global statistics, not a truncated result's, a page's or one member's. `entity_id` is the section, the names as given, or "all loads". The per-step sum uses the handler's own expression (`pd.concat(...).sum(axis=1)`), so the facts equal the shown values bit for bit (tested on 50 loads of awkward floats). At capture, peak, mean, `total_loads` and `loads_with_profile` must all equal the guard's, or nothing is stored: an edit between the guard and the handler leaves the answer unchecked. The model sees only the certified statistics, the load count and the step count; the per-step sum stays unchecked. Answers read "Aggregate load (section s, N loads, M steps): peak = v MW (sum over every load and step)."
+- **Invalidation:** the source digest covers the project, the args, the ordered target names and each member's series digest. Editing a member, an upload over a member, a load joining or leaving the selection (a new load, a bus move), another project or revoked access makes the evidence unavailable. Lookup re-derives the facts from the live source (A1.4).
+
+Not covered: per-step sums (would need SERIES-WINDOW's compact record), energy (needs snapshot weightings), static `p_set` loads (the handler leaves them out; refused here as "no profile" rather than certified), and fixing the handler's unchecked behaviour (null-not-zero, unknown and repeated names), which is A1.6/A1.7 work.
 
 ### 2026-10-28 — A1.4-RETAINED closed: a server-keyed MAC on every record
 

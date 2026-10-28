@@ -73,6 +73,7 @@ import hashlib
 import json
 import logging
 import pathlib
+import re
 import threading
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -459,8 +460,11 @@ def _validation_items(issues, connection_links: frozenset[str]) -> list[dict]:
         # Stage 2's own refusals are the load flow's items (W4b): they block its
         # verdict, not the optimisation's; /run still refuses on them.
         source = "loadflow" if i.code in STAGE2_CODES else "validation"
+        # An aggregate count ("3 item(s)") names no element: no drawer can open it.
+        counted = bool(re.fullmatch(r"\d+ item\(s\)", i.name or ""))
         out.append(_item(i.code, i.severity, i.message, source, section,
-                         component=i.component_class or "", entity=i.name or "",
+                         component="" if counted else i.component_class or "",
+                         entity="" if counted else i.name or "",
                          blocking=i.severity == "error", title=ISSUE_TITLES.get(i.code)))
         if i.code == "line_x_invalid" and any(
                 j.code == "stage2_zero_impedance" and j.name == i.name for j in issues):

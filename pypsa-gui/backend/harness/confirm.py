@@ -255,6 +255,11 @@ def _confirm_destructive_tool(
             restrictions.require_current(restriction_snapshot, session)
         except Exception:  # A failed required policy read cannot approve work.
             decision = 'revoked'
+    guard = getattr(session, 'decision_guard', None)
+    if decision == 'approve' and guard is not None and not guard(tool_name, args):
+        # The harness runner's session re-checks its project, owner and locks
+        # after the decision, under the project's locks (harness/runner.py).
+        decision = 'revoked'
     outcome, by = _DECISION_OUTCOMES.get(decision, ("unavailable", "system"))
     recorded = approvals.decided(session, call_id=tool_use_id, tool=tool_name, tier=tier,
                                  outcome=outcome, by=by, link=link)

@@ -715,7 +715,6 @@ def _results_for_run(result_kind: str, run_id: Any, *, reshaped: bool = False) -
     something else, such as the per-snapshot series or another source.
     """
     from services import retained_results, run_evidence
-    from services.results import dispatch_digest
 
     if not isinstance(run_id, str) or not run_evidence._valid_run_id(run_id):
         raise HTTPException(422, {"error_kind": "invalid_results_argument",
@@ -733,7 +732,7 @@ def _results_for_run(result_kind: str, run_id: Any, *, reshaped: bool = False) -
             f"A run keeps a digest of {result_kind!r} (the default LOPF read over all snapshots), "
             "not its per-snapshot series or another source; call it with run_id alone.",
             run_id=run_id, scope="historical", result_kind=result_kind,
-            digest_fields=list(dispatch_digest.FIELDS))
+            digest_fields=list(digest.fields))
     from services.workflow_tools import solve_freshness
 
     run_evidence._authority()
@@ -744,13 +743,13 @@ def _results_for_run(result_kind: str, run_id: Any, *, reshaped: bool = False) -
         if digest is None:
             data = get_results(result_kind)
         else:
-            live = digest()
+            live = digest.build()
             if live.get("status") != "ok":
                 return retained_results.unavailable(
                     "historical_scope_mismatch", "This run's results cannot be digested.",
                     reason=live.get("reason"), result_kind=result_kind, run_id=run_id,
                     run=run, **facts)
-            data = dispatch_digest.for_kind(live, result_kind)
+            data = digest.for_kind(live, result_kind)
         return {"status": "ok", "scope": "current", "result_kind": result_kind,
                 "data": data, "run_id": run_id, "run": run, **facts}
     record, refused = retained_results.historical(section, run_id)
@@ -758,7 +757,7 @@ def _results_for_run(result_kind: str, run_id: Any, *, reshaped: bool = False) -
         return {**refused, "result_kind": result_kind, "run_id": run_id, **facts,
                 "next_step": "Say this run is not the current result and offer to re-run."}
     return {"status": "ok", "scope": "historical", "result_kind": result_kind,
-            "data": (dispatch_digest.for_kind(record["data"], result_kind) if digest is not None
+            "data": (digest.for_kind(record["data"], result_kind) if digest is not None
                      else (record.get("data") or {}).get(result_kind)),
             "section": section, "run_id": run_id,
             "run": retained_results.run_ref(run_id, record, current=False), **facts,
@@ -5284,6 +5283,7 @@ _COMPARE_FOCUS_TO_TAB = {
     "overview": "overview",
     "capacity": "capacity",
     "dispatch": "dispatch",
+    "loading": "loading",
     "economics": "economics",
     "emissions": "emissions",
     "prices": "prices",
@@ -5296,6 +5296,7 @@ _COMPARE_FOCUS_TO_TAB = {
 _FOCUS_SUMMARY_KEYS = {
     "capacity": "capacity",
     "dispatch": "dispatch",
+    "loading": "loading",
     "economics": "economics",
     "emissions": "emissions",
     "prices": "prices",
@@ -9071,6 +9072,7 @@ from services.experiments import start_experiment, prepare_experiment, list_expe
 from harness.experiment_execution import advance_experiment, refresh_experiment, cancel_experiment
 from harness.experiment_reconciliation import reconcile_experiment
 from harness.experiment_comparison import compare_experiments, export_experiment_comparison
+from harness.sensitivity_comparison import compare_sensitivities, export_sensitivity_comparison
 from services.assistant_tasks import list_tasks, start_task, get_task, resume_task, cancel_task, resolve_task_step
 from services.assistant_tools import (find_capabilities, get_file_delivery, inspect_import, import_uploaded_network,
                                       preview_project_changes, apply_project_changes, create_chart, build_delivery)
@@ -9099,6 +9101,8 @@ DISPATCHERS: dict[str, Any] = {
     "reconcile_experiment": reconcile_experiment,
     "compare_experiments": compare_experiments,
     "export_experiment_comparison": export_experiment_comparison,
+    "compare_sensitivities": compare_sensitivities,
+    "export_sensitivity_comparison": export_sensitivity_comparison,
     "list_experiments": list_experiments,
     "get_experiment": get_experiment,
     "list_tasks": list_tasks,
@@ -9717,7 +9721,22 @@ def _lock_gated_tool_names() -> frozenset[str]:
     return frozenset(gated)
 
 
-def _check_foreign_lock(tool_name: str) -> None:
+_RUN_CONTROLS = frozenset({"cancel_task", "resume_task", "resolve_task_step"})
+
+
+def _owns_task(task_id) -> bool:
+    """The caller can read `task_id` in the active project (owner and project match)."""
+    from services import assistant_tasks
+    if not isinstance(task_id, str):
+        return False
+    try:
+        assistant_tasks._read(task_id)
+    except HTTPException:
+        return False
+    return True
+
+
+def _check_foreign_lock(tool_name: str, task_id=None) -> None:
     """
     Raise 409 `project_locked` when another user holds the active project's
     edit lock. Same predicate as the middleware gate in `main.py`.
@@ -9725,9 +9744,16 @@ def _check_foreign_lock(tool_name: str) -> None:
     CHECK ONLY — never an acquire. A free or expired lock, the acting user's
     own lock, local mode, an unbound scratch context and a tool call with no
     acting identity all pass through untouched.
+
+    A harness run's hold also refuses, except a task control (`_RUN_CONTROLS`)
+    naming a task the caller owns: the user can always stop, resume or
+    reconcile their run (GK B plan condition 4).
     """
     import local_mode
+    from services import harness_locks
 
+    if harness_locks.refuses_active() and not (tool_name in _RUN_CONTROLS and _owns_task(task_id)):
+        raise HTTPException(status_code=409, detail=harness_locks.detail())
     if local_mode.is_local_mode():
         return  # D7 — one identity, no lock semantics
     user_id = _ACTING_USER_ID.get()
@@ -9796,7 +9822,7 @@ def _lock_gated(tool_name: str, handler):
 
     @functools.wraps(handler)
     def _wrapped(*args, **kwargs):
-        _check_foreign_lock(tool_name)
+        _check_foreign_lock(tool_name, kwargs.get("task_id", args[0] if args else None))
         return handler(*args, **kwargs)
 
     return _wrapped

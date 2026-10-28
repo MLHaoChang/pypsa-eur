@@ -122,11 +122,15 @@ def _label(value):
 # profiles, computed by software from the request scope.
 # tool_guard refusals the stream names by kind; any other guard failure is
 # the generic capability_unsupported.
-GUARD_REFUSAL_KINDS = frozenset({"series_too_long_to_check"})
+GUARD_REFUSAL_KINDS = frozenset(
+    {"series_too_long_to_check", "run_not_checkable", "aggregate_not_checkable"}
+)
 
 CHECKED_TOOLS = frozenset(
     {
+        "get_aggregate_load",
         "get_component",
+        "get_run_evidence",
         "get_timeseries",
         "list_components",
         "ui_open_panel",
@@ -162,6 +166,10 @@ class Turn:
         self.page_digests = {}
         # get_timeseries: series source digests, kept the same way.
         self.series_digests = {}
+        # get_run_evidence: run manifest digests, kept the same way.
+        self.run_digests = {}
+        # get_aggregate_load: aggregate source digests, kept the same way.
+        self.aggregate_digests = {}
 
     def review_interpretations(self, blocks, provider, model, ctx):
         if self.clarification is not None:
@@ -675,6 +683,54 @@ class Turn:
                 source_digest
             )
             return True
+        if tool_name == "get_run_evidence":
+            if self.request_scope is not None or not isinstance(args, dict):
+                return False
+            # Exact args only: a section is unchecked data, not a recorded metric.
+            run_id = args.get("run_id")
+            if set(args) != {"run_id"} or not isinstance(run_id, str):
+                return False
+            _project, manifest, status = records.run_source(run_id)
+            if manifest is None:
+                raise HTTPException(
+                    409,
+                    {
+                        "error_kind": "run_not_checkable",
+                        "message": (
+                            "Only a completed run whose recorded evidence verifies "
+                            f"can be checked; this run is {status.replace('_', ' ')}. "
+                            "Ask without checking to see it as unchecked data."
+                        ),
+                    },
+                )
+            self.run_digests.setdefault(records.digest(args), []).append(
+                records.digest(manifest)
+            )
+            return True
+        if tool_name == "get_aggregate_load":
+            if self.request_scope is not None:
+                return False
+            # Exact args only: the handler drops unknown names and counts a
+            # repeated one twice, so those never reach it.
+            if records.aggregate_selector(args) is None:
+                return False
+            source_digest, gap = records.active_aggregate_source(args)
+            if gap is not None:
+                raise HTTPException(
+                    409,
+                    {
+                        "error_kind": "aggregate_not_checkable",
+                        "message": (
+                            "Only a sum over every target load's complete profile "
+                            f"can be checked; here {gap}. Ask without checking to "
+                            "see it as unchecked data."
+                        ),
+                    },
+                )
+            self.aggregate_digests.setdefault(records.digest(args), []).append(
+                source_digest
+            )
+            return True
         if tool_name == "ui_open_panel":
             # The existing typed handler owns target validation. Supported
             # mounts subsequently receive a separate issued browser ACK.
@@ -690,6 +746,12 @@ class Turn:
         elif tool_name == "get_timeseries":
             pending = self.series_digests.get(records.digest(args)) or [None]
             record = records.capture_series(self.owner, args, result, pending.pop(0))
+        elif tool_name == "get_run_evidence":
+            pending = self.run_digests.get(records.digest(args)) or [None]
+            record = records.capture_run(self.owner, args, result, pending.pop(0))
+        elif tool_name == "get_aggregate_load":
+            pending = self.aggregate_digests.get(records.digest(args)) or [None]
+            record = records.capture_aggregate(self.owner, args, result, pending.pop(0))
         elif tool_name == "get_component":
             record = records.capture_input(self.owner, args, result)
         else:
@@ -754,6 +816,30 @@ class Turn:
                 ],
                 "steps": scope["points"],
                 "certified_steps": scope["certified"],
+                "_assurance": metadata,
+            }
+        if scope.get("kind") == "aggregate_load":
+            # The certified statistics only; the per-step sum stays unchecked.
+            return {
+                "selection": scope["entity_id"],
+                "attribute": scope["attribute"],
+                "unit": record["facts"][0]["unit"],
+                **{fact["metric"]: fact["value"] for fact in record["facts"]},
+                "loads": scope["loads"],
+                "steps": scope["steps"],
+                "_assurance": metadata,
+            }
+        if scope.get("kind") == "run":
+            return {
+                "run_id": scope["entity_id"],
+                "status": "completed",
+                "finished_at": scope["finished_at"],
+                "mode": scope["mode"],
+                "unsaved_inputs": scope["unsaved_inputs"],
+                "metrics": {
+                    fact["metric"]: {"value": fact["value"], "unit": fact["unit"]}
+                    for fact in record["facts"]
+                },
                 "_assurance": metadata,
             }
         return {
@@ -877,6 +963,29 @@ class Turn:
                 )
                 notes.add("series")
                 continue
+            if scope.get("kind") == "aggregate_load":
+                selection = (
+                    f"section {_label(scope['entity_id'])}"
+                    if scope["selector"] == "section"
+                    else _label(scope["entity_id"])
+                )
+                lines.append(
+                    f"Aggregate load ({selection}, {scope['loads']} loads, "
+                    f"{scope['steps']} steps): {fact['metric']} = {value_text} "
+                    f"{fact['unit']} (sum over every load and step)."
+                )
+                notes.add("aggregate")
+                continue
+            if scope.get("kind") == "run":
+                unsaved = "; solved with unsaved inputs" if scope["unsaved_inputs"] else ""
+                lines.append(
+                    f"Run {_label(fact['entity_id'])} (completed "
+                    f"{_label(scope['finished_at'])}): {_label(fact['metric'])} = "
+                    f"{value_text} {_label(fact['unit'])} (as of that run, not the "
+                    f"current inputs{unsaved})."
+                )
+                notes.add("run")
+                continue
             lines.append(
                 f"Configured {scope['component_class']} input {_label(fact['entity_id'])}: "
                 f"{fact['metric']} = {value_text} {fact['unit']}{page}."
@@ -888,8 +997,10 @@ class Turn:
                 {
                     "static": "\nStatic inputs; time-series overrides are not checked.",
                     "series": "\nTime-series steps; other steps are not checked.",
+                    "run": "\nRecorded run metrics; run sections are not checked.",
+                    "aggregate": "\nConfigured load aggregate; per-step sums are not checked.",
                 }[note]
-                for note in ("static", "series")
+                for note in ("static", "series", "run", "aggregate")
                 if note in (notes or {"static"})
             ),
             public_blocks,
@@ -1170,6 +1281,7 @@ only JSON {"schema_version":1,"blocks":[{"id":"fact-1","kind":"observed",
 "entity_id":"the-actual-entity","metric":"p_set","value":5,"unit":"MW"}]}.
 For a list_components row the path is "/<name>/<metric>", a JSON pointer
 (write "~" in a name as "~0" and "/" as "~1"); a page is never the whole class.
+For get_run_evidence the entity_id is the run_id and the path is "/<metric>".
 Use only exact captured static input facts and their units. Do not add narrative,
 claims of completed effects or unsupported calculations. When this turn supplies
 a generator-dispatch computed ledger, return exactly its computed blocks instead
