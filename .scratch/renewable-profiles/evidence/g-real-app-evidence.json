@@ -1,0 +1,53 @@
+{
+  "sourceHead": "e726ffe5d620206788cc685a8f8a9137d67264a8",
+  "viewport": [
+    1440,
+    900
+  ],
+  "networkMocks": false,
+  "storeInjection": false,
+  "authentication": "Native authenticated fixture account; ordinary owned project and lock",
+  "navigation": "Existing public openTimeSeriesFor action, plus ordinary visible UI controls",
+  "weather": "synthetic only",
+  "shots": [
+    "g-expert-renewables.png",
+    "g-weather-window.png",
+    "g-tune-untouched.png",
+    "g-era5-disabled.png",
+    "g-tune-changed.png",
+    "g-json-error.png",
+    "g-loading.png",
+    "g-disabled-apply.png",
+    "g-compare-week.png",
+    "g-compare-statistics.png",
+    "g-out-of-date.png",
+    "g-refusal.png",
+    "g-apply-receipt.png",
+    "g-new-only.png",
+    "g-guided-renewables.png"
+  ],
+  "pageErrors": [],
+  "cases": [
+    {
+      "case": "native apply receipt and exactly one undo step",
+      "component": "rooftop_pv",
+      "hours": 168,
+      "undoBefore": 0,
+      "undoAfter": 1
+    },
+    {
+      "case": "native New-only response",
+      "a": null,
+      "delta": null,
+      "weekA": null,
+      "flh": 2819.3971
+    },
+    {
+      "case": "all native pending artifacts use synthetic weather",
+      "count": 8
+    }
+  ],
+  "faults": [
+    "Chromium blocks the comparison URL for the refusal/Retry transport-fault screenshot; no HTTP interception or mocked payloads."
+  ]
+}

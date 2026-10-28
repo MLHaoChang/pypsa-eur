@@ -41,3 +41,10 @@ it('does not claim an unverified UTC basis for model-clock comparisons', () => {
   expect(screen.getByRole('row', { name: /Mean peak hour/ }).textContent).toContain('model hour')
   expect(screen.queryByText(/UTC/)).toBeNull()
 })
+
+it('keeps a 100-point duration curve on a readable numeric percentage axis', () => {
+  const duration = Array.from({ length: 100 }, (_, i) => 1 - i / 100)
+  render(<ProfileCompare data={{ ...comparison, a: { ...comparison.a, duration }, b: { ...comparison.b, duration } }} />)
+  const ticks = Array.from(screen.getByTestId('compare-duration').querySelectorAll('.recharts-xAxis .recharts-cartesian-axis-tick-value')).map(tick => tick.textContent)
+  expect(ticks).toEqual(['0', '25', '50', '75', '100'])
+})
