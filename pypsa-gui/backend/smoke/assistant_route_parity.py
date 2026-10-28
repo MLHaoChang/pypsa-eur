@@ -1,6 +1,7 @@
 """Regenerate/check the GUI-route to typed-tool parity matrix (live-voice issue 08).
 
-Run from any directory: python <this-file> --write or --check.
+Run from any directory: python <this-file> --check (or --write to also save the
+matrix for reading; it is not committed, so tool PRs never regenerate it).
 
 Every backend route the GUI reaches (axios ``client`` calls, ``fetch``,
 ``EventSource``, ``sendBeacon`` and raw ``/api/`` URLs under
@@ -12,9 +13,15 @@ Every backend route the GUI reaches (axios ``client`` calls, ``fetch``,
 * ``needs-tool``: declared in the declarations file, a coverage gap;
 * ``limitation``: declared with a reason from ``LIMITATION_REASONS``.
 
+Declarations are ``assistant_route_parity_declarations.json`` plus the fragments in
+``assistant_route_parity_declarations.d/`` (``smoke/json_fragments.py``).
+
 ``--check`` fails closed: an unresolvable GUI binding, a binding matching no
 route, more than one route or the wrong method, an unclassified GUI route, or a
-stale declaration. The matrix is a source contract, not a behavioral test.
+declaration whose route is gone or unreached. A declaration whose route a tool
+now serves is reported as stale but passes; the coordinator's sweep deletes it
+(``smoke/prune_stale_declarations.py``). The matrix is a source contract, not a
+behavioral test.
 
 The app is imported, not served: ``PYPSAGUI_APP_DATA_DIR`` and
 ``PYPSAGUI_PROJECTS_ROOT`` point at a temporary directory first, no lifespan
@@ -35,6 +42,11 @@ import sys
 import tempfile
 import textwrap
 from pathlib import Path
+
+try:
+    from smoke.json_fragments import load_merged
+except ImportError:  # run as a script: smoke/ itself is on sys.path
+    from json_fragments import load_merged
 
 ROOT = Path(__file__).resolve().parents[3]
 BACKEND = ROOT / 'pypsa-gui/backend'
@@ -281,7 +293,8 @@ def _resolve_callee(node, glb):
 
 
 def load_declarations(path: Path = DECLARATIONS) -> dict:
-    return json.loads(path.read_text())
+    """The base declarations merged with ``assistant_route_parity_declarations.d/*.json``."""
+    return load_merged(path)
 
 
 def build(app=None, declarations: dict | None = None, frontend: tuple | None = None) -> tuple[dict, list[str]]:
@@ -338,6 +351,9 @@ def build(app=None, declarations: dict | None = None, frontend: tuple | None = N
 
     limitations = {(d['method'], d['path']): d for d in decl.get('limitations', [])}
     needs = {(d['method'], d['path']): d for d in decl.get('needs_tool', [])}
+    for name, declared in (('limitations', limitations), ('needs_tool', needs)):
+        if len(declared) != len(decl.get(name, [])):
+            problems.append(f'{name}: a route is declared more than once (base or a .d/ fragment)')
     for key, d in limitations.items():
         if d.get('reason') not in LIMITATION_REASONS:
             problems.append(f'limitation {key}: reason {d.get("reason")!r} not in {LIMITATION_REASONS}')
@@ -350,6 +366,7 @@ def build(app=None, declarations: dict | None = None, frontend: tuple | None = N
         problems.append(f'stale non_mutating_routes entry {key}: route gone')
 
     used_services: set[str] = set()
+    stale: list[dict] = []
     rows = []
     for key in sorted(gui_routes, key=lambda k: (k[1], k[0])):
         tools = {t for t in by_http.get(key, ()) if tier_allows(t, key)}
@@ -364,7 +381,10 @@ def build(app=None, declarations: dict | None = None, frontend: tuple | None = N
         if tools:
             row |= {'class': 'tool', 'tools': sorted(tools), 'via': via}
             if key in limitations or key in needs:
-                problems.append(f'stale declaration {key}: route is now tool-covered by {sorted(tools)}')
+                # Not a failure: the PR that serves a route leaves its declaration,
+                # so two such PRs never edit the same lines.
+                # `smoke/prune_stale_declarations.py --apply` deletes it.
+                stale.append({'method': key[0], 'path': key[1], 'tools': sorted(tools)})
         elif key in needs:
             row |= {'class': 'needs-tool', 'family': needs[key].get('family')}
             if 'note' in needs[key]:
@@ -390,10 +410,11 @@ def build(app=None, declarations: dict | None = None, frontend: tuple | None = N
             'pypsa-gui/frontend/src/** (client/fetch/EventSource/sendBeacon/raw /api/ URLs)',
             'pypsa-gui/backend/harness/catalogue.py (TOOL_ROUTES, safety tiers)',
             'pypsa-gui/backend/services/chat_tools.py (DISPATCHERS)',
-            'pypsa-gui/backend/smoke/assistant_route_parity_declarations.json',
+            'pypsa-gui/backend/smoke/assistant_route_parity_declarations.json (+ .d/*.json)',
         ],
         'counts': {'backend_routes': len(routes), 'gui_routes': len(rows), **counts},
         'rows': rows,
+        'stale_declarations': stale,
     }
     return matrix, problems
 
@@ -405,19 +426,17 @@ def _dump(matrix: dict) -> str:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument('--check', action='store_true')
-    mode.add_argument('--write', action='store_true')
+    mode.add_argument('--check', action='store_true', help='Build in memory; fail on any problem.')
+    mode.add_argument('--write', action='store_true', help='Also write the matrix (not committed) for reading.')
     parser.add_argument('--output', type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args(argv)
     matrix, problems = build()
     if args.write:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(_dump(matrix))
         print(f'wrote {args.output}: {matrix["counts"]}')
-    else:
-        if not args.output.exists():
-            problems.append(f'missing {args.output}; run --write')
-        elif args.output.read_text() != _dump(matrix):
-            problems.append(f'{args.output} is stale; run --write')
+    for s in matrix['stale_declarations']:
+        print(f'stale (sweep prunes) {s["method"]} {s["path"]}: now served by {s["tools"]}')
     for p in problems:
         print('FAIL', p)
     if not problems:
