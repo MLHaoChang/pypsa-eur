@@ -346,10 +346,10 @@ def _move_window(t: _Target, s: pd.Series, op: Mapping[str, Any], i: int,
         raise MoveWindowYearError(f"op {i} (move_window): {exc}") from None
     except AvailabilityError as exc:
         raise InvalidRefineOpError(f"op {i} (move_window): {exc}") from None
-    if len(frame) != len(s):
+    if not frame.index.equals(pd.DatetimeIndex(s.index)):
         raise InvalidRefineOpError(
-            f"op {i}: the series does not span the source year {year}, so its "
-            "window cannot be regenerated")
+            f"op {i}: the series is not on the hours of its source year {year}, so "
+            "its window cannot be regenerated")
     record["window"] = k
     record["moved"] = {end: [before[end], after[end]] for end in ("from", "to")}
     extra["window_before"], extra["window_after"] = before, after

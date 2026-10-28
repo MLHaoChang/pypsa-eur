@@ -220,6 +220,12 @@ def test_a_replayed_dated_move_into_another_year_names_the_op():
     assert exc.value.index == 1 and exc.value.op == "move_window"
 
 
+def test_a_series_off_its_recorded_source_year_is_refused():
+    s, meta = _gen(ONE)  # 2023's hours (8760, as 2022's)
+    with pytest.raises(InvalidRefineOpError, match="source year 2022"):
+        _refine(s, {**meta, "weather_year": 2022}, [{"op": "move_window", "by": "14d"}])
+
+
 # ── which window ────────────────────────────────────────────────────────────
 
 def test_two_windows_without_an_index_are_refused_naming_both():
