@@ -34,3 +34,10 @@ it('renders native warning text as sentences rather than Python repr or freshnes
   render(<ProfileCompare data={{ ...comparison, warnings: ["bus 'B1' moved — stale inputs"] }} />)
   expect(screen.getByText('bus “B1” moved: out of date inputs')).toBeTruthy()
 })
+
+it('does not claim an unverified UTC basis for model-clock comparisons', () => {
+  render(<ProfileCompare data={comparison} />)
+  expect(screen.getByText('Model time')).toBeTruthy()
+  expect(screen.getByRole('row', { name: /Mean peak hour/ }).textContent).toContain('model hour')
+  expect(screen.queryByText(/UTC/)).toBeNull()
+})
