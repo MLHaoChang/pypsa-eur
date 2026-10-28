@@ -80,11 +80,18 @@ export default function ProductionTiles({ view }: { view: ProcessView | null | u
           {view.products.length > 1 && <div className="text-[11px] text-muted">{p.bus}</div>}
           <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
             {productionTiles(p).map(t => (
+              // A missing tonne factor is said once for the product, under the tiles it affects.
               <Kpi key={t.id} testId={`production-${p.bus}-${t.id}`} label={t.label} value={t.value} unit={t.unit}
-                state={t.state} reason={t.reason} basis={t.basis}
-                action={t.fixBus ? { label: `Set it on ${t.fixBus} ›`, onClick: () => setSelectedComponent({ type: 'Bus', name: p.bus }) } : undefined} />
+                state={t.state} reason={t.fixBus ? undefined : t.reason} basis={t.basis} />
             ))}
           </div>
+          {productionTiles(p).some(t => t.fixBus) && (
+            <p data-testid={`production-${p.bus}-fix`} className="flex flex-wrap items-center gap-x-2 text-[11.5px] text-muted">
+              {REASON.tonne_factor_missing}
+              <button type="button" onClick={() => setSelectedComponent({ type: 'Bus', name: p.bus })}
+                className="text-accent hover:underline">Set it on {p.bus} ›</button>
+            </p>
+          )}
         </div>
       ))}
     </section>

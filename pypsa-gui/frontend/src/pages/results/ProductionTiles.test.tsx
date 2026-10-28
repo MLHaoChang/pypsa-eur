@@ -37,9 +37,10 @@ describe('ProductionTiles', () => {
       inventory: [] }
     render(<ProductionTiles view={view([p])} />)
     expect(screen.getByTestId('production-nh3-made').getAttribute('data-state')).toBe('not_modelled')
-    expect(screen.getByTestId('production-nh3-made').textContent).toMatch(/Energy per tonne/)
-    expect(screen.getByTestId('production-nh3-made').textContent).not.toMatch(/mwh_per_t/)
-    expect(screen.getByTestId('production-nh3-made').textContent).toContain('Set it on nh3 ›')
+    const fix = screen.getByTestId('production-nh3-fix')
+    expect(fix.textContent).toMatch(/Energy per tonne/)
+    expect(fix.textContent).not.toMatch(/mwh_per_t/)
+    expect(screen.getAllByText('Set it on nh3 ›')).toHaveLength(1)
     expect(screen.getByTestId('production-nh3-lost-eur').getAttribute('data-state')).toBe('not_modelled')
     expect(screen.getByTestId('production-nh3-inventory').getAttribute('data-state')).toBe('not_applicable')
   })
