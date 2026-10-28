@@ -1,0 +1,16 @@
+{
+  "kinds": {
+    "invalid_envelope": {
+      "surface": "inline",
+      "why": "A harness run's approval envelope is wider than its profile's, or an edit entry has no numeric bounds or allowed values (services/run_envelope.py, study harness issue 03). Nothing is granted; the user narrows it on the plan-review card."
+    },
+    "envelope_not_grantable": {
+      "surface": "inline",
+      "why": "The plan-review verdict names a plan with no envelope, a run that is over, one already running inside a granted envelope, or nothing granted to stop. Nothing changes; the assistant reads the plan again with get_task."
+    },
+    "envelope_decision_unavailable": {
+      "surface": "inline",
+      "why": "An envelope verdict arrived with a user message or could not be applied now (harness/loop.py). Nothing is granted; the user answers the plan-review card again."
+    }
+  }
+}

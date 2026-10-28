@@ -8,7 +8,10 @@ Borrowed from DeepSeek Harness's approval subsystem (assessment design 2):
 * ``approval/decided {call_id, tool, tier, outcome, by}`` when the card is
   answered (``by: user``), times out (``ttl``), is aborted (``session``) or
   revoked (``system``), or when policy approves a tier without a card
-  (``by: policy``, ``AUTO_APPROVE_TIERS``, no ``asked``).
+  (``by: policy``, ``AUTO_APPROVE_TIERS``, no ``asked``), or when a harness
+  run's granted approval envelope admits the call (``by: envelope:<id>``,
+  study harness issue 03, `services/run_envelope.py`; no ``asked``). The
+  grant itself is a ``by: user`` decision carrying ``envelope_id``.
 
 Outcomes are the closed set ``OUTCOMES``; anything but ``approved`` denies.
 Arguments are never written: the tool call already holds them, and a log
@@ -30,6 +33,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,6 +44,9 @@ logger = logging.getLogger("pypsa_gui.chat")
 OUTCOMES = frozenset({"approved", "rejected", "expired", "aborted", "revoked", "unavailable"})
 DECIDERS = frozenset({"user", "ttl", "session", "system", "policy"})
 RETENTION_SECONDS: int = 90 * 24 * 3600
+# Issue 03: a decision the run's granted envelope made, named by its id.
+_ENVELOPE_DECIDER = re.compile(r"envelope:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+_LINKS = ("operation_id", "preview_id", "envelope_id")
 
 
 def _root() -> Path:
@@ -128,11 +135,11 @@ def links(session: Any, args: Any) -> dict[str, str]:
 
 def decided(session: Any, *, call_id: str, tool: str, tier: str, outcome: str, by: str,
             link: dict[str, str] | None = None) -> bool:
-    if outcome not in OUTCOMES or by not in DECIDERS:
+    if outcome not in OUTCOMES or (by not in DECIDERS and not (isinstance(by, str) and _ENVELOPE_DECIDER.fullmatch(by))):
         raise ValueError(f"approval outcome {outcome!r} by {by!r} is not in the closed set")
     record = _base(session, "approval/decided", call_id, tool, tier)
     record.update(outcome=outcome, by=by)
-    record.update({k: v for k, v in (link or {}).items() if k in ("operation_id", "preview_id")})
+    record.update({k: v for k, v in (link or {}).items() if k in _LINKS})
     return _write(session, record)
 
 

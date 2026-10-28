@@ -144,7 +144,15 @@ def load(profile: dict) -> dict:
             if own.get(core["id"]) != core:
                 raise ProfileError(f"Stage {name}: rule {core['id']} is inherited and cannot be dropped or changed.")
         stages[name] = {"actions": actions, "rules": rules}
-    return {**copy.deepcopy(profile), "stages": stages}
+    loaded = {**copy.deepcopy(profile), "stages": stages}
+    if "envelope" in profile:
+        # Issue 03: what a run of this profile may propose; a grant narrows it, never widens it.
+        from services import run_envelope
+        try:
+            loaded["envelope"] = run_envelope.check_block(profile["envelope"])
+        except run_envelope.EnvelopeError as exc:
+            raise ProfileError(f"Envelope: {exc}") from exc
+    return loaded
 
 
 def scope_for(template: dict | None) -> dict:
@@ -174,6 +182,22 @@ EH_SITE = {
                 {"component": "candidate:bess", "attr": "max_mw"},
                 {"component": "candidate:pv", "attr": "max_mw"},
                 {"component": "candidate:bess", "attr": "hours"}],
+    # Issue 03 (§7): the edits and runs a granted envelope covers. The
+    # candidates' size caps within ±50 % of their value at grant, and the
+    # run's own queued solve.
+    "envelope": {
+        "edits": [{"tool": "update_component", "target": {"component": "Generator", "name": "genset_new_*", "attr": "p_nom_max"},
+                   "bounds": {"min": 0.0, "rel": 0.5}},
+                  {"tool": "update_component", "target": {"component": "Generator", "name": "pv_new_*", "attr": "p_nom_max"},
+                   "bounds": {"min": 0.0, "rel": 0.5}},
+                  {"tool": "update_component", "target": {"component": "StorageUnit", "name": "bess_new_*", "attr": "p_nom_max"},
+                   "bounds": {"min": 0.0, "rel": 0.5}},
+                  {"tool": "update_component", "target": {"component": "StorageUnit", "name": "bess_new_*", "attr": "max_hours"},
+                   "bounds": {"min": 1.0, "max": 8.0}}],
+        "runs": [{"tool": "solve_queue_enqueue"}],
+        "budget": {"solves": 6, "rounds": 6, "wall_time_h": 8.0},
+        "research": {"allowed": False, "cost_cap_eur": 2.0},
+    },
     "kpis": [],
     "chapters": [],
     "missing_tools": [],
