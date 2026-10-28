@@ -30,14 +30,19 @@ function signed2(v: number): string {
   return v > 0 ? `+${mvar(v)}` : v < 0 ? `−${mvar(-v)}` : mvar(v)
 }
 
+/** A side counts as short only above this many Mvar, as in gridspine's campus_reactive: a band edge equal to the
+ * circle up to float noise is met, never "0.00 Mvar short". */
+const SHORT_EPS = 1e-9
+
 /** A fail row's detail in the table's own number style; the other rows keep the engine's words. */
 function detailText(r: IbrQCurveRow): string {
   if (r.status !== 'fail' || r.available_mvar == null || r.shortfall_mvar == null
     || r.q_min_req_mvar == null || r.q_max_req_mvar == null) return r.detail
   const deliver = Math.max(0, r.q_max_req_mvar - r.available_mvar)
   const absorb = Math.max(0, -r.q_min_req_mvar - r.available_mvar)
-  const short = mvar(deliver) === mvar(absorb) && deliver > 0 ? `${mvar(deliver)} Mvar short each way`
-    : [deliver > 0 && `${mvar(deliver)} Mvar short to deliver`, absorb > 0 && `${mvar(absorb)} Mvar short to absorb`]
+  const short = mvar(deliver) === mvar(absorb) && deliver > SHORT_EPS ? `${mvar(deliver)} Mvar short each way`
+    : [deliver > SHORT_EPS && `${mvar(deliver)} Mvar short to deliver`,
+      absorb > SHORT_EPS && `${mvar(absorb)} Mvar short to absorb`]
       .filter(Boolean).join(' and ') || `${mvar(r.shortfall_mvar)} Mvar short`
   return `±${mvar(r.available_mvar)} Mvar available for ${signed2(r.q_min_req_mvar)} to ${signed2(r.q_max_req_mvar)} Mvar: ${short}`
 }

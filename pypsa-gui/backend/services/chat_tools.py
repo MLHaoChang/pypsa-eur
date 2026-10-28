@@ -678,14 +678,17 @@ _RESULTS_NO_DATA_MESSAGE = (
 
 
 def get_results(result_kind: str, source: str = "lopf", detail: str | None = None,
-                offset: int = 0, limit: int | None = None) -> Any:
+                offset: int = 0, limit: int | None = None, run_id: str | None = None) -> Any:
     """
     v4-MAJOR-4 dispatcher: every results enum routes through the named
     handler, with ac_pf_status mapped to a distinct path via the lookup dict.
     `source` ('lopf' | 'ac_pf') is forwarded where the handler supports it.
     `detail` ('summary' | 'lines') with `offset` / `limit` shapes the kinds
     that have a summary (value_flows, IC P3 WP3.4) and is ignored elsewhere.
+    `run_id` (LC-03) answers for one run: see `_results_for_run`.
     """
+    if run_id is not None:
+        return _results_for_run(result_kind, run_id)
     handler = _resolve_results_handler(result_kind)
     # Some handlers take `source` as a query param; pass via kwargs if the
     # function accepts it, else call bare. Inspect via __code__.co_varnames.
@@ -698,6 +701,45 @@ def get_results(result_kind: str, source: str = "lopf", detail: str | None = Non
         result = (_value_flow_lines_page(result, offset, limit) if detail == "lines"
                   else _value_flows_summary(result))
     return _with_freshness(result)
+
+
+def _results_for_run(result_kind: str, run_id: Any) -> dict:
+    """LC-03: one run's results, never another run's.
+
+    The run the current results came from answers with the current read; any
+    other run answers from the section kept when it finished
+    (`retained_results`), or a typed unavailable naming the run. Only the
+    kinds a family keeps take a run_id.
+    """
+    from services import retained_results, run_evidence
+
+    if not isinstance(run_id, str) or not run_evidence._valid_run_id(run_id):
+        raise HTTPException(422, {"error_kind": "invalid_results_argument",
+                                  "message": "run_id must be a run id from list_project_runs."})
+    if result_kind not in retained_results.SUMMARY_KINDS:
+        return retained_results.unavailable(
+            "historical_scope_mismatch",
+            f"result_kind {result_kind!r} is not kept per run; run_id reads only these kinds.",
+            run_id=run_id, scope="historical", kept_kinds=list(retained_results.SUMMARY_KINDS))
+    from services.workflow_tools import solve_freshness
+
+    run_evidence._authority()
+    run, facts = retained_results.run_binding(run_id)
+    # The current read answers for its run only while it is that run's own
+    # optimal solve (as at capture); otherwise the kept section answers.
+    if run is not None and solve_freshness().get("results_current") is True:
+        return {"status": "ok", "scope": "current", "result_kind": result_kind,
+                "data": get_results(result_kind), "run_id": run_id, "run": run, **facts}
+    record, refused = retained_results.historical(retained_results.SUMMARY_SECTION, run_id)
+    if refused is not None:
+        return {**refused, "result_kind": result_kind, "run_id": run_id, **facts,
+                "next_step": "Say this run is not the current result and offer to re-run."}
+    return {"status": "ok", "scope": "historical", "result_kind": result_kind,
+            "data": (record.get("data") or {}).get(result_kind),
+            "section": retained_results.SUMMARY_SECTION, "run_id": run_id,
+            "run": retained_results.run_ref(run_id, record, current=False), **facts,
+            "scope_note": "This run's results as kept when it finished; the Results tabs "
+                          "show the current results, not this run."}
 
 
 def _with_freshness(result: Any) -> Any:
@@ -5610,6 +5652,7 @@ def ui_open_panel(
     window_from: int | None = None,
     window_to: int | None = None,
     highlight_branch: dict | None = None,
+    highlight_projects: list[str] | None = None,
 ) -> dict:
     """
     Navigate the GUI. Emits a ``ui_event`` SSE frame (kind=navigate) that
@@ -5619,6 +5662,9 @@ def ui_open_panel(
     Load flow arguments (live-voice 07) need panel results and results_tab
     loadflow. With any of them the view is read first: an unavailable view or
     an unknown branch refuses with no event. Without them the call is unchanged.
+
+    `highlight_projects` (LC-17, Scenarios only): up to four projects the
+    caller may open, highlighted in the scenario tree; any other refuses.
     """
     from harness.catalogue import (
         BOTTOM_TAB_ENUM, COMPARE_TAB_ENUM, RESULTS_TAB_ENUM, SAFETY_PANEL_ENUM,
@@ -5652,6 +5698,16 @@ def ui_open_panel(
             "error_kind": "invalid_navigation", "field": "canvas_view",
             "message": "Choose blank for topology, or satellite, hybrid or site for map.",
         })
+    if highlight_projects is not None:
+        if (panel_id not in {"Scenarios", "scenarios"} or not isinstance(highlight_projects, list)
+                or not 1 <= len(highlight_projects) <= 4 or not all(isinstance(p, str) for p in highlight_projects)):
+            raise HTTPException(400, detail={
+                "error_kind": "invalid_navigation", "field": "highlight_projects",
+                "message": "Pass 1–4 project ids with panel_id scenarios.",
+            })
+        from services import project_registry
+        with _acting() as (db, user):  # an id the caller cannot open refuses like an unknown one
+            highlight_projects = [str(project_registry.resolve_project(db, user, p).id) for p in highlight_projects]
     loadflow = _loadflow_navigation_args(panel_id, results_tab, loadflow_source,
                                          window_from, window_to, highlight_branch)
     facts = None
@@ -5682,6 +5738,8 @@ def ui_open_panel(
         event["compare_tab"] = compare_tab
     if canvas_view is not None:
         event["canvas_view"] = canvas_view
+    if highlight_projects:
+        event["highlight_projects"] = highlight_projects
     return event
 
 
@@ -8532,8 +8590,9 @@ def import_map_geometry(name: str, file_id: str, apply: bool = False, tolerance_
         # would apply one project's file to the other (GK B follow-up on #769).
         raise HTTPException(status_code=409, detail={
             "error_kind": "upload_project_mismatch",
-            "message": f"file_id is an upload of the active project {active!r}; "
-                       f"import into that project, or switch to {name!r} and upload there"})
+            "message": f"That file was uploaded to the open project ({active}), so it "
+                       f"can only be imported there. To import it into {name}, "
+                       f"open {name} and upload the file again."})
     data = upload_service.get_upload_bytes(active, file_id)
     request = _b2b_body_request(data, f"/api/projects/{name}/map_layout/import")
     with _acting() as (db, user):

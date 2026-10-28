@@ -40,6 +40,8 @@ Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sh
 
 Probe tests that monkeypatch `_probe` can hide dispatcher-signature bugs: ask for a test against the real signature.
 
+When a PR changes a validation guard, confirm by mutation that its test fails for the guard, not for a downstream check (#807's decoy case).
+
 ## Rulings
 
 - `profile_location_missing` skips uploaded and network_native profiles (`readiness.profile_kind`).

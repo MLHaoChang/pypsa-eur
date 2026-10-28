@@ -128,18 +128,20 @@ MAX_QUEUE_FOLLOW_SECONDS = 6 * 3600  # then the step settles uncertain; nothing 
 
 
 def queue_jobs(result) -> list[dict]:
-    """The queue jobs a sweep or enqueue result started, as {job_id, project_id}.
+    """The queue jobs a sweep or enqueue result started, as {job_id, project_id},
+    with the sweep case's `name` (LC-17: each case is reported by its name).
 
     A sweep case reused from an earlier solve started no job. The child's
     UUID is the second half of the job's `project_key` (`org:uuid`)."""
     if not isinstance(result, dict):
         return []
     if "cases" in result:
-        found = [case.get("job") for case in result["cases"] if isinstance(case, dict)]
+        found = [(case.get("job"), case.get("name")) for case in result["cases"] if isinstance(case, dict)]
     else:
-        found = [result]
-    return [{"job_id": str(job["id"]), "project_id": str(job.get("project_key", "")).split(":", 1)[-1]}
-            for job in found if isinstance(job, dict) and job.get("id")]
+        found = [(result, None)]
+    return [{"job_id": str(job["id"]), "project_id": str(job.get("project_key", "")).split(":", 1)[-1],
+             **({"name": str(name)} if name else {})}
+            for job, name in found if isinstance(job, dict) and job.get("id")]
 
 
 def _queue_job_status(job) -> str:
@@ -151,6 +153,18 @@ def _queue_job_status(job) -> str:
             return _visible_job_or_404(db, user, job["job_id"]).get("status") or "unknown"
     except Exception:  # noqa: BLE001 — an unreadable job proves nothing
         return "unknown"
+
+
+def _queue_job_error(job) -> str | None:
+    """A failed job's own error line, bounded; None when unreadable."""
+    from routers.solve_queue import _visible_job_or_404
+    from services import chat_tools
+    try:
+        with chat_tools._acting() as (db, user):
+            error = _visible_job_or_404(db, user, job["job_id"]).get("error")
+    except Exception:  # noqa: BLE001 — an unreadable job names no cause
+        return None
+    return str(error)[:200] if error else None
 
 
 def _queue_run(job) -> dict | None:
@@ -201,18 +215,30 @@ def queue_outcome(jobs) -> tuple[str, str, dict]:
 
     Completed only when every job completed with intact evidence. Failed only
     when no job completed (each failed or was aborted): a retry then repeats
-    nothing that landed. Anything else, a mix included, is uncertain."""
-    runs, natives = [], []
+    nothing that landed. Anything else, a mix included, is uncertain.
+
+    Whatever the step's status, `cases` holds each job's own outcome (LC-17):
+    a failed case is named with its job's error and never hides the others.
+    A completed job whose evidence disagrees is `unverified`, never completed."""
+    runs, natives, cases = [], [], []
     for job in jobs:
         native = _queue_job_status(job)
         natives.append(native)
+        case = {k: job[k] for k in ("name", "project_id", "job_id") if job.get(k)}
         if native == "completed":
-            runs.append(_queue_run(job))
+            run = _queue_run(job)
+            runs.append(run)
+            case["status"] = "completed" if run else "unverified"
+        else:
+            case["status"] = native
+            if native == "failed":
+                case["error"] = _queue_job_error(job)
+        cases.append(case)
     if natives and all(n == "completed" for n in natives) and all(runs):
-        return "completed", "completed", {"runs": runs}
+        return "completed", "completed", {"runs": runs, "cases": cases}
     if natives and all(n in ("failed", "aborted") for n in natives):
-        return "failed", "aborted" if "aborted" in natives else "failed", {}
-    return "uncertain", "completed" if "completed" in natives else "unknown", {}
+        return "failed", "aborted" if "aborted" in natives else "failed", {"cases": cases}
+    return "uncertain", "completed" if "completed" in natives else "unknown", {"cases": cases}
 
 
 def settle_queue_from_record(task_path, ticket):

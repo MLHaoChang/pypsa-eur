@@ -7,6 +7,7 @@ import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import { mismatchSentence } from '../utils/projectMismatch'
 import { EditCardTable, editCardOf, editCardWords } from './EditCard'
+import { SweepCardTable, sweepCardOf } from './SweepCard'
 
 // Tools that require an EXTRA typed-confirmation step (Phase 4 polish).
 // v4-MAJOR-1 / v6-F1: save_project force-overwrite needs the user to type
@@ -244,9 +245,11 @@ export function ConfirmationCard() {
   const timerRef = useRef<number | null>(null)
   const review = completePreview(pending?.args)
   const edit = editCardOf(pending?.edit_card)
+  const sweep = sweepCardOf(pending?.sweep_card)
   // LC-04: a chat edit's card that arrived malformed is never approvable.
   const reviewUnavailable = (pending?.tool_name === 'apply_project_changes' && !review)
     || (pending?.edit_card !== undefined && !edit)
+    || (pending?.sweep_card !== undefined && !sweep)
 
   // Reset the typed-confirmation field whenever the pending card changes.
   useEffect(() => { setTypedConfirmation('') }, [pending?.confirmation_token])
@@ -395,7 +398,7 @@ export function ConfirmationCard() {
         <>
           <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text"
             data-testid="chat-confirmation-summary">
-            {(edit && (editCardWords(edit) || edit.says)) || (pending.external
+            {(edit && (editCardWords(edit) || edit.says)) || sweep?.says || (pending.external
               ? shortMcpToolName(pending.tool_name)
               : guidedCardSummary(pending.tool_name, pending.args))}
           </div>
@@ -420,6 +423,10 @@ export function ConfirmationCard() {
         </>
       )}
       {edit && <EditCardTable card={edit} guided={Boolean(guidedWording)} />}
+      {sweep && <SweepCardTable card={sweep} guided={Boolean(guidedWording)} />}
+      {pending.sweep_card !== undefined && !sweep && <p role="alert" className="mb-2 text-xs text-warn">
+        The cases of this sweep are unavailable. Deny it and ask again.
+      </p>}
       {pending.edit_card !== undefined && !edit && <p role="alert" className="mb-2 text-xs text-warn">
         The old and new values of this change are unavailable. Deny it and ask again.
       </p>}

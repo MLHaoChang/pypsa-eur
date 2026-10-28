@@ -157,6 +157,8 @@ def test_republishing_with_only_inert_edits_is_not_a_changed_code(hub, inert):  
 @pytest.mark.parametrize("edit", [
     lambda p: p["q_range_demand"].update(value=p["q_range_demand"]["value"] + 0.05),
     lambda p: p["q_range_demand"].update(clause="Test code §2"),
+    # The TDD standard's clause too, so rewording its "not verified" note marks existing runs changed.
+    lambda p: p["current_tdd_standard"].update(clause="IEEE 519-2014 Tables 2-4, checked"),
     lambda p: p["q_range_demand"].update(source="code"),
     lambda p: p.update(unbalance_limit_pct={"value": 2.0, "clause": "Test code §3", "source": "code"}),
 ])

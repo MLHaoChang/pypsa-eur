@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Show the specific reason when saving solver settings is refused, accept GeoJSON and KML files in the chat upload picker, reword the import-into-another-project refusal in plain words, and drop leftover "(tag literature)" text from assistant tool descriptions.

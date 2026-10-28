@@ -118,6 +118,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                (_r("get_results", result_kind="statistics"),
                 _r("get_results", result_kind="cost_breakdown")),
                guided_label="Summary",
+               historical_section="results_summary",
                units="EUR, MWh",
                checked_profiles=("generator-dispatch/1", "network-linear-cost/1",
                                  "carrier-energy/1")),

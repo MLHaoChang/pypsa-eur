@@ -778,6 +778,7 @@ describe('P29: Guided tool lines', () => {
     ['get_adequacy_results', 'read the study results'],
     ['list_components', 'list what is in the network'],
     ['run_fmea_sweep', 'start the equipment-failure check'],
+    ['run_sensitivity_sweep', 'start the sensitivity cases'],
     ['update_solver_config', 'change a study setting'],
     ['put_stress_scenarios', 'save the stress scenarios'],
     ['frob_widget', 'use frob widget'],
@@ -839,7 +840,9 @@ describe('P29 gate B1-1: start-only tools never say they finished', () => {
     // campus island I7: the frequency-cut loop runs in the background (poll campus_island_cuts)
     'campus_apply_island_cuts',
     // a background report job (poll get_report_status), not "Start …" worded
-    'regenerate_report_section'])]
+    'regenerate_report_section',
+    // LC-17: creates the cases, then queues their solves
+    'run_sensitivity_sweep'])]
 
   it('the schema scan finds the study starters', () => {
     expect(fromSchema).toEqual(expect.arrayContaining([

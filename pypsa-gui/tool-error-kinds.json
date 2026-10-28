@@ -1319,6 +1319,10 @@
       "surface": "inline",
       "why": "get_run_evidence refuses a malformed section name. The assistant selects an existing lowercase snake_case evidence section."
     },
+    "invalid_results_argument": {
+      "surface": "inline",
+      "why": "get_results refuses a malformed run_id. The assistant takes a run id from list_project_runs instead of inventing one."
+    },
     "invalid_run_status": {
       "surface": "inline",
       "why": "list_project_runs refuses an unknown status filter. The assistant uses one of the native run statuses instead of inventing a state."
@@ -1638,6 +1642,34 @@
     "use_project_preview": {
       "surface": "inline",
       "why": "Model-only (LC-16 slice C, harness/edit_routing.py): a chat edit of several assets is refused toward preview_project_changes before any frame, so the client never receives it; listed so the contract holds every kind the backend authors. The message carries the preview's changes; the model retries through the one preview card."
+    },
+    "baseline_not_saved": {
+      "surface": "inline",
+      "why": "LC-17: a sensitivity sweep branches the SAVED baseline and the open one has unsaved edits. The assistant offers save_project (its own card) in the conversation; never a banner, never a silent save."
+    },
+    "invalid_sensitivity_cases": {
+      "surface": "inline",
+      "why": "LC-17: a sweep's cases are malformed (count, shape, names or values). The model's own call is wrong and it corrects it; nothing for the user to act on."
+    },
+    "sensitivity_name_conflict": {
+      "surface": "inline",
+      "why": "LC-17: a case name is already held by a project with other inputs. The assistant asks the user for another name in the conversation."
+    },
+    "sweep_card_too_large": {
+      "surface": "inline",
+      "why": "LC-17: a sweep has more asset rows than one card shows. The assistant splits the sweep; per call."
+    },
+    "sweep_preview_stale": {
+      "surface": "inline",
+      "why": "LC-17: the saved baseline or a case changed between the sweep card and its execution. Nothing ran; the assistant shows a new card."
+    },
+    "sweep_preview_unavailable": {
+      "surface": "inline",
+      "why": "LC-17: the saved baseline could not be read to build the sweep card. Nothing ran; the detail names the project and the assistant says so."
+    },
+    "unsupported_sensitivity_project": {
+      "surface": "inline",
+      "why": "LC-17: the baseline is a GridSpine study, which the sweep does not branch. The assistant uses the GridSpine config tools instead; per call."
     }
   }
 }
