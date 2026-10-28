@@ -486,7 +486,13 @@ def binary_check(n, cfg, *, solver_options: dict | None = None, solve=None) -> d
     periods = (list(n.investment_periods) if isinstance(n.snapshots, pd.MultiIndex) else [None])
     rows = []
     for period in periods:
-        for first, sns in _windows(n, period):
+        try:
+            windows = _windows(n, period)
+        except Exception as exc:                                 # noqa: BLE001
+            rows.append({**_empty_row(period), "status": "unverified",
+                         "reason": f"{type(exc).__name__}: {exc}"})
+            continue
+        for first, sns in windows:
             try:
                 rows.append(_period_row(n, period, cfg, solver_options or {}, solve, first, sns))
             except Exception as exc:                             # noqa: BLE001
@@ -500,8 +506,10 @@ def binary_check(n, cfg, *, solver_options: dict | None = None, solve=None) -> d
                    + ", ".join(dict.fromkeys(str(r["period"]) if r["period"] is not None else "the window"
                                              for r in verified if r["flagged"])))
     elif status != "ok":
+        several = is_year_base(n)       # several weeks a period: name the week, not only the period
         message = "binary check unverified: " + "; ".join(
-            f"{r['period']}: {r.get('reason')}" for r in rows if r["status"] != "ok")
+            f"{r['window'] if several and r['window'] else r['period']}: {r.get('reason')}"
+            for r in rows if r["status"] != "ok")
     else:
         message = "binary check: linearised UC within the flag threshold in every period"
     return _payload(n, status, flagged, message, rows, _ledger(rows, cfg), t0)

@@ -292,6 +292,11 @@ def test_2027_plans_plain_and_checks_four_weeks_binary(reset_backend):
 @pytest.mark.live_solve
 def test_mass_balance_per_period(reset_backend):
     n, _, _ = _plan("2027", years=(2027,))
+    _assert_mass_balance(n)
+
+
+def _assert_mass_balance(n) -> None:
+    """Design §3.B's four balances, per period, to 1e-6 of the period's mined tonnes."""
     p0, p1, p2 = n.links_t.p0, n.links_t.p1, n.links_t.p2
     mined = n.generators_t.p["mine"]
     crushed = -p1["crusher"]
@@ -449,3 +454,4 @@ def test_the_three_period_year_solves_within_the_budget(reset_backend):
     shed = _by_period(n.stores_t.p["concentrate_shed"])
     scale = _by_period(n.loads_t.p["shipments"]).max()
     assert shed.abs().max() < 1e-6 * scale
+    _assert_mass_balance(n)

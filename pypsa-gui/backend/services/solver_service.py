@@ -981,7 +981,7 @@ def run_simulation(
                     phase(_proc_note)
                 # The UC keywords the plan actually solved with (the full
                 # branch adds the island's); the binary check runs after a
-                # linearised plan only.
+                # linearised plan, or a plain one on the year base.
                 plan_uc_kwargs = dict(proc_uc_kwargs)
                 _plain = _process_uc.planning_uc_mode(network, config) == "plain"
                 # Solve-strategy dispatch. Three modes share the same lifecycle
@@ -1115,8 +1115,9 @@ def run_simulation(
                 _heartbeat.begin("Optimising")
                 # The year base plans the process units as a plain LP (`process_uc.relax_for_plan`);
                 # put back before the check and, at the latest, in the finally below.
-                _undo_plain = _process_uc.relax_for_plan(network, config)
+                _undo_plain = lambda: None  # noqa: E731
                 try:
+                    _undo_plain = _process_uc.relax_for_plan(network, config)
                     if use_myopic:
                         status, condition, _ = _run_myopic_foresight(
                             network, config, phase,
@@ -1250,7 +1251,7 @@ def run_simulation(
                             except Exception as exc:
                                 phase(f"Post-solve diagnostic failed: {exc}")
                     # The mandatory binary operational check after a
-                    # linearised plan with committable process units (design
+                    # linearised (or year-base plain) plan with committable process units (design
                     # §2.3). On copies, before the restore so the solve-time
                     # transforms are on them; it never fails the run.
                     _proc_check = None
@@ -1271,7 +1272,10 @@ def run_simulation(
                     # KeyboardInterrupt that already landed propagates as normal;
                     # any further abort signal is a no-op here).
                     _abort_watcher.disarm()
-                    _undo_plain()
+                    try:
+                        _undo_plain()
+                    except Exception as exc:
+                        phase(f"Restoring the process units' commitment failed: {exc}")
                     _heartbeat.end()  # silence pings before the restore walk
                     # Reverse myopic capacity-freezes first (innermost layer),
                     # then unwind the modelling-assumption transforms. Each
