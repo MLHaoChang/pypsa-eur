@@ -1,6 +1,6 @@
 # Re-generating replays the stored refinements
 
-Status: ready-for-agent (triage 2026-10-28: generate routes replay only caller-passed refinements; chat generate tools take none)
+Status: done (claude/tsg06-replay-refinements; was ready-for-agent, triage 2026-10-28)
 Type: task
 Blocked by: none (04 done, #576)
 Gated: yes (apply path)
@@ -41,11 +41,11 @@ The load, availability and series generate routes replay refinements only when t
 - The three `generate_*` chat tools gain the same opt-out argument and report replay warnings in their result.
 
 **Acceptance criteria:**
-- [ ] Re-generating a refined load from the editor, without passing ops, yields the refined series.
-- [ ] The same from chat (`generate_load_profile`), without passing ops, yields the refined series.
-- [ ] With the opt-out set, the unrefined series is generated.
-- [ ] A replay refusal (e.g. a window op outside the new year) names the op and its index on the card.
-- [ ] Tests cover the route default, the opt-out, the chat tool and the refusal.
+- [x] Re-generating a refined load from the editor, without passing ops, yields the refined series.
+- [x] The same from chat (`generate_load_profile`), without passing ops, yields the refined series.
+- [x] With the opt-out set, the unrefined series is generated.
+- [x] A replay refusal (e.g. a window op outside the new year) names the op and its index on the card.
+- [x] Tests cover the route default, the opt-out, the chat tool and the refusal.
 
 **Out of scope:**
 - Per-op undo (issue 05).

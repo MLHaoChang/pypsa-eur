@@ -1113,6 +1113,66 @@ brief grants nothing: every write or run step keeps its own card.
   After two retries, `task_step_retry_limit` leaves the failed step unchanged
   and the correction tells the assistant to stop and let the user decide.
 
+### Harness runs (study harness issue 01)
+
+A harness run is a task of file version 3 with a `run` block
+(`.scratch/study-harness/design.md` §3–§5, §9). Issue 01 is step-by-step
+only: no runner, no envelope, no loops.
+
+- **Start.** `start_task(title, steps=[], request_id, brief, run={"profile":
+  "eh_site@1", "mode": "stepwise"})`. The brief has `objective`, `cards` and
+  optional `cases`, no `phases`: the profile's stages replace them. Any other
+  mode, an unknown profile or caller steps is `invalid_task`. Version 1 and 2
+  files are read as before and have no `run` block.
+- **Profiles** (`services/run_profiles.py`) are data: per stage the actions
+  the harness materialises on entry (`<stage>.<n>`, ≤ 24 steps and 32 000
+  characters per stage) and the exit gate's rules. Stages a profile leaves out
+  take `GENERIC` (§9.2); `skip` carries a reason. A stage a profile does
+  set keeps every generic rule unchanged (refused at load): it may add rules,
+  never drop or loosen one. The card scope is read from
+  `flow_scope.preset_for` at setup. `load` refuses an unknown fact, a wildcard,
+  a unit that is not the fact's, a never-tunable attr (§6.0, `NEVER_TUNABLE`)
+  and a stage tool outside `BOUND_CONTEXT_TOOLS` (the §6.6 sweep test).
+- **Gates** (`services/run_gates.py`). A closed registry (`FACTS`,
+  `FACTS_VERSION`) maps each fact to one native reader and the key it reads;
+  every gate result carries that source. Fail closed: a reader that raises
+  or reads None or NaN is `not_evaluated`, which fails a `block` rule.
+  `gate(rules, env)` takes the run project's context explicitly (`Env.ctx`;
+  readers without a context argument run through `run_gates._on`, the turn
+  cell cleared). A context of another project makes every rule
+  `not_evaluated`. The gate is pinned to the inputs it judged: the input
+  fingerprint is read before and after the readers, and a difference makes
+  every rule `not_evaluated` ("inputs changed during evaluation").
+- **Who writes the run block.** Only `assistant_tasks._advance_run`: it enters
+  the stage, adds its steps, and once they completed evaluates the gate from
+  native facts, outside the task lock, writing it only if the stage, its
+  attempts and the inputs did not move meanwhile (racing evaluations advance
+  once). It writes only for a caller who may edit the project (ACL, no other
+  user's edit lock); otherwise `get_task` shows `run.gate_due`. It runs after
+  `start_task`, `finish_step`, `resolve_task_step`, `continue_at_card` and in
+  `get_task` and `resume_task` (a job settled on its follower thread is gated
+  on the next `get_task`). `resolve_task_step(completed,
+  result=…)` never reaches a gate (SC-12). A read step in a run completes once
+  it returns: what it found is the gate's to judge.
+- **Pass and fail.** A passed gate enters the next stage that is not skipped;
+  the last one completes the task. A failed gate stops the run at that stage
+  (`run.status: needs_user`, task `needs_review`), and no later stage's step
+  exists, so nothing is enqueued. `resume_task` checks the failed gate again
+  (attempts + 1) once the user fixed the inputs; no loop budget yet (issue 04).
+- **The input gate holds until the solve.** Before a later stage's write or
+  run step, the input gate's fingerprint is compared with the current inputs
+  (on stage entry and after the user's Continue). An edit since then checks
+  the input gate again; if it now fails, the later stage's unstarted steps are
+  dropped and the run stops at the input gate.
+- **Profiles are immutable once shipped.** A run keeps the `id@version` it
+  started on; a changed rule set is a new version beside the old one.
+- **COP-1.** Every step is an ordinary offered call with its own card, and
+  the plan pauses (`paused_at_card`, the card is the stage id) before each
+  stage holding a write or run step; only the user's Continue goes on.
+- **`get_task`** returns `run`: profile, mode, status, current and next stage,
+  the scope preset, and per stage its status and each rule's verdict, fact and
+  value.
+
 ## Recorded runs, load flow, and experiment plans
 
 These tools live in `services/run_evidence.py`, `services/loadflow_summary.py`,

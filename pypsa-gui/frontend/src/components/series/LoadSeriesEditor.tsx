@@ -11,8 +11,11 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Play, Upload } from 'lucide-react'
 import { Btn, Seg } from '../PageKit'
-import { errorText, seriesApi, type PendingSeries } from '../../api/profiles'
-import { CurrentSeriesLine, DisabledReason, INPUT, PendingCard, RefinePanel, type EditorMode } from './SeriesKit'
+import { seriesApi, type PendingSeries } from '../../api/profiles'
+import {
+  CurrentSeriesLine, DisabledReason, INPUT, PendingCard, RefinePanel, GenerateError, ReplayToggle, useReplay,
+  type EditorMode,
+} from './SeriesKit'
 
 const SCALE_KEYS = new Set(['peak_mw', 'annual_mwh', 'preset'])
 const UNITS = ['kW', 'MW', 'kWh', 'MWh']
@@ -64,13 +67,16 @@ export default function LoadSeriesEditor({ project, component, mode, initialTab 
     [catalogue, archetypeName],
   )
 
+  const replay = useReplay(project, 'loads', 'p_set', component, archetypeName)
   const generate = useMutation({
-    mutationFn: () => {
+    mutationFn: (replayRefinements: boolean) => {
       const params: Record<string, unknown> = {}
       for (const [k, v] of Object.entries(overrides)) params[k] = coerce(v, defaults[k])
       params[scaleKind === 'peak' ? 'peak_mw' : 'annual_mwh'] = Number(scale)
       if (preset) params.preset = preset.name
-      return seriesApi.generateLoad(project, { archetype: archetypeName, loads: [component], params })
+      return seriesApi.generateLoad(project, {
+        archetype: archetypeName, loads: [component], params, ...(replayRefinements ? {} : { replay_refinements: false }),
+      })
     },
     onSuccess: setPending,
   })
@@ -134,9 +140,10 @@ export default function LoadSeriesEditor({ project, component, mode, initialTab 
             </div>
           )}
           <div className="flex items-center gap-2">
-            <Btn variant="primary" onClick={() => generate.mutate()} disabled={!scale || busy}>
+            <Btn variant="primary" onClick={() => generate.mutate(replay.replay)} disabled={!scale || busy}>
               <Play size={12} /> Preview
             </Btn>
+            <ReplayToggle {...replay} />
             <DisabledReason reason={scale ? null
               : `Enter ${scaleKind === 'peak' ? 'a peak in MW' : 'the annual energy in MWh'} to preview.`} />
           </div>
@@ -170,7 +177,7 @@ export default function LoadSeriesEditor({ project, component, mode, initialTab 
         </div>
       )}
 
-      {error && <p className="text-[11px] text-red-600 mt-1" data-testid="editor-error">{errorText(error)}</p>}
+      <GenerateError error={error} onRetryWithoutOps={() => generate.mutate(false)} />
 
       {pending && (
         <>

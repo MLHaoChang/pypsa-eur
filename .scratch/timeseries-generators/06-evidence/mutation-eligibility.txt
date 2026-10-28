@@ -1,0 +1,10 @@
+# Mutation check (GK B condition 8): routers/profiles.py _stored_refinements with
+#   same = stored is not None and _generator_of(stored) == made_by
+# replaced by
+#   same = stored is not None
+
+E       AssertionError: assert not [{'op': 'scale_window', 'hours': [5, 10], 'factor': 1.3, 'target': ['loads', 'p_set']}, {'op': 'scale_peak_to', 'mw': 60.0, 'target': ['loads', 'p_set']}]
+E       assert 59.99999999999999 == 80.0 ± 8.0e-05
+E         comparison failed
+FAILED tests/test_profiles_replay_stored.py::test_another_archetype_does_not_replay
+FAILED tests/test_profiles_replay_stored.py::test_a_refined_upload_does_not_replay
