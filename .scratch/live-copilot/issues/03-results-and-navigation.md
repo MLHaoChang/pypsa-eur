@@ -1,7 +1,11 @@
 # LC-03 — generic native evidence and navigation adapters
 
 Status: ready-for-agent
-Progress: Result-view registry #407, walk #410, retained load flow #416 merged; common retained adapter + Summary family (PR-D, below) open; LC-14 reach fixes outsourced.
+Progress: Result-view registry #407, walk #410, retained load flow #416, common adapter + Summary,
+capacity, dispatch, prices and emissions families (#848, #861 and earlier) merged; LC-T08 ACL
+recheck and LC-T09/T10 browser cases (PR-I, below) open. Remaining, after the results
+workbook's RW-03 (LC03-SCOPE-1): UI/export parity for past runs; queue/study/report sections;
+undigestable prices; sections over 16 KB. LC-14 reach fixes outsourced.
 Type: task
 Baseline: master `c75ca5584b873418f10f1bca42f868255d445b7b`
 Dependencies: LC-01/02 and current native evidence stores
@@ -288,3 +292,43 @@ the Emissions view's `historical_section`, the catalogue's run_id list.
   (unavailable instead of ok).
 - Oversized emissions (thousands of generators) take the existing rule: the
   section is not stored and the run refuses.
+
+### PR-I, ACL recheck and historical browser cases (2026-10-28)
+
+Owner scope LC03-SCOPE-1. Branch `claude/lc03-acl-historical`, from master `fcf28e3e`.
+
+- Finding: every past-run path already resolves the project ACL per request:
+  `discuss_project_run` and `export_run_evidence` through `get_run_evidence`,
+  the Results run view (`GET /results/run-view`) through `_authority`, and the
+  exported file through the uploads route's `ProjectAccessDep`. The refusal was
+  a bare 404 "Project not found", and the run view showed only "evidence
+  unavailable".
+- `run_evidence._authority` now refuses typed `project_unavailable` (404) with
+  a plain reason, the same text for revoked and deleted (no new existence
+  leak); `RunBoundView` shows that message. The uploads route is unchanged.
+- LC-T08 (`tests/test_retained_acl.py`): a real ACL change, no monkeypatch. A
+  member of the same org reads every family's kept section of a past oj-grid run
+  (loadflow, results_summary, results_capacity, results_dispatch,
+  results_prices, results_emissions), then the membership row is deleted. Per
+  family: navigation (`discuss_project_run`, the run view) and download
+  (`export_run_evidence`, the file exported while they had access) refuse;
+  `get_results(run_id)` and `list_project_runs` refuse with the same reason.
+  RED before the change at the reason assert (detail was a bare string).
+- LC-T09/T10 browser (`frontend/scripts/smoke-copilot-lc03-historical.mjs`,
+  composer-fixture journey `lc03h`, in the owner-journeys CI step): oj-grid
+  solved through chat at Gas 50, re-priced to 60, solved again. The first run
+  opens from `results_capacity`: rendered binding historical, that run, gas
+  LCOE 50 (hand oracle; current 60), the answer says 50. Then the user's
+  Clear, a newer turn about the latest run, and a project switch each leave no
+  past-run view.
+- RED found (LC-T10): a newer turn's `ui_open_panel(results, …)` left the past
+  run's view on screen under an answer about the current results. Fix: a model
+  turn's Results navigation drops the discussed run (`applyUiNavigate(…, {turn:
+  true})` from ChatPanel); a past run opens only by `open_run_result`, and the
+  live walk's own steps keep it (vitest for each).
+
+Kept, with reasons:
+- The past-run view's Results chrome still says "From the latest run" above the
+  retained section: UI parity for past runs is out of scope until RW-03.
+- Queue, study and report runs still refuse until each gets its own capture.
+

@@ -14,6 +14,12 @@ export default function RunBoundView({ run, tab }: { run: RunResultRequest; tab:
     enabled: !!project, staleTime: 0, refetchOnMount: 'always',
   })
   if (query.isFetching || query.isPending) return <p className="p-4" role="status">Loading retained run {run.runId}…</p>
+  // LC-T08: access lost since the run is refused on read; say so plainly.
+  const detail = (query.error as { response?: { data?: { detail?: { error_kind?: string; message?: string } } } } | null)
+    ?.response?.data?.detail
+  if (query.isError && detail?.error_kind === 'project_unavailable' && detail.message) {
+    return <p className="p-4" role="status">{detail.message}</p>
+  }
   if (query.isError || !query.data) return <p className="p-4" role="status">Retained {section ?? 'summary'} evidence unavailable for run {run.runId}. Current results have not been substituted.</p>
   const { data, binding } = query.data
   if (binding.project_name !== project || binding.run_id !== run.runId

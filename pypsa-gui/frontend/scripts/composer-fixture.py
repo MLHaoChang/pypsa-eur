@@ -21,7 +21,7 @@ def main():
     parser.add_argument("--storage", type=Path, required=True)
     parser.add_argument("--decisions", action="store_true")
     parser.add_argument("--no-model", action="store_true", help="configure no model profile (the no-key path)")
-    parser.add_argument("--journey", choices=["oj01", "oj05", "oj21", "oj22", "lc16c"],
+    parser.add_argument("--journey", choices=["oj01", "oj05", "oj21", "oj22", "lc16c", "lc03h"],
                         help="script a finite owner journey on the loopback wire (LC-03 OJ-01)")
     args = parser.parse_args()
     storage = args.storage.resolve()
@@ -136,6 +136,18 @@ def main():
                          ("get_loadflow_summary", {"run_id": ((results[0].get("items") or [{}])[0].get("run_id")
                                                               if results else None)}),
                          ("ui_open_panel", {"panel_id": "results", "results_tab": "loadflow"})]
+            elif "capacity results of the first run" in said:
+                # LC-03 LC-T09: a past run is opened from its kept section, never the current results.
+                items = (results[0].get("items") or [{}]) if results else [{}]
+                first = items[-1].get("run_id")
+                steps = [("list_project_runs", {"limit": 10, "status": "completed"}),
+                         ("discuss_project_run", {"run_id": first, "results_tab": "capex",
+                                                  "section": "results_capacity"}),
+                         ("get_results", {"result_kind": "economics_by_carrier", "run_id": first})]
+            elif "capacity results of the latest run" in said:
+                # LC-T10: a newer turn about the current results supersedes the past-run view.
+                steps = [("get_results", {"result_kind": "economics_by_carrier"}),
+                         ("ui_open_panel", {"panel_id": "results", "results_tab": "capex"})]
             elif "something else" in said:
                 listing = results[0] if results else {}
                 picked = next((v for v in listing.get("views", []) if v.get("data") == "available"), None)
@@ -172,6 +184,15 @@ def main():
                         f"{'read back' if receipt.get('outcome') == 'verified' else 'not confirmed'}; "
                         f"results stale: {receipt.get('results_stale')}; "
                         f"undo: {(receipt.get('undo') or {}).get('available')}.")
+            elif steps[0][0] == "list_project_runs" and steps[-1][0] == "get_results":
+                read = results[2]
+                gas = ((read.get("data") or {}).get("by_carrier") or {}).get("gas") or {}
+                text = (f"LC03H_PAST Run {steps[1][1]['run_id']} ({read.get('scope')}): "
+                        f"gas LCOE {(gas.get('lcoe_eur_per_mwh') or {}).get('total')} EUR/MWh.")
+            elif steps[0] == ("get_results", {"result_kind": "economics_by_carrier"}):
+                gas = (results[0].get("by_carrier") or {}).get("gas") or {}
+                text = (f"LC03H_LATEST Current results: "
+                        f"gas LCOE {(gas.get('lcoe_eur_per_mwh') or {}).get('total')} EUR/MWh.")
             elif len(steps) == 1:
                 text = f"The solve was started (job {results[0].get('job_id')})."
             else:
@@ -315,7 +336,7 @@ with SessionLocal() as db:
             else:
                 raise RuntimeError("Backend readiness timeout")
             ready = {"base": f"http://127.0.0.1:{port}", "credentials_file": str(credentials)}
-            if args.journey in ("oj01", "oj05", "oj21", "oj22", "lc16c"):
+            if args.journey in ("oj01", "oj05", "oj21", "oj22", "lc16c", "lc03h"):
                 # The same oj-grid the Tier A tests use (tests/oj_grid.py), as NetCDF.
                 network = storage / "oj-grid.nc"
                 # OJ-22 adds two more solar units, one inactive, so "all solar" is a set of three.

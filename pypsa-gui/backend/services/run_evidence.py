@@ -89,7 +89,16 @@ def _authority() -> tuple[Path, str, str]:
         _refuse('run_project_required',
                 'Create, save and activate a project before reading run evidence.')
     with chat_tools._acting() as (db, user):
-        project = project_registry.resolve_project(db, user, ctx.project_uuid)
+        try:
+            project = project_registry.resolve_project(db, user, ctx.project_uuid)
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            # Rechecked on every read, navigation and download: access lost since
+            # the run refuses here. Deleted and revoked read the same, as the 404 does.
+            _refuse('project_unavailable',
+                    'This project is not available to you: your access was removed or the '
+                    'project was deleted. Its runs and their kept results are not shown.', 404)
         return project_registry.project_dir(project), str(project.id), str(user.id)
 
 

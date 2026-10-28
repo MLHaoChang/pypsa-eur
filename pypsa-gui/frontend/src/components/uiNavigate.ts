@@ -105,15 +105,16 @@ export function openScenariosHighlight(ids: string[]): void {
   })
 }
 
-export function applyUiNavigate(d: NavigationRequest, expectedEpoch?: number): boolean {
+export function applyUiNavigate(d: NavigationRequest, expectedEpoch?: number,
+  opts?: { turn?: boolean }): boolean {
   if (expectedEpoch !== undefined && expectedEpoch !== navigationEpoch()) return false
   if (d.kind === 'set_snapshot' && typeof d.snapshot_index !== 'number') return true
   if (expectedEpoch === undefined) manualNavigation()
-  withAssistantNavigation(() => apply(d))
+  withAssistantNavigation(() => apply(d, opts?.turn === true))
   return true
 }
 
-function apply(d: NavigationRequest) {
+function apply(d: NavigationRequest, turn = false) {
   const ui = useUIStore.getState()
   // A highlight lasts until the next navigation.
   ui.setResultsHighlight(null)
@@ -165,6 +166,10 @@ function apply(d: NavigationRequest) {
   }
   // kind === 'navigate' | legacy 'open_panel'
   const panel = d.panel_id ? _normalizePanelId(d.panel_id) : null
+  // LC-T10: a model turn's Results navigation shows the current results (a past
+  // run opens only through open_run_result), so it ends a past run's view rather
+  // than leave it under a newer answer. The live walk's own steps keep it.
+  if (turn && panel === 'results' && ui.discussedRun) ui.clearDiscussedRun()
   if (panel === 'topology' || panel === 'map') {
     if (ui.activeSlidePanel) closePanelWithReturn()
     const view = d.canvas_view && ['blank', 'satellite', 'hybrid', 'site'].includes(d.canvas_view)
