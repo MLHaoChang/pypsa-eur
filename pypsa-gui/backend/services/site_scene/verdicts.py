@@ -106,9 +106,10 @@ def actions(*, saved: bool, can_edit: bool, anchor_confirmed: bool, site: str, b
                 ["accepted buildings", "existing Loads, assets or processes"]),
         _action("show_connectivity", False, "projects the native 2D/SLD graph onto the scene",
                 _blocker("not_in_this_slice", REASON_NOT_IN_N, HOME_SITE_MAP)),
+        # Playback is not in N whether or not a run exists, so a run is never the
+        # blocker here (UX #821): REASON_NO_RUN applies once playback ships.
         _action("play_results", False, "plays native hourly results at their own cadence",
-                _blocker("no_native_run", REASON_NO_RUN, HOME_RESULTS) if native_runs == 0
-                else _blocker("not_in_this_slice", REASON_NOT_IN_N, HOME_RESULTS)),
+                _blocker("not_in_this_slice", REASON_NOT_IN_N, HOME_RESULTS)),
         _action("export_scene", False, "writes an export snapshot of one generation",
                 _blocker("not_in_this_slice", REASON_NOT_IN_N, HOME_SITE_MAP)),
         _action("apply_proposal", writable and pending_proposal, "commits the reviewed proposal as a new revision",

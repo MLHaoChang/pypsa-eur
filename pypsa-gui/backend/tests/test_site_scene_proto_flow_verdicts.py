@@ -157,3 +157,14 @@ def test_blocker_reasons_use_no_developer_words():
     for name in dir(verdicts):
         if name.startswith("REASON_"):
             assert "slice" not in getattr(verdicts, name).lower(), name
+
+
+@pytest.mark.parametrize("native_runs", [0, 1])
+def test_play_results_is_not_in_n_with_or_without_a_run(native_runs):
+    """UX #821: "run a study" would promise playback this version does not have."""
+    from services.site_scene import verdicts
+    actions = verdicts.actions(saved=True, can_edit=True, anchor_confirmed=True, site="enabled", boundary=True,
+                               buildings=1, targets=1, native_runs=native_runs, pending_proposal=False)
+    play = next(a for a in actions if a["action"] == "play_results")
+    assert play["blocker"]["code"] == "not_in_this_slice"
+    assert play["blocker"]["reason"] == "Not available yet: comes in a later version"
