@@ -40,11 +40,11 @@ def _parse_side(side):
 
 def resolve_sides(ctx, proj_dir, a, b, component=None):
     """A current side supplies the default target for its pending counterpart."""
-    parsed = [_parse_side(a), _parse_side(b)]
+    parsed = [_parse_side(side) for side in (a, b) if side is not None]
     if component is None:
         component = next((name for kind, name, _ in parsed if kind == "current"), None)
     return (
-        side_series(ctx, proj_dir, a, component),
+        side_series(ctx, proj_dir, a, component) if a is not None else None,
         side_series(ctx, proj_dir, b, component),
     )
 
@@ -112,34 +112,35 @@ def _stats(series, weights):
     return stats
 
 
-def compare(a: pd.Series, b: pd.Series, weights: pd.Series) -> dict:
+def compare(a: pd.Series | None, b: pd.Series, weights: pd.Series) -> dict:
     """Compute only from aligned native series and generator snapshot weights."""
-    if a.empty or not a.index.equals(b.index):
+    if b.empty or (a is not None and (a.empty or not a.index.equals(b.index))):
         raise ProfileApplyError(
             "Both profiles must share the nonempty model snapshot clock"
         )
-    w = weights.reindex(a.index).to_numpy(dtype=float)
+    w = weights.reindex(b.index).to_numpy(dtype=float)
     if (
         not np.isfinite(w).all()
         or (w < 0).any()
         or w.sum() <= 0
-        or not np.isfinite(a.to_numpy(dtype=float)).all()
+        or (a is not None and not np.isfinite(a.to_numpy(dtype=float)).all())
         or not np.isfinite(b.to_numpy(dtype=float)).all()
     ):
         raise ProfileApplyError(
             "Comparison needs finite profiles and nonnegative snapshot weights with a positive sum"
         )
-    left, right = _stats(a, w), _stats(b, w)
+    left, right = _stats(a, w) if a is not None else None, _stats(b, w)
     delta = {
         key: round(right[key] - left[key], 4)
         if right[key] is not None and left[key] is not None
         else None
         for key in ("cf", "flh", "p10", "p50", "p90", "peak", "peak_hour")
-    }
-    delta["monthly"] = {
-        month: round(right["monthly"][month] - value, 4)
-        for month, value in left["monthly"].items()
-    }
+    } if left is not None else None
+    if delta is not None:
+        delta["monthly"] = {
+            month: round(right["monthly"][month] - value, 4)
+            for month, value in left["monthly"].items()
+        }
     stamps = _stamps(b.index)
     peak = int(np.argmax(b.to_numpy()))
     start = stamps[peak].normalize() - pd.Timedelta(days=stamps[peak].dayofweek)
@@ -151,7 +152,7 @@ def compare(a: pd.Series, b: pd.Series, weights: pd.Series) -> dict:
         week["period"] = period.item() if isinstance(period, np.generic) else period
     week.update(
         snapshots=[stamp.isoformat() for stamp in stamps[mask]],
-        a=[round(float(v), 4) for v in a.to_numpy()[mask]],
+        a=[round(float(v), 4) for v in a.to_numpy()[mask]] if a is not None else None,
         b=[round(float(v), 4) for v in b.to_numpy()[mask]],
     )
     return {"a": left, "b": right, "delta": delta, "week": week}

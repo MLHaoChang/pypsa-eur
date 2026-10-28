@@ -1613,7 +1613,7 @@ def clear_weather_choice(
 
 
 @project_router.get("/{name}/profiles/compare")
-def compare_profiles(a: str, b: str, component: str | None = None,
+def compare_profiles(b: str, a: str | None = None, component: str | None = None,
                      proj: AuthorizedProject = ProjectAccessDep):
     """Read before/after statistics on the model clock without changing it."""
     from services.profile_gen import compare
