@@ -969,7 +969,8 @@ class Turn:
                     ctx, self.request_scope, None if draft_failed else self.request_evidence)
             records.save(record, answer_id)
             # Access revoked between the check above and the save (REVOKE-TOCTOU)
-            # must not leave a committed answer: re-check, and withdraw it.
+            # must not leave a committed answer: re-check, and withdraw it on
+            # any refusal or failure (answer_id is fresh, so nothing older).
             try:
                 records.authorize(self.owner, self.project_id)
             except Exception:

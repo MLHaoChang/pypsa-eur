@@ -192,15 +192,10 @@ def test_access_revoked_during_commit_publishes_nothing(
         assert answer_records(owner) == before | {answer_id}
         with pytest.raises(HTTPException) as refused:
             records.load(owner, answer_id, "answer")
-        assert refused.value.status_code in (401, 404)
+        assert refused.value.status_code == {"membership": 404, "disabled": 401}[kind]
         stuck = [r for r in caplog.records if "could not be removed" in r.message]
         assert len(stuck) == 1 and answer_id in stuck[0].getMessage()
-        (
-            app_paths.app_data_dir()
-            / "assistant_assurance"
-            / owner
-            / (answer_id + ".json")
-        ).unlink()
+        records._path(owner, answer_id).unlink()
     assert_nothing_published(frames, owner, before)
     formatter = logging.Formatter()
     for record in caplog.records:
