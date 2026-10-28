@@ -1,6 +1,6 @@
 # Bulk upload: an in-place receipt
 
-Status: ready-for-agent (triage 2026-10-28: Time Series bulk upload still ends in a toast only)
+Status: done
 Type: task
 Blocked by: none (ts-05 done, #586)
 Gated: no; UX reviewer for the UI

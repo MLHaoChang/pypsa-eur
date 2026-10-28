@@ -259,6 +259,40 @@ def aggregate_load_profile(
         "mean": float(sum(finite_vals) / len(finite_vals)) if finite_vals else 0.0,
     }
 
+_COMPONENT_LISTS = ("loads", "generators", "links", "buses", "lines", "stores",
+                    "storage_units", "transformers", "carriers", "global_constraints")
+
+
+def _peak_mean(meta: dict) -> dict | None:
+    """The {peak, mean} of a `_profile_meta_for` block; None when there was no series."""
+    if not meta.get("has_profile"):
+        return None
+    return {"peak": meta.get("peak"), "mean": meta.get("mean")}
+
+
+def _unmatched_detail(n, comp_attr: str, columns, valid: set) -> list[dict]:
+    """Why each column that names no component of this kind was ignored.
+
+    ``reason`` is ``duplicate`` (pandas renames a repeated header ``x`` to
+    ``x.1``), ``other_kind`` (the name is a component of another kind, in
+    ``kind``) or ``no_such_component``.
+    """
+    cols = [str(c) for c in columns]
+    detail = []
+    for c in cols:
+        if c in valid:
+            continue
+        base = c.rsplit(".", 1)[0] if c.rsplit(".", 1)[-1].isdigit() else None
+        if base is not None and base in cols:
+            detail.append({"name": c, "reason": "duplicate", "of": base})
+            continue
+        kind = next((k for k in _COMPONENT_LISTS if k != comp_attr
+                     and c in getattr(n, k).index), None)
+        detail.append({"name": c, "reason": "other_kind", "kind": kind} if kind
+                      else {"name": c, "reason": "no_such_component"})
+    return detail
+
+
 def _apply_profile_upload(n, comp_attr: str, attribute: str, display_class: str, df) -> dict:
     """
     Shared body of the load/generator/link profile-upload endpoints.
@@ -277,6 +311,7 @@ def _apply_profile_upload(n, comp_attr: str, attribute: str, display_class: str,
     valid = set(getattr(n, comp_attr).index)
     matched   = [c for c in df.columns if c in valid]
     unmatched = [c for c in df.columns if c not in valid]
+    unmatched_detail = _unmatched_detail(n, comp_attr, df.columns, valid)
     if not matched:
         raise HTTPException(
             400,
@@ -292,6 +327,10 @@ def _apply_profile_upload(n, comp_attr: str, attribute: str, display_class: str,
     # One PyPSA-lock block, so the growth placeholders' prior peaks stay current.
     with PyPSAService.get_lock():
         prior = growth_placeholders.before(n, comp_attr, attribute, matched)
+        # Peak and mean before the write, for the receipt's old → new.
+        net_df = getattr(getattr(n, f"{comp_attr}_t", None), attribute, None)
+        old = {c: _profile_meta_for(c, _user_ts.get((comp_attr, attribute, c)), net_df)
+               for c in matched}
         with _user_ts_lock:
             for col in matched:
                 key = (comp_attr, attribute, col)
@@ -310,9 +349,15 @@ def _apply_profile_upload(n, comp_attr: str, attribute: str, display_class: str,
         "timeseries", display_class, names_preview,
         f"Uploaded {cls_lower} {attribute} profiles: {len(matched)} {cls_lower}(s), {len(df)} rows",
     )
+    matched_detail = [
+        {"name": c, "old": _peak_mean(old[c]),
+         "new": _peak_mean(_profile_meta_for(c, df[c].astype(float), None))}
+        for c in matched
+    ]
     return {
         "matched": matched, "unmatched": unmatched, "rows": len(df),
         "snapshot_count": len(n.snapshots),
+        "matched_detail": matched_detail, "unmatched_detail": unmatched_detail,
     }
 
 @router.post("/loads/upload_profile")

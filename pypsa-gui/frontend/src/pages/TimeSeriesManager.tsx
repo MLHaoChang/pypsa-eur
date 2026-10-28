@@ -8,7 +8,7 @@ import {
   BarChart3, Layers, Zap, Flame, Atom, Gauge, ArrowDownToLine, ChevronDown,
   Coins, Trash2, SlidersHorizontal, X,
 } from 'lucide-react'
-import { networkApi } from '../api/network'
+import { networkApi, type ProfileUploadResult } from '../api/network'
 import type {
   Load, Generator, Link,
   LoadProfileMeta, GeneratorProfileMeta, LinkProfileMeta,
@@ -203,6 +203,72 @@ const CATEGORY_LABEL: Record<string, string> = {
   other: 'Other',
 }
 
+// ── UploadReceipt ──────────────────────────────────────────────────────────────
+
+interface UploadReceiptState {
+  tab: string; attribute: string; file: string
+  result?: ProfileUploadResult
+  refusal?: string
+}
+
+const RECEIPT_UNITS: Record<string, string> = { p_set: ' MW', marginal_cost: ' €/MWh' }
+const fmtNum = (v: number | null | undefined) => v == null ? '–' : Number(v.toPrecision(3)).toString()
+
+function whyUnmatched(u: NonNullable<ProfileUploadResult['unmatched_detail']>[number]): string {
+  if (u.reason === 'duplicate') return `a second column named '${u.of}': only the first is read`
+  if (u.reason === 'other_kind') return `'${u.name}' is a ${(u.kind ?? 'different').replace(/_/g, ' ').replace(/s$/, '')}, not a component of this tab`
+  return 'no component of this tab has this name'
+}
+
+function UploadReceipt({ receipt, onDismiss, onTemplate, editorFor }: {
+  receipt: UploadReceiptState
+  onDismiss: () => void
+  onTemplate: () => void
+  editorFor: (name: string) => (() => void) | undefined
+}) {
+  const { result, refusal, attribute } = receipt
+  const unit = RECEIPT_UNITS[attribute] ?? ''
+  // An older answer names the columns only; say less rather than guess why.
+  const matched = result?.matched_detail ?? (result?.matched ?? []).map(name => ({ name, old: null, new: null }))
+  const unmatched = result?.unmatched_detail
+    ?? (result?.unmatched ?? []).map(name => ({ name, reason: 'no_such_component' as const }))
+  return (
+    <div className="border border-border/60 rounded-lg p-3 bg-panel text-xs space-y-1" data-testid="upload-receipt">
+      <div className="flex items-center justify-between">
+        <p className="font-semibold text-text text-[11px]">
+          {refusal ? `${receipt.file} was not read` : `${receipt.file}: ${fieldLabel(attribute)}`}
+        </p>
+        <button type="button" className="text-[11px] text-muted hover:underline" onClick={onDismiss}>Dismiss</button>
+      </div>
+      {refusal && (
+        <p className="text-red-600" data-testid="receipt-refusal">
+          {refusal}{' '}
+          <button type="button" className="text-accent hover:underline" onClick={onTemplate}>
+            Download the template
+          </button>{' '}for the expected columns.
+        </p>
+      )}
+      {matched.map(m => {
+        const open = editorFor(m.name)
+        return (
+          <p key={m.name} className="text-green-700" data-testid={`receipt-matched-${m.name}`}>
+            <span className="font-mono">{m.name}</span>:{' '}
+            {m.new
+              ? <>peak {m.old ? `${fmtNum(m.old.peak)} → ` : ''}{fmtNum(m.new.peak)}{unit}, mean {m.old ? `${fmtNum(m.old.mean)} → ` : ''}{fmtNum(m.new.mean)}{unit}</>
+              : 'updated'}
+            {open && <>{' '}<button type="button" className="text-accent hover:underline" onClick={open}>Open its editor ›</button></>}
+          </p>
+        )
+      })}
+      {unmatched.map(u => (
+        <p key={u.name} className="text-muted" data-testid={`receipt-unmatched-${u.name}`}>
+          <span className="font-mono">{u.name}</span>: not used, {whyUnmatched(u)}.
+        </p>
+      ))}
+    </div>
+  )
+}
+
 // ── UploadZone ─────────────────────────────────────────────────────────────────
 
 function UploadZone({ onFile, label }: { onFile: (f: File) => void; label?: string }) {
@@ -230,6 +296,7 @@ function UploadZone({ onFile, label }: { onFile: (f: File) => void; label?: stri
       <p className="text-[10px] text-muted text-center">Columns = names · Index = timestamps (ISO 8601)</p>
       <input
         ref={inputRef}
+        data-testid="tab-upload-input"
         type="file"
         accept=".xlsx,.xls,.csv"
         className="hidden"
@@ -1453,10 +1520,19 @@ export default function TimeSeriesManager() {
     : activeTab === 'links' ? uploadLinkMut.isPending
     : uploadGenMut.isPending
 
-  const handleFile = (f: File) =>
-    activeTab === 'loads' ? uploadLoadMut.mutate(f)
-    : activeTab === 'links' ? uploadLinkMut.mutate({ file: f, attribute: effectiveAttr })
-    : uploadGenMut.mutate({ file: f, attribute: effectiveAttr })
+  // The whole-tab upload's receipt: it stays until the next upload or Dismiss.
+  const [receipt, setReceipt] = useState<UploadReceiptState | null>(null)
+  const handleFile = (f: File) => {
+    const tab = activeTab, attribute = effectiveAttr
+    const mine = {
+      onSuccess: (result: ProfileUploadResult) => setReceipt({ tab, attribute, file: f.name, result }),
+      onError: (e: Error) => setReceipt({ tab, attribute, file: f.name, refusal: sentence(errorText(e)) }),
+    }
+    setReceipt(null)
+    if (tab === 'loads') uploadLoadMut.mutate(f, mine)
+    else if (tab === 'links') uploadLinkMut.mutate({ file: f, attribute }, mine)
+    else uploadGenMut.mutate({ file: f, attribute }, mine)
+  }
 
   // ── Template horizon ──────────────────────────────────────────────────────
   // Default 'simulation' = use n.snapshots (the simulation horizon). Picker
@@ -2049,6 +2125,16 @@ export default function TimeSeriesManager() {
               : 'Drop Excel or CSV here'}
           />
           {isPending && <p className="text-xs text-accent animate-pulse text-center">Uploading…</p>}
+          {receipt && receipt.tab === activeTab && (
+            <UploadReceipt
+              receipt={receipt}
+              onDismiss={() => setReceipt(null)}
+              onTemplate={handleDownloadTemplate}
+              editorFor={name =>
+                activeTab === 'loads' ? () => setSeriesEditor({ family: 'load', component: name, tab: 'upload' })
+                : rowEditor(name, activeTab === 'links' ? 'links' : 'generators')}
+            />
+          )}
 
           <div className="border border-border/60 rounded-lg p-3 bg-panel text-xs text-muted space-y-1">
             <p className="font-semibold text-text text-[11px]">Expected file format</p>
