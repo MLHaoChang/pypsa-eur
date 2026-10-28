@@ -29,3 +29,45 @@ neighbors. Record actual source/commands/results and remaining gates here.
 No new capability is enabled by this issue. Paid calls, reviewer contact,
 deployment and full-coverage/domain-approval claims remain outside this package.
 
+
+## Rebaseline (2026-10-28, master `a6d73f57`)
+
+Branch `claude/lc06-family-manifest`. Denominators have moved since `c75ca558`:
+367 tools (was 255), 21 result tabs (15), 23 panels (19), 187 creation
+controls (170, 178 with a tool and 9 with an explicit gap). The capability matrix
+(`smoke/assistant_control_matrix.py`) still maps the 14 families to
+`pending:issue-05-*` journeys. Every inventory tool reads
+`behavioral_fixture: pending`, and `full_coverage=not_established`. No
+tool→family map or per-variant execution manifest exists yet.
+
+LC-03 kept six result families with their run: load flow, summary, capacity,
+dispatch, prices and emissions (`services/retained_results.py`). The other
+result views (overview, flows, loadshape, grid_code, electrical_design,
+island, grid_forming, economics, curtailment, lostload, adequacy, storage,
+fmea, investment, asset) answer the current run only.
+
+Labels: **PS+O** = public seam (chat tool, checked stream or authenticated API)
+plus a hand oracle; **SEED** = engine/service oracle with no seam; **weak** =
+seam that checks only shape or refusals, or that stubs the engine.
+
+| Suite | Already PS+O | Missing (the backlog) |
+|---|---|---|
+| D04 | fixed/extendable build to bound, MVA/MWh units (`test_capacity_cycles_assurance.py`) | 10/6/4 unique-LP objective and cap perturbation; `get_vintage_results` untested |
+| D05 | — (SEED: `test_myopic_horizon_cost.py` full/myopic/limited) | any seam; two-period discount/retire |
+| D06 | full LP (310, `test_assistant_capabilities.py`); infeasible (`test_lc19_run_lifecycle_journeys.py`) | rolling, myopic, SCLOPF and AC stage numbers through the seam; unbounded, time limit, MIP gap, unavailable solver |
+| D07 | active proxy, AC apparent, convergence mask, weighting, `s_max_pu`, missing Q (`test_loadflow_summary.py`, `test_branch_loading_assurance.py`) | exact P=60/Q=80→100 MVA; independently solved static PF; N-1/voltage disposition |
+| D08 | lost load, curtailment, energy balance | — |
+| D09 | StorageUnit trajectory, 51 EUR cost, invalidation, Store sign/cyclic | native inflow/spill oracle |
+| D10 | prices, binding-cap dual, emissions | — |
+| D11 | COPT two-unit (`test_copt_assurance.py`) | FMEA numbers and health through the seam (weak only) |
+| D12 | — (SEED: standard MC vs exact COPT, storage, period reset; zonal; common-mode) | standard, zonal and common-mode MC through the seam |
+| D13 | COPT EUE/LOLE screening | margin_loop (engine stubbed), eh_redundancy, eh_levers, eh_dtc, eh_dtc_planning, energization, H₂/heat reporting through the seam |
+| D14 | — (SEED: `tests/gridspine/test_campus_ranking.py`) | static campus through the seam (chat tests stub it) |
+| D15 | — (SEED: `test_island_schema.py` for all but gfl_pq) | all six control models and droop/isochronous governors through the native tools; gfl_pq specific case |
+| D16 | — (SEED: `test_frequency*.py` inertia/settled/one-governor, E1/E3/E4/E6, collapse, UPS) | `campus_run_island_study` unstubbed per event E1–E6; E2/E5 oracles |
+| D17 | apply digest/read-back (equality) | recommend→apply→re-study chain through the seam |
+| D18/D19 | hand cash flow; one experiment case (200) | two-case solve compare |
+| D01/02/20–23 | seam-only (no oracle) | independent oracles per the annex |
+| D24 | frontend e2e, not re-audited here | — |
+
+## Slice log
