@@ -202,14 +202,19 @@ export function polygonRect(ring: readonly XY[]): Rect {
 }
 
 /**
- * Exact only for a source-verified catalogue record; a library fit or an
- * entered envelope is approximate (V18); no footprint at all is 'none' (no
- * size entered), never approximate.
+ * Where an item's size comes from. A footprint carries `source` only when it
+ * did not come from the #712 footprint editor: 'catalogue' (source-verified,
+ * exact) or a library fit (approximate). One without a source is the user's
+ * own envelope, entered; no footprint at all is 'none' (no size entered).
  */
-export type SizeBasis = 'exact' | 'approximate' | 'none'
+export type SizeBasis = 'exact' | 'entered' | 'approximate' | 'none'
 export const sizeBasis = (footprint: { source?: string } | null | undefined): SizeBasis =>
-  !footprint ? 'none' : footprint.source === 'catalogue' ? 'exact' : 'approximate'
+  !footprint ? 'none' : footprint.source === 'catalogue' ? 'exact' : footprint.source ? 'approximate' : 'entered'
 export const APPROXIMATE_SIZE = 'Approximate size'
+/** The size line for an item, by where its size comes from; none has the no-rule line instead (noSizeCopy). */
+export const SIZE_COPY: Record<SizeBasis, string | null> = {
+  exact: 'Exact size', entered: 'Entered size', approximate: APPROXIMATE_SIZE, none: null,
+}
 /** The one line for an item with no size: which rule is not checked, and why (V19). */
 export const noSizeCopy = (name: string): string =>
   `No rule checked: no size entered for ${name}, so overlap with buildings uses the centre point only`

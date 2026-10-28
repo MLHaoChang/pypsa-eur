@@ -33,7 +33,7 @@ export interface AssetFootprint {
   width_m: number
   depth_m: number
   height_m?: number
-  /** Set only for a source-verified catalogue record (exact size); anything else is approximate. */
+  /** Set only for a source-verified catalogue record (exact size); absent, it is the user's entered envelope (#712 editor). */
   source?: 'catalogue'
 }
 

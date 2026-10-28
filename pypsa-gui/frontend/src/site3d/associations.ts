@@ -190,6 +190,12 @@ export function startingShares(associations: readonly SceneAssociation[], target
 const round1 = (v: number) => Math.round(v * 10) / 10
 export const pct = (v: number): string => `${round1(v).toLocaleString('en-US')} %`
 
+/** A position from the site origin in compass words: "80 m west, 20 m south"; 0 reads "0 m east" / "0 m north". */
+export function positionCopy(x: number, y: number): string {
+  const m = (v: number) => `${Math.abs(v).toLocaleString('en-US')} m`
+  return `${m(x)} ${x < 0 ? 'west' : 'east'}, ${m(y)} ${y < 0 ? 'south' : 'north'}`
+}
+
 export type ShareState = 'none' | 'partial' | 'ok' | 'off' | 'invalid'
 export interface ShareCheck { state: ShareState; total: number | null; copy: string | null }
 

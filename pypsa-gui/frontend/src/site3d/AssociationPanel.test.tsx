@@ -246,13 +246,38 @@ describe('Model part: place equipment', () => {
     expect(screen.queryByTestId('place-no-rule')).toBeNull()
   })
 
-  it('an exact catalogue size shows no "Approximate size"', async () => {
+  it('an exact catalogue size reads "Exact size", never "Approximate size"', async () => {
     view(scene({ asset_footprints: { 'StorageUnit:bess': { width_m: 6, depth_m: 2.5, source: 'catalogue' } } }))
     const item = screen.getByTestId('place-item') as HTMLSelectElement
     await waitFor(() => expect(item.options.length).toBe(4))
     fireEvent.change(item, { target: { value: 'StorageUnit:bess' } })
-    expect(screen.queryByTestId('place-size')).toBeNull()
+    expect(screen.getByTestId('place-size').textContent).toBe('Exact size')
     expect(screen.queryByTestId('place-no-rule')).toBeNull()
+  })
+
+  it('a user-entered envelope (#712 editor, no source) reads "Entered size", not "Approximate size"', async () => {
+    view(scene({ asset_footprints: { 'StorageUnit:bess': { width_m: 12, depth_m: 3 } } }))
+    const item = screen.getByTestId('place-item') as HTMLSelectElement
+    await waitFor(() => expect(item.options.length).toBe(4))
+    fireEvent.change(item, { target: { value: 'StorageUnit:bess' } })
+    expect(screen.getByTestId('place-size').textContent).toBe('Entered size')
+    expect(screen.queryByTestId('place-no-rule')).toBeNull()
+  })
+
+  it('preview: an entered size, a position in compass words, and the pass line only for a checked item', async () => {
+    vi.mocked(propose).mockResolvedValue({ id: 'm5', site_id: 'campus', action: 'place_existing', base_revision: 3, input_hash: 'h', status: 'ready',
+      preview: { placements: { 'StorageUnit:bess': { x: -80, y: -20, heading: 0, on: 'ground' } }, findings: [] } } as never)
+    view(scene({ asset_footprints: { 'StorageUnit:bess': { width_m: 12, depth_m: 3 } } }))
+    const item = screen.getByTestId('place-item') as HTMLSelectElement
+    await waitFor(() => expect(item.options.length).toBe(4))
+    fireEvent.change(item, { target: { value: 'StorageUnit:bess' } })
+    fireEvent.click(screen.getByTestId('place-preview'))
+    await screen.findByTestId('assoc-proposal')
+    expect(screen.getByTestId('assoc-proposal-line-StorageUnit:bess').firstChild?.textContent)
+      .toBe('bess · storage unit · on the ground · 80 m west, 20 m south · heading 0°')
+    expect(screen.getByTestId('proposal-size').textContent).toBe('Entered size')
+    expect(screen.queryByTestId('proposal-no-rule')).toBeNull()
+    expect(screen.getByTestId('assoc-no-findings').textContent).toBe('No overlap with buildings found')
   })
 
   it('a solar item on an eligible roof: "Roof of OSM building 7", previewed as place_existing', async () => {
@@ -268,8 +293,9 @@ describe('Model part: place equipment', () => {
     await screen.findByTestId('assoc-proposal')
     expect(vi.mocked(propose).mock.calls[0].slice(3)).toEqual(['place_existing',
       { placements: { 'Generator:pv': { x: 10, y: 10, heading: 0, on: 'roof:osm:7' } } }])
-    expect(screen.getByTestId('assoc-proposal').textContent).toContain('pv · generator · on the roof of OSM building 7')
-    expect(screen.getByTestId('assoc-no-findings').textContent).toBe('No overlap with buildings found')
+    expect(screen.getByTestId('assoc-proposal').textContent).toContain('pv · generator · on the roof of OSM building 7 · 10 m east, 10 m north')
+    // Centre point only: an unchecked rule is never shown next to a pass.
+    expect(screen.queryByTestId('assoc-no-findings')).toBeNull()
     expect(screen.queryByTestId('proposal-size')).toBeNull()
     expect(screen.getByTestId('proposal-no-rule').textContent).toBe('No rule checked: no size entered for pv, so overlap with buildings uses the centre point only')
   })
@@ -335,6 +361,8 @@ describe('Model part: place equipment', () => {
     expect(screen.getByTestId('add-asset-link').textContent).toBe('› Add model asset')
     fireEvent.change(kind, { target: { value: kind.options[1].value } })
     expect(useUIStore.getState().creationItem).not.toBeNull()
+    // Choosing the kind keeps the Guided trip's return.
+    expect(useUIStore.getState().flowReturn).toMatchObject({ label: 'Site 3D', mode: 'guided' })
     expect(screen.queryByTestId('place-it-link')).toBeNull()
     vi.mocked(networkApi.getStorageUnits).mockResolvedValue([{ name: 'bess' }, { name: 'bess_2', carrier: 'battery' }] as never)
     // The form closes and Back to Site 3D is used: the lists are read again, no remount needed.

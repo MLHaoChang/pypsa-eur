@@ -198,6 +198,11 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
         ))}
       </div>
 
+      {/* The part's body scrolls inside itself, so the tabs (and the Site toolbar above the panel) stay in view
+          when the Model part grows (a preview, the Place form, the bottom table open); focusable so the
+          keyboard scrolls it. */}
+      <div role="tabpanel" tabIndex={0} aria-label={PARTS.find(p => p.id === part)?.label} data-testid="site-part-body"
+        className="flex flex-col gap-2 max-h-[40vh] overflow-y-auto overscroll-contain pr-1 focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent">
       {moved && (
         <div data-testid="site-anchor-moved" className="text-[11px] text-warn">
           Site coordinates moved over 1 km from this site: the site stays where it was created{' '}
@@ -214,7 +219,9 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
       )}
       {enabled?.unbound_keys && enabled.unbound_keys.length > 0 && (
         <div data-testid="site-unbound" className="text-[11px] text-warn">
-          {enabled.unbound_keys.length} placed {enabled.unbound_keys.length === 1 ? 'item names' : 'items name'} equipment no longer in the model: the scene keeps their place until it is updated
+          {enabled.unbound_keys.length === 1
+            ? '1 placed item is no longer in the model: the scene keeps its place until you attach it again'
+            : `${enabled.unbound_keys.length} placed items are no longer in the model: the scene keeps their places until you attach them again`}
           {action('assign_native')?.available && canWrite && (
             // One link per placed key: the user picks what it stands for now (rebind {placement}).
             <ul className="mt-0.5">
@@ -343,6 +350,7 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
           {error.snapshots && <> <SnapshotsLink /></>}
         </div>
       )}
+      </div>
     </div>
   )
 }

@@ -6,7 +6,7 @@ import type { SceneAssociation, SceneBuilding, SceneTarget } from '../api/siteSc
 import type { Generator, Link, Load, StorageUnit, Store } from '../api/types'
 import {
   attachCandidates, buildBindInputs, buildingName, CAPACITY_OPTIMISED, candidatesFor, carrierWords, checkShares, clauseTail, featureName, findingCopy,
-  findingObjects, isExtendable, isHelperItem, KIND_WORDS, nextTask, NOT_CHECKED_COPY, placeableItems, placeRefusalCopy, rowCopy, sameClassItems,
+  findingObjects, isExtendable, isHelperItem, KIND_WORDS, nextTask, NOT_CHECKED_COPY, placeableItems, placeRefusalCopy, positionCopy, rowCopy, sameClassItems,
   shareBlockReason, shareFeatures, startingShares, targetDetail, targetLabel, TASK_ATTACH, TASK_PLACE,
 } from './associations'
 
@@ -325,5 +325,14 @@ describe('shares: review fixes', () => {
     const { sameClassItems } = await import('./associations')
     expect(sameClassItems(rows, 'Link').map(c => c.name)).toEqual(['haber', 'tie'])
     expect(sameClassItems(rows, 'Bus')).toEqual([])
+  })
+})
+
+describe('positionCopy', () => {
+  it('reads compass words, never a minus sign; 0 reads east and north', () => {
+    expect(positionCopy(-80, -20)).toBe('80 m west, 20 m south')
+    expect(positionCopy(12.5, 3)).toBe('12.5 m east, 3 m north')
+    expect(positionCopy(0, 0)).toBe('0 m east, 0 m north')
+    expect(positionCopy(-0, 1500)).toBe('0 m east, 1,500 m north')
   })
 })

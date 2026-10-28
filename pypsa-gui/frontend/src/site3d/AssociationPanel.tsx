@@ -20,9 +20,9 @@ import { nk } from '../utils/queryKeys'
 import {
   attachCandidates, sameClassItems, buildBindInputs, buildingName, candidateKey, candidatesFor, checkShares, clauseTail, featureName, findingCopy,
   findingObjects, isExtendable, KIND_WORDS, nextTask, pct, placeableItems, placeRefusalCopy, rowCopy, shareBlockReason, shareFeatures, startingShares,
-  targetDetail, targetLabel, type Candidate, type CarrierNames, type UiMode,
+  positionCopy, targetDetail, targetLabel, type Candidate, type CarrierNames, type UiMode,
 } from './associations'
-import { APPROXIMATE_SIZE, noSizeCopy, roofEligible, roofItem, sizeBasis } from './placementCheck'
+import { noSizeCopy, roofEligible, roofItem, SIZE_COPY, sizeBasis } from './placementCheck'
 import { DEMAND_PALETTE_SECTION } from '../layout/sidebar/AssetPaletteInline'
 import { PALETTE_SECTIONS_DATA, PROCESS_UNIT_ITEM, type PaletteItemData } from '../layout/paletteData'
 import { componentOfKey } from './placementFindingsStore'
@@ -60,16 +60,20 @@ const ADD_KINDS: PaletteItemData[] = [
 /**
  * Expert: the creation form for one asset kind, in the Properties panel
  * beside Site 3D. When a panel covers the canvas it is closed through
- * withReturnFromSite3D, so "Back to Site 3D" brings it back.
+ * withReturnFromSite3D, so "Back to Site 3D" brings it back. A return already
+ * set (Guided's "› Add model asset in Expert") is kept: closing a panel is a
+ * navigation, which would otherwise drop it.
  */
 function openCreationForm(item: PaletteItemData): void {
   const open = () => {
     const ui = useUIStore.getState()
-    ui.setSlidePanel(null)
+    if (ui.activeSlidePanel) ui.setSlidePanel(null)
     ui.openRightPanel()
     ui.setCreationItem({ id: item.id, label: item.label })
   }
-  if (useUIStore.getState().activeSlidePanel) withReturnFromSite3D(open)
+  const { flowReturn: kept, activeSlidePanel } = useUIStore.getState()
+  if (kept) { open(); useUIStore.setState({ flowReturn: kept }) }
+  else if (activeSlidePanel) withReturnFromSite3D(open)
   else open()
 }
 
@@ -308,7 +312,7 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
   const placeIt = (c: Candidate) => { setAddAssetFrom(null); setPlace({ ...emptyPlace, key: candidateKey(c) }) }
 
   const sizeOf = (key: string) => footprints[key]
-  const approx = (key: string) => sizeBasis(sizeOf(key)) === 'approximate'
+  const sizeLine = (key: string) => SIZE_COPY[sizeBasis(sizeOf(key))]
   const sceneFeatures = useMemo(() => [...buildings.map(b => b.id), ...groups.map(g => g.id)], [buildings, groups])
 
   return (
@@ -342,7 +346,7 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
       )}
 
       {mine ? (
-        <Review proposal={mine} mode={mode} buildings={buildings} groups={groups} itemName={itemName} approx={approx}
+        <Review proposal={mine} mode={mode} buildings={buildings} groups={groups} itemName={itemName} sizeLine={sizeLine}
           shortName={key => componentOfKey(key).name}
           sized={key => !!sizeOf(key)} onApply={() => void apply()} onDiscard={() => void discard()}
           canApply={writable} applyReason={!canWrite ? blockedReason : null} busy={busy} />
@@ -458,7 +462,7 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
             {placeable.length === 0 && <span className="text-[11px] text-muted" data-testid="place-item-reason">{NO_PLACEABLE}</span>}
             {placeItem && (
               <>
-                {approx(place.key) && <span className="text-[11px] text-muted" data-testid="place-size">{APPROXIMATE_SIZE}</span>}
+                {sizeLine(place.key) && <span className="text-[11px] text-muted" data-testid="place-size">{sizeLine(place.key)}</span>}
                 {sizeBasis(sizeOf(place.key)) === 'none' && (
                   <span className="text-[11px] text-muted" data-testid="place-no-rule">{noSizeCopy(placeItem.name)}</span>
                 )}
@@ -529,7 +533,7 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
   )
 }
 
-function Review({ proposal, mode, buildings, groups, itemName, shortName, approx, sized, onApply, onDiscard, canApply, applyReason, busy }: {
+function Review({ proposal, mode, buildings, groups, itemName, shortName, sizeLine, sized, onApply, onDiscard, canApply, applyReason, busy }: {
   proposal: ModelProposal
   mode: UiMode
   buildings: readonly SceneBuilding[]
@@ -537,7 +541,8 @@ function Review({ proposal, mode, buildings, groups, itemName, shortName, approx
   itemName: (key: string) => string
   /** An item as findings name it: its name as written ("site_battery"). */
   shortName: (key: string) => string
-  approx: (key: string) => boolean
+  /** Where the item's size comes from, in words; null when it has none (the no-rule line says so). */
+  sizeLine: (key: string) => string | null
   sized: (key: string) => boolean
   onApply: () => void
   onDiscard: () => void
@@ -547,7 +552,7 @@ function Review({ proposal, mode, buildings, groups, itemName, shortName, approx
 }) {
   const fName = (f: string) => featureName(f, buildings, groups)
   const bName = (id: string) => buildingName(id, buildings)
-  const lines: { key: string; text: string; note?: string[] }[] = []
+  const lines: { key: string; text: string; note?: { text: string; testId: string }[] }[] = []
   if (proposal.action === 'bind_targets') {
     const changed = proposal.preview.associations.filter(r => r.status !== 'kept')
     for (const [i, r] of changed.entries()) {
@@ -568,13 +573,20 @@ function Review({ proposal, mode, buildings, groups, itemName, shortName, approx
   } else {
     for (const [key, e] of Object.entries(proposal.preview.placements)) {
       const where = e.on && e.on.startsWith('roof:') ? `on the roof of ${bName(e.on.slice(5))}` : 'on the ground'
-      const note = [approx(key) ? APPROXIMATE_SIZE : null,
-        sized(key) ? null : noSizeCopy(shortName(key))].filter((x): x is string => !!x)
-      lines.push({ key, text: `${itemName(key)} · ${where} · ${e.x.toLocaleString('en-US')} m east, ${e.y.toLocaleString('en-US')} m north · heading ${e.heading}°`, note })
+      const size = sizeLine(key)
+      const note = size ? [{ text: size, testId: 'proposal-size' }] : []
+      if (!sized(key)) note.push({ text: noSizeCopy(shortName(key)), testId: 'proposal-no-rule' })
+      lines.push({ key, text: `${itemName(key)} · ${where} · ${positionCopy(e.x, e.y)} · heading ${e.heading}°`, note })
     }
   }
   const findings = proposal.preview.findings ?? []
   const names = { item: shortName, building: bName }
+  // A pass is said only for an item whose corners were checked: an item with the no-rule line
+  // (centre point only) never also reads "no overlap".
+  const checked = proposal.action === 'place_existing' ? Object.keys(proposal.preview.placements).filter(sized) : []
+  const allChecked = proposal.action === 'place_existing' && checked.length === Object.keys(proposal.preview.placements).length
+  const pass = checked.length === 0 ? null
+    : allChecked ? 'No overlap with buildings found' : `No overlap with buildings found: ${checked.map(shortName).join(', ')}`
   return (
     <div className="flex flex-col gap-1.5" data-testid="assoc-proposal" data-action={proposal.action}>
       <span className="text-text">Preview: nothing is saved until Apply</span>
@@ -582,7 +594,7 @@ function Review({ proposal, mode, buildings, groups, itemName, shortName, approx
         {lines.map(l => (
           <li key={l.key} data-testid={`assoc-proposal-line-${l.key}`}>
             {l.text}
-            {l.note?.map(n => <span key={n} className="block text-muted" data-testid={n === APPROXIMATE_SIZE ? 'proposal-size' : 'proposal-no-rule'}>{n}</span>)}
+            {l.note?.map(n => <span key={n.testId} className="block text-muted" data-testid={n.testId}>{n.text}</span>)}
           </li>
         ))}
       </ul>
@@ -599,8 +611,8 @@ function Review({ proposal, mode, buildings, groups, itemName, shortName, approx
           ))}
         </ul>
       )}
-      {findings.length === 0 && proposal.action === 'place_existing' && (
-        <span className="text-[11px] text-muted" data-testid="assoc-no-findings">No overlap with buildings found</span>
+      {findings.length === 0 && pass && (
+        <span className="text-[11px] text-muted" data-testid="assoc-no-findings">{pass}</span>
       )}
       <div className="flex gap-2">
         <button type="button" data-testid="assoc-apply" className={primary} disabled={!canApply} onClick={onApply}>Apply</button>

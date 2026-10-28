@@ -287,9 +287,10 @@ describe('native buildings (V17)', () => {
 })
 
 describe('exact versus approximate size (V18)', () => {
-  it('only a source-verified catalogue record is exact', () => {
+  it('catalogue is exact, no source is entered, a library fit is approximate, none is none', () => {
     expect(sizeBasis({ source: 'catalogue' })).toBe('exact')
-    expect(sizeBasis({})).toBe('approximate')
+    expect(sizeBasis({})).toBe('entered')
+    expect(sizeBasis({ source: 'library' })).toBe('approximate')
     expect(sizeBasis(undefined)).toBe('none')
     expect(sizeBasis(null)).toBe('none')
   })
