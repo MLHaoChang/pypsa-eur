@@ -5,11 +5,13 @@ user is disabled. Values a tool returned while access held may already be on
 the stream; nothing may be published, certified or read back after it.
 """
 
+import contextlib
 import json
 import logging
 import uuid
 
 import pytest
+from fastapi import HTTPException
 
 import app_paths
 from db.models import OrgMembership, User
@@ -135,6 +137,7 @@ def test_access_revoked_after_capture_publishes_nothing(
     assert_nothing_published(frames, owner, before)
 
 
+@pytest.mark.parametrize("removal", ["removed", "stuck"])
 @pytest.mark.parametrize("kind", KINDS)
 @pytest.mark.parametrize(
     "read, draft",
@@ -142,23 +145,68 @@ def test_access_revoked_after_capture_publishes_nothing(
     ids=["get_component", "list_components"],
 )
 def test_access_revoked_during_commit_publishes_nothing(
-    baseline, harness, revoke, seeded_identity, monkeypatch, kind, read, draft
+    baseline,
+    harness,
+    revoke,
+    seeded_identity,
+    monkeypatch,
+    caplog,
+    kind,
+    read,
+    draft,
+    removal,
 ):
-    """REVOKE-TOCTOU: revoked after commit's last ACL check, as the record lands."""
+    """REVOKE-TOCTOU: revoked after commit's last ACL check, as the record lands.
+
+    "stuck": the saved file cannot be removed; the refusal still ends the turn
+    and load() keeps refusing the leftover record.
+    """
+    caplog.set_level(logging.DEBUG)
     owner = str(seeded_identity["user_id"])
     before = answer_records(owner)
-    save = records.save
+    save, saved = records.save, []
+
+    @contextlib.contextmanager
+    def busy(directory):
+        raise TimeoutError("assurance storage busy")
+        yield
 
     def save_then_revoke(record, record_id):
         save(record, record_id)
         if record["record_kind"] == "answer":
+            saved.append(record_id)
             revoke[kind]()
+            if removal == "stuck":
+                monkeypatch.setattr(records, "transaction", busy)
 
     monkeypatch.setattr(records, "save", save_then_revoke)
     turns = [read(), text_turn(draft), text_turn(draft)]
     response = harness.request(FakeProvider(turns))
     assert response.status_code == 200
-    assert_nothing_published(parse_sse(response.text), owner, before)
+    frames = parse_sse(response.text)
+    # The answer reached disk; it must not stay (or, if stuck, stay unreadable).
+    [answer_id] = saved
+    if removal == "removed":
+        assert answer_records(owner) == before
+    else:
+        assert answer_records(owner) == before | {answer_id}
+        with pytest.raises(HTTPException) as refused:
+            records.load(owner, answer_id, "answer")
+        assert refused.value.status_code in (401, 404)
+        stuck = [r for r in caplog.records if "could not be removed" in r.message]
+        assert len(stuck) == 1 and answer_id in stuck[0].getMessage()
+        (
+            app_paths.app_data_dir()
+            / "assistant_assurance"
+            / owner
+            / (answer_id + ".json")
+        ).unlink()
+    assert_nothing_published(frames, owner, before)
+    formatter = logging.Formatter()
+    for record in caplog.records:
+        logged = formatter.format(record)
+        for value in ("5 MW", "5.0", "p_set", draft):
+            assert value not in logged, (value, record.name)
 
 
 @pytest.mark.parametrize("kind", KINDS)
