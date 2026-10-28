@@ -1,6 +1,6 @@
 # LC-06 — whole-application behavior coverage
 
-Status: ready-for-agent
+Status: in progress (LC-06 session; S0 manifest PR, then S1–S3 with GK B; S4–S9 reviewer named by the coordinator)
 Type: task
 Baseline: master `c75ca5584b873418f10f1bca42f868255d445b7b`
 Dependencies: LC-01–05 as applicable
@@ -76,14 +76,21 @@ seam that checks only shape or refusals, or that stubs the engine.
 
 Branch `claude/lc06-family-manifest`.
 
-- `smoke/family_manifest.py` assigns all 367 tools to the 14 families: 0
-  unmapped, none in two families. Campus/GridSpine tools go by prefix, except
-  the four campus library/investment tools, which go to economics. It lists
-  72 variants: 19 covered, 51 pending, 2 unavailable (N-1/voltage compliance,
-  EMT/PLL/voltage dynamics). `--check` fails on a stale tool, a duplicate, a
-  covered node id with no test function, or a missing suite. A new tool is
-  printed as `unmapped` and does not fail (pending GK B's choice).
+- `smoke/family_manifest.py` gives each of the 367 tools one primary family
+  (0 unmapped, none in two). A variant's `tools` show where a tool is shared;
+  there is no `shared` family. Campus/GridSpine tools go by prefix, except the
+  four campus library/investment tools, which go to economics. It lists 72
+  variants: 19 covered, 51 pending, 2 unavailable. The unavailable rows point at
+  `loadflow_summary.py LIMITS_CLAIM` and `gridspine/static/frequency.py LABEL`.
+  Tools covered: 17 / 367. Checked-stream rows list no tools, so they do not
+  raise the tool count.
+- GK B plan GO, option 1 with conditions. A new tool prints as `unmapped`,
+  stays in the denominator and never fails `--check`. `covered` node ids must
+  collect (`pytest --collect-only`). An oracle line names the asserted hand
+  value. An `unavailable` row needs a pointer that resolves (file + symbol).
+  Nothing generated is committed.
 - RED: `tests/test_family_manifest.py` errors on master (no module). Green
-  after, together with `tests/test_assistant_control_matrix.py` (96 tests).
+  after, together with `tests/test_assistant_control_matrix.py` (98 tests).
+  `assistant_inventory.py --check` passes at the master merge (2d8779ca).
 - Covered rows are the rebaseline's PS+O tests. Their oracles were read from
   the tests and were not re-derived here. `full_coverage=not_established`.
