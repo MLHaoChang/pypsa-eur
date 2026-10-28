@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Added `smoke/family_manifest.py`, the LC-06 execution manifest. It assigns every assistant tool to one of the 14 capability families and lists each LC-D01–24 engine/control variant as covered (public-seam test plus hand oracle), pending or unavailable. A guard test refuses missing tests, stale tools and tools listed in two families.

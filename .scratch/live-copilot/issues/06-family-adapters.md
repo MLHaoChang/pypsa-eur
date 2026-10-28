@@ -71,3 +71,19 @@ seam that checks only shape or refusals, or that stubs the engine.
 | D24 | frontend e2e, not re-audited here | — |
 
 ## Slice log
+
+### S0, execution manifest (2026-10-28)
+
+Branch `claude/lc06-family-manifest`.
+
+- `smoke/family_manifest.py` assigns all 367 tools to the 14 families: 0
+  unmapped, none in two families. Campus/GridSpine tools go by prefix, except
+  the four campus library/investment tools, which go to economics. It lists
+  72 variants: 19 covered, 51 pending, 2 unavailable (N-1/voltage compliance,
+  EMT/PLL/voltage dynamics). `--check` fails on a stale tool, a duplicate, a
+  covered node id with no test function, or a missing suite. A new tool is
+  printed as `unmapped` and does not fail (pending GK B's choice).
+- RED: `tests/test_family_manifest.py` errors on master (no module). Green
+  after, together with `tests/test_assistant_control_matrix.py` (96 tests).
+- Covered rows are the rebaseline's PS+O tests. Their oracles were read from
+  the tests and were not re-derived here. `full_coverage=not_established`.
