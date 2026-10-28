@@ -1,7 +1,6 @@
 # 19 — External tools over MCP: the harness as an MCP client
 
-Status: ready-for-agent (spec decided 2026-10-14: `../mcp-spec.md` Part A, build step 2; step 1, the tier fallback, merged as PR #220)
-Progress: mcp_client.py slice 1 on master; slice 2 settings routes, panel section, PYPSA_GUI_MCP_KEY managed-key not found
+Status: done (slice 1 on master; slice 2 merged as PR #725; the last two A.8 tests 2026-10-27)
 Type: research
 Blocked by: 08 (done), the MCP spec (done), PR #220 (done)
 
@@ -103,3 +102,11 @@ them. `validate_entry` refuses env names `LD_*`, `DYLD_*`, `PYTHON*`,
 token. The parity probe deviates from A's "stub stdio server": the stub gains
 `--http PORT` and is registered through PUT, since the routes take http only.
 Done: the probe, the release note, mp-code-review. Left: the PR, GK/UX OKs, CI.
+
+2026-10-27 (closed): both slices are on master (slice 2 as PR #725). Two
+A.8 backend items had no test; `tests/test_harness_mcp_client.py` now pins
+them: a checked turn refuses an external tool with `capability_unsupported`
+and the server sees no `tools/call`; an oversized external result is spilled
+behind a `read_result` locator inside the untrusted fence. No code change was
+needed. Left out on purpose (A.8a): the Python MCP SDK; the hand-written
+client stays until its footprint is worth taking.

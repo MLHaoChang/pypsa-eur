@@ -551,6 +551,13 @@ def _pages_for(project, profile: dict):
 # extraction
 # --------------------------------------------------------------------------
 
+def extraction_disclosure() -> str:
+    """What an extraction sends and where, for the confirmation card (the harness
+    keeps vendor names out of its own code, so the card takes the sentence from here)."""
+    return (f"Sends the document to the configured extraction provider (Anthropic, model "
+            f"{_extraction_model()}): one API call, and a second only if the API refuses the first.")
+
+
 def _extraction_model() -> str:
     """The configured default model: the active LLM profile's when it is an
     Anthropic profile on the built-in key, else ``DEFAULT_MODEL``."""

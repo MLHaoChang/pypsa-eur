@@ -491,6 +491,25 @@ describe('CampusElectricalPanel', () => {
     expect(screen.queryByTestId('scan-chart')).toBeNull()
   })
 
+  it('shows the unit reactive capability between the PCC compliance and the scan, and hides it without a curve', async () => {
+    const results = sized().results
+    api.state.mockResolvedValue({ ...sized(), results: { ...results, ibr_q_curve: [{
+      unit: 'BESS1', kind: 'bess', p_pu: 1, p_mw: 20, s_mva: 21, q_min_req_mvar: -6, q_max_req_mvar: 6,
+      available_mvar: 6.4, shortfall_mvar: 0, status: 'pass', detail: 'BESS1 covers it', clause: 'generic test clause',
+      source: 'code', basis: 'screening at unit terminals' }] } })
+    renderPanel()
+    const row = await screen.findByTestId('qcurve-BESS1-1')
+    const compliance = screen.getByTestId('compliance-pcc_reactive')
+    expect(compliance.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(row.compareDocumentPosition(screen.getByTestId('scan-not-computed')) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy()
+    cleanup()
+    api.state.mockResolvedValue(sized())
+    renderPanel()
+    await screen.findByTestId('scan-not-computed')
+    expect(screen.queryByText('Unit reactive capability')).toBeNull()
+  })
+
   it('says plainly that this is a steady-state study', async () => {
     renderPanel()
     const intro = await screen.findByTestId('campus-intro')

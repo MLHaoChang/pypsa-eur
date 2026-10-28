@@ -1,0 +1,57 @@
+{
+  "chromium": "153.0.8010.12",
+  "three": "0.186.1",
+  "viewport": "1280x720",
+  "results": [
+    {
+      "n": 1,
+      "mode": "mesh-per-building",
+      "median_ms": 0.1,
+      "p95_ms": 0.4,
+      "draw_calls": 1,
+      "triangles": 12,
+      "heap_mb": 6.6,
+      "gl": "WebKit WebGL"
+    },
+    {
+      "n": 100,
+      "mode": "mesh-per-building",
+      "median_ms": 0.3,
+      "p95_ms": 1.5,
+      "draw_calls": 100,
+      "triangles": 1200,
+      "heap_mb": 6.9,
+      "gl": "WebKit WebGL"
+    },
+    {
+      "n": 1000,
+      "mode": "mesh-per-building",
+      "median_ms": 1.7,
+      "p95_ms": 3.7,
+      "draw_calls": 1000,
+      "triangles": 12000,
+      "heap_mb": 9.5,
+      "gl": "WebKit WebGL"
+    },
+    {
+      "n": 2000,
+      "mode": "mesh-per-building",
+      "median_ms": 3.1,
+      "p95_ms": 3.8,
+      "draw_calls": 1572,
+      "triangles": 18864,
+      "heap_mb": 10,
+      "gl": "WebKit WebGL"
+    },
+    {
+      "n": 2000,
+      "mode": "instanced",
+      "median_ms": 0.1,
+      "p95_ms": 0.2,
+      "draw_calls": 1,
+      "triangles": 24000,
+      "heap_mb": 6.5,
+      "gl": "WebKit WebGL"
+    }
+  ]
+}

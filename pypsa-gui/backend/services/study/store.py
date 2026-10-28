@@ -20,6 +20,7 @@ other shape is "not found" before the disk is touched.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import threading
 import uuid
@@ -71,7 +72,13 @@ def studies_dir(project_dir: pathlib.Path) -> pathlib.Path:
 def _path(project_dir: pathlib.Path, study_id: str) -> pathlib.Path:
     if not isinstance(study_id, str) or not STUDY_ID_RE.fullmatch(study_id):
         raise StudyNotFound(study_id)
-    return studies_dir(project_dir) / f"{study_id}.json"
+    # The id is already a bare token; the containment check also keeps the path inside the
+    # study directory for any caller, however the id or directory reached here.
+    root = os.path.normpath(os.fspath(studies_dir(project_dir)))
+    full = os.path.normpath(os.path.join(root, f"{study_id}.json"))
+    if not full.startswith(root + os.sep):
+        raise StudyNotFound(study_id)
+    return pathlib.Path(full)
 
 
 def _read(path: pathlib.Path, study_id: str) -> DecisionStudy:

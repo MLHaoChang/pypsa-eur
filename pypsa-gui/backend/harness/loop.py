@@ -1709,6 +1709,7 @@ def _run_turn_body(
     with session._lock:
         selection_history = list(session.messages)
     selected_tools = [] if clarifying_scope else _tools_payload_for_profile(profile, message, history=selection_history)
+    from harness import assurance
     yield "session_init", {
         "session_id": session.session_id,
         "session6": session.session6(),
@@ -1718,6 +1719,8 @@ def _run_turn_body(
         "tool_count": len(selected_tools),
         "profile_id": profile.id,
         "profile_label": profile.label,
+        # A checked turn's projection replaces this with its "checking" state.
+        "assurance": assurance.legacy_state(),
     }
 
     # Seed conversation history. Caller-supplied message_history wins for

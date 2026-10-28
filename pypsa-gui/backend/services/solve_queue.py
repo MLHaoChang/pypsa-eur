@@ -125,6 +125,17 @@ KIND_CAMPUS = "campus"
 KIND_PROFILE_GEN = "profile_gen"
 KINDS = (KIND_SOLVE, KIND_GRIDSPINE, KIND_CAMPUS, KIND_PROFILE_GEN)
 
+# Any other kind is refused, never run as a solve (SC-00 N, decision D04): a
+# kind added by a later build, or a corrupt row, must not fall through to
+# `_run_solve_job`. The value is the job error/condition, not a tool error kind.
+UNKNOWN_KIND_CONDITION = "unknown_job_kind"
+
+
+def check_kind(kind: str) -> None:
+    """Raise `ValueError` naming `UNKNOWN_KIND_CONDITION` unless `kind` is in `KINDS`."""
+    if kind not in KINDS:
+        raise ValueError(f"{UNKNOWN_KIND_CONDITION}: {kind!r} is not one of {KINDS}")
+
 
 @dataclass
 class SolveJob:
@@ -269,6 +280,7 @@ class SolveQueue:
         kind: str = KIND_SOLVE,
     ) -> SolveJob:
         """Append a job for `project_id` and ensure the dispatcher is running."""
+        check_kind(kind)
         with self._lock:
             jid = uuid.uuid4()
             job = SolveJob(
@@ -357,6 +369,7 @@ class SolveQueue:
         unchanged — the caller still sees the programming error, but nothing
         was published or left resident.
         """
+        check_kind(kind)
         with self._lock:
             existing = self._active_job_locked(project_id, project_key)
             if existing is not None:
@@ -830,7 +843,11 @@ class SolveQueue:
         persisted (still `queued`, untouched) — nothing about the skip needs
         undoing, and the row is reconsidered the next time reconciliation runs
         once the project's active job goes terminal.
+
+        A row whose kind is not in `KINDS` raises `ValueError`; boot
+        reconciliation fails such a row before it gets here.
         """
+        check_kind(row.get("kind") or KIND_SOLVE)
         with self._lock:
             existing = self._jobs.get(row["id"])
             if existing is not None:
@@ -962,8 +979,11 @@ class SolveQueue:
             self._run_campus_job(job)
         elif job.kind == KIND_PROFILE_GEN:
             self._run_profile_gen_job(job)
-        else:
+        elif job.kind == KIND_SOLVE:
             self._run_solve_job(job)
+        else:
+            logger.error("solve_queue: job %s has unknown kind %r; not run", job.id, job.kind)
+            self._finish(job, "failed", error=f"{UNKNOWN_KIND_CONDITION}: {job.kind!r}")
 
     def _claim(self, job: SolveJob, stop_event, log_queue) -> str:
         """Flip a popped job to `running` and publish its handles.

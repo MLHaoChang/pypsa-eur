@@ -387,3 +387,11 @@ def test_every_engine_bill_note_has_the_studys_own_sentence():
     """
     missing = sorted(c for c in _engine_note_codes() if report.help_for(c)[1] != "study")
     assert missing == []
+
+
+# ── Q3-CARDS-1: the intake and settings words the chat edit card uses ────
+
+def test_the_intake_words_mirror_equals_the_backend_table():
+    from services.study.intake_words import INTAKE_WORDS
+
+    assert _block("INTAKE WORDS MIRROR") == INTAKE_WORDS

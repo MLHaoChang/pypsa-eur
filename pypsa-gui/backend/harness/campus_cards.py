@@ -351,9 +351,7 @@ def _new_draft_preview(args: dict) -> list[dict]:
             old = ((existing or {}).get("profile") or {}).get("document") or {}
             rows = [{**_row(name, "document", "document", old.get("sha256"), gc._doc_id(str(args["document_id"]))),
                      "says_name": f"{name}: source document"}]
-            rows.append(_note(name, 9, f"Sends the document to the configured extraction provider (Anthropic, "
-                                       f"model {gc._extraction_model()}): one API call, and a second only if "
-                                       "the API refuses the first."))
+            rows.append(_note(name, 9, gc.extraction_disclosure()))
         else:
             old_title = ((existing or {}).get("profile") or {}).get("title")
             title = (args.get("title") or "").strip()[:200] or "Project grid code (to be filled in by hand)"
