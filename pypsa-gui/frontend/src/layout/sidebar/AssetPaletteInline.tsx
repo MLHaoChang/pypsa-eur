@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, Factory } from 'lucide-react'
 import { useUIStore } from '../../store/uiStore'
 import { useAssetDrag } from '../../hooks/useAssetDrag'
-import { PALETTE_SECTIONS_DATA } from '../paletteData'
+import { PALETTE_SECTIONS_DATA, PROCESS_UNIT_ITEM } from '../paletteData'
 import { PALETTE_ICONS } from '../paletteIcons'
 
 // ── Asset palette sections ─────────────────────────────────────────────────────
@@ -78,6 +78,33 @@ export default function AssetPaletteInline({ only, skip }: { only?: string[]; sk
           ))}
         </div>
       ))}
+
+      {/* The Process unit is a Link built from rates per tonne (grid-to-process 07). Click or Enter only:
+          it has no canvas drop. */}
+      {(!only || only.includes('process')) && !(skip ?? []).includes('process') && (
+        <div data-testid="palette-process">
+          <div className="flex items-center gap-1.5 w-full pl-8 pr-3 py-1">
+            <span className="text-[9px] font-bold uppercase tracking-widest text-ink-400">PROCESS</span>
+          </div>
+          <button
+            type="button"
+            data-testid="palette-process-unit"
+            className="flex items-center gap-2.5 w-full pl-9 pr-3 py-1 text-left hover:bg-panel-2 transition-colors group"
+            style={{ height: 32 }}
+            onClick={() => setCreationItem({ id: PROCESS_UNIT_ITEM.id, label: PROCESS_UNIT_ITEM.label })}
+            title="Add a process unit: enter rates per tonne of product and the efficiencies are derived"
+          >
+            <span className="text-muted group-hover:text-text transition-colors shrink-0"
+              style={{ width: 15, height: 15, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Factory size={15} />
+            </span>
+            <div className="min-w-0">
+              <div className="text-[11px] font-medium text-ink-700 truncate">{PROCESS_UNIT_ITEM.label}</div>
+              <div className="text-[9px] text-ink-400 truncate leading-tight">{PROCESS_UNIT_ITEM.subtitle}</div>
+            </div>
+          </button>
+        </div>
+      )}
 
       {/* Drag ghost — z-[9999] beats every panel; pointer-events-none lets
           the pointerup land on the real target underneath. */}
