@@ -17,13 +17,13 @@ import { useState, type ReactNode } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Pencil, Play, Plus, Trash2 } from 'lucide-react'
 import { Btn, Seg } from '../PageKit'
-import { errorKind, errorText, seriesApi, type PendingSeries } from '../../api/profiles'
+import { seriesApi, type PendingSeries } from '../../api/profiles'
 import { useUIStore } from '../../store/uiStore'
 import {
   openFlowTarget, openFlowTargetInPlace,
 } from '../../layout/flowNavigation'
 import {
-  CurrentSeriesLine, DisabledReason, INPUT, MeasuredFileTab, PendingCard, RefinePanel, ReplayRefusal, ReplayToggle,
+  CurrentSeriesLine, DisabledReason, INPUT, MeasuredFileTab, PendingCard, RefinePanel, GenerateError, ReplayToggle,
   useReplay, type EditorMode,
 } from './SeriesKit'
 
@@ -143,7 +143,7 @@ export default function AvailabilityEditor({ project, component, componentType, 
   const ready = missing == null
 
   const replay = useReplay(project, componentType,
-    kind === 'must_run' ? 'p_min_pu' : 'p_max_pu', component)
+    kind === 'must_run' ? 'p_min_pu' : 'p_max_pu', component, kind)
   const generate = useMutation({
     mutationFn: (replayRefinements: boolean) => seriesApi.generateAvailability(project, {
       kind, components: [component], component_type: componentType, params: params(),
@@ -284,9 +284,7 @@ export default function AvailabilityEditor({ project, component, componentType, 
         </div>
       )}
 
-      {errorKind(generate.error) === 'replay_refused'
-        ? <ReplayRefusal error={generate.error} onRetry={() => generate.mutate(false)} />
-        : generate.error && <p className="text-[11px] text-red-600 mt-1" data-testid="editor-error">{errorText(generate.error)}</p>}
+      <GenerateError error={generate.error} onRetryWithoutOps={() => generate.mutate(false)} />
 
       {pending && kind !== 'forced_outages' && (
         <>

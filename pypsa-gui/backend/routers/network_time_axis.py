@@ -1189,6 +1189,8 @@ def get_timeseries(component: str, attribute: str, columns: str | None = None):
     if periods is not None:
         payload["periods"] = periods
     return payload
+
+
 def _same_series(old: pd.Series | None, new: pd.Series) -> bool:
     """Whether a timeseries edit left a stored column as it was."""
     if old is None or not old.index.equals(new.index):

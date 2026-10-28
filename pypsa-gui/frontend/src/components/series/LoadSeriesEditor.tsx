@@ -11,9 +11,9 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Play, Upload } from 'lucide-react'
 import { Btn, Seg } from '../PageKit'
-import { errorKind, errorText, seriesApi, type PendingSeries } from '../../api/profiles'
+import { seriesApi, type PendingSeries } from '../../api/profiles'
 import {
-  CurrentSeriesLine, DisabledReason, INPUT, PendingCard, RefinePanel, ReplayRefusal, ReplayToggle, useReplay,
+  CurrentSeriesLine, DisabledReason, INPUT, PendingCard, RefinePanel, GenerateError, ReplayToggle, useReplay,
   type EditorMode,
 } from './SeriesKit'
 
@@ -67,7 +67,7 @@ export default function LoadSeriesEditor({ project, component, mode, initialTab 
     [catalogue, archetypeName],
   )
 
-  const replay = useReplay(project, 'loads', 'p_set', component)
+  const replay = useReplay(project, 'loads', 'p_set', component, archetypeName)
   const generate = useMutation({
     mutationFn: (replayRefinements: boolean) => {
       const params: Record<string, unknown> = {}
@@ -177,9 +177,7 @@ export default function LoadSeriesEditor({ project, component, mode, initialTab 
         </div>
       )}
 
-      {errorKind(error) === 'replay_refused'
-        ? <ReplayRefusal error={error} onRetry={() => generate.mutate(false)} />
-        : error && <p className="text-[11px] text-red-600 mt-1" data-testid="editor-error">{errorText(error)}</p>}
+      <GenerateError error={error} onRetryWithoutOps={() => generate.mutate(false)} />
 
       {pending && (
         <>

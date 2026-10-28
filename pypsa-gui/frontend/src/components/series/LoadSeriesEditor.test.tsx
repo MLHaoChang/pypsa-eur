@@ -235,6 +235,13 @@ describe('LoadSeriesEditor replay of stored refinements', () => {
     expect(screen.queryByTestId('replay-toggle')).toBeNull()
   })
 
+  it('hides the toggle when another archetype made the current series', async () => {
+    api.current.mockResolvedValue({ ...REFINED, kind: 'commercial' })
+    renderEditor()
+    await screen.findByTestId('current-series')
+    expect(screen.queryByTestId('replay-toggle')).toBeNull()
+  })
+
   it('names a refused op and its index and retries without the refinements', async () => {
     api.current.mockResolvedValue(REFINED)
     api.generateLoad.mockRejectedValueOnce({ response: { status: 422, data: { detail: {

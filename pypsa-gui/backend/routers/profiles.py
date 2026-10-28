@@ -782,12 +782,12 @@ def _stored_refinements(ctx, result) -> list[dict[str, Any]] | None:
 
 
 def _replay_refinements(ctx, result, refinements, *, replay_stored: bool = False):
-    """A regenerated series replays the refinements it is given; without any,
-    and unless the caller opted out, those its targets' applied series record
+    """A regenerated series replays the refinements it is given (an empty list
+    is a choice too); without a list, and unless the caller opted out, those its targets' applied series record
     (`_stored_refinements`). A stored list's refusal names the op and its
     index and offers the retry without them."""
     stored = False
-    if not refinements and replay_stored:
+    if refinements is None and replay_stored:
         refinements, stored = _stored_refinements(ctx, result), True
     if not refinements:
         return result
@@ -810,7 +810,7 @@ def _replay_refinements(ctx, result, refinements, *, replay_stored: bool = False
     return SimpleNamespace(series=frame, meta=meta)
 
 
-def _replay_answer(record: dict) -> dict:
+def _take_replay(record: dict) -> dict:
     """What a generate says of its replay: the ops it replayed, kept out of
     the pending record so an apply does not store it."""
     replay = record.pop("replay", None)
@@ -968,7 +968,7 @@ def generate_load_profiles(
                                  replay_stored=body.replay_refinements)
     job_id = str(uuid.uuid4())
     record = dict(result.meta)
-    replay = _replay_answer(record)
+    replay = _take_replay(record)
     record["job_id"] = job_id
     record["project_id"] = proj.name
     record["points"] = list(result.series.columns)
@@ -1116,7 +1116,7 @@ def generate_availability_profiles(
                                  replay_stored=body.replay_refinements)
     job_id = str(uuid.uuid4())
     record = dict(result.meta)
-    replay = _replay_answer(record)
+    replay = _take_replay(record)
     record["job_id"] = job_id
     record["project_id"] = proj.name
     record["points"] = list(result.series.columns)
@@ -1223,7 +1223,7 @@ def generate_series_profiles(
                                  replay_stored=body.replay_refinements)
     job_id = str(uuid.uuid4())
     record = dict(result.meta)
-    replay = _replay_answer(record)
+    replay = _take_replay(record)
     if ambient_from_spec:
         record["ambient_from"] = "dc_load_profile"
     record["job_id"] = job_id

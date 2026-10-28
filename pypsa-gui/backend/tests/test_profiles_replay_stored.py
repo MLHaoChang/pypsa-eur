@@ -294,3 +294,10 @@ def test_a_refused_request_list_keeps_its_error_kind(client, project):
     detail = resp.json()["detail"]
     assert detail["error_kind"] == "refine_replay"
     assert "retry" not in detail and "op" not in detail
+
+
+def test_an_explicit_empty_list_wins_over_the_stored_one(client, project):
+    _refine_and_apply(client, project)
+    plain = _generate(client, project, refinements=[])
+    assert plain["stats"]["plant"]["peak_mw"] == pytest.approx(80.0)
+    assert "replay" not in plain
