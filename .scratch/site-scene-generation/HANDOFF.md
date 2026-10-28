@@ -3,7 +3,7 @@
 
 # Continuation handoff
 
-Status: execution-support extension prepared; historical advisory reviews recorded; prototype/runtime implementation not started
+Status: SC-00 N native prototype and proposed contract closures in review ([sc-00-n/record.md](sc-00-n/record.md)); SC-01 onward, B and P not started
 Date: 2026-10-24
 Branch/worktree: `claude/site-scene-generation-spec`, `/workspace/site-scene-spec`
 Baseline: `9988f9899a3bf8e80f51272529f18ea70599b90c`

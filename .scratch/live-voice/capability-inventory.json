@@ -1,14 +1,17 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-27",
-  "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
+  "generated_at": "2026-10-28",
+  "status": "source inventory and assurance adapter map; behavioral fixtures and GUI parameter mapping pending",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
     "pypsa-gui/backend/harness/toolsets.py",
     "pypsa-gui/frontend/src/pages/Results.tsx",
     "pypsa-gui/frontend/src/store/uiStore.ts",
     "pypsa-gui/backend/models/energy_hub.py",
-    "pypsa-gui/backend/services/adequacy/mc.py"
+    "pypsa-gui/backend/services/adequacy/mc.py",
+    "pypsa-gui/backend/harness/assurance_coverage.py",
+    "pypsa-gui/backend/harness/assurance.py",
+    "pypsa-gui/backend/harness/navigation.py"
   ],
   "tool_count": 341,
   "tools": [
@@ -31,6 +34,7 @@
         "project_name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "5c2e4b5a552480f8f4b512121b9c2048dead2a7cb5c94e72799da14e96e807f1",
       "behavioral_fixture": "pending"
     },
@@ -52,6 +56,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "9c914e11d02c18d953c65eab78934c415263d4c751d906ca74139b6ad0246887",
       "behavioral_fixture": "pending"
     },
@@ -78,6 +83,7 @@
         "target"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "16d68ed9508b52f40c77158769becd50f4b3e19c4c852392cf1b34ad9cbc79a6",
       "behavioral_fixture": "pending"
     },
@@ -103,6 +109,7 @@
         "component_class"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "d989502ae0d5f29cd166dc65f85b0ee61765371baad5f17e4dc3284e6cdec921",
       "behavioral_fixture": "pending"
     },
@@ -166,6 +173,7 @@
         "component_class"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "6e4521eb8f8ac1bc72ab54928c82adbab7b47bf4bb8f627ff00b10ceb2dfa353",
       "behavioral_fixture": "pending"
     },
@@ -186,6 +194,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "static_input_evidence",
       "schema_sha256": "8fcf1af620907ec9eea2e325e5981fd665785455bab256b5ead3f13987acf2b3",
       "behavioral_fixture": "pending"
     },
@@ -200,6 +209,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -215,6 +225,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -232,6 +243,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -249,6 +261,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -266,6 +279,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -295,6 +309,7 @@
         "profile_kind"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "0be3304f1c11797d3340b1c742273faf746c7d4ce78ca3a3fb8487a2e3afa663",
       "behavioral_fixture": "pending"
     },
@@ -310,6 +325,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -340,6 +356,7 @@
         "kind"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "b5c33f4dd5f60b1654b21678b01b6ceaeb4706afb973cc6eaecea282ab6ca392",
       "behavioral_fixture": "pending"
     },
@@ -357,6 +374,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -374,6 +392,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -391,6 +410,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -409,6 +429,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -435,6 +456,7 @@
         "attribute"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "65030552c88cbc4e2f67c6b7798eb92c40a774dd7ccaa5664345d89c891f0e41",
       "behavioral_fixture": "pending"
     },
@@ -455,6 +477,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "44773c45b2ba2d795c978e7ec0078f02ef1206656b57614f5be2f060c5040db1",
       "behavioral_fixture": "pending"
     },
@@ -472,6 +495,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -489,6 +513,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -504,6 +529,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -521,6 +547,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -538,6 +565,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -555,6 +583,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -700,6 +729,7 @@
         "result_kind"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "93630057d488ce9c3daaddedf55ff1892830d78f8753bba9f3cc9b5a78f0d6ad",
       "behavioral_fixture": "pending"
     },
@@ -718,6 +748,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "49cd7d3066d8405553280d53afeea4b809936b2157ae9e0670f4bba89eeb66a2",
       "behavioral_fixture": "pending"
     },
@@ -783,6 +814,7 @@
         "attrs"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "c5d844aeba6c3495bfc3d4a6ab3474ecdf7634c45f6bde3fa9007ea8dfc67989",
       "behavioral_fixture": "pending"
     },
@@ -852,6 +884,7 @@
         "name"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "checked_input_effect",
       "schema_sha256": "620554ac6bc2ecc1d9abf2620676d5e050b7c0f5ad50d0c0d00c1de13f908734",
       "behavioral_fixture": "pending"
     },
@@ -915,6 +948,7 @@
         "name"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "8fcf1af620907ec9eea2e325e5981fd665785455bab256b5ead3f13987acf2b3",
       "behavioral_fixture": "pending"
     },
@@ -934,6 +968,7 @@
         "name"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
       "behavioral_fixture": "pending"
     },
@@ -959,6 +994,7 @@
         "updates"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "eed50b5ccfc78c67d97858ef0a5be66f8648c325b8bc2c738b3f4019bf85f087",
       "behavioral_fixture": "pending"
     },
@@ -979,6 +1015,7 @@
         "components"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "d76cd744ddf39fb31405ffa0f79734f86ee54103ceabdad7c0b9c7b78083245a",
       "behavioral_fixture": "pending"
     },
@@ -999,6 +1036,7 @@
         "names"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "dd46d854563c4fc35a4059dbb67006b6a35129216f5cb3c18620b7c6f388a050",
       "behavioral_fixture": "pending"
     },
@@ -1023,6 +1061,7 @@
         "name"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "e4097bec70c4054e3a4df78acfefcab9003bf9f1f2fb7f7db90b38e53f085ee1",
       "behavioral_fixture": "pending"
     },
@@ -1042,6 +1081,7 @@
         "name"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
       "behavioral_fixture": "pending"
     },
@@ -1065,6 +1105,7 @@
         "mode"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "f8a44735700fff3de234826b59274317a846af1a7ec883b0ae0d8c9230136968",
       "behavioral_fixture": "pending"
     },
@@ -1080,6 +1121,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -1104,6 +1146,7 @@
         "end"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "b01dbaa816e6d342c072be43c795d435e0781d8a4317872f7dbac32b46104e04",
       "behavioral_fixture": "pending"
     },
@@ -1125,6 +1168,7 @@
         "updates"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "d9144a83ca48f527f3cb4034b65a16cfbe328c0fd8da32c43dc3684b12d9ec64",
       "behavioral_fixture": "pending"
     },
@@ -1147,6 +1191,7 @@
         "csv_content_b64"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "d762f0bc54359b09d3626d3e60095ca4f68c05629a59ca04bd445051c78a28f2",
       "behavioral_fixture": "pending"
     },
@@ -1166,6 +1211,7 @@
         "n_weeks"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "20c94a9661c6b9b61013313776e7c104fdd3d0584d751c4cd91897f5d119b083",
       "behavioral_fixture": "pending"
     },
@@ -1192,6 +1238,7 @@
         "operational_to"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "0555da73676e0b782929d8e46f95f50bda5c1ceb0c543a58fb689d1b02547879",
       "behavioral_fixture": "pending"
     },
@@ -1213,6 +1260,7 @@
         "periods"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "7bf18001e3d42ba123edec8b4d9c30555d273d10842c253c9965c84015a8b4ab",
       "behavioral_fixture": "pending"
     },
@@ -1234,6 +1282,7 @@
         "updates"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "d9144a83ca48f527f3cb4034b65a16cfbe328c0fd8da32c43dc3684b12d9ec64",
       "behavioral_fixture": "pending"
     },
@@ -1259,6 +1308,7 @@
         "period_bounds"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "8b9cc3c145173998abc16cb85ace86a4ef10a7eb4b27fbf45e55a60aa52d68a7",
       "behavioral_fixture": "pending"
     },
@@ -1282,6 +1332,7 @@
         "name"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "8fcf1af620907ec9eea2e325e5981fd665785455bab256b5ead3f13987acf2b3",
       "behavioral_fixture": "pending"
     },
@@ -1299,6 +1350,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -1326,6 +1378,7 @@
         "csv_content"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "c94cfd16e46f5a3526fac28454e619cc3cc7abdfd13a5f2606f686e7d20d16f3",
       "behavioral_fixture": "pending"
     },
@@ -1350,6 +1403,7 @@
         "attribute"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "148f63924be899d8b1171c526359180d515759a0a968f957fb9ec429b5d1df85",
       "behavioral_fixture": "pending"
     },
@@ -1375,6 +1429,7 @@
         "attribute"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "3926677cfc445e05044b8baa8b0ecbcba72b6575a77b00278adadf4ffade6e96",
       "behavioral_fixture": "pending"
     },
@@ -1397,6 +1452,7 @@
         "csv_content_b64"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "d762f0bc54359b09d3626d3e60095ca4f68c05629a59ca04bd445051c78a28f2",
       "behavioral_fixture": "pending"
     },
@@ -1420,6 +1476,7 @@
         "csv_content_b64"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "aaff7099e0fa0e8c283c6dc92277ef410ff7bd20f4704dea636890355433a41c",
       "behavioral_fixture": "pending"
     },
@@ -1443,6 +1500,7 @@
         "csv_content_b64"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "aaff7099e0fa0e8c283c6dc92277ef410ff7bd20f4704dea636890355433a41c",
       "behavioral_fixture": "pending"
     },
@@ -1464,6 +1522,7 @@
         "partial"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "12752067d0ca181167728aca1b848aee68322e074cfa3ebaeaff38fd515ee522",
       "behavioral_fixture": "pending"
     },
@@ -1482,6 +1541,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -1499,6 +1559,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -1513,6 +1574,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -1530,6 +1592,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "execution",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -1547,6 +1610,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "execution",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -1564,6 +1628,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -1581,6 +1646,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -1600,6 +1666,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
       "behavioral_fixture": "pending"
     },
@@ -1621,6 +1688,7 @@
         "entries"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "0cc7e96ecec534e315cddf9cbe7de385d7f3a8f408c8f822a9582e5c835575b5",
       "behavioral_fixture": "pending"
     },
@@ -1641,6 +1709,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f85b0c3bc0c24c78e4fe5f105c40171b37a9953c032d21e75976891330280b5a",
       "behavioral_fixture": "pending"
     },
@@ -1722,6 +1791,7 @@
         "kind"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "03c205fe47bc6d2185453223bdf83d82f0cccdb1e10ba3b4adf52ac0d2671d47",
       "behavioral_fixture": "pending"
     },
@@ -1741,6 +1811,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
       "behavioral_fixture": "pending"
     },
@@ -1762,6 +1833,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
       "behavioral_fixture": "pending"
     },
@@ -1785,6 +1857,7 @@
         "scenarios"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "e0863fe434ae6077f1e0da7078e994ba0e7b6d1b4538ffc84eadd85f92d35125",
       "behavioral_fixture": "pending"
     },
@@ -1806,6 +1879,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
       "behavioral_fixture": "pending"
     },
@@ -1824,6 +1898,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "2bbd66eb3f27959ee535054e2b92f926966f3073067b4ae7b27ecba003df8954",
       "behavioral_fixture": "pending"
     },
@@ -1841,6 +1916,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -1855,6 +1931,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "e10f55f123a66ce6e0cb028eb85bd9c4d452dd9fbf852d5f7e5b39d124ea3d8f",
       "behavioral_fixture": "pending"
     },
@@ -1874,6 +1951,7 @@
       ],
       "required": [],
       "safety_tier": "execution",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "c0a8421a7d2f1d937cd32ef706e27a3415adbc14d3ece8c9a8861e00b85e4f31",
       "behavioral_fixture": "pending"
     },
@@ -1893,6 +1971,7 @@
       ],
       "required": [],
       "safety_tier": "execution",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "128e828201e6d7371ee8a5f2a0675577af5c5598a55b50999790a6418966a8b6",
       "behavioral_fixture": "pending"
     },
@@ -1916,6 +1995,7 @@
       ],
       "required": [],
       "safety_tier": "execution",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "dae666cbc9dfcc20047a19432d9f4a8082be13b3be02b311e1d60876e4aa7f69",
       "behavioral_fixture": "pending"
     },
@@ -1940,6 +2020,7 @@
       ],
       "required": [],
       "safety_tier": "execution",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "75012b7496d2cbf55c3c4bad8375db8389c05a56a48f8a754316355e7c90fee3",
       "behavioral_fixture": "pending"
     },
@@ -1963,6 +2044,7 @@
       ],
       "required": [],
       "safety_tier": "execution",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "e3288573a36ab33c6f24f5bfa67efd59a97b0ec24184e83e8e08f00bf7a32383",
       "behavioral_fixture": "pending"
     },
@@ -1989,6 +2071,7 @@
       ],
       "required": [],
       "safety_tier": "execution",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "5d591ad4fa73186b98078137eb890db840d4ad4cc3f70d59586f626c041dad9f",
       "behavioral_fixture": "pending"
     },
@@ -2006,6 +2089,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "bc7c98e84d76eb63ce0f4645829bddd0c3e35aa098ac4f569d20deb5b095277c",
       "behavioral_fixture": "pending"
     },
@@ -2025,6 +2109,7 @@
         "objective"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "86eb7cd9574a0748ddc38058099bdaeec50318ee6e7d537a506a97bf3cda80a5",
       "behavioral_fixture": "pending"
     },
@@ -2039,6 +2124,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -2055,6 +2141,7 @@
       ],
       "required": [],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "eba412cf406ba67f8f44ab7309b83e010712aad97e655cdf49bdc895713df992",
       "behavioral_fixture": "pending"
     },
@@ -2096,6 +2183,7 @@
         "study"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "67ee627b53bfcedf5f90e7154f23edaca403c8e98e8681c7610557585feddc1e",
       "behavioral_fixture": "pending"
     },
@@ -2118,6 +2206,7 @@
         "project_id"
       ],
       "safety_tier": "execution",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },
@@ -2136,6 +2225,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -2158,6 +2248,7 @@
         "job_id"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "f5530c9c1ffa2d6e18e530480f1ae9fdbd93fde0302fd760e13dbb29f50813b4",
       "behavioral_fixture": "pending"
     },
@@ -2176,6 +2267,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -2199,6 +2291,7 @@
         "job_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "568efedc0d91153e7bfdd4c4d54c7defd15e2dde5e0ce164b035ec0aa1691930",
       "behavioral_fixture": "pending"
     },
@@ -2217,6 +2310,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -2239,6 +2333,7 @@
         "job_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "f5530c9c1ffa2d6e18e530480f1ae9fdbd93fde0302fd760e13dbb29f50813b4",
       "behavioral_fixture": "pending"
     },
@@ -2261,6 +2356,7 @@
         "job_id"
       ],
       "safety_tier": "execution",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "f5530c9c1ffa2d6e18e530480f1ae9fdbd93fde0302fd760e13dbb29f50813b4",
       "behavioral_fixture": "pending"
     },
@@ -2284,6 +2380,7 @@
         "overlays"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "59d7918fb77670f873d887e4b864768e70f901381a08631f11c894755e40d0ff",
       "behavioral_fixture": "pending"
     },
@@ -2309,6 +2406,7 @@
         "component"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "5d85f34eb4f58652e7aaeecc3bc47df992e42f6cfc8dc05c7ef3b3ddd7872810",
       "behavioral_fixture": "pending"
     },
@@ -2328,6 +2426,7 @@
         "project_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },
@@ -2351,6 +2450,7 @@
         "year"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "9eba6a6e746ea73d4cfb926f8eb9f68ff94bf6c4ba871412bfa6a649d4a8afad",
       "behavioral_fixture": "pending"
     },
@@ -2378,6 +2478,7 @@
         "component"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "5d85f34eb4f58652e7aaeecc3bc47df992e42f6cfc8dc05c7ef3b3ddd7872810",
       "behavioral_fixture": "pending"
     },
@@ -2405,6 +2506,7 @@
         "file_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "e0b6f29b6b0f9267d23aaca838afa2256b8ed82de3d7d900f9957d724f249e6c",
       "behavioral_fixture": "pending"
     },
@@ -2432,6 +2534,7 @@
         "component"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "38300a0e28beed936c7be447b118edb7a3d0c382e96cfa47e25c096f9dd846ad",
       "behavioral_fixture": "pending"
     },
@@ -2451,6 +2554,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "10e4732f44164e5bf8b46863a0a221fcc243a83303340255989dbfb4936675a5",
       "behavioral_fixture": "pending"
     },
@@ -2470,6 +2574,7 @@
         "preset"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "9bea505ddbdd3528dd9da2b4e1c5d14c7479706956324e24571da2c7b7b02d86",
       "behavioral_fixture": "pending"
     },
@@ -2497,6 +2602,7 @@
         "technology"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "e5188f2e1d2491b60e3d970bc608b3b2751cc958d28fe88b8a7b4508e84b502c",
       "behavioral_fixture": "pending"
     },
@@ -2518,6 +2624,7 @@
         "project_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },
@@ -2539,6 +2646,7 @@
         "project_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },
@@ -2566,6 +2674,7 @@
         "b"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "42fb52ad4fc8a5f2d3cbe2fff509a66ebb6aaf308f7a7e3f579a2756608405ae",
       "behavioral_fixture": "pending"
     },
@@ -2596,6 +2705,7 @@
         "technology"
       ],
       "safety_tier": "execution",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "8d5dde33da6c77d62a97471c072428ed3380c53ce41db87f045b5d36ef8a3830",
       "behavioral_fixture": "pending"
     },
@@ -2625,6 +2735,7 @@
         "component"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "9c10de8b5841842b12f915e39dabefeeb4b00b349267f1076755589499c3e279",
       "behavioral_fixture": "pending"
     },
@@ -2651,6 +2762,7 @@
         "job_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "ef4cf4b77c3da8c40dbfb3647c402998ad13176f27e00d0e31777a7575ffb9f6",
       "behavioral_fixture": "pending"
     },
@@ -2672,6 +2784,7 @@
         "project_id"
       ],
       "safety_tier": "execution",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "d2bffa1352e1c4f15d71f9e93afa5f173b66aba0eb08e0d07084622bbad1e62a",
       "behavioral_fixture": "pending"
     },
@@ -2693,6 +2806,7 @@
         "job_ids"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "4269f1d7d6b12df848df53620eeb7843392056062a9e9e4cd45573e6572dd0cc",
       "behavioral_fixture": "pending"
     },
@@ -2710,6 +2824,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -2737,6 +2852,7 @@
         "loads"
       ],
       "safety_tier": "execution",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "7e4c6f8350d345f5d6c9908cc9f9944961f4b7ea0c7e540c60046c3b9ce33e97",
       "behavioral_fixture": "pending"
     },
@@ -2765,6 +2881,7 @@
         "generators"
       ],
       "safety_tier": "execution",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "9a8958ce2c7ba44d44c476dbbf9a70f2b0660d95c91708439d58ed5fa749ab10",
       "behavioral_fixture": "pending"
     },
@@ -2790,6 +2907,7 @@
         "ops"
       ],
       "safety_tier": "execution",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "14771d18c344f4d2ba2c0783cf73e8ecc8c6396b6c8071a9de620c98d2da3c98",
       "behavioral_fixture": "pending"
     },
@@ -2817,6 +2935,7 @@
         "components"
       ],
       "safety_tier": "execution",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "48bae26db000db4ba9df339c0ea20af456d40e4ba2d2a07f3b54b36c25f331cd",
       "behavioral_fixture": "pending"
     },
@@ -2838,6 +2957,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -2863,6 +2983,7 @@
         "name"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
       "behavioral_fixture": "pending"
     },
@@ -2888,6 +3009,7 @@
         "project_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },
@@ -2915,6 +3037,7 @@
         "name"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "40acf6a4da226bbc5ba0ec1be571635ef8c97e307679138a87bccd327274733f",
       "behavioral_fixture": "pending"
     },
@@ -2940,6 +3063,7 @@
         "name"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
       "behavioral_fixture": "pending"
     },
@@ -2965,6 +3089,7 @@
         "name"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
       "behavioral_fixture": "pending"
     },
@@ -2992,6 +3117,7 @@
         "new_name"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "9ec0ac5fa23ac474680db7a47962f80e5a7546037248c3950c47fc0b0af84bb9",
       "behavioral_fixture": "pending"
     },
@@ -3018,6 +3144,7 @@
         "name"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "837acb31387a7297e08e7a792950a51f61eadfd5d1eea3fb4175a0b35d011fac",
       "behavioral_fixture": "pending"
     },
@@ -3046,6 +3173,7 @@
         "new_name"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "7846ee633c2f1f480f769bf0f94fade76b5cc49a02f3947164c7f50f200c4f0e",
       "behavioral_fixture": "pending"
     },
@@ -3068,6 +3196,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
       "behavioral_fixture": "pending"
     },
@@ -3090,6 +3219,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
       "behavioral_fixture": "pending"
     },
@@ -3111,6 +3241,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
       "behavioral_fixture": "pending"
     },
@@ -3134,6 +3265,7 @@
         "layout"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "fb5671ab4916b8b45622f4f62226977136150f959e8a0e3a57aec8d645349da2",
       "behavioral_fixture": "pending"
     },
@@ -3155,6 +3287,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
       "behavioral_fixture": "pending"
     },
@@ -3177,6 +3310,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "454b61bedf3b8e640beb6f1719609c35520a6086bb7558875a8081b53e116a25",
       "behavioral_fixture": "pending"
     },
@@ -3199,6 +3333,7 @@
         "project_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },
@@ -3223,6 +3358,7 @@
         "component_class"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "e141a7e4bd5fecd474d9c2cfc73c217efe67fcabd3295e06625b592d67efd6d1",
       "behavioral_fixture": "pending"
     },
@@ -3249,6 +3385,7 @@
         "bundle_bytes_b64"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "6e035e962e72ee290e3fb8525da99a4c21225918ec37c318fb9e1960df3fe5ac",
       "behavioral_fixture": "pending"
     },
@@ -3277,6 +3414,7 @@
         "new_name"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "ca48da82f598cd3ad8996b65bec04dfe94961be6da8fb4e63d35cce295e29e0f",
       "behavioral_fixture": "pending"
     },
@@ -3299,6 +3437,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
       "behavioral_fixture": "pending"
     },
@@ -3321,6 +3460,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
       "behavioral_fixture": "pending"
     },
@@ -3346,6 +3486,7 @@
         "label"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "1532dc27a6d2b4fbc14ace9dad79a1263f7137cca04507089ea7ac3013584416",
       "behavioral_fixture": "pending"
     },
@@ -3368,6 +3509,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
       "behavioral_fixture": "pending"
     },
@@ -3392,6 +3534,7 @@
         "snapshot_id"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "d9d9108cb4391b211127607243064bf50efc9e22be4065711fa4213b07122dd8",
       "behavioral_fixture": "pending"
     },
@@ -3416,6 +3559,7 @@
         "snapshot_id"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "d9d9108cb4391b211127607243064bf50efc9e22be4065711fa4213b07122dd8",
       "behavioral_fixture": "pending"
     },
@@ -3438,6 +3582,7 @@
         "bytes_b64"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "2e946bc2fbdaf93b1f260fa1fe80c71762d3ae12e2a84f98e305d95f24bf9a00",
       "behavioral_fixture": "pending"
     },
@@ -3458,6 +3603,7 @@
         "bytes_b64"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "2e946bc2fbdaf93b1f260fa1fe80c71762d3ae12e2a84f98e305d95f24bf9a00",
       "behavioral_fixture": "pending"
     },
@@ -3478,6 +3624,7 @@
         "bytes_b64"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "2e946bc2fbdaf93b1f260fa1fe80c71762d3ae12e2a84f98e305d95f24bf9a00",
       "behavioral_fixture": "pending"
     },
@@ -3498,6 +3645,7 @@
         "bytes_b64"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "2e946bc2fbdaf93b1f260fa1fe80c71762d3ae12e2a84f98e305d95f24bf9a00",
       "behavioral_fixture": "pending"
     },
@@ -3516,6 +3664,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -3533,6 +3682,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -3550,6 +3700,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -3567,6 +3718,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -3584,6 +3736,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "57470f87de8905ee7ade69a85ef8ab08b81b54a77f6b37ff95229a2b8849aedf",
       "behavioral_fixture": "pending"
     },
@@ -3599,6 +3752,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -3614,6 +3768,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -3629,6 +3784,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -3650,6 +3806,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "navigation_unvalidated",
       "schema_sha256": "f8aaa3aa1f205674d055e2efea24358747f7f0e6a218827fe2a093db21e66211",
       "behavioral_fixture": "pending"
     },
@@ -3678,6 +3835,7 @@
         "panel_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "navigation_ack",
       "schema_sha256": "93e4ba6a83996226176f7ca0cf7798c8bb96bcd0c67da8819140f4b565f61cba",
       "behavioral_fixture": "pending"
     },
@@ -3704,6 +3862,7 @@
         "project_b"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "d7247789b6bfe3500ba63e87f81caca1358ea33c30dc39ff19bade0d661e4a8a",
       "behavioral_fixture": "pending"
     },
@@ -3723,6 +3882,7 @@
         "snapshot_iso"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "navigation_unvalidated",
       "schema_sha256": "c9c65b8e3883d438a2612d2f4fd4f160b6325cef72ce3656100fdb11338a7d83",
       "behavioral_fixture": "pending"
     },
@@ -3743,6 +3903,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "2165a55898677e2040f0621b8fb46dbf8bf02b8c8301193d6371c43fa9c7a100",
       "behavioral_fixture": "pending"
     },
@@ -3766,6 +3927,7 @@
         "job_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "d3721ae19b621988324a82d8dc4c971f2d3659c8e325dc9a9bbf8ed3276c9939",
       "behavioral_fixture": "pending"
     },
@@ -3795,6 +3957,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "4f98b5bc92adc5e0421d13eeadf86c5d483c69c6dc8b5c2da505af46ae3647cf",
       "behavioral_fixture": "pending"
     },
@@ -3815,6 +3978,7 @@
         "cases"
       ],
       "safety_tier": "execution",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "cd776670ffb897fbd3ff1be7c75ef361592583067edb2ddbe253d29c421074d9",
       "behavioral_fixture": "pending"
     },
@@ -3837,6 +4001,7 @@
         "domain"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "689282210c314a481dd1926e924606909bcabb0cb5d142186bfe8c2f26cadc9a",
       "behavioral_fixture": "pending"
     },
@@ -3867,6 +4032,7 @@
         "options"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "user_choice",
       "schema_sha256": "8131e8e85f0f4773cdb9055b32f31ba534c32ba199a5feb998baaafea585f660",
       "behavioral_fixture": "pending"
     },
@@ -3892,6 +4058,7 @@
         "locator"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f2fb5139e30f6abeebd6ca348603bc53a4f5cda11de70accd848de5c2e843e32",
       "behavioral_fixture": "pending"
     },
@@ -3914,6 +4081,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "ed6154741bf6499e62775bc9acc684b6dd14cc479a4f0acf8be32ea80b847b87",
       "behavioral_fixture": "pending"
     },
@@ -3936,6 +4104,7 @@
         "workflow_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "76b559b6a3f2e90deab0ee13126fc440d83186a74b20d4c1ad583d836d0bdbd2",
       "behavioral_fixture": "pending"
     },
@@ -3958,6 +4127,7 @@
         "step"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "d1813ff25f1bd94df452830661de29186bc0b9913f2b3baa203960018024a87b",
       "behavioral_fixture": "pending"
     },
@@ -3976,6 +4146,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -3999,6 +4170,7 @@
         "objective"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "49238031919745be891bb751357085dfadebade0736747a984f51a4335dd9128",
       "behavioral_fixture": "pending"
     },
@@ -4019,6 +4191,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "9b949e9b326ef176a205c24085457fde4099e5f7ac60917503f35f36b01e4bc4",
       "behavioral_fixture": "pending"
     },
@@ -4039,6 +4212,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "a5d009f89fcf54f9cb28622db5d5c68f4adbf32f3ecb55cadf340d7dc506b96d",
       "behavioral_fixture": "pending"
     },
@@ -4053,6 +4227,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "57470f87de8905ee7ade69a85ef8ab08b81b54a77f6b37ff95229a2b8849aedf",
       "behavioral_fixture": "pending"
     },
@@ -4065,6 +4240,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -4080,6 +4256,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -4099,6 +4276,7 @@
         "file_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "44ef5aaf76e0b3fa602217a6344683300d5915767181a315b4d38889bbb0b106",
       "behavioral_fixture": "pending"
     },
@@ -4117,6 +4295,7 @@
         "file_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "556a0a4a7bd9fa57efb6d4dec6e926f155a9993a72a90da97c2ae0916147a842",
       "behavioral_fixture": "pending"
     },
@@ -4140,6 +4319,7 @@
         "load_name"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "8aa3afacd4bd2fe6addc882e434d47e4e65ec9b53544726f3817e4c54bf621fc",
       "behavioral_fixture": "pending"
     },
@@ -4159,6 +4339,7 @@
         "file_id"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "44ef5aaf76e0b3fa602217a6344683300d5915767181a315b4d38889bbb0b106",
       "behavioral_fixture": "pending"
     },
@@ -4181,6 +4362,7 @@
         "file_id"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "bbdb9cc1e6babd509642db10845652e03dc47742870c8d21f0225ad57ac1d320",
       "behavioral_fixture": "pending"
     },
@@ -4201,6 +4383,7 @@
         "filename"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "d6c7782d94d5acb96a4ea92ec48a48a21f058a922366ef829233013b625f8d4e",
       "behavioral_fixture": "pending"
     },
@@ -4223,6 +4406,7 @@
         "filename"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "fe33939d7ea2cee5a99960b3d2d8ff08a9c0d668f99b20a3d93f2e37b0f2e311",
       "behavioral_fixture": "pending"
     },
@@ -4243,6 +4427,7 @@
         "png_bytes_b64"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "1f1a70f7272f2c42148b180fe85024eec43b9883522470a91eb1b003420c1046",
       "behavioral_fixture": "pending"
     },
@@ -4255,6 +4440,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -4273,6 +4459,7 @@
       ],
       "required": [],
       "safety_tier": "write",
+      "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "86e1968d4c5704a151a21d7011304bbe53cfd6f9dd2312e8502ee3b72545763d",
       "behavioral_fixture": "pending"
     },
@@ -4289,6 +4476,7 @@
       ],
       "required": [],
       "safety_tier": "write",
+      "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "55701aea901f042162b1a827a08ec9ef01173193b22492e2d934a8a4d0070792",
       "behavioral_fixture": "pending"
     },
@@ -4312,6 +4500,7 @@
       ],
       "required": [],
       "safety_tier": "execution",
+      "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "1bfb561ce5cf1d09bacce1814709d426c95d88f3a14ec76aa08e54dac6e19d82",
       "behavioral_fixture": "pending"
     },
@@ -4329,6 +4518,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -4346,6 +4536,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -4363,6 +4554,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -4384,6 +4576,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f3590056c157bdf52702e5833774bf72636d0378e9cab506dcec01cfbe0d8738",
       "behavioral_fixture": "pending"
     },
@@ -4410,6 +4603,7 @@
         "table_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "a57cbf2466909ae2d67d6cbdb920df0ab24e942447e81ebf8222581a8a1a24b9",
       "behavioral_fixture": "pending"
     },
@@ -4435,6 +4629,7 @@
         "section_id"
       ],
       "safety_tier": "execution",
+      "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "6acae38f81dd2522be6fc6bbe1fe4c810644eb115694991f7d548c142702c273",
       "behavioral_fixture": "pending"
     },
@@ -4456,6 +4651,7 @@
       ],
       "required": [],
       "safety_tier": "write",
+      "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "286be60f210ee34ec4f2ce620da90ec9df7743948e62a058a082aa91af929c5a",
       "behavioral_fixture": "pending"
     },
@@ -4477,6 +4673,7 @@
         "report_id"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "21fa9a9a69b79f9ac9737d17fa6ac7cee38b8b75d71cd6b2a0454cd5cad5e86a",
       "behavioral_fixture": "pending"
     },
@@ -4495,6 +4692,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -4518,6 +4716,7 @@
         "report_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "66238bb5dacac86b2d4f90dec030dddf7505af4d356e59e035a3c76411dc46c9",
       "behavioral_fixture": "pending"
     },
@@ -4538,6 +4737,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "4cf3c0008071a59f144050575370d72376b0b59b1324dfa346e326bf18c0c4a1",
       "behavioral_fixture": "pending"
     },
@@ -4560,6 +4760,7 @@
         "report_id"
       ],
       "safety_tier": "execution",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "b4a8de25d40c1ab654e561466acfe2c38fcba3c16f8517b7f9da0ffd8880dd03",
       "behavioral_fixture": "pending"
     },
@@ -4584,6 +4785,7 @@
         "plan"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "aaf3ce71ea9cbd9c1f6b7c3f02176a03d239d956c7ab72e0b64493afbf8eee72",
       "behavioral_fixture": "pending"
     },
@@ -4601,6 +4803,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -4625,6 +4828,7 @@
         "file_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "238398196d7f9e1d5bbee52d38efff669e338ab5a2323837e11a5e9ded47837d",
       "behavioral_fixture": "pending"
     },
@@ -4650,6 +4854,7 @@
         "b"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "6225dc7c917a0f21960a10dd4b4e7411c94e84e614b7567272bceac50adf66c9",
       "behavioral_fixture": "pending"
     },
@@ -4671,6 +4876,7 @@
       ],
       "required": [],
       "safety_tier": "write",
+      "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "286be60f210ee34ec4f2ce620da90ec9df7743948e62a058a082aa91af929c5a",
       "behavioral_fixture": "pending"
     },
@@ -4689,6 +4895,7 @@
         "profile_id"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "c79a08c8ec3d79707d38595f7a8b1b3547079d4507157123f98d024cb0ee3b74",
       "behavioral_fixture": "pending"
     },
@@ -4717,6 +4924,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "08c6bb196aa2d3077e3ae01b6e37324816423f701e8b0407e8e47f293912f476",
       "behavioral_fixture": "pending"
     },
@@ -4739,6 +4947,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "navigation_unvalidated",
       "schema_sha256": "fb457dfa21c66e018027ab8c65583c80fd839df0a4c8af880a7944bb970f187f",
       "behavioral_fixture": "pending"
     },
@@ -4765,6 +4974,7 @@
         "name"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "7d315ac52f9a424743bfa666c63b4c6bfae46e31af856156e55538da4882b8c7",
       "behavioral_fixture": "pending"
     },
@@ -4788,6 +4998,7 @@
         "name"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "2438bd5fde8df1d4266432885e2c691bdb32b1966d67ee3ad778f21a25e1d0c5",
       "behavioral_fixture": "pending"
     },
@@ -4808,6 +5019,7 @@
         "project_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "b9a77ab3e2116d7b5ae9081c80cf4dc99c94da523469496c115b03423d70dcc3",
       "behavioral_fixture": "pending"
     },
@@ -4826,6 +5038,7 @@
         "project_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },
@@ -4850,6 +5063,7 @@
         "project_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "a41e5959914bef493e4f5829094b3cfea683e1c8a71106ae7aaac9e3b0bf570c",
       "behavioral_fixture": "pending"
     },
@@ -4868,6 +5082,7 @@
         "project_id"
       ],
       "safety_tier": "execution_long_running",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },
@@ -4886,6 +5101,7 @@
         "project_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },
@@ -4905,6 +5121,7 @@
         "project_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },
@@ -4923,6 +5140,7 @@
         "project_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },
@@ -4950,6 +5168,7 @@
         "source"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "d29c34969ed1e7f0e15ece46e01f68e3554ec9a2f7b805f28953e97613deda99",
       "behavioral_fixture": "pending"
     },
@@ -4971,6 +5190,7 @@
         "hour"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "7f12fdcd64a4299a21dd048f900445442657a5f4f1600de388257df80cc0153e",
       "behavioral_fixture": "pending"
     },
@@ -4989,6 +5209,7 @@
         "project_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },
@@ -5011,6 +5232,7 @@
         "project_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "7e65aa813f378c6c04524fa4597fbdd2fcdd2984a7123694ce185cd9476114ef",
       "behavioral_fixture": "pending"
     },
@@ -5034,6 +5256,7 @@
         "kind"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "e4b49439d242e13f1ff7845f030d2b3060cffb886a1db1de420b2d696b736030",
       "behavioral_fixture": "pending"
     },
@@ -5053,6 +5276,7 @@
         "project_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },
@@ -5072,6 +5296,7 @@
         "project_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "825f9ebf480c66bad28019849e8c76fe874f6e860ad4f17a0c3ea37494afb943",
       "behavioral_fixture": "pending"
     },
@@ -5099,6 +5324,7 @@
         "project_id"
       ],
       "safety_tier": "execution_long_running",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "c2516f103a5d78e5c75ff13fb31a31febf7e33a4fb0cde85287b1b77e0e16f7d",
       "behavioral_fixture": "pending"
     },
@@ -5117,6 +5343,7 @@
         "project_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },
@@ -5136,6 +5363,7 @@
         "project_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "b638f21159458f54ae0ee6a3d6916a963a83d51be4d58eb13da126e2f7368d09",
       "behavioral_fixture": "pending"
     },
@@ -5156,6 +5384,7 @@
         "config"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "a1aed3e4cbe57e40f9ca0ebee86efaecaf8753d4b88df023dcd13b8177469cbb",
       "behavioral_fixture": "pending"
     },
@@ -5176,6 +5405,7 @@
         "project_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "14d6c1e5acfc0e709b9d1b861a66e12689f25bff21b7f8a6e1e16c6f38bfcb22",
       "behavioral_fixture": "pending"
     },
@@ -5194,6 +5424,7 @@
         "project_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },
@@ -5212,6 +5443,7 @@
         "project_id"
       ],
       "safety_tier": "execution_long_running",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },
@@ -5230,6 +5462,7 @@
         "project_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },
@@ -5249,6 +5482,7 @@
         "project_id"
       ],
       "safety_tier": "execution_long_running",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "3460ec2d07f9d23551871ef75d2559e1e1f3bfc08cfc9644218a752d4672edfb",
       "behavioral_fixture": "pending"
     },
@@ -5267,6 +5501,7 @@
         "project_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },
@@ -5285,6 +5520,7 @@
         "project_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },
@@ -5305,6 +5541,7 @@
         "yaml"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "fe9d2ba36d0bf4c21379a9ea4e5bf91d6545fa39905e997494f46a0ecede8ef0",
       "behavioral_fixture": "pending"
     },
@@ -5323,6 +5560,7 @@
         "project_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },
@@ -5341,6 +5579,7 @@
         "project_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },
@@ -5359,6 +5598,7 @@
         "project_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },
@@ -5379,6 +5619,7 @@
         "document_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "c48b6138d378f30a360404e46c541a4b8fb739291856736d9bdfaeec64587b86",
       "behavioral_fixture": "pending"
     },
@@ -5405,6 +5646,7 @@
         "load_mw"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "aaa0bdf7e5927ebf462a278943e938db65e923cabdc36fa7aaad91d4e8f076d1",
       "behavioral_fixture": "pending"
     },
@@ -5426,6 +5668,7 @@
         "project_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "723471724cc7e355bde44a03cf36904d5448c168bf00f5f8147dc9f9705ccb9e",
       "behavioral_fixture": "pending"
     },
@@ -5448,6 +5691,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f3b9d34cb270dd00dbae42bab665df74ba31cd243789f510068dae08d3b25e16",
       "behavioral_fixture": "pending"
     },
@@ -5469,6 +5713,7 @@
         "kind"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "ee9db02edce37f746f9439c7e50c87c773ee3b7f104f4e6815bf55d276fe8460",
       "behavioral_fixture": "pending"
     },
@@ -5493,6 +5738,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "691c79bfad7957e77f5810a30519bad0fa4c077c64d4a3a63b04c1d5b0174ef7",
       "behavioral_fixture": "pending"
     },
@@ -5522,6 +5768,7 @@
         "name"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "c5cd663d0e28376e9825738f4ab9b6f74bf50f4db4843060a0b108825af3ee22",
       "behavioral_fixture": "pending"
     },
@@ -5549,6 +5796,7 @@
         "name"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "743228dbe166990a2f0fad7a884cde9ec2e264b826a0ce7f163b03a5006611ac",
       "behavioral_fixture": "pending"
     },
@@ -5567,6 +5815,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "dcaafa29211617afc9399243ad3712bb418e13ffacf92bd13be99085790db371",
       "behavioral_fixture": "pending"
     },
@@ -5589,6 +5838,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "6b4bf7be8b84df61224ddf0a029935669cd4ff444d827294601a7b58a6e528a2",
       "behavioral_fixture": "pending"
     },
@@ -5611,6 +5861,7 @@
         "name"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "5d3a34bb486e364dc2b13b72cce5dd949a77980a882fc8d73af820c41fcacd03",
       "behavioral_fixture": "pending"
     },
@@ -5637,6 +5888,7 @@
         "unit"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "6860be5ca2bc283b79a53d2f2e23f977a27dad232fd06c240bd292a8a68fed5f",
       "behavioral_fixture": "pending"
     },
@@ -5661,6 +5913,7 @@
         "payload"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "b3871d1937cf40a4f68657eb1bb0ac23463ce4c61d35f644d752235d1389a8c1",
       "behavioral_fixture": "pending"
     },
@@ -5676,6 +5929,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -5697,6 +5951,7 @@
         "if_match"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "a930184bda0febe42fb954bbab358a1fc407d97d5b8193d900d576cee08adeba",
       "behavioral_fixture": "pending"
     },
@@ -5712,6 +5967,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -5730,6 +5986,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "dcaafa29211617afc9399243ad3712bb418e13ffacf92bd13be99085790db371",
       "behavioral_fixture": "pending"
     },
@@ -5749,6 +6006,7 @@
         "tariff"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "70107a854c9a9daf494301c4a274feb99326338eee34bb8c1a18cf93e0213b40",
       "behavioral_fixture": "pending"
     },
@@ -5764,6 +6022,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -5787,6 +6046,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "1f0436a7f7231145ecc41a6dd5700f0b783aeb8910a934ddb93d6f5979b3e269",
       "behavioral_fixture": "pending"
     },
@@ -5805,6 +6065,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "dcaafa29211617afc9399243ad3712bb418e13ffacf92bd13be99085790db371",
       "behavioral_fixture": "pending"
     },
@@ -5832,6 +6093,7 @@
         "projection_year"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "d0bb21532317ba1c4c749f14f1728a4d2bbc9a1fe3c8d786f7c82ad4dbd6fb60",
       "behavioral_fixture": "pending"
     },
@@ -5858,6 +6120,7 @@
         "projection_year"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "d66c30b50d2d1a901bb3645a22784cf4ebcbada49b826b9ea608a161c88d7231",
       "behavioral_fixture": "pending"
     },
@@ -5887,6 +6150,7 @@
         "columns"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "1c2443ff6f0d5d79a2626d5d1c850603441be36936b236c8173cc55dc934e281",
       "behavioral_fixture": "pending"
     },
@@ -5918,6 +6182,7 @@
         "source_sha256"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "c8b2666c513bdd1c6ee6a9aea17927f9cba659c9039101d4b843d6e641e76b63",
       "behavioral_fixture": "pending"
     },
@@ -5945,6 +6210,7 @@
         "citations"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "fe307619891fdb555f3f48c4ff2bf60efb91021de3d320b94bc3d9f982254fa1",
       "behavioral_fixture": "pending"
     },
@@ -5974,6 +6240,7 @@
         "source_sha256"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "46573de48a4a62e0bb4c508693111f48a010a18e99117287a02f243d95c0a841",
       "behavioral_fixture": "pending"
     },
@@ -5999,6 +6266,7 @@
         "citations"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "7f50006ac302589d9049d83ac66817e442fae231251b237ec9ff2c32c1f09408",
       "behavioral_fixture": "pending"
     },
@@ -6026,6 +6294,7 @@
         "source_sha256"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "a2f996059bf4aa0189649ac477ae22ed074e6dec2ab839f7dd44635dec053c96",
       "behavioral_fixture": "pending"
     },
@@ -6053,6 +6322,7 @@
         "poc_link"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "a80e937c3ac37ec3d286c0be71d509f16aa19942af9a9d5ab9f67cff8a0c46b1",
       "behavioral_fixture": "pending"
     },
@@ -6083,6 +6353,7 @@
       ],
       "required": [],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "2c53fbf57c84cc557557b9d75c76802cd5582b34603a0814c810a27e11ef30bf",
       "behavioral_fixture": "pending"
     },
@@ -6100,6 +6371,7 @@
       ],
       "required": [],
       "safety_tier": "execution_long_running",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "e916d9592329c4170e51d6e5d0cbd6a5672f1d0b5865ca702a2adc09050d4483",
       "behavioral_fixture": "pending"
     },
@@ -6122,6 +6394,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "2f78a321fabbb3fef8ad27878d4f84de8d402acc6a68e7ca4989d47febd44d08",
       "behavioral_fixture": "pending"
     },
@@ -6145,6 +6418,7 @@
         "target_year"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "b81bc9e8099876f804b2488f0306c7a660140fc5c1ab4d408516e45f7175326f",
       "behavioral_fixture": "pending"
     },
@@ -6168,6 +6442,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "0255989cd003852e2a25c3efca98367e6e231a2e69aa3456b05cde6c544499a9",
       "behavioral_fixture": "pending"
     },
@@ -6196,6 +6471,7 @@
         "intake"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "f5fb3e690ffc90f4805a24ba356d8b3c350153d5416655b132fbbfb91f869a56",
       "behavioral_fixture": "pending"
     },
@@ -6226,6 +6502,7 @@
         "unit"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "65c0d48902200e114aebc2ad07533699ccd0a1baad068d9c37420d6a0702372a",
       "behavioral_fixture": "pending"
     },
@@ -6255,6 +6532,7 @@
         "study_id"
       ],
       "safety_tier": "execution_long_running",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "5cd1577cb48b39b800a3c74f3da4aa21d68fde56aa56504fc135691c6160ca21",
       "behavioral_fixture": "pending"
     },
@@ -6286,6 +6564,7 @@
         "study_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "693fcb5125fb5bf97c9fc829772647e27ac2bad2af76cad37ba2d6997240e138",
       "behavioral_fixture": "pending"
     },
@@ -6309,6 +6588,7 @@
         "study_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "693fcb5125fb5bf97c9fc829772647e27ac2bad2af76cad37ba2d6997240e138",
       "behavioral_fixture": "pending"
     },
@@ -6346,6 +6626,7 @@
         "study_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "4c371de156bae5ed913134eef2ce1138a2c2e8b7c4eb57ac6fd8a3d50063f2a6",
       "behavioral_fixture": "pending"
     },
@@ -6370,6 +6651,7 @@
         "project"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "4356651fc0b454d48227bdea046bd03dd52573433b7bdc7858ae0298e67aaa8d",
       "behavioral_fixture": "pending"
     },
@@ -6407,6 +6689,7 @@
         "study_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "d8223b2425e34a80a2614374916f4408ccc1fb5418cdb9fadc07bc9eee8dba18",
       "behavioral_fixture": "pending"
     },
@@ -6430,6 +6713,7 @@
         "intake"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "6c03bf643886345c1ac2634b0b5dfc71ddc137533d8436b55d3d79c84bf11414",
       "behavioral_fixture": "pending"
     },
@@ -6457,6 +6741,7 @@
         "study_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "acb1cb7f5c5af8a2f32d17da24b89441d080b4250fa424e38921c2c40c3f2800",
       "behavioral_fixture": "pending"
     },
@@ -6485,6 +6770,7 @@
         "study_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "61a813fba64c0ae52f128219a46da95c7d86bdc86aca0b55d81dc2fb5cff3c3a",
       "behavioral_fixture": "pending"
     },
@@ -6508,6 +6794,7 @@
         "study_id"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "693fcb5125fb5bf97c9fc829772647e27ac2bad2af76cad37ba2d6997240e138",
       "behavioral_fixture": "pending"
     },
@@ -6525,6 +6812,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -6546,6 +6834,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
       "behavioral_fixture": "pending"
     },
@@ -6569,6 +6858,7 @@
         "scope"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "ab30dd86fdb5a1a09338d3fb4fe481fa98f10b04a7abb786d948e37f7c6589a1",
       "behavioral_fixture": "pending"
     },
@@ -6592,6 +6882,7 @@
         "name"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "f28d465994ca558a4d8efd7b42e5bfd542dbea8a109ca9d0de70fd66a5e5c727",
       "behavioral_fixture": "pending"
     },
@@ -6615,6 +6906,7 @@
         "derive_lengths_from_geometry"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "18c934a5887147f5321d1c4372785c5dd659273ed260c1cd2ba4850c9542766a",
       "behavioral_fixture": "pending"
     },
@@ -6643,6 +6935,7 @@
         "view"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "2e0a85dcf5c518f50fef1015ab1ff1a90af8244b1ad6996080f859f8b700bbe6",
       "behavioral_fixture": "pending"
     },
@@ -6662,6 +6955,7 @@
         "query"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "601046e05564cdf0199bc4ed39e895c699de12233cc3dfc3ff1e968282452abe",
       "behavioral_fixture": "pending"
     },
@@ -6679,6 +6973,7 @@
       ],
       "required": [],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "407d8dcf750b298333839e26f4726ee9c11c8e0bd2c5eed86aea4f1bcfc80848",
       "behavioral_fixture": "pending"
     },
@@ -6698,6 +6993,7 @@
         "lines"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "745da6bbec52092dd4b2e7d212cce87e7ef36f66d088659918f3ab4722080de5",
       "behavioral_fixture": "pending"
     },
@@ -6715,6 +7011,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -6741,6 +7038,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "009e6a7967c4b6dbbaf61018f4e2dd9f65d6b1b021c2fb874b51b687f09939b1",
       "behavioral_fixture": "pending"
     },
@@ -6764,6 +7062,7 @@
         "sites"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "61cdfdb565cac86a3bdc83706b7ebb6c59cd9503041d4bb6db921802e5102c45",
       "behavioral_fixture": "pending"
     },
@@ -6785,6 +7084,7 @@
         "site_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "8ae7f0028f5bcb778eae46c87dee38da20826a6a046eeba1c12d35e954687ac4",
       "behavioral_fixture": "pending"
     },
@@ -6807,6 +7107,7 @@
         "experiment_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "add7aa39807e1175fd337d20587108cc688fda582690e35ca067c2eb5b731000",
       "behavioral_fixture": "pending"
     },
@@ -6829,6 +7130,7 @@
         "experiment_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "add7aa39807e1175fd337d20587108cc688fda582690e35ca067c2eb5b731000",
       "behavioral_fixture": "pending"
     },
@@ -6851,6 +7153,7 @@
         "experiment_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "add7aa39807e1175fd337d20587108cc688fda582690e35ca067c2eb5b731000",
       "behavioral_fixture": "pending"
     },
@@ -6876,6 +7179,7 @@
         "receipt_sha256"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "50b7d96a9252c167417284f46837e231a5465f754a29c2bc3853e254e93e8659",
       "behavioral_fixture": "pending"
     },
@@ -6904,6 +7208,7 @@
         "comparison_sha256"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "8c8fce545a8997a907233d094bc65af76d0261d75b8d750ccfec1c9917c3d0a5",
       "behavioral_fixture": "pending"
     },
@@ -6930,6 +7235,7 @@
         "baseline_experiment_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "d5f9190dafe2375049b82eb4c3ae58e9f6b30c2c4f9ce40388d5e5c13abbe683",
       "behavioral_fixture": "pending"
     },
@@ -6952,6 +7258,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "6589c8ed23a3e16ce50017dfb20fc21f85798d73b376db7f43aa12ad7299fc5c",
       "behavioral_fixture": "pending"
     },
@@ -6978,6 +7285,7 @@
         "run_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "4abaac2419832365fa560a3c15252f7900510c90f2b42c052298b438a97032cb",
       "behavioral_fixture": "pending"
     },
@@ -7004,6 +7312,7 @@
         "baseline_run_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "5ff81e9828bdd6ccb997ace8ad45a83d40efafd2ac4860887ca0f17247238a5f",
       "behavioral_fixture": "pending"
     },
@@ -7030,6 +7339,7 @@
         "run_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "navigation_unvalidated",
       "schema_sha256": "3739720ac25eaba3d2985f5ee0f5902599cced67ea8a509a9c2081ca379c0ead",
       "behavioral_fixture": "pending"
     },
@@ -7051,6 +7361,7 @@
       ],
       "required": [],
       "safety_tier": "write",
+      "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "90b9ba2879c5659cbe8d1cfbe93242c14dc785c354308d151cf77acd572e812f",
       "behavioral_fixture": "pending"
     },
@@ -7080,6 +7391,7 @@
         "request_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "b45737e812c528e106c8ca96fa9a50417263e72f7653bf516ec5569f30178525",
       "behavioral_fixture": "pending"
     },
@@ -7102,6 +7414,7 @@
         "experiment_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "add7aa39807e1175fd337d20587108cc688fda582690e35ca067c2eb5b731000",
       "behavioral_fixture": "pending"
     },
@@ -7122,6 +7435,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "440e1ce843e6a44f64517d8f7540084aa5e990bea1fe374afd091fca0a73ee09",
       "behavioral_fixture": "pending"
     },
@@ -7144,6 +7458,7 @@
         "experiment_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "8141d78f100db6a8a9c0e566273a6a97fe92d94493d1912c0d50d2f30462899d",
       "behavioral_fixture": "pending"
     },
@@ -7164,6 +7479,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "3914ac2afc6ecf565a667beb948839ec1af36bf8a8752d2c19760faf0d59226b",
       "behavioral_fixture": "pending"
     },
@@ -7186,6 +7502,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "87dab0f09008944469043e7b7737f1d5ee9e05f228dc8d9af2bf2591b4fc8602",
       "behavioral_fixture": "pending"
     },
@@ -7209,6 +7526,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "0344962bfc2c5846a2638d1651823621d12841a3fd3ccc2b9b906a16daf96f74",
       "behavioral_fixture": "pending"
     },
@@ -7229,6 +7547,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "440e1ce843e6a44f64517d8f7540084aa5e990bea1fe374afd091fca0a73ee09",
       "behavioral_fixture": "pending"
     },
@@ -7251,6 +7570,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "1b2d621facbc118e8eda7c3970378eea9eeefee4c87892a31ad67344666ca146",
       "behavioral_fixture": "pending"
     },
@@ -7278,6 +7598,7 @@
         "request_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "4d6b132ebaa33a6237e5459f77cdbd57da6776e2753b0a35e15c1f5273ccfe9a",
       "behavioral_fixture": "pending"
     },
@@ -7300,6 +7621,7 @@
         "task_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "0030340a5c7321f52ddf73fffe190c98c0986f67cbb0328ed8c75ba56856ec7c",
       "behavioral_fixture": "pending"
     },
@@ -7322,6 +7644,7 @@
         "task_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "0030340a5c7321f52ddf73fffe190c98c0986f67cbb0328ed8c75ba56856ec7c",
       "behavioral_fixture": "pending"
     },
@@ -7344,6 +7667,7 @@
         "task_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "0030340a5c7321f52ddf73fffe190c98c0986f67cbb0328ed8c75ba56856ec7c",
       "behavioral_fixture": "pending"
     },
@@ -7369,6 +7693,7 @@
         "outcome"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "7e24ff3de66e691a6953f90d29b562209e8f00cc2cd9ba2fe20560c5cee671bc",
       "behavioral_fixture": "pending"
     },
@@ -7391,6 +7716,7 @@
         "file_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "44ef5aaf76e0b3fa602217a6344683300d5915767181a315b4d38889bbb0b106",
       "behavioral_fixture": "pending"
     },
@@ -7413,6 +7739,7 @@
         "file_id"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "44ef5aaf76e0b3fa602217a6344683300d5915767181a315b4d38889bbb0b106",
       "behavioral_fixture": "pending"
     },
@@ -7433,6 +7760,7 @@
         "format"
       ],
       "safety_tier": "destructive",
+      "assurance_adapter": "destructive_unvalidated",
       "schema_sha256": "8f7c794420ae0aa9176945867c1bb34e63fa6cd81593f38220419a1c3f117f40",
       "behavioral_fixture": "pending"
     },
@@ -7455,6 +7783,7 @@
         "changes"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "9c58e0301fad14f995c9bf772b69970b895b03f2281b4c2ecbc3b9416d0f91a8",
       "behavioral_fixture": "pending"
     },
@@ -7477,6 +7806,7 @@
         "preview_id"
       ],
       "safety_tier": "execution",
+      "assurance_adapter": "job_unvalidated",
       "schema_sha256": "fd9d04d2b6d85650af94f0faaa0ba416750edcdda9639ee701678ccb46265f61",
       "behavioral_fixture": "pending"
     },
@@ -7504,6 +7834,7 @@
         "names"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "c4f3fb3cd967745aeb5b744ee76678dfe1edc83272ad0277e2a2b568a29f08f9",
       "behavioral_fixture": "pending"
     },
@@ -7527,6 +7858,7 @@
         "file_ids"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "03068bc75969f2330c68781e3c718de251ca87e12e5a76ea329ad3f6d3849f1d",
       "behavioral_fixture": "pending"
     },
@@ -7548,6 +7880,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
       "behavioral_fixture": "pending"
     },
@@ -7567,6 +7900,7 @@
         "name"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
       "behavioral_fixture": "pending"
     },
@@ -7590,6 +7924,7 @@
         "bbox"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "aad73e63c38860b93ed6d9e19a41e00e31d3b8bdf4af63598ebef6860a0a5c35",
       "behavioral_fixture": "pending"
     },
@@ -7616,6 +7951,7 @@
         "projection_year"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "d66c30b50d2d1a901bb3645a22784cf4ebcbada49b826b9ea608a161c88d7231",
       "behavioral_fixture": "pending"
     },
@@ -7639,6 +7975,7 @@
         "file_id"
       ],
       "safety_tier": "write",
+      "assurance_adapter": "write_unvalidated",
       "schema_sha256": "70bc2068b22c68f0e0c3817bedd81b27734d36c8a38239a2205bcbcd914bc947",
       "behavioral_fixture": "pending"
     },
@@ -7657,6 +7994,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "afaca79305d91acd73b598e80af283b363bc089c5a48c7549d68338505d0ab55",
       "behavioral_fixture": "pending"
     },
@@ -7675,6 +8013,7 @@
       ],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "afaca79305d91acd73b598e80af283b363bc089c5a48c7549d68338505d0ab55",
       "behavioral_fixture": "pending"
     },
@@ -7698,6 +8037,7 @@
         "archetype"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "d2e0a9342ebd7a1ba9c7229daa45e3981bec0885b2a32fe9e9011fd35a3938eb",
       "behavioral_fixture": "pending"
     },
@@ -7715,6 +8055,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -7732,6 +8073,7 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },
@@ -7756,6 +8098,7 @@
         "version"
       ],
       "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
       "schema_sha256": "1ac421660c82e796435425c255bb41b7028754bc6c895899e85c06cf67b12803",
       "behavioral_fixture": "pending"
     },
@@ -7775,6 +8118,7 @@
       ],
       "required": [],
       "safety_tier": "write",
+      "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "ef3b1970c8b86eef1d17c7500b88e8495b55e2fef30eff8399783ad924bf07e6",
       "behavioral_fixture": "pending"
     }
@@ -7984,6 +8328,175 @@
     "library"
   ],
   "slide_panels_not_in_tool_enum": [],
+  "assurance": {
+    "version": 1,
+    "adapters": {
+      "static_input_evidence": {
+        "effects": "none",
+        "validity": "exact captured static input fact (P0 pilot)",
+        "progress": "tool_result",
+        "artifact": "none",
+        "status": "checked"
+      },
+      "checked_input_effect": {
+        "effects": "static input update",
+        "validity": "operation contract and independent read-back",
+        "progress": "operation outcome",
+        "artifact": "none",
+        "status": "checked"
+      },
+      "navigation_ack": {
+        "effects": "view state",
+        "validity": "issued mounted-view acknowledgement",
+        "progress": "sent/acknowledged/unavailable",
+        "artifact": "none",
+        "status": "checked"
+      },
+      "approved_answer": {
+        "effects": "none",
+        "validity": "approved answer record and content digest",
+        "progress": "answer_approved",
+        "artifact": "none",
+        "status": "checked"
+      },
+      "read_unvalidated": {
+        "effects": "none",
+        "validity": "raw tool result",
+        "progress": "tool_result",
+        "artifact": "none",
+        "status": "unvalidated",
+        "pending": "P1 per-family source adapter"
+      },
+      "write_unvalidated": {
+        "effects": "saved state",
+        "validity": "handler return only, no read-back",
+        "progress": "tool_result",
+        "artifact": "none",
+        "status": "unvalidated",
+        "pending": "P3 outcome adapter"
+      },
+      "destructive_unvalidated": {
+        "effects": "saved state removal",
+        "validity": "handler return only, no read-back",
+        "progress": "tool_result",
+        "artifact": "none",
+        "status": "unvalidated",
+        "pending": "P3 outcome adapter"
+      },
+      "job_unvalidated": {
+        "effects": "job",
+        "validity": "job status, not completion evidence",
+        "progress": "job_adapters",
+        "artifact": "none",
+        "status": "unvalidated",
+        "pending": "P3 job outcome adapter"
+      },
+      "artifact_unvalidated": {
+        "effects": "file",
+        "validity": "no manifest",
+        "progress": "tool_result",
+        "artifact": "manifest required",
+        "status": "unvalidated",
+        "pending": "P4 verified artifacts"
+      },
+      "navigation_unvalidated": {
+        "effects": "view state",
+        "validity": "event sent, no acknowledgement",
+        "progress": "ui_event",
+        "artifact": "none",
+        "status": "unvalidated",
+        "pending": "P5 navigation"
+      },
+      "user_choice": {
+        "effects": "none",
+        "validity": "the user's own answer",
+        "progress": "choice_request",
+        "artifact": "none",
+        "status": "unvalidated",
+        "pending": "not a factual source"
+      },
+      "results_view_unvalidated": {
+        "effects": "none",
+        "validity": "ordinary authorized result UI",
+        "progress": "none",
+        "artifact": "none",
+        "status": "unvalidated",
+        "pending": "P1/P5 result evidence cards"
+      },
+      "pending_channel": {
+        "effects": "none",
+        "validity": "not yet bound to the approved answer",
+        "progress": "none",
+        "artifact": "none",
+        "status": "unvalidated",
+        "pending": "P6 durable history and compaction"
+      }
+    },
+    "checked_tools": [
+      "get_component",
+      "ui_open_panel",
+      "update_component"
+    ],
+    "result_tabs": {
+      "summary": "results_view_unvalidated",
+      "overview": "results_view_unvalidated",
+      "capex": "results_view_unvalidated",
+      "dispatch": "results_view_unvalidated",
+      "loadflow": "results_view_unvalidated",
+      "grid_code": "results_view_unvalidated",
+      "electrical_design": "results_view_unvalidated",
+      "island": "results_view_unvalidated",
+      "grid_forming": "results_view_unvalidated",
+      "flows": "results_view_unvalidated",
+      "loadshape": "results_view_unvalidated",
+      "prices": "results_view_unvalidated",
+      "economics": "results_view_unvalidated",
+      "emissions": "results_view_unvalidated",
+      "curtailment": "results_view_unvalidated",
+      "lostload": "results_view_unvalidated",
+      "adequacy": "results_view_unvalidated",
+      "storage": "results_view_unvalidated",
+      "fmea": "results_view_unvalidated",
+      "investment": "results_view_unvalidated",
+      "asset": "results_view_unvalidated"
+    },
+    "slide_panels": {
+      "timeseries": "navigation_ack",
+      "simparams": "navigation_ack",
+      "horizon": "navigation_ack",
+      "results": "navigation_ack",
+      "snapshots": "navigation_ack",
+      "issues": "navigation_ack",
+      "overview": "navigation_ack",
+      "scenarios": "navigation_ack",
+      "compare": "navigation_unvalidated",
+      "capacityBounds": "navigation_ack",
+      "solveQueue": "navigation_ack",
+      "workspace": "navigation_ack",
+      "settings": "navigation_ack",
+      "gridspine": "navigation_ack",
+      "hubDesign": "navigation_ack",
+      "reports": "navigation_ack",
+      "campusElectrical": "navigation_ack",
+      "campusStudy": "navigation_ack",
+      "campusResults": "navigation_ack",
+      "decision": "navigation_unvalidated",
+      "economics": "navigation_unvalidated",
+      "profiles": "navigation_unvalidated",
+      "library": "navigation_unvalidated"
+    },
+    "output_channels": {
+      "stream_tokens": "approved_answer",
+      "tool_result_frames": "read_unvalidated",
+      "history_replay": "approved_answer",
+      "answer_fetch": "approved_answer",
+      "answer_export": "approved_answer",
+      "tts": "approved_answer",
+      "live_voice": "approved_answer",
+      "conversation_summary": "pending_channel",
+      "compaction": "pending_channel"
+    }
+  },
   "requested_aliases": {
     "AR": "unresolved label; map against actual UI/module vocabulary during coverage audit, do not infer expansion"
   }

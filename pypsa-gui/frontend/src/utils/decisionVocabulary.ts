@@ -420,6 +420,65 @@ export function errorCopy(code: string | null | undefined): ErrorCopy {
   return (code && ERROR_COPY[code]) || ERROR_FALLBACK
 }
 
+// ── the intake steps' and study settings' words, for the chat edit card (MIRROR) ──
+// Parity: `backend/tests/test_decision_vocabulary_parity.py` against
+// `backend/services/study/intake_words.py`; `decisionVocabulary.test.ts` ties the
+// labels to VOCAB, INTAKE_STEP_LABELS and BASIS_SENTENCE.
+
+// BEGIN INTAKE WORDS MIRROR
+export const INTAKE_WORDS_MIRROR = {
+  "steps": {
+    "site": "Your site",
+    "existing": "What exists today",
+    "load": "Your consumption",
+    "goal": "Your goal",
+    "horizon": "Horizon and perspective"
+  },
+  "fields": {
+    "site.zone": {
+      "label": "Country or grid zone"
+    },
+    "site.year": {
+      "label": "Year modelled"
+    },
+    "site.connection_mw": {
+      "label": "Grid connection limit",
+      "unit": "MW"
+    },
+    "site.latitude": {
+      "label": "Latitude (for the PV profile)",
+      "unit": "°"
+    },
+    "load.annual_mwh": {
+      "label": "Yearly consumption",
+      "unit": "MWh/yr"
+    },
+    "load.profile": {
+      "label": "Sector profile"
+    },
+    "load.unit": {
+      "label": "The file’s unit"
+    }
+  },
+  "settings": {
+    "perspective": {
+      "label": "Perspective",
+      "words": {
+        "site_owner": "The site owner’s"
+      }
+    },
+    "basis": {
+      "label": "Basis",
+      "default": "Real terms, before tax, without subsidy"
+    },
+    "currency_year": {
+      "label": "Currency year",
+      "format": "EUR of {}"
+    }
+  }
+}
+// END INTAKE WORDS MIRROR
+
 // ── the study's own code -> sentence table (MIRROR; see the file header) ───
 
 // BEGIN HELP MIRROR

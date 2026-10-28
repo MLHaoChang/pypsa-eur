@@ -464,6 +464,15 @@ def answer(owner, answer_id):
     return record
 
 
+def _unvalidated(turn):
+    # A legacy turn is explicitly unvalidated; persisted trust fields without an
+    # approved answer record are imported flags, never a checked label (A0.3).
+    return {
+        **{k: v for k, v in turn.items() if k not in {"receipt", "requires_checked"}},
+        "assurance_state": "unvalidated",
+    }
+
+
 def history_projection(turns, owner, *, strict=False):
     """Every approved replay is revalidated; imported flags cannot create trust."""
     projected = []
@@ -477,6 +486,7 @@ def history_projection(turns, owner, *, strict=False):
                         "requires_checked": True,
                         "assistant": [{"type": "text", "text": checked["text"]}],
                         "receipt": checked["receipt"],
+                        "assurance_state": "checked",
                     }
                 )
             except HTTPException:
@@ -490,6 +500,7 @@ def history_projection(turns, owner, *, strict=False):
                         # An expired/unavailable answer still cannot silently
                         # downgrade its retry. This is policy, never evidence.
                         "requires_checked": True,
+                        "assurance_state": "unavailable",
                         "assistant": [
                             {
                                 "type": "text",
@@ -501,12 +512,12 @@ def history_projection(turns, owner, *, strict=False):
         elif strict:
             projected.append(
                 {
-                    **turn,
+                    **_unvalidated(turn),
                     "assistant": [
                         {"type": "text", "text": "Legacy answer: not validated."}
                     ],
                 }
             )
         else:
-            projected.append(turn)
+            projected.append(_unvalidated(turn))
     return projected

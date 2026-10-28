@@ -50,6 +50,11 @@ def admission(options):
     return mode == "strict" or options is not None
 
 
+def legacy_state():
+    """`session_init.assurance` for a turn the gate does not check (A0.3): never "checking"."""
+    return {"version": 1, "mode": "legacy", "state": "unvalidated"}
+
+
 class Source(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     tool_use_id: str | None = Field(default=None, min_length=1, max_length=128)

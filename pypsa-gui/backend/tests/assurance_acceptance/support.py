@@ -100,6 +100,9 @@ def approval(frames):
     return data
 
 
+OMIT = object()
+
+
 class Harness:
     def __init__(self, client, monkeypatch):
         self.client, self.monkeypatch = client, monkeypatch
@@ -125,6 +128,8 @@ class Harness:
             "assurance": {"version": 1, "mode": "strict"},
             **options,
         }
+        # An old client sends no assurance field at all.
+        body = {k: v for k, v in body.items() if v is not OMIT}
         return self.client.post("/api/chat/stream", json=body)
 
     def run(self, turns, **options):
