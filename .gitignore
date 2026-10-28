@@ -141,3 +141,8 @@ pypsa-gui/backend/pilot-evaluation.json
 pypsa-gui/backend/pilot-evaluation.json.log
 pypsa-gui/backend/pilot-evaluation.json.tmp
 pypsa-gui/backend/test-results/
+
+# Built in memory by the assistant smoke checks; --write saves them for reading (RETRO-COST-1).
+.scratch/live-voice/capability-inventory.json
+.scratch/live-voice/capability-matrix.json
+.scratch/live-voice/route-parity.json
