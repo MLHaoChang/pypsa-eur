@@ -1,0 +1,9 @@
+{
+  "needs_tool": [
+    {
+      "method": "GET",
+      "path": "/api/profiles/schema",
+      "family": "timeseries-horizon"
+    }
+  ]
+}
