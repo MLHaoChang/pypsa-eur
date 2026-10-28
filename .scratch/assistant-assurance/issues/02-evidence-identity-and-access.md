@@ -3,7 +3,7 @@
 
 # P1: authorized evidence identity and validity
 
-Status: ready-for-agent
+Status: in progress — list_components page evidence (A1.1, current-input part of A1.3, A1.5 page capture) on claude/assurance-02-evidence-identity; rest of P1 open
 Progress: Authorized retained evidence, ACL rechecks shipped; status says whole phase open, displayed-data revision proof pending
 Type: task
 Blocked by: 01; live-voice issue 06 for retained-run guarantees
@@ -55,3 +55,7 @@ does not cover these additions; review/freeze them before implementation.
 Scoped raw evidence is now immutable through the store API, owner/project authorized and recalculated on every public lookup. Explicit retained IDs preserve a bounded historical run after foreground edits; current-source records still invalidate. Per-owner bounded transactions enforce quotas/atomic files across independent POSIX processes. The project/network runtime is still single-worker, Windows locking and complete browser/backend restart journeys are not certified, and retention is 24 hours. Unresolved effect reservations are not pruned or reused.
 
 See [implementation status](../implementation-status.md) and [contracts](../harness-contracts.md). Whole ticket remains open.
+
+### 2026-10-28 — list_components page evidence
+
+`list_components` is the second checked read (`static_input_page_evidence`). A page's evidence holds the exact static inputs of the rows it showed, by entity name (RFC 6901 paths), bound to owner/org/project and a digest of the class's rows and input metrics taken before the handler; a changed digest at capture or lookup, or another project, makes it unavailable. Out-of-range pages are refused before the handler. Answers name the rows ("rows a..b of N, not the whole class"). Retained runs, coverage masks, aggregates, results families and other read families remain open.

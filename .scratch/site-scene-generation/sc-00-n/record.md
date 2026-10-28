@@ -139,7 +139,7 @@ The return label is `"Site 3D"`. In Guided, a jump always uses `openFlowTargetIn
 - **Next unit.** SC-01: mount the D01/D02 routes; build `scene_store` into a service with the real project lock and ACL; route enabled-Site copies through the closure; build the rule-3 entry and the `FlowReturn` extension. First failing test: `GET /api/projects/{name}/site-anchor` returns `{version: 1, revision: 0, anchor: null}` on a saved project, through the real router.
 - **Before SC-02.** Close D06. The delete hook leaves placements behind, and best-effort hooks can leave footprints (evidence/gap-probe.txt).
 - **Skipped, and the risk it leaves.**
-  - The return-label correction is not in issues/01 or optional-site-workflow.md yet; until the coordinator-routed fix lands, both still read "Back to 3D site", and this record overrides them.
+  - The return-label correction landed on master in 810c0abb: issues/01 and optional-site-workflow.md both read "Back to Site 3D".
   - D12 device numbers are software-GL only.
   - D05 quotas are policy values not yet enforced by any upload path.
   - The prototype project lock is a process-local stand-in for the native project lock.

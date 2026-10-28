@@ -11,7 +11,7 @@ const row = (over: Partial<IbrQCurveRow> = {}): IbrQCurveRow => ({
   unit: 'BESS1', kind: 'bess', p_pu: 1, p_mw: 20, s_mva: 21, q_min_req_mvar: -6, q_max_req_mvar: 6,
   available_mvar: 6.403, shortfall_mvar: 0, status: 'pass',
   detail: 'BESS1 at P 1 pu (20.00 MW) covers -6.00 to 6.00 Mvar with ±6.40 Mvar',
-  clause: 'generic test clause', source: 'code', basis: 'screening at unit terminals', ...over,
+  clause: 'generic test clause', source: 'code', basis: 'engine-written basis words', ...over,
 })
 const fail = row({
   p_pu: 0.5, p_mw: 10, q_min_req_mvar: -19, q_max_req_mvar: 19, available_mvar: 18.466, shortfall_mvar: 0.534,
@@ -42,7 +42,7 @@ describe('CampusUnitQCurveSection', () => {
     expect(tr.textContent).toContain('−19 to +19 Mvar')
     expect(tr.textContent).toContain('±18.5 Mvar')
     expect(tr.textContent).toContain('0.534 Mvar')
-    expect(screen.getByText(/Basis: screening at unit terminals: √\(S² − P²\)/)).toBeTruthy()
+    expect(screen.getByText('Basis: engine-written basis words')).toBeTruthy()
     expect(screen.getByTestId('qcurve-detail-BESS1-0.5').textContent)
       .toBe('±18.47 Mvar available for −19.00 to +19.00 Mvar: 0.53 Mvar short each way')
   })
@@ -60,6 +60,14 @@ describe('CampusUnitQCurveSection', () => {
     render(<CampusUnitQCurveSection rows={[r]} />)
     expect(screen.getByTestId('qcurve-detail-BESS1-0.5').textContent)
       .toBe('±6.00 Mvar available for −6.00 to +7.00 Mvar: 1.00 Mvar short to deliver')
+  })
+
+  it('prints a real shortfall below 0.005 Mvar as under 0.01, not 0.00', () => {
+    const r = row({ p_pu: 0.5, q_min_req_mvar: -6, q_max_req_mvar: 6.003, available_mvar: 6, shortfall_mvar: 0.003,
+      status: 'fail' })
+    render(<CampusUnitQCurveSection rows={[r]} />)
+    expect(screen.getByTestId('qcurve-detail-BESS1-0.5').textContent)
+      .toBe('±6.00 Mvar available for −6.00 to +6.00 Mvar: under 0.01 Mvar short to deliver')
   })
 
   it('fails closed: a status other than pass, fail or reported shows Fail', () => {

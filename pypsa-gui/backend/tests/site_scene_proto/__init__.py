@@ -1,10 +1,12 @@
 """
 SC-00 N prototype of the Site 3D native scene contracts.
 
-Disabled from production by construction (execution-guide.md, "Contract
-freeze"): this package lives under `tests/`, and no router, service, harness or
-catalogue module imports it (`test_site_scene_proto_isolation.py` checks that).
-It adds no route, chat tool, tool error kind or assistant-inventory entry.
+SC-01a promoted contract, frames, anchor, scene_store, native_scene and
+flow_verdicts to `services/site_scene/` (contract, frames, anchor, store,
+native, verdicts); the modules of those names here are aliases, so the SC-00 N
+tests run against the production code. media_policy (SC-06) and
+assistant_context (SC-07) stay prototypes. No production module imports this
+package (`test_site_scene_proto_isolation.py` checks that).
 
 Each module freezes one decision of `.scratch/site-scene-generation/
 decision-register.md`; the closures, with their evidence, are in
