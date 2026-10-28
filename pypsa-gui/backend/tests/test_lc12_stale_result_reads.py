@@ -12,7 +12,7 @@ from services import chat_tools
 from tests.journey_wire import run_journey
 from tests.test_oj05_selected_line_edit_journey import _decide, oj_grid  # noqa: F401
 from tests.test_workflow_provider_parity import PROVIDERS
-from tests.test_workflow_tools import helpers_state  # noqa: F401
+from tests.test_workflow_tools import baseline, helpers_state  # noqa: F401
 
 
 READ = 'How loaded are the lines? Check dispatch_status, then get_results for lines.'
@@ -113,3 +113,59 @@ def test_a_project_solved_here_saved_and_reopened_is_still_current(oj_grid, clie
     assert status['inputs_changed_since_solve'] is False
     assert status['results_current'] is gens['results_current'] is _guard() is True
     assert 'freshness_note' not in gens
+
+
+def _saved_freshness(project_id):
+    from services import project_registry, workflow_tools
+    with chat_tools._acting() as (db, user):
+        project = project_registry.resolve_project(db, user, project_id)
+    return workflow_tools.solve_freshness(workflow_tools._load_context(project))
+
+
+def _profile(values):
+    import pandas as pd
+
+    def change(ctx):
+        series = pd.Series(values, index=ctx.network.snapshots, name='G1')   # as the upload stores it
+        ctx.network.generators_t.p_max_pu['G1'] = series
+        ctx.user_ts[('generators', 'p_max_pu', 'G1')] = series
+    return change
+
+
+def test_a_queued_solve_of_another_project_with_an_uploaded_profile_reads_current(baseline):  # noqa: F811
+    """LC-18: a queued solve fingerprints the solving project's own context,
+    uploaded series (user_ts) included, as every later read hydrates them from
+    disk. Editing that profile afterwards still reads "inputs changed"."""
+    from tests.test_sensitivity_comparison import edit_saved, sweep
+    from services.pypsa_service import PyPSAService
+
+    _ctx, base_id, _root = baseline
+    edit_saved(base_id, _profile([1.0, 0.8]))
+    case_id = sweep(base_id, 20)['Gas 20']   # queued, while the base stays the open project
+    assert str(PyPSAService.get_active_context().project_uuid) != case_id
+    assert _saved_freshness(case_id) == {'inputs_changed_since_solve': False, 'results_current': True}
+    edit_saved(case_id, _profile([1.0, 0.6]))
+    assert _saved_freshness(case_id) == {'inputs_changed_since_solve': True, 'results_current': False}
+
+
+def test_a_solve_of_a_network_no_context_owns_records_a_fresh_context(baseline, monkeypatch):  # noqa: F811
+    """With no solving target, the record falls back to exactly the old
+    fresh-context fingerprint: the open project's user_ts never leaks in."""
+    import pandas as pd
+    import pypsa
+    from services import workflow_tools
+    from services.pypsa_service import PyPSAService
+
+    ctx, _base_id, _root = baseline
+    ctx.user_ts[('generators', 'p_max_pu', 'G1')] = pd.Series([1.0, 0.5], index=ctx.network.snapshots)
+    monkeypatch.setattr(PyPSAService, '_transient_target', classmethod(lambda cls, *, ensure: None))
+    n = pypsa.Network()
+    n.set_snapshots(ctx.network.snapshots)
+    n.add('Bus', 'B1', v_nom=110)
+    config = {'solver': 'highs'}
+    workflow_tools._record_solve_inputs(n, config)
+    fresh = PyPSAService.build_context()
+    fresh.network = n
+    fresh.solver_state['solver_config'] = config
+    assert n.meta['assistant_solve_input_fingerprint'] == workflow_tools._network_input_fingerprint(fresh)
+    assert n.meta['assistant_solve_exact_input_fingerprint'] == workflow_tools._network_input_fingerprint(fresh, exact=True)
