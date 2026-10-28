@@ -177,6 +177,40 @@ export function CurrentSeriesLine({
   )
 }
 
+/** Whether a re-generate replays the current series' recorded refinements
+ *  (TSG 06): on by default, offered only when the series is refined. The
+ *  backend replays them only for the same shape or kind. */
+export function useReplay(project: string, componentType: string, attribute: string,
+  component: string) {
+  const { data } = useQuery({
+    queryKey: ['series-current', project, componentType, attribute, component],
+    queryFn: () => seriesApi.current(project, componentType, attribute, component),
+  })
+  const [replay, setReplay] = useState(true)
+  return { refined: data?.exists ? data.refinements ?? 0 : 0, replay, setReplay }
+}
+
+export function ReplayToggle({ refined, replay, setReplay }: ReturnType<typeof useReplay>) {
+  if (!refined) return null
+  return (
+    <label className="flex items-center gap-1 text-[11px]" data-testid="replay-toggle">
+      <input type="checkbox" checked={replay} onChange={e => setReplay(e.target.checked)} />
+      Keep its {refined} refinement{refined === 1 ? '' : 's'} (same shape)
+    </label>
+  )
+}
+
+/** A refused replay names the op and its index; the retry drops the ops. */
+export function ReplayRefusal({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  if (errorKind(error) !== 'replay_refused') return null
+  return (
+    <div className="flex items-center gap-2 text-[11px] mt-1" data-testid="replay-refused">
+      <span className="text-red-600">{sentence(errorText(error))}</span>
+      <Btn onClick={onRetry}>Preview without the refinements</Btn>
+    </div>
+  )
+}
+
 // Plain titles for the apply path's warning codes (`profile_gen/apply.py`,
 // `refine.py`, `defaults.py`): a row reads as its title, the backend's
 // sentence sits behind a disclosure, the code stays for support and search.

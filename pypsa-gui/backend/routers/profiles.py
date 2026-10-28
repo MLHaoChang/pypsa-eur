@@ -190,8 +190,10 @@ class LoadGenerateRequest(BaseModel):
     # Archetypes are hourly shapes; the field stays for the shared engine call.
     resolution: Literal["hourly"] = "hourly"
     # A previous artifact's `refinements`, replayed onto the new series
-    # (`profile_gen/refine.replay`).
+    # (`profile_gen/refine.replay`). Without them, the ops the loads' applied
+    # series record replay unless `replay_refinements` is false (TSG 06).
     refinements: list[dict[str, Any]] | None = None
+    replay_refinements: bool = True
 
 
 class AvailabilityGenerateRequest(BaseModel):
@@ -208,6 +210,7 @@ class AvailabilityGenerateRequest(BaseModel):
     # maintenance windows land where the user means them.
     year: int | None = None
     refinements: list[dict[str, Any]] | None = None
+    replay_refinements: bool = True
 
 
 class SeriesGenerateRequest(BaseModel):
@@ -219,6 +222,7 @@ class SeriesGenerateRequest(BaseModel):
     params: dict[str, Any] | None = None
     year: int | None = None
     refinements: list[dict[str, Any]] | None = None
+    replay_refinements: bool = True
 
 
 class CurrentSeriesRequest(BaseModel):
@@ -719,8 +723,63 @@ def _refine_frame(ctx, frame: pd.DataFrame, meta: dict, ops: list, *, replaying:
     return pd.DataFrame(cols, index=frame.index), new_meta, stats, warnings
 
 
-def _replay_refinements(ctx, result, refinements):
-    """A regenerated series replays the refinements it is given."""
+# Opting out of a stored replay: what a refusal offers the caller instead.
+_REPLAY_RETRY = {"replay_refinements": False}
+# An apply records a must-run floor that means a min stable level under that
+# name (`apply._prepare`); it is still the generator that made it.
+_KIND_ALIASES = {"min_stable_level": "must_run"}
+
+
+def _generator_of(meta: dict) -> tuple:
+    """Which generator made a series: its family and archetype or kind. An
+    upload has neither, so it matches no generate."""
+    from services.profile_gen.families import family_of
+
+    kind = meta.get("kind")
+    return (family_of(meta), meta.get("archetype"), _KIND_ALIASES.get(kind, kind))
+
+
+def _stored_refinements(ctx, result) -> list[dict[str, Any]] | None:
+    """The op list the targets' applied series record, when the same generator
+    made them (TSG 06): replayed by default on a re-generate. Targets holding
+    different lists (or some none) are refused together, since one artifact
+    records one list."""
+    from services.profile_gen.families import default_target
+
+    ct, attr = default_target(result.meta, None, None)
+    made_by = _generator_of(result.meta)
+    if made_by[1] is None and made_by[2] is None:
+        return None
+    lists: dict[str, list] = {}
+    for comp in result.series.columns:
+        stored = ctx.user_ts_meta.get((ct, attr, comp)) or {}
+        same = (ct, attr, comp) in ctx.user_ts and _generator_of(stored) == made_by
+        lists[comp] = list(stored.get("refinements") or []) if same else []
+    distinct = {json.dumps(ops, sort_keys=True, default=str) for ops in lists.values()}
+    if len(distinct) > 1:
+        refined = sorted(c for c, ops in lists.items() if ops)
+        plain = sorted(c for c, ops in lists.items() if not ops)
+        raise HTTPException(
+            status_code=422,
+            detail={"error_kind": "replay_mixed", "retry": _REPLAY_RETRY,
+                    "message": f"{', '.join(refined)} carry refinements that a "
+                               f"re-generate replays"
+                               + (f" and {', '.join(plain)} carry none" if plain else
+                                  ", and the lists differ")
+                               + "; generate them one at a time, or set "
+                               "replay_refinements false to drop the ops"},
+        )
+    return next(iter(lists.values()), None) or None
+
+
+def _replay_refinements(ctx, result, refinements, *, replay_stored: bool = False):
+    """A regenerated series replays the refinements it is given; without any,
+    and unless the caller opted out, those its targets' applied series record
+    (`_stored_refinements`). A stored list's refusal names the op and its
+    index and offers the retry without them."""
+    stored = False
+    if not refinements and replay_stored:
+        refinements, stored = _stored_refinements(ctx, result), True
     if not refinements:
         return result
     from types import SimpleNamespace
@@ -729,13 +788,22 @@ def _replay_refinements(ctx, result, refinements):
         frame, meta, _stats, warnings = _refine_frame(ctx, result.series, dict(result.meta),
                                                       refinements, replaying=True)
     except ProfileGenError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={**_apply_refusal_kind(exc),
-                    "message": public_message(exc, route="refine_replay")},
-        ) from exc
+        detail = {**_apply_refusal_kind(exc),
+                  "message": public_message(exc, route="refine_replay")}
+        if stored and isinstance(exc, RefineReplayError):
+            detail.update(error_kind="replay_refused", op=exc.op, index=exc.index,
+                          retry=_REPLAY_RETRY)
+        raise HTTPException(status_code=422, detail=detail) from exc
     meta["replay_warnings"] = warnings
+    meta["replay"] = {"from": "stored" if stored else "request", "ops": len(refinements)}
     return SimpleNamespace(series=frame, meta=meta)
+
+
+def _replay_answer(record: dict) -> dict:
+    """What a generate says of its replay: the ops it replayed, kept out of
+    the pending record so an apply does not store it."""
+    replay = record.pop("replay", None)
+    return {"replay": replay} if replay else {}
 
 
 def _foreground_ctx(proj: AuthorizedProject, verb: str):
@@ -885,9 +953,11 @@ def generate_load_profiles(
                     "message": public_message(exc, route="load_generate")},
         ) from exc
 
-    result = _replay_refinements(ctx, result, body.refinements)
+    result = _replay_refinements(ctx, result, body.refinements,
+                                 replay_stored=body.replay_refinements)
     job_id = str(uuid.uuid4())
     record = dict(result.meta)
+    replay = _replay_answer(record)
     record["job_id"] = job_id
     record["project_id"] = proj.name
     record["points"] = list(result.series.columns)
@@ -897,7 +967,9 @@ def generate_load_profiles(
                         int(record["weather_year"]))
     warnings = _preview_load_energy(ctx, result.series, record, stats)
     dry, weeks = _dry_run(ctx, result.series, record)
-    return {**record, "stats": stats, "warnings": sorted({*warnings, *dry}), "weeks": weeks}
+    replayed = record.get("replay_warnings") or []
+    return {**record, **replay, "stats": stats,
+            "warnings": sorted({*warnings, *dry, *replayed}), "weeks": weeks}
 
 
 @project_router.post("/{name}/profiles/loads/upload")
@@ -1029,9 +1101,11 @@ def generate_availability_profiles(
                     "message": public_message(exc, route="availability_generate")},
         ) from exc
 
-    result = _replay_refinements(ctx, result, body.refinements)
+    result = _replay_refinements(ctx, result, body.refinements,
+                                 replay_stored=body.replay_refinements)
     job_id = str(uuid.uuid4())
     record = dict(result.meta)
+    replay = _replay_answer(record)
     record["job_id"] = job_id
     record["project_id"] = proj.name
     record["points"] = list(result.series.columns)
@@ -1047,7 +1121,8 @@ def generate_availability_profiles(
         else:
             stats[col]["hours_floored"] = int((v > 1e-9).sum())
     warnings, weeks = _dry_run(ctx, result.series, record)
-    return {**record, "stats": stats, "warnings": warnings, "weeks": weeks}
+    warnings += [w for w in record.get("replay_warnings") or [] if w not in warnings]
+    return {**record, **replay, "stats": stats, "warnings": warnings, "weeks": weeks}
 
 
 _SERIES_TYPES = {"inflow": "storage_units", "cop": "links"}
@@ -1133,9 +1208,11 @@ def generate_series_profiles(
                     "message": public_message(exc, route="series_generate")},
         ) from exc
 
-    result = _replay_refinements(ctx, result, body.refinements)
+    result = _replay_refinements(ctx, result, body.refinements,
+                                 replay_stored=body.replay_refinements)
     job_id = str(uuid.uuid4())
     record = dict(result.meta)
+    replay = _replay_answer(record)
     if ambient_from_spec:
         record["ambient_from"] = "dc_load_profile"
     record["job_id"] = job_id
@@ -1150,7 +1227,8 @@ def generate_series_profiles(
         if body.kind == "inflow":
             stats[col]["annual_mwh"] = float(v.sum())
     warnings, weeks = _dry_run(ctx, result.series, record)
-    return {**record, "stats": stats, "warnings": warnings, "weeks": weeks}
+    warnings += [w for w in record.get("replay_warnings") or [] if w not in warnings]
+    return {**record, **replay, "stats": stats, "warnings": warnings, "weeks": weeks}
 
 
 @project_router.get("/{name}/profiles/current")

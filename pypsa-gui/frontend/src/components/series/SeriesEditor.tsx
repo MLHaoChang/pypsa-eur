@@ -13,9 +13,10 @@ import { useState, type ReactNode } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Play, Plus, Trash2 } from 'lucide-react'
 import { Btn, Seg } from '../PageKit'
-import { errorText, seriesApi, type PendingSeries } from '../../api/profiles'
+import { errorKind, errorText, seriesApi, type PendingSeries } from '../../api/profiles'
 import {
-  CurrentSeriesLine, DisabledReason, INPUT, MeasuredFileTab, PendingCard, RefinePanel, type EditorMode,
+  CurrentSeriesLine, DisabledReason, INPUT, MeasuredFileTab, PendingCard, RefinePanel, ReplayRefusal, ReplayToggle,
+  useReplay, type EditorMode,
 } from './SeriesKit'
 
 export type SeriesKind = 'tou' | 'inflow' | 'cop'
@@ -154,8 +155,12 @@ export default function SeriesEditor({ project, component, kind, componentType =
       : sink ? null : 'Enter the supply temperature to preview.'
   const ready = missing == null
 
+  const replay = useReplay(project, kind === 'inflow' ? 'storage_units' : kind === 'cop' ? 'links' : componentType,
+    kind === 'inflow' ? 'inflow' : kind === 'cop' ? 'efficiency' : 'marginal_cost', component)
   const generate = useMutation({
-    mutationFn: () => seriesApi.generateSeries(project, { kind, components: [component], params: params() }),
+    mutationFn: (replayRefinements: boolean) => seriesApi.generateSeries(project, {
+      kind, components: [component], params: params(), ...(replayRefinements ? {} : { replay_refinements: false }),
+    }),
     onSuccess: setPending,
   })
 
@@ -312,15 +317,18 @@ export default function SeriesEditor({ project, component, kind, componentType =
           )}
 
           <div className="flex items-center gap-2">
-            <Btn variant="primary" onClick={() => generate.mutate()} disabled={!ready || generate.isPending}>
+            <Btn variant="primary" onClick={() => generate.mutate(replay.replay)} disabled={!ready || generate.isPending}>
               <Play size={12} /> Preview
             </Btn>
+            <ReplayToggle {...replay} />
             <DisabledReason reason={missing} />
           </div>
         </>
       )}
 
-      {generate.error && <p className="text-[11px] text-red-600 mt-1" data-testid="editor-error">{errorText(generate.error)}</p>}
+      {errorKind(generate.error) === 'replay_refused'
+        ? <ReplayRefusal error={generate.error} onRetry={() => generate.mutate(false)} />
+        : generate.error && <p className="text-[11px] text-red-600 mt-1" data-testid="editor-error">{errorText(generate.error)}</p>}
 
       {pending && (
         <>
