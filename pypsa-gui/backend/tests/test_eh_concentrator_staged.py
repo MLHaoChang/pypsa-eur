@@ -267,11 +267,18 @@ def test_auto_plans_the_year_base_as_a_plain_lp_and_puts_the_units_back(n0):
 
 def test_the_check_takes_one_week_per_season_on_the_year_and_the_first_week_otherwise(n0):
     starts = [h for h, _ in process_uc._windows(n0, 2030)]
-    assert starts == [14 * 24, 104 * 24, 195 * 24, 287 * 24]
+    assert starts == [14 * 24, 105 * 24, 196 * 24, 287 * 24]
     assert {pd.Timestamp(sns[0][1]).month for _, sns in process_uc._windows(n0, 2030)} == {1, 4, 7, 10}
     week = C.build_eh_concentrator_staged(T, time_base="week")
     assert not process_uc.is_year_base(week)
     assert [(h, len(s)) for h, s in process_uc._windows(week, 2027)] == [(0, 168)]
+
+
+def test_every_period_checks_a_week_that_holds_a_load_out(n0):
+    ship = n0.loads_t.p_set["shipments"]
+    for y in YEARS:
+        loading = [bool((ship.loc[sns] > 0).any()) for _, sns in process_uc._windows(n0, y)]
+        assert any(loading), y
 
 
 # ── the 2027 plan ──────────────────────────────────────────────────────────
