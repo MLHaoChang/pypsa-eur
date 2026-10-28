@@ -68,3 +68,21 @@ A1.2 is now executable in `tests/assurance_acceptance/test_p1_revocation.py`, co
 
 - **REVOKE-TOCTOU.** The project ACL is not held under `network_guard`. A revocation that lands between commit's last `records.authorize` (`harness/assurance.py`, inside the `network_guard` block) and `records.save` can still commit the answer; the next read refuses it. Closing the window needs the ACL check and the save inside one DB transaction, or a re-check after save that deletes the record.
 - **REVOKE-KIND.** Revocation surfaces as the generic `assurance_publication_failed` ("could not be saved"), and `harness/loop.py` logs it as an ERROR traceback. A typed kind (for example `assurance_access_revoked`) and a warning-level log need a ChatPanel change and UX review.
+
+### 2026-10-28 — get_timeseries series-step evidence
+
+`get_timeseries` is the third checked read (`series_input_evidence`). It covers `loads/p_set` (MW) and `generators/p_max_pu` (p.u.).
+
+- **Exact args only:** `component`, `name` and `attribute`. A `period` argument, or a comma or padding in the name, is refused.
+- **Source digest:** taken by the guard before the handler runs, over the raw series that `routers.network_time_axis.resolve_series` reads. That is a user upload if there is one, else the network column; the handler reads through the same function. The digest covers the project, the args, the source, the index levels (int64 ns plus tz) and the values (float64 bytes).
+- **What certifies:** a step certifies only where the shown value equals the raw value after a JSON round-trip. Steps are mapped by timestep (and period), never by position. NaN, inf and None never certify.
+- **Path:** `/<name>/<timestep>`, or `/<name>/<period>/<timestep>`. Answers say "one step, not the whole series".
+- **Invalidation:** any edit to the series, another project, or revoked access makes the evidence unavailable.
+
+#### Follow-ups
+
+- **SERIES-WINDOW.** The guard refuses a series with `series_too_long_to_check` before the handler runs when either:
+  - it has more than `MAX_SERIES_POINTS` (744) steps, or
+  - its facts would exceed `MAX_SERIES_FACT_BYTES` (a long or wide-character name).
+
+  So a full-year series can't be checked yet. The likely end state is a compact series record (a values array plus an index digest, with facts resolved on lookup), or a windowed checked read with exact window args.

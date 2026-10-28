@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A checked assistant answer can now cite single steps of a load's set power or a generator's availability time series, each bound to its timestep and to the exact series it was read from; a series too long to check is refused with its own message.

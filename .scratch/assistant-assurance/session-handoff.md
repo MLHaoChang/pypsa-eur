@@ -866,6 +866,25 @@ Cost: two class digests per checked `list_components` call and one per lookup, l
 
 Remaining for P1: retained/historical runs (A1.3 as-of), A1.2 ACL revocation before publish, A1.4 corruption/restart, A1.5 complete-source aggregates, A1.6/A1.7 validity and masks, every other `read_unvalidated` family, frontend `assurance_state`. Next runnable tracer: a second `read_unvalidated` family with a time-series source (`get_timeseries`), or A1.2 revocation between capture and publish.
 
+### 2026-10-28 — P1 tracer: get_timeseries series steps (issue 02)
+
+Policy version 1. `get_timeseries` is the third checked read (`series_input_evidence`), for `loads/p_set` and `generators/p_max_pu`. `routers.network_time_axis.resolve_series` and `index_labels` were extracted from the handler, and the handler and the evidence both read through them. The time-series route tests (b3_solver_timeseries, chat_tools_profiles, network_time_axis_surface, user_ts_tenancy, profiles_router, e1_set_growth_placeholders, line_rescale, profile_batch_apply) gave 213 passed after the extraction. The source digest hashes raw bytes (index int64 ns plus tz, values float64), never repr.
+
+The guard refuses a series of more than 744 steps, or one whose facts would exceed 120 KiB, with the typed `series_too_long_to_check`. It is `inline` in `tool-error-kinds.json`; that kind's text is the only guard refusal the checked projection passes through.
+
+`tests/assurance_acceptance/test_p1_timeseries.py` has 38 cases: 19 red and 19 green on master (the green ones are refusals, which master gives anyway), and 38 / 38 after the change. Run it with `python -m pytest -q -o addopts='' tests/assurance_acceptance/test_p1_timeseries.py`.
+
+Mutants, one at a time, each red on its own case:
+- digest over `repr(series)`: the middle-step edit (rows 32/64 and 372/744);
+- plain `==` for `_certified`: non-finite ±inf;
+- no comma check: the comma args case;
+- subset instead of exact keys: the period and extra args cases;
+- no period in the path: the multi-period case;
+- no series re-check at lookup: the edit-after-capture and time-zone cases;
+- no size guard: the long-name case.
+
+Next: SERIES-WINDOW (issue 02) for full-year series. REVOKE-KIND stays open.
+
 ### 2026-10-28 — P1 tracer: A1.2 revocation (issue 02)
 
 Policy version 1. The probes found A1.2 already enforced, except for one existence leak. The checks are `records.authorize` at commit (twice, the second under `network_guard`), `records.load` on every lookup, the acting-user/restriction check in `tool_guard`, and the `unavailable` history projection. The leak: `records.load` answered a revoked project with 404 `Project not found`, while an unknown id got `Record not found`. It now answers both with `Record not found`. `tests/assurance_acceptance/test_p1_revocation.py` (11 cases) makes all of this executable. A fixture removes the seeded user's `OrgMembership` or disables the user; its yield teardown restores both and asserts the restore, and the module's last test checks it again. The late-tool-call case first shows the same call returns values without revocation. `RevokingProvider` (a `FakeProvider`) revokes just before a chosen model turn.

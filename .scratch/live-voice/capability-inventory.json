@@ -456,7 +456,7 @@
         "attribute"
       ],
       "safety_tier": "read",
-      "assurance_adapter": "read_unvalidated",
+      "assurance_adapter": "series_input_evidence",
       "schema_sha256": "65030552c88cbc4e2f67c6b7798eb92c40a774dd7ccaa5664345d89c891f0e41",
       "behavioral_fixture": "pending"
     },
@@ -8346,6 +8346,13 @@
         "artifact": "none",
         "status": "checked"
       },
+      "series_input_evidence": {
+        "effects": "none",
+        "validity": "exact captured steps of one configured time series, series source rechecked",
+        "progress": "tool_result",
+        "artifact": "none",
+        "status": "checked"
+      },
       "checked_input_effect": {
         "effects": "static input update",
         "validity": "operation contract and independent read-back",
@@ -8442,6 +8449,7 @@
     },
     "checked_tools": [
       "get_component",
+      "get_timeseries",
       "list_components",
       "ui_open_panel",
       "update_component"
