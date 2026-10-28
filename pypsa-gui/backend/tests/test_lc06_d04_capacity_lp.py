@@ -118,7 +118,8 @@ def test_raising_the_cap_lowers_the_objective_by_the_cost_difference(lp, client)
     assert (sizing('Cheap')['optimised'], sizing('Backup')['optimised']) == pytest.approx((7, 3))
     # The older run keeps its own capacity answer (LC-03 retained family).
     kept = chat_tools.get_results('economics_by_carrier', run_id=older['run_id'])
-    assert kept['by_carrier']['cheap']['capex_meur']['total'] == pytest.approx(6 * CHEAP['capital_cost'] / 1e6)
+    assert (kept['status'], kept['scope']) == ('ok', 'historical'), kept
+    assert kept['data']['by_carrier']['cheap']['capex_meur']['total'] == pytest.approx(6 * CHEAP['capital_cost'] / 1e6)
 
 
 def test_a_single_period_network_reports_no_vintages(lp):
