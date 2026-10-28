@@ -509,12 +509,32 @@ def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx
     reason = _standing(session, envelope, task, ctx, solve=is_run)
     if reason is not None:
         return reason
+    if _names_another_project(args, ctx):
+        return "wrong_project"
     if is_run:
         kinds = [r.get("kind") for r in envelope["runs"] if r["tool"] == tool]
         return None if None in kinds or (isinstance(args, dict) and args.get("kind") in kinds) else "outside_entry"
     if not any(e["tool"] == tool for e in envelope["edits"]):
         return "unlisted_tool"
     return _match_edit(envelope, tool, edit_card)
+
+
+def _names_another_project(args, ctx):
+    """Whether a call's arguments name any project but the run's (GK B (8)):
+    every `project*` argument, a list of them included, must be the run's
+    uuid, or its name where the tool would not read the name as a uuid
+    (`project_registry.find_project`). Fail closed on anything else."""
+    from services.project_registry import _try_uuid
+    own = str(ctx.project_uuid)
+    name = getattr(ctx, "loaded_project", None)
+    for key, value in (args.items() if isinstance(args, dict) else ()):
+        if "project" not in key or key == "projection_year":
+            continue
+        for item in value if isinstance(value, list) else [value]:
+            if item == own or (item == name and _try_uuid(item) is None):
+                continue
+            return True
+    return False
 
 
 def _standing(session, envelope, task, ctx, solve=False):
@@ -630,17 +650,37 @@ def cross(session, task_path, card, ctx):
     return reason or "crossed"
 
 
-def settle(task_path, call_id, ctx):
-    """The freshness chain's next link after a runner change. The brief's
-    fingerprint follows it while it was the chain's last link (SC-11)."""
+def chain_head(task_path, ctx):
+    """What a runner step starts from while an envelope is live, read under
+    the step's locks: (fingerprint, None) on the chain's last link, else
+    (fingerprint, "drift" or "fingerprint_unreadable"). (None, None) with
+    no live envelope."""
+    from services import assistant_tasks
+    if not live(task_path):
+        return None, None
+    current = _fingerprint(ctx)
+    with assistant_tasks._LOCK:
+        envelope = _load(task_path)
+    if envelope is None or envelope["state"] != "granted":
+        return None, None
+    last = envelope["chain"][-1]["fingerprint"] if envelope["chain"] else envelope["fingerprint"]
+    return current, None if current and current == last else "drift" if current else "fingerprint_unreadable"
+
+
+def settle(task_path, call_id, ctx, before):
+    """The freshness chain's next link after a runner change, only when the
+    step started from the chain's last link (`before`, read under the step's
+    locks): a change made before the step, even one the envelope never saw
+    (an uncarded step), stays drift (GK B (8)). The brief's fingerprint
+    follows the chain while it was the chain's last link (SC-11)."""
     from services import assistant_tasks
     current = _fingerprint(ctx)  # None: no link, so the next admission reads drift
     with assistant_tasks._LOCK:
         envelope = _load(task_path)
-        if envelope is None or envelope["state"] != "granted" or not current:
+        if envelope is None or envelope["state"] != "granted" or not current or not before:
             return
         last = envelope["chain"][-1]["fingerprint"] if envelope["chain"] else envelope["fingerprint"]
-        if current == last:
+        if before != last or current == last:
             return
         envelope["chain"].append({"after_change": call_id, "fingerprint": current})
         _save(task_path, envelope)

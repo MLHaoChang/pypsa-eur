@@ -714,6 +714,7 @@ class Runner:
         tool_use_id = f"run-{step['id']}-{uuid.uuid4().hex[:8]}"
         locks = contextlib.ExitStack()
         refused = []
+        before = []  # the project's fingerprint under this step's locks, before it runs
 
         def take_locks(*_):
             if not ctx.mutation_lock.acquire(timeout=LOCK_TIMEOUT_SECONDS):
@@ -726,6 +727,17 @@ class Runner:
                 locks.close()
                 return False
             self._hold_if_effectful(_read(path), step)  # decided: the project is the run's until the step ends
+            if _tasks()._effectful(step["tool"]):
+                from services import run_envelope
+                fingerprint, reason = run_envelope.chain_head(path, ctx)
+                before[:] = [fingerprint]
+                if reason and decision is None:
+                    # Uncarded, so the envelope never admits it: a change the chain never saw stops it
+                    # here (issue 03). An envelope's own step is refused by its admission instead.
+                    run_envelope.refused_before_gate(path, tool_use_id, step["tool"], reason)
+                    refused.append("envelope")
+                    locks.close()
+                    return False
             return True
 
         results = []
@@ -762,11 +774,14 @@ class Runner:
                 eventlog.message(session, {"role": "user", "content": [results[-1]]})
             _tasks().release_claim(path, step["id"], session.session_id)
             if ran and _tasks()._effectful(step["tool"]):
-                # The freshness chain's next link: only a runner change moves it; a read never
-                # does, so a change seen after one is someone else's (drift, issue 03).
+                # The freshness chain's next link: only a runner change moves it, and only from
+                # the chain's last link; a read never does, so a change seen after one, or before
+                # an uncarded step, is someone else's (drift, issue 03).
                 from services import run_envelope
-                run_envelope.settle(path, tool_use_id, ctx)
-            if refused:
+                run_envelope.settle(path, tool_use_id, ctx, before[0] if before else None)
+            if refused == ["envelope"]:
+                self._envelope_refused(path, step)
+            elif refused:
                 _update(path, lambda t: _stop_in(t, "needs_user", "locked" if refused == ["busy"] else "recheck"))
             elif decision == "envelope" and carded:
                 self._envelope_refused(path, step)

@@ -1289,7 +1289,8 @@ else.
   asked. Every dispatch re-checks, in order: native (not external, known),
   not grid-code publish, not a delete, not `destructive`, no researched value,
   `granted`, owner/project/task, `expires_at`, budget, the freshness chain,
-  `brief_stale`, then the tool and the edit card's typed rows (listed instance
+  `brief_stale`, any `project*` argument naming a project but the run's
+  (`wrong_project`: its uuid, or its name where that is not a uuid), then the tool and the edit card's typed rows (listed instance
   at grant, within bounds relative to `at_grant`). The runner's
   `decision_guard` then takes the locks and re-checks ACL and holds. A match
   is `approvals.decided(by="envelope:<id>")` plus `used`; a refusal is
@@ -1299,8 +1300,13 @@ else.
   (`waiting.envelope_refused`). COP-1 card boundaries are crossed inside a
   live envelope (`continue_at_card`, on record). Expiry, an exhausted budget,
   a revoke, drift, an unreadable fingerprint or a stale brief pause the run
-  (`reason: envelope_<why>`) and notify; nothing re-grants itself. After each
-  runner change `settle` appends the chain's next fingerprint.
+  (`reason: envelope_<why>`) and notify; nothing re-grants itself. Under an
+  effectful step's locks the runner reads `chain_head`: an uncarded step
+  (one the envelope never admits) that starts off the chain's last link
+  pauses the run with `envelope_drift`. After the step, `settle` appends the
+  chain's next fingerprint only when the step started on the last link.
+  Known limit: a user edit that lands *during* a step (its handler takes its
+  own locks after the runner's are released) is taken into the chain.
 - **End.** `cancel_task` revokes; the plan card's revoke pauses the run.
 
 

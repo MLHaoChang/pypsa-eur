@@ -116,7 +116,7 @@ def test_the_grant_is_the_users_card_decision_with_the_envelope_id(granted, sess
     assert grant == [dict(grant[0], tool="grant_envelope", outcome="approved", by="user", envelope_id=envelope["id"])]
     assert [a["event"] for a in envelope["audit"]] == ["granted"]
     assert envelope["owner_id"] == json.loads(path.read_text())["owner_id"]
-    assert envelope["project_id"] == task["project_id"] if "project_id" in task else True
+    assert envelope["project_id"] == json.loads(path.read_text())["project_id"]
     assert envelope["edits"][0]["at_grant"] == {"G1": 20.0}
 
 
@@ -251,6 +251,44 @@ def test_refused_wrong_project(matrix):
     refused(matrix, "wrong_project", "update_component", step(2, 25.0)["args"])
 
 
+OTHER = "00000000-0000-4000-8000-000000000002"
+
+
+def run_project():
+    ctx = PyPSAService.get_active_context()
+    return str(ctx.project_uuid), ctx.loaded_project
+
+
+@pytest.mark.parametrize("tool,args", [
+    ("solve_queue_enqueue", lambda own: {"project_id": OTHER}),
+    ("solve_queue_enqueue", lambda own: {"project_id": "Some Other Project"}),
+    ("run_sensitivity_sweep", lambda own: {"baseline_project_id": OTHER, "cases": []}),
+    ("run_sensitivity_sweep", lambda own: {"baseline_project_id": own, "case_project_ids": [own, OTHER]}),
+    ("set_study_parameter", lambda own: {"project": "Some Other Project", "parameter": "x", "value": 1}),
+    ("start_decision_study", lambda own: {"project": own, "base_project_name": "Some Other Project"}),
+])
+def test_refused_a_call_that_names_another_project(matrix, tool, args):
+    """SH-ENVELOPE-1 scopes the envelope to the run's project: a listed run
+    or edit tool that names any other project is refused (GK B (8))."""
+    task, path = matrix
+    envelope = envelope_of(path)
+    envelope["runs"].append({"tool": "run_sensitivity_sweep"})
+    run_envelope.path_for(path).write_text(json.dumps(envelope))
+    refused(matrix, "wrong_project", tool, args(run_project()[0]))
+
+
+@pytest.mark.parametrize("which", [0, 1])
+def test_a_listed_run_tool_naming_the_runs_own_project_is_admitted(matrix, which):
+    task, path = matrix
+    envelope = envelope_of(path)
+    envelope["runs"].append({"tool": "run_sensitivity_sweep"})
+    run_envelope.path_for(path).write_text(json.dumps(envelope))
+    own = run_project()[which]  # the run's uuid, or its name, as the tool resolves either
+    with on_run(task, path) as run:
+        assert ask(run, "solve_queue_enqueue", {"project_id": own}) == "admitted"
+        assert ask(run, "run_sensitivity_sweep", {"baseline_project_id": own, "cases": []}) == "admitted"
+
+
 def test_refused_foreign_drift(matrix):
     PyPSAService.get_active_context().network.loads.at["L1", "p_set"] = 6.0  # a user edit, not the run's
     refused(matrix, "drift", "update_component", step(2, 25.0)["args"])
@@ -299,8 +337,9 @@ def test_bounds_are_relative_to_the_value_at_grant(granted):
 def test_a_glob_records_each_instance_at_grant_and_a_later_instance_gets_a_card(matrix):
     task, path = matrix
     ctx = PyPSAService.get_active_context()
+    before, _ = run_envelope.chain_head(path, ctx)
     ctx.network.add("Generator", "G2", bus="B1", p_nom=10.0, marginal_cost=5.0)
-    run_envelope.settle(path, "the-runs-own-add", ctx)  # created by the run: its chain follows
+    run_envelope.settle(path, "the-runs-own-add", ctx, before)  # created by the run: its chain follows
     assert envelope_of(path)["edits"][0]["at_grant"] == {"G1": 20.0}
     refused(matrix, "new_instance", "update_component",
             {"component_class": "Generator", "name": "G2", "attrs": {"p_nom": 11.0}})
@@ -455,6 +494,33 @@ def test_a_user_edit_between_two_runner_changes_pauses_the_run(granted, monkeypa
     assert record["run"]["status"] == "paused" and record["run"]["reason"] in ("envelope_drift", "envelope_brief_stale")
     assert g1() == 25.0 and refusals(path) in (["drift"], ["brief_stale"])
     assert not run_envelope.live(path)
+
+
+def test_a_user_edit_before_an_uncarded_effectful_step_is_not_taken_into_the_chain(granted):
+    """GK B (8): a step the envelope never admits (GUIDED_UNCARDED: no card)
+    must not launder a user edit made before it into the chain."""
+    preview = {"id": "inputs.2", "tool": "preview_project_changes", "args": {"changes": [
+        {"component_class": "Generator", "names": ["G1"], "attribute": "p_nom", "value": 22.0}]}}
+    task, path, _ = granted(steps=[preview, step(3, 25.0)])
+    assert "preview_project_changes" in confirm.GUIDED_UNCARDED
+    PyPSAService.get_active_context().network.loads.at["L1", "p_set"] = 6.0  # a user edit, not the run's
+    record = until(harness_runner.Runner("a"), path, task, stopped)
+    assert record["run"]["status"] == "paused" and record["run"]["reason"] == "envelope_drift", record["run"]
+    assert [s["status"] for s in record["steps"][1:]] == ["pending", "pending"]
+    assert g1() == 20.0 and refusals(path) == ["drift"] and envelope_of(path)["chain"] == []
+
+
+def test_a_step_that_started_off_the_chain_adds_no_link(matrix):
+    """A runner change advances the chain only from the chain's last link, read before the step."""
+    task, path = matrix
+    ctx = PyPSAService.get_active_context()
+    ctx.network.loads.at["L1", "p_set"] = 6.0  # a user edit
+    before, reason = run_envelope.chain_head(path, ctx)
+    assert reason == "drift"
+    ctx.network.generators.at["G1", "marginal_cost"] = 12.0  # the step's own change
+    run_envelope.settle(path, "a-step", ctx, before)
+    assert envelope_of(path)["chain"] == []
+    refused(matrix, "drift", "update_component", step(2, 25.0)["args"])
 
 
 def test_an_unreadable_fingerprint_pauses_the_run(granted, monkeypatch):
