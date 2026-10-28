@@ -16,6 +16,8 @@ second save button can be rendered for it.
 """
 from __future__ import annotations
 
+import math
+
 from typing import Any
 
 # UI contract rule 3, exact strings.
@@ -137,15 +139,33 @@ def site_state(project_dir) -> dict[str, Any]:
     return {"site": site, "boundary": boundary, "buildings": buildings}
 
 
+def anchor_moved(project_dir, current: dict[str, Any] | None) -> list[str]:
+    """Ids of the Sites whose origin lies more than `ANCHOR_MOVED_M` from the anchor (D01)."""
+    from services import site_service
+    from services.site_scene import anchor, frames
+
+    if not current:
+        return []
+    out = []
+    for site in site_service.read_sites(project_dir).get("sites") or []:
+        o = site.get("origin") or {}
+        x, y = frames.lnglat_to_local((current["lng"], current["lat"]), (o["lng"], o["lat"]))
+        if math.hypot(x, y) > anchor.ANCHOR_MOVED_M:
+            out.append(site["id"])
+    return sorted(out)
+
+
 def scene_block(project_dir, *, can_edit: bool, targets: int, native_runs: int,
                 pending_proposal: bool) -> dict[str, Any]:
-    """The additive `/flow` key: `{entry, actions}`, recomputed on every read (never cached)."""
+    """The additive `/flow` key: `{entry, anchor_moved, actions}`, recomputed on every read (never cached)."""
     from services.site_scene import anchor
 
     facts = site_state(project_dir)
-    confirmed = anchor.admits_creation(anchor.read_anchor(project_dir))
+    doc = anchor.read_anchor(project_dir)
+    confirmed = anchor.admits_creation(doc)
     return {
         "entry": entry(saved=True, can_edit=can_edit, anchor_confirmed=confirmed, site=facts["site"]),
+        "anchor_moved": anchor_moved(project_dir, doc.get("anchor")),
         "actions": actions(saved=True, can_edit=can_edit, anchor_confirmed=confirmed, site=facts["site"],
                            boundary=facts["boundary"], buildings=facts["buildings"], targets=targets,
                            native_runs=native_runs, pending_proposal=pending_proposal),

@@ -323,21 +323,47 @@ def _copy_bundle_dirs(src: pathlib.Path, dst: pathlib.Path) -> None:
         src_d, dst_d = src / dname, dst / dname
         if not src_d.exists():
             continue
+        if dname == "sites":
+            _swap_in_sites(src_d, dst_d, scene_blobs)
+            continue
         try:
             if dst_d.exists():
                 _force_rmtree(dst_d)
-            if dname == "sites":
-                _shutil.copytree(str(src_d), str(dst_d), ignore=scene_store.ignore_scene_dirs(src_d))
-                for rel, data in scene_blobs:
-                    (dst / rel).parent.mkdir(parents=True, exist_ok=True)
-                    (dst / rel).write_bytes(data)
-            else:
-                _shutil.copytree(str(src_d), str(dst_d))
+            _shutil.copytree(str(src_d), str(dst_d))
         except OSError as exc:
             logger.warning(
                 "bundle: copy_bundle_dir %s → %s failed: %s",
                 src_d, dst_d, exc,
             )
+
+
+def _swap_in_sites(src_d: pathlib.Path, dst_d: pathlib.Path, scene_blobs: list) -> None:
+    """
+    Copy `sites/` (scene dirs as their closure only) into a temp sibling, then
+    swap it in. An I/O error while building it leaves `dst_d` as it was.
+    """
+    from services.site_scene import store as scene_store
+
+    stamp = f"{os.getpid()}-{time.time_ns()}"
+    tmp_d = dst_d.with_name(f".{dst_d.name}.tmp-{stamp}")
+    old_d = dst_d.with_name(f".{dst_d.name}.old-{stamp}")
+    try:
+        shutil.copytree(str(src_d), str(tmp_d), ignore=scene_store.ignore_scene_dirs(src_d))
+        for rel, data in scene_blobs:
+            target = tmp_d / pathlib.PurePath(rel).relative_to(dst_d.name)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        if dst_d.exists():
+            os.replace(dst_d, old_d)
+        os.replace(tmp_d, dst_d)
+    except OSError as exc:
+        logger.warning("bundle: copy_bundle_dir %s → %s failed: %s", src_d, dst_d, exc)
+        if old_d.exists() and not dst_d.exists():
+            os.replace(old_d, dst_d)
+    finally:
+        for leftover in (tmp_d, old_d):
+            if leftover.exists():
+                _force_rmtree(leftover)
 
 
 def _copy_history_dirs(src: pathlib.Path, dst: pathlib.Path) -> None:

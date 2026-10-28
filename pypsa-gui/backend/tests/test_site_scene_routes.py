@@ -504,3 +504,73 @@ def test_an_oversize_body_is_413_before_parsing(client, geo):
     r = client.put("/api/projects/geo/site-anchor", content=b"x" * (site_scene.MAX_SMALL_BODY + 1),
                    headers={"content-type": "application/json"})
     assert (r.status_code, _kind(r)) == (413, "resource_limit")
+
+
+def test_a_proposal_for_a_site_without_a_boundary_is_refused(client, geo, monkeypatch):
+    from services.site_scene import store
+    from services.site_scene.verdicts import REASON_NO_BOUNDARY
+    _adopted(client, geo)
+    real = store.read_scene
+
+    def two_points(*a, **k):
+        # The legacy PUT refuses such a Site; an older or imported generation may still hold one.
+        scene = real(*a, **k)
+        return {**scene, "site": {**scene["site"], "boundary": scene["site"]["boundary"][:2]}}
+
+    monkeypatch.setattr(store, "read_scene", two_points)
+    r = _propose(client, 1)
+    assert (r.status_code, _kind(r)) == (422, "invalid_input")
+    assert r.json()["detail"]["message"] == REASON_NO_BOUNDARY
+
+
+def test_a_committed_apply_reads_back_its_receipt_after_the_map_is_lost(client, geo):
+    from services.site_scene import proposals
+    _adopted(client, geo)
+    pid = _propose(client, 1).json()["id"]
+    url = f"/api/projects/geo/sites/campus/scene/proposals/{pid}/apply"
+    receipt = client.post(url, json={"expected_revision": 1}).json()
+    proposals.clear()
+    r = client.post(url, json={"expected_revision": 1})
+    assert r.status_code == 200 and r.json() == receipt
+    assert client.get("/api/projects/geo/sites/campus/scene").json()["revision"] == 2
+
+
+def test_a_cancel_during_apply_does_not_relabel_the_commit(client, geo, monkeypatch):
+    from services.site_scene import proposals, store
+    _adopted(client, geo)
+    pid = _propose(client, 1).json()["id"]
+    base = "/api/projects/geo/sites/campus/scene/proposals/" + pid
+    real, cancels = store.apply, []
+
+    def apply_then_cancel(*a, **k):
+        # A cancel that lands between apply's status check and its commit.
+        project_key = next(k for (k, p) in proposals._entries if p == pid)
+        cancels.append(proposals.cancel(project_key, proposals._entries[(project_key, pid)]["owner"],
+                                        "campus", pid)["status"])
+        return real(*a, **k)
+
+    monkeypatch.setattr(store, "apply", apply_then_cancel)
+    r = client.post(base + "/apply", json={"expected_revision": 1})
+    assert r.status_code == 200, r.text
+    assert cancels == ["applying"]
+    assert client.get(base).json()["status"] == "applied"
+
+
+def test_a_failed_apply_releases_its_claim(client, geo):
+    _adopted(client, geo)
+    pid = _propose(client, 1).json()["id"]
+    base = "/api/projects/geo/sites/campus/scene/proposals/" + pid
+    assert client.post(base + "/apply", json={"expected_revision": 7}).status_code == 409
+    assert client.get(base).json()["status"] == "ready"
+
+
+def test_flow_lists_sites_more_than_1000_m_from_the_anchor(client, geo):
+    far = {**SITE, "id": "far", "origin": {"lng": 11.60, "lat": 48.14}}
+    near = {**SITE, "origin": {"lng": 11.585, "lat": 48.14}}
+    r = client.put("/api/projects/geo/sites", json={"version": 1, "sites": [near, far]})
+    assert r.status_code == 200, r.text
+    assert client.get("/api/projects/geo/flow").json()["scene"]["anchor_moved"] == []
+    assert client.put("/api/projects/geo/site-anchor",
+                      json={"anchor": ANCHOR, "expected_revision": 0}).status_code == 200
+    # far is ~1.49 km east of the anchor, near ~0.37 km.
+    assert client.get("/api/projects/geo/flow").json()["scene"]["anchor_moved"] == ["far"]

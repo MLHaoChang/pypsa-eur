@@ -29,6 +29,7 @@ from typing import Any
 
 from services.site_scene import native, store
 from services.site_scene.contract import SceneError
+from services.site_scene.verdicts import REASON_NO_BOUNDARY
 
 ACTIONS = ("generate_native", "edit_buildings")
 MAX_PROPOSALS = 64
@@ -92,6 +93,8 @@ def create(project_dir, project_key: str, owner: str | None, site_id: str, body:
     if base != scene["revision"]:
         raise SceneError("revision_conflict", "This site changed since you opened it: reload it and try again",
                          {"current_revision": scene["revision"]})
+    if len(scene["site"].get("boundary") or []) < 3:
+        raise SceneError("invalid_input", REASON_NO_BOUNDARY, {"field": "boundary"})
     buildings, stats = _buildings(action, scene["buildings"], scene["site"], inputs)
     pid = f"p-{uuid.uuid4().hex}"
     entry = {"id": pid, "site_id": site_id, "owner": owner, "action": action, "base_revision": base,
@@ -108,6 +111,13 @@ def view(entry: dict[str, Any]) -> dict[str, Any]:
     return {k: entry[k] for k in ("id", "site_id", "action", "base_revision", "input_hash", "status", "preview")}
 
 
+def _committed(project_dir, site_id: str, pid: str) -> dict[str, Any] | None:
+    """The receipt this site's chain holds for `pid`, if it was committed before the map lost it."""
+    with store.project_lock(project_dir):
+        pointer = store._read_pointer(project_dir, site_id)
+        return None if pointer is None else store._chain_receipt(project_dir, site_id, pointer, pid)
+
+
 def get(project_key: str, owner: str | None, site_id: str, pid: str) -> dict[str, Any]:
     """The caller's own live proposal, else `proposal_expired`."""
     with _lock:
@@ -122,6 +132,7 @@ def cancel(project_key: str, owner: str | None, site_id: str, pid: str) -> dict[
     """Idempotent. An applied proposal stays applied; it is never relabelled cancelled."""
     entry = get(project_key, owner, site_id, pid)
     with _lock:
+        # An apply in flight ("applying") has claimed the proposal: it is not relabelled.
         if entry["status"] == "ready":
             entry["status"] = "cancelled"
     return view(entry)
@@ -134,9 +145,37 @@ def apply(project_dir, project_key: str, owner: str | None, site_id: str, pid: s
     expected = body.get("expected_revision")
     if not isinstance(expected, int) or isinstance(expected, bool):
         raise SceneError("invalid_input", "Apply: expected_revision is required", {"field": "expected_revision"})
-    entry = get(project_key, owner, site_id, pid)
-    if entry["status"] == "cancelled":
-        raise SceneError("proposal_cancelled", "This proposal was cancelled: generate the site again")
+    try:
+        entry = get(project_key, owner, site_id, pid)
+    except SceneError:
+        # A restart or eviction loses the map, not the commit: an apply that
+        # already landed reads back its receipt instead of answering 410.
+        receipt = _committed(project_dir, site_id, pid)
+        if receipt is None:
+            raise
+        return receipt
+    with _lock:
+        # Check and claim under one lock, so a concurrent cancel cannot land
+        # between the check and the commit.
+        if entry["status"] == "cancelled":
+            raise SceneError("proposal_cancelled", "This proposal was cancelled: generate the site again")
+        claimed = entry["status"] == "ready"
+        if claimed:
+            entry["status"] = "applying"
+    try:
+        receipt = _apply_entry(project_dir, site_id, pid, entry, body, expected)
+    except BaseException:
+        if claimed:
+            with _lock:
+                entry["status"] = "ready"
+        raise
+    with _lock:
+        entry["status"] = "applied"
+    return receipt
+
+
+def _apply_entry(project_dir, site_id: str, pid: str, entry: dict[str, Any], body: dict[str, Any],
+                 expected: int) -> dict[str, Any]:
     stored = input_hash(site_id, entry["action"], entry["base_revision"], entry["inputs"])
     reviewed = body.get("input_hash", entry["input_hash"])
     if stored != entry["input_hash"] or reviewed != entry["input_hash"]:
@@ -158,8 +197,6 @@ def apply(project_dir, project_key: str, owner: str | None, site_id: str, pid: s
             receipt = store.apply(project_dir, site_id, {"id": pid, "base_revision": entry["base_revision"],
                                                          "input_hash": entry["input_hash"],
                                                          "changes": {"buildings": buildings}}, expected)
-    with _lock:
-        entry["status"] = "applied"
     return receipt
 
 

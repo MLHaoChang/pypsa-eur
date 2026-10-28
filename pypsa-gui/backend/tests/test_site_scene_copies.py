@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import json
+import pathlib
 import zipfile
 
 import pytest
@@ -137,6 +138,25 @@ def test_a_missing_pointed_generation_fails_before_the_copy(client, enabled, pro
     with pytest.raises(SceneError):
         _copy_bundle_dirs(project, dst)
     assert (dst / "sites" / "marker").read_text() == "kept"
+
+
+def test_an_io_error_building_sites_keeps_the_prior_destination(client, enabled, monkeypatch):
+    name, project, pointer = enabled
+    import routers.projects as projects_router
+    dst = project.parent / "copy_target_io"
+    (dst / "sites").mkdir(parents=True)
+    (dst / "sites" / "marker").write_text("kept")
+    real = projects_router.shutil.copytree
+
+    def failing(src, target, *a, **k):
+        if pathlib.Path(src).name == "sites":
+            raise OSError("disk full")
+        return real(src, target, *a, **k)
+
+    monkeypatch.setattr(projects_router.shutil, "copytree", failing)
+    projects_router._copy_bundle_dirs(project, dst)
+    assert (dst / "sites" / "marker").read_text() == "kept"
+    assert sorted(p.name for p in dst.iterdir()) == ["sites"]
 
 
 @pytest.mark.parametrize("generation", ["../x", "/etc", "g000001-0123456789ab/../../x", ORPHAN + "/"])
