@@ -109,3 +109,11 @@ def test_no_curve_no_table_and_q_range_ibr_stays_its_own_table():
     assert "TOTAL" in set(single["unit"])
     assert (curve["basis"] == IBR_CURVE_LABEL).all() and not (single["basis"] == IBR_CURVE_LABEL).any()
     assert set(curve["clause"]) == {"generic test clause"}
+
+
+def test_curve_basis_is_the_plain_words_the_gui_shows():
+    """The GUI shows each row's ``basis`` as is, so the words are pinned here: no internal names, no ASCII maths."""
+    assert IBR_CURVE_LABEL == (
+        "Screening at unit terminals: √(S² − P²) per inverter against the grid code's per-unit curve "
+        "× rated P, at each checked active power; collector and transformer reactive losses are not included.")
+    assert not any(w in IBR_CURVE_LABEL for w in ("q_capability_unit", "sqrt", "^"))
