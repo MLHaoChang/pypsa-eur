@@ -1076,7 +1076,7 @@ def _motor_start_rows(inp: _Inputs) -> list[dict]:
 GENERIC_PV_MARGIN_PCT = 5.0
 GENERIC_QV_MARGIN_MVAR = 0.0
 _VS_PLACEHOLDER = "planning practice placeholder, not a requirement of this project's grid code"
-_VS_SCREENING = "screening; binding answer is the RMS study"
+_VS_SCREENING = "A screening estimate: an RMS study gives the binding answer."
 _VS_NO_NOSE = "the sweep did not reach the nose"
 _VS_NO_QMIN = "the sweep did not reach the Q–V minimum"
 #: Why both rows leave the scorecard on an off-grid project.
@@ -1137,7 +1137,7 @@ def _vs_rows(inp: _Inputs) -> list[dict]:
         reason = ("No minimum short-circuit power entered at the PCC: the screen needs the grid's weakest state"
                   if text == NO_SK_MIN else f"The P–V/Q–V screen could not run: {text}")
     elif not (run / ce.VOLTAGE_STABILITY_META).is_file() or not (run / VOLTAGE_STABILITY_CSV).is_file():
-        reason = "No campus run with the P–V/Q–V screen yet: run the campus study"
+        reason = "No grid study with the voltage stability check yet: run the grid study"
     else:
         frame = pd.read_csv(run / VOLTAGE_STABILITY_CSV)
         bad = frame[frame["verdict"] != "solved"]
@@ -1155,7 +1155,7 @@ def _vs_rows(inp: _Inputs) -> list[dict]:
                       section="connection", target=target)
         if reason is not None:
             rows.append(_row(rid, spec["req"], project_value=None, verdict="unknown",
-                             note=f"{reason}; {_VS_SCREENING}", **common))
+                             note=f"{reason}. {_VS_SCREENING}", **common))
             continue
         # A flag read back as anything but True/False (a blank cell) is no answer, never a bound.
         blank = [int(r["period"]) for _, r in frame.iterrows()
@@ -1163,8 +1163,10 @@ def _vs_rows(inp: _Inputs) -> list[dict]:
         periods = [(int(r["period"]), float(r[spec["value"]]), str(r[spec["bound"]]) == "True")
                    for _, r in frame.iterrows()]
         if blank:
+            gap = ("no Q–V margin, because the P–V margin is below its limit" if rid == "voltage_stability_qv"
+                   else "no P–V margin from the screen")
             rows.append(_row(rid, spec["req"], project_value=None, verdict="unknown",
-                             note=f"Period {blank[0]}: the screen gives no value; {_VS_SCREENING}", **common))
+                             note=f"Period {blank[0]}: {gap}. {_VS_SCREENING}", **common))
             continue
         verdict, (period, value, bound) = judge_bounded(periods, limit, spec["rule"])
         shown = f"≥ {value:.4g}" if bound else f"{value:.4g}"
@@ -1172,7 +1174,7 @@ def _vs_rows(inp: _Inputs) -> list[dict]:
                  "unknown": spec["no_bound"]}[verdict]
         r = frame[frame["period"] == period].iloc[0]
         note = (f"Worst period {period}: {shown} {spec['unit']}, {words}; planned load {r['planned_mw']:.4g} MW "
-                f"({r['note']}); {_VS_SCREENING}")
+                f"({r['note']}). {_VS_SCREENING}")
         row = _row(rid, spec["req"], project_value=round(value, 4), verdict=verdict, note=note, **common)
         row["project_value_is_lower_bound"] = bound
         row["period"] = period

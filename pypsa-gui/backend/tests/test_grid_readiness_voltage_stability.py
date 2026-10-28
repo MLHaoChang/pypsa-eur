@@ -65,7 +65,7 @@ def test_both_rows_show_a_margin_a_limit_and_its_source(tmp_path):
     assert (qv["verdict"], qv["project_value"], qv["limit"]) == ("pass", 120.0, 0.0)
     for r in (pv, qv):
         assert r["section"] == "connection" and r["assumed"] is True
-        assert "screening; binding answer is the RMS study" in r["note"]
+        assert "A screening estimate: an RMS study gives the binding answer." in r["note"]
         assert "within the screening margin" in r["note"] and "Worst period 2030" in r["note"]
         assert "planned load 50 MW" in r["note"] and "binds" in r["note"]
 
@@ -151,7 +151,7 @@ def test_no_run_is_unknown(tmp_path):
     pv, qv, _ = _vs(tmp_path)
     for r in (pv, qv):
         assert r["verdict"] == "unknown" and r["project_value"] is None
-        assert r["note"].startswith("No campus run with the P–V/Q–V screen yet")
+        assert r["note"].startswith("No grid study with the voltage stability check yet: run the grid study")
 
 
 def test_no_sk_min_entered_is_unknown_with_the_reason(tmp_path):
@@ -182,7 +182,7 @@ def test_a_blank_bound_flag_is_no_answer_never_a_bound(tmp_path):
     p["nose_is_lower_bound"] = None
     _write(tmp_path, [p])
     pv, qv, _ = _vs(tmp_path)
-    assert pv["verdict"] == "unknown" and "Period 2030: the screen gives no value" in pv["note"]
+    assert pv["verdict"] == "unknown" and "Period 2030: no P–V margin from the screen" in pv["note"]
     assert qv["verdict"] == "pass"
 
 

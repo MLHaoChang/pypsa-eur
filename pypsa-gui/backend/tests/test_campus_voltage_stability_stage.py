@@ -94,7 +94,7 @@ def test_a_run_from_before_the_stage_has_none(user_and_db):  # noqa: F811
     for name in (ce.cs.VOLTAGE_STABILITY_CSV, ce.VOLTAGE_STABILITY_META):
         (run / name).unlink()
     assert ce.get_state(hub)["results"]["voltage_stability"] is None
-    assert _rows(hub)[IDS[0]]["note"].startswith("No campus run with the P–V/Q–V screen yet")
+    assert _rows(hub)[IDS[0]]["note"].startswith("No grid study with the voltage stability check yet: run the grid study")
 
 
 @pytest.mark.live_solve
