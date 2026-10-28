@@ -1,5 +1,6 @@
 """
-The backend half of the `tool_error` kind manifest (`pypsa-gui/tool-error-kinds.json`).
+The backend half of the `tool_error` kind manifest (`pypsa-gui/tool-error-kinds.json`
+plus the fragments in `pypsa-gui/tool-error-kinds.d/`).
 
 THE HOLE THIS FILLS. `ChatPanel.profile.test.tsx` proves every kind in
 `TOOL_ERROR_BANNER_KINDS` has `KIND_COPY` — it catches a routed kind losing
@@ -30,10 +31,11 @@ a line of JSON.
 from __future__ import annotations
 
 import ast
-import json
 import pathlib
 
 import pytest
+
+from smoke.json_fragments import tool_error_kinds
 
 BACKEND = pathlib.Path(__file__).resolve().parent.parent
 MANIFEST = BACKEND.parent / "tool-error-kinds.json"
@@ -158,7 +160,8 @@ def derive_tool_error_kinds() -> set[str]:
 
 
 def _manifest() -> dict:
-    return json.loads(MANIFEST.read_text(encoding="utf-8"))
+    # The base file plus tool-error-kinds.d/ fragments (RETRO-COST-1).
+    return {"kinds": tool_error_kinds()}
 
 
 def test_the_manifest_still_describes_the_backend():
@@ -170,7 +173,8 @@ def test_the_manifest_still_describes_the_backend():
     assert not missing, (
         "these error_kinds can reach a tool_error frame and the manifest does "
         f"not classify them: {missing}. Add each to "
-        f"{MANIFEST.name} with a `surface` ('banner' or 'inline') and a `why`. "
+        f"a new fragment in {MANIFEST.with_suffix('.d').name}/ (named after your branch) "
+        "with a `surface` ('banner' or 'inline') and a `why`. "
         "Choosing 'banner' means the frontend must also give it KIND_COPY and "
         "TOOL_ERROR_BANNER_KINDS membership — its own test will say so."
     )

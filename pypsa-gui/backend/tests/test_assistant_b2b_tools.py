@@ -11,10 +11,10 @@ preview writing nothing (F5).
 """
 from __future__ import annotations
 
+import functools
 import json
 import uuid as _uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
@@ -24,7 +24,6 @@ from services import chat_tools as T
 from services import upload_service
 from services.pypsa_service import PyPSAService
 
-ROOT = Path(__file__).resolve().parents[3]
 CAP = 4000
 
 NEW_TOOLS = {
@@ -55,8 +54,13 @@ def _size(payload) -> int:
     return len(json.dumps(payload, default=str))
 
 
+@functools.cache
 def _parity_rows() -> dict:
-    matrix = json.loads((ROOT / ".scratch/live-voice/route-parity.json").read_text())
+    # Built in memory: route-parity.json is not committed (RETRO-COST-1).
+    from smoke import assistant_route_parity as parity
+
+    matrix, problems = parity.build()
+    assert not problems, problems
     return {(r["method"], r["path"]): r for r in matrix["rows"]}
 
 
