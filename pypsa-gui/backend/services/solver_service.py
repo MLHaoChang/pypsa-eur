@@ -489,7 +489,7 @@ def _run_process_uc_check(network, config, merged_solver_options, phase) -> dict
     phase(f"Binary operational check: {len(_process_uc.process_committable(network))} "
           "committable process unit(s), "
           + ("one week per season of each period" if _process_uc.is_year_base(network) else "one window per period")
-          + ", capacities fixed")
+          + f", capacities fixed, up to {_process_uc.check_workers()} at once")
     t0 = time.monotonic()
     try:
         check = _process_uc.binary_check(network, config, solver_options=opts)

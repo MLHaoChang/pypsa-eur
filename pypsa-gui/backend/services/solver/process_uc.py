@@ -33,7 +33,11 @@ the cost on a weighted network and the solver warns on a user network (``weighte
 from __future__ import annotations
 
 import math
+import multiprocessing
+import os
+import tempfile
 import time
+from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 import pandas as pd
@@ -506,20 +510,37 @@ def binary_check(n, cfg, *, solver_options: dict | None = None, solve=None) -> d
     t0 = time.monotonic()
     solve = solve or _solve_window
     periods = (list(n.investment_periods) if isinstance(n.snapshots, pd.MultiIndex) else [None])
-    rows = []
+    slots: list = []                     # one per window, in order: a row, or the window to solve
     for period in periods:
         try:
             windows = _windows(n, period)
         except Exception as exc:                                 # noqa: BLE001
-            rows.append({**_empty_row(period), "status": "unverified",
-                         "reason": f"{type(exc).__name__}: {exc}"})
+            slots.append({**_empty_row(period), "status": "unverified",
+                          "reason": f"{type(exc).__name__}: {exc}"})
             continue
-        for first, sns in windows:
-            try:
-                rows.append(_period_row(n, period, cfg, solver_options or {}, solve, first, sns))
-            except Exception as exc:                             # noqa: BLE001
-                rows.append({**_empty_row(period, _window_text(period, first, sns), len(sns)),
-                             "status": "unverified", "reason": f"{type(exc).__name__}: {exc}"})
+        slots += [(period, first, sns) for first, sns in windows]
+
+    def one(slot) -> dict:
+        if isinstance(slot, dict):
+            return slot
+        period, first, sns = slot
+        try:
+            return _period_row(n, period, cfg, solver_options or {}, solve, first, sns)
+        except Exception as exc:                                 # noqa: BLE001
+            return {**_empty_row(period, _window_text(period, first, sns), len(sns)),
+                    "status": "unverified", "reason": f"{type(exc).__name__}: {exc}"}
+
+    # The windows are independent solves on their own copies: on the year base they run side by side, in
+    # worker processes (HiGHS keeps one thread pool per process, so threads would queue on it). An injected
+    # ``solve`` (tests) stays in this process.
+    pending = [s for s in slots if not isinstance(s, dict)]
+    workers = min(check_workers(), len(pending)) if solve is _solve_window else 1
+    workers = max(workers, 1)
+    if workers > 1:
+        solved = _solve_in_workers(n, cfg, solver_options or {}, pending, workers)
+        rows = [s if isinstance(s, dict) else solved.pop(0) for s in slots]
+    else:
+        rows = [one(s) for s in slots]
     verified = [r for r in rows if r["status"] == "ok"]
     flagged = any(r["flagged"] for r in verified)
     status = "ok" if len(verified) == len(rows) else "unverified"
@@ -541,7 +562,54 @@ def binary_check(n, cfg, *, solver_options: dict | None = None, solve=None) -> d
         message = f"{PLAIN_NOTE}. {message}"
     if worst is not None and len(verified) > 1:
         message += f"; worst window: {worst['window']} ({result_line(worst)})"
-    return _payload(n, status, flagged, message, rows, _ledger(rows, cfg, plain, worst), t0, worst)
+    out = _payload(n, status, flagged, message, rows, _ledger(rows, cfg, plain, worst), t0, worst)
+    out["workers"] = workers
+    return out
+
+
+_WORKER: dict = {}
+
+
+def _init_worker(path: str, cfg, opts: dict) -> None:
+    import pypsa
+
+    _WORKER.update(n=pypsa.Network(path), cfg=cfg, opts=opts)
+
+
+def _row_in_worker(slot) -> dict:
+    period, first, sns = slot
+    n, cfg, opts = _WORKER["n"], _WORKER["cfg"], _WORKER["opts"]
+    try:
+        return _period_row(n, period, cfg, opts, _solve_window, first, sns)
+    except Exception as exc:                                     # noqa: BLE001
+        return {**_empty_row(period, _window_text(period, first, sns), len(sns)),
+                "status": "unverified", "reason": f"{type(exc).__name__}: {exc}"}
+
+
+def _solve_in_workers(n, cfg, solver_options: dict, slots: list, workers: int) -> list[dict]:
+    """``_period_row`` of each window in ``slots``, in order, on ``workers`` fresh processes. Each worker reads the
+    solved network once from a temporary NetCDF export (a Network does not pickle); an abort's KeyboardInterrupt
+    stops them all."""
+    with tempfile.TemporaryDirectory(prefix="uc-check-") as tmp:
+        path = os.path.join(tmp, "plan.nc")
+        _copy(n).export_to_netcdf(path)
+        pool = ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("spawn"),
+                                   initializer=_init_worker, initargs=(path, cfg, solver_options))
+        try:
+            rows = list(pool.map(_row_in_worker, slots))
+        except BaseException:
+            for proc in list(getattr(pool, "_processes", {}).values()):
+                proc.terminate()
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
+        pool.shutdown()
+    return rows
+
+
+def check_workers() -> int:
+    """How many windows the check solves at once: the machine's cores less the one the plan's solver held, at
+    least 1 (a 2-core machine stays serial rather than oversubscribed)."""
+    return max(1, (os.cpu_count() or 1) - 1)
 
 
 def _flag_message(plain: bool) -> str:
@@ -557,7 +625,7 @@ def _worst(rows: list[dict]) -> dict | None:
 
 
 def _payload(n, status, flagged, message, rows, ledger, t0, worst=None) -> dict:
-    return {"status": status, "flagged": flagged, "message": message,
+    return {"status": status, "flagged": flagged, "message": message, "workers": None,
             "worst": None if worst is None else {
                 k: worst[k] for k in ("period", "window", "delta", "pct", "extra_shortfall")},
             "process_units": [str(u) for u in process_committable(n)],

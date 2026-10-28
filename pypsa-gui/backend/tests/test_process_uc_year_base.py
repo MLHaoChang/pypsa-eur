@@ -146,3 +146,27 @@ def test_the_end_level_binds_in_the_binary_window():
     m = PU.window_copy(n, None, first)
     m.optimize(snapshots=sns, solver_name="highs")
     assert m.stores_t.e.at[sns[-1], "tank"] >= n.stores_t.e.at[sns[-1], "tank"] - 1e-6
+
+
+def test_the_windows_solve_side_by_side_with_the_same_result(monkeypatch):
+    from services.solver_service import SolverConfig
+
+    n = _solved_plain()
+    results = {}
+    for workers in (1, 3):
+        monkeypatch.setattr(PU, "check_workers", lambda w=workers: w)
+        check = PU.binary_check(n, SolverConfig())
+        assert check["workers"] == workers and check["status"] == "ok", check["message"]
+        results[workers] = [(r["window"], r["cost_lin"], r["cost_bin"]) for r in check["periods"]]
+    assert [w for w, *_ in results[3]] == [w for w, *_ in results[1]]
+    for (_, lin1, bin1), (_, lin3, bin3) in zip(results[1], results[3]):
+        assert lin3 == pytest.approx(lin1, rel=1e-6) and bin3 == pytest.approx(bin1, rel=1e-3)
+
+
+def test_the_check_leaves_a_core_to_the_plan_and_never_drops_below_one(monkeypatch):
+    monkeypatch.setattr(PU.os, "cpu_count", lambda: 4)
+    assert PU.check_workers() == 3
+    monkeypatch.setattr(PU.os, "cpu_count", lambda: 2)
+    assert PU.check_workers() == 1
+    monkeypatch.setattr(PU.os, "cpu_count", lambda: None)
+    assert PU.check_workers() == 1

@@ -371,7 +371,9 @@ def test_2027_with_every_candidate_off_loses_concentrate_and_a_bess_lowers_it(re
     view = {p["bus"]: p for p in compute_process_view(bare)["products"]}
     unmined = view["ore_rom"]["unused_supply"]["by_period"]
     feed = bare.generators_t.p_max_pu["mine"] * bare.generators.at["mine", "p_nom"]
-    expect = _by_period(feed - bare.generators_t.p["mine"])[2027]
+    # The view weights energy by the period's years, as PyPSA does (process_view's ENERGY_BASIS).
+    years = float(bare.investment_period_weightings.at[2027, "years"])
+    expect = _by_period(feed - bare.generators_t.p["mine"])[2027] * years
     assert expect > 0
     assert unmined[next(k for k in unmined if "2027" in str(k))] == pytest.approx(expect, rel=1e-6)
     assert view["concentrate"]["lost"]["by_period"]
@@ -388,7 +390,12 @@ def test_2027_with_every_candidate_at_pack_price(reset_backend):
         "pile_t": float(n.stores.at["coarse_ore_stockpile_new_2027", "e_nom_opt"]),
         "lost_t": float(_lost(n)[2027]),
     }
-    print("PINME", built)
+    # The plan meets the curtailment with PV: no BESS, no pile extension, and (within the LP's tolerance) no
+    # concentrate lost. Measured: 40 MW PV (the cap), 0 BESS, 0 t pile, about 0 t lost.
+    assert built["pv_mw"] == pytest.approx(C.PV_MAX_MW, rel=1e-3)          # at its cap
+    assert built["bess_mw"] == pytest.approx(0.0, abs=1e-3)
+    assert built["pile_t"] == pytest.approx(0.0, abs=1e-3)
+    assert built["lost_t"] < 1.0
 
 
 # ── restart, on the binary check's January week (it holds the first curtailment event) ──
