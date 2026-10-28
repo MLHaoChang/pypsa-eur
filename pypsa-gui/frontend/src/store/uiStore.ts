@@ -8,7 +8,7 @@ import type { SizingMode } from '../site3d/sizing'
 // live Results pane usable when the splitter is dragged to an extreme. Single
 // definition, shared with the rail's own width arithmetic: this store and
 // Results.tsx enforcing the same number independently is how they can drift.
-import type { FlowSectionId, FlowTarget } from '../api/flow'
+import type { FlowSectionId, FlowTarget, SitePart } from '../api/flow'
 import type { FlowReturn } from '../layout/flowNavigation'
 import { PANEL_SECTION, SECTION_OPEN, sectionForComponent } from '../layout/flowSections'
 import { RAIL_MIN_W } from '../pages/results/railWidth'
@@ -74,6 +74,7 @@ export type SidebarMode = 'expanded' | 'icon' | 'hidden'
 //   site       — 3D site view of one bus (pages/SiteCanvas.tsx; spike, see
 //                docs/superpowers/assessments/2026-09-28-3d-site-view-feasibility.md)
 export type CanvasView = 'blank' | 'satellite' | 'hybrid' | 'site'
+export interface SitePartSelection { kind: 'building' | 'target'; id: string }
 export type Theme = 'light' | 'dark'
 export type Density = 'comfortable' | 'compact'
 // Guided hides the navigation chrome the EH hub-design flow does not need;
@@ -653,6 +654,16 @@ interface UIStore {
   setSiteDraft: (d: Array<[number, number]>) => void
   activeSiteId: string | null
   setActiveSiteId: (id: string | null) => void
+  /** SC-01b: the Site 3D part shown (not a stepper; UI contract rule 5). */
+  sitePart: SitePart
+  setSitePart: (p: SitePart) => void
+  /** The selected building or target inside Site 3D, by stable id. */
+  sitePartSelection: SitePartSelection | null
+  setSitePartSelection: (s: SitePartSelection | null) => void
+  /** Request-then-scroll to the site coordinate field; its home clears it once shown. */
+  siteAnchorRequest: boolean
+  requestSiteAnchor: () => void
+  clearSiteAnchorRequest: () => void
   // 3D site view (Phase 2 E6): draw extendable assets at their installed
   // size or at the optimum. Takes effect only while dispatch is fresh
   // (site3d/sizing.ts effectiveSizing). A view setting, not a mutation.
@@ -959,6 +970,13 @@ export const useUIStore = create<UIStore>((set, get) => ({
   setSiteDrawMode: (m) => set({ siteDrawMode: m }),
   setSiteDraft: (d) => set({ siteDraft: d }),
   setActiveSiteId: (id) => set({ activeSiteId: id }),
+  sitePart: 'map',
+  setSitePart: (p) => set({ sitePart: p }),
+  sitePartSelection: null,
+  setSitePartSelection: (sel) => set({ sitePartSelection: sel }),
+  siteAnchorRequest: false,
+  requestSiteAnchor: () => set({ siteAnchorRequest: true }),
+  clearSiteAnchorRequest: () => set({ siteAnchorRequest: false }),
   setSiteSizing: (m) => set({ siteSizing: m }),
   setSlidePanel: (requested) => {
     navigationChanged()
