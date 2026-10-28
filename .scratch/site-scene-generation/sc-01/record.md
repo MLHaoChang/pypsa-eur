@@ -33,7 +33,7 @@ GK B (session `01G7qCujXTFZ…`):
 
 | # | Condition | Proof |
 |---|---|---|
-| 1 | Project ACL on every route; the native edit lock before any read on every write; the per-project mutex across check and write | `test_site_scene_routes.py::test_a_caller_without_project_access_gets_404_on_every_route`, `::test_every_write_route_409s_under_a_foreign_lock_before_any_effect`, `::test_anchor_and_scene_writes_409_under_a_foreign_lock`; `test_project_route_acl_policy`, `test_write_surface_lock_policy`. Production has no viewer/editor role: access is `project_acl` yes/no (404, never 403), and read-only means another user's lock. Raised with GK B. |
+| 1 | Project ACL on every route; the native edit lock before any read on every write; the per-project mutex across check and write | GK B accepted the reading (no viewer/editor role in production; adding one is out of scope). (a) `test_project_route_acl_policy` plus `test_site_scene_routes.py::test_a_caller_without_project_access_gets_404_on_every_route` (all 8 routes); (b) `::test_every_write_route_409s_under_a_foreign_lock_before_any_effect` and `::test_anchor_and_scene_writes_409_under_a_foreign_lock` (PUT anchor, adopt, proposals, apply, cancel), plus `test_write_surface_lock_policy`; (c) `::test_concurrent_applies_have_one_winner`, `::test_anchor_put_is_compare_and_swap`, `::test_a_cancel_during_apply_does_not_relabel_the_commit`. |
 | 2 | No scene or anchor field reaches a network input | `::test_anchor_and_scene_writes_leave_the_network_input_fingerprint` (`_network_input_fingerprint(exact=True)` and the `network.nc` bytes unchanged); `::test_generate_preview_then_apply_writes_no_network` |
 | 3 | Error kinds classified | `contract.ERROR_STATUS`: one status per kind, and an unclassified kind raises (`test_site_scene_proto_isolation`). They are route kinds and never reach a `tool_error` frame, so `tool-error-kinds.json` is unchanged (D02) and `test_tool_error_kind_manifest` passes. |
 | 4 | Proposal map: owner and project keyed, bounded by count, bytes and TTL; apply re-checks the hash and revision under the lock | `::test_a_cleared_map_answers_410`, `::test_apply_refuses_inputs_other_than_the_reviewed_ones`, `::test_another_projects_or_users_proposal_is_refused`, `::test_the_map_is_bounded_by_count`, `::test_the_map_is_bounded_by_age` |
@@ -56,10 +56,20 @@ UX (session `01G7qCuipbbh…`):
 
 - **RED.** [evidence/routes-red.txt](evidence/routes-red.txt): 30 of 30 route tests failed before any route existed. The unmounted GET answered the SPA catch-all's 503.
 - **GREEN** (run from `pypsa-gui/backend`, Python 3.12):
-  - `tests/test_site_scene_routes.py`: 41 passed;
-  - `test_site_scene_copies.py`: 11;
+  - `tests/test_site_scene_routes.py`: 46 passed;
+  - `test_site_scene_copies.py`: 12;
   - `test_site_scene_hooks.py`: 3;
   - `test_site_scene_proto_*.py`: 126.
+
+## Spec-review fixes (mp-code-review)
+
+| Finding | Fix | Test |
+|---|---|---|
+| A proposal for a Site with no boundary | `proposals.create` refuses it as `invalid_input` with `REASON_NO_BOUNDARY` | `::test_a_proposal_for_a_site_without_a_boundary_is_refused` |
+| Apply after the map lost a committed proposal answered 410 | apply reads the committed receipt back from the chain first | `::test_a_committed_apply_reads_back_its_receipt_after_the_map_is_lost` |
+| Cancel could land between apply's check and its commit | apply checks and claims (`applying`) under `proposals._lock`; a failed apply releases the claim | `::test_a_cancel_during_apply_does_not_relabel_the_commit`, `::test_a_failed_apply_releases_its_claim` |
+| `anchor_moved` (D01) was not reported | the `/flow` scene block lists Sites more than 1000 m from the anchor | `::test_flow_lists_sites_more_than_1000_m_from_the_anchor` |
+| An I/O error mid-copy of `sites/` lost the destination | `_swap_in_sites` builds a temp sibling and swaps it in | `test_site_scene_copies.py::test_an_io_error_building_sites_keeps_the_prior_destination` |
 
 ## Decisions taken in SC-01a
 
