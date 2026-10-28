@@ -33,7 +33,7 @@ units:
   ticket: issues/02-editable-native-scene.md
   depends_on: [SC-00-N]
   decision_gates: []
-  status: not_started
+  status: in_progress  # SC-01a backend in review; SC-01b UI after it (sc-01/record.md)
   accepted_evidence: null
   primary_cases: [V01, V02, V03, V04, V05, V06, V07, V08, V09, V10, V45, V46, V47, V48, V49, V51, V52, V53, V54,
     V55, V56, V58, V59, V60, V73, V74, V75, V76, V77, V78, V79, V84, V90]

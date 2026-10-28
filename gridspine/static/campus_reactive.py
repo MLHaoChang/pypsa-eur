@@ -234,9 +234,9 @@ def ibr_q_capability(campus, profile: dict):
 
 
 #: The basis of every ``ibr_q_curve`` row.
-IBR_CURVE_LABEL = ("screening at unit terminals: sqrt(S^2 - P^2) per inverter against the profile's "
-                   "q_capability_unit x P_n at each checked active power; collector and transformer reactive "
-                   "losses are not counted")
+IBR_CURVE_LABEL = ("Screening at unit terminals: √(S² − P²) per inverter against the grid code's per-unit "
+                   "curve × rated P, at each checked active power; collector and transformer reactive losses are "
+                   "not included.")
 #: The columns of ``ibr_q_curve``'s table.
 IBR_CURVE_COLUMNS = ("unit", "kind", "p_pu", "p_mw", "s_mva", "q_min_req_mvar", "q_max_req_mvar", "available_mvar",
                      "shortfall_mvar", "status", "detail", "clause", "source", "basis")

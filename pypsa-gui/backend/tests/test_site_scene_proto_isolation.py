@@ -1,10 +1,10 @@
 """
-SC-00 N "disabled from production" (execution-guide.md, Contract freeze) and
-the D02 route table against the current app.
+SC-00 N isolation, as SC-01a left it, and the D02 route table against the app.
 
-No router, service, harness, catalogue or app module imports the prototype, and
-none of the frozen SC-01 scene routes is mounted yet or collides with a
-mounted one.
+SC-01a promoted the frozen contract modules to `services/site_scene/`; the
+prototype package keeps aliases so its tests run against production code. No
+production module imports the prototype, and every frozen SC-01 scene route is
+mounted exactly once, with chat disposition "none".
 """
 from __future__ import annotations
 
@@ -31,14 +31,16 @@ def _shape(path: str) -> str:
     return re.sub(r"\{[^}]+\}", "{}", path)
 
 
-def test_frozen_routes_are_not_mounted_and_do_not_collide():
+def test_frozen_routes_are_mounted_exactly_once():
     from main import app
 
     paths = app.openapi()["paths"]
-    mounted = {(m.upper(), _shape(path)) for path, ops in paths.items() for m in ops}
+    mounted = [(m.upper(), _shape(path)) for path, ops in paths.items() for m in ops]
     for route in contract.ROUTES:
-        assert (route["method"], _shape(route["path"])) not in mounted, route
+        assert mounted.count((route["method"], _shape(route["path"]))) == 1, route
         assert route["chat"] == "none"
+    # The deferred rows (sources: SC-06; exports/artifacts: SC-04) stay unmounted.
+    assert not any("/scene/sources" in p or "/scene/exports" in p or "/scene/artifacts" in p for p in paths)
     # The legacy sites routes the guard wraps are the ones that exist today.
     assert ("GET", "/api/projects/{}/sites") in mounted and ("PUT", "/api/projects/{}/sites") in mounted
 

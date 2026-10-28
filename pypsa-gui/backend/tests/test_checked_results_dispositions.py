@@ -30,8 +30,10 @@ SENTINEL = 987654.321
 CATALOGUE = sorted({t["name"] for t in TOOLS})
 
 
-def test_checked_turn_runs_exactly_three_tools():
-    assert assurance.CHECKED_TOOLS == {"get_component", "ui_open_panel", "update_component"}
+def test_checked_turn_runs_exactly_four_tools():
+    assert assurance.CHECKED_TOOLS == {
+        "get_component", "list_components", "ui_open_panel", "update_component"
+    }
     assert assurance.CHECKED_TOOLS <= set(CATALOGUE)
 
 
