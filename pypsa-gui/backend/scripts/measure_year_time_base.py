@@ -4,6 +4,7 @@ Not part of the test suite: the year solve may take minutes. Run from pypsa-gui/
 
     python scripts/measure_year_time_base.py                    # both bases, each in its own process
     python scripts/measure_year_time_base.py year --ipm --timeout 1800
+    python scripts/measure_year_time_base.py week year --no-uc     # process units as plain LP (no UC rows)
 
 `--ipm` sets the app's `solver_options` {"solver": "ipm"} (HiGHS interior point; the app's default is HiGHS'
 choice, dual simplex here). Each base runs in a child process; the parent reports the child's peak RSS and wall
@@ -55,7 +56,7 @@ def _profiles(index: pd.DatetimeIndex) -> dict[str, np.ndarray]:
     return {"pv": pv, "wind": wind, "price": price}
 
 
-def build(base: str) -> pypsa.Network:
+def build(base: str, uc: bool = True) -> pypsa.Network:
     import eh_site as S
 
     index = (S.SNAPSHOTS if base == "week" else pd.date_range("2030-01-01", periods=8760, freq="h"))
@@ -81,11 +82,13 @@ def build(base: str) -> pypsa.Network:
     n.add("Load", "shipments", bus="conc", p_set=pd.Series(ship, index))
     # Process units: electricity in on bus0, product out on bus1, ore drawn on bus2 (mills).
     n.add("Link", "crusher", bus0="mv", bus1="ore", p_nom=12.0, efficiency=200.0 / 12.0,
-          committable=True, p_min_pu=0.4, min_up_time=4, min_down_time=4, start_up_cost=500.0)
+          **(dict(committable=True, p_min_pu=0.4, min_up_time=4, min_down_time=4, start_up_cost=500.0)
+             if uc else {}))
     for mill in ("mill_1", "mill_2"):
         n.add("Link", mill, bus0="mv", bus1="conc", bus2="ore", p_nom=18.0, efficiency=40.0 / 18.0,
-              efficiency2=-100.0 / 18.0, committable=True, p_min_pu=0.5, min_up_time=8, min_down_time=6,
-              start_up_cost=2000.0)
+              efficiency2=-100.0 / 18.0,
+              **(dict(committable=True, p_min_pu=0.5, min_up_time=8, min_down_time=6, start_up_cost=2000.0)
+                 if uc else {}))
     n.links["eh_process"] = n.links.index.isin(["crusher", "mill_1", "mill_2"])
     n.add("Store", "stockpile", bus="ore", e_nom=8000.0)
     n.add("Store", "shed", bus="conc", e_nom_extendable=True, capital_cost=40.0, e_nom_max=60_000.0)
@@ -113,13 +116,13 @@ def build(base: str) -> pypsa.Network:
                            candidates=candidates, time_base=base)
 
 
-def measure(base: str, ipm: bool = False) -> dict:
+def measure(base: str, ipm: bool = False, uc: bool = True) -> dict:
     import highspy
     from services.solver_service import SolverConfig, run_simulation
     from services.validation_service import has_errors, validate_for_run
 
     t0 = time.perf_counter()
-    n = build(base)
+    n = build(base, uc)
     build_s = time.perf_counter() - t0
     cfg = SolverConfig(solver_name="highs", multi_investment_periods=True,
                        solver_options={"solver": "ipm"} if ipm else {})
@@ -158,15 +161,18 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("bases", nargs="*", default=["week", "year"])
     ap.add_argument("--ipm", action="store_true")
+    ap.add_argument("--no-uc", action="store_true", help="process units not committable: a plain LP")
     ap.add_argument("--timeout", type=float, default=2700.0)
     ap.add_argument("--child", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args()
     logging.disable(logging.WARNING)
     if args.child:
-        print(json.dumps({**measure(args.bases[0], args.ipm), "solver_options": "ipm" if args.ipm else "app default"}))
+        print(json.dumps({**measure(args.bases[0], args.ipm, not args.no_uc),
+                          "solver_options": "ipm" if args.ipm else "app default", "uc": not args.no_uc}))
     else:
         for b in args.bases:
-            cmd = [sys.executable, __file__, b, "--child", *(["--ipm"] if args.ipm else [])]
+            cmd = [sys.executable, __file__, b, "--child", *(["--ipm"] if args.ipm else []),
+                   *(["--no-uc"] if args.no_uc else [])]
             t0 = time.perf_counter()
             try:
                 out = subprocess.run(cmd, capture_output=True, text=True, cwd=BACKEND, timeout=args.timeout)
