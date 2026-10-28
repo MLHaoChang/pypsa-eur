@@ -70,6 +70,12 @@ def status_kind(text):
     return kinds.get(word, "triage"), False
 
 
+def num_key(text):
+    """``4`` -> ``04``, ``04b`` -> ``04b``: the number as written, zero-padded."""
+    m = re.match(r"(\d+)([a-z]?)$", text, re.I)
+    return f"{int(m.group(1)):02d}{m.group(2).lower()}"
+
+
 def blockers_of(lines, status):
     """(refs, free text): per item of ``Blocked by:`` a leading issue number
     (``NN``, ``NN–MM``) or a tag such as ``RP-04`` (as ``tag:RP-04``), plus
@@ -79,9 +85,13 @@ def blockers_of(lines, status):
     if not re.match(r"(none|—|-|n/a)\b", raw, re.I) and raw:
         for item in re.split(r"[;,]|\bplus\b", raw):
             item = item.strip()
-            m = re.match(r"(\d{1,3})(?:\s*[–-]\s*(\d{1,3}))?(?![\w/#-])", item)
-            if m:
-                lo, hi = int(m.group(1)), int(m.group(2) or m.group(1))
+            m = re.match(r"(\d{1,3})([a-z]?)(?:\s*[–-]\s*(\d{1,3}))?(?![\w/#-])", item)
+            if m and m.group(2) and m.group(3):
+                free.append(item)
+            elif m and m.group(2):
+                nums.append(f"{int(m.group(1)):02d}{m.group(2)}")
+            elif m:
+                lo, hi = int(m.group(1)), int(m.group(3) or m.group(1))
                 nums += [f"{n:02d}" for n in range(lo, hi + 1)]
             elif item and not re.match(r"(none|—)", item, re.I):
                 tags = re.findall(r"\b[A-Za-z]{1,4}-\d{1,3}\b", item.split("(")[0])
@@ -89,7 +99,7 @@ def blockers_of(lines, status):
                     nums += [f"tag:{t.upper()}" for t in tags]
                 else:
                     free.append(item)
-    nums += [f"{int(m):02d}" for m in re.findall(r"still blocked by (\d{1,3})", status, re.I)]
+    nums += [num_key(m) for m in re.findall(r"still blocked by (\d{1,3}[a-z]?)\b", status, re.I)]
     return sorted(set(nums)), free
 
 
@@ -106,7 +116,7 @@ def named_files(text):
 def load_issues(root):
     issues = {}
     for path in sorted(root.glob(".scratch/*/issues/*.md")):
-        m = re.match(r"(\d+)-", path.name)
+        m = re.match(r"(\d+[a-z]?)-", path.name)
         if not m:
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -121,7 +131,7 @@ def load_issues(root):
         issues[path.relative_to(root).as_posix()] = {
             "path": path.relative_to(root).as_posix(),
             "effort": path.parts[-3],
-            "num": f"{int(m.group(1)):02d}",
+            "num": num_key(m.group(1)),
             "title": title,
             "kind": kind,
             "pending": pending,
@@ -157,7 +167,7 @@ def in_session(issue, text):
     stem = Path(issue["path"]).stem
     if stem in text or issue["path"] in text:
         return True
-    pair = rf"{re.escape(issue['effort'])}[\s/#:._-]+0*{int(issue['num'])}\b"
+    pair = rf"{re.escape(issue['effort'])}[\s/#:._-]+0*{issue['num'].lstrip('0') or '0'}\b"
     return bool(re.search(pair, text, re.I))
 
 

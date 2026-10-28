@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import logging
@@ -4380,9 +4381,30 @@ def get_sites(
     try:
         # A scene-enabled Site is projected from its pointed generation (D03);
         # every other Site, and a project with none, reads sites.json as before.
-        return scene_store.project_sites(src)
+        doc = scene_store.project_sites(src)
     except PermissionError as exc:
         raise _access_denied(src / site_service.SITES_FILE) from exc
+    return _bound_sites(src, doc)
+
+
+def _bound_sites(src: pathlib.Path, doc: dict) -> dict:
+    """
+    The open project's document as its network sees it (D06): an entry whose
+    component instance is gone is hidden and listed in `unbound_keys`. Another
+    project's document is returned as stored. Read-only: binding a new key is
+    the PUT's job.
+    """
+    from services import site_bindings
+    from services.pypsa_service import PyPSAService
+    from services.site_scene import store as scene_store
+
+    n = site_bindings.open_network(src)
+    if n is None:
+        return doc
+    enabled = scene_store.enabled_site_ids(src)
+    owned = site_bindings.owned_footprints(src, enabled)
+    with PyPSAService.get_lock():
+        return site_bindings.project_view(doc, n, enabled, owned)
 
 
 @router.put("/{name}/sites")
@@ -4398,7 +4420,7 @@ def put_sites(
     the canvas writes on drag-settle). The one side effect: a `sites/<id>/`
     context cache whose site is no longer in the document is removed.
     """
-    from services import project_registry, site_service
+    from services import project_registry, site_bindings, site_service
     from services.site_scene import store as scene_store
 
     dest, name = _resolve_project_src(name, db, user)
@@ -4414,9 +4436,17 @@ def put_sites(
     # PUT that would change or drop it, or a footprint it owns, is refused
     # (409 scene_managed_site), whatever the client says. The guard, the write
     # and the prune run under the scene mutex, so an adoption cannot land
-    # between the check and the write.
-    with scene_store.project_lock(dest):
+    # between the check and the write. When this is the open project, the
+    # network lock is taken first: the component delete and rename hooks hold
+    # it when they take the scene mutex, so one order everywhere (D06).
+    with contextlib.ExitStack() as held:
+        n = site_bindings.open_network(dest)
+        if n is not None:
+            held.enter_context(PyPSAService.get_lock())
+            n = site_bindings.open_network(dest)       # still open, under the lock
+        held.enter_context(scene_store.project_lock(dest))
         scene_store.guard_legacy_put(dest, sites)      # SceneError -> main's handler
+        sites = _stamp_sites(dest, sites, n)
         try:
             site_service.write_sites(dest, sites)
         except site_service.SitesTooLarge as exc:
@@ -4428,6 +4458,22 @@ def put_sites(
         except OSError:
             logger.warning("sites: orphan context prune failed for %s", name, exc_info=True)
     return {"saved": name, "sites": len(sites["sites"])}
+
+
+def _stamp_sites(dest: pathlib.Path, sites: dict, n) -> dict:
+    """
+    PUT under the network lock (when `n` is the open network) and the scene
+    mutex: bind new keys to the open network's instances and keep hidden stale
+    entries (D06).
+    """
+    from services import site_bindings, site_service
+    from services.site_scene import store as scene_store
+
+    sites = {k: v for k, v in sites.items() if k != "unbound_keys"}
+    if n is None:
+        return sites
+    on_disk = site_service.read_sites(dest)
+    return site_bindings.stamp(sites, on_disk, n, scene_store.enabled_site_ids(dest))
 
 
 def _site_context_dir(dest: pathlib.Path, site_id: str) -> tuple[pathlib.Path, dict]:

@@ -59,7 +59,7 @@ def test_refine_writes_a_new_pending_artifact(client, project):
     assert body["job_id"] != gen["job_id"]
     assert [r["op"] for r in body["refinements"]] == ["scale_window", "scale_peak_to"]
     assert body["stats"]["plant"][1]["peak_after"] == pytest.approx(60.0)
-    assert body["stats"]["plant"][1]["load_factor_basis"] == "hourly mean / peak, source year"
+    assert body["stats"]["plant"][1]["load_factor_basis"] == "weighted, model snapshots"
     assert body["provenance"].endswith("user-refined")
 
 
@@ -103,6 +103,26 @@ def test_the_card_shows_old_and_new_and_the_receipt_verifies(client, project, bo
         chat_tools.DISPATCHERS["apply_generated_profile"](**args)
         receipt = edit_card.receipt(card, args)
     assert receipt["outcome"] == "verified"
+
+
+def test_refine_and_card_report_one_load_factor_under_uneven_weights(client, project, bound_ctx):
+    with bound_ctx(client):
+        from services.pypsa_service import PyPSAService
+        n = PyPSAService.get_active_context().network
+        n.snapshot_weightings.loc[:, :] = 1.0
+        n.snapshot_weightings.iloc[::2, :] = 3.0
+        gen = chat_tools.DISPATCHERS["generate_load_profile"](
+            project_id=project, archetype="industrial", loads=["plant"], year=2025,
+            params={"shifts": 2, "peak_mw": 80.0, "timezone": "Europe/Berlin"})
+        refined = chat_tools.DISPATCHERS["refine_generated_profile"](
+            project_id=project, job_id=gen["job_id"], ops=_OPS)
+        args = {"project_id": project, "job_id": refined["job_id"],
+                "component": "plant"}
+        card = edit_card.preview("apply_generated_profile", args)
+    row = next(r for r in card["rows"] if r["field"] == "p_set.load_factor")
+    stat = refined["stats"]["plant"][-1]
+    assert stat["load_factor_basis"] == "weighted, model snapshots"
+    assert stat["load_factor"] == pytest.approx(row["new"], abs=1e-6)
 
 
 def test_undo_reverts_an_applied_refinement(client, project):
