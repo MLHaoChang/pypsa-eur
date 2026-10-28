@@ -266,3 +266,10 @@ Branch `claude/lc03-retained-prices` (stacked on PR-F). Plan GO from GK B
   x 8,760 h + 200 driver rows under the budget, Compare parity overall and per
   carrier, oj-grid hand oracle 50 EUR/MWh at every bus with B1/B2 out of the
   load weighting, current = kept digest, argument refusal, legacy refusal).
+- Mutation: weighting by `generators` instead of `objective` fails the
+  load-weighting and Compare-parity tests; not trimming price_drivers rows
+  fails the worst case (51,035 B > 12,288 B).
+- Commands: `pytest tests/test_retained_prices.py tests/test_retained_dispatch.py
+  tests/test_result_views.py tests/test_compare_facade_surface.py` (148) and
+  `tests/test_retained_summary.py tests/test_retained_loadflow.py
+  tests/test_loadflow_navigation.py tests/test_openai_tool_selection.py` (419) pass.
