@@ -86,6 +86,8 @@ def test_the_kept_section_is_the_api_read_at_completion(repriced, client):
     assert {'name': 'loadflow', 'available': True} in detail['sections']
     assert {'name': 'results_capacity', 'available': True} in detail['sections']
     for kind, section in retained_results.KEPT_KINDS.items():
+        if retained_results.adapter(section).digest:   # a digest, not the read (test_retained_dispatch)
+            continue
         kept = run_evidence.get_run_evidence(repriced['newest']['run_id'], section)['data']
         assert kept[kind] == client.get(f'/api/results/{kind}').json()
 
@@ -112,10 +114,12 @@ def test_a_legacy_run_refuses_with_its_id(repriced):
 
 
 def test_a_kind_no_family_keeps_refuses_for_a_run(repriced):
-    out = chat_tools.get_results(result_kind='prices', run_id=repriced['older']['run_id'])
+    out = chat_tools.get_results(result_kind='curtailment', run_id=repriced['older']['run_id'])
     assert out['status'] == 'unavailable' and 'data' not in out
     assert out['unavailable_kind'] == 'historical_scope_mismatch'
-    assert out['kept_kinds'] == ['statistics', 'cost_breakdown', 'economics_by_carrier']
+    assert out['kept_kinds'] == ['statistics', 'cost_breakdown', 'economics_by_carrier',
+                                 'generators', 'storage_dispatch', 'prices', 'price_drivers',
+                                 'emissions']
 
 
 def test_a_capacity_run_without_its_section_refuses_with_its_id(repriced):

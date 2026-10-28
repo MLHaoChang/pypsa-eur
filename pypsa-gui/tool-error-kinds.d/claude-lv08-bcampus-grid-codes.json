@@ -1,0 +1,1 @@
+{"kinds": {"file_changed_since_read": {"surface": "inline", "why": "A whole-file write (campus file, grid-code draft) names the digest of the text the model read, and the file changed since; the model recovers in the same turn by reading the file again and redoing the change on the current text."}}}

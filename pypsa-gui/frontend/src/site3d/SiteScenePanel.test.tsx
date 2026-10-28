@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Proposal, SceneBuilding, SiteScene } from '../api/siteScene'
+import type { BuildingInputs, Proposal, SceneBuilding, SiteScene } from '../api/siteScene'
 
 const flowState: { flow: unknown; isPending: boolean } = { flow: null, isPending: false }
 vi.mock('../hooks/useProjectFlow', () => ({ useProjectFlow: () => flowState }))
@@ -55,6 +55,48 @@ describe('Site 3D scene panel', () => {
     expect(screen.getByTestId('scene-blocker-assign_native').textContent).toBe('Buildings only: configure model elements to map them › Loads')
   })
 
+  it('Model: with assign_native available on an enabled scene, the attachments panel replaces the blocker', async () => {
+    vi.mocked(siteSceneApi.getScene).mockResolvedValue(enabled([osm]))
+    const flow = flowState.flow as { scene: { actions: { action: string }[] } }
+    flow.scene.actions = flow.scene.actions.map(a => (a.action === 'assign_native' ? available('assign_native') : a))
+    useUIStore.setState({ sitePart: 'model' })
+    view()
+    await screen.findByTestId('association-panel')
+    expect(screen.queryByTestId('scene-blocker-assign_native')).toBeNull()
+    expect(screen.getByTestId('site-part-model-body').textContent).not.toContain('Not available yet')
+  })
+
+  it('the unbound banner offers › Attach again per placed key, opening the Model part to pick', async () => {
+    vi.mocked(siteSceneApi.getScene).mockResolvedValue({ ...enabled([osm]), unbound_keys: ['StorageUnit:bess'] } as SiteScene)
+    const flow = flowState.flow as { scene: { actions: { action: string }[] } }
+    flow.scene.actions = flow.scene.actions.map(a => (a.action === 'assign_native' ? available('assign_native') : a))
+    view()
+    const link = await screen.findByTestId('site-unbound-attach-StorageUnit:bess')
+    expect(screen.getByTestId('site-unbound').textContent).toContain('1 placed item is no longer in the model: the scene keeps its place until you attach it again')
+    expect(screen.getByTestId('site-unbound').textContent).toContain('bess · storage unit › Attach again')
+    expect(screen.getByTestId('site-unbound').textContent).not.toContain('StorageUnit:bess')
+    fireEvent.click(link)
+    expect(useUIStore.getState().sitePart).toBe('model')
+    const { useModelProposal } = await import('./useSiteScene')
+    expect(useModelProposal.getState().placementRebind).toEqual({ siteId: 'campus', key: 'StorageUnit:bess' })
+  })
+
+  it('the unbound banner counts in the plural for several placed items', async () => {
+    vi.mocked(siteSceneApi.getScene).mockResolvedValue({ ...enabled([osm]), unbound_keys: ['StorageUnit:bess', 'Generator:pv'] } as SiteScene)
+    view()
+    expect((await screen.findByTestId('site-unbound')).textContent).toContain('2 placed items are no longer in the model: the scene keeps their places until you attach them again')
+  })
+
+  it('the part body scrolls inside itself under the tabs, and is keyboard-focusable', async () => {
+    view()
+    const body = screen.getByTestId('site-part-body')
+    expect(body.getAttribute('role')).toBe('tabpanel')
+    expect(body.tabIndex).toBe(0)
+    expect(body.className).toContain('overflow-y-auto')
+    expect(body.className).toContain('max-h-[40vh]')
+    expect(body.contains(screen.getByRole('tablist'))).toBe(false)
+  })
+
   it('no mapped buildings: says so, and generates a proposed building', async () => {
     vi.mocked(propose).mockResolvedValue(proposal)
     view()
@@ -65,7 +107,7 @@ describe('Site 3D scene panel', () => {
     await screen.findByTestId('scene-proposal')
     const [, , siteId, action, inputs] = vi.mocked(propose).mock.calls[0]
     expect([siteId, action]).toEqual(['campus', 'generate_native'])
-    expect(inputs.greenfield).toHaveLength(1)
+    expect((inputs as BuildingInputs).greenfield).toHaveLength(1)
     expect(screen.getByTestId('scene-proposal').textContent).toContain('Preview: 1 building')
   })
 
@@ -95,8 +137,8 @@ describe('Site 3D scene panel', () => {
     await waitFor(() => expect(propose).toHaveBeenCalled())
     const [, , , action, inputs] = vi.mocked(propose).mock.calls[0]
     expect(action).toBe('edit_buildings')
-    expect(inputs.sources?.[0]).toMatchObject({ namespace: 'osm', source_id: '7', height_m: 14 })
-    expect(inputs.sources?.[0].ring).toHaveLength(4)
+    expect((inputs as BuildingInputs).sources?.[0]).toMatchObject({ namespace: 'osm', source_id: '7', height_m: 14 })
+    expect((inputs as BuildingInputs).sources?.[0].ring).toHaveLength(4)
   })
 
   it('a proposed building is corrected with its six numbers', async () => {

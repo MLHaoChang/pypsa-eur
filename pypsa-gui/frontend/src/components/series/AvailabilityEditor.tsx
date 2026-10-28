@@ -17,13 +17,14 @@ import { useState, type ReactNode } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Pencil, Play, Plus, Trash2 } from 'lucide-react'
 import { Btn, Seg } from '../PageKit'
-import { errorText, seriesApi, type PendingSeries } from '../../api/profiles'
+import { seriesApi, type PendingSeries } from '../../api/profiles'
 import { useUIStore } from '../../store/uiStore'
 import {
   openFlowTarget, openFlowTargetInPlace,
 } from '../../layout/flowNavigation'
 import {
-  CurrentSeriesLine, DisabledReason, INPUT, MeasuredFileTab, PendingCard, RefinePanel, type EditorMode,
+  CurrentSeriesLine, DisabledReason, INPUT, MeasuredFileTab, PendingCard, RefinePanel, GenerateError, ReplayToggle,
+  useReplay, type EditorMode,
 } from './SeriesKit'
 
 type Kind = 'maintenance' | 'must_run' | 'derating' | 'forced_outages'
@@ -141,9 +142,12 @@ export default function AvailabilityEditor({ project, component, componentType, 
       : floor ? null : 'Enter the derating floor to preview.'
   const ready = missing == null
 
+  const replay = useReplay(project, componentType,
+    kind === 'must_run' ? 'p_min_pu' : 'p_max_pu', component, kind)
   const generate = useMutation({
-    mutationFn: () => seriesApi.generateAvailability(project, {
+    mutationFn: (replayRefinements: boolean) => seriesApi.generateAvailability(project, {
       kind, components: [component], component_type: componentType, params: params(),
+      ...(replayRefinements ? {} : { replay_refinements: false }),
     }),
     onSuccess: setPending,
   })
@@ -271,15 +275,16 @@ export default function AvailabilityEditor({ project, component, componentType, 
           )}
 
           <div className="flex items-center gap-2">
-            <Btn variant="primary" onClick={() => generate.mutate()} disabled={!ready || generate.isPending}>
+            <Btn variant="primary" onClick={() => generate.mutate(replay.replay)} disabled={!ready || generate.isPending}>
               <Play size={12} /> Preview
             </Btn>
+            <ReplayToggle {...replay} />
             <DisabledReason reason={missing} />
           </div>
         </div>
       )}
 
-      {generate.error && <p className="text-[11px] text-red-600 mt-1" data-testid="editor-error">{errorText(generate.error)}</p>}
+      <GenerateError error={generate.error} onRetryWithoutOps={() => generate.mutate(false)} />
 
       {pending && kind !== 'forced_outages' && (
         <>

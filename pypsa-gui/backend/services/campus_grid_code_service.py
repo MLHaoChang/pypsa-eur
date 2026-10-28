@@ -551,6 +551,13 @@ def _pages_for(project, profile: dict):
 # extraction
 # --------------------------------------------------------------------------
 
+def extraction_disclosure() -> str:
+    """What an extraction sends and where, for the confirmation card (the harness
+    keeps vendor names out of its own code, so the card takes the sentence from here)."""
+    return (f"Sends the document to the configured extraction provider (Anthropic, model "
+            f"{_extraction_model()}): one API call, and a second only if the API refuses the first.")
+
+
 def _extraction_model() -> str:
     """The configured default model: the active LLM profile's when it is an
     Anthropic profile on the built-in key, else ``DEFAULT_MODEL``."""
@@ -809,11 +816,19 @@ def save_draft(project, profile_id: str, text: str) -> dict:
     draft_file = _inside(_drafts(project), f"{profile_id}.yaml")
     if not draft_file.is_file():
         raise HTTPException(status_code=404, detail=f"no draft grid-code profile {profile_id!r}")
+    return _save(project, profile_id, check_draft_text(profile_id, text))
+
+
+def check_draft_text(profile_id: str, text: str) -> dict:
+    """``save_draft``'s checks of the text without the write (the chat card runs
+    them at preview): the validated profile ``save_draft`` stores, or its refusal."""
+    if len(text.encode()) > MAX_PROFILE_BYTES:
+        raise HTTPException(status_code=413, detail=f"the profile is larger than {MAX_PROFILE_BYTES} bytes")
     try:
         spec = yaml.safe_load(text)
     except yaml.YAMLError as exc:
         raise HTTPException(status_code=422, detail=f"the profile is not valid YAML: {exc}")
-    return _save(project, profile_id, _validate(profile_id, spec))
+    return _validate(_profile_id(profile_id), spec)
 
 
 def _save(project, profile_id: str, validated: dict) -> dict:

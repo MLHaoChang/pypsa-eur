@@ -54,7 +54,7 @@ units:
   ticket: issues/03-bindings-and-placement.md
   depends_on: [SC-01, SC-07-foundation]
   decision_gates: [D06]
-  status: not_started
+  status: in_progress  # SC-02a backend in review; SC-02b UI next (sc-02/plan.md)
   accepted_evidence: null
   primary_cases: [V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V80, V81, V82, V83, V85, V86]
   additional_applicable_cases: [V02, V03, V04, V09, V45, V46, V47, V49, V50, V51, V54, V59, V60, V64, V65, V66,

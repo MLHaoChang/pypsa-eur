@@ -23,7 +23,7 @@ Design: [design.md](../design.md) §5, §6.2
 
 ## Acceptance criteria
 
-- [ ] LC-20's done-when: `oj-grid` clean returns no warnings; `oj-grid-bad` with one seeded defect per rule returns each finding traced to a fact; LC-T19 extra-claim injection is withheld.
+- [ ] LC-20's done-when: `oj-grid` clean returns no warnings; `oj-grid-bad` with one seeded defect per rule returns each finding traced to a fact. LC-T19 extra-claim withholding for plausibility findings depends on the assurance follow-up "Checked plausibility findings" (`.scratch/assistant-assurance/issues/10-metric-calculation-and-validity.md`), not on Codex K (GK B amendment on #851).
 - [ ] An infeasible eh_site fixture: triage reads run, ≤2 changes are applied, one re-solve; ledger rows carry `rule` and `round`.
 - [ ] A third round is refused; the run is `needs_user` with the failing rules.
 - [ ] A profile with `native:run_margin_loop` never starts an agent turn for that rule.
@@ -34,6 +34,6 @@ Design: [design.md](../design.md) §5, §6.2
 
 ## Likely files
 
-`pypsa-gui/backend/services/run_gates.py`, `pypsa-gui/backend/services/results_plausibility.py` (new), `pypsa-gui/backend/harness/runner.py`, `pypsa-gui/backend/harness/catalogue.py` (only if GK B picks the argument route), `pypsa-gui/backend/tests/test_results_plausibility.py` (new)
+`pypsa-gui/backend/services/run_gates.py` (the `plaus.*` adapters only), `pypsa-gui/backend/harness/runner.py`, new tests for the adapters. The rule set lives in `pypsa-gui/backend/services/results/plausibility.py`, owned by Codex K (#851); this issue must not create `services/results_plausibility.py`. The user-facing read is K's `get_results(result_kind="plausibility")` and `GET /api/results/plausibility`, with no new tool (GK B plan verdict on #851, TOOLSEL-1).
 
 ## Comments

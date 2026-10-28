@@ -271,9 +271,13 @@ def remove_asset_footprint_on_disk(project_dir: pathlib.Path | str | None, compo
 
     pdir = pathlib.Path(project_dir)
     try:
-        doc = read_sites(pdir)
-        if remove_asset_footprint(doc, component_class, name):
-            write_sites(pdir, doc)
+        # Under the scene mutex, like PUT /sites and every scene write, so no
+        # write is lost (SC-02a). A CRUD caller holds the network lock: the
+        # order stays network, then scene, and nothing below takes the network lock.
+        with scene_store.project_lock(pdir):
+            doc = read_sites(pdir)
+            if remove_asset_footprint(doc, component_class, name):
+                write_sites(pdir, doc)
     except (OSError, ValueError) as exc:
         log.warning("sites.json footprint cleanup failed for %s %r: %s", component_class, name, type(exc).__name__)
     # A scene-enabled Site drops the placement AND the footprint together.
@@ -292,9 +296,13 @@ def rename_component_on_disk(project_dir: pathlib.Path | str | None, component_c
 
     pdir = pathlib.Path(project_dir)
     try:
-        doc = read_sites(pdir)
-        if rename_component(_legacy_view(pdir, doc), component_class, old, new):
-            write_sites(pdir, doc)
+        # Under the scene mutex (SC-02a). The bus rename calls this after its
+        # network-lock block, the CRUD rename inside it; either way nothing
+        # below takes the network lock, so the order cannot invert.
+        with scene_store.project_lock(pdir):
+            doc = read_sites(pdir)
+            if rename_component(_legacy_view(pdir, doc), component_class, old, new):
+                write_sites(pdir, doc)
     except Exception as exc:  # noqa: BLE001 — best-effort by design
         log.warning("sites.json rename hook failed for %s %r→%r: %s", component_class, old, new, exc)
     _scene_hook("rename", scene_store.rename_component, pdir, component_class, old, new)

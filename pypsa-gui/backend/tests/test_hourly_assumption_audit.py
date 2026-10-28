@@ -58,6 +58,7 @@ ALLOWED: dict[str, tuple[int, str]] = {
                                     "— a unit, not a step (IC WP1.4a)"),
     "chat_tools.py": (2, "prose / output-budget guidance"),
     "harness/catalogue.py": (3, "tool descriptions (row counts, default hours)"),
+    "harness/sensitivity_comparison.py": (1, "HOURS_PER_YEAR = 8760 h/yr annualises; not a snapshot step"),
     "legacy_import.py": (1, "prose describing a legacy fixture"),
     "profile_gen/load_archetypes.py": (1, "an archetype is drawn on the source year's "
                                           "HOURS by design (load shapes are hourly only); "
@@ -156,6 +157,7 @@ def test_the_inventory_is_pinned():
     # TS 01 B3: profile_gen/load_upload.py (1) added.
     # TS 01 B1: profile_gen/load_archetypes.py (1) added.
     # G-a: profile_gen/compare.py (1) annualises weighted CF in calendar-year hours.
-    assert sum(c for c, _ in ALLOWED.values()) == 86
-    assert len(ALLOWED) == 45
+    # LC-18: harness/sensitivity_comparison.py (1) annualises in h/yr.
+    assert sum(c for c, _ in ALLOWED.values()) == 87
+    assert len(ALLOWED) == 46
     assert all(reason for _, reason in ALLOWED.values())

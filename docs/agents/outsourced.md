@@ -29,6 +29,8 @@ An outsourced app opens one PR from its `outsource/<slug>` branch, with a body t
 | #713 | Library gap research and implementation plan (19 tickets, LG-01…LG-19) | Codex | `claude/library-gap-implementation-plan` | PR body | — | draft; GK plan OK @1d79b630 with 9 conditions |
 | P | Five wording fixes: end-year refusal, screen notes without exceptions, motor-start digits, upload toasts' em dash, Guided destructive/execution card headers | Codex | `outsource/ui-wording-pack-2` | `.scratch/project-workflow/outsource/P-ui-wording-pack-2.md` | none | briefed 2026-10-28; starts after #827 and #838 merge |
 | Q | Core read tools always survive OpenAI's 128-tool cut; Network.remove signature pin; validate_network annotation; results_current wording | Codex | `outsource/tool-selection-pins` | `.scratch/harness/outsource/Q-tool-selection-pins.md` | none | briefed 2026-10-28; starts after #812 merges; GK B reviews |
+| S | Stale `Status:` lines, pack 2 (LC-17, LC-19, SC-00, LV08 and others); the pilot scorer reads `POLICY_VERSION` | Codex | `outsource/stale-status-pack-2` | `.scratch/coordination/outsource/S-stale-status-pack-2.md` | none | briefed 2026-10-28; starts now; CI for the docs, GK B for `pilot_evaluation.py` |
+| R | The assistant opens a named Guided card and a section of the grid-study and GridSpine panels (LC-14 items 4, 5) | Codex | `outsource/navigation-reach-2` | `.scratch/live-copilot/outsource/R-navigation-reach-2.md` | `.scratch/live-copilot/issues/14-navigation-reach.md` | briefed 2026-10-28; starts after #812 merges; GK B and UX review |
 
 I and G-a both edit `harness/catalogue.py` and the capability inventory: whichever merges second merges master and regenerates the inventory with `--write`, never by hand. H touches no file G-a or I touches.
 
@@ -39,3 +41,5 @@ Ordering: if C merges before B, B adds its one new kind (`task_step_retry_limit`
 Source: the PR #567 assessment, `.scratch/harness/pr-567-assessment.md`.
 
 P edits `eh_templates.py` (also #838's) and `grid_readiness.py` (also #827's), so it starts after both merge. Q edits `harness/providers/wiring.py` (also #812's) and one annotation line in `services/chat_tools.py`, so it starts after #812 merges and touches nothing else in `chat_tools.py`. P and Q share no file.
+
+S touches only `Status:`/`Progress:` lines under `.scratch/` (never the files with a live session, listed in its brief) plus `harness/pilot_evaluation.py` and its scoring test, so it shares no file with P, Q or R. R edits `harness/catalogue.py`, `services/chat_tools.py`, `harness/loop.py` and `uiNavigate.ts` (all also #812's), so it starts after #812 merges; it touches neither `wiring.py` nor the `validate_network` annotation, so it shares no line with Q.

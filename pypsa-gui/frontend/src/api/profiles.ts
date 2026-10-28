@@ -202,6 +202,11 @@ export interface LoadPreset {
 
 export interface SeriesStats {
   peak_mw?: number
+  /** The peak as a fraction of the point-of-connection link's p_nom (absent
+   *  with no connection link). */
+  peak_share_of_connection?: number
+  /** That link's display name. */
+  connection_link?: string
   annual_mwh?: number
   // What this model's snapshots will count (Σ value × weighting) — a sampled
   // template sees less than the year. null when apply could not align it.
@@ -273,6 +278,8 @@ export interface PendingSeries {
   unmatched?: string[]
   qa_warnings?: Array<{ column: string; code: string; message: string }>
   refinements?: Array<Record<string, unknown>>
+  /** The ops a generate replayed: the request's or the stored series' (TSG 06). */
+  replay?: { from: 'stored' | 'request'; ops: number }
   weeks?: Record<string, PreviewWeek>
   /** A guessed default (Generate defaults for all). */
   assumed?: boolean
@@ -304,6 +311,7 @@ export const seriesApi = {
 
   generateLoad: (project: string, body: {
     archetype: string; loads: string[]; params: Record<string, unknown>; year?: number
+    replay_refinements?: boolean
   }) => client.post<PendingSeries>(`${projectPath(project)}/loads/generate`, body).then(r => r.data),
 
   uploadLoad: (project: string, file: File, opts: {
@@ -333,12 +341,13 @@ export const seriesApi = {
 
   generateAvailability: (project: string, body: {
     kind: string; components: string[]; component_type: 'generators' | 'links'
-    params: Record<string, unknown>; year?: number
+    params: Record<string, unknown>; year?: number; replay_refinements?: boolean
   }) => client.post<PendingSeries>(`${projectPath(project)}/availability/generate`, body)
     .then(r => r.data),
 
   generateSeries: (project: string, body: {
     kind: string; components: string[]; params: Record<string, unknown>; year?: number
+    replay_refinements?: boolean
   }) => client.post<PendingSeries>(`${projectPath(project)}/series/generate`, body).then(r => r.data),
 
   /** What the component carries now for that attribute. */

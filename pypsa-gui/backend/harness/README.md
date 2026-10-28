@@ -1136,7 +1136,9 @@ only: no runner, no envelope, no loops.
 - **Gates** (`services/run_gates.py`). A closed registry (`FACTS`,
   `FACTS_VERSION`) maps each fact to one native reader and the key it reads;
   every gate result carries that source. Fail closed: a reader that raises
-  or reads None or NaN is `not_evaluated`, which fails a `block` rule.
+  or reads None or NaN is `not_evaluated`, which fails a `block` rule; so is
+  a reading the reader marks `NoEvidence` (state and reason kept, e.g.
+  `ic.counterfactual` reading `not_established` with the case's flags).
   `gate(rules, env)` takes the run project's context explicitly (`Env.ctx`;
   readers without a context argument run through `run_gates._on`, the turn
   cell cleared). A context of another project makes every rule
@@ -1548,3 +1550,19 @@ baseline_case_id selectors for their respective two-case plans. Two distinct
 cases of the same plan are allowed. The existing exact source/basis/digest export
 checks still apply. No strict checked-profile expansion or broader domain adapter
 is introduced. See `.scratch/chat-companion/issues/05b2-shared-two-case.md`.
+
+LC-18 compares a base with several sensitivities in one read.
+`compare_sensitivities(baseline_project_id, case_project_ids?, metrics?,
+rank_by?, rank_order?, compare_case?)` (`harness/sensitivity_comparison.py`)
+reads the saved base and up to 8 of its LC-17 cases (children with
+`sensitivity_case.json`) as the acting user, through the results-summary
+engines in `services/compare/`; a project the user cannot open is not found.
+It returns, per metric, each value, the signed delta (case − base) and delta %
+with the Compare view's label and unit; a case that is unsolved, out of date,
+changed since branching, or on another horizon, mode or solver settings
+(`experiment_comparison.basis_digests`) is listed in plain words with no
+deltas. `rank_by` gives a qualified preference or no defensible preference
+under a 0.1 % tie tolerance, with at most 12 `why` facts; `show` carries the
+existing Compare navigation, offered only. `export_sensitivity_comparison`
+writes the same report while its `comparison_sha256` is current. See
+`.scratch/live-copilot/issues/18-sensitivity-comparison.md`.

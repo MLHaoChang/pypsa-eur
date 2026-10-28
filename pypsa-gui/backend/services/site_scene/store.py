@@ -149,7 +149,8 @@ def read_scene(project_dir: pathlib.Path, site_id: str) -> dict[str, Any]:
     gen = _read_generation(project_dir, site_id, pointer)
     return {"state": "enabled", "site_id": site_id, "revision": pointer["revision"],
             "generation": pointer["generation"], "site": gen["site"], "buildings": gen["buildings"],
-            "asset_footprints": gen["asset_footprints"], "last_receipt": pointer["last_receipt"]}
+            "asset_footprints": gen["asset_footprints"], "associations": gen.get("associations", []),
+            "groups": gen.get("groups", []), "last_receipt": pointer["last_receipt"]}
 
 
 def legacy_site_digest(doc: dict[str, Any], site_id: str) -> str:
@@ -215,7 +216,7 @@ def _chain_receipt(project_dir: pathlib.Path, site_id: str, pointer: dict[str, A
     return None
 
 
-APPLY_KEYS = frozenset({"buildings", "placements", "asset_footprints"})
+APPLY_KEYS = frozenset({"buildings", "placements", "asset_footprints", "associations", "groups"})
 
 
 def apply(project_dir: pathlib.Path, site_id: str, proposal: dict[str, Any], expected_revision: int,
@@ -229,7 +230,8 @@ def apply(project_dir: pathlib.Path, site_id: str, proposal: dict[str, Any], exp
     """
     changes = proposal.get("changes") or {}
     if set(changes) - APPLY_KEYS:
-        raise SceneError("invalid_input", "A proposal may only change buildings, placements and asset footprints")
+        raise SceneError("invalid_input", "A proposal may only change buildings, placements, asset footprints, "
+                                          "associations and groups")
     with project_lock(project_dir):
         pointer = _read_pointer(project_dir, site_id)
         if pointer is None:
@@ -249,6 +251,9 @@ def apply(project_dir: pathlib.Path, site_id: str, proposal: dict[str, Any], exp
             gen["site"]["placements"] = copy.deepcopy(changes["placements"])
         if "asset_footprints" in changes:
             gen["asset_footprints"] = copy.deepcopy(changes["asset_footprints"])
+        for key in ("associations", "groups"):
+            if key in changes:
+                gen[key] = copy.deepcopy(changes[key])
         revision = pointer["revision"] + 1
         receipt = {"proposal_id": proposal["id"], "input_hash": proposal["input_hash"],
                    "revision": revision, "changed": sorted(changes)}
@@ -314,9 +319,13 @@ def rename_component(project_dir: pathlib.Path, component_class: str, old: str, 
             placements, fps = state["site"].get("placements") or {}, state["asset_footprints"]
             if old_key not in placements and old_key not in fps:
                 continue
+            swap = lambda k: new_key if k == old_key else k  # noqa: E731
             changes = {
-                "placements": {(new_key if k == old_key else k): v for k, v in placements.items()},
-                "asset_footprints": {(new_key if k == old_key else k): v for k, v in fps.items()},
+                "placements": {swap(k): v for k, v in placements.items()},
+                "asset_footprints": {swap(k): v for k, v in fps.items()},
+                # SC-02a: a placed item can be a group member or an association's feature.
+                "groups": [{**g, "members": [swap(m) for m in g["members"]]} for g in state["groups"]],
+                "associations": [{**a, "feature": swap(a["feature"])} for a in state["associations"]],
             }
             pid = f"rename:{old_key}->{new_key}@{state['revision']}"
             apply(project_dir, site_id, {"id": pid, "base_revision": state["revision"],

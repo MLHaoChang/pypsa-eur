@@ -1,6 +1,6 @@
 # P3: an hourly chronological year as a staged-template time base
 
-Status: ready-for-agent (triage 2026-10-28: 03 is done; `stage_network` is still week-only on master; gated, plan to GK A first)
+Status: done (2026-10-28: `stage_network(time_base="year")`, the inventory-cadence validator rule and the audit are built; the B measurement exceeded the 30-min budget, so 10 waits on the owner's choice)
 Type: task
 Blocked by: 03
 Gated: **yes** (solver: it changes the staged templates' time base and adds a validator rule)

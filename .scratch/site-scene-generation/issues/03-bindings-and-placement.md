@@ -3,7 +3,7 @@
 
 # SC-02 — multi-energy buildings, process complexes and equipment
 
-Status: needs-triage — specification proposed; not implemented
+Status: in-progress — SC-02a backend merged (#844, c86f572f); SC-02b UI merged (#859, 2d8779ca); open: group editing and detach UI (placement is one item per preview), see [../sc-02/record.md](../sc-02/record.md) follow-ups
 Type: task
 Dependencies: SC-01; SC-00 target-lifecycle contract
 Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c

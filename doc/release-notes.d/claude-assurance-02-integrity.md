@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A stored checked answer or its evidence is now shown as unavailable when its facts no longer match the current inputs (even if the record's checksum was rewritten), or when it was written under another checked-answer policy or evidence-adapter version.

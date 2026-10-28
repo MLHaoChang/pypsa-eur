@@ -26,8 +26,23 @@ from collections.abc import Callable
 from fastapi import HTTPException
 
 from services import run_evidence
+from services.results import dispatch_digest, prices_digest
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class Digest:
+    """A digest family's module (services/results/*_digest.py) on its adapter.
+
+    `build` digests the live network ({'status': 'ok', ...} or unavailable with
+    a reason); `for_kind` is one get_results kind's answer from a digest;
+    `fields` are what it keeps, named when a run_id read asks for more.
+    """
+
+    build: Callable[[], dict]
+    for_kind: Callable[[dict, str], Any]
+    fields: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -39,6 +54,9 @@ class Retained:
     read did not answer (no section is stored: the run then refuses).
     `refusal` is the unavailable_kind a past run without the section answers.
     `kinds` are the get_results kinds the section keeps (none for other reads).
+    `digest` is set when the section keeps a bounded digest rather than the
+    reads themselves; a run_id read of its kinds then answers that digest for
+    the current run too, so a run has one shape.
     """
 
     section: str
@@ -46,6 +64,7 @@ class Retained:
     refusal: str
     label: str
     kinds: tuple[str, ...] = ()
+    digest: Digest | None = None
 
 
 def _capture_loadflow(token: dict) -> dict | None:
@@ -59,6 +78,9 @@ def _capture_loadflow(token: dict) -> dict | None:
 
 SUMMARY_SECTION = 'results_summary'
 CAPACITY_SECTION = 'results_capacity'
+DISPATCH_SECTION = 'results_dispatch'
+PRICES_SECTION = 'results_prices'
+EMISSIONS_SECTION = 'results_emissions'
 
 
 def _capture_kinds(kinds: tuple[str, ...]) -> dict | None:
@@ -87,6 +109,41 @@ def _results_family(section: str, refusal: str, label: str, kinds: tuple[str, ..
     return Retained(section, lambda token: _capture_kinds(kinds), refusal, label, kinds)
 
 
+def _dispatch_digest() -> dict:
+    from services.pypsa_service import PyPSAService
+
+    return dispatch_digest.dispatch_digest(PyPSAService.get_network())
+
+
+def _prices_digest() -> dict:
+    """The Prices tab's reads: the prices digest, price_drivers as the route serves it."""
+    from routers.results import _result_df
+    from services import chat_tools
+    from services.pypsa_service import PyPSAService
+
+    drivers = chat_tools._payload_or_no_data(
+        'price_drivers', chat_tools._resolve_results_handler('price_drivers')(),
+        chat_tools._RESULTS_NO_DATA_MESSAGE)
+    return prices_digest.prices_digest(PyPSAService.get_network(), result_df=_result_df, price_drivers=drivers)
+
+
+def _digest_family(section: str, label: str, kinds: tuple[str, ...], build: Callable[[], dict],
+                   module) -> Retained:
+    return Retained(section, lambda token: _capture_digest(build),
+                    'historical_results_unavailable', label, kinds,
+                    Digest(build, module.for_kind, module.FIELDS))
+
+
+def _capture_digest(build: Callable[[], dict]) -> dict | None:
+    """A digest family's section, under the same rule as `_capture_kinds`."""
+    from services.workflow_tools import solve_freshness
+
+    if solve_freshness().get('results_current') is not True:
+        return None
+    out = build()
+    return out if out.get('status') == 'ok' else None
+
+
 ADAPTERS: tuple[Retained, ...] = (
     Retained('loadflow', _capture_loadflow,
              'historical_loadflow_unavailable', 'load flow'),
@@ -95,6 +152,12 @@ ADAPTERS: tuple[Retained, ...] = (
     # cost_breakdown, the Capacity Expansion tab's other read, is kept with Summary.
     _results_family(CAPACITY_SECTION, 'historical_results_unavailable', 'capacity results',
                     ('economics_by_carrier',)),
+    _digest_family(DISPATCH_SECTION, 'dispatch results', ('generators', 'storage_dispatch'),
+                   _dispatch_digest, dispatch_digest),
+    _digest_family(PRICES_SECTION, 'price results', ('prices', 'price_drivers'),
+                   _prices_digest, prices_digest),
+    _results_family(EMISSIONS_SECTION, 'historical_results_unavailable', 'emissions results',
+                    ('emissions',)),
 )
 
 # get_results kind -> the one section that keeps it.

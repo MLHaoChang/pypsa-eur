@@ -909,3 +909,24 @@ Policy version 1. Commit checked access under `network_guard` and then saved, so
 `test_access_revoked_during_commit_publishes_nothing` (membership/disabled × get_component/list_components × removed/stuck) wraps `records.save` to revoke right after the answer lands. It checks the record file first, then that the stream has no `answer_approved`, no token and no value, and that no log record carries a value or the draft. "stuck" makes the removal fail (`TimeoutError` from the lock): the refusal still ends the turn, the warning names only the record id, and `load()` refuses the leftover. Red/green: on master the 8 new cases are red, 11 / 19 overall (removed: the record is kept; stuck: nothing is withdrawn or logged); after the fix 19 / 19 (`python -m pytest -q -o addopts='' tests/assurance_acceptance/test_p1_revocation.py`). Mutants: removing the post-save re-check gives 8 red, with the record kept in the removed cases and no warning in the stuck cases; removing the OSError catch in `discard` gives 4 red, the stuck cases with no warning.
 
 Next runnable tracer: `get_timeseries` as the third checked read. REVOKE-KIND stays open.
+
+### 2026-10-28 — P1 tracer: A1.4 integrity (issue 02)
+
+Policy version 1. `test_p1_integrity.py`: 43 cases. On the base (#826 head) 22 fail, 21 pass; after the change 43 pass. The red cases were facts rewritten with a recomputed checksum (static, page and series kinds), records from another policy, schema or adapter version, and a malformed receipt (500 instead of 409).
+
+Mutants, one at a time, each red: `_require_current_facts` a no-op (13), no empty-facts check (3), no policy check (3), no version/adapter check (2), the page facts echoed instead of re-derived (2), no series facts check (3), no static facts check (7), no exception guard in `answer()` (3), no `evidence_ids` list check (1). One survives: dropping the registered-profile check for scoped results, because `scoped_calculate` already refuses an unregistered profile; the check stays as the explicit guard.
+
+Regressions: `tests/assurance_acceptance` 205 passed; `tests/test_*assur*.py` with the checked-answer pilot and dispositions: see the PR.
+
+Remaining for P1: A1.4-RETAINED (retained scoped results are still certified by an unkeyed hash; a server-keyed MAC on the envelope closes it), A1.3 historical as-of runs, A1.5 complete-source aggregates, A1.6/A1.7 validity and masks, the other `read_unvalidated` families, frontend `assurance_state`, SERIES-WINDOW, REVOKE-KIND.
+
+
+### 2026-10-28 — P1 tracer: A1.3 a completed run, checked as of its finish (issue 02)
+
+Policy version 1. `get_run_evidence` with an exact `run_id` is the fourth checked read (`run_metric_evidence`, `run-metrics/1`). Facts are the run's recorded metrics (`/<metric>`, `entity_id` = run id). The scope (kind, mode, `finished_at`, `unsaved_inputs`) is rebuilt from the manifest on every lookup. Failed, running, missing, malformed or unverifiable runs are refused before the handler with `run_not_checkable` (manifest `pypsa-gui/tool-error-kinds.d/claude-assurance-02-run-as-of.json`).
+
+`test_p1_run_as_of.py`: 38 cases; on master 25 of the first 36 fail and 11 pass (refusals that must stay refusals); after the change 38 pass. GK B (6) NOT OK @e4446459: a running or interrupted run was refused as "corrupt" (shape checks ran before the status check); the refusal test now asserts the status each message names (failed, running, interrupted, not found, corrupt), red on e4446459 for 3 of 5. Mutants, each red: no manifest digest on lookup (2), no fact re-derivation (1), no scope rebuild (3), no capture digest (1), no manifest shape check (1).
+
+Regressions: `tests/assurance_acceptance` with run-evidence, reference ladder, lv08 tools, inventory, dispositions, kinds manifest and JSON fragments: 898 passed, 6 skipped. `tests/test_*assur*.py` and the checked-answer pilot: 282 passed. `ChatPanel.manifest.test.tsx`: 458 passed.
+
+Remaining for P1: A1.5 complete-source aggregates, A1.6/A1.7 validity and masks, the other `read_unvalidated` families (run sections, `compare_project_runs`), frontend `assurance_state`, SERIES-WINDOW, REVOKE-KIND.

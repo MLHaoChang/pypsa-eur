@@ -102,6 +102,7 @@ CODE_SECTION: Final[dict[str, str]] = {
     "p_max_pu_above_one": "assets",
     "profile_and_outage_modelled": "assets",
     "storage_initial_ignored": "assets",
+    "inventory_cadence_needs_year": "assets",
     "storage_max_hours_invalid": "assets",
     "storage_soc_oob": "assets",
     "uc_start_cost_unweighted": "assets",

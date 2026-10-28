@@ -1,6 +1,6 @@
 import { AxiosError, AxiosHeaders } from 'axios'
 import { describe, expect, it } from 'vitest'
-import { sceneErrorCopy, sceneErrorWantsReload } from './siteScene'
+import { CONTEXT_UNREACHABLE_COPY, contextFailureToast, plainMessage, sceneErrorCopy, sceneErrorWantsReload } from './siteScene'
 
 const refused = (status: number, detail: Record<string, unknown>) => {
   const headers = new AxiosHeaders()
@@ -69,5 +69,59 @@ describe('sceneErrorCopy', () => {
 
   it('reads a network failure as no answer', () => {
     expect(sceneErrorCopy(new AxiosError('down', 'ERR_NETWORK'))).toBe('The server did not answer: check the connection and try again')
+  })
+})
+
+describe('SC-02 route detail codes', () => {
+  it('shows the server message for each model code, in house style', () => {
+    const cases: [number, string, string, string][] = [
+      [422, 'invalid_input', 'ambiguous_target', 'Several heat loads: choose one'],
+      [422, 'invalid_input', 'invalid_allocation', 'cooling_1 · load: shares total 85 %, not 100 %'],
+      [422, 'invalid_input', 'confirmation_required', 'Attach: choose the item and confirm'],
+      [422, 'invalid_input', 'unbound_target', 'pv · generator: this placement belonged to an item that was deleted or replaced: attach it again first'],
+      [422, 'invalid_input', 'not_roof_eligible', 'bess · storage unit: only solar panels go on a roof'],
+      [422, 'invalid_input', 'off_roof', 'pv · generator: not within the roof of building osm:7'],
+      [409, 'revision_conflict', 'target_changed', 'cooling_1 · load was replaced since you reviewed it: review again'],
+      [422, 'invalid_input', 'unknown_target', 'x · load: not in the model'],
+      [422, 'invalid_input', 'unsupported_target', 'l1 · link: only a process unit can be attached'],
+      [422, 'invalid_input', 'orphan_member', 'b9 is not a building, group or placed item'],
+      [422, 'invalid_input', 'cycle', 'Groups contain each other: a > b > a'],
+      [422, 'invalid_input', 'duplicate', 'cooling_1 · load is attached to osm:7 twice'],
+    ]
+    for (const [status, kind, code, message] of cases) {
+      expect(sceneErrorCopy(refused(status, { error_kind: kind, code, message }))).toBe(message)
+    }
+  })
+
+  it('a not-open project names the fix without a message', () => {
+    expect(sceneErrorCopy(refused(422, { error_kind: 'invalid_input', code: 'project_not_open' })))
+      .toBe('Open the project’s model to check attachments')
+  })
+
+  it('colon, not em dash; no Python quotes', () => {
+    expect(plainMessage("Load 'cooling_1' — not in the model")).toBe('Load cooling_1: not in the model')
+    expect(sceneErrorCopy(refused(422, { error_kind: 'invalid_input', code: 'unknown_target', message: "Load 'x' — gone" })))
+      .toBe('Load x: gone')
+  })
+
+  it('a code under another kind keeps that kind’s copy', () => {
+    expect(sceneErrorCopy(refused(409, { error_kind: 'project_locked', code: 'duplicate', message: 'x' })))
+      .toBe('Another user is editing this project: try again when they finish')
+  })
+})
+
+describe('site context footer (condition 8)', () => {
+  it('one fixed line, never the raw URL, error or env var', () => {
+    expect(CONTEXT_UNREACHABLE_COPY).toBe('Site context unavailable: the map data service could not be reached')
+    expect(CONTEXT_UNREACHABLE_COPY).not.toMatch(/overpass|https?:|ConnectError|PYPSAGUI/i)
+  })
+
+  it('the toast says the same plain line for an upstream failure, never the raw message', () => {
+    const raw = 'Overpass request to https://overpass-api.de/api/interpreter failed: ConnectError (set PYPSAGUI_OVERPASS_URL)'
+    expect(contextFailureToast(502, true, raw)).toBe(CONTEXT_UNREACHABLE_COPY)
+    expect(contextFailureToast(undefined, true, raw)).toBe(CONTEXT_UNREACHABLE_COPY)
+    // The project's own state: the server's words (a boundary too large), and no toast for a lock.
+    expect(contextFailureToast(422, false, 'The boundary is too large to fetch')).toBe('The boundary is too large to fetch')
+    expect(contextFailureToast(409, false, 'the project is locked or a solve is running')).toBeNull()
   })
 })

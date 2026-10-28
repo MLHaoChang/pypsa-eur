@@ -16,7 +16,7 @@
 // reduction; (3) with a specific period selected, both sides must read
 // `by_period[period]`, never fall back to `total`.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
@@ -409,5 +409,29 @@ describe('Task 18 — period selection', () => {
     await userEvent.click(screen.getByRole('button', { name: '2030' }))
     await waitFor(() => expect(screen.queryAllByText(/4\.00 M€/).length).toBeGreaterThan(0))
     expect(screen.queryAllByText(/12\.00 M€/).length).toBe(0)
+  })
+})
+
+// ── LC-18: a tab opened from chat is brought into view ───────────────────
+describe('LC-18 — Compare opened on a tab', () => {
+  it('scrolls the tab row so the requested tab shows, so the landing shows which tab opened', async () => {
+    const { useUIStore } = await import('../store/uiStore')
+    // jsdom has no layout: a 300 px row whose Economics tab sits at 600-680 px.
+    const proto = HTMLElement.prototype
+    const saved = ['offsetLeft', 'offsetWidth', 'clientWidth'].map(k => [k, Object.getOwnPropertyDescriptor(proto, k)] as const)
+    Object.defineProperty(proto, 'offsetLeft', { configurable: true, get() { return this.textContent === 'Economics' ? 600 : 0 } })
+    Object.defineProperty(proto, 'offsetWidth', { configurable: true, get() { return 80 } })
+    Object.defineProperty(proto, 'clientWidth', { configurable: true, get() { return 300 } })
+    try {
+      seedPicker('overview')
+      renderCompare()
+      await waitFor(() => expect(screen.queryAllByText(AA_ANCHOR.overview).length).toBeGreaterThan(0))
+      const row = screen.getByRole('button', { name: 'Economics' }).parentElement!
+      expect(row.scrollLeft).toBe(0)
+      act(() => useUIStore.getState().requestCompareNav({ tab: 'economics' }))
+      await waitFor(() => expect(row.scrollLeft).toBe(600 + 80 - 300))
+    } finally {
+      for (const [k, d] of saved) if (d) Object.defineProperty(proto, k, d)
+    }
   })
 })

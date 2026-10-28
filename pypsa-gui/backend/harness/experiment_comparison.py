@@ -26,13 +26,20 @@ def _basis(record, data):
         manifest = run_evidence._load_run(project_registry.project_dir(child), str(child.id), data['run_id'])
         if not manifest or ex._digest(manifest) != data['evidence_sha256']:
             raise ValueError()
-        n = saved.network
         return dict(mode=manifest['mode'], objective_basis='recorded_solver_objective',
-            window='full_prepared_horizon', objective_unit=data['objective_unit'],
-            snapshots_sha256=ex._digest(wt._exact_frame_json(n.snapshots.to_series().to_frame())),
-            weights_sha256=ex._digest([wt._exact_frame_json(n.snapshot_weightings),
-                wt._exact_frame_json(n.investment_period_weightings)]),
-            solver_config_sha256=ex._digest(goal_free_config(saved.solver_state['solver_config'])))
+            window='full_prepared_horizon', objective_unit=data['objective_unit'], **basis_digests(saved))
+
+
+def basis_digests(saved):
+    """The horizon, weights and solver settings a saved case was solved on
+    (shared with LC-18's sensitivity comparison)."""
+    from services import workflow_tools as wt
+    n = saved.network
+    return dict(
+        snapshots_sha256=ex._digest(wt._exact_frame_json(n.snapshots.to_series().to_frame())),
+        weights_sha256=ex._digest([wt._exact_frame_json(n.snapshot_weightings),
+            wt._exact_frame_json(n.investment_period_weightings)]),
+        solver_config_sha256=ex._digest(goal_free_config(saved.solver_state['solver_config'])))
 
 
 def _case(root, record):

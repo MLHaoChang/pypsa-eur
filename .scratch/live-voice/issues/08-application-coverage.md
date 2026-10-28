@@ -61,3 +61,21 @@ flattened app route and writes/checks `.scratch/live-voice/route-parity.json`: 4
 carries a `route_parity` summary and one `route-parity:needs-tool:<family>` blocker per family.
 CI: `.github/workflows/assistant-route-parity.yaml`. Tests: `tests/test_assistant_route_parity.py`.
 Slice B adds typed tools for the needs-tool rows; slice C does the rest and the issue-05 journeys.
+
+2026-10-27: Slice B-campus landed. The last 31 needs-tool rows (gridspine-campus) are covered:
+24 new tools calling their route handlers in-process (campus file, MILP status/start/cancel,
+grid-readiness limits, island report/cuts/GFM card, library reset, gridspine external dispatch and
+readback from uploads, and the 10 grid-code document/draft/confirm/publish/delete tools), and 7
+routes matched to existing tools once the parity scan follows `run_in_threadpool(service, ...)`.
+Owner decision GRIDCODE-CHAT-1 supersedes plans C10 and C12: confirm, publish, the deletes and the
+MILP start show a content card first (`harness/campus_cards.py`, `edit_card.CARDED_ACTIONS`); the
+campus file and grid-code drafts are whole-file writes that refuse a stale read
+(`file_changed_since_read`). route-parity.json: 0 needs-tool of 466 GUI routes. Tests:
+`tests/test_lv08_bcampus_tools.py`, `tests/test_assistant_route_parity.py`. Slice C (behavioral
+journeys on issue 05) remains; the full-coverage claim stays `not_established`.
+GK B plan-delta conditions a–f: every campus card's receipt reads the effect back (stored sha256,
+the limit's `code` source, the profile or document gone, the new MILP job and its basis settings),
+so a missing effect is `uncertain`; delete, publish, confirm and the MILP start say what they do in
+words; a file moved after the card is `edit_preview_stale` (also when a whole-file base check trips
+at confirm); both saves run the service's own YAML checks at preview (`check_campus_text`,
+`check_draft_text`); the extract card names the extraction provider call.
