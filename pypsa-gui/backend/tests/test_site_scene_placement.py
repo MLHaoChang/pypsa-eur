@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from tests.test_site_scene_associations import A, NAME, _apply, _detail, _get, _propose, _table, make_scene
+from services import site_service as ss
+from tests.test_site_scene_associations import A, NAME, _network, _apply, _detail, _get, _propose, _table, make_scene
 
 
 @pytest.fixture
@@ -82,7 +83,9 @@ def test_a_failed_placement_after_a_create_is_retried_without_a_second_create(cl
         _apply(client, p, ok=False)
     monkeypatch.undo()
     assert "Generator:pv_new" not in _get(client)["site"]["placements"]
+    uid = ss.read_sites(scene)["bindings"]["Generator:pv_new"]              # recorded before the failed commit
     _apply(client, p)                                                    # the retry: placement only
+    assert ss.read_sites(scene)["bindings"]["Generator:pv_new"] == uid      # the same instance, not a second
     assert [g["name"] for g in _table(client, "generators")].count("pv_new") == 1
     assert list(_get(client)["site"]["placements"]).count("Generator:pv_new") == 1
 
@@ -98,3 +101,21 @@ def test_a_visual_move_leaves_line_lengths_whatever_the_length_setting(client, s
     p = _propose(client, "place_existing", {"placements": {"Bus:B2": {"x": 60.0, "y": -50.0, "heading": 0}}})
     _apply(client, p)
     assert [row["length"] for row in _table(client, "lines") if row["name"] == "ln"] == [1.5]
+
+
+def test_a_stale_bound_placement_is_refused_until_the_user_rebinds_it(client, scene, install_network):
+    _apply(client, _propose(client, "place_existing", {"placements": {
+        "StorageUnit:bess": {"x": 60.0, "y": -50.0, "heading": 0}}}))
+    install_network(_network())                                          # a foreign network, same names ...
+    assert client.post(f"/api/projects/{NAME}", params={"force": True}).status_code == 200
+    move = {"placements": {"StorageUnit:bess": {"x": 61.0, "y": -50.0, "heading": 0}}}
+    r = _propose(client, "place_existing", move, ok=False)
+    assert r.status_code == 422 and _detail(r)["code"] == "unbound_target"   # never re-bound by name
+    r = client.post("/api/network/storage_units", json={"name": "bess2", "bus": "B1", "p_nom": 1.0})
+    assert r.status_code in (200, 201), r.text
+    _apply(client, _propose(client, "rebind", {"placement": "StorageUnit:bess", "confirmed": True,
+                                               "target": {"class": "StorageUnit", "name": "bess2"}}))
+    placed, bindings = _get(client)["site"]["placements"], ss.read_sites(scene)["bindings"]
+    assert "StorageUnit:bess2" in placed and "StorageUnit:bess" not in placed
+    assert placed["StorageUnit:bess2"]["x"] == 60.0                         # the same placement, re-keyed
+    assert "StorageUnit:bess" not in bindings and isinstance(bindings["StorageUnit:bess2"], str)

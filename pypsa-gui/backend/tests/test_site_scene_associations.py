@@ -128,8 +128,12 @@ def test_a_building_binds_one_load_per_carrier_in_native_units(client, scene):
     assert "cooling" in cooling[0]["reason"]
     _apply(client, p)
     got = _get(client)
-    bound = {a["name"]: a for a in _assoc(got, A)}
-    assert set(bound) == {"it", "heat_demand", "h2_offtake"}           # the unavailable row stores nothing
+    rows = _assoc(got, A)
+    missing = [a for a in rows if a["status"] == "unavailable"]
+    assert len(missing) == 1 and missing[0]["carrier"] == "cooling"     # kept so the panel can say why
+    assert missing[0]["name"] is None and missing[0].get("uid") is None
+    bound = {a["name"]: a for a in rows if a["status"] != "unavailable"}
+    assert set(bound) == {"it", "heat_demand", "h2_offtake"}
     assert all(a["status"] == "bound" for a in bound.values())
     assert bound["it"]["carrier"] == "AC" and bound["heat_demand"]["carrier"] == "heat"
     assert bound["it"]["unit"] == "MW"
@@ -453,3 +457,103 @@ def test_every_legacy_sites_write_holds_the_scene_mutex_and_never_the_reverse(cl
     assert r.status_code in (200, 204), r.text
     assert writes and all(writes), writes                                # every sites.json write under the mutex
     assert not inverted, inverted                                        # never the network lock under it
+
+
+# ── V12: the double-count finding is about electricity only ──
+
+def test_double_count_fires_for_an_electricity_load_on_another_ac_bus_and_not_for_heat(client, scene):
+    assert client.post("/api/network/buses", json={"name": "B2", "carrier": "AC"}).status_code in (200, 201)
+    assert client.post("/api/network/loads", json={"name": "l2", "bus": "B2", "p_set": 1.0}).status_code in (200, 201)
+    p = _propose(client, "bind_targets", {"associations": [
+        {"feature": A, "target": {"class": "Link", "name": "haber"}},
+        {"feature": A, "target": {"class": "Load", "name": "l2"}}], "groups": []})
+    assert [(f["code"], f["severity"], f["objects"]) for f in p["preview"]["findings"]] == [
+        ("double_counted_demand", "warn", ["Link:haber", "Load:l2"])]
+    p = _propose(client, "bind_targets", {"associations": [
+        {"feature": A, "target": {"class": "Link", "name": "haber"}},
+        {"feature": A, "target": {"class": "Load", "name": "heat_demand"}}], "groups": []})
+    assert p["preview"]["findings"] == []
+
+
+# ── V16: a rebind keeps every target's shares at 100 % ──
+
+def test_a_rebind_that_breaks_a_split_is_refused(client, scene):
+    _bind(client, [{"feature": A, "target": {"class": "Load", "name": "it"}, "weight": 0.4},
+                   {"feature": B, "target": {"class": "Load", "name": "it"}, "weight": 0.6}])
+    row = _assoc(_get(client), A)[0]
+    r = _propose(client, "rebind", {"association": row["id"], "target": {"class": "Load", "name": "L1"},
+                                    "confirmed": True}, ok=False)
+    assert r.status_code == 422 and _detail(r)["code"] == "invalid_allocation", r.text
+
+
+# ── Apply checks access and revision again (GK B condition 8) ──
+
+def test_a_stale_revision_refuses_and_writes_nothing(client, scene):
+    first = _propose(client, "bind_targets", {"associations": [
+        {"feature": A, "target": {"class": "Load", "name": "it"}}], "groups": []})
+    _bind(client, [{"feature": B, "target": {"class": "Load", "name": "L1"}}])
+    got = _get(client)
+    r = _apply(client, first, ok=False)
+    assert r.status_code == 409, r.text
+    assert _get(client)["revision"] == got["revision"] and _assoc(_get(client), A) == []
+
+
+def test_another_org_cannot_apply_a_prepared_bind(client, other_org_client, scene):
+    p = _propose(client, "bind_targets", {"associations": [
+        {"feature": A, "target": {"class": "Load", "name": "it"}}], "groups": []})
+    revision = _get(client)["revision"]
+    r = other_org_client.post(_url(f"/proposals/{p['id']}/apply"),
+                              json={"expected_revision": p["base_revision"], "input_hash": p["input_hash"]})
+    assert r.status_code == 404, r.text
+    assert _get(client)["revision"] == revision and _assoc(_get(client), A) == []
+
+
+def test_a_lock_taken_between_prepare_and_apply_refuses_and_writes_nothing(client, scene, _auth_db,
+                                                                          seeded_identity, second_identity,
+                                                                          project_row):
+    from services import project_locks
+
+    p = _propose(client, "bind_targets", {"associations": [
+        {"feature": A, "target": {"class": "Load", "name": "it"}}], "groups": []})
+    revision = _get(client)["revision"]
+    sites_before = (scene / "sites.json").read_bytes()
+    _engine, session_local = _auth_db
+    with session_local() as db:
+        project_locks.release_lock(db, project_row(NAME).id, seeded_identity["user_id"])
+        assert project_locks.acquire_lock(db, project_row(NAME).id, second_identity["user_id"]) is not None
+    try:
+        r = _apply(client, p, ok=False)
+        assert r.status_code == 409 and _detail(r)["error_kind"] == "project_locked", r.text
+    finally:
+        with session_local() as db:
+            project_locks.release_lock(db, project_row(NAME).id, second_identity["user_id"])
+            db.commit()
+    assert _get(client)["revision"] == revision and _assoc(_get(client), A) == []
+    assert (scene / "sites.json").read_bytes() == sites_before
+
+
+# ── lock order under real concurrency (GK B condition 1) ──
+
+@pytest.mark.parametrize("edit", ["rename", "delete"])
+def test_a_threaded_placement_apply_and_a_crud_edit_keep_both_sites_writes(client, scene, edit):
+    from concurrent.futures import ThreadPoolExecutor
+
+    _apply(client, _propose(client, "place_existing", {"placements": {
+        "Generator:gas": {"x": 70.0, "y": -40.0, "heading": 0}}}))
+    p = _propose(client, "place_existing", {"placements": {"StorageUnit:bess": {"x": 60.0, "y": -50.0, "heading": 0}}})
+
+    def crud():
+        if edit == "rename":
+            return client.put("/api/network/generators/gas", json={"name": "gas2", "bus": "B1"})
+        return client.delete("/api/network/generators/gas")
+
+    with ThreadPoolExecutor(2) as pool:
+        placing, editing = pool.submit(_apply, client, p), pool.submit(crud)
+        placing.result(timeout=60)
+        assert editing.result(timeout=60).status_code in (200, 204)
+    bindings = ss.read_sites(scene).get("bindings") or {}
+    placed = _get(client)["site"]["placements"]
+    assert "StorageUnit:bess" in bindings and "StorageUnit:bess" in placed, (bindings, placed)
+    assert "Generator:gas" not in placed, placed                         # the edit's scene write kept
+    if edit == "rename":                                                 # a delete leaves a dead binding
+        assert "Generator:gas2" in placed and "Generator:gas2" in bindings and "Generator:gas" not in bindings
