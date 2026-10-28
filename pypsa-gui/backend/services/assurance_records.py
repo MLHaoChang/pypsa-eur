@@ -162,8 +162,25 @@ def load(owner, record_id, kind):
             if kind == "answer"
             else "evidence_unavailable"
         )
-    authorize(owner, record.get("project_id"))
+    try:
+        authorize(owner, record.get("project_id"))
+    except HTTPException as refused:
+        # Revoked project access reads exactly like a record that never existed.
+        if refused.status_code == 404:
+            raise HTTPException(404, "Record not found") from None
+        raise
     return record
+
+
+def _finite(raw):
+    """The float of a finite real input, else None; bools and strings are not numbers."""
+    if isinstance(raw, bool) or not isinstance(raw, Real):
+        return None
+    try:
+        value = float(raw)
+    except (ValueError, TypeError, OverflowError):
+        return None
+    return value if math.isfinite(value) else None
 
 
 def _raw_facts(ctx, component_class, name):
@@ -173,15 +190,9 @@ def _raw_facts(ctx, component_class, name):
         unavailable("evidence_unavailable")
     facts = []
     for metric, unit in INPUT_METRICS[component_class].items():
-        raw = component.static.at[name, metric]
         # Missing data does not become zero or a fact.
-        if isinstance(raw, bool) or not isinstance(raw, Real):
-            continue
-        try:
-            value = float(raw)
-        except (ValueError, TypeError, OverflowError):
-            continue
-        if math.isfinite(value):
+        value = _finite(component.static.at[name, metric])
+        if value is not None:
             facts.append(
                 {
                     "path": "/" + metric,
@@ -247,6 +258,145 @@ def capture_input(owner, args, result):
     return record
 
 
+# The handler packs a page under its own MAX_PAGE_CHARS, so a page is a few
+# dozen rows; save() caps every record at 128 KiB and refuses a larger one.
+def pointer(*tokens):
+    """RFC 6901 JSON pointer; '~' and '/' in names cannot alias another path."""
+    return "".join(
+        "/" + str(t).replace("~", "~0").replace("/", "~1") for t in tokens
+    )
+
+
+def page_source_digest(ctx, component_class):
+    """What a page asserts: the project, the class's rows and its INPUT_METRICS.
+
+    Call under network_guard. Milliseconds, unlike the whole-network input
+    fingerprint, so a checked page does not hold the network lock for seconds.
+    """
+    static = ctx.network.components[component_class].static
+    metrics = [m for m in INPUT_METRICS[component_class] if m in static.columns]
+    return digest(
+        {
+            "project_id": ctx.project_uuid,
+            "component_class": component_class,
+            # repr keeps NaN, inf and float/int distinctions JSON would lose.
+            "rows": [
+                [str(name), *(repr(static.at[name, m]) for m in metrics)]
+                for name in static.index
+            ],
+        }
+    )
+
+
+def active_page_source_digest(component_class):
+    """Taken before list_components runs; capture keeps evidence only if unchanged."""
+    ctx = PyPSAService.get_active_context()
+    with network_guard():
+        return page_source_digest(ctx, component_class)
+
+
+def _certified(shown, raw):
+    """Exact numeric equality of a shown value with a finite raw input.
+
+    JSON has one number type, so an int shown for a float input of the same
+    value certifies; the stored fact is always the raw float. Bools, None,
+    strings and non-finite values never certify.
+    """
+    value = _finite(raw)
+    return (
+        type(shown) in (int, float)
+        and value is not None
+        and math.isfinite(shown)
+        and shown == value
+    )
+
+
+def capture_input_page(owner, args, result, digest_before):
+    """Evidence for exactly the rows one list_components page showed.
+
+    Rows are identified by name, never by position. The class source digest
+    taken before the handler must equal the one read here, so the handler's
+    rows and the raw values come from one input state.
+    """
+    ctx = PyPSAService.get_active_context()
+    component_class = args.get("component_class")
+    if (
+        component_class not in INPUT_METRICS
+        or digest_before is None
+        or not isinstance(result, dict)
+        or not ctx.project_uuid
+    ):
+        return None
+    items, total = result.get("items"), result.get("total_count")
+    if not isinstance(items, list) or not items or type(total) is not int:
+        return None
+    names = [row.get("name") if isinstance(row, dict) else None for row in items]
+    if any(not isinstance(n, str) for n in names) or len(set(names)) != len(names):
+        return None
+    authorize(owner, ctx.project_uuid)
+    with network_guard():
+        if ctx.solver_state.get("status") == "running":
+            return None
+        if page_source_digest(ctx, component_class) != digest_before:
+            return None
+        static = ctx.network.components[component_class].static
+        if any(n not in static.index for n in names):
+            return None
+        facts = []
+        for row, name in zip(items, names):
+            for metric, unit in INPUT_METRICS[component_class].items():
+                if metric not in static.columns:
+                    continue
+                raw = static.at[name, metric]
+                if _certified(row.get(metric), raw):
+                    facts.append(
+                        {
+                            "path": pointer(name, metric),
+                            "entity_id": name,
+                            "metric": metric,
+                            "value": float(raw),
+                            "unit": unit,
+                        }
+                    )
+        if not facts:
+            return None
+        offset = args.get("offset", 0)
+        if result.get("has_more") is not (offset + len(items) < total):
+            return None
+        record = {
+            "version": 1,
+            "record_kind": "evidence",
+            "evidence_id": str(uuid.uuid4()),
+            "owner_id": owner,
+            "project_id": ctx.project_uuid,
+            "org_id": ctx.org_id,
+            "source_kind": "configured_input",
+            "adapter_version": "static-input-page/1",
+            "scope": {
+                "component_class": component_class,
+                "kind": "static_page",
+                "offset": offset,
+                "returned": len(items),
+                "total_count": total,
+                "has_more": result["has_more"],
+            },
+            "facts": facts,
+            "source_sha256": digest_before,
+            "validity": {
+                "outcome": "completed",
+                "as_of": time.time(),
+                "coverage": "page",
+                "warnings": [
+                    "One page of configured inputs, not the whole class.",
+                    "Static configured input; time-series overrides are not checked.",
+                ],
+            },
+            "expires_at": time.time() + RETENTION_SECONDS,
+        }
+        save(record, record["evidence_id"])
+    return record
+
+
 def evidence(owner, evidence_id):
     record = load(owner, evidence_id, "evidence")
     if record["source_kind"] == "scoped_result":
@@ -293,6 +443,15 @@ def evidence(owner, evidence_id):
                 return record
             if ctx.solver_state.get("status") == "running":
                 unavailable("evidence_unavailable")
+            if scope.get("kind") == "static_page":
+                # Any edit to the class's rows or inputs, or another project,
+                # invalidates the page.
+                if (
+                    page_source_digest(ctx, scope["component_class"])
+                    != record["source_sha256"]
+                ):
+                    unavailable("evidence_unavailable")
+                return record
             if (
                 digest(_raw_facts(ctx, scope["component_class"], scope["entity_id"]))
                 != record["source_sha256"]
