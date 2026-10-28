@@ -42,6 +42,8 @@ SERIES_METRICS = {
 # 128 KiB record cap with room for the rest of the record.
 MAX_SERIES_POINTS = 744
 MAX_SERIES_FACT_BYTES = 120 * 1024
+# get_aggregate_load's `section` or `names` argument, at most.
+MAX_AGGREGATE_ARG_CHARS = 1024
 
 # The checked-answer policy and the current-input adapters this server applies.
 # A record written under another one is not re-read as checked (A1.4).
@@ -51,6 +53,7 @@ INPUT_ADAPTERS = {
     "static_page": "static-input-page/1",
     "series": "series-input/1",
     "run": "run-metrics/1",
+    "aggregate_load": "aggregate-load/1",
 }
 
 
@@ -508,6 +511,211 @@ def active_series_source(args):
     return source_digest, len(series), size
 
 
+def aggregate_selector(args):
+    """(selector, entity id, target names or None) for exact get_aggregate_load
+    args, else None.
+
+    No args is every load; `section` is normalised as the handler does
+    (lower case, stripped); `names` is a comma list with no padding, empty or
+    repeated name (the handler would silently drop or double-count those).
+    A null, empty or blank value is refused, not read as absent.
+    """
+    if not isinstance(args, dict) or len(args) > 1:
+        return None
+    if not args:
+        return "all", "all loads", None
+    ((key, value),) = args.items()
+    if key not in ("section", "names") or not isinstance(value, str):
+        return None
+    if not 1 <= len(value) <= MAX_AGGREGATE_ARG_CHARS:
+        return None
+    if key == "section":
+        section = value.lower().strip()
+        return ("section", section, None) if section else None
+    names = value.split(",")
+    if any(not n or n != n.strip() for n in names) or len(set(names)) != len(names):
+        return None
+    return "names", value, names
+
+
+def aggregate_source(ctx, args):
+    """(source digest, gap, totals, target names) for get_aggregate_load args.
+
+    Call under network_guard. Every target's raw series is read through
+    resolve_series, the source the handler sums. `gap` names why the sum is
+    not complete (no targets, an unknown name, a load with no profile, a
+    missing or non-finite step, indexes that differ), else it is None and
+    `totals` is the per-step sum, by the handler's own expression so a shown
+    value matches bit for bit. Members must share the network's snapshots: a
+    series uploaded on another snapshot set would sum over the wrong steps.
+    The digest covers the project, the normalised selection, the ordered
+    target names and each member's series digest.
+    """
+    import numpy as np
+    import pandas as pd
+
+    from services.profile_shapes import _load_section
+
+    n = ctx.network
+    selector, entity, names = aggregate_selector(args)
+    if selector == "names":
+        targets = names
+    elif selector == "section":
+        targets = [t for t in n.loads.index if _load_section(n, t) == entity]
+    else:
+        targets = list(n.loads.index)
+    hashed = hashlib.sha256(
+        json.dumps(
+            {
+                "project_id": ctx.project_uuid,
+                "selection": [selector, entity],
+                "targets": targets,
+            },
+            sort_keys=True,
+        ).encode()
+    )
+    unknown = [t for t in targets if t not in n.loads.index]
+    if not targets or unknown:
+        gap = f"no load named {unknown[0]}" if unknown else "no loads match"
+        return hashed.hexdigest(), gap, None, targets
+    members = []
+    for name in targets:
+        member_digest, series = _series_source(
+            ctx, {"component": "loads", "name": name, "attribute": "p_set"}
+        )
+        hashed.update(member_digest.encode())
+        members.append(series)
+    missing = sum(s is None for s in members)
+    if missing:
+        return (
+            hashed.hexdigest(),
+            f"{missing} of {len(targets)} loads have no profile",
+            None,
+            targets,
+        )
+    if any(not s.index.equals(n.snapshots) for s in members):
+        return (
+            hashed.hexdigest(),
+            "the loads do not share the network's snapshots",
+            None,
+            targets,
+        )
+    # A numeric-string upload would convert below but join, not add, in sum().
+    if any(not pd.api.types.is_numeric_dtype(s) or s.dtype == bool for s in members):
+        return hashed.hexdigest(), "a step that is not a number", None, targets
+    frame = pd.concat(members, axis=1)
+    try:
+        bad = int((~np.isfinite(frame.to_numpy(dtype="float64"))).sum())
+    except (TypeError, ValueError):
+        return hashed.hexdigest(), "a step that is not a number", None, targets
+    if bad or frame.empty:
+        step = "step" if bad == 1 else "steps"
+        gap = f"{bad} missing or non-finite {step}" if bad else "no steps"
+        return hashed.hexdigest(), gap, None, targets
+    return hashed.hexdigest(), None, frame.sum(axis=1).tolist(), targets
+
+
+def _aggregate_facts(entity, totals):
+    """The peak and the mean over steps of the per-step sum, as the handler
+    computes them."""
+    totals = [float(v) for v in totals]
+    values = {"peak": max(totals), "mean": sum(totals) / len(totals)}
+    return [
+        {
+            "path": pointer(metric),
+            "entity_id": entity,
+            "metric": metric,
+            "value": json.loads(json.dumps(value)),
+            "unit": "MW",
+        }
+        for metric, value in values.items()
+    ]
+
+
+def active_aggregate_source(args):
+    """Taken before get_aggregate_load runs: (source digest, gap)."""
+    ctx = PyPSAService.get_active_context()
+    with network_guard():
+        source_digest, gap, _totals, _targets = aggregate_source(ctx, args)
+    return source_digest, gap
+
+
+def capture_aggregate(owner, args, result, digest_before):
+    """Evidence for the peak and mean one get_aggregate_load result showed.
+
+    The sum is recomputed from every member's raw series. Every shown
+    statistic and count must equal it after a JSON round-trip, or nothing is
+    stored: an edit between the guard and the handler leaves it unchecked.
+    """
+    ctx = PyPSAService.get_active_context()
+    selected = aggregate_selector(args)
+    if (
+        selected is None
+        or digest_before is None
+        or not isinstance(result, dict)
+        or not ctx.project_uuid
+    ):
+        return None
+    selector, entity, _names = selected
+    authorize(owner, ctx.project_uuid)
+    with network_guard():
+        if ctx.solver_state.get("status") == "running":
+            return None
+        source_digest, gap, totals, targets = aggregate_source(ctx, args)
+        if (
+            source_digest != digest_before
+            or gap is not None
+            or result.get("total_loads") != len(targets)
+            or result.get("loads_with_profile") != len(targets)
+            or not isinstance(result.get("values"), list)
+            or len(result["values"]) != len(totals)
+        ):
+            return None
+        facts = _aggregate_facts(entity, totals)
+        if not all(_certified(result.get(f["metric"]), f["value"]) for f in facts):
+            return None
+        record = {
+            "version": 1,
+            "record_kind": "evidence",
+            "evidence_id": str(uuid.uuid4()),
+            "owner_id": owner,
+            "project_id": ctx.project_uuid,
+            "org_id": ctx.org_id,
+            "source_kind": "configured_input",
+            "adapter_version": INPUT_ADAPTERS["aggregate_load"],
+            "scope": {
+                "kind": "aggregate_load",
+                "selector": selector,
+                "entity_id": entity,
+                "component_class": "Load",
+                "attribute": "p_set",
+                "loads": len(targets),
+                "steps": len(totals),
+            },
+            "facts": facts,
+            "source_sha256": digest_before,
+            "validity": {
+                "outcome": "completed",
+                "as_of": time.time(),
+                "coverage": "complete_source",
+                "warnings": [
+                    "Sum of every target load's configured p_set over every step.",
+                ],
+            },
+            "expires_at": time.time() + RETENTION_SECONDS,
+        }
+        save(record, record["evidence_id"])
+    return record
+
+
+def aggregate_args(scope):
+    """The get_aggregate_load args an aggregate scope was captured from."""
+    selector, entity = scope["selector"], scope["entity_id"]
+    if selector == "all":
+        return {}
+    return {selector: entity}
+
+
 def unpointer(path):
     """The tokens of an RFC 6901 pointer built by pointer()."""
     return [t.replace("~1", "/").replace("~0", "~") for t in path.split("/")[1:]]
@@ -734,6 +942,19 @@ def evidence(owner, evidence_id):
                 if source_digest != record["source_sha256"] or series is None:
                     unavailable("evidence_unavailable")
                 _require_current_facts(record["facts"], _series_steps(args, series)[2])
+                return record
+            if scope.get("kind") == "aggregate_load":
+                # Any edit to a member, or a load joining or leaving the
+                # target set, invalidates it.
+                args = aggregate_args(scope)
+                if aggregate_selector(args) is None:
+                    unavailable("evidence_unavailable")
+                source_digest, gap, totals, _targets = aggregate_source(ctx, args)
+                if source_digest != record["source_sha256"] or gap is not None:
+                    unavailable("evidence_unavailable")
+                _require_current_facts(
+                    record["facts"], _aggregate_facts(scope["entity_id"], totals)
+                )
                 return record
             if scope.get("kind") == "static_page":
                 # Any edit to the class's rows or inputs, or another project,

@@ -151,8 +151,8 @@ def test_every_tool_target_and_channel_maps_to_a_declared_adapter(tmp_path):
             *assurance['output_channels'].values()} <= set(adapters)
     checked = {t['name'] for t in tools if adapters[t['assurance_adapter']]['status'] == 'checked'}
     assert checked == set(assurance['checked_tools']) == {
-        'get_component', 'get_run_evidence', 'get_timeseries', 'list_components',
-        'update_component', 'ui_open_panel'}
+        'get_aggregate_load', 'get_component', 'get_run_evidence', 'get_timeseries',
+        'list_components', 'update_component', 'ui_open_panel'}
     assert all(a['status'] in {'checked', 'unvalidated'} for a in adapters.values())
     assert all(a.get('pending') for a in adapters.values() if a['status'] == 'unvalidated')
     assert set(assurance['output_channels']) >= {'stream_tokens', 'history_replay', 'tts', 'answer_export'}
