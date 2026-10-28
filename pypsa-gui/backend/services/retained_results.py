@@ -39,6 +39,9 @@ class Retained:
     read did not answer (no section is stored: the run then refuses).
     `refusal` is the unavailable_kind a past run without the section answers.
     `kinds` are the get_results kinds the section keeps (none for other reads).
+    `digest` builds the section from the live network when it keeps a bounded
+    digest rather than the reads themselves; a run_id read of its kinds then
+    answers that digest for the current run too, so a run has one shape.
     """
 
     section: str
@@ -46,6 +49,7 @@ class Retained:
     refusal: str
     label: str
     kinds: tuple[str, ...] = ()
+    digest: Callable[[], dict] | None = None
 
 
 def _capture_loadflow(token: dict) -> dict | None:
@@ -59,6 +63,7 @@ def _capture_loadflow(token: dict) -> dict | None:
 
 SUMMARY_SECTION = 'results_summary'
 CAPACITY_SECTION = 'results_capacity'
+DISPATCH_SECTION = 'results_dispatch'
 
 
 def _capture_kinds(kinds: tuple[str, ...]) -> dict | None:
@@ -87,6 +92,23 @@ def _results_family(section: str, refusal: str, label: str, kinds: tuple[str, ..
     return Retained(section, lambda token: _capture_kinds(kinds), refusal, label, kinds)
 
 
+def _dispatch_digest() -> dict:
+    from services.pypsa_service import PyPSAService
+    from services.results.dispatch_digest import dispatch_digest
+
+    return dispatch_digest(PyPSAService.get_network())
+
+
+def _capture_digest(build: Callable[[], dict]) -> dict | None:
+    """A digest family's section, under the same rule as `_capture_kinds`."""
+    from services.workflow_tools import solve_freshness
+
+    if solve_freshness().get('results_current') is not True:
+        return None
+    out = build()
+    return out if out.get('status') == 'ok' else None
+
+
 ADAPTERS: tuple[Retained, ...] = (
     Retained('loadflow', _capture_loadflow,
              'historical_loadflow_unavailable', 'load flow'),
@@ -95,6 +117,9 @@ ADAPTERS: tuple[Retained, ...] = (
     # cost_breakdown, the Capacity Expansion tab's other read, is kept with Summary.
     _results_family(CAPACITY_SECTION, 'historical_results_unavailable', 'capacity results',
                     ('economics_by_carrier',)),
+    Retained(DISPATCH_SECTION, lambda token: _capture_digest(_dispatch_digest),
+             'historical_results_unavailable', 'dispatch results',
+             ('generators', 'storage_dispatch'), _dispatch_digest),
 )
 
 # get_results kind -> the one section that keeps it.

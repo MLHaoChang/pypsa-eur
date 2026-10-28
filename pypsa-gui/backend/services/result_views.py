@@ -141,6 +141,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                "hourly generation and storage operation", "results",
                (_r("get_results", result_kind="generators"),
                 _r("get_results", result_kind="storage_dispatch")),
+               historical_section="results_dispatch",
                units="MW per snapshot, MWh",
                checked_profiles=("generator-dispatch/1", "storage-unit-dispatch/1",
                                  "carrier-energy/1"),
