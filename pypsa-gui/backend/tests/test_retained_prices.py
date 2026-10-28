@@ -218,3 +218,37 @@ def test_the_prices_view_names_its_section():
     assert rv.view('prices').historical_section == 'results_prices'
     assert retained_results.KEPT_KINDS['prices'] == 'results_prices'
     assert retained_results.KEPT_KINDS['price_drivers'] == 'results_prices'
+
+
+def test_a_trimmed_run_says_what_it_left_out(repriced):  # noqa: F811
+    """A trimmed list is told apart from a complete one: the counters reach the read."""
+    n = _network({f'bus-{i:03d}': [float(i)] * 24 for i in range(300)})
+    kept = pd_.prices_digest(n, price_drivers=_drivers(200))
+    assert kept['prices']['buses_omitted'] > 0 and kept['price_drivers']['rows_omitted'] > 0
+    root, project_id, owner = run_evidence._authority()
+    run_evidence.publish_run(root, project_id, run_id='fg-trimmed07', kind='simulation',
+                             status='completed', fingerprint='0' * 64, actor_id=owner,
+                             sections={'results_prices': kept})
+    prices = chat_tools.get_results(result_kind='prices', run_id='fg-trimmed07')
+    assert prices['scope'] == 'historical'
+    assert prices['data']['buses_omitted'] == kept['prices']['buses_omitted']
+    assert prices['data']['carriers_omitted'] == 0
+    assert len(prices['data']['buses']) + prices['data']['buses_omitted'] == 300
+    drivers = chat_tools.get_results(result_kind='price_drivers', run_id='fg-trimmed07')
+    assert drivers['data']['rows_omitted'] == kept['price_drivers']['rows_omitted']
+    assert len(drivers['data']['rows']) + drivers['data']['rows_omitted'] == 200
+
+
+def test_price_drivers_without_data_still_keeps_the_prices(repriced, monkeypatch):  # noqa: F811
+    """The route answers 204 for price_drivers: the digest is still built and
+    keeps that no-data payload, as the plain read would answer it."""
+    from fastapi import Response
+
+    from routers import results as results_router
+
+    monkeypatch.setattr(results_router, 'get_price_drivers', lambda: Response(status_code=204))
+    d = retained_results._prices_digest()
+    assert d['status'] == 'ok'
+    assert d['prices']['overall']['mean_price'] == pytest.approx(60.0, abs=1e-6)
+    assert d['price_drivers'] == chat_tools._no_data('price_drivers', chat_tools._RESULTS_NO_DATA_MESSAGE)
+    assert pd_.for_kind(d, 'price_drivers')['status'] == 'no_data'

@@ -12,11 +12,13 @@ Prices are the merit-order-corrected duals every other price surface reads
 the load-weighted mean weights each price by that bus's load (`loads_t.p`,
 negative load counted as none) times it. A bus without load is left out of
 the load weighting but kept in the plain statistics; no load at all gives a
-null load-weighted mean with its reason. NaN/inf are null.
+null load-weighted mean with its reason. inf is null; a NaN dual is 0, as
+on every price surface (the shared merit-order correction fills it).
 
-Buses are ordered by max price, then name, and trimmed from the tail until
-the section fits `BUDGET_BYTES`, then price_drivers rows, then carriers; what
-was trimmed is counted. Multi-period networks are not digested.
+Buses are ordered by max price, then name. Until the section fits
+`BUDGET_BYTES`, buses and price_drivers rows (by |price|, as the route sorts
+them) are trimmed from the tail, the longer list first, then carriers; what
+was trimmed is counted (`buses_omitted`, `rows_omitted`, `carriers_omitted`). Multi-period networks are not digested.
 """
 from __future__ import annotations
 

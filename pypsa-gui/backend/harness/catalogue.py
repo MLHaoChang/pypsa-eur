@@ -489,10 +489,13 @@ TOOLS: list[dict[str, Any]] = [
         "except that generators and storage_dispatch answer a digest (shape "
         "'digest': per carrier and per unit weighted energy, peak and its "
         "snapshot, weighted mean and running hours; storage discharge and charge "
-        "apart) and prices answers one (overall, per bus carrier and per bus: "
-        "objective-weighted mean, median, p90, max with its snapshot, min, and the "
-        "load-weighted mean) for every run, with price_drivers kept beside it; "
-        "these refuse those arguments. "
+        "apart) and prices answers one (overall and per bus carrier: "
+        "objective-weighted mean, median, p90, max and min, and the load-weighted "
+        "mean; per bus: mean, max with its snapshot, min and the load-weighted "
+        "mean) for every run, with price_drivers kept beside it; these refuse "
+        "those arguments. A digest's lists are trimmed to fit: units_omitted, "
+        "carriers_omitted, buses_omitted and rows_omitted count the rows left "
+        "out, so a nonzero count means that list is not complete; say so. "
         "Safety: read.",
         {
             "result_kind": {"type": "string", "enum": RESULTS_ENUM},
