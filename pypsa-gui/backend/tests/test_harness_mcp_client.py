@@ -14,7 +14,8 @@ behind the same card and fence as the built-in tools.
   read-only gets the card in Expert as well as Guided.
 * Results are fenced like any tool result; images are dropped; server
   instructions never reach the model; a server's own requests (sampling,
-  elicitation, roots) are refused.
+  elicitation, roots) are refused; an oversized result is spilled like any
+  other; a checked turn refuses external tools.
 * `smoke/mcp_stub_server.py` is the server.
 """
 from __future__ import annotations
@@ -242,6 +243,20 @@ def test_a_read_only_external_tool_runs_without_a_card_and_its_result_is_fenced(
     assert marked == []                                         # an external tool is not a project edit
 
 
+def test_a_checked_turn_refuses_an_external_tool_and_never_calls_the_server(servers, tmp_path):
+    from harness.assurance import Turn
+    log = tmp_path / "stub.log"
+    servers(_stub(args=[str(STUB), "--log", str(log)]))
+    session = _session()
+    mcp_client.session_tools(session)
+    session.assurance_turn = object.__new__(Turn)   # the real guard, no checked-turn setup
+    session.assurance_turn.effect_pending = False
+    frames, results = _dispatch(session, "mcp__stub__lookup", {"key": "k"}, guided=False)
+    assert [p["error_kind"] for e, p in frames if e == "tool_error"] == ["capability_unsupported"]
+    assert results[0]["is_error"] is True
+    assert "tools/call" not in log.read_text()
+
+
 def test_an_mcp_name_missing_from_the_session_is_carded():
     session = _session()
     frames, _ = _dispatch(session, "mcp__ghost__anything", {}, guided=False)
@@ -258,6 +273,25 @@ def test_is_error_becomes_mcp_tool_error(servers):
     errors = [p for e, p in frames if e == "tool_error"]
     assert errors and errors[0]["error_kind"] == "mcp_tool_error"
     assert results[0]["is_error"] is True
+
+
+def test_an_oversized_external_result_is_spilled_inside_the_fence(servers):
+    from harness import loop, spill
+    from harness.providers.fake import FakeProvider
+    servers(_stub())
+    session = _session()
+    key = "k" * 40_000
+    fake = FakeProvider([{"blocks": [{"type": "tool_use", "id": "tu_big", "name": "mcp__stub__lookup",
+                                      "input": {"key": key}}],
+                          "usage": {"input_tokens": 1, "output_tokens": 1}},
+                         {"blocks": [{"type": "text", "text": "done"}],
+                          "usage": {"input_tokens": 1, "output_tokens": 1}}])
+    list(loop.run_turn(session, "look it up", provider=fake))
+    msg = fake.requests[1].messages[-1]
+    content = "".join(b["content"] for b in msg["content"] if b.get("type") == "tool_result")
+    assert "untrusted_data" in content and len(content) < 4500
+    info = json.loads(content.split("\n", 1)[1].rsplit("\n", 1)[0])["spill"]
+    assert json.loads(spill.path_for(session, info["locator"]).read_text())["key"] == key
 
 
 def test_images_are_dropped_with_a_note(servers):

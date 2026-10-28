@@ -1,0 +1,1 @@
+* Chore(coordination): Record the UX reviewer's standing wording rulings (no Python-repr quotes, colons over em dashes, "out of date", shared card word maps, the Guided headline cap, no automatic panel jump after a background run) in `docs/agents/review-ux.md`.

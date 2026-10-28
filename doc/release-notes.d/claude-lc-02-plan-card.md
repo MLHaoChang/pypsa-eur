@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The chat's plan card now lists each step of the plan with its state (to do, running, waiting for a job with its ID, done, failed, needs review), marks the next step, shows the study brief's current phase and lists the changes already applied.

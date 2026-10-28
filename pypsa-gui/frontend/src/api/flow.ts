@@ -31,6 +31,7 @@ export type FlowFreshness = 'not_run' | 'running' | 'fresh' | 'stale'
 
 export type FlowItemSource =
   | 'validation' | 'eh_study' | 'eh_readiness' | 'commercial' | 'library' | 'template' | 'flow'
+  | 'loadflow'
 
 /** Where an item's fix lives. `panel` is a `SlidePanel` id, or null for the
  *  component's own Properties (`component` + `entity`); unknowns are null. */
@@ -74,6 +75,9 @@ export interface FlowSection {
   summary: string | null
   /** `results` only. */
   freshness?: FlowFreshness
+  /** `results` only: one freshness per run kind (W4b); `study` is null for a
+   *  project with no study. Never feeds `run_ready`. */
+  freshness_by_kind?: { optimisation: FlowFreshness, study: FlowFreshness | null, loadflow: FlowFreshness }
 }
 
 /** A pointer to one item: the Run's blocker, or a display-only note. */
@@ -103,10 +107,14 @@ export interface ProjectFlow {
   run_blocker: FlowRunBlocker | null
   /** What the one Run does: the optimisation always; the study for a project
    *  made from an Energy Hub template (until section 8 has a run mode). */
-  run_request: { optimisation: boolean, study: boolean }
+  run_request: { optimisation: boolean, study: boolean, loadflow?: boolean }
   /** Each run kind's own server verdict; `run_ready` is the AND over the
-   *  requested kinds. `study` is null when the Run has no study. */
-  verdicts: { optimisation: FlowVerdict, study: FlowVerdict | null }
+   *  requested kinds. `study` is null when the Run has no study, `loadflow`
+   *  when Load flow is off (Stage 2's own refusals are its items). */
+  verdicts: { optimisation: FlowVerdict, study: FlowVerdict | null, loadflow?: FlowVerdict | null }
+  /** What `/run` itself answers (the header's Run): the optimisation and,
+   *  with Load flow on, its Stage 2, the first blocker in flow order. */
+  run_verdict?: FlowVerdict
   /** Display-only gaps (non-blocking errors), shown beside an enabled Run. */
   notes: FlowNote[]
   /** What the Run computes (W4a): stored, or the template's preset. */

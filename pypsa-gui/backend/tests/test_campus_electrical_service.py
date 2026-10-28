@@ -179,6 +179,45 @@ def test_a_run_sizes_the_campus_and_its_results_read_back(hub):
     assert state["results"] == res and state["settings"]["pf"] == 0.95 and not state["stale"]
 
 
+def _curve_profile(hub, name="with_curve"):
+    """A published profile with a per-unit reactive capability curve (DC 15; generic values, SAGC-1)."""
+    from gridspine.templates.grid_codes import load_grid_code
+
+    p = load_grid_code("generic_assumed", raw=True)
+    p["q_capability_unit"] = {"points": [[0.0, -0.5, 0.5], [0.5, -0.95, 0.95], [1.0, -0.3, 0.3]],
+                              "clause": "generic test clause", "source": "code"}
+    ce.grid_codes_dir(hub).mkdir(parents=True, exist_ok=True)
+    (ce.grid_codes_dir(hub) / f"{name}.yaml").write_text(yaml.safe_dump(p, sort_keys=False))
+    return name
+
+
+def test_the_unit_q_curve_table_reads_back_only_for_a_grid_code_with_the_curve(hub):
+    ce.draft(hub)
+    res = ce.run(hub, {"k": 1, "profile": _curve_profile(hub)})["results"]
+    rows = res["ibr_q_curve"]
+    assert rows and {"unit", "p_pu", "q_min_req_mvar", "q_max_req_mvar", "available_mvar", "shortfall_mvar",
+                     "status", "detail", "clause", "source"} <= set(rows[0])
+    assert {r["status"] for r in rows} <= {"pass", "fail", "reported"} and not res["ibr_q_curve_not_computed"]
+    assert {r["clause"] for r in rows} == {"generic test clause"}
+    res = ce.run(hub, {"k": 1})["results"]                      # the default profile has no curve
+    assert res["ibr_q_curve"] is None and not res["ibr_q_curve_not_computed"]
+
+
+def test_a_run_from_before_the_q_curve_table_says_it_was_not_computed(hub):
+    ce.draft(hub)
+    ce.run(hub, {"k": 1, "profile": _curve_profile(hub)})
+    run = ce.campus_dir(hub) / "run"
+    # A run from before the table and the kept profile: neither file.
+    (run / ce.cs.IBR_Q_CURVE_CSV).unlink()
+    (run / ce.PROFILE_USED_FILE).unlink()
+    res = ce.get_state(hub)["results"]
+    assert res["ibr_q_curve"] is None and res["ibr_q_curve_not_computed"] is True
+    # The same old run held to a grid code without the curve has nothing to say.
+    settings = json.loads((ce.campus_dir(hub) / ce.SETTINGS_FILE).read_text())
+    (ce.campus_dir(hub) / ce.SETTINGS_FILE).write_text(json.dumps({**settings, "profile": "generic_assumed"}))
+    assert ce.get_state(hub)["results"]["ibr_q_curve_not_computed"] is False
+
+
 def test_results_turn_stale_when_the_campus_changes(hub):
     spec = yaml.safe_load(ce.draft(hub)["campus_yaml"])
     ce.run(hub, {"k": 1})

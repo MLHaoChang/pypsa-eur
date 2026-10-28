@@ -18,13 +18,21 @@ ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUTPUT = ROOT / '.scratch/live-voice/capability-inventory.json'
 
 
+def _literal(value: ast.expr):
+    # frozenset({...}) is the one call allowed: its argument must itself be a literal.
+    if (isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id == 'frozenset'
+            and len(value.args) == 1 and not value.keywords):
+        return frozenset(ast.literal_eval(value.args[0]))
+    return ast.literal_eval(value)
+
+
 def _literal_constant(path: Path, name: str):
     """Read schema caps without importing their scientific/Pydantic modules."""
     for node in ast.parse(path.read_text(), filename=str(path)).body:
         if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
-            return ast.literal_eval(node.value)
+            return _literal(node.value)
         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == name:
-            return ast.literal_eval(node.value)
+            return _literal(node.value)
     raise ValueError(f'Cannot read literal schema constant {name} in {path}; update the reader.')
 
 
@@ -63,6 +71,9 @@ def build_inventory() -> dict:
     RESULTS_TAB_ENUM, SAFETY_PANEL_ENUM = catalogue['RESULTS_TAB_ENUM'], catalogue['SAFETY_PANEL_ENUM']
     safety_tier_for = catalogue['safety_tier_for']
     DOMAINS, filter_tools = toolsets['DOMAINS'], toolsets['filter_tools']
+    coverage = _metadata('pypsa-gui/backend/harness/assurance_coverage.py')
+    checked_tools = _literal_constant(ROOT / 'pypsa-gui/backend/harness/assurance.py', 'CHECKED_TOOLS')
+    ack_panels = _literal_constant(ROOT / 'pypsa-gui/backend/harness/navigation.py', 'PANELS')
 
     results = (ROOT / 'pypsa-gui/frontend/src/pages/Results.tsx').read_text()
     tab_block = re.search(r'\bconst TABS:.*?=\s*\[(.*?)\n\]', results, re.S)
@@ -82,14 +93,27 @@ def build_inventory() -> dict:
     if not tabs or not panels or len({t['id'] for t in tabs}) != len(tabs) or len(set(panels)) != len(panels):
         raise ValueError('Empty or duplicate frontend targets; inventory cannot certify navigation.')
     domains = {d: {t['name'] for t in filter_tools(TOOLS, d)} for d in DOMAINS if d != 'all'}
+    adapters = {t['name']: coverage['tool_adapter'](t['name'], safety_tier_for(t['name']), TOOL_ROUTES[t['name']])
+                for t in TOOLS}
+    assurance = {
+        'version': coverage['VERSION'],
+        'adapters': coverage['ADAPTERS'],
+        'checked_tools': sorted(checked_tools),
+        'result_tabs': {t['id']: 'results_view_unvalidated' for t in tabs},
+        'slide_panels': {p: coverage['panel_adapter'](p, ack_panels) for p in panels},
+        'output_channels': coverage['OUTPUT_CHANNELS'],
+    }
+    _check_assurance(assurance, adapters, coverage)
     return {
         'format_version': 1,
         'generated_at': datetime.now(timezone.utc).date().isoformat(),
-        'status': 'source inventory; behavioral coverage and GUI parameter mapping pending implementation',
+        'status': 'source inventory and assurance adapter map; behavioral fixtures and GUI parameter mapping pending',
         'sources': [
             'pypsa-gui/backend/harness/catalogue.py', 'pypsa-gui/backend/harness/toolsets.py',
             'pypsa-gui/frontend/src/pages/Results.tsx', 'pypsa-gui/frontend/src/store/uiStore.ts',
             'pypsa-gui/backend/models/energy_hub.py', 'pypsa-gui/backend/services/adequacy/mc.py',
+            'pypsa-gui/backend/harness/assurance_coverage.py', 'pypsa-gui/backend/harness/assurance.py',
+            'pypsa-gui/backend/harness/navigation.py',
         ],
         'tool_count': len(TOOLS),
         'tools': [{
@@ -99,6 +123,7 @@ def build_inventory() -> dict:
             'input_keys': list(tool['input_schema'].get('properties', {})),
             'required': tool['input_schema'].get('required', []),
             'safety_tier': safety_tier_for(tool['name']),
+            'assurance_adapter': adapters[tool['name']],
             'schema_sha256': hashlib.sha256(json.dumps(tool['input_schema'], sort_keys=True).encode()).hexdigest(),
             'behavioral_fixture': 'pending',
         } for tool in TOOLS],
@@ -108,10 +133,31 @@ def build_inventory() -> dict:
         'slide_panels': panels,
         'tool_panel_enum': SAFETY_PANEL_ENUM,
         'slide_panels_not_in_tool_enum': [p for p in panels if p not in SAFETY_PANEL_ENUM],
+        'assurance': assurance,
         'requested_aliases': {
             'AR': 'unresolved label; map against actual UI/module vocabulary during coverage audit, do not infer expansion',
         },
     }
+
+
+def _check_assurance(assurance: dict, tool_adapters: dict, coverage: dict) -> None:
+    """Fail closed: every surface names a declared adapter; only the checked tools are checked."""
+    known = assurance['adapters']
+    surfaces = [*tool_adapters.items(), *assurance['result_tabs'].items(),
+                *assurance['slide_panels'].items(), *assurance['output_channels'].items()]
+    unknown = sorted(f'{surface}={adapter}' for surface, adapter in surfaces if adapter not in known)
+    if unknown:
+        raise ValueError('Unknown assurance adapter: ' + ', '.join(unknown))
+    declared = set(coverage['CHECKED_TOOL_ADAPTERS'])
+    if set(assurance['checked_tools']) != declared:
+        raise ValueError('harness.assurance.CHECKED_TOOLS differs from the assurance adapter map.')
+    missing = sorted(declared - set(tool_adapters))
+    if missing:
+        raise ValueError('Checked tools absent from the catalogue: ' + ', '.join(missing))
+    labelled = sorted(name for name, adapter in tool_adapters.items()
+                      if coverage['checked_label_allowed'](adapter) != (name in declared))
+    if labelled:
+        raise ValueError('Checked label without a checked tool adapter: ' + ', '.join(labelled))
 
 
 def main(argv=None) -> int:
