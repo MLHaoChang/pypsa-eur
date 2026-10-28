@@ -31,6 +31,8 @@ _FIELDS = {'source_id', 'family', 'session_id', 'tool_use_id', 'tool_name',
 _QUESTION_STATES = {'waiting_for_input', 'followed_up', 'superseded'}
 _CONFIRM_STATES = {'waiting_for_approval', 'approved', 'rejected', 'expired',
                    'aborted', 'revoked', 'unavailable'}
+# Study harness §6.6: a harness run's state changes the companion shows.
+RUN_STATES = {'needs_user', 'completed', 'failed', 'paused'}
 
 
 def _text(value, size):
@@ -83,10 +85,11 @@ def _validate(record):
     for field, size in (('session_id', 200), ('tool_use_id', 200), ('tool_name', 120)):
         _text(record[field], size)
     family = record['family']
-    if family not in {'question', 'confirmation', 'source_gap'}:
+    if family not in {'question', 'confirmation', 'source_gap', 'run'}:
         raise ValueError('invalid decision family')
     states = (_QUESTION_STATES if family == 'question' else
-              {'source_gap_recorded'} if family == 'source_gap' else _CONFIRM_STATES)
+              {'source_gap_recorded'} if family == 'source_gap' else
+              RUN_STATES if family == 'run' else _CONFIRM_STATES)
     if record['native_status'] not in states:
         raise ValueError('invalid decision status')
     if type(record['revision']) is not int or not 1 <= record['revision'] <= 1000000:
@@ -114,6 +117,10 @@ def _validate(record):
         if (record['tool_use_id'] != record['source_gap']['turn_id']
                 or record['source_id'] != _gap_id(record['source_gap']['answer_id'])):
             raise ValueError('invalid source gap identity')
+    elif family == 'run':
+        if record['question'] is not None or record['tool_name'] != 'harness_run' \
+                or record['session_id'] != 'run:' + _uuid(record['tool_use_id']):
+            raise ValueError('invalid run notice')
     elif record['question'] is not None:
         raise ValueError('confirmation arguments prohibited')
     return record
@@ -411,6 +418,26 @@ def confirmation(session, pc, tool_use_id, state='waiting_for_approval'):
     _observe(session, getattr(pc, 'project_id', None), change)
 
 
+def run_notice(owner, project, task_id, state, seq):
+    """One record per harness-run state change (`harness/runner.py`): the
+    run's id and state only, never its values. `seq` makes each change its own
+    record, and the same change written twice one record."""
+    def change(records):
+        source = hashlib.sha256(f'run:{task_id}:{seq}'.encode()).hexdigest()
+        if any(r['source_id'] == source for r in records):
+            return
+        now = time.time()
+        records.append(_validate(dict(source_id=source, family='run', session_id='run:' + task_id,
+            tool_use_id=task_id, tool_name='harness_run', native_status=state, revision=1,
+            created_at=now, observed_at=now, question=None)))
+    try:
+        _update(owner, str(project), change)
+        return True
+    except _ERRORS:
+        _failed(owner, str(project), True)
+        return False
+
+
 def project_records(owner, project, live):
     """Private display projection, including exact current native availability."""
     try:
@@ -424,7 +451,11 @@ def project_records(owner, project, live):
                   and (record['source_id'], record['session_id'], record['tool_name']) in pending
                   and record['native_status'] == 'waiting_for_approval')
         state = record['native_status']
-        if record['family'] == 'question':
+        if record['family'] == 'run':
+            status = 'needs_user' if state in ('needs_user', 'paused') else 'decision_recorded'
+            reason = ('The harness run stopped for you; open it to see why and what it waits on.'
+                      if status == 'needs_user' else 'The harness run ended; open it to read its stages.')
+        elif record['family'] == 'question':
             status = 'waiting_for_input' if state == 'waiting_for_input' else 'decision_recorded'
             reason = ('Inspect the recorded question. Continue through an ordinary chat turn; this view cannot answer it.'
                 if state == 'waiting_for_input' else
