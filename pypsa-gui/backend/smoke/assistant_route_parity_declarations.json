@@ -677,6 +677,41 @@
    "method": "POST",
    "path": "/api/gridspine/{name}/readback/{hour}",
    "family": "gridspine-campus"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/site-anchor",
+   "family": "projects"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/projects/{name}/site-anchor",
+   "family": "projects"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/sites/{site_id}/scene",
+   "family": "projects"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/sites/{site_id}/scene/adopt",
+   "family": "projects"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/sites/{site_id}/scene/proposals",
+   "family": "projects"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/apply",
+   "family": "projects"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/cancel",
+   "family": "projects"
   }
  ],
  "non_mutating_routes": [

@@ -1,9 +1,9 @@
 {
  "counts": {
   "backend_routes": 514,
-  "gui_routes": 466,
+  "gui_routes": 473,
   "limitation": 87,
-  "needs-tool": 31,
+  "needs-tool": 38,
   "tool": 348,
   "unclassified": 0
  },
@@ -3471,6 +3471,24 @@
    "via": "tool_routes"
   },
   {
+   "class": "needs-tool",
+   "family": "projects",
+   "gui_files": [
+    "api/siteScene.ts"
+   ],
+   "method": "GET",
+   "path": "/api/projects/{name}/site-anchor"
+  },
+  {
+   "class": "needs-tool",
+   "family": "projects",
+   "gui_files": [
+    "api/siteScene.ts"
+   ],
+   "method": "PUT",
+   "path": "/api/projects/{name}/site-anchor"
+  },
+  {
    "class": "tool",
    "gui_files": [
     "api/sites.ts"
@@ -3518,6 +3536,51 @@
     "fetch_site_context"
    ],
    "via": "tool_routes"
+  },
+  {
+   "class": "needs-tool",
+   "family": "projects",
+   "gui_files": [
+    "api/siteScene.ts"
+   ],
+   "method": "GET",
+   "path": "/api/projects/{name}/sites/{site_id}/scene"
+  },
+  {
+   "class": "needs-tool",
+   "family": "projects",
+   "gui_files": [
+    "api/siteScene.ts"
+   ],
+   "method": "POST",
+   "path": "/api/projects/{name}/sites/{site_id}/scene/adopt"
+  },
+  {
+   "class": "needs-tool",
+   "family": "projects",
+   "gui_files": [
+    "api/siteScene.ts"
+   ],
+   "method": "POST",
+   "path": "/api/projects/{name}/sites/{site_id}/scene/proposals"
+  },
+  {
+   "class": "needs-tool",
+   "family": "projects",
+   "gui_files": [
+    "api/siteScene.ts"
+   ],
+   "method": "POST",
+   "path": "/api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/apply"
+  },
+  {
+   "class": "needs-tool",
+   "family": "projects",
+   "gui_files": [
+    "api/siteScene.ts"
+   ],
+   "method": "POST",
+   "path": "/api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/cancel"
   },
   {
    "class": "limitation",

@@ -38,7 +38,7 @@ export function saveBlockedReason(name: string, errs: Partial<Record<keyof Bound
 /** A plan sketch: the rectangle, the coordinate marker and a scale bar. */
 function PlanPreview({ v, at }: { v: BoundaryInputs; at: { lat: number; lng: number } }) {
   const ring = rectangleLocal({ x: v.east, y: v.north }, v.width, v.depth, v.heading)
-  const reach = Math.max(...ring.map(p => Math.max(Math.abs(p.x), Math.abs(p.y))), 10) * 1.15
+  const reach = Math.max(...ring.map(p => Math.max(Math.abs(p.x), Math.abs(p.y))), 10) * 1.3
   const bar = [10, 20, 50, 100, 200, 500, 1000, 2000].find(b => b >= reach / 3) ?? 5000
   const s = 50 / reach
   const pts = ring.map(p => `${(p.x * s).toFixed(2)},${(-p.y * s).toFixed(2)}`).join(' ')
