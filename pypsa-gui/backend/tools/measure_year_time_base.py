@@ -2,9 +2,9 @@
 
 Not part of the test suite: the year solve may take minutes. Run from pypsa-gui/backend:
 
-    python scripts/measure_year_time_base.py                    # both bases, each in its own process
-    python scripts/measure_year_time_base.py year --ipm --timeout 1800
-    python scripts/measure_year_time_base.py week year --no-uc     # process units as plain LP (no UC rows)
+    python tools/measure_year_time_base.py                    # both bases, each in its own process
+    python tools/measure_year_time_base.py year --ipm --timeout 1800
+    python tools/measure_year_time_base.py week year --no-uc     # process units as plain LP (no UC rows)
 
 `--ipm` sets the app's `solver_options` {"solver": "ipm"} (HiGHS interior point; the app's default is HiGHS'
 choice, dual simplex here). Each base runs in a child process; the parent reports the child's peak RSS and wall
