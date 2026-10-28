@@ -129,7 +129,7 @@ def _unbound_keys(project: AuthorizedProject, scene: dict) -> list[str] | None:
     if active is None or os.path.realpath(active) != os.path.realpath(project.directory):
         return None
     n = PyPSAService.get_network()
-    keys = set((scene["site"].get("placements") or {})) | set(scene.get("asset_footprints") or {})
+    keys = set(scene["site"].get("placements") or {}) | set(scene.get("asset_footprints") or {})
     unbound = []
     for key in sorted(keys):
         cls, _, comp = key.partition(":")

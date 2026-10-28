@@ -9,6 +9,7 @@ import concurrent.futures
 import copy
 import hashlib
 import json
+import threading
 
 import pandas as pd
 import pypsa
@@ -220,14 +221,20 @@ def test_a_stale_proposal_is_refused_and_keeps_the_scene(client, geo):
 def test_concurrent_applies_have_one_winner(client, geo):
     _adopted(client, geo)
     props = [_propose(client, 1, [{**BOX, "id": f"b{i}"}]).json()["id"] for i in range(8)]
+    barrier = threading.Barrier(8)
 
     def go(pid):
+        barrier.wait(timeout=10)      # all eight leave together: no sleeps
         return client.post(f"/api/projects/geo/sites/campus/scene/proposals/{pid}/apply",
-                           json={"expected_revision": 1}).status_code
+                           json={"expected_revision": 1})
 
     with concurrent.futures.ThreadPoolExecutor(8) as pool:
-        codes = sorted(pool.map(go, props))
-    assert codes == [200] + [409] * 7
+        results = list(pool.map(go, props))
+    assert sorted(r.status_code for r in results) == [200] + [409] * 7
+    for r in results:
+        if r.status_code == 409:
+            assert r.json()["detail"] == {**r.json()["detail"], "error_kind": "revision_conflict",
+                                          "current_revision": 2}
     assert client.get("/api/projects/geo/sites/campus/scene").json()["revision"] == 2
 
 
@@ -310,3 +317,190 @@ def test_an_unchanged_legacy_put_still_saves_other_sites(client, geo):
     r = client.put("/api/projects/geo/sites", json=doc)
     assert r.status_code == 200, r.text
     assert (geo / "sites" / "campus" / "scene" / "current.json").exists()
+
+
+# ── GK B conditions: ACL and lock on every route (1) ────────────────────────
+
+WRITES = [
+    ("put", "/api/projects/geo/site-anchor", {"anchor": ANCHOR, "expected_revision": 0}),
+    ("post", "/api/projects/geo/sites/campus/scene/adopt", {"expected_digest": "0" * 64}),
+    ("post", "/api/projects/geo/sites/campus/scene/proposals", {"action": "generate_native", "base_revision": 1,
+                                                                "inputs": {"greenfield": [BOX]}}),
+    ("post", "/api/projects/geo/sites/campus/scene/proposals/p-x/apply", {"expected_revision": 1}),
+    ("post", "/api/projects/geo/sites/campus/scene/proposals/p-x/cancel", None),
+]
+READS = ["/api/projects/geo/site-anchor", "/api/projects/geo/sites/campus/scene",
+         "/api/projects/geo/sites/campus/scene/proposals/p-x"]
+
+
+def test_a_caller_without_project_access_gets_404_on_every_route(client, other_org_client, geo):
+    _adopted(client, geo)
+    for path in READS:
+        assert other_org_client.get(path).status_code == 404, path
+    for method, path, body in WRITES:
+        assert getattr(other_org_client, method)(path, json=body).status_code == 404, path
+    assert client.get("/api/projects/geo/sites/campus/scene").json()["revision"] == 1
+
+
+def test_every_write_route_409s_under_a_foreign_lock_before_any_effect(client, geo, _auth_db, seeded_identity,
+                                                                        second_identity, project_row):
+    from services import project_locks
+    _adopted(client, geo)
+    _engine, session_local = _auth_db
+    with session_local() as db:
+        project_locks.release_lock(db, project_row("geo").id, seeded_identity["user_id"])
+        assert project_locks.acquire_lock(db, project_row("geo").id, second_identity["user_id"]) is not None
+    try:
+        for method, path, body in WRITES:
+            r = getattr(client, method)(path, json=body)
+            assert (r.status_code, _kind(r)) == (409, "project_locked"), path
+        assert client.get("/api/projects/geo/sites/campus/scene").json()["revision"] == 1
+        assert not (geo / "site_anchor.json").exists()
+        # The /flow verdict shows the project read-only for this caller.
+        entry = client.get("/api/projects/geo/flow").json()["scene"]["actions"][0]
+        assert entry["blocker"]["code"] == "read_only"
+    finally:
+        with session_local() as db:
+            project_locks.release_lock(db, project_row("geo").id, second_identity["user_id"])
+
+
+# ── (2) no scene or anchor field reaches a network input ────────────────────
+
+def test_anchor_and_scene_writes_leave_the_network_input_fingerprint(client, geo):
+    from services import workflow_tools
+    from services.pypsa_service import PyPSAService
+
+    def fingerprint():
+        return workflow_tools._network_input_fingerprint(PyPSAService.get_active_context(), exact=True)
+
+    before, nc = fingerprint(), (geo / "network.nc").read_bytes()
+    assert client.put("/api/projects/geo/site-anchor", json={"anchor": ANCHOR, "expected_revision": 0}).status_code == 200
+    _adopted(client, geo)
+    pid = _propose(client, 1).json()["id"]
+    assert client.post(f"/api/projects/geo/sites/campus/scene/proposals/{pid}/apply",
+                       json={"expected_revision": 1}).status_code == 200
+    assert fingerprint() == before
+    assert (geo / "network.nc").read_bytes() == nc
+
+
+# ── (4) the proposal map ────────────────────────────────────────────────────
+
+def test_a_cleared_map_answers_410(client, geo):
+    from services.site_scene import proposals
+    _adopted(client, geo)
+    pid = _propose(client, 1).json()["id"]
+    proposals.clear()
+    r = client.post(f"/api/projects/geo/sites/campus/scene/proposals/{pid}/apply", json={"expected_revision": 1})
+    assert (r.status_code, _kind(r)) == (410, "proposal_expired")
+    assert r.json()["detail"]["message"] == "This proposal expired: generate the site again"
+
+
+def test_apply_refuses_inputs_other_than_the_reviewed_ones(client, geo):
+    from services.site_scene import proposals
+    _adopted(client, geo)
+    prop = _propose(client, 1).json()
+    # The reviewed hash does not match: refused.
+    r = client.post(f"/api/projects/geo/sites/campus/scene/proposals/{prop['id']}/apply",
+                    json={"expected_revision": 1, "input_hash": "0" * 64})
+    assert (r.status_code, _kind(r)) == (409, "revision_conflict")
+    # The stored inputs changed after the preview: refused, nothing written.
+    entry = next(e for e in proposals._entries.values() if e["id"] == prop["id"])
+    entry["inputs"]["greenfield"][0]["height"] = 99
+    r = client.post(f"/api/projects/geo/sites/campus/scene/proposals/{prop['id']}/apply",
+                    json={"expected_revision": 1})
+    assert (r.status_code, _kind(r)) == (409, "revision_conflict")
+    assert client.get("/api/projects/geo/sites/campus/scene").json()["revision"] == 1
+
+
+def test_another_projects_or_users_proposal_is_refused(client, install_network, geo):
+    from services.site_scene import proposals
+    _adopted(client, geo)
+    pid = _propose(client, 1).json()["id"]
+    # Another user of the same project: the same answer as an unknown id.
+    key = next(k for k in proposals._entries if k[1] == pid)
+    with pytest.raises(Exception) as exc:
+        proposals.get(key[0], "someone-else", "campus", pid)
+    assert getattr(exc.value, "kind", None) == "proposal_expired"
+    # Another project of the same user.
+    install_network(_empty_network(), name="geo2")
+    assert client.post("/api/projects/geo2", params={"force": True, "rebind": True}).status_code == 200
+    _put_site_in = client.put("/api/projects/geo2/sites", json={"version": 1, "sites": [copy.deepcopy(SITE)]})
+    assert _put_site_in.status_code == 200
+    r = client.post(f"/api/projects/geo2/sites/campus/scene/proposals/{pid}/apply", json={"expected_revision": 1})
+    assert (r.status_code, _kind(r)) == (410, "proposal_expired")
+
+
+def test_the_map_is_bounded_by_count(client, geo, monkeypatch):
+    from services.site_scene import proposals
+    _adopted(client, geo)
+    monkeypatch.setattr(proposals, "MAX_PROPOSALS", 3)
+    ids = [_propose(client, 1).json()["id"] for _ in range(5)]
+    live = {k[1] for k in proposals._entries}
+    assert live == set(ids[2:])
+
+
+def test_the_map_is_bounded_by_age(client, geo, monkeypatch):
+    from services.site_scene import proposals
+    _adopted(client, geo)
+    pid = _propose(client, 1).json()["id"]
+    monkeypatch.setattr(proposals, "TTL_SECONDS", -1)
+    r = client.get(f"/api/projects/geo/sites/campus/scene/proposals/{pid}")
+    assert (r.status_code, _kind(r)) == (410, "proposal_expired")
+
+
+# ── (7) /flow: electrical keys untouched, the scene block never stale ───────
+
+def test_flow_keeps_the_electrical_payload_and_shows_an_apply_at_once(client, geo, monkeypatch):
+    from services import flow_service
+
+    built = []
+    real = flow_service.project_flow
+
+    def spy(*a, **k):
+        built.append(real(*a, **k))
+        return built[-1]
+
+    monkeypatch.setattr(flow_service, "project_flow", spy)
+    flow = client.get("/api/projects/geo/flow").json()
+    served = {k: v for k, v in flow.items() if k != "scene"}
+    # The electrical payload is byte-for-byte what the unchanged flow service built,
+    # and the service's (possibly cached) dict never gained a scene key.
+    assert json.dumps(served, sort_keys=True) == json.dumps(built[-1], sort_keys=True, default=str)
+    assert "scene" not in built[-1]
+    assert [a["action"] for a in flow["scene"]["actions"]] == [
+        "open_site_creation", "create_plot", "generate_native", "assign_native", "show_connectivity",
+        "play_results", "export_scene", "apply_proposal", "process_layout", "reconstruct_photos",
+        "generate_blender"]
+    _adopted(client, geo)
+    assert client.get("/api/projects/geo/flow").json()["scene"]["entry"]["label"] == "Resume site setup"
+    pid = _propose(client, 1).json()["id"]
+    assert _by_action(client)["apply_proposal"]["available"]
+    client.post(f"/api/projects/geo/sites/campus/scene/proposals/{pid}/apply", json={"expected_revision": 1})
+    after = client.get("/api/projects/geo/flow").json()
+    assert after["scene"]["entry"]["label"] == "Open 3D site"
+    assert not _by_action(client)["apply_proposal"]["available"]
+    assert {k: v for k, v in after.items() if k != "scene"} == served
+
+
+def _by_action(client):
+    return {a["action"]: a for a in client.get("/api/projects/geo/flow").json()["scene"]["actions"]}
+
+
+# ── (9) raw body size before JSON parsing ───────────────────────────────────
+
+def test_an_oversize_body_is_413_before_parsing(client, geo):
+    from routers import site_scene
+    _adopted(client, geo)
+    cap = site_scene.MAX_PROPOSAL_BODY
+    at_cap = b"{" + b" " * (cap - 2) + b"}"
+    r = client.post("/api/projects/geo/sites/campus/scene/proposals", content=at_cap,
+                    headers={"content-type": "application/json"})
+    assert r.status_code == 422          # within the cap: parsed, then refused as input
+    over = b"x" * (cap + 1)              # not JSON at all: refused on size, never parsed
+    r = client.post("/api/projects/geo/sites/campus/scene/proposals", content=over,
+                    headers={"content-type": "application/json"})
+    assert (r.status_code, _kind(r)) == (413, "resource_limit")
+    assert r.json()["detail"]["max"] == cap and r.json()["detail"]["actual"] == cap + 1
+    r = client.put("/api/projects/geo/site-anchor", content=b"x" * (site_scene.MAX_ANCHOR_BODY + 1),
+                   headers={"content-type": "application/json"})
+    assert (r.status_code, _kind(r)) == (413, "resource_limit")

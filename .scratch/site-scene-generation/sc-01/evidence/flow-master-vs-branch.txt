@@ -1,0 +1,7 @@
+GET /api/projects/cmp/flow, same project (1 Bus, 1 Load), master fe59c529 vs branch claude/site3d-sc01a
+master keys: ['deferred', 'deferred_reason', 'notes', 'run_blocker', 'run_ready', 'run_request', 'run_verdict', 'scope', 'sections', 'verdicts']
+branch keys without scene: ['deferred', 'deferred_reason', 'notes', 'run_blocker', 'run_ready', 'run_request', 'run_verdict', 'scope', 'sections', 'verdicts']
+sha256 master payload:             0624e0b5b36a3c0094599e81b8a1e6ac0a6dc3648c7575718588467445446d85
+sha256 branch payload minus scene: 0624e0b5b36a3c0094599e81b8a1e6ac0a6dc3648c7575718588467445446d85
+byte-equal (canonical JSON): True
+scene.entry: {"blocker": {"code": "site_anchor_missing", "home": {"expert": {"panel": "horizon"}, "guided": {"drawer": "site_anchor", "open": "request_then_scroll", "section": "project"}}, "link": "\u203a", "reason": "Add site coordinates to create a 3D site"}, "enabled": false, "label": "Create 3D site"}
