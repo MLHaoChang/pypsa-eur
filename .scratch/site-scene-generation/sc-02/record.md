@@ -3,7 +3,7 @@
 
 # SC-02 implementation record
 
-Status: SC-02a (backend) in review; SC-02b (UI) after it. Copied from [implementation-record-template.md](../implementation-record-template.md). Plan and plan verdicts: [plan.md](plan.md).
+Status: SC-02a (backend) merged (#844, c86f572f); SC-02b (UI) merged (#859, 2d8779ca). Copied from [implementation-record-template.md](../implementation-record-template.md). Plan and plan verdicts: [plan.md](plan.md).
 
 ## Assignment contract
 
@@ -82,4 +82,11 @@ Route detail codes (under the existing `invalid_input` 422 and `revision_conflic
 - **A never-bound target replaced between prepare and Apply.** If a component that holds no uid yet is deleted and recreated with the same name, bus and carrier between the preview and Apply, Apply binds the new one: there is no identity to compare (uids are minted only at Apply, GK B condition 2). The user reviewed that name and bus; a bound target is fully checked.
 - **Place-existing writes two files.** The D06 binding goes to sites.json before the generation commit, so a placement never exists without one; a failed commit leaves a binding to the same instance, which the retry reuses.
 - **Test thread versus request network.** `PyPSAService.get_network()` called from the test thread is not the network the requests use (a uid minted through a request was not visible there). These tests read the model only over HTTP and check minting by patching `component_identity`. `test_site_identity.py::test_a_get_never_writes` compares `get_network().meta` from the test thread, which may be the same blind spot; GK B agreed, follow-up (patch `uid_for` to fail, as `test_a_scene_get_and_a_prepare_never_mint_or_write` does), not changed here.
-- **SC-02b next**: the association panel, Attach picker, placement findings view, Add model asset flow and the two SC-01b follow-ups UX asked for, with Guided/Expert screenshots.
+- **SC-02b merged** (#859, 2d8779ca; UX OK @96fde803, frontend only): the association panel, Attach picker, placement findings view, Add model asset flow and the two SC-01b follow-ups. Follow-ups from its builder, not ticketed:
+  - the Issues panel does not list the native building findings (IssuesPanel and the findings store);
+  - Guided default-open reopens Hub design when the user switches back from Expert;
+  - the other overlay messages capitalise item names (Roof_pv);
+  - an NH3 Load shows MWh from its bus unit (backend);
+  - flowReturn does not record the mode;
+  - detach and group editing are not built; placement is one item per preview;
+  - GK B (5)'s `test_site_identity::test_a_get_never_writes` follow-up is still open.
