@@ -125,7 +125,7 @@ UX (plan GO with conditions; addendum GO):
 | 1 | "›" for links, "·" for data | the panels' links |
 | 2 | Server text as is for invalid_geometry, resource_limit, the height limit, revision_conflict and the proposal kinds; the client maps invalid_input, the swapped hint, project_locked, integrity_error, not_found, scene_managed_site | `api/siteScene.ts::sceneErrorCopy`; backend strings in `services/site_scene/proposals.py` ("This preview expired: generate again", "This preview was discarded: generate again", "This preview changed since you reviewed it: review it again"), pinned in `test_site_scene_routes.py` |
 | 3 | integrity_error copy plus "› Snapshots" | `SiteScenePanel.tsx` (`SnapshotsLink`, through `withReturnFromSite3D`) |
-| 4 | Results part: "Not available yet: 3D results come in a later version" with "› Results" | overridden on the client (`RESULTS_NOT_YET`), so the frozen `verdicts.py` table stays as is |
+| 4 | No developer words: one wording, one source | `verdicts.REASON_NOT_IN_N` reads "Not available yet: comes in a later version" (UX #821 NOT OK, fix 2), pinned by `test_blocker_reasons_use_no_developer_words`; the Model note matches; no client override |
 | 5 | OSM height source words | `nativeSite.ts::heightEvidenceWords` |
 | 6 | Preview shows the building count only | `SiteScenePanel.tsx` |
 | 7 | Fixed-boundary note in Map | `SiteScenePanel.tsx`, part Map |
@@ -134,6 +134,17 @@ UX (plan GO with conditions; addendum GO):
 | add. 1 | Limits under each field; Save's reason | `SiteCreationPanel.tsx::saveBlockedReason` |
 | add. 2 | Scale bar, north mark, marker label "47.3769, 8.5417" | `PlanPreview` |
 | add. 4 | "Need another shape? Draw the boundary on the Satellite map ›" | `flowNavigation.ts::openSiteBoundaryDraw`, `uiStore.siteDrawRequest`, consumed by `MapCanvas.tsx` |
+
+UX NOT OK @8afaf9b7 (five fixes):
+
+| # | Fix | Where |
+|---|---|---|
+| 1 | Parts row as tabs, no "·" | `SiteScenePanel.tsx`, the EconomicsPanel tab style |
+| 2 | "slice" reworded at the source | `verdicts.py`, `SiteScenePanel.tsx` Model note |
+| 3 | The managed-site refusal points to Generate | `api/siteScene.ts::MANAGED_SITE_COPY`, `services/site_scene/store.py` (two messages), "› Generate" in the panel |
+| 4 | Confirm coordinates off with a reason while a field is empty | `SiteAnchorField.tsx` |
+| 5 | One link per place on the Guided card | `SiteSetupSection.tsx`: "› Edit", dropped while the entry reason links there |
+| 6 (optional) | No "scene revision" counter in Map | `SiteScenePanel.tsx` |
 
 ### Risks left
 

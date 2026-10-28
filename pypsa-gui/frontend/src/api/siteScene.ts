@@ -122,6 +122,9 @@ const FIELD_WORDS: Record<string, string> = {
   action: 'The action', base_revision: 'The revision', inputs: 'The building inputs',
 }
 
+/** A Site the 3D scene owns: its boundary and placements change only through the scene (UX #821). */
+export const MANAGED_SITE_COPY = 'This site’s boundary and equipment positions are managed by its 3D scene: correct buildings in Generate'
+
 /** The refused building's name ("Building 3", "Mapped building 2") at the start of a server message. */
 function subjectOf(message: string): string {
   const who = /^(Mapped building|Building) (\d+)/.exec(message)
@@ -157,7 +160,7 @@ export function sceneErrorCopy(err: unknown): string {
     case 'invalid_geometry': return d.message || 'A building footprint is not valid'
     case 'revision_conflict': return d.message || 'Changed elsewhere since you opened it: reload to see the latest'
     case 'project_locked': return 'Another user is editing this project: try again when they finish'
-    case 'scene_managed_site': return 'This site is managed by its 3D scene: reload to edit it'
+    case 'scene_managed_site': return MANAGED_SITE_COPY
     case 'proposal_expired': return d.message || 'This preview expired: generate again'
     case 'proposal_cancelled': return d.message || 'This preview was discarded: generate again'
     case 'resource_limit': return d.message || 'Too large: reduce the number of buildings'
@@ -170,4 +173,4 @@ export function sceneErrorCopy(err: unknown): string {
 
 /** Kinds a reload resolves: the caller offers Reload beside the copy. */
 export const sceneErrorWantsReload = (err: unknown): boolean =>
-  ['revision_conflict', 'scene_managed_site', 'not_found'].includes(sceneErrorDetail(err)?.error_kind ?? '')
+  ['revision_conflict', 'not_found'].includes(sceneErrorDetail(err)?.error_kind ?? '')

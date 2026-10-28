@@ -27,6 +27,16 @@ beforeEach(() => {
 })
 
 describe('site coordinates', () => {
+  it('Confirm is off with a visible reason while a field is empty', async () => {
+    view()
+    await waitFor(() => expect(screen.getByTestId('site-anchor-state').textContent).toBe('Not set'))
+    expect((screen.getByTestId('site-anchor-confirm') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTestId('site-anchor-confirm-reason').textContent).toBe('Enter latitude and longitude to confirm')
+    type('site-anchor-lat', '47.3'); type('site-anchor-lng', '8.5')
+    expect((screen.getByTestId('site-anchor-confirm') as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.queryByTestId('site-anchor-confirm-reason')).toBeNull()
+  })
+
   it('checks the range before sending and names a swapped pair', () => {
     expect(anchorInputErrors(8.5, 47.3)).toEqual({ lat: null, lng: null })
     expect(anchorInputErrors(120, 47).lat).toBe('Latitude must be between −90 and 90: did you swap latitude and longitude?')

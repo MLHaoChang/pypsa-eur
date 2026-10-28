@@ -31,7 +31,7 @@ REASON_SAVE_FIRST = "Unsaved project: save it to keep a 3D site"
 REASON_NO_BOUNDARY = "No campus boundary: draw it to generate buildings"
 REASON_NO_TARGETS = "Buildings only: configure model elements to map them"
 REASON_NO_RUN = "No native run: run a study to play results"
-REASON_NOT_IN_N = "Not available yet: arrives with a later Site 3D slice"
+REASON_NOT_IN_N = "Not available yet: comes in a later version"
 REASON_NO_WORKER = "Not available: this engine is not installed"
 REASON_NO_PROPOSAL = "No proposal: generate or edit first"
 

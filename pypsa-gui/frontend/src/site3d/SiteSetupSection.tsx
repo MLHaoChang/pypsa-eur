@@ -1,19 +1,23 @@
 // "3D site" in Project & site: the coordinate field and the one
 // "Create 3D site" action (UI contract rules 2–4). Guided shows the
-// coordinates as one line with a "›" link to the `site_anchor` drawer;
+// coordinates as one line with a "› Edit" link to the `site_anchor` drawer
+// (dropped while the entry's reason links there);
 // Expert (the horizon panel) shows the field itself. Each mode renders the
 // entry exactly once.
 import { useEffect, useRef } from 'react'
 import { useUIStore } from '../store/uiStore'
 import { openSiteAnchor } from '../layout/flowNavigation'
 import SiteAnchorField, { anchorSummary, useSiteAnchor } from './SiteAnchorField'
-import SiteEntryAction from './SiteEntryAction'
+import SiteEntryAction, { useSceneEntry } from './SiteEntryAction'
 
 export default function SiteSetupSection({ variant }: { variant: 'guided' | 'expert' }) {
   const project = useUIStore(s => s.currentProject)
   const request = useUIStore(s => s.siteAnchorRequest)
   const drawer = useUIStore(s => s.fieldDrawer)
   const anchor = useSiteAnchor()
+  const { entry } = useSceneEntry()
+  // One link per place (UX #821): when the entry's reason already links to the coordinates, the line drops its own.
+  const reasonLinks = !!entry && !entry.enabled && !!entry.blocker && 'guided' in entry.blocker.home
   const ref = useRef<HTMLElement>(null)
 
   // Guided: the card answers a request only when no drawer took it (the drawer's field scrolls itself).
@@ -31,9 +35,9 @@ export default function SiteSetupSection({ variant }: { variant: 'guided' | 'exp
         <div data-testid="site-anchor-summary" className="flex flex-wrap items-baseline gap-2 text-[12px]">
           <span className="text-muted">Site coordinates:</span>
           <span className="text-text">{project ? anchorSummary(anchor.data) : 'Not set'}</span>
-          {project && (
-            <button type="button" onClick={() => openSiteAnchor()} className="text-[11px] text-accent hover:underline">
-              › Site coordinates
+          {project && !reasonLinks && (
+            <button type="button" data-testid="site-anchor-edit" onClick={() => openSiteAnchor()} className="text-[11px] text-accent hover:underline">
+              › Edit
             </button>
           )}
         </div>

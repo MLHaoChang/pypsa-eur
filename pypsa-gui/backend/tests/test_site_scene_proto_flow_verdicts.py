@@ -148,3 +148,12 @@ def test_anchor_and_scene_files_leave_the_real_flow_unchanged(client, install_ne
     assert after["scene"]["entry"]["label"] == "Resume site setup"
     # The geometry-first Site has no buses and the network stays empty.
     assert site_service.read_sites(project)["sites"][0]["buses"] == []
+
+
+def test_blocker_reasons_use_no_developer_words():
+    """UX #821: a reason the user reads never says "slice" (one wording, one source)."""
+    from services.site_scene import verdicts
+    assert verdicts.REASON_NOT_IN_N == "Not available yet: comes in a later version"
+    for name in dir(verdicts):
+        if name.startswith("REASON_"):
+            assert "slice" not in getattr(verdicts, name).lower(), name

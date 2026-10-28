@@ -76,8 +76,13 @@ export default function SiteAnchorField() {
 
   const guard = evaluateMutation(readOnly, readOnlyReason)
   const blocked = !project ? SAVE_FIRST : guard.allowed ? null : guard.blockedMessage
-  const errs = touched ? anchorInputErrors(lat, lng) : { lat: null, lng: null }
   const confirmedSame = !!server?.confirmed && server.lat === lat && server.lng === lng
+  // Confirm stays off with a visible reason while a field is empty or invalid (UX #821).
+  const inputErrs = anchorInputErrors(lat, lng)
+  const errs = touched ? inputErrs : { lat: null, lng: null }
+  const confirmReason = !Number.isFinite(lat) || !Number.isFinite(lng)
+    ? 'Enter latitude and longitude to confirm'
+    : inputErrs.lat || inputErrs.lng ? 'Correct the field marked in red to confirm' : null
 
   const write = async (anchor: SiteAnchorDoc['anchor']) => {
     if (!project || !q.data || blocked) return
@@ -116,7 +121,7 @@ export default function SiteAnchorField() {
       </div>
       <div className="flex flex-wrap items-center gap-2 text-[11px]">
         <button type="button" data-testid="site-anchor-confirm" onClick={confirm}
-          disabled={!!blocked || busy || !q.data || confirmedSame}
+          disabled={!!blocked || busy || !q.data || confirmedSame || !!confirmReason}
           className="px-2.5 py-1 rounded bg-accent text-white font-semibold hover:bg-accent/90 disabled:opacity-50">
           Confirm coordinates
         </button>
@@ -132,6 +137,7 @@ export default function SiteAnchorField() {
         </span>
       </div>
       {blocked && <div data-testid="site-anchor-blocked" className="text-[11px] text-muted">{blocked}</div>}
+      {!blocked && confirmReason && <div data-testid="site-anchor-confirm-reason" className="text-[11px] text-muted">{confirmReason}</div>}
       {error && (
         <div role="alert" data-testid="site-anchor-error" className="flex items-center gap-2 text-[11px] text-danger">
           <span>{error.copy}</span>

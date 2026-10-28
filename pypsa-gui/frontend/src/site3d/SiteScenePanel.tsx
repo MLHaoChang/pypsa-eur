@@ -16,7 +16,7 @@ import { sceneErrorCopy, sceneErrorDetail, sceneErrorWantsReload, type Greenfiel
 import type { SceneAction, SitePart } from '../api/flow'
 import { evaluateMutation } from '../utils/mutationGuard'
 import NumberField from './NumberField'
-import { adoptServerDocument, useSitesStore } from './sitesStore'
+import { useSitesStore } from './sitesStore'
 import { applyProposal, discardProposal, propose, SitesNotSaved } from './sceneActions'
 import { useSceneProposal, useSiteScene } from './useSiteScene'
 import { heightEvidenceWords, HEIGHT_MAX_M, greenfieldFromBuilding, osmSourcesInside } from './nativeSite'
@@ -44,8 +44,6 @@ function goHome(home: unknown): void {
   })
 }
 
-const RESULTS_NOT_YET = 'Not available yet: 3D results come in a later version'
-
 /** "› Snapshots" beside an unreadable scene (UX SC-01b plan, condition 3). */
 function SnapshotsLink() {
   return (
@@ -58,14 +56,14 @@ function SnapshotsLink() {
 
 const unreadable = (err: unknown) => sceneErrorDetail(err)?.error_kind === 'integrity_error'
 
-function Blocker({ action, reason }: { action: SceneAction | undefined; reason?: string }) {
+function Blocker({ action }: { action: SceneAction | undefined }) {
   if (!action || action.available || !action.blocker) return null
   const leaves = !('site_part' in (action.blocker.home as object))
   const where = (action.blocker.home as { guided?: { section: string } }).guided?.section
   const words: Record<string, string> = { project: 'Site coordinates', loads: 'Loads', results: 'Results' }
   return (
     <span className="text-[11px] text-muted" data-testid={`scene-blocker-${action.action}`}>
-      {reason ?? action.blocker.reason}
+      {action.blocker.reason}
       {leaves && where && (
         <> <button type="button" onClick={() => goHome(action.blocker!.home)} className="text-accent hover:underline">
           {action.blocker.link} {words[where] ?? where}
@@ -179,15 +177,12 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
 
   return (
     <div data-testid="site-scene-panel" className="w-[min(26rem,100%)] rounded-lg border border-border bg-bg/95 p-3 text-[12px] flex flex-col gap-2 shadow">
-      <div role="tablist" aria-label="Site 3D parts" className="flex items-center gap-1 text-[11px]">
-        {PARTS.map((p, i) => (
-          <span key={p.id} className="flex items-center gap-1">
-            {i > 0 && <span aria-hidden className="text-ink-400">·</span>}
-            <button type="button" role="tab" aria-selected={part === p.id} data-testid={`site-part-${p.id}`} onClick={() => setPart(p.id)}
-              className={part === p.id ? 'font-semibold text-text' : 'text-muted hover:text-text'}>
-              {p.label}
-            </button>
-          </span>
+      <div role="tablist" aria-label="Site 3D parts" className="flex gap-1 border-b border-border">
+        {PARTS.map(p => (
+          <button key={p.id} type="button" role="tab" aria-selected={part === p.id} data-testid={`site-part-${p.id}`} onClick={() => setPart(p.id)}
+            className={`text-xs px-2 py-1 border-b-2 ${part === p.id ? 'border-accent text-text' : 'border-transparent text-muted hover:text-text'}`}>
+            {p.label}
+          </button>
         ))}
       </div>
 
@@ -200,10 +195,8 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
       {refusal && (
         <div role="alert" className="flex items-center gap-2 text-[11px] text-danger">
           <span>{refusal}</span>
-          {project && (
-            <button type="button" data-testid="scene-refusal-reload" className="underline text-text hover:text-accent"
-              onClick={() => { void adoptServerDocument(project).then(() => clearRefusal(project)); reload() }}>Reload</button>
-          )}
+          <button type="button" data-testid="scene-refusal-generate" className="text-accent hover:underline"
+            onClick={() => { clearRefusal(project); setPart('generate') }}>› Generate</button>
           <button type="button" onClick={() => clearRefusal(project)} className="text-muted hover:text-text">Dismiss</button>
         </div>
       )}
@@ -216,7 +209,7 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
 
       {part === 'map' && (
         <div className="flex flex-col gap-1 text-[11px] text-muted" data-testid="site-part-map-body">
-          <span>{site.name} · boundary of {site.boundary.length} corners · {enabled ? `scene revision ${enabled.revision}` : 'not yet a 3D scene'}</span>
+          <span>{site.name} · boundary of {site.boundary.length} corners{enabled ? '' : ' · not yet a 3D scene'}</span>
           {enabled && <span>The boundary is fixed: buildings can still be corrected in Generate.</span>}
         </div>
       )}
@@ -308,13 +301,13 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
 
       {part === 'model' && (
         <div className="flex flex-col gap-1" data-testid="site-part-model-body">
-          <span className="text-[11px] text-muted">Mapping buildings to model elements arrives with a later Site 3D slice.</span>
+          <span className="text-[11px] text-muted">Not available yet: mapping buildings to model elements comes in a later version</span>
           <Blocker action={action('assign_native')} />
         </div>
       )}
       {part === 'results' && (
         <div className="flex flex-col gap-1" data-testid="site-part-results-body">
-          <Blocker action={action('play_results')} reason={RESULTS_NOT_YET} />
+          <Blocker action={action('play_results')} />
         </div>
       )}
 

@@ -50,6 +50,7 @@ describe('Site 3D scene panel', () => {
   it('shows the four parts as one row, not a stepper', () => {
     view()
     expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual(['Map', 'Generate', 'Model', 'Results'])
+    expect(screen.getByRole('tablist').textContent).not.toContain('·')
     fireEvent.click(screen.getByTestId('site-part-model'))
     expect(screen.getByTestId('scene-blocker-assign_native').textContent).toBe('Buildings only: configure model elements to map them › Loads')
   })
@@ -113,15 +114,15 @@ describe('Site 3D scene panel', () => {
     expect(screen.getByTestId('scene-proposal').textContent).not.toContain('triangles')
   })
 
-  it('Results says 3D results come later, with one › link to Results', () => {
+  it('Results shows the served reason, with one › link to Results', () => {
     useUIStore.setState({ sitePart: 'results' })
     const flow = flowState.flow as { scene: { actions: unknown[] } }
     flow.scene.actions.push({ action: 'play_results', available: false, required_inputs: [], computes: '',
-      blocker: { code: 'not_in_this_slice', reason: 'Not available yet: arrives with a later Site 3D slice', link: '›',
+      blocker: { code: 'not_in_this_slice', reason: 'Not available yet: comes in a later version', link: '›',
         home: { guided: { section: 'results', drawer: null, open: 'request_then_scroll' }, expert: { panel: 'results' } } } })
     view()
     expect(screen.getByTestId('scene-blocker-play_results').textContent)
-      .toBe('Not available yet: 3D results come in a later version › Results')
+      .toBe('Not available yet: comes in a later version › Results')
   })
 
   it('an expired preview is dropped with its error, and the error clears on a part change', async () => {
@@ -159,6 +160,18 @@ describe('Site 3D scene panel', () => {
     fireEvent.click(screen.getByTestId('scene-snapshots-link'))
     expect(useUIStore.getState().activeSlidePanel).toBe('snapshots')
     expect(useUIStore.getState().flowReturn?.label).toBe('Site 3D')
+  })
+
+  it('a managed-site refusal points to Generate', async () => {
+    const { useSitesStore, MANAGED_SITE_COPY } = await import('./sitesStore')
+    useUIStore.setState({ sitePart: 'map' })
+    useSitesStore.setState({ sceneRefusal: { p: MANAGED_SITE_COPY } })
+    view()
+    expect(screen.getByText(MANAGED_SITE_COPY)).toBeTruthy()
+    expect(MANAGED_SITE_COPY).not.toMatch(/reload/i)
+    fireEvent.click(screen.getByTestId('scene-refusal-generate'))
+    expect(useUIStore.getState().sitePart).toBe('generate')
+    expect(useSitesStore.getState().sceneRefusal.p).toBeUndefined()
   })
 
   it('read-only: the reason is visible and nothing can be generated', () => {

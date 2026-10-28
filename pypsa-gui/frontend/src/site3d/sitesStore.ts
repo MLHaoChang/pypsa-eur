@@ -17,7 +17,7 @@
 import { useEffect } from 'react'
 import { create } from 'zustand'
 import { sitesApi } from '../api/sites'
-import { sceneErrorCopy, sceneErrorDetail } from '../api/siteScene'
+import { MANAGED_SITE_COPY, sceneErrorCopy, sceneErrorDetail } from '../api/siteScene'
 import { rawFetchHeaders } from '../api/csrf'
 import { assertFootprintValid } from './footprints'
 import type { AssetFootprint } from './types'
@@ -351,7 +351,7 @@ async function persist(project: string | null): Promise<'server' | 'local' | 're
 }
 
 /** The refusal copy for an edit to a scene-managed Site (sceneErrorCopy's `scene_managed_site`). */
-export const MANAGED_SITE_COPY = 'This site is managed by its 3D scene: reload to edit it'
+export { MANAGED_SITE_COPY } from '../api/siteScene'
 
 /**
  * Replace the cached document with the server's (after a refusal, an adopt
