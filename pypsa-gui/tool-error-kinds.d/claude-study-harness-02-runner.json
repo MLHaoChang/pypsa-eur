@@ -1,0 +1,8 @@
+{
+  "kinds": {
+    "task_step_claimed": {
+      "surface": "inline",
+      "why": "A harness run's step is held by another session of the same plan (the server-side runner or another chat, harness/runner.py); refused before any card. The assistant waits and reads the plan again with get_task."
+    }
+  }
+}

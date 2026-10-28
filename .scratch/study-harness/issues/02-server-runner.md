@@ -25,18 +25,18 @@ Plan verdict: GK B GO, 28 Oct; B1 = option b (explicit base context)
 
 ## Acceptance criteria
 
-- [ ] With no chat session open, an eh_site run whose cards were pre-clicked (test hook) advances setup → solve → hand-off; the eventlog of `run:<task_id>` holds every call.
-- [ ] Kill-and-restart mid-solve: a queue job that finished settles `completed` from its row; a lost job settles `uncertain` and the run is `needs_user`; nothing is requeued.
-- [ ] Two runner instances: only the lease holder acts; the other takes over after the lease lapses.
-- [ ] The foreground active project is never touched by a run on another project (assert on `get_active_context`).
-- [ ] ACL revoked mid-run → the next tick stops with `task_not_found`/refusal and no effect (SC-07, SC-16).
-- [ ] An attention record is written on `needs_user` and `completed`; email is sent once when configured (outbox test hook), never when not.
-- [ ] `goals.py` behaviour is unchanged (its tests pass).
-- [ ] Foreground switch mid-stage: the runner's writes land only in its project, the foreground's only in the foreground (`_user_ts`, dirty state, change log, undo checked).
-- [ ] A foreground PUT during a mutating stage gets 409 `project_locked` ("a harness run is editing this project") and no write is lost.
-- [ ] `chat_tools._acting()` resolves the run owner inside the runner; each dispatch re-resolves the project by uuid and refuses on a mismatch.
-- [ ] Notification text is server-built; no researched value appears in an email.
-- [ ] A total model-cost cap (input, cached and output tokens from provider usage, in EUR) ends the run `needs_user` when exhausted (GK B).
+- [x] With no chat session open, an eh_site run whose cards were pre-clicked (test hook) advances setup → solve → hand-off; the eventlog of `run:<task_id>` holds every call.
+- [x] Kill-and-restart mid-solve: a queue job that finished settles `completed` from its row; a lost job settles `uncertain` and the run is `needs_user`; nothing is requeued.
+- [x] Two runner instances: only the lease holder acts; the other takes over after the lease lapses.
+- [x] The foreground active project is never touched by a run on another project (assert on `get_active_context`).
+- [x] ACL revoked mid-run → the next tick stops with `task_not_found`/refusal and no effect (SC-07, SC-16).
+- [x] An attention record is written on `needs_user` and `completed`; email is sent once when configured (outbox test hook), never when not.
+- [x] `goals.py` behaviour is unchanged (its tests pass).
+- [x] Foreground switch mid-stage: the runner's writes land only in its project, the foreground's only in the foreground (`_user_ts`, dirty state, change log, undo checked).
+- [x] A foreground PUT during a mutating stage gets 409 `project_locked` ("a harness run is editing this project") and no write is lost.
+- [x] `chat_tools._acting()` resolves the run owner inside the runner; each dispatch re-resolves the project by uuid and refuses on a mismatch.
+- [x] Notification text is server-built; no researched value appears in an email.
+- [x] A total model-cost cap (input, cached and output tokens from provider usage, in EUR) ends the run `needs_user` when exhausted (GK B).
 
 ## Likely files
 
@@ -47,3 +47,5 @@ Plan verdict: GK B GO, 28 Oct; B1 = option b (explicit base context)
 Agent turns (04), envelope admission (03), the UI (08).
 
 ## Comments
+
+28 Oct: all criteria are proven in `pypsa-gui/backend/tests/test_harness_runner.py`. `goals.py` is untouched and `test_harness_goals.py` passes. GK B additions (a)–(d) are built. The lock-release mutation evidence is in `../evidence/02-lock-release-mutation.md`. Criterion 11: the email no longer carries the run title, because the model writes it.
