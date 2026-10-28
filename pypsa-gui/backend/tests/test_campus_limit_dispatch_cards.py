@@ -191,4 +191,5 @@ def test_dispatch_card_refuses_a_table_the_write_would_refuse(tables, hub, monke
     monkeypatch.setattr(gs, "_check_external", refuse)
     with pytest.raises(HTTPException) as exc:
         edit_card.preview("gridspine_upload_external_dispatch", {**P, "dispatch_file_id": "d1"})
-    assert exc.value.status_code == 422 and "no hours column" in exc.value.detail
+    assert exc.value.status_code == 422
+    assert exc.value.detail["error_kind"] == "edit_refused" and "no hours column" in exc.value.detail["message"]

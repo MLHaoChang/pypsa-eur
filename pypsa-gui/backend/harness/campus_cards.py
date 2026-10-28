@@ -772,8 +772,6 @@ def _dispatch_rows(old_config: dict, dispatch: dict, loads: dict | None) -> list
 
 
 def _dispatch_preview(args: dict) -> list[dict]:
-    from fastapi import HTTPException
-
     from harness import edit_card_campus as ecc
     from services import gridspine_service as gs
 
@@ -796,7 +794,7 @@ def _dispatch_preview(args: dict) -> list[dict]:
             try:
                 gs._check_external(dispatch_path, loads_path)
             except gs.ContractError as exc:
-                raise HTTPException(status_code=422, detail=str(exc)) from exc
+                ec._refuse("edit_refused", str(exc))  # the write's 422 text, with an error_kind
         rows = _dispatch_rows(gs.stored_config(project).to_json(), dispatch, loads)
         if not rows:
             ec._refuse("empty_edit", "The study already uses these tables.")
