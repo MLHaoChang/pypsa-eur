@@ -75,15 +75,14 @@ def _cases(base_project_id: str) -> tuple[Any, list[tuple[Any, dict]], int]:
         base = sc._resolve(db, user, base_project_id)
         cases, no_access = [], 0
         for child in project_registry.direct_children(db, base):
-            spec = wt._read_json(project_registry.project_dir(child) / wt.SENSITIVITY_CASE_FILE)
-            if not spec:
-                continue
-            try:
+            try:  # access first: nothing of a child the user cannot open is read
                 child = project_registry.resolve_project(db, user, str(child.id))
             except HTTPException:
                 no_access += 1
                 continue
-            cases.append((child, spec))
+            spec = wt._read_json(project_registry.project_dir(child) / wt.SENSITIVITY_CASE_FILE)
+            if spec:
+                cases.append((child, spec))
     return base, sorted(cases, key=lambda pair: pair[0].name.lower()), no_access
 
 
@@ -206,6 +205,11 @@ def _is_num(v) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
+def _is_established(v) -> bool:
+    """A number, or `True` for a formula written over two number cells."""
+    return v is True or _is_num(v)
+
+
 def write_scenarios(ws, base: Run, scen: Scenarios) -> dict:
     """Write the sheet; returns where things went (rows by key, columns)."""
     ws.title = TITLE
@@ -246,12 +250,22 @@ def write_scenarios(ws, base: Run, scen: Scenarios) -> dict:
         row += 1
         rows[key] = row
         put(ws, row, 1, label)
+        # System LCOE is a formula on the Overview, so the line has no value: here
+        # too it is a live formula over the run's own cost and energy cells.
+        line, _, period = key.partition("@")
+        cost, energy = rows.get(f"system_cost@{period}"), rows.get(f"energy_served@{period}")
         for j, v in enumerate(vals):
-            put(ws, row, first_val + j, v)
+            col = get_column_letter(first_val + j)
+            if (line == "system_lcoe" and cost and energy and _is_num(ws[f"{col}{cost}"].value)
+                    and _is_num(ws[f"{col}{energy}"].value) and ws[f"{col}{energy}"].value != 0):
+                formula(ws, row, first_val + j, f"={col}{cost}*1000/{col}{energy}")
+                vals[j] = True        # established: a delta may read it
+            else:
+                put(ws, row, first_val + j, v)
         base_ref = f"{get_column_letter(first_val)}{row}"
         for j, run in enumerate(runs):
             col = first_delta + j
-            if not run.reasons and _is_num(vals[0]) and _is_num(vals[1 + j]):
+            if not run.reasons and _is_established(vals[0]) and _is_established(vals[1 + j]):
                 formula(ws, row, col, f"={get_column_letter(first_val + 1 + j)}{row}-{base_ref}")
             else:
                 put(ws, row, col, None)

@@ -68,16 +68,34 @@ def _is_num(v) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
+def _refs(expr: str) -> list[str]:
+    return [f"{c}{r}" for c, r in re.findall(r"\$?([A-Z]{1,3})\$?(\d+)", expr)]
+
+
+def _value(ws, ref: str) -> float:
+    """A number cell, or a formula over number cells evaluated by hand."""
+    v = ws[ref].value
+    if _is_num(v):
+        return v
+    assert isinstance(v, str) and v.startswith("="), (ref, v)
+    expr = v[1:]
+    for r in sorted(_refs(expr), key=len, reverse=True):
+        expr = expr.replace(r, repr(_value(ws, r)))
+    assert re.fullmatch(r"[-+*/(). 0-9e]+", expr), expr
+    return eval(expr)  # noqa: S307 -- arithmetic over numbers only, checked above
+
+
 def _assert_deltas_read_two_numbers(ws):
-    """Every formula on the sheet is `=<run>-<base>` over two number cells."""
+    """Every formula on the sheet reads two cells, each a number or a formula
+    over numbers (never text or an empty cell)."""
     seen = 0
     for row in ws.iter_rows():
         for cell in row:
             if cell.data_type == "f":
-                refs = re.findall(r"\$?([A-Z]{1,3})\$?(\d+)", cell.value)
+                refs = _refs(cell.value)
                 assert len(refs) == 2, cell.value
-                for col, r in refs:
-                    assert _is_num(ws[f"{col}{r}"].value), (cell.coordinate, cell.value)
+                for ref in refs:
+                    assert _is_num(_value(ws, ref)), (cell.coordinate, cell.value)
                 seen += 1
     return seen
 
@@ -126,12 +144,25 @@ def test_the_scenarios_sheet_equals_the_comparison_and_overview_services(client,
                             ctx.solver_state.get("last_lost_load"),
                             functools.partial(results_router._result_df, state=ctx.solver_state))
     for line in figs.lines:
+        if line.key == "system_lcoe":   # a formula here, checked by hand below
+            continue
         row = _kpi_row(ws, f"{line.label.strip()} ({line.unit}), horizon")
         got = ws.cell(row, cols["Gas 20"]).value
         assert (got == NOT_ESTABLISHED) if line.total is None else got == pytest.approx(line.total, rel=1e-9)
     # Opex in the Overview's own unit agrees with the hand oracle too.
     assert ws.cell(_kpi_row(ws, "Opex (M EUR), horizon"), cols["Gas 5"]).value \
         == pytest.approx(opex(5), rel=1e-9)
+
+    # System LCOE: a live formula over each run's own cost and energy cells; by
+    # hand, no capex and 10 MWh served, so it is the run's gas price.
+    lcoe = _kpi_row(ws, "System LCOE (EUR/MWh), horizon")
+    cost = _kpi_row(ws, "Total system cost (M EUR), horizon")
+    energy = _kpi_row(ws, "Energy served (GWh), horizon")
+    for name, price in ((base_name, 10), ("Gas 20", 20), ("Gas 5", 5)):
+        col = ws.cell(lcoe, cols[name]).column_letter
+        assert ws.cell(lcoe, cols[name]).value == f"={col}{cost}*1000/{col}{energy}"
+        assert _value(ws, f"{col}{lcoe}") == pytest.approx(price, rel=1e-9)
+    assert _value(ws, ws.cell(lcoe, cols["Δ Gas 5 − base"]).coordinate) == pytest.approx(-5, rel=1e-9)
 
     # No case: every investment-case row and its delta is not_established, no formula.
     for _key, label, unit, _reader in CASE_ROWS:
