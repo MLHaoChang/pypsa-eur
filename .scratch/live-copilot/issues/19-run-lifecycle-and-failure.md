@@ -3,7 +3,7 @@
 
 # LC-19 — run, re-run, queue and failure handling in chat
 
-Status: ready-for-agent inside LC-05, beside LC-12
+Status: ready-for-agent inside LC-05, beside LC-12 (built on `claude/lc19-run-lifecycle`)
 Type: task
 Baseline: master `ae95a94a866730c0fe67fad37e238dc281786bd6`
 Dependencies: LC-12
@@ -59,3 +59,34 @@ Source: draft PR #567 `.scratch/high-value-ai-study/` (commit e8d53410), researc
 - A failed step yields a correction draft, never an automatic retry.
 - Superseded by AI-567b: the cross-card study brief is built by the study copilot (ticket 23, #569) on these plans; no separate progress line, the plan card is its one entry point and the card workspace Next row stays the per-card next step.
 - Cases: #567 S-series (see 05-IMPLEMENTATION-AND-TESTS.md).
+
+## Built (claude/lc19-run-lifecycle)
+
+- Item 1 was already on master (live-voice 08 B3): `solve_queue_requeue`
+  (execution) and `solve_queue_cancel_queued` (destructive), both carded.
+  This branch gives them Guided card sentences.
+- Item 2: `harness/run_lifecycle.py`. `run_simulation`, `solve_queue_enqueue`
+  and `solve_queue_requeue` aimed at the open project whose results match its
+  inputs (`calculations.solve_matches_inputs`) are refused before any frame
+  with `results_current`, naming the latest run. The user's yes comes back as
+  `rerun_current: true`, which shows the ordinary run card. `run_ac_pf_stage`
+  is refused the same way while the project flow's
+  `freshness_by_kind.loadflow` (W4b, #780) reads fresh.
+- Item 3: a failed solve's `wait_for_job` result carries `triage` (the job's
+  log, `diagnose_network`, `validate_network`, then what to say), and a failed
+  plan job's continuation message carries the same rule in one line. Nothing
+  re-runs: a run still needs its own request and card.
+- Item 4: `project_readiness` returns `engines` (named from the separability
+  matrix) and `ask_engine`, the ready kinds when there is more than one. The
+  load flow is ready while the dispatch is fresh; its `results_current` is
+  `freshness_by_kind.loadflow == "fresh"`.
+
+## Cases adopted from #567 (HV-S), with their limits
+
+| Case | Source | Proved by | Limit |
+| --- | --- | --- | --- |
+| LC19-S1 | S14 | `test_oj33_an_infeasible_solve_is_triaged_and_never_rerun` | 3 triage reads; log ≤ 200 lines by default (`max_lines` ≤ 2000); each result ≤ 4,000 chars, 40,000 per turn (`harness/results.py`) |
+| LC19-S2 | S14 | `test_oj33_wait_for_job_names_the_triage_of_a_failed_solve` | `wait_for_job` ≤ 25 s per call; `triage` is 3 entries and one sentence |
+| LC19-S3 | S06 | `test_oj32_a_denied_rerun_card_starts_nothing`, `test_oj34_a_denied_retry_queues_nothing` | one card per run call; zero jobs on deny |
+| LC19-S4 | S12, S13 | existing `test_oj07_*` (restart, cancel, no replay) | one continuation per job; retries ≤ `TASK_STEP_RETRIES_MAX` (2) |
+| LC19-S5 | S09 | existing `test_a_process_restart_loses_the_job_and_continues_once_uncertain` | uncertain step blocks dependents; no reset |

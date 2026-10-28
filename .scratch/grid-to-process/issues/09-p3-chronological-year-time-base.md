@@ -1,6 +1,6 @@
 # P3: an hourly chronological year as a staged-template time base
 
-Status: needs-triage
+Status: ready-for-agent (triage 2026-10-28: 03 is done; `stage_network` is still week-only on master; gated, plan to GK A first)
 Type: task
 Blocked by: 03
 Gated: **yes** (solver: it changes the staged templates' time base and adds a validator rule)
@@ -47,3 +47,36 @@ hourly year.
 - The week-based templates are unchanged (regression).
 - The measurement is reported, with the solve time, the peak memory, the runner and the solver
   version.
+
+## Triage (2026-10-28)
+
+**Verified on master (41ade3be):** not built. `project_templates/eh_site.py` `stage_network` tiles the one-week `SNAPSHOTS` per period and has no time-base argument. Stores are already set `e_cyclic_per_period`. No validator rule for inventory cadence exists.
+
+### Agent brief
+
+**Category:** enhancement (gated: send GK A the plan before code)
+**Summary:** `stage_network` takes a `year` time base (8,760 h per period), the week-assuming code paths are audited, the inventory-cadence validator rule is added, and the cost of a B-sized year solve is measured.
+
+**Desired behaviour:**
+- `stage_network(..., time_base="week")` is the default, and every existing template's output is byte-identical to today.
+- `time_base="year"`:
+  - 8,760 hourly snapshots per period;
+  - weightings `objective` = `generators` = `stores` = 1, with the investment-period weighting still the period's years;
+  - stores cyclic per period;
+  - min up and down times unchanged (hours).
+- Each place listed in item 3 above is either tested on `year` or refuses `year` with a named reason. The audit result is a table in the PR body.
+- The validator refuses a `week`-base network holding a Store whose delivery is neither continuous nor at most weekly, naming the store (design §2.4).
+- **The measurement:**
+  - a B-sized demo network (~30 components, 3 periods, linearised UC) on HiGHS;
+  - report solve time, peak memory, the machine (a GitHub-hosted runner if a job can host it; else the session container, with CPU and RAM named) and the HiGHS version;
+  - send it to the coordinator before the PR asks for its OK.
+
+**Acceptance:** the four checks above under "Acceptance". In addition:
+- [ ] The 21-day Store test runs on a small year network inside the normal test budget. Mark the B-sized measurement run `slow`, or keep it out of the default suite.
+- [ ] The week-template regression covers every `*_staged` template's objective, to the unit.
+
+**Out of scope:** template 10 itself; chained representative days (design §4.2 (c)) unless the measurement exceeds the budget, which is then a new gated item for the owner, not this PR.
+
+**Likely files:** `pypsa-gui/backend/project_templates/eh_site.py`, `pypsa-gui/backend/services/validation_service.py`, `pypsa-gui/backend/services/solver_service.py`, `pypsa-gui/backend/services/time_aggregation_service.py`, `pypsa-gui/backend/routers/network_time_axis.py`, `pypsa-gui/backend/services/profile_shapes.py`, `pypsa-gui/backend/services/study/packs.py`, new tests under `pypsa-gui/backend/tests/`.
+**Blocked by:** none (03 is done). This blocks 10, through the measurement's verdict.
+**Model:** Opus (engine, gated).

@@ -68,7 +68,7 @@ def wait_for_job(job_id: str, timeout_seconds: float = 20) -> dict:
     from routers.solve_queue import _visible_job_or_404
     from services import chat_tools
     from services.solve_queue import _TERMINAL
-    from harness import job_adapters as ja
+    from harness import job_adapters as ja, run_lifecycle
     if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float)) or not math.isfinite(timeout_seconds) or not 0 <= timeout_seconds <= 25:
         _refuse("invalid_wait_timeout", "timeout_seconds must be between 0 and 25.")
     session = chat_tools.chat_session()
@@ -96,12 +96,12 @@ def wait_for_job(job_id: str, timeout_seconds: float = 20) -> dict:
         else:
             waiter = ja.wait_report_job
         try:
-            return waiter(
+            return run_lifecycle.with_triage(waiter(
                 job_id, timeout_seconds,
                 actor_id=actor_id,
                 stop=stop,
                 progress_slot=progress,
-            )
+            ), job_id)
         finally:
             if session is not None:
                 with session._lock:
@@ -120,10 +120,10 @@ def wait_for_job(job_id: str, timeout_seconds: float = 20) -> dict:
             with session._lock:
                 session.job_wait_progress = {"job_id": job_id, "status": job["status"], "position": job.get("position")}
         if terminal or cancelled or time.monotonic() >= deadline:
-            return {"job": job, "terminal": terminal, "completed": job["status"] == "completed",
+            return run_lifecycle.with_triage({"job": job, "terminal": terminal, "completed": job["status"] == "completed",
                     "timed_out": not terminal and not cancelled,
                     "wait_cancelled": cancelled, "waited_seconds": round(time.monotonic() - started, 3),
-                    "note": "Cancelling this wait does not abort the job; use solve_queue_abort to stop it."}
+                    "note": "Cancelling this wait does not abort the job; use solve_queue_abort to stop it."}, job_id)
         stop.wait(min(0.25, max(0, deadline - time.monotonic())))
 
 
@@ -200,6 +200,27 @@ def _study_state(project):
                           "note": "Freshness uses the saved config and artifact/source file timestamps; this is steady-state evidence, not dynamic compliance."}
 
 
+def _network_engines(ready, dispatch_fresh, results_current, loadflow_current):
+    """LC-19 item 4: the engines a network project can start from chat, named
+    from the separability matrix. The load flow seeds from the optimisation's
+    dispatch, so it is ready only while that dispatch is fresh; its own results
+    are current while the project flow's `freshness_by_kind.loadflow` is fresh."""
+    from services.run_separability import MATRIX
+    loadflow = {"kind": "loadflow", "label": MATRIX["loadflow"].label, "tool": "run_ac_pf_stage",
+                "ready": ready and dispatch_fresh, "results_current": bool(loadflow_current)}
+    if not dispatch_fresh:
+        loadflow["needs"] = "a current optimisation dispatch (run the optimisation first)"
+    return [{"kind": "optimisation", "label": MATRIX["optimisation"].label, "tool": "run_simulation",
+             "ready": ready, "results_current": bool(results_current)}, loadflow]
+
+
+def _engine_choice(engines):
+    """`ask_engine` lists the ready engines when there is more than one: a bare
+    "run" then asks once (ask_user) instead of picking."""
+    ready = [e["kind"] for e in engines if e["ready"]]
+    return {"engines": engines, "ask_engine": ready if len(ready) > 1 else None}
+
+
 def project_readiness(project_id: str | None = None) -> dict:
     from services import chat_tools, dirty_state, gridspine_service as gs, project_registry
     active = PyPSAService.get_active_context()
@@ -217,7 +238,10 @@ def project_readiness(project_id: str | None = None) -> dict:
             except HTTPException as exc:
                 return {**identity, "ready": False, "blockers": [exc.detail], "next_tools": ["gridspine_get_config"]}
             blockers = ["A study job is still active."] if state["active_job_id"] else []
+            engines = [{"kind": "gridspine_pipeline", "label": "GridSpine study pipeline",
+                        "tool": "gridspine_run_pipeline", "ready": not blockers, "results_current": state["fresh"]}]
             return {**identity, "ready": not blockers, "blockers": blockers, "evidence": state,
+                    **_engine_choice(engines),
                     "next_tools": ["wait_for_job"] if blockers else (["get_study_evidence"] if state["fresh"] else ["gridspine_get_config", "gridspine_run_pipeline"])}
         saved = (project_registry.project_dir(project) / "network.nc").is_file()
         if not saved and not identity["active"]:
@@ -229,6 +253,8 @@ def project_readiness(project_id: str | None = None) -> dict:
             solvers = chat_tools.check_solver_availability()
             status = chat_tools.get_simulation_status()
             freshness = chat_tools.dispatch_status()
+            from harness.run_lifecycle import loadflow_current
+            lf_current = loadflow_current(ctx)
         blockers = []
         if validation.get("deferred"):
             blockers.append("Validation is deferred while a solver or study is active.")
@@ -239,7 +265,9 @@ def project_readiness(project_id: str | None = None) -> dict:
         if ctx.user_ts_unreadable:
             blockers.append("The saved user time-series store cannot be read.")
         dirty = dirty_state.is_dirty(ctx)
-        return {**identity, "saved": saved, "dirty": dirty, "ready": not blockers,
+        engines = _network_engines(not blockers, freshness.get("state") == "fresh",
+                                   solve_freshness(ctx)["results_current"], lf_current)
+        return {**identity, "saved": saved, "dirty": dirty, "ready": not blockers, **_engine_choice(engines),
                 "blockers": blockers, "validation": {**validation, "issues": validation.get("issues", [])[:12]},
                 "validation_issue_count": len(validation.get("issues", [])), "solvers": solvers,
                 "solver_name": cfg.get("solver_name"), "simulation": status, "dispatch": freshness,

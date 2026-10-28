@@ -19,6 +19,11 @@ ADAPTERS: dict[str, dict[str, str]] = {
         "effects": "none", "validity": "exact captured static input fact (P0 pilot)",
         "progress": "tool_result", "artifact": "none", "status": "checked",
     },
+    "static_input_page_evidence": {
+        "effects": "none",
+        "validity": "exact captured static inputs for the rows of one page, input fingerprint rechecked",
+        "progress": "tool_result", "artifact": "none", "status": "checked",
+    },
     "checked_input_effect": {
         "effects": "static input update", "validity": "operation contract and independent read-back",
         "progress": "operation outcome", "artifact": "none", "status": "checked",
@@ -77,6 +82,7 @@ ADAPTERS: dict[str, dict[str, str]] = {
 # The tools a checked turn may run (harness.assurance.CHECKED_TOOLS must equal these keys).
 CHECKED_TOOL_ADAPTERS = {
     "get_component": "static_input_evidence",
+    "list_components": "static_input_page_evidence",
     "update_component": "checked_input_effect",
     "ui_open_panel": "navigation_ack",
 }

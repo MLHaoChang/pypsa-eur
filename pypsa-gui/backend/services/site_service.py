@@ -27,6 +27,7 @@ import os
 import pathlib
 import re
 import shutil
+import uuid
 from collections.abc import Callable
 
 from services.atomic_io import atomic_write_text
@@ -42,6 +43,7 @@ SCHEMA_VERSION = 1
 # Presentation envelopes only; no cable/line, building-load or bus footprint.
 FOOTPRINT_CLASSES = frozenset({"Generator", "StorageUnit", "Store", "Transformer", "Link"})
 MAX_FOOTPRINT_DIMENSION_M = 100_000
+MAX_BINDING_UID = 36
 
 # The PyPSA classes a placement key may name. `Bus` is included: the site
 # view draws a switchyard per bus and the user may move it.
@@ -136,6 +138,24 @@ def _validate_asset_footprints(value: object) -> None:
                 raise SitesInvalid(f"asset_footprints[{key!r}].{field} must be positive finite metres <= {MAX_FOOTPRINT_DIMENSION_M}")
 
 
+def _validate_bindings(value: object) -> None:
+    """`bindings`: `<Class>:<name>` -> the uid of the instance it was authored against (D06)."""
+    if not isinstance(value, dict):
+        raise SitesInvalid("bindings must be an object")
+    seen: set[str] = set()
+    for key, uid in value.items():
+        cls, sep, name = key.partition(":") if isinstance(key, str) else ("", "", "")
+        if not sep or not name or cls not in PLACEABLE_CLASSES:
+            raise SitesInvalid("bindings key must be <Class>:<name> with a placeable class")
+        try:
+            canonical = str(uuid.UUID(uid if isinstance(uid, str) and len(uid) <= MAX_BINDING_UID else ""))
+        except ValueError:
+            raise SitesInvalid(f"bindings[{key!r}] must be a uuid") from None
+        if canonical in seen:                # a case or hyphen variant is the same uid
+            raise SitesInvalid(f"bindings[{key!r}]: a uid binds one key only")
+        seen.add(canonical)
+
+
 def validate_sites(doc: object) -> None:
     """
     Raise `SitesInvalid` naming the field, else return. Unknown keys are
@@ -151,6 +171,8 @@ def validate_sites(doc: object) -> None:
         raise SitesInvalid("sites must be a list")
     if "asset_footprints" in doc:
         _validate_asset_footprints(doc["asset_footprints"])
+    if "bindings" in doc:
+        _validate_bindings(doc["bindings"])
     seen: set[str] = set()
     for i, site in enumerate(sites):
         where = f"sites[{i}]"
@@ -219,16 +241,43 @@ def remove_asset_footprint(doc: dict, component_class: str, name: str) -> bool:
     return True
 
 
+def _scene_hook(action: str, fn, pdir: pathlib.Path, *args: str) -> None:
+    """
+    The scene half of a CRUD hook (SC-01a, D03): a scene-enabled Site's
+    placements and footprints are re-keyed or dropped in a NEW generation,
+    never in sites.json behind its pointer. It runs after the network edit,
+    like the sites.json half. A failure leaves the old generation in place;
+    it is logged as an error and shows as an `unbound_keys` entry on the
+    Site's scene (a key whose component is gone), never silently.
+    """
+    try:
+        fn(pdir, *args)
+    except Exception as exc:  # noqa: BLE001 — the network edit already happened; surfaced via unbound_keys
+        log.error("site scene %s hook failed for %s: %s", action, args, exc)
+
+
+def _legacy_view(pdir: pathlib.Path, doc: dict) -> dict:
+    """`doc` without the scene-enabled Sites, whose placements only their scene may change."""
+    from services.site_scene import store as scene_store
+
+    enabled = scene_store.enabled_site_ids(pdir)
+    return {**doc, "sites": [s for s in doc.get("sites", []) if s.get("id") not in enabled]}
+
+
 def remove_asset_footprint_on_disk(project_dir: pathlib.Path | str | None, component_class: str, name: str) -> None:
     if not project_dir:
         return
+    from services.site_scene import store as scene_store
+
+    pdir = pathlib.Path(project_dir)
     try:
-        pdir = pathlib.Path(project_dir)
         doc = read_sites(pdir)
         if remove_asset_footprint(doc, component_class, name):
             write_sites(pdir, doc)
     except (OSError, ValueError) as exc:
         log.warning("sites.json footprint cleanup failed for %s %r: %s", component_class, name, type(exc).__name__)
+    # A scene-enabled Site drops the placement AND the footprint together.
+    _scene_hook("delete", scene_store.remove_component, pdir, component_class, name)
 
 
 def rename_component_on_disk(project_dir: pathlib.Path | str | None, component_class: str, old: str, new: str) -> None:
@@ -239,13 +288,44 @@ def rename_component_on_disk(project_dir: pathlib.Path | str | None, component_c
     """
     if not project_dir or old == new:
         return
+    from services.site_scene import store as scene_store
+
+    pdir = pathlib.Path(project_dir)
     try:
-        pdir = pathlib.Path(project_dir)
         doc = read_sites(pdir)
-        if rename_component(doc, component_class, old, new):
+        if rename_component(_legacy_view(pdir, doc), component_class, old, new):
             write_sites(pdir, doc)
     except Exception as exc:  # noqa: BLE001 — best-effort by design
         log.warning("sites.json rename hook failed for %s %r→%r: %s", component_class, old, new, exc)
+    _scene_hook("rename", scene_store.rename_component, pdir, component_class, old, new)
+    try:
+        _rename_binding(pdir, component_class, old, new)
+    except Exception as exc:  # noqa: BLE001 — best-effort: a lost binding reads unbound, never aliased
+        log.warning("sites.json binding rename failed for %s %r→%r: %s", component_class, old, new, exc)
+
+
+def _rename_binding(pdir: pathlib.Path, component_class: str, old: str, new: str) -> None:
+    """
+    Move the D06 binding with the renamed entries. Not when a scene still shows
+    the old key (its rename failed): that key keeps the binding and reads
+    unbound, and the renamed entries are bound by the next PUT.
+    """
+    from services.site_scene import store as scene_store
+
+    old_key, new_key = f"{component_class}:{old}", f"{component_class}:{new}"
+    # Under the scene mutex, like PUT /sites, so neither write loses the other.
+    # The caller holds the network lock, so the order is network, then scene.
+    with scene_store.project_lock(pdir):
+        doc = read_sites(pdir)
+        bindings = doc.get("bindings")
+        if not isinstance(bindings, dict) or old_key not in bindings or new_key in bindings:
+            return
+        shown = scene_store.project_sites(pdir)
+        if old_key in (shown.get("asset_footprints") or {}) or any(
+                old_key in (s.get("placements") or {}) for s in shown.get("sites") or []):
+            return
+        bindings[new_key] = bindings.pop(old_key)
+        write_sites(pdir, doc)
 
 
 # ── thumbnail (visual-layers plan 3, S5) ────────────────────────────────────
