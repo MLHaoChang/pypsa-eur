@@ -26,6 +26,7 @@ Design: [design.md](../design.md) §6.1, §6.3, §6.4, §6.5
 - [ ] An attempted edit outside the tunables or the envelope is carded (not run) and counted as a refusal.
 - [ ] The headless turn offers only the allowlisted tools (assert the offered tool list).
 - [ ] Round and token use in `run.budget.used` match budget.py, not the model's text.
+- [ ] `attach_tariff`, `set_weather_choice` and series attaches are admitted only when listed in the envelope with a target; unlisted, each gets a card (both cases tested).
 
 ## Likely files
 

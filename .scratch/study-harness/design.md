@@ -202,6 +202,14 @@ GateResult = {"rule": id, "verdict": "pass" | "fail" | "not_evaluated",
     always assumed: I_L is not IEEE 519's maximum demand, and S_sc is the
     entered fault level. The wording is "within the screening limit", never
     "meets IEEE 519". Resonance inside the clearance is `warn`.
+- **Row families** (GK A): several scorecard row ids are families:
+  `energization_peak:<period>`, `dynamic:<id>`, `ride_through:<scenario>`,
+  `motor_start:<unit>`. A rule on a family evaluates every row with the
+  prefix: every row `pass` → pass; any other verdict → fail; zero rows →
+  `not_evaluated`. A reader never picks one row of a family. Issues 05 and 10
+  pin this with a test.
+- **No wildcards**: a rule names one row id or one family. A `dc.readiness.*`
+  wildcard is refused at profile load.
 - **No model verdicts**: the model never supplies a fact or a verdict. It reads
   the gate result and narrates it (LC-20 "the model narrates; it adds no
   verdicts").
@@ -284,8 +292,14 @@ it as a design choice.
     (g2p 13);
   - the engine changes the levers. Its own converged / not-converged result
     and its `goal_sources` are the gate fact;
-  - its `max_solves` is bounded by the profile and counted against the solve
-    budget and the ≤2-round limit;
+  - one engine-loop call is one round. Its `max_solves` is bounded by the
+    profile, and its solves count against the solve budget;
+  - **LOLE basis**: `adequacy.lole_h_per_year` is per year (`eh_study.py:519`
+    divides by the horizon), while the engine loops take `target_lole_h` on a
+    **horizon** basis (`coupling_loop_runner.py:101`). Every LOLE rule names
+    its basis. Where an engine loop drives the rule, the profile converts the
+    goal once (h/yr × horizon years), and a test pins the conversion on a
+    multi-year horizon;
   - an engine loop and the agent loop are never nested, and never run on the
     same rule.
 - **Exhaustion**: the case is `failed` with its rules and ledger. In the base
@@ -347,6 +361,7 @@ caps them:
 | Agent rounds (L1 + L2 + explore proposals) | 6 | 20 (= `goals.MAX_ROUNDS`) | `needs_user` |
 | Wall time | 8 h | 72 h | `paused`; the envelope expires |
 | Model output tokens | 200 k (budget.py session cap) | 1 M | `needs_user` |
+| Model cost, total (GK B) | profile, e.g. €5 | owner value | `needs_user`; metered from provider usage (input, cached and output tokens, TOKEN-MEASURE-1), because cache reads and input dominate cost |
 | Research cost | €2 (pending owner) | €10 (pending owner) | research stops; the stage goes on without it |
 | Cases | 4 | 4 (AI-558) | refused at proposal |
 
@@ -531,6 +546,17 @@ Envelope = {
      fingerprint counts as drift (fail closed; the SC-11 analogue).
 
   Admission is re-checked at every dispatch. Nothing is cached from the grant.
+
+- **Glob targets** (GK B): `at_grant` is recorded per matched instance at the
+  grant. An instance that did not exist at the grant, including one the run
+  created, matches no entry and gets a card. A glob matches names within the
+  entry's component class only.
+- **Non-numeric attributes** (GK B): an edit entry carries numeric `bounds`
+  or an explicit enum of allowed values. An entry with neither, for an
+  attribute such as `carrier` or `bus`, is `invalid_envelope`.
+- **Data-gap tools** (GK B): `attach_tariff`, `set_weather_choice` and series
+  attaches are admitted only when listed in `edits` or `runs` with a target.
+  Otherwise they get a card.
 - A match is recorded as `approvals.decided(..., by="envelope:<id>")` plus an
   audit row `used`, and the call runs: this is the `policy` path, which
   "still needs a durable approval record", and fails closed when it cannot be
@@ -604,6 +630,16 @@ of bounds, expired, revoked, ACL loss, wrong project, foreign drift.
   - a rejected value stays in the ledger as `rejected`.
 - **Unit check**: the confirmed value must carry the target's unit. A value in
   another unit is refused, not converted (as `apply_user_row`).
+- **Source integrity** (GK B): the server checks every `SourceRow` the model
+  writes:
+  - its `url` must be one fetched in that turn;
+  - its `quote` must appear verbatim in the fetched content.
+
+  A row that fails is shown as "unverified source" on the card, never as
+  sourced. Issue 09 tests a fabricated URL and a fabricated quote.
+- **Currency**: every cap is in EUR. Provider usage billed in another currency
+  is converted server-side at a stated rate kept in the harness settings, and
+  the rate and its date are printed in the report's harness chapter.
 
 ## 9. Harness profiles
 
@@ -673,7 +709,7 @@ lists what blocks the profile from running unattended end to end today.
   - for each stage, `energization_mw ≥ 0`.
 - Solve: the multi-period EH solve (the investment card), then `run_eh_study` (reliability).
 - Result rules: the core rules plus:
-  - `adequacy.lole_h_per_year ≤ target_lole_h` (`eh_study`);
+  - `adequacy.lole_h_per_year ≤ goal` (h/yr basis; the engine loop gets `goal × horizon years`, §6.2);
   - `kpi.unserved_mwh == 0` in normal operation.
 - Loop: L2 uses an engine loop for the LOLE rule (`run_margin_loop` for a firm-capacity lever, `run_coupling_loop` for an ENS-cap lever; §6.2), and the agent loop for the other rules. The two never run on the same rule.
 - Tunable: candidate `max_mw` (genset, bess, pv), BESS hours. `connection_mw` is the user's to change.
@@ -693,9 +729,9 @@ lists what blocks the profile from running unattended end to end today.
   - `gridspine.poc.count == 1`;
   - `network.frequency == profile.frequency`.
 - Result rules:
-  - `dc.readiness.*` scorecard rows (`grid_readiness_for`: SCR, peak, ramp, flicker, TDD, unbalance, reactive, island), gated by verdict: only `pass` passes, and a pass on assumed inputs is a screening pass (§5). The chat tool `campus_grid_readiness` already reads them;
+  - scorecard rows (`grid_readiness_for`: SCR, peak, ramp, flicker, TDD, unbalance, reactive, island, and the families of §5), gated by verdict: only `pass` passes, and a pass on assumed inputs is a screening pass (§5). The chat tool `campus_grid_readiness` already reads them. There is no wildcard: on the shipped template 19 of 20 rows are `unknown` by construction, so a wildcard over `block` rules would end every run `needs_user`. Issue 10 lists each row id or family with its severity (`block` or `warn`), a one-line basis and the run that produces its input. For a `warn` row, `unknown` is reported as not evaluated, never as a pass;
   - energised ≥ IT load per stage;
-  - LOLE ≤ target;
+  - LOLE (h/yr basis, §6.2) ≤ goal;
   - the studies chosen under SAGC-1 (public SAGC, May 2026, and generic engineering only), built in `gridspine/static/` (DC 09–14 are done):
     - SCR/ESCR (`strength.py`, G4): screening, never certifying;
     - PQ: TDD, unbalance, harmonic impedance scan (G5): screening; "within the screening limit", never "meets IEEE 519"; resonance inside the clearance is `warn`;
@@ -717,7 +753,7 @@ lists what blocks the profile from running unattended end to end today.
 - Result rules:
   - the H2 offtake is met (25 MW) in every hour;
   - electrolyser utilisation within the profile band (warn);
-  - LOLE ≤ target with the fuel cell as firm backup.
+  - LOLE (h/yr basis, §6.2) ≤ goal, with the fuel cell as firm backup.
 - Investment: the IC counterfactual with H2 offtake is impossible today (`.scratch/generic-site/design.md` Q3). It is an IC engine change that needs its own issue (GK A) and is not a gate yet: the investment rules are `warn` and stay `not_evaluated` with that reason. The offtake itself is demand and never tunable (§6.0).
 - Tunable: wind/PV/BESS candidate max, electrolyser and H2 storage size within bounds.
 - Missing: an H2 utilisation fact (no named reader), the IC counterfactual.
@@ -727,9 +763,9 @@ lists what blocks the profile from running unattended end to end today.
 - Scope: `_MICROGRID` (island_checks, outage_screening, goal_study, stress, investment_case). Archetype `off_grid`.
 - Input rules: the tie is open (`off_grid`); the critical (hospital) feeder is tagged.
 - Result rules:
-  - island survival by the verdicts of the scorecard's island rows (`sustained_h` from `gridspine/schema/island.py`, the frequency judge);
-  - LOLE ≤ target;
-  - no SCR rule: SCR means nothing on an island, and the fault level comes from the diesels.
+  - island survival by the verdicts of the scorecard's island rows (`ride_through:*`, `sustained_h` from `gridspine/schema/island.py`, the frequency judge);
+  - LOLE (h/yr basis, §6.2) ≤ goal;
+  - excluded on `off_grid`, with the reason and a test (GK A): SCR and every row built from the PoC's entered S_k'' (TDD, rapid voltage change, flicker, unbalance, motor start). With the tie open they mean nothing, and the fault level comes from the diesels.
 - Investment baseline: the existing diesel fleet, an IC engine change (generic-site Q4) that needs its own issue (GK A). It is not a gate yet; the rule is `warn`, `not_evaluated` until then.
 - Tunable: battery size and GFM settings within bounds, PV max.
 - Missing: the island tools are the `campus_*` set and their fit for a microgrid project is unverified; the IC baseline.

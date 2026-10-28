@@ -35,6 +35,8 @@ Plan verdict: GK B GO, 28 Oct (B2)
 - [ ] Grid-code publish is never admitted, even when listed.
 - [ ] The grant is recorded as `approvals.decided(by="user")` with the envelope id; each admitted dispatch as `by="envelope:<id>"`.
 - [ ] Tool-error kinds added here go in a `tool-error-kinds.d` fragment once #798 lands.
+- [ ] Glob targets: `at_grant` is recorded per matched instance; an instance created after the grant (including by the run) gets a card; a glob never matches another component class.
+- [ ] An edit entry without numeric `bounds` or an enum of allowed values (e.g. `carrier`, `bus`) is `invalid_envelope`.
 
 ## Likely files
 

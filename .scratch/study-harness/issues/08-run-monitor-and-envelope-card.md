@@ -38,7 +38,7 @@ UX placement: GO, 28 Oct, with the conditions under "UX conditions" below
 - [ ] Screenshots of every state in Guided and Expert are in the PR.
 - [ ] LC-23 SC-03 and SC-16 pass; Guided and Expert show the same plan card.
 - [ ] A waiting card is issued when the user opens the companion, with its TTL starting then.
-- [ ] Stop revokes the envelope and cancels the task; the card shows `cancelled`.
+- [ ] Stop revokes the envelope and cancels the task; the card says "Stopped at <stage>" and what was kept, never an internal status such as `cancelled` (the same for every task status).
 
 ## Likely files
 

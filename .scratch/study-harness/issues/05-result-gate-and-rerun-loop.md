@@ -29,6 +29,8 @@ Design: [design.md](../design.md) §5, §6.2
 - [ ] A profile with `native:run_margin_loop` never starts an agent turn for that rule.
 - [ ] The solve count in `run.budget.used` equals the solve-queue jobs of the run.
 - [ ] A scorecard row with `warn`, `unknown` or missing fails a `block` rule; an `assumed` pass shows "screening pass" in the gate record.
+- [ ] A family rule (`ride_through:*`, `motor_start:*`, …) passes only when every row of the family passes; zero rows → `not_evaluated`.
+- [ ] LOLE basis: on a multi-year horizon the h/yr goal is converted once to the engine loop's horizon-basis `target_lole_h`; one engine-loop call counts as one round.
 
 ## Likely files
 

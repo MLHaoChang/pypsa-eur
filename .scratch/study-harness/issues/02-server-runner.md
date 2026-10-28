@@ -36,6 +36,7 @@ Plan verdict: GK B GO, 28 Oct; B1 = option b (explicit base context)
 - [ ] A foreground PUT during a mutating stage gets 409 `project_locked` ("a harness run is editing this project") and no write is lost.
 - [ ] `chat_tools._acting()` resolves the run owner inside the runner; each dispatch re-resolves the project by uuid and refuses on a mismatch.
 - [ ] Notification text is server-built; no researched value appears in an email.
+- [ ] A total model-cost cap (input, cached and output tokens from provider usage, in EUR) ends the run `needs_user` when exhausted (GK B).
 
 ## Likely files
 

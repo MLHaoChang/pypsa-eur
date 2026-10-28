@@ -23,6 +23,8 @@ Design: [design.md](../design.md) §9.3 "eh_microgrid"
 - [ ] A run on each template reaches hand-off with island survival as a gate result.
 - [ ] A seeded undersized battery fails survival; L2 resizes within bounds or ends `needs_user`.
 - [ ] No SCR rule appears in the gate for an `off_grid` archetype.
+- [ ] On `off_grid`, the rows built from the PoC's S_k'' (TDD, rapid voltage change, flicker, unbalance, motor start) are excluded with the reason (test); the gate is the island rows.
+- [ ] The LOLE rule names its h/yr basis.
 
 ## Likely files
 

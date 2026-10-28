@@ -24,6 +24,9 @@ Plan verdict: GK A GO, 28 Oct (screening rows, verdict gating, never-tunable lis
 - [ ] A DC fixture with a published blank-schema profile (SAGC fields filled per project) runs to hand-off; each scorecard row is a gate result by verdict (only `pass` passes), with its `assumed` flag; screening rows read "within the screening limit", and a pass on assumed inputs is never "verified".
 - [ ] P–V/Q–V is listed as "deferred: needs issue" (no backend import of `voltage_stability.py`), not as a gate.
 - [ ] Grid-code publish is always the user's own card; the envelope never admits it.
+- [ ] The profile has no `dc.readiness.*` wildcard: a table lists each row id or family with its severity (`block`/`warn`), a one-line basis and the run that produces its input (this also answers which run produces each SAGC study); a `warn` row that is `unknown` reads "not evaluated".
+- [ ] On the shipped template (19 of 20 rows `unknown`), the run does not end `needs_user` on `warn` rows.
+- [ ] Family rows (`energization_peak:*`, `dynamic:*`, `ride_through:*`, `motor_start:*`) evaluate all rows of the family.
 - [ ] No published profile → the run waits at stage 2 and notifies; nothing is drafted or published by the run.
 - [ ] A contingency failure: L2 changes only tunables; taps and shunts only in stage 2 after an outage (DC13-SCOPE); redispatch is not attempted.
 - [ ] 60 Hz project: the frequency rule passes; a 50 Hz network under a SAGC profile fails `block`.

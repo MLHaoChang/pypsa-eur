@@ -24,12 +24,13 @@ Plan verdict: GK B GO, 28 Oct (B3); cost-cap default pending the owner (design Â
 
 - [ ] A chat turn never offers web search; a research turn does.
 - [ ] A researched tariff value is shown with url and quote and is written only after the card click; inside a granted envelope it is still carded.
-- [ ] Cost over the cap stops research mid-stage; `run.budget.used.research_usd` is from provider usage.
+- [ ] Cost over the cap stops research mid-stage; `run.budget.used.research_eur` is from provider usage, converted server-side at the stated rate.
 - [ ] A rejected value stays `rejected` in the ledger and the report.
 - [ ] Layout test: no vendor word outside `harness/providers`.
 - [ ] B3: a research turn offers read-only tools plus the source-ledger write; it cannot call `update_component` even when the envelope would allow it.
 - [ ] Fetched content is framed as data: an injected instruction in a fetched page does not change the tool subset (test with a fake provider page).
 - [ ] An `apply_user_row` from a research value is the card's effect, never envelope-admitted.
+- [ ] Source integrity: a `SourceRow` with a URL not fetched in that turn, or a quote not verbatim in the fetched content, shows "unverified source" and is never presented as sourced (fabricated URL and fabricated quote tested).
 
 ## Likely files
 
