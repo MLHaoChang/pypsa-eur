@@ -2156,7 +2156,9 @@ TOOLS: list[dict[str, Any]] = [
         "eh_h2_hub (strong_grid), "
         "eh_microgrid (off_grid), eh_h2_hub_staged and eh_microgrid_staged "
         "(those two planned over 2027/2030/2035, multi-period), eh_ammonia_staged "
-        "(the H2 hub making ammonia for a contracted delivery, with a Haber-Bosch loop; multi-period), eh_ipp_hybrid "
+        "(the H2 hub making ammonia for a contracted delivery, with a Haber-Bosch loop; multi-period), "
+        "eh_concentrator_staged (a mining concentrator on a weak, staged connection, planned on the hourly "
+        "year 2027/2030/2035; its own years only), eh_ipp_hybrid "
         "(a wind and PV IPP with a battery candidate behind a 70 MW export limit; one hourly 2030 year, "
         "illustrative day-ahead prices, financial PPAs), eh_site (a generic site that is not a data "
         "center, parametrized by `params`: site_type industrial | commercial | "
@@ -2181,7 +2183,8 @@ TOOLS: list[dict[str, Any]] = [
                                      "eh_datacenter", "eh_datacenter_staged",
                                      "eh_h2_hub", "eh_microgrid", "eh_site",
                                      "eh_h2_hub_staged", "eh_microgrid_staged",
-                                     "eh_ammonia_staged", "eh_ipp_hybrid"]},
+                                     "eh_ammonia_staged", "eh_concentrator_staged",
+                                     "eh_ipp_hybrid"]},
             "new_name": {"type": "string"},
             "params": {"type": "object",
                        "description": "eh_site: the site's parameters (omit "

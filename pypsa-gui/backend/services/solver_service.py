@@ -487,7 +487,9 @@ def _run_process_uc_check(network, config, merged_solver_options, phase) -> dict
                                getattr(config, "mip_time_limit_s", 0),
                                dict(merged_solver_options or {}))
     phase(f"Binary operational check: {len(_process_uc.process_committable(network))} "
-          "committable process unit(s), one window per period, capacities fixed")
+          "committable process unit(s), "
+          + ("one week per season of each period" if _process_uc.is_year_base(network) else "one window per period")
+          + ", capacities fixed")
     t0 = time.monotonic()
     try:
         check = _process_uc.binary_check(network, config, solver_options=opts)
@@ -981,6 +983,7 @@ def run_simulation(
                 # branch adds the island's); the binary check runs after a
                 # linearised plan only.
                 plan_uc_kwargs = dict(proc_uc_kwargs)
+                _plain = _process_uc.planning_uc_mode(network, config) == "plain"
                 # Solve-strategy dispatch. Three modes share the same lifecycle
                 # (apply_modelling → optimise → restore) but branch differently
                 # at the solve step:
@@ -1110,6 +1113,9 @@ def run_simulation(
                 _check_stop(stop_event, phase, "before LP solve")
                 _abort_watcher.arm()
                 _heartbeat.begin("Optimising")
+                # The year base plans the process units as a plain LP (`process_uc.relax_for_plan`);
+                # put back before the check and, at the latest, in the finally below.
+                _undo_plain = _process_uc.relax_for_plan(network, config)
                 try:
                     if use_myopic:
                         status, condition, _ = _run_myopic_foresight(
@@ -1248,8 +1254,9 @@ def run_simulation(
                     # §2.3). On copies, before the restore so the solve-time
                     # transforms are on them; it never fails the run.
                     _proc_check = None
+                    _undo_plain()     # the units' commitment back before the check copies them
                     if (status in ("ok", "optimal") and config.mode == "lopf"
-                            and plan_uc_kwargs.get("linearized_unit_commitment")
+                            and (plan_uc_kwargs.get("linearized_unit_commitment") or _plain)
                             and len(_process_uc.process_committable(network))
                             and not getattr(network, "_ic_operational", False)):
                         _proc_check = _run_process_uc_check(
@@ -1264,6 +1271,7 @@ def run_simulation(
                     # KeyboardInterrupt that already landed propagates as normal;
                     # any further abort signal is a no-op here).
                     _abort_watcher.disarm()
+                    _undo_plain()
                     _heartbeat.end()  # silence pings before the restore walk
                     # Reverse myopic capacity-freezes first (innermost layer),
                     # then unwind the modelling-assumption transforms. Each

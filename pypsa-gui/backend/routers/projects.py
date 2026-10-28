@@ -1539,6 +1539,8 @@ _TEMPLATE_DEFAULT_NAMES = {
     "eh_microgrid_staged": "Island Microgrid (staged growth)",
     # Grid-to-process ticket 05 (project_templates/eh_ammonia.py).
     "eh_ammonia_staged": "Green Ammonia Hub (staged growth)",
+    # Grid-to-process ticket 10 (project_templates/eh_concentrator.py).
+    "eh_concentrator_staged": "Mining Concentrator (staged growth)",
     # IPP renewables + BESS ticket 03 (project_templates/eh_ipp.py).
     "eh_ipp_hybrid": "Renewables IPP with battery",
 }

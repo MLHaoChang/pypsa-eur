@@ -1,0 +1,202 @@
+{
+  "description": "A copper concentrator on a weak, staged grid connection: the mine feeds 800 \u2192 1000 \u2192 1200 t/h of ore over 2027, 2030 and 2035 through a crusher, a coarse-ore stockpile, 2 (then 3) mill lines and flotation to a concentrate shed that loads a vessel every 21 days. The 2027 connection is non-firm (25 MW, curtailed to 15 MW in 300 h), firm from 2030; PV and BESS candidates per period. Planned on the hourly chronological year, so the shed carries across shipments.",
+  "dtc_attribution": null,
+  "energization": [
+    {
+      "available_import_mw": 25.0,
+      "connection_mw": 25.0,
+      "note": "non-firm: 15 MW in 300 h",
+      "source": "demo",
+      "year": 2027
+    },
+    {
+      "available_import_mw": 25.0,
+      "connection_mw": 25.0,
+      "note": "firm",
+      "source": "demo",
+      "year": 2030
+    },
+    {
+      "available_import_mw": 35.0,
+      "connection_mw": 35.0,
+      "note": "firm",
+      "source": "demo",
+      "year": 2035
+    }
+  ],
+  "id": "eh_concentrator_staged",
+  "ledger": [
+    {
+      "item": "time base",
+      "note": "stage_network(time_base='year') (ticket 09, D4): every weighting 1, so the shed carries concentrate across the 21-day cycle; the representative-week build is refused (inventory_cadence_needs_year). The same synthetic year repeats in each period",
+      "source": "demo",
+      "value": "hourly chronological year (8760 h from 2030-01-01) per period"
+    },
+    {
+      "item": "ore feed (mine)",
+      "note": "about 19\u201329 kt/d, a mid-size copper concentrator. The mine is an ore Generator whose fixed schedule is its upper bound: ore the plant cannot take is not mined, and the lost concentrate shows at the next vessel",
+      "source": "demo",
+      "value": "800 / 1000 / 1200 t/h (2027 / 2030 / 2035)"
+    },
+    {
+      "item": "grinding specific energy (Bond)",
+      "note": "the method is sourced (Bond's third theory of comminution, Bond 1952); Wi, F80 and P80 are demo",
+      "source": "sourced",
+      "value": "W = 10\u00b7Wi\u00b7(1/\u221aP80 \u2212 1/\u221aF80) = 8.30 kWh/t ball-mill duty (Wi 14 kWh/t, F80 2 mm, P80 150 \u00b5m)"
+    },
+    {
+      "item": "SAG specific energy",
+      "note": "",
+      "source": "demo",
+      "value": "8 kWh/t"
+    },
+    {
+      "item": "grinding per mill line",
+      "note": "one Link per line: efficiency 62.5 t/MWh",
+      "source": "demo",
+      "value": "16 kWh/t (SAG + ball, rounded)"
+    },
+    {
+      "item": "crushing",
+      "note": "",
+      "source": "demo",
+      "value": "0.8 kWh/t"
+    },
+    {
+      "item": "flotation",
+      "note": "one line sized for the first two mill lines (1,100 t/h), one with the third (550 t/h, 2035); no slurry inventory, so flotation follows the mills (D7)",
+      "source": "demo",
+      "value": "2 kWh/t of slurry"
+    },
+    {
+      "item": "site services",
+      "note": "pumps, water, offices. The life-safety share has no tier: criticality tiers are on process Links, not Loads",
+      "source": "demo",
+      "value": "3 MW fixed"
+    },
+    {
+      "item": "mill lines",
+      "note": "10\u201338 % headroom over feed, so a stop can be caught up; 8.8 MW each",
+      "source": "demo",
+      "value": "2 \u00d7 550 t/h; a third from 2035"
+    },
+    {
+      "item": "crusher capacity",
+      "note": "it can run in cheap or sunny hours only when the mine schedule varies; with this flat schedule it follows the mine",
+      "source": "demo",
+      "value": "1.4 \u00d7 the period's feed"
+    },
+    {
+      "item": "coarse-ore stockpile",
+      "note": "an extension is a candidate from 2030 (25 EUR/t live, 25 years, up to 60,000 t); 2027 has the pile it has",
+      "source": "demo",
+      "value": "24 h live at the 2027 feed (19,200 t)"
+    },
+    {
+      "item": "mill p_min_pu, min up / min down",
+      "note": "restart after a stop: re-establishing the charge and the circuit; its cost is the lost tonnes, so start_up_cost and shut_down_cost are 0",
+      "source": "demo",
+      "value": "0.6, 12 h / 4 h"
+    },
+    {
+      "item": "flotation p_min_pu",
+      "note": "follows the mills",
+      "source": "demo",
+      "value": "0.5"
+    },
+    {
+      "item": "mass pull to concentrate",
+      "note": "the formula is standard metallurgical accounting; the numbers are demo",
+      "source": "demo",
+      "value": "1.8857% (head 0.6% Cu \u00d7 recovery 0.88 / concentrate grade 28%)"
+    },
+    {
+      "item": "shipments",
+      "note": "the design's 25 kt per vessel is about 2.6 times the concentrate 1,000 t/h of ore makes in 21 days (9.5 kt), so each vessel is the year's nameplate concentrate over its vessels; the shed's delivery_interval_h is 504",
+      "source": "demo",
+      "value": "one vessel every 21 days (17 a year, loaded out over 24 h): 7,774 / 9,717 / 11,660 t (2027 / 2030 / 2035)"
+    },
+    {
+      "item": "concentrate shed",
+      "note": "fixed: the design marks it extendable, but it holds more than three of the largest vessels, so an extension is never built",
+      "source": "demo",
+      "value": "40,000 t"
+    },
+    {
+      "item": "lost-production value (__lost_concentrate)",
+      "note": "NSR minus variable cost, the client's own number. The concentrate has no buy-in, so this is the only slack",
+      "source": "demo",
+      "value": "1300 EUR/t concentrate (\u2248 25 EUR/t ore)"
+    },
+    {
+      "item": "grid connection",
+      "note": "the envelope is in the LP as grid_import's p_max_pu over 2027 (two 150-h winter events, from 15 January and 17 November), the stages as its energization. The project's connection agreement is one per project, so the commercial block keeps the industrial preset's",
+      "source": "demo",
+      "value": "2027: 25 MW non_firm_dynamic, its envelope 15 MW in 300 h and 25 MW otherwise; 2030: 25 MW firm; 2035: 35 MW firm"
+    },
+    {
+      "item": "PoC fault level",
+      "note": "weak, so the motor-start check (ticket 12) bites",
+      "source": "demo",
+      "value": "150 MVA (SCR about 6 against 25 MW)"
+    },
+    {
+      "item": "PV, BESS candidates",
+      "note": "defaults pack 2026-10-26; per period, PV up to 40 MW, BESS up to 20 MW \u00d7 4 h",
+      "source": "sourced",
+      "value": "pack prices (solar-utility, battery)"
+    },
+    {
+      "item": "PV and price profiles",
+      "note": "summer-high PV with a weekly cloud cycle; wholesale price 55\u2013125 EUR/MWh with an evening and a winter peak",
+      "source": "demo",
+      "value": "synthetic hourly year"
+    },
+    {
+      "item": "tariff, finance",
+      "note": "eh_site.py (SITE_TARIFF, finance_inputs)",
+      "source": "demo",
+      "value": "as the generic site's industrial preset"
+    },
+    {
+      "item": "unit commitment in planning",
+      "note": "linearised UC on 26,280 snapshots did not finish within the 30-min budget (ticket 09), so the plan dispatches the mills and flotation without their minimum load and min up / down; the binary operational check then re-solves one week per season of each period with them committable, and reports the gap",
+      "source": "demo",
+      "value": "plain LP on the year base, then the binary check on sampled weeks"
+    }
+  ],
+  "name": "Mining Concentrator (staged growth)",
+  "pack_overrides": {},
+  "period_years": {
+    "2027": 3,
+    "2030": 5,
+    "2035": 10
+  },
+  "projected_load": [
+    {
+      "note": "crushing, grinding and flotation at the period's feed, plus site services; demo",
+      "peak_mw": 18.04,
+      "year": 2027
+    },
+    {
+      "note": "crushing, grinding and flotation at the period's feed, plus site services; demo",
+      "peak_mw": 21.8,
+      "year": 2030
+    },
+    {
+      "note": "crushing, grinding and flotation at the period's feed, plus site services; demo",
+      "peak_mw": 25.56,
+      "year": 2035
+    }
+  ],
+  "provenance": "synthetic illustrative data (P19 template) \u2014 representative week, public-catalogue-range costs; replace with project data before any decision",
+  "recommended_archetype": "weak_flexible",
+  "stages": null,
+  "study_notes": [
+    "Each period is one chronological year of hours, so the concentrate shed fills over 21 days and empties at each vessel.",
+    "The mills and flotation are fixed-size units; the plan sizes PV, BESS and the stockpile extension.",
+    "Planning dispatches the process units as a plain LP; the binary operational check after the solve re-solves one week per season with their minimum load and min up / down.",
+    "A shortfall at a vessel is lost concentrate, valued at 1,300 EUR/t."
+  ],
+  "time_base": "year"
+}

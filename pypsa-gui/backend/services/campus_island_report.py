@@ -232,6 +232,10 @@ def _static_tables(run_dir, missing) -> list:
     return tables
 
 
+#: The every-hour E1 table shows at most this many failing rows (grid-to-process 10).
+E1_ROWS_SHOWN = 200
+
+
 def _freq_tables(run_dir, missing) -> list:
     try:
         from gridspine.drivers import campus_study as cs
@@ -259,10 +263,16 @@ def _freq_tables(run_dir, missing) -> list:
         key = fname.removeprefix("campus_freq_").removesuffix(".csv")
         title = _FREQ_TITLES[key]
         if fname == cs.FREQ_E1_HOURLY_CSV:
-            # Every hour is too long to show; its failing rows are the verdict.
+            # Every hour is too long to show; its failing rows are the verdict, the first E1_ROWS_SHOWN of them
+            # (on the year base a period has 8,760 hours, so thousands may fail; the summary names them all).
             total = len(df)
             df = df[df["ok"].map(lambda v: str(v).lower() in ("false", "0"))]
-            title = f"{title} ({len(df)} of {total} rows)"
+            failing = len(df)
+            title = f"{title} ({failing} of {total} rows"
+            if failing > E1_ROWS_SHOWN:
+                df = df.head(E1_ROWS_SHOWN)
+                title += f"; the first {E1_ROWS_SHOWN} shown"
+            title += ")"
         tables.append(_table(f"freq_{key}", title, model, columns, df.values.tolist(), group="frequency"))
     return tables
 
