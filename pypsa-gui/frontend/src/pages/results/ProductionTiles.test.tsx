@@ -23,8 +23,8 @@ describe('ProductionTiles', () => {
   it('shows made, delivered, lost, lost EUR and closing inventory', () => {
     render(<ProductionTiles view={view([NH3])} />)
     const val = (id: string) => screen.getByTestId(`production-nh3-${id}`).querySelector('[data-kpi-value]')?.getAttribute('data-kpi-value')
-    expect(val('made')).toBe('1,200 t')
-    expect(val('delivered')).toBe('1,000 t')
+    expect(val('made')).toBe('1.20 kt')
+    expect(val('delivered')).toBe('1.00 kt')
     expect(val('lost')).toBe('40.0 t')
     expect(val('lost-eur')).toBe('€32.0 k')
     expect(val('inventory')).toBe('100 t')
@@ -37,6 +37,9 @@ describe('ProductionTiles', () => {
       inventory: [] }
     render(<ProductionTiles view={view([p])} />)
     expect(screen.getByTestId('production-nh3-made').getAttribute('data-state')).toBe('not_modelled')
+    expect(screen.getByTestId('production-nh3-made').textContent).toMatch(/Energy per tonne/)
+    expect(screen.getByTestId('production-nh3-made').textContent).not.toMatch(/mwh_per_t/)
+    expect(screen.getByTestId('production-nh3-made').textContent).toContain('Set it on nh3 ›')
     expect(screen.getByTestId('production-nh3-lost-eur').getAttribute('data-state')).toBe('not_modelled')
     expect(screen.getByTestId('production-nh3-inventory').getAttribute('data-state')).toBe('not_applicable')
   })

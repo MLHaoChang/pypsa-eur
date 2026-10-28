@@ -1,9 +1,9 @@
 {
  "counts": {
   "backend_routes": 514,
-  "gui_routes": 466,
+  "gui_routes": 467,
   "limitation": 87,
-  "needs-tool": 31,
+  "needs-tool": 32,
   "tool": 348,
   "unclassified": 0
  },
@@ -4759,6 +4759,15 @@
     "get_results"
    ],
    "via": "tool_routes"
+  },
+  {
+   "class": "needs-tool",
+   "family": "all-results",
+   "gui_files": [
+    "api/simulation.ts"
+   ],
+   "method": "GET",
+   "path": "/api/results/process_view"
   },
   {
    "class": "tool",

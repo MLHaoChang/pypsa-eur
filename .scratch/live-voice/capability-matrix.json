@@ -5073,9 +5073,9 @@
     "source": ".scratch/live-voice/route-parity.json",
     "counts": {
       "backend_routes": 514,
-      "gui_routes": 466,
+      "gui_routes": 467,
       "limitation": 87,
-      "needs-tool": 31,
+      "needs-tool": 32,
       "tool": 348,
       "unclassified": 0
     },
@@ -5090,6 +5090,9 @@
       "ui-local-state": 3
     },
     "needs_tool_by_family": {
+      "all-results": [
+        "GET /api/results/process_view"
+      ],
       "gridspine-campus": [
         "DELETE /api/campus-electrical/{name}/grid-codes/documents/{document_id}",
         "DELETE /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}",
@@ -5230,6 +5233,12 @@
         "id": "hosted-gates-pending",
         "issue": "05",
         "summary": "Hosted profile, device and latency gates and the prolonged mixed-domain conversation are not run; an architecture review does not certify production behavior."
+      },
+      {
+        "id": "route-parity:needs-tool:all-results",
+        "issue": "08",
+        "family": "all-results",
+        "summary": "1 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
       },
       {
         "id": "route-parity:needs-tool:gridspine-campus",

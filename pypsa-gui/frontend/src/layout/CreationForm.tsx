@@ -46,6 +46,9 @@ interface FieldSpec {
   // descriptor for a column the schema does not list (a CHP's efficiency2).
   scale?: number
   keepLabel?: boolean
+  /** Process unit: the unit label follows this bus field's chosen bus (tonnes or MWh per tonne). */
+  rateBus?: string
+  hint?: string
   like?: string
 }
 
@@ -186,14 +189,15 @@ export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 'bus1',         label: 'Product bus (output)',      type: 'bus',    required: true } as BusFieldSpec,
     { key: 'carrier',      label: 'Carrier',                   type: 'text',   defaultValue: 'process' },
     { key: 'p_nom',        label: 'Capacity (electricity in)', type: 'number', keepLabel: true, defaultValue: '100', unit: 'MW', half: true },
-    { key: 'product_per_t', label: 'Product per tonne',        type: 'number', defaultValue: '1', unit: 'bus unit/t', half: true },
+    { key: 'product_per_t', label: 'Product per tonne',        type: 'number', defaultValue: '1', rateBus: 'bus1', half: true,
+      hint: 'How much the product bus counts for one tonne: 1 for a bus in tonnes, the energy content (MWh/t) for a bus in MWh.' },
     { key: 'el_kwh_per_t', label: 'Electricity per tonne',     type: 'number', defaultValue: '1000', unit: 'kWh/t', half: true },
     { key: 'in1_bus',      label: 'Input 1 bus',               type: 'bus',    required: true } as BusFieldSpec,
-    { key: 'in1_rate',     label: 'Input 1 per tonne',         type: 'number', unit: 'bus unit/t', half: true },
+    { key: 'in1_rate',     label: 'Input 1 per tonne',         type: 'number', rateBus: 'in1_bus', half: true },
     { key: 'in2_bus',      label: 'Input 2 bus (optional)',    type: 'bus' } as BusFieldSpec,
-    { key: 'in2_rate',     label: 'Input 2 per tonne',         type: 'number', unit: 'bus unit/t', half: true },
+    { key: 'in2_rate',     label: 'Input 2 per tonne',         type: 'number', rateBus: 'in2_bus', half: true },
     { key: 'in3_bus',      label: 'Input 3 bus (optional)',    type: 'bus' } as BusFieldSpec,
-    { key: 'in3_rate',     label: 'Input 3 per tonne',         type: 'number', unit: 'bus unit/t', half: true },
+    { key: 'in3_rate',     label: 'Input 3 per tonne',         type: 'number', rateBus: 'in3_bus', half: true },
     { key: 'committable',  label: 'Unit commitment (min load, min up / down)', type: 'checkbox', defaultValue: 'true' },
     { key: 'p_min_pu',     label: 'Min load',                  type: 'number', keepLabel: true, defaultValue: '0.4', half: true },
     { key: 'min_up_time',  label: 'Min up time',               type: 'number', keepLabel: true, defaultValue: '24', unit: 'h', half: true },
@@ -501,10 +505,16 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
   const prefix = AUTO_PREFIX[item.id] ?? 'Asset'
 
   const allBuses = useMemo(
-    () => qc.getQueryData<Array<{ name: string; carrier?: string; x?: number | null; y?: number | null }>>(nk(currentProject, 'buses')) ?? [],
+    () => qc.getQueryData<Array<{ name: string; carrier?: string; unit?: string; x?: number | null; y?: number | null }>>(nk(currentProject, 'buses')) ?? [],
     [qc, currentProject],
   )
   const busNames = useMemo(() => allBuses.map(b => b.name).sort(), [allBuses])
+
+  // The unit a process-unit rate is counted in: the chosen bus's own (tonnes, else MWh).
+  const rateUnit = (busName: string | undefined): string => {
+    const u = allBuses.find(b => b.name === (busName ?? '').trim())?.unit?.trim()
+    return `${u === 't' ? 't' : 'MWh'}/t`
+  }
 
   const filteredBusNames = (filter: BusCarrier | undefined): string[] => {
     if (!filter) return busNames
@@ -807,7 +817,10 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
               return (
                 <div key={f.key} className={colSpan}>
                   <label className={lbl}>
-                    {f.label}{f.unit ? <span className="text-muted font-normal"> ({f.unit})</span> : null}
+                    {f.label}{(() => {
+                      const u = f.rateBus ? rateUnit(form[f.rateBus]) : f.unit
+                      return u ? <span className="text-muted font-normal"> ({u})</span> : null
+                    })()}
                   </label>
                   <input
                     type="number" step="any"
@@ -815,6 +828,7 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
                     value={form[f.key] ?? ''}
                     onChange={e => set(f.key, e.target.value)}
                   />
+                  {f.hint && <p className="text-[9px] text-muted mt-0.5">{f.hint}</p>}
                   {error && <p className={errCls}>{error}</p>}
                 </div>
               )
