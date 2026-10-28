@@ -21,6 +21,7 @@ import {
 import type { AdequacyReportPayload } from './adequacy'
 import { CARD_GROUPS, type CardGroupId } from './groups'
 import { freshnessOf } from './GroupHeader'
+import ProductionTiles from './ProductionTiles'
 import { StatePill } from '../../components/ResultState'
 import { ScopeGate } from '../../components/flowScope/ScopeGate'
 import { useGridReadiness } from '../../components/gridReadiness/GridReadinessScorecard'
@@ -115,6 +116,9 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
   })
   const { data: margin } = useQuery({ queryKey: nk(project, 'results', 'reserve_margin'), queryFn: () => resultsApi.getReserveMargin() })
   const { data: adequacy } = useQuery({ queryKey: nk(project, 'results', 'adequacy'), queryFn: resultsApi.getAdequacy })
+  const { data: processView } = useQuery({
+    queryKey: nk(project, 'results', 'process_view'), queryFn: resultsApi.getProcessView, retry: false,
+  })
   const { data: readiness } = useGridReadiness()
   const { data: stats } = useQuery({ queryKey: nk(project, 'results_statistics'), queryFn: resultsApi.getStatistics })
 
@@ -247,6 +251,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
           )}
         </Card>
       </div>
+      <ProductionTiles view={processView} />
       {/* The visible next step (UX-flow rule 3): what follows the answer. */}
       <div data-testid="summary-handoff" className="flex flex-wrap items-center gap-3 text-[11px]">
         <span className="text-muted">Next: hand off</span>

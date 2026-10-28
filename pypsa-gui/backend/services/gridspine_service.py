@@ -215,6 +215,16 @@ def read_config(project) -> StudyConfig:
     return _config_from(project, stored)
 
 
+def _gridspine_dir_if_any(project) -> Path:
+    """`gridspine_dir` without the mkdir: where a read or a preview looks."""
+    return project_registry.project_dir(project) / GRIDSPINE_SUBDIR
+
+
+def stored_config(project) -> StudyConfig:
+    """`read_config` that creates nothing: the config as the next run would use it."""
+    return config_for_dir(_gridspine_dir_if_any(project))
+
+
 def _write_config(project, config: StudyConfig) -> dict:
     data = config.to_json()
     config_path(project).write_text(json.dumps(data, indent=2))
@@ -401,6 +411,28 @@ def _refuse_while_active(project, what: str) -> None:
         )
 
 
+def planned_config_update(project, patch: dict, *, db=None, user=None) -> tuple[StudyConfig, StudyConfig]:
+    """`(current, new)` for `update_config`: every check it makes, nothing written.
+    The edit card calls this too, so its new values are the ones the write stores."""
+    require_planning(project)
+    if not isinstance(patch, dict):
+        raise HTTPException(status_code=422, detail="config patch must be an object")
+    unknown = sorted(set(patch) - EDITABLE_CONFIG_FIELDS)
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=f"config field(s) not editable: {unknown}; editable: {sorted(EDITABLE_CONFIG_FIELDS)}",
+        )
+    _refuse_while_active(project, "changing the config")
+    current = stored_config(project)
+    merged = {**current.to_json(), **patch}
+    if patch.get("from_dispatch"):
+        src = _finished_dispatch_dir(db, user, project, patch["from_dispatch"])
+        merged["from_dispatch"] = str(src)       # the resolved path, never the caller's string
+        merged["from_network"] = None            # one dispatch source at a time
+    return current, config_for_dir(_gridspine_dir_if_any(project), merged)  # validates; 422 on a bad value
+
+
 def update_config(project, patch: dict, *, db=None, user=None) -> dict:
     """Change some of the study config after creation. Validated as a whole
     through StudyConfig (422 on a bad value, nothing written), refused while a
@@ -412,23 +444,7 @@ def update_config(project, patch: dict, *, db=None, user=None) -> dict:
     authorization-bearing (`_authorized_dispatch_dir`); a patch without it is
     the plain-argument call the parity rule asks for.
     """
-    require_planning(project)
-    if not isinstance(patch, dict):
-        raise HTTPException(status_code=422, detail="config patch must be an object")
-    unknown = sorted(set(patch) - EDITABLE_CONFIG_FIELDS)
-    if unknown:
-        raise HTTPException(
-            status_code=422,
-            detail=f"config field(s) not editable: {unknown}; editable: {sorted(EDITABLE_CONFIG_FIELDS)}",
-        )
-    _refuse_while_active(project, "changing the config")
-    current = read_config(project).to_json()
-    merged = {**current, **patch}
-    if patch.get("from_dispatch"):
-        src = _finished_dispatch_dir(db, user, project, patch["from_dispatch"])
-        merged["from_dispatch"] = str(src)       # the resolved path, never the caller's string
-        merged["from_network"] = None            # one dispatch source at a time
-    config = _config_from(project, merged)          # validates; 422 on a bad value
+    _, config = planned_config_update(project, patch, db=db, user=user)
     return _write_config(project, config)
 
 
@@ -487,22 +503,12 @@ def _project_for_network(db, project, path):
     return None
 
 
-def set_dispatch_source(db, project, source, user=None) -> dict:
-    """`"generate"` to solve the unit commitment; `{"from_dispatch": dir}` to
-    study a finished run's dispatch (drivers F3); `{"from_project": name}` to
-    study the SOLVED NETWORK of one of the caller's capacity-expansion projects
-    (increment 5, D3). One source at a time: setting any clears the others.
-
-    `from_project` is the only way to point a study at a network. A raw path
-    would let a caller read any file the server can; the project route goes
-    through the ACL and the kind check. `from_dispatch` IS a path, for
-    historical reasons, and is held to the same line by
-    `_authorized_dispatch_dir`: it is accepted only when it resolves to the
-    run directory of a project the caller may read.
-    """
+def planned_dispatch_source(db, project, source, user=None) -> tuple[StudyConfig, StudyConfig]:
+    """`(current, new)` for `set_dispatch_source`: every check it makes, nothing written."""
     require_planning(project)
     _refuse_while_active(project, "changing the dispatch source")
-    base = {**read_config(project).to_json(), "from_dispatch": None,
+    current = stored_config(project)
+    base = {**current.to_json(), "from_dispatch": None,
             "from_network": None, "from_external": None,
             "from_external_loads": None}
     if source == "generate" or source is None:
@@ -521,6 +527,23 @@ def set_dispatch_source(db, project, source, user=None) -> dict:
             detail='dispatch source must be "generate", {"from_dispatch": "<directory>"} '
                    'or {"from_project": "<project name>"}',
         )
+    return current, updated
+
+
+def set_dispatch_source(db, project, source, user=None) -> dict:
+    """`"generate"` to solve the unit commitment; `{"from_dispatch": dir}` to
+    study a finished run's dispatch (drivers F3); `{"from_project": name}` to
+    study the SOLVED NETWORK of one of the caller's capacity-expansion projects
+    (increment 5, D3). One source at a time: setting any clears the others.
+
+    `from_project` is the only way to point a study at a network. A raw path
+    would let a caller read any file the server can; the project route goes
+    through the ACL and the kind check. `from_dispatch` IS a path, for
+    historical reasons, and is held to the same line by
+    `_authorized_dispatch_dir`: it is accepted only when it resolves to the
+    run directory of a project the caller may read.
+    """
+    _, updated = planned_dispatch_source(db, project, source, user)
     return _write_config(project, updated)
 
 
@@ -632,6 +655,14 @@ def edit_template_param(project, unit_id: str, param: str, value, source: str, e
     trail. `edited_by` is `user` or `chat` — the spec's ledger provenance,
     which is what makes the audit cover both interfaces for free.
     """
+    overlay, entry = planned_template_edit(project, unit_id, param, value, source, edited_by)
+    overlay_path(project).write_text(json.dumps(overlay, indent=2))
+    return {"unit_id": unit_id, "param": param, **entry}
+
+
+def planned_template_edit(project, unit_id: str, param: str, value, source: str, edited_by: str):
+    """`(overlay, entry)` for `edit_template_param`: every check it makes, nothing
+    written. `overlay` is the whole overlay the write stores; `entry` the one edit."""
     require_planning(project)
     if edited_by not in EDITORS:
         raise HTTPException(status_code=422, detail=f"edited_by must be one of {list(EDITORS)}")
@@ -654,8 +685,18 @@ def edit_template_param(project, unit_id: str, param: str, value, source: str, e
         "at": datetime.now(tz=timezone.utc).isoformat(),
     }
     overlay.setdefault(unit_id, {})[param] = entry
-    overlay_path(project).write_text(json.dumps(overlay, indent=2))
-    return {"unit_id": unit_id, "param": param, **entry}
+    return overlay, entry
+
+
+def template_param(project, unit_id: str, param: str):
+    """`(value, source)` of one template parameter as this project's studies use it
+    (the shipped library with the project's own edits), or None; reads only."""
+    overlay = _read_overlay(project)
+    templates = load_unit_templates(overlay=overlay or None)
+    rows = templates.params[(templates.params["unit_id"] == unit_id) & (templates.params["param"] == param)]
+    if rows.empty:
+        return None
+    return float(rows.iloc[0]["value"]), str(rows.iloc[0]["source"])
 
 
 def export_handoff_bundle(project, hour: int) -> Path:
@@ -992,7 +1033,7 @@ def fetch_result_figure(project, name: str, hour: int) -> dict:
 # --------------------------------------------------------------------------
 
 def _read_overlay(project) -> dict:
-    path = overlay_path(project)
+    path = _gridspine_dir_if_any(project) / "templates_overlay.json"  # a read creates nothing
     return json.loads(path.read_text()) if path.is_file() else {}
 
 

@@ -1,0 +1,6 @@
+E        +    where None = <built-in method get of dict object at 0x7efc460fc880>('digest')
+E       KeyError: 'digest'
+E       KeyError: 'digest'
+FAILED tests/test_site_scene_digest.py::test_the_unadopted_digest_adopts_an_unchanged_site
+FAILED tests/test_site_scene_digest.py::test_a_changed_site_refuses_the_old_digest_and_a_fresh_get_adopts
+FAILED tests/test_site_scene_digest.py::test_an_enabled_scene_has_no_digest

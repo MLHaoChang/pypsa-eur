@@ -150,7 +150,12 @@ def _unbound_keys(project: AuthorizedProject, scene: dict) -> list[str] | None:
 @router.get("/{name}/sites/{site_id}/scene")
 def get_scene(site_id: str, project: AuthorizedProject = ProjectAccessDep) -> dict:
     _site_known(project, site_id)
-    scene = store.read_scene(project.directory, site_id)
+    with store.project_lock(project.directory):
+        scene = store.read_scene(project.directory, site_id)
+        if scene["state"] == "unadopted":
+            # SC-01b: the adoption digest, from the same function adopt checks.
+            # The browser cannot rebuild Python's canonical JSON (47.0 reads as 47).
+            scene = {**scene, "digest": store.legacy_site_digest(site_service.read_sites(project.directory), site_id)}
     if scene["state"] == "enabled":
         scene = {**scene, "unbound_keys": _unbound_keys(project, scene)}
     return scene

@@ -145,7 +145,9 @@ def test_get_scene_never_adopts(client, geo):
     before = (geo / site_service.SITES_FILE).read_bytes()
     r = client.get("/api/projects/geo/sites/campus/scene")
     assert r.status_code == 200
-    assert r.json() == {"state": "unadopted", "site_id": "campus"}
+    body = r.json()
+    assert set(body) == {"state", "site_id", "digest"}          # SC-01b: the adoption digest
+    assert (body["state"], body["site_id"]) == ("unadopted", "campus")
     assert (geo / site_service.SITES_FILE).read_bytes() == before
     assert not (geo / "sites" / "campus" / "scene").exists()
 
@@ -245,6 +247,7 @@ def test_a_cancelled_proposal_cannot_be_applied(client, geo):
     assert client.post(f"/api/projects/geo/sites/campus/scene/proposals/{pid}/cancel").status_code == 200
     r = client.post(f"/api/projects/geo/sites/campus/scene/proposals/{pid}/apply", json={"expected_revision": 1})
     assert (r.status_code, _kind(r)) == (409, "proposal_cancelled")
+    assert r.json()["detail"]["message"] == "This preview was discarded: generate again"
 
 
 def test_an_unknown_proposal_is_expired(client, geo):
@@ -392,7 +395,7 @@ def test_a_cleared_map_answers_410(client, geo):
     proposals.clear()
     r = client.post(f"/api/projects/geo/sites/campus/scene/proposals/{pid}/apply", json={"expected_revision": 1})
     assert (r.status_code, _kind(r)) == (410, "proposal_expired")
-    assert r.json()["detail"]["message"] == "This proposal expired: generate the site again"
+    assert r.json()["detail"]["message"] == "This preview expired: generate again"
 
 
 def test_apply_refuses_inputs_other_than_the_reviewed_ones(client, geo):
@@ -403,6 +406,7 @@ def test_apply_refuses_inputs_other_than_the_reviewed_ones(client, geo):
     r = client.post(f"/api/projects/geo/sites/campus/scene/proposals/{prop['id']}/apply",
                     json={"expected_revision": 1, "input_hash": "0" * 64})
     assert (r.status_code, _kind(r)) == (409, "revision_conflict")
+    assert r.json()["detail"]["message"] == "This preview changed since you reviewed it: review it again"
     # The stored inputs changed after the preview: refused, nothing written.
     entry = next(e for e in proposals._entries.values() if e["id"] == prop["id"])
     entry["inputs"]["greenfield"][0]["height"] = 99

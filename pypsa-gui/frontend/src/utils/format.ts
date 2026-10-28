@@ -41,6 +41,15 @@ export function fmtCurrency(eur: number | null | undefined, digits = 2): string 
   return `€${eur.toFixed(digits)}`
 }
 
+/** Tonnes of product, scaled like fmtEnergy: t, kt, Mt. */
+export function fmtTonnage(t: number | null | undefined, digits = 2): string {
+  if (t == null || !Number.isFinite(t)) return '—'
+  const a = Math.abs(t)
+  if (a >= 1e6) return `${(t / 1e6).toFixed(digits)} Mt`
+  if (a >= 1e3) return `${(t / 1e3).toFixed(digits)} kt`
+  return `${t.toFixed(digits)} t`
+}
+
 export function fmtPower(mw: number | null | undefined, digits = 2): string {
   if (mw == null || !Number.isFinite(mw)) return '—'
   const a = Math.abs(mw)

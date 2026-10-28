@@ -56,6 +56,22 @@ def test_an_older_run_answers_from_its_own_kept_results(repriced):
     assert not set(old['data']) & {'inputs_changed_since_solve', 'results_current', 'freshness_note'}
 
 
+def test_an_older_run_answers_its_capacity_from_its_own_kept_results(repriced):
+    """Capacity family: the Capacity Expansion tab's by-carrier economics."""
+    current = chat_tools.get_results(result_kind='economics_by_carrier')
+    assert current['by_carrier']['gas']['opex_meur']['total'] == pytest.approx(60 * GAS_MWH / 1e6, rel=1e-6)
+    run_id = repriced['older']['run_id']
+    old = chat_tools.get_results(result_kind='economics_by_carrier', run_id=run_id)
+    assert old['status'] == 'ok' and old['scope'] == 'historical'
+    assert old['section'] == 'results_capacity' and old['run']['is_current'] is False
+    gas = old['data']['by_carrier']['gas']
+    assert gas['opex_meur']['total'] == pytest.approx(50 * GAS_MWH / 1e6, rel=1e-6)   # not 60
+    assert gas['lcoe_eur_per_mwh']['total'] == pytest.approx(50, rel=1e-6)
+    assert gas['dispatch_gwh']['total'] == pytest.approx(GAS_MWH / 1e3, rel=1e-6)
+    # The tab's other read, cost_breakdown, is kept once, with Summary.
+    assert chat_tools.get_results(result_kind='cost_breakdown', run_id=run_id)['section'] == 'results_summary'
+
+
 def test_the_newest_run_is_read_as_current(repriced):
     latest = chat_tools.get_results(result_kind='cost_breakdown', run_id=repriced['newest']['run_id'])
     assert latest['scope'] == 'current' and latest['run_is_current'] is True
@@ -68,8 +84,9 @@ def test_the_kept_section_is_the_api_read_at_completion(repriced, client):
     detail = run_evidence.get_run_evidence(repriced['newest']['run_id'])
     assert {'name': 'results_summary', 'available': True} in detail['sections']
     assert {'name': 'loadflow', 'available': True} in detail['sections']
-    kept = run_evidence.get_run_evidence(repriced['newest']['run_id'], 'results_summary')['data']
-    for kind in retained_results.SUMMARY_KINDS:
+    assert {'name': 'results_capacity', 'available': True} in detail['sections']
+    for kind, section in retained_results.KEPT_KINDS.items():
+        kept = run_evidence.get_run_evidence(repriced['newest']['run_id'], section)['data']
         assert kept[kind] == client.get(f'/api/results/{kind}').json()
 
 
@@ -98,7 +115,19 @@ def test_a_kind_no_family_keeps_refuses_for_a_run(repriced):
     out = chat_tools.get_results(result_kind='prices', run_id=repriced['older']['run_id'])
     assert out['status'] == 'unavailable' and 'data' not in out
     assert out['unavailable_kind'] == 'historical_scope_mismatch'
-    assert out['kept_kinds'] == ['statistics', 'cost_breakdown']
+    assert out['kept_kinds'] == ['statistics', 'cost_breakdown', 'economics_by_carrier']
+
+
+def test_a_capacity_run_without_its_section_refuses_with_its_id(repriced):
+    root, project_id, owner = run_evidence._authority()
+    run_evidence.publish_run(root, project_id, run_id='fg-legacy03', kind='simulation',
+                             status='completed', fingerprint='0' * 64, actor_id=owner,
+                             sections={'results_summary': {'statistics': [], 'cost_breakdown': {}}})
+    out = chat_tools.get_results(result_kind='economics_by_carrier', run_id='fg-legacy03')
+    assert out['status'] == 'unavailable' and out['run_id'] == 'fg-legacy03'
+    assert out['unavailable_kind'] == 'historical_results_unavailable'
+    assert 'capacity' in out['message']
+    assert 'data' not in out
 
 
 def test_a_corrupt_section_refuses_with_the_run_id(repriced):
@@ -116,6 +145,15 @@ def test_the_registry_declares_every_family_it_keeps():
             == {a.section for a in retained_results.ADAPTERS})
 
 
+def test_every_kept_kind_has_one_family_and_every_view_read_is_kept():
+    kinds = [k for a in retained_results.ADAPTERS for k in a.kinds]
+    assert len(kinds) == len(set(kinds)) == len(retained_results.KEPT_KINDS)
+    for v in rv.RESULT_VIEWS:
+        if v.historical_section and v.historical_section != 'loadflow':
+            read_kinds = {r.args['result_kind'] for r in v.reads if r.tool == 'get_results'}
+            assert read_kinds <= set(retained_results.KEPT_KINDS), v.view_id
+
+
 def test_results_that_are_not_current_are_not_kept(oj_grid, monkeypatch):  # noqa: F811
     """A family that cannot vouch for its run stores nothing and says so; the
     other families keep theirs."""
@@ -131,8 +169,8 @@ def test_results_that_are_not_current_are_not_kept(oj_grid, monkeypatch):  # noq
         run = _solve_once(session)
     detail = run_evidence.get_run_evidence(run['run_id'])
     names = {s['name'] for s in detail['sections']}
-    assert 'results_summary' not in names and 'loadflow' in names
-    assert 'results_summary_not_captured' in detail['warnings']
+    assert not names & {'results_summary', 'results_capacity'} and 'loadflow' in names
+    assert {'results_summary_not_captured', 'results_capacity_not_captured'} <= set(detail['warnings'])
     assert 'loadflow_not_captured' not in detail['warnings']
 
 

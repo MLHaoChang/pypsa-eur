@@ -66,8 +66,9 @@ import { appLog, useSimulationStore } from './store/simulationStore'
 import { PanelChromeContext, type PanelChrome } from './components/PageKit'
 import { NextSectionButton } from './components/NextSectionButton'
 import { PANEL_SECTION } from './layout/flowSections'
-import { openSectionInExpert } from './layout/flowNavigation'
+import { SITE_ANCHOR_TARGET, openSectionInExpert } from './layout/flowNavigation'
 import BackToHubResults from './components/BackToHubResults'
+import SiteAnchorField from './site3d/SiteAnchorField'
 
 // Top-level boundary so any render error in the header/tabs/sidebar/etc. shows
 // a visible error screen instead of whitescreening the entire app.
@@ -812,7 +813,10 @@ export default function App() {
           <AssistantDock />
           {uiMode === 'guided' && (
             <FieldDrawer>
-              {t => LIMIT_FIELDS[t.field ?? '']
+              {t => t.field === SITE_ANCHOR_TARGET.field
+                // Site 3D rule 4: the coordinate field's Guided home.
+                ? <div className="px-3 py-2"><SiteAnchorField /></div>
+                : LIMIT_FIELDS[t.field ?? '']
                 // The grid-readiness limits' one editor (DC 03 slice 6): a to-check ramp or oscillation
                 // limit opens its line; the fault level's value and source are one line too.
                 ? <div className="px-3"><ConnectionLimits only={LIMIT_FIELDS[t.field ?? '']} /></div>

@@ -1097,6 +1097,46 @@ def list_timeseries():
                     "columns": cols,
                 })
     return result
+
+def resolve_series(n, component: str, attribute: str, name: str):
+    """The one series get_timeseries shows for ``name``, and where it came from.
+
+    A user-uploaded Series wins over the network's ``<component>_t.<attribute>``
+    column. Checked-answer evidence reads through here too, so it cannot drift
+    from what the handler showed. Returns ``(source, series)`` or ``(None, None)``.
+    """
+    user_series = _user_ts.get((component, attribute, name))
+    if user_series is not None:
+        return "user", user_series.rename(name)
+    ts_store = getattr(n, f"{component}_t", None)
+    net_df = ts_store.get(attribute) if ts_store is not None else None
+    if net_df is not None and not net_df.empty and name in net_df.columns:
+        return "network", net_df[name]
+    return None, None
+
+
+def index_labels(index):
+    """ISO timestep labels and, for multi-period snapshots, the parallel periods."""
+    # MultiIndex on multi-period: emit ISO timesteps + parallel periods array,
+    # same convention as `_ts_payload` and `/network/snapshots`. Without this,
+    # `str(s)` on the tuple yields garbage like "(2026, Timestamp('...'))".
+    periods: list | None = None
+    if isinstance(index, pd.MultiIndex):
+        try:
+            periods = [int(p) for p in index.get_level_values(0)]
+        except (TypeError, ValueError):
+            periods = [str(p) for p in index.get_level_values(0)]
+        timesteps = index.get_level_values(1)
+        if isinstance(timesteps, pd.DatetimeIndex):
+            idx = timesteps.strftime("%Y-%m-%dT%H:%M:%S").tolist()
+        else:
+            idx = [str(s) for s in timesteps]
+    elif isinstance(index, pd.DatetimeIndex):
+        idx = index.strftime("%Y-%m-%dT%H:%M:%S").tolist()
+    else:
+        idx = [str(s) for s in index]
+    return idx, periods
+
 @router.get("/timeseries/{component}/{attribute}")
 def get_timeseries(component: str, attribute: str, columns: str | None = None):
     """
@@ -1120,11 +1160,9 @@ def get_timeseries(component: str, attribute: str, columns: str | None = None):
         # For each requested column: prefer user-uploaded Series, fall back to network data
         series_list: list[pd.Series] = []
         for col in wanted:
-            user_series = _user_ts.get((component, attribute, col))
-            if user_series is not None:
-                series_list.append(user_series.rename(col))
-            elif net_df is not None and not net_df.empty and col in net_df.columns:
-                series_list.append(net_df[col])
+            _source, series = resolve_series(n, component, attribute, col)
+            if series is not None:
+                series_list.append(series)
         df = pd.concat(series_list, axis=1) if series_list else pd.DataFrame()
     else:
         # No column filter — build from all user-uploaded columns for this
@@ -1160,24 +1198,7 @@ def get_timeseries(component: str, attribute: str, columns: str | None = None):
     # range — long enough to block the event loop and time out the periodic
     # /network/meta poll. NumPy + DatetimeIndex.strftime do the same work in
     # well under a second.
-    # MultiIndex on multi-period: emit ISO timesteps + parallel periods array,
-    # same convention as `_ts_payload` and `/network/snapshots`. Without this,
-    # `str(s)` on the tuple yields garbage like "(2026, Timestamp('...'))".
-    periods: list | None = None
-    if isinstance(df.index, pd.MultiIndex):
-        try:
-            periods = [int(p) for p in df.index.get_level_values(0)]
-        except (TypeError, ValueError):
-            periods = [str(p) for p in df.index.get_level_values(0)]
-        timesteps = df.index.get_level_values(1)
-        if isinstance(timesteps, pd.DatetimeIndex):
-            idx = timesteps.strftime("%Y-%m-%dT%H:%M:%S").tolist()
-        else:
-            idx = [str(s) for s in timesteps]
-    elif isinstance(df.index, pd.DatetimeIndex):
-        idx = df.index.strftime("%Y-%m-%dT%H:%M:%S").tolist()
-    else:
-        idx = [str(s) for s in df.index]
+    idx, periods = index_labels(df.index)
 
     arr = df.to_numpy(dtype=float, copy=False)
     arr_obj = arr.astype(object)
