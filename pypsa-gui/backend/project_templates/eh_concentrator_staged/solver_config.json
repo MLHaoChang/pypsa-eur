@@ -114,6 +114,11 @@
           "owner": "site"
         },
         {
+          "asset_id": "coarse_ore_stockpile_new_2027",
+          "component": "Store",
+          "owner": "site"
+        },
+        {
           "asset_id": "coarse_ore_stockpile_new_2030",
           "component": "Store",
           "owner": "site"
@@ -159,8 +164,8 @@
           "owner": "site"
         }
       ],
-      "built_digest": "90c497a36e404b37",
-      "built_inputs_digest": "b4e0671c9ea15bf6",
+      "built_digest": "b50a6b150185c7f1",
+      "built_inputs_digest": "7bb457fcc98a696d",
       "connection_fee_payee": null,
       "export_revenue_to": "site_party",
       "externals": [
