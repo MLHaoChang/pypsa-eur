@@ -104,6 +104,10 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
                  # services/site_service.py owns it; its cached context lives
                  # under the `sites/` dir below.
                  "sites.json",
+                 # The confirmed site anchor (SC-01a, D01): one revisioned
+                 # project coordinate. Not private, so it travels everywhere
+                 # sites.json does. Pinned equal to site_scene.anchor.ANCHOR_FILE.
+                 "site_anchor.json",
                  # The map view's user geometry: routed branches and dragged
                  # asset bubbles (visual layers plan 2, M1).
                  # services/map_layout_service.py owns it; `test_map_layout_routes`
@@ -306,9 +310,21 @@ def _copy_bundle_dirs(src: pathlib.Path, dst: pathlib.Path) -> None:
     project save itself — a future Save will retry.
     """
     import shutil as _shutil
+
+    from services.site_scene import store as scene_store
+
+    # A scene-enabled Site travels as its closure only (D03): the pointer and
+    # the one pointed generation, read under the scene mutex. Read it before
+    # touching `dst`, so a missing generation (integrity_error, raised) leaves
+    # the destination as it was. Orphan, superseded and failed generations
+    # are never copied.
+    scene_blobs = scene_store.closure_blobs(src)
     for dname in _BUNDLE_DIRS:
         src_d, dst_d = src / dname, dst / dname
         if not src_d.exists():
+            continue
+        if dname == "sites":
+            _swap_in_sites(src_d, dst_d, scene_blobs)
             continue
         try:
             if dst_d.exists():
@@ -319,6 +335,35 @@ def _copy_bundle_dirs(src: pathlib.Path, dst: pathlib.Path) -> None:
                 "bundle: copy_bundle_dir %s → %s failed: %s",
                 src_d, dst_d, exc,
             )
+
+
+def _swap_in_sites(src_d: pathlib.Path, dst_d: pathlib.Path, scene_blobs: list) -> None:
+    """
+    Copy `sites/` (scene dirs as their closure only) into a temp sibling, then
+    swap it in. An I/O error while building it leaves `dst_d` as it was.
+    """
+    from services.site_scene import store as scene_store
+
+    stamp = f"{os.getpid()}-{time.time_ns()}"
+    tmp_d = dst_d.with_name(f".{dst_d.name}.tmp-{stamp}")
+    old_d = dst_d.with_name(f".{dst_d.name}.old-{stamp}")
+    try:
+        shutil.copytree(str(src_d), str(tmp_d), ignore=scene_store.ignore_scene_dirs(src_d))
+        for rel, data in scene_blobs:
+            target = tmp_d / pathlib.PurePath(rel).relative_to(dst_d.name)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        if dst_d.exists():
+            os.replace(dst_d, old_d)
+        os.replace(tmp_d, dst_d)
+    except OSError as exc:
+        logger.warning("bundle: copy_bundle_dir %s → %s failed: %s", src_d, dst_d, exc)
+        if old_d.exists() and not dst_d.exists():
+            os.replace(old_d, dst_d)
+    finally:
+        for leftover in (tmp_d, old_d):
+            if leftover.exists():
+                _force_rmtree(leftover)
 
 
 def _copy_history_dirs(src: pathlib.Path, dst: pathlib.Path) -> None:
@@ -4327,12 +4372,15 @@ def get_sites(
     never reported as "no sites". See services/site_service.py.
     """
     from services import site_service
+    from services.site_scene import store as scene_store
 
     src, name = _resolve_project_src(name, db, user)
     if not src.exists():
         raise HTTPException(404, f"Project '{name}' not found")
     try:
-        return site_service.read_sites(src)
+        # A scene-enabled Site is projected from its pointed generation (D03);
+        # every other Site, and a project with none, reads sites.json as before.
+        return scene_store.project_sites(src)
     except PermissionError as exc:
         raise _access_denied(src / site_service.SITES_FILE) from exc
 
@@ -4351,6 +4399,7 @@ def put_sites(
     context cache whose site is no longer in the document is removed.
     """
     from services import project_registry, site_service
+    from services.site_scene import store as scene_store
 
     dest, name = _resolve_project_src(name, db, user)
     if not dest.exists():
@@ -4361,16 +4410,23 @@ def put_sites(
         site_service.validate_sites(sites)
     except site_service.SitesInvalid as exc:
         raise HTTPException(422, str(exc)) from exc
-    try:
-        site_service.write_sites(dest, sites)
-    except site_service.SitesTooLarge as exc:
-        raise HTTPException(413, str(exc)) from exc
-    # The document is on disk; a problem listing or removing orphan context
-    # caches must not turn that success into a 500.
-    try:
-        site_service.prune_site_dirs(dest, sites, rmtree=_force_rmtree)
-    except OSError:
-        logger.warning("sites: orphan context prune failed for %s", name, exc_info=True)
+    # A scene-enabled Site has one writer, its scene (D03): a whole-document
+    # PUT that would change or drop it, or a footprint it owns, is refused
+    # (409 scene_managed_site), whatever the client says. The guard, the write
+    # and the prune run under the scene mutex, so an adoption cannot land
+    # between the check and the write.
+    with scene_store.project_lock(dest):
+        scene_store.guard_legacy_put(dest, sites)      # SceneError -> main's handler
+        try:
+            site_service.write_sites(dest, sites)
+        except site_service.SitesTooLarge as exc:
+            raise HTTPException(413, str(exc)) from exc
+        # The document is on disk; a problem listing or removing orphan context
+        # caches must not turn that success into a 500.
+        try:
+            site_service.prune_site_dirs(dest, sites, rmtree=_force_rmtree)
+        except OSError:
+            logger.warning("sites: orphan context prune failed for %s", name, exc_info=True)
     return {"saved": name, "sites": len(sites["sites"])}
 
 
@@ -4772,6 +4828,10 @@ def _project_bundle_bytes(name: str, src: pathlib.Path | None = None) -> bytes:
         # Chatbot uploads (Phase A) — locked decision row 6: uploads/ travels
         # with the bundle. Walk each _BUNDLE_DIRS recursively so an exported
         # bundle round-trips on import with all reference files intact.
+        # A scene-enabled Site's scene goes in as its closure only (D03),
+        # read under the scene mutex; nothing else under sites/<id>/scene.
+        from services.site_scene import store as scene_store
+        scene_blobs = scene_store.closure_blobs(src)
         for dname in _BUNDLE_DIRS + _HISTORY_DIRS:
             d = src / dname
             if not d.is_dir():
@@ -4780,8 +4840,12 @@ def _project_bundle_bytes(name: str, src: pathlib.Path | None = None) -> bytes:
                 root_p = pathlib.Path(root)
                 for fname in files:
                     full = root_p / fname
+                    if scene_store.is_scene_path(full.relative_to(src)):
+                        continue
                     arc = full.relative_to(src).as_posix()
                     zf.write(full, arcname=arc)
+        for rel, data in scene_blobs:
+            zf.writestr(rel.as_posix(), data)
     change_log_service.log(
         "export", "Project", name, f"Downloaded project bundle '{name}.pypsaproj.zip'",
     )
