@@ -1155,11 +1155,10 @@ def _compute_run_objective(n, cfg=None) -> float | None:
     cfg = cfg if cfg is not None else _state["solver_config"]
     # ROLLING: each window is a separate LP too, and `n.objective` is the LAST
     # window's alone, so the run's cost is the statistics basis as for myopic.
+    # Without statistics there is no run cost to report: the last window is not it.
     if getattr(cfg, "solve_strategy", "full") == "rolling":
         from services.cost_totals import horizon_system_cost
-        total = horizon_system_cost(n, cfg)
-        if total is not None:
-            return total
+        return horizon_system_cost(n, cfg)
     myopic_entries = getattr(n, "_myopic_period_objectives", None)
     if isinstance(myopic_entries, list) and myopic_entries:
         from services.cost_totals import horizon_system_cost

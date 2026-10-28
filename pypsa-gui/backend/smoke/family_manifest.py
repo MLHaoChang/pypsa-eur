@@ -234,7 +234,8 @@ VARIANTS: list[dict] = [
     _covered('LC-D06.rolling', 'windows of 2 with overlap 1 over loads 10/20/30/40 at 2 EUR/MWh: status, run record and queue reader 200 '
              '(not the last window); decomposition labels its LP figure last_window',
              'update_solver_config run_simulation get_simulation_status list_project_runs get_run_evidence get_results',
-             B + 'test_lc06_d05_foresight.py::test_a_rolling_solve_reports_the_cost_of_every_window'),
+             B + 'test_lc06_d05_foresight.py::test_a_rolling_solve_reports_the_cost_of_every_window',
+             B + 'test_lc06_d05_foresight.py::test_a_rolling_run_without_statistics_reports_no_cost'),
     _covered('LC-D06.myopic_solve', 'see LC-D05.myopic and LC-D05.limited_foresight',
              'update_solver_config run_simulation get_simulation_status',
              B + 'test_lc06_d05_foresight.py::test_every_foresight_reports_the_hand_horizon_cost[myopic]',

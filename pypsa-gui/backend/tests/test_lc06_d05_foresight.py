@@ -238,6 +238,18 @@ def test_a_rolling_solve_reports_the_cost_of_every_window(seam):
     assert d['residual_gap_eur'] is None  # no single LP total to reconcile against
 
 
+def test_a_rolling_run_without_statistics_reports_no_cost(monkeypatch):
+    # The fallback must not be the last window's LP (which is all `n.objective` holds).
+    import services.cost_totals as cost_totals
+    from routers.simulation import _compute_run_objective
+    from services.solver_service import SolverConfig
+    n = one_bus((1,) * 2, (10, 20), {'G': dict(p_nom=50, marginal_cost=2.0)})
+    n._objective = 40.0
+    monkeypatch.setattr(cost_totals, 'horizon_system_cost', lambda *_: None)
+    assert _compute_run_objective(n, SolverConfig(solve_strategy='rolling')) is None
+    assert _compute_run_objective(n, SolverConfig(solve_strategy='full')) == pytest.approx(40.0)
+
+
 # ── LC-D06: refusals and stops ───────────────────────────────────────────────
 
 def refused_before_solving(state, code, where):
