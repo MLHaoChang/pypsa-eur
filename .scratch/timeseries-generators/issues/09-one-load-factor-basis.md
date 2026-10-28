@@ -1,6 +1,6 @@
 # One load-factor basis
 
-Status: ready-for-agent (triage 2026-10-28: still two load-factor bases on master, refine stats vs the edit card)
+Status: done
 Type: task
 Blocked by: none (04 done, #576)
 Gated: no
