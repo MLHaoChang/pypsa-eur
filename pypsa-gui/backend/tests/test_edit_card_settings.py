@@ -260,3 +260,26 @@ def test_studies_disabled_refuses_with_the_handlers_refusal(client, api_project,
     with pytest.raises(HTTPException) as unknown:  # the gate comes before the study lookup
         edit_card.preview("update_decision_study", {"project": project, "study_id": "no-such-study", "name": "x"})
     assert (unknown.value.status_code, unknown.value.detail["error_kind"]) == (404, "decision_studies_disabled")
+
+
+def test_scenario_description_changed_past_the_cap_is_changed_and_uncertain_until_written(client, api_project):
+    name = api_project("card-cap-desc")
+    head = "x" * edit_card.TEXT_CAP
+    chat_tools.update_project_scenario_metadata(name, description=head + " first")
+    args = {"name": name, "description": head + " second"}
+    card = edit_card.preview("update_project_scenario_metadata", args)
+    row = card["rows"][0]
+    assert row["new"].endswith(" (changed)") and row["fingerprint"]
+    adapter = edit_card.ADAPTERS["update_project_scenario_metadata"]
+    assert adapter.readback({"name": name}, card["rows"]) != [row["new"]]  # unwritten: uncertain
+    chat_tools.update_project_scenario_metadata(name, description=head + " second")
+    assert adapter.readback({"name": name}, card["rows"]) == [row["new"]]  # written: verified
+
+
+def test_a_study_text_differing_only_past_the_cap_is_changed_and_fingerprinted():
+    head = "y" * edit_card.TEXT_CAP
+    row = edit_card._study_row("intake.site.note", "Note", head + "a", head + "b")
+    assert row["new"].endswith(" (changed)")
+    assert row["fingerprint"] == edit_card._value_fingerprint(head + "b")
+    assert edit_card._settle(row, head + "a") != row["new"]
+    assert edit_card._settle(row, head + "b") == row["new"]

@@ -415,18 +415,18 @@ def match_features(
 
 # ── apply ───────────────────────────────────────────────────────────────────
 
-def apply_report(project_dir: pathlib.Path, report: dict) -> dict:
+def plan_apply(project_dir: pathlib.Path, report: dict) -> dict:
     """
-    Write the report: routes into `map_layout.json` with `source: 'import'`
-    (a matched feature with no interior vertex is a chord and REMOVES any
-    route the branch had — the import is authoritative), sites appended to
-    `sites.json`. Both documents are validated before they are written.
-    Returns `{routes: [keys], sites: [ids]}`.
+    What `apply_report` would write, validated and not written: `{layout, sites, routes,
+    site_ids}` (a document is None when the report has nothing for it). A matched feature
+    with no interior vertex is a chord and REMOVES any route the branch had (the import is
+    authoritative); sites are appended. Pure: the edit card shows this plan.
     """
     keys: list[str] = []
+    layout = None
     if report.get("routes"):
-        doc = map_layout_service.read_map_layout(project_dir)
-        routes = doc.setdefault("routes", {})
+        layout = map_layout_service.read_map_layout(project_dir)
+        routes = layout.setdefault("routes", {})
         for r in report["routes"]:
             key = r["key"]
             keys.append(key)
@@ -434,9 +434,9 @@ def apply_report(project_dir: pathlib.Path, report: dict) -> dict:
                 routes[key] = {"points": [list(p) for p in r["points"]], "source": "import"}
             else:
                 routes.pop(key, None)
-        map_layout_service.validate_map_layout(doc)
-        map_layout_service.write_map_layout(project_dir, doc)
+        map_layout_service.validate_map_layout(layout)
     ids: list[str] = []
+    sdoc = None
     if report.get("sites"):
         sdoc = site_service.read_sites(project_dir)
         existing = {s.get("id") for s in sdoc["sites"] if isinstance(s, dict)}
@@ -451,5 +451,18 @@ def apply_report(project_dir: pathlib.Path, report: dict) -> dict:
                 "placements": {},
             })
         site_service.validate_sites(sdoc)
-        site_service.write_sites(project_dir, sdoc)
-    return {"routes": keys, "sites": ids}
+    return {"layout": layout, "sites": sdoc, "routes": keys, "site_ids": ids}
+
+
+def apply_report(project_dir: pathlib.Path, report: dict) -> dict:
+    """
+    Write the report (see `plan_apply`): routes into `map_layout.json` with
+    `source: 'import'`, sites appended to `sites.json`. Both documents are validated
+    before they are written. Returns `{routes: [keys], sites: [ids]}`.
+    """
+    plan = plan_apply(project_dir, report)
+    if plan["layout"] is not None:
+        map_layout_service.write_map_layout(project_dir, plan["layout"])
+    if plan["sites"] is not None:
+        site_service.write_sites(project_dir, plan["sites"])
+    return {"routes": plan["routes"], "sites": plan["site_ids"]}
