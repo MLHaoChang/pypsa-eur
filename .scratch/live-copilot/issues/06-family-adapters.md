@@ -154,3 +154,19 @@ Branch `claude/lc06-d04-capacity-lp`, stacked on S0. GK B reviews.
   partial-year case belongs with the LC-D05 horizon-vs-annual work.
 - Reads `get_study_evidence` 409 `unsaved_results` before a save, by design,
   so the objective is read from the unsaved current solve instead.
+
+## Hand-off (2026-10-28, context near 300k)
+
+State:
+- S0 #867 (manifest) has GK OK and premerge ok @9398fa61, waiting on the coordinator's merge.
+- S1 is done on `claude/lc06-d04-capacity-lp` (stacked on S0) with all tests green. Its PR is not opened yet: after #867 merges, merge master in and open it against master for GK B. Run `smoke/family_manifest.py --check`, `tests/test_family_manifest.py` and `tests/test_lc06_d04_capacity_lp.py` (background, ~4 min) first.
+
+Next slices, in order (each a separate PR; the conditions are above):
+- S2 (GK B): LC-D05 myopic/limited/perfect foresight and LC-D06 rolling/myopic through the seam, against `test_myopic_horizon_cost.py` hand costs; unbounded, time limit, MIP gap; unavailable solver via the real dispatcher (no monkeypatched `_probe`); LC-D04.vintage_results on a two-period fixture; a partial-year nyears case.
+- S3 (GK B): LC-D07 P=60/Q=80 → 100 MVA and an independently solved 3-bus AC PF.
+- S4–S9 (GK A, GO with conditions): D12 standard MC, D12 zonal and common-mode, D15 control models, D16 E1–E6, D17 chain, then D13 EH variants.
+- Then (GK B): D11 FMEA/health, D14 static campus, D19 two-case, D09 inflow/spill, and the oracle-less D01/02/20–23 rows. D24 needs UX.
+
+Families left without any covered variant: Projects (D01), Network/topology (D02), Reliability beyond COPT (D11 FMEA/health, D12, D13 EH), GridSpine/campus (D14–17), Experiments beyond one case (D19), Import/export (D20), Reports (D21), Audit/undo (D22), Harness parity (D23), UI (D24).
+
+Env notes: the `lp` fixture in `test_lc06_d04_capacity_lp.py` is the solve pattern to reuse. `get_study_evidence` needs a saved project, so read objectives through `get_results('objective_decomposition')`. A past run's `get_results(run_id=…)` wraps the payload in `{status, scope, data}`. The validator refuses unbounded extendables and periodises capex by nyears.
