@@ -162,7 +162,13 @@ def load(owner, record_id, kind):
             if kind == "answer"
             else "evidence_unavailable"
         )
-    authorize(owner, record.get("project_id"))
+    try:
+        authorize(owner, record.get("project_id"))
+    except HTTPException as refused:
+        # Revoked project access reads exactly like a record that never existed.
+        if refused.status_code == 404:
+            raise HTTPException(404, "Record not found") from None
+        raise
     return record
 
 
