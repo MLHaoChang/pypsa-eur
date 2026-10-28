@@ -27,6 +27,7 @@ from services import workflow_tools as wt
 from services.finance.export_xlsx import NOT_ESTABLISHED
 from services.results_workbook import scenarios as S
 from services.results_workbook.overview import CASE_ROWS, overview_figures
+from services.solver_service import SolverConfig
 from tests.test_results_workbook import _report, _rdf, solved  # noqa: F401
 from tests.test_sensitivity_comparison import edit_saved, opex, solve, sweep
 from tests.test_workflow_tools import baseline, helpers_state  # noqa: F401
@@ -260,12 +261,12 @@ def test_a_stale_case_shows_its_reason_and_no_figures_or_deltas(client, swept):
 
 def _blob(n, scen, report=None, case_state=None) -> bytes:
     return RW.build_results_workbook(RW.WorkbookInputs(
-        network=n, cfg=None, lost_load=None, result_df=_rdf, views=[], ic_report=report,
+        network=n, cfg=SolverConfig(), lost_load=None, result_df=_rdf, views=[], ic_report=report,
         case_state=case_state, project="Base", scenarios=scen))
 
 
 def _run(n, name, **kw) -> S.Run:
-    return S.Run(name=name, figs=overview_figures(n, None, None, _rdf), **kw)
+    return S.Run(name=name, figs=overview_figures(n, SolverConfig(), None, _rdf), **kw)
 
 
 def test_per_run_case_staleness_and_a_not_established_delta(solved):
@@ -303,7 +304,10 @@ def test_not_comparable_reasons_are_written_and_hidden_runs_counted(solved):
     assert "2 scenario(s) not shown: no access" in texts
     assert any(t.startswith("1 scenario(s) not shown") for t in texts)
     assert any(sc._REASONS["horizon_differs"] in t for t in texts)
-    assert _assert_deltas_read_two_numbers(ws) == 0
+    _assert_deltas_read_two_numbers(ws)
+    _h, cols = _header(ws)
+    delta = cols["Δ H − base"]
+    assert not any(ws.cell(r, delta).data_type == "f" for r in range(1, ws.max_row + 1))
 
 
 def test_formula_like_run_names_stay_text(solved):
@@ -313,3 +317,32 @@ def test_formula_like_run_names_stay_text(solved):
         cells = [c for row in ws.iter_rows() for c in row if c.value == name]
         assert cells and all(c.data_type == "s" for c in cells)
     _assert_deltas_read_two_numbers(ws)
+
+
+def test_system_lcoe_is_a_per_run_formula_per_period_and_the_charts_read_numbers(solved):
+    """Two investment periods: each run's System LCOE, per period and over the
+    horizon, is cost × 1000 / energy of its own cells (hand value from the
+    figures); every chart series reads number or formula cells only."""
+    from tests.test_results_workbook import _refs as range_refs
+    figs = overview_figures(solved, SolverConfig(), None, _rdf)
+    scen = S.Scenarios(runs=[_run(solved, "A"), _run(solved, "B")])
+    ws = _sheet(_blob(solved, scen))[1]
+    _h, cols = _header(ws)
+    cost, energy = figs.line("system_cost"), figs.line("energy_served")
+    assert figs.periods
+    for period in ["horizon", *figs.periods]:
+        c = cost.total if period == "horizon" else cost.by_period[period]
+        e = energy.total if period == "horizon" else energy.by_period[period]
+        row = _kpi_row(ws, f"System LCOE (EUR/MWh), {period}")
+        for name in ("Base", "A", "B"):
+            cell = ws.cell(row, cols[name])
+            assert cell.data_type == "f", (period, name, cell.value)
+            assert _value(ws, cell.coordinate) == pytest.approx(c * 1000 / e, rel=1e-9)
+        assert _value(ws, ws.cell(row, cols["Δ A − base"]).coordinate) == pytest.approx(0, abs=1e-9)
+    series = []
+    for chart in ws._charts:
+        for s in chart.series:
+            series += range_refs(s.val.numRef.f.split("!")[1])
+    assert series
+    for ref in series:
+        assert ws[ref].data_type == "f" or _is_num(ws[ref].value), (ref, ws[ref].value)
