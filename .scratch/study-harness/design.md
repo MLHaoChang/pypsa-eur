@@ -737,7 +737,7 @@ lists what blocks the profile from running unattended end to end today.
     - SCR/ESCR (`strength.py`, G4): screening, never certifying;
     - PQ: TDD, unbalance, harmonic impedance scan (G5): screening; "within the screening limit", never "meets IEEE 519"; resonance inside the clearance is `warn`;
     - planning contingencies (`contingency_set.py`, `campus_taps.py`, G6): stage 2 after an outage allows taps and shunts only, and redispatch is not a remedy (DC13-SCOPE);
-    - P–V/Q–V margin (G7a): **deferred, needs an issue**. `gridspine/static/voltage_stability.py` exists, but no pypsa-gui backend module imports it, so it is not a gate fact today (GK A).
+    - P–V/Q–V margin (G7a): **deferred to [issue 18](issues/18-pv-qv-gate-fact.md)**. `gridspine/static/voltage_stability.py` exists, but no pypsa-gui backend module imports it, so it is not a gate fact today (GK A).
 - Loop: agent L2 only on tunables. Nothing in §6.0 is tunable: grid-code limits, fault levels, `eh_poc`/`eh_ibr_mva`, contingency sets, IT load.
 - Tunable: BESS and genset candidates, reactive support (`q` devices), within bounds.
 - Missing for an unattended run:
@@ -755,7 +755,7 @@ lists what blocks the profile from running unattended end to end today.
   - the H2 offtake is met (25 MW) in every hour;
   - electrolyser utilisation within the profile band (warn);
   - LOLE (h/yr basis, §6.2) ≤ goal, with the fuel cell as firm backup.
-- Investment: the IC counterfactual with H2 offtake is impossible today (`.scratch/generic-site/design.md` Q3). It is an IC engine change that needs its own issue (GK A) and is not a gate yet: the investment rules are `warn` and stay `not_evaluated` with that reason. The offtake itself is demand and never tunable (§6.0).
+- Investment: the IC counterfactual with H2 offtake exists in the engine (H2e, #312: the baseline re-solve buys grey H2 at its reference price; `pypsa-gui/backend/services/results/finance_case.py:1467`, `services/results/baseline.py:25`, `:210`), and `eh_h2_hub_staged` ships it (`project_templates/eh_staged_hubs.py:262`); the single-year hub's data and the gate fact are [issue 19](issues/19-h2-offtake-ic-counterfactual.md) (GK A). Until it lands it is not a gate: the investment rules are `warn` and stay `not_evaluated` with that reason. The offtake itself is demand and never tunable (§6.0).
 - Tunable: wind/PV/BESS candidate max, electrolyser and H2 storage size within bounds.
 - Missing: an H2 utilisation fact (no named reader), the IC counterfactual.
 
@@ -767,7 +767,7 @@ lists what blocks the profile from running unattended end to end today.
   - island survival by the verdicts of the scorecard's island rows (`ride_through:*`, `sustained_h` from `gridspine/schema/island.py`, the frequency judge);
   - LOLE (h/yr basis, §6.2) ≤ goal;
   - excluded on `off_grid`, with the reason and a test (GK A): SCR and every row built from the PoC's entered S_k'' (TDD, rapid voltage change, flicker, unbalance, motor start). With the tie open they mean nothing, and the fault level comes from the diesels.
-- Investment baseline: the existing diesel fleet, an IC engine change (generic-site Q4) that needs its own issue (GK A). It is not a gate yet; the rule is `warn`, `not_evaluated` until then.
+- Investment baseline: the existing diesel fleet, which the engine's baseline re-solve already gives (#302, owner M2e (a); `pypsa-gui/backend/services/results/baseline.py:4`, `finance_case.py:1376` `baseline_plan`; tested in `tests/test_eh_microgrid_case.py:97`); the gate fact is [issue 20](issues/20-microgrid-diesel-ic-baseline.md) (GK A). It is not a gate yet; the rule is `warn`, `not_evaluated` until then.
 - Tunable: battery size and GFM settings within bounds, PV max.
 - Missing: the island tools are the `campus_*` set and their fit for a microgrid project is unverified; the IC baseline.
 
@@ -861,9 +861,12 @@ Settled at plan review (28 Oct):
 - Gateable facts, engine loops and the never-tunable list: GK A (§5, §6.0,
   §6.2, §9.3).
 - Execution context: option b, the explicit base context (GK B, §6.6).
-- New engine issues needed (GK A), not opened here: P–V/Q–V wiring into the
-  backend, the H2-offtake IC counterfactual, the microgrid diesel-fleet IC
-  baseline.
+- Engine issues (GK A): [18](issues/18-pv-qv-gate-fact.md) P–V/Q–V wiring into
+  the backend; [19](issues/19-h2-offtake-ic-counterfactual.md) the H2-offtake IC
+  counterfactual (the engine has it since H2e/#312; 19 adds the single-year hub's
+  data and the `ic.counterfactual` fact); [20](issues/20-microgrid-diesel-ic-baseline.md)
+  the microgrid diesel-fleet IC baseline (the engine has it since #302; 20 adds the
+  fact).
 
 ## 12. What stays as it is
 
