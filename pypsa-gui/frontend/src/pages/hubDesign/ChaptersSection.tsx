@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import Kpi from '../../components/Kpi'
 import { campusApi, isActiveRun } from '../../api/campusElectrical'
 import { financeApi } from '../../api/finance'
-import { simulationApi } from '../../api/simulation'
+import { resultsApi, simulationApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { CAMPUS_KEY, CAMPUS_RUN_POLL_MS } from '../CampusElectricalPanel'
@@ -14,6 +14,7 @@ import { GFM_KEY } from '../CampusIslandGfmSection'
 import { chapterTiles, dispatchSolved, FROM_STUDY_HINT, type ChapterInputs, type ChapterOpen } from './chapters'
 import { useHubDesignStore } from './hubDesignStore'
 import RunGridChecks from './RunGridChecks'
+import ProductionTiles from '../results/ProductionTiles'
 import { useInScope } from '../../components/flowScope/useFlowScope'
 import { AddToScope } from '../../components/flowScope/ScopeCards'
 
@@ -46,6 +47,11 @@ export function ChaptersSection({ reliability }: { reliability: ChapterInputs['r
   useTick(isRunJob(campus.data?.run_job) && isActiveRun(campus.data?.run_job))
   const status = useQuery({
     queryKey: nk(project, 'simulationStatus'), queryFn: simulationApi.getStatus, enabled: !!project,
+  })
+  // The Production group (grid-to-process 07): absent when the network has no product bus.
+  const processView = useQuery({
+    queryKey: nk(project, 'results', 'process_view'), queryFn: resultsApi.getProcessView,
+    enabled: !!project, retry: false,
   })
   // The campus GFM settings, for the operation tile's control line (GFM-b);
   // only for a hub with a campus run (the island section's own key).
@@ -103,6 +109,7 @@ export function ChaptersSection({ reliability }: { reliability: ChapterInputs['r
           </div>
         ))}
       </div>
+      <ProductionTiles view={processView.data} />
     </section>
   )
 }

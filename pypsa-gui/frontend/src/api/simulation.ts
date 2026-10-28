@@ -1,6 +1,6 @@
 import client from './client'
 import type { SiteParams } from '../pages/hubDesign/genericSite'
-import type { SolverConfig, SimulationStatus, PreflightResult } from './types'
+import type { SolverConfig, SimulationStatus, PreflightResult, ProcessView } from './types'
 
 export const simulationApi = {
   getSolverConfig: () => client.get<SolverConfig>('/simulation/solver_config').then(r => r.data),
@@ -1677,6 +1677,8 @@ export const resultsApi = {
   getStressProfilePacks: (project: string) =>
     client.get(`/projects/${encodeURIComponent(project)}/stress_profile_packs`)
       .then(r => r.data as { packs: StressProfilePack[] }),
+  // Process view (ticket 04): products and process units; both lists empty on a network with neither.
+  getProcessView: () => client.get<ProcessView>('/results/process_view').then(r => r.data),
   getLostLoad: (range?: TSRange) => client.get<{
     index: string[]; columns: string[]; data: number[][];
     total_mwh: number; total_cost_eur: number;

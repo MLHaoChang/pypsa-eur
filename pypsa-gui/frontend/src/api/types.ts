@@ -1345,3 +1345,30 @@ export interface InvestmentCaseStudy {
   error_code?: string | null
   flags?: string[]
 }
+
+// `GET /results/process_view` (grid-to-process ticket 04, services/results/process_view.py). Only the
+// fields the Guided Production tiles read.
+export interface ProcessAmount {
+  value: number | null
+  unit: string
+  /** Tonnes (value × t_per_unit); null with `t_flag` when the bus has no tonne factor. */
+  t: number | null
+  t_flag?: string | null
+  flag: string | null
+  /** Set on `lost` only: the shortfall priced, null with `eur_flag` when unknown. */
+  eur?: number | null
+  eur_flag?: string | null
+}
+export interface ProcessInventory { name: string; unit: string; e: (number | null)[]; flag: string | null }
+export interface ProcessProduct {
+  bus: string
+  carrier: string
+  unit: string
+  t_per_unit: number | null
+  production: ProcessAmount
+  delivery: ProcessAmount
+  buy_in: ProcessAmount
+  lost: ProcessAmount
+  inventory: ProcessInventory[]
+}
+export interface ProcessView { products: ProcessProduct[]; process_units: { name: string }[] }

@@ -1081,6 +1081,32 @@ def get_ledger(study_id: str,
                        maturity)
 
 
+def _ledger_after(study: DecisionStudy, ledger, body: "LedgerPut", changed_by: str | None, now):
+    """
+    The ledger a ``PUT .../ledger`` would store, from the stored (or seeded) ``ledger``;
+    nothing is saved. Raises ``LedgerEditError`` / ``LibraryError`` for a refused edit.
+    The route and the chat edit card both call this.
+    """
+    if body.reseed:
+        ledger = study_ledger.reseed_ledger(
+            ledger, _key_drivers(study), study.intake, _library_or_500())
+    if body.reset:
+        # The rows come back from the defaults the ledger (after any
+        # re-seed above) was seeded from, never another money year.
+        ledger = study_ledger.reset_rows(
+            ledger, body.reset, _key_drivers(study), study.intake,
+            _library_for_or_500(ledger))
+    ledger = study_ledger.with_study_currency_year(ledger, study.currency_year)
+    for edit in body.rows:
+        ledger = study_ledger.apply_user_row(
+            ledger, edit.key, edit.value, unit=edit.unit,
+            changed_by=changed_by, changed_at=now,
+            provenance=edit.provenance, source=edit.source,
+            source_year=edit.source_year, source_url=edit.source_url,
+            currency_year=edit.currency_year)
+    return ledger
+
+
 @router.put("/{study_id}/ledger")
 def put_ledger(study_id: str, body: LedgerPut,
                project: AuthorizedProject = ProjectAccessDep,
@@ -1092,25 +1118,7 @@ def put_ledger(study_id: str, body: LedgerPut,
         study = _load(project, study_id)
         ledger, _stored = _current_ledger(study)
         try:
-            if body.reseed:
-                ledger = study_ledger.reseed_ledger(
-                    ledger, _key_drivers(study), study.intake, _library_or_500())
-            if body.reset:
-                # The rows come back from the defaults the ledger (after any
-                # re-seed above) was seeded from, never another money year.
-                ledger = study_ledger.reset_rows(
-                    ledger, body.reset, _key_drivers(study), study.intake,
-                    _library_for_or_500(ledger))
-            ledger = study_ledger.with_study_currency_year(ledger, study.currency_year)
-            now = _now()
-            changed_by = str(user.id) if user is not None else None
-            for edit in body.rows:
-                ledger = study_ledger.apply_user_row(
-                    ledger, edit.key, edit.value, unit=edit.unit,
-                    changed_by=changed_by, changed_at=now,
-                    provenance=edit.provenance, source=edit.source,
-                    source_year=edit.source_year, source_url=edit.source_url,
-                    currency_year=edit.currency_year)
+            ledger = _ledger_after(study, ledger, body, str(user.id) if user is not None else None, _now())
         except (study_ledger.LedgerEditError, study_library.LibraryError) as exc:
             raise HTTPException(422, str(exc)) from None
         maturity = study_ledger.maturity_from_ledger(

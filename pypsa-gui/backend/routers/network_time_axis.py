@@ -103,6 +103,7 @@ from services.user_timeseries import (  # noqa: F401
     _user_ts_delete_asset,
     _user_ts_extent,
     _user_ts_lock,
+    _user_ts_meta,
     _user_ts_rename_asset,
     _reject_nonfinite_timeseries,
 )
@@ -1097,6 +1098,46 @@ def list_timeseries():
                     "columns": cols,
                 })
     return result
+
+def resolve_series(n, component: str, attribute: str, name: str):
+    """The one series get_timeseries shows for ``name``, and where it came from.
+
+    A user-uploaded Series wins over the network's ``<component>_t.<attribute>``
+    column. Checked-answer evidence reads through here too, so it cannot drift
+    from what the handler showed. Returns ``(source, series)`` or ``(None, None)``.
+    """
+    user_series = _user_ts.get((component, attribute, name))
+    if user_series is not None:
+        return "user", user_series.rename(name)
+    ts_store = getattr(n, f"{component}_t", None)
+    net_df = ts_store.get(attribute) if ts_store is not None else None
+    if net_df is not None and not net_df.empty and name in net_df.columns:
+        return "network", net_df[name]
+    return None, None
+
+
+def index_labels(index):
+    """ISO timestep labels and, for multi-period snapshots, the parallel periods."""
+    # MultiIndex on multi-period: emit ISO timesteps + parallel periods array,
+    # same convention as `_ts_payload` and `/network/snapshots`. Without this,
+    # `str(s)` on the tuple yields garbage like "(2026, Timestamp('...'))".
+    periods: list | None = None
+    if isinstance(index, pd.MultiIndex):
+        try:
+            periods = [int(p) for p in index.get_level_values(0)]
+        except (TypeError, ValueError):
+            periods = [str(p) for p in index.get_level_values(0)]
+        timesteps = index.get_level_values(1)
+        if isinstance(timesteps, pd.DatetimeIndex):
+            idx = timesteps.strftime("%Y-%m-%dT%H:%M:%S").tolist()
+        else:
+            idx = [str(s) for s in timesteps]
+    elif isinstance(index, pd.DatetimeIndex):
+        idx = index.strftime("%Y-%m-%dT%H:%M:%S").tolist()
+    else:
+        idx = [str(s) for s in index]
+    return idx, periods
+
 @router.get("/timeseries/{component}/{attribute}")
 def get_timeseries(component: str, attribute: str, columns: str | None = None):
     """
@@ -1120,11 +1161,9 @@ def get_timeseries(component: str, attribute: str, columns: str | None = None):
         # For each requested column: prefer user-uploaded Series, fall back to network data
         series_list: list[pd.Series] = []
         for col in wanted:
-            user_series = _user_ts.get((component, attribute, col))
-            if user_series is not None:
-                series_list.append(user_series.rename(col))
-            elif net_df is not None and not net_df.empty and col in net_df.columns:
-                series_list.append(net_df[col])
+            _source, series = resolve_series(n, component, attribute, col)
+            if series is not None:
+                series_list.append(series)
         df = pd.concat(series_list, axis=1) if series_list else pd.DataFrame()
     else:
         # No column filter — build from all user-uploaded columns for this
@@ -1160,24 +1199,7 @@ def get_timeseries(component: str, attribute: str, columns: str | None = None):
     # range — long enough to block the event loop and time out the periodic
     # /network/meta poll. NumPy + DatetimeIndex.strftime do the same work in
     # well under a second.
-    # MultiIndex on multi-period: emit ISO timesteps + parallel periods array,
-    # same convention as `_ts_payload` and `/network/snapshots`. Without this,
-    # `str(s)` on the tuple yields garbage like "(2026, Timestamp('...'))".
-    periods: list | None = None
-    if isinstance(df.index, pd.MultiIndex):
-        try:
-            periods = [int(p) for p in df.index.get_level_values(0)]
-        except (TypeError, ValueError):
-            periods = [str(p) for p in df.index.get_level_values(0)]
-        timesteps = df.index.get_level_values(1)
-        if isinstance(timesteps, pd.DatetimeIndex):
-            idx = timesteps.strftime("%Y-%m-%dT%H:%M:%S").tolist()
-        else:
-            idx = [str(s) for s in timesteps]
-    elif isinstance(df.index, pd.DatetimeIndex):
-        idx = df.index.strftime("%Y-%m-%dT%H:%M:%S").tolist()
-    else:
-        idx = [str(s) for s in df.index]
+    idx, periods = index_labels(df.index)
 
     arr = df.to_numpy(dtype=float, copy=False)
     arr_obj = arr.astype(object)
@@ -1188,6 +1210,16 @@ def get_timeseries(component: str, attribute: str, columns: str | None = None):
     if periods is not None:
         payload["periods"] = periods
     return payload
+
+
+def _same_series(old: pd.Series | None, new: pd.Series) -> bool:
+    """Whether a timeseries edit left a stored column as it was."""
+    if old is None or not old.index.equals(new.index):
+        return False
+    return bool(np.allclose(old.to_numpy(dtype=float), new.to_numpy(dtype=float),
+                            rtol=1e-12, atol=0.0, equal_nan=True))
+
+
 @router.put("/timeseries/{component}/{attribute}")
 def set_timeseries(component: str, attribute: str, body: dict):
     import pandas as pd
@@ -1212,7 +1244,13 @@ def set_timeseries(component: str, attribute: str, body: dict):
         # without serialization. Inner lock; outer is the PyPSA lock.
         with _user_ts_lock:
             for col in df.columns:
-                _user_ts[(component, attribute, col)] = df[col].copy()
+                key = (component, attribute, col)
+                old = _user_ts.get(key)
+                _user_ts[key] = df[col].copy()
+                # An edited column no longer is the series its recorded meta
+                # (generator, refinements) describes; an untouched one still is.
+                if not _same_series(old, _user_ts[key]):
+                    _user_ts_meta.pop(key, None)
         # A user edit sets the growth placeholders it covers (E1 follow-up).
         growth_placeholders.mark_set(n, component, attribute,
                                      {c: df[c] for c in df.columns}, prior)
@@ -1332,6 +1370,9 @@ async def upload_timeseries(
                         _user_ts[(component, attribute, col)] = new_s.copy()
                 else:
                     _user_ts[(component, attribute, col)] = new_s.copy()
+                # The upload replaces the series, so the meta recorded for the
+                # old one (generator, refinements) no longer describes it.
+                _user_ts_meta.pop((component, attribute, col), None)
         # A user upload sets the growth placeholders its periods cover (E1
         # follow-up); a `period=` upload covers that period only.
         growth_placeholders.mark_set(n, component, attribute,

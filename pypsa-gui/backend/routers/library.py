@@ -214,6 +214,34 @@ async def upload_series(file: UploadFile = File(...), name: str = Form(...),
         raise _refuse_422(exc) from exc
 
 
+def _meter_parts(data: bytes, filename: str, unit: str, settlement: str, label: str,
+                 timezone: str | None):
+    """The meter upload's parse: `(series to store, its meta, the monthly history)`. Pure:
+    the route stores it and the edit card shows it, from this one function."""
+    raw = _parsed(series_io.parse_upload, data, filename, None,
+                  max_points=MAX_POINTS, allow_empty=True)
+    series, notes = _parsed(series_io.meter_series, raw, timezone=timezone, unit=unit,
+                            label=label)
+    hist = _parsed(series_io.meter_history, series, settlement=settlement)
+    hist["notes"] = notes + hist["notes"]
+    stored = series.dropna()
+    if len(stored) < len(series):
+        hist["notes"].append(f"empty_rows_not_stored:{len(series) - len(stored)}")
+    meta = {"source": "meter_data", "unit": "kW", "source_unit": unit, "label": label,
+            "settlement": settlement, "notes": hist["notes"]}
+    return stored, meta, hist
+
+
+def meter_meta_clash(name: str, kept: dict, meta: dict) -> None:
+    """Identical data is one version; its stored meta must describe THIS history (review F8)."""
+    clash = {k: kept.get(k) for k in ("settlement", "source_unit", "label")
+             if kept.get(k) != meta[k]}
+    if clash:
+        raise HTTPException(409, {"code": "meter_meta_conflict", "message": (
+            f"series {name!r} already holds this data with {clash}; upload it under "
+            "another name")})
+
+
 @router.post("/meter_data", response_model=MeterDataOut)
 async def upload_meter_data(file: UploadFile = File(...), name: str = Form(...),
                             unit: str = Form(...), settlement: str = Form("15min"),
@@ -230,27 +258,9 @@ async def upload_meter_data(file: UploadFile = File(...), name: str = Form(...),
     data = await read_capped(file)
 
     def work():
-        raw = _parsed(series_io.parse_upload, data, file.filename or "", None,
-                      max_points=MAX_POINTS, allow_empty=True)
-        series, notes = _parsed(series_io.meter_series, raw, timezone=timezone, unit=unit,
-                                label=label)
-        hist = _parsed(series_io.meter_history, series, settlement=settlement)
-        hist["notes"] = notes + hist["notes"]
-        stored = series.dropna()
-        if len(stored) < len(series):
-            hist["notes"].append(f"empty_rows_not_stored:{len(series) - len(stored)}")
-        meta = {"source": "meter_data", "unit": "kW", "source_unit": unit, "label": label,
-                "settlement": settlement, "notes": hist["notes"]}
+        stored, meta, hist = _meter_parts(data, file.filename or "", unit, settlement, label, timezone)
         ref = S.put_series(db, org, name, stored, meta, created_by=user.id)
-        kept = S.series_meta(db, org, ref)
-        clash = {k: kept.get(k) for k in ("settlement", "source_unit", "label")
-                 if kept.get(k) != meta[k]}
-        if clash:
-            # Identical data is one version; its meta must describe THIS
-            # history (review F8).
-            raise HTTPException(409, {"code": "meter_meta_conflict", "message": (
-                f"series {name!r} already holds this data with {clash}; upload it under "
-                "another name")})
+        meter_meta_clash(name, S.series_meta(db, org, ref), meta)
         return ref, hist
 
     try:

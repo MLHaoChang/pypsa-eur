@@ -295,12 +295,12 @@ def guard_legacy_put(project_dir: pathlib.Path, incoming: dict[str, Any]) -> Non
         theirs = {k: v for k, v in by_id.get(site_id, {}).items() if k != "scene_enabled"}
         if theirs != mine:
             raise SceneError("scene_managed_site",
-                             "This site is managed by its 3D scene and your copy is out of date: reload to edit it",
+                             "This site’s boundary and equipment positions are managed by its 3D scene: correct buildings in Generate",
                              {"site_id": site_id})
         for key, value in state["asset_footprints"].items():
             if in_fps.get(key) != value:
                 raise SceneError("scene_managed_site",
-                                 "An equipment footprint is managed by a 3D scene and your copy is out of date: reload to edit it",
+                                 "An equipment footprint here is managed by its site’s 3D scene: correct buildings in Generate",
                                  {"site_id": site_id, "key": key})
 
 

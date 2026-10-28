@@ -59,6 +59,15 @@ export const PALETTE_SECTIONS_DATA: PaletteSectionData[] = [
   },
 ]
 
+/**
+ * The Process unit: a Link whose efficiencies the creation form derives from rates per tonne. It is not a
+ * palette item (it has no 3D type and is not dragged onto the canvas), so it stays out of the sections above;
+ * the sidebar lists it under its own PROCESS heading.
+ */
+export const PROCESS_UNIT_ITEM: PaletteItemData = {
+  id: 'process_unit', label: 'Process unit', subtitle: 'Rates per tonne → Link',
+}
+
 export const PALETTE_ITEM_IDS: string[] = PALETTE_SECTIONS_DATA.flatMap(s => s.items.map(i => i.id))
 
 export type PaletteClass = 'Bus' | 'Line' | 'Transformer' | 'Generator' | 'StorageUnit' | 'Store' | 'Link' | 'Load'
@@ -68,7 +77,7 @@ export const PALETTE_COMPONENT_TYPE: Record<string, PaletteClass> = {
   thermal: 'Generator', renewable: 'Generator',
   battery: 'StorageUnit', psh: 'StorageUnit', hydrogen: 'StorageUnit',
   caes: 'StorageUnit', flywheel: 'StorageUnit',
-  electrolyzer: 'Link', fuel_cell: 'Link',
+  electrolyzer: 'Link', fuel_cell: 'Link', process_unit: 'Link',
   power_to_heat: 'Link', chp: 'Link',
   thermal_storage: 'Store',
   load_elec: 'Load', load_h2: 'Load', load_heat: 'Load',
