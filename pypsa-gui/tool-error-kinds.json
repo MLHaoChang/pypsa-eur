@@ -1603,26 +1603,6 @@
       "surface": "inline",
       "why": "A chat edit card's own refusal (harness/edit_card.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The named study does not exist; the model lists the studies and retries."
     },
-    "finance_changed": {
-      "surface": "inline",
-      "why": "A chat edit card's own refusal (harness/edit_card*.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The finance inputs changed since the model last read them (stale if_match); the model re-reads them and retries."
-    },
-    "value_flows_drafts_need_pricing": {
-      "surface": "inline",
-      "why": "A chat edit card's own refusal (harness/edit_card*.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The chosen participants template needs contracts priced first; the model tells the user what to price."
-    },
-    "project_not_found": {
-      "surface": "inline",
-      "why": "A chat edit card's own refusal (harness/edit_card*.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. No project of that name is visible to the caller; the model lists the projects and asks which."
-    },
-    "library_item_common_readonly": {
-      "surface": "inline",
-      "why": "A chat edit card's own refusal (harness/edit_card*.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The Library item is a shipped common item and cannot be overwritten; the model offers a new name."
-    },
-    "meter_meta_conflict": {
-      "surface": "inline",
-      "why": "A chat edit card's own refusal (harness/edit_card*.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The same meter data was imported with different settings than the stored version; the model asks which settings to keep."
-    },
     "empty_edit": {
       "surface": "inline",
       "why": "A chat edit card's own refusal (harness/edit_card.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The call named nothing to change; the model asks what to change."
