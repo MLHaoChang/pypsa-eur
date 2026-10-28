@@ -140,6 +140,13 @@ def save(record, record_id):
             temp.unlink(missing_ok=True)
 
 
+def discard(owner, record_id):
+    """Remove a record just saved by a commit whose access was revoked meanwhile."""
+    path = _path(owner, record_id)
+    with transaction(path.parent):
+        path.unlink(missing_ok=True)
+
+
 def load(owner, record_id, kind):
     path = _path(owner, record_id)
     authorize(owner)

@@ -14,6 +14,7 @@ import pytest
 import app_paths
 from db.models import OrgMembership, User
 from harness.providers.fake import FakeProvider
+from services import assurance_records as records
 from tests.assurance_acceptance.test_p1_evidence import page_draft
 from tests.assurance_acceptance.support import (
     approval,
@@ -132,6 +133,32 @@ def test_access_revoked_after_capture_publishes_nothing(
     result = next(d for event, d in frames if event == "tool_result")
     assert result["result"]["_assurance"]["evidence_ids"]
     assert_nothing_published(frames, owner, before)
+
+
+@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize(
+    "read, draft",
+    [(get_component, observed_draft()), (list_loads, PAGE_DRAFT)],
+    ids=["get_component", "list_components"],
+)
+def test_access_revoked_during_commit_publishes_nothing(
+    baseline, harness, revoke, seeded_identity, monkeypatch, kind, read, draft
+):
+    """REVOKE-TOCTOU: revoked after commit's last ACL check, as the record lands."""
+    owner = str(seeded_identity["user_id"])
+    before = answer_records(owner)
+    save = records.save
+
+    def save_then_revoke(record, record_id):
+        save(record, record_id)
+        if record["record_kind"] == "answer":
+            revoke[kind]()
+
+    monkeypatch.setattr(records, "save", save_then_revoke)
+    turns = [read(), text_turn(draft), text_turn(draft)]
+    response = harness.request(FakeProvider(turns))
+    assert response.status_code == 200
+    assert_nothing_published(parse_sse(response.text), owner, before)
 
 
 @pytest.mark.parametrize("kind", KINDS)
