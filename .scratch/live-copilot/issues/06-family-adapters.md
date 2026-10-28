@@ -70,6 +70,55 @@ seam that checks only shape or refusals, or that stubs the engine.
 | D01/02/20–23 | seam-only (no oracle) | independent oracles per the annex |
 | D24 | frontend e2e, not re-audited here | — |
 
+## Comments
+
+### GK A (3), GO conditions for S4–S9 (restated 2026-10-28, after rotation)
+
+GK A checks each condition at its slice's PR.
+
+All slices:
+- Show one mutation per slice (a perturbed fixture input, e.g. a doubled FOR,
+  halved H or link removed) under which the oracle assert fails.
+- State and justify each tolerance; no bare rel=0.1.
+- Take f0 from the network or profile (60 Hz on SAGC fixtures); test_sixty_hz stays green.
+- Use SAGC-1 generic demo figures in campus fixtures.
+- An engine bug found by a RED gets its own plan to GK A before any engine edit.
+
+S4, standard MC:
+- Oracle LOLE = Σ_h P(cap < L_h), EUE = Σ_h E[max(L_h − cap, 0)] from the two-unit COPT.
+- Fixed seed, with enough draws that the CI half-width is ≤ 10 % of the oracle LOLE.
+  Assert both the containment and the width.
+- If outages are chronological with MTTR and start all-available, make that
+  bias ≪ the CI or start stationary, and say which.
+
+S5:
+- Zonal: per hour, min(available Link capacity, max(surplus, 0) × delivery
+  ratio), on hours where each bound binds.
+- Common-mode: equal per-draw unit states across the two runs (no RNG shift),
+  then per draw EUE_cm ≥ EUE_base, and strictly greater in total where the Link
+  matters.
+
+S7:
+- Refusals name the field and the model.
+- One wrong-base case per class (H unit vs system base, droop % vs pu).
+- Exact read-back.
+
+S8:
+- RoCoF = −ΔP·f0/(2·H·S) at the first step, with D = 0.
+- Settled Δf = −ΔP/(ΣK + D), with no isochronous unit in that fixture; the
+  isochronous case asserts Δf → 0.
+- UPS L·T/2/3600 MWh.
+- dt-halving error ratio ≥ ~1.8 (first order).
+- The EMT/PLL/voltage unavailable row stays.
+
+S9:
+- Stale = a network edit between preview and apply, refused with the reason.
+- The re-study runs on the applied values.
+
+S6:
+- min(schedule, capacity) survives capacity edits up and down.
+- eh_dtc: bus VoLL and per-Load VoLL each change the result.
+
 ## Slice log
 
 ### S0, execution manifest (2026-10-28)
@@ -254,6 +303,9 @@ Branch `claude/lc06-d12-standard-mc`, stacked on S3. GK A reviews. Session LC-06
   2. EUE shortfall less 1 MW: the EUE test fails.
   3. 5 draws at cov_target 0.2: the half-width is 371 h, over the 193 h bound.
   4. The hand total off by 0.01 per cycle: the hand-oracle test fails.
+  5. Fixture input (GK A's form): G60's FOR doubled in the network the app
+     runs, after the oracle is taken. LOLE 2702.8 h, CI (2673.9, 2731.7), excludes
+     1927.2; EUE 85,970 excludes 54,312. Both tests fail.
 
 ## Hand-off (2026-10-28, context near 300k)
 
