@@ -58,12 +58,12 @@ METRICS = {
 }
 RANK_ORDERS = ("lowest_first", "highest_first")
 
-# Plain-word reasons; the assistant shows "<case>: <text>".
+# Plain-word reasons; the assistant shows one "<case>: <text>; <text>" line per case.
 _REASONS = {
     "case_unsolved": "not solved yet",
     "case_stale": "its inputs changed since its last solve, so its results are out of date",
-    "case_inputs_changed": "its inputs changed since it was branched from the base (inputs include finance)",
-    "baseline_changed": "the base changed since this case was branched (inputs include finance)",
+    "case_inputs_changed": "its inputs or finance settings changed since it was branched from the base",
+    "baseline_changed": "the base's inputs or finance settings changed since this case was branched",
     "mode_differs": "solved in a different mode from the base",
     "horizon_differs": "a different time horizon or snapshot weighting from the base",
     "solver_settings_differ": "different solver settings from the base",
@@ -73,6 +73,31 @@ _BASE_REASONS = {
     "case_unsolved": "the base is not solved yet",
     "case_stale": "the base's inputs changed since its last solve, so its results are out of date",
 }
+
+
+# Both input reasons at once read as one clause (UX).
+_STALE_AND_CHANGED = ("its inputs or finance settings changed since its last solve and since it was "
+                      "branched from the base, so its results are out of date")
+
+# Money rows read in M€, k€ or €, whichever makes the row's largest value at least 1.
+_MONEY_UNITS = (("M€", 1.0), ("k€", 1e3), ("€", 1e6))
+
+
+def _not_comparable(name: str, reasons: list[str]) -> str:
+    texts = [_REASONS[r] for r in reasons]
+    if "case_stale" in reasons and "case_inputs_changed" in reasons:
+        texts = [_STALE_AND_CHANGED if r == "case_stale" else _REASONS[r]
+                 for r in reasons if r != "case_inputs_changed"]
+    return f"{name}: {'; '.join(texts)}"
+
+
+def _scale(metric: str, values) -> tuple[str, float]:
+    """The row's display unit and its factor from the stored unit."""
+    unit = METRICS[metric][1]
+    if unit != "M€":
+        return unit, 1.0
+    top = max((abs(v) for v in values if v is not None), default=0.0)
+    return next(((u, f) for u, f in _MONEY_UNITS if top * f >= 1), _MONEY_UNITS[-1])
 
 
 def _refuse(kind: str, message: str, status: int = 422):
@@ -275,34 +300,44 @@ def _declared(base_network, spec) -> tuple[list[str], bool]:
     return rows[:MAX_ROWS], len(rows) > MAX_ROWS
 
 
-def _cell(metric, base_value, value):
-    _label, unit, _tab, _tol = METRICS[metric]
-    cell = {"value": value, "display": _with_unit(_number(value), unit)}
+def _cell(scale, base_value, value):
+    """Raw value and delta in the stored unit; `cell` is the table cell in the
+    row's unit, "value · Δ · Δ %", the unit in the row header (UX)."""
+    factor = scale[1]
+    cell = {"value": value, "cell": _number(value * factor)}
     if base_value is None:
         return cell
     delta = value - base_value
     cell["delta"] = delta
-    cell["delta_display"] = _with_unit(_signed(delta), unit)
+    cell["cell"] += f" · {_signed(delta * factor)}"
     if base_value == 0:
         cell["delta_pct"] = None
         cell["delta_pct_note"] = "zero base: no percentage"
     else:
         pct = delta / abs(base_value) * 100
         cell["delta_pct"] = pct
-        cell["delta_display"] += f" ({_signed(pct)} %)"
+        cell["cell"] += f" · {_signed(pct)} %"
     return cell
 
 
-def _rank(metric, order, entries, base_value):
-    label, unit, _tab, abs_tol = METRICS[metric]
+def _delta_display(scale, cell) -> str:
+    """A cell's delta in prose, with its unit: "−22.6 k€ (−15.5 %)"."""
+    unit, factor = scale
+    text = _with_unit(_signed(cell["delta"] * factor), unit)
+    return text if cell.get("delta_pct") is None else f"{text} ({_signed(cell['delta_pct'])} %)"
+
+
+def _rank(metric, order, entries, base_value, scale):
+    label, _unit, _tab, abs_tol = METRICS[metric]
+    unit, factor = scale
     tol = TIE_REL * abs(base_value) if base_value not in (None, 0) else abs_tol
     ranked = sorted((e for e in entries if e["value"] is not None),
                     key=lambda e: e["value"], reverse=order == "highest_first")
     out = {"metric": metric, "label": label, "unit": unit, "order": order,
-           "tie_tolerance": tol, "tie_tolerance_display": _with_unit(_number(tol), unit)
+           "tie_tolerance": tol, "tie_tolerance_display": _with_unit(_number(tol * factor), unit)
            + (" (0.1 % of the base)" if base_value not in (None, 0) else " (absolute: the base is zero)"),
            "ranking": [{"name": e["name"], "project_id": e["project_id"], "value": e["value"],
-                        "display": _with_unit(_number(e["value"]), unit)} for e in ranked]}
+                        "display": _with_unit(_number(e["value"] * factor), unit)} for e in ranked]}
     word = "lowest" if order == "lowest_first" else "highest"
     if len(ranked) < 2:
         out["preference"] = None
@@ -313,14 +348,14 @@ def _rank(metric, order, entries, base_value):
     if margin < tol:
         out["preference"] = None
         out["no_defensible_preference"] = (
-            f"{first['name']} and {second['name']} differ by {_with_unit(_number(margin), unit)}, "
+            f"{first['name']} and {second['name']} differ by {_with_unit(_number(margin * factor), unit)}, "
             f"within the tie tolerance of {out['tie_tolerance_display']}")
         return out
     out["preference"] = {
         "name": first["name"], "project_id": first["project_id"], "is_base": first["is_base"],
-        "margin": margin, "margin_display": _with_unit(_number(margin), unit), "runner_up": second["name"],
+        "margin": margin, "margin_display": _with_unit(_number(margin * factor), unit), "runner_up": second["name"],
         "qualifier": (f"{word.capitalize()} {label} among the {len(ranked)} comparable results, "
-                      f"{_with_unit(_number(margin), unit)} ahead of {second['name']}"),
+                      f"{_with_unit(_number(margin * factor), unit)} ahead of {second['name']}"),
     }
     return out
 
@@ -337,9 +372,19 @@ def _report(baseline_project_id, case_project_ids, metrics, rank_by, rank_order,
     base_reasons = (["case_unsolved"] if not base_read["summary"].get("has_solve")
                     else [] if base_read["fresh"] else ["case_stale"])
     base_ok = not base_reasons
+    reads = []
+    for project, spec in cases:
+        read = _read(project)
+        reasons = (["baseline_unavailable"] if not base_ok else []) + _reasons(
+            base_read, read, spec, base_read["fingerprint"])
+        reads.append((project, spec, reasons, None if reasons else _values(read)))
+    scales = {m: _scale(m, [base_values[m][0] if base_ok else None]
+                        + [values[m][0] for *_rest, values in reads if values])
+              for m in chosen}
     out = {
         "version": 1,
-        "metrics": [{"metric": m, "label": METRICS[m][0], "unit": METRICS[m][1],
+        "metrics": [{"metric": m, "label": METRICS[m][0], "unit": scales[m][0],
+                     "header": f"{METRICS[m][0]} ({scales[m][0]})", "value_unit": METRICS[m][1],
                      "tab": METRICS[m][2], "tab_label": TAB_LABELS[METRICS[m][2]]} for m in chosen],
         "base": {"name": base.name, "project_id": str(base.id), "comparable": base_ok,
                  "unavailable": [f"{base.name}: {_BASE_REASONS[r]}" for r in base_reasons],
@@ -348,16 +393,14 @@ def _report(baseline_project_id, case_project_ids, metrics, rank_by, rank_order,
     }
     for m in chosen:
         value, why, note = base_values[m]
-        out["base"]["values"][m] = ({"value": value, "display": _with_unit(_number(value), METRICS[m][1])}
+        factor = scales[m][1]
+        out["base"]["values"][m] = ({"value": value, "cell": _number(value * factor)}
                                     if value is not None and base_ok else {"value": None, "unavailable": why or "base not comparable"})
         if note and value is not None:
             out["base"]["values"][m]["basis_note"] = note
     entries = [{"name": base.name, "project_id": str(base.id), "is_base": True,
                 "values": {m: base_values[m][0] if base_ok else None for m in chosen}}]
-    for project, spec in cases:
-        read = _read(project)
-        reasons = (["baseline_unavailable"] if not base_ok else []) + _reasons(
-            base_read, read, spec, base_read["fingerprint"])
+    for project, spec, reasons, values in reads:
         rows, truncated = _declared(base_read["ctx"].network, spec)
         case = {"name": project.name, "project_id": str(project.id), "comparable": not reasons,
                 "declared_changes": rows}
@@ -365,9 +408,8 @@ def _report(baseline_project_id, case_project_ids, metrics, rank_by, rank_order,
             case["declared_changes_truncated"] = True
         if reasons:
             case["reasons"] = reasons
-            case["not_comparable"] = [f"{project.name}: {_REASONS[r]}" for r in reasons]
+            case["not_comparable"] = [_not_comparable(project.name, reasons)]
         else:
-            values = _values(read)
             case["values"] = {}
             for m in chosen:
                 value, why, note = values[m]
@@ -375,7 +417,7 @@ def _report(baseline_project_id, case_project_ids, metrics, rank_by, rank_order,
                 if value is None:
                     case["values"][m] = {"value": None, "unavailable": f"{project.name}: {why}"}
                     continue
-                case["values"][m] = _cell(m, base_value, value)
+                case["values"][m] = _cell(scales[m], base_value, value)
                 if base_value is None:
                     case["values"][m]["delta_unavailable"] = f"{base.name}: {base_values[m][1]}"
                 if note:
@@ -388,15 +430,16 @@ def _report(baseline_project_id, case_project_ids, metrics, rank_by, rank_order,
                      else "completed" if comparable == len(out["cases"]) else "partial")
     if rank_by is not None:
         ranking = _rank(rank_by, rank_order,
-                        [{**e, "value": e["values"][rank_by]} for e in entries], entries[0]["values"][rank_by])
+                        [{**e, "value": e["values"][rank_by]} for e in entries], entries[0]["values"][rank_by],
+                        scales[rank_by])
         out["rank"] = ranking
         preferred = ranking.get("preference")
         if preferred and not preferred["is_base"]:
             entry = next(e for e in entries if e["project_id"] == preferred["project_id"])
             cell = next(c for c in out["cases"] if c["project_id"] == preferred["project_id"])["values"][rank_by]
             facts = entry["rows"][:MAX_FACTS - 1]
-            if "delta_display" in cell:
-                facts.append(f"{METRICS[rank_by][0]}: {cell['delta_display']} against {base.name}")
+            if "delta" in cell:
+                facts.append(f"{METRICS[rank_by][0]}: {_delta_display(scales[rank_by], cell)} against {base.name}")
             out["why"] = {"case": preferred["name"], "facts": facts,
                           "note": "Declared input changes beside the ranked delta; the solve, not the "
                                   "assistant, links them."}
@@ -418,8 +461,9 @@ def _report(baseline_project_id, case_project_ids, metrics, rank_by, rank_order,
             "note": "Offer it; open only on the user's yes.",
         }
     out["note"] = ("Every value and delta (case − base) is computed from each project's saved results "
-                   "with the Compare view's own engines. Show the labels, units and display strings as "
-                   "given; list each not_comparable line as written. No input was changed.")
+                   "with the Compare view's own engines. Table: one row per metric headed by its `header`, "
+                   "one column per comparable case, each cell its `cell` as given (value · delta · delta %; "
+                   "the unit is in the header). List each not_comparable line as written. No input was changed.")
     out["comparison_sha256"] = ex._digest(out)
     return out
 

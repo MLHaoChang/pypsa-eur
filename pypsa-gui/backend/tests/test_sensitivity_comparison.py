@@ -102,9 +102,12 @@ def test_oj29_one_read_gives_every_case_its_hand_computed_deltas(swept):
         assert cell["delta_pct"] == pytest.approx((price - 10) / 10 * 100)
         assert cases[f"Gas {price}"]["project_id"] == ids[f"Gas {price}"]
         assert any("10 → " + str(price) in row for row in cases[f"Gas {price}"]["declared_changes"])
-    # UX: signed with + and U+2212, each with its unit; labels are the Compare view's.
-    assert cases["Gas 20"]["values"]["opex_meur"]["delta_display"] == "+0.0001 M€ (+100 %)"
-    assert cases["Gas 5"]["values"]["opex_meur"]["delta_display"] == "−0.00005 M€ (−50 %)"
+    # UX: signed with + and U+2212, money in the unit that reads the row (here €);
+    # the table cell carries no unit, its header does. Labels are the Compare view's.
+    assert cases["Gas 20"]["values"]["opex_meur"]["cell"] == "200 · +100 · +100 %"
+    assert cases["Gas 5"]["values"]["opex_meur"]["cell"] == "50 · −50 · −50 %"
+    assert report["base"]["values"]["opex_meur"]["cell"] == "100"
+    assert {m["metric"]: m["header"] for m in report["metrics"]}["opex_meur"] == "Operational expenditure (€)"
     assert {m["metric"]: m["label"] for m in report["metrics"]}["opex_meur"] == "Operational expenditure"
     # A metric this network does not have is unavailable in words, never a zero.
     loading = cases["Gas 20"]["values"]["peak_line_loading_pct"]
@@ -127,7 +130,7 @@ def test_oj30_rank_by_gives_a_qualified_preference_and_its_why(swept):
     assert preferred["qualifier"].startswith("Lowest Total annuitised CAPEX + Operational expenditure among the 4")
     facts = report["why"]["facts"]
     assert report["why"]["case"] == "Gas 5" and any("10 → 5" in f for f in facts)
-    assert facts[-1] == ("Total annuitised CAPEX + Operational expenditure: −0.00005 M€ (−50 %) "
+    assert facts[-1] == ("Total annuitised CAPEX + Operational expenditure: −50 € (−50 %) "
                          "against Tool Baseline")
     assert report["show"]["args"] == {"panel_id": "compare", "compare_a": "Tool Baseline",
                                       "compare_b": "Gas 5", "compare_tab": "economics"}
@@ -158,7 +161,7 @@ def test_a_lead_inside_the_tie_tolerance_is_no_defensible_preference(baseline, p
     assert (margin < rank["tie_tolerance"]) is tie
     if tie:
         assert rank["preference"] is None
-        assert "within the tie tolerance of 0.0000001 M€ (0.1 % of the base)" in rank["no_defensible_preference"]
+        assert "within the tie tolerance of 0.1 € (0.1 % of the base)" in rank["no_defensible_preference"]
     else:
         assert rank["preference"]["name"] == "Tool Baseline"
 
@@ -175,7 +178,8 @@ def test_ld19_zero_baseline_has_deltas_but_no_percentage(baseline):
     capex = 20 * 1000 / 1e6 * 2 / 8760
     assert cell["value"] == pytest.approx(capex) and cell["delta"] == pytest.approx(capex)
     assert cell["delta_pct"] is None and cell["delta_pct_note"] == "zero base: no percentage"
-    assert cell["delta_display"] == "+0.000004566 M€"
+    assert cell["cell"] == "4.566 · +4.566"
+    assert sc._delta_display(sc._scale("capex_meur_total", [0, capex]), cell) == "+4.566 €"
     assert report["rank"]["tie_tolerance"] == sc.METRICS["capex_meur_total"][3]
     assert report["rank"]["tie_tolerance_display"].endswith("(absolute: the base is zero)")
     assert report["rank"]["preference"]["name"] == "Tool Baseline"
@@ -199,7 +203,9 @@ def test_a_case_edited_after_its_solve_is_out_of_date_and_names_finance(swept):
     edit_saved(ids["Gas 30"], set_price(31))
     case = by_name(tool("compare_sensitivities", baseline_project_id=base_id))["Gas 30"]
     assert case["reasons"] == ["case_stale", "case_inputs_changed"] and "values" not in case
-    assert "inputs include finance" in case["not_comparable"][1]
+    # UX: one line per case, both reasons in one plain clause.
+    assert case["not_comparable"] == ["Gas 30: its inputs or finance settings changed since its last solve "
+                                      "and since it was branched from the base, so its results are out of date"]
 
 
 def test_a_base_changed_since_branching_compares_nothing(swept):
@@ -218,7 +224,8 @@ def test_ld19_another_horizon_is_incomparable(swept):
     edit_saved(ids["Gas 20"], weights)     # a queued solve re-derives the weights, so none here
     case = by_name(tool("compare_sensitivities", baseline_project_id=base_id))["Gas 20"]
     assert "horizon_differs" in case["reasons"] and "values" not in case
-    assert "Gas 20: a different time horizon or snapshot weighting from the base" in case["not_comparable"]
+    [line] = case["not_comparable"]
+    assert line.startswith("Gas 20: ") and "a different time horizon or snapshot weighting from the base" in line
 
 
 @pytest.mark.parametrize("field, value, reason", [("solver_options", {"threads": 1}, "solver_settings_differ"),
@@ -390,3 +397,21 @@ def test_cases_with_an_uploaded_profile_read_as_current(baseline):
     sweep(base_id, 20)
     report = tool("compare_sensitivities", baseline_project_id=base_id)
     assert report["status"] == "completed", report["cases"][0].get("not_comparable")
+
+
+@pytest.mark.parametrize("values, unit", [([0.02264, 0.1132], "k€"), ([1.5, 0.2], "M€"), ([0.0001], "€"),
+                                          ([None, 0.0], "€")])
+def test_money_rows_read_in_the_unit_that_makes_their_largest_value_at_least_one(values, unit):
+    assert sc._scale("total_cost_meur", values)[0] == unit
+    assert sc._scale("emissions_kt", [0.0001]) == ("kt", 1.0)
+
+
+def test_a_k_euro_row_formats_cells_and_deltas_like_the_cost_card():
+    cell = sc._cell(sc._scale("total_cost_meur", [0.1458, 0.1232]), 0.1458, 0.1232)
+    assert sc._delta_display(sc._scale("total_cost_meur", [0.1458]), cell) == "−22.6 k€ (−15.5 %)"
+    assert cell["cell"] == "123.2 · −22.6 · −15.5 %"
+
+
+def test_other_reasons_join_in_one_line():
+    assert sc._not_comparable("Lines 160", ["case_unsolved", "mode_differs"]) == (
+        "Lines 160: not solved yet; solved in a different mode from the base")

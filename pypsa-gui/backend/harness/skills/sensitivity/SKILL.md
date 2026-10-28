@@ -35,9 +35,9 @@ use them only when the user asks for a recorded experiment receipt.
    highlight_projects=[<case project ids>])` only when the user asks to see them.
 7. **Compare.** "Compare them with the base" and "which is cheapest and why"
    are one `compare_sensitivities` call, never pairwise calls you add up.
-   Show its table as given: each metric's label and unit, each case's
-   `display` and `delta_display`, and every `not_comparable` line word for
-   word. Rank only with `rank_by` (`total_cost_meur` for "cheapest"): say
+   Show its table as given: one row per metric headed by its `header`, one
+   column per comparable case, each cell its `cell` as given (the unit is in
+   the header), and every `not_comparable` line word for word. Rank only with `rank_by` (`total_cost_meur` for "cheapest"): say
    `rank.preference.qualifier`, or `no_defensible_preference` as written,
    and answer "why" only with the `why` facts (declared changes beside the
    ranked delta). Then ask the `show.offer` question; open Compare with
