@@ -43,6 +43,15 @@ SERIES_METRICS = {
 MAX_SERIES_POINTS = 744
 MAX_SERIES_FACT_BYTES = 120 * 1024
 
+# The checked-answer policy and the current-input adapters this server applies.
+# A record written under another one is not re-read as checked (A1.4).
+POLICY_VERSION = "1"
+INPUT_ADAPTERS = {
+    "static": "static-input/1",
+    "static_page": "static-input-page/1",
+    "series": "series-input/1",
+}
+
 
 def digest(value):
     encoded = json.dumps(
@@ -264,7 +273,7 @@ def capture_input(owner, args, result):
             "project_id": ctx.project_uuid,
             "org_id": ctx.org_id,
             "source_kind": "configured_input",
-            "adapter_version": "static-input/1",
+            "adapter_version": INPUT_ADAPTERS["static"],
             "scope": {
                 "component_class": component_class,
                 "entity_id": name,
@@ -399,7 +408,7 @@ def capture_input_page(owner, args, result, digest_before):
             "project_id": ctx.project_uuid,
             "org_id": ctx.org_id,
             "source_kind": "configured_input",
-            "adapter_version": "static-input-page/1",
+            "adapter_version": INPUT_ADAPTERS["static_page"],
             "scope": {
                 "component_class": component_class,
                 "kind": "static_page",
@@ -562,7 +571,7 @@ def capture_series(owner, args, result, digest_before):
             "project_id": ctx.project_uuid,
             "org_id": ctx.org_id,
             "source_kind": "configured_input",
-            "adapter_version": "series-input/1",
+            "adapter_version": INPUT_ADAPTERS["series"],
             "scope": {
                 "component_class": component_class,
                 "component": key[0],
@@ -598,8 +607,60 @@ def series_args(scope):
     }
 
 
+def _adapter(record):
+    """The adapter version this server would write for the record's kind."""
+    if record["source_kind"] == "scoped_result":
+        return record["request_scope"]["profile"]
+    if record["source_kind"] == "calculated_result":
+        from services import assurance_metrics
+
+        return assurance_metrics.PROFILE
+    return INPUT_ADAPTERS[record["scope"]["kind"]]
+
+
+def _facts_hold(facts, expected):
+    """Every stored fact is one the current source gives, so a rewritten
+    record whose checksum was recomputed still cannot certify a value."""
+    if (
+        not isinstance(facts, list)
+        or not facts
+        or any(f not in expected for f in facts)
+    ):
+        unavailable("evidence_unavailable")
+
+
+def _page_facts(ctx, component_class, facts):
+    """The facts a page would certify now, for the rows and metrics stored."""
+    static = ctx.network.components[component_class].static
+    expected = []
+    for fact in facts:
+        name, metric = fact["entity_id"], fact["metric"]
+        unit = INPUT_METRICS[component_class].get(metric)
+        if unit is None or name not in static.index or metric not in static.columns:
+            continue
+        value = _finite(static.at[name, metric])
+        if value is not None:
+            expected.append(
+                {
+                    "path": pointer(name, metric),
+                    "entity_id": name,
+                    "metric": metric,
+                    "value": value,
+                    "unit": unit,
+                }
+            )
+    return expected
+
+
 def evidence(owner, evidence_id):
     record = load(owner, evidence_id, "evidence")
+    try:
+        adapter = _adapter(record)
+        current = record["version"] == 1 and record["adapter_version"] == adapter
+    except (KeyError, TypeError, AttributeError):
+        current = False
+    if not current:
+        unavailable("evidence_unavailable")
     if record["source_kind"] == "scoped_result":
         from harness import calculations
 
@@ -646,8 +707,11 @@ def evidence(owner, evidence_id):
                 unavailable("evidence_unavailable")
             if scope.get("kind") == "series":
                 # Any edit to the series, its source or index invalidates it.
-                if _series_source(ctx, series_args(scope))[0] != record["source_sha256"]:
+                args = series_args(scope)
+                source_digest, series = _series_source(ctx, args)
+                if source_digest != record["source_sha256"] or series is None:
                     unavailable("evidence_unavailable")
+                _facts_hold(record["facts"], _series_steps(args, series)[2])
                 return record
             if scope.get("kind") == "static_page":
                 # Any edit to the class's rows or inputs, or another project,
@@ -657,12 +721,15 @@ def evidence(owner, evidence_id):
                     != record["source_sha256"]
                 ):
                     unavailable("evidence_unavailable")
+                _facts_hold(
+                    record["facts"],
+                    _page_facts(ctx, scope["component_class"], record["facts"]),
+                )
                 return record
-            if (
-                digest(_raw_facts(ctx, scope["component_class"], scope["entity_id"]))
-                != record["source_sha256"]
-            ):
+            raw = _raw_facts(ctx, scope["component_class"], scope["entity_id"])
+            if digest(raw) != record["source_sha256"]:
                 unavailable("evidence_unavailable")
+            _facts_hold(record["facts"], raw)
     except (KeyError, ValueError, TypeError):
         unavailable("evidence_unavailable")
     return record
@@ -809,7 +876,9 @@ def public(record):
 def answer(owner, answer_id):
     record = load(owner, answer_id, "answer")
     if (
-        hashlib.sha256(record["text"].encode()).hexdigest()
+        record.get("version") != 1
+        or record["receipt"].get("policy_version") != POLICY_VERSION
+        or hashlib.sha256(record["text"].encode()).hexdigest()
         != record["receipt"]["content_sha256"]
     ):
         unavailable("answer_evidence_unavailable")

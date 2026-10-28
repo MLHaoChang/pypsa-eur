@@ -909,3 +909,14 @@ Policy version 1. Commit checked access under `network_guard` and then saved, so
 `test_access_revoked_during_commit_publishes_nothing` (membership/disabled × get_component/list_components × removed/stuck) wraps `records.save` to revoke right after the answer lands. It checks the record file first, then that the stream has no `answer_approved`, no token and no value, and that no log record carries a value or the draft. "stuck" makes the removal fail (`TimeoutError` from the lock): the refusal still ends the turn, the warning names only the record id, and `load()` refuses the leftover. Red/green: on master the 8 new cases are red, 11 / 19 overall (removed: the record is kept; stuck: nothing is withdrawn or logged); after the fix 19 / 19 (`python -m pytest -q -o addopts='' tests/assurance_acceptance/test_p1_revocation.py`). Mutants: removing the post-save re-check gives 8 red, with the record kept in the removed cases and no warning in the stuck cases; removing the OSError catch in `discard` gives 4 red, the stuck cases with no warning.
 
 Next runnable tracer: `get_timeseries` as the third checked read. REVOKE-KIND stays open.
+
+### 2026-10-28 — P1 tracer: A1.4 integrity (issue 02)
+
+Policy version 1. `test_p1_integrity.py`: 38 cases. On the base (#826 head) 18 fail, 20 pass; after the change 38 pass. The red cases were facts rewritten with a recomputed checksum (static, page and series kinds) and records from another policy, schema or adapter version.
+
+Mutants, one at a time, each red: `_facts_hold` a no-op (13), no empty-facts check (3), no policy check (3), no version/adapter check (2), the page facts echoed instead of re-derived (2), no series facts check (3), no static facts check (7).
+
+Regressions: `tests/assurance_acceptance` 205 passed; `tests/test_*assur*.py` with the checked-answer pilot and dispositions: see the PR.
+
+Remaining for P1: A1.3 historical as-of runs, A1.5 complete-source aggregates, A1.6/A1.7 validity and masks, the other `read_unvalidated` families, frontend `assurance_state`, SERIES-WINDOW, REVOKE-KIND.
+
