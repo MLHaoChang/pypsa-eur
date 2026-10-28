@@ -1,0 +1,4 @@
+D06-1 after delete: footprint kept = False | placement kept = True -> a new Generator 'pv' inherits {'x': 40.0, 'y': 12.0, 'heading': 90.0}
+D06-2 after a failed delete hook: footprint kept = True -> a new Generator 'pv' inherits {'width_m': 4, 'depth_m': 2}
+D03 recursive _copy_bundle_dirs copies: ['sites/campus/scene/current.json', 'sites/campus/scene/generations/g000001-fbbea91d8946/generation.json', 'sites/campus/scene/generations/g000009-orphan/generation.json']
+D03 closure would copy: ['sites/campus/scene/current.json', 'sites/campus/scene/generations/g000001-fbbea91d8946/generation.json']

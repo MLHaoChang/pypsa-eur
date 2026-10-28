@@ -69,6 +69,7 @@ def agent_loop_stub(
     # so a script-driven SSE test can assert the binding without needing a
     # live/fake provider at all.
     stub_profile = _resolve_turn_profile(session)
+    from harness.assurance import legacy_state
     yield "session_init", {
         "session_id": session.session_id,
         "session6": session.session6(),
@@ -76,6 +77,7 @@ def agent_loop_stub(
         "tool_count": len(TOOLS),
         "profile_id": stub_profile.id,
         "profile_label": stub_profile.label,
+        "assurance": legacy_state(),
     }
 
     for step in script:

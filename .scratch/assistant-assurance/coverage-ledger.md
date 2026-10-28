@@ -93,9 +93,10 @@ stems from the directories above; “UI” means the ChatPanel acceptance file.
 
 | Matrix group | Existing executable coverage | Still required |
 | --- | --- | --- |
-| A0.1 | Partial: p0 admission; p2 malformed draft | Duplicate IDs, exact size/count boundaries, extra trust fields, complete block schemas |
-| A0.2 | Existing inventory CLI matches 220 tools/14 tabs/17 panels | Adapter/family/output-channel behavior mapping; unknown-adapter refusal and stale inventory negative fixture |
-| A0.3 | None | Explicit legacy/unvalidated state; disabled/shadow/pilot semantics and old clients |
+| A0.1 | Passed: p0 admission, exact 20/21-block, 64/65-char ID and 64 KiB/+1 bounds, duplicate IDs, forged trust fields (top/block/source), non-observed kinds refused; p2 malformed draft | Computed/action/proposal block schemas need the reviewed additive schema (tickets 09–11) |
+| A0.2 | Passed: inventory maps 341 tools/21 tabs/23 panels/9 output channels to `harness/assurance_coverage.py` adapters; unknown adapter, unmapped tier/channel, checked label off the strict gate and stale map fail `--check` | Per-family behavioral fixtures (`behavioral_fixture: pending`) belong to P1–P5 adapters |
+| A0.3 | Passed: disabled/shadow/pilot unchecked turns send `session_init.assurance` `{version 1, mode legacy, state unvalidated}`; old clients on strict still get the gate; history marks legacy turns unvalidated and drops imported receipt/requires_checked | Summary/compaction channels stay `pending_channel` (P6); the frontend does not yet render `assurance_state` |
+| A0.4 | Partial: schema/route/toolset drift and an unmapped tool surface fail the inventory check; bounded request-scope slices (see below) | Reviewed request/profile/metric/computed/guard schemas and spoofed intent/ownership cases wait on tickets 09–11 |
 | A1.1 | Partial: p1 project/entity/unit, cross-org; p2 entity mismatch | Run/section/metric/window identity, forged pointers and traversal, same-org ACL denial |
 | A1.2 | Partial: p1 anonymous; p5 missing CSRF | Post-collection/review/cache revocation, disabled identity, publish/read races, invalid CSRF and cross-owner ACK |
 | A1.3 | None | Real immutable historical run fixture, failed/newer run choice, current input invalidation |

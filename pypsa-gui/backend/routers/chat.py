@@ -1169,11 +1169,13 @@ def chat_history(limit: int = 200,
     turns, history_gap = chat_service.read_all_turns_with_gap(ctx)
     from harness import assurance
     from services import assurance_records
-    if assurance.strict_configured() or any(t.get("answer_id") for t in turns):
-        turns = assurance_records.history_projection(
-            turns, str(actor.id) if actor is not None else assurance_records.actor_id(),
-            strict=assurance.strict_configured(),
-        )
+    # Every turn is projected so legacy turns are explicitly unvalidated (A0.3).
+    checked = assurance.strict_configured() or any(t.get("answer_id") for t in turns)
+    turns = assurance_records.history_projection(
+        turns,
+        (str(actor.id) if actor is not None else assurance_records.actor_id()) if checked else None,
+        strict=assurance.strict_configured(),
+    )
     pending_turn = _recover_pending_turn(ctx, str(actor.id) if actor is not None else None)
     if not turns:
         return {"turns": [], "last_session_id": None,

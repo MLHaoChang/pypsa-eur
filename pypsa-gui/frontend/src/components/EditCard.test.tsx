@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { editCardWords, HEADLINE_CAP, type EditCard } from './EditCard'
 import { ConfirmationCard } from './ConfirmationCard'
 import AssistantResultCard from './AssistantResultCard'
 import { useChatStore } from '../store/chatStore'
@@ -342,4 +343,20 @@ it('a bus set on a Line says any port, as the server matches bus0 or bus1', () =
     old: 100, new: 120, unit: 'MVA', role: 'typed' }], sets: [{ ...solarSet, component_class: 'Line',
     attribute: 's_nom', selector: { bus: 'B2' }, names: ['L1'], size: 1, inactive: 0 }] })
   expect(screen.getByTestId('chat-edit-header').textContent).toBe('Every Line at bus B2 (any port)')
+})
+
+it('a long card keeps its Guided headline short and the table lists every row', () => {
+  const rows = Array.from({ length: 9 }, (_, i) => ({ component_class: 'Settings', name: 'Study', field: `f${i}`,
+    label: `Field ${i}`, old: null, new: i, unit: '', role: 'typed' as const }))
+  const words = editCardWords({ rows, sets: [] } as unknown as EditCard)
+  expect(words.split('; ')).toHaveLength(HEADLINE_CAP + 1)
+  expect(words.endsWith('; and 5 more changes')).toBe(true)
+})
+
+it('a card one line over the cap shows every line rather than "and 1 more"', () => {
+  const rows = Array.from({ length: HEADLINE_CAP + 1 }, (_, i) => ({ component_class: 'Settings', name: 'Study',
+    field: `f${i}`, label: `Field ${i}`, old: null, new: i, unit: '', role: 'typed' as const }))
+  const words = editCardWords({ rows, sets: [] } as unknown as EditCard)
+  expect(words.split('; ')).toHaveLength(HEADLINE_CAP + 1)
+  expect(words).not.toContain('more')
 })

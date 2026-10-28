@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The chat edit cards for the project flow scope, project settings, scenario labels and decision-study edits now show the stored old value → new value (or "not set") instead of the new value only.
