@@ -1,7 +1,10 @@
 // Ticket 07: the Production tiles render from a /results/process_view payload, and are absent
 // when the network has no product bus.
-import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { useUIStore } from '../../store/uiStore'
+const nav = vi.hoisted(() => ({ openFlowTarget: vi.fn(), openFlowTargetInPlace: vi.fn() }))
+vi.mock('../../layout/flowNavigation', () => nav)
 import ProductionTiles from './ProductionTiles'
 import type { ProcessAmount, ProcessProduct, ProcessView } from '../../api/types'
 
@@ -51,4 +54,15 @@ describe('ProductionTiles', () => {
     cleanup()
     expect(render(<ProductionTiles view={undefined} />).container.innerHTML).toBe('')
   })
+
+  it.each([['guided', 'openFlowTargetInPlace', 'openFlowTarget'], ['expert', 'openFlowTarget', 'openFlowTargetInPlace']] as const)(
+    'the link opens the bus field through the %s opener', (mode, used, other) => {
+      nav.openFlowTarget.mockClear(); nav.openFlowTargetInPlace.mockClear()
+      useUIStore.setState({ uiMode: mode })
+      const p: ProcessProduct = { ...NH3, t_per_unit: null, production: amount(1, { t: null, t_flag: 'tonne_factor_missing' }) }
+      render(<ProductionTiles view={view([p])} />)
+      fireEvent.click(screen.getByText('Set it on nh3 ›'))
+      expect(nav[used]).toHaveBeenCalledWith({ section: 'carriers', panel: null, component: 'Bus', entity: 'nh3', field: 'mwh_per_t' })
+      expect(nav[other]).not.toHaveBeenCalled()
+    })
 })

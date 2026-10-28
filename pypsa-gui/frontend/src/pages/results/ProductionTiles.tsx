@@ -6,7 +6,7 @@ import Kpi from '../../components/Kpi'
 import type { ResultStateKind } from '../../components/ResultState'
 import type { ProcessAmount, ProcessProduct, ProcessView } from '../../api/types'
 import { fmtCurrency, fmtTonnage } from '../../utils/format'
-import { useUIStore } from '../../store/uiStore'
+import { openComponentField } from './openPanel'
 
 const REASON: Record<string, string> = {
   tonne_factor_missing: 'The product bus has no “Energy per tonne”, so its amounts cannot be shown in tonnes.',
@@ -70,7 +70,6 @@ export function productionTiles(p: ProcessProduct): ProductionTile[] {
 }
 
 export default function ProductionTiles({ view }: { view: ProcessView | null | undefined }) {
-  const setSelectedComponent = useUIStore(s => s.setSelectedComponent)
   if (!view || !view.products.length) return null
   return (
     <section data-testid="summary-production" className="flex flex-col gap-2">
@@ -88,7 +87,7 @@ export default function ProductionTiles({ view }: { view: ProcessView | null | u
           {productionTiles(p).some(t => t.fixBus) && (
             <p data-testid={`production-${p.bus}-fix`} className="flex flex-wrap items-center gap-x-2 text-[11.5px] text-muted">
               {REASON.tonne_factor_missing}
-              <button type="button" onClick={() => setSelectedComponent({ type: 'Bus', name: p.bus })}
+              <button type="button" onClick={() => openComponentField({ section: 'carriers', panel: null, component: 'Bus', entity: p.bus, field: 'mwh_per_t' })}
                 className="text-accent hover:underline">Set it on {p.bus} ›</button>
             </p>
           )}
