@@ -20,7 +20,7 @@ from models.energy_hub import EH_CUSTOM_COLUMNS, EH_INTERNAL_ROLES, EH_LINK_ROLE
 from models.process_unit import (CRITICALITY_TIERS, HARMONIC_SOURCES, PROCESS_CUSTOM_COLUMNS,
                                  PROCESS_GENERATOR_ROLES)
 
-_ATTR_OF = {"Bus": "buses", "Link": "links", "Generator": "generators"}
+_ATTR_OF = {"Bus": "buses", "Link": "links", "Generator": "generators", "Store": "stores"}
 _TRUE = ("true", "1", "yes", "y", "t")
 _FALSE = ("false", "0", "no", "n", "f", "")
 

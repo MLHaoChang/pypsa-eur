@@ -185,6 +185,18 @@ def test_the_column_is_a_registered_process_column():
         coerce_eh_value("Store", "delivery_interval_h", -1)
 
 
+def test_the_column_survives_the_save_normalisation():
+    from services.adequacy.eh_columns import ensure_eh_column, normalise_eh_columns
+
+    n = _week()
+    n.stores["delivery_interval_h"] = "504"
+    normalise_eh_columns(n)
+    assert n.stores["delivery_interval_h"].dtype == float and n.stores.at["shed", "delivery_interval_h"] == 504.0
+    m = _week(None)
+    ensure_eh_column(m, "Store", "delivery_interval_h")
+    assert np.isnan(m.stores.at["shed", "delivery_interval_h"]) and _cadence(m) == []
+
+
 # ── The audit (issue item 3): each week-assuming path on the year base ───────
 
 def _lf_cfg(**kw):
