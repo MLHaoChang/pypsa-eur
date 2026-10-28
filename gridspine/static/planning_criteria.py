@@ -98,7 +98,11 @@ from gridspine.static.contingency import (
 )
 from gridspine.static.contingency_set import branch_contingencies
 from gridspine.static.loadflow import branch_keys, check_net_carries_hour
-from gridspine.templates.grid_codes import band_for, validate_profile
+from gridspine.templates.grid_codes import (
+    ANGLE_LIMIT_MAX_DEG,
+    band_for,
+    validate_profile,
+)
 
 LINE_EMERGENCY = "max_i_ka_emergency"
 TRAFO_EMERGENCY = "sn_mva_emergency"
@@ -192,7 +196,8 @@ class AngleLimit:
     """The voltage-angle limit across a branch or bus pair, in degrees.
     ``basis`` is ``"assumed"`` or ``"sagc"``; ``"sagc"`` names the public
     SAGC clause in ``reference`` (one built from a profile reads
-    ``"<profile>: <clause>"``). ``pairs`` holds branch ids and (bus, bus)
+    ``"<profile>: <clause>"``). ``deg`` is bounded 0 < deg < 90, as the
+    profile key ``angle_limit_deg`` is. ``pairs`` holds branch ids and (bus, bus)
     name pairs; empty means every in-service branch on the net. A branch
     pair is measured net of a transformer's phase shift; a (bus, bus) pair
     is measured raw, since it may span several transformers, so name a
@@ -208,6 +213,8 @@ class AngleLimit:
             raise ContractError(f"angle limit must be a finite number of degrees, got {d!r}")
         if float(d) <= 0.0:
             raise ContractError(f"angle limit must be > 0 degrees, got {d!r}")
+        if float(d) >= ANGLE_LIMIT_MAX_DEG:
+            raise ContractError(f"angle limit must be an angle below {ANGLE_LIMIT_MAX_DEG:g} degrees, got {d!r}")
         if self.basis not in ANGLE_BASES:
             raise ContractError(f"angle limit basis must be one of {sorted(ANGLE_BASES)}, got {self.basis!r}")
         if self.basis == "sagc" and not (isinstance(self.reference, str) and self.reference.strip()):
