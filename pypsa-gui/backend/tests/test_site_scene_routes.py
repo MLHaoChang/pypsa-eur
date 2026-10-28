@@ -145,7 +145,9 @@ def test_get_scene_never_adopts(client, geo):
     before = (geo / site_service.SITES_FILE).read_bytes()
     r = client.get("/api/projects/geo/sites/campus/scene")
     assert r.status_code == 200
-    assert r.json() == {"state": "unadopted", "site_id": "campus"}
+    body = r.json()
+    assert set(body) == {"state", "site_id", "digest"}          # SC-01b: the adoption digest
+    assert (body["state"], body["site_id"]) == ("unadopted", "campus")
     assert (geo / site_service.SITES_FILE).read_bytes() == before
     assert not (geo / "sites" / "campus" / "scene").exists()
 
