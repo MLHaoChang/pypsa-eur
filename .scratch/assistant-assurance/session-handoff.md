@@ -865,3 +865,20 @@ Red/green: the first tracer `test_listed_input_row_has_page_scoped_project_evide
 Cost: two class digests per checked `list_components` call and one per lookup, linear in the class's rows. An edit to another class or a time series leaves page evidence valid: the page asserts static inputs only, and says so.
 
 Remaining for P1: retained/historical runs (A1.3 as-of), A1.2 ACL revocation before publish, A1.4 corruption/restart, A1.5 complete-source aggregates, A1.6/A1.7 validity and masks, every other `read_unvalidated` family, frontend `assurance_state`. Next runnable tracer: a second `read_unvalidated` family with a time-series source (`get_timeseries`), or A1.2 revocation between capture and publish.
+
+### 2026-10-28 — P1 tracer: A1.2 revocation (issue 02)
+
+Policy version 1. The probes found A1.2 already enforced, except for one existence leak. The checks are `records.authorize` at commit (twice, the second under `network_guard`), `records.load` on every lookup, the acting-user/restriction check in `tool_guard`, and the `unavailable` history projection. The leak: `records.load` answered a revoked project with 404 `Project not found`, while an unknown id got `Record not found`. It now answers both with `Record not found`. `tests/assurance_acceptance/test_p1_revocation.py` (11 cases) makes all of this executable. A fixture removes the seeded user's `OrgMembership` or disables the user; its yield teardown restores both and asserts the restore, and the module's last test checks it again. The late-tool-call case first shows the same call returns values without revocation. `RevokingProvider` (a `FakeProvider`) revokes just before a chosen model turn.
+
+Red/green: on master, 10 / 11. The red case was `test_reads_after_revocation_look_like_unknown_records[membership]`, where the bodies differed. After the fix, 11 / 11. Mutants, one at a time:
+- Removing commit's first `authorize` alone: green.
+- Removing commit's second `authorize` alone: green. Each covers the other.
+- Removing both: 8 red. The evidence lookup during validation then fails with `internal_error`, and nothing is published.
+- Removing `load()`'s project `authorize`: the membership read case goes red.
+- Removing `load()`'s first `authorize(owner)`: green. Global auth and the project `authorize` that follows both cover it.
+
+Regressions: assurance_acceptance, test_answer_assurance, test_checked_answer_pilot, test_assistant_inventory, test_project_route_acl_policy, test_assurance_storage: 183 passed.
+
+Pending in A1.2: CSRF on a stateful ACK (no assurance ACK route before P3) and a reviewer cache hit (the reviewer is withheld, so no cache). Follow-ups REVOKE-TOCTOU and REVOKE-KIND are in issue 02.
+
+Remaining for P1: A1.3 historical as-of runs, A1.4 corruption/restart, A1.5 complete-source aggregates, A1.6/A1.7 validity and masks, the other `read_unvalidated` families, frontend `assurance_state`. Next runnable tracer: `get_timeseries` (a time-series source) as the third checked read.
