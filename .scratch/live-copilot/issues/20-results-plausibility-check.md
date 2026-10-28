@@ -5,7 +5,7 @@
 
 Status: folded into the study harness (owner decision SH-FOLD-1, 2026-10-28): built as the result gate in `.scratch/study-harness/issues/05-result-gate-and-rerun-loop.md`; the rule list and done-when below stay its spec.
 Previous status: ready-for-agent. Owner decision Q5 = A (2026-10-19): the first item
-Progress: Only interim rung (prompt chains pre-solve checks, says rules absent) merged; no native post-solve plausibility rule set or tool.
+Progress: Outsourced task K has a draft plan awaiting GK B approval and alignment with study-harness issue 05 (SH-FOLD-1); no implementation or tests have been written. Only the interim rung is merged. K proposes the first five shared native rules; the remaining six rules, tab navigation and sensitivity checks stay follow-ups.
 after LC-05 closes, ahead of the other LC-06 work, with the interim rung
 (item 4) from LC-03 on.
 Type: task
