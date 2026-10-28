@@ -107,7 +107,7 @@ def get_site_anchor(project: AuthorizedProject = ProjectAccessDep) -> dict:
 async def put_site_anchor(request: Request, project: AuthorizedProject = ProjectAccessDep,
                           db: DBSession = Depends(get_db),
                           user: User | None = Depends(optional_user)) -> dict:
-    await run_in_threadpool(_check_lock, project, db, user)
+    _check_lock(project, db, user)
     body = await _json_body(request, MAX_ANCHOR_BODY)
     if not isinstance(body, dict):
         raise _raise(SceneError("invalid_input", "Site coordinates: send anchor and expected_revision"))
@@ -127,7 +127,7 @@ def get_scene(site_id: str, project: AuthorizedProject = ProjectAccessDep) -> di
 async def adopt_scene(site_id: str, request: Request, project: AuthorizedProject = ProjectAccessDep,
                       db: DBSession = Depends(get_db),
                       user: User | None = Depends(optional_user)) -> dict:
-    await run_in_threadpool(_check_lock, project, db, user)
+    _check_lock(project, db, user)
     body = await _json_body(request, MAX_SMALL_BODY)
     await run_in_threadpool(_site_known, project, site_id)
     digest = body.get("expected_digest") if isinstance(body, dict) else None
@@ -141,7 +141,7 @@ async def adopt_scene(site_id: str, request: Request, project: AuthorizedProject
 async def create_proposal(site_id: str, request: Request, project: AuthorizedProject = ProjectAccessDep,
                           db: DBSession = Depends(get_db),
                           user: User | None = Depends(optional_user)) -> dict:
-    await run_in_threadpool(_check_lock, project, db, user)
+    _check_lock(project, db, user)
     body = await _json_body(request, MAX_PROPOSAL_BODY)
     await run_in_threadpool(_site_known, project, site_id)
     return await _call(proposals.create, project.directory, project.registry_key, _owner(user), site_id, body)
@@ -161,7 +161,7 @@ async def apply_proposal(site_id: str, proposal_id: str, request: Request,
                          project: AuthorizedProject = ProjectAccessDep,
                          db: DBSession = Depends(get_db),
                          user: User | None = Depends(optional_user)) -> dict:
-    await run_in_threadpool(_check_lock, project, db, user)
+    _check_lock(project, db, user)
     body = await _json_body(request, MAX_SMALL_BODY)
     return await _call(proposals.apply, project.directory, project.registry_key, _owner(user), site_id,
                        proposal_id, body)

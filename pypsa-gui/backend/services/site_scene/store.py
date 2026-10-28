@@ -33,6 +33,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import threading
 from typing import Any
 
@@ -103,11 +104,30 @@ def enabled_site_ids(project_dir: pathlib.Path) -> set[str]:
     return {p.parent.parent.name for p in root.glob(f"*/{SCENE_DIR}/{POINTER}")}
 
 
+# A generation id is a plain directory name this module wrote: never a path.
+GENERATION_ID_RE = re.compile(r"^g\d{6}-[0-9a-f]{12}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
 def _read_pointer(project_dir: pathlib.Path, site_id: str) -> dict[str, Any] | None:
+    """
+    The pointer, validated on every read: an imported or hand-edited pointer
+    whose generation is not a plain id (`../x`, an absolute path, a `/`) is an
+    integrity_error, so no read, copy or export ever follows it.
+    """
     path = scene_dir(project_dir, site_id) / POINTER
     if not path.exists():
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        pointer = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError:
+        pointer = None
+    if not (isinstance(pointer, dict) and pointer.get("version") == SCHEMA_VERSION
+            and isinstance(pointer.get("revision"), int) and not isinstance(pointer.get("revision"), bool)
+            and isinstance(pointer.get("generation"), str) and GENERATION_ID_RE.match(pointer["generation"])
+            and isinstance(pointer.get("sha256"), str) and _SHA256_RE.match(pointer["sha256"])):
+        raise SceneError("integrity_error", "This site's saved scene is not readable: it was left as it is")
+    return pointer
 
 
 def _read_generation(project_dir: pathlib.Path, site_id: str, pointer: dict[str, Any]) -> dict[str, Any]:
@@ -180,8 +200,12 @@ def _chain_receipt(project_dir: pathlib.Path, site_id: str, pointer: dict[str, A
                    proposal_id: str) -> dict[str, Any] | None:
     """The committed receipt of `proposal_id` anywhere in the pointed chain, else None."""
     gen_id: str | None = pointer["generation"]
-    while gen_id:
+    while gen_id and GENERATION_ID_RE.match(gen_id):
         path = scene_dir(project_dir, site_id) / GENERATIONS / gen_id / GENERATION_FILE
+        if not path.exists():
+            # A copy carries only the pointed generation (the closure), so its
+            # history ends there: older receipts belong to the source project.
+            return None
         gen = json.loads(path.read_text(encoding="utf-8"))
         receipt = gen.get("receipt")
         if receipt and receipt["proposal_id"] == proposal_id:
@@ -348,3 +372,34 @@ def copy_closure(src: pathlib.Path, dst: pathlib.Path, site_id: str) -> list[pat
         (dst / rel).parent.mkdir(parents=True, exist_ok=True)
         (dst / rel).write_bytes(data)
     return paths
+
+
+def closure_blobs(project_dir: pathlib.Path) -> list[tuple[pathlib.Path, bytes]]:
+    """
+    Every enabled Site's closure, as (path relative to the project, bytes),
+    read under the scene mutex so a concurrent apply cannot mix generations.
+    Raises integrity_error for a missing or corrupt pointed generation BEFORE
+    the caller writes anything to a destination.
+    """
+    with project_lock(project_dir):
+        out = []
+        for site_id in sorted(enabled_site_ids(project_dir)):
+            for rel in _closure_locked(project_dir, site_id):
+                out.append((rel, (project_dir / rel).read_bytes()))
+        return out
+
+
+def is_scene_path(rel: pathlib.PurePath) -> bool:
+    """Whether a path relative to the project lies inside some Site's scene directory."""
+    parts = rel.parts
+    return len(parts) >= 3 and parts[0] == site_service.SITES_DIR and parts[2] == SCENE_DIR
+
+
+def ignore_scene_dirs(sites_root: pathlib.Path):
+    """A `shutil.copytree` ignore callback that skips every `sites/<id>/scene` directory."""
+    root = str(sites_root.resolve())
+
+    def _ignore(directory: str, names: list[str]) -> set[str]:
+        parent = pathlib.Path(directory).resolve()
+        return {SCENE_DIR} if SCENE_DIR in names and str(parent.parent) == root else set()
+    return _ignore

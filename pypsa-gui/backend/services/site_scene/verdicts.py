@@ -3,7 +3,7 @@ D02 + "SC-00 N UI contract": the additive `/flow` scene verdicts.
 
 SC-01 adds `scene: {entry, actions}` to `GET /api/projects/{name}/flow`
 beside the existing keys; electrical run_ready and every existing verdict keep
-their value (test_site_scene_proto_flow_verdicts checks the real projection is
+their value (the flow-verdict tests check the real projection is
 unchanged by anchor and scene files). The UI renders these verdicts and never
 derives availability itself.
 
@@ -117,3 +117,36 @@ def actions(*, saved: bool, can_edit: bool, anchor_confirmed: bool, site: str, b
         out.append(_action(name, False, "optional engine action",
                            _blocker("worker_unavailable", REASON_NO_WORKER, HOME_SITE_MAP)))
     return out
+
+
+def site_state(project_dir) -> dict[str, Any]:
+    """
+    The scene facts the verdicts read, from the project's own files: whether a
+    Site exists and whether one has accepted buildings, whether any Site has a
+    boundary, and how many accepted buildings there are. Never adopts.
+    """
+    from services import site_service
+    from services.site_scene import store
+
+    doc = site_service.read_sites(project_dir)
+    enabled = store.enabled_site_ids(project_dir)
+    buildings = sum(len(store.read_scene(project_dir, sid).get("buildings") or []) for sid in sorted(enabled))
+    sites = doc.get("sites") or []
+    site = "none" if not sites else ("accepted" if buildings else "unfinished")
+    boundary = any(len(s.get("boundary") or []) >= 3 for s in sites)
+    return {"site": site, "boundary": boundary, "buildings": buildings}
+
+
+def scene_block(project_dir, *, can_edit: bool, targets: int, native_runs: int,
+                pending_proposal: bool) -> dict[str, Any]:
+    """The additive `/flow` key: `{entry, actions}`, recomputed on every read (never cached)."""
+    from services.site_scene import anchor
+
+    facts = site_state(project_dir)
+    confirmed = anchor.admits_creation(anchor.read_anchor(project_dir))
+    return {
+        "entry": entry(saved=True, can_edit=can_edit, anchor_confirmed=confirmed, site=facts["site"]),
+        "actions": actions(saved=True, can_edit=can_edit, anchor_confirmed=confirmed, site=facts["site"],
+                           boundary=facts["boundary"], buildings=facts["buildings"], targets=targets,
+                           native_runs=native_runs, pending_proposal=pending_proposal),
+    }

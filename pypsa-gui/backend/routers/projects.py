@@ -310,6 +310,15 @@ def _copy_bundle_dirs(src: pathlib.Path, dst: pathlib.Path) -> None:
     project save itself — a future Save will retry.
     """
     import shutil as _shutil
+
+    from services.site_scene import store as scene_store
+
+    # A scene-enabled Site travels as its closure only (D03): the pointer and
+    # the one pointed generation, read under the scene mutex. Read it before
+    # touching `dst`, so a missing generation (integrity_error, raised) leaves
+    # the destination as it was. Orphan, superseded and failed generations
+    # are never copied.
+    scene_blobs = scene_store.closure_blobs(src)
     for dname in _BUNDLE_DIRS:
         src_d, dst_d = src / dname, dst / dname
         if not src_d.exists():
@@ -317,7 +326,13 @@ def _copy_bundle_dirs(src: pathlib.Path, dst: pathlib.Path) -> None:
         try:
             if dst_d.exists():
                 _force_rmtree(dst_d)
-            _shutil.copytree(str(src_d), str(dst_d))
+            if dname == "sites":
+                _shutil.copytree(str(src_d), str(dst_d), ignore=scene_store.ignore_scene_dirs(src_d))
+                for rel, data in scene_blobs:
+                    (dst / rel).parent.mkdir(parents=True, exist_ok=True)
+                    (dst / rel).write_bytes(data)
+            else:
+                _shutil.copytree(str(src_d), str(dst_d))
         except OSError as exc:
             logger.warning(
                 "bundle: copy_bundle_dir %s → %s failed: %s",
@@ -4794,6 +4809,10 @@ def _project_bundle_bytes(name: str, src: pathlib.Path | None = None) -> bytes:
         # Chatbot uploads (Phase A) — locked decision row 6: uploads/ travels
         # with the bundle. Walk each _BUNDLE_DIRS recursively so an exported
         # bundle round-trips on import with all reference files intact.
+        # A scene-enabled Site's scene goes in as its closure only (D03),
+        # read under the scene mutex; nothing else under sites/<id>/scene.
+        from services.site_scene import store as scene_store
+        scene_blobs = scene_store.closure_blobs(src)
         for dname in _BUNDLE_DIRS + _HISTORY_DIRS:
             d = src / dname
             if not d.is_dir():
@@ -4802,8 +4821,12 @@ def _project_bundle_bytes(name: str, src: pathlib.Path | None = None) -> bytes:
                 root_p = pathlib.Path(root)
                 for fname in files:
                     full = root_p / fname
+                    if scene_store.is_scene_path(full.relative_to(src)):
+                        continue
                     arc = full.relative_to(src).as_posix()
                     zf.write(full, arcname=arc)
+        for rel, data in scene_blobs:
+            zf.writestr(rel.as_posix(), data)
     change_log_service.log(
         "export", "Project", name, f"Downloaded project bundle '{name}.pypsaproj.zip'",
     )

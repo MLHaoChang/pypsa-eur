@@ -161,3 +161,11 @@ def apply(project_dir, project_key: str, owner: str | None, site_id: str, pid: s
     with _lock:
         entry["status"] = "applied"
     return receipt
+
+
+def has_ready(project_key: str, owner: str | None) -> bool:
+    """Whether the caller has a live, unapplied proposal in this project."""
+    with _lock:
+        _evict(time.monotonic())
+        return any(k[0] == project_key and e["owner"] == owner and e["status"] == "ready"
+                   for k, e in _entries.items())
