@@ -1,24 +1,33 @@
 """Check/write the LC-06 family execution manifest.
 
-Assigns every assistant tool to one of the 14 capability-matrix families and
-lists each named engine/control variant of the LC-D01–24 domain suites
-(`.scratch/live-copilot/domain-coverage.md`) with its disposition:
+Assigns every assistant tool one PRIMARY capability-matrix family (of 14): the
+family that owns its native seam. A tool other families also use (get_results,
+run_simulation, find_capabilities) stays in its primary family only; each
+variant lists the tools it exercises in ``tools``, which is where shared use
+shows. There is no ``shared`` family, and the guard refuses a tool in two
+families.
+
+Each named engine/control variant of the LC-D01–24 domain suites
+(`.scratch/live-copilot/domain-coverage.md`) has a disposition:
 
 - ``covered``: public-seam tests (chat tool, checked stream or authenticated
-  API) that check an independent hand oracle, named as pytest node ids;
+  API) that assert an independent hand oracle. ``tests`` are pytest node ids
+  that must collect; ``oracle`` names the hand value or source they assert;
 - ``pending``: the gap, naming any engine-only seed oracle;
-- ``unavailable``: a claim the application does not make, and why.
+- ``unavailable``: a claim the application does not make, with ``pointer`` to
+  the issue or the code that refuses it.
 
-A tool that no family names is reported as unmapped (it blocks claims for its
-slice), not a failure, so other packages can add tools. ``full_coverage``
-stays ``not_established``: covered variants are evidence for that variant only.
+Denominator: every inventory tool, mapped or not. A tool no family names is
+printed as unmapped and counts as not covered; it never fails the check (other
+packages add tools) and is never dropped from the total. A tool is covered when
+a covered variant lists it. ``full_coverage`` stays ``not_established``.
 """
 from __future__ import annotations
 
 import argparse
-import ast
 import functools
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -155,16 +164,17 @@ TOOLS_BY_FAMILY: dict[str, frozenset[str]] = {f: frozenset(names.split()) for f,
 }.items()}
 
 
-def _covered(vid: str, oracle: str, *tests: str) -> dict:
-    return {'id': vid, 'suite': vid.split('.')[0], 'status': 'covered', 'oracle': oracle, 'tests': list(tests)}
+def _covered(vid: str, oracle: str, tools: str, *tests: str) -> dict:
+    return {'id': vid, 'suite': vid.split('.')[0], 'status': 'covered', 'oracle': oracle,
+            'tools': tools.split(), 'tests': list(tests)}
 
 
 def _pending(vid: str, reason: str) -> dict:
     return {'id': vid, 'suite': vid.split('.')[0], 'status': 'pending', 'reason': reason}
 
 
-def _unavailable(vid: str, reason: str) -> dict:
-    return {'id': vid, 'suite': vid.split('.')[0], 'status': 'unavailable', 'reason': reason}
+def _unavailable(vid: str, reason: str, pointer: str) -> dict:
+    return {'id': vid, 'suite': vid.split('.')[0], 'status': 'unavailable', 'reason': reason, 'pointer': pointer}
 
 
 # Rebaselined on master a6d73f57; see the slice log in
@@ -172,13 +182,16 @@ def _unavailable(vid: str, reason: str) -> dict:
 VARIANTS: list[dict] = [
     _pending('LC-D01.projects', 'seam tests check identity/ACL; no independent file/ID oracle'),
     _pending('LC-D02.topology', 'seam tests check shape; no reference-count/KCL oracle'),
-    _covered('LC-D03.dynamic_weights', 'objective 10*(5*2+7*3)=310 through objective weights',
+    _covered('LC-D03.dynamic_weights', 'objective = 10 EUR/MWh x (5 MW x 2 h + 7 MW x 3 h) = 310, after an import round trip',
+             'import_uploaded_network save_project_as run_simulation save_project get_study_evidence',
              B + 'test_assistant_capabilities.py::test_native_dynamic_roundtrip_solves_and_persists_evidence'),
     _pending('LC-D03.chronology_edges', 'DST/leap/duplicate/nonmonotonic times not mapped'),
-    _covered('LC-D04.bound_build', 'hand 3 MW extendable build to its bound; fixed is not optimised',
+    _covered('LC-D04.bound_build', 'extendable G2 built to p_nom_max: optimal_capacity 3 = capacity_change 3; fixed G: 20 MW, change 0',
+             '',
              B + 'test_capacity_cycles_assurance.py::test_an_extendable_generator_built_to_its_bound',
              B + 'test_capacity_cycles_assurance.py::test_a_fixed_generator_says_it_was_not_optimised'),
-    _covered('LC-D04.units', 'MVA for branches, MWh for Store',
+    _covered('LC-D04.units', 'answer states "Line s_nom in MVA: apparent power."; Store cycles: discharged 4 MWh of 20 MWh = 0.2 cycles',
+             '',
              B + 'test_capacity_cycles_assurance.py::test_a_line_states_mva_and_an_unbounded_build_never_reads_as_at_its_bound',
              B + 'test_capacity_cycles_assurance.py::test_a_store_counts_only_energy_leaving_it'),
     _pending('LC-D04.unique_lp', '10 MW demand, 6 MW cheap cap, 4 MW backup: hand objective and cap perturbation'),
@@ -187,55 +200,71 @@ VARIANTS: list[dict] = [
     _pending('LC-D05.myopic', 'engine seed only: test_myopic_horizon_cost.py'),
     _pending('LC-D05.limited_foresight', 'engine seed only: test_myopic_horizon_cost.py'),
     _pending('LC-D05.two_period_discount', 'hand-discounted build/retirement fixture'),
-    _covered('LC-D06.full_lp', 'hand objectives 310 and 200 = 5*2*20',
-             B + 'test_assistant_capabilities.py::test_native_dynamic_roundtrip_solves_and_persists_evidence'),
-    _covered('LC-D06.infeasible', 'hand-built infeasible island is triaged and never re-run',
+    _covered('LC-D06.full_lp', 'objectives 310 (LC-D03 fixture) and 200 = 5 MW x 2 h x 20 EUR/MWh through the experiment queue',
+             'run_simulation refresh_experiment wait_for_job export_run_evidence get_file_delivery',
+             B + 'test_assistant_capabilities.py::test_native_dynamic_roundtrip_solves_and_persists_evidence',
+             B + 'test_experiment_case_advancement.py::test_real_case_finishes_only_with_terminal_and_intact_evidence'),
+    _covered('LC-D06.infeasible', 'hand-built infeasible island: triaged by validate/diagnose, never re-run',
+             'run_simulation validate_network diagnose_network get_simulation_log_history start_task get_task',
              B + 'test_lc19_run_lifecycle_journeys.py::test_oj33_an_infeasible_solve_is_triaged_and_never_rerun'),
     _pending('LC-D06.rolling', 'config refusals only; no hand value through the seam'),
     _pending('LC-D06.myopic_solve', 'engine seed only (see LC-D05)'),
     _pending('LC-D06.sclopf', 'engine seed only: test_fixed_sizes.py'),
     _pending('LC-D06.ac_stage', 'lifecycle/refusal only, no numbers'),
     _pending('LC-D06.solver_outcomes', 'unbounded, time limit, MIP gap, unavailable solver'),
-    _covered('LC-D07.active_proxy', 'hand line loadings; LOPF never claims compliance',
+    _covered('LC-D07.active_proxy', 'basis active_power_proxy only; line values equal the test LINE dict and the tab peak_branch_utilisation',
+             'get_loadflow_summary',
              B + 'test_loadflow_summary.py::test_lopf_is_an_active_power_proxy_and_never_claims_compliance',
              B + 'test_branch_loading_assurance.py::test_line_loading_matches_the_hand_values_and_the_load_flow_tab'),
-    _covered('LC-D07.ac_apparent', 'hypot(95, 60) from hand-set flows',
+    _covered('LC-D07.ac_apparent', 'apparent loading hypot(95, 60) from hand-set p and q flows',
+             'get_loadflow_summary',
              B + 'test_loadflow_summary.py::test_ac_pf_uses_apparent_power_where_reactive_flows_exist'),
-    _covered('LC-D07.convergence_mask', 'unconverged snapshots excluded and reported',
+    _covered('LC-D07.convergence_mask', '1 unconverged snapshot excluded; L_hot util 30 %',
+             'get_loadflow_summary',
              B + 'test_loadflow_summary.py::test_ac_pf_excludes_unconverged_snapshots_and_reports_them'),
-    _covered('LC-D07.weighting', 'weighted hours/mean and zero s_max_pu limit skipped',
+    _covered('LC-D07.weighting', 'h_at_limit 3.0, mean util (95x3+10+20+100x3)/8, weighted hours 8; s_max_pu=0 -> zero_effective_limit',
+             'get_loadflow_summary',
              B + 'test_loadflow_summary.py::test_weighted_snapshots_drive_hours_and_mean',
              B + 'test_loadflow_summary.py::test_zero_effective_limit_from_s_max_pu_is_skipped'),
-    _covered('LC-D07.missing_q', 'earlier PF Q never mixed into LOPF flow',
+    _covered('LC-D07.missing_q', 'LOPF line values equal the test LINE dict despite Q left by an earlier PF',
+             'get_loadflow_summary',
              B + 'test_branch_loading_assurance.py::test_q_left_by_an_earlier_power_flow_is_never_mixed_into_lopf_flow'),
     _pending('LC-D07.static_pf_oracle', 'P=60/Q=80 -> 100 MVA and an independently solved static PF'),
-    _unavailable('LC-D07.n1_voltage', 'no N-1 or voltage compliance claim is made; summaries say so'),
-    _covered('LC-D08.dispatch', 'hand lost load and curtailment from a real solve',
+    _unavailable('LC-D07.n1_voltage', 'no N-1 or voltage compliance claim is made',
+                 'pypsa-gui/backend/services/loadflow_summary.py LIMITS_CLAIM'),
+    _covered('LC-D08.dispatch', 'lost load and curtailment equal the values hand-computed in each test',
+             '',
              B + 'test_lost_load_assurance.py::test_lost_load_matches_the_hand_values_from_a_real_solve',
              B + 'test_result_profiles_assurance.py::test_curtailment_of_a_variable_generator'),
-    _covered('LC-D09.storage_unit', 'chronological trajectory with efficiencies and standing loss',
+    _covered('LC-D09.storage_unit', 'chronological E_t with efficiencies and standing loss, values hand-computed in each test',
+             '',
              B + 'test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations',
              B + 'test_storage_assurance.py::test_storage_standing_loss_and_fractional_efficiencies_use_chronological_duration',
              B + 'test_storage_assurance.py::test_storage_simultaneous_operation_cannot_be_reconstructed_from_net_power'),
-    _covered('LC-D09.cost_edit', 'independent 51 EUR direct cost; edit invalidates',
+    _covered('LC-D09.cost_edit', 'direct storage cost 51 EUR computed independently; a cost edit invalidates current evidence',
+             '',
              B + 'test_storage_cost_assurance.py::test_direct_storage_cost_uses_independent_51_eur_oracle',
              B + 'test_storage_cost_assurance.py::test_current_cost_evidence_invalidates_after_cost_edit'),
-    _covered('LC-D09.store', 'reversed sign refused; cyclic store checked round its loop',
+    _covered('LC-D09.store', 'reversed sign -> unsupported_storage_boundary; cyclic Store: 4 MWh of 10 MWh = 0.4 cycles, loop closes at 0',
+             '',
              B + 'test_capacity_cycles_assurance.py::test_a_store_with_a_reversed_sign_is_refused',
              B + 'test_capacity_cycles_assurance.py::test_a_cyclic_store_is_checked_around_its_loop'),
     _pending('LC-D09.inflow_spill', 'refusal only; no native inflow/spill oracle'),
-    _covered('LC-D10.prices_emissions', 'time-weighted price, binding-cap dual, dispatch/efficiency emissions',
+    _covered('LC-D10.prices_emissions', 'time-weighted bus price, positive dual of a binding cap, emissions = dispatch / efficiency x factor',
+             '',
              B + 'test_result_profiles_assurance.py::test_bus_price_is_time_weighted_and_observed',
              B + 'test_result_profiles_assurance.py::test_a_binding_cap_reports_the_dual_as_a_positive_price',
              B + 'test_result_profiles_assurance.py::test_generator_emissions_use_dispatch_over_efficiency'),
-    _covered('LC-D11.copt', 'two units 0.72/0.18/0.08/0.02, mass sums to one',
+    _covered('LC-D11.copt', 'two-unit capacity distribution 0.72/0.18/0.08/0.02 (sums to 1), equal to GET /results/copt',
+             '',
              B + 'test_copt_assurance.py::test_the_classical_fleet_by_hand_and_as_the_tab_has_it'),
     _pending('LC-D11.fmea', 'seam checks shape only; engine seeds test_energy_hub_fmea_top.py'),
     _pending('LC-D11.health', 'validation only'),
     _pending('LC-D12.standard_mc', 'engine seed only: thermal-only MC vs exact convolution (test_adequacy_mc.py)'),
     _pending('LC-D12.zonal_mc', 'engine seed only: test_energy_hub_zonal_*.py'),
     _pending('LC-D12.common_mode', 'engine seed only: test_energy_hub_common_mode.py'),
-    _covered('LC-D13.copt_screening', 'hand EUE/LOLE on the two-unit COPT',
+    _covered('LC-D13.copt_screening', 'EUE/LOLE from the hand two-unit COPT distribution',
+             '',
              B + 'test_copt_assurance.py::test_the_classical_fleet_by_hand_and_as_the_tab_has_it'),
     _pending('LC-D13.margin_loop', 'HTTP test stubs the engine'),
     _pending('LC-D13.reserve_margin_coupling', 'seam checks shape only'),
@@ -251,12 +280,15 @@ VARIANTS: list[dict] = [
       for m in ('gfl_pq', 'gfl_qu', 'gfl_pf', 'gfl_fw', 'gfm_droop', 'gfm_vsm', 'governors')],
     *[_pending(f'LC-D16.{e}', 'engine seed only (test_frequency*.py); campus_run_island_study tests stub it')
       for e in ('E1', 'E2', 'E3', 'E4', 'E5', 'E6')],
-    _unavailable('LC-D16.emt_pll_voltage', 'single-bus aggregate frequency screening only; no EMT/RMS/PLL/voltage dynamics'),
+    _unavailable('LC-D16.emt_pll_voltage', 'single-bus aggregate frequency screening only; no EMT/RMS/PLL/voltage dynamics',
+                 'gridspine/static/frequency.py LABEL'),
     _pending('LC-D17.recommend_apply_restudy', 'apply digest checked by equality; no chain through the seam'),
-    _covered('LC-D18.investment', 'hand cash flow with a nonzero first year',
+    _covered('LC-D18.investment', 'equity NPV 4.1322314 at cost of equity 10 %, WACC 7 %; financial close undiscounted',
+             '',
              B + 'test_investment_assurance.py::test_hand_cash_with_a_nonzero_first_year'),
-    _covered('LC-D19.single_case', 'objective 200 = 5*2*20 through the chat tool and queue',
-             B + 'test_experiment_case_advancement.py'),
+    _covered('LC-D19.single_case', 'objective 200 = 5 MW x 2 h x 20 EUR/MWh, same in the exported evidence',
+             'prepare_experiment advance_experiment refresh_experiment wait_for_job export_run_evidence',
+             B + 'test_experiment_case_advancement.py::test_real_case_finishes_only_with_terminal_and_intact_evidence'),
     _pending('LC-D19.two_case_compare', 'two independently solved cases and signed deltas'),
     _pending('LC-D20.delivery', 'seam only; delivered bytes not independently parsed'),
     _pending('LC-D21.reports', 'seam only; document facts not independently inspected'),
@@ -273,34 +305,47 @@ def inventory_tools() -> tuple[str, ...]:
     return tuple(sorted(t['name'] for t in build_inventory()['tools']))
 
 
-def _with_gridspine(tools_by_family: dict) -> dict[str, set[str]]:
+def _families(tools_by_family: dict, inventory: tuple[str, ...]) -> dict[str, set[str]]:
     families = {f: set(tools) for f, tools in tools_by_family.items()}
-    families['gridspine-campus'] |= {t for t in inventory_tools()
+    families['gridspine-campus'] |= {t for t in inventory
                                      if t.startswith(('campus_', 'gridspine_')) and t not in _CAMPUS_ECONOMICS}
     families['gridspine-campus'].add('get_study_evidence')
     families['economics-investment'] |= _CAMPUS_ECONOMICS
     return families
 
 
-@functools.cache
-def _test_names(path: str) -> frozenset[str]:
-    tree = ast.parse((ROOT / path).read_text(encoding='utf-8'))
-    return frozenset(n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)))
+def uncollected_nodes(nodes: list[str]) -> list[str]:
+    """Node ids pytest cannot collect. Backend ids collect from the backend
+    directory (its conftest), the rest from the repository root."""
+    missing = []
+    for cwd, prefix in ((ROOT / 'pypsa-gui/backend', 'pypsa-gui/backend/'), (ROOT, '')):
+        group = [n for n in nodes if n.startswith(prefix) and (prefix or not n.startswith('pypsa-gui/backend/'))]
+        if not group:
+            continue
+        local = [n[len(prefix):] for n in group]
+        run = subprocess.run([sys.executable, '-m', 'pytest', '--collect-only', '-q', '-o', 'addopts=', '-W', 'ignore',
+                              '-p', 'no:cacheprovider', *local], cwd=cwd, capture_output=True, text=True, timeout=300)
+        out = run.stdout + run.stderr
+        not_found = {n for n, loc in zip(group, local) if f'not found: {cwd / loc}' in out}
+        missing += sorted(not_found) if not_found or run.returncode == 0 else group
+    return missing
 
 
-def _node_problem(node: str) -> str | None:
-    path, _, name = node.partition('::')
+def _pointer_problem(pointer: str) -> str | None:
+    path, _, symbol = pointer.partition(' ')
     if not (ROOT / path).is_file():
-        return f'{node}: no such test file'
-    if name and name not in _test_names(path):
-        return f'{node}: no test function {name}'
+        return f'pointer {pointer}: no such file'
+    if symbol and symbol not in (ROOT / path).read_text(encoding='utf-8'):
+        return f'pointer {pointer}: {symbol} not in the file'
     return None
 
 
-def manifest_problems(*, tools_by_family: dict | None = None, variants: list[dict] | None = None) -> list[str]:
-    families = _with_gridspine(TOOLS_BY_FAMILY if tools_by_family is None else tools_by_family)
+def manifest_problems(*, tools_by_family: dict | None = None, variants: list[dict] | None = None,
+                      inventory: tuple[str, ...] | None = None, collect: bool = True) -> list[str]:
+    inventory = inventory_tools() if inventory is None else inventory
+    families = _families(TOOLS_BY_FAMILY if tools_by_family is None else tools_by_family, inventory)
     variants = VARIANTS if variants is None else variants
-    known, problems, seen = set(inventory_tools()), [], {}
+    known, problems, seen = set(inventory), [], {}
     if set(families) != set(FAMILIES) or set(SUITES_BY_FAMILY) != set(FAMILIES):
         problems.append('families disagree with FAMILIES')
     for family, tools in families.items():
@@ -313,36 +358,63 @@ def manifest_problems(*, tools_by_family: dict | None = None, variants: list[dic
     ids = [v['id'] for v in variants]
     problems += [f'duplicate variant {i}' for i in sorted({i for i in ids if ids.count(i) > 1})]
     problems += [f'{s} has no variant' for s in sorted(suites - {v['suite'] for v in variants})]
+    nodes = []
     for v in variants:
         if v['suite'] not in suites or not v['id'].startswith(v['suite'] + '.'):
             problems.append(f'{v["id"]}: suite {v["suite"]} is not an annex suite')
         if v['status'] == 'covered':
             if not v.get('tests') or not v.get('oracle'):
                 problems.append(f'{v["id"]}: covered needs tests and an oracle')
-            problems += [p for p in map(_node_problem, v.get('tests', [])) if p]
+            if any('::' not in t for t in v.get('tests', [])):
+                problems.append(f'{v["id"]}: covered tests must be node ids (file::test)')
+            problems += [f'{v["id"]}: {t} is not an inventory tool' for t in v.get('tools', []) if t not in known]
+            nodes += v.get('tests', [])
         elif v['status'] in ('pending', 'unavailable'):
             if not v.get('reason'):
                 problems.append(f'{v["id"]}: {v["status"]} needs a reason')
+            if v['status'] == 'unavailable':
+                problem = _pointer_problem(v.get('pointer') or '') if v.get('pointer') else 'no pointer'
+                if problem:
+                    problems.append(f'{v["id"]}: {problem}')
         else:
             problems.append(f'{v["id"]}: unknown status {v["status"]!r}')
+    if collect and nodes:
+        problems += [f'{n}: does not collect' for n in uncollected_nodes(sorted(set(nodes)))]
     return problems
 
 
-def build_manifest() -> dict:
-    families = _with_gridspine(TOOLS_BY_FAMILY)
+def build_manifest(inventory: tuple[str, ...] | None = None) -> dict:
+    inventory = inventory_tools() if inventory is None else inventory
+    families = _families(TOOLS_BY_FAMILY, inventory)
     mapped = set().union(*families.values())
+    covered_tools = {t for v in VARIANTS if v['status'] == 'covered' for t in v['tools']}
     counts = {s: sum(v['status'] == s for v in VARIANTS) for s in ('covered', 'pending', 'unavailable')}
     return {
         'format_version': 1,
         'source': 'pypsa-gui/backend/smoke/family_manifest.py',
         'families': FAMILIES,
         'suites_by_family': {f: [f'LC-D{i:02d}' for i in s] for f, s in SUITES_BY_FAMILY.items()},
-        'tools_by_family': {f: sorted(families[f]) for f in FAMILIES},
-        'unmapped_tools': sorted(set(inventory_tools()) - mapped),
+        'tools_by_family': {f: sorted(families[f] & set(inventory)) for f in FAMILIES},
+        'unmapped_tools': sorted(set(inventory) - mapped),
+        'covered_tools': sorted(covered_tools & set(inventory)),
         'variants': VARIANTS,
-        'counts': {'tools': len(inventory_tools()), 'variants': len(VARIANTS), **counts},
+        'counts': {'tools': len(inventory), 'covered_tools': len(covered_tools & set(inventory)),
+                   'unmapped_tools': len(set(inventory) - mapped), 'variants': len(VARIANTS),
+                   **{f'{k}_variants': n for k, n in counts.items()}},
         'full_coverage': 'not_established',
     }
+
+
+def report(built: dict) -> str:
+    c = built['counts']
+    lines = [' '.join([
+        'ok', f'families={len(FAMILIES)}', 'suites=24',
+        f'covered {c["covered_tools"]} / {c["tools"]} ({c["unmapped_tools"]} unmapped)',
+        f'variants={c["variants"]}', f'covered={c["covered_variants"]}', f'pending={c["pending_variants"]}',
+        f'unavailable={c["unavailable_variants"]}', 'full_coverage=not_established'])]
+    if built['unmapped_tools']:
+        lines.append('unmapped: ' + ' '.join(built['unmapped_tools']))
+    return '\n'.join(lines)
 
 
 def main(argv=None) -> int:
@@ -360,13 +432,7 @@ def main(argv=None) -> int:
     if args.write:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(built, indent=2) + '\n', encoding='utf-8')
-    c = built['counts']
-    print('ok', f'families={len(FAMILIES)}', 'suites=24', f'tools={c["tools"]}',
-          f'unmapped={len(built["unmapped_tools"])}', f'variants={c["variants"]}',
-          f'covered={c["covered"]}', f'pending={c["pending"]}', f'unavailable={c["unavailable"]}',
-          'full_coverage=not_established')
-    if built['unmapped_tools']:
-        print('unmapped:', ' '.join(built['unmapped_tools']))
+    print(report(built))
     return 0
 
 
