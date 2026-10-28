@@ -2354,7 +2354,8 @@ TOOLS: list[dict[str, Any]] = [
         "highlight_branch from get_loadflow_summary's ui_reference to open the same source and "
         "window and highlight one line or transformer. Only when one of these is given, an "
         "unavailable view or an unknown branch refuses with no navigation; the result's highlight "
-        "says whether the branch is ranked and shown. Safety: read.",
+        "says whether the branch is ranked and shown. With panel_id scenarios, highlight_projects "
+        "(1–4 project ids, e.g. a sweep's new cases) highlights them in the scenario tree. Safety: read.",
         {
             "panel_id": {"type": "string", "enum": SAFETY_PANEL_ENUM},
             "canvas_view": {"type": "string", "enum": ["blank", "satellite", "hybrid", "site"]},
@@ -2376,6 +2377,7 @@ TOOLS: list[dict[str, Any]] = [
                 "required": ["component", "name"],
                 "additionalProperties": False,
             },
+            "highlight_projects": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"type": "string"}},
         },
         ["panel_id"],
     ),
@@ -2450,7 +2452,7 @@ TOOLS: list[dict[str, Any]] = [
         "changes: component_class, names (1–100), attribute, value. Numeric engineering inputs only; "
         "*_extendable flags require booleans. No solver code or topology rewrites. Existing time-series overrides "
         "still override static values. Reuses matching, solved cases; refuses name/input conflicts and unsaved "
-        "baseline/case edits. Returns per-case project IDs/jobs or reused objectives, with explicit partial failures. "
+        "baseline/case edits. Omit new_name to use the name derived from the changes (battery-capex-70pct), shown on the card. Returns per-case project IDs/jobs or reused objectives, with explicit partial failures. "
         "After waiting for jobs, get_study_evidence(section='simulation', compare_to=baseline_project_id) "
         "compares each saved result. Study refinement uses gridspine_update_config and gridspine_run_pipeline. "
         "The confirmation authorizes these bounded changes and queued solves. Safety: execution.",
@@ -2464,7 +2466,7 @@ TOOLS: list[dict[str, Any]] = [
                         "attribute": {"type": "string", "enum": ["marginal_cost", "capital_cost", "p_nom", "p_nom_min", "p_nom_max", "p_nom_extendable", "p_min_pu", "p_max_pu", "efficiency", "p_set", "q_set", "s_nom", "s_nom_min", "s_nom_max", "s_nom_extendable", "s_max_pu", "r", "x", "max_hours", "efficiency_store", "efficiency_dispatch", "e_nom", "e_nom_min", "e_nom_max", "e_nom_extendable", "e_min_pu", "e_max_pu"]},
                         "value": {"type": ["number", "boolean"]}},
                     "required": ["component_class", "names", "attribute", "value"]}}},
-                "required": ["new_name", "changes"]}}}, ["baseline_project_id", "cases"],
+                "required": ["changes"]}}}, ["baseline_project_id", "cases"],
     ),
     _t(
         "use_toolset",

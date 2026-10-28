@@ -5610,6 +5610,7 @@ def ui_open_panel(
     window_from: int | None = None,
     window_to: int | None = None,
     highlight_branch: dict | None = None,
+    highlight_projects: list[str] | None = None,
 ) -> dict:
     """
     Navigate the GUI. Emits a ``ui_event`` SSE frame (kind=navigate) that
@@ -5619,6 +5620,9 @@ def ui_open_panel(
     Load flow arguments (live-voice 07) need panel results and results_tab
     loadflow. With any of them the view is read first: an unavailable view or
     an unknown branch refuses with no event. Without them the call is unchanged.
+
+    `highlight_projects` (LC-17, Scenarios only): up to four projects the
+    caller may open, highlighted in the scenario tree; any other refuses.
     """
     from harness.catalogue import (
         BOTTOM_TAB_ENUM, COMPARE_TAB_ENUM, RESULTS_TAB_ENUM, SAFETY_PANEL_ENUM,
@@ -5652,6 +5656,16 @@ def ui_open_panel(
             "error_kind": "invalid_navigation", "field": "canvas_view",
             "message": "Choose blank for topology, or satellite, hybrid or site for map.",
         })
+    if highlight_projects is not None:
+        if (panel_id not in {"Scenarios", "scenarios"} or not isinstance(highlight_projects, list)
+                or not 1 <= len(highlight_projects) <= 4 or not all(isinstance(p, str) for p in highlight_projects)):
+            raise HTTPException(400, detail={
+                "error_kind": "invalid_navigation", "field": "highlight_projects",
+                "message": "Pass 1–4 project ids with panel_id scenarios.",
+            })
+        from services import project_registry
+        with _acting() as (db, user):  # an id the caller cannot open refuses like an unknown one
+            highlight_projects = [str(project_registry.resolve_project(db, user, p).id) for p in highlight_projects]
     loadflow = _loadflow_navigation_args(panel_id, results_tab, loadflow_source,
                                          window_from, window_to, highlight_branch)
     facts = None
@@ -5682,6 +5696,8 @@ def ui_open_panel(
         event["compare_tab"] = compare_tab
     if canvas_view is not None:
         event["canvas_view"] = canvas_view
+    if highlight_projects:
+        event["highlight_projects"] = highlight_projects
     return event
 
 
