@@ -154,7 +154,8 @@ def test_every_tool_target_and_channel_maps_to_a_declared_adapter(tmp_path):
     assert {*assurance['result_tabs'].values(), *assurance['slide_panels'].values(),
             *assurance['output_channels'].values()} <= set(adapters)
     checked = {t['name'] for t in tools if adapters[t['assurance_adapter']]['status'] == 'checked'}
-    assert checked == set(assurance['checked_tools']) == {'get_component', 'update_component', 'ui_open_panel'}
+    assert checked == set(assurance['checked_tools']) == {
+        'get_component', 'list_components', 'update_component', 'ui_open_panel'}
     assert all(a['status'] in {'checked', 'unvalidated'} for a in adapters.values())
     assert all(a.get('pending') for a in adapters.values() if a['status'] == 'unvalidated')
     assert set(assurance['output_channels']) >= {'stream_tokens', 'history_replay', 'tts', 'answer_export'}
@@ -174,7 +175,7 @@ def test_runtime_checked_tools_are_exactly_the_mapped_checked_adapters():
     # A tool given a checked label the strict gate does not run.
     (COVERAGE, '"ask_user": "user_choice"', '"ask_user": "static_input_evidence"'),
     # The checked map and the runtime gate disagree.
-    (COVERAGE, '"ui_open_panel": "navigation_ack",', '"ui_open_panel": "navigation_ack", "list_components": "static_input_evidence",'),
+    (COVERAGE, '"ui_open_panel": "navigation_ack",', '"ui_open_panel": "navigation_ack", "get_component_schema": "static_input_evidence",'),
     # A safety tier with no adapter.
     (COVERAGE, '    "execution_long_running": "job_unvalidated",\n', ''),
     # An output channel bound to an undeclared contract.
