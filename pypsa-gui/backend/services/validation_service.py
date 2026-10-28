@@ -1251,6 +1251,33 @@ def _check_stage2_ac_pf(n, cfg) -> list[Issue]:
     return out
 
 
+def _check_inventory_cadence(n) -> list[Issue]:
+    """A representative-period network refuses a Store whose `delivery_interval_h` (hours between shipments out of
+    it, absent or 0 = continuous) exceeds the hours its period holds in a row (grid-to-process 09, design §2.4).
+
+    Representative: some period's snapshots stand for more hours than they hold (Σ objective weighting > Σ stores
+    weighting; the staged week templates: 8,760 vs 168). Its store cycles within that span and repeats, so it cannot
+    carry product to a shipment further away; the chronological year (`stage_network(time_base="year")`, every
+    weighting 1) can.
+    Inferred from the weightings, so it needs no marker on the network."""
+    if n.stores.empty or "delivery_interval_h" not in n.stores.columns:
+        return []
+    w = n.snapshot_weightings
+    period = w.index.get_level_values(0) if isinstance(w.index, pd.MultiIndex) else np.zeros(len(w))
+    hours = w[["objective", "stores"]].groupby(period).sum()
+    representative = hours[hours["objective"] > hours["stores"] * (1 + 1e-9)]
+    if representative.empty:
+        return []
+    span = float(representative["stores"].min())
+    interval = pd.to_numeric(n.stores["delivery_interval_h"], errors="coerce")
+    return [_err("inventory_cadence_needs_year", "Store", str(name),
+                 f"Inventory {name} is delivered every {float(h):g} h, but each period holds {span:g} hours in a "
+                 f"row (a representative period, repeated), so it cannot carry product to its next shipment. "
+                 f"Build the plan on the chronological year time base, or make the delivery continuous or at "
+                 f"most every {span:g} h.")
+            for name, h in interval.items() if _is_finite(h) and float(h) > span + 1e-9]
+
+
 def _check_storage_cyclic_initial(n) -> list[Issue]:
     """
     When cyclic_state_of_charge=True, PyPSA ignores state_of_charge_initial
@@ -1828,6 +1855,7 @@ def _check_lopf(n, solver_config) -> list[Issue]:
     out += _check_snapshot_weights_nyears(n)
     out += _check_loss_magnitude(n, solver_config)
     out += _check_storage_cyclic_initial(n)
+    out += _check_inventory_cadence(n)
     out += _check_p_max_pu_bounds(n)
     out += _check_unweighted_start_costs(n)
     out += _check_safety_tier_off_critical_bus(n)
