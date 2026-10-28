@@ -493,8 +493,6 @@ def _in_bounds(entry, new, at_grant):
 
 def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx):
     from harness.catalogue import TOOLS
-    from harness.runner import budget_spent
-    from services import assistant_tasks
     if external:
         return "external"
     if tool not in {t["name"] for t in TOOLS}:
@@ -507,6 +505,24 @@ def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx
         return "destructive"
     if _research(args):
         return "research_value"
+    is_run = any(r["tool"] == tool for r in envelope["runs"])
+    reason = _standing(session, envelope, task, ctx, solve=is_run)
+    if reason is not None:
+        return reason
+    if is_run:
+        kinds = [r.get("kind") for r in envelope["runs"] if r["tool"] == tool]
+        return None if None in kinds or (isinstance(args, dict) and args.get("kind") in kinds) else "outside_entry"
+    if not any(e["tool"] == tool for e in envelope["edits"]):
+        return "unlisted_tool"
+    return _match_edit(envelope, tool, edit_card)
+
+
+def _standing(session, envelope, task, ctx, solve=False):
+    """What a granted envelope must still be at a dispatch or a card
+    boundary: granted, this run's, unexpired, budget left, the freshness
+    chain unbroken and the brief current. None, or the reason."""
+    from harness.runner import budget_spent
+    from services import assistant_tasks
     if envelope["state"] != "granted":
         return "not_granted" if envelope["state"] == "proposed" else envelope["state"]
     if not (envelope["task_id"] == task["task_id"] and envelope["project_id"] == task["project_id"]
@@ -515,9 +531,8 @@ def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx
         return "wrong_project"
     if _now() >= _epoch(envelope["expires_at"]):
         return "expired"
-    is_run = any(r["tool"] == tool for r in envelope["runs"])
     solves = sum(1 for a in envelope["audit"] if a["event"] == "used" and a.get("tool") in RUN_TOOLS)
-    if budget_spent(task) or (is_run and solves >= envelope["budget"]["solves"]):
+    if budget_spent(task) or (solve and solves >= envelope["budget"]["solves"]):
         return "exhausted"
     current = _fingerprint(ctx)
     if not current:
@@ -526,12 +541,7 @@ def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx
         return "drift"
     if assistant_tasks._stale(task, current):
         return "brief_stale"
-    if is_run:
-        kinds = [r.get("kind") for r in envelope["runs"] if r["tool"] == tool]
-        return None if None in kinds or (isinstance(args, dict) and args.get("kind") in kinds) else "outside_entry"
-    if not any(e["tool"] == tool for e in envelope["edits"]):
-        return "unlisted_tool"
-    return _match_edit(envelope, tool, edit_card)
+    return None
 
 
 def admit(session, *, call_id, tool, args, tier, external, edit_card):
@@ -596,23 +606,28 @@ def refused_before_gate(task_path, call_id, tool, reason):
         _save(task_path, envelope)
 
 
-def cross(session, task_path, card):
+def cross(session, task_path, card, ctx):
     """COP-1's card boundary inside a live envelope: the runner goes on, on
-    record as the envelope's decision."""
+    record as the envelope's decision, only while the envelope still stands
+    (the same freshness, project and expiry checks as a dispatch; the tick
+    has re-checked ACL and locks). Returns "crossed", the refusal's reason
+    (on the audit too), or None when no live envelope applies."""
     from harness import approvals
     from services import assistant_tasks
     if not live(task_path):
-        return False
+        return None
     with assistant_tasks._LOCK:
         envelope = _load(task_path)
+        task = json.loads(Path(task_path).read_text())
         call_id = f"stage-{card}-{uuid.uuid4().hex[:8]}"
-        if not approvals.decided(session, call_id=call_id, tool="continue_at_card", tier="stage",
-                                 outcome="approved", by="envelope:" + envelope["id"],
-                                 link={"envelope_id": envelope["id"]}):
-            return False
-        _audit(envelope, "used", call_id=call_id, tool="continue_at_card")
+        reason = _standing(session, envelope, task, ctx)
+        if reason is None and not approvals.decided(
+                session, call_id=call_id, tool="continue_at_card", tier="stage", outcome="approved",
+                by="envelope:" + envelope["id"], link={"envelope_id": envelope["id"]}):
+            reason = "approval_unavailable"
+        _audit(envelope, "refused" if reason else "used", call_id=call_id, tool="continue_at_card", reason=reason)
         _save(task_path, envelope)
-    return True
+    return reason or "crossed"
 
 
 def settle(task_path, call_id, ctx):

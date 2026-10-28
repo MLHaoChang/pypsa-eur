@@ -35,7 +35,9 @@ BLOCK = {
 @pytest.fixture
 def profile(monkeypatch):
     def use(block=BLOCK):
-        monkeypatch.setitem(run_profiles.PROFILES, "eh_site@1", {**run_profiles.EH_SITE, "envelope": block})
+        tunable = [{"component": "Generator", "attr": a} for a in ("p_nom", "marginal_cost")]
+        monkeypatch.setitem(run_profiles.PROFILES, "eh_site@1", {**run_profiles.EH_SITE, "envelope": block,
+                                                                  "tunable": tunable})
     use()
     return use
 
@@ -333,6 +335,21 @@ def test_an_enum_entry_admits_only_its_values():
              "enum": ["gas", "solar"]}
     assert run_envelope.check_block(dict(BLOCK, edits=[entry]))["edits"] == [entry]
     assert run_envelope._in_bounds(entry, "solar", "gas") and not run_envelope._in_bounds(entry, "coal", "gas")
+
+
+def test_an_envelope_edit_names_only_the_profiles_tunable_attrs():
+    with pytest.raises(run_profiles.ProfileError, match="tunable"):
+        run_profiles.load({**run_profiles.EH_SITE, "envelope": BLOCK})  # G* p_nom is not an eh_site lever
+
+
+def test_a_boundary_is_not_crossed_after_foreign_drift(granted):
+    task, path, _ = granted()
+    PyPSAService.get_active_context().network.loads.at["L1", "p_set"] = 6.0  # before the solve boundary
+    record = until(harness_runner.Runner("a"), path, task, stopped)
+    assert record["run"]["status"] == "paused" and record["run"]["reason"].startswith("envelope_")
+    assert record["status"] != "completed" and not any(s["id"].startswith("solve.") and s["status"] == "completed"
+                                                       for s in record["steps"])
+    assert "continue_at_card" not in [a.get("tool") for a in envelope_of(path)["audit"] if a["event"] == "used"]
 
 
 @pytest.mark.parametrize("attr", ["p_set", "target_lole_h", "grid_code_limit"])

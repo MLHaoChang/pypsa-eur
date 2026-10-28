@@ -152,6 +152,11 @@ def load(profile: dict) -> dict:
             loaded["envelope"] = run_envelope.check_block(profile["envelope"])
         except run_envelope.EnvelopeError as exc:
             raise ProfileError(f"Envelope: {exc}") from exc
+        tunable = {(t["component"], t["attr"]) for t in profile.get("tunable", [])}
+        for edit in loaded["envelope"]["edits"]:
+            if (edit["target"]["component"], edit["target"]["attr"]) not in tunable:
+                raise ProfileError(f"Envelope: {edit['target']['component']}.{edit['target']['attr']} is not "
+                                   "one of the profile's tunable attributes (§6.0).")
     return loaded
 
 
@@ -181,7 +186,11 @@ EH_SITE = {
     "tunable": [{"component": "candidate:genset", "attr": "max_mw"},
                 {"component": "candidate:bess", "attr": "max_mw"},
                 {"component": "candidate:pv", "attr": "max_mw"},
-                {"component": "candidate:bess", "attr": "hours"}],
+                {"component": "candidate:bess", "attr": "hours"},
+                # The same levers as the network columns the envelope's edits write (issue 03).
+                {"component": "Generator", "attr": "p_nom_max"},
+                {"component": "StorageUnit", "attr": "p_nom_max"},
+                {"component": "StorageUnit", "attr": "max_hours"}],
     # Issue 03 (§7): the edits and runs a granted envelope covers. The
     # candidates' size caps within ±50 % of their value at grant, and the
     # run's own queued solve.

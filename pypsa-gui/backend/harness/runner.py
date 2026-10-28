@@ -649,11 +649,15 @@ class Runner:
         if task["status"] == "paused_at_card":
             card = task["pause"]["card"]
             decision = decide(task, card, None)
-            if decision == "approve" or run_envelope.cross(session, path, card):
+            crossed = None if decision == "approve" else run_envelope.cross(session, path, card, ctx)
+            if decision == "approve" or crossed == "crossed":
                 tasks.continue_at_card(session, task["task_id"])
                 self.wake(path)
                 return "continued"
-            self._wait_for_user(path, "card", card)
+            if crossed in run_envelope.PAUSING:
+                self._envelope_refused(path, {"id": card})  # drift, a stale brief, expiry: pause, not wait
+                return "paused"
+            self._wait_for_user(path, "card", card, envelope_refused=crossed is not None)
             return "waiting"
         step = tasks._next(task)
         if step is None:
@@ -757,9 +761,11 @@ class Runner:
             if results:
                 eventlog.message(session, {"role": "user", "content": [results[-1]]})
             _tasks().release_claim(path, step["id"], session.session_id)
-            if ran:
+            if ran and _tasks()._effectful(step["tool"]):
+                # The freshness chain's next link: only a runner change moves it; a read never
+                # does, so a change seen after one is someone else's (drift, issue 03).
                 from services import run_envelope
-                run_envelope.settle(path, tool_use_id, ctx)  # the freshness chain's next link
+                run_envelope.settle(path, tool_use_id, ctx)
             if refused:
                 _update(path, lambda t: _stop_in(t, "needs_user", "locked" if refused == ["busy"] else "recheck"))
             elif decision == "envelope" and carded:
