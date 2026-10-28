@@ -473,22 +473,25 @@ def checked_run_manifest(run_id: Any) -> tuple[str, dict | None, str]:
     The manifest is returned only for a well-formed completed run of the
     active project whose recorded sections all verify; otherwise None with the
     run's status ('not_found' when there is no such run, 'corrupt' when its
-    manifest is malformed). Raises like every run read when there is no
-    active project.
+    manifest is malformed, 'unverified' when a section fails to verify).
+    Raises like every run read when there is no active project.
     """
     root, project_id, _owner = _authority()
     with _LOCK:
         record = _load_run(root, project_id, run_id)
         if record is None:
             return project_id, None, 'not_found'
+        status = record.get('status')
+        if status != 'completed':
+            known = isinstance(status, str) and status in STATUSES
+            return project_id, None, status if known else 'corrupt'
         if (not isinstance(record.get('metrics'), dict)
                 or not isinstance(record.get('sections') or {}, dict)
                 or not isinstance(record.get('finished_at'), str)):
             return project_id, None, 'corrupt'
-        if record['status'] != 'completed' or any(
-                _section_state(root, record, name)[1] is not None
-                for name in list(record.get('sections') or {})):
-            return project_id, None, record['status']
+        if any(_section_state(root, record, name)[1] is not None
+               for name in list(record.get('sections') or {})):
+            return project_id, None, 'unverified'
         return project_id, copy.deepcopy(record), 'completed'
 
 

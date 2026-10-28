@@ -213,17 +213,42 @@ def test_newer_failed_and_running_runs_do_not_replace_it(run, harness):
     assert again["verdict"] == "passed"
 
 
-@pytest.mark.parametrize("run_id", ["run-failed", "run-live", "run-missing"])
+@pytest.mark.parametrize(
+    "run_id, status",
+    [
+        ("run-failed", "failed"),
+        ("run-live", "running"),
+        ("run-dead", "interrupted"),
+        ("run-missing", "not found"),
+        ("run-no-status", "corrupt"),
+    ],
+)
 def test_a_run_that_did_not_complete_is_refused_before_the_handler(
-    run, harness, monkeypatch, run_id
+    run, harness, monkeypatch, run_id, status
 ):
-    newer_runs(run[2], run[1])
+    root, project_id = run[2], run[1]
+    newer_runs(root, project_id)
+    # An orphaned marker: no live process will publish it.
+    run_evidence.start_run(
+        root,
+        project_id,
+        run_id="run-dead",
+        kind="simulation",
+        started_at="2026-10-05T10:00:00+00:00",
+        mode="lopf",
+    )
+    run_evidence._LIVE.discard(run_evidence._live_key(root, "run-dead"))
+    publish(root, project_id, "run-no-status", "completed", "2026-10-06T10:00:00+00:00")
+    path = root / "run_evidence" / "run-no-status" / "manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    del manifest["status"]
+    path.write_text(json.dumps(manifest), encoding="utf-8")
     calls = wrap_handler(monkeypatch)
     frames = read_run(harness, run_draft(run_id=run_id), {"run_id": run_id})
     assert not calls
     refused = run_result(frames)
     assert refused["error_kind"] == "run_not_checkable"
-    assert "completed" in refused["message"]
+    assert f"this run is {status}." in refused["message"]
     assert approval(frames)["verdict"] == "limited"
     assert "1250.5" not in json.dumps(frames)
 

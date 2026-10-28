@@ -925,7 +925,7 @@ Remaining for P1: A1.4-RETAINED (retained scoped results are still certified by 
 
 Policy version 1. `get_run_evidence` with an exact `run_id` is the fourth checked read (`run_metric_evidence`, `run-metrics/1`). Facts are the run's recorded metrics (`/<metric>`, `entity_id` = run id). The scope (kind, mode, `finished_at`, `unsaved_inputs`) is rebuilt from the manifest on every lookup. Failed, running, missing, malformed or unverifiable runs are refused before the handler with `run_not_checkable` (manifest `pypsa-gui/tool-error-kinds.d/claude-assurance-02-run-as-of.json`).
 
-`test_p1_run_as_of.py`: 36 cases; on the base 25 fail and 11 pass (refusals that must stay refusals); after the change 36 pass. Mutants, each red: no manifest digest on lookup (2), no fact re-derivation (1), no scope rebuild (3), no capture digest (1), no manifest shape check (1).
+`test_p1_run_as_of.py`: 38 cases; on master 25 of the first 36 fail and 11 pass (refusals that must stay refusals); after the change 38 pass. GK B (6) NOT OK @e4446459: a running or interrupted run was refused as "corrupt" (shape checks ran before the status check); the refusal test now asserts the status each message names (failed, running, interrupted, not found, corrupt), red on e4446459 for 3 of 5. Mutants, each red: no manifest digest on lookup (2), no fact re-derivation (1), no scope rebuild (3), no capture digest (1), no manifest shape check (1).
 
 Regressions: `tests/assurance_acceptance` with run-evidence, reference ladder, lv08 tools, inventory, dispositions, kinds manifest and JSON fragments: 898 passed, 6 skipped. `tests/test_*assur*.py` and the checked-answer pilot: 282 passed. `ChatPanel.manifest.test.tsx`: 458 passed.
 
