@@ -478,13 +478,18 @@ TOOLS: list[dict[str, Any]] = [
         "has nothing to serve — an unsolved or stale network, or a solve that "
         "produced none of this kind (lost_load on a run that shed nothing). "
         "Read `message` and check dispatch_status; do NOT report it as a zero. "
-        "run_id (statistics, cost_breakdown and economics_by_carrier only) answers for one run as "
+        "run_id (statistics, cost_breakdown, economics_by_carrier, generators and "
+        "storage_dispatch only) answers for one run as "
         "{status, scope, result_kind, data, run}: the newest completed run whose "
         "inputs are still current answers with the current read (scope current); "
         "any other run answers from the results kept when it finished (scope "
         "historical; the Results tabs still show the current results), or "
         "unavailable for a run without them. Never quote current results for "
-        "another run. With run_id, source, detail, offset and limit are ignored. "
+        "another run. With run_id, source, detail, offset and limit are ignored, "
+        "except that generators and storage_dispatch answer a digest (shape "
+        "'digest': per carrier and per unit weighted energy, peak and its "
+        "snapshot, weighted mean and running hours; storage discharge and charge "
+        "apart) for every run and refuse those arguments. "
         "Safety: read.",
         {
             "result_kind": {"type": "string", "enum": RESULTS_ENUM},

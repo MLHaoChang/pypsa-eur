@@ -688,7 +688,8 @@ def get_results(result_kind: str, source: str = "lopf", detail: str | None = Non
     `run_id` (LC-03) answers for one run: see `_results_for_run`.
     """
     if run_id is not None:
-        return _results_for_run(result_kind, run_id)
+        return _results_for_run(result_kind, run_id, reshaped=(
+            source != "lopf" or detail is not None or offset != 0 or limit is not None))
     handler = _resolve_results_handler(result_kind)
     # Some handlers take `source` as a query param; pass via kwargs if the
     # function accepts it, else call bare. Inspect via __code__.co_varnames.
@@ -703,15 +704,18 @@ def get_results(result_kind: str, source: str = "lopf", detail: str | None = Non
     return _with_freshness(result)
 
 
-def _results_for_run(result_kind: str, run_id: Any) -> dict:
+def _results_for_run(result_kind: str, run_id: Any, *, reshaped: bool = False) -> dict:
     """LC-03: one run's results, never another run's.
 
     The run the current results came from answers with the current read; any
     other run answers from the section kept when it finished
     (`retained_results`), or a typed unavailable naming the run. Only the
-    kinds a family keeps take a run_id.
+    kinds a family keeps take a run_id. A digest family answers its bounded
+    digest for every run, and refuses any argument (`reshaped`) that asks for
+    something else, such as the per-snapshot series or another source.
     """
     from services import retained_results, run_evidence
+    from services.results import dispatch_digest
 
     if not isinstance(run_id, str) or not run_evidence._valid_run_id(run_id):
         raise HTTPException(422, {"error_kind": "invalid_results_argument",
@@ -722,6 +726,14 @@ def _results_for_run(result_kind: str, run_id: Any) -> dict:
             "historical_scope_mismatch",
             f"result_kind {result_kind!r} is not kept per run; run_id reads only these kinds.",
             run_id=run_id, scope="historical", kept_kinds=list(retained_results.KEPT_KINDS))
+    digest = retained_results.adapter(section).digest
+    if digest is not None and reshaped:
+        return retained_results.unavailable(
+            "historical_scope_mismatch",
+            f"A run keeps a digest of {result_kind!r} (the default LOPF read over all snapshots), "
+            "not its per-snapshot series or another source; call it with run_id alone.",
+            run_id=run_id, scope="historical", result_kind=result_kind,
+            digest_fields=list(dispatch_digest.FIELDS))
     from services.workflow_tools import solve_freshness
 
     run_evidence._authority()
@@ -729,14 +741,25 @@ def _results_for_run(result_kind: str, run_id: Any) -> dict:
     # The current read answers for its run only while it is that run's own
     # optimal solve (as at capture); otherwise the kept section answers.
     if run is not None and solve_freshness().get("results_current") is True:
+        if digest is None:
+            data = get_results(result_kind)
+        else:
+            live = digest()
+            if live.get("status") != "ok":
+                return retained_results.unavailable(
+                    "historical_scope_mismatch", "This run's results cannot be digested.",
+                    reason=live.get("reason"), result_kind=result_kind, run_id=run_id,
+                    run=run, **facts)
+            data = dispatch_digest.for_kind(live, result_kind)
         return {"status": "ok", "scope": "current", "result_kind": result_kind,
-                "data": get_results(result_kind), "run_id": run_id, "run": run, **facts}
+                "data": data, "run_id": run_id, "run": run, **facts}
     record, refused = retained_results.historical(section, run_id)
     if refused is not None:
         return {**refused, "result_kind": result_kind, "run_id": run_id, **facts,
                 "next_step": "Say this run is not the current result and offer to re-run."}
     return {"status": "ok", "scope": "historical", "result_kind": result_kind,
-            "data": (record.get("data") or {}).get(result_kind),
+            "data": (dispatch_digest.for_kind(record["data"], result_kind) if digest is not None
+                     else (record.get("data") or {}).get(result_kind)),
             "section": section, "run_id": run_id,
             "run": retained_results.run_ref(run_id, record, current=False), **facts,
             "scope_note": "This run's results as kept when it finished; the Results tabs "
