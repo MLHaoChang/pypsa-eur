@@ -46,8 +46,9 @@ describe('SC-00 N UI contract anchors', () => {
     expect(returnButtonSource).toContain('Back to {back.label}')
   })
 
-  it('rule 2: today\'s empty state still has its own Generate button; SC-01 folds it into "Create 3D site"', () => {
-    expect(emptyStateSource).toContain('Generate 3D site')
-    expect(emptyStateSource).toContain('New site')
+  it('rule 2: the empty state is no creation control; its Generate and New site pointer are folded into the one entry', () => {
+    expect(emptyStateSource).not.toContain('Generate 3D site')
+    expect(emptyStateSource).not.toContain('New site</')
+    expect(emptyStateSource).toContain('openSiteEntry')
   })
 })
