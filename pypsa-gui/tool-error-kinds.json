@@ -1666,6 +1666,26 @@
     "unsupported_sensitivity_project": {
       "surface": "inline",
       "why": "LC-17: the baseline is a GridSpine study, which the sweep does not branch. The assistant uses the GridSpine config tools instead; per call."
+    },
+    "invalid_sensitivity_comparison": {
+      "surface": "inline",
+      "why": "compare_sensitivities refuses malformed arguments or more than 8 cases. The assistant names up to 8 cases and metrics from the schema."
+    },
+    "sensitivity_project_not_found": {
+      "surface": "inline",
+      "why": "compare_sensitivities refuses a base or case the caller cannot open, with no detail about it. The assistant asks which project the user means."
+    },
+    "no_sensitivity_cases": {
+      "surface": "inline",
+      "why": "compare_sensitivities finds no sensitivity cases of the base. The assistant offers run_sensitivity_sweep."
+    },
+    "not_a_sensitivity_case": {
+      "surface": "inline",
+      "why": "compare_sensitivities refuses a project that is not a sensitivity case of the base. The assistant uses compare_scenarios for two unrelated projects."
+    },
+    "sensitivity_comparison_changed": {
+      "surface": "inline",
+      "why": "export_sensitivity_comparison refuses when the cases or results changed since the inspected report. The assistant compares again before exporting."
     }
   }
 }

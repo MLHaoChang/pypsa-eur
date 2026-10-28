@@ -5162,6 +5162,7 @@ _COMPARE_FOCUS_TO_TAB = {
     "overview": "overview",
     "capacity": "capacity",
     "dispatch": "dispatch",
+    "loading": "loading",
     "economics": "economics",
     "emissions": "emissions",
     "prices": "prices",
@@ -5174,6 +5175,7 @@ _COMPARE_FOCUS_TO_TAB = {
 _FOCUS_SUMMARY_KEYS = {
     "capacity": "capacity",
     "dispatch": "dispatch",
+    "loading": "loading",
     "economics": "economics",
     "emissions": "emissions",
     "prices": "prices",
@@ -8678,6 +8680,7 @@ from services.experiments import start_experiment, prepare_experiment, list_expe
 from harness.experiment_execution import advance_experiment, refresh_experiment, cancel_experiment
 from harness.experiment_reconciliation import reconcile_experiment
 from harness.experiment_comparison import compare_experiments, export_experiment_comparison
+from harness.sensitivity_comparison import compare_sensitivities, export_sensitivity_comparison
 from services.assistant_tasks import list_tasks, start_task, get_task, resume_task, cancel_task, resolve_task_step
 from services.assistant_tools import (find_capabilities, get_file_delivery, inspect_import, import_uploaded_network,
                                       preview_project_changes, apply_project_changes, create_chart, build_delivery)
@@ -8706,6 +8709,8 @@ DISPATCHERS: dict[str, Any] = {
     "reconcile_experiment": reconcile_experiment,
     "compare_experiments": compare_experiments,
     "export_experiment_comparison": export_experiment_comparison,
+    "compare_sensitivities": compare_sensitivities,
+    "export_sensitivity_comparison": export_sensitivity_comparison,
     "list_experiments": list_experiments,
     "get_experiment": get_experiment,
     "list_tasks": list_tasks,

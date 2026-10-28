@@ -75,6 +75,7 @@ NOT_EDITS = {
     "create_project_snapshot": "a backup of the current inputs",
     "export_asset_results": "an export", "export_chat_summary": "an export",
     "export_eh_report_docx": "an export", "export_experiment_comparison": "an export",
+    "export_sensitivity_comparison": "an export",
     "export_preview_png": "an export", "export_report_docx": "an export", "export_report_pdf": "an export",
     "export_run_evidence": "an export", "export_to_csv": "an export", "export_to_excel": "an export",
     "gridspine_export_handoff_bundle": "an export", "generate_study_report": "a report from a finished study",

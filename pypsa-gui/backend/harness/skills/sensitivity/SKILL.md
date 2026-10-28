@@ -24,12 +24,22 @@ use them only when the user asks for a recorded experiment receipt.
    conversation continues once, by itself, when the last job ends. Then say
    which jobs were queued and that you will report when they finish; do not
    poll.
-5. **Report.** The continuation lists every case's status. Read each
-   completed case's result with `get_study_evidence(section='simulation',
-   compare_to=<baseline id>)`; name a failed case with the cause `get_task`
+5. **Report.** The continuation lists every case's status. Read the
+   completed cases against the base in ONE call, `compare_sensitivities(
+   baseline_project_id=<baseline id>)` (step 7); name a failed case with the cause `get_task`
    gives (`steps[].cases[].error`) and report the others anyway. Never give a
    number for a failed or unverified case.
 6. **Show.** Do not open the Scenarios panel by yourself: the sweep's result
    in chat carries the link "Open the new cases in Scenarios", which opens the
    panel with them highlighted. Use `ui_open_panel(panel_id='scenarios',
    highlight_projects=[<case project ids>])` only when the user asks to see them.
+7. **Compare.** "Compare them with the base" and "which is cheapest and why"
+   are one `compare_sensitivities` call, never pairwise calls you add up.
+   Show its table as given: each metric's label and unit, each case's
+   `display` and `delta_display`, and every `not_comparable` line word for
+   word. Rank only with `rank_by` (`total_cost_meur` for "cheapest"): say
+   `rank.preference.qualifier`, or `no_defensible_preference` as written,
+   and answer "why" only with the `why` facts (declared changes beside the
+   ranked delta). Then ask the `show.offer` question; open Compare with
+   `show.tool` and `show.args` only on the user's yes. Export the same table
+   with `export_sensitivity_comparison` and its `comparison_sha256`.

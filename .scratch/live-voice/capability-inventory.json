@@ -13,7 +13,7 @@
     "pypsa-gui/backend/harness/assurance.py",
     "pypsa-gui/backend/harness/navigation.py"
   ],
-  "tool_count": 341,
+  "tool_count": 343,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -3863,7 +3863,7 @@
       ],
       "safety_tier": "read",
       "assurance_adapter": "read_unvalidated",
-      "schema_sha256": "d7247789b6bfe3500ba63e87f81caca1358ea33c30dc39ff19bade0d661e4a8a",
+      "schema_sha256": "ae2a59fc2f53887a5551c2e836b805dfb3d62c16b7aba738985254f37fae9e8c",
       "behavioral_fixture": "pending"
     },
     {
@@ -7210,6 +7210,64 @@
       "safety_tier": "write",
       "assurance_adapter": "artifact_unvalidated",
       "schema_sha256": "8c8fce545a8997a907233d094bc65af76d0261d75b8d750ccfec1c9917c3d0a5",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "compare_sensitivities",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "baseline_project_id",
+        "case_project_ids",
+        "metrics",
+        "rank_by",
+        "rank_order",
+        "compare_case"
+      ],
+      "required": [
+        "baseline_project_id"
+      ],
+      "safety_tier": "read",
+      "assurance_adapter": "read_unvalidated",
+      "schema_sha256": "7a35e72f72597b6710f0985a86b342211740ab17c323bbfa167f13024403d96f",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "export_sensitivity_comparison",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "baseline_project_id",
+        "case_project_ids",
+        "metrics",
+        "rank_by",
+        "rank_order",
+        "compare_case",
+        "comparison_sha256"
+      ],
+      "required": [
+        "baseline_project_id",
+        "comparison_sha256"
+      ],
+      "safety_tier": "write",
+      "assurance_adapter": "artifact_unvalidated",
+      "schema_sha256": "e88610bb6e1a6c87c1a63c56bee914e28d23af12b819e34c60f1a26d1ec5281b",
       "behavioral_fixture": "pending"
     },
     {
