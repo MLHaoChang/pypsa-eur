@@ -29,3 +29,8 @@ it('shows only New without a fabricated current side or changes', () => {
   expect(screen.queryByText(/Δ/)).toBeNull()
   expect(screen.getByTestId('compare-text').textContent).not.toContain('Current')
 })
+
+it('renders native warning text as sentences rather than Python repr or freshness codes', () => {
+  render(<ProfileCompare data={{ ...comparison, warnings: ["bus 'B1' moved — stale inputs"] }} />)
+  expect(screen.getByText('bus “B1” moved: out of date inputs')).toBeTruthy()
+})

@@ -1,17 +1,17 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useId, useRef, useState } from 'react'
 import { errorText, profilesApi, type ApplyResult, type ReadinessRow } from '../../api/profiles'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
-import ProfileCompare from './ProfileCompare'
+import ProfileCompare, { profileText } from './ProfileCompare'
 import { generatePending } from './renewableGeneration'
 import { weatherKey } from './WeatherBar'
 
-function Refusal({ label, error, retry }: { label: string; error: unknown; retry: () => void }) {
+function Refusal({ label, error, retry, disabled = false }: { label: string; error: unknown; retry: () => void; disabled?: boolean }) {
   const raw = errorText(error)
-  const plain = raw.replace(/—/g, ':').replace(/'([^']+)'/g, '“$1”').replace(/\bstale\b/gi, 'out of date')
+  const plain = profileText(raw)
   return <div role="alert" className="text-warn space-y-1"><p>{label}: {plain}</p>
-    <button type="button" onClick={retry} className="text-accent hover:underline">› Retry</button>
+    <button type="button" onClick={retry} disabled={disabled} className="text-accent hover:underline disabled:opacity-50">› Retry</button>
     <details><summary>Details</summary><pre className="whitespace-pre-wrap">{raw}</pre></details>
   </div>
 }
@@ -20,6 +20,7 @@ export default function RenewableTuner({ project, row, onApplied }: {
   project: string; row: ReadinessRow; onApplied: (result: ApplyResult) => void
 }) {
   const id = useId()
+  const qc = useQueryClient()
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const weather = useQuery({ queryKey: weatherKey(project), queryFn: () => profilesApi.weather(project) })
@@ -52,15 +53,17 @@ export default function RenewableTuner({ project, row, onApplied }: {
       `pending:${job!.id}:${row.generator}`, row.generator), enabled: Boolean(job) && !outdated && !blocked, retry: false })
   const apply = useMutation({ mutationFn: async () => {
     const state = useUIStore.getState()
-    if (!job || job.stamp !== latest.current.stamp || !compare.isSuccess || compare.isFetching
+    if (!job || job.stamp !== latest.current.stamp || generation.isPending || !compare.isSuccess || compare.isFetching
       || state.currentProject !== project || state.readOnly || state.uiMode !== 'expert') throw new Error('This preview is out of date: generate again')
     return profilesApi.apply(project, job.id, row.generator)
   }, onSuccess: result => {
+    void qc.invalidateQueries({ predicate: query => query.queryKey[1] === project })
     if (mounted.current && useUIStore.getState().currentProject === project && latest.current.stamp === job?.stamp) onApplied(result)
   } })
   const fields = schema.data?.fields ?? []
   const changed = fields.filter(f => f.key in edits && edits[f.key] !== f.preset_value)
   function generate() {
+    if (blocked || generation.isPending || apply.isPending) return
     setFormError('')
     let extra: unknown
     try { extra = JSON.parse(advanced || '{}') } catch { setFormError('Advanced settings must be a JSON object.'); return }
@@ -109,15 +112,15 @@ export default function RenewableTuner({ project, row, onApplied }: {
     {formError && <p role="alert" className="text-warn">{formError}</p>}
     <button type="button" disabled={blocked || !preset || !schema.data || generation.isPending || apply.isPending} className="text-accent hover:underline disabled:opacity-50" onClick={generate}>Generate</button>
     {generation.isPending && <p role="status">Generating this profile: wait before generating again.</p>}
-    {generation.isError && <Refusal label="Couldn't generate" error={generation.error} retry={generate} />}
+    {generation.isError && <Refusal label="Couldn't generate" error={generation.error} retry={generate} disabled={blocked || generation.isPending || apply.isPending} />}
     {outdated && <p role="status">This preview is out of date: generate again</p>}
     {job && !outdated && compare.isFetching && <p role="status">Loading comparison…</p>}
-    {job && !outdated && compare.isError && <Refusal label="Couldn't compare" error={compare.error} retry={() => { void compare.refetch() }} />}
+    {job && !outdated && compare.isError && <Refusal label="Couldn't compare" error={compare.error} retry={() => { void compare.refetch() }} disabled={blocked || compare.isFetching || apply.isPending} />}
     {job && !outdated && compare.data && !compare.isError && !compare.isFetching && <ProfileCompare data={compare.data} />}
     <div><button type="button" disabled={blocked || !job || outdated || !compare.isSuccess || compare.isFetching || apply.isPending || generation.isPending}
       className="text-accent hover:underline disabled:opacity-50" onClick={() => apply.mutate()}>{apply.isPending ? 'Applying…' : 'Apply'}</button>
       {!job || compare.isFetching ? <p>Compare first</p> : compare.isError ? <p>Comparison failed: retry or close</p> : null}
     </div>
-    {apply.isError && <Refusal label="Couldn't apply" error={apply.error} retry={() => apply.mutate()} />}
+    {apply.isError && <Refusal label="Couldn't apply" error={apply.error} retry={() => apply.mutate()} disabled={blocked || generation.isPending || apply.isPending || outdated || !compare.isSuccess || compare.isFetching} />}
   </div>
 }

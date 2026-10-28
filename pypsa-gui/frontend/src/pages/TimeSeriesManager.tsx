@@ -30,6 +30,7 @@ import { errorText } from '../api/profiles'
 import DefaultsReview from '../components/series/DefaultsReview'
 import { WeatherBar } from '../components/series/WeatherBar'
 import RenewableTuner from '../components/series/RenewableTuner'
+import { profileText } from '../components/series/ProfileCompare'
 import { generateAndApply, readyRows } from '../components/series/renewableGeneration'
 import { MissingCoordinatesBanner, ReadinessBadge } from '../components/series/RenewableReadiness'
 import { profilesApi, type ReadinessRow } from '../api/profiles'
@@ -2376,7 +2377,7 @@ export default function TimeSeriesManager() {
             readinessOf(seriesEditor.component) ? <RenewableTuner key={`${currentProject}:${seriesEditor.component}`} project={currentProject}
               row={readinessOf(seriesEditor.component)!} onApplied={result => {
                 setSeriesEditor(null)
-                setGenNotice({ tone: 'ok', text: `${result.component}: profile applied. Undo (Ctrl+Z) reverts it.${result.warning ? ` ${result.warning}` : ''}${result.warnings?.length ? ` ${result.warnings.join(' ')}` : ''}` })
+                setGenNotice({ tone: 'ok', text: profileText(`${result.component}: profile applied. Undo (Ctrl+Z) reverts it.${result.warning ? ` ${result.warning}` : ''}${result.warnings?.length ? ` ${result.warnings.join(' ')}` : ''}`) })
                 void qc.invalidateQueries()
               }} /> : <p>This generator is no longer available.</p>
           ) : seriesEditor.family === 'load' ? (

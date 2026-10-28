@@ -10,6 +10,13 @@ const METRICS: Array<[keyof Omit<ProfileStats, 'duration' | 'monthly'>, string, 
 const fmt = (v: number | null | undefined) => v == null ? 'Not available'
   : v.toLocaleString('en-GB', { useGrouping: false, maximumFractionDigits: 4 })
 
+/** Native warning/error text presented as a sentence; raw detail stays available separately. */
+export function profileText(text: string): string {
+  return text.replace(/\s*—\s*/g, ': ')
+    .replace(/(^|[\s:,(])'([^'\n]+)'(?=$|[\s:,.);])/g, '$1“$2”')
+    .replace(/\bstale\b/gi, value => value[0] === 'S' ? 'Out of date' : 'out of date')
+}
+
 function Curves({ rows, current, duration }: {
   rows: Array<{ x: number | string; new: number; current?: number }>; current: boolean; duration?: boolean
 }) {
@@ -54,6 +61,6 @@ export default function ProfileCompare({ data }: { data: Comparison }) {
         {current && <td>{data.delta?.[key] != null && data.delta[key]! > 0 ? '+' : ''}{fmt(data.delta?.[key])}</td>}
       </tr>)}</tbody>
     </table>
-    <WarningList warnings={data.warnings ?? []} />
+    <WarningList warnings={(data.warnings ?? []).map(profileText)} />
   </div>
 }

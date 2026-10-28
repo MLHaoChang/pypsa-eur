@@ -8,8 +8,8 @@ import RenewableTuner from './RenewableTuner'
 const api = vi.hoisted(() => ({ schema: vi.fn(), weather: vi.fn(), presets: vi.fn(), generate: vi.fn(), pending: vi.fn(), compare: vi.fn(), apply: vi.fn() }))
 vi.mock('../../api/profiles', async () => ({ ...await vi.importActual('../../api/profiles'), profilesApi: api }))
 const row = { generator: 'PV', technology: 'solar' as const, bus: 'B', lon: 8, lat: 50, coord_source: 'bus' as const, profile: 'generated' as const }
-function mount(onApplied = vi.fn()) {
-  return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+function mount(onApplied = vi.fn(), client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
+  return render(<QueryClientProvider client={client}>
     <RenewableTuner project="P" row={row} onApplied={onApplied} />
   </QueryClientProvider>)
 }
@@ -99,4 +99,33 @@ it('does not close a newer editor when an old apply finishes after Close', async
   view.unmount()
   await act(async () => { finish({ component: 'PV', hours: 168 }); await Promise.resolve() })
   expect(applied).not.toHaveBeenCalled()
+})
+
+it('refreshes only the affected project cache even if Apply finishes after Close', async () => {
+  let finish!: (result: object) => void
+  api.apply.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  client.setQueryData(['generator_profiles', 'P'], { old: true })
+  client.setQueryData(['generator_profiles', 'Other'], { old: true })
+  const view = mount(vi.fn(), client)
+  await screen.findByLabelText('Tilt (°)')
+  await userEvent.click(screen.getByRole('button', { name: 'Generate' }))
+  await screen.findByTestId('compare-week')
+  await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
+  view.unmount()
+  await act(async () => { finish({ component: 'PV', hours: 168 }); await Promise.resolve() })
+  expect(client.getQueryState(['generator_profiles', 'P'])?.isInvalidated).toBe(true)
+  expect(client.getQueryState(['generator_profiles', 'Other'])?.isInvalidated).toBe(false)
+})
+
+it('disables a generation Retry when the project becomes read-only', async () => {
+  api.generate.mockRejectedValue(new Error('Queue unavailable'))
+  mount(); await screen.findByLabelText('Tilt (°)')
+  await userEvent.click(screen.getByRole('button', { name: 'Generate' }))
+  await screen.findByRole('button', { name: '› Retry' })
+  act(() => useUIStore.setState({ readOnly: true }))
+  const retry = screen.getByRole('button', { name: '› Retry' })
+  expect((retry as HTMLButtonElement).disabled).toBe(true)
+  await userEvent.click(retry)
+  expect(api.generate).toHaveBeenCalledTimes(1)
 })
