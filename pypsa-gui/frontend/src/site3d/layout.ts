@@ -40,7 +40,8 @@ import { assertFootprintValid, footprintGeometry } from './footprints'
 import type { AssetFootprint } from './types'
 import {
   rectOf, rectSize, rectCentre, rectsOverlap, rectDistance, bearingDeg, betweenSegment, pairRequirement, ruleLookup,
-  type Rect, type XY,
+  shapeOverlapsPolygon, polygonRect, roofEligible,
+  type NativeObstacle, type Rect, type XY,
 } from './placementCheck'
 
 export type { Part, Anchors } from './templates'
@@ -64,8 +65,10 @@ export interface SiteObject {
   origin: [number, number]
   /** Degrees clockwise from north. Packed objects face north (0); a placement sets it. */
   heading: number
-  /** Height of the object's base above the ground, metres (rooftop PV on a hall). */
+  /** Height of the object's base above the ground, metres (rooftop PV on a hall or a native roof). */
   elevation?: number
+  /** The native building whose roof the user placed the object on (SC-02). */
+  roof?: string
   /** Footprint envelope (east extent, north extent), metres — what the packer packs. */
   footprint: [number, number]
   parts: Part[]
@@ -99,7 +102,9 @@ export interface SiteInput {
   lines: Line[]
   links: Link[]
   /** `"<Class>:<name>"` → where the user put it (site frame). Others are packed. */
-  placements?: Record<string, { x: number; y: number; heading: number }>
+  placements?: Record<string, { x: number; y: number; heading: number; on?: string }>
+  /** Native scene buildings (SC-02): obstacles to everything packed; their roofs take roof placements. */
+  buildings?: readonly NativeObstacle[]
   /** Every network bus's carrier (not only members'); unknown = AC. */
   busCarrier?: (name: string) => string | undefined
   /** The asset library; the default when absent. */
@@ -186,7 +191,11 @@ class Packer {
   readonly fixed: SiteObject[] = []
   readonly unresolved: string[] = []
   private readonly rects = new Map<SiteObject, Rect>()
-  constructor(private readonly ruleOf: (kind: string) => PlacementRule | undefined, readonly yards: Map<string, SiteObject>) {}
+  private readonly obstacles: { ring: readonly XY[]; rect: Rect }[]
+  constructor(private readonly ruleOf: (kind: string) => PlacementRule | undefined, readonly yards: Map<string, SiteObject>,
+    buildings: readonly NativeObstacle[] = []) {
+    this.obstacles = buildings.filter(b => b.footprint.length >= 3).map(b => ({ ring: b.footprint, rect: polygonRect(b.footprint) }))
+  }
 
   /** The object stands here from now on: an obstacle to everything packed after it. */
   fix(o: SiteObject): void { this.fixed.push(o); this.rects.set(o, rectOf(o)) }
@@ -205,8 +214,15 @@ class Packer {
 
   /** Would the object, standing at `at`, overlap or come closer than a rule allows to anything fixed? */
   violates(o: SiteObject, at: XY): boolean {
-    const r = rectOf({ origin: at, footprint: o.footprint, heading: this.headingFor(o, at) })
+    const shape = { origin: at, footprint: o.footprint, heading: this.headingFor(o, at) }
+    const r = rectOf(shape)
     const rule = this.ruleOf(o.kind)
+    // A native building is an obstacle: no overlap, and the type's own clearance from its walls.
+    for (const b of this.obstacles) {
+      if (shapeOverlapsPolygon(shape, b.ring)) return true
+      const need = rule?.clearanceM ?? 0
+      if (need > 0 && rectDistance(r, b.rect) < need) return true
+    }
     for (const f of this.fixed) {
       if (f === o) continue
       const fr = this.rect(f)
@@ -405,7 +421,8 @@ function rooftopPass(objects: SiteObject[], candidates: Candidate[], lib: readon
   const [w, d] = hall.footprint
   const free = { w: w - 2, d: 0.65 * d - 2, cy: body.pos[1] + (-d / 2 + 1 + 0.15 * d - 1) / 2, h: body.pos[2] + body.size[2] / 2 }
   for (const o of objects) {
-    if (!roofTypes.has(o.kind)) continue
+    // The user put it on a native roof: it stays there.
+    if (!roofTypes.has(o.kind) || o.roof) continue
     const c = candidates.find(x => x.cls === o.type && x.comp.name === o.name)
     if (!c) continue
     const { obj, out } = objectFrom(c.cls, c.comp, c.m, { roof: free }, sizing, footprints[objectKey(o)])
@@ -458,7 +475,9 @@ export function buildSiteLayout(input: SiteInput): SiteLayout {
     if (p) { yard.heading = p.heading; placed.push(objectKey(yard)) }
     yards.set(bus.name, yard)
   }
-  const packer = new Packer(ruleOf, yards)
+  const buildings = input.buildings ?? []
+  const buildingById = new Map(buildings.map(b => [b.id, b]))
+  const packer = new Packer(ruleOf, yards, buildings)
   for (const yard of yards.values()) packer.fix(yard)
 
   // The bus's objects, in site order: yard, then its components in list order.
@@ -474,7 +493,14 @@ export function buildSiteLayout(input: SiteInput): SiteLayout {
         o.origin = [p.x, p.y]
         o.heading = p.heading
         placed.push(objectKey(o))
-        packer.fix(o)
+        const roof = typeof p.on === 'string' && p.on.startsWith('roof:') ? buildingById.get(p.on.slice(5)) : undefined
+        if (roof && roofEligible(roof)) {
+          // On a native roof: lifted to the roof, not an obstacle on the ground.
+          o.roof = roof.id
+          o.elevation = roof.height_m
+        } else {
+          packer.fix(o)
+        }
       } else if (zone(o) !== null) {
         // Rooftop PV bound for a hall is not packed (the rooftop pass places it).
         pending.push(o)
@@ -498,7 +524,7 @@ export function buildSiteLayout(input: SiteInput): SiteLayout {
   }
   rooftopPass(objects, candidates, lib, sizing, footprints)
   // A rooftop object that went onto a hall is not "placed" by its own entry.
-  const onRoof = new Set(objects.filter(o => roofTypes.has(o.kind) && o.elevation).map(objectKey))
+  const onRoof = new Set(objects.filter(o => roofTypes.has(o.kind) && o.elevation && !o.roof).map(objectKey))
   const placedOut = placed.filter(k => !onRoof.has(k))
 
   const keys = new Set(objects.map(objectKey))

@@ -118,7 +118,8 @@ def test_a_kind_no_family_keeps_refuses_for_a_run(repriced):
     assert out['status'] == 'unavailable' and 'data' not in out
     assert out['unavailable_kind'] == 'historical_scope_mismatch'
     assert out['kept_kinds'] == ['statistics', 'cost_breakdown', 'economics_by_carrier',
-                                 'generators', 'storage_dispatch', 'prices', 'price_drivers']
+                                 'generators', 'storage_dispatch', 'prices', 'price_drivers',
+                                 'emissions']
 
 
 def test_a_capacity_run_without_its_section_refuses_with_its_id(repriced):

@@ -3,7 +3,7 @@
 
 # LC-18 — compare a base with several sensitivities
 
-Status: ready-for-human (PR open on claude/lc18-sensitivity-compare; merges with GK B and UX OKs)
+Status: done (#812, fb7876f6)
 Type: task
 Baseline: master `ae95a94a866730c0fe67fad37e238dc281786bd6`
 Dependencies: LC-17; LC-03 adapter interfaces

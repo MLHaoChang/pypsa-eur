@@ -28,6 +28,20 @@ Ops (``{"op": name, **params}``), applied in order:
 - ``smooth``: ``{"window_h": int >= 2}`` centred moving average, wrapping,
   rescaled to keep the energy.
 - ``rescale_energy``: ``{"mwh"}``, power targets only.
+- ``move_window``: ``{"window"?, "by": "±Nd" | "±Nw"}`` (1-365 days or 1-52
+  weeks), a ``maintenance`` availability series only (ticket 07). It moves
+  one recorded outage window — ``window`` may be left out only when there is
+  one — and RE-GENERATES through the availability generator from the moved
+  parameters; it never transforms the series. The ops before it run again,
+  in order, on the regenerated series and keep their own hours: a window or
+  a cap does not move with the outage. An MM-DD end moves inside the source
+  year (wrapping the new year, in that year's calendar); a dated end keeps
+  its year, and the generator refuses one carried out of the source year. A
+  ``rule`` is moved as the window it produces, recorded as
+  ``converted_from_rule``. The op is relative to the parameters it finds, so
+  a replay (onto another year too) moves the regenerated window again, and a
+  move and its opposite give the series back bit for bit (the generator has
+  no seed: its output is a function of the parameters and the year).
 
 ``keep_energy: true`` is refused in v1 (only proportional edits). After every
 op the target's bounds clip the series (no negative load, a bound in its
@@ -45,8 +59,10 @@ and its index.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -62,11 +78,20 @@ from services.profile_gen.apply import (
     _align_to_snapshots,
     commercial_timezone,
 )
+from services.profile_gen.availability import (
+    AvailabilityError,
+    MaintenanceYearError,
+    _day,
+)
+from services.profile_gen.availability import generate_frame as _availability_frame
+from services.profile_gen.families import family_of
 
 EARLIER_TARGET_WARNING = "earlier_target_broken"
 CONNECTION_CHANGED_WARNING = "connection_changed_since_refinement"
 OPS = ("scale_peak_to", "scale_window", "set_floor", "set_cap", "shift", "smooth",
-       "rescale_energy")
+       "rescale_energy", "move_window")
+NO_WINDOW_TO_MOVE = "this series has no maintenance window to move"
+_BY = re.compile(r"([+-]?)(\d{1,3})([dw])")
 # What the server records on an op; only a replay may carry them in.
 _RESOLVED = ("connection", "resolved_mw")
 
@@ -89,6 +114,11 @@ class WindowSourceOpError(RefineError):
 
 class AnnualEnergyOnWindowSourceError(RefineError):
     """An annual energy target on a source that only knows its window."""
+
+
+class MoveWindowYearError(RefineError, MaintenanceYearError):
+    """A move would carry a dated maintenance window out of its source year
+    (the generator's refusal, keeping its ``maintenance_year`` kind)."""
 
 
 class RefineReplayError(RefineError):
@@ -137,6 +167,11 @@ class _Target:
         # outside the window is unknown (NaN), see `current.py`.
         self.window_source = meta.get("profile_annual_basis") == WINDOW_MEAN_BASIS
         self.resolution = str(meta.get("resolution") or "hourly")
+        # A maintenance series is its generator's output for ``params``, with
+        # the value ops in ``history`` run over it (``move_window``).
+        self.params = copy.deepcopy(meta.get("params"))
+        self.windows: list | None = None
+        self.history: list[dict[str, Any]] = []
 
     def clip(self, v: np.ndarray) -> tuple[np.ndarray, int]:
         if self.spec.kind == "per_unit":
@@ -226,6 +261,118 @@ def _window_mask(index: pd.DatetimeIndex, op: Mapping[str, Any], zone: str) -> n
             raise InvalidRefineOpError(f"scale_window.{key} must list integers {lo}-{hi}")
         mask &= np.isin(values, chosen)
     return np.asarray(mask)
+
+
+def _by_days(op: Mapping[str, Any], i: int) -> int:
+    raw = op.get("by")
+    # Length-checked before the match: a caller's string is never scanned long.
+    m = _BY.fullmatch(raw) if isinstance(raw, str) and len(raw) <= 5 else None
+    n = int(m.group(2)) if m else 0
+    if m is None or not 1 <= n <= (365 if m.group(3) == "d" else 52):
+        raise InvalidRefineOpError(
+            f"Step {i + 1}: move maintenance by a whole number of days from 1 to "
+            "365 (or weeks from 1 to 52), earlier or later")
+    return (-n if m.group(1) == "-" else n) * (7 if m.group(3) == "w" else 1)
+
+
+def _move_end(raw: Any, days: int, year: int, what: str) -> str:
+    """One window end moved by ``days``: a dated end keeps its (new) year,
+    refused out of ``year``; an MM-DD end wraps round ``year``'s own calendar
+    (its length, its leap day), so a move and its opposite are exact."""
+    day, dated = _day(raw, year, what)
+    if dated:
+        return f"{day + pd.Timedelta(days=days):%Y-%m-%d}"
+    first = pd.Timestamp(year=year, month=1, day=1)
+    length = (first + pd.DateOffset(years=1) - first).days
+    return f"{first + pd.Timedelta(days=((day - first).days + days) % length):%m-%d}"
+
+
+def _day_words(raw: str) -> str:
+    """'2025-12-20' → '20 Dec 2025'; '06-15' → '15 Jun'."""
+    d = pd.Timestamp(raw if len(raw) == 10 else f"2000-{raw}")
+    return f"{d.day} {d:%b}" + (f" {d.year}" if len(raw) == 10 else "")
+
+
+def _window_words(w: Mapping[str, Any], *, year: bool = False) -> str:
+    """A window in words: '1–7 Jul', '28 Jun–4 Jul'; ``year`` adds a dated
+    window's year: '3–11 Jan 2026'."""
+    a, b = (pd.Timestamp(r if len(r) == 10 else f"2000-{r}")
+            for r in (str(w["from"]), str(w["to"])))
+    dated = year and len(str(w["from"])) == 10 or year and len(str(w["to"])) == 10
+    if dated and a.year != b.year:
+        return f"{_day_words(str(w['from']))}–{_day_words(str(w['to']))}"
+    words = (f"{a.day}–{b.day} {b:%b}" if (a.month, a.year) == (b.month, b.year)
+             else f"{a.day} {a:%b}–{b.day} {b:%b}")
+    return f"{words} {max(a.year, b.year)}" if dated else words
+
+
+def _one_of(windows: list) -> str:
+    names = [_window_words(w) for w in windows]
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} or {names[-1]}"
+
+
+def _move_window(t: _Target, s: pd.Series, op: Mapping[str, Any], i: int,
+                 record: dict[str, Any], extra: dict[str, Any]) -> np.ndarray:
+    params = t.params
+    if (family_of(t.meta) != "availability" or t.meta.get("kind") != "maintenance"
+            or not isinstance(params, Mapping)
+            or (params.get("windows") is None and params.get("rule") is None)):
+        raise InvalidRefineOpError(f"Step {i + 1}: {NO_WINDOW_TO_MOVE}")
+    days = _by_days(op, i)
+    year = int(t.meta.get("weather_year") or s.index[0].year)
+    new = copy.deepcopy(dict(params))
+    rule = new.pop("rule", None)
+    try:
+        if rule is not None:
+            _frame, produced = _availability_frame(["_"], "maintenance",
+                                                   {**new, "rule": rule}, year)
+            new["windows"] = [{"from": w["from"], "to": w["to"], "available": 0.0}
+                              for w in produced["windows"]]
+            record["converted_from_rule"] = rule
+        windows = new["windows"]
+        # The windows in their order: ``window`` is the position, from 0.
+        k = op.get("window")
+        if k is None:
+            if len(windows) != 1:
+                raise InvalidRefineOpError(
+                    f"Step {i + 1}: this series has {len(windows)} maintenance "
+                    f"windows: pick one ({_one_of(windows)})")
+            k = 0
+        elif not isinstance(k, int) or isinstance(k, bool) or not 0 <= k < len(windows):
+            raise InvalidRefineOpError(
+                f"Step {i + 1}: there is no such maintenance window; pick one "
+                f"({_one_of(windows)})")
+        before = {"from": windows[k].get("from"), "to": windows[k].get("to")}
+        after = {end: _move_end(before[end], days, year, f"windows[{k}].{end}")
+                 for end in ("from", "to")}
+        if any(len(after[end]) == 10 and not after[end].startswith(f"{year}-")
+               for end in after):
+            edge = f"last day 31 Dec {year}" if days > 0 else f"first day 1 Jan {year}"
+            raise MoveWindowYearError(
+                f"Step {i + 1}: can't move maintenance {_window_words(before)} by "
+                f"{days:+d} days: it would run {_window_words(after, year=True)}, past "
+                f"the model horizon ({edge}). A dated window stays in its year.")
+        windows[k] = {**windows[k], **after}
+        frame, produced = _availability_frame(["_"], "maintenance", new, year)
+    except RefineError:
+        raise
+    except MaintenanceYearError as exc:
+        raise MoveWindowYearError(f"Step {i + 1}: can't move maintenance: {exc}") from None
+    except AvailabilityError as exc:
+        raise InvalidRefineOpError(f"Step {i + 1}: can't move maintenance: {exc}") from None
+    if not frame.index.equals(pd.DatetimeIndex(s.index)):
+        raise InvalidRefineOpError(
+            f"Step {i + 1}: the series is not on the hours of its source year "
+            f"{year}, so its maintenance window can't be regenerated")
+    record["window"] = k
+    record["moved"] = {end: [before[end], after[end]] for end in ("from", "to")}
+    extra["window_before"], extra["window_after"] = before, after
+    t.params, t.windows = new, produced["windows"]
+    # The ops before the move, again, over the regenerated series.
+    out = pd.Series(frame.iloc[:, 0].to_numpy(dtype=float), index=s.index, name=s.name)
+    for j, prior in enumerate(t.history):
+        out, _ = _apply_op(t, out, prior, j, dict(prior))
+    return out.to_numpy(dtype=float)
 
 
 def _apply_op(t: _Target, s: pd.Series, op: Mapping[str, Any], i: int,
@@ -327,6 +474,8 @@ def _apply_op(t: _Target, s: pd.Series, op: Mapping[str, Any], i: int,
         v = v * (mwh / total)
         extra["energy_requested_mwh"] = mwh
         extra["energy_basis"] = basis
+    elif name == "move_window":
+        v = _move_window(t, s, op, i, record, extra)
     clipped_v, clipped = t.clip(v)
     out = pd.Series(clipped_v, index=s.index, name=s.name)
     stats = {"op": name, "index": i, "peak_before": t.aligned_peak(s),
@@ -359,6 +508,9 @@ def _run(ctx, series, meta, ops, component_type, attribute, *, replaying: bool) 
         raise InvalidRefineOpError("ops must be a non-empty list")
     s = _absolute(series, meta, t.power)
     records, stats, warnings = [], [], []
+    if not replaying:  # the series already carries its recorded ops
+        t.history = [dict(r) for r in meta.get("refinements") or []
+                     if isinstance(r, Mapping) and r.get("op") != "move_window"]
     for i, op in enumerate(ops):
         if not isinstance(op, Mapping):
             raise InvalidRefineOpError(f"op {i} must be an object")
@@ -404,6 +556,8 @@ def _run(ctx, series, meta, ops, component_type, attribute, *, replaying: bool) 
             s, st = _apply_op(t, s, op, i, record)
         records.append(record)
         stats.append(st)
+        if record.get("op") != "move_window":
+            t.history.append(record)
 
     # An earlier target a later op moved.
     final_peak = t.aligned_peak(s)
@@ -426,6 +580,8 @@ def _run(ctx, series, meta, ops, component_type, attribute, *, replaying: bool) 
                 f"left it at {final_energy:g} MWh; put the energy op last")
 
     new_meta = dict(meta)
+    if t.windows is not None:  # a moved maintenance window
+        new_meta["params"], new_meta["windows"] = t.params, t.windows
     if t.power:
         new_meta["unit"] = "MW"
         new_meta.pop("scale_mw", None)

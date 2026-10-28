@@ -25,9 +25,12 @@ export const sitesApi = {
       if (axios.isAxiosError(err) && err.response?.status === 404) return null
       throw err
     }),
-  /** Fetch upstream and (re)write the cache; also what Refresh calls, so a failed refresh keeps the old cache. */
+  /**
+   * Fetch upstream and (re)write the cache; also what Refresh calls, so a failed refresh keeps the old cache.
+   * Quiet: the 3D view words a failure itself (the upstream's raw message stays behind its Details).
+   */
   fetchContext: (project: string, siteId: string) =>
-    client.post<SiteContext>(site(project, siteId)).then(r => r.data),
+    client.post<SiteContext>(site(project, siteId), undefined, { skipErrorToast: true }).then(r => r.data),
   /**
    * The site's capture from the south (plan 3 S5): a raw PNG body to
    * `sites/<id>/thumbnail` (415 / 413 / 422 / 409 as the route says). Quiet:
