@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): In checked-answer mode the assistant can cite rows from one page of `list_components`. Each fact is tied to the project, the exact model inputs and the page it came from, and becomes unavailable once inputs change or another project is opened.

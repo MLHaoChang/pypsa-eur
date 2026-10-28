@@ -247,6 +247,146 @@ def capture_input(owner, args, result):
     return record
 
 
+# A checked page is bounded by list_components' own MAX_PAGE_SIZE rows times
+# the metrics INPUT_METRICS names per class; save() still enforces 128 KiB.
+MAX_PAGE_ROWS = 1000
+MAX_PAGE_FACTS = MAX_PAGE_ROWS * max(len(m) for m in INPUT_METRICS.values())
+
+
+def pointer(*tokens):
+    """RFC 6901 JSON pointer; '~' and '/' in names cannot alias another path."""
+    return "".join(
+        "/" + str(t).replace("~", "~0").replace("/", "~1") for t in tokens
+    )
+
+
+def input_fingerprint(ctx):
+    """The active project's exact model-input fingerprint (the run/cache identity)."""
+    from services.workflow_tools import _network_input_fingerprint
+
+    return digest(
+        {
+            "project_id": ctx.project_uuid,
+            "input_fingerprint": _network_input_fingerprint(ctx, exact=True),
+        }
+    )
+
+
+def page_fingerprint():
+    """Taken before list_components runs; capture keeps evidence only if unchanged."""
+    ctx = PyPSAService.get_active_context()
+    with network_guard():
+        return input_fingerprint(ctx)
+
+
+def _certified(shown, raw):
+    """Exact numeric equality; bool, None, strings and non-finite values never certify.
+
+    JSON has one number type, so an int shown for a float input of the same
+    value certifies; the stored fact is always the raw float.
+    """
+    if type(shown) not in (int, float) or isinstance(raw, bool):
+        return False
+    if not isinstance(raw, Real):
+        return False
+    try:
+        value = float(raw)
+    except (ValueError, TypeError, OverflowError):
+        return False
+    return math.isfinite(value) and math.isfinite(shown) and shown == value
+
+
+def capture_input_page(owner, args, result, before):
+    """Evidence for exactly the rows one list_components page showed.
+
+    Rows are identified by name, never by position. The model-input
+    fingerprint taken before the handler must equal the one read here, so the
+    handler's rows and the raw values come from one input state.
+    """
+    ctx = PyPSAService.get_active_context()
+    component_class = args.get("component_class")
+    if (
+        component_class not in INPUT_METRICS
+        or before is None
+        or not isinstance(result, dict)
+        or not ctx.project_uuid
+    ):
+        return None
+    items, total = result.get("items"), result.get("total_count")
+    if not isinstance(items, list) or not items or type(total) is not int:
+        return None
+    if len(items) > MAX_PAGE_ROWS:
+        return None
+    names = [row.get("name") if isinstance(row, dict) else None for row in items]
+    if any(not isinstance(n, str) for n in names) or len(set(names)) != len(names):
+        return None
+    authorize(owner, ctx.project_uuid)
+    with network_guard():
+        if ctx.solver_state.get("status") == "running":
+            return None
+        if input_fingerprint(ctx) != before:
+            return None
+        static = ctx.network.components[component_class].static
+        if any(n not in static.index for n in names):
+            return None
+        facts = []
+        for row, name in zip(items, names):
+            for metric, unit in INPUT_METRICS[component_class].items():
+                if metric not in static.columns:
+                    continue
+                raw = static.at[name, metric]
+                if _certified(row.get(metric), raw):
+                    facts.append(
+                        {
+                            "path": pointer(name, metric),
+                            "entity_id": name,
+                            "metric": metric,
+                            "value": float(raw),
+                            "unit": unit,
+                        }
+                    )
+        if not facts or len(facts) > MAX_PAGE_FACTS:
+            return None
+        offset = args.get("offset", 0)
+        if result.get("has_more") is not (offset + len(items) < total):
+            return None
+        record = {
+            "version": 1,
+            "record_kind": "evidence",
+            "evidence_id": str(uuid.uuid4()),
+            "owner_id": owner,
+            "project_id": ctx.project_uuid,
+            "org_id": ctx.org_id,
+            "source_kind": "configured_input",
+            "adapter_version": "static-input-page/1",
+            "scope": {
+                "component_class": component_class,
+                "kind": "static_page",
+                "offset": offset,
+                "returned": len(items),
+                "total_count": total,
+                "has_more": result["has_more"],
+            },
+            "facts": facts,
+            "source_sha256": before,
+            "validity": {
+                "outcome": "completed",
+                "as_of": time.time(),
+                "coverage": "page",
+                "warnings": [
+                    "One page of configured inputs, not the whole class.",
+                    "Static configured input; time-series overrides are not checked.",
+                ],
+            },
+            "expires_at": time.time() + RETENTION_SECONDS,
+        }
+        try:
+            save(record, record["evidence_id"])
+        except HTTPException:
+            return None
+    return record
+
+
 def evidence(owner, evidence_id):
     record = load(owner, evidence_id, "evidence")
     if record["source_kind"] == "scoped_result":
@@ -293,6 +433,11 @@ def evidence(owner, evidence_id):
                 return record
             if ctx.solver_state.get("status") == "running":
                 unavailable("evidence_unavailable")
+            if scope.get("kind") == "static_page":
+                # Any model-input edit, or another project, invalidates the page.
+                if input_fingerprint(ctx) != record["source_sha256"]:
+                    unavailable("evidence_unavailable")
+                return record
             if (
                 digest(_raw_facts(ctx, scope["component_class"], scope["entity_id"]))
                 != record["source_sha256"]

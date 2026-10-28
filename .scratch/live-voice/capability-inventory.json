@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-27",
+  "generated_at": "2026-10-28",
   "status": "source inventory and assurance adapter map; behavioral fixtures and GUI parameter mapping pending",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
@@ -173,7 +173,7 @@
         "component_class"
       ],
       "safety_tier": "read",
-      "assurance_adapter": "read_unvalidated",
+      "assurance_adapter": "static_input_page_evidence",
       "schema_sha256": "6e4521eb8f8ac1bc72ab54928c82adbab7b47bf4bb8f627ff00b10ceb2dfa353",
       "behavioral_fixture": "pending"
     },
@@ -8337,6 +8337,13 @@
         "artifact": "none",
         "status": "checked"
       },
+      "static_input_page_evidence": {
+        "effects": "none",
+        "validity": "exact captured static inputs for the rows of one page, input fingerprint rechecked",
+        "progress": "tool_result",
+        "artifact": "none",
+        "status": "checked"
+      },
       "checked_input_effect": {
         "effects": "static input update",
         "validity": "operation contract and independent read-back",
@@ -8433,6 +8440,7 @@
     },
     "checked_tools": [
       "get_component",
+      "list_components",
       "ui_open_panel",
       "update_component"
     ],

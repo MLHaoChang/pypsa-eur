@@ -1,10 +1,22 @@
 """A1: real configured inputs, scoped evidence and anonymous refusal."""
 
 import json
+import math
+import uuid
 
 import pytest
+from fastapi.testclient import TestClient
 
-from tests.assurance_acceptance.support import approval, text_turn, tool_turn
+import main
+from services import assurance_records, chat_tools
+from services.pypsa_service import PyPSAService
+from tests.assurance_acceptance.support import (
+    approval,
+    public_text,
+    text_turn,
+    tool_turn,
+)
+from tests.conftest import attach_session
 
 
 def test_real_input_fact_has_resolvable_project_entity_unit_evidence(baseline, harness):
@@ -111,3 +123,232 @@ def test_listed_input_row_has_page_scoped_project_evidence(baseline, harness):
         "value": 5,
         "unit": "MW",
     } in record["facts"]
+
+
+def page_result(frames):
+    return next(
+        data["result"]
+        for event, data in frames
+        if event == "tool_result" and data["tool_use_id"] == "list-loads"
+    )
+
+
+def page_evidence_ids(frames):
+    return page_result(frames).get("_assurance", {}).get("evidence_ids", [])
+
+
+def add_loads(*names, p_set=7):
+    network = PyPSAService.get_active_context().network
+    for name in names:
+        network.add("Load", name, bus="B1", p_set=p_set)
+
+
+def wrap_handler(monkeypatch, after):
+    """Run the real list_components, then `after(result)` before capture."""
+    real = chat_tools.DISPATCHERS["list_components"]
+
+    def handler(**kwargs):
+        result = real(**kwargs)
+        after(result)
+        return result
+
+    monkeypatch.setitem(chat_tools.DISPATCHERS, "list_components", handler)
+
+
+def test_page_answer_names_its_rows_and_is_never_class_wide(baseline, harness):
+    add_loads("L2")
+    frames = list_loads(
+        harness, page_draft("L2", 7, "/L2/p_set"), offset=1, limit=1
+    )
+    assert approval(frames)["verdict"] == "passed"
+    text = public_text(frames)
+    assert "rows 2..2 of 2" in text and "not the whole class" in text
+    record = harness.client.get(
+        f"/api/chat/evidence/{page_evidence_ids(frames)[0]}"
+    ).json()
+    assert record["scope"]["offset"] == 1 and record["scope"]["returned"] == 1
+    assert {f["entity_id"] for f in record["facts"]} == {"L2"}
+
+
+def test_claim_on_a_row_off_the_page_is_refused(baseline, harness):
+    add_loads("L2")
+    # L1 exists but the page shows only L2; neither entity nor position aliases.
+    for draft in (
+        page_draft("L1", 5, "/L1/p_set"),
+        page_draft("L2", 7, "/0/p_set"),
+        page_draft("L1", 5, "/L2/p_set"),
+    ):
+        frames = list_loads(harness, draft, offset=1, limit=1)
+        assert approval(frames)["verdict"] == "limited"
+        assert "L1" not in public_text(frames)
+
+
+@pytest.mark.parametrize(
+    "args",
+    [{"limit": 0}, {"limit": 1001}, {"offset": -1}, {"offset": "1"}, {"limit": True}],
+)
+def test_out_of_range_page_is_refused_before_the_handler(
+    baseline, harness, monkeypatch, args
+):
+    calls = []
+    monkeypatch.setitem(
+        chat_tools.DISPATCHERS, "list_components", lambda **kw: calls.append(kw)
+    )
+    frames = list_loads(harness, page_draft(), **args)
+    assert not calls
+    assert any(
+        event == "tool_error" and data["error_kind"] == "capability_unsupported"
+        for event, data in frames
+    )
+    assert approval(frames)["verdict"] == "limited"
+
+
+def test_offset_past_the_end_yields_no_evidence_and_no_claim(baseline, harness):
+    frames = list_loads(harness, page_draft(), offset=1)
+    assert "items" not in page_result(frames)
+    assert page_evidence_ids(frames) == []
+    assert approval(frames)["verdict"] == "limited"
+
+
+def test_input_edit_after_capture_invalidates_page_evidence(baseline, harness):
+    evidence_id = page_evidence_ids(list_loads(harness, page_draft()))[0]
+    # Generator inputs are not on the page; the input fingerprint still moves.
+    PyPSAService.get_active_context().network.generators.at["G1", "p_nom"] = 30
+    response = harness.client.get(f"/api/chat/evidence/{evidence_id}")
+    assert response.status_code == 409
+    assert response.json()["detail"]["error_kind"] == "evidence_unavailable"
+    assert "p_set" not in response.text
+
+
+def test_project_switch_after_capture_invalidates_page_evidence(baseline, harness):
+    evidence_id = page_evidence_ids(list_loads(harness, page_draft()))[0]
+    for path in ("/api/projects/Another Baseline", "/api/projects/Another Baseline/activate"):
+        assert harness.client.post(path).status_code == 200
+    response = harness.client.get(f"/api/chat/evidence/{evidence_id}")
+    assert response.status_code == 409
+    assert response.json()["detail"]["error_kind"] == "evidence_unavailable"
+    assert "p_set" not in response.text
+
+
+def test_edit_between_handler_and_capture_yields_no_evidence(
+    baseline, harness, monkeypatch
+):
+    def edit(result):
+        PyPSAService.get_active_context().network.generators.at["G1", "p_nom"] = 30
+
+    wrap_handler(monkeypatch, edit)
+    frames = list_loads(harness, page_draft())
+    assert page_evidence_ids(frames) == []
+    assert approval(frames)["verdict"] == "limited"
+
+
+@pytest.mark.parametrize(
+    ("shown", "certifies"),
+    [(5, True), (5.0, True), ("5", False), (True, False), (None, False), (5.5, False)],
+)
+def test_shown_value_certifies_only_on_exact_numeric_equality(
+    baseline, harness, monkeypatch, shown, certifies
+):
+    def show(result):
+        result["items"][0]["p_set"] = shown
+
+    wrap_handler(monkeypatch, show)
+    frames = list_loads(harness, page_draft())
+    ids = page_evidence_ids(frames)
+    if not ids:
+        assert not certifies
+        return
+    record = harness.client.get(f"/api/chat/evidence/{ids[0]}").json()
+    paths = {f["path"]: f["value"] for f in record["facts"]}
+    assert ("/L1/p_set" in paths) is certifies
+    if certifies:
+        assert paths["/L1/p_set"] == 5.0 and type(paths["/L1/p_set"]) is float
+
+
+@pytest.mark.parametrize("raw", [math.nan, math.inf, -math.inf])
+def test_non_finite_raw_input_never_certifies(baseline, harness, monkeypatch, raw):
+    network = PyPSAService.get_active_context().network
+    network.loads.at["L1", "p_set"] = raw
+
+    def show(result):
+        # Even a handler that echoes the raw value cannot certify it.
+        result["items"][0]["p_set"] = raw
+
+    wrap_handler(monkeypatch, show)
+    frames = list_loads(harness, page_draft())
+    for evidence_id in page_evidence_ids(frames):
+        record = harness.client.get(f"/api/chat/evidence/{evidence_id}").json()
+        assert all(f["metric"] != "p_set" for f in record["facts"])
+    assert approval(frames)["verdict"] == "limited"
+
+
+def test_names_with_pointer_characters_resolve_only_when_escaped(baseline, harness):
+    PyPSAService.get_active_context().network.remove("Load", "L1")
+    add_loads("a/b~c", "a", "b~c")
+    escaped = page_draft("a/b~c", 7, "/a~1b~0c/p_set")
+    assert approval(list_loads(harness, escaped))["verdict"] == "passed"
+    for draft in (
+        page_draft("a/b~c", 7, "/a/b~c/p_set"),
+        page_draft("a", 7, "/a~1b~0c/p_set"),
+        page_draft("b~c", 7, "/a~1b~0c/p_set"),
+    ):
+        assert approval(list_loads(harness, draft))["verdict"] == "limited"
+
+
+def test_largest_page_stays_under_the_stored_evidence_cap(baseline, harness):
+    add_loads(*(f"Load-{i:04d}" for i in range(1, 1000)))
+    frames = list_loads(harness, page_draft(), limit=assurance_records.MAX_PAGE_ROWS)
+    result = page_result(frames)
+    record = harness.client.get(
+        f"/api/chat/evidence/{page_evidence_ids(frames)[0]}"
+    ).json()
+    assert record["scope"]["returned"] == result["returned"] >= len(result["items"])
+    assert record["scope"]["total_count"] == 1000
+    assert len(record["facts"]) <= assurance_records.MAX_PAGE_FACTS
+    assert len(json.dumps(record).encode()) < 128 * 1024
+
+
+@pytest.fixture
+def same_org_client(_auth_db, seeded_identity):
+    from datetime import datetime, timezone
+
+    from db.models import OrgMembership, User
+
+    _engine, session_local = _auth_db
+    with session_local() as db:
+        user = User(
+            id=uuid.uuid4(),
+            email=f"colleague-{uuid.uuid4().hex[:8]}@example.com",
+            password_hash="unused",
+            status="active",
+            is_super_admin=False,
+            created_at=datetime.now(tz=timezone.utc),
+        )
+        db.add(user)
+        db.flush()
+        db.add(
+            OrgMembership(
+                id=uuid.uuid4(),
+                user_id=user.id,
+                org_id=seeded_identity["org_id"],
+                role="admin",
+            )
+        )
+        db.commit()
+        user_id = user.id
+    with TestClient(main.app) as c:
+        yield attach_session(c, session_local, user_id)
+
+
+def test_page_evidence_is_owner_scoped(
+    baseline, harness, other_org_client, same_org_client
+):
+    evidence_id = page_evidence_ids(list_loads(harness, page_draft()))[0]
+    for client in (other_org_client, same_org_client):
+        for path in (
+            f"/api/chat/evidence/{evidence_id}",
+            f"/api/chat/evidence/{uuid.uuid4()}",
+        ):
+            response = client.get(path)
+            assert response.status_code == 404
+            assert "L1" not in response.text and "p_set" not in response.text
