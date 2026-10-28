@@ -444,6 +444,7 @@ POST    /api/results/mc                                                         
 POST    /api/results/mc/abort                                                      -> post_mc_abort_api_results_mc_abort_post
 GET     /api/results/mc/elcc_candidates                                            -> get_mc_elcc_candidates_api_results_mc_elcc_candidates_get
 GET     /api/results/objective_decomposition                                       -> get_objective_decomposition_api_results_objective_decomposition_get
+GET     /api/results/plausibility                                                  -> get_plausibility_api_results_plausibility_get
 GET     /api/results/price_drivers                                                 -> get_price_drivers_api_results_price_drivers_get
 GET     /api/results/prices                                                        -> get_prices_api_results_prices_get
 GET     /api/results/process_uc_check                                              -> get_process_uc_check_api_results_process_uc_check_get
