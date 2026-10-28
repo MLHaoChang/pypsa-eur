@@ -49,11 +49,14 @@ This ticket builds no new loop (design D5).
   - **Connection curtailment:** the LP's own lost tonnes, shown, not recomputed.
 - Each line shows its tonnes, its EUR at the bus's `lost_production_value`, and the result file it came from.
 - EUR is null and displayed "Unavailable" when the value is missing. A risk whose input is missing reads as such, not 0.
-- Total = Σ lines.
+- **Overlap** (GK A, 2026-10-28). The same event can sit in more than one line: an LP shortfall hour that is also an island hour, or a dip trip during a transformer outage. The plan sent to GK A picks one of two rules and states it in the report:
+  - each line is defined over disjoint causes, with a precedence order, and the total = Σ lines; or
+  - the total is labelled "upper bound (lines may overlap)".
 
 **Acceptance:**
 - [ ] On A and B, every line traces to its source result file (named in the payload).
-- [ ] The total equals the sum of the lines.
+- [ ] The total equals the sum of the lines (disjoint rule), or is labelled an upper bound (overlap rule).
+- [ ] One overlapping event (a shortfall hour that is also an island hour) is counted once under the disjoint rule, or shown in both lines with the upper-bound label. Either way, the test asserts it.
 - [ ] A bus with no `lost_production_value` gives tonnes and a null EUR.
 - [ ] A network with no process unit omits the section.
 

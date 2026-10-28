@@ -69,10 +69,15 @@ Owner question **G2P-12-SPLIT** (sent 2026-10-28) asks whether 12a may start now
   - `restart_time_h`.
 
   An unset field means "no input": the check reads unknown, never pass (as 17a's harmonic fields do).
-- **A gridspine static check** beside `static/capacity.py` and `static/flicker.py`:
-  - ΔU% = S_start / S_k at the unit's PoC, less the reactive support of grid-forming storage at that PoC;
-  - judged against the profile's rapid-voltage-change limit (demo 3 %, ledgered; the client's grid code governs);
-  - one row per unit and start method on the grid-readiness scorecard.
+- **A gridspine static check** beside `static/capacity.py` and `static/flicker.py` (GK A, 2026-10-28):
+  - **Source strength.** S_sc = S_k''/c, i.e. Z = c·Un²/S_k'' (the standing c-factor rule). Judge on the PoC's **minimum** short-circuit case when it has one; else use the entered S_k'' with c, plus a note saying so. Reuse flicker's S_k *lookup* (`_sk_of`) only, not its "S_k as is" ledger line.
+  - **Formula.** ΔU% ≈ (S_start·sin φ_start − Q_gfm) / S_sc × 100.
+    - S_start = √3·U·I_start from the start method.
+    - The starting power factor is ledgered per start method (demo, assumed).
+    - Q_gfm is the grid-forming storage's available reactive power at that PoC.
+    - If Q_gfm cannot be stated from the network, set Q_gfm = 0 (conservative) and say so in the row.
+  - **Limit.** Read the profile's existing rapid-voltage-change key (`rvc_limit_pct`, as the scorecard's `rapid_voltage_change` rows do). Add no new profile key. A shipped demo 3 % carries the clause "planning level, not an emission limit allocated to this installation". The project's grid code governs.
+  - **Scorecard.** One row per unit and start method on the grid-readiness scorecard. This changes the row count, so the PR updates the pilot-evaluation golden (`not_checked` count in `pypsa-gui/backend/tests/test_pilot_evaluation.py`) and names that update.
 - **Dip to trips:**
   - demo dip statistics per PoC (counts per year by depth and duration class, in the ledger);
   - a unit trips when a class falls outside its ride-through curve;
@@ -87,7 +92,8 @@ Owner question **G2P-12-SPLIT** (sent 2026-10-28) asks whether 12a may start now
 - **Results:** a campus-study output file and a results section.
 
 **Acceptance (on the B template):**
-- [ ] A DOL mill start fails on 150 MVA; a VFD start passes.
+- [ ] Hand-calculated: a DOL start of the B mill's motor kW at its ledgered start pf on 150 MVA (c applied) gives ΔU = the hand value in % (written in the test) > the limit, so it fails. The VFD start's hand value is ≤ the limit, so it passes.
+- [ ] Q_gfm = 0 and Q_gfm > 0 give the hand values of the formula above.
 - [ ] The restart timeline's lost tonnes equal Σ restart time × rate × mass pull over the units that tripped.
 - [ ] A unit with no motor fields reads unknown on the scorecard, not pass.
 - [ ] The assistant inventory and the attrs-doc compact cap test pass. If the cap is exceeded, ask the owner, as G2P-17A-DOCCAP did; do not raise it unasked.

@@ -42,6 +42,8 @@ Read [the design](../design.md) §3.B (the IC paragraph) first.
 - When an owner conversion feeds a **product** Load (a bus that carries a `process_role` = `shortfall` Generator, the predicate `product_role_generators` that tickets 03, 04 and 08 share), the case does not block. Its counterfactual is the existing baseline re-solve: same process, existing connection, no candidates.
 - A non-product load (heat from the owner's heat pump) keeps today's rules (block, or `reference_purchases`).
 - The case reports the delta in lost tonnes and the delta in lost-production EUR as its own line, separate from the energy bill.
+  - The shortfall Generator's marginal cost *is* the lost-production value, so lost tonnes are already inside each solve's operating cost.
+  - The line is therefore **split out** of the opex delta, never added beside it (GK A, 2026-10-28).
 - Shortfall is lost revenue on both sides and is counted once. The lost-production value is the ledgered bus input, never VoLL (#312).
 
 **Acceptance:**
@@ -49,6 +51,7 @@ Read [the design](../design.md) §3.B (the IC paragraph) first.
 - [ ] With no candidates, NPV = 0 and the lost-tonne delta = 0.
 - [ ] The microgrid, ammonia and H2-hub staged cases keep their NPV to the unit.
 - [ ] A heat-load case without `reference_purchases` still blocks with `owner_conversion_load`.
+- [ ] Reconciliation: the case's line items (energy-bill delta + lost-production delta + the rest) sum exactly to the NPV's cash flows, per year. One test changes only the shortfall (same energy bill) and sees the change in the lost-production line alone.
 
 **Out of scope:** new baseline mechanics; buy-in prices for products.
 
