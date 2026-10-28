@@ -1,0 +1,1 @@
+{"kinds": {"aggregate_not_checkable": {"surface": "inline", "why": "A checked answer asked for a load aggregate whose sum would not be complete: no or unknown loads, a load with no profile, a missing or non-finite step, or loads on different time indexes. Nothing ran; the message names the gap and the assistant offers an unchecked answer, per call."}}}

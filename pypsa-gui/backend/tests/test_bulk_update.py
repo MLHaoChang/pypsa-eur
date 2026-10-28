@@ -192,7 +192,8 @@ def test_setting_carrier_creates_the_carrier_row(client, net):
 
 
 def test_one_call_writes_exactly_one_changelog_entry(client, net):
-    before = len(client.get("/api/changelog/").json())
+    # The log is a process-global deque capped at 500, so count new ids, not length.
+    top = max((e["id"] for e in client.get("/api/changelog/").json()), default=0)
     r = client.patch(BULK, json={
         "component_class": "Generator", "names": ["gas", "solar"],
         "updates": {"p_nom": 123.0, "marginal_cost": 7.0},
@@ -200,7 +201,7 @@ def test_one_call_writes_exactly_one_changelog_entry(client, net):
     assert r.status_code == 200
     entries = client.get("/api/changelog/").json()
     # Two rows and two fields, still exactly ONE audit entry.
-    assert len(entries) == before + 1
+    assert len([e for e in entries if e["id"] > top]) == 1
 
 
 def test_response_reports_row_count_and_field_names(client, net):
@@ -260,7 +261,8 @@ def test_row_form_reports_the_union_of_columns(client, net):
 
 
 def test_row_form_writes_exactly_one_changelog_entry(client, net):
-    before = len(client.get("/api/changelog/").json())
+    # The log is a process-global deque capped at 500, so count new ids, not length.
+    top = max((e["id"] for e in client.get("/api/changelog/").json()), default=0)
     r = client.patch(BULK, json={
         "component_class": "Generator",
         "rows": [
@@ -270,7 +272,7 @@ def test_row_form_writes_exactly_one_changelog_entry(client, net):
     })
     assert r.status_code == 200
     entries = client.get("/api/changelog/").json()
-    assert len(entries) == before + 1
+    assert len([e for e in entries if e["id"] > top]) == 1
     assert "2 row(s)" in entries[0]["description"]
 
 
