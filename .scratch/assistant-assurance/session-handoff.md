@@ -920,3 +920,13 @@ Regressions: `tests/assurance_acceptance` 205 passed; `tests/test_*assur*.py` wi
 
 Remaining for P1: A1.4-RETAINED (retained scoped results are still certified by an unkeyed hash; a server-keyed MAC on the envelope closes it), A1.3 historical as-of runs, A1.5 complete-source aggregates, A1.6/A1.7 validity and masks, the other `read_unvalidated` families, frontend `assurance_state`, SERIES-WINDOW, REVOKE-KIND.
 
+
+### 2026-10-28 — P1 tracer: A1.3 a completed run, checked as of its finish (issue 02)
+
+Policy version 1. `get_run_evidence` with an exact `run_id` is the fourth checked read (`run_metric_evidence`, `run-metrics/1`). Facts are the run's recorded metrics (`/<metric>`, `entity_id` = run id). The scope (kind, mode, `finished_at`, `unsaved_inputs`) is rebuilt from the manifest on every lookup. Failed, running, missing, malformed or unverifiable runs are refused before the handler with `run_not_checkable` (manifest `pypsa-gui/tool-error-kinds.d/claude-assurance-02-run-as-of.json`).
+
+`test_p1_run_as_of.py`: 36 cases; on the base 25 fail and 11 pass (refusals that must stay refusals); after the change 36 pass. Mutants, each red: no manifest digest on lookup (2), no fact re-derivation (1), no scope rebuild (3), no capture digest (1), no manifest shape check (1).
+
+Regressions: `tests/assurance_acceptance` with run-evidence, reference ladder, lv08 tools, inventory, dispositions, kinds manifest and JSON fragments: 898 passed, 6 skipped. `tests/test_*assur*.py` and the checked-answer pilot: 282 passed. `ChatPanel.manifest.test.tsx`: 458 passed.
+
+Remaining for P1: A1.5 complete-source aggregates, A1.6/A1.7 validity and masks, the other `read_unvalidated` families (run sections, `compare_project_runs`), frontend `assurance_state`, SERIES-WINDOW, REVOKE-KIND.

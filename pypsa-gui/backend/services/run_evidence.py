@@ -467,6 +467,31 @@ def get_run_evidence(run_id: str, section: str | None = None) -> dict:
         return out
 
 
+def checked_run_manifest(run_id: Any) -> tuple[str, dict | None, str]:
+    """(project id, manifest, status) for a checked answer about one run.
+
+    The manifest is returned only for a well-formed completed run of the
+    active project whose recorded sections all verify; otherwise None with the
+    run's status ('not_found' when there is no such run, 'corrupt' when its
+    manifest is malformed). Raises like every run read when there is no
+    active project.
+    """
+    root, project_id, _owner = _authority()
+    with _LOCK:
+        record = _load_run(root, project_id, run_id)
+        if record is None:
+            return project_id, None, 'not_found'
+        if (not isinstance(record.get('metrics'), dict)
+                or not isinstance(record.get('sections') or {}, dict)
+                or not isinstance(record.get('finished_at'), str)):
+            return project_id, None, 'corrupt'
+        if record['status'] != 'completed' or any(
+                _section_state(root, record, name)[1] is not None
+                for name in list(record.get('sections') or {})):
+            return project_id, None, record['status']
+        return project_id, copy.deepcopy(record), 'completed'
+
+
 MAX_COMPARE_METRICS = 20
 
 

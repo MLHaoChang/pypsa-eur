@@ -50,6 +50,7 @@ INPUT_ADAPTERS = {
     "static": "static-input/1",
     "static_page": "static-input-page/1",
     "series": "series-input/1",
+    "run": "run-metrics/1",
 }
 
 
@@ -691,8 +692,23 @@ def evidence(owner, evidence_id):
         except (ValueError, KeyError, TypeError):
             unavailable("evidence_unavailable")
         return record
-    # This tranche admits current inputs only. It does not substitute a cold,
-    # saved network for changed foreground inputs or claim retained-run validity.
+    if record["scope"].get("kind") == "run":
+        # As of the run's finish: current inputs and newer runs do not touch it.
+        try:
+            project_id, manifest, _status = run_source(record["scope"]["entity_id"])
+            if (
+                project_id != record["project_id"]
+                or manifest is None
+                or digest(manifest) != record["source_sha256"]
+                or _run_scope(manifest) != record["scope"]
+            ):
+                unavailable("evidence_unavailable")
+            _require_current_facts(record["facts"], _run_facts(manifest))
+        except (HTTPException, KeyError, ValueError, TypeError, AttributeError):
+            unavailable("evidence_unavailable")
+        return record
+    # Otherwise current inputs only. This does not substitute a cold, saved
+    # network for changed foreground inputs.
     ctx = PyPSAService.get_active_context()
     if ctx.project_uuid != record["project_id"]:
         unavailable("evidence_unavailable")
@@ -738,6 +754,99 @@ def evidence(owner, evidence_id):
             _require_current_facts(record["facts"], raw)
     except (KeyError, ValueError, TypeError):
         unavailable("evidence_unavailable")
+    return record
+
+
+def run_source(run_id):
+    """(project id, manifest, status) of one run; the manifest only when the
+    run completed and its recorded sections verify."""
+    from services import run_evidence
+
+    return run_evidence.checked_run_manifest(run_id)
+
+
+def _run_facts(manifest):
+    """One fact per finite recorded metric, bound to the run by its id."""
+    from services import run_evidence
+
+    return [
+        {
+            "path": pointer(metric),
+            "entity_id": manifest["run_id"],
+            "metric": metric,
+            "value": entry["value"],
+            "unit": entry["unit"],
+        }
+        for metric, entry in sorted((manifest.get("metrics") or {}).items())
+        if run_evidence._METRIC.fullmatch(metric)
+        and isinstance(entry, dict)
+        and _finite(entry.get("value")) is not None
+        and isinstance(entry.get("unit"), str)
+    ]
+
+
+def _run_scope(manifest):
+    return {
+        "kind": "run",
+        "entity_id": manifest["run_id"],
+        "run_kind": manifest.get("kind"),
+        "mode": manifest.get("mode"),
+        "finished_at": manifest["finished_at"],
+        "unsaved_inputs": bool(manifest.get("unsaved_inputs")),
+    }
+
+
+def capture_run(owner, args, result, digest_before):
+    """Evidence for the metrics one get_run_evidence result showed, as of the
+    run's finish. A metric certifies only when the shown value equals the
+    recorded one; the manifest must be the one digested before the handler."""
+    ctx = PyPSAService.get_active_context()
+    if digest_before is None or not isinstance(result, dict) or not ctx.project_uuid:
+        return None
+    authorize(owner, ctx.project_uuid)
+    project_id, manifest, _status = run_source(args.get("run_id"))
+    if (
+        manifest is None
+        or project_id != ctx.project_uuid
+        or digest(manifest) != digest_before
+        or result.get("run_id") != manifest["run_id"]
+        or result.get("status") != "completed"
+        or not isinstance(result.get("metrics"), dict)
+    ):
+        return None
+    shown = result["metrics"]
+    facts = [
+        fact
+        for fact in _run_facts(manifest)
+        if isinstance(shown.get(fact["metric"]), dict)
+        and shown[fact["metric"]].get("unit") == fact["unit"]
+        and _certified(shown[fact["metric"]].get("value"), fact["value"])
+    ]
+    if not facts:
+        return None
+    record = {
+        "version": 1,
+        "record_kind": "evidence",
+        "evidence_id": str(uuid.uuid4()),
+        "owner_id": owner,
+        "project_id": project_id,
+        "org_id": ctx.org_id,
+        "source_kind": "run_manifest",
+        "adapter_version": INPUT_ADAPTERS["run"],
+        "scope": _run_scope(manifest),
+        "facts": facts,
+        "source_sha256": digest_before,
+        "validity": {
+            "outcome": "completed",
+            "as_of": time.time(),
+            "coverage": "run_metrics",
+            "warnings": [
+                "Metrics as recorded when the run finished; current inputs may differ.",
+            ],
+        },
+        "expires_at": time.time() + RETENTION_SECONDS,
+    }
+    save(record, record["evidence_id"])
     return record
 
 

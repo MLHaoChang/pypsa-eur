@@ -1,0 +1,1 @@
+{"kinds": {"run_not_checkable": {"surface": "inline", "why": "A checked answer asked for a run that did not complete, is missing, or whose recorded evidence does not verify. Nothing ran; the message names the run's status and the assistant offers an unchecked answer, per call."}}}
