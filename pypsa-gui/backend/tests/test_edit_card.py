@@ -9,6 +9,7 @@ tests/test_oj05_selected_line_edit_journey.py.
 """
 import json
 
+from fastapi import HTTPException
 import pypsa
 import pytest
 
@@ -29,16 +30,8 @@ def test_every_write_tool_is_an_edit_or_a_named_non_edit():
     assert set(edit_card.SETTINGS_EDITS) <= writes, set(edit_card.SETTINGS_EDITS) - writes
 
 
-# Q3-CARDS-1: every settings edit has its own old → new adapter. Slice 2 moves the rest here.
-_NO_ADAPTER_YET = frozenset({
-    "set_site_connection", "attach_tariff", "import_urdb_tariff", "define_participants",
-    "put_stress_scenarios", "record_asset_health", "set_study_parameter", "update_project_layout",
-    "gridspine_update_config", "gridspine_edit_template_param", "gridspine_set_dispatch_source",
-    "campus_set_island_config", "campus_set_library", "campus_draft_campus", "set_report_mapping",
-    "set_report_template", "import_edited_report", "set_weather_choice", "import_library_series",
-    "import_meter_data", "put_library_item", "set_finance_inputs", "set_project_sites",
-    "import_map_geometry",
-})
+# Q3-CARDS-1: every settings edit has its own old → new adapter; a new edit tool without one is listed here.
+_NO_ADAPTER_YET = frozenset()
 
 
 def test_every_settings_edit_has_an_adapter():
@@ -278,6 +271,16 @@ def test_a_parts_edit_shows_the_native_clear_of_an_imported_overnight_cost(grid)
     assert PyPSAService.get_network().storage_units["overnight_cost"].isna()["Battery"]
 
 
+def test_a_receipt_after_a_solve_reports_results_stale(grid):
+    """The solve records its input fingerprint; an edit after it makes the receipt say the results are stale."""
+    PyPSAService.get_network().meta["assistant_solve_input_fingerprint"] = edit_card._fingerprint()
+    assert edit_card._results_stale() is False
+    frames, cards, result = _dispatch(grid, "update_component", {"component_class": "Line", "name": "L1",
+                                                                 "attrs": {"s_nom": 400.0}})
+    assert result["_edit_receipt"]["outcome"] == "verified"
+    assert result["_edit_receipt"]["results_stale"] is True
+
+
 def test_the_receipt_names_a_section_state_that_changed(grid, monkeypatch):
     """PR-2: the card names its flow section; the receipt adds the section's
     state after the write and says when it changed. The section-state read is
@@ -304,3 +307,21 @@ def test_the_section_state_does_not_bind_the_card(grid, monkeypatch):
     first["section_state"] = edit_card._section_state("connection")  # the state moved on
     edit_card.require_current("update_component", {"component_class": "Line", "name": "L1",
                                                    "attrs": {"s_nom": 9.0}}, first)
+
+
+@pytest.mark.parametrize("partial,kind", [
+    ({"solve_strategy": "rolling", "rolling_horizon": 24, "rolling_overlap": 24}, "rolling_overlap_exceeds_horizon"),
+    ({"solve_strategy": "rolling", "rolling_horizon": 0}, "rolling_horizon_invalid"),
+    ({"solve_strategy": "rolling", "rolling_horizon": 48, "rolling_overlap": -1}, "rolling_overlap_invalid"),
+])
+def test_solver_card_refuses_an_unusable_rolling_window(grid, partial, kind):
+    with pytest.raises(HTTPException) as exc:
+        edit_card.preview("update_solver_config", {"partial": partial})
+    assert exc.value.detail["error_kind"] == kind
+
+
+def test_solver_card_allows_turning_rolling_off_with_a_stale_window(grid):
+    cfg = PyPSAService.get_active_context().solver_state["solver_config"]
+    cfg.solve_strategy, cfg.rolling_horizon, cfg.rolling_overlap = "rolling", 24, 24  # legacy pair
+    card = edit_card.preview("update_solver_config", {"partial": {"solve_strategy": "full"}})
+    assert [r["field"] for r in card["rows"]] == ["solve_strategy"]

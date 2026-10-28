@@ -27,6 +27,8 @@ An outsourced app opens one PR from its `outsource/<slug>` branch, with a body t
 | #711 | Editable campuses and Blender exchange (spec only) | Codex | `claude/site-scene-generation-spec` | `.scratch/site-scene-generation/execution-guide.md` | — | merged 2026-10-26 20:53 CET (GK B + UX OK @fd485e50; fixes by our session, CODEX-711-OWN) |
 | #712 | Optional asset footprint dimensions (width, depth, height) in Site 3D and Properties | Codex | `claude/asset-footprint-parameters` | PR body | — | merged 26 Oct 20:05 CET (UX OK @1f7a44ba) |
 | #713 | Library gap research and implementation plan (19 tickets, LG-01…LG-19) | Codex | `claude/library-gap-implementation-plan` | PR body | — | draft; GK plan OK @1d79b630 with 9 conditions |
+| P | Five wording fixes: end-year refusal, screen notes without exceptions, motor-start digits, upload toasts' em dash, Guided destructive/execution card headers | Codex | `outsource/ui-wording-pack-2` | `.scratch/project-workflow/outsource/P-ui-wording-pack-2.md` | none | briefed 2026-10-28; starts after #827 and #838 merge |
+| Q | Core read tools always survive OpenAI's 128-tool cut; Network.remove signature pin; validate_network annotation; results_current wording | Codex | `outsource/tool-selection-pins` | `.scratch/harness/outsource/Q-tool-selection-pins.md` | none | briefed 2026-10-28; starts after #812 merges; GK B reviews |
 
 I and G-a both edit `harness/catalogue.py` and the capability inventory: whichever merges second merges master and regenerates the inventory with `--write`, never by hand. H touches no file G-a or I touches.
 
@@ -35,3 +37,5 @@ K also adds a tool to `harness/catalogue.py` and regenerates the capability inve
 Ordering: if C merges before B, B adds its one new kind (`task_step_retry_limit`) to the manifest; both briefs say so. E (LC-22, the "not via chat" list) builds on A (merged), since both edit `find_capabilities`. Whichever of D and E merges second classifies the live preview path; both briefs say so.
 
 Source: the PR #567 assessment, `.scratch/harness/pr-567-assessment.md`.
+
+P edits `eh_templates.py` (also #838's) and `grid_readiness.py` (also #827's), so it starts after both merge. Q edits `harness/providers/wiring.py` (also #812's) and one annotation line in `services/chat_tools.py`, so it starts after #812 merges and touches nothing else in `chat_tools.py`. P and Q share no file.

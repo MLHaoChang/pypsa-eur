@@ -38,6 +38,7 @@ from services.reports import store, templates
 __all__ = [
     "RoundTripNotAReport",
     "diff_versions",
+    "read_edited_copy",
     "roundtrip_available",
     "run_round_trip",
 ]
@@ -88,6 +89,20 @@ def _meta_has(field: str) -> bool:
     return field in ReportMeta.model_fields and field in store._CARRIED_META_FIELDS
 
 
+def read_edited_copy(base: ReportDocument, upload_bytes: bytes, *, read: Any = None) -> Any:
+    """
+    The edited copy read against `base` (WP12's `RoundTripResult`), or
+    `RoundTripNotAReport` when nothing in it matched a section. Pure: nothing
+    is written, so the edit card shows what `run_round_trip` will merge.
+    """
+    result = (read or _read_edited_docx())(bytes(upload_bytes), base)
+    if not _matched_sections(result):
+        raise RoundTripNotAReport(
+            "nothing in the file matched a section of the report: no sec:<id> "
+            "bookmark and no heading names one of its sections")
+    return result
+
+
 def run_round_trip(project_dir: pathlib.Path, report_id: str, upload_bytes: bytes, *,
                    bind_as_template: bool, file_id: str | None = None,
                    ) -> tuple[ReportDocument, Any]:
@@ -107,11 +122,7 @@ def run_round_trip(project_dir: pathlib.Path, report_id: str, upload_bytes: byte
     read = _read_edited_docx()
     merge = _merge_round_trip()
     base = store.load_report(project_dir, report_id)
-    result = read(bytes(upload_bytes), base)
-    if not _matched_sections(result):
-        raise RoundTripNotAReport(
-            "nothing in the file matched a section of the report: no sec:<id> "
-            "bookmark and no heading names one of its sections")
+    result = read_edited_copy(base, upload_bytes, read=read)
     merged = merge(base, result)
     if not isinstance(merged, ReportDocument):
         merged = ReportDocument.model_validate(merged)

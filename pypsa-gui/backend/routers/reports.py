@@ -68,6 +68,7 @@ an id outside the slug charset cannot name a figure that exists.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import pathlib
 import uuid
@@ -673,6 +674,37 @@ def get_template(report_id: str,
             "plan": meta.mapping_plan}
 
 
+def _validated_plan(project: AuthorizedProject, doc: ReportDocument,
+                    body: dict[str, Any]) -> tuple[dict[str, Any], TemplateOutline]:
+    """
+    The plan `put_template_plan` would store for `body`, with the bound
+    template's outline: the pure half of the route (nothing is written), so
+    the edit card shows exactly what the route stores.
+    """
+    _data, outline = _bound(project, doc)
+    if outline.mode != "untagged":
+        raise _template_not_untagged(outline.mode)
+    raw = dict(body)
+    strict = bool(raw.pop("strict", False))
+    try:
+        plan, notes = templates.sanitise_plan(raw, outline, doc)
+    except templates.InvalidMappingPlan as exc:
+        raise HTTPException(400, {
+            "error_kind": "invalid_mapping_plan",
+            "message": f"Not a mapping plan: {exc}",
+            "notes": [str(exc)],
+        }) from exc
+    if strict and notes:
+        raise HTTPException(400, {
+            "error_kind": "invalid_mapping_plan",
+            "message": "The plan refers to headings or sections the template or the "
+                       "report does not have (strict mode refuses it): "
+                       + "; ".join(notes),
+            "notes": notes,
+        })
+    return plan, outline
+
+
 @router.put("/{name}/reports/{report_id}/template/plan")
 def put_template_plan(report_id: str, body: dict[str, Any],
                       project: AuthorizedProject = ProjectAccessDep,
@@ -696,27 +728,7 @@ def put_template_plan(report_id: str, body: dict[str, Any],
                        "it) before saving a mapping plan; a mapping job would "
                        "overwrite it when it finishes.",
         })
-    _data, outline = _bound(project, doc)
-    if outline.mode != "untagged":
-        raise _template_not_untagged(outline.mode)
-    raw = dict(body)
-    strict = bool(raw.pop("strict", False))
-    try:
-        plan, notes = templates.sanitise_plan(raw, outline, doc)
-    except templates.InvalidMappingPlan as exc:
-        raise HTTPException(400, {
-            "error_kind": "invalid_mapping_plan",
-            "message": f"Not a mapping plan: {exc}",
-            "notes": [str(exc)],
-        }) from exc
-    if strict and notes:
-        raise HTTPException(400, {
-            "error_kind": "invalid_mapping_plan",
-            "message": "The plan refers to headings or sections the template or the "
-                       "report does not have (strict mode refuses it): "
-                       + "; ".join(notes),
-            "notes": notes,
-        })
+    plan, _outline = _validated_plan(project, doc, body)
     try:
         store.update_meta(project.directory, report_id, mapping_plan=plan)
     except store.ReportStoreError as exc:
@@ -750,6 +762,34 @@ def _job_slot_busy() -> bool:
 
     with PyPSAService.get_solver_state_lock():
         return slot_is_busy(_state())
+
+
+@contextlib.contextmanager
+def _roundtrip_refusals(meta: Any, file_id: str, report_id: str):
+    """The round trip's refusals as the route answers them (the edit card raises the same)."""
+    try:
+        yield
+    except ImportError as exc:
+        raise HTTPException(500, {
+            "error_kind": "tool_error",
+            "message": "The round trip is not available in this build "
+                       "(services.reports.roundtrip is missing).",
+        }) from exc
+    except templates.TemplateReadError as exc:
+        raise HTTPException(400, {
+            "error_kind": "roundtrip_unreadable",
+            "message": f"Upload {file_id} ({meta.filename}) could not be read as a "
+                       f"Word document: {exc}. Export the report, edit the .docx in "
+                       "Word and upload that file.",
+        }) from exc
+    except roundtrip_service.RoundTripNotAReport as exc:
+        raise HTTPException(400, {
+            "error_kind": "roundtrip_not_a_report",
+            "message": f"Upload {file_id} ({meta.filename}) is not an edited copy of "
+                       f"report {report_id}: {exc}. Nothing was merged.",
+        }) from exc
+    except store.ReportStoreError as exc:
+        raise _http(exc) from exc
 
 
 @router.post("/{name}/reports/{report_id}/roundtrip")
@@ -786,31 +826,10 @@ def roundtrip_report(report_id: str, body: RoundTripBody,
                                           project_dir=project.directory)
     data = upload_service.get_upload_bytes(project.name, body.file_id,
                                            project_dir=project.directory)
-    try:
+    with _roundtrip_refusals(meta, body.file_id, report_id):
         doc, result = roundtrip_service.run_round_trip(
             project.directory, report_id, data,
             bind_as_template=body.bind_as_template, file_id=body.file_id)
-    except ImportError as exc:
-        raise HTTPException(500, {
-            "error_kind": "tool_error",
-            "message": "The round trip is not available in this build "
-                       "(services.reports.roundtrip is missing).",
-        }) from exc
-    except templates.TemplateReadError as exc:
-        raise HTTPException(400, {
-            "error_kind": "roundtrip_unreadable",
-            "message": f"Upload {body.file_id} ({meta.filename}) could not be read as a "
-                       f"Word document: {exc}. Export the report, edit the .docx in "
-                       "Word and upload that file.",
-        }) from exc
-    except roundtrip_service.RoundTripNotAReport as exc:
-        raise HTTPException(400, {
-            "error_kind": "roundtrip_not_a_report",
-            "message": f"Upload {body.file_id} ({meta.filename}) is not an edited copy of "
-                       f"report {report_id}: {exc}. Nothing was merged.",
-        }) from exc
-    except store.ReportStoreError as exc:
-        raise _http(exc) from exc
     return {
         "report_id": report_id,
         "version": doc.version,
