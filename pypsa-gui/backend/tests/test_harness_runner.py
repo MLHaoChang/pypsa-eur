@@ -754,3 +754,19 @@ def test_a_step_the_runner_holds_is_refused_to_the_chat_before_any_card(detached
     frames, _ = dispatch(session, monkeypatch, 'solve_queue_enqueue', args)
     assert [p['error_kind'] for e, p in frames if e == 'tool_error'] == ['task_step_claimed']
     assert 'tool_pending_confirmation' not in [e for e, _ in frames] and queue_rows() == rows
+
+
+def test_the_runner_refuses_to_lock_or_wake_a_path_outside_assistant_tasks(tmp_path):
+    inside = tmp_path / "project" / "assistant_tasks"
+    inside.mkdir(parents=True)
+    with harness_runner._file_lock(inside / "a.json"):
+        pass
+    outside = [tmp_path / "project" / "a.json", inside / "nested" / "a.json", inside / ".." / "a.json", inside / "a.txt"]
+    for path in outside:
+        with pytest.raises(ValueError):
+            with harness_runner._file_lock(path):
+                pass
+    assert not (tmp_path / "project" / "a.json.lease").exists()
+    runner = harness_runner.Runner()
+    runner.wake(tmp_path / "project" / "a.json")
+    assert runner._due == set()

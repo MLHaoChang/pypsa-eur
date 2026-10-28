@@ -88,11 +88,26 @@ def _read(path):
         return None
 
 
+def _task_path(path):
+    """`path` resolved, refused (ValueError) unless it is a task file directly
+    inside an `assistant_tasks` folder: the only files the runner drives or
+    locks. Spelled as realpath plus a string prefix check, the form CodeQL
+    reads as a py/path-injection sanitiser (see `site_service`)."""
+    full = os.path.realpath(path)
+    root = os.path.join(os.path.dirname(os.path.dirname(full)), "assistant_tasks")
+    if not full.startswith(root + os.sep):
+        raise ValueError(f"not a task file: {path}")
+    if not full.endswith(".json"):
+        raise ValueError(f"not a task file: {path}")
+    return Path(full)
+
+
 @contextlib.contextmanager
 def _file_lock(path):
     """The lease's cross-process guard: an exclusive lock on a sidecar file."""
     from harness import durable
-    with durable.file_lock(Path(path).with_name(Path(path).name + ".lease"), timeout=LEASE_SECONDS):
+    path = _task_path(path)
+    with durable.file_lock(path.with_name(path.name + ".lease"), timeout=LEASE_SECONDS):
         yield
 
 
@@ -328,6 +343,11 @@ class Runner:
 
     def wake(self, path=None):
         if path is not None:
+            try:
+                _task_path(path)
+            except ValueError:
+                logger.warning("harness runner: wake for a path outside assistant_tasks refused")
+                return
             with self._due_lock:
                 self._due.add(Path(path))
         self._wakeup.set()
