@@ -170,3 +170,14 @@ def test_the_check_leaves_a_core_to_the_plan_and_never_drops_below_one(monkeypat
     assert PU.check_workers() == 1
     monkeypatch.setattr(PU.os, "cpu_count", lambda: None)
     assert PU.check_workers() == 1
+
+
+def test_the_worst_window_ignores_shortfall_noise():
+    def row(window, pct, extra, above):
+        return {"window": window, "pct": pct,
+                "extra_shortfall": {"b": {"value": extra, "above_tolerance": above}}}
+
+    rows = [row("jan", 0.02, 0.0, False), row("oct", 0.009, 4e-10, False)]
+    assert PU._worst(rows)["window"] == "jan"
+    rows.append(row("jul", 0.001, 5.0, True))
+    assert PU._worst(rows)["window"] == "jul"

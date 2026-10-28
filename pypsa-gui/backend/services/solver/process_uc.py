@@ -617,9 +617,10 @@ def _flag_message(plain: bool) -> str:
 
 
 def _worst(rows: list[dict]) -> dict | None:
-    """The verified window with the largest extra lost production, then the largest cost gap."""
+    """The verified window with the largest extra lost production above tolerance (noise ranks as none), then the
+    largest cost gap."""
     def key(r):
-        lost = sum(max(0.0, float(e["value"])) for e in r["extra_shortfall"].values())
+        lost = sum(float(e["value"]) for e in r["extra_shortfall"].values() if e["above_tolerance"])
         return (lost, r["pct"] if r["pct"] is not None else math.inf)
     return max(rows, key=key) if rows else None
 
