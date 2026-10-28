@@ -716,11 +716,12 @@ def _results_for_run(result_kind: str, run_id: Any) -> dict:
     if not isinstance(run_id, str) or not run_evidence._valid_run_id(run_id):
         raise HTTPException(422, {"error_kind": "invalid_results_argument",
                                   "message": "run_id must be a run id from list_project_runs."})
-    if result_kind not in retained_results.SUMMARY_KINDS:
+    section = retained_results.KEPT_KINDS.get(result_kind)
+    if section is None:
         return retained_results.unavailable(
             "historical_scope_mismatch",
             f"result_kind {result_kind!r} is not kept per run; run_id reads only these kinds.",
-            run_id=run_id, scope="historical", kept_kinds=list(retained_results.SUMMARY_KINDS))
+            run_id=run_id, scope="historical", kept_kinds=list(retained_results.KEPT_KINDS))
     from services.workflow_tools import solve_freshness
 
     run_evidence._authority()
@@ -730,13 +731,13 @@ def _results_for_run(result_kind: str, run_id: Any) -> dict:
     if run is not None and solve_freshness().get("results_current") is True:
         return {"status": "ok", "scope": "current", "result_kind": result_kind,
                 "data": get_results(result_kind), "run_id": run_id, "run": run, **facts}
-    record, refused = retained_results.historical(retained_results.SUMMARY_SECTION, run_id)
+    record, refused = retained_results.historical(section, run_id)
     if refused is not None:
         return {**refused, "result_kind": result_kind, "run_id": run_id, **facts,
                 "next_step": "Say this run is not the current result and offer to re-run."}
     return {"status": "ok", "scope": "historical", "result_kind": result_kind,
             "data": (record.get("data") or {}).get(result_kind),
-            "section": retained_results.SUMMARY_SECTION, "run_id": run_id,
+            "section": section, "run_id": run_id,
             "run": retained_results.run_ref(run_id, record, current=False), **facts,
             "scope_note": "This run's results as kept when it finished; the Results tabs "
                           "show the current results, not this run."}

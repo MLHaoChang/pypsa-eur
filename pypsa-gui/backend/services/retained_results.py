@@ -13,7 +13,8 @@ completed run, solved from the current inputs) so the live read answers.
 One adapter per family. A family is one `Retained` row and its capture, the
 registry entry that names its section (`result_views.ResultView.
 historical_section`, held equal to these rows by tests/test_retained_summary.py)
-and its read's `run_id` argument.
+and its read's `run_id` argument. A get_results family names its `kinds`; each
+kind is kept by one family only, and `KEPT_KINDS` maps it to that section.
 """
 from __future__ import annotations
 
@@ -37,12 +38,14 @@ class Retained:
     project context and actor bound; it returns the section, or None when the
     read did not answer (no section is stored: the run then refuses).
     `refusal` is the unavailable_kind a past run without the section answers.
+    `kinds` are the get_results kinds the section keeps (none for other reads).
     """
 
     section: str
     capture: Callable[[dict], dict | None]
     refusal: str
     label: str
+    kinds: tuple[str, ...] = ()
 
 
 def _capture_loadflow(token: dict) -> dict | None:
@@ -55,20 +58,20 @@ def _capture_loadflow(token: dict) -> dict | None:
 
 
 SUMMARY_SECTION = 'results_summary'
-SUMMARY_KINDS = ('statistics', 'cost_breakdown')
+CAPACITY_SECTION = 'results_capacity'
 
 
-def _capture_summary(token: dict) -> dict | None:
-    """The Summary tab's two reads as the results API serves them (the route's
-    own payload, so nothing the chat layer adds about the current inputs is
-    kept), only while they describe this run's own optimal solve."""
+def _capture_kinds(kinds: tuple[str, ...]) -> dict | None:
+    """These get_results reads as the results API serves them (the route's own
+    payload, so nothing the chat layer adds about the current inputs is kept),
+    only while they describe this run's own optimal solve."""
     from services import chat_tools
     from services.workflow_tools import solve_freshness
 
     if solve_freshness().get('results_current') is not True:
         return None
     out = {}
-    for kind in SUMMARY_KINDS:
+    for kind in kinds:
         payload = chat_tools._payload_or_no_data(
             kind, chat_tools._resolve_results_handler(kind)(), chat_tools._RESULTS_NO_DATA_MESSAGE)
         if isinstance(payload, dict):
@@ -80,12 +83,22 @@ def _capture_summary(token: dict) -> dict | None:
     return out
 
 
+def _results_family(section: str, refusal: str, label: str, kinds: tuple[str, ...]) -> Retained:
+    return Retained(section, lambda token: _capture_kinds(kinds), refusal, label, kinds)
+
+
 ADAPTERS: tuple[Retained, ...] = (
     Retained('loadflow', _capture_loadflow,
              'historical_loadflow_unavailable', 'load flow'),
-    Retained(SUMMARY_SECTION, _capture_summary,
-             'historical_results_unavailable', 'summary results'),
+    _results_family(SUMMARY_SECTION, 'historical_results_unavailable', 'summary results',
+                    ('statistics', 'cost_breakdown')),
+    # cost_breakdown, the Capacity Expansion tab's other read, is kept with Summary.
+    _results_family(CAPACITY_SECTION, 'historical_capacity_unavailable', 'capacity results',
+                    ('economics_by_carrier',)),
 )
+
+# get_results kind -> the one section that keeps it.
+KEPT_KINDS: dict[str, str] = {k: a.section for a in ADAPTERS for k in a.kinds}
 
 
 def adapter(section: str) -> Retained:
