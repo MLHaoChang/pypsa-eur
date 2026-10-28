@@ -23,6 +23,7 @@ import { StepPeriodEconomics } from './modelHorizon/StepPeriodEconomics'
 import { StepWindow } from './modelHorizon/StepWindow'
 import { StepSampling } from './modelHorizon/StepSampling'
 import { StepWeights, StepWeightsAdvanced } from './modelHorizon/StepWeights'
+import SiteSetupSection from '../site3d/SiteSetupSection'
 
 // ── Load carrier canonicaliser ──────────────────────────────────────────────
 // Mirrors loadCarrierKey in Dispatch.tsx + _canonical_load_carrier_key on the
@@ -797,6 +798,9 @@ export default function ModelHorizon() {
             : 'capacity decided once'}
         />
       </RowGrid>
+
+      {/* ── Site coordinates and the one "Create 3D site" (Site 3D rule 4: Expert home) ── */}
+      <SiteSetupSection variant="expert" />
 
       {/* ── Guided steps, routed off `view` (Task 3 shell) ── */}
       {view === 'summary' ? (

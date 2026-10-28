@@ -639,6 +639,8 @@ describe('P26 gate B2: Guided cards name what they touch', () => {
     'campus_apply_island_cuts',
     // GFM-b: the recommender job and the apply
     'campus_recommend_gfm_settings', 'campus_apply_gfm_settings',
+    // LC-19: retry a finished job, cancel your queued ones
+    'solve_queue_requeue', 'solve_queue_cancel_queued',
   ]
   it.each(DESTRUCTIVE_AND_EXECUTION)('%s has its own summary (not the fallback)', (tool) => {
     expect(guidedCardSummary(tool, {})).not.toMatch(/^The assistant wants to use/)
@@ -680,6 +682,17 @@ describe('P26 gate B2: Guided cards name what they touch', () => {
     ['run_mc_study', { draws: 1000 }, 'Run the reliability simulation (1000 runs)'],
     ['run_coupling_loop', { target_lole_h: 3 }, 'Size the design to meet 3 h/yr of shortfall (repeated calculations)'],
     ['solve_queue_enqueue', { project_id: 'Demo' }, 'Queue a calculation of the project Demo'],
+    // LC-19: the re-run card says the results already match; retry and cancel name what they touch.
+    ['run_simulation', {}, 'Run a full calculation of the network'],
+    ['run_simulation', { rerun_current: true },
+      'Run the full calculation again; the results already match the inputs, so it gives the same answer'],
+    ['run_ac_pf_stage', { rerun_current: true },
+      'Run the power-flow check again; its results already match the network, so it gives the same answer'],
+    ['solve_queue_requeue', { job_id: 'j1' }, 'Run the finished calculation j1 again as a new job'],
+    ['solve_queue_requeue', { job_id: 'j1', rerun_current: true },
+      'Run the finished calculation j1 again as a new job; its results already match the inputs, so it gives the same answer'],
+    ['solve_queue_cancel_queued', {},
+      'Cancel every calculation you queued that has not started; running ones go on'],
     ['set_active_profile', { profile_id: 'local' }, 'Switch the assistant to the model profile local'],
   ])('%s names its target', (tool, args, want) => {
     expect(guidedCardSummary(tool, args)).toBe(want)

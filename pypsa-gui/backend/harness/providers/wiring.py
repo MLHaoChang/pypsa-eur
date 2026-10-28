@@ -307,6 +307,10 @@ _SELECTION_INTENTS = (
     # Result plausibility (VS2 "do these results make sense?").
     (frozenset({"sense", "plausible", "plausibility", "realistic", "reasonable", "sanity", "believable"}),
      ("project_readiness", "validate_network", "diagnose_network")),
+    # LC-19: following, retrying and triaging runs (OJ-33, OJ-34).
+    (frozenset({"queue", "queued", "retry", "rerun", "failed", "failure", "infeasible", "crashed"}),
+     ("solve_queue_list", "solve_queue_job_log", "get_simulation_log_history", "diagnose_network",
+      "validate_network")),
 )
 
 
