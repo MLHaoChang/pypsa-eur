@@ -35,7 +35,7 @@ PLUS = "+cmd|' /C calc'!A0"
 PERIODS = ["2030", "2040"]
 
 
-def _network() -> pypsa.Network:
+def _network(energy_weight: float = 2190.0) -> pypsa.Network:
     n = pypsa.Network()
     hours = pd.date_range("2030-01-01", periods=4, freq="h")
     mi = pd.MultiIndex.from_product([[2030, 2040], hours], names=["period", "timestep"])
@@ -44,6 +44,8 @@ def _network() -> pypsa.Network:
     # Stated weights (GK B condition 2): each snapshot stands for 2190 h, each
     # period for 10 years, undiscounted.
     n.snapshot_weightings.loc[:, :] = 2190.0
+    # Energy columns on another weighting (GK B (8)): the Overview must not use them.
+    n.snapshot_weightings.loc[:, ["generators", "stores"]] = energy_weight
     n.investment_period_weightings.loc[:, "years"] = 10.0
     n.investment_period_weightings.loc[:, "objective"] = 1.0
     n.add("Carrier", ["gas", "solar", EVIL, PLUS, "AC"])
@@ -64,6 +66,12 @@ def _network() -> pypsa.Network:
 @pytest.fixture(scope="module")
 def solved():
     return _network()
+
+
+@pytest.fixture(scope="module")
+def split_weights():
+    """Cost (objective) weighting 2190 h, energy (generators) weighting 1000 h."""
+    return _network(energy_weight=1000.0)
 
 
 def _rdf(n, accessor, attr, source="lopf"):
@@ -89,10 +97,10 @@ def _report() -> InvestmentCaseReport:
         completeness={s: sections[s].status for s in IC_REPORT_SECTIONS})
 
 
-def _build(n, *, report=None, views=(), **kw) -> bytes:
+def _build(n, *, report=None, views=(), cfg=None, lost_load=None, **kw) -> bytes:
     return RW.build_results_workbook(RW.WorkbookInputs(
-        network=n, cfg=SolverConfig(), lost_load=None, result_df=_rdf, views=list(views),
-        ic_report=report, **kw))
+        network=n, cfg=cfg or SolverConfig(), lost_load=lost_load, result_df=_rdf,
+        views=list(views), ic_report=report, **kw))
 
 
 def _wb(blob):
@@ -410,3 +418,44 @@ def test_case_sheets_equal_the_standalone_case_export(solved):
             for c in row:
                 if c.data_type == "f" and "!" in c.value:
                     assert c.value.split("!")[0].strip("='") in titles, c.value
+
+
+# ── energy served: the cost weighting and the lost-load capture (GK B (8)) ──
+
+SERVED = 235.0 * 2190.0 * 10.0 / 1e3          # GWh per period, no lost load
+
+
+def test_energy_served_and_lcoe_use_the_cost_weighting_not_the_energy_one(split_weights):
+    n = split_weights
+    cb = compute_cost_breakdown(n, SolverConfig())
+    ws = _wb(_build(n))["Overview"]
+    served, total = _row(ws, "Energy served"), _row(ws, "Total system cost")
+    for j in (1, 2):
+        assert _approx(served[j].value, SERVED)              # 2190, not 1000
+    assert _approx(served[3].value, 2 * SERVED)
+    lcoe = _row(ws, "System LCOE")
+    assert lcoe[3].value == f"={total[3].coordinate}*1000/{served[3].coordinate}"
+    assert _approx(total[3].value * 1000 / served[3].value, cb["total"] / (2 * 235.0 * 2190.0 * 10.0))
+
+
+def test_energy_served_is_load_less_the_captured_lost_load(solved):
+    lost = pd.DataFrame({"L": [5.0, 0.0, 10.0, 0.0] * 2}, index=solved.snapshots)
+    ws = _wb(_build(solved, lost_load={"lost_load_t": lost, "lost_load_total_mwh": 1.0}))["Overview"]
+    served = _row(ws, "Energy served")
+    for j in (1, 2):
+        assert _approx(served[j].value, (235.0 - 15.0) * 2190.0 * 10.0 / 1e3)
+    assert _approx(served[3].value, 2 * (235.0 - 15.0) * 2190.0 * 10.0 / 1e3)
+
+
+@pytest.mark.parametrize("lost_load, voll", [
+    ({"lost_load_t": None, "lost_load_total_mwh": None}, 0.0),    # the capture's total unknown
+    ({}, 1000.0),                                                  # VOLL on, no capture: it failed
+    (None, 1000.0),
+])
+def test_an_unknown_lost_load_makes_energy_and_lcoe_not_established(solved, lost_load, voll):
+    ws = _wb(_build(solved, lost_load=lost_load, cfg=SolverConfig(voll=voll)))["Overview"]
+    served, lcoe = _row(ws, "Energy served"), _row(ws, "System LCOE")
+    assert [served[j].value for j in (1, 2, 3)] == [None, None, None]
+    assert "not_established" in served[5].value
+    assert not any(isinstance(lcoe[j].value, str) and lcoe[j].value.startswith("=")
+                   for j in (1, 2, 3))

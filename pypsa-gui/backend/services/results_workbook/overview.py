@@ -97,12 +97,14 @@ def _econ_sum(by_carrier: dict, key: str, periods: list[str]) -> tuple[float | N
     return total, pp
 
 
-def _energy_served(n, lost_load: dict | None, result_df) -> tuple[float | None, dict[str, float]]:
+def _energy_served(n, lost_load: dict | None, result_df,
+                   voll_on: bool = False) -> tuple[float | None, dict[str, float]]:
     """MWh of load served: Σ load less the lost-load capture, on the COST
     columns' weighting (snapshot objective weighting × the period's years), so
     the system LCOE divides like by like (GK B plan condition 3). A capture
     whose lost energy is unknown makes the figure unknown, never "demand
-    minus 0"."""
+    minus 0"; with VOLL on, a missing capture is one that failed
+    (`_capture_and_remove_slacks` swallows its errors), not zero lost load."""
     import pandas as pd
 
     from services.compare.support import _per_period_groupby
@@ -117,6 +119,8 @@ def _energy_served(n, lost_load: dict | None, result_df) -> tuple[float | None, 
     served = p.reindex(sns).fillna(0.0).astype(float).sum(axis=1)
     ll = (lost_load or {}).get("lost_load_t")
     if isinstance(lost_load, dict) and ll is None and lost_load.get("lost_load_total_mwh", 0.0) is None:
+        return None, {}
+    if voll_on and ll is None:
         return None, {}
     if ll is not None and not getattr(ll, "empty", True):
         served = served - ll.reindex(sns).fillna(0.0).astype(float).sum(axis=1)
@@ -163,7 +167,9 @@ def overview_figures(n, cfg, lost_load: dict | None, result_df) -> OverviewFigur
                     f"cost_breakdown.{field_}", note)
 
     overnight = _finite(cb.get("capex_lifetime")) if cb else None
-    energy_mwh, energy_pp = _energy_served(n, lost_load, result_df)
+    voll = cfg.get("voll") if isinstance(cfg, dict) else getattr(cfg, "voll", None)
+    energy_mwh, energy_pp = _energy_served(n, lost_load, result_df,
+                                           voll_on=(_finite(voll) or 0.0) > 0)
     lines = [
         Line("capex_overnight", "Capex, overnight (present value of the upfront investment)",
              "M EUR", None if overnight is None else overnight / 1e6, {p: None for p in periods},
