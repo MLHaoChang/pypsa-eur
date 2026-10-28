@@ -112,7 +112,8 @@ def test_no_limit_is_unknown_with_the_value_shown():
 
 @pytest.mark.parametrize("kw, method, k, match", [
     (-1.0, "dol", None, "Motor rating must be 0 or more"), (2000.0, "star-delta", None, "Start method"),
-    (2000.0, "dol", -2.0, "Start current multiple must be 0 or more")])
+    (2000.0, "dol", -2.0, "Start current multiple must be above 0"),
+    (2000.0, "dol", 0.0, "Start current multiple must be above 0")])
 def test_malformed_inputs_are_refused(kw, method, k, match):
     with pytest.raises(ContractError, match=match):
         _one(method, kw=kw, k=k)

@@ -97,6 +97,21 @@ def test_a_malformed_stored_start_method_reads_unknown_on_its_row(tmp_path):
     assert row["verdict"] == "unknown" and "star-delta" in row["note"]
 
 
+def test_a_start_current_multiple_of_zero_reads_unknown_never_pass(tmp_path):
+    n = _site(method="dol")
+    n.links["i_start_pu"] = [math.nan, 0.0]
+    row = _row(tmp_path, n)
+    assert row["verdict"] == "unknown" and row["project_value"] is None
+    assert "Start current multiple must be above 0" in row["note"]
+
+
+def test_the_gui_and_gridspine_start_methods_are_equal():
+    from gridspine.static.motor_start import START_METHODS
+    from models.process_unit import START_METHODS as GUI_START_METHODS
+
+    assert GUI_START_METHODS == START_METHODS
+
+
 def test_one_row_per_process_unit(tmp_path):
     n = _site()
     n.add("Link", "kiln", bus0="mv", bus1="ore", p_nom=1.0)

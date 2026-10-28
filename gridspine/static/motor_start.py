@@ -157,9 +157,11 @@ def motor_start_table(units: pd.DataFrame, sources: dict, q_gfm_mvar_by_poc: dic
         method = rec["start_method"]
         method = None if method is None or (isinstance(method, float) and math.isnan(method)) else str(method).strip()
         method = method or None
-        for label, v in ((MOTOR_LABEL, kw), (MULTIPLE_LABEL, own_k)):
-            if v is not None and v < 0:
-                raise ContractError(f"{name}: {label} must be 0 or more, got {v:g}.")
+        if kw is not None and kw < 0:
+            raise ContractError(f"{name}: {MOTOR_LABEL} must be 0 or more, got {kw:g}.")
+        # A motor draws current to start: a multiple of 0 would read as no voltage change, a pass.
+        if own_k is not None and own_k <= 0:
+            raise ContractError(f"{name}: {MULTIPLE_LABEL} must be above 0, got {own_k:g}.")
         if method is not None and method not in START_METHODS:
             raise ContractError(f"{name}: {METHOD_LABEL} {method!r} is not one of {', '.join(START_METHODS)}.")
         s_sc, sk, case, c, sk_note = short_circuit_power(sources.get(poc))
