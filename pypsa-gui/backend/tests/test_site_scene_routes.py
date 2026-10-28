@@ -8,6 +8,7 @@ from __future__ import annotations
 import concurrent.futures
 import copy
 import hashlib
+import json
 
 import pandas as pd
 import pypsa
@@ -80,14 +81,17 @@ def test_anchor_put_is_compare_and_swap(client, geo):
 
 @pytest.mark.parametrize("anchor,field,hint", [
     ({**ANCHOR, "lat": float("nan")}, "lat", None),
-    ({**ANCHOR, "lat": 91}, "lat", None),
+    ({**ANCHOR, "lat": 91, "lng": 120}, "lat", None),
+    ({**ANCHOR, "lat": 91}, "lat", "swapped"),
     ({**ANCHOR, "lat": 120, "lng": 45}, "lat", "swapped"),
     ({**ANCHOR, "lng": -180.5}, "lng", None),
     ({**ANCHOR, "source": "bus"}, "source", None),
     ({**ANCHOR, "confirmed": "yes"}, "confirmed", None),
 ])
 def test_anchor_put_refuses_invalid_input_naming_the_field(client, geo, anchor, field, hint):
-    r = client.put("/api/projects/geo/site-anchor", json={"anchor": anchor, "expected_revision": 0})
+    # Raw JSON, so a NaN reaches the server as the browser's JSON.parse never would.
+    raw = json.dumps({"anchor": anchor, "expected_revision": 0}, allow_nan=True)
+    r = client.put("/api/projects/geo/site-anchor", content=raw, headers={"content-type": "application/json"})
     assert r.status_code == 422, r.text
     detail = r.json()["detail"]
     assert (detail["error_kind"], detail["field"], detail.get("hint")) == ("invalid_input", field, hint)
@@ -105,13 +109,15 @@ def test_another_org_cannot_read_or_write_the_anchor(client, other_org_client, g
     assert r.status_code == 404
 
 
-def test_anchor_and_scene_writes_409_under_a_foreign_lock(client, geo, _auth_db, second_identity, project_row):
+def test_anchor_and_scene_writes_409_under_a_foreign_lock(client, geo, _auth_db, seeded_identity, second_identity,
+                                                          project_row):
     from services import project_locks
     _put_site(client)
     _engine, session_local = _auth_db
     with session_local() as db:
+        # The save left the caller holding the lock; hand it to another user.
+        project_locks.release_lock(db, project_row("geo").id, seeded_identity["user_id"])
         assert project_locks.acquire_lock(db, project_row("geo").id, second_identity["user_id"]) is not None
-        db.commit()
     try:
         r = client.put("/api/projects/geo/site-anchor", json={"anchor": ANCHOR, "expected_revision": 0})
         assert (r.status_code, _kind(r)) == (409, "project_locked")

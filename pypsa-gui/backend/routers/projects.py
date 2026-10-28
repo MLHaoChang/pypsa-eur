@@ -104,6 +104,10 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
                  # services/site_service.py owns it; its cached context lives
                  # under the `sites/` dir below.
                  "sites.json",
+                 # The confirmed site anchor (SC-01a, D01): one revisioned
+                 # project coordinate. Not private, so it travels everywhere
+                 # sites.json does. Pinned equal to site_scene.anchor.ANCHOR_FILE.
+                 "site_anchor.json",
                  # The map view's user geometry: routed branches and dragged
                  # asset bubbles (visual layers plan 2, M1).
                  # services/map_layout_service.py owns it; `test_map_layout_routes`
@@ -4327,14 +4331,20 @@ def get_sites(
     never reported as "no sites". See services/site_service.py.
     """
     from services import site_service
+    from services.site_scene import store as scene_store
+    from services.site_scene.contract import SceneError
 
     src, name = _resolve_project_src(name, db, user)
     if not src.exists():
         raise HTTPException(404, f"Project '{name}' not found")
     try:
-        return site_service.read_sites(src)
+        # A scene-enabled Site is projected from its pointed generation (D03);
+        # every other Site, and a project with none, reads sites.json as before.
+        return scene_store.project_sites(src)
     except PermissionError as exc:
         raise _access_denied(src / site_service.SITES_FILE) from exc
+    except SceneError as exc:
+        raise HTTPException(exc.status, exc.to_body()["detail"]) from exc
 
 
 @router.put("/{name}/sites")
@@ -4351,6 +4361,8 @@ def put_sites(
     context cache whose site is no longer in the document is removed.
     """
     from services import project_registry, site_service
+    from services.site_scene import store as scene_store
+    from services.site_scene.contract import SceneError
 
     dest, name = _resolve_project_src(name, db, user)
     if not dest.exists():
@@ -4361,16 +4373,26 @@ def put_sites(
         site_service.validate_sites(sites)
     except site_service.SitesInvalid as exc:
         raise HTTPException(422, str(exc)) from exc
-    try:
-        site_service.write_sites(dest, sites)
-    except site_service.SitesTooLarge as exc:
-        raise HTTPException(413, str(exc)) from exc
-    # The document is on disk; a problem listing or removing orphan context
-    # caches must not turn that success into a 500.
-    try:
-        site_service.prune_site_dirs(dest, sites, rmtree=_force_rmtree)
-    except OSError:
-        logger.warning("sites: orphan context prune failed for %s", name, exc_info=True)
+    # A scene-enabled Site has one writer, its scene (D03): a whole-document
+    # PUT that would change or drop it, or a footprint it owns, is refused
+    # (409 scene_managed_site), whatever the client says. The guard, the write
+    # and the prune run under the scene mutex, so an adoption cannot land
+    # between the check and the write.
+    with scene_store.project_lock(dest):
+        try:
+            scene_store.guard_legacy_put(dest, sites)
+        except SceneError as exc:
+            raise HTTPException(exc.status, exc.to_body()["detail"]) from exc
+        try:
+            site_service.write_sites(dest, sites)
+        except site_service.SitesTooLarge as exc:
+            raise HTTPException(413, str(exc)) from exc
+        # The document is on disk; a problem listing or removing orphan context
+        # caches must not turn that success into a 500.
+        try:
+            site_service.prune_site_dirs(dest, sites, rmtree=_force_rmtree)
+        except OSError:
+            logger.warning("sites: orphan context prune failed for %s", name, exc_info=True)
     return {"saved": name, "sites": len(sites["sites"])}
 
 

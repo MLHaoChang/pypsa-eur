@@ -82,6 +82,7 @@ from routers import (
     clustering,
     adequacy_worksheet,
     flow,
+    site_scene,
     compare,
     gridspine,
     campus_electrical,
@@ -1373,6 +1374,12 @@ app.include_router(
 app.include_router(
     studies.router, prefix="/api/projects/{name}/studies",
     tags=["decision-studies"], dependencies=_projects_router_guard,
+)
+# The Site 3D native scene (SC-01a): the site anchor and a Site's scene,
+# adoption and proposals. Same guard; before the `/{name}` catch-all.
+app.include_router(
+    site_scene.router, prefix="/api/projects", tags=["site-scene"],
+    dependencies=_projects_router_guard,
 )
 app.include_router(
     projects.router, prefix="/api/projects", tags=["projects"],
