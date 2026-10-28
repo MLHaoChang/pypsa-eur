@@ -1096,16 +1096,18 @@ _VS = {
 
 
 def _vs_blank_reason(rid: str, row) -> str:
-    """Why a period has no value for the row, from the period's own record: the nose below the planned load,
-    else the engine's note (the planned-load point not converging), else that no Q–V point solved."""
-    qv = rid == "voltage_stability_qv"
-    label = "Q–V" if qv else "P–V"
-    note = row["engine_note"].strip() if isinstance(row.get("engine_note"), str) else ""
+    """Why a period has no value for the row, in plain words, from the period's own record: the nose below the
+    planned load, the load flow at the planned load not solving (the engine's note), else that no Q–V point solved."""
+    if rid != "voltage_stability_qv":
+        return "the check gave no P–V margin"
+    engine = row["engine_note"] if isinstance(row.get("engine_note"), str) else ""
     if str(row["nose_below_planned"]) == "True":
-        return f"no {label} margin, because the nose is below the planned load"
-    if qv:
-        return f"no Q–V margin, because {note or 'no Q–V point solved'}"
-    return "the check gave no P–V margin"
+        cause = "the grid connection can't carry the planned load (its maximum power is below it)"
+    elif "did not converge" in engine:
+        cause = "the load flow at the planned load did not solve"
+    else:
+        cause = "no Q–V point could be solved"
+    return f"no Q–V margin, because {cause}"
 
 
 def _vs_limit(inp: _Inputs, spec: dict) -> tuple[float | None, str, bool]:

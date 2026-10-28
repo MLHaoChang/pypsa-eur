@@ -187,10 +187,10 @@ def test_a_blank_bound_flag_is_no_answer_never_a_bound(tmp_path):
 
 
 @pytest.mark.parametrize("fields, cause", [
-    ({"margin_pct": -5.0}, "Period 2030: no Q–V margin, because the nose is below the planned load"),
+    ({"margin_pct": -5.0}, "Period 2030: no Q–V margin, because the grid connection can't carry the planned load (its maximum power is below it)"),
     ({"note": "planned-load point did not converge: no Q–V"},
-     "Period 2030: no Q–V margin, because planned-load point did not converge: no Q–V"),
-    ({"note": ""}, "Period 2030: no Q–V margin, because no Q–V point solved"),
+     "Period 2030: no Q–V margin, because the load flow at the planned load did not solve"),
+    ({"note": ""}, "Period 2030: no Q–V margin, because no Q–V point could be solved"),
 ], ids=["nose_below_planned", "planned_point_not_converged", "no_qv_point_solves"])
 def test_a_blank_qv_margin_names_its_own_cause(tmp_path, fields, cause):
     p = {**_period(2030, margin_pct=fields.pop("margin_pct", 40.0))}
