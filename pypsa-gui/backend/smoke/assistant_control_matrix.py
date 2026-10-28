@@ -22,6 +22,9 @@ INVENTORY = ROOT / '.scratch/live-voice/capability-inventory.json'
 CREATION_FORM = ROOT / 'pypsa-gui/frontend/src/layout/CreationForm.tsx'
 ATTR_CATALOG = ROOT / 'pypsa-gui/frontend/src/utils/attributeCatalog.ts'
 
+# Process-unit form fields that are not Link attributes (utils/processUnit.ts derives the attributes).
+PROCESS_UNIT_HELPER = re.compile(r'^(product_per_t|el_kwh_per_t|in[1-3]_(bus|rate))$')
+
 # Palette id → PyPSA component_class accepted by create_component / update_component.
 PALETTE_TO_CLASS: dict[str, str] = {
     'bus': 'Bus',
@@ -31,6 +34,7 @@ PALETTE_TO_CLASS: dict[str, str] = {
     'fuel_cell': 'Link',
     'power_to_heat': 'Link',
     'chp': 'Link',
+    'process_unit': 'Link',
     'thermal': 'Generator',
     'renewable': 'Generator',
     'battery': 'StorageUnit',
@@ -357,6 +361,10 @@ def build_matrix() -> dict:
         for field in fields:
             # Form-only helpers that are not PyPSA attrs (voltage-step preset).
             if palette_id == 'transformer' and field['key'] == 'type':
+                tool = None
+                gap = 'ui_helper_not_pypsa_attr'
+            elif palette_id == 'process_unit' and PROCESS_UNIT_HELPER.match(field['key']):
+                # Rates per tonne: derived into efficiency / efficiency2.. and bus2.. on submit.
                 tool = None
                 gap = 'ui_helper_not_pypsa_attr'
             elif field['key'].endswith('_per_km'):

@@ -3055,6 +3055,448 @@
     {
       "family": "Network/topology/asset parameters",
       "ui_surface": "creation_form",
+      "ui_target": "palette:process_unit.name",
+      "palette_id": "process_unit",
+      "field_key": "name",
+      "label": "Name",
+      "parameter_type": "text",
+      "unit": null,
+      "component_class": "Link",
+      "tool": "create_component",
+      "attrs_path": "attrs.name",
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": null,
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:process_unit.bus0",
+      "palette_id": "process_unit",
+      "field_key": "bus0",
+      "label": "Electricity bus (input)",
+      "parameter_type": "bus",
+      "unit": null,
+      "component_class": "Link",
+      "tool": "create_component",
+      "attrs_path": "attrs.bus0",
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": null,
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:process_unit.bus1",
+      "palette_id": "process_unit",
+      "field_key": "bus1",
+      "label": "Product bus (output)",
+      "parameter_type": "bus",
+      "unit": null,
+      "component_class": "Link",
+      "tool": "create_component",
+      "attrs_path": "attrs.bus1",
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": null,
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:process_unit.carrier",
+      "palette_id": "process_unit",
+      "field_key": "carrier",
+      "label": "Carrier",
+      "parameter_type": "text",
+      "unit": null,
+      "component_class": "Link",
+      "tool": "create_component",
+      "attrs_path": "attrs.carrier",
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": null,
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:process_unit.p_nom",
+      "palette_id": "process_unit",
+      "field_key": "p_nom",
+      "label": "Capacity (electricity in)",
+      "parameter_type": "number",
+      "unit": "MW",
+      "component_class": "Link",
+      "tool": "create_component",
+      "attrs_path": "attrs.p_nom",
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": null,
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:process_unit.product_per_t",
+      "palette_id": "process_unit",
+      "field_key": "product_per_t",
+      "label": "Product per tonne",
+      "parameter_type": "number",
+      "unit": "bus unit/t",
+      "component_class": "Link",
+      "tool": null,
+      "attrs_path": null,
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": "ui_helper_not_pypsa_attr",
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:process_unit.el_kwh_per_t",
+      "palette_id": "process_unit",
+      "field_key": "el_kwh_per_t",
+      "label": "Electricity per tonne",
+      "parameter_type": "number",
+      "unit": "kWh/t",
+      "component_class": "Link",
+      "tool": null,
+      "attrs_path": null,
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": "ui_helper_not_pypsa_attr",
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:process_unit.in1_bus",
+      "palette_id": "process_unit",
+      "field_key": "in1_bus",
+      "label": "Input 1 bus",
+      "parameter_type": "bus",
+      "unit": null,
+      "component_class": "Link",
+      "tool": null,
+      "attrs_path": null,
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": "ui_helper_not_pypsa_attr",
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:process_unit.in1_rate",
+      "palette_id": "process_unit",
+      "field_key": "in1_rate",
+      "label": "Input 1 per tonne",
+      "parameter_type": "number",
+      "unit": "bus unit/t",
+      "component_class": "Link",
+      "tool": null,
+      "attrs_path": null,
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": "ui_helper_not_pypsa_attr",
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:process_unit.in2_bus",
+      "palette_id": "process_unit",
+      "field_key": "in2_bus",
+      "label": "Input 2 bus (optional)",
+      "parameter_type": "bus",
+      "unit": null,
+      "component_class": "Link",
+      "tool": null,
+      "attrs_path": null,
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": "ui_helper_not_pypsa_attr",
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:process_unit.in2_rate",
+      "palette_id": "process_unit",
+      "field_key": "in2_rate",
+      "label": "Input 2 per tonne",
+      "parameter_type": "number",
+      "unit": "bus unit/t",
+      "component_class": "Link",
+      "tool": null,
+      "attrs_path": null,
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": "ui_helper_not_pypsa_attr",
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:process_unit.in3_bus",
+      "palette_id": "process_unit",
+      "field_key": "in3_bus",
+      "label": "Input 3 bus (optional)",
+      "parameter_type": "bus",
+      "unit": null,
+      "component_class": "Link",
+      "tool": null,
+      "attrs_path": null,
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": "ui_helper_not_pypsa_attr",
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:process_unit.in3_rate",
+      "palette_id": "process_unit",
+      "field_key": "in3_rate",
+      "label": "Input 3 per tonne",
+      "parameter_type": "number",
+      "unit": "bus unit/t",
+      "component_class": "Link",
+      "tool": null,
+      "attrs_path": null,
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": "ui_helper_not_pypsa_attr",
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:process_unit.committable",
+      "palette_id": "process_unit",
+      "field_key": "committable",
+      "label": "Unit commitment (min load, min up / down)",
+      "parameter_type": "checkbox",
+      "unit": null,
+      "component_class": "Link",
+      "tool": "create_component",
+      "attrs_path": "attrs.committable",
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": null,
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:process_unit.p_min_pu",
+      "palette_id": "process_unit",
+      "field_key": "p_min_pu",
+      "label": "Min load",
+      "parameter_type": "number",
+      "unit": null,
+      "component_class": "Link",
+      "tool": "create_component",
+      "attrs_path": "attrs.p_min_pu",
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": null,
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:process_unit.min_up_time",
+      "palette_id": "process_unit",
+      "field_key": "min_up_time",
+      "label": "Min up time",
+      "parameter_type": "number",
+      "unit": "h",
+      "component_class": "Link",
+      "tool": "create_component",
+      "attrs_path": "attrs.min_up_time",
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": null,
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:process_unit.min_down_time",
+      "palette_id": "process_unit",
+      "field_key": "min_down_time",
+      "label": "Min down time (restart)",
+      "parameter_type": "number",
+      "unit": "h",
+      "component_class": "Link",
+      "tool": "create_component",
+      "attrs_path": "attrs.min_down_time",
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": null,
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
       "ui_target": "palette:psh.name",
       "palette_id": "psh",
       "field_key": "name",
@@ -4799,7 +5241,7 @@
     "permitted_statement": "Tested subsets only, labelled accordingly; no whole-application coverage claim."
   },
   "counts": {
-    "creation_controls": 170,
+    "creation_controls": 187,
     "editability_overrides": 3,
     "closed_sets": 3,
     "family_journeys": 14,
