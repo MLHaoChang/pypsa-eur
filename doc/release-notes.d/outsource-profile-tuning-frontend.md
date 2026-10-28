@@ -1,0 +1,1 @@
+* Refactor(pypsa-gui): Separate renewable profile generation from apply so the forthcoming Expert tuning dialog can wait for a pending profile without changing the model. Existing one-click generation still uses the project's weather choice and applies in one batch step.

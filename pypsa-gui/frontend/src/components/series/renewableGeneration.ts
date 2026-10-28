@@ -5,7 +5,7 @@
 // project; the request leaves them out so the backend reads the same value the
 // assistant does.
 import { useUIStore } from '../../store/uiStore'
-import { errorText, profilesApi, type ReadinessRow } from '../../api/profiles'
+import { errorText, profilesApi, type ProfileTechnology, type ReadinessRow } from '../../api/profiles'
 
 export interface GenerationOutcome {
   technology: 'wind' | 'solar'
@@ -51,6 +51,17 @@ export async function waitForJob(project: string, jobId: string, pollMs = 1500, 
   throw new Error(`The generation is still running: it will appear ${expert ? 'in Profile Studio’s pending list' : 'as a pending profile you can apply'} when it finishes.`)
 }
 
+/** Queue a profile without changing the model, so Tune can compare it first.
+ * Source and year stay the project's weather choice, as in one-click Generate. */
+export async function generatePending(
+  project: string, technology: ProfileTechnology, generators: string[],
+  opts: { preset?: string; params?: Record<string, unknown> } = {}, pollMs = 1500,
+): Promise<string> {
+  const job = await profilesApi.generate(project, { points: [], from_generators: generators, technology, ...opts })
+  await waitForJob(project, job.id, pollMs)
+  return job.id
+}
+
 export async function generateAndApply(
   project: string, rows: ReadinessRow[], pollMs = 1500,
 ): Promise<GenerationOutcome[]> {
@@ -59,9 +70,8 @@ export async function generateAndApply(
     const generators = rows.filter(r => r.technology === technology).map(r => r.generator)
     if (generators.length === 0) continue
     try {
-      const job = await profilesApi.generate(project, { points: [], from_generators: generators, technology })
-      await waitForJob(project, job.id, pollMs)
-      const res = await profilesApi.applyBatch(project, job.id)
+      const jobId = await generatePending(project, technology, generators, {}, pollMs)
+      const res = await profilesApi.applyBatch(project, jobId)
       out.push({ technology, generators, applied: res.count })
     } catch (e) {
       out.push({ technology, generators, applied: 0, error: errorText(e) })
