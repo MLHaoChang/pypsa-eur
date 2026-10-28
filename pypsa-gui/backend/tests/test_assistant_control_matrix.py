@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -10,8 +11,6 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 SMOKE = ROOT / 'pypsa-gui/backend/smoke/assistant_control_matrix.py'
-MATRIX = ROOT / '.scratch/live-voice/capability-matrix.json'
-INVENTORY = ROOT / '.scratch/live-voice/capability-inventory.json'
 COVERAGE_DOC = ROOT / '.scratch/live-voice/application-coverage.md'
 
 EXPECTED_FAMILIES = {
@@ -34,7 +33,7 @@ EXPECTED_FAMILIES = {
 
 def _run(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, '-S', str(SMOKE), *args],
+        [sys.executable, str(SMOKE), *args],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -42,16 +41,22 @@ def _run(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _gen():
+    sys.path.insert(0, str(SMOKE.parent))
+    try:
+        import assistant_control_matrix as gen
+    finally:
+        sys.path.remove(str(SMOKE.parent))
+    return gen
+
+
 @pytest.fixture(scope='module')
 def matrix() -> dict:
-    written = _run('--write')
-    assert written.returncode == 0, written.stderr + written.stdout
-    checked = _run('--check')
-    assert checked.returncode == 0, checked.stderr + checked.stdout
-    return json.loads(MATRIX.read_text(encoding='utf-8'))
+    # Built in memory: the matrix is not committed (RETRO-COST-1).
+    return json.loads(json.dumps(_gen().build_matrix()))
 
 
-def test_control_matrix_check_passes_committed_artifact(matrix):
+def test_control_matrix_builds(matrix):
     assert matrix['format_version'] == 1
     assert matrix['counts']['creation_controls'] >= 80
     assert matrix['counts']['unmapped_palette_ids'] == 0
@@ -85,7 +90,8 @@ def test_ar_alias_resolves_to_inventory_ids_not_ardat(matrix):
     ar = matrix['ar_resolution']
     assert ar['status'] == 'mapped'
     assert 'Ardat' not in json.dumps(ar)
-    inventory = json.loads(INVENTORY.read_text(encoding='utf-8'))
+    from smoke.assistant_inventory import build_inventory
+    inventory = build_inventory()
     tool_names = {t['name'] for t in inventory['tools']}
     tab_ids = {t['id'] for t in inventory['result_tabs']}
     for name in ar['maps_to']['tools']:
@@ -112,38 +118,11 @@ def test_ineligible_ui_targets_mark_project_requirement(matrix):
         assert 'expert' in elig['ui_modes'] or 'guided' in elig['ui_modes']
 
 
-def test_control_matrix_reader_needs_no_site_packages():
-    proc = _run('--check')
-    assert proc.returncode == 0, proc.stderr + proc.stdout
-
-
-def test_matrix_rejects_stale_palette_digest(tmp_path, matrix):
-    stale = dict(matrix)
-    stale['controls'] = list(matrix['controls']) + [{
-        'family': 'Network/topology/asset parameters',
-        'ui_surface': 'creation_form',
-        'ui_target': 'palette:ghost.fake',
-        'palette_id': 'ghost',
-        'field_key': 'fake',
-        'label': 'Fake',
-        'parameter_type': 'text',
-        'unit': None,
-        'component_class': 'Bus',
-        'tool': 'create_component',
-        'attrs_path': 'attrs.fake',
-        'eligibility': {
-            'project_kinds': ['capacity_expansion', None],
-            'ui_modes': ['expert'],
-            'requires_project': True,
-        },
-        'gap': None,
-        'behavioral_fixture': 'pending:issue-05-network-topology',
-    }]
+def test_check_builds_in_memory_and_never_touches_a_matrix_file(tmp_path):
     path = tmp_path / 'capability-matrix.json'
-    path.write_text(json.dumps(stale, indent=2) + '\n', encoding='utf-8')
     proc = _run('--check', '--output', str(path))
-    assert proc.returncode != 0
-    assert 'stale' in (proc.stdout + proc.stderr).lower()
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert not path.exists()
 
 
 # ── issue 08 close-out: explicit full-coverage limitation block ─────────
@@ -178,9 +157,9 @@ def test_matrix_never_asserts_whole_application_coverage_elsewhere(matrix):
     assert 'Whole-application coverage is NOT claimed.' in doc
     assert (f'Pending family journeys: {matrix["full_coverage"]["journeys_pending"]} of '
             f'{matrix["full_coverage"]["journeys_total"]}') in doc
-    counts = matrix['route_parity']['counts']
-    assert f'{counts["needs-tool"]} of {counts["gui_routes"]} GUI-reached routes need a typed tool' in doc
-    assert f'{counts["limitation"]} routes are declared' in doc
+    # Route counts change with every tool PR, so the doc points at the build instead.
+    assert 'assistant_route_parity.py --write' in doc
+    assert not re.search(r'\d+ of \d+ GUI-reached routes', doc)
 
 
 @pytest.mark.parametrize('mutate, expected', [
@@ -190,23 +169,26 @@ def test_matrix_never_asserts_whole_application_coverage_elsewhere(matrix):
     (lambda m: m['full_coverage'].update(journeys_pending=0), 'journeys_pending disagrees'),
     (lambda m: m.pop('full_coverage'), 'missing'),
 ])
-def test_ci_rejects_a_full_coverage_claim_without_passing_journeys(tmp_path, matrix, mutate, expected):
+def test_ci_rejects_a_full_coverage_claim_without_passing_journeys(matrix, mutate, expected):
     tampered = json.loads(json.dumps(matrix))
     mutate(tampered)
-    path = tmp_path / 'capability-matrix.json'
-    path.write_text(json.dumps(tampered, indent=2) + '\n', encoding='utf-8')
-    proc = _run('--check', '--output', str(path))
-    assert proc.returncode != 0
-    output = proc.stdout + proc.stderr
-    assert 'stale' in output.lower() or expected in output
+    assert expected in (_gen().matrix_problem(tampered) or '')
+
+
+@pytest.mark.parametrize('mutate, expected', [
+    (lambda m: m['ar_resolution'].update(status='unresolved'), 'AR alias'),
+    (lambda m: m['family_journeys'].pop(), 'all 14'),
+    (lambda m: m['controls'][0].update(tool=None, gap=None), 'tool or an explicit gap'),
+])
+def test_matrix_guards_reject_each_broken_invariant(matrix, mutate, expected):
+    assert _gen().matrix_problem(matrix) is None
+    tampered = json.loads(json.dumps(matrix))
+    mutate(tampered)
+    assert expected in (_gen().matrix_problem(tampered) or '')
 
 
 def test_claim_guard_rejects_claim_even_if_artifact_was_regenerated():
-    sys.path.insert(0, str(SMOKE.parent))
-    try:
-        import assistant_control_matrix as gen
-    finally:
-        sys.path.remove(str(SMOKE.parent))
+    gen = _gen()
     built = gen.build_matrix()
     assert gen._full_coverage_problem(built) is None
     forged = json.loads(json.dumps(built))

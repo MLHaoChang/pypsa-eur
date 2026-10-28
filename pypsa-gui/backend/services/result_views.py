@@ -133,6 +133,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                "sized assets and their capital cost", "results",
                (_r("get_results", result_kind="cost_breakdown"),
                 _r("get_results", result_kind="economics_by_carrier")),
+               historical_section="results_capacity",
                units="MW, MWh, EUR/a",
                checked_profiles=("generator-cost/1", "storage-unit-cost/1", "capacity/1"),
                card="capacity", sub_option="sizing", card_tab="build"),

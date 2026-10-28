@@ -1,5 +1,5 @@
 // The frontend half of the `tool_error` kind manifest
-// (`pypsa-gui/tool-error-kinds.json`).
+// (`pypsa-gui/tool-error-kinds.json` plus its `tool-error-kinds.d/` fragments).
 //
 // THE HOLE THIS FILLS. `ChatPanel.profile.test.tsx` proves
 // TOOL_ERROR_BANNER_KINDS ⊆ KIND_COPY — it catches a routed kind losing its
@@ -33,17 +33,34 @@
 // rather than anything silent.)
 /// <reference types="node" />
 import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { KIND_COPY, TOOL_ERROR_BANNER_KINDS } from './ChatPanel'
 
 const MANIFEST_PATH = resolve(process.cwd(), '..', 'tool-error-kinds.json')
+// New kinds arrive as fragments, one file per PR (backend smoke/json_fragments.py
+// validates them; this reads the same merged view).
+const FRAGMENT_DIR = resolve(process.cwd(), '..', 'tool-error-kinds.d')
 
 type Entry = { surface: 'banner' | 'inline'; why: string }
-const manifest = JSON.parse(readFileSync(MANIFEST_PATH, 'utf-8')) as {
-  kinds: Record<string, Entry>
+type Manifest = { kinds: Record<string, Entry> }
+const read = (path: string) => JSON.parse(readFileSync(path, 'utf-8')) as Manifest
+const fragments = existsSync(FRAGMENT_DIR)
+  ? readdirSync(FRAGMENT_DIR).filter((f) => f.endsWith('.json')).sort().map((f) => resolve(FRAGMENT_DIR, f))
+  : []
+const kinds: Record<string, Entry> = { ...read(MANIFEST_PATH).kinds }
+for (const path of fragments) {
+  const fragment = read(path) as Record<string, unknown>
+  const unknown = Object.keys(fragment).filter((k) => k !== '$comment' && k !== 'kinds')
+  if (unknown.length) throw new Error(`${path}: unknown keys ${unknown.join(', ')}`)
+  const fragmentKinds = fragment.kinds ?? {}
+  if (typeof fragmentKinds !== 'object' || Array.isArray(fragmentKinds)) throw new Error(`${path}: kinds must be an object`)
+  for (const [kind, entry] of Object.entries(fragmentKinds as Record<string, Entry>)) {
+    if (kind in kinds) throw new Error(`${path}: kind ${kind} is already defined`)
+    kinds[kind] = entry
+  }
 }
-const entries = Object.entries(manifest.kinds)
+const entries = Object.entries(kinds)
 const banner = entries.filter(([, e]) => e.surface === 'banner').map(([k]) => k)
 const inline = entries.filter(([, e]) => e.surface === 'inline').map(([k]) => k)
 

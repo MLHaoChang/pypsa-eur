@@ -1,0 +1,176 @@
+import axios from 'axios'
+import { client } from './client'
+
+// The Site 3D scene routes (SC-01a, `routers/site_scene.py`): the project's
+// site anchor (compare-and-swap on `expected_revision`), a Site's scene, its
+// explicit adoption and the in-memory proposals (create → review → apply or
+// cancel). Every call is quiet: the caller shows `sceneErrorCopy(err)` where
+// the action is.
+
+export interface SiteAnchor { lat: number; lng: number; source: 'manual' | 'geocode'; confirmed: boolean }
+export interface SiteAnchorDoc { version: 1; revision: number; anchor: SiteAnchor | null }
+
+export type HeightEvidence = 'tagged' | 'levels' | 'fallback' | 'greenfield'
+
+/** A native building (native.py, frozen): footprint in Site-local metres, counter-clockwise. */
+export interface SceneBuilding {
+  id: string
+  source: { namespace: 'osm' | 'greenfield' | 'manual' | 'layout'; source_id: string }
+  footprint: [number, number][]
+  height_m: number
+  height_evidence: HeightEvidence
+  levels: number | null
+}
+
+export interface SceneReceipt { proposal_id: string; revision: number; [k: string]: unknown }
+
+export type SiteScene =
+  | { state: 'unadopted'; site_id: string; digest: string }
+  | {
+      state: 'enabled'
+      site_id: string
+      revision: number
+      generation: string
+      site: Record<string, unknown>
+      buildings: SceneBuilding[]
+      asset_footprints: Record<string, unknown>
+      last_receipt: SceneReceipt | null
+      /** Keys whose component is gone from the open network; null when not checked. */
+      unbound_keys: string[] | null
+    }
+
+/** A proposed rectangle in Site-local metres (`native.greenfield_building`). */
+export interface GreenfieldInput {
+  id: string
+  center: [number, number]
+  width: number
+  depth: number
+  height: number
+  heading: number
+  unit: 'm'
+}
+
+/** A mapped footprint (`native.source_building`): WGS84 ring, optional height or levels. */
+export interface SourceInput {
+  namespace: 'osm' | 'manual'
+  source_id: string
+  ring: [number, number][]
+  height_m?: number
+  levels?: number
+}
+
+export interface ProposalInputs { greenfield?: GreenfieldInput[]; sources?: SourceInput[] }
+export type ProposalAction = 'generate_native' | 'edit_buildings'
+
+export interface Proposal {
+  id: string
+  site_id: string
+  action: ProposalAction
+  base_revision: number
+  input_hash: string
+  status: string
+  preview: { buildings: SceneBuilding[]; stats: { buildings: number; triangles: number; bytes: number } }
+}
+
+const enc = encodeURIComponent
+const anchorPath = (p: string) => `/projects/${enc(p)}/site-anchor`
+const scenePath = (p: string, site: string) => `/projects/${enc(p)}/sites/${enc(site)}/scene`
+const quiet = { skipErrorToast: true }
+
+export const siteSceneApi = {
+  getAnchor: (project: string) =>
+    client.get<SiteAnchorDoc>(anchorPath(project), quiet).then(r => r.data),
+  putAnchor: (project: string, anchor: SiteAnchor | null, expectedRevision: number) =>
+    client.put<SiteAnchorDoc>(anchorPath(project), { anchor, expected_revision: expectedRevision }, quiet).then(r => r.data),
+  getScene: (project: string, siteId: string) =>
+    client.get<SiteScene>(scenePath(project, siteId), quiet).then(r => r.data),
+  adopt: (project: string, siteId: string, expectedDigest: string) =>
+    client.post<SiteScene>(`${scenePath(project, siteId)}/adopt`, { expected_digest: expectedDigest }, quiet).then(r => r.data),
+  propose: (project: string, siteId: string, action: ProposalAction, baseRevision: number, inputs: ProposalInputs) =>
+    client.post<Proposal>(`${scenePath(project, siteId)}/proposals`, { action, base_revision: baseRevision, inputs }, quiet).then(r => r.data),
+  apply: (project: string, siteId: string, proposal: Pick<Proposal, 'id' | 'base_revision' | 'input_hash'>) =>
+    client.post<SceneReceipt>(`${scenePath(project, siteId)}/proposals/${enc(proposal.id)}/apply`,
+      { expected_revision: proposal.base_revision, input_hash: proposal.input_hash }, quiet).then(r => r.data),
+  cancel: (project: string, siteId: string, proposalId: string) =>
+    client.post<unknown>(`${scenePath(project, siteId)}/proposals/${enc(proposalId)}/cancel`, undefined, quiet).then(r => r.data),
+}
+
+// ── error copy ──────────────────────────────────────────────────────────────
+
+export interface SceneErrorDetail {
+  error_kind: string
+  message?: string
+  field?: string
+  hint?: string
+  limit?: string
+  max?: number
+  actual?: number
+  current_revision?: number
+  site_id?: string
+}
+
+/** The `{detail: {error_kind, …}}` body of a refused scene call, or null (network error, other shape). */
+export function sceneErrorDetail(err: unknown): SceneErrorDetail | null {
+  if (!axios.isAxiosError(err)) return null
+  const d = (err.response?.data as { detail?: unknown } | undefined)?.detail
+  return d && typeof d === 'object' && typeof (d as SceneErrorDetail).error_kind === 'string' ? d as SceneErrorDetail : null
+}
+
+const FIELD_WORDS: Record<string, string> = {
+  lat: 'Latitude', lng: 'Longitude', source: 'The coordinate source', confirmed: 'Confirmation',
+  expected_revision: 'The revision', expected_digest: 'The site version', boundary: 'The boundary',
+  action: 'The action', base_revision: 'The revision', inputs: 'The building inputs',
+}
+
+/** A Site the 3D scene owns: its boundary and placements change only through the scene (UX #821). */
+export const MANAGED_SITE_COPY = 'This site’s boundary and equipment positions are managed by its 3D scene: correct buildings in Generate'
+
+/** The refused building's name ("Building 3", "Mapped building 2") at the start of a server message. */
+function subjectOf(message: string): string {
+  const who = /^(Mapped building|Building) (\d+)/.exec(message)
+  return who ? `${who[1]} ${who[2]}` : 'A building'
+}
+
+function invalidInputCopy(d: SceneErrorDetail): string {
+  if (d.field === 'lat' && d.hint === 'swapped') return 'Latitude must be between −90 and 90: did you swap latitude and longitude?'
+  if (d.field === 'lat') return 'Latitude: enter a number between −90 and 90'
+  if (d.field === 'lng') return 'Longitude: enter a number between −180 and 180'
+  if (d.field === 'boundary') return 'No campus boundary: draw it to generate buildings'
+  const msg = d.message ?? ''
+  if (msg.includes('heading')) return `${subjectOf(msg)}: heading must be a number`
+  if (msg.includes('duplicate')) return 'Two buildings share an id: remove the duplicate'
+  if (msg.includes('namespace')) return `${subjectOf(msg)}: its source is not recognised`
+  const field = d.field ? FIELD_WORDS[d.field] : undefined
+  return field ? `${field} is not valid: check it and try again` : 'The request was not valid: check the values and try again'
+}
+
+/**
+ * UI copy for a refused scene call. The server's own text shows as is for
+ * invalid_geometry, resource_limit and the proposal kinds (UX SC-01b plan,
+ * condition 2); the other kinds map from `error_kind` and the detail fields.
+ */
+export function sceneErrorCopy(err: unknown): string {
+  const d = sceneErrorDetail(err)
+  if (!d) {
+    if (axios.isAxiosError(err) && !err.response) return 'The server did not answer: check the connection and try again'
+    return 'Something went wrong: try again'
+  }
+  switch (d.error_kind) {
+    case 'invalid_input': return invalidInputCopy(d)
+    case 'invalid_geometry': return d.message || 'A building footprint is not valid'
+    case 'revision_conflict': return d.message || 'Changed elsewhere since you opened it: reload to see the latest'
+    case 'project_locked': return 'Another user is editing this project: try again when they finish'
+    case 'scene_managed_site': return MANAGED_SITE_COPY
+    case 'proposal_expired': return d.message || 'This preview expired: generate again'
+    case 'proposal_cancelled': return d.message || 'This preview was discarded: generate again'
+    case 'resource_limit': return d.message || 'Too large: reduce the number of buildings'
+    case 'not_found': return 'This site no longer exists: reload'
+    case 'forbidden': return 'You cannot change this project: ask an editor'
+    case 'integrity_error': return 'This site’s 3D scene could not be read: restore a snapshot'
+    default: return 'Something went wrong: try again'
+  }
+}
+
+/** Kinds a reload resolves: the caller offers Reload beside the copy. */
+export const sceneErrorWantsReload = (err: unknown): boolean =>
+  ['revision_conflict', 'not_found'].includes(sceneErrorDetail(err)?.error_kind ?? '')

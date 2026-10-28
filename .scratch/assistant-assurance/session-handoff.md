@@ -870,7 +870,7 @@ Remaining for P1: retained/historical runs (A1.3 as-of), A1.2 ACL revocation bef
 
 Policy version 1. `get_timeseries` is the third checked read (`series_input_evidence`), for `loads/p_set` and `generators/p_max_pu`. `routers.network_time_axis.resolve_series` and `index_labels` were extracted from the handler, and the handler and the evidence both read through them. The time-series route tests (b3_solver_timeseries, chat_tools_profiles, network_time_axis_surface, user_ts_tenancy, profiles_router, e1_set_growth_placeholders, line_rescale, profile_batch_apply) gave 213 passed after the extraction. The source digest hashes raw bytes (index int64 ns plus tz, values float64), never repr.
 
-The guard refuses a series of more than 744 steps, or one whose facts would exceed 120 KiB, with the typed `series_too_long_to_check`. It is `inline` in `tool-error-kinds.json`; that kind's text is the only guard refusal the checked projection passes through.
+The guard refuses a series of more than 744 steps, or one whose facts would exceed 120 KiB, with the typed `series_too_long_to_check`. It is `inline` in `tool-error-kinds.d/claude-assurance-02-timeseries.json`; that kind's text is the only guard refusal the checked projection passes through.
 
 `tests/assurance_acceptance/test_p1_timeseries.py` has 36 cases: 17 red and 19 green on master (the green ones are refusals, which master gives anyway), and 36 / 36 after the change. `test_p1_revocation.py` gains the `get_timeseries` read in its revoked-after-capture cases (membership, disabled). Run it with `python -m pytest -q -o addopts='' tests/assurance_acceptance/test_p1_timeseries.py`.
 

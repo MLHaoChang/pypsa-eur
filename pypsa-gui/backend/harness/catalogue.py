@@ -211,6 +211,14 @@ def _empty(name: str, description: str) -> dict[str, Any]:
     return _t(name, description, {}, [])
 
 
+# LC-19: the re-run rule the solve tools and the load flow share (harness/run_lifecycle.py).
+_RERUN_NOTE = (
+    "When the current project's results already match its inputs, the call is refused with "
+    "results_current before any card: tell the user and ask; only on their yes call it again "
+    "with rerun_current: true. "
+)
+
+
 TOOLS: list[dict[str, Any]] = [
     _t(
         "resolve_project_target",
@@ -470,7 +478,7 @@ TOOLS: list[dict[str, Any]] = [
         "has nothing to serve — an unsolved or stale network, or a solve that "
         "produced none of this kind (lost_load on a run that shed nothing). "
         "Read `message` and check dispatch_status; do NOT report it as a zero. "
-        "run_id (statistics and cost_breakdown only) answers for one run as "
+        "run_id (statistics, cost_breakdown and economics_by_carrier only) answers for one run as "
         "{status, scope, result_kind, data, run}: the newest completed run whose "
         "inputs are still current answers with the current read (scope current); "
         "any other run answers from the results kept when it finished (scope "
@@ -903,14 +911,15 @@ TOOLS: list[dict[str, Any]] = [
         "run_simulation",
         "Start LOPF in a worker thread. Long-running (minutes to hours). "
         "[PHASE] / [VALIDATION] / TRACEBACK lines stream via the chat tool-"
-        "progress SSE bridge. Safety: execution.",
-        {},
+        "progress SSE bridge. " + _RERUN_NOTE + "Safety: execution.",
+        {"rerun_current": {"type": "boolean"}},
     ),
-    _empty(
+    _t(
         "run_ac_pf_stage",
         "Run Stage 2 AC PF using the most recent LOPF dispatch as the seed. "
         "Long-running. dispatch_status must be 'fresh' before calling. "
-        "Safety: execution.",
+        + _RERUN_NOTE + "Safety: execution.",
+        {"rerun_current": {"type": "boolean"}},
     ),
     _empty(
         "abort_simulation",
@@ -1420,8 +1429,8 @@ TOOLS: list[dict[str, Any]] = [
         "if the project already has a queued or running job the response is 200 "
         "with THAT job and `already_queued: true`, and no second job is created "
         "— this is not an error, so do not retry. A new job returns "
-        "`already_queued: false`. Safety: execution.",
-        {"project_id": {"type": "string"}},
+        "`already_queued: false`. " + _RERUN_NOTE + "Safety: execution.",
+        {"project_id": {"type": "string"}, "rerun_current": {"type": "boolean"}},
         ["project_id"],
     ),
     _empty(
@@ -1479,12 +1488,13 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "solve_queue_requeue",
-        "Run a FINISHED job again as a NEW queued job for the same project "
+        "Retry or re-run a FINISHED job (failed, aborted, interrupted or done) as a NEW queued job for the same project "
         "(the job then solves and saves that project). A queued or running "
         "job is refused (409); a project another user holds the edit lock on "
-        "is refused. Returns the new job and `already_queued`. "
-        "Safety: execution.",
-        {"job_id": {"type": "string"}},
+        "is refused. Returns the new job and `already_queued`. It solves the "
+        "project's saved inputs with the job's own solver settings. "
+        + _RERUN_NOTE + "Safety: execution.",
+        {"job_id": {"type": "string"}, "rerun_current": {"type": "boolean"}},
         ["job_id"],
     ),
 
@@ -2421,7 +2431,11 @@ TOOLS: list[dict[str, Any]] = [
         "project_readiness",
         "Check project kind, saved/dirty state, network validation, time-series store, solver availability, "
         "and result freshness without running a solve. Defaults to the active project. "
-        "Returns ready, blockers, and next_tools; GridSpine returns run/config/source freshness. Safety: read.",
+        "Returns ready, blockers, and next_tools; GridSpine returns run/config/source freshness. "
+        "engines lists what this project can run from chat, each {kind, label, tool, ready}; "
+        "ask_engine lists the ready kinds when more than one is ready. A bare \"run\" then asks "
+        "once with ask_user, one option per listed engine, before any run tool; with one ready "
+        "engine it runs that one. Safety: read.",
         {"project_id": {"type": "string"}}, [],
     ),
     _t(
@@ -2432,7 +2446,8 @@ TOOLS: list[dict[str, Any]] = [
         "investment_case), or report job (rpt:… from generate_report / "
         "regenerate_report_section / propose_report_mapping), "
         "avoiding repeated model status polls. "
-        "Returns job, terminal, completed, timed_out, wait_cancelled, waited_seconds. "
+        "Returns job, terminal, completed, timed_out, wait_cancelled, waited_seconds; a failed solve "
+        "adds triage: the reads to make (its log, diagnose_network, validate_network) and what to say. "
         "Default 20 seconds, maximum 25. On timeout report pending and end the turn; never busy-poll. "
         "A cancelled wait leaves the job running; solve_queue_abort, abort_simulation, "
         "abort_adequacy_study, or abort_report_generation stops it. Safety: read.",

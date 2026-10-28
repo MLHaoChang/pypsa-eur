@@ -323,9 +323,9 @@ def test_typed_chat_loadflow_journey_matches_software_values(result_project, kin
 
 
 def test_new_refusal_kinds_are_classified_in_the_manifest():
-    from pathlib import Path
+    from smoke.json_fragments import tool_error_kinds
 
-    kinds = json.loads((Path(__file__).resolve().parents[2] / "tool-error-kinds.json").read_text())["kinds"]
+    kinds = tool_error_kinds()
     for kind in ("loadflow_view_unavailable", "unknown_branch", "invalid_navigation", "ui_ack_mismatch"):
         assert kinds[kind]["surface"] in ("banner", "inline")
 

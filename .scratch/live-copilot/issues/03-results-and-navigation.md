@@ -193,3 +193,27 @@ Remaining gates: LC-T08 ACL recheck at navigation and download for past-run
 sections (read is rechecked); the other families (capacity, dispatch, prices, emissions)
 one adapter per PR, which LC-21's chapters read; UI/export parity for past
 runs; LC-T09/T10 browser cases for historical views.
+
+### PR-E, capacity family (2026-10-28)
+
+Rebaselined on master `069a1d81`. Branch `claude/lc03-retained-capacity`.
+Plan GO from GK B (option 1, kind→section map).
+
+- `Retained.kinds`: the get_results kinds a section keeps; `KEPT_KINDS`
+  (kind → section) is built from the adapters and each kind has one owner.
+  `_capture_summary` became `_capture_kinds(kinds)` with the same rules.
+- Capacity family: section `results_capacity` keeps `economics_by_carrier`;
+  the Capacity Expansion tab's `cost_breakdown` stays kept once, with
+  Summary. Capex view `historical_section="results_capacity"`. A run without
+  it refuses `historical_results_unavailable` naming capacity results.
+  `economics_by_carrier` takes no arguments, so no argument can reshape it.
+- RED/oracle: older oj-grid run (Gas 50) read after the Gas 60 solve:
+  gas opex_meur = 50 x sum(90 - 80 pu_t) / 1e6, LCOE 50, dispatch_gwh.
+  Mutation check: every kind sent to `results_summary` fails the capacity
+  test at its section assert and the legacy-refusal test.
+- Commands: `pytest tests/test_retained_summary.py tests/test_retained_loadflow.py
+  tests/test_result_views.py tests/test_run_evidence_*.py
+  tests/test_vs2_results_walk_journey.py tests/test_oj01_latest_loadflow_journey.py` pass.
+
+Next: dispatch and prices need a plan first (per-snapshot payloads far exceed
+16 KB at 8760 h: bounded summary vs larger cap); then emissions.

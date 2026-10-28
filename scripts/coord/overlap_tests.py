@@ -19,6 +19,8 @@ relative to ``pypsa-gui/backend``), ``vitest <file> <test>`` (relative to
   ``pypsa-gui/backend/tests/test_<mod>*.py``.
 - Frontend ``pypsa-gui/frontend/src/**/<Name>.tsx|ts`` maps to every
   ``<Name>*.test.*`` under ``pypsa-gui/frontend/src``.
+- The shared JSON files in ``SHARED_JSON`` (and their ``.d/`` fragments) map to
+  the backend tests that read them.
 """
 
 import sys
@@ -26,12 +28,22 @@ from pathlib import Path, PurePosixPath
 
 BACKEND = PurePosixPath("pypsa-gui/backend")
 FRONTEND = PurePosixPath("pypsa-gui/frontend")
+# Hand-written shared JSON: base file stem -> the backend tests that read it.
+SHARED_JSON = {
+    "pypsa-gui/tool-error-kinds": ["tests/test_tool_error_kind_manifest.py", "tests/test_json_fragments.py"],
+    "pypsa-gui/backend/smoke/assistant_route_parity_declarations": [
+        "tests/test_assistant_route_parity.py", "tests/test_json_fragments.py"],
+}
 
 
 def tests_for(root, path):
     """Return ``(runner, [test paths])`` for ``path``; the list is empty if none."""
     root = Path(root)
     p = PurePosixPath(path)
+    if p.suffix == ".json":
+        stem = str(p.parent.with_suffix("") if p.parent.suffix == ".d" else p.with_suffix(""))
+        if stem in SHARED_JSON:
+            return "pytest", SHARED_JSON[stem]
     if p.suffix == ".py" and p.is_relative_to(BACKEND):
         if p.is_relative_to(BACKEND / "tests") or p.stem.startswith("__"):
             return "pytest", []

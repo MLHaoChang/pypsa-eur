@@ -316,6 +316,10 @@ def apply_clustering(req: ClusterRequest) -> dict:
         # swallowed: the user chose those bounds, and losing them to a
         # clustering run is a thing to be told about.
         new_n.meta = dict(getattr(n, "meta", None) or {})
+        # Component identities (D06) never carry: a cluster can reuse an old
+        # name, and a carried uid would bind its 3D placement to it.
+        from services import component_identity
+        component_identity.forget_all(new_n)
         dropped_bounds = vintage_service.prune_orphaned_entries(new_n)
         PyPSAService.set_network(new_n)
 
