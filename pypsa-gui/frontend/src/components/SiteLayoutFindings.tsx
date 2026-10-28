@@ -4,7 +4,7 @@
 // same deep link the Issues panel offers). Collapsed when there is nothing
 // to say; open when there is. DOM only, no three.
 import { useUIStore } from '../store/uiStore'
-import { findingColor, type PlacementFinding } from '../site3d/placementCheck'
+import { findingColor, nativeFindingColor, type NativeFinding, type PlacementFinding } from '../site3d/placementCheck'
 import { componentOfKey } from '../site3d/placementFindingsStore'
 import { OUTSIDE_COLOR, WARN_COLOR } from '../site3d/resultStyle'
 
@@ -12,11 +12,22 @@ interface Props {
   findings: readonly PlacementFinding[]
   /** Keys the packer could not arrange by their rules (layout.unresolved). */
   unresolved?: readonly string[]
+  /** SC-02: the native scene's findings (a building in the way, a roof); a click selects the item and the building. */
+  native?: readonly NativeFinding[]
 }
 
-export default function SiteLayoutFindings({ findings, unresolved = [] }: Props) {
+const BUILDING_PREFIX = 'building:'
+
+/** Select both objects a native finding names: the item, and the building it overlaps or stands on. */
+function selectNative(f: NativeFinding): void {
+  const ui = useUIStore.getState()
+  if (f.other?.startsWith(BUILDING_PREFIX)) ui.setSitePartSelection({ kind: 'building', id: f.other.slice(BUILDING_PREFIX.length) })
+  ui.setSelectedComponent(componentOfKey(f.key))
+}
+
+export default function SiteLayoutFindings({ findings, unresolved = [], native = [] }: Props) {
   const setSelectedComponent = useUIStore(s => s.setSelectedComponent)
-  const n = findings.length
+  const n = findings.length + native.length
   return (
     <details
       data-testid="site-layout-findings"
@@ -45,6 +56,18 @@ export default function SiteLayoutFindings({ findings, unresolved = [] }: Props)
               </button>
             </li>
           ))}
+          {native.map((f, i) => {
+            const color = nativeFindingColor(f.kind)
+            return (
+              <li key={`native:${f.key}:${f.kind}:${f.other ?? ''}:${i}`} className="flex items-start gap-1.5" data-testid="site-native-finding">
+                <span aria-hidden className="mt-1 inline-block h-2 w-2 shrink-0 rounded-sm border border-border"
+                  style={color ? { background: color === 'red' ? OUTSIDE_COLOR : WARN_COLOR } : undefined} />
+                <button type="button" className="text-left hover:text-text hover:underline" onClick={() => selectNative(f)}>
+                  {f.message}
+                </button>
+              </li>
+            )
+          })}
         </ul>
       )}
       {unresolved.length > 0 && (
