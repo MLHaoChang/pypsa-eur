@@ -2566,16 +2566,25 @@ def _dispatch_real_tool_call(
         return
 
     if session.assurance_turn is not None:
+        refusal = {"error_kind": "capability_unsupported",
+                   "message": "This operation is outside the checked-input pilot."}
+        content = "Unsupported in strict checked-input mode; no effect executed."
         try:
             admitted = session.assurance_turn.tool_guard(tool_name, args)
+        except HTTPException as refused:  # a typed refusal names its own kind
+            admitted = False
+            from harness.assurance import GUARD_REFUSAL_KINDS
+            if (isinstance(refused.detail, dict)
+                    and refused.detail.get("error_kind") in GUARD_REFUSAL_KINDS):
+                refusal = {"error_kind": refused.detail["error_kind"],
+                           "message": str(refused.detail.get("message", ""))}
+                content = refusal["message"]
         except Exception:  # noqa: BLE001 — required guard failures never abstain
             admitted = False
         if not admitted:
-            yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
-                                 "error_kind": "capability_unsupported",
-                                 "message": "This operation is outside the checked-input pilot."}
+            yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name, **refusal}
             tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
-                                           "is_error": True, "content": "Unsupported in strict checked-input mode; no effect executed."})
+                                           "is_error": True, "content": content})
             return
 
     # #19 — argument validation BEFORE the confirmation gate. The gate below
