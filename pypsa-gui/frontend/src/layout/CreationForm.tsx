@@ -20,6 +20,7 @@ import { openTimeSeriesFor } from './flowNavigation'
 import toast from 'react-hot-toast'
 import type { Bus, Line, Link, Generator, Load, StorageUnit, Store, Transformer } from '../api/types'
 import { PALETTE_COMPONENT_TYPE } from './paletteData'
+import { processUnitLink } from '../utils/processUnit'
 import { carrierMatches, type BusFilter } from '../utils/busCarriers'
 import { busLatLng, haversineKm } from '../utils/geo'
 
@@ -177,6 +178,27 @@ export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 'lifetime', label: 'Lifetime', type: 'number', half: true },
     { key: 'marginal_cost',label: 'Marginal cost',          type: 'number', defaultValue: '0', unit: '€/MWh',  half: true },
   ],
+  // Process unit (grid-to-process 07): rates per tonne in, efficiencies out. `processUnitLink` derives
+  // bus2.. and efficiency, efficiency2.. on submit; the user never types an efficiency.
+  process_unit: [
+    { key: 'name',         label: 'Name',                      type: 'text',   required: true },
+    { key: 'bus0',         label: 'Electricity bus (input)',   type: 'bus',    required: true,  busCarrierFilter: 'non-h2' } as BusFieldSpec,
+    { key: 'bus1',         label: 'Product bus (output)',      type: 'bus',    required: true } as BusFieldSpec,
+    { key: 'carrier',      label: 'Carrier',                   type: 'text',   defaultValue: 'process' },
+    { key: 'p_nom',        label: 'Capacity (electricity in)', type: 'number', keepLabel: true, defaultValue: '100', unit: 'MW', half: true },
+    { key: 'product_per_t', label: 'Product per tonne',        type: 'number', defaultValue: '1', unit: 'bus unit/t', half: true },
+    { key: 'el_kwh_per_t', label: 'Electricity per tonne',     type: 'number', defaultValue: '1000', unit: 'kWh/t', half: true },
+    { key: 'in1_bus',      label: 'Input 1 bus',               type: 'bus',    required: true } as BusFieldSpec,
+    { key: 'in1_rate',     label: 'Input 1 per tonne',         type: 'number', unit: 'bus unit/t', half: true },
+    { key: 'in2_bus',      label: 'Input 2 bus (optional)',    type: 'bus' } as BusFieldSpec,
+    { key: 'in2_rate',     label: 'Input 2 per tonne',         type: 'number', unit: 'bus unit/t', half: true },
+    { key: 'in3_bus',      label: 'Input 3 bus (optional)',    type: 'bus' } as BusFieldSpec,
+    { key: 'in3_rate',     label: 'Input 3 per tonne',         type: 'number', unit: 'bus unit/t', half: true },
+    { key: 'committable',  label: 'Unit commitment (min load, min up / down)', type: 'checkbox', defaultValue: 'true' },
+    { key: 'p_min_pu',     label: 'Min load',                  type: 'number', keepLabel: true, defaultValue: '0.4', half: true },
+    { key: 'min_up_time',  label: 'Min up time',               type: 'number', keepLabel: true, defaultValue: '24', unit: 'h', half: true },
+    { key: 'min_down_time', label: 'Min down time (restart)',  type: 'number', keepLabel: true, defaultValue: '8', unit: 'h', half: true },
+  ],
   fuel_cell: [
     { key: 'name',         label: 'Name',                    type: 'text',   required: true },
     { key: 'bus0',         label: 'H₂ bus (input)',          type: 'bus',    required: true,  busCarrierFilter: 'h2' } as BusFieldSpec,
@@ -303,7 +325,7 @@ export function nearestPlacedBus(
 
 export const TERMINAL_FIELD: Record<string, 'bus' | 'bus0'> = {
   line: 'bus0', transformer: 'bus0',
-  electrolyzer: 'bus0', fuel_cell: 'bus0', power_to_heat: 'bus0', chp: 'bus0',
+  electrolyzer: 'bus0', fuel_cell: 'bus0', process_unit: 'bus0', power_to_heat: 'bus0', chp: 'bus0',
   thermal: 'bus', renewable: 'bus',
   battery: 'bus', psh: 'bus', caes: 'bus', flywheel: 'bus', hydrogen: 'bus',
   thermal_storage: 'bus',
@@ -314,7 +336,7 @@ const AUTO_PREFIX: Record<string, string> = {
   bus: 'Bus', line: 'Line', transformer: 'Tx',
   thermal: 'Gas', renewable: 'Wind',
   battery: 'Battery', psh: 'PSH', hydrogen: 'H2', caes: 'CAES', flywheel: 'FW',
-  electrolyzer: 'Electrolyzer', fuel_cell: 'FuelCell',
+  electrolyzer: 'Electrolyzer', fuel_cell: 'FuelCell', process_unit: 'Process',
   power_to_heat: 'P2H', chp: 'CHP', thermal_storage: 'TES',
   load_elec: 'Load', load_h2: 'H2Load', load_heat: 'HeatLoad',
 }
@@ -324,7 +346,7 @@ const QUERY_KEY: Record<string, string> = {
   thermal: 'generators', renewable: 'generators',
   battery: 'storage_units', psh: 'storage_units', hydrogen: 'storage_units',
   caes: 'storage_units', flywheel: 'storage_units',
-  electrolyzer: 'links', fuel_cell: 'links',
+  electrolyzer: 'links', fuel_cell: 'links', process_unit: 'links',
   power_to_heat: 'links', chp: 'links',
   thermal_storage: 'stores',
   load_elec: 'loads', load_h2: 'loads', load_heat: 'loads',
@@ -341,6 +363,7 @@ const CREATE_FN: Record<string, CreateFn> = {
   transformer:   p => networkApi.createTransformer(p as Partial<Transformer>),
   electrolyzer:  p => networkApi.createLink(p as Partial<Link>),
   fuel_cell:     p => networkApi.createLink(p as Partial<Link>),
+  process_unit:  p => networkApi.createLink(p as Partial<Link>),
   power_to_heat: p => networkApi.createLink(p as Partial<Link>),
   chp:           p => networkApi.createLink(p as Partial<Link>),
   thermal:       p => networkApi.createGenerator(p as Partial<Generator>),
@@ -361,6 +384,7 @@ const CREATE_FN: Record<string, CreateFn> = {
 // the UI displays differently from PyPSA's storage format. Today: Line r/x/b
 // are entered as Ω/km · S/km but PyPSA stores absolute Ω · S.
 const SUBMIT_TRANSFORM: Record<string, (p: Record<string, unknown>) => Record<string, unknown>> = {
+  process_unit: processUnitLink,
   line: (p) => {
     const L = Number(p.length ?? 0) || 0
     const out = { ...p }
