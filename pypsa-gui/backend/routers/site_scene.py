@@ -124,26 +124,26 @@ def _unbound_keys(project: AuthorizedProject, scene: dict) -> list[str] | None:
     from services import site_bindings
     from services.pypsa_service import PyPSAService
 
-    n = site_bindings.open_network(project.directory)
-    if n is None:
-        return None
     keys = set(scene["site"].get("placements") or {}) | set(scene.get("asset_footprints") or {})
     try:
         bindings = site_service.read_sites(project.directory).get("bindings") or {}
     except PermissionError:
         bindings = {}
     with PyPSAService.get_lock():
+        n = site_bindings.open_network(project.directory)      # resolved under the lock: no switch in between
+        if n is None:
+            return None
         stale = site_bindings.stale_keys(n, keys, bindings)
-    unbound = []
-    for key in sorted(keys):
-        cls, _, comp = key.partition(":")
-        try:
-            known = comp in n.components[cls].static.index
-        except (KeyError, AttributeError):
-            known = False                   # not a component class this network has
-        # A same-name component that is not the instance the key was bound to (D06) is unbound too.
-        if not known or key in stale:
-            unbound.append(key)
+        unbound = []
+        for key in sorted(keys):
+            cls, _, comp = key.partition(":")
+            try:
+                known = comp in n.components[cls].static.index
+            except (KeyError, AttributeError):
+                known = False                   # not a component class this network has
+            # A same-name component that is not the instance the key was bound to (D06) is unbound too.
+            if not known or key in stale:
+                unbound.append(key)
     return unbound
 
 
@@ -167,10 +167,8 @@ def _read_back(project: AuthorizedProject, scene: dict) -> dict:
     from services.pypsa_service import PyPSAService
     from services.site_scene import associations
 
-    n = site_bindings.open_network(project.directory)
-    if n is None:
-        return associations.read_back(scene, None)
     with PyPSAService.get_lock():
+        n = site_bindings.open_network(project.directory)      # resolved under the lock: no switch in between
         return associations.read_back(scene, n)
 
 

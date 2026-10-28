@@ -557,3 +557,87 @@ def test_a_threaded_placement_apply_and_a_crud_edit_keep_both_sites_writes(clien
     assert "Generator:gas" not in placed, placed                         # the edit's scene write kept
     if edit == "rename":                                                 # a delete leaves a dead binding
         assert "Generator:gas2" in placed and "Generator:gas2" in bindings and "Generator:gas" not in bindings
+
+
+# ── a uid minted at Apply reaches the saved network (GK B review of #844) ──
+
+def _unsaved(client):
+    return client.get("/api/network/undo/info").json()["unsaved"]
+
+
+def _save_and_reload(client):
+    assert client.post(f"/api/projects/{NAME}", params={"force": True, "rebind": True}).status_code == 200
+    assert client.get(f"/api/projects/{NAME}").status_code == 200       # read back from disk
+
+
+def test_an_apply_that_mints_marks_the_project_unsaved_and_a_save_keeps_the_binding(client, scene):
+    _save_and_reload(client)
+    assert _unsaved(client) is False
+    _bind(client, [{"feature": A, "target": {"class": "Load", "carrier": "heat"}}])
+    assert _unsaved(client) is True
+    _save_and_reload(client)
+    (row,) = _assoc(_get(client), A)
+    assert row["status"] == "bound" and row["name"] == "heat_demand"
+
+
+def test_an_apply_that_mints_nothing_new_leaves_the_project_clean(client, scene):
+    _bind(client, [{"feature": A, "target": {"class": "Load", "name": "heat_demand"}}])
+    _save_and_reload(client)
+    keep = _assoc(_get(client), A)[0]["id"]
+    _bind(client, [{"id": keep}, {"feature": B, "target": {"class": "Load", "name": "heat_demand"}}])
+    assert _unsaved(client) is False
+
+
+def test_a_placement_and_a_rebind_that_mint_mark_the_project_unsaved(client, scene):
+    _save_and_reload(client)
+    _apply(client, _propose(client, "place_existing", {"placements": {
+        "StorageUnit:bess": {"x": 60.0, "y": -50.0, "heading": 0}}}))
+    assert _unsaved(client) is True
+    row, _ = _unbound_after_recreate(client)
+    _save_and_reload(client)
+    _apply(client, _propose(client, "rebind", {"association": row["id"], "confirmed": True,
+                                               "target": {"class": "Load", "name": "it"}}))
+    assert _unsaved(client) is True
+
+
+def test_a_refused_apply_mints_nothing(client, scene, monkeypatch):
+    """Every step is re-validated before any uid is minted (GK B, non-blocking note on #844)."""
+    from services import component_identity
+
+    p = _propose(client, "bind_targets", {"associations": [
+        {"feature": A, "target": {"class": "Load", "name": "heat_demand"}},
+        {"feature": A, "target": {"class": "Load", "name": "it"}}], "groups": []})
+    assert client.delete("/api/network/loads/it").status_code in (200, 204)
+
+    def no_mint(*_a, **_k):
+        raise AssertionError("a refused Apply minted a uid")
+
+    monkeypatch.setattr(component_identity, "uid_for", no_mint)
+    r = _apply(client, p, ok=False)
+    assert r.status_code == 409 and _detail(r)["code"] == "target_changed"
+
+
+# ── the network is resolved under its lock (GK B review of #844) ──
+
+@pytest.mark.parametrize("step", ["get", "prepare", "apply"])
+def test_the_network_is_resolved_while_its_lock_is_held(client, scene, monkeypatch, step):
+    from services import site_bindings
+    from services.pypsa_service import PyPSAService
+
+    p = _propose(client, "bind_targets", {"associations": [
+        {"feature": A, "target": {"class": "Load", "name": "it"}}], "groups": []}) if step == "apply" else None
+    real, held = site_bindings.open_network, []
+
+    def recording(project_dir):
+        held.append(PyPSAService.get_lock()._is_owned())
+        return real(project_dir)
+
+    monkeypatch.setattr(site_bindings, "open_network", recording)
+    if step == "get":
+        _get(client)
+    elif step == "prepare":
+        _propose(client, "bind_targets", {"associations": [
+            {"feature": A, "target": {"class": "Load", "name": "it"}}], "groups": []})
+    else:
+        _apply(client, p)
+    assert held and all(held), held

@@ -33,7 +33,7 @@ import math
 import uuid
 from typing import Any
 
-from services import component_identity
+from services import component_identity, dirty_state
 from services.site_scene import frames
 from services.site_scene.contract import SceneError, quantity
 
@@ -147,13 +147,11 @@ def _fingerprint(n, cls: str, name: str) -> dict[str, Any]:
             "bus": _bus_of(n, cls, name), "carrier": _carrier(n, cls, name)}
 
 
-def _revalidate(n, expect: dict[str, Any], minted: dict[tuple[str, str], str] | None = None,
-                *, attachable: bool = True) -> str:
+def _check(n, expect: dict[str, Any], prior: str | None = None, *, attachable: bool = True) -> None:
     """
-    Re-run every check against the live network; mint and return the uid.
-    `minted` holds uids already bound to this instance (earlier in the same
-    Apply, or by a placement attempt whose commit failed), so a target several
-    features share stays one instance. Caller holds the network lock.
+    Re-run every check against the live network; mint nothing. `prior` is a
+    uid already bound to this instance by a placement attempt whose commit
+    failed, so the retry finds the same instance. Caller holds the network lock.
     """
     cls, name = expect["class"], expect["name"]
     label = _label(n, cls, name)
@@ -165,15 +163,25 @@ def _revalidate(n, expect: dict[str, Any], minted: dict[tuple[str, str], str] | 
         except SceneError:
             raise _changed(f"{label} can no longer be attached: review again") from None
     now = _fingerprint(n, cls, name)
-    if now["uid"] != expect["uid"] and not (expect["uid"] is None and minted
-                                            and now["uid"] == minted.get((cls, name))):
+    if now["uid"] != expect["uid"] and not (expect["uid"] is None and prior and now["uid"] == prior):
         raise _changed(f"{label} was replaced since you reviewed it: review again")
     if (now["bus"], now["carrier"]) != (expect["bus"], expect["carrier"]):
         raise _changed(f"{label} changed since you reviewed it: review again")
+
+
+def _mint(n, cls: str, name: str) -> str:
+    """The instance's uid, minted on first use; a new uid marks the project unsaved so a save keeps it (D06)."""
+    first = component_identity.get(n, cls, name) is None
     uid = component_identity.uid_for(n, cls, name)
-    if minted is not None:
-        minted[(cls, name)] = uid
+    if first:
+        dirty_state.mark_dirty()
     return uid
+
+
+def _revalidate(n, expect: dict[str, Any], *, attachable: bool = True) -> str:
+    """`_check`, then `_mint`. Caller holds the network lock."""
+    _check(n, expect, attachable=attachable)
+    return _mint(n, expect["class"], expect["name"])
 
 
 # ── groups and allocation ───────────────────────────────────────────────────
@@ -365,7 +373,11 @@ def prepare_bind(scene: dict[str, Any], n, inputs: dict[str, Any],
 def apply_bind(_scene: dict[str, Any], n, stored: dict[str, Any],
                _recorded: dict[str, str]) -> tuple[dict[str, Any], dict[str, str | None]]:
     """The changes to commit. Caller holds the network lock, then the scene mutex."""
-    out, minted = [], {}
+    # Every step is checked before any uid is minted, so a refused Apply leaves the network as it was.
+    for step in stored["plan"]:
+        if "new" in step:
+            _check(n, step["new"]["expect"])
+    out = []
     for step in stored["plan"]:
         if "keep" in step:
             out.append(copy.deepcopy(step["keep"]))
@@ -375,7 +387,7 @@ def apply_bind(_scene: dict[str, Any], n, stored: dict[str, Any],
                         "uid": None, "name_at_bind": None, "carrier": gap["carrier"], "role": "load"})
         else:
             new = step["new"]
-            uid = _revalidate(n, new["expect"], minted)
+            uid = _mint(n, new["expect"]["class"], new["expect"]["name"])
             row = {"id": f"a-{uuid.uuid4().hex[:12]}", "feature": new["feature"], "class": new["expect"]["class"],
                    "uid": uid, "name_at_bind": new["expect"]["name"], "role": new["role"]}
             if new["weight"] is not None:
@@ -559,8 +571,9 @@ def apply_place(scene: dict[str, Any], n, stored: dict[str, Any],
         prior = recorded.get(key)
         if _stale(n, cls, name, prior):
             raise _changed(_unbound_text(n, cls, name), "unbound_target")
-        bindings[key] = _revalidate(n, step["expect"], {(cls, name): prior} if isinstance(prior, str) else {},
-                                    attachable=False)
+        _check(n, step["expect"], prior if isinstance(prior, str) else None, attachable=False)
+    for key, step in stored["plan"].items():
+        bindings[key] = _mint(n, step["expect"]["class"], step["expect"]["name"])
         placements[key] = step["entry"]
     return {"placements": placements}, bindings
 

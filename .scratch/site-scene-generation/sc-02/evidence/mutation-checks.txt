@@ -48,6 +48,22 @@ M9 double count ignores the Load's carrier
 M10 Apply takes the scene mutex without the network lock
   exit 1
   FAILED tests/test_site_scene_associations.py::test_bind_apply_takes_the_network_lock_before_the_scene_mutex
+  FAILED tests/test_site_scene_associations.py::test_the_network_is_resolved_while_its_lock_is_held[apply]
+M11 a first uid minted at Apply is not marked unsaved
+  exit 1
+  FAILED tests/test_site_scene_associations.py::test_an_apply_that_mints_marks_the_project_unsaved_and_a_save_keeps_the_binding
+  FAILED tests/test_site_scene_associations.py::test_a_placement_and_a_rebind_that_mint_mark_the_project_unsaved
+M12 Apply resolves the network before taking its lock
+  exit 1
+  FAILED tests/test_site_scene_associations.py::test_the_network_is_resolved_while_its_lock_is_held[apply]
+M13 bind Apply mints each step before checking the next
+  exit 1
+  FAILED tests/test_site_scene_associations.py::test_several_enclosures_of_one_battery_count_its_capacity_once
+  FAILED tests/test_site_scene_associations.py::test_an_aggregate_load_in_two_buildings_is_not_split
+  FAILED tests/test_site_scene_associations.py::test_an_explicit_split_shows_allocated_values_that_sum_to_the_native_total
+  FAILED tests/test_site_scene_associations.py::test_a_rebind_that_breaks_a_split_is_refused
+  FAILED tests/test_site_scene_associations.py::test_a_refused_apply_mints_nothing
+(M10–M13 re-run after the GK B (5) fixes on #844; M10 now also drops the in-lock network resolve.)
 Restored: exit 0
 
-Each red comes from the named guard: M1 the uid read-back, M2 the stored uid, M3 the cycle DFS, M4 the sum tolerance, M5/M5c the Apply-time re-validation (existence; bus and carrier), M5b the instance check, M6 the scene mutex in the legacy hook, M7 the stale-binding refusal in place_existing, M8 the allocation check in rebind, M9 the electricity filter of double_counted_demand, M10 the network lock before the scene mutex at Apply.
+Each red comes from the named guard: M1 the uid read-back, M2 the stored uid, M3 the cycle DFS, M4 the sum tolerance, M5/M5c the Apply-time re-validation (existence; bus and carrier), M5b the instance check, M6 the scene mutex in the legacy hook, M7 the stale-binding refusal in place_existing, M8 the allocation check in rebind, M9 the electricity filter of double_counted_demand, M10 the network lock before the scene mutex at Apply, M11 the dirty mark on a first uid, M12 the in-lock network resolve, M13 check-every-step-then-mint.

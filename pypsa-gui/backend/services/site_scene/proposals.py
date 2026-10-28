@@ -138,8 +138,8 @@ def _prepare_model(project_dir, action: str, scene: dict[str, Any], inputs: dict
     """Prepare reads the open network under its lock; it never writes or mints (SC-02a)."""
     from services.pypsa_service import PyPSAService
 
-    n = _open_network(project_dir)
     with PyPSAService.get_lock():
+        n = _open_network(project_dir)                 # resolved under the lock: no switch in between
         return MODEL_ACTIONS[action][0](scene, n, inputs, _recorded_bindings(project_dir))
 
 
@@ -221,9 +221,10 @@ def _apply_entry(project_dir, site_id: str, pid: str, entry: dict[str, Any], bod
         # One lock order everywhere (D06): the network lock, then the scene mutex.
         from services.pypsa_service import PyPSAService
 
-        n = _open_network(project_dir)
-        with PyPSAService.get_lock(), store.project_lock(project_dir):
-            return _commit_entry(project_dir, site_id, pid, entry, expected, n)
+        with PyPSAService.get_lock():
+            n = _open_network(project_dir)             # resolved under the lock: no switch in between
+            with store.project_lock(project_dir):
+                return _commit_entry(project_dir, site_id, pid, entry, expected, n)
     with store.project_lock(project_dir):
         return _commit_entry(project_dir, site_id, pid, entry, expected, None)
 

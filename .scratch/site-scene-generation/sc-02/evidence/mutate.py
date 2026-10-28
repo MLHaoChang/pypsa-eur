@@ -73,8 +73,26 @@ M = [
     (
         "M10 Apply takes the scene mutex without the network lock",
         P,
-        "with PyPSAService.get_lock(), store.project_lock(project_dir):",
-        "with store.project_lock(project_dir):",
+        "        with PyPSAService.get_lock():\n            n = _open_network(project_dir)",
+        "        n = _open_network(project_dir)\n        if True:",
+    ),
+    (
+        "M11 a first uid minted at Apply is not marked unsaved",
+        A,
+        "    if first:\n        dirty_state.mark_dirty()\n",
+        "",
+    ),
+    (
+        "M12 Apply resolves the network before taking its lock",
+        P,
+        "        with PyPSAService.get_lock():\n            n = _open_network(project_dir)",
+        "        n = _open_network(project_dir)\n        with PyPSAService.get_lock():",
+    ),
+    (
+        "M13 bind Apply mints each step before checking the next",
+        A,
+        '    for step in stored["plan"]:\n        if "new" in step:\n            _check(n, step["new"]["expect"])\n    out = []\n    for step in stored["plan"]:\n        if "keep" in step:\n            out.append(copy.deepcopy(step["keep"]))\n        elif "unavailable" in step:\n            gap = step["unavailable"]\n            out.append({"id": f"a-{uuid.uuid4().hex[:12]}", "feature": gap["feature"], "class": "Load",\n                        "uid": None, "name_at_bind": None, "carrier": gap["carrier"], "role": "load"})\n        else:\n            new = step["new"]\n            uid = _mint(n, new["expect"]["class"], new["expect"]["name"])\n',
+        '    out = []\n    for step in stored["plan"]:\n        if "keep" in step:\n            out.append(copy.deepcopy(step["keep"]))\n        elif "unavailable" in step:\n            gap = step["unavailable"]\n            out.append({"id": f"a-{uuid.uuid4().hex[:12]}", "feature": gap["feature"], "class": "Load",\n                        "uid": None, "name_at_bind": None, "carrier": gap["carrier"], "role": "load"})\n        else:\n            new = step["new"]\n            _check(n, new["expect"])\n            uid = _mint(n, new["expect"]["class"], new["expect"]["name"])\n',
     ),
 ]
 TESTS = ["tests/test_site_scene_associations.py", "tests/test_site_scene_placement.py"]
