@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant's grid-limit set and reset and its external dispatch upload now show an old → new confirmation card before the write, and their receipts read the stored limit or tables back from the project.
