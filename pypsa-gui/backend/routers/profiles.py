@@ -82,6 +82,7 @@ from services.profile_gen.availability import (
 from services.profile_gen.refine import (
     AnnualEnergyOnWindowSourceError,
     InvalidRefineOpError,
+    RefineError,
     RefineReplayError,
     WindowClockUnknownError,
     WindowSourceOpError,
@@ -744,16 +745,24 @@ def _stored_refinements(ctx, result) -> list[dict[str, Any]] | None:
     made them (TSG 06): replayed by default on a re-generate. Targets holding
     different lists (or some none) are refused together, since one artifact
     records one list."""
+    import copy
+
     from services.profile_gen.families import default_target
+    from services.user_timeseries import _user_ts_lock
 
     ct, attr = default_target(result.meta, None, None)
     made_by = _generator_of(result.meta)
     if made_by[1] is None and made_by[2] is None:
         return None
+    # One read under the store's lock, so an apply or upload running beside
+    # this generate never shows half of its write.
+    with _user_ts_lock:
+        held = {comp: copy.deepcopy(ctx.user_ts_meta.get((ct, attr, comp)))
+                if (ct, attr, comp) in ctx.user_ts else None
+                for comp in result.series.columns}
     lists: dict[str, list] = {}
-    for comp in result.series.columns:
-        stored = ctx.user_ts_meta.get((ct, attr, comp)) or {}
-        same = (ct, attr, comp) in ctx.user_ts and _generator_of(stored) == made_by
+    for comp, stored in held.items():
+        same = stored is not None and _generator_of(stored) == made_by
         lists[comp] = list(stored.get("refinements") or []) if same else []
     distinct = {json.dumps(ops, sort_keys=True, default=str) for ops in lists.values()}
     if len(distinct) > 1:
@@ -790,9 +799,11 @@ def _replay_refinements(ctx, result, refinements, *, replay_stored: bool = False
     except ProfileGenError as exc:
         detail = {**_apply_refusal_kind(exc),
                   "message": public_message(exc, route="refine_replay")}
-        if stored and isinstance(exc, RefineReplayError):
-            detail.update(error_kind="replay_refused", op=exc.op, index=exc.index,
-                          retry=_REPLAY_RETRY)
+        if stored and isinstance(exc, RefineError):
+            # A refusal of the whole list (an hourly-only op on a coarser
+            # series) names no op; the retry still drops them.
+            detail.update(error_kind="replay_refused", op=getattr(exc, "op", None),
+                          index=getattr(exc, "index", None), retry=_REPLAY_RETRY)
         raise HTTPException(status_code=422, detail=detail) from exc
     meta["replay_warnings"] = warnings
     meta["replay"] = {"from": "stored" if stored else "request", "ops": len(refinements)}

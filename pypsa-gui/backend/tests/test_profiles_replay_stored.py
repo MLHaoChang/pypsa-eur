@@ -164,3 +164,133 @@ def test_the_chat_tool_replays_and_opts_out(client, project, bound_ctx):
     assert again["stats"]["plant"]["peak_mw"] == pytest.approx(60.0)
     assert again["replay"] == {"from": "stored", "ops": 2}
     assert plain["stats"]["plant"]["peak_mw"] == pytest.approx(80.0)
+
+
+# Every writer that replaces a stored series drops its recorded meta, so a
+# later re-generate cannot replay ops from a series that is no longer there
+# (GK B plan condition 1).
+
+def _hourly_csv(value: float) -> str:
+    idx = pd.date_range("2025-01-01", periods=8760, freq="h")
+    return "snapshot,plant\n" + "".join(f"{t.isoformat()},{value}\n" for t in idx)
+
+
+def _assert_no_replay(client, project):
+    again = _generate(client, project)
+    assert again["stats"]["plant"]["peak_mw"] == pytest.approx(80.0)
+    assert "replay" not in again and not again.get("refinements")
+
+
+def test_a_timeseries_edit_drops_the_stored_ops(client, project):
+    _refine_and_apply(client, project)
+    table = client.get("/api/network/timeseries/loads/p_set").json()
+    plant = table["columns"].index("plant")
+    data = [[*row[:plant], 12.0, *row[plant + 1:]] for row in table["data"]]
+    resp = client.put("/api/network/timeseries/loads/p_set",
+                      json={"index": table["index"], "columns": table["columns"],
+                            "data": data})
+    assert resp.status_code == 200, resp.text
+    _assert_no_replay(client, project)
+
+
+def test_an_unchanged_column_of_a_timeseries_edit_keeps_its_ops(client, project):
+    _refine_and_apply(client, project)
+    table = client.get("/api/network/timeseries/loads/p_set").json()
+    resp = client.put("/api/network/timeseries/loads/p_set", json=table)
+    assert resp.status_code == 200, resp.text
+    assert _generate(client, project)["replay"] == {"from": "stored", "ops": 2}
+
+
+def test_a_csv_upload_drops_the_stored_ops(client, project):
+    _refine_and_apply(client, project)
+    resp = client.post("/api/network/timeseries/upload",
+                       params={"component": "loads", "attribute": "p_set"},
+                       files={"file": ("plant.csv", _hourly_csv(12.0), "text/csv")})
+    assert resp.status_code == 200, resp.text
+    _assert_no_replay(client, project)
+
+
+def test_the_chat_demand_upload_drops_the_stored_ops(client, project, bound_ctx):
+    from services import upload_service
+
+    _refine_and_apply(client, project)
+    csv = _hourly_csv(12.0).replace("snapshot,plant", "timestamp,demand")
+    with bound_ctx(client):
+        meta = upload_service.add_upload(project, csv.encode(), "demand.csv", "text/csv")
+        result = chat_tools.apply_demand_from_excel(
+            file_id=meta.file_id, time_col="timestamp", value_col="demand", load_name="plant")
+    assert result["applied"] is True
+    _assert_no_replay(client, project)
+
+
+# Each refusal of a stored replay names its op and index (GK B condition 3).
+
+def _store_ops(client, bound_ctx, ops):
+    with bound_ctx(client) as ctx:
+        ctx.user_ts_meta[("loads", "p_set", "plant")]["refinements"] = ops
+
+
+def _refused(client, project):
+    resp = _post_generate(client, project)
+    assert resp.status_code == 422, resp.text
+    detail = resp.json()["detail"]
+    assert detail["error_kind"] == "replay_refused"
+    assert detail["retry"] == {"replay_refinements": False}
+    return detail
+
+
+def test_an_op_recorded_for_another_target_is_named(client, project, bound_ctx):
+    _refine_and_apply(client, project)
+    _store_ops(client, bound_ctx, [{"op": "cap", "value": 0.5,
+                                    "target": ["generators", "p_max_pu"]}])
+    detail = _refused(client, project)
+    assert (detail["op"], detail["index"]) == ("cap", 0)
+    assert "recorded for generators/p_max_pu" in detail["message"]
+
+
+def test_a_connection_op_that_disagrees_with_its_record_is_named(client, project, bound_ctx):
+    _refine_and_apply(client, project)
+    _store_ops(client, bound_ctx, [
+        {"op": "scale_window", "hours": [5, 10], "factor": 1.1, "target": ["loads", "p_set"]},
+        {"op": "scale_peak_to", "fraction": 0.5, "of": "connection", "resolved_mw": 70.0,
+         "connection": {"link": "poc", "value": 100.0, "hash": "x"},
+         "target": ["loads", "p_set"]}])
+    detail = _refused(client, project)
+    assert (detail["op"], detail["index"]) == ("scale_peak_to", 1)
+
+
+def test_an_op_that_no_longer_fits_is_named(client, project, bound_ctx):
+    _refine_and_apply(client, project)
+    _store_ops(client, bound_ctx, [{"op": "smooth", "window_h": 1,
+                                    "target": ["loads", "p_set"]}])
+    detail = _refused(client, project)
+    assert (detail["op"], detail["index"]) == ("smooth", 0)
+    assert "op 0 (smooth) no longer fits" in detail["message"]
+
+
+def test_a_coarser_regenerate_is_refused_with_the_retry(client, project, monkeypatch):
+    from routers import profiles as P
+
+    _refine_and_apply(client, project)
+    real = P.engine.generate_profile
+
+    def daily(*a, **k):
+        out = real(*a, **k)
+        out.meta["resolution"] = "daily"
+        return out
+
+    monkeypatch.setattr(P.engine, "generate_profile", daily)
+    detail = _refused(client, project)
+    assert detail["op"] is None and detail["index"] is None
+    assert "hourly" in detail["message"]
+
+
+# The request path keeps its refusal (GK B condition 4).
+
+def test_a_refused_request_list_keeps_its_error_kind(client, project):
+    resp = _post_generate(client, project, refinements=[
+        {"op": "cap", "value": 0.5, "target": ["generators", "p_max_pu"]}])
+    assert resp.status_code == 422, resp.text
+    detail = resp.json()["detail"]
+    assert detail["error_kind"] == "refine_replay"
+    assert "retry" not in detail and "op" not in detail
