@@ -6,6 +6,7 @@
 // Availability block): host-agnostic props, no store reads besides the
 // query client.
 import { useState } from 'react'
+import type { AxiosError } from 'axios'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Check, Download, Plus, Trash2, Upload, Wand2 } from 'lucide-react'
@@ -206,6 +207,17 @@ export function ReplayToggle({ refined, replay, setReplay }: ReturnType<typeof u
   )
 }
 
+/** A refused replay in plain words: its step counted from 1 and the op's
+ *  label, never the backend's op key or field path (UX review). */
+export function replayRefusalText(error: unknown): string {
+  const detail = ((error as AxiosError)?.response?.data as { detail?: { op?: unknown; index?: unknown } } | undefined)?.detail
+  const op = typeof detail?.op === 'string' ? detail.op : null
+  const index = typeof detail?.index === 'number' ? detail.index : null
+  if (op == null || index == null) return 'The refinements no longer fit the new series.'
+  const label = OP_LABELS[op as OpKind] ?? 'a refinement'
+  return `Step ${index + 1} of the refinements (${label.charAt(0).toLowerCase()}${label.slice(1)}) no longer fits the new series.`
+}
+
 /** A generate's refusal in place. A refused replay names the op and its
  *  index, and its retry drops the ops. */
 export function GenerateError({ error, onRetryWithoutOps }: {
@@ -217,7 +229,7 @@ export function GenerateError({ error, onRetryWithoutOps }: {
   }
   return (
     <div className="flex items-center gap-2 text-[11px] mt-1" data-testid="replay-refused">
-      <span className="text-red-600">{sentence(errorText(error))}</span>
+      <span className="text-red-600">{replayRefusalText(error)}</span>
       <Btn onClick={onRetryWithoutOps}>Preview without the refinements</Btn>
     </div>
   )

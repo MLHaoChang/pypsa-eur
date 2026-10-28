@@ -254,7 +254,8 @@ describe('LoadSeriesEditor replay of stored refinements', () => {
     await userEvent.type(screen.getByLabelText('Peak MW'), '80')
     await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
     const refused = await screen.findByTestId('replay-refused')
-    expect(refused.textContent).toContain('Op 1 (scale_window) no longer fits')
+    expect(refused.textContent).toBe(
+      'Step 2 of the refinements (scale an hour window) no longer fits the new series.Preview without the refinements')
     expect(screen.queryByTestId('editor-error')).toBeNull()
     await userEvent.click(within(refused).getByRole('button', { name: 'Preview without the refinements' }))
     await waitFor(() => expect(api.generateLoad).toHaveBeenLastCalledWith('Site A', {

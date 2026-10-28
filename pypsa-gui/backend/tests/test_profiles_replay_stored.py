@@ -241,10 +241,10 @@ def _refused(client, project):
 
 def test_an_op_recorded_for_another_target_is_named(client, project, bound_ctx):
     _refine_and_apply(client, project)
-    _store_ops(client, bound_ctx, [{"op": "cap", "value": 0.5,
+    _store_ops(client, bound_ctx, [{"op": "set_cap", "value": 0.5,
                                     "target": ["generators", "p_max_pu"]}])
     detail = _refused(client, project)
-    assert (detail["op"], detail["index"]) == ("cap", 0)
+    assert (detail["op"], detail["index"]) == ("set_cap", 0)
     assert "recorded for generators/p_max_pu" in detail["message"]
 
 
@@ -289,7 +289,7 @@ def test_a_coarser_regenerate_is_refused_with_the_retry(client, project, monkeyp
 
 def test_a_refused_request_list_keeps_its_error_kind(client, project):
     resp = _post_generate(client, project, refinements=[
-        {"op": "cap", "value": 0.5, "target": ["generators", "p_max_pu"]}])
+        {"op": "set_cap", "value": 0.5, "target": ["generators", "p_max_pu"]}])
     assert resp.status_code == 422, resp.text
     detail = resp.json()["detail"]
     assert detail["error_kind"] == "refine_replay"
