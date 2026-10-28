@@ -95,7 +95,7 @@ def test_two_windows_without_an_index_name_both(client, project):
     assert resp.status_code == 422
     detail = resp.json()["detail"]
     assert detail["error_kind"] == "invalid_refine_op"
-    assert "06-01" in detail["message"] and "09-01" in detail["message"]
+    assert "pick one (1–7 Jun or 1–3 Sep)" in detail["message"]
 
 
 def test_a_dated_window_past_the_year_keeps_its_kind(client, project):

@@ -232,7 +232,8 @@ def test_two_windows_without_an_index_are_refused_naming_both():
     s, meta = _gen(TWO)
     with pytest.raises(InvalidRefineOpError) as exc:
         _refine(s, meta, [{"op": "move_window", "by": "14d"}])
-    assert "06-01" in str(exc.value) and "09-01" in str(exc.value)
+    assert str(exc.value) == ("Step 1: this series has 2 maintenance windows: "
+                              "pick one (1–7 Jun or 1–3 Sep)")
 
 
 def test_an_index_picks_one_of_two():
@@ -264,7 +265,7 @@ def test_a_long_by_is_not_echoed_in_full():
     s, meta = _gen(ONE)
     with pytest.raises(InvalidRefineOpError) as exc:
         _refine(s, meta, [{"op": "move_window", "by": "0" * 100_000 + "d"}])
-    assert len(str(exc.value)) < 200
+    assert "0000" not in str(exc.value) and str(exc.value).startswith("Step 1: ")
 
 
 @pytest.mark.parametrize("by", ["365d", "-365d", "52w", "+1d"])
@@ -297,14 +298,17 @@ def test_a_dated_window_past_the_source_year_is_refused():
                                  "available": 0.0}]})
     with pytest.raises(MaintenanceYearError) as exc:
         _refine(s, meta, [{"op": "move_window", "by": "14d"}])
-    assert "31 Dec 2023" in str(exc.value) and "never shifted" in str(exc.value)
+    assert str(exc.value) == (
+        "Step 1: can't move maintenance 20–28 Dec by +14 days: it would run "
+        "3–11 Jan 2024, past the model horizon (last day 31 Dec 2023). A dated "
+        "window stays in its year.")
     assert isinstance(exc.value, InvalidRefineOpError) is False
 
 
 def test_a_dated_window_before_the_source_year_is_refused():
     s, meta = _gen({"windows": [{"from": "2023-01-03", "to": "2023-01-05",
                                  "available": 0.0}]})
-    with pytest.raises(MaintenanceYearError, match="the first day is 1 Jan 2023"):
+    with pytest.raises(MaintenanceYearError, match="first day 1 Jan 2023"):
         _refine(s, meta, [{"op": "move_window", "by": "-7d"}])
 
 

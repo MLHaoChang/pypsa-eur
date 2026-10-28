@@ -572,7 +572,7 @@ export function RefinePanel({
             <label className="flex items-center gap-1 text-[11px] text-muted">
               By days (+ later, − earlier)
               <input aria-label="By days (+ later, − earlier)" className={`${INPUT} w-16`} value={d.a}
-                onChange={e => setD({ ...d, a: e.target.value })} placeholder="14" />
+                onChange={e => setD({ ...d, a: e.target.value })} placeholder="e.g. 7" />
             </label>
           </>
         ) : d.kind === 'scale_window' ? (

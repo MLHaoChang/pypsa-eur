@@ -270,9 +270,8 @@ def _by_days(op: Mapping[str, Any], i: int) -> int:
     n = int(m.group(2)) if m else 0
     if m is None or not 1 <= n <= (365 if m.group(3) == "d" else 52):
         raise InvalidRefineOpError(
-            f"op {i}: move_window.by must be a whole number of days (1-365, "
-            f"\"14d\", \"-3d\") or weeks (1-52, \"2w\"), later or with - "
-            f"earlier, got {str(raw)[:12]}{'…' if len(str(raw)) > 12 else ''}")
+            f"Step {i + 1}: move maintenance by a whole number of days from 1 to "
+            "365 (or weeks from 1 to 52), earlier or later")
     return (-n if m.group(1) == "-" else n) * (7 if m.group(3) == "w" else 1)
 
 
@@ -294,13 +293,31 @@ def _day_words(raw: str) -> str:
     return f"{d.day} {d:%b}" + (f" {d.year}" if len(raw) == 10 else "")
 
 
+def _window_words(w: Mapping[str, Any], *, year: bool = False) -> str:
+    """A window in words: '1–7 Jul', '28 Jun–4 Jul'; ``year`` adds a dated
+    window's year: '3–11 Jan 2026'."""
+    a, b = (pd.Timestamp(r if len(r) == 10 else f"2000-{r}")
+            for r in (str(w["from"]), str(w["to"])))
+    dated = year and len(str(w["from"])) == 10 or year and len(str(w["to"])) == 10
+    if dated and a.year != b.year:
+        return f"{_day_words(str(w['from']))}–{_day_words(str(w['to']))}"
+    words = (f"{a.day}–{b.day} {b:%b}" if (a.month, a.year) == (b.month, b.year)
+             else f"{a.day} {a:%b}–{b.day} {b:%b}")
+    return f"{words} {max(a.year, b.year)}" if dated else words
+
+
+def _one_of(windows: list) -> str:
+    names = [_window_words(w) for w in windows]
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} or {names[-1]}"
+
+
 def _move_window(t: _Target, s: pd.Series, op: Mapping[str, Any], i: int,
                  record: dict[str, Any], extra: dict[str, Any]) -> np.ndarray:
     params = t.params
     if (family_of(t.meta) != "availability" or t.meta.get("kind") != "maintenance"
             or not isinstance(params, Mapping)
             or (params.get("windows") is None and params.get("rule") is None)):
-        raise InvalidRefineOpError(f"op {i}: {NO_WINDOW_TO_MOVE}")
+        raise InvalidRefineOpError(f"Step {i + 1}: {NO_WINDOW_TO_MOVE}")
     days = _by_days(op, i)
     year = int(t.meta.get("weather_year") or s.index[0].year)
     new = copy.deepcopy(dict(params))
@@ -313,43 +330,40 @@ def _move_window(t: _Target, s: pd.Series, op: Mapping[str, Any], i: int,
                               for w in produced["windows"]]
             record["converted_from_rule"] = rule
         windows = new["windows"]
-        listing = "; ".join(f"{k}: {w.get('from')} to {w.get('to')} (available "
-                            f"{float(w.get('available', 0.0)):g})"
-                            for k, w in enumerate(windows))
+        # The windows in their order: ``window`` is the position, from 0.
         k = op.get("window")
         if k is None:
             if len(windows) != 1:
                 raise InvalidRefineOpError(
-                    f"op {i}: this series has {len(windows)} maintenance windows; "
-                    f"name the one to move as window ({listing})")
+                    f"Step {i + 1}: this series has {len(windows)} maintenance "
+                    f"windows: pick one ({_one_of(windows)})")
             k = 0
         elif not isinstance(k, int) or isinstance(k, bool) or not 0 <= k < len(windows):
             raise InvalidRefineOpError(
-                f"op {i}: move_window.window must be one of {listing}; got {k}")
+                f"Step {i + 1}: there is no such maintenance window; pick one "
+                f"({_one_of(windows)})")
         before = {"from": windows[k].get("from"), "to": windows[k].get("to")}
         after = {end: _move_end(before[end], days, year, f"windows[{k}].{end}")
                  for end in ("from", "to")}
         if any(len(after[end]) == 10 and not after[end].startswith(f"{year}-")
                for end in after):
-            edge = f"the last day is 31 Dec {year}" if days > 0 else \
-                f"the first day is 1 Jan {year}"
+            edge = f"last day 31 Dec {year}" if days > 0 else f"first day 1 Jan {year}"
             raise MoveWindowYearError(
-                f"op {i} (move_window): moves past the model horizon: {edge}, and "
-                f"the window would run {_day_words(after['from'])} to "
-                f"{_day_words(after['to'])} (a dated window is never shifted to "
-                "another year)")
+                f"Step {i + 1}: can't move maintenance {_window_words(before)} by "
+                f"{days:+d} days: it would run {_window_words(after, year=True)}, past "
+                f"the model horizon ({edge}). A dated window stays in its year.")
         windows[k] = {**windows[k], **after}
         frame, produced = _availability_frame(["_"], "maintenance", new, year)
     except RefineError:
         raise
     except MaintenanceYearError as exc:
-        raise MoveWindowYearError(f"op {i} (move_window): {exc}") from None
+        raise MoveWindowYearError(f"Step {i + 1}: can't move maintenance: {exc}") from None
     except AvailabilityError as exc:
-        raise InvalidRefineOpError(f"op {i} (move_window): {exc}") from None
+        raise InvalidRefineOpError(f"Step {i + 1}: can't move maintenance: {exc}") from None
     if not frame.index.equals(pd.DatetimeIndex(s.index)):
         raise InvalidRefineOpError(
-            f"op {i}: the series is not on the hours of its source year {year}, so "
-            "its window cannot be regenerated")
+            f"Step {i + 1}: the series is not on the hours of its source year "
+            f"{year}, so its maintenance window can't be regenerated")
     record["window"] = k
     record["moved"] = {end: [before[end], after[end]] for end in ("from", "to")}
     extra["window_before"], extra["window_after"] = before, after
