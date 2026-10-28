@@ -3,7 +3,7 @@
 
 # 19 — H2-offtake IC counterfactual: single-year hub and the investment gate fact
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Blocked by: none (11 keeps its investment rules `not_evaluated` until this lands)
 Gated: yes (GK A reviews the plan and the PR)
