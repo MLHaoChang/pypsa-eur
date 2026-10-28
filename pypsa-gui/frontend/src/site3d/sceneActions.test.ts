@@ -11,7 +11,7 @@ vi.mock('../api/siteScene', async (orig) => ({
 }))
 
 import { sitesApi } from '../api/sites'
-import { siteSceneApi } from '../api/siteScene'
+import { siteSceneApi, type SiteScene } from '../api/siteScene'
 import { useUIStore } from '../store/uiStore'
 import { SitesNotSaved, adoptSite, createSite, propose } from './sceneActions'
 import { useSitesStore } from './sitesStore'
@@ -20,8 +20,8 @@ import type { Site } from './types'
 const calls: string[] = []
 const site: Site = { id: 'campus', name: 'Campus', buses: [], origin: { lng: 11, lat: 48 }, placements: {},
   boundary: [[10.999, 47.999], [11.001, 47.999], [11.001, 48.001]] }
-const enabled = { state: 'enabled', site_id: 'campus', revision: 1, generation: 'g1', site: {}, buildings: [],
-  asset_footprints: {}, last_receipt: null, unbound_keys: [] } as const
+const enabled: SiteScene = { state: 'enabled', site_id: 'campus', revision: 1, generation: 'g1', site: {}, buildings: [],
+  asset_footprints: {}, last_receipt: null, unbound_keys: [] }
 
 beforeEach(() => {
   calls.length = 0

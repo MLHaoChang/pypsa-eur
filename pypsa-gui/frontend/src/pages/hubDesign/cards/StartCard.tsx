@@ -22,6 +22,7 @@ import { useHubStudy, useHubTemplate } from '../useHubData'
 import { STUDY_RUNNING_SWITCH } from '../../../hooks/useCreateFromTemplate'
 import { GenericSiteForm } from './GenericSiteForm'
 import { plainIds } from '../plainWords'
+import SiteSetupSection from '../../../site3d/SiteSetupSection'
 
 // The generic site (`eh_site`) is not in the table: it has its own tile and form.
 const HUB_TEMPLATES = TEMPLATES.filter(t => t.id.startsWith('eh_'))
@@ -142,6 +143,8 @@ export function StartCard() {
       </section>
 
       <InvestQuestions project={project} />
+
+      <SiteSetupSection variant="guided" />
     </CardShell>
   )
 }
