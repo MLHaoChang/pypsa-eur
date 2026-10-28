@@ -103,6 +103,7 @@ from services.user_timeseries import (  # noqa: F401
     _user_ts_delete_asset,
     _user_ts_extent,
     _user_ts_lock,
+    _user_ts_meta,
     _user_ts_rename_asset,
     _reject_nonfinite_timeseries,
 )
@@ -1209,6 +1210,16 @@ def get_timeseries(component: str, attribute: str, columns: str | None = None):
     if periods is not None:
         payload["periods"] = periods
     return payload
+
+
+def _same_series(old: pd.Series | None, new: pd.Series) -> bool:
+    """Whether a timeseries edit left a stored column as it was."""
+    if old is None or not old.index.equals(new.index):
+        return False
+    return bool(np.allclose(old.to_numpy(dtype=float), new.to_numpy(dtype=float),
+                            rtol=1e-12, atol=0.0, equal_nan=True))
+
+
 @router.put("/timeseries/{component}/{attribute}")
 def set_timeseries(component: str, attribute: str, body: dict):
     import pandas as pd
@@ -1233,7 +1244,13 @@ def set_timeseries(component: str, attribute: str, body: dict):
         # without serialization. Inner lock; outer is the PyPSA lock.
         with _user_ts_lock:
             for col in df.columns:
-                _user_ts[(component, attribute, col)] = df[col].copy()
+                key = (component, attribute, col)
+                old = _user_ts.get(key)
+                _user_ts[key] = df[col].copy()
+                # An edited column no longer is the series its recorded meta
+                # (generator, refinements) describes; an untouched one still is.
+                if not _same_series(old, _user_ts[key]):
+                    _user_ts_meta.pop(key, None)
         # A user edit sets the growth placeholders it covers (E1 follow-up).
         growth_placeholders.mark_set(n, component, attribute,
                                      {c: df[c] for c in df.columns}, prior)
@@ -1353,6 +1370,9 @@ async def upload_timeseries(
                         _user_ts[(component, attribute, col)] = new_s.copy()
                 else:
                     _user_ts[(component, attribute, col)] = new_s.copy()
+                # The upload replaces the series, so the meta recorded for the
+                # old one (generator, refinements) no longer describes it.
+                _user_ts_meta.pop((component, attribute, col), None)
         # A user upload sets the growth placeholders its periods cover (E1
         # follow-up); a `period=` upload covers that period only.
         growth_placeholders.mark_set(n, component, attribute,

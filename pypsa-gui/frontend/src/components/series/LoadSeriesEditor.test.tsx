@@ -8,7 +8,7 @@
 // - refinement posts the ordered ops and replaces the pending result;
 // - refusals show inline.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import LoadSeriesEditor from './LoadSeriesEditor'
@@ -198,5 +198,69 @@ describe('LoadSeriesEditor', () => {
     await userEvent.type(screen.getByLabelText('Peak MW'), '80')
     await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
     expect((await screen.findByTestId('editor-error')).textContent).toContain('peak_mw or annual_mwh')
+  })
+})
+
+// TSG 06: a refined current series replays its ops on a re-generate unless
+// the editor's toggle is cleared; a refused replay names the op and offers
+// the preview without them.
+describe('LoadSeriesEditor replay of stored refinements', () => {
+  const REFINED = { exists: true, provenance: 'synthetic/assumed, user-refined', kind: 'industrial',
+    rows: 8760, refinements: 2 }
+
+  it('keeps the refinements by default and drops them when the toggle is cleared', async () => {
+    api.current.mockResolvedValue(REFINED)
+    api.generateLoad.mockResolvedValue(PENDING)
+    renderEditor()
+    await screen.findByRole('option', { name: 'industrial' })
+    const toggle = within(await screen.findByTestId('replay-toggle')).getByRole('checkbox')
+    expect((toggle as HTMLInputElement).checked).toBe(true)
+    expect(screen.getByTestId('replay-toggle').textContent).toContain('Keep its 2 refinements')
+    await userEvent.type(screen.getByLabelText('Peak MW'), '80')
+    await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
+    await waitFor(() => expect(api.generateLoad).toHaveBeenLastCalledWith('Site A', {
+      archetype: 'industrial', loads: ['plant'], params: { peak_mw: 80 },
+    }))
+    await userEvent.click(toggle)
+    await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
+    await waitFor(() => expect(api.generateLoad).toHaveBeenLastCalledWith('Site A', {
+      archetype: 'industrial', loads: ['plant'], params: { peak_mw: 80 }, replay_refinements: false,
+    }))
+  })
+
+  it('hides the toggle when the current series is not refined', async () => {
+    api.current.mockResolvedValue({ ...REFINED, refinements: 0 })
+    renderEditor()
+    await screen.findByTestId('current-series')
+    expect(screen.queryByTestId('replay-toggle')).toBeNull()
+  })
+
+  it('hides the toggle when another archetype made the current series', async () => {
+    api.current.mockResolvedValue({ ...REFINED, kind: 'commercial' })
+    renderEditor()
+    await screen.findByTestId('current-series')
+    expect(screen.queryByTestId('replay-toggle')).toBeNull()
+  })
+
+  it('names a refused op and its index and retries without the refinements', async () => {
+    api.current.mockResolvedValue(REFINED)
+    api.generateLoad.mockRejectedValueOnce({ response: { status: 422, data: { detail: {
+      error_kind: 'replay_refused', op: 'scale_window', index: 1,
+      message: 'op 1 (scale_window) no longer fits: the window is outside the year',
+      retry: { replay_refinements: false } } } } })
+    api.generateLoad.mockResolvedValueOnce(PENDING)
+    renderEditor()
+    await screen.findByRole('option', { name: 'industrial' })
+    await userEvent.type(screen.getByLabelText('Peak MW'), '80')
+    await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
+    const refused = await screen.findByTestId('replay-refused')
+    expect(refused.textContent).toBe(
+      'Step 2 of the refinements (scale an hour window) no longer fits the new series.Preview without the refinements')
+    expect(screen.queryByTestId('editor-error')).toBeNull()
+    await userEvent.click(within(refused).getByRole('button', { name: 'Preview without the refinements' }))
+    await waitFor(() => expect(api.generateLoad).toHaveBeenLastCalledWith('Site A', {
+      archetype: 'industrial', loads: ['plant'], params: { peak_mw: 80 }, replay_refinements: false,
+    }))
+    expect(await screen.findByTestId('stat-peak')).toBeTruthy()
   })
 })

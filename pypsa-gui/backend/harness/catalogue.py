@@ -1820,7 +1820,11 @@ TOOLS: list[dict[str, Any]] = [
         "peak MW, its source-year annual MWh, the MWh this model's snapshots "
         "will see (modelled_mwh: a sampled template sees less), any "
         "warnings to relay (energy_mismatch, an assumed UTC clock), and the "
-        "job_id to apply. On a project made "
+        "job_id to apply. "
+        "The same archetype re-generates a refined load with its stored ops "
+        "(answer: replay); replay_refinements false drops them, and "
+        "replay_refused names the op and its index. "
+        "On a project made "
         "with a data-centre dc_load spec, that spec owns the DC load: apply "
         "refuses a data_centre profile there. `project_id` is the project "
         "NAME and must be the open project. Safety: execution.",
@@ -1831,7 +1835,8 @@ TOOLS: list[dict[str, Any]] = [
                                 "library"]},
          "loads": {"type": "array", "items": {"type": "string"}},
          "params": {"type": "object"},
-         "year": {"type": "integer"}},
+         "year": {"type": "integer"},
+         "replay_refinements": {"type": "boolean"}},
         ["project_id", "archetype", "loads"],
     ),
     _t(
@@ -1855,6 +1860,9 @@ TOOLS: list[dict[str, Any]] = [
         "act on process links (bounds on p0): a shutdown on a two-way link "
         "closes both directions; a floor on a two-way or point-of-connection "
         "link is refused. `generators` then names the links. "
+        "The same kind re-generates a refined series with its stored ops "
+        "(answer: replay); replay_refinements false drops them, and "
+        "replay_refused names the op and its index. "
         "`project_id` is the project NAME and must be the open project. "
         "Safety: execution.",
         {"project_id": {"type": "string"},
@@ -1864,7 +1872,8 @@ TOOLS: list[dict[str, Any]] = [
          "generators": {"type": "array", "items": {"type": "string"}},
          "component_type": {"type": "string", "enum": ["generators", "links"]},
          "params": {"type": "object"},
-         "year": {"type": "integer"}},
+         "year": {"type": "integer"},
+         "replay_refinements": {"type": "boolean"}},
         ["project_id", "kind", "generators"],
     ),
     _t(
@@ -1910,14 +1919,19 @@ TOOLS: list[dict[str, Any]] = [
         "COP falls below 1 are raised to 1 and warned. market is refused until "
         "market price bundles exist; part_load is refused (it depends on "
         "the dispatch). A price on a point-of-connection link is refused: "
-        "set the tariff. `project_id` is the project NAME and must be the "
+        "set the tariff. "
+        "The same kind re-generates a refined series with its stored ops "
+        "(answer: replay); replay_refinements false drops them, and "
+        "replay_refused names the op and its index. "
+        "`project_id` is the project NAME and must be the "
         "open project. Safety: execution.",
         {"project_id": {"type": "string"},
          "kind": {"type": "string",
                   "enum": ["tou", "inflow", "cop", "market", "part_load"]},
          "components": {"type": "array", "items": {"type": "string"}},
          "params": {"type": "object"},
-         "year": {"type": "integer"}},
+         "year": {"type": "integer"},
+         "replay_refinements": {"type": "boolean"}},
         ["project_id", "kind", "components"],
     ),
 
