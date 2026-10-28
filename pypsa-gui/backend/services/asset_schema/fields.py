@@ -215,6 +215,9 @@ GENERATOR: tuple[FieldSpec, ...] = (
               "modelled horizon, e.g. a fuel or water budget. Empty for no upper bound.", "MWh", "MWh"),
     FieldSpec("control", "performance", "AC control", "Control type in the AC power flow only: PQ fixes P and Q, "
               "PV holds the voltage, Slack absorbs the imbalance.", kind="enum", options=("PQ", "PV", "Slack")),
+    FieldSpec("process_role", "identity", "Process role", "Marks a generator on a product bus: buy_in is bought "
+              "product, shortfall is the priced lost-production slack. Empty for an ordinary generator.",
+              kind="enum", options=("buy_in", "shortfall")),
     *_outages(with_cf_flag=True),
 )
 
@@ -528,6 +531,10 @@ BUS: tuple[FieldSpec, ...] = (
               "per the bus's unit (EUR/MWh or EUR/t), with its source in the ledger. Results value a process unit's "
               "output at it. Empty: that value is Unavailable, never 0.", "EUR/unit",
               reveal_when={"unit": ("MWh", "t")}),
+    FieldSpec("lost_production_value", "identity", "Lost-production value", "What one unit of this product not "
+              "delivered costs, per the bus's unit (EUR/MWh or EUR/t). Prices the shortfall slack; it must exceed "
+              "the buy-in price. Empty: no shortfall slack is added.", "EUR/unit", "EUR/unit",
+              reveal_when={"unit": ("MWh", "t")}),
     FieldSpec("sub_network", "identity", "Sub-network", "Manual region label for the 'region' clustering mode: buses "
               "sharing it collapse to one node. Empty: determined from the electrical topology.", kind="text"),
     FieldSpec("x", "identity", "Longitude", "Geographic longitude, east positive. Places the bus on the map and "
@@ -593,10 +600,11 @@ _CLEAR = {"p_nom_max", "e_nom_max", "s_nom_max", "v_nom_0", "v_nom_1", "lifetime
 # M5: per class. `empty` sends "" (a text column the write model types `str = ""`: an emptied country or display
 # name is a decision, and null would be refused); GlobalConstraint's optional columns clear to null.
 _EMPTY_BY_CLASS = {"Bus": {"country", "sub_network", "unit"}, "Carrier": {"nice_name", "color", "unit"},
+                   "Generator": {"process_role"},
                    "Link": {"bus2", "bus3", "bus4", "criticality_tier", "harmonic_source", "harmonic_spectrum",
                             "start_method"}}
 _CLEAR_BY_CLASS = {"GlobalConstraint": {"carrier_attribute", "carrier", "investment_period"},
-                   "Bus": {"mwh_per_t", "product_value"}, "Link": {"rated_mva", "flicker_step_mva", "flicker_changes_per_min",
+                   "Bus": {"mwh_per_t", "product_value", "lost_production_value"}, "Link": {"rated_mva", "flicker_step_mva", "flicker_changes_per_min",
                             "single_phase_share", "motor_kw", "i_start_pu"}}
 
 
