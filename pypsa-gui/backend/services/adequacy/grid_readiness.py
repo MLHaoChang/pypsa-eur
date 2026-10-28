@@ -118,6 +118,10 @@ RULE_OSC = {"comparator": "<=", "otherwise": "fail", "tolerance": 1e-9}
 #: A motor-start row's voltage change against the rapid-voltage-change limit (grid-to-process issue 18): a
 #: screening estimate, so over it warns, as the rapid-voltage-change row.
 RULE_MOTOR_START = {"comparator": "<=", "otherwise": "warn", "tolerance": 1e-9}
+#: The P–V and Q–V margins at the PoC against their least margin (study harness issue 18): screening, so below
+#: the limit warns and never fails.
+RULE_PV = {"comparator": ">=", "otherwise": "warn", "tolerance": 1e-9}
+RULE_QV = {"comparator": ">=", "otherwise": "warn", "tolerance": 1e-9}
 
 
 def _judge(value: float, limit: float, rule: dict) -> str:
@@ -245,6 +249,14 @@ def _marking_source(row: dict) -> tuple[str, bool]:
 
 
 # ── rows ───────────────────────────────────────────────────────────────────
+
+
+def _archetype(inp: _Inputs) -> str:
+    """The project's site type as the study runs it (``flow_service._archetype``): a stored reliability goal
+    first, then the template's recommendation."""
+    from services.flow_service import _archetype as archetype
+
+    return archetype(inp.meta or None, _read_json(inp.dir / "solver_config.json") or {})
 
 
 def _scr_rows(inp: _Inputs) -> list[dict]:
@@ -1060,6 +1072,126 @@ def _motor_start_rows(inp: _Inputs) -> list[dict]:
     return rows
 
 
+#: The P–V/Q–V placeholders when neither the profile nor the user sets a least margin (GK A, 28 Oct).
+GENERIC_PV_MARGIN_PCT = 5.0
+GENERIC_QV_MARGIN_MVAR = 0.0
+_VS_PLACEHOLDER = "planning practice placeholder, not a requirement of this project's grid code"
+_VS_SCREENING = "screening; binding answer is the RMS study"
+_VS_NO_NOSE = "the sweep did not reach the nose"
+_VS_NO_QMIN = "the sweep did not reach the Q–V minimum"
+#: Why both rows leave the scorecard on an off-grid project.
+VS_OFF_GRID = "Off-grid project: with the tie open there is no grid infeed to collapse against"
+_VS = {
+    "voltage_stability_pv": {"req": "P–V real-power margin at the PoC (screening)", "key": "pv_margin_min_pct",
+                             "generic": GENERIC_PV_MARGIN_PCT, "unit": "% of planned load", "rule": RULE_PV,
+                             "value": "margin_pct", "bound": "nose_is_lower_bound", "no_bound": _VS_NO_NOSE,
+                             "placeholder": f"P–V margin of at least {GENERIC_PV_MARGIN_PCT:g} % of the planned "
+                                            f"load, {_VS_PLACEHOLDER}"},
+    "voltage_stability_qv": {"req": "Q–V reactive margin at the PoC (screening)", "key": "qv_margin_min_mvar",
+                             "generic": GENERIC_QV_MARGIN_MVAR, "unit": "Mvar", "rule": RULE_QV,
+                             "value": "q_margin_mvar", "bound": "qmin_at_sweep_edge", "no_bound": _VS_NO_QMIN,
+                             "placeholder": "Q–V margin of at least 0 Mvar (the Q–V curve's minimum at or below "
+                                            f"zero injection at the operating voltage), {_VS_PLACEHOLDER}"},
+}
+
+
+def _vs_limit(inp: _Inputs, spec: dict) -> tuple[float | None, str, bool]:
+    """(least margin, its source, assumed): the profile's own key (the row cites the profile), else
+    ``_limit_from`` (the user's limit, the ledger row, else the placeholder)."""
+    lim = (inp.profile or {}).get(spec["key"])
+    if isinstance(lim, dict) and _num(lim.get("value")) is not None:
+        return (float(lim["value"]), f"{_profile_title(inp)}: {lim.get('clause') or spec['key']}",
+                lim.get("source") != "code")
+    return _limit_from(inp, spec["key"], spec["generic"], spec["placeholder"])
+
+
+def judge_bounded(periods: list[tuple], limit: float, rule: dict) -> tuple[str, tuple]:
+    """The verdict of per-period margins ``[(period, value, is_lower_bound)]`` against ``limit``, worst period
+    first: a found value is judged by ``rule``; a lower bound at or above the limit passes (the margin is at
+    least that), one below it is ``unknown``, never ``otherwise``, since it says nothing about the margin.
+    Returns ``(verdict, the period shown)``: the worst warning period, else the worst bound below the limit,
+    else the worst period."""
+    judged = [(per, v, b, (("pass" if v >= limit - rule["tolerance"] else "unknown") if b
+                           else _judge(v, limit, rule))) for per, v, b in periods]
+    for want in (rule["otherwise"], "unknown", "pass"):
+        hit = [j for j in judged if j[3] == want]
+        if hit:
+            return want, min(hit, key=lambda j: j[1])[:3]
+    raise ValueError("no period to judge")
+
+
+def _vs_rows(inp: _Inputs) -> list[dict]:
+    """The P–V and Q–V margins at the PoC (study harness issue 18, ``campus_study.voltage_stability_campus``),
+    worst over the campus run's periods, each against its least margin: screening, so below warns."""
+    import pandas as pd
+
+    from gridspine.drivers.campus_study import NO_SK_MIN, VOLTAGE_STABILITY_CSV, VS_NO_OPERATING_POINT
+
+    run = inp.dir / "campus_electrical" / "run"
+    target = _target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"), "eh_sk_mva")
+    error = _read_json(run / "voltage_stability_error.json")
+    reason, frame = None, None
+    if isinstance(error, dict):
+        text = str(error.get("error") or "")
+        reason = ("No S_k''min entered at the PCC: the screen needs the grid's minimum short-circuit level"
+                  if text == NO_SK_MIN else f"The P–V/Q–V screen could not run: {text}")
+    elif not (run / "campus_voltage_stability.json").is_file() or not (run / VOLTAGE_STABILITY_CSV).is_file():
+        reason = "No campus run with the P–V/Q–V screen yet: run the campus study"
+    else:
+        frame = pd.read_csv(run / VOLTAGE_STABILITY_CSV)
+        bad = frame[frame["verdict"] != "solved"]
+        if not bad.empty:
+            r = bad.iloc[0]
+            why = ("no operating point" if r["verdict"] == VS_NO_OPERATING_POINT
+                   else "the intact case does not solve")
+            reason = f"Period {int(r['period'])}: {why} ({r['note']})"
+        elif frame.empty:
+            reason = "The campus run has no period to screen"
+    rows = []
+    for rid, spec in _VS.items():
+        limit, source, _ = _vs_limit(inp, spec)
+        common = dict(rule=spec["rule"], limit=limit, unit=spec["unit"], source=source, assumed=True,
+                      section="connection", target=target)
+        if reason is not None:
+            rows.append(_row(rid, spec["req"], project_value=None, verdict="unknown",
+                             note=f"{reason}; {_VS_SCREENING}", **common))
+            continue
+        periods = [(int(r["period"]), float(r[spec["value"]]), bool(r[spec["bound"]]))
+                   for _, r in frame.iterrows()]
+        blank = [per for per, v, _ in periods if not math.isfinite(v)]
+        if blank:
+            rows.append(_row(rid, spec["req"], project_value=None, verdict="unknown",
+                             note=f"Period {blank[0]}: the screen gives no value; {_VS_SCREENING}", **common))
+            continue
+        verdict, (period, value, bound) = judge_bounded(periods, limit, spec["rule"])
+        shown = f"≥ {value:.4g}" if bound else f"{value:.4g}"
+        words = {"pass": "within the screening margin", "warn": "below the screening margin",
+                 "unknown": spec["no_bound"]}[verdict]
+        r = frame[frame["period"] == period].iloc[0]
+        note = (f"Worst period {period}: {shown} {spec['unit']}, {words}; planned load {r['planned_mw']:.4g} MW "
+                f"({r['note']}); {_VS_SCREENING}")
+        row = _row(rid, spec["req"], project_value=round(value, 4), verdict=verdict, note=note, **common)
+        row["project_value_is_lower_bound"] = bound
+        row["period"] = period
+        rows.append(row)
+    return rows
+
+
+def readiness_fact(card: dict, row_id: str):
+    """A scorecard row as a gate fact (study harness 10's ``dc.readiness.<id>``): the row's verdict, or
+    ``run_gates.NoEvidence`` with the reason when the row was excluded or is not on the scorecard, so an
+    excluded row never passes and never raises."""
+    from services.run_gates import NoEvidence
+
+    for r in card.get("rows") or []:
+        if r["id"] == row_id:
+            return r["verdict"]
+    for r in card.get("excluded") or []:
+        if r["id"] == row_id:
+            return NoEvidence("excluded", f"excluded: {r['reason']}")
+    return NoEvidence("missing", f"no scorecard row {row_id!r}")
+
+
 def _poc_sk_mva(n) -> float | None:
     if "eh_poc" not in n.buses.columns or "eh_sk_mva" not in n.buses.columns:
         return None
@@ -1411,8 +1543,13 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
     inp = _Inputs(project_dir, network, profile, error, eh_study, study_edited)
     rows = [*_scr_rows(inp), *_peak_rows(inp), _ramp_row(inp), _oscillation_row(inp),
             _rvc_row(inp), _rvc_infrequent_row(inp), _harmonic_row(inp), _tdd_row(inp), _flicker_row(inp),
-            *_motor_start_rows(inp), _unbalance_row(inp),
+            *_motor_start_rows(inp), _unbalance_row(inp), *_vs_rows(inp),
             _reactive_row(inp), *_support_rows(inp), *_island_rows(inp), _lole_row(inp)]
+    excluded = []
+    if _archetype(inp) == "off_grid":
+        excluded = [{"id": r["id"], "requirement": r["requirement"], "reason": VS_OFF_GRID}
+                    for r in rows if r["id"] in _VS]
+        rows = [r for r in rows if r["id"] not in _VS]
     _after_battery(inp, rows)
     settings = {"ramp_rate": ("connection_ramp", _generic_ramp(inp)),
                 "oscillation": ("oscillation", GENERIC_OSCILLATION_PCT),
@@ -1426,7 +1563,7 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
     return {"schema": SCHEMA, "profile": {"id": profile_id, "title": (profile or {}).get("title"),
                                           "error": error},
             "template_id": inp.meta.get("id"), "envelope": inp.envelope is not None,
-            "rows": rows, "summary": {**counts, "assumed": sum(r["assumed"] for r in rows),
+            "rows": rows, "excluded": excluded, "summary": {**counts, "assumed": sum(r["assumed"] for r in rows),
                                       "red_flags": counts["fail"] + counts["warn"],
                                       "pass_after_mitigation": after},
             "basis": ("advisory screening of the saved network and its sidecars; never blocks Run. "

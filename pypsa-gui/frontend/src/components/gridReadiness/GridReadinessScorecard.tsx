@@ -210,7 +210,8 @@ function ScoreRow({ row, mode, onJump, fieldLabels, noAssistant }: {
                 className="ml-1 rounded border border-warn/30 bg-warn/5 px-1 text-[10px] text-warn">assumed</span>
             )}
             <span className="mx-1.5">·</span>
-            Project:{'\u00A0'}<span className="text-text">{fmt(row.project_value, row.unit)}</span>
+            Project:{'\u00A0'}<span className="text-text">
+              {row.project_value_is_lower_bound ? '≥\u00A0' : ''}{fmt(row.project_value, row.unit)}</span>
           </div>
           <AfterLine row={row} />
         </div>
@@ -294,6 +295,23 @@ function Group({ id, title, rows, mode, onJump, fieldLabels, noAssistant, defaul
   )
 }
 
+/** Rows that do not apply to this project, each with its reason; no verdict and outside the summary counts. */
+function Excluded({ rows }: { rows: NonNullable<GridReadiness['excluded']> }) {
+  if (!rows.length) return null
+  return (
+    <div data-testid="gr-excluded" className="border-t border-border px-4 py-2 text-[11px] text-muted">
+      <div className="font-semibold">Not applicable to this project</div>
+      <ul className="mt-1 flex flex-col gap-0.5">
+        {rows.map(r => (
+          <li key={r.id} data-testid={`gr-excluded-${r.id}`}>
+            <span className="text-text">{r.requirement}</span>: {r.reason}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 /** The scorecard body. `fieldLabels` maps a target field to the template
  *  ledger's label (Guided's "Editable in Expert" line), so no item id shows. */
 export function GridReadinessScorecard({ data, mode, onJump = () => {}, fieldLabels = {} }: {
@@ -331,6 +349,7 @@ export function GridReadinessScorecard({ data, mode, onJump = () => {}, fieldLab
       ))}
       <Group id="dynamic" title="Needs a dynamic (EMT) study" rows={dynamic} mode={mode} onJump={onJump}
         fieldLabels={fieldLabels} noAssistant={noAssistant} defaultOpen={false} />
+      <Excluded rows={data.excluded ?? []} />
     </div>
   )
 }

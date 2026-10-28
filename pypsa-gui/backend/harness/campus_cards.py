@@ -48,6 +48,8 @@ LIMIT_LABELS = {
                          "exports reactive power)",
     "voltage_deadband_pct": "Voltage-control deadband per unit (reported, not checked)",
     "angle_limit_deg": "Voltage-angle difference across a branch",
+    "pv_margin_min_pct": "P–V real-power margin at the PCC (screening)",
+    "qv_margin_min_mvar": "Q–V reactive margin at the PCC (screening)",
 }
 
 

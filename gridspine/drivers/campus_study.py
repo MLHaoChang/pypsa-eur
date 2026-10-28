@@ -1084,3 +1084,150 @@ def harmonic_scan_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(
                      (HARMONIC_RESONANCE_CSV, study.resonance)):
         _write_text_atomic(run_dir / name, df.to_csv(index=False))
     return study
+
+
+# --- the P–V/Q–V margin at the PCC (study harness issue 18) ---------------
+
+VOLTAGE_STABILITY_CSV = "campus_voltage_stability.csv"
+#: Why the screen did not run: no minimum short-circuit level the user stated.
+NO_SK_MIN = "no S_k''min entered"
+VS_NO_OPERATING_POINT = "no_operating_point"
+#: One row per period, every column present on every row.
+VS_COLUMNS = ("period", "verdict", "planned_mw", "hour", "pf", "e_pu", "nose_mw", "nose_is_lower_bound", "margin_mw",
+              "margin_pct", "nose_below_planned", "q_margin_mvar", "qmin_at_sweep_edge", "v_poc_pu", "sk_min_mva",
+              "rx_min", "c", "vn_kv", "basis", "note")
+
+
+def _vs_net(vn_kv, e_pu, sk_min_mva, rx, c, f_hz):
+    """The grid-side screening net: a source at ``e_pu`` behind the Thevenin
+    impedance Z = c·Un²/S_k''min with R/X ``rx``, and the PCC as the PoC."""
+    import pandapower as pp
+
+    z = c * vn_kv**2 / sk_min_mva
+    x = z / math.sqrt(1.0 + rx**2)
+    net = pp.create_empty_network(f_hz=f_hz)
+    src = pp.create_bus(net, vn_kv=vn_kv, name="SOURCE")
+    pcc = pp.create_bus(net, vn_kv=vn_kv, name="PCC")
+    pp.create_ext_grid(net, src, vm_pu=e_pu, name="GRID")
+    pp.create_line_from_parameters(net, src, pcc, length_km=1.0, r_ohm_per_km=rx * x, x_ohm_per_km=x,
+                                   c_nf_per_km=0.0, max_i_ka=1e6, name="THEVENIN")
+    return net
+
+
+def _vs_period(lf, bus, period, rated_mw):
+    """The operating point of one period from its converged intact hours: ``(planned_mw, planned_from, pf,
+    pf_note, e_pu, e_note, hour)``, or the reason there is none (a string)."""
+    from gridspine.static.voltage_stability import VoltageStabilitySettings
+
+    pcc = lf["pcc"]
+    rows = pcc[(pcc["period"] == period) & (pcc["case"] == "intact") & pcc["converged"].astype(bool)]
+    if rows.empty and rated_mw is None:
+        return "no converged hour and no rated import (p_connection_mw)"
+    pf_default = VoltageStabilitySettings().pf
+    peak = hour = None
+    pf, pf_note = pf_default, f"no converged hour: probe power factor {pf_default:g} (lagging, the default)"
+    e_pu, e_note = 1.0, "E = 1.0 pu: no converged hour gives a PCC voltage"
+    if not rows.empty:
+        top = rows.loc[rows["p_mw"].astype(float).idxmax()]
+        peak, hour = float(top["p_mw"]), int(top["hour"])
+        p, q = float(top["p_mw"]), float(top["q_mvar"])
+        if p > 0 and q > 0:
+            pf, pf_note = p / math.hypot(p, q), f"probe power factor {p / math.hypot(p, q):.4g} lagging, from hour {hour}"
+        else:
+            pf_note = (f"hour {hour} draws no lagging reactive power: probe power factor {pf_default:g} "
+                       "(lagging, the default)")
+        b = lf["bus"]
+        vm = b[(b["period"] == period) & (b["case"] == "intact") & (b["bus"].astype(str) == bus)
+               & b["hour"].isin(rows["hour"])]["vm_pu"].astype(float)
+        if not vm.empty and vm.min() < 1.0:
+            e_pu, e_note = float(vm.min()), f"E = {vm.min():.4g} pu, the lowest converged PCC voltage of the period"
+        elif not vm.empty:
+            e_note = "E = 1.0 pu: no converged PCC voltage of the period is lower"
+    if peak is not None and peak > 0 and (rated_mw is None or peak >= rated_mw):
+        planned, frm = peak, f"planned load {peak:.4g} MW: the largest converged PCC import (hour {hour}) binds"
+    elif rated_mw is not None:
+        planned, frm = rated_mw, f"planned load {rated_mw:.4g} MW: the rated import (p_connection_mw) binds"
+    else:
+        return "no converged hour imports from the grid and no rated import (p_connection_mw) is entered"
+    return planned, frm, pf, pf_note, e_pu, e_note, hour
+
+
+def voltage_stability_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> dict:
+    """The P–V nose and Q–V margin at the PCC of a sized run, per period
+    (``static/voltage_stability.py`` on the grid-side screening net), written
+    to ``campus_voltage_stability.csv``. Returns the summary: ``ledger``,
+    ``notes`` and the equivalent's inputs.
+
+    The equivalent is the grid seen from the PCC on its weakest state: a
+    source behind Z = c_min·Un²/S_k''min (c_min from IEC 60909, R/X the
+    PCC's ``rx_min``), intact only, since S_k''min already is the user's
+    weakest grid state and campus-internal outages do not move the grid-side
+    nose. Per period the probe is the larger of the largest converged PCC
+    import and the rated import (``p_connection_mw``), at the max-import
+    hour's lagging power factor; the source EMF is the lowest converged PCC
+    voltage of the period when below 1.0 pu. ``profile`` is accepted with the
+    other screens' signature; the limits are the readiness rows'."""
+    from gridspine.static.island_sc_seq import c_factor
+    from gridspine.static.voltage_stability import (
+        SCREENING_BASIS,
+        VOLTAGE_STABILITY_LEDGER,
+        VoltageStabilitySettings,
+        voltage_stability,
+    )
+
+    del profile, profile_dirs
+    run_dir = Path(run_dir)
+    n = _unchanged_project(run_dir)
+    spec = yaml.safe_load(_require(run_dir, CAMPUS_YAML).read_text())
+    campus = build_campus(spec)
+    if campus.tie_normally_open:
+        raise ContractError("the tie to the grid is normally open: no grid infeed to collapse against")
+    net = campus.net
+    eg = net.ext_grid[net.ext_grid["in_service"].astype(bool)]
+    if eg.empty:
+        raise ContractError("the campus has no grid connection")
+    eg = eg.iloc[0]
+    bus = int(eg["bus"])
+    name = str(net.bus.at[bus, "name"])
+    vn = float(net.bus.at[bus, "vn_kv"])
+    sk = float(eg.get("s_sc_min_mva", math.nan))
+    rx = float(eg.get("rx_min", math.nan))
+    if not (math.isfinite(sk) and sk > 0) or _sk_source(spec, n)[1]:
+        raise ContractError(NO_SK_MIN)
+    if not (math.isfinite(rx) and rx >= 0):
+        raise ContractError(f"the PCC's rx_min must be a number >= 0, got {rx!r}")
+    p = campus.params
+    rated = p[(p["element"] == name) & (p["param"] == "p_connection_mw")]["value"]
+    rated_mw = float(rated.iloc[0]) if len(rated) and float(rated.iloc[0]) > 0 else None
+    c = c_factor(vn, "min")
+    lf = {"pcc": pd.read_csv(_require(run_dir, LF_PCC_CSV)), "bus": pd.read_csv(_require(run_dir, LF_BUS_CSV))}
+    periods = sorted(int(x) for x in campus_tables(run_dir)[1]["period"].unique())
+    rows, notes = [], []
+    for period in periods:
+        op = _vs_period(lf, name, period, rated_mw)
+        base = {"period": period, "sk_min_mva": sk, "rx_min": rx, "c": c, "vn_kv": vn}
+        if isinstance(op, str):
+            rows.append({**base, "verdict": VS_NO_OPERATING_POINT, "note": op})
+            continue
+        planned, frm, pf, pf_note, e_pu, e_note, hour = op
+        # The probe stops at twice the R = 0, unity-pf nose E²·S_k''/(2c), so a nose is always reached.
+        cap = max(10.0 * planned, e_pu**2 * sk / c)
+        st = VoltageStabilitySettings(pf=pf, max_cases=0, cap_mw=cap, step_pct=max(20.0, 2.0 * cap / planned))
+        out, _ = voltage_stability(_vs_net(vn, e_pu, sk, rx, c, float(net.f_hz)), "PCC", planned, None, st)
+        r = out.iloc[0].to_dict()
+        rows.append({**base, **{k: r.get(k) for k in ("verdict", "nose_mw", "nose_is_lower_bound", "margin_mw",
+                                                      "margin_pct", "nose_below_planned", "q_margin_mvar",
+                                                      "qmin_at_sweep_edge", "v_poc_pu", "basis")},
+                     "planned_mw": planned, "hour": hour, "pf": pf, "e_pu": e_pu,
+                     "note": "; ".join(x for x in (frm, pf_note, e_note, r.get("note") or "") if x)})
+    _write_text_atomic(run_dir / VOLTAGE_STABILITY_CSV, pd.DataFrame(rows, columns=list(VS_COLUMNS)).to_csv(index=False))
+    notes.append(f"S_k''min {sk:g} MVA, R/X {rx:g}, c_min {c:g} at {vn:g} kV: "
+                 f"Z = c·Un²/S_k''min = {c * vn**2 / sk:.4g} Ω")
+    ledger = [*VOLTAGE_STABILITY_LEDGER,
+              "grid-side equivalent: source behind Z = c_min·Un²/S_k''min (IEC 60909 c_min) with the PCC's "
+              "rx_min; intact only, as S_k''min is the weakest grid state entered",
+              "planned load per period: the larger of the largest converged PCC import and the rated import; "
+              "power factor from the max-import hour (lagging), else the default",
+              "source EMF: 1.0 pu, or the period's lowest converged PCC voltage when lower"]
+    return {"ledger": ledger, "notes": notes, "basis": SCREENING_BASIS, "sk_min_mva": sk, "rx_min": rx,
+            "c": c, "vn_kv": vn}

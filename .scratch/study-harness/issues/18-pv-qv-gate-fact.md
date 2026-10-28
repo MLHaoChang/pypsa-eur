@@ -48,16 +48,16 @@ Design: [design.md](../design.md) §9.3 "eh_datacenter" (P–V/Q–V, deferred),
 
 ## Acceptance criteria
 
-- [ ] A campus run on `eh_datacenter` writes `campus_voltage_stability.csv` and its meta; the scorecard shows both rows with a margin, a limit and its source.
-- [ ] On the equivalent held to R = 0 (rx = 0) the nose matches the analytic P_max = E² cos φ / (2X (1 + sin φ)) within 1 % (the DC 14 formula, X = c_min·Un²/S_k''min). With rx_min > 0 the nose is only checked to be finite and below the R = 0 value.
-- [ ] `planned_mw` is the larger of the LF peak import and the rated import, and the note names which bound.
-- [ ] A lower-bound nose below the limit reads `unknown` with "the sweep did not reach the nose"; one at or above reads `pass` shown as "≥ x" (same for `qmin_at_sweep_edge`).
-- [ ] No S_k'' min entered → both rows `unknown` with the reason; the run still succeeds.
-- [ ] A stage exception writes the error file, the run succeeds, the rows read `unknown` with the error.
-- [ ] Below the limit → `warn`, never `fail`; no row text says "compliant" or "meets".
-- [ ] With no user limit the rows show the placeholders (5 %, 0 Mvar) with the placeholder wording; a user limit in the profile replaces them and the row cites the profile.
-- [ ] `off_grid` → both rows excluded with the reason (test).
-- [ ] `tests/gridspine/test_sixty_hz.py` stays green (no 50 Hz literal added).
+- [x] A campus run on `eh_datacenter` writes `campus_voltage_stability.csv` and its meta; the scorecard shows both rows with a margin, a limit and its source.
+- [x] On the equivalent held to R = 0 (rx = 0) the nose matches the analytic P_max = E² cos φ / (2X (1 + sin φ)) within 1 % (the DC 14 formula, X = c_min·Un²/S_k''min). With rx_min > 0 the nose is only checked to be finite and below the R = 0 value.
+- [x] `planned_mw` is the larger of the LF peak import and the rated import, and the note names which bound.
+- [x] A lower-bound nose below the limit reads `unknown` with "the sweep did not reach the nose"; one at or above reads `pass` shown as "≥ x" (same for `qmin_at_sweep_edge`).
+- [x] No S_k'' min entered → both rows `unknown` with the reason; the run still succeeds.
+- [x] A stage exception writes the error file, the run succeeds, the rows read `unknown` with the error.
+- [x] Below the limit → `warn`, never `fail`; no row text says "compliant" or "meets".
+- [x] With no user limit the rows show the placeholders (5 %, 0 Mvar) with the placeholder wording; a user limit in the profile replaces them and the row cites the profile.
+- [x] `off_grid` → both rows excluded with the reason (test).
+- [x] `tests/gridspine/test_sixty_hz.py` stays green (no 50 Hz literal added).
 
 ## Test plan
 
