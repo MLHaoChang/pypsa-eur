@@ -3,7 +3,7 @@
 
 # Continuation handoff
 
-Status: SC-00 N native prototype and proposed contract closures in review ([sc-00-n/record.md](sc-00-n/record.md)); SC-01 onward, B and P not started
+Status: SC-00 N merged (#794, [sc-00-n/record.md](sc-00-n/record.md)); SC-01a backend in review ([sc-01/record.md](sc-01/record.md)); SC-01b UI, SC-02 onward, B and P not started
 Date: 2026-10-24
 Branch/worktree: `claude/site-scene-generation-spec`, `/workspace/site-scene-spec`
 Baseline: `9988f9899a3bf8e80f51272529f18ea70599b90c`

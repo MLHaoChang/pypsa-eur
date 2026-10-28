@@ -1,6 +1,7 @@
 """Regenerate/check source coverage without credentials, models or application I/O.
 
-Run from any directory: python <this-file> --write or --check.
+Run from any directory: python <this-file> --check (or --write to also save the
+inventory for reading; it is not committed, so tool PRs never regenerate it).
 The inventory is a source contract, never a certification of tool behavior.
 """
 from __future__ import annotations
@@ -162,8 +163,8 @@ def _check_assurance(assurance: dict, tool_adapters: dict, coverage: dict) -> No
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument('--check', action='store_true', help='Reject source drift or unoffered navigation targets.')
-    mode.add_argument('--write', action='store_true', help='Regenerate the source inventory; behavior remains unverified.')
+    mode.add_argument('--check', action='store_true', help='Build in memory; reject unoffered navigation targets.')
+    mode.add_argument('--write', action='store_true', help='Also write the inventory (not committed) for reading.')
     parser.add_argument('--output', type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args(argv)
     try:
@@ -175,18 +176,7 @@ def main(argv=None) -> int:
     if args.write:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(current, indent=2) + '\n')
-        print(f'Wrote {current["tool_count"]} tools; behavioral/GUI parameter coverage still pending.')
-        return 0
-    try:
-        stored = json.loads(args.output.read_text())
-    except (OSError, ValueError):
-        print('Inventory missing or invalid; run with --write to regenerate.')
-        return 1
-    stored.pop('generated_at', None)
-    current.pop('generated_at', None)
-    if stored != current:
-        print('Inventory stale; run with --write, review changes and commit the updated source contract.')
-        return 1
+        print(f'Wrote {args.output} (not committed; for reading).')
     missing = current['result_tabs_not_in_tool_enum'] + current['slide_panels_not_in_tool_enum']
     if missing:
         print('GUI navigation targets absent from shared tool schema: ' + ', '.join(missing))

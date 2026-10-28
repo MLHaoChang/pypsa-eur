@@ -4,8 +4,8 @@ on:
   pull_request:
     branches: [master]
     paths:
-      - '.scratch/live-voice/capability-inventory.json'
       - 'pypsa-gui/backend/harness/catalogue.py'
+      - 'pypsa-gui/backend/services/asset_schema/attrs_doc.py'
       - 'pypsa-gui/backend/harness/toolsets.py'
       - 'pypsa-gui/backend/models/energy_hub.py'
       - 'pypsa-gui/backend/services/adequacy/mc.py'
@@ -16,8 +16,8 @@ on:
   push:
     branches: [master]
     paths:
-      - '.scratch/live-voice/capability-inventory.json'
       - 'pypsa-gui/backend/harness/catalogue.py'
+      - 'pypsa-gui/backend/services/asset_schema/attrs_doc.py'
       - 'pypsa-gui/backend/harness/toolsets.py'
       - 'pypsa-gui/backend/models/energy_hub.py'
       - 'pypsa-gui/backend/services/adequacy/mc.py'
@@ -39,5 +39,5 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - name: Check source inventory and shared navigation coverage
+      - name: Build the inventory in memory and check shared navigation coverage
         run: python pypsa-gui/backend/smoke/assistant_inventory.py --check

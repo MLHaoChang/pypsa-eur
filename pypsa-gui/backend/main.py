@@ -82,6 +82,7 @@ from routers import (
     clustering,
     adequacy_worksheet,
     flow,
+    site_scene,
     compare,
     gridspine,
     campus_electrical,
@@ -106,6 +107,7 @@ from routers import (
     vintage,
 )
 from services.pypsa_service import PyPSAService
+from services.site_scene.contract import SceneError
 from services.study.body_limit import StudyBodyLimitMiddleware
 from settings import get_settings
 
@@ -690,6 +692,16 @@ async def _request_validation_as_422(request: Request, exc: RequestValidationErr
     return JSONResponse(
         status_code=422,
         content={"detail": _json_safe(jsonable_encoder(exc.errors()))})
+
+
+@app.exception_handler(SceneError)
+async def _scene_error_as_its_status(request: Request, exc: SceneError):
+    """SC-01a. A Site 3D scene refusal raised under a route that is not a
+    scene route (an export, Save-As, scenario or snapshot copying a damaged
+    scene: `integrity_error`) answers with its own status and the same
+    ``{detail: {error_kind, message, …}}`` body the scene routes raise,
+    never an unclassified 500."""
+    return JSONResponse(status_code=exc.status, content=exc.to_body())
 
 def _csrf_rejection(request: Request) -> JSONResponse | None:
     """
@@ -1373,6 +1385,12 @@ app.include_router(
 app.include_router(
     studies.router, prefix="/api/projects/{name}/studies",
     tags=["decision-studies"], dependencies=_projects_router_guard,
+)
+# The Site 3D native scene (SC-01a): the site anchor and a Site's scene,
+# adoption and proposals. Same guard; before the `/{name}` catch-all.
+app.include_router(
+    site_scene.router, prefix="/api/projects", tags=["site-scene"],
+    dependencies=_projects_router_guard,
 )
 app.include_router(
     projects.router, prefix="/api/projects", tags=["projects"],

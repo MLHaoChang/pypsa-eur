@@ -120,7 +120,9 @@ def _label(value):
 # The only tools a checked turn may run. Every results read, chart and export
 # is refused before its handler runs; checked results come from the bounded
 # profiles, computed by software from the request scope.
-CHECKED_TOOLS = frozenset({"get_component", "ui_open_panel", "update_component"})
+CHECKED_TOOLS = frozenset(
+    {"get_component", "list_components", "ui_open_panel", "update_component"}
+)
 
 
 class Turn:
@@ -145,6 +147,9 @@ class Turn:
         self.effect_pending = False
         self.reservation_nonce = None
         self.scope_hint = None
+        # list_components: class source digests taken before each handler run,
+        # in call order per args digest, so repeated identical calls keep their own.
+        self.page_digests = {}
 
     def review_interpretations(self, blocks, provider, model, ctx):
         if self.clarification is not None:
@@ -603,6 +608,27 @@ class Turn:
                 and isinstance(args.get("name"), str)
                 and 1 <= len(args["name"]) <= 128
             )
+        if tool_name == "list_components":
+            if self.request_scope is not None or not isinstance(args, dict):
+                return False
+            if not set(args) <= {"component_class", "offset", "limit"}:
+                return False
+            from services.chat_tools import MAX_PAGE_SIZE
+
+            offset, limit = args.get("offset", 0), args.get("limit", 1)
+            # Refuse rather than let the handler clamp: the scope is the rows shown.
+            if (
+                args.get("component_class") not in records.INPUT_METRICS
+                or type(offset) is not int
+                or type(limit) is not int
+                or offset < 0
+                or not 1 <= limit <= MAX_PAGE_SIZE
+            ):
+                return False
+            self.page_digests.setdefault(records.digest(args), []).append(
+                records.active_page_source_digest(args["component_class"])
+            )
+            return True
         if tool_name == "ui_open_panel":
             # The existing typed handler owns target validation. Supported
             # mounts subsequently receive a separate issued browser ACK.
@@ -610,9 +636,15 @@ class Turn:
         return False
 
     def capture(self, tool_name, args, result, tool_use_id):
-        if tool_name != "get_component":
+        if tool_name == "list_components":
+            pending = self.page_digests.get(records.digest(args)) or [None]
+            record = records.capture_input_page(
+                self.owner, args, result, pending.pop(0)
+            )
+        elif tool_name == "get_component":
+            record = records.capture_input(self.owner, args, result)
+        else:
             return
-        record = records.capture_input(self.owner, args, result)
         if record is not None:
             self.sources[tool_use_id] = record
 
@@ -646,6 +678,21 @@ class Turn:
         if record is None:
             return {"_assurance": metadata}
         # No arbitrary annotations, prose, links or artifact metadata pre-approval.
+        scope = record["scope"]
+        if scope.get("kind") == "static_page":
+            rows = {}
+            for fact in record["facts"]:
+                rows.setdefault(fact["entity_id"], {"name": fact["entity_id"]})[
+                    fact["metric"]
+                ] = fact["value"]
+            return {
+                "items": list(rows.values()),
+                **{
+                    key: scope[key]
+                    for key in ("offset", "returned", "total_count", "has_more")
+                },
+                "_assurance": metadata,
+            }
         return {
             **{fact["metric"]: fact["value"] for fact in record["facts"]},
             "_assurance": metadata,
@@ -750,9 +797,16 @@ class Turn:
             if record["evidence_id"] not in evidence_ids:
                 evidence_ids.append(record["evidence_id"])
             value_text = repr(fact["value"]).removesuffix(".0")
+            scope = record["scope"]
+            page = (
+                f" (page rows {scope['offset'] + 1}..{scope['offset'] + scope['returned']}"
+                f" of {scope['total_count']}, not the whole class)"
+                if scope.get("kind") == "static_page"
+                else ""
+            )
             lines.append(
-                f"Configured {record['scope']['component_class']} input {_label(fact['entity_id'])}: "
-                f"{fact['metric']} = {value_text} {fact['unit']}."
+                f"Configured {scope['component_class']} input {_label(fact['entity_id'])}: "
+                f"{fact['metric']} = {value_text} {fact['unit']}{page}."
             )
         return (
             "\n".join(lines)
@@ -914,6 +968,14 @@ class Turn:
                 receipt["chart"] = checked_charts.for_answer(
                     ctx, self.request_scope, None if draft_failed else self.request_evidence)
             records.save(record, answer_id)
+            # Access revoked between the check above and the save (REVOKE-TOCTOU)
+            # must not leave a committed answer: re-check, and withdraw it on
+            # any refusal or failure (answer_id is fresh, so nothing older).
+            try:
+                records.authorize(self.owner, self.project_id)
+            except Exception:
+                records.discard(self.owner, answer_id)
+                raise
         self.approved = record
         return [{"type": "text", "text": text}]
 
@@ -1023,6 +1085,8 @@ Strict checked-answer mode: any prose/thinking is private. After tools, return
 only JSON {"schema_version":1,"blocks":[{"id":"fact-1","kind":"observed",
 "source":{"tool_use_id":"the-actual-call-id","path":"/p_set"},
 "entity_id":"the-actual-entity","metric":"p_set","value":5,"unit":"MW"}]}.
+For a list_components row the path is "/<name>/<metric>", a JSON pointer
+(write "~" in a name as "~0" and "/" as "~1"); a page is never the whole class.
 Use only exact captured static input facts and their units. Do not add narrative,
 claims of completed effects or unsupported calculations. When this turn supplies
 a generator-dispatch computed ledger, return exactly its computed blocks instead
