@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A chat-started solve now keeps its Emissions results with the run (section `results_emissions`). `get_results(result_kind='emissions', run_id=…)` answers an older run from what it kept, never from the current results, and refuses a run without that section by its run ID.

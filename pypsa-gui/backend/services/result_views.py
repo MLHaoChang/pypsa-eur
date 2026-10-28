@@ -238,6 +238,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
     ResultView("emissions", _RESULTS, "emissions", "Emissions",
                "CO2 totals and any cap's shadow price", "results",
                (_r("get_results", result_kind="emissions"),),
+               historical_section="results_emissions",
                units="t CO2, EUR/t",
                checked_profiles=("generator-emissions/1", "network-emissions/1"),
                card="capacity", sub_option="dispatch", card_tab="operation"),
