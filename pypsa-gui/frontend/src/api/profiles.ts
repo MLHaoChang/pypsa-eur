@@ -24,6 +24,7 @@ export interface ProfilePoint {
 export interface ProfilePreset {
   name: string
   technology: ProfileTechnology
+  source_type?: ProfileSource
   description: string
   params: Record<string, unknown>
 }
@@ -132,6 +133,25 @@ export interface WeatherChoice {
   year_source: 'saved' | 'snapshots' | 'default'
   /** What the snapshots are read as; set in the site connection, never here. */
   time_basis: { value: string; assumed: boolean }
+  window?: { first: string; last: string; hours: number; runs: number } | { unsupported: string } | null
+}
+
+export interface TuningField {
+  key: string; label: string; unit: string | null; type: 'number' | 'string'
+  min?: number; max?: number; options?: string[]; sources: ProfileSource[]
+  preset_value: string | number | null; provenance: string
+}
+export interface TuningSchema { technology: ProfileTechnology; preset: string; fields: TuningField[] }
+export type CompareSide = `current:${string}` | `pending:${string}` | `shaped:${string}`
+export interface ProfileStats {
+  cf: number; flh: number; peak: number; peak_hour: number | null
+  p10: number; p50: number; p90: number; monthly: Record<string, number>; duration: number[]
+}
+export interface ProfileCompare {
+  a: ProfileStats | null; b: ProfileStats
+  delta: Omit<ProfileStats, 'duration'> | null
+  week: { snapshots: string[]; a: number[] | null; b: number[]; period?: number | string }
+  warnings?: string[]
 }
 
 export interface BatchApplyResult {
@@ -141,6 +161,11 @@ export interface BatchApplyResult {
 }
 
 export const profilesApi = {
+  schema: (technology: ProfileTechnology, preset: string) =>
+    client.get<TuningSchema>('/profiles/schema', { params: { technology, preset } }).then(r => r.data),
+  compare: (project: string, a: CompareSide | undefined, b: CompareSide, component?: string) =>
+    client.get<ProfileCompare>(`/projects/${encodeURIComponent(project)}/profiles/compare`,
+      { params: { ...(a ? { a } : {}), b, component } }).then(r => r.data),
   weather: (project: string) =>
     client.get<WeatherChoice>(`/projects/${encodeURIComponent(project)}/profiles/weather`).then(r => r.data),
 

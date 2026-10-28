@@ -24,6 +24,26 @@ beforeEach(() => { vi.clearAllMocks(); prof.weather.mockResolvedValue(answer()) 
 afterEach(() => cleanup())
 
 describe('WeatherBar', () => {
+  it('names a sampled week and its UTC hours', async () => {
+    prof.weather.mockResolvedValue(answer({ window: { first: '2025-07-01T00:00:00', last: '2025-07-07T23:00:00', hours: 168, runs: 1 } }))
+    renderIt()
+    expect((await screen.findByTestId('weather-window')).textContent).toContain('1–7 Jul · 168 h (UTC)')
+  })
+  it('names multiple sampled periods', async () => {
+    prof.weather.mockResolvedValue(answer({ window: { first: '2025-01-01', last: '2025-07-07', hours: 336, runs: 2 } }))
+    renderIt()
+    expect((await screen.findByTestId('weather-window')).textContent).toContain('2 sampled periods')
+  })
+  it('does not add a window line for a full weather year', async () => {
+    prof.weather.mockResolvedValue(answer({ window: null }))
+    renderIt(); await screen.findByTestId('weather-time-basis')
+    expect(screen.queryByTestId('weather-window')).toBeNull()
+  })
+  it('explains an unsupported window', async () => {
+    prof.weather.mockResolvedValue(answer({ window: { unsupported: 'Snapshots must be hourly' } }))
+    renderIt()
+    expect((await screen.findByTestId('weather-window')).textContent).toContain('Profile window unavailable: Snapshots must be hourly')
+  })
   it('shows where the year came from', async () => {
     renderIt()
     expect((await screen.findByTestId('weather-year-source')).textContent).toBe('from your snapshots')

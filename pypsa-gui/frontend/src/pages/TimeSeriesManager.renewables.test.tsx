@@ -56,6 +56,18 @@ async function openRenewables() {
 }
 
 describe('Renewables tab', () => {
+  it('offers Tune only for located Expert rows and opens the existing dialog', async () => {
+    await openRenewables()
+    expect(screen.queryByTestId('tune-pv_noloc')).toBeNull()
+    await userEvent.click(screen.getByTestId('tune-pv_ready'))
+    expect(screen.getByRole('dialog', { name: 'Tune the profile of pv_ready' })).toBeTruthy()
+  })
+
+  it('offers no Tune entry in Guided', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    await openRenewables()
+    expect(screen.queryByTestId('tune-pv_ready')).toBeNull()
+  })
   it('links to Profile Studio in Expert', async () => {
     await openRenewables()
     expect(screen.getByTestId('ts-open-profile-studio')).toBeTruthy()

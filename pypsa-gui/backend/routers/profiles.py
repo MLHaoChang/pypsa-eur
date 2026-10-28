@@ -517,6 +517,7 @@ def list_profile_presets(technology: str | None = None):
             {
                 "name": p.name,
                 "technology": p.technology,
+                "source_type": p.source_type,
                 "description": getattr(p, "description", ""),
                 "params": dict(p.params),
             }
