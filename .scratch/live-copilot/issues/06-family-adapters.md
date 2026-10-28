@@ -214,3 +214,32 @@ Families left without any covered variant: Projects (D01), Network/topology (D02
 Env notes: the `lp` fixture in `test_lc06_d04_capacity_lp.py` is the solve pattern to reuse. `get_study_evidence` needs a saved project, so read objectives through `get_results('objective_decomposition')`. A past run's `get_results(run_id=…)` wraps the payload in `{status, scope, data}`. The validator refuses unbounded extendables and periodises capex by nyears.
 
 Reviewer ids at hand-off: coordinator session_01G7qCuj4ML7V5FccYz7NghF; GK B session_01G7qCumomaAxyuvAgo3oVss (S0–S3, D-rows); GK A session_01G7qCum3HtNvhuPbBnJhiuB (S4–S9); UX (4) session_01G7qCumtovuejQkxqdLJRZD for any UI slice.
+
+## Hand-off 2 (2026-10-28, LC-06 (2) near 300k)
+
+State:
+- S1 #873 (head 4d1218fe60aecc937fdf89112e2de936f40faa71) is open against master. GK B (8)
+  has the review request (relayed by the coordinator). CI was running at hand-off.
+- S2 #877 (head 3104c2334479a0e71f5d9eccf19439b50137f54b) is open, stacked on S1. It went to
+  GK B (8) with conditions 1–7 addressed in the body. It carries two engine fixes:
+  the rolling objective and a limit stop with no incumbent.
+- After #873 merges, merge master into #877 (it then shows only S2). If #869
+  lands first, merge master too: both edit `solver_service.py` (GK B condition 7).
+
+Next: S3 (GK B): LC-D07 P=60/Q=80 → 100 MVA and an independently solved
+3-bus AC PF. Then S4–S9 (GK A conditions restated in GK A's 22:09 message: one
+mutation per oracle, stated tolerances, f0 from the network, SAGC-1). Then the
+GK B D-rows as in Hand-off 1.
+
+Env notes:
+- There is no `.pixi` here. Use `/root/.venv-pypsa-gui/bin/python` from `pypsa-gui/backend`.
+  Test collection is slow (1–3 min), so run in the background with a log file
+  and never two pytest runs at once: the container was OOM-restarted once.
+- `test_lc06_d05_foresight.py`'s `seam` fixture is the reusable solve pattern.
+  `get_simulation_status` gives status/condition/objective/failure, and
+  `get_run_evidence(run_id, section='summary')` gives the run record.
+- The mutation runner lives in the session scratchpad; it is easy to
+  recreate: copy the test with one replacement and run `-k` on the target.
+
+Ids: coordinator session_01G7qCuj4ML7V5FccYz7NghF; GK B (8)
+session_01G7qCumQA1s15bnCz8WyJuA; GK A session_01G7qCum3HtNvhuPbBnJhiuB.
