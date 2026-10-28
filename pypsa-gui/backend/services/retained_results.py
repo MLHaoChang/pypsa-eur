@@ -93,7 +93,7 @@ ADAPTERS: tuple[Retained, ...] = (
     _results_family(SUMMARY_SECTION, 'historical_results_unavailable', 'summary results',
                     ('statistics', 'cost_breakdown')),
     # cost_breakdown, the Capacity Expansion tab's other read, is kept with Summary.
-    _results_family(CAPACITY_SECTION, 'historical_capacity_unavailable', 'capacity results',
+    _results_family(CAPACITY_SECTION, 'historical_results_unavailable', 'capacity results',
                     ('economics_by_carrier',)),
 )
 

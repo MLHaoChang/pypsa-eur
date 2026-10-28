@@ -125,7 +125,8 @@ def test_a_capacity_run_without_its_section_refuses_with_its_id(repriced):
                              sections={'results_summary': {'statistics': [], 'cost_breakdown': {}}})
     out = chat_tools.get_results(result_kind='economics_by_carrier', run_id='fg-legacy03')
     assert out['status'] == 'unavailable' and out['run_id'] == 'fg-legacy03'
-    assert out['unavailable_kind'] == 'historical_capacity_unavailable'
+    assert out['unavailable_kind'] == 'historical_results_unavailable'
+    assert 'capacity' in out['message']
     assert 'data' not in out
 
 
