@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Answer assurance P0: every assistant tool, Results tab, panel and output channel maps to a declared assurance adapter, checked by the inventory CI; unchecked chat turns and legacy history are now marked explicitly unvalidated.
