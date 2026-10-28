@@ -3,7 +3,7 @@
 
 # 19 — H2-offtake IC counterfactual: single-year hub and the investment gate fact
 
-Status: ready-for-agent
+Status: done (#838, 3b8d5ecd)
 Type: task
 Blocked by: none (11 keeps its investment rules `not_evaluated` until this lands)
 Gated: yes (GK A reviews the plan and the PR)
@@ -32,11 +32,11 @@ Design §9.3 and generic-site Q3 say the investment case cannot build a counterf
 
 ## Acceptance criteria
 
-- [ ] A project from `eh_h2_hub` (single-year) runs the investment case to `done` with `counterfactual_basis:site_today` and `counterfactual_buys:h2_offtake`, and no `counterfactual_not_established:*` (live-solve test).
-- [ ] Removing the reference purchase from that project's commercial block leaves the case established with no `counterfactual_buys` and no `counterfactual_not_established:*` flag (live pin): the single-year hub's existing 60 MW electrolyser serves the flat 25 MW offtake, so the site today buys nothing (GK A, plan review, option A). The fact reads `not_established` with the reason for a case carrying `counterfactual_not_established:owner_conversion_load` (or refused), proved through the real investment-case route.
-- [ ] The fact reads `not_run` with no case and after the network is edited (stale).
-- [ ] `eh_h2_hub_staged`'s numbers in `test_eh_staged_hubs.py` are unchanged.
-- [ ] The offtake stays demand: no template or rule makes it tunable (design §6.0).
+- [x] A project from `eh_h2_hub` (single-year) runs the investment case to `done` with `counterfactual_basis:site_today` and `counterfactual_buys:h2_offtake`, and no `counterfactual_not_established:*` (live-solve test).
+- [x] Removing the reference purchase from that project's commercial block leaves the case established with no `counterfactual_buys` and no `counterfactual_not_established:*` flag (live pin): the single-year hub's existing 60 MW electrolyser serves the flat 25 MW offtake, so the site today buys nothing (GK A, plan review, option A). The fact reads `not_established` with the reason for a case carrying `counterfactual_not_established:owner_conversion_load` (or refused), proved through the real investment-case route.
+- [x] The fact reads `not_run` with no case and after the network is edited (stale).
+- [x] `eh_h2_hub_staged`'s numbers in `test_eh_staged_hubs.py` are unchanged.
+- [x] The offtake stays demand: no template or rule makes it tunable (design §6.0).
 
 ## Test plan
 

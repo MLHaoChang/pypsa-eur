@@ -30,10 +30,10 @@ Design §9.3 and generic-site Q4 say the microgrid's investment baseline, the ex
 
 ## Acceptance criteria
 
-- [ ] On `eh_microgrid` and `eh_microgrid_staged` a finished case makes the investment rule evaluated, and the report lists the kept existing assets.
-- [ ] A test project whose `diesel_1` carries a non-zero overnight cost reads `not_established` with the reason naming `diesel_1`.
-- [ ] A baseline that sheds is reported with `counterfactual:shed_at_voll` named, and the rule is still evaluated.
-- [ ] The NPVs pinned in `test_eh_microgrid_case.py` and `test_eh_staged_hubs.py` are unchanged (no engine change).
+- [x] On `eh_microgrid` and `eh_microgrid_staged` a finished case makes the investment rule evaluated, and the report lists the kept existing assets.
+- [x] A test project whose `diesel_1` carries a non-zero overnight cost reads `not_established` with the reason naming `diesel_1`.
+- [x] A baseline that sheds is reported with `counterfactual:shed_at_voll` named, and the rule is still evaluated.
+- [x] The NPVs pinned in `test_eh_microgrid_case.py` and `test_eh_staged_hubs.py` are unchanged (no engine change).
 
 ## Test plan
 
@@ -45,3 +45,5 @@ Design §9.3 and generic-site Q4 say the microgrid's investment baseline, the ex
 The harness fact reader beside 19's, issue 12's profile rules, the tests above, a release-note fragment.
 
 ## Comments
+
+- 2026-10-28, plan review (GK A): GO. The fact calls `finance_case.baseline_plan` with the case route's own arguments (owner included) after the freshness check, under the network lock; exact-set comparison against `MG_EXISTING`, proved by a mutation check (a `diesel_*` pattern guard lets the renamed unit through); `baseline_island_rows_relaxed` and `counterfactual_shed_at_voll:*` keep the case established and are quoted by `counterfactual_text`. No profile constant: the two rules are written into issue 12.
