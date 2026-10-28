@@ -616,11 +616,11 @@ export function RefinePanel({
           </p>
           <ol className="text-[11px] list-decimal pl-5" data-testid="refine-edits">
             {recorded.map((op, i) => (
-              <li key={i} className="flex items-center gap-1">
-                <span>{describe(op, outages)}</span>
+              <li key={i}>
+                <span data-testid="refine-step-words">{describe(op, outages)}</span>{' '}
                 <button type="button" aria-label={`Remove step ${i + 1} (${stepLabel(op.op)})`}
                   disabled={undo.isPending || refine.isPending}
-                  className="text-muted hover:text-danger disabled:opacity-50"
+                  className="text-muted enabled:hover:text-danger disabled:opacity-50"
                   onClick={() => undo.mutate(i)}>Remove</button>
               </li>
             ))}

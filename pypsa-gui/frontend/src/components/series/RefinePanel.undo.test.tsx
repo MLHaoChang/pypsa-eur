@@ -52,7 +52,7 @@ describe('RefinePanel per-step removal', () => {
     expect(within(steps).getByText('Refinements in this preview')).toBeTruthy()
     expect(steps.textContent).toContain('nothing changes until you apply it')
     const items = within(screen.getByTestId('refine-edits')).getAllByRole('listitem')
-    expect(items.map(i => i.querySelector('span')?.textContent)).toEqual([
+    expect(items.map(i => within(i).getByTestId('refine-step-words').textContent)).toEqual([
       '05–10 h Mon–Fri × 1.3',
       'peak to 60',
     ])
