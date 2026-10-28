@@ -33,7 +33,7 @@ Design §9.3 and generic-site Q3 say the investment case cannot build a counterf
 ## Acceptance criteria
 
 - [ ] A project from `eh_h2_hub` (single-year) runs the investment case to `done` with `counterfactual_basis:site_today` and `counterfactual_buys:h2_offtake`, and no `counterfactual_not_established:*` (live-solve test).
-- [ ] Removing the reference purchase from that project's commercial block makes the case report `counterfactual_not_established:owner_conversion_load`, and the fact reads `not_established` with that reason.
+- [ ] Removing the reference purchase from that project's commercial block leaves the case established with no `counterfactual_buys` and no `counterfactual_not_established:*` flag (live pin): the single-year hub's existing 60 MW electrolyser serves the flat 25 MW offtake, so the site today buys nothing (GK A, plan review, option A). The fact reads `not_established` with the reason for a case carrying `counterfactual_not_established:owner_conversion_load` (or refused), proved through the real investment-case route.
 - [ ] The fact reads `not_run` with no case and after the network is edited (stale).
 - [ ] `eh_h2_hub_staged`'s numbers in `test_eh_staged_hubs.py` are unchanged.
 - [ ] The offtake stays demand: no template or rule makes it tunable (design §6.0).
@@ -49,3 +49,5 @@ Design §9.3 and generic-site Q3 say the investment case cannot build a counterf
 `pypsa-gui/backend/project_templates/eh_templates.py`, `pypsa-gui/backend/project_templates/eh_staged_hubs.py` (reuse `GREY_H2`, `_co2_price`), the harness fact reader beside issue 11's profile, the tests above, a release-note fragment.
 
 ## Comments
+
+- 2026-10-28, plan review (GK A): GO with option A. Criterion 2 amended: the plan prototype showed the single-year case stays established without the purchase (existing electrolyser serves the offtake); only the staged hub's smaller electrolyser leaves the offtake unserved. Sinking the existing rows was proven LP-neutral (master vs branch: identical objective and dispatch). The fact also reads `not_run` when the solve's results no longer describe the network (`workflow_tools.solve_freshness`), since the IC staleness key follows the dispatch, not the network inputs.

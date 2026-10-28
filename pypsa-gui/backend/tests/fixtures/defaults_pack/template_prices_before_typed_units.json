@@ -251,12 +251,33 @@
    "lifetime": 40.0,
    "overnight_cost": 482478.5
   },
+  "Generator:solar_park": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Generator:wind_farm": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
   "Generator:wind_new": {
    "capital_cost": 0.0,
    "discount_rate": 0.07,
    "fom_cost": 16830.6828853,
    "lifetime": 30.0,
    "overnight_cost": 1383305.9
+  },
+  "Link:electrolyser": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
   },
   "Link:fuel_cell": {
    "capital_cost": 0.0,
@@ -271,6 +292,20 @@
    "fom_cost": 722.0066625,
    "lifetime": 25.0,
    "overnight_cost": null
+  },
+  "StorageUnit:site_battery": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Store:h2_storage": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
   }
  },
  "eh_h2_hub_staged": {
