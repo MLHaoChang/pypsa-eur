@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The Time Series whole-tab upload leaves an in-place receipt: each matched component with old → new and "Open its editor ›", each unmatched column with its reason, and a refused file's reason with the template download.
