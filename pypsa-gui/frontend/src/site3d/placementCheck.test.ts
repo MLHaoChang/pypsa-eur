@@ -297,6 +297,7 @@ describe('exact versus approximate size (V18)', () => {
 
   it('no size is one line naming the item, never "Approximate size" too', () => {
     expect(noSizeCopy('roof_pv')).toBe('No rule checked: no size entered for roof_pv, so overlap with buildings uses the centre point only')
+    expect(noSizeCopy('roof_pv', true)).toBe('No rule checked: no size entered for roof_pv, so the roof fit uses the centre point only')
   })
 
   it('a native finding keeps the item name as written: "site_battery: overlaps …"', () => {

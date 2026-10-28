@@ -297,7 +297,7 @@ describe('Model part: place equipment', () => {
     // Centre point only: an unchecked rule is never shown next to a pass.
     expect(screen.queryByTestId('assoc-no-findings')).toBeNull()
     expect(screen.queryByTestId('proposal-size')).toBeNull()
-    expect(screen.getByTestId('proposal-no-rule').textContent).toBe('No rule checked: no size entered for pv, so overlap with buildings uses the centre point only')
+    expect(screen.getByTestId('proposal-no-rule').textContent).toBe('No rule checked: no size entered for pv, so the roof fit uses the centre point only')
   })
 
   it('a building without a height offers no roof, and says why', async () => {

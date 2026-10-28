@@ -330,7 +330,7 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
             onChange={e => setRebindPick(rebindList.find(c => candidateKey(c) === e.target.value) ?? null)}
             className="rounded border border-border bg-bg px-2 py-1 text-[12px] text-text disabled:opacity-50">
             <option value="" disabled>Choose an item</option>
-            {rebindList.map(c => <option key={candidateKey(c)} value={candidateKey(c)}>{itemName(candidateKey(c))}</option>)}
+            {rebindList.map(c => <option key={candidateKey(c)} value={candidateKey(c)}>{itemName(candidateKey(c))}{candidateKey(c) in placements ? ' · placed' : ''}</option>)}
           </select>
           {rebindList.length === 0 && (
             <span className="text-[11px] text-muted" data-testid="place-rebind-reason">Nothing to attach it to: the model has no item of this kind</span>
@@ -575,7 +575,7 @@ function Review({ proposal, mode, buildings, groups, itemName, shortName, sizeLi
       const where = e.on && e.on.startsWith('roof:') ? `on the roof of ${bName(e.on.slice(5))}` : 'on the ground'
       const size = sizeLine(key)
       const note = size ? [{ text: size, testId: 'proposal-size' }] : []
-      if (!sized(key)) note.push({ text: noSizeCopy(shortName(key)), testId: 'proposal-no-rule' })
+      if (!sized(key)) note.push({ text: noSizeCopy(shortName(key), !!e.on?.startsWith('roof:')), testId: 'proposal-no-rule' })
       lines.push({ key, text: `${itemName(key)} · ${where} · ${positionCopy(e.x, e.y)} · heading ${e.heading}°`, note })
     }
   }

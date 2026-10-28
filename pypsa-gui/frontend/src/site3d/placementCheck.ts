@@ -216,8 +216,8 @@ export const SIZE_COPY: Record<SizeBasis, string | null> = {
   exact: 'Exact size', entered: 'Entered size', approximate: APPROXIMATE_SIZE, none: null,
 }
 /** The one line for an item with no size: which rule is not checked, and why (V19). */
-export const noSizeCopy = (name: string): string =>
-  `No rule checked: no size entered for ${name}, so overlap with buildings uses the centre point only`
+export const noSizeCopy = (name: string, onRoof = false): string =>
+  `No rule checked: no size entered for ${name}, so ${onRoof ? 'the roof fit' : 'overlap with buildings'} uses the centre point only`
 
 // ── the check ───────────────────────────────────────────────────────────────
 
