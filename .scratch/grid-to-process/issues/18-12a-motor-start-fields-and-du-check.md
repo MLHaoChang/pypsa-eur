@@ -1,6 +1,6 @@
 # 12a (issue 18): motor-start fields and the gridspine ΔU check
 
-Status: ready-for-agent (owner G2P-12-SPLIT, 2026-10-28: split, 12a now on a fixture network)
+Status: done (branch claude/g2p-18-motor-start; owner G2P-12-SPLIT, 2026-10-28: split, 12a on a fixture network)
 Type: task
 Blocked by: none
 Gated: **yes** (gridspine: send GK A the plan before code)
@@ -33,11 +33,11 @@ results, the B acceptance) stays in issue 12 and waits for 10.
   - **Scorecard.** One row per unit and start method on the grid-readiness scorecard. This changes the row count, so the PR updates the pilot-evaluation golden (`not_checked` count in `pypsa-gui/backend/tests/test_pilot_evaluation.py`) and names that update.
 
 **Acceptance (on a fixture network: one PoC at 150 MVA, one process unit with a motor):**
-- [ ] Hand-calculated: a DOL start of the fixture motor's kW at its ledgered start pf on 150 MVA (c applied) gives ΔU = the hand value in % (written in the test) > the limit, so it fails. The VFD start's hand value is ≤ the limit, so it passes.
-- [ ] Q_gfm = 0 and Q_gfm > 0 give the hand values of the formula above.
-- [ ] The minimum short-circuit case is used when the PoC has one. Without one, the row notes that the entered S_k'' was used.
-- [ ] A unit with no motor fields reads unknown on the scorecard, not pass.
-- [ ] The assistant inventory and the attrs-doc compact cap test pass. If the cap is exceeded, ask the owner, as G2P-17A-DOCCAP did; do not raise it unasked.
+- [x] Hand-calculated: a DOL start of the fixture motor's kW at its ledgered start pf on 150 MVA (c applied) gives ΔU = the hand value in % (written in the test) > the limit, so it fails. The VFD start's hand value is ≤ the limit, so it passes.
+- [x] Q_gfm = 0 and Q_gfm > 0 give the hand values of the formula above.
+- [x] The minimum short-circuit case is used when the PoC has one. Without one, the row notes that the entered S_k'' was used.
+- [x] A unit with no motor fields reads unknown on the scorecard, not pass.
+- [x] The assistant inventory and the attrs-doc compact cap test pass. If the cap is exceeded, ask the owner, as G2P-17A-DOCCAP did; do not raise it unasked.
 
 **Out of scope:** ride-through curves, dip statistics, the restart sequence and results (12b, issue 12); the B template's motor-start check (12b, after 10); dynamic (RMS/EMT) motor start.
 

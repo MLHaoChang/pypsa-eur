@@ -38,6 +38,8 @@ CUSTOM_BY_CLASS = {"Bus": {"country", "mwh_per_t", "product_value"}, "Carrier": 
                             "rated_mva", "harmonic_source", "harmonic_spectrum", "spectrum_post_filter",
                             "flicker_step_mva", "flicker_changes_per_min",
                             "single_phase_share",
+                            # Grid-to-process issue 18: the motor-start screen's columns.
+                            "motor_kw", "start_method", "i_start_pu",
                             # PyPSA registers extra ports on first use (`pypsa.constants.RE_PORTS_GE_2`).
                             "bus2", "bus3", "bus4", "efficiency2", "efficiency3", "efficiency4"}}
 

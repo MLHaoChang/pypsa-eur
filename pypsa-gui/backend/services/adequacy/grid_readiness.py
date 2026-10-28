@@ -115,6 +115,9 @@ RULE_TDD = {"comparator": "<=", "otherwise": "warn", "tolerance": 1e-9}
 #: The oscillation row's after-mitigation value only (the before verdict also
 #: reads the band of concern, which is not a scalar): in band, ≤ the limit.
 RULE_OSC = {"comparator": "<=", "otherwise": "fail", "tolerance": 1e-9}
+#: A motor-start row's voltage change against the rapid-voltage-change limit (grid-to-process issue 18): a
+#: screening estimate, so over it warns, as the rapid-voltage-change row.
+RULE_MOTOR_START = {"comparator": "<=", "otherwise": "warn", "tolerance": 1e-9}
 
 
 def _judge(value: float, limit: float, rule: dict) -> str:
@@ -926,6 +929,137 @@ def _flicker_row(inp: _Inputs) -> dict:
     return row
 
 
+_MOTOR_START_SCREENING = ("a screening estimate (dU = (S_start · sin φ_start − Q_gfm) / S_sc, the grid's R ignored, "
+                          "one motor starting at a time); the start current multiples and starting power factors are "
+                          "demo values; above the limit a motor-start load-flow or RMS study is needed")
+_MOTOR_FIELDS = ("motor_kw", "start_method", "i_start_pu")
+
+
+def _poc_sk_min(inp: _Inputs):
+    """``(S_k''min MVA, PoC kV)`` from the project's campus description when it states a minimum case of its own
+    for a PoC bus (``campus_study._sk_source`` reads SK_CAMPUS: not the bus's S_k'' copied, not the typical
+    fallback), else ``(None, None)``."""
+    try:
+        import yaml
+        from gridspine.drivers.campus_study import SK_CAMPUS, _pcc_sk_min, _sk_source
+    except ImportError:  # pragma: no cover - build-shape branch
+        return None, None
+    try:
+        campus = yaml.safe_load((inp.dir / "campus_electrical" / "campus_input.yaml").read_text())
+        pcc = campus["campus"]["pcc"]
+        bus = pcc.get("pypsa_name")
+        if bus not in inp.n.buses.index or not _truthy(inp.n.buses.at[bus, "eh_poc"]):
+            return None, None
+        if _sk_source(campus, inp.n)[0] != SK_CAMPUS:
+            return None, None
+        return _pcc_sk_min(pcc), _num(pcc.get("vn_kv"))
+    except (OSError, yaml.YAMLError, KeyError, TypeError, ValueError):
+        # No, or no readable, campus description: the entered S_k'' is used, and the row says so.
+        return None, None
+
+
+def _truthy(v) -> bool:
+    return v is True or str(v).lower() in ("true", "1")
+
+
+def _q_gfm_mvar(inp: _Inputs) -> tuple[float | None, str | None]:
+    """The reactive power the grid-forming storage at the PoC can give, Mvar: Σ rating · tan(acos pf_rated) over
+    the island's battery units offering grid forming, as the reactive-range row counts it; None when the project
+    has no island requirements. A unit without a size or rated power factor counts zero, named in the note."""
+    services = _services(inp)
+    if services is None:
+        return None, None
+    have, parts, unstated = 0.0, [], []
+    for name, u in services["units"].items():
+        if u["kind"] != "bess" or "grid_forming" not in u["services"]:
+            continue
+        pf = _num(inp.island["units"][name].get("values", {}).get("pf_rated"))
+        rating, _ = _unit_rating(inp.n, name)
+        if pf is None or not rating or not 0 < pf <= 1:
+            unstated.append(name)
+            continue
+        q = rating * math.tan(math.acos(pf))
+        have += q
+        parts.append(f"{name} {q:.3g} Mvar")
+    note = (f"Q_gfm {have:.4g} Mvar ({', '.join(parts) or 'no grid-forming storage'}) as rating × tan(acos rated "
+            "power factor), an assumed capability")
+    if unstated:
+        note += f"; {', '.join(unstated)} counted zero: no size or no rated power factor"
+    return have, note
+
+
+def _motor_start_rows(inp: _Inputs) -> list[dict]:
+    """The voltage change at the PoC when each process unit's motor starts (grid-to-process issue 18,
+    ``gridspine.static.motor_start``): one row per process unit, for its own start method, judged on the
+    profile's ``rvc_limit_pct``. With no process unit, one ``unknown`` row says so."""
+    req = "Voltage change at the PoC when the unit's motor starts"
+    unit_target = _target("assets", "Link", None, "motor_kw")
+    try:
+        import pandas as pd
+        from gridspine.schema.contracts import ContractError
+        from gridspine.static import motor_start as ms
+    except ImportError as exc:  # pragma: no cover - build-shape branch
+        note = f"The motor-start screen needs gridspine ({exc})"
+        return [_row("motor_start", req, rule=RULE_MOTOR_START, limit=None, unit="% of nominal", source=note,
+                     project_value=None, verdict="unknown", assumed=True, note=note, section="assets",
+                     target=unit_target)]
+    limit, clause = ms.limit_from_profile(inp.profile)
+    source = (f"{_profile_title(inp)}: {clause}" if limit is not None
+              else inp.profile_error or "The grid code sets no rapid-voltage-change limit")
+    lim = (inp.profile or {}).get("rvc_limit_pct")
+    lim_assumed = limit is None or lim.get("source") != "code"
+    links = inp.n.links if inp.n is not None else None
+    process = ([] if links is None or "eh_process" not in links.columns
+               else [u for u in links.index if _truthy(links.at[u, "eh_process"])])
+    if not process:
+        return [_row("motor_start", req, rule=RULE_MOTOR_START, limit=limit, unit="% of nominal", source=source,
+                     project_value=None, verdict="unknown", assumed=True,
+                     note="No process unit on this project: the screen reads each unit's Motor rating and Start "
+                          "method",
+                     section="assets", target=_target("assets", "Link", None, "eh_process"))]
+    units = pd.DataFrame({"unit": process, "poc": "PoC",
+                          **{c: [links.at[u, c] if c in links.columns else None for u in process]
+                             for c in _MOTOR_FIELDS}})
+    sk_min, vn = _poc_sk_min(inp)
+    sources = {"PoC": ms.Source(sk_mva=_poc_sk_mva(inp.n), sk_min_mva=sk_min,
+                                vn_kv=vn if vn is not None else _poc_vn_kv(inp.n))}
+    q_gfm, q_note = _q_gfm_mvar(inp)
+    fault_assumed = _marking_assumed(inp.marking("fault_level"))
+    rows = []
+    for rec in units.to_dict("records"):
+        rid, name = f"motor_start:{rec['unit']}", rec["unit"]
+        try:
+            r = ms.motor_start_table(pd.DataFrame([rec]), sources, {"PoC": q_gfm}, limit).iloc[0]
+        except ContractError as exc:
+            # One unit's malformed stored input reads as unknown on its own row, not a failed scorecard.
+            rows.append(_row(rid, f"{req}: {name}", rule=RULE_MOTOR_START, limit=limit, unit="% of nominal",
+                             source=source, project_value=None, verdict="unknown", assumed=True, note=str(exc),
+                             section="assets", target=_target("assets", "Link", name, "motor_kw")))
+            continue
+        d = _num(r["du_pct"])
+        if r["note"] == ms.NO_SK:
+            target = _target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"), "eh_sk_mva")
+        else:
+            # A missing input first, else the start method: the lever on the voltage change.
+            field = "motor_kw" if d is None and _num(rec["motor_kw"]) is None else "start_method"
+            target = _target("assets", "Link", name, field)
+        notes = [r["note"]]
+        if d is not None:
+            notes += [q_note] if q_note else []
+            notes.append(_MOTOR_START_SCREENING)
+        verdict = {"pass": "pass", "fail": RULE_MOTOR_START["otherwise"]}.get(r["verdict"], "unknown")
+        # A computed value rests on the demo start multiples and power factors, so it is always assumed.
+        row = _row(rid, f"{req}: {name}", rule=RULE_MOTOR_START, limit=limit, unit="% of nominal", source=source,
+                   project_value=None if d is None else round(d, 4), verdict=verdict,
+                   assumed=lim_assumed or fault_assumed or d is not None, note="; ".join(notes), section="assets",
+                   target=target)
+        row["motor_start"] = {k: (r[k] if isinstance(r[k], str) or r[k] is None else _num(r[k]))
+                              for k in ("motor_kw", "start_method", "start_multiple", "start_pf", "s_start_mva",
+                                        "q_gfm_mvar", "sk_mva", "sk_case", "c", "s_sc_mva", "du_pct")}
+        rows.append(row)
+    return rows
+
+
 def _poc_sk_mva(n) -> float | None:
     if "eh_poc" not in n.buses.columns or "eh_sk_mva" not in n.buses.columns:
         return None
@@ -1277,7 +1411,7 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
     inp = _Inputs(project_dir, network, profile, error, eh_study, study_edited)
     rows = [*_scr_rows(inp), *_peak_rows(inp), _ramp_row(inp), _oscillation_row(inp),
             _rvc_row(inp), _rvc_infrequent_row(inp), _harmonic_row(inp), _tdd_row(inp), _flicker_row(inp),
-            _unbalance_row(inp),
+            *_motor_start_rows(inp), _unbalance_row(inp),
             _reactive_row(inp), *_support_rows(inp), *_island_rows(inp), _lole_row(inp)]
     _after_battery(inp, rows)
     settings = {"ramp_rate": ("connection_ramp", _generic_ramp(inp)),
