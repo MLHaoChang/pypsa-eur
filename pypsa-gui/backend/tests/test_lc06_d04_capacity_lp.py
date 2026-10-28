@@ -12,7 +12,7 @@ builds Cheap to its cap and Backup the remaining 4 MW. Raising the cap by 1 MW
 moves one MW from Backup to Cheap and lowers the objective by the difference.
 
 Every number below is computed here from those inputs. The run goes through
-the ordinary `run_simulation` chat tool, the answer through `get_results`,
+the ordinary `run_simulation` chat tool, the answer through `get_results` (objective_decomposition, economics_by_carrier),
 `explain_investment` and `get_vintage_results`, and the cap edit through the
 authenticated generator route.
 """
@@ -79,13 +79,17 @@ def carriers(result):
     return result['by_carrier']
 
 
+def solved_objective():
+    return chat_tools.get_results('objective_decomposition')['n_objective']
+
+
 def sizing(name):
     return chat_tools.explain_investment('Generator', name)['sizing']
 
 
 def test_the_unique_optimum_matches_the_hand_solution(lp):
     lp()
-    assert chat_tools.get_study_evidence(section='simulation')['objective'] == pytest.approx(objective(6.0))
+    assert solved_objective() == pytest.approx(objective(6.0))
 
     built = {'cheap': CHEAP['p_nom_max'], 'backup': DEMAND_MW - CHEAP['p_nom_max']}
     by_carrier = carriers(chat_tools.get_results('economics_by_carrier'))
@@ -110,7 +114,7 @@ def test_raising_the_cap_lowers_the_objective_by_the_cost_difference(lp, client)
     lp()
     # One MW moves from Backup to Cheap: the delta is the per-MW cost gap, from the inputs.
     delta = per_mw(BACKUP) - per_mw(CHEAP)
-    assert chat_tools.get_study_evidence(section='simulation')['objective'] == pytest.approx(objective(6.0) - delta)
+    assert solved_objective() == pytest.approx(objective(6.0) - delta)
     assert (sizing('Cheap')['optimised'], sizing('Backup')['optimised']) == pytest.approx((7, 3))
     # The older run keeps its own capacity answer (LC-03 retained family).
     kept = chat_tools.get_results('economics_by_carrier', run_id=older['run_id'])
