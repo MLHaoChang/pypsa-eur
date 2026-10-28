@@ -67,3 +67,13 @@ Design §3.B, "Acceptance checks (B)", except:
   cycle loaded out at hours 480–503; say so in the template's ledger, or choose the year's start.
 - The campus island report (`services/campus_electrical_service`, `campus_island_report.py:259-264`) lists every
   failing hourly E1 row uncapped; on 26,280 hours that table can run to thousands of rows.
+
+## Comments
+
+- 2026-10-28, vessel size (GK A plan verdict, condition 1). The design's 25 kt per vessel does not close the mass balance: at 1,000 t/h of ore and a mass pull of 0.0189, the plant makes 18.9 t/h of concentrate, or 9.5 kt in a 21-day cycle, so 25 kt is about 2.6 times one cycle's production. The template makes each vessel the year's nameplate concentrate over its vessels: 8,760 h // 504 h = 17 vessels a year, so 7.8 / 9.7 / 11.7 kt in 2027 / 2030 / 2035 (15.1 / 18.9 / 22.6 t/h × 8,760 h ÷ 17). Ledgered as `demo`, with the arithmetic.
+- 2026-10-28, finding (GK A plan verdict, condition 5). Lost concentrate in 2027, the year whose connection is non-firm (two 150-h winter events at 15 MW of 25 MW):
+  - every 2027 candidate off (PV, BESS, the pile extension): 221 t lost;
+  - the same with a 20 MW × 4 h BESS installed: 69 t lost, so a BESS lowers it;
+  - every candidate on at the pack's price: the plan builds PV to its 40 MW cap, no BESS and no pile extension, and loses about 0 t.
+
+  At pack price, a 4-h BESS does not pay against 150-h events, and PV carries the curtailment. The tests pin all three. Prices were not tuned to force a BESS build.
