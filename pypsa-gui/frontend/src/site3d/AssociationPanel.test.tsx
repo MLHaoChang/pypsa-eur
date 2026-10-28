@@ -322,22 +322,27 @@ describe('Model part: place equipment', () => {
     expect((await screen.findByTestId('assoc-error')).textContent).toBe(`${message} › Attach again`)
   })
 
-  it('› Add model asset opens the Guided assets home with Back to Site 3D; a new item then offers › Place it', async () => {
+  it('Guided: › Add model asset in Expert switches to Expert with Back to Site 3D; the new item then offers › Place it', async () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(<QueryClientProvider client={qc}><AssociationPanel site={site} scene={scene()} canWrite blockedReason={null} /></QueryClientProvider>)
     await waitFor(() => expect((screen.getByTestId('place-item') as HTMLSelectElement).options.length).toBe(4))
+    expect(screen.getByTestId('add-asset-link').textContent).toBe('› Add model asset in Expert')
     fireEvent.click(screen.getByTestId('add-asset-link'))
-    expect([useUIStore.getState().uiMode, useUIStore.getState().activeSection]).toEqual(['guided', 'assets'])
+    expect(useUIStore.getState().uiMode).toBe('expert')
     expect(useUIStore.getState().flowReturn?.label).toBe('Site 3D')
+    const kind = await screen.findByTestId('add-asset-kind') as HTMLSelectElement
+    expect(kind.value).toBe('')
+    expect(screen.getByTestId('add-asset-link').textContent).toBe('› Add model asset')
+    fireEvent.change(kind, { target: { value: kind.options[1].value } })
+    expect(useUIStore.getState().creationItem).not.toBeNull()
     expect(screen.queryByTestId('place-it-link')).toBeNull()
     vi.mocked(networkApi.getStorageUnits).mockResolvedValue([{ name: 'bess' }, { name: 'bess_2', carrier: 'battery' }] as never)
-    // Back to Site 3D: the lists are read again on return, no remount needed.
-    act(() => useUIStore.setState({ flowReturn: null }))
+    // The form closes and Back to Site 3D is used: the lists are read again, no remount needed.
+    act(() => useUIStore.setState({ flowReturn: null, creationItem: null }))
     const link = await screen.findByTestId('place-it-link')
-    expect(screen.getByTestId('place-it').textContent).toBe('bess_2 · storage unit is in the model and not placed › Place it')
+    expect(screen.getByTestId('place-it').textContent).toBe('bess_2 · StorageUnit is in the model and not placed › Place it')
     fireEvent.click(link)
     expect((screen.getByTestId('place-item') as HTMLSelectElement).value).toBe('StorageUnit:bess_2')
-    expect(screen.queryByTestId('place-it-link')).toBeNull()
   })
 })
 

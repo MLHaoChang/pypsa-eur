@@ -281,10 +281,12 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
   // Only a snapshot of loaded lists can tell a new item from one still loading.
   const snapshotNow = () => setAddAssetFrom(rows.loaded && project ? { project, siteId: site.id, keys: placeable.map(candidateKey) } : null)
   const addAsset = () => {
-    // Expert: choose the kind, then the app's creation form opens. Guided has no add form of its own: its Assets card.
+    // Expert: choose the kind, then the app's creation form opens. Guided has no add form, so the link is
+    // a named switch to Expert (workflow rule 7, as the carriers card does; UX on #859): Back to Site 3D is
+    // set, and the mode stays Expert until the user switches back.
     if (mode === 'expert') { setAddOpen(o => !o); return }
-    snapshotNow()
-    openHome('assets')
+    withReturnFromSite3D(() => useUIStore.getState().setUiMode('expert'))
+    setAddOpen(true)
   }
   const addKind = (id: string) => {
     const item = ADD_KINDS.find(k => k.id === id)
@@ -483,7 +485,7 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
               <button type="button" data-testid="place-preview" className={primary} disabled={!writable || !!placeReason}
                 onClick={() => void previewPlace()}>Preview</button>
               <button type="button" data-testid="add-asset-link" className={link} aria-expanded={mode === 'expert' ? addOpen : undefined}
-                onClick={addAsset}>› Add model asset</button>
+                onClick={addAsset}>{mode === 'expert' ? '› Add model asset' : '› Add model asset in Expert'}</button>
             </div>
             {mode === 'expert' && addOpen && (
               <label className="flex flex-col gap-0.5 text-[11px]">
