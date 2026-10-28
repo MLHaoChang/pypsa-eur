@@ -1,5 +1,5 @@
 {
-  "sourceHead": "e726ffe5d620206788cc685a8f8a9137d67264a8",
+  "sourceHead": "9d469ec81fdc12db0a7e247f3fbb674341282c36",
   "viewport": [
     1440,
     900
@@ -44,7 +44,7 @@
     },
     {
       "case": "all native pending artifacts use synthetic weather",
-      "count": 8
+      "count": 10
     }
   ],
   "faults": [
