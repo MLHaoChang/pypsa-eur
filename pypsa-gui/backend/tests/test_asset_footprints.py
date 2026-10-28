@@ -59,15 +59,20 @@ def test_non_mapping_footprint_table_refuses():
 
 def test_owned_http_round_trip_and_invalid_write_preserve_prior_state(client, api_project):
     name = api_project('equipment_envelope')
+    # The footprint's component exists: a key naming no component reads unbound (D06).
+    created = client.post('/api/network/generators', json={'name': 'G', 'bus': 'B1', 'carrier': 'gas'})
+    assert created.status_code in (200, 201), created.text
     url = f'/api/projects/{name}/sites'
     doc = document({'width_m': 12, 'depth_m': 6})
     assert client.put(url, json=doc).status_code == 200
-    assert client.get(url).json() == doc
+    saved = client.get(url).json()
+    bindings = saved.pop('bindings')                   # D06: the PUT bound the key to G
+    assert list(bindings) == ['Generator:G'] and saved == doc
     invalid = document({'width_m': -1, 'depth_m': 6})
     response = client.put(url, json=invalid)
     assert response.status_code == 422
     assert 'asset_footprints' in response.json()['detail']
-    assert client.get(url).json() == doc
+    assert client.get(url).json() == {**doc, 'bindings': bindings}
 
 
 @pytest.mark.parametrize('cascade', [False, True])
