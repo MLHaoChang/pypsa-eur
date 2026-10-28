@@ -14,6 +14,7 @@ import pytest
 import app_paths
 from db.models import OrgMembership, User
 from harness.providers.fake import FakeProvider
+from tests.assurance_acceptance.test_p1_evidence import page_draft
 from tests.assurance_acceptance.support import (
     approval,
     observed_draft,
@@ -40,48 +41,37 @@ class RevokingProvider(FakeProvider):
 
 @pytest.fixture
 def revoke(_auth_db, seeded_identity):
-    """Revocations of the seeded user's access; each is undone after the test."""
+    """Revocations of the seeded user's access; teardown restores and checks it.
+
+    The identity is session-scoped, so a missed restore would leak into every
+    later test module.
+    """
     _engine, session_local = _auth_db
-    undo = []
+    user_id = uuid.UUID(str(seeded_identity["user_id"]))
+    membership_of = {"user_id": user_id, "org_id": seeded_identity["org_id"]}
+    removed = []  # (id, role) of the deleted OrgMembership, its only columns
 
     def membership():
         with session_local() as db:
-            row = (
-                db.query(OrgMembership)
-                .filter_by(
-                    user_id=seeded_identity["user_id"],
-                    org_id=seeded_identity["org_id"],
-                )
-                .one()
-            )
-            saved = (row.id, row.role)
+            row = db.query(OrgMembership).filter_by(**membership_of).one()
+            removed.append((row.id, row.role))
             db.delete(row)
             db.commit()
-        undo.append(("membership", saved))
 
     def disable():
         with session_local() as db:
-            db.get(User, uuid.UUID(str(seeded_identity["user_id"]))).status = "disabled"
+            db.get(User, user_id).status = "disabled"
             db.commit()
-        undo.append(("disable", None))
 
     yield {"membership": membership, "disabled": disable}
     with session_local() as db:
-        for kind, saved in reversed(undo):
-            if kind == "membership":
-                db.add(
-                    OrgMembership(
-                        id=saved[0],
-                        user_id=seeded_identity["user_id"],
-                        org_id=seeded_identity["org_id"],
-                        role=saved[1],
-                    )
-                )
-            else:
-                db.get(
-                    User, uuid.UUID(str(seeded_identity["user_id"]))
-                ).status = "active"
+        for row_id, role in removed:
+            db.add(OrgMembership(id=row_id, role=role, **membership_of))
+        db.get(User, user_id).status = "active"
         db.commit()
+    with session_local() as db:
+        assert db.get(User, user_id).status == "active"
+        assert db.query(OrgMembership).filter_by(**membership_of).one().role == "admin"
 
 
 def answer_records(owner):
@@ -106,22 +96,7 @@ def list_loads():
     )
 
 
-PAGE_DRAFT = json.dumps(
-    {
-        "schema_version": 1,
-        "blocks": [
-            {
-                "id": "page-input",
-                "kind": "observed",
-                "entity_id": "L1",
-                "metric": "p_set",
-                "value": 5,
-                "unit": "MW",
-                "source": {"tool_use_id": "list-loads", "path": "/L1/p_set"},
-            }
-        ],
-    }
-)
+PAGE_DRAFT = page_draft()
 
 
 def assert_nothing_published(frames, owner, before):
@@ -129,7 +104,7 @@ def assert_nothing_published(frames, owner, before):
     assert public_text(frames) == ""
     errors = [d for event, d in frames if event == "error"]
     assert [e["error_kind"] for e in errors] == ["assurance_publication_failed"]
-    assert "5" not in json.dumps(errors)
+    assert "5 MW" not in json.dumps(errors) and "p_set" not in json.dumps(errors)
     done = [d for event, d in frames if event == "session_done"]
     assert done == [{"reason": "assurance_publication_failed"}]
     assert answer_records(owner) == before
@@ -164,7 +139,6 @@ def test_tool_called_after_revocation_returns_no_values(
     baseline, harness, revoke, seeded_identity, kind
 ):
     owner = str(seeded_identity["user_id"])
-    before = answer_records(owner)
     draft = observed_draft()
     turns = [
         get_component(),
@@ -172,6 +146,13 @@ def test_tool_called_after_revocation_returns_no_values(
         text_turn(draft),
         text_turn(draft),
     ]
+    # Positive control: without revocation the same second call returns values.
+    control = parse_sse(harness.request(RevokingProvider(turns, lambda: None)).text)
+    assert [d["tool_use_id"] for event, d in control if event == "tool_result"] == [
+        "read-load",
+        "again",
+    ]
+    before = answer_records(owner)
     response = harness.request(RevokingProvider(turns, revoke[kind]))
     frames = parse_sse(response.text)
     late = [d for _, d in frames if d.get("tool_use_id") == "again"]
@@ -204,6 +185,8 @@ def test_reads_after_revocation_look_like_unknown_records(
     # Positive control: the owner reads all three before revocation.
     assert [harness.client.get(p).status_code for p in owned] == [200, 200, 200]
     revoke[kind]()
+    # A disabled user is refused by global auth before any record lookup;
+    # removed membership reaches records.load and its project check.
     refused = {"membership": 404, "disabled": 401}[kind]
     for path, missing in zip(owned, unknown):
         response, absent = harness.client.get(path), harness.client.get(missing)
