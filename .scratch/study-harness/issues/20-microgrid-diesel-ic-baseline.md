@@ -26,7 +26,7 @@ Design §9.3 and generic-site Q4 say the microgrid's investment baseline, the ex
 1. **Profile rule.** Issue 12's investment rule (`warn`) gates on 19's `ic.counterfactual` fact, unchanged: `established` evaluates the rule, anything else stays `not_evaluated` with the fact's reason.
 2. **Baseline guard fact.** `ic.baseline_keeps` lists the owned existing assets the baseline kept (from the case's baseline plan, `BaselinePlan`), so the report can say "compared with the island as it stands today: diesels 1–3, PV, wind, battery". The rule reads `not_established` if any `diesel_*` in `MG_EXISTING` was removed from the baseline (a template edit that priced a diesel would do that), with that as the reason.
 3. **Shed in the baseline.** When the baseline sheds load (an undersized fleet), the case already prices it at VoLL (`counterfactual:shed_at_voll`); the report names it as such and the rule stays evaluated, since that is the case's own stated basis, not a gap.
-4. **Correct the design.** In the PR that lands this, issue 12's item 4 points at the fact instead of "an IC engine change".
+4. **Issue 12.** Its item 4 already points here; the PR that lands this updates 12 so the investment rule is evaluated once the fact reads `established`.
 
 ## Acceptance criteria
 

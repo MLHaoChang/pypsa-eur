@@ -28,7 +28,7 @@ Design §9.3 and generic-site Q3 say the investment case cannot build a counterf
 1. **Template data, single-year hub.** `eh_h2_hub` gets a commercial and finance block built like the staged hub's: the same `GREY_H2` reference purchase on `h2_offtake`, the CO2 price for its single year, the synthetic tariff, single-owner value flows, finance inputs for a single period. Register it in `_SOLVER_CONFIG_BUILT`. Demo values only, marked as such in the ledger. No engine change: if the plan finds the engine refuses a single-period case with a reference purchase, that is a finding for GK A before any engine edit.
 2. **Gate fact** `ic.counterfactual` for the harness (read from the finished investment case, never by re-running it): `established` when the case is `done`, carries `counterfactual_basis:site_today` (or the analytic basis) and no `counterfactual_not_established:*` flag; otherwise `not_established` with the flag(s) as the reason; `not_run` when no case exists or it is stale. Issue 11's investment rules gate on it (`warn`), so they leave `not_evaluated` once it reads `established`.
 3. **Report wording.** The case states that the counterfactual buys grey H2 at the reference price (the flag text already exists in `services/finance/baseline_text.py`); the harness report quotes it, never restates the price.
-4. **Correct the design.** In the PR that lands this, issue 11's item 3 and its acceptance line point at the fact instead of "an IC engine change".
+4. **Issue 11.** Its item 3 already points here; the PR that lands this updates 11's acceptance line so the investment rules are evaluated once the fact reads `established`.
 
 ## Acceptance criteria
 
