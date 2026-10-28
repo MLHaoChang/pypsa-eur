@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 from numbers import Real
 import os
@@ -16,6 +17,8 @@ import app_paths
 from harness.durable import network_guard, transaction
 from services import project_registry
 from services.pypsa_service import PyPSAService
+
+logger = logging.getLogger(__name__)
 
 MAX_RECORDS = 512
 RETENTION_SECONDS = 24 * 60 * 60
@@ -138,6 +141,20 @@ def save(record, record_id):
                     os.close(fd)
         finally:
             temp.unlink(missing_ok=True)
+
+
+def discard(owner, record_id):
+    """Remove a record just saved by a commit whose access was revoked meanwhile.
+
+    A missing file is fine. A file that cannot be removed is logged by id and
+    left: load() re-checks project access, so it still reads as unknown.
+    """
+    path = _path(owner, record_id)
+    try:
+        with transaction(path.parent):
+            path.unlink(missing_ok=True)
+    except OSError:
+        logger.warning("Revoked record %s could not be removed", record_id)
 
 
 def load(owner, record_id, kind):
