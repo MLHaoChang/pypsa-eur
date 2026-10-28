@@ -310,7 +310,7 @@ def test_largest_page_stays_under_the_stored_evidence_cap(baseline, harness):
 
 @pytest.fixture
 def same_org_client(_auth_db, seeded_identity):
-    from datetime import datetime, timezone
+    from datetime import UTC, datetime
 
     from db.models import OrgMembership, User
 
@@ -322,7 +322,7 @@ def same_org_client(_auth_db, seeded_identity):
             password_hash="unused",
             status="active",
             is_super_admin=False,
-            created_at=datetime.now(tz=timezone.utc),
+            created_at=datetime.now(tz=UTC),
         )
         db.add(user)
         db.flush()
