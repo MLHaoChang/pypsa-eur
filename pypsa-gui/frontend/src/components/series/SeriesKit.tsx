@@ -397,6 +397,12 @@ export function PendingCard({
           )}
         </dl>
       )}
+      {power && stats.peak_share_of_connection != null && (
+        <div className="text-[11px] text-muted mt-1" data-testid="stat-connection-share"
+             title={stats.connection_link ? `Peak ÷ p_nom of ${stats.connection_link}` : undefined}>
+          {fmt(stats.peak_share_of_connection * 100, 0)} % of the grid connection
+        </div>
+      )}
       {pending.weeks?.[component] && (
         <WeekChart week={pending.weeks[component]} unit={power ? 'MW' : unit} />
       )}
