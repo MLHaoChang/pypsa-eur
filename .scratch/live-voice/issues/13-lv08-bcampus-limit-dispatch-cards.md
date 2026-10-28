@@ -1,6 +1,6 @@
 # LV08 B-campus: content cards for the grid-limit and external-dispatch tools
 
-Status: ready-for-agent
+Status: done
 
 `campus_set_grid_limit`, `campus_reset_grid_limit` and `gridspine_upload_external_dispatch` are settings
 edits with no `edit_card` adapter. `tests/test_edit_card.py::_NO_ADAPTER_YET` lists them (accepted by GK B

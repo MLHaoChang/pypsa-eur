@@ -7,7 +7,9 @@ import json
 import os
 import re
 import threading
+import time
 import uuid
+from contextvars import ContextVar
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -29,6 +31,75 @@ _WAIT_TOOLS = frozenset({"run_simulation", "run_ac_pf_stage"})
 # Queued runs wait on their solve-queue job(s) (`harness/continuation.py`).
 QUEUE_WAIT_TOOLS = frozenset({"run_sensitivity_sweep", "solve_queue_enqueue"})
 _QUEUE_FOLLOWERS = set()  # (task_id, step_id, attempt_id) of steps this process follows
+# Study harness 02 (GK B, B1 option b): the harness runner binds its run's own
+# project context here; `_authority` and `_advance_run` prefer it to the
+# request's active context. Only `harness/runner.py` sets it.
+RUN_CONTEXT: ContextVar = ContextVar("assistant_task_run_context", default=None)
+CLAIM_SECONDS = 360  # a run step's claim: the card TTL (300 s) and a margin
+_WAKE_LISTENERS = []  # called with a task path when its run may go on (the runner's wake)
+
+
+def _wake(path):
+    for listener in list(_WAKE_LISTENERS):
+        try:
+            listener(Path(path))
+        except Exception:  # noqa: BLE001 — a wake is a hint; the runner's timer still ticks
+            pass
+
+
+def _claim_live(step):
+    claim = step.get("claim")
+    return claim if claim and claim["until"] > time.time() else None
+
+
+def _check_claim(task, step, holder):
+    """GK B condition 7: a run step has one holder at a time, the chat or the
+    runner; another holder's live claim refuses before any card."""
+    claim = _claim_live(step) if task.get("run") else None
+    if claim and claim["by"] != holder:
+        _refuse("task_step_claimed", f"Step {step['id']} is being run by another session of this plan; "
+                "wait for it, then read the plan again.")
+
+
+def _take_claim(step, holder):
+    step["claim"] = {"by": holder, "until": time.time() + CLAIM_SECONDS}
+
+
+def claim_step(path, step_id, holder):
+    """Compare-and-set the claim on a run's pending step, under the task lock.
+    True when `holder` now holds it; the runner dispatches only then."""
+    with _LOCK:
+        task = json.loads(Path(path).read_text())
+        step = _next(task)
+        if (step is None or step["id"] != step_id or step["status"] != "pending"
+                or task["status"] in ("cancelled", "completed", "paused_at_card")):
+            return False
+        claim = _claim_live(step)
+        if claim and claim["by"] != holder:
+            return False
+        _take_claim(step, holder)
+        _save(Path(path), task)
+        return True
+
+
+def release_claim(path, step_id, holder):
+    """A dispatch that ended before its step began frees the step."""
+    with _LOCK:
+        task = json.loads(Path(path).read_text())
+        step = next((s for s in task["steps"] if s["id"] == step_id), None)
+        if step is not None and step["status"] == "pending" and (step.get("claim") or {}).get("by") == holder:
+            step.pop("claim")
+            _save(Path(path), task)
+
+
+def _clear_waiting(task, ref):
+    """The user acted on what the run waited for (a card it held back)."""
+    run = task.get("run")
+    if run and (run.get("waiting") or {}).get("ref") == ref:
+        run["waiting"] = None
+        run.pop("reason", None)
+        if run["status"] == "needs_user":
+            run["status"] = "running"
 
 
 def track_queue_follower(ticket):
@@ -46,7 +117,7 @@ def _refuse(kind, message, status=409):
 
 def _authority():
     from services import chat_tools, project_registry
-    ctx = PyPSAService.get_active_context()
+    ctx = RUN_CONTEXT.get() or PyPSAService.get_active_context()
     if not ctx.loaded_project or not ctx.project_uuid:
         _refuse("task_project_required", "Create, save and activate a project before using tasks.")
     with chat_tools._acting() as (db, user):
@@ -431,6 +502,7 @@ def _start_run(session, title, request_id, run, profile, brief):
             _save(path, task)
         session.task_id = task_id
     _advance_run(path)
+    _wake(path)
     with _LOCK:
         return _view(_read(task_id)[1])
 
@@ -496,7 +568,7 @@ def _advance_run(path, ctx=None):
     written only if (stage, attempts, fingerprint) did not move meanwhile; a
     caller that may not edit the project writes nothing (`gate_due`)."""
     from services import flow_service, run_gates, run_profiles
-    ctx = ctx or PyPSAService.get_active_context()
+    ctx = ctx or RUN_CONTEXT.get() or PyPSAService.get_active_context()
     for _ in range(2 * len(run_profiles.STAGES)):
         with _LOCK:
             task = json.loads(Path(path).read_text())
@@ -569,6 +641,8 @@ def _run_view(task):
         s["status"] == "completed" for s in task["steps"] if s["id"].startswith(run["stage"] + "."))
     return {"profile": run["profile"], "mode": run["mode"], "status": run["status"], "stage": run["stage"],
             **({"gate_due": True} if due else {}),
+            **({"waiting": {k: run["waiting"][k] for k in ("kind", "ref", "since")}} if run.get("waiting") else {}),
+            **({"reason": run["reason"]} if run.get("reason") else {}),
             "next_stage": _next_stage(run, run["stage"]), "scope": (run.get("scope") or {}).get("preset"),
             "stages": stages}
 
@@ -611,11 +685,21 @@ def resume_task(task_id: str) -> dict:
             # from native facts (attempts + 1); nothing the caller says reaches it.
             run["status"], run["stages"][run["stage"]]["status"], task["status"] = "running", "active", "ready"
             _save(path, task)
+        elif run and run["status"] in ("needs_user", "paused") and run.get("reason"):
+            # The runner stopped it (a card, a budget, a lock, an unknown job,
+            # a crash loop): the user's resume lets it look again, and the
+            # runner's own stop checks decide anew (harness/runner.py).
+            run["status"], run["waiting"] = "running", None
+            run.pop("reason")
+            if task["status"] == "needs_review" and not any(s["status"] == "uncertain" for s in task["steps"]):
+                task["status"] = "ready"
+            _save(path, task)
         session.task_id = task_id
     if task.get("run"):
         _advance_run(path)
         with _LOCK:
             _, task = _read(task_id)
+        _wake(path)
     return _view(task, fresh=True)
 
 
@@ -634,7 +718,9 @@ def cancel_task(task_id: str) -> dict:
         session = chat_tools.chat_session()
         if session and getattr(session, "task_id", None) == task_id:
             session.task_id = None
-        return _view(task)
+        view = _view(task)
+    _wake(path)  # the runner lets go of the project
+    return view
 
 
 def continue_at_card(session, task_id):
@@ -648,10 +734,12 @@ def continue_at_card(session, task_id):
             _refuse("task_not_paused", "This plan is not paused at a card.")
         card = task.pop("pause")["card"]
         task["status"] = "ready"
+        _clear_waiting(task, card)
         _save(path, task)
         session.task_id = task_id
     if task.get("run"):
         _advance_run(path)  # inputs edited during the pause: the input gate is checked again first
+        _wake(path)
     return f"Continue to the {card} card (plan: {task['title']})"
 
 
@@ -748,7 +836,7 @@ def admit(session, tool, args):
         return
     with _LOCK:
         try:
-            _, task = _read(task_id)
+            path, task = _read(task_id)
         except HTTPException:
             return  # begin_step detaches a task this project cannot read
         if task["status"] in ("cancelled", "completed"):
@@ -774,6 +862,14 @@ def admit(session, tool, args):
             _gate_brief(task, step)
             if len(json.dumps(expected, default=str)) > ARGS_CHARS:
                 _refuse("task_reference_too_large", "Resolved arguments exceed the step's limit; use file IDs or smaller result references.")
+            if task.get("run") and step["status"] == "running" and step.get("session_id") != session.session_id:
+                # past pending -> running the step's status is the authority, not its (lapsing) claim
+                _refuse("task_step_claimed", f"Step {step['id']} is being run by another session of this plan; "
+                        "wait for it, then read the plan again.")
+            if task.get("run") and step["status"] == "pending":
+                _check_claim(task, step, session.session_id)
+                _take_claim(step, session.session_id)
+                _save(path, task)
             return
 
 
@@ -830,7 +926,9 @@ def settle_job(path, ticket, job_id, native_status, step_status, result=None):
             return None
         _settle(task, step, native_status, step_status, result)
         _save(Path(path), task)
-        return _view(task)
+        view = _view(task)
+    _wake(path)  # the runner gates the settled stage (a follower thread holds no context)
+    return view
 
 
 def _settle(task, step, native_status, step_status, result):
@@ -1002,6 +1100,9 @@ def begin_step(session, tool, args):
         _gate_brief(task, step)
         if len(json.dumps(expected, default=str)) > ARGS_CHARS:
             _refuse("task_reference_too_large", "Resolved arguments exceed the step's limit; use file IDs or smaller result references.")
+        _check_claim(task, step, session.session_id)
+        step.pop("claim", None)
+        _clear_waiting(task, step["id"])
         step["status"], step["session_id"] = "running", session.session_id
         step["attempt_id"] = uuid.uuid4().hex
         task["status"] = "running"

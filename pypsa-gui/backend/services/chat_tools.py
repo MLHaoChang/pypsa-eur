@@ -9723,7 +9723,22 @@ def _lock_gated_tool_names() -> frozenset[str]:
     return frozenset(gated)
 
 
-def _check_foreign_lock(tool_name: str) -> None:
+_RUN_CONTROLS = frozenset({"cancel_task", "resume_task", "resolve_task_step"})
+
+
+def _owns_task(task_id) -> bool:
+    """The caller can read `task_id` in the active project (owner and project match)."""
+    from services import assistant_tasks
+    if not isinstance(task_id, str):
+        return False
+    try:
+        assistant_tasks._read(task_id)
+    except HTTPException:
+        return False
+    return True
+
+
+def _check_foreign_lock(tool_name: str, task_id=None) -> None:
     """
     Raise 409 `project_locked` when another user holds the active project's
     edit lock. Same predicate as the middleware gate in `main.py`.
@@ -9731,9 +9746,16 @@ def _check_foreign_lock(tool_name: str) -> None:
     CHECK ONLY — never an acquire. A free or expired lock, the acting user's
     own lock, local mode, an unbound scratch context and a tool call with no
     acting identity all pass through untouched.
+
+    A harness run's hold also refuses, except a task control (`_RUN_CONTROLS`)
+    naming a task the caller owns: the user can always stop, resume or
+    reconcile their run (GK B plan condition 4).
     """
     import local_mode
+    from services import harness_locks
 
+    if harness_locks.refuses_active() and not (tool_name in _RUN_CONTROLS and _owns_task(task_id)):
+        raise HTTPException(status_code=409, detail=harness_locks.detail())
     if local_mode.is_local_mode():
         return  # D7 — one identity, no lock semantics
     user_id = _ACTING_USER_ID.get()
@@ -9802,7 +9824,7 @@ def _lock_gated(tool_name: str, handler):
 
     @functools.wraps(handler)
     def _wrapped(*args, **kwargs):
-        _check_foreign_lock(tool_name)
+        _check_foreign_lock(tool_name, kwargs.get("task_id", args[0] if args else None))
         return handler(*args, **kwargs)
 
     return _wrapped

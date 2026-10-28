@@ -634,6 +634,15 @@ async def lifespan(app: FastAPI):
         logging.getLogger("pypsa_gui").exception(
             "solve-queue boot reconciliation failed; continuing without it"
         )
+    # Study harness runner (issue 02, design §6.6): AFTER the solve queue,
+    # so the runs it takes over find their jobs' rows reconciled. Never
+    # fails boot.
+    try:
+        from harness import runner as harness_runner
+
+        harness_runner.start_default()
+    except Exception:  # noqa: BLE001 — runs wait for the user instead
+        logger.exception("harness runner did not start; runs advance only from chat")
     _load_skills_at_startup()
     # Ask macOS for the projects root NOW, on a thread, rather than letting
     # the first data request discover it is gated. On a granted machine this
@@ -655,6 +664,12 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001 — a probe must never break startup
         logger.exception("could not start the projects-root access probe")
     yield
+    try:
+        from harness import runner as harness_runner
+
+        harness_runner.stop_default()
+    except Exception:  # noqa: BLE001
+        logger.exception("harness runner did not stop cleanly")
 
 
 app = FastAPI(
@@ -890,14 +905,11 @@ async def undo_snapshot_middleware(request: Request, call_next):
                 session_row = resolve_request_session(request, db)
                 if session_row is not None:
                     ctx, slot = active_project.resolve_for_session(db, session_row)
-                    PyPSAService.bind_request_context(ctx)
-                    # P33b: shared with the handler's context copy, so the
-                    # edit-counter bump below lands on the ctx the request
-                    # ENDED on (see `PyPSAService._request_ctx_box`).
-                    PyPSAService.bind_request_box([ctx])
-                    PyPSAService.bind_request_slot(slot)
-                    PyPSAService.bind_request_scratch(
-                        active_project.scratch_key(session_row)
+                    # Context, P33b box (shared with the handler's context
+                    # copy, so the edit-counter bump below lands on the ctx
+                    # the request ENDED on), registry slot and scratch slot.
+                    PyPSAService.bind_request_scope(
+                        ctx, slot, active_project.scratch_key(session_row)
                     )
         except Exception:  # noqa: BLE001
             logger.exception("could not bind the session's active project")
@@ -928,6 +940,20 @@ async def undo_snapshot_middleware(request: Request, call_next):
                 ),
             },
         )
+
+    # ── Harness-run gate (study harness §6.6, GK B) ────────────────────
+    # A run that dispatches or waits on an effectful step holds its project;
+    # a foreground write to it is refused rather than racing the runner, in
+    # local mode too. Same paths and exemptions as the foreign-lock gate
+    # below; reads and the chat routes (stop, resume) stay open. Before the
+    # solver gate: during a run's solve the user is told the run holds it.
+    if (is_write
+            and any(path.startswith(p) for p in _FOREIGN_LOCK_GATE_PREFIXES)
+            and not _foreign_lock_gate_exempt(path)):
+        from services import harness_locks
+        if harness_locks.refuses_active():
+            return JSONResponse(status_code=409, content={"detail": harness_locks.detail(),
+                                                          "code": "project_locked"})
 
     # ── Solver-in-flight gate ─────────────────────────────────────────
     # Refuse writes to /api/network/* and /api/io/* while the LP worker
