@@ -7,7 +7,7 @@ A 3D placement or footprint key (`<Class>:<name>`) now binds to one component in
 - **`services/component_identity.py`** (new, the sole writer). It holds a uuid4 per component in `n.meta["component_ids"]`, so the uid travels with the network through netCDF, undo, saves, Save-As and scenario copies.
   - **Mint:** only on a write (PUT), under the network lock.
   - **Rename:** moves the uid (`_update_component`, `apply_rename_bus`).
-  - **Removal:** `purge_component_side_data` drops it.
+  - **Removal:** every `n.remove` drops it (a wrapper on `pypsa.Network.remove`; see below), and `purge_component_side_data` drops it too.
   - **Clustering:** forgets every uid, because a cluster can reuse an old name.
 - **`services/site_bindings.py`** (new). `sites.json` gets a top-level `bindings` map.
   - **GET `/sites` is read-only.** A bound entry follows its instance. An entry whose instance is gone is hidden on a legacy Site and listed in `unbound_keys`; it stays on disk, so an undo brings it back.
@@ -33,8 +33,11 @@ A 3D placement or footprint key (`<Class>:<name>`) now binds to one component in
 - Mutation checks: `.scratch/site-scene-generation/d06/evidence/mutation-checks.txt`. Resolving by name, carrying uids through clustering, or keeping the uid on delete each turns the delete-and-recreate and clustering tests red. For the GK B fixes: the old PUT lock order, an unlocked binding rename, no remove hook, a raw-string duplicate check, and an edit that does not put the uid back each turn their test red.
 - `test_write_surface_lock_policy`, `test_route_chat_disposition`, `test_project_route_acl_policy` and the clustering suites: 32 passed, 1 skipped.
 - On the master merge `fb7cec71`: `tests/test_site_*.py` and `tests/test_sites_routes.py` (389 tests), plus undo, bundle sidecars, workflow tools and `site_scene_proto` (61 tests), all passed.
+- At `8a0ab153`: the same site suites; the route-policy, clustering, vintage cleanup, lost-production, AC PF, assumptions, global-constraint and `test_network*` suites; and every `test_adequacy_*.py` passed. The remove hook touches every removal, hence the wide run.
 
 **Skipped / risk.**
+
+- `pypsa.Network.remove` is wrapped process-wide once `component_identity` is imported (`network_crud` imports it). The wrapper only pops `n.meta["component_ids"]` entries after the original remove, and is a no-op on a network with no uids. A remove-and-re-add edit path added later must call `component_identity.keep`, or the edit unbinds the component (lost, never aliased).
 
 - There is no redo endpoint, so redo has no test.
 - Snapshot restore and bundle import are covered by the existing route tests only.
