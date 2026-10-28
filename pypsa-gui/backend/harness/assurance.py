@@ -147,7 +147,8 @@ class Turn:
         self.effect_pending = False
         self.reservation_nonce = None
         self.scope_hint = None
-        # list_components: input fingerprint taken before the handler, by args digest.
+        # list_components: input fingerprints taken before each handler run, in
+        # call order per args digest, so repeated identical calls keep their own.
         self.page_fingerprints = {}
 
     def review_interpretations(self, blocks, provider, model, ctx):
@@ -612,6 +613,8 @@ class Turn:
                 return False
             if not set(args) <= {"component_class", "offset", "limit"}:
                 return False
+            from services.chat_tools import MAX_PAGE_SIZE
+
             offset, limit = args.get("offset", 0), args.get("limit", 1)
             # Refuse rather than let the handler clamp: the scope is the rows shown.
             if (
@@ -619,10 +622,12 @@ class Turn:
                 or type(offset) is not int
                 or type(limit) is not int
                 or offset < 0
-                or not 1 <= limit <= records.MAX_PAGE_ROWS
+                or not 1 <= limit <= MAX_PAGE_SIZE
             ):
                 return False
-            self.page_fingerprints[records.digest(args)] = records.page_fingerprint()
+            self.page_fingerprints.setdefault(records.digest(args), []).append(
+                records.active_input_fingerprint()
+            )
             return True
         if tool_name == "ui_open_panel":
             # The existing typed handler owns target validation. Supported
@@ -632,8 +637,10 @@ class Turn:
 
     def capture(self, tool_name, args, result, tool_use_id):
         if tool_name == "list_components":
-            before = self.page_fingerprints.pop(records.digest(args), None)
-            record = records.capture_input_page(self.owner, args, result, before)
+            pending = self.page_fingerprints.get(records.digest(args)) or [None]
+            record = records.capture_input_page(
+                self.owner, args, result, pending.pop(0)
+            )
         elif tool_name == "get_component":
             record = records.capture_input(self.owner, args, result)
         else:

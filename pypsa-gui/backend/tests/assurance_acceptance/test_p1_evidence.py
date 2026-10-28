@@ -203,11 +203,16 @@ def test_out_of_range_page_is_refused_before_the_handler(
     assert approval(frames)["verdict"] == "limited"
 
 
-def test_offset_past_the_end_yields_no_evidence_and_no_claim(baseline, harness):
-    frames = list_loads(harness, page_draft(), offset=1)
+@pytest.mark.parametrize("offset", [1, 5])
+def test_offset_past_the_end_yields_no_evidence_and_no_claim(
+    baseline, harness, offset
+):
+    frames = list_loads(harness, page_draft(), offset=offset)
     assert "items" not in page_result(frames)
     assert page_evidence_ids(frames) == []
     assert approval(frames)["verdict"] == "limited"
+    text = public_text(frames)
+    assert "L1" not in text and "5 MW" not in text
 
 
 def test_input_edit_after_capture_invalidates_page_evidence(baseline, harness):
@@ -244,7 +249,16 @@ def test_edit_between_handler_and_capture_yields_no_evidence(
 
 @pytest.mark.parametrize(
     ("shown", "certifies"),
-    [(5, True), (5.0, True), ("5", False), (True, False), (None, False), (5.5, False)],
+    [
+        (5, True),
+        (5.0, True),
+        ("5", False),
+        (True, False),
+        (None, False),
+        (5.5, False),
+        (math.nan, False),
+        (math.inf, False),
+    ],
 )
 def test_shown_value_certifies_only_on_exact_numeric_equality(
     baseline, harness, monkeypatch, shown, certifies
@@ -284,28 +298,50 @@ def test_non_finite_raw_input_never_certifies(baseline, harness, monkeypatch, ra
 
 def test_names_with_pointer_characters_resolve_only_when_escaped(baseline, harness):
     PyPSAService.get_active_context().network.remove("Load", "L1")
-    add_loads("a/b~c", "a", "b~c")
+    add_loads("a/b~c", "a", "b", "b~c")
     escaped = page_draft("a/b~c", 7, "/a~1b~0c/p_set")
     assert approval(list_loads(harness, escaped))["verdict"] == "passed"
     for draft in (
         page_draft("a/b~c", 7, "/a/b~c/p_set"),
         page_draft("a", 7, "/a~1b~0c/p_set"),
+        page_draft("b", 7, "/a~1b~0c/p_set"),
         page_draft("b~c", 7, "/a~1b~0c/p_set"),
     ):
         assert approval(list_loads(harness, draft))["verdict"] == "limited"
 
 
 def test_largest_page_stays_under_the_stored_evidence_cap(baseline, harness):
-    add_loads(*(f"Load-{i:04d}" for i in range(1, 1000)))
-    frames = list_loads(harness, page_draft(), limit=assurance_records.MAX_PAGE_ROWS)
+    # Long names make the widest rows; the handler packs pages by size, and
+    # the stored page record must stay under save()'s 128 KiB cap.
+    add_loads(*(f"Load-{i:04d}-" + "x" * 120 for i in range(1, 1000)))
+    frames = list_loads(harness, page_draft(), limit=chat_tools.MAX_PAGE_SIZE)
     result = page_result(frames)
     record = harness.client.get(
         f"/api/chat/evidence/{page_evidence_ids(frames)[0]}"
     ).json()
-    assert record["scope"]["returned"] == result["returned"] >= len(result["items"])
+    assert record["scope"]["returned"] == result["returned"]
     assert record["scope"]["total_count"] == 1000
-    assert len(record["facts"]) <= assurance_records.MAX_PAGE_FACTS
+    assert len(record["facts"]) == 2 * record["scope"]["returned"]
     assert len(json.dumps(record).encode()) < 128 * 1024
+
+
+def test_repeated_identical_page_calls_each_keep_evidence(baseline, harness):
+    call = {"component_class": "Load"}
+    frames = harness.run(
+        [
+            tool_turn("list_components", call, call_id="list-loads"),
+            tool_turn("list_components", call, call_id="list-again"),
+            text_turn(page_draft()),
+            text_turn(page_draft()),
+        ]
+    )
+    results = {
+        data["tool_use_id"]: data["result"]
+        for event, data in frames
+        if event == "tool_result"
+    }
+    assert all(r["_assurance"]["evidence_ids"] for r in results.values())
+    assert approval(frames)["verdict"] == "passed"
 
 
 @pytest.fixture

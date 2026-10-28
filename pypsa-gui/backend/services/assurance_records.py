@@ -166,6 +166,17 @@ def load(owner, record_id, kind):
     return record
 
 
+def _finite(raw):
+    """The float of a finite real input, else None; bools and strings are not numbers."""
+    if isinstance(raw, bool) or not isinstance(raw, Real):
+        return None
+    try:
+        value = float(raw)
+    except (ValueError, TypeError, OverflowError):
+        return None
+    return value if math.isfinite(value) else None
+
+
 def _raw_facts(ctx, component_class, name):
     """Read the original values under the network lock, before UI sanitization."""
     component = ctx.network.components[component_class]
@@ -173,15 +184,9 @@ def _raw_facts(ctx, component_class, name):
         unavailable("evidence_unavailable")
     facts = []
     for metric, unit in INPUT_METRICS[component_class].items():
-        raw = component.static.at[name, metric]
         # Missing data does not become zero or a fact.
-        if isinstance(raw, bool) or not isinstance(raw, Real):
-            continue
-        try:
-            value = float(raw)
-        except (ValueError, TypeError, OverflowError):
-            continue
-        if math.isfinite(value):
+        value = _finite(component.static.at[name, metric])
+        if value is not None:
             facts.append(
                 {
                     "path": "/" + metric,
@@ -247,12 +252,8 @@ def capture_input(owner, args, result):
     return record
 
 
-# A checked page is bounded by list_components' own MAX_PAGE_SIZE rows times
-# the metrics INPUT_METRICS names per class; save() still enforces 128 KiB.
-MAX_PAGE_ROWS = 1000
-MAX_PAGE_FACTS = MAX_PAGE_ROWS * max(len(m) for m in INPUT_METRICS.values())
-
-
+# The handler packs a page under its own MAX_PAGE_CHARS, so a page is a few
+# dozen rows; save() caps every record at 128 KiB and refuses a larger one.
 def pointer(*tokens):
     """RFC 6901 JSON pointer; '~' and '/' in names cannot alias another path."""
     return "".join(
@@ -272,7 +273,7 @@ def input_fingerprint(ctx):
     )
 
 
-def page_fingerprint():
+def active_input_fingerprint():
     """Taken before list_components runs; capture keeps evidence only if unchanged."""
     ctx = PyPSAService.get_active_context()
     with network_guard():
@@ -280,23 +281,22 @@ def page_fingerprint():
 
 
 def _certified(shown, raw):
-    """Exact numeric equality; bool, None, strings and non-finite values never certify.
+    """Exact numeric equality of a shown value with a finite raw input.
 
     JSON has one number type, so an int shown for a float input of the same
-    value certifies; the stored fact is always the raw float.
+    value certifies; the stored fact is always the raw float. Bools, None,
+    strings and non-finite values never certify.
     """
-    if type(shown) not in (int, float) or isinstance(raw, bool):
-        return False
-    if not isinstance(raw, Real):
-        return False
-    try:
-        value = float(raw)
-    except (ValueError, TypeError, OverflowError):
-        return False
-    return math.isfinite(value) and math.isfinite(shown) and shown == value
+    value = _finite(raw)
+    return (
+        type(shown) in (int, float)
+        and value is not None
+        and math.isfinite(shown)
+        and shown == value
+    )
 
 
-def capture_input_page(owner, args, result, before):
+def capture_input_page(owner, args, result, fingerprint_before):
     """Evidence for exactly the rows one list_components page showed.
 
     Rows are identified by name, never by position. The model-input
@@ -307,15 +307,13 @@ def capture_input_page(owner, args, result, before):
     component_class = args.get("component_class")
     if (
         component_class not in INPUT_METRICS
-        or before is None
+        or fingerprint_before is None
         or not isinstance(result, dict)
         or not ctx.project_uuid
     ):
         return None
     items, total = result.get("items"), result.get("total_count")
     if not isinstance(items, list) or not items or type(total) is not int:
-        return None
-    if len(items) > MAX_PAGE_ROWS:
         return None
     names = [row.get("name") if isinstance(row, dict) else None for row in items]
     if any(not isinstance(n, str) for n in names) or len(set(names)) != len(names):
@@ -324,7 +322,7 @@ def capture_input_page(owner, args, result, before):
     with network_guard():
         if ctx.solver_state.get("status") == "running":
             return None
-        if input_fingerprint(ctx) != before:
+        if input_fingerprint(ctx) != fingerprint_before:
             return None
         static = ctx.network.components[component_class].static
         if any(n not in static.index for n in names):
@@ -345,7 +343,7 @@ def capture_input_page(owner, args, result, before):
                             "unit": unit,
                         }
                     )
-        if not facts or len(facts) > MAX_PAGE_FACTS:
+        if not facts:
             return None
         offset = args.get("offset", 0)
         if result.get("has_more") is not (offset + len(items) < total):
@@ -368,7 +366,7 @@ def capture_input_page(owner, args, result, before):
                 "has_more": result["has_more"],
             },
             "facts": facts,
-            "source_sha256": before,
+            "source_sha256": fingerprint_before,
             "validity": {
                 "outcome": "completed",
                 "as_of": time.time(),
@@ -380,10 +378,7 @@ def capture_input_page(owner, args, result, before):
             },
             "expires_at": time.time() + RETENTION_SECONDS,
         }
-        try:
-            save(record, record["evidence_id"])
-        except HTTPException:
-            return None
+        save(record, record["evidence_id"])
     return record
 
 
