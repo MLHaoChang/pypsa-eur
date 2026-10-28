@@ -36,7 +36,8 @@ def test_unchecked_oj19_returns_exactly_five_native_findings(seeded, kind, model
     assert not [d for e, d in frames if e in {'error', 'tool_error', 'answer_approved'}]
 
 
-def test_oj18_clean_real_highs_solve_reports_coverage(client, install_network, session_ctx):
+@pytest.mark.parametrize('kind,model,base_url,auth', PROVIDERS, ids=[p[0] for p in PROVIDERS])
+def test_oj18_clean_real_highs_solve_reports_coverage(client, install_network, session_ctx, bound_ctx, kind, model, base_url, auth):
     n = build_oj_grid()
     status, condition = n.optimize(solver_name='highs', solver_options={'threads': 1, 'log_to_console': False})
     assert condition == 'optimal'
@@ -48,6 +49,13 @@ def test_oj18_clean_real_highs_solve_reports_coverage(client, install_network, s
     assert res.status_code == 200, res.text
     assert res.json()['findings'] == []
     assert res.json()['coverage']['rules']['lost_load']['not_evaluated']
+    with bound_ctx(client):
+        calls, results, frames, _ = run_journey(kind, model, base_url, auth,
+            [lambda r: ('get_results', {'result_kind': 'plausibility'}), lambda r: (None, {})],
+            'Do these results make sense?', answer='Native screening found no warnings; some rules could not run.')
+    assert calls == ['get_results', None] and results[0]['findings'] == []
+    assert results[0]['coverage']['rules']['lost_load']['not_evaluated']
+    assert not [d for e, d in frames if e in {'error', 'tool_error', 'answer_approved'}]
 
 
 def test_checked_turn_refuses_plausibility_read_as_unsupported(seeded, client, monkeypatch):
@@ -133,3 +141,22 @@ def test_existing_results_tool_does_not_reintroduce_a_removed_stub():
                    and any(isinstance(t, ast.Name) and t.id == 'removed' for t in node.targets)]
     assert len(assignments) == 1
     assert not ast.literal_eval(assignments[0].value) & {t['name'] for t in TOOLS}
+
+
+def test_ac_pf_live_frames_are_not_mixed_with_lopf_loss_capture(seeded, client):
+    seeded.network.generators_t.p.loc[:, 'Solar'] = 0.
+    seeded.solver_state['ac_pf_results'] = {'generators_t.p': seeded.network.generators_t.p.copy()}
+    seeded.solver_state['lopf_results'] = {'generators_t.p': seeded.network.generators_t.p * 0.4}
+    res = client.get('/api/results/plausibility')
+    assert res.status_code == 409
+    assert res.json()['detail']['error_kind'] == 'plausibility_results_unavailable'
+
+
+def test_known_input_changes_refuse_before_reinterpreting_old_dispatch(seeded, client):
+    from services.workflow_tools import _network_input_fingerprint
+    seeded.network.meta['assistant_solve_input_fingerprint'] = _network_input_fingerprint(seeded)
+    seeded.network.meta['assistant_solve_exact_input_fingerprint'] = _network_input_fingerprint(seeded, exact=True)
+    seeded.network.generators.loc['Gas', 'marginal_cost'] += 1.
+    res = client.get('/api/results/plausibility')
+    assert res.status_code == 409
+    assert 'out of date' in res.json()['detail']['message']

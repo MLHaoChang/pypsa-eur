@@ -219,6 +219,11 @@ def get_plausibility(source: Literal['lopf'] = 'lopf'):
         if not _dispatch_ready(n):
             unavailable('Solve the current network before screening its results.')
         state = _state_snapshot()
+        if state.get('ac_pf_results') is not None or state.get('lopf_results') is not None:
+            unavailable('Run LOPF again before screening: AC power flow replaced the live LOPF frames.')
+        freshness = solve_freshness(ctx)
+        if freshness['inputs_changed_since_solve'] is True:
+            unavailable('These results are out of date: run LOPF again before screening.')
         # This is the solve-time ENS denominator, assembled by the same native
         # report as the coupling loop; a live config/goal is not result evidence.
         target = (state.get('adequacy_report') or {}).get('target') or {}
@@ -236,7 +241,7 @@ def get_plausibility(source: Literal['lopf'] = 'lopf'):
             if model is not None and 'Bus-nodal_balance' in model.constraints:
                 raw = model.constraints['Bus-nodal_balance'].dual.to_pandas()
         out = evaluate(n, capture=state.get('last_lost_load'), ens_targets=caps, raw_prices=raw, source=result_source)
-        return {'status': 'ok', 'scope': 'native_screening', 'source': result_source, **out, **solve_freshness(ctx),
+        return {'status': 'ok', 'scope': 'native_screening', 'source': result_source, **out, **freshness,
                 'scope_note': 'Screening only; loaded/unverified results are not a current verified optimum. See coverage/freshness.'}
     finally:
         lock.release()

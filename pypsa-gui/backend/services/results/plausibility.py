@@ -41,6 +41,14 @@ def _weights(n, column):
     frame = n.snapshot_weightings
     if column not in frame or not frame.index.equals(n.snapshots) or not _valid(frame[column]):
         return pd.Series(dtype=float)
+    if isinstance(n.snapshots, pd.MultiIndex):
+        periods = n.snapshots.get_level_values(0).unique()
+        ipw = n.investment_period_weightings
+        if 'years' not in ipw or not set(periods) <= set(ipw.index):
+            return pd.Series(dtype=float)
+        years = ipw.loc[periods, 'years']
+        if not _valid(years) or (years <= 0).any():
+            return pd.Series(dtype=float)
     return snapshot_weights(n, column)
 
 
@@ -57,17 +65,34 @@ def _lost_load(n, capture, ens_targets, raw_prices, period_objective_weights):
     findings, missing = [], []
     frame = (capture or {}).get('lost_load_t')
     if (not _valid(frame) or not frame.index.equals(n.snapshots) or not frame.columns.is_unique
-            or not set(frame.columns) <= set(n.buses.index) or (frame < 0).any().any()):
+            or not set(frame.columns) <= set(n.buses.index) | set(n.loads.index) or (frame < 0).any().any()):
         return [], ['No complete finite lost-load capture for this result.']
-    w = _weights(n, 'generators').reindex(frame.index)
-    if not _valid(w) or (w < 0).any():
+    buses = {col: str(n.loads.at[col, 'bus']) if col in n.loads.index else str(col) for col in frame.columns}
+    if not set(buses.values()) <= set(n.buses.index):
+        return [], ['Lost-load locations cannot be resolved to this result network.']
+    captured_energy = (capture or {}).get('lost_load_load_period_mwh')
+    if captured_energy is not None and (not _valid(captured_energy) or set(captured_energy.columns) != set(frame.columns)):
+        return [], ['Solve-time loss energy capture is incomplete or non-finite.']
+    w = _weights(n, 'generators').reindex(frame.index) if captured_energy is None else None
+    if w is not None and (not _valid(w) or (w < 0).any()):
         return [], ['Generator energy weightings are unavailable or invalid.']
     from services.adequacy.metrics import electrical_columns
     electrical = electrical_columns(n, list(frame.columns))
     for period, sns in _groups(n):
-        if w.loc[sns].sum() <= 0:
-            missing.append(f'Period {period}: no positive energy weighting.'); continue
-        energy = frame.loc[sns].mul(w.loc[sns], axis=0).sum()
+        if captured_energy is None:
+            if w.loc[sns].sum() <= 0:
+                missing.append(f'Period {period}: no positive energy weighting.'); continue
+            energy = frame.loc[sns].mul(w.loc[sns], axis=0).sum()
+            energy_source = 'capture.lost_load_t; generator weights'
+        else:
+            labels = [str(p) for p in captured_energy.index]
+            label = 'ALL' if period is None else period
+            if labels.count(label) != 1:
+                missing.append(f'Period {period}: solve-time loss energy is unavailable.'); continue
+            energy = captured_energy.iloc[labels.index(label)].reindex(frame.columns)
+            energy_source = 'capture.lost_load_load_period_mwh'
+        if not _valid(energy) or (energy < 0).any():
+            missing.append(f'Period {period}: loss energy is non-finite or negative.'); continue
         total = float(energy.sum())
         if total > LOST_LOAD_MWH:
             target = (ens_targets or {}).get(period)
@@ -77,10 +102,12 @@ def _lost_load(n, capture, ens_targets, raw_prices, period_objective_weights):
             admitted = (cap is not None
                         and target.get('source') and energy.drop(electrical, errors='ignore').sum() == 0)
             severity = 'warning' if admitted and total <= cap else 'error'
-            facts = [_fact('capture.lost_load_t; snapshot_weightings.generators', total, 'MWh', period=period)]
-            facts += [_fact('capture.lost_load_t; generator weights', value, 'MWh', bus=str(bus), period=period,
-                            peak_snapshot=str(frame.loc[sns, bus].idxmax()[-1] if isinstance(frame.loc[sns, bus].idxmax(), tuple) else frame.loc[sns, bus].idxmax()))
-                      for bus, value in energy.items() if value > 0]
+            facts = [_fact(energy_source, total, 'MWh', period=period)]
+            for col, value in energy.items():
+                if value > 0:
+                    at = frame.loc[sns, col].idxmax()
+                    facts.append(_fact(energy_source, value, 'MWh', bus=buses[col], period=period,
+                        **({'load': str(col)} if col in n.loads.index else {}), peak_snapshot=str(at[-1] if isinstance(at, tuple) else at)))
             if admitted:
                 facts.append(_fact(target['source'], cap, 'MWh', period=period))
             findings.append(_finding('lost_load', severity, facts, {'positive_loss_mwh': LOST_LOAD_MWH, 'cap_mwh': cap if admitted else None},
@@ -241,7 +268,7 @@ def evaluate(n, *, capture, ens_targets=None, raw_prices=None, period_objective_
                lambda: _branches(n, source), lambda: _curtailment(n), lambda: _storage(n), lambda: _bounds(n))
     for rule, reader in zip(RULE_IDS, readers, strict=True):
         try:
-            found, missing = reader()
+            found, missing = reader() if source == 'lopf' else ([], ['LOPF result provenance is unavailable.'])
         except (KeyError, ValueError, TypeError, AttributeError):
             found, missing = [], ['Native facts are missing or malformed for this screening rule.']
         findings.extend(found)
