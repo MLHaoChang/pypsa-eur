@@ -526,8 +526,10 @@ def get_aggregate_load(section: str | None = None, names: str | None = None) -> 
     """
     Time-aligned sum of load p_set, by explicit names (CSV) or by section.
 
-    The handler returns a plain, already-NaN-safe dict ({index, values,
-    total_loads, loads_with_profile, peak, mean}) — no normalization needed.
+    The handler returns a plain, JSON-safe dict ({index, values, total_loads,
+    loads_with_profile, unknown_names, loads_without_profile, complete, gaps,
+    peak, mean}) — no normalization needed. A missing step is null, and
+    peak/mean are null unless the sum is complete.
     """
     from routers.network import aggregate_load_profile as _h
     return _h(section=section, names=names)
