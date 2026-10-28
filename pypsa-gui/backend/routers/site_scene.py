@@ -121,17 +121,12 @@ def _unbound_keys(project: AuthorizedProject, scene: dict) -> list[str] | None:
     the open network, or whose bound instance is gone (D06): the visible trace
     of a rename/delete hook whose scene write failed. None when the project is not the open one (not checked).
     """
-    import os
-
-    from services import network_lengths
+    from services import site_bindings
     from services.pypsa_service import PyPSAService
 
-    active = network_lengths.active_project_dir()
-    if active is None or os.path.realpath(active) != os.path.realpath(project.directory):
+    n = site_bindings.open_network(project.directory)
+    if n is None:
         return None
-    from services import site_bindings
-
-    n = PyPSAService.get_network()
     keys = set(scene["site"].get("placements") or {}) | set(scene.get("asset_footprints") or {})
     try:
         bindings = site_service.read_sites(project.directory).get("bindings") or {}

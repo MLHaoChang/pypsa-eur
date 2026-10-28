@@ -917,10 +917,6 @@ class PyPSAService:
         from services.adequacy.occurrence import normalise_flag_column
         normalise_flag_column(n)
         normalise_eh_columns(n)
-        # A saved network carries its identity lineage (D06), so a uid minted
-        # after this save can be told from one of another network.
-        from services import component_identity
-        component_identity.ensure_lineage(n)
         n.export_to_netcdf(str(path))
 
     @staticmethod

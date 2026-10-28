@@ -106,26 +106,41 @@ The prototype's generation-scoped re-keying (`scene_store.rename_component`/`rem
 
 **Accepted contract.**
 
-- **Identity.** A component instance has a uid `<lineage>-<token>` in `n.meta["component_ids"]["uids"][Class][name]` (`services/component_identity.py`, the sole writer). It travels with the network through netCDF, undo, saves, Save-As, scenario copies and imports.
-  - **Mint.** Lazily, on the first binding (`uid_for`).
+- **Identity.** A component instance has a random uid in `n.meta["component_ids"]["uids"][Class][name]` (`services/component_identity.py`, the sole writer). It travels with the network through netCDF, undo, saves, Save-As, scenario copies and imports, and it changes under the same lock as the network edit.
+  - **Mint.** Lazily, on the first binding (`uid_for`). The mint marks the network dirty.
   - **Rename.** The uid moves (`network_crud._update_component`, `network_buses.apply_rename_bus`).
-  - **Removal.** `network_crud.purge_component_side_data`, the path every removal takes, retires the uid (`drop` appends it to `retired`, capped at 4096). This happens under the same lock as `n.remove`.
-- **Lineage.** `PyPSAService.export_network_to_netcdf`, the one save and undo-snapshot seam, stamps a lineage on a network that has none.
-- **Bindings.** `sites.json` has a top-level `bindings: {"<Class>:<name>": uid}`. Validation: placeable-class keys, uid strings of at most 64 characters (422 otherwise). A binding never moves on disk. A rename shows up in the projection, so a scene key that a failed scene rename left behind keeps its old instance's binding. Correctness never depends on a sidecar hook.
+  - **Removal.** `network_crud.purge_component_side_data`, the path every removal takes, drops the uid. A same-name recreation gets a fresh one.
+  - **No re-attachment.** A uid is never re-attached by name.
+- **Bindings.** `sites.json` has a top-level `bindings: {"<Class>:<name>": uid}`. Validation: placeable-class keys, uid strings of at most 64 characters (422 otherwise). A binding never moves on disk; a rename shows up in the projection. Correctness never depends on a sidecar hook.
+- **First sight.** Each key gets a binding the first time the open network sees it, on GET or PUT. The binding is the live component's uid, or a uid no component holds when the name has none. A pre-D06 key is therefore bound by name exactly once, at migration, and a key naming no component is never taken by a later one.
 - **Resolution** (`services/site_bindings.py`, open project only).
-  - The uid is held by a live component: bound. A rename since then re-keys the entry in the projection.
-  - Else, `adopt` puts the uid back on the key's component when four things hold: it holds no uid, the uid is not retired, no component holds it, and the uid's lineage is the network's own (or the network has none yet). This is the "minted after the last save" case.
-  - Else: stale. GET `/sites` hides a stale entry on a legacy Site and lists it in `unbound_keys`. An enabled Site's entries and the footprints its scene owns are the scene's (D03), so they are never hidden or re-keyed here. One that is stale, or whose instance now has another name, is listed. Scene GET `unbound_keys` applies the same rule.
-  - A pre-D06 key with no binding is bound to the live component of its name, once.
-- **PUT `/sites`.** It binds new keys to the open network's instances. Stale entries the client never saw are carried forward with their binding, so an undo restores them. Another project's document reads and writes as stored: no binding decision is made without its network.
+  - The uid is held by a live component: bound. If the instance has a new name (an undo of a rename, or a failed sidecar rename), the entry is re-keyed in the projection.
+  - Otherwise the entry is stale. GET `/sites` hides it on a legacy Site and lists it in `unbound_keys`. It stays on disk, and a PUT carries it forward, so an undo of the delete brings it back.
+  - An enabled Site's entries and the footprints its scene owns are the scene's (D03). They are never hidden or re-keyed here. One that is stale, or whose instance now has another name, is listed. Scene GET `unbound_keys` applies the same rule.
+- **PUT `/sites`.** A key the client sends without a binding (a new placement) is bound at first sight, and the bindings the client echoes are kept. Another project's document reads and writes as stored: no binding decision is made without its network.
 
-**Copy mapping.** Save-As and scenario copy (tested), and snapshot restore and bundle import (by inspection of the same copy paths), copy the network (meta) and `sites/` together. The copy's component holds the same uid, in a separate project. A replaced network (import, then save over the project) has another lineage, or gets one at save, so every earlier binding is stale.
+**Lifecycle trace.**
+
+| Path | Hook | Effect |
+|---|---|---|
+| Rename (Properties, chat) | `_update_component` moves the uid | Bound under the new name |
+| Bus rename | `apply_rename_bus` moves the uid | Bound under the new name |
+| Delete, including the bus cascade | `purge_component_side_data` drops the uid | Stale |
+| Failed `sites.json` or scene hook | None needed | The uid changed with the network: stale or re-keyed |
+| Undo | `network_undo.apply_undo` re-imports the netCDF with its meta | Bound again |
+| Redo | No redo endpoint exists in the backend or the frontend | Nothing to trace |
+| Import or replace, then save over the project | The foreign network does not hold the uids | Stale |
+| Save-As | Saves the in-memory network | The copy keeps the uids |
+| Scenario copy, snapshot, bundle | `_copy_bundle_dirs` copies the project as saved | The copy keeps the saved uids |
+
+**Copy mapping.** A copy's component holds the same uid in a separate project. Save-As and scenario copy are tested. Snapshot and bundle are covered in `test_sites_routes.py`.
 
 **Alternatives rejected.**
 
 - A sidecar-only generation ledger with a sites snapshot in each undo entry: it fails open on a hook error and changes the undo stack.
 - A uid column on the component tables: every update is a remove plus add, and the column leaks into tables and exports.
 - A scope amendment to bind by `Class:name`: the register forbids it.
+- Lineage-prefixed uids with re-adoption of a uid minted after the last save: withdrawn. A lineage-less network adopts any uid, and an undo past a recreate adopts a later instance's uid. Both alias.
 
 **Evidence.** `pypsa-gui/backend/tests/test_site_identity.py` runs 16 tests through the real routes:
 
@@ -140,22 +155,28 @@ The prototype's generation-scoped re-keying (`scene_store.rename_component`/`rem
 | 7 | Replace the network, then save over the project |
 | 8 | Save-As: the copy only, and the source after reload |
 | 9 | Scenario copy |
-| 10 | Legacy adoption, then delete and recreate |
+| 10 | Legacy adoption once, then delete and recreate |
 | 11 | Malformed binding returns 422 |
-| 12 | A discarded session keeps an unsaved mint |
+| 12 | A binding never saved is lost, not re-attached by name |
 | 13 | A saved delete and recreate survives a reload |
-| 14 | `adopt` refuses a retired uid and another lineage |
-| 15 | A failed scene-commit delete hook on an enabled Site flags the recreation |
-| 16 | A scene key left by a failed scene rename keeps its binding through a PUT and stays unbound after a same-name recreate |
+| 14 | A key naming no component is never taken by a later one |
+| 15 | A failed scene delete hook flags the recreation |
+| 16 | A scene key left by a failed scene rename keeps its binding through a PUT |
 
-Tests 1–11 were written first and failed on master (10 of 11; scenario copy already held). The existing site, scene, undo and copy suites pass unchanged. There is no redo endpoint, so redo has no test.
+Tests 1–11 were written first. On master, 10 of 11 failed; scenario copy already held. Command:
+
+```
+cd pypsa-gui/backend && python -m pytest -q tests/test_site_identity.py
+```
+
+`test_sites_routes.py` now places an existing component, and saves before a snapshot or bundle.
 
 **Residual risk.**
 
-- **Lost, never aliased.** A placement made for an unsaved component that is then discarded binds to the saved component of that name on reopen, because the uid is its own lineage and not retired.
-- **Retired cap.** After more than 4096 retirements in one network, an old stale binding of its own lineage could re-adopt.
-- **Removals that skip `purge_component_side_data`.** The vintage expansion and the solve and study copies remove generated or copied components, not placeable live ones, so they retire nothing.
-- **Another project's document** reads as stored. The 3D view and SC-02 bind against the open project only.
+- **Unsaved mint (lost, never aliased).** A uid minted since the last save lives only in the in-memory network until that save; autosave runs every 5 minutes. A scenario branch, a snapshot, a bundle export, the Save-As source or a discarded session in that window shows those placements as unbound. They stay on disk and listed, for an SC-02 re-bind offer. See the GK B question on durability.
+- **Unretired removals.** The removals that skip `purge_component_side_data` (the vintage expansion, and the solve and study copies) act on generated or copied components, not placeable live ones.
+- **Legacy migration** binds a pre-D06 key by name once, which is today's behaviour.
+- **Failed write.** If the GET write-back of a first-sight binding fails, it is logged and retried on the next read.
 
 ## D08: native source, fixture and licence policy
 

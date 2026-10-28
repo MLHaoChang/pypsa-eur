@@ -14,18 +14,22 @@ open network decides what that uid means now:
   same-name component never inherits it. It stays on disk, and a PUT carries
   it forward, so an undo of the delete brings it back.
 - **No binding** (a document from before D06, or a key a client just placed).
-  It is bound to the live component of that name, if there is one.
+  It is bound once, the first time the open network sees it: to the live
+  component of that name, or, when there is none, to a uid no component holds.
+  A key is never re-bound by name after that.
 
 Only the open project's network can answer, so `project` and `stamp` are
 called for the open project only. An enabled Site's placements and the
 footprints its scene owns are the scene's to change (D03): they are never
-hidden or re-keyed here, and a stale one only shows in `unbound_keys`.
+hidden or re-keyed here; one that is stale, or whose instance now has
+another name, only shows in `unbound_keys`.
 """
 from __future__ import annotations
 
 import copy
 import os
 import pathlib
+import secrets
 
 from services import component_identity, dirty_state
 
@@ -38,7 +42,12 @@ def _keys(doc: dict) -> set[str]:
 
 
 def _bind_missing(n, keys, bindings: dict) -> bool:
-    """Record a binding for each key that has none and names a live component. Returns whether one was added."""
+    """
+    Give each key without a binding one, the first time the open network sees
+    it: the uid of the live component of that name, or a uid no component
+    holds when there is none, so a component created later never takes the
+    key by its name. Returns whether one was added.
+    """
     added = False
     for key in sorted(keys):
         if isinstance(bindings.get(key), str):
@@ -46,24 +55,22 @@ def _bind_missing(n, keys, bindings: dict) -> bool:
         cls, _, name = key.partition(":")
         first = component_identity.get(n, cls, name) is None
         uid = component_identity.uid_for(n, cls, name)
-        if uid is not None:
-            if first:
-                dirty_state.mark_dirty()     # the new uid must reach the saved network
-            bindings[key] = uid
-            added = True
+        if uid is None:
+            uid = secrets.token_hex(12)          # held by no component: unbound from the start
+        elif first:
+            dirty_state.mark_dirty()             # the new uid must reach the saved network
+        bindings[key] = uid
+        added = True
     return added
 
 
 def _where(n, key: str, bindings: dict) -> str | None:
     """The key the entry belongs under now, or None when it is stale or names no component."""
-    cls, _, name = key.partition(":")
+    cls = key.partition(":")[0]
     uid = bindings.get(key)
     if not isinstance(uid, str):
         return None
     live = component_identity.name_of(n, cls, uid)
-    if live is None and component_identity.adopt(n, cls, name, uid):
-        dirty_state.mark_dirty()             # minted after the last save: put it back, and save it
-        live = name
     return f"{cls}:{live}" if live is not None else None
 
 
@@ -90,8 +97,6 @@ def project(doc: dict, n, enabled: set[str], owned: set[str]) -> tuple[dict, dic
     bindings = out.get("bindings") if isinstance(out.get("bindings"), dict) else {}
     added = _bind_missing(n, _keys(out), bindings)
     where = {key: _where(n, key, bindings) for key in _keys(out)}
-    # A key that never named a live component has no binding and is shown as
-    # stored, as before D06.
     moves = {key: target for key, target in where.items() if isinstance(bindings.get(key), str) and target != key}
     for site in out.get("sites") or []:
         if site.get("id") not in enabled and isinstance(site.get("placements"), dict):

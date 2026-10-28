@@ -1,6 +1,6 @@
 # D06 plan: native target lifecycle identity
 
-Status: proposed to GK B (plan checkpoint), not accepted. The closure as built, with the lineage refinement below, is in [../sc-00-n/decisions.md](../sc-00-n/decisions.md#d06-native-target-lifecycle-identity).
+Status: proposed to GK B (plan checkpoint), not accepted. The closure as built (this plan, plus first-sight binding; the lineage refinement below is withdrawn) is in [../sc-00-n/decisions.md](../sc-00-n/decisions.md#d06-native-target-lifecycle-identity).
 Base: master `02e413808`.
 
 ## Design
@@ -69,7 +69,7 @@ A component's lifecycle identity is a random uid held in the network itself, so 
 - `services/site_scene/store.py` and the frontend belong to the SC-01 builder. I won't edit them: resolution wraps `project_sites` at the router. `bindings` is additive JSON that the frontend round-trips.
 - No UI.
 
-## Refinement found test-first (sent to GK B as an addendum)
+## Refinement found test-first (sent to GK B as an addendum; WITHDRAWN, see the closure's Alternatives)
 
 With uids only, a uid minted on PUT but not yet saved was lost from the source project after Save-As, or after a discarded session, which hid its placements.
 
