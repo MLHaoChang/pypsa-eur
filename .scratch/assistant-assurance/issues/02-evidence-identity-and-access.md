@@ -3,7 +3,7 @@
 
 # P1: authorized evidence identity and validity
 
-Status: in progress — list_components page evidence (A1.1, current-input part of A1.3, A1.5 page capture) on claude/assurance-02-evidence-identity; rest of P1 open
+Status: in progress — list_components page evidence (A1.1, current-input part of A1.3, A1.5 page capture) in #806; A1.2 revocation cases executable on claude/assurance-02-revocation; rest of P1 open
 Progress: Authorized retained evidence, ACL rechecks shipped; status says whole phase open, displayed-data revision proof pending
 Type: task
 Blocked by: 01; live-voice issue 06 for retained-run guarantees
@@ -59,3 +59,7 @@ See [implementation status](../implementation-status.md) and [contracts](../harn
 ### 2026-10-28 — list_components page evidence
 
 `list_components` is the second checked read (`static_input_page_evidence`). A page's evidence holds the exact static inputs of the rows it showed, by entity name (RFC 6901 paths), bound to owner/org/project and a digest of the class's rows and input metrics taken before the handler; a changed digest at capture or lookup, or another project, makes it unavailable. Out-of-range pages are refused before the handler. Answers name the rows ("rows a..b of N, not the whole class"). Retained runs, coverage masks, aggregates, results families and other read families remain open.
+
+### 2026-10-28 — A1.2 revocation before publish and read
+
+A1.2 is now executable in `tests/assurance_acceptance/test_p1_revocation.py`, covering two revocations: org membership removed (project ACL) and user disabled. If access is revoked after a `get_component` or `list_components` capture and before publish, nothing is published: no approval, no token, no answer record, and the stream ends with `assurance_publication_failed`. A tool called after revocation returns `tool_error` with no values. After publish, the answer, export and evidence routes refuse revoked access (404 for membership, 401 for disabled), and history projects `unavailable` without the text. The enforcement already existed; no product code changed. Still pending: CSRF on a stateful ACK (no assurance ACK route before P3) and a reviewer cache hit (the reviewer is withheld, so no cache exists). The project ACL is not held under `network_guard`, so a revocation that lands between commit's last `authorize` and `records.save` can still commit; the next read refuses it.

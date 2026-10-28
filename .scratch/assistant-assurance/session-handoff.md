@@ -865,3 +865,13 @@ Red/green: the first tracer `test_listed_input_row_has_page_scoped_project_evide
 Cost: two class digests per checked `list_components` call and one per lookup, linear in the class's rows. An edit to another class or a time series leaves page evidence valid: the page asserts static inputs only, and says so.
 
 Remaining for P1: retained/historical runs (A1.3 as-of), A1.2 ACL revocation before publish, A1.4 corruption/restart, A1.5 complete-source aggregates, A1.6/A1.7 validity and masks, every other `read_unvalidated` family, frontend `assurance_state`. Next runnable tracer: a second `read_unvalidated` family with a time-series source (`get_timeseries`), or A1.2 revocation between capture and publish.
+
+### 2026-10-28 — P1 tracer: A1.2 revocation (issue 02)
+
+Policy version 1. No product code changed: the probes found A1.2 already enforced. The checks are `records.authorize` at commit (twice, the second under `network_guard`), `records.load` on every lookup, the acting-user/restriction check in `tool_guard`, and the `unavailable` history projection. `tests/assurance_acceptance/test_p1_revocation.py` (8 cases) makes them executable. A fixture removes the seeded user's `OrgMembership` or disables the user, then restores it. `RevokingProvider` (a `FakeProvider`) revokes just before a chosen model turn.
+
+Red/green: 8 / 8 green on master. Mutants: removing `authorize` at commit and in `records.authorize` turns 7 red, with answers published after revocation. The one that stays green is the disabled-user read: global auth already returns 401 there. Removing only the commit-time `authorize` turns the 4 capture cases red (`internal_error` instead of `assurance_publication_failed`).
+
+Pending in A1.2: CSRF on a stateful ACK (no assurance ACK route before P3) and a reviewer cache hit (the reviewer is withheld, so no cache). Residual: the project ACL is not held under `network_guard`, so a revocation between commit's last `authorize` and `records.save` can still commit; the next read refuses it. Revocation surfaces as the generic `assurance_publication_failed` and logs an ERROR traceback. A typed kind would need a ChatPanel change.
+
+Remaining for P1: A1.3 historical as-of runs, A1.4 corruption/restart, A1.5 complete-source aggregates, A1.6/A1.7 validity and masks, the other `read_unvalidated` families, frontend `assurance_state`. Next runnable tracer: `get_timeseries` (a time-series source) as the third checked read.
