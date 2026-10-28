@@ -470,6 +470,13 @@ TOOLS: list[dict[str, Any]] = [
         "has nothing to serve — an unsolved or stale network, or a solve that "
         "produced none of this kind (lost_load on a run that shed nothing). "
         "Read `message` and check dispatch_status; do NOT report it as a zero. "
+        "run_id (statistics and cost_breakdown only) answers for one run as "
+        "{status, scope, result_kind, data, run}: the newest completed run whose "
+        "inputs are still current answers with the current read (scope current); "
+        "any other run answers from the results kept when it finished (scope "
+        "historical; the Results tabs still show the current results), or "
+        "unavailable for a run without them. Never quote current results for "
+        "another run. With run_id, source, detail, offset and limit are ignored. "
         "Safety: read.",
         {
             "result_kind": {"type": "string", "enum": RESULTS_ENUM},
@@ -477,6 +484,7 @@ TOOLS: list[dict[str, Any]] = [
             "detail": {"type": "string", "enum": ["summary", "lines"]},
             "offset": {"type": "integer", "minimum": 0},
             "limit": {"type": "integer", "minimum": 1},
+            "run_id": {"type": "string", "maxLength": 64},
         },
         ["result_kind"],
     ),

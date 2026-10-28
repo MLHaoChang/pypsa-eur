@@ -67,9 +67,9 @@ def test_gated_views_wait_for_their_tools():
 
 def test_only_captured_sections_are_claimed():
     """A view claims a retained section only when run completion captures it
-    (PR-C: load flow); every other view refuses past runs."""
+    (retained_results: load flow, summary); every other view refuses past runs."""
     assert {v.view_id: v.historical_section for v in rv.RESULT_VIEWS
-            if v.historical_section} == {'loadflow': 'loadflow'}
+            if v.historical_section} == {'loadflow': 'loadflow', 'summary': 'results_summary'}
 
 
 def test_every_view_declares_its_units():
