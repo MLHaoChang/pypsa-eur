@@ -42,6 +42,7 @@ SCHEMA_VERSION = 1
 # Presentation envelopes only; no cable/line, building-load or bus footprint.
 FOOTPRINT_CLASSES = frozenset({"Generator", "StorageUnit", "Store", "Transformer", "Link"})
 MAX_FOOTPRINT_DIMENSION_M = 100_000
+MAX_BINDING_UID = 64
 
 # The PyPSA classes a placement key may name. `Bus` is included: the site
 # view draws a switchyard per bus and the user may move it.
@@ -136,6 +137,18 @@ def _validate_asset_footprints(value: object) -> None:
                 raise SitesInvalid(f"asset_footprints[{key!r}].{field} must be positive finite metres <= {MAX_FOOTPRINT_DIMENSION_M}")
 
 
+def _validate_bindings(value: object) -> None:
+    """`bindings`: `<Class>:<name>` -> the uid of the instance it was authored against (D06)."""
+    if not isinstance(value, dict):
+        raise SitesInvalid("bindings must be an object")
+    for key, uid in value.items():
+        cls, sep, name = key.partition(":") if isinstance(key, str) else ("", "", "")
+        if not sep or not name or cls not in PLACEABLE_CLASSES:
+            raise SitesInvalid("bindings key must be <Class>:<name> with a placeable class")
+        if not isinstance(uid, str) or not 0 < len(uid) <= MAX_BINDING_UID:
+            raise SitesInvalid(f"bindings[{key!r}] must be a uid string of at most {MAX_BINDING_UID} characters")
+
+
 def validate_sites(doc: object) -> None:
     """
     Raise `SitesInvalid` naming the field, else return. Unknown keys are
@@ -151,6 +164,8 @@ def validate_sites(doc: object) -> None:
         raise SitesInvalid("sites must be a list")
     if "asset_footprints" in doc:
         _validate_asset_footprints(doc["asset_footprints"])
+    if "bindings" in doc:
+        _validate_bindings(doc["bindings"])
     seen: set[str] = set()
     for i, site in enumerate(sites):
         where = f"sites[{i}]"

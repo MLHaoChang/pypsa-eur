@@ -118,8 +118,8 @@ async def put_site_anchor(request: Request, project: AuthorizedProject = Project
 def _unbound_keys(project: AuthorizedProject, scene: dict) -> list[str] | None:
     """
     Placement and footprint keys (`<Class>:<name>`) whose component is not in
-    the open network: the visible trace of a rename/delete hook whose scene
-    write failed. None when the project is not the open one (not checked).
+    the open network, or whose bound instance is gone (D06): the visible trace
+    of a rename/delete hook whose scene write failed. None when the project is not the open one (not checked).
     """
     import os
 
@@ -129,8 +129,16 @@ def _unbound_keys(project: AuthorizedProject, scene: dict) -> list[str] | None:
     active = network_lengths.active_project_dir()
     if active is None or os.path.realpath(active) != os.path.realpath(project.directory):
         return None
+    from services import site_bindings
+
     n = PyPSAService.get_network()
     keys = set(scene["site"].get("placements") or {}) | set(scene.get("asset_footprints") or {})
+    try:
+        bindings = site_service.read_sites(project.directory).get("bindings") or {}
+    except PermissionError:
+        bindings = {}
+    with PyPSAService.get_lock():
+        stale = site_bindings.stale_keys(n, keys, bindings)
     unbound = []
     for key in sorted(keys):
         cls, _, comp = key.partition(":")
@@ -138,7 +146,8 @@ def _unbound_keys(project: AuthorizedProject, scene: dict) -> list[str] | None:
             known = comp in n.components[cls].static.index
         except (KeyError, AttributeError):
             known = False                   # not a component class this network has
-        if not known:
+        # A same-name component that is not the instance the key was bound to (D06) is unbound too.
+        if not known or key in stale:
             unbound.append(key)
     return unbound
 

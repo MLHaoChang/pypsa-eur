@@ -4380,9 +4380,39 @@ def get_sites(
     try:
         # A scene-enabled Site is projected from its pointed generation (D03);
         # every other Site, and a project with none, reads sites.json as before.
-        return scene_store.project_sites(src)
+        doc = scene_store.project_sites(src)
     except PermissionError as exc:
         raise _access_denied(src / site_service.SITES_FILE) from exc
+    return _bound_sites(src, doc)
+
+
+def _bound_sites(src: pathlib.Path, doc: dict) -> dict:
+    """
+    The open project's document as its network sees it (D06): an entry whose
+    component instance is gone is hidden and listed in `unbound_keys`. Another
+    project's document is returned as stored. A key with no binding yet is
+    bound here, once, and that binding is saved.
+    """
+    from services import site_bindings, site_service
+    from services.pypsa_service import PyPSAService
+    from services.site_scene import store as scene_store
+
+    n = site_bindings.open_network(src)
+    if n is None:
+        return doc
+    with scene_store.project_lock(src):
+        enabled = scene_store.enabled_site_ids(src)
+        with PyPSAService.get_lock():
+            out, added = site_bindings.project(doc, n, enabled, site_bindings.owned_footprints(src, enabled))
+        if added is not None:
+            try:
+                stored = site_service.read_sites(src)
+                stored["bindings"] = {**(stored.get("bindings") or {}), **added}
+                site_service.write_sites(src, stored)
+            except (OSError, ValueError):
+                # The projection is still right; the binding is recorded on the next read or save.
+                logger.warning("sites: recording bindings failed for %s", src.name, exc_info=True)
+    return out
 
 
 @router.put("/{name}/sites")
@@ -4417,6 +4447,7 @@ def put_sites(
     # between the check and the write.
     with scene_store.project_lock(dest):
         scene_store.guard_legacy_put(dest, sites)      # SceneError -> main's handler
+        sites = _stamp_sites(dest, sites)
         try:
             site_service.write_sites(dest, sites)
         except site_service.SitesTooLarge as exc:
@@ -4428,6 +4459,21 @@ def put_sites(
         except OSError:
             logger.warning("sites: orphan context prune failed for %s", name, exc_info=True)
     return {"saved": name, "sites": len(sites["sites"])}
+
+
+def _stamp_sites(dest: pathlib.Path, sites: dict) -> dict:
+    """PUT under the scene mutex: bind new keys to the open network's instances and keep hidden stale entries (D06)."""
+    from services import site_bindings, site_service
+    from services.pypsa_service import PyPSAService
+    from services.site_scene import store as scene_store
+
+    sites = {k: v for k, v in sites.items() if k != "unbound_keys"}
+    n = site_bindings.open_network(dest)
+    if n is None:
+        return sites
+    on_disk = site_service.read_sites(dest)
+    with PyPSAService.get_lock():
+        return site_bindings.stamp(sites, on_disk, n, scene_store.enabled_site_ids(dest))
 
 
 def _site_context_dir(dest: pathlib.Path, site_id: str) -> tuple[pathlib.Path, dict]:

@@ -1,6 +1,6 @@
 # D06 plan: native target lifecycle identity
 
-Status: proposed to GK B (plan checkpoint), not accepted.
+Status: proposed to GK B (plan checkpoint), not accepted. The closure as built, with the lineage refinement below, is in [../sc-00-n/decisions.md](../sc-00-n/decisions.md#d06-native-target-lifecycle-identity).
 Base: master `02e413808`.
 
 ## Design
@@ -48,7 +48,7 @@ A component's lifecycle identity is a random uid held in the network itself, so 
 - `network_crud._update_component` rename branch and `apply_rename_bus` (`routers/network.py`): `identity.rename`.
 - `routers/projects.py` `get_sites`/`put_sites`: resolve and stamp.
 - `routers/site_scene._unbound_keys`: uid-based.
-- `site_service`: `bindings` validation. The rename and remove hooks re-key or drop the binding as cleanup.
+- `site_service`: `bindings` validation. As built, a binding never moves on disk; the projection handles renames.
 
 `undo_service`, the import paths, Save-As and scenario copy need no change. Tests prove that.
 
@@ -68,3 +68,16 @@ A component's lifecycle identity is a random uid held in the network itself, so 
 
 - `services/site_scene/store.py` and the frontend belong to the SC-01 builder. I won't edit them: resolution wraps `project_sites` at the router. `bindings` is additive JSON that the frontend round-trips.
 - No UI.
+
+## Refinement found test-first (sent to GK B as an addendum)
+
+With uids only, a uid minted on PUT but not yet saved was lost from the source project after Save-As, or after a discarded session, which hid its placements.
+
+The fix keeps the identity network-held:
+
+- A uid is `<lineage>-<token>`.
+- `PyPSAService.export_network_to_netcdf` stamps the lineage.
+- `drop` retires the uid.
+- A binding whose uid no live component holds is re-adopted only onto its key's component, and only if four things hold: the component holds no uid, the uid is not retired, the uid is unheld, and the uid is of the network's own lineage (or the network has none yet).
+
+GET `/sites` adds `bindings` and `unbound_keys` only when they are non-empty. `unbound_keys` lists entries whose bound instance is gone.
