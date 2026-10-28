@@ -1140,11 +1140,17 @@ def _vs_rows(inp: _Inputs) -> list[dict]:
     worst over the campus run's periods, each against its least margin: screening, so below warns."""
     import pandas as pd
 
-    from gridspine.drivers.campus_study import NO_SK_MIN, VOLTAGE_STABILITY_CSV, VS_NO_OPERATING_POINT
+    target = _target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"), "eh_sk_mva")
+    try:
+        from gridspine.drivers.campus_study import NO_SK_MIN, VOLTAGE_STABILITY_CSV, VS_NO_OPERATING_POINT
+    except ImportError as exc:  # pragma: no cover - build-shape branch
+        note = f"The voltage stability screen needs gridspine ({exc})"
+        return [_row(rid, spec["req"], rule=spec["rule"], limit=None, unit=spec["unit"], source=note,
+                     project_value=None, verdict="unknown", assumed=True, note=note, section="connection",
+                     target=target) for rid, spec in _VS.items()]
     from services import campus_electrical_service as ce
 
     run = inp.dir / ce.SUBDIR / "run"
-    target = _target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"), "eh_sk_mva")
     error = _read_json(run / ce.VOLTAGE_STABILITY_ERROR)
     reason, frame = None, None
     if isinstance(error, dict):
