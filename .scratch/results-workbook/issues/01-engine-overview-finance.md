@@ -3,7 +3,7 @@
 
 # 01 — Workbook engine, Overview KPIs and finance sheets
 
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: none
 Gated: yes (finance; GK B)
@@ -22,12 +22,18 @@ Read [the spec](../spec.md) first; its owner decisions RW-CHARTS-1, RW-TABS-1, R
 
 ## Acceptance
 
-- [ ] The Overview has per-period and horizon capex (overnight and annualised), opex, system cost, energy served and system/per-carrier LCOE, matching `compute_asset_economics` / `economics_by_carrier` within 1e-9 relative on a fixture network with two investment periods.
-- [ ] With an investment case: NPV, IRR, payback, DSCR and financial LCOE equal `load_ic_report`'s values; the finance sheets reuse `finance/export_xlsx.py`; NPV cells are live formulas. Without one: each shows `not_established` and "run the investment case"; nothing is computed or run.
-- [ ] The Overview has three native charts (capex vs opex by period; LCOE by carrier by period; cash flow with cumulative NPV when the case exists), each referencing the sheet's own cells (tests read `ws._charts` and the series refs).
-- [ ] A stale run is refused with a named error kind; formula-like text is neutralised; the 25 MB cap holds.
-- [ ] The workbook opens in openpyxl (load_workbook round trip) and in LibreOffice headless if available in CI; otherwise say so.
+- [x] The Overview has per-period and horizon capex (overnight and annualised), opex, system cost, energy served and system/per-carrier LCOE, matching `compute_asset_economics` / `economics_by_carrier` within 1e-9 relative on a fixture network with two investment periods.
+- [x] With an investment case: NPV, IRR, payback, DSCR and financial LCOE equal `load_ic_report`'s values; the finance sheets reuse `finance/export_xlsx.py`; NPV cells are live formulas. Without one: each shows `not_established` and "run the investment case"; nothing is computed or run.
+- [x] The Overview has three native charts (capex vs opex by period; LCOE by carrier by period; cash flow with cumulative NPV when the case exists), each referencing the sheet's own cells (tests read `ws._charts` and the series refs).
+- [x] A stale run is refused with a named error kind; formula-like text is neutralised; the 25 MB cap holds.
+- [x] The workbook opens in openpyxl (load_workbook round trip) and in LibreOffice headless if available in CI; otherwise say so.
 
 ## Out of scope
 
 Per-view sheets beyond Overview/finance (02); the UI picker and the chat tool (03).
+
+## Notes from the build
+
+- Overnight capex is a horizon figure (`cost_breakdown.capex_lifetime`, the present value of the upfront investment); its period cells read `not_established` because no service splits it by period. Fuel reads `not_established`: PyPSA's marginal cost does not separate fuel from variable O&M.
+- The finance sheets are written when the `investment` view is included (the Commercial & finance card, or `views=investment`), prefixed "Case ".
+- LibreOffice: `tests/test_results_workbook.py` recalculates the workbook headless and checks the live NPV and system LCOE. CI installs no LibreOffice, so there that step skips; it passed in the build container (LibreOffice 24.2.7.2).
