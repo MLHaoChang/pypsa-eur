@@ -14,6 +14,9 @@ export const FIELD_LABELS: Record<string, string> = {
   harmonic_spectrum: 'Harmonic spectrum',
   flicker_step_mva: 'Largest power step',
   flicker_changes_per_min: 'Changes per minute',
+  motor_kw: 'Motor rating',
+  start_method: 'Start method',
+  i_start_pu: 'Start current multiple',
   single_phase_share: 'Single-phase share',
 }
 

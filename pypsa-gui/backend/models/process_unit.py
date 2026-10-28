@@ -6,7 +6,8 @@ Not PyPSA attributes and not Energy Hub tags, so they have their own registry be
 the same lazy-column machinery (`services/adequacy/eh_columns.py`): a project that never writes one never gets the
 column. Kinds are those of `eh_columns`: "bool", "float_nonneg", "tier" (one of CRITICALITY_TIERS or ""),
 "process_role" (one of PROCESS_GENERATOR_ROLES or ""), "text", "harmonic_source" (one of HARMONIC_SOURCES or "")
-"harmonic_spectrum" (order:% pairs, checked by gridspine's harmonic screen) and "fraction" (0..1).
+"harmonic_spectrum" (order:% pairs, checked by gridspine's harmonic screen), "fraction" (0..1) and "start_method"
+(one of START_METHODS or "").
 """
 from __future__ import annotations
 
@@ -25,6 +26,11 @@ PROCESS_GENERATOR_ROLES: tuple[str, ...] = ("buy_in", "shortfall")
 HARMONIC_SOURCES: tuple[str, ...] = ("linear", "6-pulse", "12-pulse", "18-pulse", "active-front-end", "phase-angle",
                                      "burst", "thyristor-stack")
 
+# How a unit's motor is started, for the motor-start screen (grid-to-process issue 18): direct on line, soft
+# starter or variable-speed drive. The empty string is "not set" (no input). Equal to
+# `gridspine.static.motor_start.START_METHODS`.
+START_METHODS: tuple[str, ...] = ("dol", "soft", "vfd")
+
 PROCESS_CUSTOM_COLUMNS: dict[str, dict[str, str]] = {
     "Bus": {"mwh_per_t": "float_nonneg", "product_value": "float_nonneg",
             "lost_production_value": "float_nonneg"},
@@ -34,7 +40,8 @@ PROCESS_CUSTOM_COLUMNS: dict[str, dict[str, str]] = {
              "harmonic_source": "harmonic_source", "harmonic_spectrum": "harmonic_spectrum",
              "spectrum_post_filter": "bool", "flicker_step_mva": "float_nonneg",
              "flicker_changes_per_min": "float_nonneg",
-             "single_phase_share": "fraction"},
+             "single_phase_share": "fraction", "motor_kw": "float_nonneg", "start_method": "start_method",
+             "i_start_pu": "float_nonneg"},
 }
 
 

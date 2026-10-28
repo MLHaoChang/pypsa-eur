@@ -2354,6 +2354,70 @@
       "technical_name": "single_phase_share"
      },
      {
+      "key": "motor_kw",
+      "group": "performance",
+      "label": "Motor rating",
+      "help": "Rated shaft power of the unit's largest motor, for the motor-start screen. Leave empty when the unit has no large motor or it is unknown: the check then reads unknown.",
+      "unit_display": "kW",
+      "unit_storage": "kW",
+      "scale": 1.0,
+      "kind": "number",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": {
+       "eh_process": true
+      },
+      "part": null,
+      "blank": "clear",
+      "technical_name": "motor_kw"
+     },
+     {
+      "key": "start_method",
+      "group": "performance",
+      "label": "Start method",
+      "help": "How the motor is started: dol (direct on line, about 6 × rated current), soft (soft starter, about 3 ×) or vfd (variable-speed drive, about 1 ×). Leave empty when unknown: the check then reads unknown.",
+      "unit_display": "",
+      "unit_storage": "",
+      "scale": 1.0,
+      "kind": "enum",
+      "options": [
+       "dol",
+       "soft",
+       "vfd"
+      ],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": {
+       "eh_process": true
+      },
+      "part": null,
+      "blank": "empty",
+      "technical_name": "start_method"
+     },
+     {
+      "key": "i_start_pu",
+      "group": "performance",
+      "label": "Start current multiple",
+      "help": "The starting current as a multiple of rated current, when the maker states it. Leave empty to use the start method's default (6, 3 or 1).",
+      "unit_display": "pu",
+      "unit_storage": "pu",
+      "scale": 1.0,
+      "kind": "number",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": {
+       "eh_process": true
+      },
+      "part": null,
+      "blank": "clear",
+      "technical_name": "i_start_pu"
+     },
+     {
       "key": "outage_rate_value",
       "group": "performance",
       "label": "Forced-outage rate",

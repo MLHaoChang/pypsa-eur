@@ -23,7 +23,7 @@ NOT_SCALAR = ("energization_peak:", "lole", "oscillation", "harmonic_distortion"
 CATEGORICAL = ("frequency_support", "dynamic:", "grid_former", "ride_through:")
 # Caveats the scorecard states, carried with a checked line so a pass never reads as final.
 CAVEATS = {"ramp_rate": "before mitigation", "rapid_voltage_change": "before mitigation; a screening upper bound",
-           "rapid_voltage_change_infrequent": "a screening upper bound"}
+           "rapid_voltage_change_infrequent": "a screening upper bound", "motor_start:": "a screening estimate"}
 METRICS = {
     "checked_pass": {"formula_id": "grid-readiness-checked-pass/1", "unit": "rows",
                      "label": "Scorecard rows checked as pass"},
@@ -54,11 +54,18 @@ def _registered():
 
     return {"scr": G.RULE_SCR, "ramp_rate": G.RULE_RAMP, "rapid_voltage_change": G.RULE_RVC,
             "rapid_voltage_change_infrequent": G.RULE_RVC, "reactive_range": G.RULE_REACTIVE,
-            "voltage_unbalance": G.RULE_UNBALANCE}
+            "voltage_unbalance": G.RULE_UNBALANCE, "motor_start:": G.RULE_MOTOR_START}
 
 
 def _named(row_id, prefixes):
     return any(row_id == p or (p.endswith(":") and row_id.startswith(p)) for p in prefixes)
+
+
+def _by_id(mapping, row_id):
+    """A row's entry in ``mapping``: its own id's, else (a per-unit row, ``motor_start:<unit>``) its prefix's."""
+    if row_id in mapping:
+        return mapping[row_id]
+    return mapping.get(row_id.partition(":")[0] + ":") if ":" in row_id else None
 
 
 def source(ctx, entity):
@@ -125,7 +132,7 @@ def disposition(row, registered=None):
             or not isinstance(value, (int, float)) or not isinstance(limit, (int, float))
             or not common.finite([float(value), float(limit)])):
         return "unknown", None
-    if "rule" not in row or registered.get(rid) != row["rule"]:
+    if "rule" not in row or _by_id(registered, rid) != row["rule"]:
         return "rule_mismatch", None
     verdict = _judge(float(value), float(limit), row["rule"])
     return ("checked" if verdict == row["verdict"] else "boundary_disagreement"), verdict
@@ -162,7 +169,7 @@ def notes(raw, label):
         if kind == "checked":
             unit = f" {label(str(row['unit']))}" if row.get("unit") else ""
             words = COMPARATOR_WORDS[row["rule"]["comparator"]]
-            extra = [CAVEATS[row["id"]]] if row["id"] in CAVEATS else []
+            extra = [c] if (c := _by_id(CAVEATS, row["id"])) else []
             if row.get("assumed"):
                 extra.append("limit assumed")
             lines.append(f"{name}: {_number(row['project_value'])}{unit} against {words} "

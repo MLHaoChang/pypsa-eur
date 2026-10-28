@@ -816,7 +816,7 @@
       ],
       "safety_tier": "write",
       "assurance_adapter": "write_unvalidated",
-      "schema_sha256": "c5d844aeba6c3495bfc3d4a6ab3474ecdf7634c45f6bde3fa9007ea8dfc67989",
+      "schema_sha256": "585ad46e84541c7efc446d86ef0188fe73dedb7eed4781fd6dcb8d70f8215924",
       "behavioral_fixture": "pending"
     },
     {

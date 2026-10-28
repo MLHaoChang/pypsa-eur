@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
-from models.process_unit import HARMONIC_SOURCES
+from models.process_unit import HARMONIC_SOURCES, START_METHODS
 from services.asset_schema.schema import part_columns
 
 GROUPS = ("identity", "size", "investment", "fom", "variable", "performance", "replacement", "provenance")
@@ -409,6 +409,16 @@ LINK: tuple[FieldSpec, ...] = (
            "power drawn between two phases or phase to neutral, for the unbalance screen. 0 declares a balanced "
            "three-phase load. Leave empty when unknown: the check then reads unknown.",
            reveal_when={"eh_process": True}),
+    FieldSpec("motor_kw", "performance", "Motor rating", "Rated shaft power of the unit's largest motor, for the "
+              "motor-start screen. Leave empty when the unit has no large motor or it is unknown: the check then "
+              "reads unknown.", "kW", "kW", reveal_when={"eh_process": True}),
+    FieldSpec("start_method", "performance", "Start method", "How the motor is started: dol (direct on line, about "
+              "6 × rated current), soft (soft starter, about 3 ×) or vfd (variable-speed drive, about 1 ×). Leave "
+              "empty when unknown: the check then reads unknown.", kind="enum", options=START_METHODS,
+              reveal_when={"eh_process": True}),
+    FieldSpec("i_start_pu", "performance", "Start current multiple", "The starting current as a "
+              "multiple of rated current, when the maker states it. Leave empty to use the start method's default "
+              "(6, 3 or 1).", "pu", "pu", reveal_when={"eh_process": True}),
     *_outages(with_cf_flag=False),
 )
 
@@ -583,10 +593,11 @@ _CLEAR = {"p_nom_max", "e_nom_max", "s_nom_max", "v_nom_0", "v_nom_1", "lifetime
 # M5: per class. `empty` sends "" (a text column the write model types `str = ""`: an emptied country or display
 # name is a decision, and null would be refused); GlobalConstraint's optional columns clear to null.
 _EMPTY_BY_CLASS = {"Bus": {"country", "sub_network", "unit"}, "Carrier": {"nice_name", "color", "unit"},
-                   "Link": {"bus2", "bus3", "bus4", "criticality_tier", "harmonic_source", "harmonic_spectrum"}}
+                   "Link": {"bus2", "bus3", "bus4", "criticality_tier", "harmonic_source", "harmonic_spectrum",
+                            "start_method"}}
 _CLEAR_BY_CLASS = {"GlobalConstraint": {"carrier_attribute", "carrier", "investment_period"},
                    "Bus": {"mwh_per_t", "product_value"}, "Link": {"rated_mva", "flicker_step_mva", "flicker_changes_per_min",
-                            "single_phase_share"}}
+                            "single_phase_share", "motor_kw", "i_start_pu"}}
 
 
 def _with_blank(component: str, specs: tuple[FieldSpec, ...]) -> tuple[FieldSpec, ...]:
