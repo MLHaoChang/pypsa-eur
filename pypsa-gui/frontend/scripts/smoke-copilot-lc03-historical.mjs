@@ -7,6 +7,11 @@
  * the current 60; the answer says the same number (LC-T09).
  * LC-T10: the user's own Clear, a newer turn about the latest run, and a
  * project switch each drop the past-run view; nothing of it is left showing.
+ * LC-T08: while the past run is on screen the user loses access to the
+ * project (the fixture makes it a colleague's and demotes the user from org
+ * admin to member: a real database ACL change); its next read, in
+ * Guided and Expert, and the assistant's own run tools give the server's plain
+ * reason, and the way out (Clear) stays. The user's role is then restored.
  * npm run build
  * PYPSA_COMPOSER_PYTHON=<test-env-python> CHROMIUM_BIN=<chromium> node scripts/smoke-copilot-lc03-historical.mjs
  * No paid inference. Artifacts omit credentials/cookies.
@@ -26,6 +31,7 @@ const python = process.env.PYPSA_COMPOSER_PYTHON || path.join(repository, '.pixi
 const artifacts = process.env.LC03H_ARTIFACTS || await fs.mkdtemp(path.join(os.tmpdir(), 'copilot-lc03h-'))
 const PAST = 'Show me the capacity results of the first run.'
 const LATEST = 'Show me the capacity results of the latest run.'
+const REASON = 'This project is not available to you: your access was removed or the project was deleted.'
 
 function fixture(storage) {
   const child = spawn(python, [path.join(frontend, 'scripts/composer-fixture.py'), '--storage', storage, '--journey', 'lc03h'],
@@ -99,7 +105,7 @@ async function noPastView(page) {
 }
 
 const storage = path.join(artifacts, 'storage')
-const { child, base, credentials_file: file, network_file: network } = await fixture(storage)
+const { child, base, credentials_file: file, network_file: network, control: fixtureControl } = await fixture(storage)
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_BIN || undefined })
 let report
 try {
@@ -189,8 +195,38 @@ try {
   await noPastView(page)
   await page.screenshot({ path: path.join(artifacts, 'lc03h-latest.png') })
 
-  // LC-T10 (3): a project switch leaves nothing of the past run behind.
+  // LC-T08: access to the project is lost while its past run is on screen.
   await openPast(2)
+  const control = async action => {
+    const response = await fetch(`${fixtureControl}/${action}`, { method: 'POST' })
+    assert.equal(response.status, 204, `${action} failed`)
+  }
+  await control('revoke-access')
+  // The next read of the past run (another tab of it) is refused, in the server's words.
+  await page.locator('[data-assurance-tab="summary"], button:has-text("Summary")').first().click()
+  const refusal = page.getByRole('status').filter({ hasText: REASON })
+  await refusal.first().waitFor({ timeout: 60000 }).catch(async error => {
+    await page.screenshot({ path: path.join(artifacts, 'lc03h-failed-refusal.png') })
+    throw error
+  })
+  assert.equal(await page.getByText(/not been substituted/).count(), 0)
+  // The way out stays: the run chrome's Clear and the panel's own close.
+  assert(await page.getByTestId('discussed-run-chrome').getByRole('button', { name: 'Clear' }).isVisible())
+  await page.screenshot({ path: path.join(artifacts, 'lc03h-refused-guided.png') })
+  await page.getByRole('button', { name: 'Expert', exact: true }).click()
+  await refusal.first().waitFor({ timeout: 60000 })
+  assert(await page.getByTestId('discussed-run-chrome').getByRole('button', { name: 'Clear' }).isVisible())
+  await page.screenshot({ path: path.join(artifacts, 'lc03h-refused-expert.png') })
+  // The assistant gets the same reason from its own tools.
+  await send(page, PAST)
+  const refusedAnswer = await answer(page, 'LC03H_REFUSED')
+  assert(refusedAnswer.includes(REASON), refusedAnswer)
+  await page.screenshot({ path: path.join(artifacts, 'lc03h-refused-chat.png') })
+  await control('restore-access')
+  await page.getByRole('button', { name: 'Guided', exact: true }).click()
+
+  // LC-T10 (3): a project switch leaves nothing of the past run behind.
+  await openPast(3)
   // The user's own switch: the Projects page, then the other project.
   await page.getByRole('button', { name: /^Projects$/ }).first().click()
   await page.waitForURL(/\/projects/)
@@ -212,8 +248,9 @@ try {
   report = { journey: 'LC-T09/T10 historical', passed: true, solves: runs.length,
     past: { answer: past.words.replace(runs[0], '<first run>'), scope: past.binding.scope,
       section: past.binding.section, gasLcoe: past.gas.lcoe_eur_per_mwh.total },
-    superseded: ['clear', 'newer turn', 'project switch'], latest,
-    screenshots: ['lc03h-past-run.png', 'lc03h-latest.png', 'lc03h-switched.png'] }
+    superseded: ['clear', 'newer turn', 'project switch'], latest, refused: refusedAnswer,
+    screenshots: ['lc03h-past-run.png', 'lc03h-latest.png', 'lc03h-refused-guided.png',
+      'lc03h-refused-expert.png', 'lc03h-refused-chat.png', 'lc03h-switched.png'] }
   await context.close()
 } finally {
   await browser.close()

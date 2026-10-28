@@ -5,7 +5,10 @@ import RunBoundView from './RunBoundView'
 import { resultsEvidenceApi } from '../../api/resultsEvidence'
 import { useUIStore } from '../../store/uiStore'
 
-vi.mock('../../api/resultsEvidence', () => ({ resultsEvidenceApi: { loadflow: vi.fn(), run: vi.fn() } }))
+vi.mock('../../api/resultsEvidence', async importOriginal => ({
+  ...await importOriginal<typeof import('../../api/resultsEvidence')>(),
+  resultsEvidenceApi: { loadflow: vi.fn(), run: vi.fn() },
+}))
 
 const REASON = 'This project is not available to you: your access was removed or the project was deleted. '
   + 'Its runs and their kept results are not shown.'
@@ -31,6 +34,8 @@ describe('RunBoundView refusals (LC-T08)', () => {
     vi.mocked(resultsEvidenceApi.run).mockRejectedValue(refused({ error_kind: 'project_unavailable', message: REASON }))
     show()
     expect(await screen.findByText(REASON)).toBeTruthy()
+    expect(screen.getByRole('status').textContent).toBe(REASON)   // the server's words, in full
+    expect(screen.queryByText(/not been substituted/)).toBeNull()
     expect(screen.queryByText(/native retained evidence/)).toBeNull()
   })
 
