@@ -1095,6 +1095,19 @@ _VS = {
 }
 
 
+def _vs_blank_reason(rid: str, row) -> str:
+    """Why a period has no value for the row, from the period's own record: the nose below the planned load,
+    else the engine's note (the planned-load point not converging), else that no Q–V point solved."""
+    qv = rid == "voltage_stability_qv"
+    label = "Q–V" if qv else "P–V"
+    note = row["note"].strip() if isinstance(row["note"], str) else ""
+    if str(row["nose_below_planned"]) == "True":
+        return f"no {label} margin, because the nose is below the planned load"
+    if qv:
+        return f"no Q–V margin, because {note or 'no Q–V point solved'}"
+    return "the check gave no P–V margin"
+
+
 def _vs_limit(inp: _Inputs, spec: dict) -> tuple[float | None, str, bool]:
     """(least margin, its source, assumed): the profile's own key (the row cites the profile), else
     ``_limit_from`` (the user's limit, the ledger row, else the placeholder)."""
@@ -1163,8 +1176,7 @@ def _vs_rows(inp: _Inputs) -> list[dict]:
         periods = [(int(r["period"]), float(r[spec["value"]]), str(r[spec["bound"]]) == "True")
                    for _, r in frame.iterrows()]
         if blank:
-            gap = ("no Q–V margin, because the P–V margin is below its limit" if rid == "voltage_stability_qv"
-                   else "no P–V margin from the screen")
+            gap = _vs_blank_reason(rid, frame[frame["period"] == blank[0]].iloc[0])
             rows.append(_row(rid, spec["req"], project_value=None, verdict="unknown",
                              note=f"Period {blank[0]}: {gap}. {_VS_SCREENING}", **common))
             continue

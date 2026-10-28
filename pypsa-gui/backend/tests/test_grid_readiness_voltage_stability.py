@@ -182,8 +182,22 @@ def test_a_blank_bound_flag_is_no_answer_never_a_bound(tmp_path):
     p["nose_is_lower_bound"] = None
     _write(tmp_path, [p])
     pv, qv, _ = _vs(tmp_path)
-    assert pv["verdict"] == "unknown" and "Period 2030: no P–V margin from the screen" in pv["note"]
+    assert pv["verdict"] == "unknown" and "Period 2030: the check gave no P–V margin" in pv["note"]
     assert qv["verdict"] == "pass"
+
+
+@pytest.mark.parametrize("fields, cause", [
+    ({"margin_pct": -5.0}, "Period 2030: no Q–V margin, because the nose is below the planned load"),
+    ({"note": "planned-load point did not converge: no Q–V"},
+     "Period 2030: no Q–V margin, because planned-load point did not converge: no Q–V"),
+    ({"note": ""}, "Period 2030: no Q–V margin, because no Q–V point solved"),
+], ids=["nose_below_planned", "planned_point_not_converged", "no_qv_point_solves"])
+def test_a_blank_qv_margin_names_its_own_cause(tmp_path, fields, cause):
+    p = {**_period(2030, margin_pct=fields.pop("margin_pct", 40.0)), **fields}
+    p["q_margin_mvar"] = float("nan")
+    _write(tmp_path, [p])
+    _, qv, _ = _vs(tmp_path)
+    assert qv["verdict"] == "unknown" and cause in qv["note"]
 
 
 def test_a_period_with_no_operating_point_is_unknown(tmp_path):
