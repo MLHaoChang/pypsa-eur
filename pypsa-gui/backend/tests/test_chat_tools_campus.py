@@ -65,7 +65,9 @@ def test_each_dispatcher_resolves_the_project_and_calls_its_service_function(hub
                                                                            function, expected):
     calls = []
     monkeypatch.setattr(ce, function, lambda *a: calls.append(a) or {"ok": True})
-    assert chat_tools.DISPATCHERS[tool](**args) == {"ok": True}
+    out = chat_tools.DISPATCHERS[tool](**args)
+    # campus_get_study adds the campus file's digest (LV08 B-campus: campus_save_campus's base_sha256)
+    assert {k: v for k, v in out.items() if k != "campus_sha256"} == {"ok": True}
     assert len(calls) == 1
     project, *rest = calls[0]
     assert isinstance(project, Project) and project.name == "Chat Hub"
@@ -92,9 +94,12 @@ def test_the_grid_code_tools_are_registered_routed_and_tiered():
     assert schema["campus_extract_grid_code"]["required"] == ["project_id", "document_id"]
 
 
-def test_there_is_no_tool_that_publishes_or_confirms():
-    names = {t["name"] for t in TOOLS}
-    assert not {n for n in names if n.startswith("campus_") and ("publish" in n or "confirm" in n)}
+def test_publish_and_confirm_are_destructive_carded_tools():
+    # GRIDCODE-CHAT-1 (owner, 2026-10-27): publish and confirm are chat tools, destructive, behind a card.
+    from harness import edit_card
+
+    for name in ("campus_publish_grid_code", "campus_confirm_grid_code_limit"):
+        assert safety_tier_for(name) == "destructive" and name in edit_card.CARDED_ACTIONS, name
 
 
 def test_the_extract_description_says_the_document_is_data_and_a_person_confirms():
@@ -106,7 +111,7 @@ def test_the_extract_description_says_the_document_is_data_and_a_person_confirms
 
 @pytest.mark.parametrize("tool, args, function, expected", [
     ("campus_list_grid_codes", {"project_id": "Chat Hub"}, "list_grid_codes", ()),
-    ("campus_extract_grid_code", {"project_id": "Chat Hub", "document_id": "a" * 64}, "extract", ("a" * 64,)),
+    ("campus_extract_grid_code", {"project_id": "Chat Hub", "document_id": "a" * 64}, "extract", ("a" * 64, None, False)),
 ])
 def test_each_grid_code_dispatcher_calls_its_service_function(hub, monkeypatch, tool, args, function, expected):
     from services import campus_grid_code_service as gc
@@ -184,7 +189,7 @@ def test_each_library_dispatcher_resolves_the_project_and_calls_its_service_func
 # the joint optimisation (plan C12): a read tool, no start and no cancel
 # --------------------------------------------------------------------------
 
-def test_the_milp_read_tool_is_registered_routed_and_read_tiered_and_there_is_no_start_or_cancel_tool():
+def test_the_milp_read_tool_is_registered_routed_and_read_tiered_and_names_the_start_and_cancel_tools():
     names = {t["name"] for t in TOOLS}
     assert "campus_get_milp" in names
     assert TOOL_ROUTES["campus_get_milp"] == ["_service_call_"]
@@ -192,10 +197,13 @@ def test_the_milp_read_tool_is_registered_routed_and_read_tiered_and_there_is_no
     assert safety_tier_for("campus_get_milp") == "read"
     schema = {t["name"]: t["input_schema"] for t in TOOLS}
     assert schema["campus_get_milp"]["required"] == ["project_id"]
-    assert not [n for n in names if n.startswith("campus_") and "milp" in n and n != "campus_get_milp"]
+    # GRIDCODE-CHAT-1 (owner, 2026-10-27) supersedes plan C12: start and cancel are chat tools,
+    # the start behind a confirmation card.
+    assert {n for n in names if n.startswith("campus_") and "milp" in n} == {
+        "campus_get_milp", "campus_milp_status", "campus_start_milp", "campus_cancel_milp"}
     desc = {t["name"]: t["description"] for t in TOOLS}["campus_get_milp"]
     assert desc.rstrip().endswith("Safety: read.")
-    assert "panel" in desc and "cannot start" in desc
+    assert "campus_start_milp" in desc and "confirms a card" in desc
     assert "inverter" in desc and "not quotes" in desc and "stale" in desc and "fallback" in desc
 
 

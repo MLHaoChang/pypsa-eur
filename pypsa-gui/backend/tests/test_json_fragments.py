@@ -75,7 +75,9 @@ def test_two_fragments_may_not_define_the_same_kind(base):
 def test_the_real_shared_files_merge():
     assert json_fragments.tool_error_kinds()
     from smoke.assistant_route_parity import load_declarations
-    assert load_declarations()['needs_tool']
+    declarations = load_declarations()
+    assert declarations['service_matches']
+    assert isinstance(declarations['needs_tool'], list)  # empty once every route has a tool
 
 
 def test_the_loader_needs_no_site_packages():

@@ -83,6 +83,27 @@
   },
   {
    "service": "services.llm_config:set_active"
+  },
+  {
+   "service": "services.campus_electrical_service:draft"
+  },
+  {
+   "service": "services.campus_electrical_service:enqueue_run"
+  },
+  {
+   "service": "services.adequacy.grid_readiness:grid_readiness_for"
+  },
+  {
+   "service": "services.campus_electrical_service:run_island_study"
+  },
+  {
+   "service": "services.campus_grid_code_service:extract"
+  },
+  {
+   "service": "services.gridspine_service:compute_capacity"
+  },
+  {
+   "service": "services.gridspine_service:assess_facility"
   }
  ],
  "limitations": [
@@ -522,163 +543,7 @@
    "reason": "app-shell"
   }
  ],
- "needs_tool": [
-  {
-   "method": "PUT",
-   "path": "/api/campus-electrical/{name}/campus",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "POST",
-   "path": "/api/campus-electrical/{name}/draft",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "POST",
-   "path": "/api/campus-electrical/{name}/grid-codes/documents",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "DELETE",
-   "path": "/api/campus-electrical/{name}/grid-codes/documents/{document_id}",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "POST",
-   "path": "/api/campus-electrical/{name}/grid-codes/documents/{document_id}/extract",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "POST",
-   "path": "/api/campus-electrical/{name}/grid-codes/drafts",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "DELETE",
-   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "GET",
-   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "PUT",
-   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "POST",
-   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/confirm",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "POST",
-   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/publish",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "DELETE",
-   "path": "/api/campus-electrical/{name}/grid-codes/published/{profile_id}",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "GET",
-   "path": "/api/campus-electrical/{name}/grid-codes/published/{profile_id}",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "GET",
-   "path": "/api/campus-electrical/{name}/grid-readiness",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "DELETE",
-   "path": "/api/campus-electrical/{name}/grid-readiness/limits/{item}",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "PUT",
-   "path": "/api/campus-electrical/{name}/grid-readiness/limits/{item}",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "DELETE",
-   "path": "/api/campus-electrical/{name}/island/cuts",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "POST",
-   "path": "/api/campus-electrical/{name}/island/cuts/apply/cancel",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "DELETE",
-   "path": "/api/campus-electrical/{name}/island/cuts/{period}/{hour}/{kind}",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "GET",
-   "path": "/api/campus-electrical/{name}/island/gfm-settings/card",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "GET",
-   "path": "/api/campus-electrical/{name}/island/report",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "POST",
-   "path": "/api/campus-electrical/{name}/island/study",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "POST",
-   "path": "/api/campus-electrical/{name}/library/reset",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "GET",
-   "path": "/api/campus-electrical/{name}/milp",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "POST",
-   "path": "/api/campus-electrical/{name}/milp",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "POST",
-   "path": "/api/campus-electrical/{name}/milp/cancel",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "POST",
-   "path": "/api/campus-electrical/{name}/run",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "POST",
-   "path": "/api/gridspine/{name}/capacity",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "POST",
-   "path": "/api/gridspine/{name}/connection",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "POST",
-   "path": "/api/gridspine/{name}/dispatch-source/external",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "POST",
-   "path": "/api/gridspine/{name}/readback/{hour}",
-   "family": "gridspine-campus"
-  }
- ],
+ "needs_tool": [],
  "non_mutating_routes": [
   {
    "method": "POST",

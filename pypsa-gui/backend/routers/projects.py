@@ -4312,6 +4312,18 @@ def get_layout(
     return data if isinstance(data, dict) else {}
 
 
+def _serialized_layout(layout: dict) -> str:
+    """The text `layout.json` would hold, or the 413 for a document over the cap.
+    The route and the chat edit card both call this."""
+    serialized = json.dumps(layout, separators=(",", ":"))
+    if len(serialized.encode("utf-8")) > _MAX_LAYOUT_BYTES:
+        raise HTTPException(
+            413,
+            f"Layout document exceeds the {_MAX_LAYOUT_BYTES // (1024 * 1024)} MB cap.",
+        )
+    return serialized
+
+
 @router.put("/{name}/layout")
 def put_layout(
     name: str,
@@ -4350,12 +4362,7 @@ def put_layout(
     _check_project_lock(db, lock_project, user)
     # Compact (no indent): layout.json is a machine-written coordinate blob,
     # never hand-read — pretty-printing only inflates the on-disk size.
-    serialized = json.dumps(layout, separators=(",", ":"))
-    if len(serialized.encode("utf-8")) > _MAX_LAYOUT_BYTES:
-        raise HTTPException(
-            413,
-            f"Layout document exceeds the {_MAX_LAYOUT_BYTES // (1024 * 1024)} MB cap.",
-        )
+    serialized = _serialized_layout(layout)
     _atomic_write_text(dest / "layout.json", serialized)
     return {"saved": name}
 
@@ -4729,6 +4736,47 @@ def _placed_buses_and_branches(n) -> tuple[dict[str, tuple[float, float]], list]
     return buses, branches
 
 
+def _check_import_tolerance(tolerance_m: float) -> None:
+    from services import map_geometry_import as mgi
+
+    if not (0 < tolerance_m <= mgi.MAX_TOLERANCE_M):
+        raise HTTPException(422, f"tolerance_m must be between 0 and {mgi.MAX_TOLERANCE_M:g} m")
+
+
+def _import_cap_message() -> str:
+    from services import map_geometry_import as mgi
+
+    return f"Geometry upload exceeds the {mgi.MAX_IMPORT_BYTES // (1024 * 1024)} MB cap."
+
+
+def _parse_import_features(data: bytes, filename: str | None):
+    """The geometry file's features, or its 413 / 422. Pure; the import route and the edit card share it."""
+    from services import map_geometry_import as mgi
+
+    if len(data) > mgi.MAX_IMPORT_BYTES:
+        raise HTTPException(413, _import_cap_message())
+    try:
+        return mgi.parse_features(data, filename)
+    except mgi.GeometryImportInvalid as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+def _import_match_report(dest: pathlib.Path, name: str, features, tolerance_m: float) -> dict:
+    """The match report of `features` against the active project; nothing is written."""
+    from services import map_geometry_import as mgi
+    from services import site_service
+
+    _require_active_project(dest, name)
+    n = PyPSAService.get_network()
+    with PyPSAService.get_lock():
+        buses, branches = _placed_buses_and_branches(n)
+    try:
+        existing_ids = {s.get("id") for s in site_service.read_sites(dest)["sites"] if isinstance(s, dict)}
+    except PermissionError as exc:
+        raise _access_denied(dest / site_service.SITES_FILE) from exc
+    return mgi.match_features(features, branches, buses, tolerance_m=tolerance_m, existing_site_ids=existing_ids)
+
+
 @router.post("/{name}/map_layout/import")
 async def import_map_geometry(
     name: str,
@@ -4756,9 +4804,8 @@ async def import_map_geometry(
     dest, name = _resolve_project_src(name, db, user)
     if not dest.exists():
         raise HTTPException(404, f"Project '{name}' not found")
-    if not (0 < tolerance_m <= mgi.MAX_TOLERANCE_M):
-        raise HTTPException(422, f"tolerance_m must be between 0 and {mgi.MAX_TOLERANCE_M:g} m")
-    cap_msg = f"Geometry upload exceeds the {mgi.MAX_IMPORT_BYTES // (1024 * 1024)} MB cap."
+    _check_import_tolerance(tolerance_m)
+    cap_msg = _import_cap_message()
     declared = request.headers.get("content-length")
     if declared and declared.isdigit() and int(declared) > mgi.MAX_IMPORT_BYTES:
         raise HTTPException(413, cap_msg)
@@ -4772,27 +4819,14 @@ async def import_map_geometry(
         filename = getattr(upload, "filename", None)
     else:
         data = await request.body()
-    if len(data) > mgi.MAX_IMPORT_BYTES:
-        raise HTTPException(413, cap_msg)
-    try:
-        features = mgi.parse_features(data, filename)
-    except mgi.GeometryImportInvalid as exc:
-        raise HTTPException(422, str(exc)) from exc
+    features = _parse_import_features(data, filename)
     if apply:
         # The lock is checked BEFORE anything is matched: a refusal must not
         # depend on whose network happens to be loaded.
         lock_project = project_registry.find_project(db, user, name)
         _check_project_lock(db, lock_project, user)
 
-    _require_active_project(dest, name)
-    n = PyPSAService.get_network()
-    with PyPSAService.get_lock():
-        buses, branches = _placed_buses_and_branches(n)
-    try:
-        existing_ids = {s.get("id") for s in site_service.read_sites(dest)["sites"] if isinstance(s, dict)}
-    except PermissionError as exc:
-        raise _access_denied(dest / site_service.SITES_FILE) from exc
-    report = mgi.match_features(features, branches, buses, tolerance_m=tolerance_m, existing_site_ids=existing_ids)
+    report = _import_match_report(dest, name, features, tolerance_m)
     report["applied"] = False
     if not apply:
         return report

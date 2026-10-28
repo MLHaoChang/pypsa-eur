@@ -61,8 +61,9 @@ def test_the_issue_rows_are_declared():
         'assistant_keys_and_profiles': ('out of chat', 'settings'), 'assistant_access_rule': ('out of chat', 'chat'),
         'solve_queue_instance_controls': ('out of chat', 'solveQueue'), 'map_layout_and_sites': ('manual', 'map'),
         'site_scene': ('unbuilt', 'map'),
-        'library_uploads_and_tariff_edit': ('manual', 'library'), 'grid_code_publish': ('manual', 'campusElectrical'),
+        'library_uploads_and_tariff_edit': ('manual', 'library'),
     }
+    assert 'grid_code_publish' not in entries  # GRIDCODE-CHAT-1: chat tools behind a card
     assert {k: (e['disposition'], e['panel']) for k, e in entries.items()} == expected
     assert entries['project_members']['reason'] == 'Sharing a project is not available from chat yet. Add or remove its members in the Workspace panel.'
     assert entries['solve_queue_instance_controls']['routes'] == frozenset({

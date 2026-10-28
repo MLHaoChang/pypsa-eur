@@ -688,7 +688,8 @@ def get_results(result_kind: str, source: str = "lopf", detail: str | None = Non
     `run_id` (LC-03) answers for one run: see `_results_for_run`.
     """
     if run_id is not None:
-        return _results_for_run(result_kind, run_id)
+        return _results_for_run(result_kind, run_id, reshaped=(
+            source != "lopf" or detail is not None or offset != 0 or limit is not None))
     handler = _resolve_results_handler(result_kind)
     # Some handlers take `source` as a query param; pass via kwargs if the
     # function accepts it, else call bare. Inspect via __code__.co_varnames.
@@ -703,15 +704,18 @@ def get_results(result_kind: str, source: str = "lopf", detail: str | None = Non
     return _with_freshness(result)
 
 
-def _results_for_run(result_kind: str, run_id: Any) -> dict:
+def _results_for_run(result_kind: str, run_id: Any, *, reshaped: bool = False) -> dict:
     """LC-03: one run's results, never another run's.
 
     The run the current results came from answers with the current read; any
     other run answers from the section kept when it finished
     (`retained_results`), or a typed unavailable naming the run. Only the
-    kinds a family keeps take a run_id.
+    kinds a family keeps take a run_id. A digest family answers its bounded
+    digest for every run, and refuses any argument (`reshaped`) that asks for
+    something else, such as the per-snapshot series or another source.
     """
     from services import retained_results, run_evidence
+    from services.results import dispatch_digest
 
     if not isinstance(run_id, str) or not run_evidence._valid_run_id(run_id):
         raise HTTPException(422, {"error_kind": "invalid_results_argument",
@@ -722,6 +726,14 @@ def _results_for_run(result_kind: str, run_id: Any) -> dict:
             "historical_scope_mismatch",
             f"result_kind {result_kind!r} is not kept per run; run_id reads only these kinds.",
             run_id=run_id, scope="historical", kept_kinds=list(retained_results.KEPT_KINDS))
+    digest = retained_results.adapter(section).digest
+    if digest is not None and reshaped:
+        return retained_results.unavailable(
+            "historical_scope_mismatch",
+            f"A run keeps a digest of {result_kind!r} (the default LOPF read over all snapshots), "
+            "not its per-snapshot series or another source; call it with run_id alone.",
+            run_id=run_id, scope="historical", result_kind=result_kind,
+            digest_fields=list(dispatch_digest.FIELDS))
     from services.workflow_tools import solve_freshness
 
     run_evidence._authority()
@@ -729,14 +741,25 @@ def _results_for_run(result_kind: str, run_id: Any) -> dict:
     # The current read answers for its run only while it is that run's own
     # optimal solve (as at capture); otherwise the kept section answers.
     if run is not None and solve_freshness().get("results_current") is True:
+        if digest is None:
+            data = get_results(result_kind)
+        else:
+            live = digest()
+            if live.get("status") != "ok":
+                return retained_results.unavailable(
+                    "historical_scope_mismatch", "This run's results cannot be digested.",
+                    reason=live.get("reason"), result_kind=result_kind, run_id=run_id,
+                    run=run, **facts)
+            data = dispatch_digest.for_kind(live, result_kind)
         return {"status": "ok", "scope": "current", "result_kind": result_kind,
-                "data": get_results(result_kind), "run_id": run_id, "run": run, **facts}
+                "data": data, "run_id": run_id, "run": run, **facts}
     record, refused = retained_results.historical(section, run_id)
     if refused is not None:
         return {**refused, "result_kind": result_kind, "run_id": run_id, **facts,
                 "next_step": "Say this run is not the current result and offer to re-run."}
     return {"status": "ok", "scope": "historical", "result_kind": result_kind,
-            "data": (record.get("data") or {}).get(result_kind),
+            "data": (dispatch_digest.for_kind(record["data"], result_kind) if digest is not None
+                     else (record.get("data") or {}).get(result_kind)),
             "section": section, "run_id": run_id,
             "run": retained_results.run_ref(run_id, record, current=False), **facts,
             "scope_note": "This run's results as kept when it finished; the Results tabs "
@@ -1978,12 +2001,13 @@ def _urdb_rate(data, item_index: int | None = None):
     return data
 
 
-def import_urdb_tariff(file_id: str, name: str, cyclic_year: bool = False,
-                       accept_partial: bool = False, valid_from: str | None = None,
-                       item_index: int | None = None, tariff_id: str | None = None,
-                       jurisdiction: str | None = None) -> dict:
-    """An UPLOADED URDB JSON file (never an LLM-emitted blob) → a Library tariff."""
-    from routers.library import UrdbImportIn, import_urdb as _h
+def _urdb_request(file_id: str, name: str, cyclic_year: bool = False,
+                  accept_partial: bool = False, valid_from: str | None = None,
+                  item_index: int | None = None, tariff_id: str | None = None,
+                  jurisdiction: str | None = None):
+    """The import body for an UPLOADED URDB JSON file, or the tool's refusal. Reads the
+    upload and writes nothing (the edit card calls it too)."""
+    from routers.library import UrdbImportIn
     from services import upload_service
 
     with _acting():   # identity before the file is read (review L4)
@@ -2008,6 +2032,18 @@ def import_urdb_tariff(file_id: str, name: str, cyclic_year: bool = False,
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={
             "error_kind": "urdb_invalid", "message": _safe_text(exc, 300)}) from exc
+    return body
+
+
+def import_urdb_tariff(file_id: str, name: str, cyclic_year: bool = False,
+                       accept_partial: bool = False, valid_from: str | None = None,
+                       item_index: int | None = None, tariff_id: str | None = None,
+                       jurisdiction: str | None = None) -> dict:
+    """An UPLOADED URDB JSON file (never an LLM-emitted blob) → a Library tariff."""
+    from routers.library import import_urdb as _h
+
+    body = _urdb_request(file_id, name, cyclic_year, accept_partial, valid_from, item_index,
+                         tariff_id, jurisdiction)
     out = _library_call(_h, body).model_dump(mode="json")
     refusals = out.get("refusals") or []
     out["refusals_total"] = len(refusals)
@@ -2019,13 +2055,11 @@ def import_urdb_tariff(file_id: str, name: str, cyclic_year: bool = False,
     return out
 
 
-def attach_tariff(name: str, version: int | None = None, replace_inline: bool = False) -> dict:
-    """Set `commercial.import_tariff_ref` to a Library tariff through the
-    solver-config route (which resolves and pins it). An inline tariff that is
-    not this item is never replaced silently (review M2)."""
-    from models.schemas import SolverConfigSchema
+def _attach_tariff_plan(name: str, version: int | None, replace_inline: bool) -> tuple[dict, dict, dict | None]:
+    """The Library ref, the commercial config and what an inline tariff loses, as
+    `attach_tariff` would store them. Pure: the Library is only read (the edit card calls it too)."""
     from routers.library import ItemKind, get_item as _get
-    from routers.simulation import get_solver_config as _cfg, update_solver_config as _put
+    from routers.simulation import get_solver_config as _cfg
 
     ref = _library_call(_get, ItemKind.tariff, name, version=version).ref.model_dump(mode="json")
     commercial = dict((_cfg() or {}).get("commercial") or {})
@@ -2065,6 +2099,17 @@ def attach_tariff(name: str, version: int | None = None, replace_inline: bool = 
     commercial.pop("import_tariff", None)
     commercial.pop("import_tariff_id", None)
     commercial["import_tariff_ref"] = ref
+    return ref, commercial, replaced
+
+
+def attach_tariff(name: str, version: int | None = None, replace_inline: bool = False) -> dict:
+    """Set `commercial.import_tariff_ref` to a Library tariff through the
+    solver-config route (which resolves and pins it). An inline tariff that is
+    not this item is never replaced silently (review M2)."""
+    from models.schemas import SolverConfigSchema
+    from routers.simulation import update_solver_config as _put
+
+    ref, commercial, replaced = _attach_tariff_plan(name, version, replace_inline)
     out = _library_call(_put, SolverConfigSchema(commercial=commercial))
     bound = (out.get("commercial") or {}).get("import_tariff") or {}
     return {"import_tariff_ref": ref,
@@ -2213,11 +2258,10 @@ def get_finance_inputs() -> dict:
     return _h()
 
 
-def set_finance_inputs(if_match: str, finance: dict | None = None, clear: bool = False) -> dict:
-    """Replace (or, with clear=true, remove) the finance inputs through
-    `PUT /api/simulation/finance`, always with the digest the model read
-    (gatekeeper F1: no '*', no implicit clear)."""
-    from routers.simulation import FinanceIn, put_finance as _h
+def _finance_request(if_match: str, finance: dict | None, clear: bool):
+    """The `PUT /finance` body and `If-Match` tag for `set_finance_inputs`, or the tool's
+    refusal (gatekeeper F1: no '*', no implicit clear). Pure (the edit card calls it too)."""
+    from routers.simulation import FinanceIn
 
     tag = (if_match or "").strip()
     if tag.strip('"').strip() in ("", "*"):
@@ -2234,7 +2278,17 @@ def set_finance_inputs(if_match: str, finance: dict | None = None, clear: bool =
             "error_kind": "finance_clear_invalid",
             "message": "pass the whole `finance` object, or clear=true to remove every "
                        "finance input"})
-    return _h(FinanceIn(finance=None if clear else finance), if_match=tag)
+    return FinanceIn(finance=None if clear else finance), tag
+
+
+def set_finance_inputs(if_match: str, finance: dict | None = None, clear: bool = False) -> dict:
+    """Replace (or, with clear=true, remove) the finance inputs through
+    `PUT /api/simulation/finance`, always with the digest the model read
+    (gatekeeper F1: no '*', no implicit clear)."""
+    from routers.simulation import put_finance as _h
+
+    body, tag = _finance_request(if_match, finance, clear)
+    return _h(body, if_match=tag)
 
 
 def get_poc_state() -> dict:
@@ -2349,22 +2403,15 @@ class _Unset:
 _UNSET = _Unset()
 
 
-def set_site_connection(poc_link: str, export_link: str | None | _Unset = _UNSET,
-                        timezone: str | None | _Unset = _UNSET) -> dict:
-    """Set the commercial root (`poc_link`, `export_link`, `timezone`) through
-    the solver-config route, keeping every other key of a stored commercial
-    config (the route keeps the value flows itself). An OMITTED `export_link`
-    or `timezone` keeps the stored value; an explicit null clears it. The
-    Links are checked first (`binding.check_site_connection`): they exist, are
-    one-way and point grid → site (PoC) and site → grid (export)."""
+def _site_connection_plan(poc_link: str, export_link, timezone) -> tuple[dict, object, bool]:
+    """The commercial config `set_site_connection` would store, checked and validated, and
+    whether none was stored before. Pure: nothing is written (the edit card calls it too)."""
     from pydantic import ValidationError
 
     from models.schemas import SolverConfigSchema
-    from routers.simulation import get_solver_config as _cfg, update_solver_config as _put
+    from routers.simulation import get_solver_config as _cfg
     from services.commercial import binding
 
-    with _acting():   # identity before the network is read
-        pass
     stored = (_cfg() or {}).get("commercial")
     created = not (isinstance(stored, dict) and stored.get("poc_link"))
     commercial = dict(stored) if isinstance(stored, dict) else {}
@@ -2387,6 +2434,23 @@ def set_site_connection(poc_link: str, export_link: str | None | _Unset = _UNSET
         message = str(errors[0].get("msg")) if errors else str(exc)
         raise HTTPException(status_code=422, detail={
             "error_kind": "site_connection_invalid", "message": message[:300]}) from exc
+    return commercial, body, created
+
+
+def set_site_connection(poc_link: str, export_link: str | None | _Unset = _UNSET,
+                        timezone: str | None | _Unset = _UNSET) -> dict:
+    """Set the commercial root (`poc_link`, `export_link`, `timezone`) through
+    the solver-config route, keeping every other key of a stored commercial
+    config (the route keeps the value flows itself). An OMITTED `export_link`
+    or `timezone` keeps the stored value; an explicit null clears it. The
+    Links are checked first (`binding.check_site_connection`): they exist, are
+    one-way and point grid → site (PoC) and site → grid (export)."""
+    from routers.simulation import update_solver_config as _put
+    from services.commercial import binding
+
+    with _acting():   # identity before the network is read
+        pass
+    commercial, body, created = _site_connection_plan(poc_link, export_link, timezone)
     try:
         out = _library_call(_put, body)
     except HTTPException as exc:
@@ -4398,24 +4462,27 @@ def list_load_profile_archetypes() -> dict:
 
 def generate_load_profile(project_id: str, archetype: str, loads: list,
                           params: dict | None = None,
-                          year: int | None = None) -> dict:
+                          year: int | None = None,
+                          replay_refinements: bool = True) -> dict:
     from routers.profiles import LoadGenerateRequest, generate_load_profiles as _h
     body = LoadGenerateRequest(archetype=archetype, loads=loads, params=params,
-                               year=year)
+                               year=year, replay_refinements=replay_refinements)
     return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
 def generate_availability_profile(project_id: str, kind: str, generators: list,
                                   params: dict | None = None,
                                   year: int | None = None,
-                                  component_type: str = "generators") -> dict:
+                                  component_type: str = "generators",
+                                  replay_refinements: bool = True) -> dict:
     from routers.profiles import (
         AvailabilityGenerateRequest,
         generate_availability_profiles as _h,
     )
     body = AvailabilityGenerateRequest(kind=kind, components=generators,
                                        component_type=component_type,
-                                       params=params, year=year)
+                                       params=params, year=year,
+                                       replay_refinements=replay_refinements)
     return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
@@ -4427,10 +4494,11 @@ def refine_generated_profile(project_id: str, job_id: str, ops: list) -> dict:
 
 def generate_series_profile(project_id: str, kind: str, components: list,
                             params: dict | None = None,
-                            year: int | None = None) -> dict:
+                            year: int | None = None,
+                            replay_refinements: bool = True) -> dict:
     from routers.profiles import SeriesGenerateRequest, generate_series_profiles as _h
     body = SeriesGenerateRequest(kind=kind, components=components, params=params,
-                                 year=year)
+                                 year=year, replay_refinements=replay_refinements)
     return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
@@ -4552,17 +4620,22 @@ def gridspine_create_study(name: str, config: dict | None = None) -> dict:
         return _h(db, user, name, config=config)
 
 
+def dispatch_source_arg(from_dispatch: str | None, from_project: str | None):
+    """The `source` the service takes, from the tool's two optional arguments (the
+    edit card reads it the same way)."""
+    if from_project is not None:
+        return {"from_project": from_project}
+    if from_dispatch is not None:
+        return {"from_dispatch": from_dispatch}
+    return "generate"
+
+
 def gridspine_set_dispatch_source(
     project_id: str, from_dispatch: str | None = None, from_project: str | None = None,
 ) -> dict:
     from services.gridspine_service import set_dispatch_source as _h
     with _acting() as (db, user):
-        if from_project is not None:
-            source = {"from_project": from_project}
-        elif from_dispatch is not None:
-            source = {"from_dispatch": from_dispatch}
-        else:
-            source = "generate"
+        source = dispatch_source_arg(from_dispatch, from_project)
         return _h(db, _gridspine_project(db, user, project_id), source, user=user)
 
 
@@ -4648,9 +4721,12 @@ def gridspine_get_connection_assessments(project_id: str, assessment_id: str | N
 
 
 def campus_get_study(project_id: str) -> dict:
+    from harness.campus_cards import sha256_text
     from services.campus_electrical_service import get_state as _h
     with _acting() as (db, user):
-        return _h(_gridspine_project(db, user, project_id))
+        state = _h(_gridspine_project(db, user, project_id))
+    # The digest campus_save_campus's base_sha256 names (LV08 B-campus).
+    return {**state, "campus_sha256": sha256_text(state.get("campus_yaml"))}
 
 
 def campus_draft_campus(project_id: str, overwrite: bool = False) -> dict:
@@ -4795,12 +4871,13 @@ def campus_list_grid_codes(project_id: str) -> dict:
         return _h(_gridspine_project(db, user, project_id))
 
 
-def campus_extract_grid_code(project_id: str, document_id: str) -> dict:
+def campus_extract_grid_code(project_id: str, document_id: str, profile_id: str | None = None,
+                             overwrite: bool = False) -> dict:
     # No publish or confirm tool exists, on purpose: the copilot drafts, a
     # person confirms each limit and publishes, in the panel (plan C10).
     from services.campus_grid_code_service import extract as _h
     with _acting() as (db, user):
-        return _h(_gridspine_project_for_write(db, user, project_id), document_id)
+        return _h(_gridspine_project_for_write(db, user, project_id), document_id, profile_id, bool(overwrite))
 
 
 def gridspine_assess_connection(project_id: str, bus: str, load_mw: float, load_pf: float = 0.98,
@@ -6756,6 +6833,10 @@ def apply_demand_from_excel(
         if _user_ts is not None and _user_ts_lock is not None:
             with _user_ts_lock:
                 _user_ts[("loads", "p_set", load_name)] = aligned
+                # The upload replaces the series, so the meta recorded for the
+                # old one (generator, refinements) no longer describes it.
+                from services.user_timeseries import _user_ts_meta
+                _user_ts_meta.pop(("loads", "p_set", load_name), None)
         # A user's load profile sets the growth placeholders it covers (E1 follow-up).
         growth_placeholders.mark_set(n, "loads", "p_set", {load_name: aligned}, prior)
 
@@ -8578,13 +8659,8 @@ def _b2b_body_request(data: bytes, path: str):
                     "query_string": b""}, receive)
 
 
-def import_map_geometry(name: str, file_id: str, apply: bool = False, tolerance_m: float = 50.0) -> dict:
-    """
-    An UPLOADED GeoJSON/KML file of the active project through the map's import
-    route. The bytes are the upload's (never model-emitted); the route parses,
-    caps, lock-checks on apply and writes.
-    """
-    from routers.projects import import_map_geometry as _h
+def _map_geometry_upload(name: str, file_id: str) -> tuple[str, bytes]:
+    """`(active project, bytes)` of the geometry upload `file_id`; the edit card reads it the same way."""
     from services import upload_service
 
     with _acting():   # identity before the file is read
@@ -8598,7 +8674,18 @@ def import_map_geometry(name: str, file_id: str, apply: bool = False, tolerance_
             "message": f"That file was uploaded to the open project ({active}), so it "
                        f"can only be imported there. To import it into {name}, "
                        f"open {name} and upload the file again."})
-    data = upload_service.get_upload_bytes(active, file_id)
+    return active, upload_service.get_upload_bytes(active, file_id)
+
+
+def import_map_geometry(name: str, file_id: str, apply: bool = False, tolerance_m: float = 50.0) -> dict:
+    """
+    An UPLOADED GeoJSON/KML file of the active project through the map's import
+    route. The bytes are the upload's (never model-emitted); the route parses,
+    caps, lock-checks on apply and writes.
+    """
+    from routers.projects import import_map_geometry as _h
+
+    active, data = _map_geometry_upload(name, file_id)
     request = _b2b_body_request(data, f"/api/projects/{name}/map_layout/import")
     with _acting() as (db, user):
         # Async handler: driven inside the identity scope, so its db stays open.
@@ -8705,6 +8792,267 @@ def create_evidence_report(title: str | None = None) -> dict:
         "sections": [_report_section_row(s) for s in document.get("sections") or []],
         "message": f"Stored as report {rid}: get_report('{rid}') reads it.",
     })
+
+
+# ── LV08 B-campus (live-voice issue 08 slice B): campus and gridspine routes ──
+#
+# As B2b: each tool calls its GUI route's own handler in-process (the route in
+# `catalogue.TOOL_ROUTES`), so the route's lock check, body validation and
+# refusals are the tool's. The project is NAMED (`project_id`, as the other
+# campus tools), not taken from the session.
+
+
+def _campus_route(handler, project_id: str, /, *args, **kwargs):
+    """Call a campus/gridspine router handler for the project `project_id`
+    names, as the acting user. Async handlers are driven inside the identity
+    scope, so their db stays open until they return."""
+    from routers.deps import require_project_access
+
+    with _acting() as (db, user):
+        project = _gridspine_project(db, user, project_id)
+        proj = require_project_access(project.name, db=db, user=user)
+        params = inspect.signature(handler).parameters
+        injected = {n: v for n, v in (("proj", proj), ("db", db), ("user", user)) if n in params}
+        return _sync(handler(*args, **injected, **kwargs))
+
+
+def campus_save_campus(project_id: str, yaml: str, base_sha256: str | None = None) -> dict:
+    """`PUT …/campus`: the user's campus file, validated by building it. Refused
+    when the file changed since the model read it (`base_sha256`)."""
+    from harness import campus_cards
+    from routers.campus_electrical import CampusText, save_campus as _h
+
+    with _acting() as (db, user):
+        campus_cards.require_base(campus_cards.campus_text(_gridspine_project(db, user, project_id)),
+                                  base_sha256, "campus file")
+    out = _campus_route(_h, project_id, CampusText(yaml=yaml))
+    return _b2b_fit({"campus_sha256": campus_cards.sha256_text(out.get("campus_yaml")), **out})
+
+
+def campus_milp_status(project_id: str) -> dict:
+    """`GET …/milp`: the joint optimisation job's record."""
+    from routers.campus_electrical import milp_status as _h
+
+    return _b2b_fit({"job": _campus_route(_h, project_id)})
+
+
+def campus_start_milp(project_id: str, k: int | None = None, pf: float | None = None,
+                      profile: str | None = None, margin: float | None = None,
+                      n_minus_1: bool | None = None, invest: bool | None = None,
+                      pcc_switchgear_by_operator: bool | None = None,
+                      pcc_tap_control: str | None = None) -> dict:
+    """`POST …/milp`: start the joint optimisation with these run settings
+    (omitted ones take the route's defaults)."""
+    from routers.campus_electrical import RunSettings, start_milp as _h
+
+    given = {key: v for key, v in (("k", k), ("pf", pf), ("profile", profile), ("margin", margin),
+                                   ("n_minus_1", n_minus_1), ("invest", invest),
+                                   ("pcc_switchgear_by_operator", pcc_switchgear_by_operator),
+                                   ("pcc_tap_control", pcc_tap_control)) if v is not None}
+    return _campus_route(_h, project_id, RunSettings(**given))
+
+
+def campus_cancel_milp(project_id: str) -> dict:
+    """`POST …/milp/cancel`: the job stops and keeps its best point."""
+    from routers.campus_electrical import cancel_milp as _h
+
+    return _campus_route(_h, project_id)
+
+
+def campus_set_grid_limit(project_id: str, item: str, source: str, value: float | None = None,
+                          note: str = "") -> dict:
+    """`PUT …/grid-readiness/limits/{item}`: the user's own limit."""
+    from routers.campus_electrical import LimitBody, put_grid_readiness_limit as _h
+
+    return _campus_route(_h, project_id, item, LimitBody(value=value, source=source, note=note))
+
+
+def campus_reset_grid_limit(project_id: str, item: str) -> dict:
+    """`DELETE …/grid-readiness/limits/{item}`: back to the template's value."""
+    from routers.campus_electrical import delete_grid_readiness_limit as _h
+
+    return _campus_route(_h, project_id, item)
+
+
+def campus_island_report(project_id: str) -> dict:
+    """`GET …/island/report`, trimmed under the result cap."""
+    from routers.campus_electrical import island_report as _h
+
+    return _b2b_fit(_campus_route(_h, project_id))
+
+
+def campus_cancel_island_cuts(project_id: str) -> dict:
+    """`POST …/island/cuts/apply/cancel`: stop after the trial in hand."""
+    from routers.campus_electrical import cancel_island_cuts as _h
+
+    return {"job": _campus_route(_h, project_id)}
+
+
+def campus_remove_island_cut(project_id: str, period: int, hour: int, kind: str) -> dict:
+    """`DELETE …/island/cuts/{period}/{hour}/{kind}`: take one applied cut back."""
+    from routers.campus_electrical import remove_island_cut as _h
+
+    return _b2b_fit(_campus_route(_h, project_id, int(period), int(hour), kind))
+
+
+def campus_clear_island_cuts(project_id: str) -> dict:
+    """`DELETE …/island/cuts`: every cut back, and the trials with them."""
+    from routers.campus_electrical import clear_island_cuts as _h
+
+    return _b2b_fit(_campus_route(_h, project_id))
+
+
+def campus_gfm_settings_card(project_id: str) -> dict:
+    """`GET …/island/gfm-settings/card`: the apply card, written nowhere."""
+    from routers.campus_electrical import gfm_settings_card as _h
+
+    return _b2b_fit(_campus_route(_h, project_id))
+
+
+def campus_reset_library(project_id: str) -> dict:
+    """`POST …/library/reset`: drop the project's copy of the asset library."""
+    from routers.campus_electrical import reset_library as _h
+
+    return _b2b_fit(_campus_route(_h, project_id))
+
+
+def _gridspine_upload(project_id: str, file_id: str):
+    """An UploadFile of the active project's upload `file_id`, for a gridspine
+    upload route on the project `project_id` names. The upload belongs to the
+    active project, so naming another one is 409 (as import_map_geometry). No
+    edit lock, as the route: a gridspine study is not lock-coordinated
+    (`STUDY_NOT_LOCK_COORDINATED` in tests/test_write_surface_lock_policy.py)."""
+    with _acting() as (db, user):
+        target = _gridspine_project(db, user, project_id).name
+    active = _require_active_project()
+    if target != active:
+        raise HTTPException(status_code=409, detail={
+            "error_kind": "upload_project_mismatch",
+            "message": f"the file is an upload of the active project {active!r}; "
+                       f"use that project, or switch to {target!r} and upload there"})
+    from fastapi import UploadFile
+    from starlette.datastructures import Headers
+
+    from services import upload_service
+
+    upload = _active_upload(file_id)
+    # The stored upload's own media type, as a browser would send it (the PDF route checks it).
+    mime = upload_service.get_upload_meta(active, file_id).mime
+    return UploadFile(file=upload.file, filename=upload.filename, headers=Headers({"content-type": mime}))
+
+
+@contextlib.contextmanager
+def _closing_uploads(*files):
+    """Close the stored uploads' handles once the route has read them."""
+    try:
+        yield
+    finally:
+        for f in files:
+            if f is not None:
+                f.file.close()
+
+
+def gridspine_upload_external_dispatch(project_id: str, dispatch_file_id: str,
+                                       loads_file_id: str | None = None) -> dict:
+    """`POST …/dispatch-source/external` with UPLOADED tables (never model bytes)."""
+    from routers.gridspine import upload_external_dispatch as _h
+
+    dispatch = _gridspine_upload(project_id, dispatch_file_id)
+    loads = _gridspine_upload(project_id, loads_file_id) if loads_file_id else None
+    with _closing_uploads(dispatch, loads):
+        return _b2b_fit(_campus_route(_h, project_id, dispatch=dispatch, loads=loads))
+
+
+def gridspine_upload_readback(project_id: str, hour: int, bus_file_id: str,
+                              branches_file_id: str | None = None) -> dict:
+    """`POST …/readback/{hour}` with the engineer's UPLOADED PowerFactory CSVs."""
+    from routers.gridspine import upload_readback as _h
+
+    bus = _gridspine_upload(project_id, bus_file_id)
+    branches = _gridspine_upload(project_id, branches_file_id) if branches_file_id else None
+    with _closing_uploads(bus, branches):
+        return _b2b_fit(_campus_route(_h, project_id, int(hour), bus=bus, branches=branches))
+
+
+# Grid codes (owner decision GRIDCODE-CHAT-1): confirm, publish and the deletes
+# are destructive and show a card (harness/campus_cards.py) before they run.
+
+
+def _with_sha(shaped: dict) -> dict:
+    from harness.campus_cards import sha256_text
+
+    return _b2b_fit({"sha256": sha256_text(shaped.get("yaml")), **shaped})
+
+
+def campus_upload_grid_code_document(project_id: str, file_id: str, page_ranges: str | None = None) -> dict:
+    """`POST …/grid-codes/documents` with the active project's UPLOADED PDF; the route's size cap runs."""
+    from routers.campus_electrical import upload_grid_code_document as _h
+
+    pdf = _gridspine_upload(project_id, file_id)
+    with _closing_uploads(pdf):
+        return _b2b_fit(_campus_route(_h, project_id, file=pdf, page_ranges=page_ranges))
+
+
+def campus_delete_grid_code_document(project_id: str, document_id: str) -> dict:
+    from routers.campus_electrical import delete_grid_code_document as _h
+
+    return _campus_route(_h, project_id, document_id)
+
+
+def campus_new_grid_code_draft(project_id: str, profile_id: str, title: str | None = None,
+                               overwrite: bool = False) -> dict:
+    from routers.campus_electrical import NewDraft, new_grid_code_draft as _h
+
+    return _with_sha(_campus_route(_h, project_id, NewDraft(profile_id=profile_id, title=title,
+                                                            overwrite=bool(overwrite))))
+
+
+def campus_get_grid_code_draft(project_id: str, profile_id: str) -> dict:
+    from routers.campus_electrical import get_grid_code_draft as _h
+
+    return _with_sha(_campus_route(_h, project_id, profile_id))
+
+
+def campus_save_grid_code_draft(project_id: str, profile_id: str, yaml: str,
+                                base_sha256: str | None = None) -> dict:
+    """`PUT …/grid-codes/drafts/{id}`; refused when the draft changed since it was read."""
+    from harness import campus_cards
+    from routers.campus_electrical import ProfileText, save_grid_code_draft as _h
+
+    with _acting() as (db, user):
+        current = campus_cards._draft_or_none(_gridspine_project(db, user, project_id), profile_id)
+    campus_cards.require_base(current and current["yaml"], base_sha256, f"draft {profile_id!r}")
+    return _with_sha(_campus_route(_h, project_id, profile_id, ProfileText(yaml=yaml)))
+
+
+def campus_delete_grid_code_draft(project_id: str, profile_id: str) -> dict:
+    from routers.campus_electrical import delete_grid_code_draft as _h
+
+    return _campus_route(_h, project_id, profile_id)
+
+
+def campus_confirm_grid_code_limit(project_id: str, profile_id: str, limit: str) -> dict:
+    from routers.campus_electrical import ConfirmLimit, confirm_grid_code_limit as _h
+
+    return _with_sha(_campus_route(_h, project_id, profile_id, ConfirmLimit(limit=limit)))
+
+
+def campus_publish_grid_code(project_id: str, profile_id: str, allow_unconfirmed: bool = False) -> dict:
+    from routers.campus_electrical import Publish, publish_grid_code as _h
+
+    return _b2b_fit(_campus_route(_h, project_id, profile_id, Publish(allow_unconfirmed=bool(allow_unconfirmed))))
+
+
+def campus_get_published_grid_code(project_id: str, profile_id: str) -> dict:
+    from routers.campus_electrical import get_published_grid_code as _h
+
+    return _with_sha(_campus_route(_h, project_id, profile_id))
+
+
+def campus_delete_published_grid_code(project_id: str, profile_id: str) -> dict:
+    from routers.campus_electrical import delete_published_grid_code as _h
+
+    return _campus_route(_h, project_id, profile_id)
 
 
 # ── Registry entry-point ────────────────────────────────────────────────────
@@ -9163,6 +9511,33 @@ DISPATCHERS.update({
     "get_report_evidence_hash": get_report_evidence_hash,
     "get_report_version": get_report_version,
     "create_evidence_report": create_evidence_report,
+})
+# ── LV08 B-campus (live-voice issue 08 slice B): campus and gridspine routes
+DISPATCHERS.update({
+    "campus_save_campus": campus_save_campus,
+    "campus_milp_status": campus_milp_status,
+    "campus_start_milp": campus_start_milp,
+    "campus_cancel_milp": campus_cancel_milp,
+    "campus_set_grid_limit": campus_set_grid_limit,
+    "campus_reset_grid_limit": campus_reset_grid_limit,
+    "campus_island_report": campus_island_report,
+    "campus_cancel_island_cuts": campus_cancel_island_cuts,
+    "campus_remove_island_cut": campus_remove_island_cut,
+    "campus_clear_island_cuts": campus_clear_island_cuts,
+    "campus_gfm_settings_card": campus_gfm_settings_card,
+    "campus_reset_library": campus_reset_library,
+    "gridspine_upload_external_dispatch": gridspine_upload_external_dispatch,
+    "gridspine_upload_readback": gridspine_upload_readback,
+    "campus_upload_grid_code_document": campus_upload_grid_code_document,
+    "campus_delete_grid_code_document": campus_delete_grid_code_document,
+    "campus_new_grid_code_draft": campus_new_grid_code_draft,
+    "campus_get_grid_code_draft": campus_get_grid_code_draft,
+    "campus_save_grid_code_draft": campus_save_grid_code_draft,
+    "campus_delete_grid_code_draft": campus_delete_grid_code_draft,
+    "campus_confirm_grid_code_limit": campus_confirm_grid_code_limit,
+    "campus_publish_grid_code": campus_publish_grid_code,
+    "campus_get_published_grid_code": campus_get_published_grid_code,
+    "campus_delete_published_grid_code": campus_delete_published_grid_code,
 })
 
 

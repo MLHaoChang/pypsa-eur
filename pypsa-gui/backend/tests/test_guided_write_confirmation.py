@@ -19,6 +19,7 @@ unchanged; a denial skips only that call.
 """
 from __future__ import annotations
 
+import contextvars
 import threading
 import time
 
@@ -53,8 +54,9 @@ def _voll() -> float:
 
 
 class _StressSpy:
-    """put_stress_scenarios needs a saved project; the question here is only
-    WHETHER it runs, so the dispatcher is replaced by a recorder."""
+    """put_stress_scenarios writes into a saved project; the question here is
+    only WHETHER it runs, so the dispatcher is replaced by a recorder. Its card
+    still reads the real project ("P", saved by `world`)."""
     def __init__(self):
         self.calls: list[dict] = []
 
@@ -73,14 +75,18 @@ CASES = [
      lambda spy: _bus_flag("eh_critical"), True),
     ("update_solver_config", {"partial": {"voll": 4321.0}},
      lambda spy: _voll(), 4321.0),
-    ("put_stress_scenarios", {"name": "P", "scenarios": []},
+    ("put_stress_scenarios",
+     {"name": "P", "scenarios": [{"id": "dunkel", "name": "Dunkel", "kind": "parametric",
+                                  "frequency_per_year": 2.0, "electrical_load_multiplier": 1.1,
+                                  "renewable_availability_multiplier": 0.2}]},
      lambda spy: len(spy.calls), 1),
 ]
 
 
 @pytest.fixture
-def world(tmp_projects_dir, install_network, monkeypatch):
+def world(tmp_projects_dir, install_network, api_project, monkeypatch):
     monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 5.0)
+    api_project("P")  # the stress-scenario card reads a saved project
     n = pypsa.Network()
     n.add("Bus", "B1")
     n.add("Bus", "B2")
@@ -113,7 +119,7 @@ def _run(session, client, ui_context, decisions, *, observe=None):
             streamed.append(ev)
         done.set()
 
-    t = threading.Thread(target=go)
+    t = threading.Thread(target=contextvars.copy_context().run, args=(go,))  # the acting user, as the server's thread pool keeps it
     t.start()
     for decision in decisions:
         deadline = time.monotonic() + 5.0
