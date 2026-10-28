@@ -2448,6 +2448,8 @@ export function CarrierKpiPanel({
   }, [lostLoadByCarrier, carrier])
   const lostLoadEnergy = lostLoadRow?.mwh ?? 0
   const lostLoadCostFromCarrier = lostLoadRow?.cost ?? 0
+  // Shed energy with no known cost (VOLL unknown): show "—", never €0.
+  const lostLoadCostUnknown = lostLoadRow != null && lostLoadRow.cost == null && lostLoadEnergy > 0
 
   // Economic KPIs — aggregate `econByCarrier` (keyed by COMPONENT carrier,
   // e.g., "gas", "solar", "heat-pump-waste") across all component carriers
@@ -2633,8 +2635,11 @@ export function CarrierKpiPanel({
                          ? { state: 'not_modelled' as const, reason: `No renewable on ${where} buses has a curtailment cost set.` }
                          : zeroOr(econ.curt))}
                      hint="Σ curtailment_cost × curtailed-energy × weights" />
-                <KPI label="Lost-load cost" value={fmtCurrency(Math.max(econ.lost * 1e6, lostLoadCostFromCarrier))}
-                     {...(lostLoadNotModelled ? lostLoadOff : zeroOr(Math.max(econ.lost, lostLoadCostFromCarrier / 1e6)))}
+                <KPI label="Lost-load cost"
+                     value={lostLoadCostUnknown && !(econ.lost > 0) ? '—' : fmtCurrency(Math.max(econ.lost * 1e6, lostLoadCostFromCarrier))}
+                     {...(lostLoadNotModelled ? lostLoadOff
+                       : lostLoadCostUnknown && !(econ.lost > 0) ? {}
+                       : zeroOr(Math.max(econ.lost, lostLoadCostFromCarrier / 1e6)))}
                      hint="VOLL × unserved demand on this carrier's buses" />
                 <KPI label="CAPEX (annuitised)" value={fmtCurrency(econ.capex * 1e6)}
                      hint="Σ ((overnight × annuity, or capital_cost) + fom_cost) × p_nom_opt × years_in_horizon — annuitised CAPEX plus fixed O&M, the fixed cost the LP objective paid; same gens/storage basis as Economics Fixed cost (excludes line CAPEX)." />

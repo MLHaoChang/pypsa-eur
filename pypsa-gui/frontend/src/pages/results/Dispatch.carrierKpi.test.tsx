@@ -115,4 +115,11 @@ describe('CarrierKpiPanel — result states', () => {
     renderPanel()
     expect(tile('Lost load').getAttribute('data-state')).toBe('zero')
   })
+
+  it('shows the lost-load cost as — when load was shed but its cost is unknown', () => {
+    renderPanel({ lostLoadByCarrier: [{ carrier: 'electrical', mwh: 5, cost: null }] })
+    const cost = tile('Lost-load cost')
+    expect(cost.textContent).toContain('—')
+    expect(cost.textContent).not.toMatch(/€\s*0/)
+  })
 })
