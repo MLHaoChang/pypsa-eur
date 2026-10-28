@@ -181,6 +181,35 @@ def test_an_imported_pointer_that_is_not_a_plain_id_is_never_followed(client, en
     assert r.status_code == 500
 
 
+def test_a_traversal_pointer_is_refused_even_with_a_matching_decoy(client, enabled, project_storage_dir):
+    # The decoy sits where "../x" resolves and matches the pointer's sha, so only
+    # the plain-id check refuses it (GK B mutation: loosening GENERATION_ID_RE fails this).
+    name, project, pointer = enabled
+    real = (project / ss.SITES_DIR / "campus" / "scene" / "generations" / pointer["generation"]
+            / "generation.json").read_bytes()
+    bundle = client.get(f"/api/projects/{name}/bundle").content
+    src, out = zipfile.ZipFile(io.BytesIO(bundle)), io.BytesIO()
+    with zipfile.ZipFile(out, "w") as zf:
+        for item in src.namelist():
+            data = src.read(item)
+            if item == "sites/campus/scene/current.json":
+                data = json.dumps({**pointer, "generation": "../x"}).encode()
+            zf.writestr(item, data)
+        zf.writestr("sites/campus/scene/x/generation.json", real)
+    r = client.post("/api/projects/import_bundle?name=decoy",
+                    files={"file": ("x.pypsaproj.zip", out.getvalue(), "application/zip")})
+    assert r.status_code in (200, 201), r.text
+    imported = r.json().get("imported") or r.json().get("name") or "decoy"
+    decoy = project_storage_dir(imported) / ss.SITES_DIR / "campus" / "scene" / "x" / "generation.json"
+    if not decoy.exists():
+        # The import keeps only the closure; plant the decoy where a loosened check would look.
+        decoy.parent.mkdir(parents=True, exist_ok=True)
+        decoy.write_bytes(real)
+    r = client.get(f"/api/projects/{imported}/sites/campus/scene")
+    assert (r.status_code, r.json()["detail"]["error_kind"]) == (500, "integrity_error")
+    assert client.get(f"/api/projects/{imported}/bundle").status_code == 500
+
+
 def test_deleting_the_project_removes_its_scene(client, enabled, project_storage_dir):
     name, project, _pointer = enabled
     r = client.delete(f"/api/projects/{name}")

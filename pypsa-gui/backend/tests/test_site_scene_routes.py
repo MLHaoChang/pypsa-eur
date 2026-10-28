@@ -501,6 +501,7 @@ def test_an_oversize_body_is_413_before_parsing(client, geo):
                     headers={"content-type": "application/json"})
     assert (r.status_code, _kind(r)) == (413, "resource_limit")
     assert r.json()["detail"]["max"] == cap and r.json()["detail"]["actual"] == cap + 1
+    assert r.json()["detail"]["message"].startswith("Too large: the request is over the ")
     r = client.put("/api/projects/geo/site-anchor", content=b"x" * (site_scene.MAX_SMALL_BODY + 1),
                    headers={"content-type": "application/json"})
     assert (r.status_code, _kind(r)) == (413, "resource_limit")
@@ -574,3 +575,24 @@ def test_flow_lists_sites_more_than_1000_m_from_the_anchor(client, geo):
                       json={"anchor": ANCHOR, "expected_revision": 0}).status_code == 200
     # far is ~1.49 km east of the anchor, near ~0.37 km.
     assert client.get("/api/projects/geo/flow").json()["scene"]["anchor_moved"] == ["far"]
+
+
+def test_an_undeclared_oversize_body_is_cut_at_the_cap():
+    """Without a Content-Length, the body stream stops being read once it passes the cap."""
+    import asyncio
+
+    from starlette.requests import Request
+
+    from routers import site_scene
+    from services.site_scene.contract import SceneError
+    parts = [b"x" * 6, b"x" * 6, b"x" * 6]
+    read = []
+
+    async def receive():
+        read.append(parts.pop(0))
+        return {"type": "http.request", "body": read[-1], "more_body": bool(parts)}
+
+    request = Request({"type": "http", "method": "POST", "headers": []}, receive)
+    with pytest.raises(SceneError) as e:
+        asyncio.run(site_scene._json_body(request, 10))
+    assert (e.value.kind, e.value.detail["actual"], len(read)) == ("resource_limit", 12, 2)

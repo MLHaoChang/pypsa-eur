@@ -33,7 +33,7 @@ from db.session import get_db
 from deps import optional_user
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from services import site_service
-from services.site_scene import anchor, proposals, store
+from services.site_scene import anchor, native, proposals, store
 from services.site_scene.contract import SceneError
 
 router = APIRouter()
@@ -52,11 +52,23 @@ async def _call(fn, *args) -> Any:
     return await run_in_threadpool(fn, *args)
 
 
+def _too_large(cap: int, actual: int) -> SceneError:
+    return SceneError("resource_limit", f"Too large: the request is over the {native.size_text(cap)} limit",
+                      {"limit": "request_bytes", "max": cap, "actual": actual})
+
+
 async def _json_body(request: Request, cap: int) -> Any:
-    raw = await request.body()
-    if len(raw) > cap:
-        raise SceneError("resource_limit", f"Too large: the request is {len(raw)} bytes, the limit is {cap}",
-                                {"limit": "request_bytes", "max": cap, "actual": len(raw)})
+    """The parsed body; refused on size before reading past `cap` (declared length first, then streamed)."""
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > cap:
+        raise _too_large(cap, int(declared))
+    chunks, size = [], 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > cap:
+            raise _too_large(cap, size)
+        chunks.append(chunk)
+    raw = b"".join(chunks)
     if not raw:
         return None
     try:

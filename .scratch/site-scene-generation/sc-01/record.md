@@ -37,11 +37,11 @@ GK B (session `01G7qCujXTFZ…`):
 | 2 | No scene or anchor field reaches a network input | `::test_anchor_and_scene_writes_leave_the_network_input_fingerprint` (`_network_input_fingerprint(exact=True)` and the `network.nc` bytes unchanged); `::test_generate_preview_then_apply_writes_no_network` |
 | 3 | Error kinds classified | `contract.ERROR_STATUS`: one status per kind, and an unclassified kind raises (`test_site_scene_proto_isolation`). They are route kinds and never reach a `tool_error` frame, so `tool-error-kinds.json` is unchanged (D02) and `test_tool_error_kind_manifest` passes. |
 | 4 | Proposal map: owner and project keyed, bounded by count, bytes and TTL; apply re-checks the hash and revision under the lock | `::test_a_cleared_map_answers_410`, `::test_apply_refuses_inputs_other_than_the_reviewed_ones`, `::test_another_projects_or_users_proposal_is_refused`, `::test_the_map_is_bounded_by_count`, `::test_the_map_is_bounded_by_age` |
-| 5 | Generation pointers are plain ids on every read, copy and import; copies on every path | `test_site_scene_copies.py`: scenario, Save-As, snapshot and restore, export plus import, missing generation, a hostile `../x` (and 3 more) pointer, project delete |
-| 6 | Rename/delete order; a failed scene write is visible | `test_site_scene_hooks.py::test_a_failed_scene_write_is_visible_not_silent`. The network edit runs first; the scene write follows in a new generation. On failure the old generation is kept, an error is logged and GET scene lists the key in `unbound_keys`. |
+| 5 | Generation pointers are plain ids on every read, copy and import; copies on every path | `test_site_scene_copies.py`: scenario, Save-As, snapshot and restore, export plus import, missing generation, a hostile `../x` (and 3 more) pointer, `::test_a_traversal_pointer_is_refused_even_with_a_matching_decoy` (a decoy with the matching sha at the `../x` target: only the plain-id check refuses it; fails with `GENERATION_ID_RE` loosened to `.+`), project delete |
+| 6 | Rename/delete order; a failed scene write is visible | `test_site_scene_hooks.py::test_a_failed_scene_write_is_visible_not_silent`. The network edit runs first; the scene write follows in a new generation. On failure the old generation is kept, an error is logged and GET scene lists the key in `unbound_keys`. The hooks also still re-key or drop the project-level `asset_footprints` record in sites.json (the legacy behaviour, kept); the scene's placements and footprints change only in the new generation. |
 | 7 | `/flow` electrical keys byte-equal to master; the scene block never stale | `::test_flow_keeps_the_electrical_payload_and_shows_an_apply_at_once`; [evidence/flow-master-vs-branch.txt](evidence/flow-master-vs-branch.txt): the same sha256 on master `fe59c529` and on the branch, minus `scene` |
-| 8 | The prototype tests run in CI against production | `pytest tests` collects all 126 (`--collect-only`: 20 + 5 + 24 + 19 + 22 + 32 + 4); the modules are aliases of `services.site_scene.*` |
-| 9 | 413 on raw body size before parsing, both sides | `::test_an_oversize_body_is_413_before_parsing` |
+| 8 | The prototype tests run in CI against production | `pytest tests` collects all 127 (`--collect-only`: 20 + 5 + 24 + 19 + 22 + 33 + 4); the modules are aliases of `services.site_scene.*` |
+| 9 | 413 on raw body size before parsing, both sides | `::test_an_oversize_body_is_413_before_parsing`; `::test_an_undeclared_oversize_body_is_cut_at_the_cap` (a declared Content-Length over the cap is refused unread; otherwise the stream stops once past the cap) |
 | 10 | 8 concurrent applies, deterministic; losers name the committed revision | `::test_concurrent_applies_have_one_winner` (a `threading.Barrier`, no sleeps) |
 | 11 | Policy tests and scripts at the trial merge | `test_route_chat_disposition`, `test_project_route_acl_policy`, `test_write_surface_lock_policy`, `test_not_via_chat`; `assistant_route_parity.py --check` (514 routes, 0 unclassified); `assistant_inventory.py --check` unchanged (341 tools) |
 
@@ -56,10 +56,10 @@ UX (session `01G7qCuipbbh…`):
 
 - **RED.** [evidence/routes-red.txt](evidence/routes-red.txt): 30 of 30 route tests failed before any route existed. The unmounted GET answered the SPA catch-all's 503.
 - **GREEN** (run from `pypsa-gui/backend`, Python 3.12):
-  - `tests/test_site_scene_routes.py`: 46 passed;
-  - `test_site_scene_copies.py`: 12;
+  - `tests/test_site_scene_routes.py`: 47 passed;
+  - `test_site_scene_copies.py`: 13;
   - `test_site_scene_hooks.py`: 3;
-  - `test_site_scene_proto_*.py`: 126.
+  - `test_site_scene_proto_*.py`: 127.
 
 ## Spec-review fixes (mp-code-review)
 
