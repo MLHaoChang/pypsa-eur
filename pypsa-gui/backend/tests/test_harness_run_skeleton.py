@@ -257,6 +257,9 @@ def test_a_never_tunable_attr_is_refused_at_load(entry):
 ])
 def test_a_profile_cannot_drop_or_loosen_an_inherited_rule(stage, rules):
     profile = copy.deepcopy(run_profiles.EH_SITE)
+    profile['stages'][stage] = {'skip': 'Not needed here.'}  # skipping a gate is dropping its rules
+    with pytest.raises(run_profiles.ProfileError, match='inherited'):
+        run_profiles.load(profile)
     profile['stages'][stage] = {**run_profiles.GENERIC[stage], 'rules': rules}
     with pytest.raises(run_profiles.ProfileError, match='inherited'):
         run_profiles.load(profile)

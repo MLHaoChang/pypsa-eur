@@ -118,6 +118,8 @@ def load(profile: dict) -> dict:
     for name in STAGES:
         stage = copy.deepcopy(profile["stages"].get(name, GENERIC[name]))
         if "skip" in stage:
+            if "skip" not in GENERIC[name]:
+                raise ProfileError(f"Stage {name}: its inherited rules cannot be skipped.")
             if not isinstance(stage["skip"], str) or not stage["skip"] or set(stage) != {"skip"}:
                 raise ProfileError(f"Stage {name}: skip carries its reason and nothing else.")
             stages[name] = stage
