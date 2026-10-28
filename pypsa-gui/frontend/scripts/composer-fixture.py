@@ -65,7 +65,9 @@ def main():
                     except ValueError:
                         results.append({"unparsed": text[:200]})
             if "Run the simulation" in said:
-                steps = [("run_simulation", {})]
+                # OJ-01 solves twice on purpose: the second is a re-run of current
+                # results, which LC-19 asks about first; the user's yes is the flag.
+                steps = [("run_simulation", {"rerun_current": True})]
             elif "this line: s_nom 400" in said:
                 # LC-04 OJ-05: "this line" from the selection, then one edit with its card.
                 target = (results[0].get("target") or {}) if results else {}
