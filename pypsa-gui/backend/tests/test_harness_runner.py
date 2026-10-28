@@ -130,7 +130,8 @@ def test_a_runner_write_lands_in_the_run_project_as_the_same_tool_does_from_chat
     revision, undo = dirty_state.revision(ctx), len(ctx.undo.stack)
     runner = harness_runner.Runner('a', decisions=Clicks(refs={'inputs.2'}))
     from services import change_log_service
-    logged, user_ts = len(change_log_service.get_all()), dict(ctx.user_ts)
+    # The log is a process-global deque capped at 500: take new ids, not a length.
+    top, user_ts = max((e["id"] for e in change_log_service.get_all()), default=0), dict(ctx.user_ts)
     bus = {'component_class': 'Bus', 'name': 'F1', 'attrs': {'v_nom': 20.0}}
     with foreground(two_buses()) as front:  # the user switched project mid-stage
         front_frames, _ = dispatch(harness_session.ChatSession(), monkeypatch, 'update_component', bus)
@@ -142,7 +143,7 @@ def test_a_runner_write_lands_in_the_run_project_as_the_same_tool_does_from_chat
     assert ctx.network.generators.at['G1', 'marginal_cost'] == 25.0 and 'F1' not in ctx.network.buses.index
     assert (dirty_state.revision(ctx) - revision, len(ctx.undo.stack) - undo) == chat_delta == (1, 1)
     assert ctx.user_ts == user_ts
-    entries = change_log_service.get_all()[:len(change_log_service.get_all()) - logged]  # newest first
+    entries = [e for e in change_log_service.get_all() if e['id'] > top]
     assert sorted((e['name'], e['org_id']) for e in entries) == sorted([('F1', front.org_id), ('G1', ctx.org_id)])
 
 
