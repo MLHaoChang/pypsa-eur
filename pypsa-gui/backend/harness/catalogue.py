@@ -124,7 +124,7 @@ RESULTS_ENUM = [
     "losses", "carrier_kpis", "emissions", "transformers", "unit_commitment",
     "line_duals", "voltages", "line_reactive", "transformer_reactive",
     "prices", "price_drivers", "curtailment", "lost_load", "loads",
-    "asset_economics", "billing", "cfe_score", "value_flows",
+    "asset_economics", "billing", "cfe_score", "value_flows", "plausibility",
 ]
 RESULTS_SOURCE_ENUM = ["lopf", "ac_pf"]
 # Task 14 — per-asset results chat tools (get_asset_results /
@@ -454,8 +454,9 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "get_results",
-        "Results dispatcher. result_kind selects which /api/results/* "
-        "endpoint to read; ac_pf_status routes to /api/results/ac_pf/status "
+        "Results dispatcher. result_kind selects which /api/results/* endpoint to read; "
+        "plausibility returns native screening findings and explicit coverage, not certification. "
+        "ac_pf_status routes to /api/results/ac_pf/status "
         "via a lookup dict (v4-MAJOR-4). source ('lopf' | 'ac_pf') is "
         "forwarded where the underlying handler accepts it. "
         "Returns (dispatch kinds): {index:[iso], columns:[name], data:[[float]]}; "

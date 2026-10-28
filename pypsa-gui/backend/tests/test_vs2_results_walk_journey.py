@@ -161,7 +161,7 @@ def test_compare_with_the_previous_run(oj_grid, client, monkeypatch):
 
 def test_do_these_results_make_sense_runs_the_input_checks_only(oj_grid):
     """OJ-18 interim (Q5 = A): the three input checks, and the prompt says
-    result-plausibility rules do not exist yet."""
+    native result-plausibility screening is available; strict publication remains unsupported."""
     from harness import compose
 
     steps = [lambda r: ('project_readiness', {}), lambda r: ('validate_network', {}),
@@ -171,7 +171,7 @@ def test_do_these_results_make_sense_runs_the_input_checks_only(oj_grid):
     assert not [d for e, d in frames if e in {'error', 'tool_error'}]
     text = ' '.join(compose._RESULTS_WALK.split())
     assert 'project_readiness, validate_network and diagnose_network' in text
-    assert "result-plausibility rules don't exist yet" in text
+    assert 'native result-plausibility screening is available' in text
 
 
 def _numbers(text):
