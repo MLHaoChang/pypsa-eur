@@ -18,7 +18,9 @@ from routers.network_profiles import aggregate_load_profile
 from services import assurance_records as records
 from services import chat_tools
 from services.pypsa_service import PyPSAService
-from tests.assurance_acceptance.test_p1_aggregate import L1, L2, MEAN, PEAK, loads  # noqa: F401
+from tests.assurance_acceptance.test_p1_aggregate import L1, L2, MEAN, PEAK, loads  # noqa: F401  (fixture)
+
+pytestmark = pytest.mark.usefixtures("loads")
 
 
 def network():
@@ -40,7 +42,7 @@ def assert_blocked(out):
     assert out["mean"] is None
 
 
-def test_complete_sum_is_unchanged(loads, read):
+def test_complete_sum_is_unchanged(read):
     out = read(section="electricity")
     assert out["complete"] is True
     assert out["gaps"] == []
@@ -51,7 +53,7 @@ def test_complete_sum_is_unchanged(loads, read):
     assert out["loads_without_profile"] == []
 
 
-def test_complete_sum_matches_checked_source(loads):
+def test_complete_sum_matches_checked_source():
     ctx = PyPSAService.get_active_context()
     with records.network_guard():
         _digest, gap, totals, _targets = records.aggregate_source(
@@ -63,7 +65,7 @@ def test_complete_sum_matches_checked_source(loads):
     assert out["peak"] == max(totals)
 
 
-def test_missing_step_is_null_not_zero(loads, read):
+def test_missing_step_is_null_not_zero(read):
     network().loads_t.p_set.loc[network().snapshots[1], "L2"] = np.nan
     out = read(names="L1,L2")
     assert out["values"] == [6.0, None, 6.0]
@@ -71,14 +73,14 @@ def test_missing_step_is_null_not_zero(loads, read):
     assert any("1 missing or non-finite step" in g for g in out["gaps"])
 
 
-def test_infinite_step_is_null(loads, read):
+def test_infinite_step_is_null(read):
     network().loads_t.p_set.loc[network().snapshots[0], "L1"] = np.inf
     out = read(names="L1,L2")
     assert out["values"][0] is None
     assert_blocked(out)
 
 
-def test_repeated_name_counts_once(loads, read):
+def test_repeated_name_counts_once(read):
     out = read(names="L1,L1,L2")
     assert out["values"] == [6.0, 8.0, 6.0]
     assert out["total_loads"] == 2
@@ -86,20 +88,23 @@ def test_repeated_name_counts_once(loads, read):
     assert out["complete"] is True
 
 
-def test_unknown_name_is_named_and_blocks(loads, read):
-    out = read(names="L1,L2,ghost")
+def test_unknown_name_is_named_and_blocks(read):
+    out = read(names="L1,L2,ghost,ghost")
     assert out["unknown_names"] == ["ghost"]
+    assert out["total_loads"] == 2
     assert any("ghost" in g for g in out["gaps"])
     assert_blocked(out)
 
 
-def test_only_unknown_names_is_null_not_zero(loads, read):
+def test_only_unknown_names_is_null_not_zero(read):
     out = read(names="ghost")
     assert out["unknown_names"] == ["ghost"]
+    assert out["total_loads"] == 0
+    assert out["index"] == [] and out["values"] == []
     assert_blocked(out)
 
 
-def test_load_without_profile_is_named_and_blocks(loads, read):
+def test_load_without_profile_is_named_and_blocks(read):
     network().add("Load", "S1", bus="B1", p_set=3.0)
     out = read(names="L1,L2,S1")
     assert out["loads_without_profile"] == ["S1"]
@@ -108,21 +113,22 @@ def test_load_without_profile_is_named_and_blocks(loads, read):
     assert_blocked(out)
 
 
-def test_no_profile_at_all_is_null_not_zero(loads, read):
+def test_no_profile_at_all_is_null_not_zero(read):
     network().add("Load", "S1", bus="B1", p_set=3.0)
     out = read(names="S1")
     assert out["values"] == []
     assert_blocked(out)
 
 
-def test_empty_selection_is_null_not_zero(loads, read):
+def test_empty_selection_is_null_not_zero(read):
     out = read(section="heat")
     assert out["total_loads"] == 0
+    assert out["index"] == [] and out["values"] == []
     assert_blocked(out)
-    assert "no loads match" in out["gaps"]
+    assert out["gaps"] == ["no loads match"]
 
 
-def test_misaligned_upload_is_a_gap(loads, read, monkeypatch):
+def test_misaligned_upload_is_a_gap(read, monkeypatch):
     from routers import network_profiles
 
     other = pd.Series(
@@ -136,11 +142,37 @@ def test_misaligned_upload_is_a_gap(loads, read, monkeypatch):
     assert_blocked(out)
 
 
-def test_boolean_series_is_not_a_number(loads, read, monkeypatch):
+def test_boolean_series_is_not_a_number(read, monkeypatch):
     from routers import network_profiles
 
     flags = pd.Series([True, False, True], index=network().snapshots)
     monkeypatch.setitem(network_profiles._user_ts, ("loads", "p_set", "L2"), flags)
     out = read(names="L1,L2")
+    assert "a step that is not a number" in out["gaps"]
+    assert_blocked(out)
+
+
+def test_shared_index_off_the_snapshots_is_a_gap(read, monkeypatch):
+    from routers import network_profiles
+
+    other = pd.date_range("2030-01-01", periods=3, freq="h")
+    for name, values in (("L1", L1), ("L2", L2)):
+        monkeypatch.setitem(
+            network_profiles._user_ts,
+            ("loads", "p_set", name),
+            pd.Series(values, index=other),
+        )
+    out = read(names="L1,L2")
+    assert out["gaps"] == ["the loads do not share the network's snapshots"]
+    assert_blocked(out)
+
+
+def test_numeric_string_upload_is_null_not_joined(read, monkeypatch):
+    from routers import network_profiles
+
+    text = pd.Series(["1", "4", "5"], index=network().snapshots, dtype=object)
+    monkeypatch.setitem(network_profiles._user_ts, ("loads", "p_set", "L2"), text)
+    out = read(names="L1,L2")
+    assert out["values"] == [None, None, None]
     assert "a step that is not a number" in out["gaps"]
     assert_blocked(out)

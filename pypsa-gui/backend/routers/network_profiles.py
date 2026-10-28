@@ -242,7 +242,7 @@ def aggregate_load_profile(
     out = {
         "index": [],
         "values": [],
-        "total_loads": len(targets) + len(unknown),
+        "total_loads": len(targets),
         "loads_with_profile": 0,
         "unknown_names": unknown,
         "loads_without_profile": [],
@@ -274,12 +274,20 @@ def aggregate_load_profile(
         return out
     if any(not s.index.equals(n.snapshots) for s in series_list):
         gaps.append("the loads do not share the network's snapshots")
-    if any(not pd.api.types.is_numeric_dtype(s) or s.dtype == bool for s in series_list):
+    # A bool or string member (a numeric-string upload) is not summed: every
+    # step of it counts as missing, as aggregate_source refuses it.
+    not_numbers = [s.name for s in series_list
+                   if not pd.api.types.is_numeric_dtype(s) or s.dtype == bool]
+    if not_numbers:
         gaps.append("a step that is not a number")
 
-    df = pd.concat(series_list, axis=1).apply(pd.to_numeric, errors="coerce").astype("float64")
-    finite = np.isfinite(df.to_numpy())
-    total = df.sum(axis=1).where(finite.all(axis=1))
+    raw = pd.concat(series_list, axis=1)
+    numeric = raw.drop(columns=not_numbers).astype("float64").reindex(columns=raw.columns)
+    finite = np.isfinite(numeric.to_numpy())
+    # A complete sum keeps the handler's own expression, so a value the
+    # checked path captured matches what is shown bit for bit.
+    total = raw.sum(axis=1) if not gaps else numeric.sum(axis=1)
+    total = total.where(finite.all(axis=1))
     bad = int((~finite).sum())
     if bad:
         gaps.append(f"{bad} missing or non-finite {'step' if bad == 1 else 'steps'}")
