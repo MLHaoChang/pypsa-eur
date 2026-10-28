@@ -79,7 +79,7 @@ describe('LoadSeriesEditor', () => {
     await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
     const line = await screen.findByTestId('stat-connection-share')
     expect(line.textContent).toBe('80 % of the grid connection')
-    expect(line.getAttribute('title')).toContain('poc')
+    expect(line.getAttribute('title')).toContain('rated power of poc')
     await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
     await waitFor(() => expect(screen.queryByTestId('stat-connection-share')).toBeNull())
   })
