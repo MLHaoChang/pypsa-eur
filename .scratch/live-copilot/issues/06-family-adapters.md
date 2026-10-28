@@ -155,6 +155,48 @@ Branch `claude/lc06-d04-capacity-lp`, stacked on S0. GK B reviews.
 - Reads `get_study_evidence` 409 `unsaved_results` before a save, by design,
   so the objective is read from the unsaved current solve instead.
 
+### S2, LC-D05 foresight and LC-D06 solver outcomes (2026-10-28)
+
+Branch `claude/lc06-d05-foresight`, stacked on S1. GK B reviews. Successor
+session session_01G7qCun3kha23YVZyoEFDuW.
+
+- `tests/test_lc06_d05_foresight.py`: every solve goes through `run_simulation`,
+  with the strategy set by `update_solver_config` and the outcome read through
+  `get_simulation_status`. Hand oracles:
+  - perfect, myopic and limited foresight on the `test_myopic_horizon_cost.py`
+    network: 33,000, never the per-period LP sum of 13,000;
+  - two periods at r = 0.05 with years 10, discounted as the app's
+    auto-discount defines it, and Old retiring before 2040: G@2030 = 6,
+    G@2040 = 4, objective = the hand PV;
+  - a half-year horizon charges 0.5 x the annual capex;
+  - rolling windows of 2 give 200;
+  - an unbounded LP and an unavailable solver are refused by the real
+    validator before the solver runs;
+  - a MIP gap of 0.25 bounds the brute-forced UC optimum of 640;
+  - a real HiGHS time limit with no incumbent (1 ms, stopped in presolve) is a
+    failed run. The other limit stops cannot be produced deterministically:
+    no incumbent at the SCLOPF and myopic call sites, and a stop with an
+    incumbent. For those, only PyPSA's optimize return is stubbed; the app's
+    solve path runs as is.
+- The RED run found two engine defects and one misleading field:
+  - D-a: a rolling solve reported only the last window's LP (140 for 200).
+  - D-b: a MIP stopped by its time limit with no incumbent read
+    `completed` / `time_limit` with objective inf (linopy returns status ok).
+    Fix: `solver/objective._no_solution_is_a_failure` (a `math.isfinite`
+    test) at the full-horizon, SCLOPF and myopic per-period call sites.
+    It returns status "warning" with the condition kept, so the run fails
+    with the `time_limit` card. A stop with an incumbent stays completed,
+    and its run record keeps condition `time_limit`.
+  - D-a fix: `_compute_run_objective` prices a rolling run on the
+    statistics basis (`horizon_system_cost`), as it already does for myopic.
+    The status, the run record and the solve queue's reader all read 200,
+    with overlap 1.
+  - `objective_decomposition.myopic_horizon_total` was the per-period LP sum.
+    It is renamed `myopic_lp_sum`, and `lp_total_scope` (horizon, last_period
+    or last_window) says what `lp_total` covers.
+- Limit: a rolling window that stops on a limit without an incumbent is
+  not caught, because PyPSA only logs it.
+
 ## Hand-off (2026-10-28, context near 300k)
 
 State:

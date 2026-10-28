@@ -31,7 +31,7 @@ from services.solver.diagnostics import (
     _log_cost_decomposition_post_solve,
     _log_sclopf_post_solve,
 )
-from services.solver.objective import _rescale_results_for_objective
+from services.solver.objective import _no_solution_is_a_failure, _rescale_results_for_objective
 from services.solver.process_uc import sclopf_model_kwargs
 from services.solver.runtime import _check_stop, ValidationRefused
 from services.validation_service import _check_nonfinite_bounds
@@ -959,6 +959,8 @@ def _run_myopic_foresight(
                     assign_all_duals=True,
                     **uc_kwargs,
                 )
+            # A limit stop with no incumbent fails the iteration (the check below).
+            status, condition = _no_solution_is_a_failure(network, status, condition, phase)
             # Rescale n.objective + LP duals back to user-facing € BEFORE
             # the next myopic iteration starts (each iteration sets the
             # scale fresh via the extra_functionality wrapper).
