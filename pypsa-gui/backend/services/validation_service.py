@@ -1889,8 +1889,10 @@ def _check_lopf(n, solver_config) -> list[Issue]:
         # what the user meant. Warning only.
         zero_cost = _zero_cost_generators(n)
         if len(zero_cost) > 0:
+            # One unit is named so Guided can open it; several are a count, not
+            # an element (the flow files them to the section).
             out.append(_warn("gen_zero_costs", "Generator",
-                f"{len(zero_cost)} item(s)",
+                str(zero_cost[0]) if len(zero_cost) == 1 else f"{len(zero_cost)} item(s)",
                 f"{len(zero_cost)} generator(s) have capital_cost, "
                 "overnight_cost, and marginal_cost all == 0. Result will be indeterminate."))
 

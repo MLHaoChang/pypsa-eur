@@ -612,11 +612,12 @@ TEMPLATE_STATES = {
                           "assets": "warning", "profiles": "complete",
                           "commercial": "warning", "scenarios": "complete"},
     # DC 02's assumed connection limits → connection warning; no LOLE goal
-    # (the strong-grid pack sets an ENS cap only) → scenarios complete.
+    # (the strong-grid pack sets an ENS cap only) → scenarios complete. Study
+    # harness 19's assumed investment case and finance inputs → commercial warning.
     "eh_h2_hub": {"project": "warning", "carriers": "complete",
                   "connection": "warning", "loads": "complete",
                   "assets": "warning", "profiles": "complete",
-                  "commercial": "complete", "scenarios": "complete"},
+                  "commercial": "warning", "scenarios": "complete"},
     # Generation-only (IPP ticket 03): no Load, so loads `not_needed` and no study.
     # Assumed limits (connection) and finance, tax and charges (commercial) read warning.
     "eh_ipp_hybrid": {"project": "warning", "carriers": "complete",

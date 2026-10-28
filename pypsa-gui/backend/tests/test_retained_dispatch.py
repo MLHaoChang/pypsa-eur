@@ -186,3 +186,18 @@ def test_a_dispatch_run_without_its_section_refuses_with_its_id(repriced):  # no
 def test_the_dispatch_view_names_its_section():
     assert rv.view('dispatch').historical_section == 'results_dispatch'
     assert retained_results.KEPT_KINDS['generators'] == 'results_dispatch'
+
+
+def test_a_trimmed_run_says_what_it_left_out(repriced):  # noqa: F811
+    """A trimmed list is told apart from a complete one: the counters reach the read."""
+    kept = dd.dispatch_digest(_network({f'c{i % 20}-unit-{i:03d}': [float(i)] * 24 for i in range(300)}))
+    assert kept['generators']['units_omitted'] > 0
+    root, project_id, owner = run_evidence._authority()
+    run_evidence.publish_run(root, project_id, run_id='fg-trimmed08', kind='simulation',
+                             status='completed', fingerprint='0' * 64, actor_id=owner,
+                             sections={'results_dispatch': kept})
+    out = chat_tools.get_results(result_kind='generators', run_id='fg-trimmed08')
+    assert out['scope'] == 'historical'
+    assert out['data']['units_omitted'] == kept['generators']['units_omitted']
+    assert out['data']['carriers_omitted'] == 0
+    assert len(out['data']['units']) + out['data']['units_omitted'] == 300

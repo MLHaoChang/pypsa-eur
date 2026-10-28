@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A power series' peak is reported as a share of the grid connection ("80 % of the grid connection") in the series preview and the refine stats; omitted when the project has no connection link.

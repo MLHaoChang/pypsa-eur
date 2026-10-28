@@ -69,6 +69,21 @@ describe('LoadSeriesEditor', () => {
     expect(screen.queryByTestId('disabled-reason')).toBeNull()
   })
 
+  it('reports the peak as a share of the grid connection, and omits it without one', async () => {
+    const withShare = { ...PENDING, stats: { plant: {
+      ...PENDING.stats.plant, peak_share_of_connection: 0.8, connection_link: 'poc' } } }
+    api.generateLoad.mockResolvedValueOnce(withShare).mockResolvedValueOnce(PENDING)
+    renderEditor('expert')
+    await screen.findByRole('option', { name: 'industrial' })
+    await userEvent.type(screen.getByLabelText('Peak MW'), '80')
+    await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
+    const line = await screen.findByTestId('stat-connection-share')
+    expect(line.textContent).toBe('80 % of the grid connection')
+    expect(line.getAttribute('title')).toContain('rated power of poc')
+    await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
+    await waitFor(() => expect(screen.queryByTestId('stat-connection-share')).toBeNull())
+  })
+
   it('opens the archetype parameters in Expert', async () => {
     renderEditor('expert')
     await screen.findByRole('option', { name: 'industrial' })

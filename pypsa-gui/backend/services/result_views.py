@@ -227,6 +227,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                "bus prices and what sets them", "results",
                (_r("get_results", result_kind="prices"),
                 _r("get_results", result_kind="price_drivers")),
+               historical_section="results_prices",
                units="EUR/MWh", checked_profiles=("bus-price/1",),
                card="capacity", sub_option="dispatch", card_tab="costs_prices"),
     ResultView("economics", _RESULTS, "economics", "Economics",

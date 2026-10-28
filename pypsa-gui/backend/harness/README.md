@@ -1136,7 +1136,9 @@ only: no runner, no envelope, no loops.
 - **Gates** (`services/run_gates.py`). A closed registry (`FACTS`,
   `FACTS_VERSION`) maps each fact to one native reader and the key it reads;
   every gate result carries that source. Fail closed: a reader that raises
-  or reads None or NaN is `not_evaluated`, which fails a `block` rule.
+  or reads None or NaN is `not_evaluated`, which fails a `block` rule; so is
+  a reading the reader marks `NoEvidence` (state and reason kept, e.g.
+  `ic.counterfactual` reading `not_established` with the case's flags).
   `gate(rules, env)` takes the run project's context explicitly (`Env.ctx`;
   readers without a context argument run through `run_gates._on`, the turn
   cell cleared). A context of another project makes every rule

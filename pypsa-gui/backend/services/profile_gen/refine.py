@@ -171,7 +171,9 @@ def _site_clock(ctx, meta: Mapping[str, Any]) -> str:
     return str(zone)
 
 
-def _connection(ctx) -> dict[str, Any]:
+def _find_connection(ctx) -> dict[str, Any] | None:
+    """The point-of-connection link's MW record, or None when the project has
+    none. The one lookup: ``_connection`` and the connection share use it."""
     state = getattr(ctx, "solver_state", None) or {}
     cfg = state.get("solver_config") if isinstance(state, Mapping) else None
     commercial = getattr(cfg, "commercial", None) or {}
@@ -179,14 +181,31 @@ def _connection(ctx) -> dict[str, Any]:
         commercial, "poc_link", None)
     links = ctx.network.links
     if not poc or poc not in links.index:
-        raise InvalidRefineOpError(
-            "fraction of the connection needs the project's point-of-connection "
-            "link (set the site connection first)")
+        return None
     p_nom = float(links.at[poc, "p_nom"])
     p_max = float(links.at[poc, "p_max_pu"])
     digest = hashlib.sha256(json.dumps([poc, p_nom, p_max]).encode()).hexdigest()[:16]
     return {"source": f"links.p_nom of {poc!r}", "link": poc, "value": p_nom,
             "hash": digest}
+
+
+def _connection(ctx) -> dict[str, Any]:
+    conn = _find_connection(ctx)
+    if conn is None:
+        raise InvalidRefineOpError(
+            "fraction of the connection needs the project's point-of-connection "
+            "link (set the site connection first)")
+    return conn
+
+
+def connection_share(ctx, peak_mw: float) -> dict[str, Any]:
+    """``peak_share_of_connection`` (a fraction) and ``connection_link`` for a
+    power peak; empty with no connection link or a zero ``p_nom``."""
+    conn = _find_connection(ctx)
+    if conn is None or not conn["value"] > 0 or not np.isfinite(peak_mw):
+        return {}
+    return {"peak_share_of_connection": float(peak_mw) / conn["value"],
+            "connection_link": conn["link"]}
 
 
 def _window_mask(index: pd.DatetimeIndex, op: Mapping[str, Any], zone: str) -> np.ndarray:
@@ -323,6 +342,7 @@ def _apply_op(t: _Target, s: pd.Series, op: Mapping[str, Any], i: int,
         stats["load_factor"] = weighted_load_factor(
             t.ctx.network, aligned.to_numpy(dtype=float), t.spec.weighting)
         stats["load_factor_basis"] = LOAD_FACTOR_BASIS
+        stats.update(connection_share(t.ctx, stats["peak_after"]))
     return out, stats
 
 

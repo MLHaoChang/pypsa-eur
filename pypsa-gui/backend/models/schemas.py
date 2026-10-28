@@ -186,7 +186,7 @@ class LengthsFromGeometryRequest(BaseModel):
 LINK_LAZY_COLUMNS = frozenset({"eh_process", "criticality_tier", "throughput_unit", "specific_energy_kwh_per_t",
                                "rated_mva", "harmonic_source", "harmonic_spectrum", "spectrum_post_filter",
                                "flicker_step_mva", "flicker_changes_per_min",
-                               "single_phase_share"})
+                               "single_phase_share", "motor_kw", "start_method", "i_start_pu"})
 BUS_LAZY_COLUMNS = frozenset({"mwh_per_t", "product_value"})
 
 
@@ -270,6 +270,10 @@ class LinkCreate(BaseModel):
     flicker_changes_per_min: float | None = None
     # The unbalance screen's input, lazy the same way.
     single_phase_share: float | None = None
+    # The motor-start screen's inputs (grid-to-process issue 18), lazy the same way.
+    motor_kw: float | None = None
+    start_method: str | None = None
+    i_start_pu: float | None = None
 
     @model_validator(mode="after")
     def _process_unit_ports_state_their_efficiency(self):
