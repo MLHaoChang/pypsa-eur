@@ -154,6 +154,19 @@ jobs:
         cache: true
         cache-write: ${{ github.event_name == 'push' && github.ref_name == 'master' }}
 
+    # Route-parity tests build the parity in memory (RETRO-COST-1), and its GUI
+    # scanner, scripts/api-bindings.mjs, needs the frontend's TypeScript.
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: npm
+        cache-dependency-path: pypsa-gui/frontend/package-lock.json
+
+    - name: Install the frontend (the parity scanner uses its TypeScript)
+      working-directory: pypsa-gui/frontend
+      run: npm ci --no-audit --no-fund
+
     # The full output goes to a log file and the artifact below, so a failure
     # can be read whole instead of from under the job log's tail.
     - name: Run backend tests
