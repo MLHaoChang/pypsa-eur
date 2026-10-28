@@ -101,4 +101,24 @@ SC-07 tools and conversational binding (V93–V98), V80–V86 coordinate-first m
 
 Coordinator, 2026-10-28: split as SC-01 did. SC-02a = backend (associations, groups, allocation, lifecycle, rebind, site_service lock fix), reviewed by GK B; SC-02b = UI placement/association panel with browser evidence, reviewed by UX, after a. The Done line is met when b merges. No chat tool (SC-07 held on an open owner question) and V80–V86 out are accepted; both are stated in each PR body and the hand-off.
 
-GK B: pending.
+**GK B (session `01G7qCuoAEuhfoTjC1LTPrST`), 2026-10-28: GO with conditions** (SC-02a):
+
+1. Lock premise corrected. `project_lock` is an RLock taken inside the two legacy hooks; nothing under it takes the network lock. Callers:
+
+   | Caller | Network lock held |
+   |---|---|
+   | CRUD rename (`network_crud._update_component` → `_rename_site_placement`) | yes |
+   | CRUD delete (`purge_component_side_data` → `remove_asset_footprint_on_disk`) | yes |
+   | Cascade delete (`network_buses`, via `purge_component_side_data`) | yes |
+   | Bus rename (`network_buses.apply_rename_bus` → `_rename_site_placement`, after its lock block) | no |
+
+   Order test on CRUD rename, CRUD delete and bus rename against a concurrent bind Apply: no deadlock, no lost sites.json write. `map_layout_service.rename_component_on_disk` writes `map_layout.json`, which no scene write touches, so it keeps its own path (stated, not changed).
+2. GET is read-only: resolution uses `component_identity` lookups only; a scene GET never mints or writes (bytes/mtime test). uids are minted only at Apply, network lock then `project_lock`.
+3. Apply re-runs every validation (class, carrier, eh_process, existence by uid, ACL, revision, input hash); a target gone or changed class refuses and writes nothing. Two Loads on one carrier: ambiguous, the user picks; never by name or order.
+4. Allocation: every weight finite and > 0, `abs(sum - 1) <= 1e-9`. 0.1+0.2+0.7 accepted; 0.9, NaN and 0 refused.
+5. `rebind` needs `confirmed: true` and the target's uid at Apply; a rebind prepared before a delete/recreate refuses if the uid changed. Declining keeps the association unbound with its old uid for audit.
+6. Create and placement are separate receipts; a retried placement after a failure uses the created asset's uid and never re-creates (one asset, one placement; the retry is tested).
+7. `double_counted_demand` is a non-blocking finding on the proposal; fires for Process Link + fixed electricity Load on one feature, not across two features.
+8. Run `test_project_route_acl_policy`, `test_write_surface_lock_policy`, `test_route_chat_disposition` and route-parity `--check` at the trial merge. New codes stay route detail codes.
+9. Extra mutation: prepare-only validation must turn item 3's test red.
+10. Re-run `test_a_changed_site_refuses_the_old_digest_and_a_fresh_get_adopts` on the trial merge.
