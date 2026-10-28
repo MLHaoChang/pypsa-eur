@@ -69,7 +69,7 @@ def test_units_and_carriers_order_by_energy_then_name():
 def test_the_worst_case_is_bounded_by_construction():
     """500 units over 8760 h fit, trimmed smallest-first and counted."""
     rng = np.random.default_rng(0)
-    p = {f'c{i % 60}-unit-{i:03d}': rng.random(8760) * (i + 1) for i in range(500)}
+    p = {f'c{i % 20}-unit-{i:03d}': rng.random(8760) * (i + 1) for i in range(500)}
     d = dd.dispatch_digest(_network(p, storage={f's{i}': rng.random(8760) - 0.5 for i in range(50)}))
     assert len(run_evidence._json_bytes(d)) <= dd.BUDGET_BYTES < run_evidence.MAX_SECTION_BYTES
     gens = d['generators']
@@ -77,7 +77,36 @@ def test_the_worst_case_is_bounded_by_construction():
     energies = [u['energy_mwh'] for u in gens['units']]
     assert energies == sorted(energies, reverse=True)
     assert gens['units'][0]['name'] == 'c19-unit-499'                  # the largest unit stays
+    assert len(gens['by_carrier']) == 20 and gens['carriers_omitted'] == 0   # carriers go last
     assert dd.dispatch_digest(_network(p)) == dd.dispatch_digest(_network(p))   # deterministic
+
+
+def test_the_digest_is_fast_and_bounded_at_scale():
+    """Trimming measures each row once: 500 units in well under 2 s, 5,000 still fit."""
+    import time
+
+    rng = np.random.default_rng(1)
+    n = _network({f'c{i % 60}-unit-{i:04d}': rng.random(8760) for i in range(500)})
+    start = time.perf_counter()
+    dd.dispatch_digest(n)
+    assert time.perf_counter() - start < 2.0
+    big = dd.dispatch_digest(_network({f'c{i % 60}-unit-{i:04d}': rng.random(240) for i in range(5000)}))
+    assert len(run_evidence._json_bytes(big)) <= dd.BUDGET_BYTES
+    assert len(big['generators']['units']) + big['generators']['units_omitted'] == 5000
+
+
+def test_negative_generator_output_is_net_and_named(oj_grid):  # noqa: F811
+    """A generator that absorbs (p < 0): energy stays net, as Compare sums it,
+    and the absorbed part is its own field."""
+    from services.compare.dispatch import _compute_dispatch_summary
+
+    n = _network({'gas-1': [10.0, 10.0], 'shed-1': [-4.0, 2.0]})
+    gens = {u['name']: u for u in dd.dispatch_digest(n)['generators']['units']}
+    assert gens['shed-1']['energy_mwh'] == -2.0 and gens['shed-1']['absorbed_mwh'] == 4.0
+    assert gens['shed-1']['peak_mw'] == 2.0 and gens['shed-1']['hours'] == 1.0
+    carriers = {c['name']: c['energy_mwh'] for c in dd.dispatch_digest(n)['generators']['by_carrier']}
+    compare = _compute_dispatch_summary(n, [], False, True).dispatch_gwh_by_carrier
+    assert {c: pytest.approx(v.total * 1000) for c, v in compare.items()} == carriers
 
 
 def test_non_finite_values_are_null():
