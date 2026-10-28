@@ -46,18 +46,12 @@ Both are navigation fixes. Neither adds authority: `ui_open_panel` stays `Safety
 
 ### Item 4: `guided_step` on `ui_open_panel`
 
-**Catalogue** (`catalogue.py`, the `ui_open_panel` schema): add
-
-```python
-"guided_step": {"type": "string", "enum": ["start", "site", "goal", "results", "improve"]},
-```
-
-and one clause to the description: "With panel_id hubDesign, guided_step opens that card: start, site, goal, results or improve." Keep `Safety: read.` and keep `panel_id` the only required key.
+**Catalogue** (`catalogue.py`, the `ui_open_panel` schema): add a `guided_step` property, `{"type": "string", "enum": [...]}`, whose enum is **built from** `harness.workflows.get("hub-design").steps` (the step ids, in order), as `panel_section`'s enum is built from `_PANEL_SECTIONS` below. Never write the five ids as a literal (gatekeeper B's condition on #852). Add one clause to the description: "With panel_id hubDesign, guided_step opens that card: start, site, goal, results or improve." Keep `Safety: read.` and keep `panel_id` the only required key.
 
 **Dispatcher** (`chat_tools.ui_open_panel`): add a keyword argument `guided_step: str | None = None`.
 
 - Valid only with `panel_id` in `{"HubDesign", "hubDesign"}` and a value in the five steps. Read the five steps from the `hub-design` workflow, as `compose.py:164` does (`harness.workflows.get("hub-design").steps`); do not import compose's private `_GUIDED_STEPS`.
-- Any other value, a non-string, or another panel raises, before any event, `HTTPException(400, detail={"error_kind": "invalid_navigation", "field": "guided_step", "message": "Choose start, site, goal, results or improve, with panel_id hubDesign."})`.
+- Any other value, a non-string, or another panel raises, before any event, `HTTPException(400, detail={"error_kind": "invalid_navigation", "field": "guided_step", "message": "Choose a Guided card: start, site, goal, results or improve. Cards exist only in the hub design."})`. Build the list of ids in the message from the workflow too..
 - On success, copy it into the event as `event["guided_step"]`, next to `canvas_view` (l.5819-5820).
 
 **Frontend** (`uiNavigate.ts`): add `guided_step?: string` to `NavigationRequest` and to the `ui_event` frame type in `ChatPanel.tsx` (next to `canvas_view?: string`, l.2389).
@@ -107,7 +101,13 @@ Put the table in the PR plan. The gatekeeper and UX may trim it; build what they
 
 **Catalogue.** Add `"panel_section": {"type": "string", "enum": [<every id above>]}` and one clause: "With campusElectrical, campusStudy, campusResults or gridspine, panel_section scrolls to one section of that panel (for example island, grid_codes, readback)." Keep the backend's pair table in one constant in `chat_tools.py` (for example `_PANEL_SECTIONS: dict[str, frozenset[str]]`, keyed by the lower-camel panel id) and build the enum from it, so the two cannot drift.
 
-**Dispatcher.** Add `panel_section: str | None = None`. Normalise `CampusElectrical` / `CampusStudy` / `CampusResults` / `GridSpine` to their lower-camel id first. A value that is not a string, is unknown, or does not belong to that panel raises, before any event, `invalid_navigation` with `field: "panel_section"` and a message that names the valid ids for that panel, starting with a capital, e.g. "Choose one of island, study_settings for campusStudy." Copy it into the event as `event["panel_section"]`.
+**Dispatcher.** Add `panel_section: str | None = None`. Normalise `CampusElectrical` / `CampusStudy` / `CampusResults` / `GridSpine` to their lower-camel id first. A value that is not a string, is unknown, or does not belong to that panel raises, before any event, `invalid_navigation` with `field: "panel_section"` and a message that names the panel by the title the user sees and lists its valid ids, e.g. "Choose a section of the grid study: island or study_settings." Copy it into the event as `event["panel_section"]`.
+
+**Refusal wording (UX condition, #852).** Tool results the chat shows are covered by the wording rules in `docs/agents/review-ux.md`. In every refusal message:
+
+- name the panel by its on-screen title (`App.tsx:142-146`), never by a `panel_id`: `campusElectrical` → "the grid connection", `campusStudy` → "the grid study", `campusResults` → "the grid study results", `gridspine` → "Planning → dynamics";
+- the ids the model must retry with stay, as plain words: no repr quotes, no backticks;
+- a colon, not an em dash, before the list; join the last two ids with "or".
 
 **Frontend: one request, read by the panel.** Follow `settingsSectionRequest`:
 
@@ -115,6 +115,14 @@ Put the table in the PR plan. The gatekeeper and UX may trim it; build what they
 - `uiNavigate.ts`: when `panel` is one of the four panels and `d.panel_section` is a string, run the jump through `withReturnFrom`, setting the slide panel and then `requestPanelSection(panel, d.panel_section)`. Without `panel_section`, these panels open as today.
 - Mark each section with a wrapper attribute and nothing else: `data-panel-section="<id>"` on the existing element or a plain `<div>` around it. No new class, style, text or element that shows.
 - Consume it once per panel, in `CampusView` (the three campus parts) and in `GridspinePanel`: when the request's `panel` is this panel, wait until the panel's data has loaded, then look up `[data-panel-section="<id>"]` inside the panel, `scrollIntoView({ block: 'start' })` it if present, and clear the request either way. A section that is not rendered for this project (for example `study_settings` before a campus file exists, l.256-265) leaves the panel at its top and clears the request; it must not linger and scroll later. Put the shared lookup in one small hook in the same folder rather than copying it.
+
+### Guided stays Guided (UX)
+
+`guided_step` and `panel_section` open the panel the same way `ui_open_panel` already opens that panel in the current mode. Neither ever switches Guided to Expert (or Expert to Guided). Vitest case 12 asserts the mode is unchanged.
+
+### No self-return (UX)
+
+When the target is the view already showing (the same Guided card with `hubDesign` open, or the same panel with the same section requested), do not call `withReturnFrom`: scroll to the section, or do nothing for a card already showing. A "Back to <origin>" must never point at the view it would return from. Vitest case 13 covers both.
 
 ### Back to the view the jump left (UX)
 
@@ -158,8 +166,8 @@ Every new test must fail on `master`'s code; say why for each in the PR body. Us
 
 1. `test_guided_step_pairs`: `ui_open_panel("hubDesign", guided_step=s)` carries `guided_step == s` for each of the five; `("HubDesign", guided_step="goal")` too. `("hubDesign", guided_step="nope")`, `("results", guided_step="goal")` and `("hubDesign", guided_step=3)` raise 400 `invalid_navigation` with `field == "guided_step"`. Without it, the `hubDesign` event is today's, byte for byte (`json.dumps` equal to `{"_ui_event": True, "kind": "navigate", "panel_id": "hubDesign"}`).
 2. `test_guided_steps_match_the_workflow`: the schema enum equals the `hub-design` workflow's step ids, in order.
-3. `test_panel_section_pairs`: one valid id per panel is carried (`campusStudy`/`island`, `campusElectrical`/`grid_codes`, `campusResults`/`electrical_design`, `gridspine`/`readback`, and `CampusStudy`/`island`). `("campusStudy", panel_section="grid_codes")` (wrong panel), `("results", panel_section="island")`, `("gridspine", panel_section="nope")` and a non-string raise `invalid_navigation` with `field == "panel_section"`, and the message starts with a capital and names the panel's ids.
-4. Extend the pattern of `test_schema_matches_dispatchers` in a new test: both arguments validate against the catalogue schema (`tests.test_chat_tools_schema_panels._errors`), the `panel_section` enum equals the union of `_PANEL_SECTIONS`, `safety_tier_for("ui_open_panel") == "read"`, and `TOOL_ROUTES["ui_open_panel"]` is still `_UI_EVENT`.
+3. `test_panel_section_pairs`: one valid id per panel is carried (`campusStudy`/`island`, `campusElectrical`/`grid_codes`, `campusResults`/`electrical_design`, `gridspine`/`readback`, and `CampusStudy`/`island`). `("campusStudy", panel_section="grid_codes")` (wrong panel), `("results", panel_section="island")`, `("gridspine", panel_section="nope")` and a non-string raise `invalid_navigation` with `field == "panel_section"`, and the message starts with a capital, names the panel by its on-screen title (no `panel_id` such as `campusStudy` in it), and lists the panel's ids.
+4. Extend the pattern of `test_schema_matches_dispatchers` in a new test: both arguments validate against the catalogue schema (`tests.test_chat_tools_schema_panels._errors`), the `guided_step` enum equals the step ids built from the `hub-design` workflow (not a literal) and every one of them validates, the `panel_section` enum equals the union of `_PANEL_SECTIONS`, `safety_tier_for("ui_open_panel") == "read"`, and `TOOL_ROUTES["ui_open_panel"]` is still `_UI_EVENT`.
 
 ### Tier A journey, add to `tests/test_lc14_navigation_reach_journey.py`
 
@@ -177,6 +185,8 @@ Add to `src/components/ChatPanel.navigationReach.test.tsx`, inside its `describe
 9. **Card survives the first reset.** Add a case to `src/pages/hubDesign/HubDesignPanel.flow.test.tsx` (add; change none): apply `guided_step: 'site'` before the panel has run `resetFor` for the project, mount it, and assert the Site card shows. Do the same for `'improve'` (see item 4's note).
 10. **Panel section request.** With no panel open, `{kind: 'navigate', panel_id: 'campusStudy', panel_section: 'island'}` gives `activeSlidePanel === 'campusStudy'` and `panelSectionRequest` equal to `{panel: 'campusStudy', section: 'island'}`; with `'overview'` open beforehand, `flowReturn.panel === 'overview'`. Without `panel_section`, `panelSectionRequest` stays `null` and `flowReturn` is unchanged from today.
 11. **Scroll and clear.** In `src/pages/CampusElectricalPanel.test.tsx` and `src/pages/GridspinePanel.test.tsx` (add cases, following their mocks): with a request for `island` (and for `readback`), after the data loads, `scrollIntoView` was called on the `[data-panel-section="island"]` node and `panelSectionRequest` is `null`. A request for a section that is not rendered (e.g. `study_settings` with no campus file) clears without a scroll.
+12. **Guided stays Guided.** In the `guided` pass of case 8 and case 10, the UI mode after the jump is still Guided; in the `expert` pass it is still Expert.
+13. **No self-return.** With `hubDesign` open on the Goal card, applying `guided_step: 'goal'` leaves `flowReturn` unchanged (no "Back to" pointing at the same card). With `campusStudy` open, applying `panel_section: 'island'` sets the scroll request but leaves `flowReturn` unchanged.
 
 ### Inventory, control matrix and route parity
 
@@ -207,7 +217,7 @@ cd pypsa-gui/frontend && npm test   # full vitest suite before opening the PR
 ## Review
 
 - **Gatekeeper B** reviews the plan (open the PR as a draft with the plan at the top: the section table, the ACK choice (a)/(b), the tile note) and then the harness half: `catalogue.py`, `chat_tools.py`, `loop.py`, the tests, against `docs/agents/review-gk.md`.
-- **UX** reviews the frontend navigation against `docs/agents/review-ux.md`: Back to <origin> in Guided and Expert, no visible change in the panels, and the refusal wording. The vitest cases cover Guided and Expert; add a before/after screenshot only if UX asks.
+- **UX** reviews the frontend navigation against `docs/agents/review-ux.md`: Back to <origin> in Guided and Expert, no visible change in the panels, and the refusal wording. **Evidence in the PR (UX condition):** screenshots in Guided and in Expert of: the Goal card reached from another card, with the Back pill; Island in the grid study; the PowerFactory read-back in GridSpine (Planning → dynamics); Back returning to the origin; one refusal as the chat shows it.
 
 ## Repo rules
 
@@ -226,10 +236,11 @@ cd pypsa-gui/frontend && npm test   # full vitest suite before opening the PR
 
 ## Done when
 
-- [ ] The 11 new tests pass, and each fails against `master`'s code.
-- [ ] Every invalid `guided_step` or `panel_section` (unknown, wrong type, wrong panel) is refused with `invalid_navigation` before any `ui_event`; refusal messages start with a capital.
+- [ ] The 13 new tests pass, and each fails against `master`'s code.
+- [ ] Every invalid `guided_step` or `panel_section` (unknown, wrong type, wrong panel) is refused with `invalid_navigation` before any `ui_event`; refusal messages start with a capital and name panels by their on-screen title, never by `panel_id`.
 - [ ] Without the new arguments, `ui_open_panel` events and the frontend behave exactly as on `master`.
-- [ ] Each jump that leaves a view sets `flowReturn` through `withReturnFrom`, in Expert and Guided, and "Back to <origin>" restores it.
+- [ ] Each jump that leaves a view sets `flowReturn` through `withReturnFrom`, in Expert and Guided, and "Back to <origin>" restores it; a jump to the view already showing sets none; the mode never changes.
+- [ ] The PR carries the UX screenshots (Guided and Expert) listed under Review.
 - [ ] No app-visible string, style or element changed; only `data-panel-section` attributes were added.
 - [ ] `ui_open_panel` is still `Safety: read` and `_UI_EVENT`; no tool, panel id or `error_kind` was added; `navigation.py` is unchanged unless the gatekeeper chose (b).
 - [ ] The three `--check` commands, the named backend and frontend files, `npx tsc -b`, the full `gui-tests` and `npm test` are green, or the PR lists each failure that also fails on `master`.

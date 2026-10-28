@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-Status: ready-for-agent — written 2026-10-28; part 1 is docs only (CI), part 2 is one harness line (GK B reviews)
+Status: ready-for-agent — written 2026-10-28; part 1 is docs only (CI), part 2 is one harness constant and its test (GK B reviews)
 
 # Outsourced task S: Stale `Status:` lines, pack 2, and the pilot scorer's policy version
 
@@ -18,7 +18,7 @@ Every pointer below was checked on `master` at `c86f572f` (2026-10-28).
 ## Goal in plain words
 
 1. More issue files in `.scratch/` still say `ready-for-agent` for work that has merged. The coordinator and the sessions read these lines to decide what is open. Set each stale line to its true state and cite the merge PR and its 8-character merge commit. Where only part of the work merged, keep the status word and add a `Progress:` line under it that says what merged and what did not. Change only `Status:` and `Progress:` lines.
-2. The pilot scorer checks an approved answer's policy version against a literal `"1"`, while the records module owns the version as a constant. When the version moves, the scorer would silently mark every good answer `unsupported_policy`. Make it read the constant.
+2. The pilot scorer checks an approved answer's policy version against an unnamed literal `"1"`. Name it as the suite's own constant, and add one test that fails by name when the runtime's policy version moves away from it.
 
 ## First: get the full history
 
@@ -86,7 +86,7 @@ Look at each line that says `claimed`, `in-progress`, `in progress`, `ready-for-
 4. If you cannot find a merged PR, leave the line and list the file under "Could not verify". **Never guess.**
 5. A file with no `Status:` line, and any text other than the Status and Progress lines, stays as it is.
 
-## Part 2: the pilot scorer reads `POLICY_VERSION`
+## Part 2: the pilot scorer names its own policy version
 
 `pypsa-gui/backend/harness/pilot_evaluation.py:298` reads:
 
@@ -94,47 +94,40 @@ Look at each line that says `claimed`, `in-progress`, `in progress`, `ready-for-
     if approved.get("version") != 1 or answer.get("version") != 1 or receipt.get("policy_version") != "1":
 ```
 
-The version is owned by `pypsa-gui/backend/services/assurance_records.py:48`, `POLICY_VERSION = "1"`. The assurance loop writes that constant into every receipt (`harness/assurance.py:948`, `"policy_version": records.POLICY_VERSION`), and the records module checks it (`assurance_records.py:887`).
+The runtime owns the policy version in `pypsa-gui/backend/services/assurance_records.py:48`, `POLICY_VERSION = "1"`. The scorer must stay independent of it (gatekeeper B, #852): `pilot_evaluation.py` is the independent finite-suite scorer and imports nothing from `services`. The literal `"1"` is the suite's own label for the policy its cases were written against. If the runtime policy changes, all 292 cases fail loudly with `unsupported_policy`, and that is the signal to re-check the labels and bump `SUITE_VERSION`. What is missing is a name for that label and one test that points at the drift directly.
 
 The change:
 
-1. Add the import that `harness/assurance.py:23` already uses: `from services import assurance_records as records`. Put it with the module's other imports (`pilot_evaluation.py:4-12`). Use the module, not `from ... import POLICY_VERSION`, so a test can patch the constant.
-2. In l.298, replace `receipt.get("policy_version") != "1"` with `receipt.get("policy_version") != records.POLICY_VERSION`. Leave the two `version != 1` checks; they are the answer and approval schema versions, not the policy version.
+1. In `pilot_evaluation.py`, add a module constant `POLICY_VERSION = "1"` next to `SUITE_VERSION` (l.14), with a one-line comment: the assurance policy this suite's labels were written for; when `services.assurance_records.POLICY_VERSION` changes, re-check the labels, then move this constant and `SUITE_VERSION` together.
+2. In l.298, replace `receipt.get("policy_version") != "1"` with `receipt.get("policy_version") != POLICY_VERSION`. Leave the two `version != 1` checks; they are the answer and approval schema versions, not the policy version.
+3. **Add no import from `services`** to `pilot_evaluation.py`. Change nothing else in it.
 
-Change nothing else in `pilot_evaluation.py`.
+**Tests.** Add to `pypsa-gui/backend/tests/test_pilot_evaluation_scoring.py`, which already builds a passing observation with `observation(case)` (l.14-34; `receipt` is one dict shared by `answer` and `approved`):
 
-**Import check.** `assurance_records` imports `harness.durable` and `services.pypsa_service` at module level (l.16-19). After the change, run each of these. If one fails with an import cycle, move the import into the function that holds l.298 instead, and say so in the PR body:
-
-```bash
-cd pypsa-gui/backend
-python -c "import harness.pilot_evaluation"
-python -c "import harness.reliability_cases"
-python tools/run_pilot_evaluation.py --help
-```
-
-**Test.** Add one test to `pypsa-gui/backend/tests/test_pilot_evaluation_scoring.py`, which already builds a passing observation with `observation(case)` (l.14-34; `receipt` is one dict shared by `answer` and `approved`):
+1. A test that imports both modules and asserts `pilot_evaluation.POLICY_VERSION == assurance_records.POLICY_VERSION`, with a failure message that says to re-check the suite's labels, then move `pilot_evaluation.POLICY_VERSION` and `SUITE_VERSION` together. A drift then shows up as one named unit-test failure instead of 292 `unsupported_policy` cases.
+2. Optional: a test that the scorer follows its own constant:
 
 ```python
-def test_policy_version_follows_the_records_module(monkeypatch):
-    from services import assurance_records
+def test_policy_version_follows_the_suite_constant(monkeypatch):
+    from harness import pilot_evaluation
     case = GOLDEN_CASES[0]
     frames, answer = observation(case)
     assert "unsupported_policy" not in score(case, frames, answer)["failures"]
-    monkeypatch.setattr(assurance_records, "POLICY_VERSION", "2")
+    monkeypatch.setattr(pilot_evaluation, "POLICY_VERSION", "2")
     assert "unsupported_policy" in score(case, frames, answer)["failures"]
     answer["receipt"]["policy_version"] = "2"
     assert "unsupported_policy" not in score(case, frames, answer)["failures"]
 ```
 
-On `master` the last assertion fails (the literal `"1"` rejects `"2"`). Show that red run in the PR body, then the green one. Do not change `observation()` or any existing test.
+On `master` both fail: test 1 because `pilot_evaluation` has no `POLICY_VERSION`, test 2's last assertion because the literal `"1"` rejects `"2"`. Show the red run in the PR body, then the green one. Do not change `observation()` or any existing test.
 
 Part 2 adds no user-visible behaviour. No release-note fragment: `.github/workflows/release-notes-guard.yaml` only fails a PR that edits `doc/release_notes.md`.
 
 ## Files it may touch
 
 - The `Status:` and `Progress:` lines of the files in the table, and of any other `.scratch/**/issues/*.md` or `.scratch/**/spec.md` found by the rule.
-- `pypsa-gui/backend/harness/pilot_evaluation.py`: the one import and l.298 only.
-- `pypsa-gui/backend/tests/test_pilot_evaluation_scoring.py`: the one new test only.
+- `pypsa-gui/backend/harness/pilot_evaluation.py`: the one `POLICY_VERSION` constant and l.298 only.
+- `pypsa-gui/backend/tests/test_pilot_evaluation_scoring.py`: the new tests only.
 
 ## Files it must NOT touch
 
@@ -169,5 +162,5 @@ pixi run gui-tests   # the full backend suite before you open the PR
 - [ ] Every row of the table is applied, or the PR body says why not.
 - [ ] Every `done (...)` and `Progress:` cites a PR and a commit you confirmed on `origin/master` by subject.
 - [ ] No line outside `Status:` and `Progress:` changed under `.scratch/`; no "do not touch" file changed.
-- [ ] `pilot_evaluation.py` compares against `records.POLICY_VERSION`; the new test failed on `master` and passes; the three pilot test files and the full `gui-tests` are green.
+- [ ] `pilot_evaluation.py` compares against its own `POLICY_VERSION` and imports nothing from `services`; the new tests failed on `master` and pass; the three pilot test files and the full `gui-tests` are green.
 - [ ] The "Could not verify" list is in the PR body.
