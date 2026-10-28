@@ -43,6 +43,7 @@ import { busLatLng } from '../utils/geo'
 import { tileRangeAround, mosaicExtent, zoomFor, tileCount, fromLocal, type LngLat, type LocalExtent } from '../site3d/geo'
 import { buildGroundMosaic, ESRI_ATTRIBUTION } from '../site3d/imagery'
 import { sitesApi, contextErrorMessage, contextFailureBacksOff } from '../api/sites'
+import { contextFailureCopy } from '../api/siteScene'
 import {
   buildingsGeometry, linesToRibbons, areasGeometry, heightmapToDisplacement, terrainSampler, groundHeightAt,
   groundMode, hillshadeCanvas, terrainCellMetres, RIBBON_COLOR, AREA_COLOR, BUILDING_COLOR, OSM_ATTRIBUTION, type HeightAt,
@@ -78,7 +79,8 @@ import { writeActiveSite } from '../site3d/activeSite'
 import { boundaryToLocal } from '../site3d/boundary'
 import { busOffsets, siteBounds } from '../site3d/siteModel'
 import { fitReport, type FitObject } from '../site3d/fit'
-import { placementFindings, findingKeys } from '../site3d/placementCheck'
+import { placementFindings, findingKeys, nativeFindings, nativeFindingKeys } from '../site3d/placementCheck'
+import { sceneObstacles, withSceneRoofs } from '../site3d/associations'
 import { libraryGaps, libraryGapLine } from '../site3d/libraryGaps'
 import { thumbSize, captureDue } from '../site3d/thumbnail'
 import WalkControls from '../site3d/WalkControls'
@@ -755,21 +757,35 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
       .catch(() => { /* read-only, locked or offline: no thumbnail this time */ })
   }, [currentProject, siteIdForPng, bumpThumbnail])
 
+  // SC-01b: the native scene's buildings, and the proposal under review. The
+  // context layer leaves out the OSM buildings the scene already draws.
+  const sceneQuery = useSiteScene(site?.id ?? null)
+  const acceptedBuildings = useMemo(() => (sceneQuery.data?.state === 'enabled' ? sceneQuery.data.buildings : []), [sceneQuery.data])
+  // SC-02: those buildings are obstacles to the packer and roofs for solar items.
+  const sceneBuildings = useMemo(() => sceneObstacles(acceptedBuildings), [acceptedBuildings])
+  const scenePlacements = sceneQuery.data?.state === 'enabled'
+    ? (sceneQuery.data.site as { placements?: Record<string, { x: number; y: number; heading: number; on?: string }> }).placements
+    : undefined
+  const placementsIn = useMemo(() => (site ? withSceneRoofs(site.placements, scenePlacements) : undefined), [site, scenePlacements])
+
   // The layout is in the SITE frame already: one yard per bus at its
   // offset, placements honoured.
   const layout = useMemo(() => (site && site.buses.length === 0
     // SC-01b: a native Site (no model equipment) is framed by its own boundary.
     ? emptyLayoutFor(site)
     : site && memberInputs.length > 0
-    ? buildSiteLayout({ buses: memberInputs, generators, storageUnits, stores, loads, transformers, lines, links, placements: site.placements, footprints: sitesDoc.asset_footprints, busCarrier, sizing })
+    ? buildSiteLayout({ buses: memberInputs, generators, storageUnits, stores, loads, transformers, lines, links, placements: placementsIn, footprints: sitesDoc.asset_footprints, busCarrier, sizing, buildings: sceneBuildings })
     : null),
-  [site, sitesDoc.asset_footprints, memberInputs, generators, storageUnits, stores, loads, transformers, lines, links, busCarrier, sizing])
+  [site, placementsIn, sitesDoc.asset_footprints, memberInputs, generators, storageUnits, stores, loads, transformers, lines, links, busCarrier, sizing, sceneBuildings])
   const objects: SiteObject[] = layout?.objects ?? []
 
   // ── Site context (WP5): the cache first (never an upstream call), then
   // one fetch when online; a failure is shown, not retried in a loop. ──────
   const [context, setContext] = useState<SiteContext | null>(null)
   const [contextStatus, setContextStatus] = useState<string>('')
+  // A failed fetch: the raw reason, shown only behind Details (UX SC-02, condition 8a).
+  const [contextFailure, setContextFailure] = useState<string | null>(null)
+  const [contextDetails, setContextDetails] = useState(false)
   const [contextBusy, setContextBusy] = useState(false)
   // Refresh: bump the nonce with the force flag set; the effect then skips
   // the cache and the backoff and re-POSTs (the cache is replaced only when
@@ -781,6 +797,8 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
     const force = forceContextRef.current
     forceContextRef.current = false
     if (!force) setContext(null)
+    setContextFailure(null)
+    setContextDetails(false)
     if (!siteId) { setContextStatus(''); return }
     if (!currentProject) { setContextStatus('site context needs a saved project'); return }
     let cancelled = false
@@ -797,7 +815,7 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
           }
           const failed = contextFailures.get(key)
           if (!force && failed && Date.now() - failed.at < CONTEXT_RETRY_MS) {
-            if (!cancelled) setContextStatus(`site context unavailable: ${failed.message}`)
+            if (!cancelled) { setContextStatus(''); setContextFailure(failed.message) }
             return
           }
           // Checked before the upstream call too: a StrictMode double-mount
@@ -813,7 +831,7 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
       } catch (err: unknown) {
         const message = contextErrorMessage(err)
         if (contextFailureBacksOff(err)) contextFailures.set(key, { at: Date.now(), message })
-        if (!cancelled) setContextStatus(`site context unavailable: ${message}`)
+        if (!cancelled) { setContextStatus(''); setContextFailure(message) }
       } finally {
         if (!cancelled) setContextBusy(false)
       }
@@ -850,8 +868,11 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
   // the first and third, amber for the rest; the overlay lists them and the
   // Issues panel reads them from the store. Advisory: nothing blocks a save.
   const findings = useMemo(() => placementFindings(objects, DEFAULT_LIBRARY, { outside: fit?.outside ?? [] }), [objects, fit])
-  const redSet = useMemo(() => findingKeys(findings, 'red'), [findings])
-  const amberSet = useMemo(() => findingKeys(findings, 'amber'), [findings])
+  // SC-02: a ground item inside a native building, an item off its roof or not for a roof (V17–V19).
+  // Shown in the overlay and outlined here; the Issues panel still reads only `findings`.
+  const sceneFindings = useMemo(() => nativeFindings(objects, DEFAULT_LIBRARY, { buildings: sceneBuildings }), [objects, sceneBuildings])
+  const redSet = useMemo(() => new Set([...findingKeys(findings, 'red'), ...nativeFindingKeys(sceneFindings, 'red')]), [findings, sceneFindings])
+  const amberSet = useMemo(() => new Set([...findingKeys(findings, 'amber'), ...nativeFindingKeys(sceneFindings, 'amber')]), [findings, sceneFindings])
   const publishFindings = usePlacementFindings(s => s.publish)
   const clearFindings = usePlacementFindings(s => s.clear)
   const siteName = site?.name ?? null
@@ -984,13 +1005,10 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
   const [walking, setWalking] = useState(false)
   useEffect(() => { setWalking(false) }, [siteId])
   // Stable, so the memoised object meshes re-render only when their own props change.
-  // SC-01b: the native scene's buildings, and the proposal under review. The
-  // context layer leaves out the OSM buildings the scene already draws.
-  const sceneQuery = useSiteScene(site?.id ?? null)
+  // The proposal under review (the scene query is read above, before the layout).
   const proposal = useSceneProposal(s => s.proposal)
   const sitePartSelection = useUIStore(s => s.sitePartSelection)
   const setSitePartSelection = useUIStore(s => s.setSitePartSelection)
-  const acceptedBuildings = useMemo(() => (sceneQuery.data?.state === 'enabled' ? sceneQuery.data.buildings : []), [sceneQuery.data])
   const previewBuildings = proposal && site && proposal.site_id === site.id ? proposal.preview.buildings : null
   const sceneContext = useMemo(() => {
     if (!context) return null
@@ -1142,6 +1160,9 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
               {findings.filter(f => f.key === key && f.kind !== 'outsideBoundary').map(f => (
                 <div key={`${f.kind}:${f.other ?? ''}`} className="text-[10px] text-accent">{f.message}</div>
               ))}
+              {sceneFindings.filter(f => f.key === key).map(f => (
+                <div key={`native:${f.kind}:${f.other ?? ''}`} className="text-[10px] text-accent">{f.message}</div>
+              ))}
               {/* The result at this snapshot (LabelTracker writes it every frame). */}
               <div data-result-line className="text-text empty:hidden" />
             </div>
@@ -1187,9 +1208,9 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
         {selectedComponent && showFootprintEditor && <AssetFootprintEditor key={`footprint:${selectedComponent.type}:${selectedComponent.name}`} componentClass={selectedComponent.type} name={selectedComponent.name} />}
         <p className="max-w-72 rounded bg-bg/95 px-2 py-1 text-[10px] text-muted">Library dimensions are estimates unless a user-entered envelope is provided. Fit checks do not certify clearances or compliance.</p>
         {/* Legend — under the picker; the result bands only while results show. */}
-        <SiteLegend entries={legend} results={resultsStore} />
+        {legend.length > 0 && <SiteLegend entries={legend} results={resultsStore} />}
         {/* The placement check's findings, in words, each a deep link (S2). */}
-        <SiteLayoutFindings findings={findings} unresolved={layout.unresolved} />
+        <SiteLayoutFindings findings={findings} unresolved={layout.unresolved} native={sceneFindings} />
         {/* Results readout under the legend, only while results show (spec §6.4:
             not hover-only). In this column it never covers the control strip;
             collapsed by default in a narrow pane so it does not cover the scene. */}
@@ -1204,7 +1225,23 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
       <div className="absolute right-3 bottom-12 z-[400] max-w-[45%] rounded bg-bg/80 px-1.5 py-0.5 text-right text-[10px] text-muted">
         {tileStatus ? `${tileStatus} · ` : ''}
         {contextStatus ? <span data-testid="context-status">{contextStatus} · </span> : null}
-        {currentProject && (
+        {contextFailure !== null && (
+          <span data-testid="context-status">
+            {contextFailureCopy(contextFailure)}{' '}
+            <button type="button" data-testid="context-retry" className="text-accent hover:underline disabled:opacity-50 disabled:no-underline"
+              disabled={readOnly || contextBusy}
+              onClick={() => { forceContextRef.current = true; setContextNonce(n => n + 1) }}>
+              › Retry
+            </button>{' '}
+            <button type="button" data-testid="context-details-toggle" aria-expanded={contextDetails}
+              className="underline decoration-dotted hover:text-text" onClick={() => setContextDetails(v => !v)}>
+              Details
+            </button>
+            {contextDetails && <span data-testid="context-details" className="block break-words">{contextFailure}</span>}
+            {' · '}
+          </span>
+        )}
+        {currentProject && contextFailure === null && (
           <>
             <button
               type="button"

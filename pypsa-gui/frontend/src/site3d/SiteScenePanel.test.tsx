@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Proposal, SceneBuilding, SiteScene } from '../api/siteScene'
+import type { BuildingInputs, Proposal, SceneBuilding, SiteScene } from '../api/siteScene'
 
 const flowState: { flow: unknown; isPending: boolean } = { flow: null, isPending: false }
 vi.mock('../hooks/useProjectFlow', () => ({ useProjectFlow: () => flowState }))
@@ -55,6 +55,17 @@ describe('Site 3D scene panel', () => {
     expect(screen.getByTestId('scene-blocker-assign_native').textContent).toBe('Buildings only: configure model elements to map them › Loads')
   })
 
+  it('Model: with assign_native available on an enabled scene, the attachments panel replaces the blocker', async () => {
+    vi.mocked(siteSceneApi.getScene).mockResolvedValue(enabled([osm]))
+    const flow = flowState.flow as { scene: { actions: { action: string }[] } }
+    flow.scene.actions = flow.scene.actions.map(a => (a.action === 'assign_native' ? available('assign_native') : a))
+    useUIStore.setState({ sitePart: 'model' })
+    view()
+    await screen.findByTestId('association-panel')
+    expect(screen.queryByTestId('scene-blocker-assign_native')).toBeNull()
+    expect(screen.getByTestId('site-part-model-body').textContent).not.toContain('Not available yet')
+  })
+
   it('no mapped buildings: says so, and generates a proposed building', async () => {
     vi.mocked(propose).mockResolvedValue(proposal)
     view()
@@ -65,7 +76,7 @@ describe('Site 3D scene panel', () => {
     await screen.findByTestId('scene-proposal')
     const [, , siteId, action, inputs] = vi.mocked(propose).mock.calls[0]
     expect([siteId, action]).toEqual(['campus', 'generate_native'])
-    expect(inputs.greenfield).toHaveLength(1)
+    expect((inputs as BuildingInputs).greenfield).toHaveLength(1)
     expect(screen.getByTestId('scene-proposal').textContent).toContain('Preview: 1 building')
   })
 
@@ -95,8 +106,8 @@ describe('Site 3D scene panel', () => {
     await waitFor(() => expect(propose).toHaveBeenCalled())
     const [, , , action, inputs] = vi.mocked(propose).mock.calls[0]
     expect(action).toBe('edit_buildings')
-    expect(inputs.sources?.[0]).toMatchObject({ namespace: 'osm', source_id: '7', height_m: 14 })
-    expect(inputs.sources?.[0].ring).toHaveLength(4)
+    expect((inputs as BuildingInputs).sources?.[0]).toMatchObject({ namespace: 'osm', source_id: '7', height_m: 14 })
+    expect((inputs as BuildingInputs).sources?.[0].ring).toHaveLength(4)
   })
 
   it('a proposed building is corrected with its six numbers', async () => {

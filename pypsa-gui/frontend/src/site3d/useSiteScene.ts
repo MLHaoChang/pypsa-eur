@@ -3,7 +3,7 @@
 // a reload drops both, and the server then answers proposal_expired.
 import { useQuery } from '@tanstack/react-query'
 import { create } from 'zustand'
-import { siteSceneApi, type Proposal, type SiteScene } from '../api/siteScene'
+import { siteSceneApi, type ModelProposal, type Proposal, type SiteScene } from '../api/siteScene'
 import { useUIStore } from '../store/uiStore'
 import { sceneKey } from './sceneActions'
 
@@ -26,4 +26,20 @@ interface ProposalState {
 export const useSceneProposal = create<ProposalState>(set => ({
   proposal: null,
   setProposal: proposal => set({ proposal }),
+}))
+
+interface ModelProposalState {
+  /** The attach or place proposal under review in the Model part (buildings proposals stay above). */
+  proposal: ModelProposal | null
+  setProposal: (p: ModelProposal | null) => void
+  /** The placeable keys when the user left for "› Add model asset"; a new one on return offers "› Place it". */
+  addAssetFrom: string[] | null
+  setAddAssetFrom: (keys: string[] | null) => void
+}
+
+export const useModelProposal = create<ModelProposalState>(set => ({
+  proposal: null,
+  setProposal: proposal => set({ proposal }),
+  addAssetFrom: null,
+  setAddAssetFrom: addAssetFrom => set({ addAssetFrom }),
 }))

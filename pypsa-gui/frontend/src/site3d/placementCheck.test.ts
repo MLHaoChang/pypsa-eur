@@ -198,3 +198,127 @@ describe('geometry', () => {
     expect(pairRequirement('h2store', h2, 'pv', pv)).toEqual({ keepOutM: 50, clearanceM: 10 })
   })
 })
+
+// SC-02 (V17–V19): native scene buildings as obstacles and roofs; exact versus
+// approximate sizes; findings name the objects and an unknown rule is not a pass.
+import {
+  nativeFindings, polygonContains, shapeOverlapsPolygon, shapeOnRoof, roofEligible, sizeBasis, buildingKey, type NativeObstacle,
+} from './placementCheck'
+
+const square = (cx: number, cy: number, half: number): [number, number][] =>
+  [[cx - half, cy - half], [cx + half, cy - half], [cx + half, cy + half], [cx - half, cy + half]]
+const building = (id: string, label: string, cx: number, cy: number, half: number, height = 9): NativeObstacle =>
+  ({ id, label, footprint: square(cx, cy, half), height_m: height })
+
+describe('native buildings (V17)', () => {
+  it('polygon geometry: containment, overlap and a roof that holds the whole footprint', () => {
+    const ring = square(0, 0, 10)
+    expect(polygonContains(ring, [0, 0])).toBe(true)
+    expect(polygonContains(ring, [11, 0])).toBe(false)
+    expect(shapeOverlapsPolygon({ origin: [9, 0], footprint: [4, 4], heading: 0 }, ring)).toBe(true)
+    expect(shapeOverlapsPolygon({ origin: [20, 0], footprint: [4, 4], heading: 0 }, ring)).toBe(false)
+    // Touching an edge is not an overlap.
+    expect(shapeOverlapsPolygon({ origin: [12, 0], footprint: [4, 4], heading: 0 }, ring)).toBe(false)
+    expect(shapeOnRoof({ origin: [0, 0], footprint: [6, 6], heading: 45 }, ring)).toBe(true)
+    expect(shapeOnRoof({ origin: [8, 0], footprint: [6, 6], heading: 0 }, ring)).toBe(false)
+    expect(roofEligible({ footprint: ring, height_m: 9 })).toBe(true)
+    expect(roofEligible({ footprint: ring, height_m: 0 })).toBe(false)
+    expect(roofEligible({ footprint: ring.slice(0, 2), height_m: 9 })).toBe(false)
+  })
+
+  it('a native building is an obstacle: the packer keeps the BESS beside it, never on it', () => {
+    const base = objectsOf(campus)
+    const bess = obj(base, 'BESS')
+    const hall = building('osm:7', 'OSM building 7', bess.origin[0], bess.origin[1], 15)
+    const layout = buildSiteLayout({ ...campus, buildings: [hall] })
+    const moved = obj(layout.objects, 'BESS')
+    expect(shapeOverlapsPolygon(moved, hall.footprint)).toBe(false)
+    expect(rectDistance(rectOf(moved), { x0: hall.footprint[0][0], x1: hall.footprint[2][0], y0: hall.footprint[0][1], y1: hall.footprint[2][1] }))
+      .toBeLessThan(60)
+    const packed = layout.objects.filter(o => o.type !== 'Bus')
+    expect(packed.filter(o => shapeOverlapsPolygon(o, hall.footprint))).toEqual([])
+    expect(nativeFindings(layout.objects, DEFAULT_LIBRARY, { buildings: [hall] }).filter(f => f.kind === 'overlapsBuilding')).toEqual([])
+  })
+
+  it('a BESS placed into a building is a finding that names both, and selects both', () => {
+    const base = objectsOf(campus)
+    const bess = obj(base, 'BESS')
+    const hall = building('osm:7', 'OSM building 7', bess.origin[0], bess.origin[1], 15)
+    const layout = buildSiteLayout({ ...campus, buildings: [hall], placements: { 'StorageUnit:BESS': { x: bess.origin[0], y: bess.origin[1], heading: 0 } } })
+    const f = nativeFindings(layout.objects, DEFAULT_LIBRARY, { buildings: [hall] }).filter(x => x.kind === 'overlapsBuilding')
+    expect(f).toEqual([{ key: 'StorageUnit:BESS', other: buildingKey('osm:7'), kind: 'overlapsBuilding', severity: 'warn', message: 'BESS overlaps OSM building 7' }])
+    // A click selects both: the item and the building.
+    expect(new Set(f.flatMap(x => [x.key, x.other]))).toEqual(new Set(['StorageUnit:BESS', 'building:osm:7']))
+  })
+
+  it('PV on an eligible roof stands on it, lifted to its height, with no finding', () => {
+    const roof = building('osm:9', 'OSM building 9', 300, 300, 30, 12)
+    const layout = buildSiteLayout({
+      ...campus, buildings: [roof],
+      footprints: { 'Generator:PV': { width_m: 10, depth_m: 10 } },
+      placements: { 'Generator:PV': { x: 300, y: 300, heading: 0, on: 'roof:osm:9' } },
+    })
+    const pv = obj(layout.objects, 'PV')
+    expect(pv).toMatchObject({ origin: [300, 300], roof: 'osm:9', elevation: 12 })
+    expect(layout.placed).toContain('Generator:PV')
+    expect(nativeFindings(layout.objects, DEFAULT_LIBRARY, { buildings: [roof] }).filter(f => f.key === 'Generator:PV')).toEqual([])
+  })
+
+  it('off the roof and not for a roof: each a finding in words', () => {
+    const roof = building('osm:9', 'OSM building 9', 0, 0, 10)
+    const pv: CheckObject = { type: 'Generator', name: 'PV', kind: 'rooftopPv', bus: 'MV', origin: [9, 0], footprint: [6, 6], heading: 0, elevation: 9, roof: 'osm:9' }
+    const roofKind = DEFAULT_LIBRARY.find(t => t.zone === 'roof')!.id
+    const off = nativeFindings([{ ...pv, kind: roofKind }], DEFAULT_LIBRARY, { buildings: [roof] })
+    expect(off).toEqual([{ key: 'Generator:PV', other: 'building:osm:9', kind: 'offRoof', severity: 'warn', message: 'PV is off the roof of OSM building 9' }])
+    const bess: CheckObject = { ...pv, type: 'StorageUnit', name: 'BESS', kind: 'bess', origin: [0, 0] }
+    expect(nativeFindings([bess], DEFAULT_LIBRARY, { buildings: [roof] })).toEqual([
+      { key: 'StorageUnit:BESS', kind: 'notRoofEligible', severity: 'warn', message: 'Can’t go on a roof: BESS' },
+    ])
+  })
+
+  it('a transformer stays in the yard: a building elsewhere changes nothing about it', () => {
+    const without = objectsOf(campus)
+    const far = building('osm:1', 'OSM building 1', -900, -900, 20)
+    const withB = buildSiteLayout({ ...campus, buildings: [far] }).objects
+    expect(obj(withB, 'TR1').origin).toEqual(obj(without, 'TR1').origin)
+    expect(nativeFindings(withB, DEFAULT_LIBRARY, { buildings: [far] })).toEqual([])
+    expect(placementFindings(withB, DEFAULT_LIBRARY)).toEqual([])
+  })
+})
+
+describe('exact versus approximate size (V18)', () => {
+  it('only a source-verified catalogue record is exact', () => {
+    expect(sizeBasis({ source: 'catalogue' })).toBe('exact')
+    expect(sizeBasis({})).toBe('approximate')
+    expect(sizeBasis(undefined)).toBe('approximate')
+    expect(sizeBasis(null)).toBe('approximate')
+  })
+})
+
+describe('findings name objects; an unknown rule is not a pass (V19)', () => {
+  it('a type without a placement rule says which rule was not checked', () => {
+    const base = objectsOf(campus)
+    const f = nativeFindings(base, DEFAULT_LIBRARY, { reportUnchecked: true }).filter(x => x.kind === 'noRule')
+    expect(f.length).toBeGreaterThan(0)
+    for (const x of f) {
+      expect(x.message).toMatch(/^No rule checked: spacing for /)
+      expect(x.message).not.toMatch(/[A-Za-z]+:[A-Za-z]/)
+    }
+    // A library with no rules at all never reads as a clean pass.
+    const bare = DEFAULT_LIBRARY.map(t => ({ ...t, placement: undefined }))
+    expect(nativeFindings(base, bare, { reportUnchecked: true })).not.toEqual([])
+  })
+})
+
+describe('native findings in the scene overlay', () => {
+  it('scene data → layout → findings: the item is outlined, the building named', async () => {
+    const { nativeFindingKeys } = await import('./placementCheck')
+    const base = objectsOf(campus)
+    const bess = obj(base, 'BESS')
+    const hall = building('osm:7', 'OSM building 7', bess.origin[0], bess.origin[1], 15)
+    const layout = buildSiteLayout({ ...campus, buildings: [hall], placements: { 'StorageUnit:BESS': { x: bess.origin[0], y: bess.origin[1], heading: 0 } } })
+    const f = nativeFindings(layout.objects, DEFAULT_LIBRARY, { buildings: [hall] })
+    expect(nativeFindingKeys(f, 'amber')).toEqual(new Set(['StorageUnit:BESS']))
+    expect(nativeFindingKeys(f, 'red')).toEqual(new Set())
+  })
+})

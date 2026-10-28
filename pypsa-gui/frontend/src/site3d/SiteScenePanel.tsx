@@ -7,6 +7,8 @@
 //   Apply commits it (a new scene revision) or Discard cancels it.
 // - Correction: a selected accepted building gets numeric controls; "Preview
 //   change" is an `edit_buildings` proposal reviewed the same way.
+// - Model (SC-02b): attachments and placement in `AssociationPanel` once the
+//   scene is enabled and `assign_native` is available; its blocker otherwise.
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
@@ -16,6 +18,7 @@ import { sceneErrorCopy, sceneErrorDetail, sceneErrorWantsReload, type Greenfiel
 import type { SceneAction, SitePart } from '../api/flow'
 import { evaluateMutation } from '../utils/mutationGuard'
 import NumberField from './NumberField'
+import AssociationPanel from './AssociationPanel'
 import { useSitesStore } from './sitesStore'
 import { applyProposal, discardProposal, propose, SitesNotSaved } from './sceneActions'
 import { useSceneProposal, useSiteScene } from './useSiteScene'
@@ -301,8 +304,9 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
 
       {part === 'model' && (
         <div className="flex flex-col gap-1" data-testid="site-part-model-body">
-          <span className="text-[11px] text-muted">Not available yet: mapping buildings to model elements comes in a later version</span>
-          <Blocker action={action('assign_native')} />
+          {enabled && action('assign_native')?.available
+            ? <AssociationPanel site={site} scene={enabled} canWrite={canWrite} blockedReason={blocked ?? (busy ? 'Working: wait for the current step to finish' : null)} />
+            : <Blocker action={action('assign_native')} />}
         </div>
       )}
       {part === 'results' && (
