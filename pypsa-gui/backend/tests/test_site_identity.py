@@ -192,12 +192,85 @@ def test_a_get_never_writes(client, api_project, project_storage_dir):
 def test_a_malformed_binding_is_refused(client, placed):
     name, _project = placed
     for bad in ({KEY: 7}, {KEY: "not-a-uuid"}, {"Carrier:gas": "0f8fad5b-d9cb-469f-a165-70867728950e"},
-                {KEY: "0f8fad5b-d9cb-469f-a165-70867728950e", "Bus:B1": "0f8fad5b-d9cb-469f-a165-70867728950e"}):
+                {KEY: "0f8fad5b-d9cb-469f-a165-70867728950e", "Bus:B1": "0f8fad5b-d9cb-469f-a165-70867728950e"},
+                {KEY: "0f8fad5b-d9cb-469f-a165-70867728950e", "Bus:B1": "0F8FAD5B-D9CB-469F-A165-70867728950E"},
+                {KEY: "0f8fad5b-d9cb-469f-a165-70867728950e", "Bus:B1": "0f8fad5bd9cb469fa16570867728950e"}):
         r = client.put(f"/api/projects/{name}/sites", json={**DOC, "bindings": bad})
         assert r.status_code == 422 and "bindings" in r.text, bad
     # Well-formed but unknown (an undo can bring it back): accepted, and reads unbound.
     r = client.put(f"/api/projects/{name}/sites", json={**DOC, "bindings": {KEY: "0f8fad5b-d9cb-469f-a165-70867728950e"}})
     assert r.status_code == 200 and _sites(client, name)["unbound_keys"] == [KEY]
+
+
+def test_an_edit_keeps_the_binding(client, placed):
+    """An edit removes and re-adds the row under its name: still the same instance."""
+    name, project = placed
+    uid = ss.read_sites(project)["bindings"][KEY]
+    r = client.put("/api/network/generators/gas", json={"name": "gas", "bus": "B1", "p_nom": 42.0})
+    assert r.status_code == 200, r.text
+    doc = _sites(client, name)
+    assert _bound(doc) and "unbound_keys" not in doc
+    assert ss.read_sites(project)["bindings"][KEY] == uid
+
+
+def test_a_removal_that_skips_the_purge_still_leaves_nothing_to_inherit(client, api_project, monkeypatch):
+    """The vintage orphan cleanup removes rows without `purge_component_side_data`."""
+    from services.pypsa_service import PyPSAService
+
+    name, key = api_project("vint"), "Generator:gas@2030"
+    r = client.post("/api/network/generators", json={"name": "gas@2030", "bus": "B1", "carrier": "gas"})
+    assert r.status_code in (200, 201), r.text
+    doc = {**DOC, "sites": [{**SITE, "placements": {key: PLACE}}], "asset_footprints": {key: FOOT}}
+    assert client.put(f"/api/projects/{name}/sites", json=doc).status_code == 200
+    assert _bound(_sites(client, name), key)
+    # The row a vintage expansion left behind (its transient mark is request-scoped).
+    monkeypatch.setattr(PyPSAService, "get_transient_rows",
+                        classmethod(lambda cls, c: {"gas@2030"} if c == "Generator" else set()))
+    r = client.post("/api/network/vintage_bounds/_cleanup_orphans")
+    assert r.status_code == 200 and "gas@2030" in r.text, r.text
+    r = client.post("/api/network/generators", json={"name": "gas@2030", "bus": "B1", "carrier": "gas"})
+    assert r.status_code in (200, 201), r.text
+    after = _sites(client, name)
+    assert _absent(after, key) and after["unbound_keys"] == [key]
+
+
+def test_a_put_a_rename_and_a_delete_take_the_network_lock_before_the_scene_mutex(client, placed, monkeypatch):
+    """
+    One lock order everywhere, network then scene: the delete and rename hooks
+    take the scene mutex under the network lock, so a PUT /sites that took them
+    the other way round could deadlock against them. Asserted on the order, not
+    raced, so a regression fails instead of hanging the suite.
+    """
+    from services.pypsa_service import PyPSAService
+    from services.site_scene import store as scene_store
+
+    name, project = placed
+    taken: list[bool] = []
+    real = scene_store.project_lock
+
+    def recording(project_dir):
+        lock = real(project_dir)
+        if project_dir.resolve() == project.resolve():
+            taken.append(PyPSAService.get_lock()._is_owned())
+        return lock
+
+    # Every write that changes the bindings holds the scene mutex (the rename's included).
+    binding_writes: list[bool] = []
+    write = ss.write_sites
+
+    def recording_write(pdir, doc):
+        if doc.get("bindings") != ss.read_sites(pdir).get("bindings"):
+            binding_writes.append(real(pdir)._is_owned())
+        return write(pdir, doc)
+
+    monkeypatch.setattr(scene_store, "project_lock", recording)
+    monkeypatch.setattr(ss, "write_sites", recording_write)
+    assert client.put(f"/api/projects/{name}/sites", json=DOC).status_code == 200
+    r = client.put("/api/network/generators/gas", json={"name": "gas2", "bus": "B1"})
+    assert r.status_code == 200, r.text
+    assert client.delete("/api/network/generators/gas2").status_code in (200, 204)
+    assert len(taken) >= 3 and all(taken), taken
+    assert len(binding_writes) >= 1 and all(binding_writes), binding_writes
 
 
 def test_a_binding_never_saved_is_lost_not_re_attached_by_name(client, placed):

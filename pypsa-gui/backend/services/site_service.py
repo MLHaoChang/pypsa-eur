@@ -148,12 +148,12 @@ def _validate_bindings(value: object) -> None:
         if not sep or not name or cls not in PLACEABLE_CLASSES:
             raise SitesInvalid("bindings key must be <Class>:<name> with a placeable class")
         try:
-            uuid.UUID(uid if isinstance(uid, str) and len(uid) <= MAX_BINDING_UID else "")
+            canonical = str(uuid.UUID(uid if isinstance(uid, str) and len(uid) <= MAX_BINDING_UID else ""))
         except ValueError:
             raise SitesInvalid(f"bindings[{key!r}] must be a uuid") from None
-        if uid in seen:
+        if canonical in seen:                # a case or hyphen variant is the same uid
             raise SitesInvalid(f"bindings[{key!r}]: a uid binds one key only")
-        seen.add(uid)
+        seen.add(canonical)
 
 
 def validate_sites(doc: object) -> None:
@@ -313,16 +313,19 @@ def _rename_binding(pdir: pathlib.Path, component_class: str, old: str, new: str
     from services.site_scene import store as scene_store
 
     old_key, new_key = f"{component_class}:{old}", f"{component_class}:{new}"
-    doc = read_sites(pdir)
-    bindings = doc.get("bindings")
-    if not isinstance(bindings, dict) or old_key not in bindings or new_key in bindings:
-        return
-    shown = scene_store.project_sites(pdir)
-    if old_key in (shown.get("asset_footprints") or {}) or any(
-            old_key in (s.get("placements") or {}) for s in shown.get("sites") or []):
-        return
-    bindings[new_key] = bindings.pop(old_key)
-    write_sites(pdir, doc)
+    # Under the scene mutex, like PUT /sites, so neither write loses the other.
+    # The caller holds the network lock, so the order is network, then scene.
+    with scene_store.project_lock(pdir):
+        doc = read_sites(pdir)
+        bindings = doc.get("bindings")
+        if not isinstance(bindings, dict) or old_key not in bindings or new_key in bindings:
+            return
+        shown = scene_store.project_sites(pdir)
+        if old_key in (shown.get("asset_footprints") or {}) or any(
+                old_key in (s.get("placements") or {}) for s in shown.get("sites") or []):
+            return
+        bindings[new_key] = bindings.pop(old_key)
+        write_sites(pdir, doc)
 
 
 # ── thumbnail (visual-layers plan 3, S5) ────────────────────────────────────

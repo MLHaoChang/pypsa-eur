@@ -644,6 +644,8 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         # remove and put back straight after the add, under the old name, so
         # the rename below re-keys them with everything else.
         saved_series = _detach_component_series(n, attr, name)
+        # An edit keeps the instance: the remove drops its uid (D06), put back after the add.
+        held_uid = component_identity.get(n, component_class, name)
         n.remove(component_class, name)
         # Re-add under the OLD name and rename separately. A rename by
         # remove+add does NOT re-point the components that REFER to this one:
@@ -658,6 +660,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         # already used it; this path is the one the Properties panel's edit
         # cards take, and it did not.
         n.add(component_class, name, **merged)
+        component_identity.keep(n, component_class, name, held_uid)
         _apply_investment_parts(n, component_class, name, parts)
         _reattach_component_series(n, attr, name, saved_series)
         # Re-key any saved per-period bounds so the modal data follows the

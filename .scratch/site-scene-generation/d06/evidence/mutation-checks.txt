@@ -12,3 +12,15 @@ M3  network_crud.purge_component_side_data: component_identity.drop removed
     -> delete+recreate RED, failed-delete-hook RED (the kept uid binds the recreation)
 Restored: all three GREEN.
 Each red comes from the uid check: under M1 the names still resolve, under M2/M3 the uid is the only thing that changed.
+
+## GK B NOT OK @0f8d8b20 fixes (each mutation applied alone, then restored)
+M1 PUT takes the scene mutex before the network lock:
+FAILED tests/test_site_identity.py::test_a_put_a_rename_and_a_delete_take_the_network_lock_before_the_scene_mutex
+M2 _rename_binding writes without the scene mutex:
+FAILED tests/test_site_identity.py::test_a_put_a_rename_and_a_delete_take_the_network_lock_before_the_scene_mutex
+M3 removal keeps the uid (no remove hook):
+FAILED tests/test_site_identity.py::test_a_removal_that_skips_the_purge_still_leaves_nothing_to_inherit
+M4 duplicate check on raw strings:
+FAILED tests/test_site_identity.py::test_a_malformed_binding_is_refused - Ass...
+M5 an edit does not put the uid back:
+FAILED tests/test_site_identity.py::test_an_edit_keeps_the_binding - Assertio...

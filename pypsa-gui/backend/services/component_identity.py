@@ -11,9 +11,10 @@ lock. No sidecar hook is needed for it to stay right.
 - A uid is minted lazily, the first time something binds to the component
   (`uid_for`).
 - A rename moves it (`rename`).
-- Every removal drops it (`drop`, from
-  `network_crud.purge_component_side_data`), so a same-name recreation gets a
-  fresh uid.
+- Every removal drops it, so a same-name recreation gets a fresh uid. This
+  module wraps `pypsa.Network.remove` once, on import, so the paths that skip
+  `network_crud.purge_component_side_data` (the vintage cleanup and rollback,
+  the solve copies) drop it too.
 
 A uid is never re-attached by name. A binding whose uid the network does not
 hold (deleted, replaced, or minted after the last save and then discarded) is
@@ -24,7 +25,11 @@ module is the only writer. A uid is a uuid4, never derived from a name.
 """
 from __future__ import annotations
 
+import functools
 import uuid
+
+import numpy as np
+import pypsa
 
 _KEY = "component_ids"
 
@@ -88,6 +93,15 @@ def rename(n, component_class: str, old: str, new: str) -> None:
         cls[new] = cls.pop(old)
 
 
+def keep(n, component_class: str, name: str, uid: str | None) -> None:
+    """
+    Put back the uid `get` returned before an edit removed and re-added the
+    same component (`network_crud._update_component`): one instance throughout.
+    """
+    if uid is not None and _exists(n, component_class, name):
+        _root(n).setdefault("uids", {}).setdefault(component_class, {})[name] = uid
+
+
 def drop(n, component_class: str, name: str) -> None:
     _uids(n, component_class).pop(name, None)
 
@@ -100,3 +114,23 @@ def forget_all(n) -> None:
     meta = getattr(n, "meta", None)
     if isinstance(meta, dict):
         meta.pop(_KEY, None)
+
+
+def _drop_on_remove(remove):
+    @functools.wraps(remove)
+    def wrapper(self, class_name, name, suffix=""):
+        remove(self, class_name, name, suffix)
+        uids = _read(self).get("uids")
+        if not isinstance(uids, dict) or not uids:
+            return
+        names = [name] if np.isscalar(name) else list(name)
+        cls = _uids(self, self.components[class_name].name)
+        for removed in names:
+            cls.pop(f"{removed}{suffix}", None)
+
+    wrapper._drops_component_ids = True
+    return wrapper
+
+
+if not getattr(pypsa.Network.remove, "_drops_component_ids", False):
+    pypsa.Network.remove = _drop_on_remove(pypsa.Network.remove)
