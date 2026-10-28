@@ -12,7 +12,9 @@ import json
 import time
 import uuid
 
+import pandas as pd
 import pytest
+from fastapi import HTTPException
 
 import app_paths
 from services import assurance_records as records
@@ -218,6 +220,58 @@ def test_answer_from_another_policy_version_is_unavailable(baseline, harness, ve
         assert "5 MW" not in response.text
 
 
+@pytest.mark.parametrize("receipt", ["text", None, [], {"evidence_ids": 5}])
+def test_answer_with_a_malformed_receipt_is_unavailable(baseline, harness, receipt):
+    answer_id, _, paths = checked(harness)
+
+    def change(record):
+        if isinstance(receipt, dict):
+            record["receipt"].update(receipt)
+        else:
+            record["receipt"] = receipt
+
+    rewrite(answer_id, change)
+    for path in paths[:2]:
+        response = harness.client.get(path)
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"]["error_kind"] == "answer_evidence_unavailable"
+
+
+def test_scoped_evidence_from_an_unregistered_profile_is_unavailable(
+    baseline, harness, client, session_state, monkeypatch
+):
+    """A result profile this server no longer registers is not re-read."""
+    from harness import calculations
+    from tests.test_assurance_metrics import NumericalProvider
+    from tests.test_lost_load_assurance import PROFILE, SHED, scope, solve
+
+    monkeypatch.setenv("PYPSA_GUI_ANSWER_ASSURANCE_PROFILES", PROFILE)
+    ctx = baseline[0]
+    n = ctx.network
+    n.loads_t.p_set = pd.DataFrame({"L1": [5, 25]}, index=n.snapshots)
+    n.snapshot_weightings.loc[:, "generators"] = [2, 3]
+    n.snapshot_weightings.loc[:, "objective"] = [1, 2]
+    solve(client, session_state)
+    frames = harness.run(
+        NumericalProvider(SHED),
+        message="Check lost load.",
+        checked_scope=scope(ctx),
+    )
+    approved = approval(frames)
+    answer_id = approved["answer_id"]
+    paths = [p.format(answer=answer_id, evidence="") for p in READ_PATHS[:2]] + [
+        f"/api/chat/evidence/{e}" for e in approved["receipt"]["evidence_ids"]
+    ]
+    assert [harness.client.get(p).status_code for p in paths] == [200] * len(paths)
+    profiles = dict(calculations.PROFILES)
+    del profiles[PROFILE]
+    monkeypatch.setattr(calculations, "PROFILES", profiles)
+    for path in paths:
+        response = harness.client.get(path)
+        assert response.status_code == 409, response.text
+        assert "10000" not in response.text
+
+
 @pytest.mark.parametrize("field", ["version", "adapter_version"])
 def test_evidence_from_another_schema_or_adapter_is_unavailable(
     baseline, harness, field
@@ -236,9 +290,9 @@ def test_duplicate_completion_cannot_replace_a_record(baseline, harness):
         changed = (
             {**record, "facts": []} if "facts" in record else {**record, "text": ""}
         )
-        with pytest.raises(Exception) as refused:
+        with pytest.raises(HTTPException) as refused:
             records.save(changed, record_id)
-        assert getattr(refused.value, "status_code", None) == 409
+        assert refused.value.status_code == 409
         assert path.read_bytes() == before
         # Saving the identical record again is an idempotent no-op.
         records.save(record, record_id)

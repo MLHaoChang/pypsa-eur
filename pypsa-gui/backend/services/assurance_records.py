@@ -607,10 +607,14 @@ def series_args(scope):
     }
 
 
-def _adapter(record):
+def _expected_adapter_version(record):
     """The adapter version this server would write for the record's kind."""
     if record["source_kind"] == "scoped_result":
-        return record["request_scope"]["profile"]
+        from harness import calculations
+
+        profile = record["request_scope"]["profile"]
+        # A profile this server no longer registers is not re-read as checked.
+        return profile if profile in calculations.PROFILES else None
     if record["source_kind"] == "calculated_result":
         from services import assurance_metrics
 
@@ -618,7 +622,7 @@ def _adapter(record):
     return INPUT_ADAPTERS[record["scope"]["kind"]]
 
 
-def _facts_hold(facts, expected):
+def _require_current_facts(facts, expected):
     """Every stored fact is one the current source gives, so a rewritten
     record whose checksum was recomputed still cannot certify a value."""
     if (
@@ -655,7 +659,7 @@ def _page_facts(ctx, component_class, facts):
 def evidence(owner, evidence_id):
     record = load(owner, evidence_id, "evidence")
     try:
-        adapter = _adapter(record)
+        adapter = _expected_adapter_version(record)
         current = record["version"] == 1 and record["adapter_version"] == adapter
     except (KeyError, TypeError, AttributeError):
         current = False
@@ -711,7 +715,7 @@ def evidence(owner, evidence_id):
                 source_digest, series = _series_source(ctx, args)
                 if source_digest != record["source_sha256"] or series is None:
                     unavailable("evidence_unavailable")
-                _facts_hold(record["facts"], _series_steps(args, series)[2])
+                _require_current_facts(record["facts"], _series_steps(args, series)[2])
                 return record
             if scope.get("kind") == "static_page":
                 # Any edit to the class's rows or inputs, or another project,
@@ -721,7 +725,7 @@ def evidence(owner, evidence_id):
                     != record["source_sha256"]
                 ):
                     unavailable("evidence_unavailable")
-                _facts_hold(
+                _require_current_facts(
                     record["facts"],
                     _page_facts(ctx, scope["component_class"], record["facts"]),
                 )
@@ -729,7 +733,7 @@ def evidence(owner, evidence_id):
             raw = _raw_facts(ctx, scope["component_class"], scope["entity_id"])
             if digest(raw) != record["source_sha256"]:
                 unavailable("evidence_unavailable")
-            _facts_hold(record["facts"], raw)
+            _require_current_facts(record["facts"], raw)
     except (KeyError, ValueError, TypeError):
         unavailable("evidence_unavailable")
     return record
@@ -875,12 +879,17 @@ def public(record):
 
 def answer(owner, answer_id):
     record = load(owner, answer_id, "answer")
-    if (
-        record.get("version") != 1
-        or record["receipt"].get("policy_version") != POLICY_VERSION
-        or hashlib.sha256(record["text"].encode()).hexdigest()
-        != record["receipt"]["content_sha256"]
-    ):
+    try:
+        current = (
+            record["version"] == 1
+            and record["receipt"]["policy_version"] == POLICY_VERSION
+            and hashlib.sha256(record["text"].encode()).hexdigest()
+            == record["receipt"]["content_sha256"]
+            and isinstance(record["receipt"]["evidence_ids"], list)
+        )
+    except (KeyError, TypeError, AttributeError):
+        current = False
+    if not current:
         unavailable("answer_evidence_unavailable")
     for evidence_id in record["receipt"]["evidence_ids"]:
         try:

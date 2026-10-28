@@ -912,9 +912,9 @@ Next runnable tracer: `get_timeseries` as the third checked read. REVOKE-KIND st
 
 ### 2026-10-28 — P1 tracer: A1.4 integrity (issue 02)
 
-Policy version 1. `test_p1_integrity.py`: 38 cases. On the base (#826 head) 18 fail, 20 pass; after the change 38 pass. The red cases were facts rewritten with a recomputed checksum (static, page and series kinds) and records from another policy, schema or adapter version.
+Policy version 1. `test_p1_integrity.py`: 43 cases. On the base (#826 head) 22 fail, 21 pass; after the change 43 pass. The red cases were facts rewritten with a recomputed checksum (static, page and series kinds), records from another policy, schema or adapter version, and a malformed receipt (500 instead of 409).
 
-Mutants, one at a time, each red: `_facts_hold` a no-op (13), no empty-facts check (3), no policy check (3), no version/adapter check (2), the page facts echoed instead of re-derived (2), no series facts check (3), no static facts check (7).
+Mutants, one at a time, each red: `_require_current_facts` a no-op (13), no empty-facts check (3), no policy check (3), no version/adapter check (2), the page facts echoed instead of re-derived (2), no series facts check (3), no static facts check (7), no exception guard in `answer()` (3), no `evidence_ids` list check (1). One survives: dropping the registered-profile check for scoped results, because `scoped_calculate` already refuses an unregistered profile; the check stays as the explicit guard.
 
 Regressions: `tests/assurance_acceptance` 205 passed; `tests/test_*assur*.py` with the checked-answer pilot and dispositions: see the PR.
 
