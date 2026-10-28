@@ -173,6 +173,13 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
     : lostLoadTotals && lostLoadTotals.mwh === 0 ? { state: 'zero' as const } : {}
 
   // Curtailment cost (whole horizon, weighted by objective column).
+  // Whether any renewable opts into the curtailment penalty, and whether the
+  // solve returned the curtailment series it is priced on.
+  const hasCurtailmentCost = useMemo(() => (generators as Generator[]).some(g => {
+    const c = (g as unknown as { curtailment_cost?: number }).curtailment_cost
+    return c != null && Number.isFinite(c) && c > 0
+  }), [generators])
+  const curtailmentRecorded = ((curtailTS as TSPayload | null)?.data.length ?? 0) > 0
   const curtailmentCost = useMemo(() => {
     const ts = curtailTS as TSPayload | null
     if (!ts || ts.data.length === 0) return 0
@@ -460,6 +467,8 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
       }
     })
   }, [cost, lostLoad, curtailTS, generators, gensTS, loadTS, weightCtx])
+  // Every period's VOLL is unknown together (one VOLL price): drop the series.
+  const vollNotRecorded = economicsBars?.some(r => r.VOLL == null) ?? false
 
   if (!gensTS && !loadTS && !cost) {
     return (
@@ -543,8 +552,9 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
                hint={'MWh of lost load × the VOLL set in Solver Settings (e.g. 3000–10000 €/MWh).' + scaleHint} 
                {...lostLoadState} />
         </div>
-        <NotRecordedNote show={lostLoadTotals != null
-          && (lostLoadTotals.mwh == null || lostLoadTotals.cost == null)} />
+        <NotRecordedNote show={(lostLoadTotals != null
+          && (lostLoadTotals.mwh == null || lostLoadTotals.cost == null))
+          || (cost != null && hasCurtailmentCost && !curtailmentRecorded)} />
       </section>
 
       {/* ── Operational expenditure (OPEX) — whole-horizon totals ── */}
@@ -579,7 +589,12 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
             <KPI label="Dispatch OPEX" value={fmtCurrency(cost.opex)}
               hint="Σ marginal_cost × dispatch over horizon (PyPSA n.statistics() 'Operational Expenditure')" />
             <KPI label="Curtailment penalty"
-              value={curtailmentCost > 0 ? fmtCurrency(curtailmentCost) : '—'}
+              {...(!hasCurtailmentCost
+                ? { value: fmtCurrency(0), state: 'not_modelled' as const,
+                    reason: 'No renewable has a curtailment cost set.' }
+                : !curtailmentRecorded ? NOT_RECORDED_KPI
+                : { value: fmtCurrency(curtailmentCost),
+                    ...(curtailmentCost > 0 ? {} : { state: 'zero' as const }) })}
               hint="Σ curtailment_t × curtailment_cost over renewable generators that opted in. Set curtailment_cost > 0 on a renewable to start charging the optimiser for spilled energy." />
             {cost.by_component
               .filter(b => b.opex > 0)
@@ -599,7 +614,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
         && economicsBars.some(r => r.CAPEX > 0 || r.OPEX > 0 || r.VOLL == null || r.VOLL > 0) && (
         <ChartCard
           title="Economics — system cost per period"
-          hint="CAPEX · OPEX · VOLL"
+          hint={vollNotRecorded ? 'CAPEX · OPEX' : 'CAPEX · OPEX · VOLL'}
           right={
             <ChartActions
               chartRef={economicsRef}
@@ -623,13 +638,15 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
                 <Legend {...CHART_LEGEND} />
                 <Bar dataKey="CAPEX" stackId="cost" fill="#0369a1" />
                 <Bar dataKey="OPEX"  stackId="cost" fill="#d97706" />
-                <Bar dataKey="VOLL"  stackId="cost" fill="#dc2626" radius={[3, 3, 0, 0]} />
+                {!vollNotRecorded && (
+                  <Bar dataKey="VOLL"  stackId="cost" fill="#dc2626" radius={[3, 3, 0, 0]} />
+                )}
               </BarChart>
             </ResponsiveContainer>
             {/* The VOLL bars are left out, never drawn as €0: say so. */}
-            {economicsBars.some(r => r.VOLL == null) && (
+            {vollNotRecorded && (
               <p className="text-[11px] text-muted mt-2" data-testid="economics-voll-not-recorded">
-                VOLL not recorded by this solve
+                VOLL bars left out: VOLL not recorded by this solve.
               </p>
             )}
             <p className="text-[10px] text-muted mt-2">

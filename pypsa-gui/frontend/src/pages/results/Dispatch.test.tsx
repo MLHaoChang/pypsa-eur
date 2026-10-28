@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { render, cleanup, screen } from '@testing-library/react'
+import { render, cleanup, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
@@ -261,4 +261,46 @@ it('shows the lost-load cost as — when the VOLL is unknown', async () => {
   renderPage()
   const label = await screen.findByText('Lost-load cost')
   expect(getKpiValueWithin(label.parentElement as HTMLElement, '—')).toBeTruthy()
+})
+
+// UX review: Dispatch explains "—" once for the whole page, however many
+// sections (carrier KPI panel, lost-load chart header) show one.
+it('shows one — note for the page when a carrier panel and the lost-load header both show —', async () => {
+  vi.mocked(resultsApi.getLostLoad).mockReset().mockResolvedValue({
+    index: ['2026-01-01T00:00:00'], columns: ['Bus 0'], data: [[42]],
+    total_mwh: null, total_cost_eur: null, voll_eur_per_mwh: null,
+    bus_carriers: { 'Bus 0': 'AC' },
+  })
+  const flow = { total: 0, by_period: {} }
+  vi.mocked(resultsApi.getEconomicsByCarrier).mockReset().mockResolvedValue({
+    by_carrier: { gas: {
+      revenue_meur: flow, opex_meur: flow, capex_meur: flow,
+      dispatch_gwh: flow, lcoe_eur_per_mwh: flow,
+    } },
+  })
+  // A second bus carrier, so Dispatch draws one KPI panel per carrier.
+  const [bus] = await networkApi.getBuses()
+  vi.mocked(networkApi.getBuses).mockReset().mockResolvedValue([
+    bus, { ...bus, name: 'H2 Bus', carrier: 'H2' },
+  ])
+  vi.mocked(networkApi.getLoads).mockReset().mockResolvedValue([
+    { name: 'Demand', bus: 'Bus 0', carrier: 'AC', p_set: 10, q_set: 0, sign: -1 } as never,
+    { name: 'H2 demand', bus: 'H2 Bus', carrier: 'H2', p_set: 5, q_set: 0, sign: -1 } as never,
+  ])
+  vi.mocked(resultsApi.getLoadResults).mockReset().mockResolvedValue({
+    index: ['2026-01-01T00:00:00'], columns: ['Demand'], data: [[50]],
+  })
+  renderPage()
+  // The carrier panel's lost-load cost is "—" …
+  await waitFor(() => expect(
+    screen.getAllByText('Lost-load cost').some(l =>
+      l.parentElement?.querySelector('[aria-label="Not recorded by this solve"]')),
+  ).toBe(true))
+  // … and so is the lost-load chart header's cost once it is open (its MWh
+  // is summed from the series, so known).
+  fireEvent.click((await screen.findAllByTitle(/Toggle a sibling chart of unmet load/))[0])
+  await waitFor(() => expect(screen.getByText(/MW unmet per snapshot/)
+    .querySelectorAll('[aria-label="Not recorded by this solve"]').length).toBe(1))
+  expect(screen.getAllByTestId('not-recorded-note').length).toBe(1)
+  expect(screen.queryByText(/\(—: not recorded by this solve\)/)).toBeNull()
 })

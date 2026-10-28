@@ -23,7 +23,9 @@ import {
   parseSeasonStamp, useSeasonalViewMode, colourForCarrier, isAllZero, ChartZero,
 } from './shared'
 import { type LostLoadMeta, vollOf } from './summary'
-import { NOT_RECORDED_KPI, NotRecordedDash, NotRecordedNote } from './NotRecorded'
+import {
+  NOT_RECORDED_KPI, NotRecordedDash, NotRecordedNote, NotRecordedSectionNote, useNotRecordedScope,
+} from './NotRecorded'
 import { useResultsFilter, resolveRange } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
 import DispatchStack from './DispatchStack'
@@ -236,6 +238,7 @@ function isElectrolyzerCarrier(c: string | undefined | null): boolean {
 }
 
 export default function Dispatch() {
+  const notRecorded = useNotRecordedScope()
   // Result source (LOPF vs AC PF) — the same global toggle LoadFlow exposes.
   // Put it in EVERY dispatch query key AND pass it to the getter so flipping
   // the source on Load Flow also re-fetches the Dispatch tab against the
@@ -1242,7 +1245,11 @@ export default function Dispatch() {
   // it, flexbox compresses each child section to fit the viewport; sections
   // with `overflow-hidden` then clip their charts to a thin sliver.
   return (
+    <notRecorded.Provider value={notRecorded.report}>
     <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm [&>*]:shrink-0">
+
+      {/* One "—" note for the whole page; the sections below report theirs. */}
+      <NotRecordedNote show={notRecorded.show} />
 
       {/* ── Truncated-window banner (FIX 1 secondary, results-tabs-window
           final review) — a genuinely narrow-but-wide window can still hit
@@ -1371,7 +1378,7 @@ export default function Dispatch() {
               key={`lostload-${b.carrier}`}
               label={`Lost load · ${loadCarrierLabel(b.carrier)}`}
               value={fmtEnergy(b.mwh)}
-              hint={`VOLL slack dispatched at ${loadCarrierLabel(b.carrier).toLowerCase()} buses — ${b.cost != null ? `${fmtCurrency(b.cost)} at the configured VOLL price` : 'cost not recorded by this solve'}.` + scaleHint}
+              hint={`VOLL slack dispatched at ${loadCarrierLabel(b.carrier).toLowerCase()} buses: ${b.cost != null ? `${fmtCurrency(b.cost)} at the configured VOLL price` : 'cost not recorded by this solve'}.` + scaleHint}
             />
           ))}
         </div>
@@ -1982,6 +1989,7 @@ export default function Dispatch() {
       </>
       )}
     </div>
+    </notRecorded.Provider>
   )
 }
 
@@ -2653,7 +2661,7 @@ export function CarrierKpiPanel({
           })()}
         </div>
       )}
-      <NotRecordedNote show={econ !== null && lostLoadCostUnknown && !(econ.lost > 0)} />
+      <NotRecordedSectionNote show={econ !== null && lostLoadCostUnknown && !(econ.lost > 0)} />
     </section>
   )
 }
@@ -3268,10 +3276,10 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
                     <>
                       {' · Σ '}{lostLoadTotals.mwh != null ? fmtEnergy(lostLoadTotals.mwh) : <NotRecordedDash />}
                       {' · '}{lostLoadTotals.cost != null ? fmtCurrency(lostLoadTotals.cost) : <NotRecordedDash />}
-                      {(lostLoadTotals.mwh == null || lostLoadTotals.cost == null) && ' (—: not recorded by this solve)'}
                     </>
                   )}
                 </span>
+                <NotRecordedSectionNote show={lostLoadTotals != null && (lostLoadTotals.mwh == null || lostLoadTotals.cost == null)} />
                 <span className="ml-auto flex items-center gap-2">
                   <button onClick={() => {
                       const ok = downloadSVG(lostLoadChartRef.current, `${fileBase}_lost_load.svg`)

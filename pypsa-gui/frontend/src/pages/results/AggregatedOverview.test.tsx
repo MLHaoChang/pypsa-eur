@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
@@ -325,18 +325,65 @@ describe('AggregatedOverview economics chart with an unknown VOLL', () => {
     })
   }
 
-  it('keeps its axes and says VOLL was not recorded', async () => {
+  it('keeps its axes and says the VOLL bars were left out', async () => {
     mockCostAndShed(null)
     const { container } = renderOverview()
-    expect(await screen.findByText('VOLL not recorded by this solve')).toBeTruthy()
+    expect(await screen.findByText('VOLL bars left out: VOLL not recorded by this solve.')).toBeTruthy()
     expect(container.querySelector('.recharts-xAxis')).not.toBeNull()
     expect(container.querySelector('.recharts-yAxis')).not.toBeNull()
+    // Neither the subtitle nor the legend offers a VOLL series to look for.
+    expect(screen.getByText('CAPEX · OPEX')).toBeTruthy()
+    expect(container.querySelector('.recharts-legend-wrapper')?.textContent).not.toMatch(/VOLL/)
   })
 
   it('says nothing about VOLL when it is recorded', async () => {
     mockCostAndShed(4000)
-    renderOverview()
+    const { container } = renderOverview()
     await screen.findByText('Economics — system cost per period')
-    expect(screen.queryByText('VOLL not recorded by this solve')).toBeNull()
+    expect(screen.queryByTestId('economics-voll-not-recorded')).toBeNull()
+    expect(screen.getByText('CAPEX · OPEX · VOLL')).toBeTruthy()
+    expect(container.querySelector('.recharts-legend-wrapper')?.textContent).toMatch(/VOLL/)
+  })
+})
+
+// UX review: every "—" on the Overview means "not recorded"; a penalty no
+// renewable opted into is "not modelled", with its reason.
+describe('AggregatedOverview curtailment penalty tile', () => {
+  const tile = async () =>
+    (await screen.findByText('Curtailment penalty')).closest('[data-state]') as HTMLElement
+
+  async function withCurtailmentCost(data: number[][]) {
+    const [gen] = await networkApi.getGenerators()
+    vi.mocked(networkApi.getGenerators).mockReset().mockResolvedValue([
+      { ...gen, name: 'PV', carrier: 'solar', curtailment_cost: 50 },
+    ])
+    vi.mocked(resultsApi.getCurtailment).mockReset().mockResolvedValue({
+      index: data.map((_, i) => `2026-01-01T0${i}:00:00`), columns: ['PV'], data,
+    })
+  }
+
+  it('reads not modelled, with its reason, when no renewable has a curtailment cost', async () => {
+    renderOverview()
+    const t = await tile()
+    expect(t.dataset.state).toBe('not_modelled')
+    expect(t.textContent).toContain('No renewable has a curtailment cost set.')
+    expect(t.textContent).not.toContain('—')
+    expect(screen.queryByTestId('not-recorded-note')).toBeNull()
+  })
+
+  it('reads a real zero when the opted-in renewables curtailed nothing', async () => {
+    await withCurtailmentCost([[0], [0]])
+    renderOverview()
+    expect((await tile()).dataset.state).toBe('zero')
+    expect(screen.queryByTestId('not-recorded-note')).toBeNull()
+  })
+
+  it('reads — with the page note when the curtailment series was not recorded', async () => {
+    await withCurtailmentCost([])
+    renderOverview()
+    const t = await tile()
+    expect(t.dataset.state).toBe('ready')
+    expect(within(t).getByLabelText('Not recorded by this solve')).toBeTruthy()
+    expect((await screen.findAllByTestId('not-recorded-note')).length).toBe(1)
   })
 })
