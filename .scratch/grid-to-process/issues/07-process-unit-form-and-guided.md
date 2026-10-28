@@ -66,6 +66,13 @@ Read [the design](../design.md) §2.2 (item 3) first.
 
 **Out of scope:** new backend fields or endpoints; the assistant (14); heat levels (15).
 
+**Carried from 09 (GK A condition on 09's plan):** issue 09 added `delivery_interval_h` on Store (hours between
+shipments out of an inventory; absent or 0 = continuous) to `models/process_unit.PROCESS_CUSTOM_COLUMNS`, set by
+templates and read by the `inventory_cadence_needs_year` validator rule. Its user-facing registration lands here, as
+the one exception to "no new backend fields": the Store `FieldSpec` (`services/asset_schema/fields.py`), the
+`attrs_doc` line, the `StoreCreate` field and lazy-column set in `models/schemas.py`, and the regenerated
+`assetSchema.json` fixture, so a hand-built inventory can declare its cadence.
+
 **Likely files:** `pypsa-gui/frontend/src/layout/CreationForm.tsx`, `pypsa-gui/frontend/src/utils/assetWrite.ts`, `pypsa-gui/frontend/src/pages/Results.tsx`, `pypsa-gui/frontend/src/components/Kpi.tsx`, `pypsa-gui/frontend/src/api/types.ts`.
 **Blocked by:** none (02 and 04 are done). This is a UI change, so it needs the UX reviewer's OK, and the builder tells UX where the change sits before building.
 **Model:** Sonnet (frontend only).

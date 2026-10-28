@@ -1,6 +1,7 @@
 """
 Grid-to-process custom network columns: the process-unit columns on Link and the tonne factor on a product Bus
-(ticket 02); the product value on a product Bus and the role of a Generator on one (ticket 04).
+(ticket 02); the product value on a product Bus and the role of a Generator on one (ticket 04); an inventory Store's delivery
+interval (ticket 09: hours between shipments out of it, absent or 0 = continuous, read by the time-base validator rule).
 
 Not PyPSA attributes and not Energy Hub tags, so they have their own registry beside `EH_CUSTOM_COLUMNS`. They ride
 the same lazy-column machinery (`services/adequacy/eh_columns.py`): a project that never writes one never gets the
@@ -29,6 +30,7 @@ PROCESS_CUSTOM_COLUMNS: dict[str, dict[str, str]] = {
     "Bus": {"mwh_per_t": "float_nonneg", "product_value": "float_nonneg",
             "lost_production_value": "float_nonneg"},
     "Generator": {"process_role": "process_role"},
+    "Store": {"delivery_interval_h": "float_nonneg"},
     "Link": {"eh_process": "bool", "criticality_tier": "tier", "throughput_unit": "text",
              "specific_energy_kwh_per_t": "float_nonneg", "rated_mva": "float_nonneg",
              "harmonic_source": "harmonic_source", "harmonic_spectrum": "harmonic_spectrum",
