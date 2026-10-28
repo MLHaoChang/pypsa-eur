@@ -13,6 +13,7 @@ Many sessions work on this repo in parallel. One **coordinator** session relays 
    Done when the PR exists and its head is pushed.
 2. **Release note.** Add a fragment file under `doc/release-notes.d/` as `doc/release-notes.d/README.md` describes; `doc/release_notes.md` stays untouched.
    Done when the PR diff contains one new fragment and no change to `doc/release_notes.md`.
+   Shared JSON works the same way (RETRO-COST-1): a new error kind goes in `pypsa-gui/tool-error-kinds.d/<branch>.json`, a new route-parity declaration in `pypsa-gui/backend/smoke/assistant_route_parity_declarations.d/<branch>.json` (each folder's README has the format). Leave a declaration or `KNOWN_GAPS` row whose route your tool now serves: the checks list it as stale and the coordinator's sweep deletes it. Commit nothing the assistant smoke scripts generate; their `--check` builds in memory.
 3. **Wait for CI on the head.** You own CI for your PR: the coordinator does not watch it. Let every run on the current head finish. Each push cancels the ~2 h "GUI backend" run (concurrency cancel-in-progress), so batch fixes into one validated push.
    Done when every check run on the head SHA is completed.
 4. **Fix red CI.** See [CI failures](#ci-failures); loop back to step 3 after each push.
@@ -38,7 +39,7 @@ The coordinator merges a PR when `scripts/coord/premerge.sh <pr>` exits 0 and Gi
 - every check run on the head SHA is success or skipped (in progress, unreadable or none yet blocks);
 - no file **overlaps** what master changed since the PR's merge-base. Docs-only overlap (`docs/superpowers/OPEN-ITEMS.md`, `docs/superpowers/plans/*`, release notes) is fine when the merge is clean, and so is a file identical on both sides (a cherry-pick master already has);
 - a **code** overlap is waived when the trial merge is clean, the semantic tests pass and the tests that exercise each overlapping file pass (`scripts/coord/overlap_tests.py` maps file to tests). A file with no test, a conflict or a failing test still blocks;
-- a PR that touches a path in its `semantic_re` passes the `semantic_tests` it lists on a trial merge with current master, plus the assistant inventory check when it touches `harness/catalogue*`.
+- a PR that touches a path in its `semantic_re` passes the `semantic_tests` it lists on a trial merge with current master, plus the assistant inventory check when it touches `harness/catalogue*`. One that changes the tool list (`tool_list_re`) or the error-kind manifest also passes the ChatPanel tests that read them (`tool_list_vitests`), and a kind change the manifest tests (`kinds_tests`).
 
 - the latest `GK NOT OK` or `UX NOT OK` verdict comment is not newer than that reviewer's last OK. Missing and stale OKs are printed, not blocking: premerge cannot know whether the PR needs that review.
 

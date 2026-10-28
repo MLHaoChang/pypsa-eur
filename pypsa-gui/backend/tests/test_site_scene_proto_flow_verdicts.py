@@ -142,7 +142,9 @@ def test_anchor_and_scene_files_leave_the_real_flow_unchanged(client, install_ne
     scene_store.adopt(project, "campus", scene_store.legacy_site_digest(site_service.read_sites(project), "campus"))
 
     after = client.get("/api/projects/geo/flow").json()
-    assert after == before
-    assert "scene" not in after  # SC-01 adds the key; N mounts nothing
+    # SC-01a adds only the `scene` key; every electrical key keeps its value.
+    assert {k: v for k, v in after.items() if k != "scene"} == {k: v for k, v in before.items() if k != "scene"}
+    assert before["scene"]["entry"]["label"] == "Create 3D site" and not before["scene"]["entry"]["enabled"]
+    assert after["scene"]["entry"]["label"] == "Resume site setup"
     # The geometry-first Site has no buses and the network stays empty.
     assert site_service.read_sites(project)["sites"][0]["buses"] == []
