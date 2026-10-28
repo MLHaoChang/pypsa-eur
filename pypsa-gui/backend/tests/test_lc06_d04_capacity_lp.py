@@ -74,18 +74,49 @@ def lp(client, session_ctx, install_network, monkeypatch):
         PyPSAService.reset_request_context(binding)
 
 
-def test_probe(lp):
-    try:
-        lp()
-    except AssertionError:
-        import json as j
-        st = PyPSAService.get_solver_state()
-        print('STATE', j.dumps({k: st.get(k) for k in ('status', 'error', 'message', 'error_kind')}, default=str)[:1500])
-        print('LOG', str(chat_tools.get_simulation_log_history())[-1500:])
-        raise
-    import json
-    print(json.dumps(chat_tools.get_results('economics_by_carrier'), default=str)[:1500])
-    print(json.dumps(chat_tools.explain_investment('Generator', 'Cheap'), default=str)[:1500])
-    print(json.dumps(chat_tools.get_vintage_results(), default=str)[:800])
-    print(PyPSAService.get_network().objective)
-    assert False
+def carriers(result):
+    assert result['results_current'], result
+    return result['by_carrier']
+
+
+def sizing(name):
+    return chat_tools.explain_investment('Generator', name)['sizing']
+
+
+def test_the_unique_optimum_matches_the_hand_solution(lp):
+    lp()
+    assert chat_tools.get_study_evidence(section='simulation')['objective'] == pytest.approx(objective(6.0))
+
+    built = {'cheap': CHEAP['p_nom_max'], 'backup': DEMAND_MW - CHEAP['p_nom_max']}
+    by_carrier = carriers(chat_tools.get_results('economics_by_carrier'))
+    for carrier, gen in (('cheap', CHEAP), ('backup', BACKUP)):
+        energy_mwh = built[carrier] * sum(WEIGHTS)
+        row = by_carrier[carrier]
+        assert row['capex_meur']['total'] == pytest.approx(built[carrier] * gen['capital_cost'] * NYEARS / 1e6)
+        assert row['opex_meur']['total'] == pytest.approx(energy_mwh * gen['marginal_cost'] / 1e6)
+        assert row['dispatch_gwh']['total'] == pytest.approx(energy_mwh / 1e3)
+
+    cheap, backup = sizing('Cheap'), sizing('Backup')
+    assert (cheap['existing'], cheap['optimised'], cheap['added']) == pytest.approx((0, 6, 6))
+    assert cheap['binding_constraint'] == 'at_upper_bound'
+    assert (backup['existing'], backup['optimised'], backup['added']) == pytest.approx((0, 4, 4))
+    assert backup['binding_constraint'] not in ('at_upper_bound', 'at_lower_bound', 'not_built', 'not_solved')
+
+
+def test_raising_the_cap_lowers_the_objective_by_the_cost_difference(lp, client):
+    older = lp()
+    response = client.put('/api/network/generators/Cheap', json={'name': 'Cheap', 'bus': 'B', 'p_nom_max': 7.0})
+    assert response.status_code == 200, response.text
+    lp()
+    # One MW moves from Backup to Cheap: the delta is the per-MW cost gap, from the inputs.
+    delta = per_mw(BACKUP) - per_mw(CHEAP)
+    assert chat_tools.get_study_evidence(section='simulation')['objective'] == pytest.approx(objective(6.0) - delta)
+    assert (sizing('Cheap')['optimised'], sizing('Backup')['optimised']) == pytest.approx((7, 3))
+    # The older run keeps its own capacity answer (LC-03 retained family).
+    kept = chat_tools.get_results('economics_by_carrier', run_id=older['run_id'])
+    assert kept['by_carrier']['cheap']['capex_meur']['total'] == pytest.approx(6 * CHEAP['capital_cost'] / 1e6)
+
+
+def test_a_single_period_network_reports_no_vintages(lp):
+    lp()
+    assert chat_tools.get_vintage_results() == {'results': {}}
