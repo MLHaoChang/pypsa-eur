@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import main
-from services import assurance_records, chat_tools
+from services import chat_tools
 from services.pypsa_service import PyPSAService
 from tests.assurance_acceptance.support import (
     approval,
