@@ -362,7 +362,7 @@ caps them:
 | Wall time | 8 h | 72 h | `paused`; the envelope expires |
 | Model output tokens | 200 k (budget.py session cap) | 1 M | `needs_user` |
 | Model cost, total (GK B) | profile, e.g. €5 | owner value | `needs_user`; metered from provider usage (input, cached and output tokens, TOKEN-MEASURE-1), because cache reads and input dominate cost |
-| Research cost | €2 (pending owner) | €10 (pending owner) | research stops; the stage goes on without it |
+| Research cost | €2 (SH-RESEARCH-CAP-1) | €10 (SH-RESEARCH-CAP-1) | research stops; the stage goes on without it |
 | Cases | 4 | 4 (AI-558) | refused at proposal |
 
 `used` is counted by harness code: the solve queue for solves, budget.py for
@@ -610,7 +610,8 @@ of bounds, expired, revoked, ACL loss, wrong project, foreign drift.
 - **Cost cap**: `envelope.research.cost_cap_eur`, metered server-side from
   provider usage (search calls plus tokens of the research turns), never from
   the model's count. At the cap, research stops and the remaining gaps are
-  listed. Default €2, hard cap €10: pending the owner (open question 1).
+  listed. Default €2 per run; the user may raise it on the envelope up to the
+  €10 hard cap (owner decision SH-RESEARCH-CAP-1, 28 Oct).
 - **Source ledger**:
 
   ```
@@ -846,12 +847,12 @@ card for anything off-envelope, no automatic panel switch (`withReturnFrom`,
 
 ## 11. Open questions
 
-1. **Research cost cap default** (owner, asked 28 Oct): €2 per run with a
-   €10 hard cap is proposed. The owner chose a cap but no value.
-2. **LC-20's user-facing read** (GK B, in issue 05): a new read tool, or a
+1. **LC-20's user-facing read** (GK B, in issue 05): a new read tool, or a
    `checks` argument on an existing results read.
 
 Settled at plan review (28 Oct):
+- Research cost cap: €2 default per run, raisable on the envelope up to a
+  €10 hard cap (owner, SH-RESEARCH-CAP-1).
 - Guided-only studies: option A, native actions plus at most one family tool
   later (GK B). Registry actions go through the same admission, ACL, lock,
   fingerprint and audit path as the DISPATCHERS, with no bypass for profile

@@ -10,7 +10,8 @@ Gated: yes (GK B)
 Model tier: opus
 Owner decisions: SH-RESEARCH-1, TOOLSEL-1, AI-567b (values shown beside their source and confirmed before they are written)
 Design: [design.md](../design.md) §8
-Plan verdict: GK B GO, 28 Oct (B3); cost-cap default pending the owner (design §11.1)
+Plan verdict: GK B GO, 28 Oct (B3)
+Owner decision: SH-RESEARCH-CAP-1 (€2 default per run, raisable on the envelope up to a €10 hard cap)
 
 ## What to build
 
@@ -24,7 +25,7 @@ Plan verdict: GK B GO, 28 Oct (B3); cost-cap default pending the owner (design �
 
 - [ ] A chat turn never offers web search; a research turn does.
 - [ ] A researched tariff value is shown with url and quote and is written only after the card click; inside a granted envelope it is still carded.
-- [ ] Cost over the cap stops research mid-stage; `run.budget.used.research_eur` is from provider usage, converted server-side at the stated rate.
+- [ ] The envelope proposes €2; raising it above €10 is `invalid_envelope`; cost over the cap stops research mid-stage; `run.budget.used.research_eur` is from provider usage, converted server-side at the stated rate.
 - [ ] A rejected value stays `rejected` in the ledger and the report.
 - [ ] Layout test: no vendor word outside `harness/providers`.
 - [ ] B3: a research turn offers read-only tools plus the source-ledger write; it cannot call `update_component` even when the envelope would allow it.
