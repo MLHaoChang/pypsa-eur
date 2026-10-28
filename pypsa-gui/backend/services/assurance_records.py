@@ -94,9 +94,15 @@ def _path(owner, record_id):
             raise ValueError()
     except (ValueError, TypeError, AttributeError):
         raise HTTPException(404, "Record not found") from None
-    return (
-        app_paths.app_data_dir() / "assistant_assurance" / owner / (record_id + ".json")
-    )
+    from pathlib import Path
+
+    # The containment is the barrier CodeQL reads (py/path-injection), spelled
+    # as in site_service: realpath, then a prefix check against the root.
+    root = os.path.realpath(app_paths.app_data_dir() / "assistant_assurance")
+    full = os.path.realpath(os.path.join(root, owner, record_id + ".json"))
+    if not full.startswith(root + os.sep):
+        raise HTTPException(404, "Record not found")
+    return Path(full)
 
 
 def save(record, record_id):

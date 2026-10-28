@@ -400,7 +400,7 @@ def test_the_runner_imports_and_leases_without_fcntl(detached, site, monkeypatch
     monkeypatch.setitem(sys.modules, 'fcntl', None)
     monkeypatch.setitem(sys.modules, 'msvcrt', msvcrt)
     from harness import durable
-    monkeypatch.setattr(durable, 'os', type('os', (), {'name': 'nt', 'chmod': staticmethod(os.chmod)}))
+    monkeypatch.setattr(durable, 'os', type('os', (), {'name': 'nt', 'chmod': staticmethod(os.chmod), 'path': os.path, 'sep': os.sep}))
     assert harness_runner.Runner('a')._lease(path) is not None
 
 
@@ -770,3 +770,41 @@ def test_the_runner_refuses_to_lock_or_wake_a_path_outside_assistant_tasks(tmp_p
     runner = harness_runner.Runner()
     runner.wake(tmp_path / "project" / "a.json")
     assert runner._due == set()
+
+
+def test_a_lock_file_that_resolves_outside_its_directory_is_refused(tmp_path):
+    from harness import durable
+    store, elsewhere = tmp_path / "store", tmp_path / "elsewhere"
+    store.mkdir()
+    elsewhere.mkdir()
+    with durable.transaction(store):
+        pass
+    (store / ".owner.lock").unlink()
+    (store / ".owner.lock").symlink_to(elsewhere / "stolen.lock")
+    with pytest.raises(ValueError):
+        with durable.transaction(store):
+            pass
+    with pytest.raises(ValueError):
+        with durable.file_lock(store / ".owner.lock"):
+            pass
+    assert not (elsewhere / "stolen.lock").exists()
+
+
+def test_an_assurance_record_path_outside_the_assurance_root_is_refused(tmp_path, monkeypatch):
+    import uuid
+
+    import app_paths
+    from fastapi import HTTPException
+    from services import assurance_records
+    monkeypatch.setattr(app_paths, "app_data_dir", lambda: tmp_path / "app")
+    owner, record = str(uuid.uuid4()), str(uuid.uuid4())
+    root = tmp_path / "app" / "assistant_assurance"
+    root.mkdir(parents=True)
+    assert assurance_records._path(owner, record) == root.resolve() / owner / (record + ".json")
+    for bad_owner, bad_record in (("..", record), (owner, "../" + record), (owner, "x")):
+        with pytest.raises(HTTPException):
+            assurance_records._path(bad_owner, bad_record)
+    (tmp_path / "outside").mkdir()
+    (root / owner).symlink_to(tmp_path / "outside")
+    with pytest.raises(HTTPException):
+        assurance_records._path(owner, record)

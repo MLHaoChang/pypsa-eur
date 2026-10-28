@@ -55,8 +55,17 @@ def transaction(directory, *, timeout=5):
 @contextmanager
 def file_lock(path, *, timeout=5, busy="file lock busy"):
     """An exclusive cross-process lock on the file at `path` (msvcrt on
-    Windows, flock elsewhere); TimeoutError when it stays busy."""
-    with open(path, "a+b") as stream:
+    Windows, flock elsewhere); TimeoutError when it stays busy. ValueError
+    when the lock does not resolve to a file directly inside its directory
+    (a symlinked lock leaving the store); spelled as realpath plus a prefix
+    check, the form CodeQL reads as a py/path-injection barrier."""
+    directory = os.path.realpath(os.path.dirname(path))
+    full = os.path.realpath(path)
+    if not full.startswith(directory + os.sep):
+        raise ValueError("lock file outside its directory")
+    if os.path.dirname(full) != directory:
+        raise ValueError("lock file outside its directory")
+    with open(full, "a+b") as stream:
         os.chmod(stream.name, 0o600)
         if os.name == "nt":
             import msvcrt
