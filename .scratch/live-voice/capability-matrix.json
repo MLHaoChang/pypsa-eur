@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-27",
+  "generated_at": "2026-10-28",
   "status": "control/parameter matrix for Network/topology; behavioral journeys remain pending on issue 05",
   "sources": [
     "pypsa-gui/frontend/src/layout/CreationForm.tsx",
@@ -4630,7 +4630,7 @@
   "route_parity": {
     "source": ".scratch/live-voice/route-parity.json",
     "counts": {
-      "backend_routes": 506,
+      "backend_routes": 514,
       "gui_routes": 466,
       "limitation": 87,
       "needs-tool": 31,
