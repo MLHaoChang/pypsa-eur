@@ -29,6 +29,7 @@ from services.asset_schema.derive import (
 from services.asset_schema.schema import CLASS_ATTR
 from services.asset_schema import fields as asset_fields
 from services.asset_schema import provenance as asset_provenance
+from services import component_identity
 from services.carrier_catalog import ensure_carrier
 from services.component_names import require_valid_name
 from services.pypsa_service import PyPSAService
@@ -643,6 +644,8 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         # remove and put back straight after the add, under the old name, so
         # the rename below re-keys them with everything else.
         saved_series = _detach_component_series(n, attr, name)
+        # An edit keeps the instance: the remove drops its uid (D06), put back after the add.
+        held_uid = component_identity.get(n, component_class, name)
         n.remove(component_class, name)
         # Re-add under the OLD name and rename separately. A rename by
         # remove+add does NOT re-point the components that REFER to this one:
@@ -657,6 +660,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         # already used it; this path is the one the Properties panel's edit
         # cards take, and it did not.
         n.add(component_class, name, **merged)
+        component_identity.keep(n, component_class, name, held_uid)
         _apply_investment_parts(n, component_class, name, parts)
         _reattach_component_series(n, attr, name, saved_series)
         # Re-key any saved per-period bounds so the modal data follows the
@@ -665,6 +669,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
             _rename_component_safely(n, component_class, name, new_name)
             vintage_service.rename_asset(n, component_class, name, new_name)
             asset_provenance.rename(n, component_class, name, new_name)
+            component_identity.rename(n, component_class, name, new_name)
             # Same fix for the time-series store — _user_ts keys carry the
             # column name, and without this the profile would be silently
             # lost on the next save+reload (re-apply skips entries whose
@@ -725,6 +730,9 @@ def purge_component_side_data(n, component_class: str, attr: str, name: str) -> 
     vintage_service.delete_bounds_for_asset(n, component_class, name)
     _user_ts_delete_asset(attr, name)
     asset_provenance.drop(n, component_class, name)
+    # A same-name recreation must get a fresh identity, so nothing bound to
+    # this instance (a 3D placement or footprint, D06) can alias it.
+    component_identity.drop(n, component_class, name)
     from services import site_service
 
     storage_dir = getattr(PyPSAService.get_active_context(), "storage_dir", None)

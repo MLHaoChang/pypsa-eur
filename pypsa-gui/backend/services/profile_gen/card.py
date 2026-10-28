@@ -67,14 +67,21 @@ _FIELD = {"p_set": "Load", "p_max_pu": "Availability", "p_min_pu": "Must-run flo
           "marginal_cost": "Price", "inflow": "Inflow", "efficiency": "COP"}
 
 
+LOAD_FACTOR_BASIS = "weighted, model snapshots"
+
+
+def weighted_load_factor(n, values: np.ndarray, weighting: str) -> float:
+    """Weighted energy ÷ (peak × weighted hours) over the model's snapshots."""
+    w = n.snapshot_weightings[weighting].to_numpy(dtype=float)
+    peak, hours = float(values.max()), float(w.sum())
+    return float((values * w).sum()) / (peak * hours) if peak > 0 and hours > 0 else 0.0
+
+
 def _stats(n, values: np.ndarray, power: bool, weighting: str) -> dict[str, float]:
     if power:
         w = n.snapshot_weightings[weighting].to_numpy(dtype=float)
-        energy = float((values * w).sum())
-        peak = float(values.max())
-        hours = float(w.sum())
-        return {"peak": peak, "energy_mwh": energy,
-                "load_factor": energy / (peak * hours) if peak > 0 and hours > 0 else 0.0}
+        return {"peak": float(values.max()), "energy_mwh": float((values * w).sum()),
+                "load_factor": weighted_load_factor(n, values, weighting)}
     return {"max": float(values.max()), "mean": float(values.mean()),
             "min": float(values.min())}
 
@@ -108,7 +115,7 @@ def preview(args: dict) -> list[dict]:
              "min": unit}
     cls = _CLASS[ct]
     rows = [{"component_class": cls, "name": component, "field": f"{attr}.{k}",
-             "label": ("Load factor (weighted, model snapshots)" if k == "load_factor"
+             "label": (f"Load factor ({LOAD_FACTOR_BASIS})" if k == "load_factor"
                        else f"{_FIELD.get(attr, 'Series')} {k.replace('_mwh', '')}"),
              "old": round(old[k], 6), "new": round(new[k], 6), "unit": units[k], "role": "typed"}
             for k in new]

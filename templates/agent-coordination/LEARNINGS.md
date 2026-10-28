@@ -218,3 +218,6 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **#766 turned master red through a frontend test that reads the tool list.** Premerge ran only backend tests for a catalogue change.
   - Fix: a change to the tool list or the error-kind manifest also runs the ChatPanel tests that read them on the trial merge.
   - Lives in: `scripts/coord/premerge.sh`, `tool_list_re` and `tool_list_vitests`.
+- **2026-10-28: lettered issue files never reached the frontier.** `frontier.py` matched only `NN-`, so about a dozen `04b-`, `05a-`, `06a-` issues were skipped by the frontier, `--stages` and the Feature progress dashboard (grid-to-process 12a had to be renumbered 18).
+  - Fix: the number is kept as written (`04b`), `Blocked by 04b` and `Blocked by 04, 06a` parse, plain-numbered output is unchanged; test in `tests/test_coord_frontier.py`.
+  - Lives in: `scripts/coord/frontier.py` (live and template copies).

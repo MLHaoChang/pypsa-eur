@@ -87,7 +87,11 @@ Source base: master `60bf3a4bb41f2acbe486f43adefdbe8ea6b4b343`. Spec revision: t
 - **Evidence.** `test_site_scene_proto_closure_privacy.py` runs the real `_project_bundle_bytes` and `_copy_bundle_dirs` over a project whose original holds marked bytes, an EXIF marker, an original filename and its private path. None appears in the zip, the unpacked zip, the copy or the generation.
 - **Downstream.** SC-06 enables upload only with these limits enforced and a runtime proof; the quotas need measuring there.
 
-## D06: native target lifecycle identity (open; blocks SC-02)
+## D06: native target lifecycle identity
+
+Status: proposed closure on branch `claude/site3d-d06` ([plan](../d06/plan.md)). Accepted only through GK B's OK on that PR's merged head. SC-02 stays blocked until then.
+
+### Trace on master (unchanged record)
 
 Traced on master ([evidence/gap-probe.txt](evidence/gap-probe.txt)):
 
@@ -96,7 +100,71 @@ Traced on master ([evidence/gap-probe.txt](evidence/gap-probe.txt)):
 3. **Undo.** `services/undo_service.py` restores network state with no sites.json hook, so keys can point at the wrong or a missing component after an undo of a rename or delete.
 4. **Other paths.** Network import/replace leaves sites.json keys bound to any same-named component. Scenario and Save-As copy names verbatim. No identity generation exists anywhere.
 
-The prototype's generation-scoped re-keying (`scene_store.rename_component`/`remove_component`) avoids editing sites.json behind the pointer, but it is still name-keyed. SC-02 must add a lifecycle identity (or record a reviewed scope amendment) before any binding relies on it. Not closed in N, by design.
+The prototype's generation-scoped re-keying (`scene_store.rename_component`/`remove_component`) avoids editing sites.json behind the pointer, but it is still name-keyed. SC-02 must add a lifecycle identity (or record a reviewed scope amendment) before any binding relies on it. Not closed in N, by design; closed by the D06 PR below.
+
+### Closure (proposed)
+
+Plan verdict: GK B GO on option 1 (strict: never re-attach by name), with conditions. Accepted only through GK B's OK on the D06 PR's merged head.
+
+**Accepted contract.**
+
+- **Identity.** A component instance has a uuid4 in `n.meta["component_ids"]["uids"][Class][name]` (`services/component_identity.py`, the sole writer; callers hold `PyPSAService.get_lock()`). It travels with the network through netCDF, undo, saves, Save-As and scenario copies. A solve and a reload keep it.
+  - **Mint.** Only on a write: the PUT, on first binding. The mint marks the network dirty.
+  - **Rename.** The uid moves (`network_crud._update_component`, `network_buses.apply_rename_bus`).
+  - **Removal.** `network_crud.purge_component_side_data` drops the uid, so a same-name recreation gets a fresh one.
+  - **Clustering.** `forget_all` drops every uid, because a cluster can reuse an old name.
+  - **No re-attachment.** A uid is never re-attached by name. No `retired` list exists: a dropped uid is simply gone.
+- **Bindings.** `sites.json` has a top-level `bindings: {"<Class>:<name>": uuid}`. A request is rejected with 422 for a non-placeable key, a uid that is not a uuid, or one uid on two keys. A well-formed unknown uid is accepted and reads unbound (the undo case).
+  - **Rename hook.** It moves the binding after the scene hook, and not when a scene still shows the old key. That key keeps the binding and reads unbound, and the PUT gives each uid to the key of the instance's current name only.
+- **GET never writes** (`/sites` and the scene GET). It mints nothing, marks nothing dirty and writes no `sites.json`.
+  - A bound entry follows its instance: shown under its current name (re-keyed in the response only), or, when its uid is gone, hidden on a legacy Site and listed in `unbound_keys`.
+  - An enabled Site's entries and the footprints its scene owns are the scene's (D03). A stale one, or one whose instance now has another name, is listed and never hidden.
+  - A key with no binding (pre-D06, or newly placed) keeps name semantics until the first PUT binds it.
+- **PUT `/sites`**, under the network lock:
+  - It binds each unbound key, to the live component's uid or to a uuid no component holds. A key naming no component is therefore never taken by a later one.
+  - It keeps the bindings the client echoes, and carries hidden stale entries forward so an undo restores them.
+  - Another project's document reads and writes as stored.
+
+**Lifecycle trace.**
+
+| Path | Hook | Effect |
+|---|---|---|
+| Rename (Properties, chat) | `_update_component` moves the uid | Bound under the new name |
+| Bus rename | `apply_rename_bus` moves the uid | Bound under the new name |
+| Delete, including the bus cascade | `purge_component_side_data` drops the uid | Stale |
+| Failed `sites.json` or scene hook | None needed | The uid changed with the network |
+| Undo | `network_undo.apply_undo` re-imports the netCDF with its meta | Bound again |
+| Redo | No redo endpoint exists in the backend or the frontend | Nothing to trace |
+| Import or replace, then save over the project | The foreign network has no uids | Stale |
+| Clustering | `forget_all` | Stale |
+| Save-As | Saves the in-memory network | The copy keeps the uids; a PUT in the copy leaves the source byte-identical |
+| Scenario copy, snapshot, bundle | `_copy_bundle_dirs` copies the project as saved | The copy keeps the saved uids |
+
+**Meta rewriters.** `git grep -nE "\.meta\s*=[^=]"` finds four. Clustering is handled above. `asset_schema/provenance._root` and `vintage_service._ensure_meta_bucket` replace `n.meta` only when it is not a dict, so they keep `component_ids` (tested with a solve and a reload). `component_identity._root` follows the same rule.
+
+**Fingerprint.** `workflow_tools._network_input_fingerprint`, normal and exact, is unchanged by a mint, a rename or a drop (tested). Placing an asset never makes a solve stale.
+
+**Removals that skip `purge_component_side_data`.** The vintage expansion (`vintage_service`, `routers/vintage.py`), the solve and adequacy copies (`ac_pf_service`, `solver/assumptions`, `solver/lost_production`, `adequacy/*`) and `network_global_constraints`. They act on generated or copied components, or on non-placeable classes.
+
+**Alternatives rejected.**
+
+- A sidecar ledger with an undo snapshot: it fails open on a hook error.
+- A uid column: remove plus add on every update, and it leaks into tables and exports.
+- A scope amendment to bind by `Class:name`: forbidden by the register.
+- Lineage-prefixed uids with re-adoption: withdrawn. A lineage-less network adopts any uid, and an undo past a recreate adopts a later instance's uid.
+- Writing each mint into `network.nc`, or saving on first mint: rejected by GK B. The first adds a second writer; the second saves as a side effect.
+
+**Evidence.**
+
+- `pypsa-gui/backend/tests/test_site_identity.py` runs 21 tests. They cover every row above, plus: a GET never writes; legacy name semantics until the first PUT; 422 validation; the loss window (hidden and listed, kept on disk); a key naming no component; the scene delete and rename hook failures; fingerprint; the meta writers with a solve and a reload; clustering.
+- Mutation checks are in [../d06/evidence/mutation-checks.txt](../d06/evidence/mutation-checks.txt). Resolving by name, carrying uids through clustering, or keeping the uid on delete each turns the delete-and-recreate and clustering tests red.
+- The first 11 tests were written first; 10 failed on master. Command: `cd pypsa-gui/backend && python -m pytest -q tests/test_site_identity.py`.
+
+**Residual risk.**
+
+- **The loss window (lost, never aliased).** A placement bound since the last save reads unbound after a scenario branch, snapshot, bundle, Save-As (in the source) or discard. It stays on disk and is listed. Follow-up: [../d06/follow-up-rebind.md](../d06/follow-up-rebind.md).
+- **Legacy keys** keep name semantics until their first PUT, as today.
+- **Another project's document** reads as stored.
 
 ## D08: native source, fixture and licence policy
 

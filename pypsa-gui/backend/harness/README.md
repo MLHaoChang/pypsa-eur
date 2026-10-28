@@ -30,6 +30,7 @@ harness/
   prompts/        the system-prompt fragments as Markdown, byte-identical to the old constants
   providers/      anthropic, openai_compat, openai_responses, usage (one token-usage meaning for both OpenAI wires), fake, and wiring (profile → provider, tools payload, history portability) — the only place a wire is named
   loop.py         the turn loop: the stream seam and tool dispatch (the former services/chat_service.py); `dispatch_tool_call` is the one per-call path (allowlist → guard → validators → card → handler) every caller drives
+  run_lifecycle.py  LC-19: a re-solve of current results is asked about before its card (`results_current`), and a failed solve names its triage reads; nothing re-runs by itself
   solver_bridge.py  the solver log → tool_progress bridge for a running run_simulation / run_ac_pf_stage call
   job_adapters.py foreground (fg:…) and later domain job handles for wait_for_job without holding the turn
   activity_history.py bounded owned job-origin/status observations across worker loss; no execution, numerical or approval authority
@@ -989,7 +990,8 @@ When the job ends, one continuation is due to the session that started it
 `/stream` with `continuation_job_id` (no message, attachments, script or
 checked fields) claims one, at most once per job, and runs an ordinary turn
 whose user message the harness writes: `job <id> finished: <status> (plan:
-<title>)`. None is due after `cancel_task` or a user abort, and none for
+<title>)`, plus, for a failed job, LC-19's one-line triage rule
+(`run_lifecycle.continuation_note`). None is due after `cancel_task` or a user abort, and none for
 another session or project. The continuation approves nothing: every card in
 that turn still needs its click. `POST /api/chat/{session_id}/continuations/
 {job_id}/dismiss` ("Stop waiting") withdraws it; the job runs on.

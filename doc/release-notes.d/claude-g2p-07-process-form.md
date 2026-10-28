@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A "Process unit" asset type derives a Link's efficiencies from rates per tonne (kWh/t electricity, 1-3 inputs, unit-commitment fields), and Guided Summary shows a Production tile group (tonnes made, delivered, lost, lost EUR, inventory) from the process view.

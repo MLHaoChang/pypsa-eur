@@ -13,6 +13,7 @@ import { GoalStudyRun } from './shared/GoalStudyRun'
 import { NextSectionButton } from '../../components/NextSectionButton'
 import { sectionMeta } from '../../layout/flowSections'
 import { openFlowTarget, openFlowTargetInPlace, openSectionInExpert } from '../../layout/flowNavigation'
+import { PROCESS_UNIT_ITEM } from '../../layout/paletteData'
 
 // One flow section in Guided: its name and state, the items that are still to
 // do or to check (a Guided user never has a blocker hidden: the field is named
@@ -168,6 +169,18 @@ export function GenericSectionCard({ id }: { id: FlowSectionId }) {
           className="inline-flex items-center gap-1 rounded border border-border px-2.5 py-1 text-[11px] text-muted hover:border-accent hover:text-accent">
           Open {meta.label.toLowerCase()} in Expert ›
         </button>
+        {id === 'carriers' && (
+          // A unit that turns inputs into a product, entered as rates per tonne. Its form is an Expert panel.
+          <button type="button" data-testid="section-add-process-unit"
+            onClick={() => {
+              openSectionInExpert(id)
+              useUIStore.getState().setCreationItem({ id: PROCESS_UNIT_ITEM.id, label: PROCESS_UNIT_ITEM.label })
+            }}
+            title="Add a unit that turns inputs into a product; you enter rates per tonne and the efficiencies are worked out"
+            className="ml-2 inline-flex items-center gap-1 rounded border border-border px-2.5 py-1 text-[11px] text-muted hover:border-accent hover:text-accent">
+            Add a process unit in Expert ›
+          </button>
+        )}
       </div>
     </div>
   )

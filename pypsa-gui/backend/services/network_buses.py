@@ -152,6 +152,9 @@ def apply_rename_bus(name: str, body: dict):
         # subsequent `n.statistics()` would silently return wrong numbers
         # for any aggregation that walked sub_networks (P0 data integrity).
         n.rename_component_names("Bus", **{name: new_name})
+        from services import component_identity
+
+        component_identity.rename(n, "Bus", name, new_name)
     # A bus is placeable too (the site view draws a switchyard per bus): keep
     # its placement across the rename. Same best-effort seam as the CRUD path.
     from services.network_crud import _rename_site_placement

@@ -32,19 +32,23 @@ describe('SC-00 N UI contract anchors', () => {
     expect(typeof flowNavigation.openFlowTarget).toBe('function')
     expect(typeof flowNavigation.openFlowTargetInPlace).toBe('function')
     expect(typeof flowNavigation.showResultsTab).toBe('function')
-    expect(navigationSource).toMatch(/function withReturn\(target: FlowTarget \| null, jump: \(\) => void\)/)
+    expect(navigationSource).toMatch(/function withReturn\(target: FlowTarget \| null, jump: \(\) => void, fromSite3D = false\)/)
+    expect(typeof flowNavigation.withReturnFromSite3D).toBe('function')
   })
 
-  it('rule 4: FlowReturn records no map mode, Site or part yet; SC-01 adds the frozen extension', () => {
+  it('rule 4: FlowReturn carries the frozen SC-00 N extension (map mode, Site, part, selection)', () => {
     const body = navigationSource.match(/export interface FlowReturn \{([\s\S]*?)\n\}/)?.[1] ?? ''
     const fields = [...body.matchAll(/^\s+(\w+):/gm)].map(m => m[1])
-    expect(fields).toEqual(['label', 'mode', 'section', 'panel', 'drawer', 'selected', 'scroll'])
+    expect(fields).toEqual(['label', 'mode', 'section', 'panel', 'drawer', 'selected', 'scroll',
+      'mapMode', 'siteId', 'part', 'partSelection'])
+    expect(navigationSource).toContain("SITE3D_RETURN_LABEL = 'Site 3D'")
     // The return label renders as "Back to <label>"; the frozen label is "Site 3D".
     expect(returnButtonSource).toContain('Back to {back.label}')
   })
 
-  it('rule 2: today\'s empty state still has its own Generate button; SC-01 folds it into "Create 3D site"', () => {
-    expect(emptyStateSource).toContain('Generate 3D site')
-    expect(emptyStateSource).toContain('New site')
+  it('rule 2: the empty state is no creation control; its Generate and New site pointer are folded into the one entry', () => {
+    expect(emptyStateSource).not.toContain('Generate 3D site')
+    expect(emptyStateSource).not.toContain('New site</')
+    expect(emptyStateSource).toContain('openSiteEntry')
   })
 })

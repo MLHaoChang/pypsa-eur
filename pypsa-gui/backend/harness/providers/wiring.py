@@ -310,6 +310,10 @@ _SELECTION_INTENTS = (
     # A component's own values ("show L_hot's parameters").
     (frozenset({"parameter", "parameters", "attribute", "attributes", "properties"}),
      ("get_component", "list_components")),
+    # LC-19: following, retrying and triaging runs (OJ-33, OJ-34).
+    (frozenset({"queue", "queued", "retry", "rerun", "failed", "failure", "infeasible", "crashed"}),
+     ("solve_queue_list", "solve_queue_job_log", "get_simulation_log_history", "diagnose_network",
+      "validate_network")),
 )
 
 
