@@ -18,7 +18,7 @@ import pandas as pd
 
 from models.energy_hub import EH_CUSTOM_COLUMNS, EH_INTERNAL_ROLES, EH_LINK_ROLES
 from models.process_unit import (CRITICALITY_TIERS, HARMONIC_SOURCES, PROCESS_CUSTOM_COLUMNS,
-                                 PROCESS_GENERATOR_ROLES)
+                                 PROCESS_GENERATOR_ROLES, START_METHODS)
 
 _ATTR_OF = {"Bus": "buses", "Link": "links", "Generator": "generators"}
 _TRUE = ("true", "1", "yes", "y", "t")
@@ -109,6 +109,11 @@ def coerce_eh_value(component_class: str, col: str, value):
         if v and v not in HARMONIC_SOURCES:
             raise ValueError(f"Harmonic source: {v!r} is not one of {', '.join(HARMONIC_SOURCES)}.")
         return v
+    if kind == "start_method":
+        v = "" if value is None else str(value).strip()
+        if v and v not in START_METHODS:
+            raise ValueError(f"Start method: {v!r} is not one of {', '.join(START_METHODS)}.")
+        return v
     if kind == "harmonic_spectrum":
         v = "" if value is None else str(value).strip()
         try:
@@ -129,7 +134,8 @@ def coerce_eh_value(component_class: str, col: str, value):
 
 def _default(kind: str):
     return {"bool": False, "float_nonneg": float("nan"), "fraction": float("nan"), "role": "", "tier": "",
-            "process_role": "", "text": "", "harmonic_source": "", "harmonic_spectrum": ""}[kind]
+            "process_role": "", "text": "", "harmonic_source": "", "harmonic_spectrum": "",
+            "start_method": ""}[kind]
 
 
 def ensure_eh_column(n, component_class: str, col: str) -> None:

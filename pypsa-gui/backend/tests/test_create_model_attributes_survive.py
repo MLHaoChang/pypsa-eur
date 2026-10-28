@@ -127,7 +127,8 @@ def test_every_declared_field_survives_the_filter(live, component_class, attr, m
     declared = {f: 1.0 for f in model.model_fields if f != "name"}
     # A field whose value is a choice, not a number, is probed with a valid choice (the filter coerces it).
     declared.update({k: v for k, v in {"criticality_tier": "safety", "throughput_unit": "t/h",
-                                         "harmonic_source": "6-pulse", "harmonic_spectrum": "5:20"}.items()
+                                         "harmonic_source": "6-pulse", "harmonic_spectrum": "5:20",
+                                         "start_method": "dol"}.items()
                      if k in declared})
     kept = _drop_unknown_extras(component_class, attr, dict(declared))
     missing = sorted(set(declared) - set(kept))

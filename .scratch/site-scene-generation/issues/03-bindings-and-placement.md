@@ -3,7 +3,7 @@
 
 # SC-02 — multi-energy buildings, process complexes and equipment
 
-Status: needs-triage — specification proposed; not implemented
+Status: in-progress — split in two PRs (coordinator, 2026-10-28): SC-02a backend (associations, groups, allocation, lifecycle, re-attach, place existing) on `claude/site3d-sc02a`, then SC-02b UI; plan and GK B/UX plan GO in [../sc-02/plan.md](../sc-02/plan.md)
 Type: task
 Dependencies: SC-01; SC-00 target-lifecycle contract
 Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c

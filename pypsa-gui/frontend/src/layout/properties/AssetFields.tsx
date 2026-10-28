@@ -132,6 +132,23 @@ function EnumInput({ spec, fs, set, badge }: { spec: AssetFieldSpec; fs: FS; set
   )
 }
 
+/** Each start method's name and default start current, × rated (equal to `gridspine.static.motor_start`). */
+const START_DEFAULTS: Record<string, [string, number]> = {
+  dol: ['Direct on line', 6], soft: ['Soft starter', 3], vfd: ['Variable-speed drive', 1],
+}
+
+/** What an empty Start current multiple stands for, as text (grid-to-process issue 18, UX: never a placeholder only). */
+function StartMultipleDefault({ fs }: { fs: FS }) {
+  if ((fs.i_start_pu ?? '').trim() !== '') return null
+  const chosen = START_DEFAULTS[fs.start_method ?? '']
+  return (
+    <div className="col-span-2 -mt-0.5 text-[9px] text-muted" data-testid="asset-start-multiple-default">
+      {chosen ? `Default for ${chosen[0]}: ${chosen[1]} × rated`
+        : `Default by start method: ${Object.values(START_DEFAULTS).map(([n, k]) => `${n} ${k}`).join(', ')} × rated`}
+    </div>
+  )
+}
+
 const PART_COLUMNS: Array<{ suffix: string; head: string }> = [
   { suffix: '_overnight', head: 'Overnight' },
   { suffix: '_lifetime', head: 'Life (y)' },
@@ -303,6 +320,7 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
                     In {moneyYear(f.key, provenance)}</div>
                 )}
                 {f.key === 'lifetime' && <LifetimeInherit fs={fs} set={set} />}
+                {f.key === 'i_start_pu' && <StartMultipleDefault fs={fs} />}
                 {!f.derived && f.key !== firstPart && LABEL_ONLY_KINDS.has(f.kind) && chipRow(provenance, f.key)}
                 {f.key !== firstPart && after?.[f.key]}
               </Fragment>

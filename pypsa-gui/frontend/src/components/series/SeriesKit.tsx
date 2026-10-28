@@ -397,6 +397,13 @@ export function PendingCard({
           )}
         </dl>
       )}
+      {power && stats.peak_share_of_connection != null && (
+        <div className={`text-[11px] mt-1 ${stats.peak_share_of_connection > 1 ? 'text-amber-700 font-medium' : 'text-muted'}`}
+             data-testid="stat-connection-share"
+             title={stats.connection_link ? `Peak ÷ the rated power of ${stats.connection_link}` : undefined}>
+          {fmt(stats.peak_share_of_connection * 100, 0)} % of the grid connection{stats.peak_share_of_connection > 1 ? ': above it' : ''}
+        </div>
+      )}
       {pending.weeks?.[component] && (
         <WeekChart week={pending.weeks[component]} unit={power ? 'MW' : unit} />
       )}

@@ -945,7 +945,7 @@ class Turn:
         if self.session.abort_event.is_set() or ctx.project_uuid != self.project_id:
             raise HTTPException(409, {"error_kind": "assurance_context_changed"})
         receipt = {
-            "policy_version": "1",
+            "policy_version": records.POLICY_VERSION,
             "content_sha256": hashlib.sha256(text.encode()).hexdigest(),
             "evidence_ids": evidence_ids,
             "checked_block_ids": [b["id"] for b in public_blocks],

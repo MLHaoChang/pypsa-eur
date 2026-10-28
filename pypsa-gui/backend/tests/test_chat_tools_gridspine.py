@@ -41,6 +41,9 @@ GRIDSPINE_TOOLS = (
     "gridspine_compute_capacity",
     "gridspine_get_connection_assessments",
     "gridspine_assess_connection",
+    # LV08 B-campus: the two upload routes
+    "gridspine_upload_external_dispatch",
+    "gridspine_upload_readback",
 )
 PROJECT_SCOPED = tuple(t for t in GRIDSPINE_TOOLS if t != "gridspine_create_study")
 CONFIG = {"hours": 24, "k": 1, "window": 24, "overlap": 0, "screen": False}
@@ -63,7 +66,9 @@ def test_every_gridspine_tool_is_registered_routed_and_tiered():
     names = {t["name"] for t in TOOLS}
     for name in GRIDSPINE_TOOLS:
         assert name in names, name
-        assert TOOL_ROUTES[name] == ["_service_call_"], name
+        # The LV08 B-campus upload tools call their route handler, so they name the route.
+        assert TOOL_ROUTES[name] == (["_service_call_"] if "upload" not in name
+                                     else [("POST", TOOL_ROUTES[name][0][1])]), name
         assert callable(chat_tools.DISPATCHERS[name]), name
         assert safety_tier_for(name) in ("read", "write", "execution_long_running"), name
 
