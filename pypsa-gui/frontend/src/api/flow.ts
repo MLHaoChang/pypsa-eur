@@ -121,6 +121,42 @@ export interface ProjectFlow {
   scope: FlowScope
   deferred: boolean
   deferred_reason: string | null
+  /** Site 3D verdicts (SC-01a): rendered verbatim, never derived here. */
+  scene?: FlowScene
+}
+
+/** Where a scene blocker's "›" link lands, in each mode (UI contract rule 4). */
+export type SceneHome =
+  | { guided: { section: FlowSectionId; drawer: string | null; open: 'request_then_scroll' }; expert: { panel?: string; table?: string } }
+  | { header_action: 'save' }
+  | { site_part: SitePart }
+
+export type SitePart = 'map' | 'generate' | 'model' | 'results'
+
+export interface SceneBlocker { code: string; reason: string; link: '›'; home: SceneHome }
+
+/** The one visible creation action (rule 3): one label per state. */
+export interface SceneEntry {
+  label: string
+  enabled: boolean
+  blocker: SceneBlocker | null
+  reason?: string
+  target?: SceneHome
+}
+
+export interface SceneAction {
+  action: string
+  available: boolean
+  blocker: SceneBlocker | null
+  required_inputs: string[]
+  computes: string
+}
+
+export interface FlowScene {
+  entry: SceneEntry
+  /** Site ids whose origin lies over 1000 m from the confirmed anchor (D01). */
+  anchor_moved: string[]
+  actions: SceneAction[]
 }
 
 export interface FlowAck {

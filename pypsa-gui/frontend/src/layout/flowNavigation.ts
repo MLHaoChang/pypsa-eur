@@ -1,5 +1,5 @@
-import type { FlowTarget, FlowSectionId } from '../api/flow'
-import { useUIStore, type SlidePanel } from '../store/uiStore'
+import type { FlowTarget, FlowSectionId, SitePart } from '../api/flow'
+import { useUIStore, type CanvasView, type SitePartSelection, type SlidePanel } from '../store/uiStore'
 import { onManualNavigation } from '../utils/navigationEpoch'
 import { fieldWords } from '../utils/flowItems'
 import { PANEL_SECTION, SECTION_OPEN, sectionMeta } from './flowSections'
@@ -20,7 +20,17 @@ export interface FlowReturn {
   drawer: FlowTarget | null
   selected: { type: string; name: string } | null
   scroll: { path: string; top: number } | null
+  /** SC-00 N frozen extension: 'site' when the jump left Site 3D, else null. */
+  mapMode: CanvasView | null
+  /** The sites.json Site id shown in Site 3D. */
+  siteId: string | null
+  part: SitePart | null
+  /** A stable id (building id or target key), never a display name. */
+  partSelection: SitePartSelection | null
 }
+
+/** The return label for a jump that leaves Site 3D (SC-00 N, SITE3D-NAME-1). */
+export const SITE3D_RETURN_LABEL = 'Site 3D'
 
 const cssPath = (el: Element): string => {
   const parts: string[] = []
@@ -53,8 +63,15 @@ const sameTarget = (a: FlowTarget | null, b: FlowTarget): boolean =>
     && a.entity === b.entity && a.field === b.field
 
 /** The view the user is on now, or null when the jump stays in it. */
-function currentOrigin(target: FlowTarget | null): FlowReturn | null {
+function currentOrigin(target: FlowTarget | null, fromSite3D = false): FlowReturn | null {
   const ui = useUIStore.getState()
+  if (fromSite3D) {
+    return {
+      label: SITE3D_RETURN_LABEL, mode: ui.uiMode, section: ui.activeSection, panel: ui.activeSlidePanel,
+      drawer: ui.fieldDrawer, selected: null, scroll: null,
+      mapMode: 'site', siteId: ui.activeSiteId, part: ui.sitePart, partSelection: ui.sitePartSelection,
+    }
+  }
   const guided = ui.uiMode === 'guided'
   if (target && guided && sameTarget(ui.fieldDrawer, target)) return null
   if (target && !guided && target.panel && ui.activeSlidePanel === target.panel) return null
@@ -70,19 +87,23 @@ function currentOrigin(target: FlowTarget | null): FlowReturn | null {
     mode: ui.uiMode, section: ui.activeSection, panel, drawer: ui.fieldDrawer,
     selected: ui.selectedComponent ? { type: ui.selectedComponent.type, name: ui.selectedComponent.name } : null,
     scroll: guided && !ui.fieldDrawer ? null : captureScroll(),
+    mapMode: null, siteId: null, part: null, partSelection: null,
   }
 }
 
 /** Run a jump and remember where it started. The store's own navigation hooks
  *  clear a pending return, so it is set after the jump. */
-function withReturn(target: FlowTarget | null, jump: () => void): void {
-  const origin = currentOrigin(target)
+function withReturn(target: FlowTarget | null, jump: () => void, fromSite3D = false): void {
+  const origin = currentOrigin(target, fromSite3D)
   jump()
   if (origin) useUIStore.setState({ flowReturn: origin })
 }
 
 /** Run a programmatic jump (the assistant's) and remember the view it left. */
 export function withReturnFrom(jump: () => void): void { withReturn(null, jump) }
+
+/** A jump that leaves Site 3D: "Back to Site 3D" lands on the same Site, part and selection. */
+export function withReturnFromSite3D(jump: () => void): void { withReturn(null, jump, true) }
 
 /** "Back to <origin>": put the view a fix link left back, with its scroll. */
 export function returnToOrigin(): void {
@@ -99,6 +120,12 @@ export function returnToOrigin(): void {
     ui.setSlidePanel(o.panel)
     if (!o.panel && o.selected) ui.setSelectedComponent(o.selected as never)
     ui.setFieldDrawer(null)
+  }
+  if (o.mapMode) {
+    ui.setCanvasView(o.mapMode)
+    if (o.siteId) ui.setActiveSiteId(o.siteId)
+    if (o.part) ui.setSitePart(o.part)
+    ui.setSitePartSelection(o.partSelection)
   }
   useUIStore.setState({ flowReturn: null })
   restoreScroll(o.scroll)
@@ -238,6 +265,45 @@ export const FAULT_LEVEL_TARGET: FlowTarget = {
 export function openFaultLevelEditor(): void {
   if (useUIStore.getState().uiMode === 'expert') openFlowTarget(FAULT_LEVEL_TARGET)
   else openFlowTargetInPlace(FAULT_LEVEL_TARGET)
+}
+
+/** The site coordinate field (D01; UI contract rule 4): Guided, a drawer over
+ *  the Project & site card; Expert, the horizon panel. */
+export const SITE_ANCHOR_TARGET: FlowTarget = {
+  section: 'project', panel: 'horizon', component: null, entity: null, field: 'site_anchor',
+}
+
+/** Open the coordinate field by request-then-scroll; `fromSite3D` makes Back read "Back to Site 3D". */
+export function openSiteAnchor(opts: { fromSite3D?: boolean } = {}): void {
+  const jump = () => {
+    const ui = useUIStore.getState()
+    ui.requestSiteAnchor()
+    if (ui.uiMode === 'guided') openFlowTargetInPlaceNow(SITE_ANCHOR_TARGET)
+    else openFlowTargetNow(SITE_ANCHOR_TARGET)
+  }
+  withReturn(SITE_ANCHOR_TARGET, jump, !!opts.fromSite3D)
+}
+
+/** Show the one "Create 3D site" action (rule 2): the Project & site card in
+ *  Guided (in place, never Expert), the horizon panel in Expert. */
+export function openSiteEntry(opts: { fromSite3D?: boolean } = {}): void {
+  withReturn(null, () => {
+    const ui = useUIStore.getState()
+    ui.requestSiteAnchor()
+    if (ui.uiMode === 'guided') { ui.setFieldDrawer(null); openSectionInGuided('project') }
+    else openFlowTargetNow({ ...SITE_ANCHOR_TARGET, field: null })
+  }, !!opts.fromSite3D)
+}
+
+/** "Draw the boundary on the Satellite map ›" from New 3D site: the Satellite
+ *  view centred on the site coordinates with its "New site" tool started;
+ *  Back reads "Back to Site 3D". */
+export function openSiteBoundaryDraw(at: { lat: number; lng: number } | null): void {
+  withReturnFromSite3D(() => {
+    const ui = useUIStore.getState()
+    ui.setCanvasView('satellite')
+    ui.requestSiteDraw(at ? [at.lat, at.lng] : null)
+  })
 }
 
 /** Show one flow item's field in Expert: its panel, or the component's own

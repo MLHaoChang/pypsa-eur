@@ -102,6 +102,40 @@ def list_loads():
 PAGE_DRAFT = page_draft()
 
 
+def get_series():
+    """Give L1 a p_set series, then read it (time-series evidence, issue 02)."""
+    from services.pypsa_service import PyPSAService
+
+    network = PyPSAService.get_active_context().network
+    network.loads_t.p_set["L1"] = [5.0] * len(network.snapshots)
+    return tool_turn(
+        "get_timeseries",
+        {"component": "loads", "name": "L1", "attribute": "p_set"},
+        call_id="read-series",
+    )
+
+
+SERIES_DRAFT = json.dumps(
+    {
+        "schema_version": 1,
+        "blocks": [
+            {
+                "id": "series-step",
+                "kind": "observed",
+                "entity_id": "L1",
+                "metric": "p_set",
+                "value": 5,
+                "unit": "MW",
+                "source": {
+                    "tool_use_id": "read-series",
+                    "path": "/L1/2026-01-01T00:00:00",
+                },
+            }
+        ],
+    }
+)
+
+
 def assert_nothing_published(frames, owner, before):
     assert not any(event == "answer_approved" for event, _ in frames)
     assert public_text(frames) == ""
@@ -119,8 +153,12 @@ KINDS = ["membership", "disabled"]
 @pytest.mark.parametrize("kind", KINDS)
 @pytest.mark.parametrize(
     "read, draft",
-    [(get_component, observed_draft()), (list_loads, PAGE_DRAFT)],
-    ids=["get_component", "list_components"],
+    [
+        (get_component, observed_draft()),
+        (list_loads, PAGE_DRAFT),
+        (get_series, SERIES_DRAFT),
+    ],
+    ids=["get_component", "list_components", "get_timeseries"],
 )
 def test_access_revoked_after_capture_publishes_nothing(
     baseline, harness, revoke, seeded_identity, kind, read, draft

@@ -31,8 +31,10 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import hmac
 import json
 import math
+import os
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -968,12 +970,41 @@ def _solver_config() -> dict:
     return asdict(config) if not isinstance(config, dict) else dict(config)
 
 
+TEXT_CAP = 120  # characters of a free-text cell a card shows
+
+
 def _setting(value):
-    """A setting's cell: a scalar as stored, a nested list or dict as compact JSON."""
+    """A setting's cell: a scalar as stored (a long text cut at TEXT_CAP), a nested list or dict as
+    compact JSON."""
     if isinstance(value, (dict, list)):
         text = json.dumps(value, default=str, separators=(",", ":"))
         return text if len(text) <= 200 else text[:200] + "\u2026"
-    return _scalar(value)
+    value = _scalar(value)
+    return value if not isinstance(value, str) or len(value) <= TEXT_CAP else value[:TEXT_CAP] + "\u2026"
+
+
+_SALT = os.urandom(16)  # per process: a fingerprint on a card can not be used to guess a value
+
+
+def _value_fingerprint(value) -> str:
+    return hmac.new(_SALT, json.dumps(value, sort_keys=True, default=str).encode(), "sha1").hexdigest()[:12]
+
+
+def _hide_cut(row: dict, old, new) -> dict:
+    """A text cut at TEXT_CAP can read the same before and after an edit that differs past the cut.
+    Such a row says "(changed)" and carries a fingerprint of the new value, so the receipt can tell
+    a written edit from an unwritten one."""
+    if row["old"] == row["new"] and not _same(old, new):
+        row["new"] = f"{row['new']} (changed)"
+        row["fingerprint"] = _value_fingerprint(new)
+    return row
+
+
+def _settle(row: dict, value):
+    """The stored value as the receipt compares it with the row's `new`."""
+    if str(row["new"]).endswith(" (changed)") and row.get("fingerprint") == _value_fingerprint(value):
+        return row["new"]
+    return _setting(value)
 
 
 def _solver_row(key: str, old, new, *, applies: bool = True) -> dict:
@@ -1508,7 +1539,7 @@ def _scenario_preview(args: dict) -> list[dict]:
             _refuse("invalid_edit_value", str(exc.detail), exc.status_code)
         if not _same(old[key], value):
             label = _SCENARIO_FIELDS[key][1]
-            rows.append(_settings_row("Scenario", key, label, old[key], value, says_name=label))
+            rows.append(_hide_cut(_settings_row("Scenario", key, label, old[key], value, says_name=label), old[key], value))
     if not rows:
         _refuse("empty_edit", "The scenario already has these values.")
     return rows
@@ -1516,7 +1547,7 @@ def _scenario_preview(args: dict) -> list[dict]:
 
 def _scenario_readback(args: dict, rows: list[dict]) -> list[Any]:
     stored = _stored_scenario(args)
-    return [_setting(stored[row["field"]]) for row in rows]
+    return [_settle(row, stored[row["field"]]) for row in rows]
 
 
 register("update_project_scenario_metadata", Adapter("settings_edit", _scenario_preview, _scenario_readback,
@@ -1600,7 +1631,8 @@ def _study_row(field: str, label: str, old, new, *, unit: str = "", says_name: s
     row["old"], row["new"] = _study_cell(field, old), _study_cell(field, new)
     if row["old"] == "set" and row["new"] == "set":
         row["new"] = "set (changed)"  # a secret never shows, but a rotation is not "unchanged"
-    return row
+        return row
+    return _hide_cut(row, old, new)
 
 
 def _title(key: str) -> str:
@@ -1662,9 +1694,17 @@ def _decision_study_readback(args: dict, rows: list[dict]) -> list[Any]:
         for part in ([parts[0]] if parts[0] != "settings" else [parts[1]]) if parts[0] != "intake" else parts:
             value = value.get(part) if isinstance(value, dict) else None
         cell = _study_cell(row["field"], value)
+        if str(row["new"]).endswith(" (changed)") and row.get("fingerprint") == _value_fingerprint(value):
+            out.append(row["new"])
+            continue
         out.append(row["new"] if cell == "set" and row["new"] == "set (changed)" else cell)
     return out
 
 
 register("update_decision_study", Adapter("settings_edit", _decision_study_preview, _decision_study_readback,
                                           section_id="project"))
+
+
+# Q3-CARDS-1 slice 2: the adapters of the remaining settings edits, one module per area.
+from harness import (  # noqa: E402,F401
+    edit_card_campus, edit_card_library, edit_card_records, edit_card_reports, edit_card_site)

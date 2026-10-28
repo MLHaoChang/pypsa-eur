@@ -6,6 +6,7 @@
 // Availability block): host-agnostic props, no store reads besides the
 // query client.
 import { useState } from 'react'
+import type { AxiosError } from 'axios'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Check, Download, Plus, Trash2, Upload, Wand2 } from 'lucide-react'
@@ -173,6 +174,63 @@ export function CurrentSeriesLine({
       <span>{what}, {data.rows} h{data.refinements ? `, refined ×${data.refinements}` : ''}</span>
       <Btn onClick={() => take.mutate()} disabled={take.isPending}><Wand2 size={12} /> Refine this series</Btn>
       {take.isError && <span className="text-red-600" data-testid="current-error">{errorText(take.error)}</span>}
+    </div>
+  )
+}
+
+// An apply records a must-run floor that means a min stable level under that
+// name; the backend still counts it as made by must_run.
+const KIND_ALIASES: Record<string, string> = { min_stable_level: 'must_run' }
+
+/** Whether a re-generate replays the current series' recorded refinements
+ *  (TSG 06): on by default, offered only when the series is refined and the
+ *  chosen archetype or kind is the one that made it, the only case the
+ *  backend replays. */
+export function useReplay(project: string, componentType: string, attribute: string,
+  component: string, generator: string) {
+  const { data } = useQuery({
+    queryKey: ['series-current', project, componentType, attribute, component],
+    queryFn: () => seriesApi.current(project, componentType, attribute, component),
+  })
+  const [replay, setReplay] = useState(true)
+  const kind = data?.kind ? KIND_ALIASES[data.kind] ?? data.kind : null
+  return { refined: data?.exists && kind === generator ? data.refinements ?? 0 : 0, replay, setReplay }
+}
+
+export function ReplayToggle({ refined, replay, setReplay }: ReturnType<typeof useReplay>) {
+  if (!refined) return null
+  return (
+    <label className="flex items-center gap-1 text-[11px]" data-testid="replay-toggle">
+      <input type="checkbox" checked={replay} onChange={e => setReplay(e.target.checked)} />
+      Keep its {refined} refinement{refined === 1 ? '' : 's'}
+    </label>
+  )
+}
+
+/** A refused replay in plain words: its step counted from 1 and the op's
+ *  label, never the backend's op key or field path (UX review). */
+export function replayRefusalText(error: unknown): string {
+  const detail = ((error as AxiosError)?.response?.data as { detail?: { op?: unknown; index?: unknown } } | undefined)?.detail
+  const op = typeof detail?.op === 'string' ? detail.op : null
+  const index = typeof detail?.index === 'number' ? detail.index : null
+  if (op == null || index == null) return 'The refinements no longer fit the new series.'
+  const label = OP_LABELS[op as OpKind] ?? 'a refinement'
+  return `Step ${index + 1} of the refinements (${label.charAt(0).toLowerCase()}${label.slice(1)}) no longer fits the new series.`
+}
+
+/** A generate's refusal in place. A refused replay names the op and its
+ *  index, and its retry drops the ops. */
+export function GenerateError({ error, onRetryWithoutOps }: {
+  error: unknown; onRetryWithoutOps: () => void
+}) {
+  if (!error) return null
+  if (errorKind(error) !== 'replay_refused') {
+    return <p className="text-[11px] text-red-600 mt-1" data-testid="editor-error">{errorText(error)}</p>
+  }
+  return (
+    <div className="flex items-center gap-2 text-[11px] mt-1" data-testid="replay-refused">
+      <span className="text-red-600">{replayRefusalText(error)}</span>
+      <Btn onClick={onRetryWithoutOps}>Preview without the refinements</Btn>
     </div>
   )
 }

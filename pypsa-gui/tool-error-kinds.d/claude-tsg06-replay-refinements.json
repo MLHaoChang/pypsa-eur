@@ -1,0 +1,4 @@
+{"kinds": {
+  "replay_refused": {"surface": "inline", "why": "A generate_* re-generate replayed the refinements the target's applied series records and one no longer fits (or the whole list does not, e.g. a coarser series). The detail names the op and its index and offers retry {replay_refinements: false}; the assistant tells the user which op failed and offers to generate without the ops, per call."},
+  "replay_mixed": {"surface": "inline", "why": "A generate_* call names several components whose applied series record different refinements (or some none), and one artifact holds one op list. The detail names them and offers retry {replay_refinements: false}; the assistant generates them one at a time or asks before dropping the ops, per call."}
+}}

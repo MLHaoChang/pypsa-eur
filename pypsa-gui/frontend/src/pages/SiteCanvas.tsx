@@ -58,6 +58,10 @@ import { matrixFor, placementFromMatrix } from '../site3d/placementMath'
 import { screenToGround, groundToScreen } from '../site3d/raycast'
 import { registerSiteDropTarget, unregisterSiteDropTarget } from '../site3d/dropRegistry'
 import SiteOverlay from '../components/SiteOverlay'
+import NativeBuildings from '../site3d/NativeBuildings'
+import SiteScenePanel from '../site3d/SiteScenePanel'
+import { useSceneProposal, useSiteScene } from '../site3d/useSiteScene'
+import { emptyLayoutFor, sceneOsmIds } from '../site3d/nativeSite'
 import AssetFootprintEditor from '../components/AssetFootprintEditor'
 import { useDispatchFresh, useSolveSettled } from '../site3d/useDispatchFresh'
 import { useReducedMotion, flyStart, flyPose, flyDuration, type Pose } from '../site3d/motion'
@@ -753,7 +757,10 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
 
   // The layout is in the SITE frame already: one yard per bus at its
   // offset, placements honoured.
-  const layout = useMemo(() => (site && memberInputs.length > 0
+  const layout = useMemo(() => (site && site.buses.length === 0
+    // SC-01b: a native Site (no model equipment) is framed by its own boundary.
+    ? emptyLayoutFor(site)
+    : site && memberInputs.length > 0
     ? buildSiteLayout({ buses: memberInputs, generators, storageUnits, stores, loads, transformers, lines, links, placements: site.placements, footprints: sitesDoc.asset_footprints, busCarrier, sizing })
     : null),
   [site, sitesDoc.asset_footprints, memberInputs, generators, storageUnits, stores, loads, transformers, lines, links, busCarrier, sizing])
@@ -977,6 +984,20 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
   const [walking, setWalking] = useState(false)
   useEffect(() => { setWalking(false) }, [siteId])
   // Stable, so the memoised object meshes re-render only when their own props change.
+  // SC-01b: the native scene's buildings, and the proposal under review. The
+  // context layer leaves out the OSM buildings the scene already draws.
+  const sceneQuery = useSiteScene(site?.id ?? null)
+  const proposal = useSceneProposal(s => s.proposal)
+  const sitePartSelection = useUIStore(s => s.sitePartSelection)
+  const setSitePartSelection = useUIStore(s => s.setSitePartSelection)
+  const acceptedBuildings = useMemo(() => (sceneQuery.data?.state === 'enabled' ? sceneQuery.data.buildings : []), [sceneQuery.data])
+  const previewBuildings = proposal && site && proposal.site_id === site.id ? proposal.preview.buildings : null
+  const sceneContext = useMemo(() => {
+    if (!context) return null
+    const ids = sceneOsmIds([...acceptedBuildings, ...(previewBuildings ?? [])])
+    return ids.size ? { ...context, buildings: context.buildings.filter(b => !ids.has(b.id)) } : context
+  }, [context, acceptedBuildings, previewBuildings])
+
   const onSelectObject = useCallback((obj: SiteObject) => setSelectedComponent({ type: obj.type, name: obj.name }), [setSelectedComponent])
   const labelRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
@@ -985,7 +1006,7 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
     return <div className="flex h-full items-center justify-center text-[12px] text-muted">Loading network…</div>
   }
   if (!site) {
-    return <SiteEmptyState buses={buses as Bus[]} branches={branches} layoutFor={layoutForBus} loading={!allLoaded} />
+    return <SiteEmptyState loading={!allLoaded} />
   }
   if (!layout || !ground || !siteExtent || !plotExtent || !fit) {
     return (
@@ -1040,7 +1061,10 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
           geometry={groundGeometry}
           onMiss={() => setSelectedComponent(null)}
         />
-        {context && <ContextScenery context={context} origin={site.origin} heightAt={heightAt} />}
+        {sceneContext && <ContextScenery context={sceneContext} origin={site.origin} heightAt={heightAt} />}
+        <NativeBuildings accepted={acceptedBuildings} preview={previewBuildings} heightAt={heightAt}
+          selectedId={sitePartSelection?.kind === 'building' ? sitePartSelection.id : null}
+          onSelect={id => setSitePartSelection({ kind: 'building', id })} />
         <BoundaryRibbon site={site} heightAt={heightAt} />
         <ObjectRegistryContext.Provider value={registry}>
         {objects.map(o => {
@@ -1159,6 +1183,7 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
           onResetPlacement={() => { if (selectedPlacedKey) removePlacement(currentProject, site.id, selectedPlacedKey) }}
         />
 
+        <SiteScenePanel site={site} contextBuildings={context?.buildings ?? null} />
         {selectedComponent && showFootprintEditor && <AssetFootprintEditor key={`footprint:${selectedComponent.type}:${selectedComponent.name}`} componentClass={selectedComponent.type} name={selectedComponent.name} />}
         <p className="max-w-72 rounded bg-bg/95 px-2 py-1 text-[10px] text-muted">Library dimensions are estimates unless a user-entered envelope is provided. Fit checks do not certify clearances or compliance.</p>
         {/* Legend — under the picker; the result bands only while results show. */}
