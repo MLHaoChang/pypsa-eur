@@ -271,16 +271,26 @@ def _by_days(op: Mapping[str, Any], i: int) -> int:
         raise InvalidRefineOpError(
             f"op {i}: move_window.by must be a whole number of days (1-365, "
             f"\"14d\", \"-3d\") or weeks (1-52, \"2w\"), later or with - "
-            f"earlier, got {raw!r}")
+            f"earlier, got {raw}")
     return (-n if m.group(1) == "-" else n) * (7 if m.group(3) == "w" else 1)
 
 
 def _move_end(raw: Any, days: int, year: int, what: str) -> str:
     """One window end moved by ``days``: a dated end keeps its (new) year,
-    for the generator to refuse; an MM-DD end wraps inside ``year``."""
+    refused out of ``year``; an MM-DD end wraps round ``year``'s own calendar
+    (its length, its leap day), so a move and its opposite are exact."""
     day, dated = _day(raw, year, what)
-    moved = day + pd.Timedelta(days=days)
-    return f"{moved:%Y-%m-%d}" if dated else f"{moved.replace(year=year):%m-%d}"
+    if dated:
+        return f"{day + pd.Timedelta(days=days):%Y-%m-%d}"
+    first = pd.Timestamp(year=year, month=1, day=1)
+    length = (first + pd.DateOffset(years=1) - first).days
+    return f"{first + pd.Timedelta(days=((day - first).days + days) % length):%m-%d}"
+
+
+def _day_words(raw: str) -> str:
+    """'2025-12-20' → '20 Dec 2025'; '06-15' → '15 Jun'."""
+    d = pd.Timestamp(raw if len(raw) == 10 else f"2000-{raw}")
+    return f"{d.day} {d:%b}" + (f" {d.year}" if len(raw) == 10 else "")
 
 
 def _move_window(t: _Target, s: pd.Series, op: Mapping[str, Any], i: int,
@@ -302,7 +312,8 @@ def _move_window(t: _Target, s: pd.Series, op: Mapping[str, Any], i: int,
                               for w in produced["windows"]]
             record["converted_from_rule"] = rule
         windows = new["windows"]
-        listing = "; ".join(f"{k}: {w.get('from')} to {w.get('to')}"
+        listing = "; ".join(f"{k}: {w.get('from')} to {w.get('to')} (available "
+                            f"{float(w.get('available', 0.0)):g})"
                             for k, w in enumerate(windows))
         k = op.get("window")
         if k is None:
@@ -313,7 +324,7 @@ def _move_window(t: _Target, s: pd.Series, op: Mapping[str, Any], i: int,
             k = 0
         elif not isinstance(k, int) or isinstance(k, bool) or not 0 <= k < len(windows):
             raise InvalidRefineOpError(
-                f"op {i}: move_window.window must be one of {listing}; got {k!r}")
+                f"op {i}: move_window.window must be one of {listing}; got {k}")
         before = {"from": windows[k].get("from"), "to": windows[k].get("to")}
         after = {end: _move_end(before[end], days, year, f"windows[{k}].{end}")
                  for end in ("from", "to")}
@@ -323,8 +334,9 @@ def _move_window(t: _Target, s: pd.Series, op: Mapping[str, Any], i: int,
                 f"the first day is 1 Jan {year}"
             raise MoveWindowYearError(
                 f"op {i} (move_window): moves past the model horizon: {edge}, and "
-                f"the window would run {after['from']} to {after['to']}; a dated "
-                "window is never shifted to another year")
+                f"the window would run {_day_words(after['from'])} to "
+                f"{_day_words(after['to'])} (a dated window is never shifted to "
+                "another year)")
         windows[k] = {**windows[k], **after}
         frame, produced = _availability_frame(["_"], "maintenance", new, year)
     except RefineError:

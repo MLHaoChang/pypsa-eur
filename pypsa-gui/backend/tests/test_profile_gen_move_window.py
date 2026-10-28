@@ -178,6 +178,24 @@ def test_forth_and_back_across_the_leap_day():
     assert back.series.to_numpy().tobytes() == s.to_numpy().tobytes()
 
 
+def test_a_wrap_onto_the_next_years_leap_day_stays_in_the_source_calendar():
+    # 2023 + 61 days from 30 Dec would be 29 Feb 2024; the source year has none.
+    params = {"windows": [{"from": "12-30", "to": "12-31", "available": 0.0}]}
+    s, meta = _gen(params)
+    there = _refine(s, meta, [{"op": "move_window", "by": "61d"}])
+    w = there.meta["params"]["windows"][0]
+    assert (w["from"], w["to"]) == ("03-01", "03-02")
+    back = _refine(there.series, there.meta, [{"op": "move_window", "by": "-61d"}])
+    assert back.series.to_numpy().tobytes() == s.to_numpy().tobytes()
+
+
+def test_a_wrap_in_a_leap_source_year_counts_its_366_days():
+    s, meta = _gen({"windows": [{"from": "12-31", "to": "12-31", "available": 0.0}]},
+                   year=2024)
+    out = _refine(s, meta, [{"op": "move_window", "by": "60d"}])
+    assert out.meta["params"]["windows"][0]["from"] == "02-29"
+
+
 # ── replay (condition 1) ────────────────────────────────────────────────────
 
 def test_replay_onto_another_year_moves_from_that_years_params():

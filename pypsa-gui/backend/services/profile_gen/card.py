@@ -66,16 +66,22 @@ _OP = {"scale_peak_to": "peak target", "scale_window": "hour window",
        "rescale_energy": "energy target", "move_window": "maintenance window"}
 
 
-def _op_words(op: Mapping[str, Any]) -> str:
+_FIELD = {"p_set": "Load", "p_max_pu": "Availability", "p_min_pu": "Must-run floor",
+          "marginal_cost": "Price", "inflow": "Inflow", "efficiency": "COP"}
+
+
+def _op_words(op: Mapping[str, Any], after_others: bool) -> str:
+    """An op in the card's words; a moved window names its dates."""
     name = str(op.get("op"))
     moved = op.get("moved")
     if name == "move_window" and isinstance(moved, Mapping):
+        from services.profile_gen.refine import _day_words
+
         (f0, f1), (t0, t1) = moved["from"], moved["to"]
-        return (f"maintenance window {f0} to {t0} moved to {f1} to {t1} (the "
-                "edits before it keep their hours)")
+        return (f"maintenance window {_day_words(f0)} to {_day_words(t0)} moved to "
+                f"{_day_words(f1)} to {_day_words(t1)}"
+                + (" (the edits before it keep their hours)" if after_others else ""))
     return _OP.get(name, "an edit")
-_FIELD = {"p_set": "Load", "p_max_pu": "Availability", "p_min_pu": "Must-run floor",
-          "marginal_cost": "Price", "inflow": "Inflow", "efficiency": "COP"}
 
 
 LOAD_FACTOR_BASIS = "weighted, model snapshots"
@@ -137,7 +143,8 @@ def preview(args: dict) -> list[dict]:
     ops = meta.get("refinements") or []
     if ops:
         rows.append(_note(cls, component, "refinements",
-                          "refined by " + ", ".join(_op_words(o) for o in ops)))
+                          "refined by " + ", ".join(_op_words(o, any(p.get("op") != "move_window" for p in ops[:k]))
+                                    for k, o in enumerate(ops))))
     return rows
 
 

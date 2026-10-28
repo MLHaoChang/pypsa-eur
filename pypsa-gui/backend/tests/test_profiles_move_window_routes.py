@@ -68,7 +68,8 @@ def test_the_copilot_proposes_the_move_behind_the_card(client, project, bound_ct
         card = edit_card.preview("apply_generated_profile", args)
         assert card["kind"] == "series_edit" and card["complete"] is True
         notes = " ".join(r["note"] for r in card["rows"] if r["role"] == "note")
-        assert "06-01 to 06-07 moved to 06-15 to 06-21" in notes
+        assert "maintenance window 1 Jun to 7 Jun moved to 15 Jun to 21 Jun" in notes
+        assert "keep their hours" not in notes  # no edit before the move
         edit_card.require_current("apply_generated_profile", args, card)
         chat_tools.DISPATCHERS["apply_generated_profile"](**args)
         receipt = edit_card.receipt(card, args)
