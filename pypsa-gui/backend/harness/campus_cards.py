@@ -579,6 +579,257 @@ def _delete_document_back(args: dict, rows: list[dict]) -> list:
 def _delete_document_says(args: dict, rows: list[dict]) -> str:
     return f"Deletes the grid-code document {rows[0]['name'].removeprefix('Document ')}; this cannot be undone"
 
+# ── the readiness limits: campus_set_grid_limit and campus_reset_grid_limit ──
+
+# The scorecard's words (ConnectionLimits.tsx `SHOWN` and `SOURCES`).
+ITEM_LABELS = {"connection_ramp": "Connection ramp limit", "oscillation": "Oscillation band",
+               "fault_level": "Fault level"}
+ITEM_UNITS = {"connection_ramp": "MW/min", "oscillation": "%", "fault_level": ""}
+SOURCE_WORDS = {"code": "Grid code", "datasheet": "Datasheet", "measured": "Measured",
+                "assumed": "Assumed (to check)"}
+_OWN, _NOT_SET = "set by you", "not set"  # the reset card's one row, and what its receipt reads
+
+
+def _limit_item(args: dict) -> str:
+    from services.adequacy import grid_limits
+
+    item = args.get("item")
+    if item not in grid_limits.ITEMS:
+        ec._refuse("invalid_limit_item", f"The limit item must be one of {list(grid_limits.ITEMS)}.")
+    return item
+
+
+def _limit_name(item: str) -> str:
+    return ITEM_LABELS[item]
+
+
+def _limit_state(project, item: str):
+    """`(the user's own entry or None, the limit as the flow reads it)`: the entry, else the template's row."""
+    from services import project_registry
+    from services.adequacy import grid_limits
+
+    folder = project_registry.project_dir(project)
+    own = grid_limits.load_limits(folder).get(item)
+    base = own or grid_limits._template_default(folder, item) or {}
+    return own, {"value": base.get("value"), "source": base.get("source"),
+                 "note": (own or {}).get("note", "")}
+
+
+def _limit_row(item: str, field: str, old, new) -> dict:
+    label = {"value": ITEM_LABELS[item], "source": "Source", "note": "Note"}[field]
+    row = {**_row(_limit_name(item), field, label, old, new), "unit": ITEM_UNITS[item] if field == "value" else ""}
+    if field == "source":
+        row["words"] = {"old": SOURCE_WORDS.get(old, old), "new": SOURCE_WORDS.get(new, new)}
+    return row
+
+
+def _limit_fields(item: str) -> tuple[str, ...]:
+    from services.adequacy import grid_limits
+
+    return ("source", "note") if item in grid_limits.SOURCE_ONLY else ("value", "source", "note")
+
+
+def _limit_checked(run):
+    from services.adequacy import grid_limits
+
+    try:
+        return run()
+    except grid_limits.LimitError as exc:
+        ec._refuse(exc.kind, exc.message)
+
+
+def _set_limit_preview(args: dict) -> list[dict]:
+    from harness import edit_card_campus as ecc
+    from services.adequacy import grid_limits
+
+    item = _limit_item(args)
+    value, source, note = _limit_checked(lambda: grid_limits.validate(
+        item, args.get("value"), args.get("source"), args.get("note", "")))
+    new = {"value": value, "source": source, "note": note}
+
+    def run(project, db, user):
+        own, old = _limit_state(project, item)
+        rows = [_limit_row(item, f, old[f], new[f]) for f in _limit_fields(item) if old[f] != new[f]]
+        if not rows and own is not None:
+            ec._refuse("empty_edit", f"The {_limit_name(item).lower()} already has these settings.")
+        # Without an entry of its own the write still stores one, so the card shows the source it keeps.
+        return rows or [_limit_row(item, "source", old["source"], source)]
+
+    return ecc._with_project(args, run, lock="campus")
+
+
+def _set_limit_back(args: dict, rows: list[dict]) -> list:
+    """Each row's value from the user's own entry: a write that stored nothing reads back as none."""
+    from harness import edit_card_campus as ecc
+
+    def run(project, db, user):
+        own, _ = _limit_state(project, _limit_item(args))
+        return [None if own is None else own.get(row["field"]) for row in rows]
+
+    return ecc._with_project(args, run, lock="campus")
+
+
+def _set_limit_says(args: dict, rows: list[dict]) -> str:
+    item = str(args.get("item", ""))
+    unit = ITEM_UNITS.get(item, "")
+    shown = [f"{args['value']:g} {unit}".strip()] if isinstance(args.get("value"), (int, float)) else []
+    shown.append(f"{SOURCE_WORDS.get(args.get('source'), args.get('source'))} source")
+    return f"Sets the {ITEM_LABELS.get(item, item).lower()} to {', '.join(shown)}"
+
+
+def _reset_limit_preview(args: dict) -> list[dict]:
+    from harness import edit_card_campus as ecc
+
+    item = _limit_item(args)
+
+    def run(project, db, user):
+        own, old = _limit_state(project, item)
+        if own is None:
+            ec._refuse("empty_edit", f"The {_limit_name(item).lower()} has no limit of your own to reset.")
+        from services import project_registry
+        from services.adequacy import grid_limits
+
+        default = grid_limits._template_default(project_registry.project_dir(project), item) or {}
+        new = {"value": default.get("value"), "source": default.get("source"), "note": ""}
+        rows = [{**_row(_limit_name(item), "entry", "Your own limit", _OWN, _NOT_SET)}]
+        return rows + [_limit_row(item, f, old[f], new[f]) for f in _limit_fields(item) if old[f] != new[f]]
+
+    return ecc._with_project(args, run, lock="campus")
+
+
+def _reset_limit_back(args: dict, rows: list[dict]) -> list:
+    from harness import edit_card_campus as ecc
+
+    def run(project, db, user):
+        item = _limit_item(args)
+        own, now = _limit_state(project, item)
+        return [(_OWN if own is not None else _NOT_SET) if row["field"] == "entry"
+                else None if row["role"] == "note" else now[row["field"]] for row in rows]
+
+    return ecc._with_project(args, run, lock="campus")
+
+
+def _reset_limit_says(args: dict, rows: list[dict]) -> str:
+    item = str(args.get("item", ""))
+    return f"Resets the {ITEM_LABELS.get(item, item).lower()} to the template's value, or the generic placeholder"
+
+# ── the study's dispatch source: gridspine_upload_external_dispatch ─────────
+
+_DISPATCH_NAME = "Study settings"
+_NO_TABLE = "none"
+
+
+def _table_file(path) -> dict:
+    """A stored table as `{name, sha256}`; None where there is none (or it is gone)."""
+    import pathlib
+
+    if not path:
+        return {"name": None, "sha256": None}
+    f = pathlib.Path(path)
+    return {"name": f.name, "sha256": hashlib.sha256(f.read_bytes()).hexdigest() if f.is_file() else None}
+
+
+def _table_words(table: dict) -> str:
+    return table["name"] or _NO_TABLE
+
+
+def _uploaded_tables(args: dict) -> tuple[dict, dict | None]:
+    """The uploads the call names, as the write will store them: `{name, sha256, bytes}` each."""
+    from services import chat_tools
+    from services import gridspine_service as gs
+
+    def read(file_id):
+        upload = chat_tools._gridspine_upload(str(args.get("project_id", "")), str(file_id))
+        try:
+            data = upload.file.read()
+        finally:
+            upload.file.close()
+        return {"name": gs._safe_table_name(upload.filename, "dispatch.csv"), "bytes": data,
+                "sha256": hashlib.sha256(data).hexdigest()}
+
+    dispatch = read(args.get("dispatch_file_id"))
+    loads = read(args["loads_file_id"]) if args.get("loads_file_id") else None
+    if loads is not None:
+        loads["name"] = gs._distinct_name(gs._safe_table_name(loads["name"], "loads.csv"), {dispatch["name"]})
+    return dispatch, loads
+
+
+def _dispatch_rows(old_config: dict, dispatch: dict, loads: dict | None) -> list[dict]:
+    old_d, old_l = _table_file(old_config.get("from_external")), _table_file(old_config.get("from_external_loads"))
+    new_l = {"name": loads["name"], "sha256": loads["sha256"]} if loads else {"name": None, "sha256": None}
+    new_d = {"name": dispatch["name"], "sha256": dispatch["sha256"]}
+    rows = []
+    for field, label, old, new in (("dispatch_table", "Dispatch table", old_d, new_d),
+                                   ("loads_table", "Loads table", old_l, new_l)):
+        if old == new:
+            continue
+        row = ec._settings_row(_DISPATCH_NAME, field, label, _table_words(old), _table_words(new), says_name=label)
+        if row["old"] == row["new"]:  # the same name, other content
+            row["new"] = f"{row['new']} (changed)"
+        row["fingerprint"] = ec._value_fingerprint(new)  # the receipt reads the stored file against it
+        rows.append(row)
+    return rows
+
+
+def _dispatch_preview(args: dict) -> list[dict]:
+    from fastapi import HTTPException
+
+    from harness import edit_card_campus as ecc
+    from services import gridspine_service as gs
+
+    dispatch, loads = _uploaded_tables(args)
+
+    def run(project, db, user):
+        import pathlib
+        import tempfile
+
+        gs.require_planning(project)
+        gs._refuse_while_active(project, "changing the dispatch source")
+        # The write's own check, on copies outside the project: a preview creates nothing.
+        with tempfile.TemporaryDirectory() as tmp:
+            dispatch_path = pathlib.Path(tmp) / dispatch["name"]
+            dispatch_path.write_bytes(dispatch["bytes"])
+            loads_path = None
+            if loads is not None:
+                loads_path = pathlib.Path(tmp) / loads["name"]
+                loads_path.write_bytes(loads["bytes"])
+            try:
+                gs._check_external(dispatch_path, loads_path)
+            except gs.ContractError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+        rows = _dispatch_rows(gs.stored_config(project).to_json(), dispatch, loads)
+        if not rows:
+            ec._refuse("empty_edit", "The study already uses these tables.")
+        return rows
+
+    return ecc._with_project(args, run)
+
+
+def _dispatch_back(args: dict, rows: list[dict]) -> list:
+    """The stored tables, read from the files the study's config now names: a row reads as its
+    "(changed)" cell only when the file there has the uploaded bytes."""
+    from harness import edit_card_campus as ecc
+    from services import gridspine_service as gs
+
+    def run(project, db, user):
+        config = gs.stored_config(project).to_json()
+        out = []
+        for row in rows:
+            table = _table_file(config.get("from_external" if row["field"] == "dispatch_table"
+                                           else "from_external_loads"))
+            plain = _table_words(table)
+            same = row.get("fingerprint") == ec._value_fingerprint(table)
+            # A file of the right name with other content is not the upload.
+            out.append(row["new"] if same else f"{plain} (other content)" if plain == row["new"] else plain)
+        return out
+
+    return ecc._with_project(args, run)
+
+
+def _dispatch_says(args: dict, rows: list[dict]) -> str:
+    return "Sets the study's dispatch source to your own tables: " + ", ".join(
+        f"{r['label'].lower()} {r['new'].removesuffix(' (changed)')}" for r in rows)
+
 
 def _register() -> None:
     reg, A = ec.register, ec.Adapter
@@ -599,6 +850,12 @@ def _register() -> None:
                        ("campus_delete_published_grid_code", "published")):
         preview, binding, back, says = _delete_profile(kind)
         reg(tool, A("settings_edit", preview, back, binding=binding, says=says))
+    reg("campus_set_grid_limit", A("settings_edit", _set_limit_preview, _set_limit_back,
+                                   says=_set_limit_says))
+    reg("campus_reset_grid_limit", A("settings_edit", _reset_limit_preview, _reset_limit_back,
+                                     says=_reset_limit_says))
+    reg("gridspine_upload_external_dispatch", A("settings_edit", _dispatch_preview, _dispatch_back,
+                                                section_id="project", says=_dispatch_says))
     reg("campus_delete_grid_code_document", A("settings_edit", _delete_document_preview, _delete_document_back,
                                               binding=_delete_document_binding, says=_delete_document_says))
 
