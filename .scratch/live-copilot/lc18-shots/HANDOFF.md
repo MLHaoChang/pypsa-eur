@@ -14,3 +14,13 @@ Next:
 3. mp-code-review against the issue, open the PR, ask GK B and UX for OKs, drive CI.
 
 Risk: services/ overlaps with open PRs #795, #797 and #802.
+
+## GK B ruling on the findings (03:30 UTC)
+
+- CAPEX note: accepted; GK's (a)3 is corrected (periodized_costs.py:484 applies nyears). Multi-period stays metric_unavailable.
+- Keep the `_record_solve_inputs` fix in this PR, on these conditions:
+  a. The owner lookup uses ensure=False (it does, through `_transient_target(ensure=False)`). A queue solve with no transient target falls back to exactly the old fresh context; add a test on that fallback.
+  b. Add a test in the freshness/fingerprint suite, not in test_sensitivity_comparison.py: a queued solve of a non-active project with an uploaded profile reads as current afterwards, and editing that profile afterwards still reads "inputs changed".
+  c. Mutation check: revert the fix and confirm that new test goes red because of the fingerprint mismatch.
+  d. Name the fix in its own paragraph of the PR body and in its own release-note bullet. Say that projects solved before this PR keep their wrong fingerprint until their next solve.
+  e. Paste the summary lines of lc12, exact_fingerprint, oj07, loadflow_summary, sensitivity_chat and conversation_recovery into the PR.
