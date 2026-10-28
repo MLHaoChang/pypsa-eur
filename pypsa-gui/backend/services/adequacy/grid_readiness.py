@@ -1100,7 +1100,7 @@ def _vs_blank_reason(rid: str, row) -> str:
     else the engine's note (the planned-load point not converging), else that no Q–V point solved."""
     qv = rid == "voltage_stability_qv"
     label = "Q–V" if qv else "P–V"
-    note = row["note"].strip() if isinstance(row["note"], str) else ""
+    note = row["engine_note"].strip() if isinstance(row.get("engine_note"), str) else ""
     if str(row["nose_below_planned"]) == "True":
         return f"no {label} margin, because the nose is below the planned load"
     if qv:

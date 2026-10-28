@@ -23,7 +23,7 @@ def _period(period=2030, margin_pct=40.0, q=120.0, nose_bound=False, q_bound=Fal
             "margin_mw": 0.5 * margin_pct, "margin_pct": margin_pct, "nose_below_planned": margin_pct < 0,
             "q_margin_mvar": q, "qmin_at_sweep_edge": q_bound, "v_poc_pu": 0.99, "sk_min_mva": 600.0,
             "rx_min": 0.1, "c": 1.0, "vn_kv": 110.0, "basis": "screening; binding answer is the RMS study",
-            "note": note}
+            "note": note, "engine_note": ""}
 
 
 def _write(d, periods=None, error=None):
@@ -193,7 +193,11 @@ def test_a_blank_bound_flag_is_no_answer_never_a_bound(tmp_path):
     ({"note": ""}, "Period 2030: no Q–V margin, because no Q–V point solved"),
 ], ids=["nose_below_planned", "planned_point_not_converged", "no_qv_point_solves"])
 def test_a_blank_qv_margin_names_its_own_cause(tmp_path, fields, cause):
-    p = {**_period(2030, margin_pct=fields.pop("margin_pct", 40.0)), **fields}
+    p = {**_period(2030, margin_pct=fields.pop("margin_pct", 40.0))}
+    # the driver's note: the operating-point notes first, the engine note last, and the engine note alone beside it
+    engine = fields.get("note", "nose below the planned load" if p["nose_below_planned"] else "")
+    p["engine_note"] = engine
+    p["note"] = "; ".join(x for x in (p["note"], "probe power factor 0.97 lagging, from hour 3", "E = 1 pu", engine) if x)
     p["q_margin_mvar"] = float("nan")
     _write(tmp_path, [p])
     _, qv, _ = _vs(tmp_path)

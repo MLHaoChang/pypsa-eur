@@ -1095,7 +1095,7 @@ VS_NO_OPERATING_POINT = "no_operating_point"
 #: One row per period, every column present on every row.
 VS_COLUMNS = ("period", "verdict", "planned_mw", "hour", "pf", "e_pu", "nose_mw", "nose_is_lower_bound", "margin_mw",
               "margin_pct", "nose_below_planned", "q_margin_mvar", "qmin_at_sweep_edge", "v_poc_pu", "sk_min_mva",
-              "rx_min", "c", "vn_kv", "basis", "note")
+              "rx_min", "c", "vn_kv", "basis", "note", "engine_note")
 
 
 def _vs_net(vn_kv, e_pu, sk_min_mva, rx, c, f_hz):
@@ -1219,7 +1219,8 @@ def voltage_stability_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_di
                                                       "margin_pct", "nose_below_planned", "q_margin_mvar",
                                                       "qmin_at_sweep_edge", "v_poc_pu", "basis")},
                      "planned_mw": planned, "hour": hour, "pf": pf, "e_pu": e_pu,
-                     "note": "; ".join(x for x in (frm, pf_note, e_note, r.get("note") or "") if x)})
+                     "note": "; ".join(x for x in (frm, pf_note, e_note, r.get("note") or "") if x),
+                     "engine_note": r.get("note") or ""})
         notes.append(f"period {period}: {frm}; {pf_note}; {e_note}")
     _write_text_atomic(run_dir / VOLTAGE_STABILITY_CSV, pd.DataFrame(rows, columns=list(VS_COLUMNS)).to_csv(index=False))
     notes.insert(0, f"S_k''min {sk:g} MVA, R/X {rx:g}, c_min {c:g} at {vn:g} kV: "

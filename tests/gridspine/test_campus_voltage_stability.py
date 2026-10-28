@@ -140,6 +140,14 @@ def test_the_planned_load_is_the_peak_converged_import_and_says_so(tmp_path):
     assert "the largest converged PCC import (hour 0) binds" in r["note"]
 
 
+def test_the_engine_note_has_its_own_column_after_the_operating_point_notes(tmp_path):
+    run = _prepared(tmp_path, [(0, True, 100000.0, 10.0, 1.0)])      # far above any nose
+    voltage_stability_campus(run)
+    r, _ = _one(run)
+    assert r["nose_below_planned"] and r["engine_note"] == "nose below the planned load"
+    assert r["note"].startswith("planned load") and r["note"].endswith(r["engine_note"])
+
+
 def test_a_larger_rated_import_binds_with_the_max_import_hours_power_factor(tmp_path):
     run = _prepared(tmp_path, [(0, True, 40.0, 10.0, 1.0)], p_connection_mw=60.0)
     voltage_stability_campus(run)
