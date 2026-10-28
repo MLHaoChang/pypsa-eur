@@ -22,12 +22,14 @@ from typing import Any
 from services import flow_scope
 from services.result_views import RESULT_VIEWS, ResultView
 
-__all__ = ["BUILDER_MODULES", "SHEET_BUILDERS", "SheetBuilder", "UnknownView",
+__all__ = ["BUILDER_MODULES", "NO_RESULTS", "SHEET_BUILDERS", "SheetBuilder", "UnknownView",
            "load_builders", "register", "resolve_views", "workbook_views"]
 
 SheetBuilder = Callable[[Any, Any], bool]
 
 SHEET_BUILDERS: dict[str, SheetBuilder] = {}
+#: What About says for a view whose builder found no results, when not the default.
+NO_RESULTS: dict[str, str] = {}
 
 #: Modules whose import registers builders (`load_builders`); 02 appends its own.
 BUILDER_MODULES: tuple[str, ...] = ("services.results_workbook.finance",)
@@ -47,7 +49,8 @@ def workbook_views() -> tuple[ResultView, ...]:
     return tuple(v for v in RESULT_VIEWS if v.panel == "results" and v.card is not None)
 
 
-def register(view_id: str) -> Callable[[SheetBuilder], SheetBuilder]:
+def register(view_id: str, *, no_results: str | None = None
+             ) -> Callable[[SheetBuilder], SheetBuilder]:
     if view_id not in {v.view_id for v in workbook_views()}:
         raise ValueError(f"{view_id!r} is not a workbook result view")
 
@@ -55,6 +58,8 @@ def register(view_id: str) -> Callable[[SheetBuilder], SheetBuilder]:
         if view_id in SHEET_BUILDERS and SHEET_BUILDERS[view_id] is not fn:
             raise ValueError(f"a sheet builder for {view_id!r} is already registered")
         SHEET_BUILDERS[view_id] = fn
+        if no_results:
+            NO_RESULTS[view_id] = no_results
         return fn
     return deco
 

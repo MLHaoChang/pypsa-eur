@@ -285,6 +285,11 @@ def test_route_refuses_a_stale_run_and_exports_the_stored_one_on_request(client,
     install_network(_network())
     r = client.get(URL)  # no solve fingerprint recorded: not current
     assert r.status_code == 409 and r.json()["detail"]["error_kind"] == "results_workbook_stale"
+    assert "no input fingerprint" in r.json()["detail"]["message"]
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(results_router, "_solver_in_flight", lambda: True)
+        r = client.get(URL, params={"stored": "true"})
+        assert r.status_code == 409 and r.json()["detail"]["error_kind"] == "results_workbook_stale"
     r = client.get(URL, params={"stored": "true"})
     assert r.status_code == 200
     about = {row[0].value: row[1].value for row in _wb(r.content)["About"].iter_rows()}

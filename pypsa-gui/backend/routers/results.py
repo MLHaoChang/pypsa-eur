@@ -2207,7 +2207,8 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
     About, Overview (investment-grade KPIs with native charts) and a sheet per
     included result view — the project's selected cards, plus `views`
     (comma-separated view ids) or `all`. 204 before a solve; 409
-    `results_workbook_stale` when the inputs changed since the solve, unless
+    `results_workbook_stale` while a solve runs, or when the results do not
+    match the current inputs (changed, or no fingerprint recorded) unless
     `stored=true` exports the stored run (About says so); 422
     `unknown_result_view`; 413 `file_too_large` over 25 MB. Never solves and
     never runs the investment case (RW-KPI-1)."""
@@ -2221,13 +2222,19 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
         return Response(status_code=204)
-    freshness = solve_freshness()
-    if not freshness.get("results_current") and not stored:
+    if _solver_in_flight():  # the network carries the LP's transient transforms
         raise HTTPException(409, {
             "error_kind": "results_workbook_stale",
-            "message": "The inputs changed since the solve, so the results describe an "
-                       "earlier model. Run the model again, or export the stored run "
-                       "with stored=true."})
+            "message": "A solve is running; export once it finishes."})
+    freshness = solve_freshness()
+    if not freshness.get("results_current") and not stored:
+        why = ("The inputs changed since the solve, so the results describe an earlier model."
+               if freshness.get("inputs_changed_since_solve") else
+               "The solve recorded no input fingerprint, so these results cannot be shown "
+               "to match the current inputs.")
+        raise HTTPException(409, {
+            "error_kind": "results_workbook_stale",
+            "message": f"{why} Run the model again, or export the stored run instead."})
     project_dir = network_lengths.active_project_dir()
     template = flow_service.read_template(project_dir) if project_dir else None
     no_load = flow_scope.no_load_plant(template, len(n.loads))
@@ -2245,7 +2252,8 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
         raise HTTPException(422, {"error_kind": "unknown_result_view", "message": str(exc)})
     try:
         runs = run_evidence.list_project_runs(limit=1, status="completed")["items"]
-    except Exception:  # noqa: BLE001 — a scratch network has no run record: "not recorded"
+    except Exception:  # noqa: BLE001 — no run record (a scratch network): About says "not recorded"
+        logger.info("results workbook: no run record for the About sheet", exc_info=True)
         runs = []
     project = PyPSAService.get_loaded_project()
     try:

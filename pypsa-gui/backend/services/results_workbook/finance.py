@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import io
 
+from services.results_workbook.overview import RUN_THE_CASE
 from services.results_workbook.registry import register
 
 __all__ = ["CASE_PREFIX", "write_case_sheets"]
@@ -46,7 +47,7 @@ def write_case_sheets(wb, report, *, project: str | None = None) -> list[str]:
     return titles
 
 
-@register("investment")
+@register("investment", no_results=f"no results: {RUN_THE_CASE}")
 def investment_sheets(wb, ctx) -> bool:
     if ctx.ic_report is None:
         return False

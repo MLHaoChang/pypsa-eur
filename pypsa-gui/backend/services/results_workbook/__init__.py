@@ -118,7 +118,7 @@ def _about(ws, inp: WorkbookInputs, statuses: list[tuple[str, str, str]], figs) 
         ("Units", "costs M EUR (Overview), EUR (case); energy GWh; LCOE EUR/MWh; "
                   "IRR per unit; DSCR ratio"),
         ("not_established", "the figure could not be computed from this run; no number "
-                            "stands in for it (ADR-0001)"),
+                            "stands in for it"),
         ("Investment case", f"report {rep.case_id}" if rep is not None
          else f"none stored: {RUN_THE_CASE} (the export never runs it)"),
     ]
@@ -160,10 +160,8 @@ def build_results_workbook(inp: WorkbookInputs) -> bytes:
             status = "not exported to Excel yet"
         elif build(wb, ctx):
             status = "sheets: " + ", ".join(ctx.sheets.get(view_id) or [])
-        elif view_id == "investment":
-            status = f"no results: {RUN_THE_CASE}"
         else:
-            status = "no results for this run"
+            status = registry.NO_RESULTS.get(view_id, "no results for this run")
         statuses.append((view_id, card_label.get(v.card, v.card or ""), status))
     _about(about, inp, statuses, figs)
     buf = io.BytesIO()
