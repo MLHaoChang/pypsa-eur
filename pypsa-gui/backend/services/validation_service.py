@@ -1257,23 +1257,24 @@ def _check_inventory_cadence(n) -> list[Issue]:
 
     Representative: some period's snapshots stand for more hours than they hold (Σ objective weighting > Σ stores
     weighting; the staged week templates: 8,760 vs 168). Its store cycles within that span and repeats, so it cannot
-    carry product to a shipment further away; the chronological year (`time_base="year"`, every weighting 1) can.
+    carry product to a shipment further away; the chronological year (`stage_network(time_base="year")`, every
+    weighting 1) can.
     Inferred from the weightings, so it needs no marker on the network."""
     if n.stores.empty or "delivery_interval_h" not in n.stores.columns:
         return []
     w = n.snapshot_weightings
-    by = w.index.get_level_values(0) if isinstance(w.index, pd.MultiIndex) else np.zeros(len(w))
-    sums = w[["objective", "stores"]].groupby(by).sum()
-    rep = sums[sums["objective"] > sums["stores"] * (1 + 1e-9)]
-    if rep.empty:
+    period = w.index.get_level_values(0) if isinstance(w.index, pd.MultiIndex) else np.zeros(len(w))
+    hours = w[["objective", "stores"]].groupby(period).sum()
+    representative = hours[hours["objective"] > hours["stores"] * (1 + 1e-9)]
+    if representative.empty:
         return []
-    span = float(rep["stores"].min())
+    span = float(representative["stores"].min())
     interval = pd.to_numeric(n.stores["delivery_interval_h"], errors="coerce")
     return [_err("inventory_cadence_needs_year", "Store", str(name),
-                 f"delivered every {float(h):g} h, but each period holds {span:g} chronological hours "
-                 f"(a representative period repeated); the store cannot carry product to its next shipment. "
-                 f"Build the template on the chronological year (stage_network time_base=\"year\") or make the "
-                 f"delivery continuous or at most every {span:g} h.")
+                 f"Inventory {name} is delivered every {float(h):g} h, but each period holds {span:g} hours in a "
+                 f"row (a representative period, repeated), so it cannot carry product to its next shipment. "
+                 f"Build the plan on the chronological year time base, or make the delivery continuous or at "
+                 f"most every {span:g} h.")
             for name, h in interval.items() if _is_finite(h) and float(h) > span + 1e-9]
 
 

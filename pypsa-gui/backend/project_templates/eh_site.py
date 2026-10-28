@@ -393,8 +393,8 @@ TIME_BASES = ("week", "year")
 
 def year_snapshots(snapshots: pd.Index) -> pd.DatetimeIndex:
     """The ``year`` base's timesteps: exactly 8,760 consecutive hourly
-    timestamps. A leap year (8,784 h) is refused, never tiled or trimmed, and
-    so is any other step: min up and down times and a delivery interval are in
+    timestamps. A leap year (8,784 h) or any span holding 29 February is
+    refused, never tiled or trimmed, and so is any other step: min up and down times and a delivery interval are in
     hours, so one snapshot must be one hour."""
     idx = pd.DatetimeIndex(snapshots)
     if len(idx) == 8784:
@@ -402,6 +402,9 @@ def year_snapshots(snapshots: pd.Index) -> pd.DatetimeIndex:
                          "(a leap year); supply a 365-day year of 8,760 hours")
     if len(idx) != 8760:
         raise ValueError(f"time_base='year' needs 8,760 hourly snapshots, the network has {len(idx)}")
+    if ((idx.month == 2) & (idx.day == 29)).any():
+        raise ValueError("time_base='year': the snapshots include 29 February; supply a span of 8,760 hours "
+                         "without a leap day")
     if not (idx[1:] - idx[:-1] == pd.Timedelta(hours=1)).all():
         raise ValueError("time_base='year' needs consecutive hourly snapshots (1 h apart); "
                          f"the network's step is {pd.infer_freq(idx) or 'irregular'}")

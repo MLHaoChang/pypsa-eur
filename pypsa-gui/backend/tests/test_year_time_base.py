@@ -28,9 +28,10 @@ SHIPMENT = MILL_MW * CYCLE_H * 0.9  # 90 % of what the mill can make in a cycle
 def _flat(snapshots, delivery, interval_h: float | None = CYCLE_H) -> pypsa.Network:
     n = pypsa.Network()
     n.set_snapshots(snapshots)
-    n.add("Bus", "elec")
+    n.add("Bus", "elec", carrier="AC")
     n.add("Bus", "conc", carrier="concentrate")
-    n.add("Generator", "grid", bus="elec", p_nom=50.0, marginal_cost=50.0)
+    n.buses["eh_poc"] = n.buses.index == "elec"     # the PCC, for the campus study
+    n.add("Generator", "grid", bus="elec", carrier="grid", p_nom=50.0, marginal_cost=50.0)
     n.add("Link", "mill", bus0="elec", bus1="conc", p_nom=MILL_MW, efficiency=1.0)
     n.add("Load", "shipments", bus="conc", p_set=pd.Series(delivery, index=n.snapshots))
     n.add("Store", "shed", bus="conc", e_nom_extendable=True, capital_cost=1.0)
@@ -84,6 +85,7 @@ def test_the_week_base_is_unchanged_by_default():
 @pytest.mark.parametrize(("snaps", "match"), [
     (pd.date_range("2028-01-01", periods=8784, freq="h"), "the year 2028 has 8,784 hourly snapshots"),
     (pd.date_range("2030-01-01", periods=8760, freq="30min"), "consecutive hourly snapshots"),
+    (pd.date_range("2027-07-01", periods=8760, freq="h"), "include 29 February"),
     (pd.date_range("2030-01-01", periods=168, freq="h"), "needs 8,760 hourly snapshots, the network has 168"),
 ])
 def test_the_year_base_refuses_a_leap_year_and_any_step_but_an_hour(snaps, match):
@@ -146,8 +148,9 @@ def test_the_week_base_refuses_a_21_day_store_and_names_it():
 
     (issue,) = _cadence(_week())
     assert (issue.code, issue.component_class, issue.name) == ("inventory_cadence_needs_year", "Store", "shed")
-    assert "504 h" in issue.message and "168 chronological hours" in issue.message
-    assert 'time_base="year"' in issue.message
+    assert "Inventory shed" in issue.message
+    assert "504 h" in issue.message and "168 hours in a row" in issue.message
+    assert "chronological year time base" in issue.message
     assert issue.severity == "error"
     codes = [(i.code, i.name) for i in validate_for_run(_week(), SolverConfig(multi_investment_periods=True))]
     assert ("inventory_cadence_needs_year", "shed") in codes
@@ -227,3 +230,30 @@ def test_profile_shapes_template_spans_the_year(year):
 
     idx = _template_snapshots(year)[0]
     assert len(idx) == 8760 and pd.Timestamp(idx[0]) == pd.Timestamp("2030-01-01")
+
+
+def test_a_new_period_on_the_year_axis_keeps_its_hours_and_weights(client, install_network, session_ctx):
+    install_network(_shipping_year())
+    r = client.post("/api/network/investment_periods", json={"periods": [*YEARS, 2040]})
+    assert r.status_code == 200, r.text
+    n = session_ctx(client).network
+    assert list(n.investment_periods) == [*YEARS, 2040]
+    assert (n.snapshots.get_level_values(0) == 2040).sum() == 8760
+    assert (n.snapshot_weightings[["objective", "generators", "stores"]] == 1.0).all().all()
+    snaps = client.get("/api/network/snapshots").json()
+    assert snaps["freq"] == "h"
+
+
+@pytest.mark.live_solve
+def test_the_campus_tables_and_ranking_take_a_year_per_period(solved):
+    from gridspine.producers.campus import campus_hourly, draft_campus
+    from gridspine.ranking.campus import campus_metrics, select_campus_hours
+
+    spec = draft_campus(solved).spec
+    hourly, pcc = campus_hourly(solved, spec)
+    assert len(pcc) == len(YEARS) * 8760 and int(hourly["hour"].max()) == 8759
+    metrics = campus_metrics(hourly, pcc, spec)
+    assert metrics.index.is_unique
+    picked = select_campus_hours(metrics, k=3)
+    assert picked.groupby("period").size().le(3 * len(metrics.columns)).all()
+    assert set(picked["period"]) <= set(YEARS)
