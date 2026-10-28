@@ -1,6 +1,6 @@
 import { AxiosError, AxiosHeaders } from 'axios'
 import { describe, expect, it } from 'vitest'
-import { CONTEXT_UNREACHABLE_COPY, contextFailureCopy, plainMessage, sceneErrorCopy, sceneErrorWantsReload } from './siteScene'
+import { CONTEXT_UNREACHABLE_COPY, plainMessage, sceneErrorCopy, sceneErrorWantsReload } from './siteScene'
 
 const refused = (status: number, detail: Record<string, unknown>) => {
   const headers = new AxiosHeaders()
@@ -111,22 +111,8 @@ describe('SC-02 route detail codes', () => {
 })
 
 describe('site context footer (condition 8)', () => {
-  it('an upstream failure reads as the map data service, never the raw URL or env var', () => {
-    for (const raw of [
-      'Overpass request failed: https://overpass-api.de/api/interpreter ConnectError',
-      'ConnectError: [Errno 111] Connection refused',
-      'set PYPSAGUI_OVERPASS_URL to a reachable mirror',
-      'upstream returned 504',
-    ]) {
-      const copy = contextFailureCopy(raw)
-      expect(copy).toBe(CONTEXT_UNREACHABLE_COPY)
-      expect(copy).not.toMatch(/overpass|https?:|ConnectError|PYPSAGUI/i)
-    }
+  it('one fixed line, never the raw URL, error or env var', () => {
     expect(CONTEXT_UNREACHABLE_COPY).toBe('Site context unavailable: the map data service could not be reached')
-  })
-
-  it('another reason keeps its words after a colon', () => {
-    expect(contextFailureCopy('the project is locked or a solve is running'))
-      .toBe('Site context unavailable: the project is locked or a solve is running')
+    expect(CONTEXT_UNREACHABLE_COPY).not.toMatch(/overpass|https?:|ConnectError|PYPSAGUI/i)
   })
 })

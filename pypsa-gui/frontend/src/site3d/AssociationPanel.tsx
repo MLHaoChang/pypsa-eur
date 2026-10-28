@@ -6,11 +6,11 @@
 // existing model item on the ground or a solar item on a roof
 // (`place_existing`). Every reason is visible text; every "›" link leaves
 // through withReturnFromSite3D so "Back to Site 3D" returns.
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { networkApi } from '../api/network'
 import {
-  sceneErrorCopy, sceneErrorDetail, type BindPreview, type ModelProposal, type PlaceEntry, type PlacePreview, type RebindPreview,
+  sceneErrorCopy, sceneErrorDetail, sceneErrorWantsReload, type BindPreview, type ModelProposal, type PlaceEntry, type PlacePreview, type RebindPreview,
   type SceneAssociation, type SceneBuilding, type SceneFinding, type SiteScene, type TargetClass,
 } from '../api/siteScene'
 import { openSectionInExpert, openSectionInGuided, withReturnFromSite3D } from '../layout/flowNavigation'
@@ -18,14 +18,14 @@ import type { FlowSectionId } from '../api/flow'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import {
-  attachCandidates, buildBindInputs, buildingName, candidateKey, candidatesFor, checkShares, clauseTail, featureName, findingCopy,
+  attachCandidates, sameClassItems, buildBindInputs, buildingName, candidateKey, candidatesFor, checkShares, clauseTail, featureName, findingCopy,
   findingObjects, KIND_WORDS, nextTask, pct, placeableItems, placeRefusalCopy, rowCopy, shareFeatures, startingShares, targetDetail,
   targetLabel, type Candidate, type UiMode,
 } from './associations'
 import { APPROXIMATE_SIZE, roofEligible, roofItem, sizeBasis } from './placementCheck'
 import { componentOfKey } from './placementFindingsStore'
 import NumberField from './NumberField'
-import { applyProposal, discardProposal, propose, SitesNotSaved } from './sceneActions'
+import { applyProposal, discardProposal, propose, sceneKey, SitesNotSaved } from './sceneActions'
 import { useModelProposal } from './useSiteScene'
 import type { AssetFootprint, Site } from './types'
 
@@ -56,24 +56,37 @@ function useNetworkRows(project: string | null) {
   const stores = useQuery({ queryKey: nk(project, 'stores'), queryFn: networkApi.getStores, ...opts })
   const generators = useQuery({ queryKey: nk(project, 'generators'), queryFn: networkApi.getGenerators, ...opts })
   const storageUnits = useQuery({ queryKey: nk(project, 'storage_units'), queryFn: networkApi.getStorageUnits, ...opts })
+  const loaded = [loads, links, stores, generators, storageUnits].every(q => q.isSuccess)
   return useMemo(() => ({
     loads: loads.data ?? [], links: links.data ?? [], stores: stores.data ?? [],
-    generators: generators.data ?? [], storageUnits: storageUnits.data ?? [],
-  }), [loads.data, links.data, stores.data, generators.data, storageUnits.data])
+    generators: generators.data ?? [], storageUnits: storageUnits.data ?? [], loaded,
+  }), [loads.data, links.data, stores.data, generators.data, storageUnits.data, loaded])
 }
 
-/** Select both objects a finding names: the item in the scene and the building. */
+/** The network component lists this panel reads, so a return from "› Add model asset" sees what was added. */
+const NETWORK_ROOTS = ['loads', 'links', 'stores', 'generators', 'storage_units']
+
+/** Select both objects a finding names: the item in the scene and the building (named in `objects` or as its `feature`). */
 function selectFinding(f: SceneFinding, buildings: readonly SceneBuilding[]): void {
   const { items, buildings: ids } = findingObjects(f, buildings)
   const ui = useUIStore.getState()
-  if (ids[0]) ui.setSitePartSelection({ kind: 'building', id: ids[0] })
+  const building = ids[0] ?? (f.feature && buildings.some(b => b.id === f.feature) ? f.feature : undefined)
+  if (building) ui.setSitePartSelection({ kind: 'building', id: building })
   if (items[0]) {
     ui.setSelectedComponent(componentOfKey(items[0]))
     ui.setHighlightedComponent(componentOfKey(items[1] ?? items[0]) as never)
   }
 }
 
-interface ErrorState { copy: string; code?: string; candidates?: string[] }
+interface ErrorState {
+  copy: string
+  code?: string
+  candidates?: string[]
+  /** Reload is the fix (the scene changed since the preview). */
+  reload?: boolean
+  /** A placed key whose item was deleted or replaced: "› Attach again" is the fix. */
+  rebindKey?: string
+}
 
 interface PlaceDraft { key: string; on: 'ground' | 'roof'; roofOf: string | null; x: number; y: number; heading: number }
 const emptyPlace: PlaceDraft = { key: '', on: 'ground', roofOf: null, x: 0, y: 0, heading: 0 }
@@ -105,6 +118,16 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
   const [place, setPlace] = useState<PlaceDraft>(emptyPlace)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<ErrorState | null>(null)
+  const [rebindPick, setRebindPick] = useState<Candidate | null>(null)
+  const placementRebind = useModelProposal(s => s.placementRebind)
+  const setPlacementRebind = useModelProposal(s => s.setPlacementRebind)
+
+  // Another building: nothing chosen for the last one carries over (its pick, shares, rebind or roof).
+  const selectedId = selection?.kind === 'building' ? selection.id : null
+  useEffect(() => {
+    setTarget(null); setShares({}); setRebinding(null); setError(null)
+    setPlace(p => (p.on === 'ground' && p.roofOf === null ? p : { ...p, on: 'ground', roofOf: null }))
+  }, [selectedId])
 
   const buildings = scene.buildings
   const associations = scene.associations ?? []
@@ -130,7 +153,10 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
       const d = sceneErrorDetail(e)
       if (['proposal_expired', 'proposal_cancelled'].includes(d?.error_kind ?? '')) setProposal(null)
       const copy = e instanceof SitesNotSaved ? e.message : (refusal?.(d?.code) ?? sceneErrorCopy(e))
-      setError({ copy, code: d?.code, candidates: d?.code === 'ambiguous_target' ? d.candidates : undefined })
+      // One fix per reason: a placement whose item is gone is attached again; a scene that changed is reloaded.
+      const rebindKey = d?.code === 'unbound_target' ? (d.key ?? (mine?.action === 'place_existing' ? Object.keys(mine.preview.placements)[0] : place.key) ?? undefined) : undefined
+      const reload = !rebindKey && (sceneErrorWantsReload(e) || d?.code === 'unknown_association')
+      setError({ copy, code: d?.code, candidates: d?.code === 'ambiguous_target' ? d.candidates : undefined, reload, rebindKey: rebindKey || undefined })
     } finally { setBusy(false) }
   }
 
@@ -189,7 +215,27 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
   // ── review ────────────────────────────────────────────────────────────────
   const apply = () => run(async () => {
     await applyProposal(qc, project!, mine!)
-    setProposal(null); resetAttach(); setPlace(emptyPlace)
+    setProposal(null); resetAttach(); setPlace(emptyPlace); setPlacementRebind(null); setRebindPick(null)
+  })
+  const reload = () => {
+    setError(null); setProposal(null)
+    void qc.invalidateQueries({ queryKey: sceneKey(project, site.id) })
+    void qc.invalidateQueries({ queryKey: nk(project, 'flow') })
+  }
+
+  // ── a placed key whose item is gone: attach it again (rebind {placement}) ─
+  const rebindKey = placementRebind?.siteId === site.id ? placementRebind.key : null
+  const rebindClass = rebindKey ? componentOfKey(rebindKey).type : ''
+  const rebindList = useMemo(() => (rebindKey ? sameClassItems(rows, rebindClass) : []), [rows, rebindKey, rebindClass])
+  const startPlacementRebind = (key: string) => {
+    setError(null); setProposal(null); setRebindPick(null); setPlacementRebind({ siteId: site.id, key })
+  }
+  const rebindReason = !rebindPick ? CHOOSE_ATTACH : !canWrite ? blockedReason : null
+  const previewPlacementRebind = () => run(async () => {
+    if (!rebindKey || !rebindPick) return
+    const p = await propose<RebindPreview>(qc, project!, site.id, 'rebind',
+      { placement: rebindKey, target: { class: rebindPick.class, name: rebindPick.name }, confirmed: true })
+    setProposal({ ...p, action: 'rebind' })
   })
   const discard = () => run(async () => {
     try { await discardProposal(project!, mine!) } catch (e) {
@@ -199,11 +245,18 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
 
   // ── add model asset → place it ────────────────────────────────────────────
   const addAsset = () => {
-    setAddAssetFrom(placeable.map(candidateKey))
+    // Only a snapshot of loaded lists can tell a new item from one still loading.
+    setAddAssetFrom(rows.loaded && project ? { project, siteId: site.id, keys: placeable.map(candidateKey) } : null)
     openHome('assets')
   }
-  const fresh = addAssetFrom
-    ? placeable.find(c => !addAssetFrom.includes(candidateKey(c)) && !(candidateKey(c) in placements)) ?? null
+  const snapshot = addAssetFrom && addAssetFrom.project === project && addAssetFrom.siteId === site.id ? addAssetFrom : null
+  // Back from adding: read the lists again (their 30 s staleTime would hide the new item).
+  const pendingAdd = !!snapshot
+  useEffect(() => {
+    if (pendingAdd) for (const root of NETWORK_ROOTS) void qc.invalidateQueries({ queryKey: nk(project, root) })
+  }, [pendingAdd, project, qc])
+  const fresh = snapshot && rows.loaded
+    ? placeable.find(c => !snapshot.keys.includes(candidateKey(c)) && !(candidateKey(c) in placements)) ?? null
     : null
   const placeIt = (c: Candidate) => { setAddAssetFrom(null); setPlace({ ...emptyPlace, key: candidateKey(c) }) }
 
@@ -214,6 +267,30 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
     <div className="flex flex-col gap-2" data-testid="association-panel">
       {mode === 'guided' && (
         <span className="text-text font-medium" data-testid="scene-next-task">Next: {nextTask(associations)}</span>
+      )}
+
+      {!mine && rebindKey && (
+        <div className="flex flex-col gap-1.5" data-testid="place-rebind">
+          <span className="text-[11px] text-text">
+            Attach again: choose the {rebindClass in KIND_WORDS && mode === 'guided' ? KIND_WORDS[rebindClass as TargetClass] : rebindClass} the placed {componentOfKey(rebindKey).name} stands for
+          </span>
+          <select data-testid="place-rebind-picker" value={rebindPick ? candidateKey(rebindPick) : ''} disabled={!writable || rebindList.length === 0}
+            onChange={e => setRebindPick(rebindList.find(c => candidateKey(c) === e.target.value) ?? null)}
+            className="rounded border border-border bg-bg px-2 py-1 text-[12px] text-text disabled:opacity-50">
+            <option value="" disabled>Choose an item</option>
+            {rebindList.map(c => <option key={candidateKey(c)} value={candidateKey(c)}>{itemName(candidateKey(c))}</option>)}
+          </select>
+          {rebindList.length === 0 && (
+            <span className="text-[11px] text-muted" data-testid="place-rebind-reason">Nothing to attach it to: the model has no item of this kind</span>
+          )}
+          <div className="flex gap-2">
+            <button type="button" data-testid="place-rebind-preview" className={primary} disabled={!writable || !!rebindReason}
+              onClick={() => void previewPlacementRebind()}>Preview</button>
+            <button type="button" data-testid="place-rebind-cancel" className={secondary}
+              onClick={() => { setPlacementRebind(null); setRebindPick(null) }}>Cancel</button>
+          </div>
+          {rebindReason && <span className="text-[11px] text-muted" data-testid="place-rebind-preview-reason">{rebindReason}</span>}
+        </div>
       )}
 
       {mine ? (
@@ -370,6 +447,14 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
       {error && (
         <div role="alert" data-testid="assoc-error" className="text-[11px] text-danger">
           {error.copy}
+          {error.rebindKey && (
+            <> <button type="button" data-testid="assoc-error-attach-again" className={link}
+              onClick={() => startPlacementRebind(error.rebindKey!)}>› Attach again</button></>
+          )}
+          {error.reload && (
+            <> <button type="button" data-testid="assoc-error-reload" onClick={reload}
+              className="whitespace-nowrap underline text-text hover:text-accent">Reload</button></>
+          )}
           {error.candidates && error.candidates.length > 0 && (
             <span className="flex flex-wrap gap-1 mt-1" data-testid="assoc-candidates">
               {error.candidates.map(name => (
@@ -416,8 +501,10 @@ function Review({ proposal, mode, buildings, groups, itemName, approx, sized, on
     if (kept > 0) lines.push({ key: 'kept', text: `${kept} other ${kept === 1 ? 'attachment stays' : 'attachments stay'} as they are` })
   } else if (proposal.action === 'rebind') {
     const p = proposal.preview
-    const what = targetLabel(p.class as TargetClass, p.name, mode)
-    lines.push({ key: 'r', text: `Attach ${p.feature ? fName(p.feature) : 'it'} to ${what} again${p.was ? ` · was ${p.was}` : ''}` })
+    const what = itemName(`${p.class}:${p.name}`)
+    lines.push({ key: 'r', text: p.placement
+      ? `Attach the placed ${p.was ?? componentOfKey(p.placement).name} to ${what} again`
+      : `Attach ${p.feature ? fName(p.feature) : 'it'} to ${what} again${p.was ? ` · was ${p.was}` : ''}` })
   } else {
     for (const [key, e] of Object.entries(proposal.preview.placements)) {
       const where = e.on && e.on.startsWith('roof:') ? `on the roof of ${bName(e.on.slice(5))}` : 'on the ground'

@@ -230,3 +230,29 @@ describe('the 3D scene’s inputs', () => {
     expect(withSceneRoofs(site, { 'StorageUnit:bess': { x: 5, y: 5, heading: 0, on: 'ground' } })['StorageUnit:bess'].on).toBe('ground')
   })
 })
+
+describe('shares: review fixes', () => {
+  it('stored thirds prefill unrounded and pass the backend’s own tolerance', () => {
+    const third = 1 / 3
+    const current = ['osm:7', 'greenfield:b1', 'g3'].map((f, i) => row({ id: `a${i}`, feature: f, weight: third }))
+    const t = { class: 'Load' as const, name: 'cooling_1' }
+    const f = ['osm:7', 'greenfield:b1', 'g3']
+    const start = startingShares(current, t, f)
+    expect(start['osm:7']).toBeCloseTo(33.3333333, 6)
+    expect(checkShares(start, f).state).toBe('ok')
+    // 33.33 + 33.33 + 33.34 is 100 within 1e-9 as fractions.
+    expect(checkShares({ a: 33.33, b: 33.33, c: 33.34 }, ['a', 'b', 'c']).state).toBe('ok')
+  })
+
+  it('a total that only rounds to 100 % is off, and shows its digits', () => {
+    const c = checkShares({ a: 50, b: 49.9999 }, ['a', 'b'])
+    expect(c.state).toBe('off')
+    expect(c.copy).toBe('Total 99.9999 %: shares should add up to 100 %')
+  })
+
+  it('the picker for a placed key lists every item of its class, any Link included', async () => {
+    const { sameClassItems } = await import('./associations')
+    expect(sameClassItems(rows, 'Link').map(c => c.name)).toEqual(['haber', 'tie'])
+    expect(sameClassItems(rows, 'Bus')).toEqual([])
+  })
+})

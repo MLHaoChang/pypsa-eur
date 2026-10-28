@@ -1,6 +1,6 @@
 // SC-02b: the Model part, each state (UX SC-02 plan, conditions 1–7).
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { AxiosError, AxiosHeaders } from 'axios'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ModelProposal, SceneAssociation, SceneBuilding, SceneTarget, SiteScene } from '../api/siteScene'
@@ -57,7 +57,7 @@ const disabled = (id: string) => (screen.getByTestId(id) as HTMLButtonElement).d
 
 beforeEach(() => {
   vi.clearAllMocks()
-  useModelProposal.setState({ proposal: null, addAssetFrom: null })
+  useModelProposal.setState({ proposal: null, addAssetFrom: null, placementRebind: null })
   useUIStore.setState({ currentProject: 'p', sitePart: 'model', sitePartSelection: { kind: 'building', id: 'osm:7' },
     readOnly: false, readOnlyReason: 'writable', uiMode: 'guided', flowReturn: null, activeSection: null })
   vi.mocked(networkApi.getLoads).mockResolvedValue([{ name: 'cooling_1', bus: 'h', carrier: 'heat' }, { name: 'office', bus: 'e', carrier: 'AC' }] as never)
@@ -102,8 +102,11 @@ describe('Model part: attach', () => {
     expect(inputs).toEqual({ associations: [{ feature: 'osm:7', target: { class: 'Load', name: 'office' } }], groups: [] })
     expect(screen.getByTestId('assoc-proposal').textContent).toContain('Attach OSM building 7 to office · load')
     expect(screen.getByTestId('assoc-finding-0').textContent).toContain('may be counted twice')
+    useUIStore.setState({ sitePartSelection: null })
     fireEvent.click(screen.getByTestId('assoc-finding-0'))
     expect(useUIStore.getState().selectedComponent).toEqual({ type: 'Link', name: 'haber' })
+    // The building the finding is about is selected too (condition 5: both highlight).
+    expect(useUIStore.getState().sitePartSelection).toEqual({ kind: 'building', id: 'osm:7' })
     fireEvent.click(screen.getByTestId('assoc-apply'))
     await waitFor(() => expect(applyProposal).toHaveBeenCalledWith(expect.anything(), 'p', expect.objectContaining({ id: 'm1' })))
     await waitFor(() => expect(useModelProposal.getState().proposal).toBeNull())
@@ -300,7 +303,7 @@ describe('Model part: place equipment', () => {
     await waitFor(() => expect(item.options.length).toBe(4))
     fireEvent.change(item, { target: { value: 'StorageUnit:bess' } })
     fireEvent.click(screen.getByTestId('place-preview'))
-    expect((await screen.findByTestId('assoc-error')).textContent).toBe(message)
+    expect((await screen.findByTestId('assoc-error')).textContent).toBe(`${message} › Attach again`)
   })
 
   it('› Add model asset opens the Guided assets home with Back to Site 3D; a new item then offers › Place it', async () => {
@@ -317,6 +320,96 @@ describe('Model part: place equipment', () => {
     expect(screen.getByTestId('place-it').textContent).toBe('bess_2 · storage unit is in the model and not placed › Place it')
     fireEvent.click(link)
     expect((screen.getByTestId('place-item') as HTMLSelectElement).value).toBe('StorageUnit:bess_2')
+    expect(screen.queryByTestId('place-it-link')).toBeNull()
+  })
+})
+
+describe('Model part: review fixes', () => {
+  const loaded = async () => {
+    const picker = screen.getByTestId('assoc-attach-picker') as HTMLSelectElement
+    await waitFor(() => expect(picker.options.length).toBeGreaterThanOrEqual(6))
+    return picker
+  }
+
+  it('another building starts with nothing chosen: no inherited pick, shares or roof', async () => {
+    vi.mocked(propose).mockResolvedValue({ id: 'm5', site_id: 'campus', action: 'place_existing', base_revision: 3, input_hash: 'h', status: 'ready',
+      preview: { placements: {}, findings: [] } } as never)
+    view(scene())
+    fireEvent.change(await loaded(), { target: { value: 'Load:office' } })
+    fireEvent.change(screen.getByTestId('place-item'), { target: { value: 'Generator:pv' } })
+    fireEvent.change(screen.getByTestId('place-on'), { target: { value: 'roof' } })
+    act(() => useUIStore.setState({ sitePartSelection: { kind: 'building', id: 'greenfield:b1' } }))
+    expect((screen.getByTestId('assoc-attach-picker') as HTMLSelectElement).value).toBe('')
+    expect(screen.getByTestId('assoc-preview-reason').textContent).toBe('Choose what to attach first')
+    expect((screen.getByTestId('place-on') as HTMLSelectElement).value).toBe('ground')
+    fireEvent.click(screen.getByTestId('place-preview'))
+    await waitFor(() => expect(propose).toHaveBeenCalled())
+    expect(vi.mocked(propose).mock.calls[0][4]).toEqual({ placements: { 'Generator:pv': { x: 10, y: 10, heading: 0, on: 'ground' } } })
+  })
+
+  it('a placed key whose item is gone: › Attach again on the refusal, a same-class picker, rebind {placement}', async () => {
+    vi.mocked(propose).mockRejectedValueOnce(refused(422, { error_kind: 'invalid_input', code: 'unbound_target', key: 'StorageUnit:bess',
+      message: 'bess · storage unit: this placement belonged to an item that was deleted or replaced: attach it again first' }))
+    vi.mocked(networkApi.getStorageUnits).mockResolvedValue([{ name: 'bess', carrier: 'battery' }, { name: 'bess_new', carrier: 'battery' }] as never)
+    view(scene())
+    await loaded()
+    fireEvent.change(screen.getByTestId('place-item'), { target: { value: 'StorageUnit:bess' } })
+    fireEvent.click(screen.getByTestId('place-preview'))
+    fireEvent.click(await screen.findByTestId('assoc-error-attach-again'))
+    expect(screen.queryByTestId('assoc-error-reload')).toBeNull()
+    const picker = screen.getByTestId('place-rebind-picker') as HTMLSelectElement
+    expect(picker.value).toBe('')
+    expect([...picker.options].filter(o => !o.disabled).map(o => o.textContent)).toEqual(['bess · storage unit', 'bess_new · storage unit'])
+    expect(disabled('place-rebind-preview')).toBe(true)
+    expect(screen.getByTestId('place-rebind-preview-reason').textContent).toBe('Choose what to attach first')
+    vi.mocked(propose).mockResolvedValueOnce({ id: 'm6', site_id: 'campus', action: 'rebind', base_revision: 3, input_hash: 'h', status: 'ready',
+      preview: { placement: 'StorageUnit:bess', class: 'StorageUnit', name: 'bess_new', was: 'bess', findings: [] } } as never)
+    fireEvent.change(picker, { target: { value: 'StorageUnit:bess_new' } })
+    fireEvent.click(screen.getByTestId('place-rebind-preview'))
+    await screen.findByTestId('assoc-proposal')
+    expect(vi.mocked(propose).mock.calls[1].slice(3)).toEqual(['rebind',
+      { placement: 'StorageUnit:bess', target: { class: 'StorageUnit', name: 'bess_new' }, confirmed: true }])
+    expect(screen.getByTestId('assoc-proposal').textContent).toContain('Attach the placed bess to bess_new · storage unit again')
+  })
+
+  it('a placement rebind for another Site is not shown here', () => {
+    useModelProposal.setState({ placementRebind: { siteId: 'elsewhere', key: 'StorageUnit:bess' } })
+    view(scene())
+    expect(screen.queryByTestId('place-rebind')).toBeNull()
+  })
+
+  it('a scene changed since the preview: Apply refused offers Reload, which drops the preview', async () => {
+    useModelProposal.setState({ proposal: { id: 'm7', site_id: 'campus', action: 'bind_targets', base_revision: 3, input_hash: 'h', status: 'ready',
+      preview: { associations: [], groups: [], findings: [] } } })
+    vi.mocked(applyProposal).mockRejectedValue(refused(409, { error_kind: 'revision_conflict', code: 'target_changed',
+      message: 'cooling_1 · load was replaced since you reviewed it: review again' }))
+    view(scene())
+    fireEvent.click(screen.getByTestId('assoc-apply'))
+    expect((await screen.findByTestId('assoc-error')).textContent).toContain('was replaced since you reviewed it: review again')
+    fireEvent.click(screen.getByTestId('assoc-error-reload'))
+    expect(useModelProposal.getState().proposal).toBeNull()
+    expect(screen.queryByTestId('assoc-error')).toBeNull()
+  })
+
+  it('an attachment gone since the preview (unknown_association) offers Reload too', async () => {
+    vi.mocked(propose).mockRejectedValue(refused(422, { error_kind: 'invalid_input', code: 'unknown_association', message: 'That attachment no longer exists: reload' }))
+    view(scene())
+    fireEvent.change(await loaded(), { target: { value: 'Load:office' } })
+    fireEvent.click(screen.getByTestId('assoc-preview'))
+    expect(await screen.findByTestId('assoc-error-reload')).toBeTruthy()
+  })
+
+  it('Add model asset before the lists load takes no snapshot; a snapshot of another Site offers nothing', async () => {
+    vi.mocked(networkApi.getStorageUnits).mockReturnValue(new Promise(() => {}) as never)
+    view(scene())
+    fireEvent.click(screen.getByTestId('add-asset-link'))
+    expect(useModelProposal.getState().addAssetFrom).toBeNull()
+  })
+
+  it('a snapshot from another Site offers no › Place it', async () => {
+    useModelProposal.setState({ addAssetFrom: { project: 'p', siteId: 'elsewhere', keys: [] } })
+    view(scene())
+    await loaded()
     expect(screen.queryByTestId('place-it-link')).toBeNull()
   })
 })

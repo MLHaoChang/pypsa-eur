@@ -301,17 +301,5 @@ export const sceneErrorWantsReload = (err: unknown): boolean =>
 
 // ── site context footer (UX SC-02 plan, condition 8) ────────────────────────
 
-/** The footer copy when the site context could not be fetched; the raw text goes behind Details. */
+/** The footer copy whenever the site context could not be fetched; the raw reason only behind Details (UX condition 8a). */
 export const CONTEXT_UNREACHABLE_COPY = 'Site context unavailable: the map data service could not be reached'
-
-/**
- * The footer line for a context failure. An upstream or connection failure
- * (the raw text names Overpass, a ConnectError, the env var, or a gateway
- * status) reads as the map data service; anything else keeps its own words.
- */
-export function contextFailureCopy(raw: string): string {
-  if (!raw || /overpass|connecterror|connect error|PYPSAGUI_|https?:\/\/|timed? ?out|50[234]|network error|upstream|unreachable/i.test(raw)) {
-    return CONTEXT_UNREACHABLE_COPY
-  }
-  return `Site context unavailable: ${raw.replace(/\s+[—–]\s+/g, ': ')}`
-}

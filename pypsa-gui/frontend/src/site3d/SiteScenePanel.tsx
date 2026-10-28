@@ -21,7 +21,9 @@ import NumberField from './NumberField'
 import AssociationPanel from './AssociationPanel'
 import { useSitesStore } from './sitesStore'
 import { applyProposal, discardProposal, propose, SitesNotSaved } from './sceneActions'
-import { useSceneProposal, useSiteScene } from './useSiteScene'
+import { useModelProposal, useSceneProposal, useSiteScene } from './useSiteScene'
+import { KIND_WORDS } from './associations'
+import type { TargetClass } from '../api/siteScene'
 import { heightEvidenceWords, HEIGHT_MAX_M, greenfieldFromBuilding, osmSourcesInside } from './nativeSite'
 import { fromLocal } from './geo'
 import type { ContextBuilding, Site } from './types'
@@ -115,6 +117,13 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
   const proposal = useSceneProposal(s => s.proposal)
   const setProposal = useSceneProposal(s => s.setProposal)
   const qc = useQueryClient()
+  const setPlacementRebind = useModelProposal(s => s.setPlacementRebind)
+  const mode = useUIStore(s => s.uiMode)
+  /** A placed key in words: "pv · generator" in Guided, "pv · Generator" in Expert; never Class:name. */
+  const placedName = (key: string) => {
+    const i = key.indexOf(':'), cls = key.slice(0, i), name = key.slice(i + 1)
+    return `${name} · ${mode === 'guided' && cls in KIND_WORDS ? KIND_WORDS[cls as TargetClass] : cls}`
+  }
   const [drafts, setDrafts] = useState<GreenfieldInput[]>([])
   const [edit, setEdit] = useState<{ id: string; g: GreenfieldInput | null; height: number } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -206,6 +215,18 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
       {enabled?.unbound_keys && enabled.unbound_keys.length > 0 && (
         <div data-testid="site-unbound" className="text-[11px] text-warn">
           {enabled.unbound_keys.length} placed {enabled.unbound_keys.length === 1 ? 'item names' : 'items name'} equipment no longer in the model: the scene keeps their place until it is updated
+          {action('assign_native')?.available && canWrite && (
+            // One link per placed key: the user picks what it stands for now (rebind {placement}).
+            <ul className="mt-0.5">
+              {enabled.unbound_keys.map(key => (
+                <li key={key}>
+                  {placedName(key)}{' '}
+                  <button type="button" data-testid={`site-unbound-attach-${key}`} className="whitespace-nowrap text-accent hover:underline"
+                    onClick={() => { setPlacementRebind({ siteId: site.id, key }); setPart('model') }}>› Attach again</button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
       {blocked && <div className="text-[11px] text-muted">{blocked}</div>}
@@ -305,7 +326,7 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
       {part === 'model' && (
         <div className="flex flex-col gap-1" data-testid="site-part-model-body">
           {enabled && action('assign_native')?.available
-            ? <AssociationPanel site={site} scene={enabled} canWrite={canWrite} blockedReason={blocked ?? (busy ? 'Working: wait for the current step to finish' : null)} />
+            ? <AssociationPanel key={site.id} site={site} scene={enabled} canWrite={canWrite} blockedReason={blocked ?? (busy ? 'Working: wait for the current step to finish' : null)} />
             : <Blocker action={action('assign_native')} />}
         </div>
       )}

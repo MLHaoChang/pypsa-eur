@@ -43,7 +43,7 @@ import { busLatLng } from '../utils/geo'
 import { tileRangeAround, mosaicExtent, zoomFor, tileCount, fromLocal, type LngLat, type LocalExtent } from '../site3d/geo'
 import { buildGroundMosaic, ESRI_ATTRIBUTION } from '../site3d/imagery'
 import { sitesApi, contextErrorMessage, contextFailureBacksOff } from '../api/sites'
-import { contextFailureCopy } from '../api/siteScene'
+import { CONTEXT_UNREACHABLE_COPY } from '../api/siteScene'
 import {
   buildingsGeometry, linesToRibbons, areasGeometry, heightmapToDisplacement, terrainSampler, groundHeightAt,
   groundMode, hillshadeCanvas, terrainCellMetres, RIBBON_COLOR, AREA_COLOR, BUILDING_COLOR, OSM_ATTRIBUTION, type HeightAt,
@@ -1227,7 +1227,7 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
         {contextStatus ? <span data-testid="context-status">{contextStatus} · </span> : null}
         {contextFailure !== null && (
           <span data-testid="context-status">
-            {contextFailureCopy(contextFailure)}{' '}
+            {CONTEXT_UNREACHABLE_COPY}{' '}
             <button type="button" data-testid="context-retry" className="text-accent hover:underline disabled:opacity-50 disabled:no-underline"
               disabled={readOnly || contextBusy}
               onClick={() => { forceContextRef.current = true; setContextNonce(n => n + 1) }}>

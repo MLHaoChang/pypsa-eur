@@ -66,6 +66,20 @@ describe('Site 3D scene panel', () => {
     expect(screen.getByTestId('site-part-model-body').textContent).not.toContain('Not available yet')
   })
 
+  it('the unbound banner offers › Attach again per placed key, opening the Model part to pick', async () => {
+    vi.mocked(siteSceneApi.getScene).mockResolvedValue({ ...enabled([osm]), unbound_keys: ['StorageUnit:bess'] } as SiteScene)
+    const flow = flowState.flow as { scene: { actions: { action: string }[] } }
+    flow.scene.actions = flow.scene.actions.map(a => (a.action === 'assign_native' ? available('assign_native') : a))
+    view()
+    const link = await screen.findByTestId('site-unbound-attach-StorageUnit:bess')
+    expect(screen.getByTestId('site-unbound').textContent).toContain('bess · storage unit › Attach again')
+    expect(screen.getByTestId('site-unbound').textContent).not.toContain('StorageUnit:bess')
+    fireEvent.click(link)
+    expect(useUIStore.getState().sitePart).toBe('model')
+    const { useModelProposal } = await import('./useSiteScene')
+    expect(useModelProposal.getState().placementRebind).toEqual({ siteId: 'campus', key: 'StorageUnit:bess' })
+  })
+
   it('no mapped buildings: says so, and generates a proposed building', async () => {
     vi.mocked(propose).mockResolvedValue(proposal)
     view()

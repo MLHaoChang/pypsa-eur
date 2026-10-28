@@ -71,6 +71,16 @@ export function attachCandidates(rows: NetworkRows): Candidate[] {
   return out.sort((a, b) => ORDER.indexOf(a.class) - ORDER.indexOf(b.class) || a.name.localeCompare(b.name))
 }
 
+/** Every model item of one class (any Link, not only process units): the picker for re-attaching a placed key. */
+export function sameClassItems(rows: NetworkRows, cls: string): Candidate[] {
+  const list: Record<TargetClass, readonly { name: string; carrier?: string }[] | undefined> = {
+    Load: rows.loads, Link: rows.links, Store: rows.stores, Generator: rows.generators, StorageUnit: rows.storageUnits,
+  }
+  if (!(cls in list)) return []
+  return (list[cls as TargetClass] ?? []).map(r => ({ class: cls as TargetClass, name: r.name, carrier: r.carrier ?? null }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
 /** What can be placed as equipment: generators, storage units, stores and process units. */
 export const placeableItems = (rows: NetworkRows): Candidate[] =>
   attachCandidates({ ...rows, loads: [] })
@@ -150,7 +160,8 @@ export function startingShares(associations: readonly SceneAssociation[], target
   const out: Record<string, number | null> = {}
   for (const f of features) {
     const row = associations.find(a => a.status === 'bound' && a.class === target.class && a.name === target.name && a.feature === f)
-    out[f] = row?.weight != null ? round1(row.weight * 100) : null
+    // Unrounded: 1/3 each must still total 100 % (round only where it is shown).
+    out[f] = row?.weight != null ? row.weight * 100 : null
   }
   return out
 }
@@ -173,7 +184,13 @@ export function checkShares(shares: Record<string, number | null>, features: rea
   if (given.some(v => !Number.isFinite(v) || v <= 0)) return { state: 'invalid', total: null, copy: 'Each share must be a number above 0 %' }
   const total = given.reduce((s, v) => s + v, 0)
   if (given.length < vals.length) return { state: 'partial', total, copy: 'Give every building a share, or none' }
-  if (Math.abs(total - 100) > 1e-6) return { state: 'off', total, copy: `Total ${pct(total)}: shares should add up to 100 %` }
+  // The backend's own test on exactly the fractions sent: abs(sum - 1) <= 1e-9.
+  const fractionTotal = given.reduce((s, v) => s + v / 100, 0)
+  if (Math.abs(fractionTotal - 1) > 1e-9) {
+    // A total that rounds to 100 % but is not shows its digits, so the copy never reads "Total 100 %: … add up to 100 %".
+    const shown = round1(total) === 100 ? `${total.toLocaleString('en-US', { maximumFractionDigits: 6 })} %` : pct(total)
+    return { state: 'off', total, copy: `Total ${shown}: shares should add up to 100 %` }
+  }
   return { state: 'ok', total, copy: 'Total 100 %' }
 }
 
