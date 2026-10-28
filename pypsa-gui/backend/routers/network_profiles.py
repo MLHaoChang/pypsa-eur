@@ -216,21 +216,45 @@ def aggregate_load_profile(
       - ``names``: comma-separated explicit load names (takes precedence).
       - ``section``: aggregate every load in this section.
     Either may be supplied; if both, ``names`` wins. The response shape mirrors
-    /timeseries: ``{index, values, total_loads, peak, mean}``.
+    /timeseries: ``{index, values, total_loads, peak, mean}``, plus
+    ``loads_with_profile``, ``unknown_names``, ``loads_without_profile``,
+    ``complete`` and ``gaps``.
+
+    A repeated name counts once. A step where any member is missing or
+    non-finite is null, never 0. ``peak`` and ``mean`` are null unless the sum
+    is complete: every target exists, has a profile on the network's
+    snapshots, and every step is finite (A1.6/A1.7).
     """
     n = PyPSAService.get_network()
     targets: list[str]
+    unknown: list[str] = []
     if names:
-        targets = [c.strip() for c in names.split(",") if c.strip()]
-        targets = [c for c in targets if c in n.loads.index]
+        requested = list(dict.fromkeys(c.strip() for c in names.split(",") if c.strip()))
+        targets = [c for c in requested if c in n.loads.index]
+        unknown = [c for c in requested if c not in n.loads.index]
     elif section:
         sec = section.lower().strip()
         targets = [name for name in n.loads.index if _load_section(n, name) == sec]
     else:
         targets = list(n.loads.index)
 
+    gaps: list[str] = [f"no load named {u}" for u in unknown]
+    out = {
+        "index": [],
+        "values": [],
+        "total_loads": len(targets) + len(unknown),
+        "loads_with_profile": 0,
+        "unknown_names": unknown,
+        "loads_without_profile": [],
+        "complete": False,
+        "gaps": gaps,
+        "peak": None,
+        "mean": None,
+    }
     if not targets:
-        return {"index": [], "values": [], "total_loads": 0, "peak": 0.0, "mean": 0.0}
+        if not unknown:
+            gaps.append("no loads match")
+        return out
 
     # Pull each series from _user_ts first, fall back to n.loads_t.p_set.
     net_p_set = getattr(n.loads_t, "p_set", None)
@@ -241,23 +265,33 @@ def aggregate_load_profile(
             s = net_p_set[name]
         if s is not None:
             series_list.append(s.rename(name))
-
+        else:
+            out["loads_without_profile"].append(name)
+    out["loads_with_profile"] = len(series_list)
+    if out["loads_without_profile"]:
+        gaps.append(f"{len(out['loads_without_profile'])} of {len(targets)} loads have no profile")
     if not series_list:
-        return {"index": [], "values": [], "total_loads": len(targets), "peak": 0.0, "mean": 0.0}
+        return out
+    if any(not s.index.equals(n.snapshots) for s in series_list):
+        gaps.append("the loads do not share the network's snapshots")
+    if any(not pd.api.types.is_numeric_dtype(s) or s.dtype == bool for s in series_list):
+        gaps.append("a step that is not a number")
 
-    df = pd.concat(series_list, axis=1).fillna(0.0)
-    total = df.sum(axis=1)
-    idx = [ts.isoformat() if hasattr(ts, "isoformat") else str(ts) for ts in total.index]
-    values = [None if isinstance(v, float) and not math.isfinite(v) else float(v) for v in total.tolist()]
-    finite_vals = [v for v in values if v is not None]
-    return {
-        "index": idx,
-        "values": values,
-        "total_loads": len(targets),
-        "loads_with_profile": len(series_list),
-        "peak": float(max(finite_vals)) if finite_vals else 0.0,
-        "mean": float(sum(finite_vals) / len(finite_vals)) if finite_vals else 0.0,
-    }
+    df = pd.concat(series_list, axis=1).apply(pd.to_numeric, errors="coerce").astype("float64")
+    finite = np.isfinite(df.to_numpy())
+    total = df.sum(axis=1).where(finite.all(axis=1))
+    bad = int((~finite).sum())
+    if bad:
+        gaps.append(f"{bad} missing or non-finite {'step' if bad == 1 else 'steps'}")
+    if total.empty:
+        gaps.append("no steps")
+    out["index"] = [ts.isoformat() if hasattr(ts, "isoformat") else str(ts) for ts in total.index]
+    out["values"] = [None if not math.isfinite(v) else float(v) for v in total.tolist()]
+    if not gaps:
+        out["complete"] = True
+        out["peak"] = float(max(out["values"]))
+        out["mean"] = float(sum(out["values"]) / len(out["values"]))
+    return out
 
 _COMPONENT_LISTS = ("loads", "generators", "links", "buses", "lines", "stores",
                     "storage_units", "transformers", "carriers", "global_constraints")
