@@ -316,7 +316,7 @@ def _apply_profile_upload(n, comp_attr: str, attribute: str, display_class: str,
         raise HTTPException(
             400,
             f"No column names matched any {display_class.lower()}. "
-            f"{display_class}s in network: {list(valid)[:10]}",
+            f"{display_class}s in network: {', '.join(sorted(valid)[:10])}.",
         )
     # Phase 12f: refuse before `_user_ts` is written — an entry that lands here
     # survives project reload and is re-injected on every solve, so a rejected

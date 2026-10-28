@@ -25,7 +25,7 @@ import { Dialog } from '../components/Dialog'
 import LoadSeriesEditor from '../components/series/LoadSeriesEditor'
 import AvailabilityEditor from '../components/series/AvailabilityEditor'
 import SeriesEditor from '../components/series/SeriesEditor'
-import { fieldLabel, sentence } from '../components/series/SeriesKit'
+import { fieldLabel, fmt, sentence } from '../components/series/SeriesKit'
 import { errorText } from '../api/profiles'
 import DefaultsReview from '../components/series/DefaultsReview'
 import { WeatherBar } from '../components/series/WeatherBar'
@@ -212,12 +212,17 @@ interface UploadReceiptState {
 }
 
 const RECEIPT_UNITS: Record<string, string> = { p_set: ' MW', marginal_cost: ' €/MWh' }
-const fmtNum = (v: number | null | undefined) => v == null ? '–' : Number(v.toPrecision(3)).toString()
 
-function whyUnmatched(u: NonNullable<ProfileUploadResult['unmatched_detail']>[number]): string {
-  if (u.reason === 'duplicate') return `a second column named '${u.of}': only the first is read`
-  if (u.reason === 'other_kind') return `'${u.name}' is a ${(u.kind ?? 'different').replace(/_/g, ' ').replace(/s$/, '')}, not a component of this tab`
-  return 'no component of this tab has this name'
+const KIND_WORDS: Record<string, string> = {
+  loads: 'load', generators: 'generator', links: 'link', buses: 'bus', lines: 'line', stores: 'store',
+  storage_units: 'storage unit', transformers: 'transformer', carriers: 'carrier',
+  global_constraints: 'global constraint',
+}
+
+function whyUnmatched(u: NonNullable<ProfileUploadResult['unmatched_detail']>[number], noun: string): string {
+  if (u.reason === 'duplicate') return `It repeats the column \u201c${u.of}\u201d, and only the first is read.`
+  if (u.reason === 'other_kind' && u.kind) return `It is a ${KIND_WORDS[u.kind] ?? 'different component'}, not a ${noun}.`
+  return `No ${noun} has this name.`
 }
 
 function UploadReceipt({ receipt, onDismiss, onTemplate, editorFor }: {
@@ -228,6 +233,9 @@ function UploadReceipt({ receipt, onDismiss, onTemplate, editorFor }: {
 }) {
   const { result, refusal, attribute } = receipt
   const unit = RECEIPT_UNITS[attribute] ?? ''
+  // The editor's applied receipt says "peak" for power and "max" otherwise.
+  const top = attribute === 'p_set' ? 'peak' : 'max'
+  const noun = receipt.tab === 'loads' ? 'load' : receipt.tab === 'links' ? 'link' : 'generator'
   // An older answer names the columns only; say less rather than guess why.
   const matched = result?.matched_detail ?? (result?.matched ?? []).map(name => ({ name, old: null, new: null }))
   const unmatched = result?.unmatched_detail
@@ -254,7 +262,7 @@ function UploadReceipt({ receipt, onDismiss, onTemplate, editorFor }: {
           <p key={m.name} className="text-green-700" data-testid={`receipt-matched-${m.name}`}>
             <span className="font-mono">{m.name}</span>:{' '}
             {m.new
-              ? <>peak {m.old ? `${fmtNum(m.old.peak)} → ` : ''}{fmtNum(m.new.peak)}{unit}, mean {m.old ? `${fmtNum(m.old.mean)} → ` : ''}{fmtNum(m.new.mean)}{unit}</>
+              ? <>{top} {m.old ? `${fmt(m.old.peak, 3)} → ` : ''}{fmt(m.new.peak, 3)}{unit}, mean {m.old ? `${fmt(m.old.mean, 3)} → ` : ''}{fmt(m.new.mean, 3)}{unit}</>
               : 'updated'}
             {open && <>{' '}<button type="button" className="text-accent hover:underline" onClick={open}>Open its editor ›</button></>}
           </p>
@@ -262,7 +270,7 @@ function UploadReceipt({ receipt, onDismiss, onTemplate, editorFor }: {
       })}
       {unmatched.map(u => (
         <p key={u.name} className="text-muted" data-testid={`receipt-unmatched-${u.name}`}>
-          <span className="font-mono">{u.name}</span>: not used, {whyUnmatched(u)}.
+          <span className="font-mono">{u.name}</span>: not used. {whyUnmatched(u, noun)}
         </p>
       ))}
     </div>
