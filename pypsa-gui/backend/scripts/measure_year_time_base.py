@@ -2,8 +2,12 @@
 
 Not part of the test suite: the year solve may take minutes. Run from pypsa-gui/backend:
 
-    python scripts/measure_year_time_base.py            # both bases, each in its own process
-    python scripts/measure_year_time_base.py year       # one base, prints one JSON line
+    python scripts/measure_year_time_base.py                    # both bases, each in its own process
+    python scripts/measure_year_time_base.py year --ipm --timeout 1800
+
+`--ipm` sets the app's `solver_options` {"solver": "ipm"} (HiGHS interior point; the app's default is HiGHS'
+choice, dual simplex here). Each base runs in a child process; the parent reports the child's peak RSS and wall
+time even when the time limit kills it.
 
 A demo network of about 30 components (5 buses; grid, PV, wind and the lost-concentrate slack; a crusher and two
 mills as committable process Links under linearised UC; a stockpile, a 21-day concentrate shed and a battery;
@@ -109,7 +113,7 @@ def build(base: str) -> pypsa.Network:
                            candidates=candidates, time_base=base)
 
 
-def measure(base: str) -> dict:
+def measure(base: str, ipm: bool = False) -> dict:
     import highspy
     from services.solver_service import SolverConfig, run_simulation
     from services.validation_service import has_errors, validate_for_run
@@ -117,7 +121,8 @@ def measure(base: str) -> dict:
     t0 = time.perf_counter()
     n = build(base)
     build_s = time.perf_counter() - t0
-    cfg = SolverConfig(solver_name="highs", multi_investment_periods=True)
+    cfg = SolverConfig(solver_name="highs", multi_investment_periods=True,
+                       solver_options={"solver": "ipm"} if ipm else {})
     issues = validate_for_run(n, cfg)
     if has_errors(issues):
         raise SystemExit(f"{base}: refused: {[(i.code, i.name) for i in issues if i.severity == 'error']}")
@@ -148,10 +153,26 @@ def measure(base: str) -> dict:
 
 
 if __name__ == "__main__":
+    import argparse
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("bases", nargs="*", default=["week", "year"])
+    ap.add_argument("--ipm", action="store_true")
+    ap.add_argument("--timeout", type=float, default=2700.0)
+    ap.add_argument("--child", action="store_true", help=argparse.SUPPRESS)
+    args = ap.parse_args()
     logging.disable(logging.WARNING)
-    if len(sys.argv) > 1:
-        print(json.dumps(measure(sys.argv[1])))
+    if args.child:
+        print(json.dumps({**measure(args.bases[0], args.ipm), "solver_options": "ipm" if args.ipm else "app default"}))
     else:
-        for b in ("week", "year"):
-            out = subprocess.run([sys.executable, __file__, b], capture_output=True, text=True, cwd=BACKEND)
-            print(out.stdout.strip().splitlines()[-1] if out.returncode == 0 else out.stderr[-2000:])
+        for b in args.bases:
+            cmd = [sys.executable, __file__, b, "--child", *(["--ipm"] if args.ipm else [])]
+            t0 = time.perf_counter()
+            try:
+                out = subprocess.run(cmd, capture_output=True, text=True, cwd=BACKEND, timeout=args.timeout)
+                line = out.stdout.strip().splitlines()[-1] if out.returncode == 0 else out.stderr[-2000:]
+            except subprocess.TimeoutExpired:
+                line = json.dumps({"base": b, "status": "time limit", "limit_s": args.timeout})
+            print(line, json.dumps({"base": b, "wall_s": round(time.perf_counter() - t0, 1),
+                                    "child_peak_rss_mb": round(resource.getrusage(resource.RUSAGE_CHILDREN)
+                                                               .ru_maxrss / 1024, 1)}), flush=True)
