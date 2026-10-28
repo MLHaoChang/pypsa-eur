@@ -53,9 +53,21 @@ def segment_pairs(n_vertices: int) -> int:
     return max(0, n_vertices * (n_vertices - 3) // 2)
 
 
+_LIMIT_WORDS = {"buildings": "buildings", "footprint_vertices": "footprint corners",
+                "segment_pairs": "edge pairs to check", "triangles": "triangles"}
+
+
+def size_text(n: int) -> str:
+    """A byte count in kB or MB, for messages."""
+    return f"{n / 1_000_000:.1f} MB" if n >= 1_000_000 else f"{max(n / 1000, 0.1):.1f} kB"
+
+
 def _limit(name: str, limit: int, actual: int) -> SceneError:
-    return SceneError("resource_limit", f"Too large: {actual} {name}, the limit is {limit}",
-                      {"limit": name, "max": limit, "actual": actual})
+    if name == "preview_bytes":
+        text = f"Too large: the preview is {size_text(actual)}, the limit is {size_text(limit)}"
+    else:
+        text = f"Too large: {actual} {_LIMIT_WORDS[name]}, the limit is {limit}"
+    return SceneError("resource_limit", text, {"limit": name, "max": limit, "actual": actual})
 
 
 def _segments_cross(a, b, c, d) -> bool:
@@ -89,13 +101,13 @@ def check_footprint(ring: list[tuple[float, float]], where: str) -> list[tuple[f
 
 def _height(value: float, where: str) -> float:
     if not (0 < value <= MAX_HEIGHT_M):
-        raise SceneError("invalid_geometry", f"{where}: height must be in (0, {MAX_HEIGHT_M:g}] m")
+        raise SceneError("invalid_geometry", f"{where}: height must be above 0 m and at most {MAX_HEIGHT_M:g} m")
     return value
 
 
 def greenfield_building(item: dict[str, Any], i: int) -> dict[str, Any]:
     """A proposed rectangle `{id, center, width, depth, height, heading, unit}` in Site-local metres."""
-    where = f"buildings[{i}]"
+    where = f"Building {i + 1}"
     unit = item.get("unit")
     w, d, h = (frames.to_metres(item.get(k), unit) for k in ("width", "depth", "height"))
     cx, cy = (frames.to_metres(c, unit) for c in item.get("center", (None, None)))
@@ -110,7 +122,7 @@ def greenfield_building(item: dict[str, Any], i: int) -> dict[str, Any]:
 
 def source_building(item: dict[str, Any], origin: tuple[float, float], i: int) -> dict[str, Any]:
     """A source footprint `{namespace, source_id, ring: [[lng, lat], ...], height_m?, levels?}`."""
-    where = f"sources[{i}]"
+    where = f"Mapped building {i + 1}"
     ns, sid = item.get("namespace"), item.get("source_id")
     if ns not in NAMESPACES or not isinstance(sid, str) or not sid:
         raise SceneError("invalid_input", f"{where}: namespace must be osm or manual, with a source_id")
