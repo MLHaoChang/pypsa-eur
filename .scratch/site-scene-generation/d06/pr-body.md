@@ -34,6 +34,7 @@ A 3D placement or footprint key (`<Class>:<name>`) now binds to one component in
 - The first 11 tests were written first; 10 failed on master.
 - Mutation checks: `.scratch/site-scene-generation/d06/evidence/mutation-checks.txt`. Resolving by name, carrying uids through clustering, or keeping the uid on delete each turns the delete-and-recreate and clustering tests red.
 - `test_write_surface_lock_policy`, `test_route_chat_disposition`, `test_project_route_acl_policy` and the clustering suites: 32 passed, 1 skipped.
+- On the master merge `fb7cec71`: `tests/test_site_*.py` and `tests/test_sites_routes.py` (389 tests), plus undo, bundle sidecars, workflow tools and `site_scene_proto` (61 tests), all passed.
 
 **Skipped / risk.**
 
@@ -52,4 +53,4 @@ A 3D placement or footprint key (`<Class>:<name>`) now binds to one component in
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
-https://claude.ai/code/session_01G7qCujC1D8BcuFzWiA63t6
+https://claude.ai/code/session_01G7qCum27T2W3q9a7wP6PkY
