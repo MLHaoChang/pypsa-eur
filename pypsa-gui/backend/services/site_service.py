@@ -219,16 +219,43 @@ def remove_asset_footprint(doc: dict, component_class: str, name: str) -> bool:
     return True
 
 
+def _scene_hook(action: str, fn, pdir: pathlib.Path, *args: str) -> None:
+    """
+    The scene half of a CRUD hook (SC-01a, D03): a scene-enabled Site's
+    placements and footprints are re-keyed or dropped in a NEW generation,
+    never in sites.json behind its pointer. It runs after the network edit,
+    like the sites.json half. A failure leaves the old generation in place;
+    it is logged as an error and shows as an `unbound_keys` entry on the
+    Site's scene (a key whose component is gone), never silently.
+    """
+    try:
+        fn(pdir, *args)
+    except Exception as exc:  # noqa: BLE001 — the network edit already happened; surfaced via unbound_keys
+        log.error("site scene %s hook failed for %s: %s", action, args, exc)
+
+
+def _legacy_view(pdir: pathlib.Path, doc: dict) -> dict:
+    """`doc` without the scene-enabled Sites, whose placements only their scene may change."""
+    from services.site_scene import store as scene_store
+
+    enabled = scene_store.enabled_site_ids(pdir)
+    return {**doc, "sites": [s for s in doc.get("sites", []) if s.get("id") not in enabled]}
+
+
 def remove_asset_footprint_on_disk(project_dir: pathlib.Path | str | None, component_class: str, name: str) -> None:
     if not project_dir:
         return
+    from services.site_scene import store as scene_store
+
+    pdir = pathlib.Path(project_dir)
     try:
-        pdir = pathlib.Path(project_dir)
         doc = read_sites(pdir)
         if remove_asset_footprint(doc, component_class, name):
             write_sites(pdir, doc)
     except (OSError, ValueError) as exc:
         log.warning("sites.json footprint cleanup failed for %s %r: %s", component_class, name, type(exc).__name__)
+    # A scene-enabled Site drops the placement AND the footprint together.
+    _scene_hook("delete", scene_store.remove_component, pdir, component_class, name)
 
 
 def rename_component_on_disk(project_dir: pathlib.Path | str | None, component_class: str, old: str, new: str) -> None:
@@ -239,13 +266,16 @@ def rename_component_on_disk(project_dir: pathlib.Path | str | None, component_c
     """
     if not project_dir or old == new:
         return
+    from services.site_scene import store as scene_store
+
+    pdir = pathlib.Path(project_dir)
     try:
-        pdir = pathlib.Path(project_dir)
         doc = read_sites(pdir)
-        if rename_component(doc, component_class, old, new):
+        if rename_component(_legacy_view(pdir, doc), component_class, old, new):
             write_sites(pdir, doc)
     except Exception as exc:  # noqa: BLE001 — best-effort by design
         log.warning("sites.json rename hook failed for %s %r→%r: %s", component_class, old, new, exc)
+    _scene_hook("rename", scene_store.rename_component, pdir, component_class, old, new)
 
 
 # ── thumbnail (visual-layers plan 3, S5) ────────────────────────────────────

@@ -114,13 +114,44 @@ async def put_site_anchor(request: Request, project: AuthorizedProject = Project
     return await _call(anchor.write_anchor, project.directory, body.get("anchor"), body.get("expected_revision"))
 
 
+def _unbound_keys(project: AuthorizedProject, scene: dict) -> list[str] | None:
+    """
+    Placement and footprint keys (`<Class>:<name>`) whose component is not in
+    the open network: the visible trace of a rename/delete hook whose scene
+    write failed. None when the project is not the open one (not checked).
+    """
+    import os
+
+    from services import network_lengths
+    from services.pypsa_service import PyPSAService
+
+    active = network_lengths.active_project_dir()
+    if active is None or os.path.realpath(active) != os.path.realpath(project.directory):
+        return None
+    n = PyPSAService.get_network()
+    keys = set((scene["site"].get("placements") or {})) | set(scene.get("asset_footprints") or {})
+    unbound = []
+    for key in sorted(keys):
+        cls, _, comp = key.partition(":")
+        try:
+            known = comp in n.components[cls].static.index
+        except (KeyError, AttributeError):
+            known = False                   # not a component class this network has
+        if not known:
+            unbound.append(key)
+    return unbound
+
+
 @router.get("/{name}/sites/{site_id}/scene")
 def get_scene(site_id: str, project: AuthorizedProject = ProjectAccessDep) -> dict:
     _site_known(project, site_id)
     try:
-        return store.read_scene(project.directory, site_id)
+        scene = store.read_scene(project.directory, site_id)
     except SceneError as exc:
         raise _raise(exc) from exc
+    if scene["state"] == "enabled":
+        scene = {**scene, "unbound_keys": _unbound_keys(project, scene)}
+    return scene
 
 
 @router.post("/{name}/sites/{site_id}/scene/adopt")
