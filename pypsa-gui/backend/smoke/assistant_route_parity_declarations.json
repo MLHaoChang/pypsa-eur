@@ -524,11 +524,6 @@
  ],
  "needs_tool": [
   {
-   "method": "GET",
-   "path": "/api/results/process_view",
-   "family": "all-results"
-  },
-  {
    "method": "PUT",
    "path": "/api/campus-electrical/{name}/campus",
    "family": "gridspine-campus"
