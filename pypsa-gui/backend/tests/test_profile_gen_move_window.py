@@ -247,7 +247,7 @@ def test_a_bad_index_is_refused(window):
 # ── by (condition 3) ────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("by", ["0d", "+0w", "366d", "53w", "14", 14, "1.5d", "14h",
-                                True, None, "d", "--2d"])
+                                True, None, "d", "--2d", "0" * 100_000 + "d", "1000d"])
 def test_by_is_bounded(by):
     s, meta = _gen(ONE)
     with pytest.raises(InvalidRefineOpError, match="by"):

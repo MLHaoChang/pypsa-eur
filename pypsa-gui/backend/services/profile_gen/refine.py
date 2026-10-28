@@ -91,7 +91,7 @@ CONNECTION_CHANGED_WARNING = "connection_changed_since_refinement"
 OPS = ("scale_peak_to", "scale_window", "set_floor", "set_cap", "shift", "smooth",
        "rescale_energy", "move_window")
 NO_WINDOW_TO_MOVE = "this series has no maintenance window to move"
-_BY = re.compile(r"([+-]?)(\d+)([dw])")
+_BY = re.compile(r"([+-]?)(\d{1,3})([dw])")
 # What the server records on an op; only a replay may carry them in.
 _RESOLVED = ("connection", "resolved_mw")
 
@@ -265,7 +265,8 @@ def _window_mask(index: pd.DatetimeIndex, op: Mapping[str, Any], zone: str) -> n
 
 def _by_days(op: Mapping[str, Any], i: int) -> int:
     raw = op.get("by")
-    m = _BY.fullmatch(raw) if isinstance(raw, str) else None
+    # Length-checked before the match: a caller's string is never scanned long.
+    m = _BY.fullmatch(raw) if isinstance(raw, str) and len(raw) <= 5 else None
     n = int(m.group(2)) if m else 0
     if m is None or not 1 <= n <= (365 if m.group(3) == "d" else 52):
         raise InvalidRefineOpError(
