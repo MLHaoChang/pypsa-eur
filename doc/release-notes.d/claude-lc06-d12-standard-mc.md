@@ -1,0 +1,1 @@
+* Test(pypsa-gui): LC-06 checks the sequential Monte Carlo adequacy study, run through its chat tool, against the exact LOLE and EUE of a two-unit capacity outage table: the oracle lies inside the reported 95 % interval, and the LOLE interval is within 10 % of it.

@@ -228,6 +228,33 @@ Branch `claude/lc06-d07-static-pf`, stacked on S2. GK B reviews. Session LC-06 (
   8. x_tol 1e-3: the voltages and the bus0 flows fail.
 - No engine defect was found. `LC-D07.n1_voltage` stays unavailable (LIMITS_CLAIM).
 
+### S4, LC-D12 standard MC (2026-10-28)
+
+Branch `claude/lc06-d12-standard-mc`, stacked on S3. GK A reviews. Session LC-06 (3).
+
+- `tests/test_lc06_d12_standard_mc.py`: the study runs through `run_mc_study`
+  (seed 1, 500 draws, cov_target 0.04) and is read back through
+  `get_adequacy_results('mc')`.
+  - The fleet is G60 (q 0.1, MTTR 50 h) and G40 (q 0.2, MTTR 40 h); the load
+    cycles 50/70/90 MW for 8760 h.
+  - The oracle is computed from the network's inputs over the four COPT
+    states: LOLE = 2920 x 0.66 = 1927.2 h, EUE = 2920 x 18.6 = 54,312 MWh.
+  - Asserted: both oracles lie inside the reported 95 % CI; the LOLE half-width
+    is at most 10 % of the oracle (seed 1 gives 25 h, 1.3 %); the time basis is
+    per year with horizon_years 1.0; the run converged; the rates come from the
+    assets.
+- The start bias: the engine starts every chain from the stationary
+  distribution (`mc.sample_capacity`). Also, horizon ≫ MTTR: an all-available
+  start would miss about sum(q x MTTR) = 13 unit-down hours, under 1 %.
+- Calibration on 40 seeds: coverage 36/40 (LOLE) and 37/40 (EUE); mean 1928.1 h
+  against the oracle's 1927.2 h; the sd across seeds of 15.0 h matches the
+  reported SEM of 13.2 h.
+- Mutations, each red on its own test:
+  1. COPT state probabilities swapped: the LOLE test fails.
+  2. EUE shortfall less 1 MW: the EUE test fails.
+  3. 5 draws at cov_target 0.2: the half-width is 371 h, over the 193 h bound.
+  4. The hand total off by 0.01 per cycle: the hand-oracle test fails.
+
 ## Hand-off (2026-10-28, context near 300k)
 
 State:
