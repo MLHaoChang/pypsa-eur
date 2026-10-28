@@ -6,6 +6,7 @@ the stream; nothing may be published, certified or read back after it.
 """
 
 import json
+import logging
 import uuid
 
 import pytest
@@ -181,19 +182,34 @@ def test_tool_called_after_revocation_returns_no_values(
     assert_nothing_published(frames, owner, before)
 
 
+READ_PATHS = (
+    "/api/chat/answers/{answer}",
+    "/api/chat/answers/{answer}/export",
+    "/api/chat/evidence/{evidence}",
+)
+
+
+def read_paths(answer, evidence):
+    return [p.format(answer=answer, evidence=evidence) for p in READ_PATHS]
+
+
 @pytest.mark.parametrize("kind", KINDS)
-def test_reads_after_revocation_return_no_values(baseline, harness, revoke, kind):
+def test_reads_after_revocation_look_like_unknown_records(
+    baseline, harness, revoke, kind
+):
     approved = approval(harness.load_fact())
     session_id = harness.session_ids[-1]
+    owned = read_paths(approved["answer_id"], approved["receipt"]["evidence_ids"][0])
+    unknown = read_paths(uuid.uuid4(), uuid.uuid4())
+    # Positive control: the owner reads all three before revocation.
+    assert [harness.client.get(p).status_code for p in owned] == [200, 200, 200]
     revoke[kind]()
-    refused = 404 if kind == "membership" else 401
-    for path in (
-        f"/api/chat/answers/{approved['answer_id']}",
-        f"/api/chat/answers/{approved['answer_id']}/export",
-        f"/api/chat/evidence/{approved['receipt']['evidence_ids'][0]}",
-    ):
-        response = harness.client.get(path)
+    refused = {"membership": 404, "disabled": 401}[kind]
+    for path, missing in zip(owned, unknown):
+        response, absent = harness.client.get(path), harness.client.get(missing)
         assert response.status_code == refused, path
+        # A revoked record is indistinguishable from one that never existed.
+        assert (absent.status_code, absent.text) == (refused, response.text), path
         assert "L1" not in response.text and "5 MW" not in response.text
     history = harness.client.get(f"/api/chat/history?session_id={session_id}")
     if kind == "disabled":
@@ -203,3 +219,40 @@ def test_reads_after_revocation_return_no_values(baseline, harness, revoke, kind
     (turn,) = history.json()["turns"]
     assert turn["assurance_state"] == "unavailable"
     assert "5 MW" not in json.dumps(turn) and "receipt" not in turn
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_revocation_logs_carry_no_values(
+    baseline, harness, revoke, seeded_identity, caplog, kind
+):
+    caplog.set_level(logging.DEBUG)
+    draft = observed_draft()
+    turns = [get_component(), text_turn(draft), text_turn(draft)]
+    response = harness.request(RevokingProvider(turns, revoke[kind]))
+    assert not any(e == "answer_approved" for e, _ in parse_sse(response.text))
+    failure = [
+        r
+        for r in caplog.records
+        if "checked answer could not be committed" in r.message
+    ]
+    assert len(failure) == 1, "the revocation path no longer logs its failure"
+    formatter = logging.Formatter()
+    for record in caplog.records:
+        logged = formatter.format(record)
+        for value in ("5 MW", "5.0", "p_set", draft):
+            assert value not in logged, (value, record.name)
+
+
+def test_revocations_are_undone_after_each_test(_auth_db, seeded_identity):
+    # Runs last in this module: every revocation above was restored.
+    _engine, session_local = _auth_db
+    with session_local() as db:
+        user = db.get(User, uuid.UUID(str(seeded_identity["user_id"])))
+        assert user.status == "active"
+        assert (
+            db.query(OrgMembership)
+            .filter_by(user_id=user.id, org_id=seeded_identity["org_id"])
+            .one()
+            .role
+            == "admin"
+        )
