@@ -137,16 +137,24 @@ def test_an_undo_that_leaves_a_later_op_invalid_is_refused_naming_it(client, pro
     assert detail["message"].startswith("op 1 (move_window) no longer fits")
 
 
-@pytest.mark.parametrize("index, says", [(2, "has 2 edits; there is no edit 3"),
-                                         (-1, "has 2 edits; there is no edit 0")])
-def test_an_index_out_of_range_is_refused_plainly(client, project, index, says):
+def test_an_index_out_of_range_is_refused_plainly(client, project):
     gen = _generate(client, project)
     both = _refine(client, project, gen["job_id"], [_WINDOW, _PEAK]).json()
-    resp = _refine(client, project, both["job_id"], undo_index=index)
+    resp = _refine(client, project, both["job_id"], undo_index=2)
     assert resp.status_code == 422, resp.text
     detail = resp.json()["detail"]
     assert detail["error_kind"] == "invalid_refine_op"
-    assert says in detail["message"]
+    assert "this series has 2 refinements; there is no step 3" in detail["message"]
+
+
+@pytest.mark.parametrize("index", [-1, True, "1", 1.0])
+def test_an_index_that_is_not_a_whole_number_from_0_is_refused(client, project, index):
+    # Python's -1 would silently undo the last op; True would undo op 1.
+    gen = _generate(client, project)
+    both = _refine(client, project, gen["job_id"], [_WINDOW, _PEAK]).json()
+    resp = client.post(f"/api/projects/{project}/profiles/refine",
+                       json={"job_id": both["job_id"], "undo_index": index})
+    assert resp.status_code == 422, resp.text
 
 
 def test_an_unrefined_artifact_has_nothing_to_undo(client, project):
@@ -154,7 +162,7 @@ def test_an_unrefined_artifact_has_nothing_to_undo(client, project):
     resp = _refine(client, project, gen["job_id"], undo_index=0)
     assert resp.status_code == 422, resp.text
     assert resp.json()["detail"]["error_kind"] == "invalid_refine_op"
-    assert "has no edits to undo" in resp.json()["detail"]["message"]
+    assert "this series has no refinements to undo" in resp.json()["detail"]["message"]
 
 
 def test_ops_and_undo_together_or_neither_are_refused(client, project):
@@ -181,3 +189,124 @@ def test_the_copilot_undoes_an_op_through_the_refine_tool(client, project, bound
             project_id=project, job_id=both["job_id"], undo_index=1)
     assert [r["op"] for r in undone["refinements"]] == ["scale_window"]
     assert undone["undone"]["index"] == 1
+
+
+# -- gatekeeper plan conditions (GK B, 2026-10-28) ------------------------------
+
+_FLOOR = {"op": "set_floor", "value": 20.0}
+
+
+def _stats_without_index(body):
+    return [{k: v for k, v in st.items() if k != "index"} for st in body["stats"]["plant"]]
+
+
+def test_undo_in_the_middle_replays_the_ops_on_both_sides(client, project):
+    # call 1 = [op0, op1], call 2 = [op2]; undoing op1 walks to the root and
+    # replays op0 and op2. Oracle: one refine of [op0, op2] on the root.
+    gen = _generate(client, project)
+    one = _refine(client, project, gen["job_id"], [_WINDOW, _FLOOR]).json()
+    two = _refine(client, project, one["job_id"], [_PEAK]).json()
+    undone = _refine(client, project, two["job_id"], undo_index=1).json()
+    direct = _refine(client, project, gen["job_id"], [_WINDOW, _PEAK]).json()
+    assert undone["based_on"] == gen["job_id"]
+    assert undone["refinements"] == direct["refinements"]
+    assert [st["index"] for st in undone["stats"]["plant"]] == [0, 2]
+    assert _stats_without_index(undone) == _stats_without_index(direct)
+    expected = _applied(client, project, direct["job_id"])
+    assert client.post("/api/network/undo").status_code == 200
+    assert np.array_equal(_applied(client, project, undone["job_id"]), expected)
+
+
+def test_undo_with_a_refined_base_replays_only_the_later_ops(client, project):
+    # call 1 = [op0], call 2 = [op1, op2]; undoing op2 starts from call 1's
+    # artifact (j = 1) and replays op1 on it.
+    gen = _generate(client, project)
+    one = _refine(client, project, gen["job_id"], [_WINDOW]).json()
+    two = _refine(client, project, one["job_id"], [_FLOOR, _PEAK]).json()
+    undone = _refine(client, project, two["job_id"], undo_index=2).json()
+    direct = _refine(client, project, one["job_id"], [_FLOOR]).json()
+    assert undone["based_on"] == one["job_id"]
+    assert undone["refinements"] == direct["refinements"]
+    assert _stats_without_index(undone) == _stats_without_index(direct)
+    expected = _applied(client, project, direct["job_id"])
+    assert client.post("/api/network/undo").status_code == 200
+    assert np.array_equal(_applied(client, project, undone["job_id"]), expected)
+
+
+def test_an_undo_can_be_undone_again_and_undone_does_not_leak(client, project):
+    gen = _generate(client, project)
+    three = _refine(client, project, gen["job_id"], [_WINDOW, _FLOOR, _PEAK]).json()
+    once = _refine(client, project, three["job_id"], undo_index=1).json()
+    assert [r["op"] for r in once["refinements"]] == ["scale_window", "scale_peak_to"]
+    assert all("undone" not in r for r in once["refinements"])
+    twice = _refine(client, project, once["job_id"], undo_index=0).json()
+    assert [r["op"] for r in twice["refinements"]] == ["scale_peak_to"]
+    assert twice["undone"] == {"index": 0, "op": "scale_window"}
+    direct = _refine(client, project, gen["job_id"], [_PEAK]).json()
+    assert twice["refinements"] == direct["refinements"]
+    # A plain refine of an undone artifact does not carry the undo along.
+    more = _refine(client, project, once["job_id"], [_FLOOR]).json()
+    assert "undone" not in more
+
+
+def _pending_dir(client, session_ctx):
+    from pathlib import Path
+
+    return Path(session_ctx(client).storage_dir) / "profiles_pending"
+
+
+def _rewrite(path, **changes):
+    import json
+
+    meta = json.loads(path.read_text())
+    meta.update(changes)
+    path.write_text(json.dumps(meta))
+
+
+def test_a_base_whose_ops_differ_is_not_a_base(client, project, session_ctx):
+    gen = _generate(client, project)
+    one = _refine(client, project, gen["job_id"], [_WINDOW]).json()
+    two = _refine(client, project, one["job_id"], [_PEAK]).json()
+    # Forge call 1's record: the same length, another op.
+    _rewrite(_pending_dir(client, session_ctx) / f"{one['job_id']}.json",
+             refinements=[{**one["refinements"][0], "factor": 2.0}])
+    resp = _refine(client, project, two["job_id"], undo_index=1)
+    assert resp.status_code == 422, resp.text
+    detail = resp.json()["detail"]
+    assert detail["error_kind"] == "invalid_refine_op"
+    assert detail["message"].startswith("the series before step 2 is no longer kept: ")
+
+
+@pytest.mark.parametrize("forged", ["not-a-kept-job", "../../Other Site/profiles_pending/x",
+                                    None])
+def test_a_based_on_outside_this_projects_store_is_refused_unread(client, project,
+                                                                 session_ctx, forged,
+                                                                 monkeypatch):
+    import routers.profiles as profiles_router
+
+    gen = _generate(client, project)
+    both = _refine(client, project, gen["job_id"], [_WINDOW, _PEAK]).json()
+    pending = _pending_dir(client, session_ctx)
+    if forged and "/" in forged:  # a genuine artifact in a sibling project's store
+        other = pending.parent.parent / "Other Site" / "profiles_pending"
+        other.mkdir(parents=True, exist_ok=True)
+        for ext in ("nc", "json"):
+            (other / f"x.{ext}").write_bytes((pending / f"{gen['job_id']}.{ext}").read_bytes())
+    _rewrite(pending / f"{both['job_id']}.json", based_on=forged)
+    read = []
+    real = profiles_router._pending_frame
+    monkeypatch.setattr(profiles_router, "_pending_frame",
+                        lambda nc, meta: read.append(str(nc)) or real(nc, meta))
+    resp = _refine(client, project, both["job_id"], undo_index=0)
+    assert resp.status_code == 422, resp.text
+    assert "is no longer kept" in resp.json()["detail"]["message"]
+    assert all(str(pending.resolve()) in r for r in read[1:])
+    assert not any("Other Site" in r for r in read)
+
+
+def test_echoed_values_are_cut_as_tsg07_cuts_them():
+    from services.profile_gen.refine import op_words
+
+    words = op_words({"op": "move_window", "by": "9" * 40})
+    assert words == "move_window by 999999999999…"
+    assert op_words({"op": "x" * 40}) == "x" * 20 + "…"

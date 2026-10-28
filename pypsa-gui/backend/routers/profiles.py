@@ -36,7 +36,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session as DBSession
 
 from db.models import Project, User
@@ -249,8 +249,17 @@ class DefaultsApplyRequest(BaseModel):
 class RefineRequest(BaseModel):
     # A pending artifact to refine by deterministic ops
     # (services/profile_gen/refine.py); the result is a new pending artifact.
+    # Or, with ``undo_index``, the artifact re-refined without that recorded
+    # op (TSG 05). Exactly one of the two.
     job_id: str
-    ops: list[dict[str, Any]] = Field(min_length=1)
+    ops: list[dict[str, Any]] = Field(default_factory=list)
+    undo_index: int | None = Field(default=None, ge=0, strict=True)
+
+    @model_validator(mode="after")
+    def _ops_or_undo(self):
+        if bool(self.ops) == (self.undo_index is not None):
+            raise ValueError("send either a non-empty ops list or undo_index")
+        return self
 
 
 class ShapeRequest(BaseModel):
@@ -708,7 +717,8 @@ def generate_profiles(
     return sq.solve_queue.get_job(job.id) or job.to_public(None)
 
 
-def _refine_frame(ctx, frame: pd.DataFrame, meta: dict, ops: list, *, replaying: bool):
+def _refine_frame(ctx, frame: pd.DataFrame, meta: dict, ops: list, *, replaying: bool,
+                  **undo):
     """Refine (or replay a recorded list over) every column of an artifact;
     one meta (the ops are the same for every column), stats per column, and
     the warnings."""
@@ -719,7 +729,7 @@ def _refine_frame(ctx, frame: pd.DataFrame, meta: dict, ops: list, *, replaying:
     run = refine.replay if replaying else refine.refine_series
     cols, stats, warnings, new_meta = {}, {}, [], meta
     for col in frame.columns:
-        out = run(ctx, frame[col], meta, ops, component_type=ct, attribute=attr)
+        out = run(ctx, frame[col], meta, ops, component_type=ct, attribute=attr, **undo)
         cols[col], stats[col], new_meta = out.series, out.stats, out.meta
         warnings += [w for w in out.warnings if w not in warnings]
     return pd.DataFrame(cols, index=frame.index), new_meta, stats, warnings
@@ -1442,6 +1452,36 @@ def apply_default_series(
             "undo": "one undo reverts every series applied here"}
 
 
+def _pending_frame(nc: Path, meta: dict) -> pd.DataFrame:
+    with pending_io_lock(), xr.open_dataset(nc) as ds:
+        frame = ds.to_dataframe()
+    frame.index = pd.DatetimeIndex(frame.index)
+    return frame[[c for c in meta.get("points", frame.columns) if c in frame.columns]]
+
+
+def _undo_frame(ctx, proj: AuthorizedProject, meta: dict, k: int):
+    """Undo op ``k`` (TSG 05): replay the later recorded ops but ``k`` on the
+    base (`refine.undo_base`, read from this project's pending store only).
+    Returns (base job id, frame, meta, stats, warnings)."""
+    from services.profile_gen import refine
+
+    def load(job_id: str):
+        try:
+            nc, m = _pending_artifact(proj, job_id)
+        except HTTPException:  # malformed, another project's, or pruned
+            return None
+        return _pending_frame(nc, m), m
+
+    base_id, base, base_meta = refine.undo_base(meta, k, load)
+    carried = list(base_meta.get("refinements") or [])
+    ops, numbers = refine.undo_plan(list(meta["refinements"]), k, carried)
+    if not ops:  # undoing the last op: the base, as it is
+        return base_id, base, dict(base_meta), {}, []
+    new, new_meta, stats, warnings = _refine_frame(ctx, base, base_meta, ops, replaying=True,
+                                                   numbers=numbers, after=carried)
+    return base_id, new, new_meta, stats, warnings
+
+
 @project_router.post("/{name}/profiles/refine")
 def refine_profile(
     body: RefineRequest,
@@ -1456,24 +1496,33 @@ def refine_profile(
     _check_lock(proj, db, user)
     ctx = _foreground_ctx(proj, "refine")
     nc, meta = _pending_artifact(proj, body.job_id)
-    with pending_io_lock(), xr.open_dataset(nc) as ds:
-        frame = ds.to_dataframe()
-    frame.index = pd.DatetimeIndex(frame.index)
-    frame = frame[[c for c in meta.get("points", frame.columns) if c in frame.columns]]
+    frame = _pending_frame(nc, meta)
+    based_on = body.job_id
     try:
-        new, new_meta, stats, warnings = _refine_frame(ctx, frame, meta, body.ops,
-                                                       replaying=False)
+        if body.undo_index is None:
+            new, new_meta, stats, warnings = _refine_frame(ctx, frame, meta, body.ops,
+                                                           replaying=False)
+        else:
+            based_on, new, new_meta, stats, warnings = _undo_frame(ctx, proj, meta,
+                                                                   body.undo_index)
     except ProfileGenError as exc:
+        from services.profile_gen.refine import _echo
+
+        named = ({"op": _echo(exc.op, 20), "index": exc.index}
+                 if isinstance(exc, RefineReplayError) else {})
         raise HTTPException(
             status_code=422,
-            detail={**_apply_refusal_kind(exc),
+            detail={**_apply_refusal_kind(exc), **named,
                     "message": public_message(exc, route="refine",
                                               job_id=body.job_id)},
         ) from exc
     job_id = str(uuid.uuid4())
-    record = {k: v for k, v in new_meta.items() if k != "replay_warnings"}
+    record = {k: v for k, v in new_meta.items() if k not in ("replay_warnings", "undone")}
+    if body.undo_index is not None:
+        record["undone"] = {"index": body.undo_index,
+                            "op": meta["refinements"][body.undo_index].get("op")}
     record["job_id"] = job_id
-    record["based_on"] = body.job_id
+    record["based_on"] = based_on
     record["project_id"] = proj.name
     record["points"] = list(new.columns)
     write_pending(str(proj.directory), job_id, new, record)
