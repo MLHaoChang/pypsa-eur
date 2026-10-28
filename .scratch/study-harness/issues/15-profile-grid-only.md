@@ -15,13 +15,14 @@ Design: [design.md](../design.md) §9.3 "Grid-only"
 
 1. One profile `grid_only@1` serving the four ids; `BLANK_PRESET` scope; no params.
 2. Setup refuses `belgium`/`ieee39` with a reason when their source is missing (`_build.py:228, 247`).
-3. Result rules: core plus `pf.converged`, voltage band, line loading ≤ 100 % (proxy labelled), N-1 `warn` when the solver config's option is on.
+3. Result rules: core plus PF convergence, voltage band and line loading ≤ 100 %, gated only on AC PF results the engine labels as PF, never on LOPF values (GK A, ACPF-BUG); N-1 `warn` when the solver config's option is on.
 4. No tunables: L2 diagnoses and ends `needs_user`. Explore skipped by default.
 
 ## Acceptance criteria
 
 - [ ] `3bus` and `ieee14` runs reach hand-off with the LC-21 network chapters.
 - [ ] A seeded overload fails the loading rule and the run asks the user (no agent edit).
+- [ ] Without an AC PF result, the PF rules are `not_evaluated`; LOPF flows never satisfy them.
 
 ## Likely files
 

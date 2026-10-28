@@ -9,7 +9,8 @@ Blocked by: 01
 Gated: yes (GK B; UX for the card in 08)
 Model tier: opus
 Owner decisions: SH-ENVELOPE-1 (amends COP-1 for harness runs only), COP-1, SH-RESEARCH-1
-Design: [design.md](../design.md) §7
+Design: [design.md](../design.md) §6.0, §7
+Plan verdict: GK B GO, 28 Oct (B2)
 
 ## What to build
 
@@ -28,6 +29,12 @@ Design: [design.md](../design.md) §7
 - [ ] If the approval record cannot be written, the call is denied (fail closed).
 - [ ] Narrowing at grant is kept; a model-supplied envelope wider than the profile's is `invalid_envelope`.
 - [ ] `brief_stale` or an ACL change after the grant → no envelope match.
+- [ ] Refusal matrix, one test per row: destructive tier, delete, MCP/external, unknown tool, outside the entry, out of bounds, expired, revoked, ACL loss, wrong project, foreign drift.
+- [ ] Bounds are absolute or relative to the value at grant: three rounds of +40 % with `rel: 0.5` are refused at the second round.
+- [ ] Freshness chain: a user edit between two runner changes pauses the run; an unreadable fingerprint pauses it too.
+- [ ] Grid-code publish is never admitted, even when listed.
+- [ ] The grant is recorded as `approvals.decided(by="user")` with the envelope id; each admitted dispatch as `by="envelope:<id>"`.
+- [ ] Tool-error kinds added here go in a `tool-error-kinds.d` fragment once #798 lands.
 
 ## Likely files
 

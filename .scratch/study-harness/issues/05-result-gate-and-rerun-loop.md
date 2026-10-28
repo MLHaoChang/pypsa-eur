@@ -17,7 +17,8 @@ Design: [design.md](../design.md) §5, §6.2
 1. LC-20's native rule set (its Scope 1 list, each rule with id, facts, threshold and basis, severity, explanation template) as `plaus.*` facts in `services/run_gates.py`, plus `kpi.*` readers over the LC-03 adapters.
 2. The user-facing read: GK B picks a `checks` argument on an existing results read (TOOLSEL-1) or LC-20's one new read tool; the same rule set serves both.
 3. L2: trigger = failed `block` result rule or non-optimal solve; triage reads first; ≤2 rounds per case, ≤2 changes per round; each round consumes a solve; no re-solve without a change (SC-14).
-4. Native loops: a profile may declare `native:run_margin_loop` or `native:run_coupling_loop` for a LOLE/margin rule; the engine loop's outcome is the round.
+4. Engine loops (GK A): where the result gate is reliability, `run_coupling_loop` (ENS cap, energy lever) or `run_margin_loop` (reserve margin, firm-capacity lever) replaces the agent loop; never nested; the loop's converged/not-converged result and `goal_sources` are the gate fact; its `max_solves` is bounded by the profile and counted against the solve budget and the ≤2 rounds.
+6. Scorecard-row rules gate by verdict (only `pass`); the `assumed` flag is carried, and a pass on assumed inputs is reported as a screening pass.
 5. Solve budget enforced; exhaustion → `needs_user`.
 
 ## Acceptance criteria
@@ -27,6 +28,7 @@ Design: [design.md](../design.md) §5, §6.2
 - [ ] A third round is refused; the run is `needs_user` with the failing rules.
 - [ ] A profile with `native:run_margin_loop` never starts an agent turn for that rule.
 - [ ] The solve count in `run.budget.used` equals the solve-queue jobs of the run.
+- [ ] A scorecard row with `warn`, `unknown` or missing fails a `block` rule; an `assumed` pass shows "screening pass" in the gate record.
 
 ## Likely files
 

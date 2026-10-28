@@ -17,7 +17,7 @@ Design: [design.md](../design.md) §2, §12
 
 ## Acceptance criteria
 
-- [ ] Generated files are checked in; the drift test passes; editing a profile without regenerating fails it.
+- [ ] Generated files are checked in; a byte-check test compares them with the generator output (GK B), and editing a profile without regenerating fails it.
 - [ ] Existing workflow tests pass; each step's `done_when` names the gate rule ids it mirrors.
 
 ## Likely files

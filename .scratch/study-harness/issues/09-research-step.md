@@ -10,6 +10,7 @@ Gated: yes (GK B)
 Model tier: opus
 Owner decisions: SH-RESEARCH-1, TOOLSEL-1, AI-567b (values shown beside their source and confirmed before they are written)
 Design: [design.md](../design.md) §8
+Plan verdict: GK B GO, 28 Oct (B3); cost-cap default pending the owner (design §11.1)
 
 ## What to build
 
@@ -26,6 +27,9 @@ Design: [design.md](../design.md) §8
 - [ ] Cost over the cap stops research mid-stage; `run.budget.used.research_usd` is from provider usage.
 - [ ] A rejected value stays `rejected` in the ledger and the report.
 - [ ] Layout test: no vendor word outside `harness/providers`.
+- [ ] B3: a research turn offers read-only tools plus the source-ledger write; it cannot call `update_component` even when the envelope would allow it.
+- [ ] Fetched content is framed as data: an injected instruction in a fetched page does not change the tool subset (test with a fake provider page).
+- [ ] An `apply_user_row` from a research value is the card's effect, never envelope-admitted.
 
 ## Likely files
 

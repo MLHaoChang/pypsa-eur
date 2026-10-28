@@ -9,7 +9,8 @@ Blocked by: 07
 Gated: yes (GK A for the engine gates and the grid-readiness actions; GK B for the harness parts)
 Model tier: opus
 Owner decisions: SH-PILOT-1, SAGC-1, D3-KEEP, DC13-SCOPE, TOOLSEL-1
-Design: [design.md](../design.md) §9.3 "eh_datacenter"
+Design: [design.md](../design.md) §5, §6.0, §9.3 "eh_datacenter"
+Plan verdict: GK A GO, 28 Oct (screening rows, verdict gating, never-tunable list); sources: public SAGC (May 2026) and generic engineering only
 
 ## What to build
 
@@ -20,7 +21,9 @@ Design: [design.md](../design.md) §9.3 "eh_datacenter"
 
 ## Acceptance criteria
 
-- [ ] A DC fixture with a published blank-schema profile (SAGC fields filled per project) runs to hand-off; each SAGC row is a gate result with its fact and limit.
+- [ ] A DC fixture with a published blank-schema profile (SAGC fields filled per project) runs to hand-off; each scorecard row is a gate result by verdict (only `pass` passes), with its `assumed` flag; screening rows read "within the screening limit", and a pass on assumed inputs is never "verified".
+- [ ] P–V/Q–V is listed as "deferred: needs issue" (no backend import of `voltage_stability.py`), not as a gate.
+- [ ] Grid-code publish is always the user's own card; the envelope never admits it.
 - [ ] No published profile → the run waits at stage 2 and notifies; nothing is drafted or published by the run.
 - [ ] A contingency failure: L2 changes only tunables; taps and shunts only in stage 2 after an outage (DC13-SCOPE); redispatch is not attempted.
 - [ ] 60 Hz project: the frequency rule passes; a 50 Hz network under a SAGC profile fails `block`.

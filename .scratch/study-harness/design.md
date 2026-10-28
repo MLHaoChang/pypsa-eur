@@ -3,7 +3,7 @@
 
 # Study harness: one agentic workflow for every template
 
-Status: needs-triage (design; GK B plan review, GK A for engine gates and the DC/g2p profiles, UX for placement)
+Status: needs-triage (design). Plan verdicts, 28 Oct: GK B GO with B1–B4 (settled in §5, §6.6, §7, §8), GK A GO with conditions (§5, §6.0, §6.2, §9.3), UX GO on placement with conditions (§10, issue 08)
 Type: design
 Baseline: master `38e5b7395`
 Owner decisions: SH-1, SH-ENVELOPE-1, SH-RESEARCH-1, SH-PILOT-1, SH-FOLD-1 (PR #829), AI-558, AI-567, AI-567b, COP-1, TOOLSEL-1, SAGC-1, D3-KEEP, DC13-SCOPE, UX-flow
@@ -168,9 +168,13 @@ GateResult = {"rule": id, "verdict": "pass" | "fail" | "not_evaluated",
               "facts": [{"fact", "value", "unit", "source": "<native reader>"}], "reason"?}
 ```
 
-- **Facts** come from a fact registry in `services/run_gates.py`, a new
-  services module beside `assistant_tasks.py`. Each fact name maps to one
-  native reader, and every reader is existing code:
+- **Facts** come from a closed, versioned fact registry in
+  `services/run_gates.py`, a new services module beside `assistant_tasks.py`
+  (GK B, B4). Each fact name maps to one native reader, and every reader is
+  existing code. Each rule names the engine row id or function it reads, so a
+  renamed row breaks a test, not a gate silently (GK A). Profile validation
+  refuses an unknown fact when the profile loads, and a test pins this. The
+  readers are:
   - `validate.*` reads `validate_network`;
   - `readiness.*` reads `project_readiness`;
   - `diagnose.*` reads `diagnose_network`;
@@ -184,9 +188,20 @@ GateResult = {"rule": id, "verdict": "pass" | "fail" | "not_evaluated",
   - `adequacy.*` reads the EH study.
 - **Operators**: `eq ne lt le gt ge in not_in empty nonempty within[lo,hi]`.
   Units are checked, never converted (as in `ledger.apply_user_row`).
-- **Fail closed**: a `block` rule whose fact cannot be read is
-  `not_evaluated`, which counts as a fail with the reason shown. A `warn` rule
-  that cannot be read is listed as not evaluated.
+- **Fail closed**: a `block` rule whose fact is unknown, cannot be read, or
+  reads as `None` or NaN is `not_evaluated`, which counts as a fail with the
+  reason shown. A `warn` rule that cannot be read is listed as not evaluated.
+- **Scorecard rows gate by verdict** (GK A):
+  - only `pass` satisfies a rule; `unknown`, `warn`, `fail` and a missing row
+    never do;
+  - each row's `assumed` flag is carried into the gate record. A pass that
+    rests on assumed inputs is a **screening pass**, reported as such, and
+    never "verified" at hand-off;
+  - screening rows (SCR/ESCR, TDD, unbalance, rapid voltage change, flicker,
+    harmonic scan, motor start) may block or flag but never certify. TDD is
+    always assumed: I_L is not IEEE 519's maximum demand, and S_sc is the
+    entered fault level. The wording is "within the screening limit", never
+    "meets IEEE 519". Resonance inside the clearance is `warn`.
 - **No model verdicts**: the model never supplies a fact or a verdict. It reads
   the gate result and narrates it (LC-20 "the model narrates; it adds no
   verdicts").
@@ -207,6 +222,27 @@ GateResult = {"rule": id, "verdict": "pass" | "fail" | "not_evaluated",
   argument over a new name. GK B decides which in issue 05.
 
 ## 6. Loops, the change ledger, budgets, runner and notification
+
+### 6.0 What the agent never changes
+
+The agent changes design levers, never the question (GK A). The profile
+validation refuses a `tunable` entry or an envelope edit that names one of
+these, and a test pins the list:
+
+- grid-code profile values and clauses: every limit, the TDD standard, the
+  frequency;
+- fault levels S_k''/S_k''min, `eh_poc`, `eh_ibr_mva`, the IEC 60909 c factors;
+- contingency sets and stress scenarios;
+- the reliability goal: `target_lole_h`, draws, seed. `run_margin_loop`'s start
+  is a measured probe by design;
+- demand: IT load, process demand, offtake;
+- demo or ledgered engine constants (start multiples, starting pf, eta·pf);
+- solver tolerances and options;
+- any `assumed` flag or verdict;
+- gate thresholds, KPI targets, profile rules and the envelope itself (GK B, B2).
+
+A per-unit fact such as `start_method` is tunable only when the profile lists
+it as a design choice.
 
 ### 6.1 L1, the input loop (stage 3)
 
@@ -239,13 +275,19 @@ GateResult = {"rule": id, "verdict": "pass" | "fail" | "not_evaluated",
   `diagnose_network`, `validate_network`. These are the existing `_correction`
   reads. An infeasible solve is never re-solved unchanged (SC-14 holds: no
   auto-retry without a change).
-- **Native loops replace the agent where a profile declares one**:
-  - `run_margin_loop` for a reserve-margin target;
-  - `run_coupling_loop` for a LOLE target;
-  - both are generic reliability-target loops (`adequacy/coupling.py:214`,
-    `adequacy/margin_lever.py`). The engine changes the levers, and the
-    harness records the outcome as the round. The agent loop does not run on
-    the same rule.
+- **Engine loops replace the agent where the result gate is reliability**
+  (GK A):
+  - `run_coupling_loop` (ENS cap, energy lever; `adequacy/coupling.py:214`) and
+    `run_margin_loop` (reserve margin, firm-capacity lever;
+    `adequacy/margin_lever.py`) are LOLE loops for any project with a
+    reliability goal (W3b-R). They are not the ammonia coupling report
+    (g2p 13);
+  - the engine changes the levers. Its own converged / not-converged result
+    and its `goal_sources` are the gate fact;
+  - its `max_solves` is bounded by the profile and counted against the solve
+    budget and the ≤2-round limit;
+  - an engine loop and the agent loop are never nested, and never run on the
+    same rule.
 - **Exhaustion**: the case is `failed` with its rules and ledger. In the base
   case the run goes `needs_user`; in an explore case it carries on to the next
   case.
@@ -305,12 +347,14 @@ caps them:
 | Agent rounds (L1 + L2 + explore proposals) | 6 | 20 (= `goals.MAX_ROUNDS`) | `needs_user` |
 | Wall time | 8 h | 72 h | `paused`; the envelope expires |
 | Model output tokens | 200 k (budget.py session cap) | 1 M | `needs_user` |
-| Research cost | profile, e.g. $2 | owner value, see open question 1 | research stops; the stage goes on without it |
+| Research cost | €2 (pending owner) | €10 (pending owner) | research stops; the stage goes on without it |
 | Cases | 4 | 4 (AI-558) | refused at proposal |
 
 `used` is counted by harness code: the solve queue for solves, budget.py for
 tokens, the provider usage for research cost. It is never counted from model
-claims.
+claims. The tool-error kinds the harness adds (`invalid_envelope`,
+`run_stale`, `run_not_runnable`, …) go in a `tool-error-kinds.d` fragment once
+#798 lands (GK B).
 
 ### 6.6 The server-side runner (G2; absorbs live-voice 10's resumable advancement)
 
@@ -330,13 +374,43 @@ claims.
 - **Wake-ups**: a job settling (the `continuation.follow_job` callback), a card
   decision, a user resume, a research confirmation, or a timer tick (60 s). The
   runner wakes on these; it does not poll the model.
-- **Explicit context**: the runner never uses `PyPSAService.get_active_context`.
+- **Explicit context** (GK B, B1 settled as option b): the runner never uses
+  `PyPSAService.get_active_context`.
   - It resolves the run's project as `services/study/runner.py` does:
-    `hydrate_or_adopt`, `mutation_lock` then `solver_state_lock`,
-    contextvars-bound request context.
-  - `assistant_tasks._authority` gains a way to take this explicit context, with
-    the same ACL check as the run's owner. ACL is re-checked on every tick, and
-    a revoked permission stops the run (SC-07, SC-16).
+    `hydrate_or_adopt` (`services/pypsa_service.py:1325`), `mutation_lock`
+    then `solver_state_lock`, and the context bound through `contextvars`.
+  - **Adopt means a shared context.** When the project is open in the
+    foreground, `hydrate_or_adopt` adopts the same context, so the user and the
+    runner edit one network. The run therefore holds the project's edit lock
+    (`routers/projects.py:972` `_check_project_lock`, 409 `project_locked`)
+    for its mutating stages. A foreground edit is refused with "a harness run is
+    editing this project" rather than racing the runner. The foreign-drift pause
+    (§7) stays as the backstop.
+  - **Acting user**: the runner sets `_ACTING_USER_ID` to the run owner, so
+    `chat_tools._acting()` (`services/chat_tools.py:4840`) resolves the owner,
+    not the request user or no user. ACL is re-checked at each dispatch, and a
+    revoked permission stops the run (SC-07, SC-16).
+  - **Each dispatch re-resolves the project by uuid** and refuses on a
+    mismatch.
+  - **Bound-context completeness**: every tool and DISPATCHER in a stage's
+    subset must resolve the project through the bound context, not through
+    module state that ignores it. Issue 01 confirms each row of this sweep
+    with a test before that tool joins a stage subset, and a tool that fails
+    stays out:
+
+    | Global | Where | Disposition |
+    |---|---|---|
+    | `_user_ts`, `_user_ts_meta` (`_Active*` proxies) | `services/user_timeseries.py:139, 210` | must read the bound context; a test writes a series from the runner and asserts it lands in the run's project only |
+    | dirty state and autosave | `services/dirty_state.py` (reads the active context) | resolve through the bound context; a runner write marks the run's project dirty, never the foreground's |
+    | change log | `services/change_log_service.py:60` `_active_org_id` | org from the bound context; rows carry the run's task id |
+    | undo | `services/network_undo.py` | runner edits go on the run's project's undo stack; the hand-off revert uses the change ledger, not undo |
+    | `chat_tools.chat_session()` | `services/chat_tools.py:6078` | returns the runner-owned session `run:<task_id>` inside a run |
+    | `_acting()` / `_acting_session` | `services/chat_tools.py:4840, 4890` | the run owner, as above |
+    | `_ActiveStateProxy` | `routers/simulation.py:270` | the solve path takes the bound context, as the B4.3 background-solve path does |
+
+  - Tests (issues 01 and 02): a foreground switch mid-stage leaves the runner's
+    writes in its own project and the foreground's in the foreground; a
+    foreground PUT during a mutating stage gets 409 with no lost write.
 - **Deterministic steps** go through the same dispatch path as an offered tool
   call:
   - `admit` → `begin_step` → the confirmation gate (envelope `policy` or a
@@ -376,8 +450,9 @@ claims.
   - In-app: an attention record (`harness/attention.py`) that the companion
     shows on the plan card. Opening it opens the companion on the run.
   - Email: `email_service.send_email` when the deployment is configured
-    (`get_status`) and the user opted in on the envelope. The email carries the
-    project name, the run title, the state and a link. It never carries values,
+    (`get_status`) and the user opted in on the envelope. The text is built by
+    the server, never by the model: the project name, the run title, the state
+    and a link. It never carries values (research-sourced ones least of all),
     tokens or secrets. At most one email per state change and at most 10 per
     run.
 - **Live-voice 10's share** (SH-FOLD-1):
@@ -408,14 +483,16 @@ Envelope = {
   "id", "task_id", "project_id", "owner_id", "version": 1,
   "granted_at", "expires_at",                  # ≤ granted_at + wall_time, hard cap 72 h
   "fingerprint": "<project input fingerprint at grant>",
+  "chain": [{"after_change": change_id, "fingerprint"}],   # freshness chain (B2)
   "profile": "eh_site@1",
   "edits":  [{"tool": "<catalogue write tool>",
               "target": {"component": "Generator|StorageUnit|…", "name": "glob", "attr": "p_nom_max|…"},
-              "bounds": {"min"?, "max"?, "rel"?: 0.5}}],      # rel: ±50 % of the value at grant
+              "bounds": {"min"?, "max"?, "rel"?: 0.5},       # absolute, or ±rel of the value AT GRANT
+              "at_grant": <value recorded at grant>}],      # never relative to the current value (B2)
   "runs":   [{"tool": "run_simulation|solve_queue_enqueue|run_sensitivity_sweep|run_eh_study|…",
               "kind"?: "lopf|ac_pf|…"}],
   "budget": Budget,                            # §6.5
-  "research": {"allowed": bool, "cost_cap_usd": float},
+  "research": {"allowed": bool, "cost_cap_eur": float},
   "notify":  {"email": bool},
   "state":  "proposed" | "granted" | "expired" | "revoked" | "exhausted",
   "audit":  [{"at", "event": "granted|used|refused|expired|revoked", "call_id"?, "tool"?, "reason"?}]
@@ -427,11 +504,14 @@ Envelope = {
 - The intake turn proposes the envelope from the profile: each profile lists
   the edits and runs its stages need (§9).
 - The user sees it on the plan-review card and grants it with one click. That
-  click is a card decision, recorded through `approvals.decided` like any card.
+  click is a card decision, recorded through `approvals.decided(by="user")`
+  with the envelope id.
   So README contract 6 holds: a card was clicked, and it named everything the
   grant covers.
 - The user can narrow the envelope before granting (remove an edit, lower a
-  budget), but never widen it past the profile's list.
+  budget), but never widen it past the profile's list. Edits may name only the
+  profile's `tunable` attrs (§6.0).
+- The envelope binds owner, project uuid and task id.
 - "Step by step" grants nothing and keeps COP-1 exactly.
 
 ### Use
@@ -443,7 +523,14 @@ Envelope = {
   3. its tier is not `destructive`;
   4. it is a native call: not external, MCP or unknown (`UNKNOWN_TOOL_TIER`);
   5. the envelope is `granted`, not expired, with budget left;
-  6. ACL and lock are unchanged since the grant.
+  6. it is the run's project (uuid), the owner still has the ACL, and no other
+     user holds the edit lock;
+  7. the project fingerprint equals the last link of the freshness chain:
+     the fingerprint at grant, then the one after each ledgered change. Any
+     other drift (a user edit, another session) pauses the run. An unreadable
+     fingerprint counts as drift (fail closed; the SC-11 analogue).
+
+  Admission is re-checked at every dispatch. Nothing is cached from the grant.
 - A match is recorded as `approvals.decided(..., by="envelope:<id>")` plus an
   audit row `used`, and the call runs: this is the `policy` path, which
   "still needs a durable approval record", and fails closed when it cannot be
@@ -454,7 +541,11 @@ Envelope = {
 
 | Can grant | Cannot grant (always a card, or refused) |
 |---|---|
-| Listed edits within bounds; listed runs; solves up to the budget; crossing stage boundaries (COP-1 card boundaries) inside the run | `destructive`-tier tools (delete, overwrite, publish); external or MCP calls; unknown tools; edits outside the list or bounds; grid-code limits and gate rules; creating or deleting projects other than the run's own setup; writing a researched value into the model (SH-RESEARCH-1, always confirmed); anything after expiry, revocation, an ACL change, or `brief_stale` |
+| Listed edits within bounds; listed runs; solves up to the budget; crossing stage boundaries (COP-1 card boundaries) inside the run | `destructive`-tier tools (delete, overwrite, publish); grid-code publish (always its own card, because others rely on the publication); external or MCP calls; unknown tools; edits outside the list or bounds; anything in §6.0; creating or deleting projects other than the run's own setup; writing a researched value into the model, including `ledger.apply_user_row` from a research value (SH-RESEARCH-1, always confirmed); anything after expiry, revocation, an ACL change, a project mismatch, foreign drift or `brief_stale` |
+
+Issue 03's acceptance criteria are this refusal matrix, one test per row:
+destructive tier, delete, MCP/external, unknown tool, outside the entry, out
+of bounds, expired, revoked, ACL loss, wrong project, foreign drift.
 
 ### Scope and audit
 
@@ -477,15 +568,23 @@ Envelope = {
   turns never see it.
   - A provider without web search marks the research step `not_available`, and
     the stage goes on with the Library and template defaults, listed as a gap.
+- **Isolation** (GK B, B3):
+  - research turns get a read-only tool subset plus the source-ledger write;
+  - no envelope admission applies inside them, so a research turn cannot call
+    `update_component` even when the envelope would allow it (issue 09 tests
+    this);
+  - fetched content is untrusted data: the prompt frames it as data, and
+    nothing in it can widen the tool subset.
 - **When research may run**:
   - in stage 2 for a gap the profile marks `researchable` (for example the
     tariff level, a fuel price, an electrolyser CAPEX range, a grid-code
     reference that the user still enters themselves);
   - in stage 6 for the sourced ranges of a case;
   - never in a loop round, never in chat.
-- **Cost cap**: `envelope.research.cost_cap_usd`. It is counted from provider
-  usage (search calls plus tokens of the research turns). At the cap, research
-  stops and the remaining gaps are listed.
+- **Cost cap**: `envelope.research.cost_cap_eur`, metered server-side from
+  provider usage (search calls plus tokens of the research turns), never from
+  the model's count. At the cap, research stops and the remaining gaps are
+  listed. Default €2, hard cap €10: pending the owner (open question 1).
 - **Source ledger**:
 
   ```
@@ -539,8 +638,9 @@ Python callable in the profile action registry, run through the same
 admission, ACL, lock and audit path as a tool, but never offered to the model.
 This is how the runner reaches studies that are GUI-only today without adding
 catalogue tools (TOOLSEL-1). A study the agent should also offer in chat gets
-one catalogue family tool with a `kind` enum, not one tool per study. (This is
-open for GK B, item 2 in §11.)
+one catalogue family tool with a `kind` enum, not one tool per study (GK B,
+option A). Native actions get no bypass: they use the same admission, ACL,
+lock, fingerprint and audit path as the DISPATCHERS.
 
 ### 9.2 Generic defaults (every profile inherits them)
 
@@ -575,7 +675,7 @@ lists what blocks the profile from running unattended end to end today.
 - Result rules: the core rules plus:
   - `adequacy.lole_h_per_year ≤ target_lole_h` (`eh_study`);
   - `kpi.unserved_mwh == 0` in normal operation.
-- Loop: L2 uses the native `run_margin_loop` for the LOLE target, and the agent loop for everything else.
+- Loop: L2 uses an engine loop for the LOLE rule (`run_margin_loop` for a firm-capacity lever, `run_coupling_loop` for an ENS-cap lever; §6.2), and the agent loop for the other rules. The two never run on the same rule.
 - Tunable: candidate `max_mw` (genset, bess, pv), BESS hours. `connection_mw` is the user's to change.
 - Explore: connection size against BESS against genset, ≤4 cases.
 - Chapters: the EH reference design, reliability, investment.
@@ -593,15 +693,15 @@ lists what blocks the profile from running unattended end to end today.
   - `gridspine.poc.count == 1`;
   - `network.frequency == profile.frequency`.
 - Result rules:
-  - `dc.readiness.*` scorecard rows (`grid_readiness_for`: SCR, peak, ramp, flicker, TDD, unbalance, reactive, island) against the project's limits; the chat tool `campus_grid_readiness` already reads them;
+  - `dc.readiness.*` scorecard rows (`grid_readiness_for`: SCR, peak, ramp, flicker, TDD, unbalance, reactive, island), gated by verdict: only `pass` passes, and a pass on assumed inputs is a screening pass (§5). The chat tool `campus_grid_readiness` already reads them;
   - energised ≥ IT load per stage;
   - LOLE ≤ target;
-  - the SAGC studies, all built (DC 09–14 are done) in `gridspine/static/`:
-    - SCR/ESCR (`strength.py`, G4);
-    - PQ: IEEE 519 TDD, unbalance, harmonic impedance (`island_sc_seq.py` and DC 12, G5);
-    - planning contingencies with stage-2 taps and shunts only (`contingency_set.py`, `campus_taps.py`, G6, DC13-SCOPE);
-    - P–V/Q–V margin (`voltage_stability.py`, G7a).
-- Loop: agent L2 only on tunables. Grid-code limits are never tunable.
+  - the studies chosen under SAGC-1 (public SAGC, May 2026, and generic engineering only), built in `gridspine/static/` (DC 09–14 are done):
+    - SCR/ESCR (`strength.py`, G4): screening, never certifying;
+    - PQ: TDD, unbalance, harmonic impedance scan (G5): screening; "within the screening limit", never "meets IEEE 519"; resonance inside the clearance is `warn`;
+    - planning contingencies (`contingency_set.py`, `campus_taps.py`, G6): stage 2 after an outage allows taps and shunts only, and redispatch is not a remedy (DC13-SCOPE);
+    - P–V/Q–V margin (G7a): **deferred, needs an issue**. `gridspine/static/voltage_stability.py` exists, but no pypsa-gui backend module imports it, so it is not a gate fact today (GK A).
+- Loop: agent L2 only on tunables. Nothing in §6.0 is tunable: grid-code limits, fault levels, `eh_poc`/`eh_ibr_mva`, contingency sets, IT load.
 - Tunable: BESS and genset candidates, reactive support (`q` devices), within bounds.
 - Missing for an unattended run:
   - the SAGC studies have no chat tool that starts one; they are read as grid-readiness rows after the campus or gridspine run (`campus_run_study`), and GK A confirms which run produces each;
@@ -618,7 +718,7 @@ lists what blocks the profile from running unattended end to end today.
   - the H2 offtake is met (25 MW) in every hour;
   - electrolyser utilisation within the profile band (warn);
   - LOLE ≤ target with the fuel cell as firm backup.
-- Investment: the IC counterfactual with H2 offtake is impossible today (`.scratch/generic-site/design.md` Q3). The investment rules stay `not_evaluated` with that reason until the engine change lands (GK A).
+- Investment: the IC counterfactual with H2 offtake is impossible today (`.scratch/generic-site/design.md` Q3). It is an IC engine change that needs its own issue (GK A) and is not a gate yet: the investment rules are `warn` and stay `not_evaluated` with that reason. The offtake itself is demand and never tunable (§6.0).
 - Tunable: wind/PV/BESS candidate max, electrolyser and H2 storage size within bounds.
 - Missing: an H2 utilisation fact (no named reader), the IC counterfactual.
 
@@ -627,10 +727,10 @@ lists what blocks the profile from running unattended end to end today.
 - Scope: `_MICROGRID` (island_checks, outage_screening, goal_study, stress, investment_case). Archetype `off_grid`.
 - Input rules: the tie is open (`off_grid`); the critical (hospital) feeder is tagged.
 - Result rules:
-  - island survival (`sustained_h` ≥ target, the frequency judge passes);
+  - island survival by the verdicts of the scorecard's island rows (`sustained_h` from `gridspine/schema/island.py`, the frequency judge);
   - LOLE ≤ target;
   - no SCR rule: SCR means nothing on an island, and the fault level comes from the diesels.
-- Investment baseline: the existing diesel fleet, which is an IC engine change (generic-site Q4). It stays `not_evaluated` until then.
+- Investment baseline: the existing diesel fleet, an IC engine change (generic-site Q4) that needs its own issue (GK A). It is not a gate yet; the rule is `warn`, `not_evaluated` until then.
 - Tunable: battery size and GFM settings within bounds, PV max.
 - Missing: the island tools are the `campus_*` set and their fit for a microgrid project is unverified; the IC baseline.
 
@@ -640,7 +740,8 @@ lists what blocks the profile from running unattended end to end today.
   - `binary_check.status` passes (`services/solver/process_uc.py:351`, automatic after a solve; the `flagged` and `periods` gaps are facts);
   - `nh3_delivery_tpd` ≥ target, with the shortfall shown as grey NH3 or penalty;
   - investment against the grey-NH3 counterfactual.
-- Loop: agent L2 on tunables. The coupling report is a chapter (g2p 13).
+- **Pending g2p 10–13** (GK A): those issues are gated and unbuilt, so the ammonia-specific result gate is marked pending until they land. The coupling report (g2p 13) is a profile chapter then. It is not `run_coupling_loop`, which is the generic LOLE loop (§6.2).
+- Loop: agent L2 on tunables. Process demand and NH3 offtake are never tunable (§6.0).
 - Missing: a chat or native read for the binary check (it is only in the solve result payload); the process-unit form is guided-only (G2P-07).
 
 **eh_ipp_hybrid** (issue 14; GK B for investment/finance)
@@ -659,12 +760,11 @@ lists what blocks the profile from running unattended end to end today.
 - Stages:
   - setup;
   - input gate (core rules);
-  - solve (LOPF, then `run_ac_pf_stage` when the profile asks);
+  - solve (LOPF, then `run_ac_pf_stage`);
   - result gate:
-    - core rules plus `pf.converged`;
-    - voltage within band;
-    - line loading ≤ 100 %, with the proxy labelled;
-    - N-1 optional (warn), when the solver config's `OWNED` option is on.
+    - core rules;
+    - PF convergence, voltage band and loading ≤ 100 % gated **only on AC PF results the engine labels as PF**, never on LOPF values (GK A, ACPF-BUG). Without an AC PF result these rules are `not_evaluated`;
+    - N-1 optional (`warn`), when the solver config's `OWNED` option is on.
 - Explore is skipped by default. Report: the LC-21 network chapters.
 - Tunable: none by default (L2 diagnoses only and goes to `needs_user`).
 
@@ -680,6 +780,7 @@ lists what blocks the profile from running unattended end to end today.
 
 ## 10. Placement (UX-flow: one entry point)
 
+- **Stage names** (the user's words; the ids stay internal): 0 Brief · 1 Set up · 2 Inputs · 3 Check inputs · 4 Solve · 5 Check results · 6 Explore options · 7 Report · 8 Hand-off.
 - **Start**: the companion composer. The user states the goal, as in LC-23.
   There is no new Start button, and the hubDesign Start card is unchanged.
 - **Approve**: the existing plan-review Choice card gains an **Envelope**
@@ -701,22 +802,31 @@ lists what blocks the profile from running unattended end to end today.
 - **Report**: LC-21 chapters in the Reports panel. The plan card's last row
   links there.
 
-The UX reviewer's placement verdict is recorded in issue 08.
+UX verdict (28 Oct): GO on placement. Issue 08 carries its eight conditions:
+both modes with a screenshot per state, plain-word envelope with units, exactly
+three verdicts with a disabled reason, what Stop keeps, today's Confirmation
+card for anything off-envelope, no automatic panel switch (`withReturnFrom`,
+`withReturn`), wording rules, and failure states in words with a "›" fix.
 
 ## 11. Open questions
 
-1. **Research cost cap default** (owner): $2 per run with a $10 hard cap is
-   proposed. The owner chose a cap but no value.
-2. **GK B**:
-   - native actions plus one family tool for guided-only studies, or separate
-     chat tools;
-   - LC-20 as a new read tool, or a `checks` argument on an existing results
-     read.
-3. **GK A**:
-   - which engine facts can be gated on today, and which need an engine issue
-     first;
-   - `run_margin_loop`/`run_coupling_loop` as the native L2 for LOLE targets;
-   - which rules the agent must never tune.
+1. **Research cost cap default** (owner, asked 28 Oct): €2 per run with a
+   €10 hard cap is proposed. The owner chose a cap but no value.
+2. **LC-20's user-facing read** (GK B, in issue 05): a new read tool, or a
+   `checks` argument on an existing results read.
+
+Settled at plan review (28 Oct):
+- Guided-only studies: option A, native actions plus at most one family tool
+  later (GK B). Registry actions go through the same admission, ACL, lock,
+  fingerprint and audit path as the DISPATCHERS, with no bypass for profile
+  code. Grid-code publish is never envelope-admissible. The family tool sets
+  its confirmation tier per `kind`. Engine semantics are GK A's.
+- Gateable facts, engine loops and the never-tunable list: GK A (§5, §6.0,
+  §6.2, §9.3).
+- Execution context: option b, the explicit base context (GK B, §6.6).
+- New engine issues needed (GK A), not opened here: P–V/Q–V wiring into the
+  backend, the H2-offtake IC counterfactual, the microgrid diesel-fleet IC
+  baseline.
 
 ## 12. What stays as it is
 

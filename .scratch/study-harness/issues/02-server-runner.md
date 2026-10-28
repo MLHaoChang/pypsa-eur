@@ -11,6 +11,7 @@ Model tier: opus
 Owner decisions: SH-1, SH-FOLD-1, AI-567b
 Absorbs: live-voice 10's resumable task advancement (`.scratch/live-voice/issues/10-cross-domain-experiments.md`, plan step 6; its typed cross-domain adapters stay there)
 Design: [design.md](../design.md) §6.6
+Plan verdict: GK B GO, 28 Oct; B1 = option b (explicit base context)
 
 ## What to build
 
@@ -31,6 +32,10 @@ Design: [design.md](../design.md) §6.6
 - [ ] ACL revoked mid-run → the next tick stops with `task_not_found`/refusal and no effect (SC-07, SC-16).
 - [ ] An attention record is written on `needs_user` and `completed`; email is sent once when configured (outbox test hook), never when not.
 - [ ] `goals.py` behaviour is unchanged (its tests pass).
+- [ ] Foreground switch mid-stage: the runner's writes land only in its project, the foreground's only in the foreground (`_user_ts`, dirty state, change log, undo checked).
+- [ ] A foreground PUT during a mutating stage gets 409 `project_locked` ("a harness run is editing this project") and no write is lost.
+- [ ] `chat_tools._acting()` resolves the run owner inside the runner; each dispatch re-resolves the project by uuid and refuses on a mismatch.
+- [ ] Notification text is server-built; no researched value appears in an email.
 
 ## Likely files
 

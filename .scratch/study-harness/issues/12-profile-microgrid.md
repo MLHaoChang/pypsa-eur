@@ -14,9 +14,9 @@ Design: [design.md](../design.md) §9.3 "eh_microgrid"
 ## What to build
 
 1. Profiles `eh_microgrid@1` and `eh_microgrid_staged@1`: scope `_MICROGRID`, archetype `off_grid`; `SINGLE_YEAR=True` handled at intake (end year after start year).
-2. Island facts: `sustained_h`, frequency judge, critical feeder served; no SCR rule on an island.
+2. Island facts by the verdicts of the scorecard's island rows (`sustained_h` from `gridspine/schema/island.py`, frequency judge), critical feeder served; no SCR rule on an island.
 3. Check the `campus_*` island tools on a microgrid project; where they do not fit, a native action over the island LP; record what was found in Comments.
-4. Diesel-fleet IC baseline rules `not_evaluated` with the reason until the engine change (generic-site Q4).
+4. Diesel-fleet IC baseline: an IC engine change that needs its own issue (GK A); the rule is `warn`, `not_evaluated` with the reason until then.
 
 ## Acceptance criteria
 

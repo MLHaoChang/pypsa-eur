@@ -15,7 +15,7 @@ Design: [design.md](../design.md) §9.3 "eh_h2_hub"
 
 1. Profiles `eh_h2_hub@1` and `eh_h2_hub_staged@1`: scope `_H2_HUB`, archetype `strong_grid`.
 2. Facts: H2 offtake served per hour, electrolyser utilisation (a new reader over the solved network; none exists today), LOLE with the fuel cell as firm backup.
-3. Investment rules `not_evaluated` with the reason "IC counterfactual with H2 offtake not available" until the engine change (generic-site Q3) lands; the report lists it as a gap.
+3. Investment rules `not_evaluated` with the reason "IC counterfactual with H2 offtake not available": an IC engine change that needs its own issue (GK A, generic-site Q3); the report lists it as a gap. Offtake is demand and never tunable.
 4. Tunables: wind/PV/BESS candidate max, electrolyser and H2 storage size within bounds.
 
 ## Acceptance criteria

@@ -10,7 +10,8 @@ Gated: yes (GK B reviews the plan and the PR)
 Model tier: opus
 Owner decisions: SH-1, SH-PILOT-1, SH-FOLD-1, AI-567b, COP-1, TOOLSEL-1
 Absorbs: LC-23 harness core (`.scratch/live-copilot/issues/23-study-copilot.md`; slices 1–2 merged, its brief and checkpoint stay)
-Design: [design.md](../design.md) §3, §4, §5, §9.1, §9.2
+Design: [design.md](../design.md) §3, §4, §5, §6.0, §6.6 (explicit context), §9.1, §9.2
+Plan verdict: GK B GO, 28 Oct; B1–B4 settled in the design
 
 ## What to build
 
@@ -31,6 +32,10 @@ The tracer bullet: one eh_site harness run goes intake → setup → inputs → 
 - [ ] A version-1/2 task file reads unchanged; LC-23 tests SC-01, SC-05–SC-07, SC-11, SC-12 stay green.
 - [ ] Step-limit check: a stage with 25 steps is `invalid_task`; a run with 3 stages × 10 steps is accepted.
 - [ ] The assistant inventory check passes with no new catalogue tool.
+- [ ] B4: the fact registry is closed and versioned; a profile naming an unknown fact is refused at load (test); a fact reading `None` or NaN fails its rule.
+- [ ] §6.0: a profile listing a never-tunable attr (a grid-code limit, `target_lole_h`, IT load) as `tunable` is refused at load (test).
+- [ ] Each rule names the engine row id or function it reads; renaming a fixture row fails a test.
+- [ ] Bound-context sweep (design §6.6 table): each tool in the eh_site stage subsets is shown, by a test, to resolve the project through the bound context; a tool that fails stays out of the subset.
 
 ## Likely files
 
