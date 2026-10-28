@@ -536,10 +536,9 @@ def test_preview_billing_without_a_commercial_config_is_409(client, install_netw
 
 
 def test_preview_billing_is_declared_non_mutating():
-    from pathlib import Path
+    from smoke.assistant_route_parity import load_declarations
 
-    decl = json.loads((Path(__file__).resolve().parents[1] / "smoke"
-                       / "assistant_route_parity_declarations.json").read_text())
+    decl = load_declarations()
     entry = [e for e in decl["non_mutating_routes"]
              if (e["method"], e["path"]) == ("POST", "/api/results/billing/preview")]
     assert len(entry) == 1 and entry[0]["reason"]

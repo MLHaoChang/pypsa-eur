@@ -116,13 +116,16 @@ def _next(task):
     return next((s for s in task["steps"] if s["status"] != "completed"), None)
 
 
-def _check_brief(brief, ids):
-    """The brief labels the steps; it grants nothing and adds no step."""
+def _check_brief(brief, ids, phased=True):
+    """The brief labels the steps; it grants nothing and adds no step. A
+    harness run's brief has no phases: its stages replace them."""
     def bad(message):
         _refuse("invalid_brief", message, 422)
-    if not isinstance(brief, dict) or not {"objective", "cards", "phases"} <= set(brief) <= {"objective", "cards", "cases", "phases"}:
-        bad("A brief has objective, cards, phases and optional cases.")
-    objective, cards, cases, phases = brief["objective"], brief["cards"], brief.get("cases", []), brief["phases"]
+    keys = {"objective", "cards"} | ({"phases"} if phased else set())
+    if not isinstance(brief, dict) or not keys <= set(brief) <= keys | {"cases"}:
+        bad("A brief has objective, cards, phases and optional cases." if phased else
+            "A run's brief has objective, cards and optional cases; its stages replace phases.")
+    objective, cards, cases, phases = brief["objective"], brief["cards"], brief.get("cases", []), brief.get("phases")
     if not isinstance(objective, str) or not 1 <= len(objective.strip()) <= 240:
         bad("State the objective in 1–240 characters.")
     if not isinstance(cards, list) or not 1 <= len(cards) <= len(CARDS) or len(set(cards)) != len(cards) \
@@ -134,15 +137,17 @@ def _check_brief(brief, ids):
             or not (c.get("experiment") is None or isinstance(c["experiment"], str) and len(c["experiment"]) <= 64)
             for c in cases):
         bad("Name at most 8 cases (1–60 characters each).")
+    out = {"objective": objective.strip(), "cards": list(cards),
+           "cases": [{"name": c["name"].strip(), "experiment": c.get("experiment")} for c in cases]}
+    if not phased:
+        return out
     if not isinstance(phases, list) or not phases or any(
             not isinstance(p, dict) or set(p) != {"card", "steps"} or p["card"] not in cards
             or not isinstance(p["steps"], list) or not p["steps"] for p in phases):
         bad("Each phase names one declared card and its steps.")
     if [step for phase in phases for step in phase["steps"]] != ids:
         bad("Phases must cover every step once, in step order.")
-    return {"objective": objective.strip(), "cards": list(cards),
-            "cases": [{"name": c["name"].strip(), "experiment": c.get("experiment")} for c in cases],
-            "phases": [{"card": p["card"], "steps": list(p["steps"])} for p in phases]}
+    return {**out, "phases": [{"card": p["card"], "steps": list(p["steps"])} for p in phases]}
 
 
 def _check_runnable(brief, steps):
@@ -189,7 +194,7 @@ def _card_of(task, step_id):
 def _pause_at_boundary(task, step):
     """COP-1: a plan going on to another card waits for the user's Continue."""
     following = _next(task)
-    if task.get("brief") and task["status"] == "ready" and following is not None \
+    if task.get("brief") and not task.get("run") and task["status"] == "ready" and following is not None \
             and step["status"] == "completed" and _card_of(task, step["id"]) != _card_of(task, following["id"]):
         task["status"] = "paused_at_card"
         task["pause"] = {"card": _card_of(task, following["id"]), "after": step["id"]}
@@ -228,7 +233,15 @@ def _view(task, fresh=False, current=None):
         if (s.get("job") or {}).get("cases"):
             entry["cases"] = s["job"]["cases"]  # LC-17: each case's outcome and a failed one's cause
     brief = task.get("brief")
-    if brief:
+    if task.get("run"):
+        out["run"] = _run_view(task)
+        out["brief"] = {"objective": brief["objective"], "cards": brief["cards"], "cases": [c["name"] for c in brief["cases"]]}
+        out["steps"] = [dict(e, limit=_limit(e["tool"])) for e in out["steps"] if e["id"].startswith(task["run"]["stage"] + ".")]
+        if state == "paused_at_card":
+            out["paused_at_card"] = task["pause"]["card"]
+        if fresh and _stale(task, current):
+            out["brief_stale"] = "inputs_changed_outside_plan"
+    elif brief:
         for entry in out["steps"]:
             entry["limit"] = _limit(entry["tool"])
         # Condensed: the current phase's steps; the other phases as counts.
@@ -268,7 +281,11 @@ def _view(task, fresh=False, current=None):
                and isinstance(s["result"]["_edit_receipt"].get("says"), str)]
     if changes:
         out["changes"] = changes
+    run = task.get("run") or {}
     out["note"] = ("Wait for the job; the conversation continues when it ends." if state == "waiting_job" else
+                   f"The {run['stage']} gate failed: tell the user which rules failed and their facts; "
+                   "the run goes on only after the user fixes the inputs and resumes it." if run.get("status") == "needs_user" else
+                   "The run reached hand-off; read back its results for the user." if run.get("status") == "completed" else
                    f"Paused before the {task['pause']['card']} card; the user continues from the plan card." if state == "paused_at_card" else
                    "The inputs changed outside this plan; draft a new brief for the user to review." if out.get("brief_stale") else
                    "Execute next_step as an ordinary offered tool call. Cancel stops future steps, not running jobs.")
@@ -278,7 +295,29 @@ def _view(task, fresh=False, current=None):
     return out
 
 
-def start_task(title: str, steps: list[dict], request_id: str, brief: dict | None = None) -> dict:
+def _check_run(run, steps, brief):
+    """A harness run (study harness issue 01): its profile's stages make the
+    steps, so the caller passes none, and the brief has no phases."""
+    from services import run_profiles
+    if not isinstance(run, dict) or set(run) != {"profile", "mode"}:
+        _refuse("invalid_task", "A run names its profile and mode.", 422)
+    if run["mode"] != "stepwise":
+        _refuse("invalid_task", "Runs are step-by-step for now: every write and run has its own card.", 422)
+    try:
+        profile = run_profiles.resolve(run["profile"])
+    except run_profiles.ProfileError as exc:
+        _refuse("invalid_task", str(exc)[:300], 422)
+    if steps != []:
+        _refuse("invalid_task", "A run's steps come from its profile's stages; pass steps as [].", 422)
+    if brief is None:
+        _refuse("invalid_brief", "A run starts from the brief the user reviewed.", 422)
+    brief = _check_brief(brief, [], phased=False)
+    _check_runnable(brief, [])
+    return profile, brief
+
+
+def start_task(title: str, steps: list[dict], request_id: str, brief: dict | None = None,
+               run: dict | None = None) -> dict:
     from harness.catalogue import TOOLS
     from harness.loop import PROJECT_REBINDING_TOOLS
     from services import chat_tools
@@ -287,6 +326,8 @@ def start_task(title: str, steps: list[dict], request_id: str, brief: dict | Non
         _refuse("no_chat_session", "Starting a task requires a chat session.")
     if not isinstance(title, str) or not 1 <= len(title.strip()) <= 120 or not isinstance(request_id, str) or not 1 <= len(request_id) <= 64:
         _refuse("invalid_task", "Provide a title and a stable request_id (maximum 64 characters).", 422)
+    if run is not None:
+        return _start_run(session, title, request_id, run, *_check_run(run, steps, brief))
     most, chars = _LIMITS[brief is not None]
     if not isinstance(steps, list) or not 1 <= len(steps) <= most:
         _refuse("invalid_task", f"A {'study brief' if brief is not None else 'task'} needs 1–{most} ordered steps; "
@@ -347,10 +388,199 @@ def start_task(title: str, steps: list[dict], request_id: str, brief: dict | Non
         return _view(task)
 
 
+# ── Harness runs (study harness issue 01): version 3 adds the `run` block ────
+# The run block is written only here, by harness code: the stage on entry,
+# its steps from the profile, and the gate from native facts. No tool
+# argument writes it, so a caller-supplied result never passes a gate (SC-12).
+
+
+def _now():
+    from datetime import UTC, datetime
+    return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def _done(task):
+    """No step left, and for a run, the run completed (its gate passed)."""
+    return not _next(task) and not task.get("run")
+
+
+def _next_stage(run, name):
+    from services.run_profiles import STAGES
+    return next((s for s in STAGES[STAGES.index(name) + 1:] if run["stages"][s]["status"] != "skipped"), None)
+
+
+def _start_run(session, title, request_id, run, profile, brief):
+    root, project, owner = _authority()
+    task_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{project}:{owner}:{request_id}"))
+    path = root / "assistant_tasks" / (task_id + ".json")
+    with _LOCK:
+        if path.exists():
+            _, task = _read(task_id)
+            if {k: (task.get("run") or {}).get(k) for k in ("profile", "mode")} != run \
+                    or task["title"] != title.strip() or task.get("brief") != brief:
+                _refuse("task_request_conflict", "This request_id already identifies a different plan.")
+        else:
+            fingerprint = _fingerprint()
+            if fingerprint is None:
+                _refuse("brief_inputs_unreadable", "The project's inputs cannot be read, so the brief cannot be kept current.")
+            stages = {name: {"status": "skipped", "reason": stage["skip"]} if "skip" in stage else
+                      {"status": "pending", "attempts": 0} for name, stage in profile["stages"].items()}
+            task = {"version": 3, "task_id": task_id, "owner_id": owner, "project_id": project,
+                    "title": title.strip(), "status": "ready", "steps": [], "brief": brief, "fingerprint": fingerprint,
+                    "run": {**run, "status": "running", "stage": "intake", "stages": stages}}
+            _save(path, task)
+        session.task_id = task_id
+    _advance_run(path)
+    with _LOCK:
+        return _view(_read(task_id)[1])
+
+
+def _may_write(task):
+    """Only a caller that may edit the run's project (ACL, and no other
+    user's edit lock) writes its run block (GK B)."""
+    from routers.projects import _check_project_lock
+    from services import chat_tools, project_registry
+    try:
+        with chat_tools._acting() as (db, user):
+            _check_project_lock(db, project_registry.resolve_project(db, user, task["project_id"]), user)
+            return True
+    except HTTPException:
+        return False
+
+
+def _gate_now(task, rules, ctx):
+    """The stage's gate from native facts, on the run's own project's context."""
+    from services import chat_tools, project_registry, run_gates
+    try:
+        with chat_tools._acting() as (db, user):
+            project = project_registry.resolve_project(db, user, task["project_id"])
+            return run_gates.gate(rules, run_gates.Env(task=task, ctx=ctx, project=project,
+                                                       project_dir=project_registry.project_dir(project)))
+    except HTTPException:  # the project cannot be resolved: no fact is evidence
+        return run_gates.gate(rules, run_gates.Env(task=task, ctx=None, project=None, project_dir=None))
+
+
+def _inputs_moved(task, current):
+    """B1 (GK B): before a stage's write or run step, the input gate must still
+    describe the inputs: its fingerprint against the current one."""
+    run = task["run"]
+    stage = run["stage"]
+    gate = (run["stages"].get("input_gate") or {}).get("gate")
+    pending = [s for s in task["steps"] if s["id"].startswith(stage + ".") and s["status"] == "pending"]
+    return (stage != "input_gate" and run["stages"].get("input_gate", {}).get("status") == "passed"
+            and gate is not None and any(_effectful(s["tool"]) for s in pending) and gate["fingerprint"] != current)
+
+
+def _back_to_input_gate(task):
+    """The input gate is checked again: later stages' unstarted steps go, and
+    those stages are entered afresh once it passes."""
+    from services.run_profiles import STAGES
+    run = task["run"]
+    later = STAGES[STAGES.index("input_gate") + 1:]
+    task["steps"] = [s for s in task["steps"] if not (s["status"] == "pending" and s["id"].split(".")[0] in later)]
+    for name in later:
+        if run["stages"][name]["status"] == "active" and not any(
+                s["id"].startswith(name + ".") for s in task["steps"]):
+            run["stages"][name] = {"status": "pending", "attempts": run["stages"][name]["attempts"]}
+    run["stage"] = "input_gate"
+    run["stages"]["input_gate"]["status"] = "active"
+    task.pop("pause", None)
+    if task["status"] == "paused_at_card":
+        task["status"] = "ready"
+
+
+def _advance_run(path, ctx=None):
+    """Enter the run's stage, or evaluate its gate once its steps completed.
+
+    Gates read the network, so they are evaluated outside the task lock and
+    written only if (stage, attempts, fingerprint) did not move meanwhile; a
+    caller that may not edit the project writes nothing (`gate_due`)."""
+    from services import flow_service, run_gates, run_profiles
+    ctx = ctx or PyPSAService.get_active_context()
+    for _ in range(2 * len(run_profiles.STAGES)):
+        with _LOCK:
+            task = json.loads(Path(path).read_text())
+            run = task.get("run")
+            if not run or run["status"] != "running" or task["status"] in ("cancelled", "completed", "paused_at_card"):
+                return
+            if str(ctx.project_uuid) != task["project_id"] or not _may_write(task):
+                return  # another project's context, or no edit right: the view shows the gate as due
+            profile = run_profiles.resolve(run["profile"])
+            name = run["stage"]
+            stage = run["stages"][name]
+            if stage["status"] == "pending":
+                steps = run_profiles.materialise(profile, name, task["project_id"])
+                stage.update(status="active", entered_at=_now())
+                task["steps"].extend(steps)
+                if any(_effectful(s["tool"]) for s in steps):
+                    # COP-1: the plan pauses before each stage that writes or runs.
+                    task["status"], task["pause"] = "paused_at_card", {"card": name, "after": None}
+                _save(path, task)
+                if steps:
+                    return
+            if stage["status"] == "active" and _inputs_moved(task, run_gates.fingerprint(ctx)):
+                _back_to_input_gate(task)
+                _save(path, task)
+                name, stage = "input_gate", run["stages"]["input_gate"]
+            if stage["status"] != "active" or any(
+                    s["status"] != "completed" for s in task["steps"] if s["id"].startswith(name + ".")):
+                return
+            attempts = stage["attempts"]
+        gate = _gate_now(task, profile["stages"][name]["rules"], ctx)
+        with _LOCK:
+            task = json.loads(Path(path).read_text())
+            run = task["run"]
+            stage = run["stages"][name]
+            if run["status"] != "running" or run["stage"] != name or stage["status"] != "active" \
+                    or stage["attempts"] != attempts or task["status"] in ("cancelled", "completed") \
+                    or (gate["fingerprint"] is not None and run_gates.fingerprint(ctx) != gate["fingerprint"]):
+                continue  # the run or its inputs moved while the gate was read: look again
+            stage["attempts"], stage["gate"] = attempts + 1, gate
+            following = _next_stage(run, name)
+            if not gate["passed"]:
+                stage["status"], run["status"], task["status"] = "failed", "needs_user", "needs_review"
+            else:
+                stage.update(status="passed", exited_at=_now())
+                if name == "setup":
+                    run["scope"] = run_profiles.scope_for(flow_service.read_template(path.parent.parent))
+                if following is None:
+                    run["status"], task["status"] = "completed", "completed"
+                else:
+                    run["stage"] = following
+            _save(path, task)
+            if run["status"] != "running":
+                return
+
+
+def _run_view(task):
+    run = task["run"]
+    stages = []
+    for name, stage in run["stages"].items():
+        entry = {"stage": name, "status": stage["status"]}
+        if stage.get("reason"):
+            entry["reason"] = stage["reason"]
+        if stage.get("gate"):
+            entry["gate"] = [{"rule": r["rule"], "verdict": r["verdict"], "fact": r["facts"][0]["fact"],
+                              "value": r["facts"][0]["value"],
+                              **({"unit": r["facts"][0]["unit"]} if r["facts"][0]["unit"] else {}),
+                              **({"reason": r["reason"]} if r.get("reason") else {})} for r in stage["gate"]["rules"]]
+        stages.append(entry)
+    due = run["status"] == "running" and run["stages"][run["stage"]]["status"] == "active" and all(
+        s["status"] == "completed" for s in task["steps"] if s["id"].startswith(run["stage"] + "."))
+    return {"profile": run["profile"], "mode": run["mode"], "status": run["status"], "stage": run["stage"],
+            **({"gate_due": True} if due else {}),
+            "next_stage": _next_stage(run, run["stage"]), "scope": (run.get("scope") or {}).get("preset"),
+            "stages": stages}
+
+
 def get_task(task_id: str) -> dict:
     with _LOCK:
-        _, task = _read(task_id)
-        return _view(task, fresh=True)
+        path, task = _read(task_id)
+    if task.get("run"):
+        _advance_run(path)
+        with _LOCK:
+            _, task = _read(task_id)
+    return _view(task, fresh=True)
 
 
 def resume_task(task_id: str) -> dict:
@@ -375,8 +605,18 @@ def resume_task(task_id: str) -> dict:
             step["status"] = "failed" if _retryable_read(step["tool"]) else "uncertain"
             task["status"] = "ready" if step["status"] == "failed" else "needs_review"
             _save(path, task)
+        run = task.get("run")
+        if run and run["status"] == "needs_user" and run["stages"][run["stage"]]["status"] == "failed":
+            # The user fixed the inputs: the harness checks the same gate again
+            # from native facts (attempts + 1); nothing the caller says reaches it.
+            run["status"], run["stages"][run["stage"]]["status"], task["status"] = "running", "active", "ready"
+            _save(path, task)
         session.task_id = task_id
-        return _view(task, fresh=True)
+    if task.get("run"):
+        _advance_run(path)
+        with _LOCK:
+            _, task = _read(task_id)
+    return _view(task, fresh=True)
 
 
 def cancel_task(task_id: str) -> dict:
@@ -385,6 +625,8 @@ def cancel_task(task_id: str) -> dict:
         path, task = _read(task_id)
         if task["status"] != "completed":
             task["status"] = "cancelled"
+            if task.get("run"):
+                task["run"]["status"] = "cancelled"
             for step in task["steps"]:
                 if step.get("job", {}).get("continuation") in ("armed", "due"):
                     step["job"]["continuation"] = "withdrawn"  # never after a cancel
@@ -408,7 +650,9 @@ def continue_at_card(session, task_id):
         task["status"] = "ready"
         _save(path, task)
         session.task_id = task_id
-        return f"Continue to the {card} card (plan: {task['title']})"
+    if task.get("run"):
+        _advance_run(path)  # inputs edited during the pause: the input gate is checked again first
+    return f"Continue to the {card} card (plan: {task['title']})"
 
 
 def resolve_task_step(task_id: str, outcome: str, result: dict | None = None) -> dict:
@@ -448,13 +692,17 @@ def resolve_task_step(task_id: str, outcome: str, result: dict | None = None) ->
             step.pop("result", None)
         for key in ("error", "late_receipt", "receipt"):
             step.pop(key, None)
-        task["status"] = "ready" if _next(task) else "completed"
+        task["status"] = "completed" if _done(task) else "ready"
         _pause_at_boundary(task, step)
         # The chain never advances on a reconcile: nothing tells the step's own
         # effect from other edits made since it went uncertain, so inputs that
         # differ now read stale and the user reviews a new brief (fail closed).
         _save(path, task)
-        return _view(task, fresh=True)
+    if task.get("run"):  # the gate reads native facts; `result` never reaches it
+        _advance_run(path)
+        with _LOCK:
+            _, task = _read(task_id)
+    return _view(task, fresh=True)
 
 
 def _native_evidence(path, task, step):
@@ -601,8 +849,8 @@ def _settle(task, step, native_status, step_status, result):
     stopped = cancelled or native_status == "aborted" or step["job"]["continuation"] == "withdrawn"
     step["job"]["continuation"] = "withdrawn" if stopped else "due"
     if not cancelled:
-        task["status"] = ("completed" if not _next(task) else
-                          "needs_review" if step_status == "uncertain" else "ready")
+        task["status"] = ("needs_review" if step_status == "uncertain" else
+                          "completed" if _done(task) else "ready")
         _pause_at_boundary(task, step)
 
 
@@ -667,8 +915,9 @@ def due_continuations(session):
 def _continuation_message(task, job):
     # The plan's title carries the request's words, so the turn is offered the
     # tools its remaining steps need (the 128-tool selection reads the message).
+    from harness.run_lifecycle import continuation_note
     cases = "".join(f"; {c.get('name') or c.get('project_id')}: {c['status']}" for c in job.get("cases") or [])
-    return f"job {job['job_id']} finished: {job['outcome']} (plan: {task['title']}){cases}"
+    return f"job {job['job_id']} finished: {job['outcome']} (plan: {task['title']}){cases}{continuation_note(job['outcome'])}"
 
 
 def dismiss_continuation(session, job_id):
@@ -739,8 +988,8 @@ def begin_step(session, tool, args):
             session.task_id = None
             return None
         step = _next(task)
-        expected = _resolve(step["args"], task["steps"]) if step["tool"] == tool else None
-        if step["tool"] != tool or not _same_args(tool, expected, args):
+        expected = _resolve(step["args"], task["steps"]) if step and step["tool"] == tool else None
+        if step is None or step["tool"] != tool or not _same_args(tool, expected, args):  # a run at a failed gate has none
             # Discovery and unrelated reads remain useful while a task is paused.
             for done in task["steps"]:
                 if done["status"] == "completed" and done["tool"] == tool and _same_args(tool, _resolve(done["args"], task["steps"]), args):
@@ -813,6 +1062,11 @@ def finish_step(ticket, result=None, error=None):
         if step.get("job"):
             return _view(task)  # waiting on its job, or already settled by it
         step["status"], message = _outcome(step["tool"], result, error)
+        if task.get("run") and error is None and _retryable_read(step["tool"]):
+            # A run's read step is done once it returned: what it found (an
+            # `ok: false` validation) is the stage gate's to judge, from its
+            # own native read (fail closed there, not here).
+            step["status"], message = "completed", None
         receipt = result.get("_edit_receipt") if isinstance(result, dict) else None
         if message:
             step["error"] = message
@@ -828,10 +1082,14 @@ def finish_step(ticket, result=None, error=None):
             if current:
                 task["fingerprint"] = current  # the chain's next link (SC-11)
         if task["status"] != "cancelled":
-            task["status"] = "completed" if not _next(task) else "needs_review" if step["status"] == "uncertain" else "ready"
+            task["status"] = "needs_review" if step["status"] == "uncertain" else "completed" if _done(task) else "ready"
             _pause_at_boundary(task, step)
         _save(path, task)
-        return _view(task, current=current)
+    if task.get("run"):
+        _advance_run(path)
+        with _LOCK:
+            _, task = _read(ticket[0])
+    return _view(task, current=current)
 
 
 def list_tasks(limit: int = 10) -> dict:
@@ -900,7 +1158,10 @@ def _late_receipt(path, ticket, result):
 
 
 def _same_args(tool, first, second):
+    from harness.run_lifecycle import FLAG
     from services import chat_tools
+    # LC-19: the re-run flag acknowledges current results; it is not an input.
+    first, second = ({k: v for k, v in args.items() if k != FLAG} for args in (first, second))
     try:
         signature = inspect.signature(chat_tools.DISPATCHERS[tool])
         a, b = signature.bind(**first), signature.bind(**second)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 from numbers import Real
 import os
@@ -17,6 +18,8 @@ from harness.durable import network_guard, transaction
 from services import project_registry
 from services.pypsa_service import PyPSAService
 
+logger = logging.getLogger(__name__)
+
 MAX_RECORDS = 512
 RETENTION_SECONDS = 24 * 60 * 60
 # Deliberately narrow: these are static configured inputs, not solved outputs.
@@ -28,6 +31,17 @@ INPUT_METRICS = {
     "StorageUnit": {"p_nom": "MW"},
     "Store": {"e_nom": "MWh"},
 }
+
+# get_timeseries (component accessor, attribute) -> (component class, unit).
+SERIES_METRICS = {
+    ("loads", "p_set"): ("Load", "MW"),
+    ("generators", "p_max_pu"): ("Generator", "p.u."),
+}
+# Larger series are refused before the handler. A step's fact carries the
+# name twice, so the facts' encoded size is bounded too, under save()'s
+# 128 KiB record cap with room for the rest of the record.
+MAX_SERIES_POINTS = 744
+MAX_SERIES_FACT_BYTES = 120 * 1024
 
 
 def digest(value):
@@ -138,6 +152,20 @@ def save(record, record_id):
                     os.close(fd)
         finally:
             temp.unlink(missing_ok=True)
+
+
+def discard(owner, record_id):
+    """Remove a record just saved by a commit whose access was revoked meanwhile.
+
+    A missing file is fine. A file that cannot be removed is logged by id and
+    left: load() re-checks project access, so it still reads as unknown.
+    """
+    path = _path(owner, record_id)
+    try:
+        with transaction(path.parent):
+            path.unlink(missing_ok=True)
+    except OSError:
+        logger.warning("Revoked record %s could not be removed", record_id)
 
 
 def load(owner, record_id, kind):
@@ -397,6 +425,179 @@ def capture_input_page(owner, args, result, digest_before):
     return record
 
 
+def _series_source(ctx, args):
+    """(digest, series) of the one series get_timeseries reads for `args`.
+
+    Call under network_guard. The digest covers the project, the exact args,
+    the source (user upload or network), and the raw bytes of the index levels
+    and values, so an edit anywhere in the series moves it. repr is never used:
+    pandas and numpy summarize long arrays.
+    """
+    import pandas as pd
+
+    from routers.network_time_axis import resolve_series
+
+    source, series = resolve_series(
+        ctx.network, args["component"], args["attribute"], args["name"]
+    )
+    hashed = hashlib.sha256(
+        json.dumps(
+            {"project_id": ctx.project_uuid, "args": args, "source": source},
+            sort_keys=True,
+        ).encode()
+    )
+    if series is not None:
+        hashed.update(f"values:{series.dtype}:{len(series)}".encode())
+        for level in range(series.index.nlevels):
+            values = series.index.get_level_values(level)
+            if isinstance(values, pd.DatetimeIndex):
+                # asi8 is in the index's own unit; pin it to ns.
+                hashed.update(f"datetime[ns]:{values.tz}".encode())
+                hashed.update(values.as_unit("ns").asi8.tobytes())
+            else:
+                hashed.update(json.dumps([str(v) for v in values]).encode())
+        hashed.update(series.to_numpy(dtype="float64").tobytes())
+    return hashed.hexdigest(), series
+
+
+def _series_steps(args, series):
+    """Every step of `series` as the fact it would certify, by row.
+
+    Values are taken after the JSON round-trip a shown result goes through.
+    """
+    from routers.network_time_axis import index_labels
+
+    labels, periods = index_labels(series.index)
+    unit = SERIES_METRICS[(args["component"], args["attribute"])][1]
+    steps = []
+    for i, raw in enumerate(series.to_numpy(dtype="float64")):
+        tokens = (labels[i],) if periods is None else (periods[i], labels[i])
+        steps.append(
+            {
+                "path": pointer(args["name"], *tokens),
+                "entity_id": args["name"],
+                "metric": args["attribute"],
+                "value": json.loads(json.dumps(float(raw))),
+                "unit": unit,
+            }
+        )
+    return labels, periods, steps
+
+
+def active_series_source(args):
+    """Taken before get_timeseries runs: the source digest, step count and the
+    encoded size of the facts if every step certified."""
+    ctx = PyPSAService.get_active_context()
+    with network_guard():
+        source_digest, series = _series_source(ctx, args)
+        if series is None:
+            return source_digest, 0, 0
+        if len(series) > MAX_SERIES_POINTS:
+            return source_digest, len(series), None
+        size = len(json.dumps(_series_steps(args, series)[2], ensure_ascii=False).encode())
+    return source_digest, len(series), size
+
+
+def unpointer(path):
+    """The tokens of an RFC 6901 pointer built by pointer()."""
+    return [t.replace("~1", "/").replace("~0", "~") for t in path.split("/")[1:]]
+
+
+def capture_series(owner, args, result, digest_before):
+    """Evidence for exactly the points one get_timeseries result showed.
+
+    Row i of the result maps to the raw series' row i, by its timestep label
+    (and period). A point certifies only when the shown value equals the raw
+    value after a JSON round-trip; missing and non-finite values never do.
+    """
+    ctx = PyPSAService.get_active_context()
+    key = (args.get("component"), args.get("attribute"))
+    name = args.get("name")
+    if (
+        key not in SERIES_METRICS
+        or digest_before is None
+        or not isinstance(result, dict)
+        or not ctx.project_uuid
+    ):
+        return None
+    component_class = SERIES_METRICS[key][0]
+    index, data = result.get("index"), result.get("data")
+    if (
+        result.get("columns") != [name]
+        or not isinstance(index, list)
+        or not isinstance(data, list)
+        or not index
+        or len(index) != len(data)
+    ):
+        return None
+    authorize(owner, ctx.project_uuid)
+    with network_guard():
+        if ctx.solver_state.get("status") == "running":
+            return None
+        source_digest, series = _series_source(ctx, args)
+        if (
+            source_digest != digest_before
+            or series is None
+            or not len(series) == len(index) <= MAX_SERIES_POINTS
+        ):
+            return None
+        labels, periods, steps = _series_steps(args, series)
+        if labels != index or periods != result.get("periods"):
+            return None
+        # A repeated timestep would make a path ambiguous.
+        if len({step["path"] for step in steps}) != len(steps) or any(
+            not isinstance(row, list) or len(row) != 1 for row in data
+        ):
+            return None
+        facts = [
+            step for step, row in zip(steps, data) if _certified(row[0], step["value"])
+        ]
+        if not facts:
+            return None
+        record = {
+            "version": 1,
+            "record_kind": "evidence",
+            "evidence_id": str(uuid.uuid4()),
+            "owner_id": owner,
+            "project_id": ctx.project_uuid,
+            "org_id": ctx.org_id,
+            "source_kind": "configured_input",
+            "adapter_version": "series-input/1",
+            "scope": {
+                "component_class": component_class,
+                "component": key[0],
+                "entity_id": name,
+                "attribute": key[1],
+                "kind": "series",
+                "points": len(index),
+                "certified": len(facts),
+            },
+            "facts": facts,
+            "source_sha256": digest_before,
+            "validity": {
+                "outcome": "completed",
+                "as_of": time.time(),
+                "coverage": "series_points",
+                "warnings": [
+                    "Points of one configured time series, not a series aggregate.",
+                    "Missing or non-finite steps are not certified.",
+                ],
+            },
+            "expires_at": time.time() + RETENTION_SECONDS,
+        }
+        save(record, record["evidence_id"])
+    return record
+
+
+def series_args(scope):
+    """The exact get_timeseries args a series evidence scope was captured for."""
+    return {
+        "component": scope["component"],
+        "name": scope["entity_id"],
+        "attribute": scope["attribute"],
+    }
+
+
 def evidence(owner, evidence_id):
     record = load(owner, evidence_id, "evidence")
     if record["source_kind"] == "scoped_result":
@@ -443,6 +644,11 @@ def evidence(owner, evidence_id):
                 return record
             if ctx.solver_state.get("status") == "running":
                 unavailable("evidence_unavailable")
+            if scope.get("kind") == "series":
+                # Any edit to the series, its source or index invalidates it.
+                if _series_source(ctx, series_args(scope))[0] != record["source_sha256"]:
+                    unavailable("evidence_unavailable")
+                return record
             if scope.get("kind") == "static_page":
                 # Any edit to the class's rows or inputs, or another project,
                 # invalidates the page.

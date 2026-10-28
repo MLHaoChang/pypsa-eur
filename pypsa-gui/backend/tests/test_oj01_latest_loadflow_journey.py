@@ -27,7 +27,7 @@ def _solve_once(session):
     fixture only), then wait for the real solve and its published manifest."""
     before = chat_tools.list_project_runs(status='completed')['total_count']
     frames = list(chat_service._dispatch_real_tool_call(
-        session, {'id': f'fixture-solve-{before}', 'name': 'run_simulation', 'input': {}}, []))
+        session, {'id': f'fixture-solve-{before}', 'name': 'run_simulation', 'input': {'rerun_current': True}}, []))
     assert not [d for e, d in frames if e == 'tool_error'], frames
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:

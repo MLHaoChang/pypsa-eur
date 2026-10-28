@@ -9,3 +9,9 @@ export function openPanel(section: FlowTarget['section'], panel: string): void {
   if (useUIStore.getState().uiMode === 'guided') openFlowTargetInPlace(target)
   else openFlowTarget(target)
 }
+
+/** Open one field of a component, mode-aware: a drawer over the card in Guided, the Properties panel in Expert. */
+export function openComponentField(target: FlowTarget): void {
+  if (useUIStore.getState().uiMode === 'guided') openFlowTargetInPlace(target)
+  else openFlowTarget(target)
+}

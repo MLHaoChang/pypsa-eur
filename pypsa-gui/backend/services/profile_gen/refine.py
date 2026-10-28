@@ -92,7 +92,12 @@ class AnnualEnergyOnWindowSourceError(RefineError):
 
 
 class RefineReplayError(RefineError):
-    """A recorded op no longer fits the series it is replayed on."""
+    """A recorded op no longer fits the series it is replayed on; ``op`` and
+    ``index`` name it."""
+
+    def __init__(self, message: str, *, op: Any = None, index: int | None = None):
+        super().__init__(message)
+        self.op, self.index = op, index
 
 
 @dataclass
@@ -312,10 +317,12 @@ def _apply_op(t: _Target, s: pd.Series, op: Mapping[str, Any], i: int,
     if t.power:
         stats["energy_before_mwh"] = float(s.sum())
         stats["energy_after_mwh"] = float(out.sum())
-        peak = float(out.max())
-        stats["load_factor"] = float(out.mean() / peak) if peak > 0 else 0.0
-        # Not the edit card's: that one is weighted over the model's snapshots.
-        stats["load_factor_basis"] = "hourly mean / peak, source year"
+        from services.profile_gen.card import LOAD_FACTOR_BASIS, weighted_load_factor
+        aligned, _ = _align_to_snapshots(out, t.ctx.network.snapshots,
+                                         resolution=t.resolution, time_basis=t.basis)
+        stats["load_factor"] = weighted_load_factor(
+            t.ctx.network, aligned.to_numpy(dtype=float), t.spec.weighting)
+        stats["load_factor_basis"] = LOAD_FACTOR_BASIS
     return out, stats
 
 
@@ -347,7 +354,7 @@ def _run(ctx, series, meta, ops, component_type, attribute, *, replaying: bool) 
             if stated is not None and list(stated) != t.key:
                 raise RefineReplayError(
                     f"op {i} ({op.get('op')}) was recorded for {stated[0]}/{stated[1]}, "
-                    f"not {t.key[0]}/{t.key[1]}")
+                    f"not {t.key[0]}/{t.key[1]}", op=op.get("op"), index=i)
             try:
                 if op.get("connection") and op.get("of") == "connection":
                     recorded = _num(op["connection"], "value") * _num(op, "fraction")
@@ -355,7 +362,7 @@ def _run(ctx, series, meta, ops, component_type, attribute, *, replaying: bool) 
                         raise RefineReplayError(
                             f"op {i} (scale_peak_to): {_num(op, 'resolved_mw'):g} MW is "
                             f"not {_num(op, 'fraction'):g} of the recorded connection "
-                            f"({recorded:g} MW)")
+                            f"({recorded:g} MW)", op=op.get("op"), index=i)
                     try:
                         now = _connection(ctx)
                     except InvalidRefineOpError:
@@ -371,7 +378,8 @@ def _run(ctx, series, meta, ops, component_type, attribute, *, replaying: bool) 
             except RefineError as exc:
                 if isinstance(exc, RefineReplayError):
                     raise
-                raise RefineReplayError(f"op {i} ({op.get('op')}) no longer fits: {exc}") from None
+                raise RefineReplayError(f"op {i} ({op.get('op')}) no longer fits: {exc}",
+                                        op=op.get("op"), index=i) from None
         else:
             s, st = _apply_op(t, s, op, i, record)
         records.append(record)

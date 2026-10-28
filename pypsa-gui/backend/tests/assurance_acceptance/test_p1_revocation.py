@@ -5,15 +5,18 @@ user is disabled. Values a tool returned while access held may already be on
 the stream; nothing may be published, certified or read back after it.
 """
 
+import contextlib
 import json
 import logging
 import uuid
 
 import pytest
+from fastapi import HTTPException
 
 import app_paths
 from db.models import OrgMembership, User
 from harness.providers.fake import FakeProvider
+from services import assurance_records as records
 from tests.assurance_acceptance.test_p1_evidence import page_draft
 from tests.assurance_acceptance.support import (
     approval,
@@ -99,6 +102,40 @@ def list_loads():
 PAGE_DRAFT = page_draft()
 
 
+def get_series():
+    """Give L1 a p_set series, then read it (time-series evidence, issue 02)."""
+    from services.pypsa_service import PyPSAService
+
+    network = PyPSAService.get_active_context().network
+    network.loads_t.p_set["L1"] = [5.0] * len(network.snapshots)
+    return tool_turn(
+        "get_timeseries",
+        {"component": "loads", "name": "L1", "attribute": "p_set"},
+        call_id="read-series",
+    )
+
+
+SERIES_DRAFT = json.dumps(
+    {
+        "schema_version": 1,
+        "blocks": [
+            {
+                "id": "series-step",
+                "kind": "observed",
+                "entity_id": "L1",
+                "metric": "p_set",
+                "value": 5,
+                "unit": "MW",
+                "source": {
+                    "tool_use_id": "read-series",
+                    "path": "/L1/2026-01-01T00:00:00",
+                },
+            }
+        ],
+    }
+)
+
+
 def assert_nothing_published(frames, owner, before):
     assert not any(event == "answer_approved" for event, _ in frames)
     assert public_text(frames) == ""
@@ -116,8 +153,12 @@ KINDS = ["membership", "disabled"]
 @pytest.mark.parametrize("kind", KINDS)
 @pytest.mark.parametrize(
     "read, draft",
-    [(get_component, observed_draft()), (list_loads, PAGE_DRAFT)],
-    ids=["get_component", "list_components"],
+    [
+        (get_component, observed_draft()),
+        (list_loads, PAGE_DRAFT),
+        (get_series, SERIES_DRAFT),
+    ],
+    ids=["get_component", "list_components", "get_timeseries"],
 )
 def test_access_revoked_after_capture_publishes_nothing(
     baseline, harness, revoke, seeded_identity, kind, read, draft
@@ -132,6 +173,73 @@ def test_access_revoked_after_capture_publishes_nothing(
     result = next(d for event, d in frames if event == "tool_result")
     assert result["result"]["_assurance"]["evidence_ids"]
     assert_nothing_published(frames, owner, before)
+
+
+@pytest.mark.parametrize("removal", ["removed", "stuck"])
+@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize(
+    "read, draft",
+    [(get_component, observed_draft()), (list_loads, PAGE_DRAFT)],
+    ids=["get_component", "list_components"],
+)
+def test_access_revoked_during_commit_publishes_nothing(
+    baseline,
+    harness,
+    revoke,
+    seeded_identity,
+    monkeypatch,
+    caplog,
+    kind,
+    read,
+    draft,
+    removal,
+):
+    """REVOKE-TOCTOU: revoked after commit's last ACL check, as the record lands.
+
+    "stuck": the saved file cannot be removed; the refusal still ends the turn
+    and load() keeps refusing the leftover record.
+    """
+    caplog.set_level(logging.DEBUG)
+    owner = str(seeded_identity["user_id"])
+    before = answer_records(owner)
+    save, saved = records.save, []
+
+    @contextlib.contextmanager
+    def busy(directory):
+        raise TimeoutError("assurance storage busy")
+        yield
+
+    def save_then_revoke(record, record_id):
+        save(record, record_id)
+        if record["record_kind"] == "answer":
+            saved.append(record_id)
+            revoke[kind]()
+            if removal == "stuck":
+                monkeypatch.setattr(records, "transaction", busy)
+
+    monkeypatch.setattr(records, "save", save_then_revoke)
+    turns = [read(), text_turn(draft), text_turn(draft)]
+    response = harness.request(FakeProvider(turns))
+    assert response.status_code == 200
+    frames = parse_sse(response.text)
+    # The answer reached disk; it must not stay (or, if stuck, stay unreadable).
+    [answer_id] = saved
+    if removal == "removed":
+        assert answer_records(owner) == before
+    else:
+        assert answer_records(owner) == before | {answer_id}
+        with pytest.raises(HTTPException) as refused:
+            records.load(owner, answer_id, "answer")
+        assert refused.value.status_code == {"membership": 404, "disabled": 401}[kind]
+        stuck = [r for r in caplog.records if "could not be removed" in r.message]
+        assert len(stuck) == 1 and answer_id in stuck[0].getMessage()
+        records._path(owner, answer_id).unlink()
+    assert_nothing_published(frames, owner, before)
+    formatter = logging.Formatter()
+    for record in caplog.records:
+        logged = formatter.format(record)
+        for value in ("5 MW", "5.0", "p_set", draft):
+            assert value not in logged, (value, record.name)
 
 
 @pytest.mark.parametrize("kind", KINDS)

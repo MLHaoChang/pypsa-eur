@@ -40,7 +40,6 @@ SERVED_BY_TOOL: dict[tuple[str, str], str] = {
     ('GET', '/api/campus-electrical/{name}/island/cuts'): 'campus_island_cuts',
     ('GET', '/api/campus-electrical/{name}/island/cuts/apply'): 'campus_island_cuts',
     ('GET', '/api/campus-electrical/{name}/island/gfm-settings'): 'campus_island_gfm_settings',
-    ('GET', '/api/campus-electrical/{name}/island/gfm-settings/card'): 'campus_apply_gfm_settings',
     ('GET', '/api/campus-electrical/{name}/library'): 'campus_get_library',
     ('GET', '/api/gridspine/{name}/bundles/{hour}'): 'gridspine_export_handoff_bundle',
     ('GET', '/api/gridspine/{name}/capacity'): 'gridspine_get_capacity',
@@ -179,12 +178,7 @@ UI_INTERNAL: dict[str, dict] = {
 
 # Each gap names its existing manual surface; this is an explicit reviewed baseline.
 KNOWN_GAPS: dict[tuple[str, str], str] = {
-    ('DELETE', '/api/campus-electrical/{name}/grid-readiness/limits/{item}'): 'Campus electrical panel',
-    ('DELETE', '/api/campus-electrical/{name}/island/cuts'): 'Campus electrical panel',
-    ('DELETE', '/api/campus-electrical/{name}/island/cuts/{period}/{hour}/{kind}'): 'Campus electrical panel',
     ('DELETE', '/api/projects/{name}/profiles/weather'): 'Time series panel',
-    ('GET', '/api/campus-electrical/{name}/island/report'): 'Campus electrical panel',
-    ('GET', '/api/campus-electrical/{name}/milp'): 'Campus electrical panel',
     ('GET', '/api/campus-electrical/{name}/owner-assets'): 'Campus electrical panel',
     ('GET', '/api/guides'): 'Help, guides panel',
     ('GET', '/api/projects/{name}/reports/{report_id}/figures/{figure_id}'): 'Reports panel',
@@ -194,17 +188,9 @@ KNOWN_GAPS: dict[tuple[str, str], str] = {
     ('GET', '/api/results/investment_case/export.xlsx'): 'Results panel',
     ('GET', '/api/results/process_uc_check'): 'Results panel',
     ('GET', '/api/results/process_view'): 'Results panel',
-    ('POST', '/api/campus-electrical/{name}/island/cuts/apply/cancel'): 'Campus electrical panel',
     ('POST', '/api/campus-electrical/{name}/island/preset'): 'Campus electrical panel',
-    ('POST', '/api/campus-electrical/{name}/library/reset'): 'Campus electrical panel',
-    ('POST', '/api/campus-electrical/{name}/milp'): 'Campus electrical panel',
-    ('POST', '/api/campus-electrical/{name}/milp/cancel'): 'Campus electrical panel',
-    ('POST', '/api/gridspine/{name}/dispatch-source/external'): 'Control strategy, planning-to-dynamics study',
-    ('POST', '/api/gridspine/{name}/readback/{hour}'): 'Control strategy, planning-to-dynamics study',
     ('POST', '/api/projects/{name}/flow/ack'): 'Projects page / Workspace panel',
     ('POST', '/api/projects/{name}/profiles/shape'): 'Time series panel',
-    ('PUT', '/api/campus-electrical/{name}/campus'): 'Campus electrical panel',
-    ('PUT', '/api/campus-electrical/{name}/grid-readiness/limits/{item}'): 'Campus electrical panel',
 }
 _KNOWN_GAPS_CEILING = 70
 
@@ -229,8 +215,18 @@ def _buckets():
         for route in entry['routes']:
             buckets[route].add('ui_internal:' + name)
     for route in KNOWN_GAPS:
-        buckets[route].add('known_gap')
+        if not buckets[route] & {'tool_routes', 'served_by_tool'}:
+            buckets[route].add('known_gap')
     return buckets
+
+
+def stale_known_gaps() -> list[tuple[str, str]]:
+    """KNOWN_GAPS rows a tool now serves. They pass: the PR that serves a route
+    leaves its row, so two such PRs never edit the same lines. The coordinator's
+    sweep deletes them and lowers the ceiling (smoke/prune_stale_declarations.py)."""
+    served = {row for rows in TOOL_ROUTES.values() for row in rows
+              if isinstance(row, tuple) and len(row) == 2} | set(SERVED_BY_TOOL)
+    return sorted(set(KNOWN_GAPS) & served)
 
 
 def _unclassified(routes):
@@ -289,6 +285,16 @@ def test_ui_internal_stays_small():
 
 def test_known_gaps_only_shrink():
     assert len(KNOWN_GAPS) <= _KNOWN_GAPS_CEILING
+    assert list(KNOWN_GAPS) == sorted(KNOWN_GAPS), 'keep KNOWN_GAPS sorted by (method, path)'
+
+
+def test_a_known_gap_a_tool_now_serves_passes_as_stale(monkeypatch):
+    route = next(iter(KNOWN_GAPS))
+    monkeypatch.setitem(SERVED_BY_TOOL, route, TOOLS[0]['name'])
+    assert _buckets()[route] == {'served_by_tool'}
+    assert route in stale_known_gaps()
+    routes = _routes()
+    assert not _unclassified(routes)
 
 
 def test_a_planted_route_is_reported():

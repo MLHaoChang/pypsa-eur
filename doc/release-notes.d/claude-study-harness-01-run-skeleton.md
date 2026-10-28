@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant can start a step-by-step study run of the own-site (eh_site) template: `start_task(run=...)` goes through intake, setup, inputs, the input gate, the solve, the result gate and hand-off, and each stage is left only when its gate, read from the project's own validation, readiness, connectivity and solve records, passes.
