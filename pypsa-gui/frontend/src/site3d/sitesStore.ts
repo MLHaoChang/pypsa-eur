@@ -17,6 +17,7 @@
 import { useEffect } from 'react'
 import { create } from 'zustand'
 import { sitesApi } from '../api/sites'
+import { sceneErrorCopy, sceneErrorDetail } from '../api/siteScene'
 import { rawFetchHeaders } from '../api/csrf'
 import { assertFootprintValid } from './footprints'
 import type { AssetFootprint } from './types'
@@ -110,6 +111,17 @@ interface SitesState {
   rearrangeAll: (project: string | null, siteId: string, objects: Array<{ key: string; origin: [number, number]; heading: number }>) => void
   /** Replace a project's document wholesale. */
   replaceDocument: (project: string | null, doc: SitesDocument) => void
+  /**
+   * SC-01b handover: Sites whose 3D scene owns them (adopted). The backend
+   * refuses a whole-document PUT that changes one (`scene_managed_site`), so
+   * local edits to them are refused here first, never queued for a 409.
+   */
+  sceneManaged: Record<string, Record<string, true>>
+  markSceneManaged: (project: string | null, siteId: string) => void
+  isSceneManaged: (project: string | null, siteId: string) => boolean
+  /** The copy of the last refused write per project (a managed Site), shown where the edit was made. */
+  sceneRefusal: Record<string, string>
+  clearSceneRefusal: (project: string | null) => void
   resetForTests: () => void
 }
 
@@ -135,9 +147,27 @@ export const useSitesStore = create<SitesState>((set, get) => {
     scheduleSave(project)
   }
   const editSite = (project: string | null, siteId: string, fn: (site: Site) => Site): void => {
+    if (get().isSceneManaged(project, siteId)) { refuseManaged(project); return }
     write(project, doc => ({ ...doc, sites: doc.sites.map(s => (s.id === siteId ? fn(s) : s)) }))
   }
+  // The managed Site that places `key`, if any: its footprint is the scene's.
+  const managedOwner = (project: string | null, key: string): boolean =>
+    get().docFor(project).sites.some(s => key in (s.placements ?? {}) && get().isSceneManaged(project, s.id))
+  const refuseManaged = (project: string | null): void => {
+    set(s => ({ sceneRefusal: { ...s.sceneRefusal, [keyOf(project)]: MANAGED_SITE_COPY } }))
+  }
   return {
+    sceneManaged: {},
+    sceneRefusal: {},
+    markSceneManaged: (project, siteId) => set(s => ({
+      sceneManaged: { ...s.sceneManaged, [keyOf(project)]: { ...s.sceneManaged[keyOf(project)], [siteId]: true } },
+    })),
+    isSceneManaged: (project, siteId) => !!get().sceneManaged[keyOf(project)]?.[siteId],
+    clearSceneRefusal: project => set(s => {
+      const next = { ...s.sceneRefusal }
+      delete next[keyOf(project)]
+      return { sceneRefusal: next }
+    }),
     docs: {},
     loaded: {},
     dirty: {},
@@ -177,7 +207,7 @@ export const useSitesStore = create<SitesState>((set, get) => {
         return { ...doc, sites: exists ? doc.sites.map(s => (s.id === site.id ? site : s)) : [...doc.sites, site] }
       })
     },
-    removeSite: (project, siteId) => write(project, doc => ({ ...doc, sites: doc.sites.filter(s => s.id !== siteId) })),
+    removeSite: (project, siteId) => get().isSceneManaged(project, siteId) ? refuseManaged(project) : write(project, doc => ({ ...doc, sites: doc.sites.filter(s => s.id !== siteId) })),
     setSiteBuses: (project, siteId, buses) => editSite(project, siteId, s => ({ ...s, buses: [...buses] })),
     setBoundary: (project, siteId, boundary) => {
       assertBoundaryValid(boundary)
@@ -218,6 +248,7 @@ export const useSitesStore = create<SitesState>((set, get) => {
     setAssetFootprint: (project, key, value) => {
       if (!canWrite()) return
       if (value !== null) assertFootprintValid(key, value)
+      if (managedOwner(project, key)) { refuseManaged(project); return }
       write(project, doc => {
         const footprints = { ...doc.asset_footprints }
         if (value === null) delete footprints[key]
@@ -230,6 +261,12 @@ export const useSitesStore = create<SitesState>((set, get) => {
       const oldKey = placementKey(cls, oldName), newKey = placementKey(cls, newName)
       const doc = get().docFor(project)
       if (!(oldKey in (doc.asset_footprints ?? {})) && !doc.sites.some(s => oldKey in (s.placements ?? {}))) return false
+      if (project && managedOwner(project, oldKey)) {
+        // The rename hook already re-keyed the scene in a new generation and
+        // GET /sites projects it: read that back instead of PUTting a copy.
+        void adoptServerDocument(project)
+        return true
+      }
       write(project, d => ({
         ...d,
         ...(d.asset_footprints && oldKey in d.asset_footprints ? {
@@ -264,7 +301,7 @@ export const useSitesStore = create<SitesState>((set, get) => {
     resetForTests: () => {
       for (const t of timers.values()) clearTimeout(t)
       timers.clear()
-      set({ docs: {}, loaded: {}, dirty: {}, loadFailures: {}, footprintDrafts: {} })
+      set({ docs: {}, loaded: {}, dirty: {}, loadFailures: {}, footprintDrafts: {}, sceneManaged: {}, sceneRefusal: {} })
     },
   }
 })
@@ -298,10 +335,46 @@ async function persist(project: string | null): Promise<'server' | 'local' | 're
     })
     return 'server'
   } catch (e) {
+    const refused = sceneErrorDetail(e)
+    if (refused?.error_kind === 'scene_managed_site') {
+      // The server's 3D scene owns a Site this copy changed: the copy is out
+      // of date. Never keep it in localStorage (it would come back on the next
+      // failed load); drop the pending write and read the server's document.
+      clearLocal(project)
+      await adoptServerDocument(project, refused.site_id, sceneErrorCopy(e))
+      return 'refused'
+    }
     writeLocal(project, doc)
     console.warn('[sites] PUT failed → wrote to localStorage instead', { project, error: e })
     return 'local'
   }
+}
+
+/** The refusal copy for an edit to a scene-managed Site (sceneErrorCopy's `scene_managed_site`). */
+export const MANAGED_SITE_COPY = 'This site is managed by its 3D scene: reload to edit it'
+
+/**
+ * Replace the cached document with the server's (after a refusal, an adopt
+ * or an apply), clear the pending write and its timer, and record a refusal's
+ * copy for the surface that made the edit.
+ */
+export async function adoptServerDocument(project: string, managedSiteId?: unknown, refusal?: string): Promise<void> {
+  const k = keyOf(project)
+  const t = timers.get(k)
+  if (t) { clearTimeout(t); timers.delete(k) }
+  let doc: SitesDocument | null = null
+  try { doc = await sitesApi.getSites(project) } catch { /* keep the cache; the next load retries */ }
+  useSitesStore.setState(s => {
+    const dirty = { ...s.dirty }, footprintDrafts = { ...s.footprintDrafts }
+    delete dirty[k]
+    delete footprintDrafts[k]
+    return {
+      docs: doc ? { ...s.docs, [k]: doc } : s.docs,
+      dirty, footprintDrafts,
+      sceneRefusal: refusal ? { ...s.sceneRefusal, [k]: refusal } : s.sceneRefusal,
+    }
+  })
+  if (typeof managedSiteId === 'string') useSitesStore.getState().markSceneManaged(project, managedSiteId)
 }
 
 export interface FlushSitesResult { status: 'nothing' | 'server' | 'local' | 'refused'; sites: number }
