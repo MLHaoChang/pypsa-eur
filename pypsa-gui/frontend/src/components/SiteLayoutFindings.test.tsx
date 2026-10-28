@@ -42,11 +42,11 @@ describe('SiteLayoutFindings: native scene findings (SC-02)', () => {
   it('lists them with the others and a click selects both the item and the building', () => {
     useUIStore.setState({ sitePartSelection: null })
     render(<SiteLayoutFindings findings={[]} native={[
-      { key: 'StorageUnit:BESS', other: 'building:osm:7', kind: 'overlapsBuilding', severity: 'warn', message: 'BESS overlaps OSM building 7' },
+      { key: 'StorageUnit:BESS', other: 'building:osm:7', kind: 'overlapsBuilding', severity: 'warn', message: 'BESS: overlaps OSM building 7' },
     ]} />)
     expect((screen.getByTestId('site-layout-findings') as HTMLDetailsElement).open).toBe(true)
     expect(screen.getByTestId('site-layout-findings').textContent).toContain('Layout · 1 finding')
-    fireEvent.click(screen.getByText('BESS overlaps OSM building 7'))
+    fireEvent.click(screen.getByText('BESS: overlaps OSM building 7'))
     expect(useUIStore.getState().selectedComponent).toEqual({ type: 'StorageUnit', name: 'BESS' })
     expect(useUIStore.getState().sitePartSelection).toEqual({ kind: 'building', id: 'osm:7' })
   })

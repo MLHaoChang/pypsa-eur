@@ -43,7 +43,9 @@ import { busLatLng } from '../utils/geo'
 import { tileRangeAround, mosaicExtent, zoomFor, tileCount, fromLocal, type LngLat, type LocalExtent } from '../site3d/geo'
 import { buildGroundMosaic, ESRI_ATTRIBUTION } from '../site3d/imagery'
 import { sitesApi, contextErrorMessage, contextFailureBacksOff } from '../api/sites'
-import { CONTEXT_UNREACHABLE_COPY } from '../api/siteScene'
+import { CONTEXT_UNREACHABLE_COPY, contextFailureToast } from '../api/siteScene'
+import axios from 'axios'
+import toast from 'react-hot-toast'
 import {
   buildingsGeometry, linesToRibbons, areasGeometry, heightmapToDisplacement, terrainSampler, groundHeightAt,
   groundMode, hillshadeCanvas, terrainCellMetres, RIBBON_COLOR, AREA_COLOR, BUILDING_COLOR, OSM_ATTRIBUTION, type HeightAt,
@@ -830,7 +832,13 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
         setContextStatus(contextSummary(doc))
       } catch (err: unknown) {
         const message = contextErrorMessage(err)
-        if (contextFailureBacksOff(err)) contextFailures.set(key, { at: Date.now(), message })
+        const upstream = contextFailureBacksOff(err)
+        if (upstream) contextFailures.set(key, { at: Date.now(), message })
+        // The raw reason (URL, ConnectError, settings names) goes to the console and the footer's Details only.
+        console.warn('Site context fetch failed:', message)
+        const status = axios.isAxiosError(err) ? err.response?.status : undefined
+        const words = contextFailureToast(status, upstream, message)
+        if (words && !cancelled) toast.error(words, { id: 'site-context' })
         if (!cancelled) { setContextStatus(''); setContextFailure(message) }
       } finally {
         if (!cancelled) setContextBusy(false)

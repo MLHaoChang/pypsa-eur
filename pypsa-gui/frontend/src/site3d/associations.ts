@@ -11,7 +11,7 @@ import {
   plainMessage, type BindInputs, type BindRow, type SceneAssociation, type SceneBuilding, type SceneFinding,
   type SceneGroup, type SceneQuantity, type SceneTarget, type TargetClass,
 } from '../api/siteScene'
-import { carrierDisplayName } from '../pages/results/carrierAliases'
+import { CARRIER_CATALOG } from '../utils/carrierCatalog'
 import type { NativeObstacle } from './placementCheck'
 import { unitLabel } from '../utils/assetForm'
 
@@ -31,8 +31,21 @@ export type UiMode = 'guided' | 'expert'
 export const targetLabel = (cls: TargetClass, name: string, mode: UiMode): string =>
   `${name} · ${mode === 'guided' ? KIND_WORDS[cls] : cls}`
 
-export const carrierWords = (carrier: string | null | undefined): string | null =>
-  carrier ? carrierDisplayName(carrier.trim().toLowerCase()) : null
+/** The project's own carrier display names (`n.carriers.nice_name`), by carrier name. */
+export type CarrierNames = Readonly<Record<string, string>>
+
+const CATALOG_NICE: Record<string, string> = Object.fromEntries(CARRIER_CATALOG.map(c => [c.name, c.nice_name]))
+
+/**
+ * A carrier in words: the project's display name (`nice_name`), else the
+ * carrier catalogue's, else the carrier as written (never re-cased: "NH3"
+ * stays "NH3", not "Nh3").
+ */
+export function carrierWords(carrier: string | null | undefined, names: CarrierNames = {}): string | null {
+  const c = carrier?.trim()
+  if (!c) return null
+  return names[c]?.trim() || CATALOG_NICE[c] || c
+}
 
 // ── candidates ──────────────────────────────────────────────────────────────
 
@@ -49,6 +62,14 @@ export interface NetworkRows {
   storageUnits?: readonly StorageUnit[]
 }
 
+/**
+ * A model-internal helper the app adds and the user never made: names that
+ * start with "__" (the process products' `__buy_<p>` buy-in and `__lost_<p>`
+ * shortfall generators, backend `services/process_products.py`). Never offered
+ * to attach or place.
+ */
+export const isHelperItem = (name: string): boolean => name.startsWith('__')
+
 /** `eh_process` is a lazy Link column: absent, null or false is an ordinary Link (backend `_is_process`). */
 export const isProcessLink = (l: Link): boolean => {
   const v = (l as unknown as { eh_process?: unknown }).eh_process
@@ -61,7 +82,7 @@ const ORDER: TargetClass[] = ['Load', 'Link', 'Store', 'Generator', 'StorageUnit
 export function attachCandidates(rows: NetworkRows): Candidate[] {
   const out: Candidate[] = []
   const add = (cls: TargetClass, list: readonly { name: string; carrier?: string }[] | undefined) => {
-    for (const r of list ?? []) out.push({ class: cls, name: r.name, carrier: r.carrier ?? null })
+    for (const r of list ?? []) if (!isHelperItem(r.name)) out.push({ class: cls, name: r.name, carrier: r.carrier ?? null })
   }
   add('Load', rows.loads)
   add('Link', (rows.links ?? []).filter(isProcessLink))
@@ -77,7 +98,7 @@ export function sameClassItems(rows: NetworkRows, cls: string): Candidate[] {
     Load: rows.loads, Link: rows.links, Store: rows.stores, Generator: rows.generators, StorageUnit: rows.storageUnits,
   }
   if (!(cls in list)) return []
-  return (list[cls as TargetClass] ?? []).map(r => ({ class: cls as TargetClass, name: r.name, carrier: r.carrier ?? null }))
+  return (list[cls as TargetClass] ?? []).filter(r => !isHelperItem(r.name)).map(r => ({ class: cls as TargetClass, name: r.name, carrier: r.carrier ?? null }))
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
@@ -130,9 +151,9 @@ export const NOT_CHECKED_COPY = 'Not checked: open the project’s model to chec
  * re-attach to. Unavailable: "Unavailable: …" with "› Loads". Not checked:
  * no link (nothing to fix from here).
  */
-export function rowCopy(a: SceneAssociation, mode: UiMode, canRebind: boolean): RowCopy {
+export function rowCopy(a: SceneAssociation, mode: UiMode, canRebind: boolean, carriers: CarrierNames = {}): RowCopy {
   if (a.status === 'bound' && a.name) {
-    const data = [targetLabel(a.class, a.name, mode), carrierWords(a.carrier), a.unit ? unitLabel(a.unit) : null]
+    const data = [targetLabel(a.class, a.name, mode), carrierWords(a.carrier, carriers), a.unit ? unitLabel(a.unit) : null]
     return { text: data.filter(Boolean).join(' · '), fix: null, tone: 'ok' }
   }
   if (a.status === 'unbound') {
@@ -140,7 +161,7 @@ export function rowCopy(a: SceneAssociation, mode: UiMode, canRebind: boolean): 
     return { text: `Not attached: ${why}`, fix: canRebind ? 'attach_again' : null, tone: 'warn' }
   }
   if (a.status === 'unavailable') {
-    const why = a.reason ? clauseTail(a.reason) : `no ${carrierWords(a.carrier) ?? ''} load in the model`.replace('  ', ' ')
+    const why = a.reason ? clauseTail(a.reason) : `no ${carrierWords(a.carrier, carriers) ?? ''} load in the model`.replace('  ', ' ')
     return { text: `Unavailable: ${why}`, fix: 'loads', tone: 'warn' }
   }
   return { text: NOT_CHECKED_COPY, fix: null, tone: 'muted' }
@@ -194,6 +215,16 @@ export function checkShares(shares: Record<string, number | null>, features: rea
   return { state: 'ok', total, copy: 'Total 100 %' }
 }
 
+/**
+ * Why Preview waits on the shares, said once: the share line already names
+ * the problem, so this says what to do.
+ */
+export function shareBlockReason(check: ShareCheck): string | null {
+  if (check.state === 'off') return 'Make the shares add up to 100 % first'
+  if (check.state === 'partial' || check.state === 'invalid') return 'Correct the shares first'
+  return null
+}
+
 // ── bind_targets inputs ─────────────────────────────────────────────────────
 
 export interface AttachChange {
@@ -227,8 +258,16 @@ export function buildBindInputs(associations: readonly SceneAssociation[], chang
 export const TASK_ATTACH = 'Attach buildings to loads and processes'
 export const TASK_PLACE = 'Place equipment'
 
-/** "Attach…" until the user has attached some building (or every one); then "Place equipment". */
-export function nextTask(associations: readonly SceneAssociation[]): string {
+/**
+ * "Attach…" until the user has attached some building (or every one); then
+ * "Place equipment". A building with an attachment that is not attached or
+ * unavailable keeps the task on Attach, with how many rows to fix.
+ * `features`: the accepted buildings (and groups) of the scene; omitted, every row counts.
+ */
+export function nextTask(associations: readonly SceneAssociation[], features?: readonly string[]): string {
+  const inScene = features ? new Set(features) : null
+  const toFix = associations.filter(a => (a.status === 'unbound' || a.status === 'unavailable') && (!inScene || inScene.has(a.feature))).length
+  if (toFix > 0) return `${TASK_ATTACH} · ${toFix} to fix`
   // "Every building attached" implies "some attached", so one test covers both.
   return associations.some(a => a.status === 'bound') ? TASK_PLACE : TASK_ATTACH
 }
@@ -244,21 +283,38 @@ export function quantityCopy(q: SceneQuantity): string {
 
 export interface TargetDetail { enclosures: string; capacity: string; shares: string[] }
 
-/** "Enclosures 2", "Capacity 3 MW", and each share as "Building 1: 40 % · 1.2 MW allocated" (or "Not split"). */
-export function targetDetail(t: SceneTarget, buildings: readonly SceneBuilding[], groups: readonly SceneGroup[] = []): TargetDetail {
+/** The capacity of an item the optimisation sizes (`p_nom_extendable` / `e_nom_extendable`): its stored value is only a start. */
+export const CAPACITY_OPTIMISED = 'Capacity: optimised'
+
+/** Whether a model item's size is left to the optimisation: `e_nom_extendable` for a Store, else `p_nom_extendable`. */
+export function isExtendable(rows: NetworkRows, cls: TargetClass, name: string): boolean {
+  const list: Record<TargetClass, readonly object[] | undefined> = {
+    Load: undefined, Link: rows.links, Store: rows.stores, Generator: rows.generators, StorageUnit: rows.storageUnits,
+  }
+  const r = (list[cls] ?? []).find(x => (x as { name?: string }).name === name) as Record<string, unknown> | undefined
+  const v = r?.[cls === 'Store' ? 'e_nom_extendable' : 'p_nom_extendable']
+  return v === true || v === 'true' || v === 'True' || v === 1
+}
+
+/**
+ * "Enclosures 2", "Capacity 3 MW" (or "Capacity: optimised" for an item the
+ * optimisation sizes), and each share as "Building 1: 40 % · 1.2 MW allocated"
+ * ("Building 1: 40 %" when optimised), or "Not split".
+ */
+export function targetDetail(t: SceneTarget, buildings: readonly SceneBuilding[], groups: readonly SceneGroup[] = [], extendable = false): TargetDetail {
   const shares = t.allocation.basis === 'explicit'
-    ? t.allocation.shares.map(s => `${featureName(s.feature, buildings, groups)}: ${pct(s.weight * 100)} · ${quantityCopy(s.allocated)} allocated`)
+    ? t.allocation.shares.map(s => `${featureName(s.feature, buildings, groups)}: ${pct(s.weight * 100)}${extendable ? '' : ` · ${quantityCopy(s.allocated)} allocated`}`)
     : t.enclosures > 1 ? ['Not split: each building counts the whole item'] : []
-  return { enclosures: `Enclosures ${t.enclosures}`, capacity: `Capacity ${quantityCopy(t.capacity)}`, shares }
+  return { enclosures: `Enclosures ${t.enclosures}`, capacity: extendable ? CAPACITY_OPTIMISED : `Capacity ${quantityCopy(t.capacity)}`, shares }
 }
 
 // ── findings and refusals in the user's words (UX SC-02b note 3) ────────────
 
 export interface Names { item: (key: string) => string; building: (id: string) => string }
 
-/** A preview finding: "Overlaps OSM building 7"; others as the server words them. */
+/** A preview finding: "site_battery: overlaps OSM building 7" (both objects named); others as the server words them. */
 export function findingCopy(f: SceneFinding, names: Names): string {
-  if (f.code === 'overlap' && f.objects && f.objects.length >= 2) return `Overlaps ${names.building(f.objects[1])}`
+  if (f.code === 'overlap' && f.objects && f.objects.length >= 2) return `${names.item(f.objects[0])}: overlaps ${names.building(f.objects[1])}`
   return plainMessage(f.message)
 }
 
@@ -269,9 +325,9 @@ export function findingObjects(f: SceneFinding, buildings: readonly SceneBuildin
   return { items: all.filter(o => !ids.has(o)), buildings: all.filter(o => ids.has(o)) }
 }
 
-/** A refused placement: off_roof and not_roof_eligible in plain words; null for other codes. */
+/** A refused placement, naming the item: "roof_pv: off the roof of Building 1"; null for other codes. */
 export function placeRefusalCopy(code: string | undefined, item: string, building: string | null): string | null {
-  if (code === 'off_roof') return `Off the roof of ${building ?? 'the building'}`
+  if (code === 'off_roof') return `${item}: off the roof of ${building ?? 'the building'}`
   if (code === 'not_roof_eligible') return `Can’t go on a roof: ${item}`
   return null
 }

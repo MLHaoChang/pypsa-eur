@@ -201,11 +201,18 @@ export function polygonRect(ring: readonly XY[]): Rect {
   return { x0, x1, y0, y1 }
 }
 
-/** Exact only for a source-verified catalogue record; a library fit or an entered envelope is approximate (V18). */
-export type SizeBasis = 'exact' | 'approximate'
+/**
+ * Exact only for a source-verified catalogue record; a library fit or an
+ * entered envelope is approximate (V18); no footprint at all is 'none' (no
+ * size entered), never approximate.
+ */
+export type SizeBasis = 'exact' | 'approximate' | 'none'
 export const sizeBasis = (footprint: { source?: string } | null | undefined): SizeBasis =>
-  footprint?.source === 'catalogue' ? 'exact' : 'approximate'
+  !footprint ? 'none' : footprint.source === 'catalogue' ? 'exact' : 'approximate'
 export const APPROXIMATE_SIZE = 'Approximate size'
+/** The one line for an item with no size: which rule is not checked, and why (V19). */
+export const noSizeCopy = (name: string): string =>
+  `No rule checked: no size entered for ${name}, so overlap with buildings uses the centre point only`
 
 // ── the check ───────────────────────────────────────────────────────────────
 
@@ -243,6 +250,8 @@ const keyOf = (o: Pick<CheckObject, 'type' | 'name'>): string => `${o.type}:${o.
 /** How an object is named in a message: a yard by its bus. */
 const nameOf = (o: Pick<CheckObject, 'type' | 'name'>): string => (o.type === 'Bus' ? `the ${o.name} yard` : o.name)
 const capital = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1)
+/** An object at the head of a "name: clause" line: an item's name as written, a bus yard as a sentence. */
+const subject = (o: Pick<CheckObject, 'type' | 'name'>): string => (o.type === 'Bus' ? capital(nameOf(o)) : o.name)
 const metres = (v: number): number => Math.round(v)
 
 /** The outline colour a finding kind earns: red for the two that matter most on the ground, amber for the rest. */
@@ -363,13 +372,13 @@ export function nativeFindings(objects: readonly CheckObject[], lib: readonly As
       out.push({ key: keyOf(o), kind: 'notRoofEligible', severity: 'warn', message: `Can’t go on a roof: ${nameOf(o)}` })
     } else if (!b || !roofEligible(b) || !shapeOnRoof(o, b.footprint)) {
       out.push({ key: keyOf(o), kind: 'offRoof', severity: 'warn', ...(b ? { other: buildingKey(b.id) } : {}),
-        message: `${capital(nameOf(o))} is off the roof of ${b ? b.label : 'its building'}` })
+        message: `${subject(o)}: off the roof of ${b ? b.label : 'its building'}` })
     }
   }
   for (const o of objects.filter(x => !x.elevation && !x.roof)) {
     for (const b of buildings) {
       if (shapeOverlapsPolygon(o, b.footprint)) {
-        out.push({ key: keyOf(o), other: buildingKey(b.id), kind: 'overlapsBuilding', severity: 'warn', message: `${capital(nameOf(o))} overlaps ${b.label}` })
+        out.push({ key: keyOf(o), other: buildingKey(b.id), kind: 'overlapsBuilding', severity: 'warn', message: `${subject(o)}: overlaps ${b.label}` })
       }
     }
     if (opts.reportUnchecked && o.type !== 'Bus' && !ruleOf(o.kind)) {

@@ -202,7 +202,7 @@ describe('geometry', () => {
 // SC-02 (V17–V19): native scene buildings as obstacles and roofs; exact versus
 // approximate sizes; findings name the objects and an unknown rule is not a pass.
 import {
-  nativeFindings, polygonContains, shapeOverlapsPolygon, shapeOnRoof, roofEligible, sizeBasis, buildingKey, type NativeObstacle,
+  nativeFindings, polygonContains, shapeOverlapsPolygon, shapeOnRoof, roofEligible, sizeBasis, noSizeCopy, buildingKey, type NativeObstacle,
 } from './placementCheck'
 
 const square = (cx: number, cy: number, half: number): [number, number][] =>
@@ -246,7 +246,7 @@ describe('native buildings (V17)', () => {
     const hall = building('osm:7', 'OSM building 7', bess.origin[0], bess.origin[1], 15)
     const layout = buildSiteLayout({ ...campus, buildings: [hall], placements: { 'StorageUnit:BESS': { x: bess.origin[0], y: bess.origin[1], heading: 0 } } })
     const f = nativeFindings(layout.objects, DEFAULT_LIBRARY, { buildings: [hall] }).filter(x => x.kind === 'overlapsBuilding')
-    expect(f).toEqual([{ key: 'StorageUnit:BESS', other: buildingKey('osm:7'), kind: 'overlapsBuilding', severity: 'warn', message: 'BESS overlaps OSM building 7' }])
+    expect(f).toEqual([{ key: 'StorageUnit:BESS', other: buildingKey('osm:7'), kind: 'overlapsBuilding', severity: 'warn', message: 'BESS: overlaps OSM building 7' }])
     // A click selects both: the item and the building.
     expect(new Set(f.flatMap(x => [x.key, x.other]))).toEqual(new Set(['StorageUnit:BESS', 'building:osm:7']))
   })
@@ -269,7 +269,7 @@ describe('native buildings (V17)', () => {
     const pv: CheckObject = { type: 'Generator', name: 'PV', kind: 'rooftopPv', bus: 'MV', origin: [9, 0], footprint: [6, 6], heading: 0, elevation: 9, roof: 'osm:9' }
     const roofKind = DEFAULT_LIBRARY.find(t => t.zone === 'roof')!.id
     const off = nativeFindings([{ ...pv, kind: roofKind }], DEFAULT_LIBRARY, { buildings: [roof] })
-    expect(off).toEqual([{ key: 'Generator:PV', other: 'building:osm:9', kind: 'offRoof', severity: 'warn', message: 'PV is off the roof of OSM building 9' }])
+    expect(off).toEqual([{ key: 'Generator:PV', other: 'building:osm:9', kind: 'offRoof', severity: 'warn', message: 'PV: off the roof of OSM building 9' }])
     const bess: CheckObject = { ...pv, type: 'StorageUnit', name: 'BESS', kind: 'bess', origin: [0, 0] }
     expect(nativeFindings([bess], DEFAULT_LIBRARY, { buildings: [roof] })).toEqual([
       { key: 'StorageUnit:BESS', kind: 'notRoofEligible', severity: 'warn', message: 'Can’t go on a roof: BESS' },
@@ -290,8 +290,18 @@ describe('exact versus approximate size (V18)', () => {
   it('only a source-verified catalogue record is exact', () => {
     expect(sizeBasis({ source: 'catalogue' })).toBe('exact')
     expect(sizeBasis({})).toBe('approximate')
-    expect(sizeBasis(undefined)).toBe('approximate')
-    expect(sizeBasis(null)).toBe('approximate')
+    expect(sizeBasis(undefined)).toBe('none')
+    expect(sizeBasis(null)).toBe('none')
+  })
+
+  it('no size is one line naming the item, never "Approximate size" too', () => {
+    expect(noSizeCopy('roof_pv')).toBe('No rule checked: no size entered for roof_pv, so overlap with buildings uses the centre point only')
+  })
+
+  it('a native finding keeps the item name as written: "site_battery: overlaps …"', () => {
+    const hall = building('osm:1', 'Building 1', 0, 0, 10)
+    const o: CheckObject = { type: 'StorageUnit', name: 'site_battery', kind: 'bess', bus: 'MV', origin: [0, 0], footprint: [4, 4], heading: 0 }
+    expect(nativeFindings([o], DEFAULT_LIBRARY, { buildings: [hall] }).map(f => f.message)).toEqual(['site_battery: overlaps Building 1'])
   })
 })
 

@@ -1,6 +1,6 @@
 import { AxiosError, AxiosHeaders } from 'axios'
 import { describe, expect, it } from 'vitest'
-import { CONTEXT_UNREACHABLE_COPY, plainMessage, sceneErrorCopy, sceneErrorWantsReload } from './siteScene'
+import { CONTEXT_UNREACHABLE_COPY, contextFailureToast, plainMessage, sceneErrorCopy, sceneErrorWantsReload } from './siteScene'
 
 const refused = (status: number, detail: Record<string, unknown>) => {
   const headers = new AxiosHeaders()
@@ -114,5 +114,14 @@ describe('site context footer (condition 8)', () => {
   it('one fixed line, never the raw URL, error or env var', () => {
     expect(CONTEXT_UNREACHABLE_COPY).toBe('Site context unavailable: the map data service could not be reached')
     expect(CONTEXT_UNREACHABLE_COPY).not.toMatch(/overpass|https?:|ConnectError|PYPSAGUI/i)
+  })
+
+  it('the toast says the same plain line for an upstream failure, never the raw message', () => {
+    const raw = 'Overpass request to https://overpass-api.de/api/interpreter failed: ConnectError (set PYPSAGUI_OVERPASS_URL)'
+    expect(contextFailureToast(502, true, raw)).toBe(CONTEXT_UNREACHABLE_COPY)
+    expect(contextFailureToast(undefined, true, raw)).toBe(CONTEXT_UNREACHABLE_COPY)
+    // The project's own state: the server's words (a boundary too large), and no toast for a lock.
+    expect(contextFailureToast(422, false, 'The boundary is too large to fetch')).toBe('The boundary is too large to fetch')
+    expect(contextFailureToast(409, false, 'the project is locked or a solve is running')).toBeNull()
   })
 })

@@ -303,3 +303,16 @@ export const sceneErrorWantsReload = (err: unknown): boolean =>
 
 /** The footer copy whenever the site context could not be fetched; the raw reason only behind Details (UX condition 8a). */
 export const CONTEXT_UNREACHABLE_COPY = 'Site context unavailable: the map data service could not be reached'
+
+/**
+ * The toast for a failed site-context fetch: the plain copy when the map data
+ * service did not answer (`upstream`: a 502/504/429 or no answer), the
+ * server's own words otherwise (a boundary too large), and none for a 409 (a
+ * lock or a solve in flight: the read-only banner says so). Never the raw
+ * upstream message (its URL, ConnectError, settings names).
+ */
+export function contextFailureToast(status: number | undefined, upstream: boolean, message: string): string | null {
+  if (upstream) return CONTEXT_UNREACHABLE_COPY
+  if (status === 409) return null
+  return message || CONTEXT_UNREACHABLE_COPY
+}

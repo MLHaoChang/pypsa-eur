@@ -5,9 +5,9 @@ import { join } from 'node:path'
 import type { SceneAssociation, SceneBuilding, SceneTarget } from '../api/siteScene'
 import type { Generator, Link, Load, StorageUnit, Store } from '../api/types'
 import {
-  attachCandidates, buildBindInputs, buildingName, candidatesFor, checkShares, clauseTail, featureName, findingCopy,
-  findingObjects, KIND_WORDS, nextTask, NOT_CHECKED_COPY, placeableItems, placeRefusalCopy, rowCopy, shareFeatures,
-  startingShares, targetDetail, targetLabel, TASK_ATTACH, TASK_PLACE,
+  attachCandidates, buildBindInputs, buildingName, CAPACITY_OPTIMISED, candidatesFor, carrierWords, checkShares, clauseTail, featureName, findingCopy,
+  findingObjects, isExtendable, isHelperItem, KIND_WORDS, nextTask, NOT_CHECKED_COPY, placeableItems, placeRefusalCopy, rowCopy, sameClassItems,
+  shareBlockReason, shareFeatures, startingShares, targetDetail, targetLabel, TASK_ATTACH, TASK_PLACE,
 } from './associations'
 
 const osm: SceneBuilding = { id: 'osm:7', source: { namespace: 'osm', source_id: '7' }, footprint: [[0, 0], [10, 0], [10, 10], [0, 10]],
@@ -160,9 +160,18 @@ describe('bind_targets inputs', () => {
 describe('next task (Guided)', () => {
   it('attach first, then place equipment', () => {
     expect(nextTask([])).toBe(TASK_ATTACH)
-    expect(nextTask([row({ status: 'unbound', name: null })])).toBe(TASK_ATTACH)
+    expect(nextTask([row({ status: 'unbound', name: null })])).toBe(`${TASK_ATTACH} · 1 to fix`)
     expect(nextTask([row({})])).toBe(TASK_PLACE)
     expect(TASK_ATTACH).toBe('Attach buildings to loads and processes')
+  })
+
+  it('stays on Attach, with a count, while an accepted building has a row not attached or unavailable', () => {
+    const scene = ['osm:7', 'greenfield:b1']
+    const mixed = [row({}), row({ id: 'a2', status: 'unbound', name: null }), row({ id: 'a3', feature: 'greenfield:b1', status: 'unavailable', name: null })]
+    expect(nextTask(mixed, scene)).toBe('Attach buildings to loads and processes · 2 to fix')
+    // A row of a building no longer in the scene does not hold the task.
+    expect(nextTask([row({}), row({ id: 'a2', feature: 'osm:99', status: 'unbound', name: null })], scene)).toBe(TASK_PLACE)
+    expect(nextTask([row({}), row({ id: 'a4', status: 'not_checked', name: null })], scene)).toBe(TASK_PLACE)
   })
 })
 
@@ -184,6 +193,30 @@ describe('Expert detail', () => {
     expect(d.shares).toEqual(['OSM building 7: 40 % · 1.2 MW allocated', 'Building 2: 60 % · 1.8 MW allocated'])
   })
 
+  it('an item the optimisation sizes reads "Capacity: optimised", never its stored 0', () => {
+    const zero = t({ class: 'Store', name: 'tank', capacity: { value: 0, available: true, reason: null, unit: 'MWh' }, allocation: { basis: 'explicit', shares: [
+      { feature: 'osm:7', weight: 0.5, allocated: { value: 0, available: true, reason: null, unit: 'MWh' } },
+    ] } })
+    const d = targetDetail(zero, buildings, [], true)
+    expect(d.capacity).toBe(CAPACITY_OPTIMISED)
+    expect(d.capacity).toBe('Capacity: optimised')
+    expect(d.shares).toEqual(['OSM building 7: 50 %'])
+    expect(targetDetail(zero, buildings).capacity).toBe('Capacity 0 MWh')
+  })
+
+  it('extendable: e_nom_extendable for a Store, p_nom_extendable for the rest; a Load never', () => {
+    const r = {
+      stores: [{ name: 'tank', e_nom_extendable: true, p_nom_extendable: false }] as unknown as Store[],
+      generators: [{ name: 'pv', p_nom_extendable: true }, { name: 'gt', p_nom_extendable: false }] as unknown as Generator[],
+      loads: rows.loads,
+    }
+    expect(isExtendable(r, 'Store', 'tank')).toBe(true)
+    expect(isExtendable(r, 'Generator', 'pv')).toBe(true)
+    expect(isExtendable(r, 'Generator', 'gt')).toBe(false)
+    expect(isExtendable(r, 'Load', 'cooling_1')).toBe(false)
+    expect(isExtendable(r, 'Generator', 'gone')).toBe(false)
+  })
+
   it('a time-varying capacity says so', () => {
     expect(targetDetail(t({ enclosures: 1, capacity: { value: null, available: false, reason: 'time_varying_demand', unit: 'MW' } }), buildings).capacity)
       .toBe('Capacity varies over time')
@@ -195,7 +228,7 @@ describe('findings and refusals in plain words', () => {
 
   it('overlap names the building as the user knows it; selects both objects', () => {
     const f = { code: 'overlap', severity: 'warn' as const, objects: ['StorageUnit:bess', 'osm:7'], message: 'bess · storage unit overlaps building osm:7' }
-    expect(findingCopy(f, names)).toBe('Overlaps OSM building 7')
+    expect(findingCopy(f, names)).toBe('bess: overlaps OSM building 7')
     expect(findingObjects(f, buildings)).toEqual({ items: ['StorageUnit:bess'], buildings: ['osm:7'] })
   })
 
@@ -205,9 +238,47 @@ describe('findings and refusals in plain words', () => {
   })
 
   it('off the roof and not for a roof', () => {
-    expect(placeRefusalCopy('off_roof', 'pv · generator', 'OSM building 7')).toBe('Off the roof of OSM building 7')
+    expect(placeRefusalCopy('off_roof', 'roof_pv', 'OSM building 7')).toBe('roof_pv: off the roof of OSM building 7')
     expect(placeRefusalCopy('not_roof_eligible', 'bess · storage unit', null)).toBe('Can’t go on a roof: bess · storage unit')
     expect(placeRefusalCopy('unbound_target', 'x', null)).toBeNull()
+  })
+})
+
+describe('helper items and carrier words', () => {
+  const withHelpers = {
+    ...rows,
+    generators: [...rows.generators, { name: '__buy_nh3', bus: 'nh3', carrier: 'NH3' }, { name: '__lost_nh3', bus: 'nh3', carrier: 'NH3' }] as Generator[],
+    loads: [...rows.loads, { name: '__helper_load', bus: 'h', carrier: 'heat' }] as Load[],
+  }
+
+  it('internal helpers ("__" names) are never offered to attach, place or attach again', () => {
+    expect(isHelperItem('__buy_nh3')).toBe(true)
+    expect(isHelperItem('buy_nh3')).toBe(false)
+    const names = (cs: { name: string }[]) => cs.map(c => c.name)
+    expect(names(attachCandidates(withHelpers)).some(isHelperItem)).toBe(false)
+    expect(names(placeableItems(withHelpers)).some(isHelperItem)).toBe(false)
+    expect(names(sameClassItems(withHelpers, 'Generator'))).toEqual(['pv'])
+  })
+
+  it('carriers: the project’s display name, else the catalogue’s, else as written (never re-cased)', () => {
+    expect(carrierWords('NH3')).toBe('Ammonia')
+    expect(carrierWords('haber_bosch')).toBe('haber_bosch')
+    expect(carrierWords('nh3')).toBe('nh3')
+    expect(carrierWords('haber_bosch', { haber_bosch: 'Haber–Bosch synthesis' })).toBe('Haber–Bosch synthesis')
+    expect(carrierWords('NH3', { NH3: ' ' })).toBe('Ammonia')
+    expect(carrierWords(null)).toBeNull()
+    expect(rowCopy(row({ carrier: 'nh3', unit: null }), 'expert', true).text).toBe('cooling_1 · Load · nh3')
+  })
+})
+
+describe('shares: one finding, one reason', () => {
+  it('Preview says what to do, not the total again', () => {
+    const off = checkShares({ a: 40, b: 45 }, ['a', 'b'])
+    expect(off.copy).toBe('Total 85 %: shares should add up to 100 %')
+    expect(shareBlockReason(off)).toBe('Make the shares add up to 100 % first')
+    expect(shareBlockReason(checkShares({ a: 40, b: null }, ['a', 'b']))).toBe('Correct the shares first')
+    expect(shareBlockReason(checkShares({ a: 50, b: 50 }, ['a', 'b']))).toBeNull()
+    expect(shareBlockReason(checkShares({}, ['a', 'b']))).toBeNull()
   })
 })
 

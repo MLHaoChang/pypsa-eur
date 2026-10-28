@@ -19,10 +19,12 @@ import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import {
   attachCandidates, sameClassItems, buildBindInputs, buildingName, candidateKey, candidatesFor, checkShares, clauseTail, featureName, findingCopy,
-  findingObjects, KIND_WORDS, nextTask, pct, placeableItems, placeRefusalCopy, rowCopy, shareFeatures, startingShares, targetDetail,
-  targetLabel, type Candidate, type UiMode,
+  findingObjects, isExtendable, KIND_WORDS, nextTask, pct, placeableItems, placeRefusalCopy, rowCopy, shareBlockReason, shareFeatures, startingShares,
+  targetDetail, targetLabel, type Candidate, type CarrierNames, type UiMode,
 } from './associations'
-import { APPROXIMATE_SIZE, roofEligible, roofItem, sizeBasis } from './placementCheck'
+import { APPROXIMATE_SIZE, noSizeCopy, roofEligible, roofItem, sizeBasis } from './placementCheck'
+import { DEMAND_PALETTE_SECTION } from '../layout/sidebar/AssetPaletteInline'
+import { PALETTE_SECTIONS_DATA, PROCESS_UNIT_ITEM, type PaletteItemData } from '../layout/paletteData'
 import { componentOfKey } from './placementFindingsStore'
 import NumberField from './NumberField'
 import { applyProposal, discardProposal, propose, sceneKey, SitesNotSaved } from './sceneActions'
@@ -45,6 +47,32 @@ function openHome(section: FlowSectionId): void {
   })
 }
 
+/**
+ * What Expert's "› Add model asset" offers: the sidebar asset palette's items
+ * that become placeable equipment (not the network's buses and lines, not
+ * demand), plus the process unit. Choosing one opens the app's creation form.
+ */
+const ADD_KINDS: PaletteItemData[] = [
+  ...PALETTE_SECTIONS_DATA.filter(s => s.id !== 'network' && s.id !== DEMAND_PALETTE_SECTION).flatMap(s => s.items),
+  PROCESS_UNIT_ITEM,
+]
+
+/**
+ * Expert: the creation form for one asset kind, in the Properties panel
+ * beside Site 3D. When a panel covers the canvas it is closed through
+ * withReturnFromSite3D, so "Back to Site 3D" brings it back.
+ */
+function openCreationForm(item: PaletteItemData): void {
+  const open = () => {
+    const ui = useUIStore.getState()
+    ui.setSlidePanel(null)
+    ui.openRightPanel()
+    ui.setCreationItem({ id: item.id, label: item.label })
+  }
+  if (useUIStore.getState().activeSlidePanel) withReturnFromSite3D(open)
+  else open()
+}
+
 const link = 'whitespace-nowrap text-accent hover:underline'
 const primary = 'px-3 py-1 rounded bg-accent text-white font-semibold hover:bg-accent/90 disabled:opacity-50'
 const secondary = 'px-3 py-1 rounded border border-border text-text hover:border-accent disabled:opacity-50'
@@ -57,10 +85,13 @@ function useNetworkRows(project: string | null) {
   const generators = useQuery({ queryKey: nk(project, 'generators'), queryFn: networkApi.getGenerators, ...opts })
   const storageUnits = useQuery({ queryKey: nk(project, 'storage_units'), queryFn: networkApi.getStorageUnits, ...opts })
   const loaded = [loads, links, stores, generators, storageUnits].every(q => q.isSuccess)
+  const carriers = useQuery({ queryKey: nk(project, 'carriers'), queryFn: networkApi.getCarriers, ...opts })
+  const carrierNames = useMemo<CarrierNames>(
+    () => Object.fromEntries((carriers.data ?? []).filter(c => c.nice_name).map(c => [c.name, c.nice_name])), [carriers.data])
   return useMemo(() => ({
     loads: loads.data ?? [], links: links.data ?? [], stores: stores.data ?? [],
-    generators: generators.data ?? [], storageUnits: storageUnits.data ?? [], loaded,
-  }), [loads.data, links.data, stores.data, generators.data, storageUnits.data, loaded])
+    generators: generators.data ?? [], storageUnits: storageUnits.data ?? [], loaded, carrierNames,
+  }), [loads.data, links.data, stores.data, generators.data, storageUnits.data, loaded, carrierNames])
 }
 
 /** The network component lists this panel reads, so a return from "› Add model asset" sees what was added. */
@@ -119,6 +150,9 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<ErrorState | null>(null)
   const [rebindPick, setRebindPick] = useState<Candidate | null>(null)
+  const [addOpen, setAddOpen] = useState(false)
+  // Away on an add trip (another view, or the creation form open): the lists are read again on the way back.
+  const atHome = useUIStore(s => !s.flowReturn && !s.creationItem)
   const placementRebind = useModelProposal(s => s.placementRebind)
   const setPlacementRebind = useModelProposal(s => s.setPlacementRebind)
 
@@ -169,7 +203,7 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
   const features = target && feature && !rebinding ? shareFeatures(associations, target, feature) : []
   const shareCheck = checkShares(shares, features)
   const shareBlocks = features.length > 1 && ['partial', 'off', 'invalid'].includes(shareCheck.state)
-  const attachReason = !target ? CHOOSE_ATTACH : shareBlocks ? shareCheck.copy : !canWrite ? blockedReason : null
+  const attachReason = !target ? CHOOSE_ATTACH : shareBlocks ? shareBlockReason(shareCheck) : !canWrite ? blockedReason : null
 
   const choose = (key: string) => {
     const c = pickList.find(x => candidateKey(x) === key) ?? null
@@ -209,7 +243,7 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
     const entry: PlaceEntry = { x: place.x, y: place.y, heading: place.heading, on: roofBuilding ? `roof:${roofBuilding}` : 'ground' }
     const p = await propose<PlacePreview>(qc, project!, site.id, 'place_existing', { placements: { [place.key]: entry } })
     setProposal({ ...p, action: 'place_existing' })
-  }, code => placeRefusalCopy(code, placeItem ? targetLabel(placeItem.class, placeItem.name, mode) : 'this item',
+  }, code => placeRefusalCopy(code, placeItem ? placeItem.name : 'this item',
     roofBuilding ? bName(roofBuilding) : null))
 
   // ── review ────────────────────────────────────────────────────────────────
@@ -244,17 +278,28 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
   })
 
   // ── add model asset → place it ────────────────────────────────────────────
+  // Only a snapshot of loaded lists can tell a new item from one still loading.
+  const snapshotNow = () => setAddAssetFrom(rows.loaded && project ? { project, siteId: site.id, keys: placeable.map(candidateKey) } : null)
   const addAsset = () => {
-    // Only a snapshot of loaded lists can tell a new item from one still loading.
-    setAddAssetFrom(rows.loaded && project ? { project, siteId: site.id, keys: placeable.map(candidateKey) } : null)
+    // Expert: choose the kind, then the app's creation form opens. Guided has no add form of its own: its Assets card.
+    if (mode === 'expert') { setAddOpen(o => !o); return }
+    snapshotNow()
     openHome('assets')
   }
+  const addKind = (id: string) => {
+    const item = ADD_KINDS.find(k => k.id === id)
+    if (!item) return
+    setAddOpen(false)
+    snapshotNow()
+    openCreationForm(item)
+  }
   const snapshot = addAssetFrom && addAssetFrom.project === project && addAssetFrom.siteId === site.id ? addAssetFrom : null
-  // Back from adding: read the lists again (their 30 s staleTime would hide the new item).
+  // Back from adding (or the form closed): read the lists again, so "› Place it" shows at once (their 30 s
+  // staleTime would hide the new item until a remount).
   const pendingAdd = !!snapshot
   useEffect(() => {
-    if (pendingAdd) for (const root of NETWORK_ROOTS) void qc.invalidateQueries({ queryKey: nk(project, root) })
-  }, [pendingAdd, project, qc])
+    if (pendingAdd && atHome) for (const root of NETWORK_ROOTS) void qc.invalidateQueries({ queryKey: nk(project, root) })
+  }, [pendingAdd, atHome, project, qc])
   const fresh = snapshot && rows.loaded
     ? placeable.find(c => !snapshot.keys.includes(candidateKey(c)) && !(candidateKey(c) in placements)) ?? null
     : null
@@ -262,11 +307,12 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
 
   const sizeOf = (key: string) => footprints[key]
   const approx = (key: string) => sizeBasis(sizeOf(key)) === 'approximate'
+  const sceneFeatures = useMemo(() => [...buildings.map(b => b.id), ...groups.map(g => g.id)], [buildings, groups])
 
   return (
     <div className="flex flex-col gap-2" data-testid="association-panel">
       {mode === 'guided' && (
-        <span className="text-text font-medium" data-testid="scene-next-task">Next: {nextTask(associations)}</span>
+        <span className="text-text font-medium" data-testid="scene-next-task">Next: {nextTask(associations, sceneFeatures)}</span>
       )}
 
       {!mine && rebindKey && (
@@ -295,6 +341,7 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
 
       {mine ? (
         <Review proposal={mine} mode={mode} buildings={buildings} groups={groups} itemName={itemName} approx={approx}
+          shortName={key => componentOfKey(key).name}
           sized={key => !!sizeOf(key)} onApply={() => void apply()} onDiscard={() => void discard()}
           canApply={writable} applyReason={!canWrite ? blockedReason : null} busy={busy} />
       ) : (
@@ -306,9 +353,9 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
               <ul className="flex flex-col gap-1">
                 {mineRows.map(a => {
                   const canRebind = all.some(c => c.class === a.class)
-                  const copy = rowCopy(a, mode, canRebind)
+                  const copy = rowCopy(a, mode, canRebind, rows.carrierNames)
                   const t = a.status === 'bound' ? targets.find(x => x.class === a.class && x.name === a.name) : undefined
-                  const detail = t && mode === 'expert' ? targetDetail(t, buildings, groups) : null
+                  const detail = t && mode === 'expert' ? targetDetail(t, buildings, groups, !!a.name && isExtendable(rows, a.class, a.name)) : null
                   return (
                     <li key={a.id} data-testid={`assoc-row-${a.id}`} data-status={a.status}
                       className={`text-[11px] ${copy.tone === 'warn' ? 'text-warn' : copy.tone === 'ok' ? 'text-text' : 'text-muted'}`}>
@@ -355,7 +402,7 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
 
               {features.length > 1 && (
                 <div className="flex flex-col gap-1" data-testid="assoc-shares">
-                  <span className="text-[11px] text-muted">Shares of {target ? targetLabel(target.class, target.name, mode) : ''} (optional)</span>
+                  <span className="text-[11px] text-muted">Shares of {target ? targetLabel(target.class, target.name, mode) : ''}{shareCheck.state === 'none' ? ' (optional)' : ''}</span>
                   <div className="flex flex-wrap gap-2">
                     {features.map(f => (
                       <NumberField key={f} label={featureName(f, buildings, groups)} unit="%" width="w-16" testId={`assoc-share-${f}`}
@@ -410,10 +457,8 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
             {placeItem && (
               <>
                 {approx(place.key) && <span className="text-[11px] text-muted" data-testid="place-size">{APPROXIMATE_SIZE}</span>}
-                {!sizeOf(place.key) && (
-                  <span className="text-[11px] text-muted" data-testid="place-no-rule">
-                    No rule checked: overlap with buildings uses the centre point only (no size entered for {placeItem.name})
-                  </span>
+                {sizeBasis(sizeOf(place.key)) === 'none' && (
+                  <span className="text-[11px] text-muted" data-testid="place-no-rule">{noSizeCopy(placeItem.name)}</span>
                 )}
                 <label className="flex flex-col gap-0.5 text-[11px]">
                   <span className="text-muted">Stands on</span>
@@ -437,8 +482,19 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
             <div className="flex flex-wrap items-center gap-2">
               <button type="button" data-testid="place-preview" className={primary} disabled={!writable || !!placeReason}
                 onClick={() => void previewPlace()}>Preview</button>
-              <button type="button" data-testid="add-asset-link" className={link} onClick={addAsset}>› Add model asset</button>
+              <button type="button" data-testid="add-asset-link" className={link} aria-expanded={mode === 'expert' ? addOpen : undefined}
+                onClick={addAsset}>› Add model asset</button>
             </div>
+            {mode === 'expert' && addOpen && (
+              <label className="flex flex-col gap-0.5 text-[11px]">
+                <span className="text-muted">Kind to add</span>
+                <select data-testid="add-asset-kind" value="" onChange={e => addKind(e.target.value)}
+                  className="rounded border border-border bg-bg px-2 py-1 text-[12px] text-text">
+                  <option value="" disabled>Choose a kind</option>
+                  {ADD_KINDS.map(k => <option key={k.id} value={k.id}>{k.label}</option>)}
+                </select>
+              </label>
+            )}
             {placeReason && <span className="text-[11px] text-muted" data-testid="place-preview-reason">{placeReason}</span>}
           </div>
         </>
@@ -471,12 +527,14 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
   )
 }
 
-function Review({ proposal, mode, buildings, groups, itemName, approx, sized, onApply, onDiscard, canApply, applyReason, busy }: {
+function Review({ proposal, mode, buildings, groups, itemName, shortName, approx, sized, onApply, onDiscard, canApply, applyReason, busy }: {
   proposal: ModelProposal
   mode: UiMode
   buildings: readonly SceneBuilding[]
   groups: readonly { id: string; label: string; members: string[] }[]
   itemName: (key: string) => string
+  /** An item as findings name it: its name as written ("site_battery"). */
+  shortName: (key: string) => string
   approx: (key: string) => boolean
   sized: (key: string) => boolean
   onApply: () => void
@@ -509,12 +567,12 @@ function Review({ proposal, mode, buildings, groups, itemName, approx, sized, on
     for (const [key, e] of Object.entries(proposal.preview.placements)) {
       const where = e.on && e.on.startsWith('roof:') ? `on the roof of ${bName(e.on.slice(5))}` : 'on the ground'
       const note = [approx(key) ? APPROXIMATE_SIZE : null,
-        sized(key) ? null : 'No rule checked: overlap with buildings uses the centre point only'].filter((x): x is string => !!x)
+        sized(key) ? null : noSizeCopy(shortName(key))].filter((x): x is string => !!x)
       lines.push({ key, text: `${itemName(key)} · ${where} · ${e.x.toLocaleString('en-US')} m east, ${e.y.toLocaleString('en-US')} m north · heading ${e.heading}°`, note })
     }
   }
   const findings = proposal.preview.findings ?? []
-  const names = { item: itemName, building: bName }
+  const names = { item: shortName, building: bName }
   return (
     <div className="flex flex-col gap-1.5" data-testid="assoc-proposal" data-action={proposal.action}>
       <span className="text-text">Preview: nothing is saved until Apply</span>
