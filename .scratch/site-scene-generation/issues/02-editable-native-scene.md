@@ -3,7 +3,7 @@
 
 # SC-01 — native campus generation and editable buildings
 
-Status: needs-triage — specification proposed; not implemented
+Status: in-progress — SC-01a (backend: routes, scene service, /flow scene block, closure copies) in review on `claude/site3d-sc01a`; SC-01b (UI) opens after it merges. Record: [sc-01/record.md](../sc-01/record.md)
 Type: task
 Dependencies: accepted SC-00 N only; Blender/Photo not required
 Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c

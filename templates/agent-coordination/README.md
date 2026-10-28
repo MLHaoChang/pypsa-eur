@@ -106,7 +106,7 @@ When a change is specific to this project, such as a pypsa-gui test path in `sem
 
 **Intentional differences** between the live files and the template:
 - The live files name pypsa-gui paths, tests, models and session ids. The template uses placeholders and `docs/agents/roles.md`.
-- The live premerge.sh also has the semantic test list and the assistant-inventory check; the template has an empty `semantic_re`.
+- The live premerge.sh also has the semantic test list, the assistant-inventory check, the error-kind tests and the frontend tool-list tests; the template has an empty `semantic_re`.
 - Bootstrap exists only in the template, because this repo is already set up. The live gatekeeper runs from its first message rather than from a skill file.
 
 Learnings from another project that used the template come back here by hand: that project's coordinator sends them to this repo's coordinator, or the owner opens a PR.

@@ -57,12 +57,41 @@ def _org(project: AuthorizedProject):
 
 @router.get("/{name}/flow")
 def get_project_flow(project: AuthorizedProject = ProjectAccessDep,
-                     db: DBSession = Depends(get_db)) -> dict:
-    """``{sections, run_ready, run_blocker, deferred, deferred_reason}``; see
-    ``services/flow_service.py`` for the states and the sources."""
+                     db: DBSession = Depends(get_db),
+                     user: User | None = Depends(optional_user)) -> dict:
+    """``{sections, run_ready, run_blocker, deferred, deferred_reason, scene}``;
+    see ``services/flow_service.py`` for the states and the sources. ``scene``
+    is the Site 3D verdict block (SC-01a, ``_scene_block``)."""
     _require_open(project)
-    return flow_service.project_flow(project.directory, cache_key=project.registry_key,
-                                     db=db, org_id=_org(project))
+    payload = flow_service.project_flow(project.directory, cache_key=project.registry_key,
+                                        db=db, org_id=_org(project))
+    # A new dict: the service may hand back its cached payload, which the
+    # scene key must never enter (the electrical keys stay exactly as served).
+    return {**payload, "scene": _scene_block(project, db, user)}
+
+
+def _scene_block(project: AuthorizedProject, db: DBSession, user: User | None) -> dict:
+    """The additive scene verdicts (contracts.md §4), read fresh on every
+    request: a scene apply shows on the next read, never from a cache. Edit
+    access is the native lock (another user's lock makes the project
+    read-only here, as in the app); targets are the model elements a building
+    can later be associated with; no Bus is needed for any native action."""
+    from services import project_locks
+    from services.pypsa_service import PyPSAService
+    from services.site_scene import proposals, verdicts
+
+    can_edit = True
+    try:
+        lock = project_locks.get_lock(db, uuid.UUID(project.uuid))
+        can_edit = lock is None or user is None or lock.holder_user_id == user.id
+    except (TypeError, ValueError):
+        pass                            # no registry row, no lock
+    n = PyPSAService.get_network()
+    targets = sum(len(getattr(n, c)) for c in ("loads", "generators", "storage_units", "stores", "links"))
+    native_runs = int(not n.generators_t.p.empty)
+    owner = str(user.id) if user is not None else None
+    return verdicts.scene_block(project.directory, can_edit=can_edit, targets=targets, native_runs=native_runs,
+                                pending_proposal=proposals.has_ready(project.registry_key, owner))
 
 
 @router.post("/{name}/flow/ack")

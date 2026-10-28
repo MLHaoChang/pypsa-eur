@@ -4,32 +4,28 @@ on:
   pull_request:
     branches: [master]
     paths:
-      - '.scratch/live-voice/route-parity.json'
-      - '.scratch/live-voice/capability-matrix.json'
+      # Everything the in-memory builds read (nothing generated is committed).
       - 'pypsa-gui/frontend/src/**'
       - 'pypsa-gui/frontend/scripts/api-bindings.mjs'
-      - 'pypsa-gui/backend/main.py'
-      - 'pypsa-gui/backend/routers/**'
-      - 'pypsa-gui/backend/harness/catalogue.py'
-      - 'pypsa-gui/backend/services/chat_tools.py'
-      - 'pypsa-gui/backend/smoke/assistant_route_parity.py'
-      - 'pypsa-gui/backend/smoke/assistant_route_parity_declarations.json'
+      # The builds `import main`, so any backend module can change the routes.
+      - 'pypsa-gui/backend/**'
+      - '!pypsa-gui/backend/tests/**'
       - 'pypsa-gui/backend/tests/test_assistant_route_parity.py'
+      - 'pypsa-gui/backend/tests/test_assistant_control_matrix.py'
+      - '.scratch/live-voice/application-coverage.md'
       - '.github/workflows/assistant-route-parity.yaml'
   push:
     branches: [master]
     paths:
-      - '.scratch/live-voice/route-parity.json'
-      - '.scratch/live-voice/capability-matrix.json'
+      # Everything the in-memory builds read (nothing generated is committed).
       - 'pypsa-gui/frontend/src/**'
       - 'pypsa-gui/frontend/scripts/api-bindings.mjs'
-      - 'pypsa-gui/backend/main.py'
-      - 'pypsa-gui/backend/routers/**'
-      - 'pypsa-gui/backend/harness/catalogue.py'
-      - 'pypsa-gui/backend/services/chat_tools.py'
-      - 'pypsa-gui/backend/smoke/assistant_route_parity.py'
-      - 'pypsa-gui/backend/smoke/assistant_route_parity_declarations.json'
+      # The builds `import main`, so any backend module can change the routes.
+      - 'pypsa-gui/backend/**'
+      - '!pypsa-gui/backend/tests/**'
       - 'pypsa-gui/backend/tests/test_assistant_route_parity.py'
+      - 'pypsa-gui/backend/tests/test_assistant_control_matrix.py'
+      - '.scratch/live-voice/application-coverage.md'
       - '.github/workflows/assistant-route-parity.yaml'
   workflow_dispatch:
 
@@ -68,7 +64,10 @@ jobs:
       - name: Check every GUI route maps to a tool or a declared gap
         run: pixi run -e test python pypsa-gui/backend/smoke/assistant_route_parity.py --check
 
-      - name: Route-parity contract tests
+      - name: Check the editable-control matrix (it summarises route parity, so it runs here)
+        run: pixi run -e test python pypsa-gui/backend/smoke/assistant_control_matrix.py --check
+
+      - name: Route-parity and control-matrix contract tests
         env:
           REQUIRE_TS_SCANNER: '1'
         working-directory: pypsa-gui/backend

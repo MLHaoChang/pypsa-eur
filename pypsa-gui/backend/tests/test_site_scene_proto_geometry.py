@@ -182,3 +182,17 @@ def test_equipment_proxies_reuse_asset_footprints_and_never_guess_height():
     assert (w, d) == (pytest.approx(4), pytest.approx(2))
     assert proxies[0]["height"] == {"value": 1.5, "available": True, "reason": None, "unit": "m"}
     assert proxies[1]["height"] == {"value": None, "available": False, "reason": "height_not_set", "unit": "m"}
+
+
+def test_messages_name_buildings_in_words_and_sizes_in_kb_or_mb():
+    # Review-ux: no raw keys or indexes in what a user reads.
+    with pytest.raises(SceneError) as e:
+        native_scene.generate(SITE, {"greenfield": [_ref(), {**_ref(), "id": "low", "height": 0}]})
+    assert e.value.message == "Building 2: height must be above 0 m and at most 1000 m"
+    with pytest.raises(SceneError) as e:
+        native_scene.generate(SITE, {"sources": [{"namespace": "osm", "source_id": "1", "ring": []}]})
+    assert e.value.message == "Mapped building 1: a footprint needs at least three vertices"
+    with pytest.raises(SceneError) as e:
+        native_scene.check_footprint(_ngon(native_scene.MAX_FOOTPRINT_VERTICES + 1), "Building 1")
+    assert e.value.message == "Too large: 257 footprint corners, the limit is 256"
+    assert native_scene.size_text(2_000_000) == "2.0 MB" and native_scene.size_text(1500) == "1.5 kB"
