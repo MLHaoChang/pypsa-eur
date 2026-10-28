@@ -146,3 +146,18 @@ def test_gen_zero_costs_exemptions_cover_exactly_the_template_generators(tid):
     still = set(VS._zero_cost_generators(n))
     assert static - still == _EXEMPT[tid]
     assert still == set()
+
+
+def test_one_unit_is_named_and_several_are_a_count_the_flow_files_to_the_section():
+    from services import flow_service as FS
+    n = _net()
+    n.add("Generator", "free_a", bus="b", p_nom=1.0)
+    one = [i for i in VS.validate_for_run(n, SolverConfig()) if i.code == "gen_zero_costs"]
+    assert one[0].name == "free_a"
+    n.add("Generator", "free_b", bus="b", p_nom=1.0)
+    many = [i for i in VS.validate_for_run(n, SolverConfig()) if i.code == "gen_zero_costs"]
+    assert many[0].name == "2 item(s)"
+    [item] = FS._validation_items(many, frozenset())
+    assert item["target"]["entity"] is None and item["target"]["component"] is None
+    [item] = FS._validation_items(one, frozenset())
+    assert item["target"]["entity"] == "free_a"
