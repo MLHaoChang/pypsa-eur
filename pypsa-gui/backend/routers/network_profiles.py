@@ -274,9 +274,6 @@ def aggregate_load_profile(
         return out
     if any(not s.index.equals(n.snapshots) for s in series_list):
         gaps.append("the loads do not share the network's snapshots")
-        # A repeated timestamp cannot be aligned at all (concat would raise).
-        if any(s.index.has_duplicates for s in series_list):
-            return out
     # A bool or string member (a numeric-string upload) is not summed: every
     # step of it counts as missing, as aggregate_source refuses it.
     not_numbers = [s.name for s in series_list
@@ -284,7 +281,12 @@ def aggregate_load_profile(
     if not_numbers:
         gaps.append("a step that is not a number")
 
-    raw = pd.concat(series_list, axis=1)
+    try:
+        raw = pd.concat(series_list, axis=1)
+    except (TypeError, ValueError):
+        # Members that cannot be aligned at all (a repeated timestamp, or a
+        # timezone-aware index next to a naive one) are only a gap.
+        return out
     numeric = raw.drop(columns=not_numbers).astype("float64").reindex(columns=raw.columns)
     finite = np.isfinite(numeric.to_numpy())
     # A complete sum keeps the handler's own expression, so a value the

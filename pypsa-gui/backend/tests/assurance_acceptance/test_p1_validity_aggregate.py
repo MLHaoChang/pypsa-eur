@@ -188,3 +188,14 @@ def test_repeated_timestamp_is_a_gap_not_an_error(read, monkeypatch):
     assert out["gaps"] == ["the loads do not share the network's snapshots"]
     assert out["values"] == []
     assert_blocked(out)
+
+
+def test_timezone_aware_member_is_a_gap_not_an_error(read, monkeypatch):
+    from routers import network_profiles
+
+    aware = pd.Series(L2, index=network().snapshots.tz_localize("UTC"))
+    monkeypatch.setitem(network_profiles._user_ts, ("loads", "p_set", "L2"), aware)
+    out = read(names="L1,L2")
+    assert out["gaps"] == ["the loads do not share the network's snapshots"]
+    assert out["values"] == []
+    assert_blocked(out)
