@@ -315,6 +315,21 @@ def test_the_single_year_h2_hub_case_buys_grey_h2_in_its_counterfactual(reset_ba
     # The demo's NPV, pinned (measured 2026-10-28, live solve): re-derive it if the
     # baseline or the solver changes, never loosen the tolerance.
     assert run_case(case).metrics["project_pre_tax_npv"] == pytest.approx(7_823_212.0, rel=0.01)
+    # Without the reference purchase the case is still established: the hub
+    # as it stands today serves the flat 25 MW offtake with its existing 60 MW
+    # electrolyser (40.8 MW of H2), so nothing is unserved and nothing is
+    # bought (GK A, plan review of issue 19, option A). The staged hub's
+    # smaller electrolyser cannot (`counterfactual_not_established:
+    # owner_conversion_load`, covered by the fact's tests).
+    from routers.projects import _solver_config_from_dict
+
+    raw = T.solver_config("eh_h2_hub")
+    raw["commercial"]["reference_purchases"] = []
+    _base, case = _h2_case(n, _solver_config_from_dict(raw), state)
+    assert "counterfactual_basis:site_today" in case.flags
+    assert not any(f.startswith(("counterfactual_buys", "counterfactual_not_established"))
+                   for f in case.flags)
+    assert run_case(case).metrics["project_pre_tax_npv"] == pytest.approx(11_440_773.0, rel=0.01)
 
 
 @pytest.mark.live_solve

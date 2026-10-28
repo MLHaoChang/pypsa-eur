@@ -5,7 +5,9 @@ Read from the stored run, the body of `GET /results/investment_case`
 (`routers.results.get_investment_case`), never by re-running the case:
 
 - `not_run`: no case, a case still running, a failed run (no evidence either
-  way), or a stored report that is stale (an input changed since the run);
+  way), a stored report that is stale (an input changed since the run), or
+  results that no longer describe the network (it was edited after the solve
+  the case read: `workflow_tools.solve_freshness`);
 - `established`: a `done` case with no `counterfactual_not_established:*`
   flag, on the site-today basis when flagged `counterfactual_basis:site_today`,
   else the analytic one;
@@ -25,9 +27,10 @@ _BLOCKER = "counterfactual_not_established:"
 _SITE_TODAY = "counterfactual_basis:site_today"
 
 
-def classify(body: dict | None) -> dict:
+def classify(body: dict | None, results_current: bool = True) -> dict:
     """``{"state", "basis", "reasons"}`` for one investment-case status body
-    (None: the route answered 204, no run and no report)."""
+    (None: the route answered 204, no run and no report) and whether the
+    solve's results still describe the network."""
     if not body:
         return {"state": NOT_RUN, "basis": None, "reasons": ["no_case"]}
     status = body.get("status")
@@ -41,6 +44,8 @@ def classify(body: dict | None) -> dict:
     if report.get("stale") is not False:
         return {"state": NOT_RUN, "basis": None,
                 "reasons": ["case_stale", *(f"changed:{c}" for c in report.get("changed") or [])]}
+    if not results_current:
+        return {"state": NOT_RUN, "basis": None, "reasons": ["case_stale", "results_not_current"]}
     if status == "refused":
         return {"state": NOT_ESTABLISHED, "basis": None,
                 "reasons": [str(body.get("error_code") or "refused")]}
@@ -52,15 +57,17 @@ def classify(body: dict | None) -> dict:
     return {"state": ESTABLISHED, "basis": basis, "reasons": []}
 
 
-def read(ctx_call) -> dict:
-    """The fact for the active project: ``ctx_call(fn)`` calls ``fn`` with the
-    run's project context bound (`services.run_gates._on`)."""
+def read(ctx, on) -> dict:
+    """The fact for the run's project ``ctx``: ``on(fn)`` calls ``fn`` with
+    that context bound (`services.run_gates._on`)."""
     from fastapi import Response
 
     from routers.results import get_investment_case
+    from services import workflow_tools
 
-    body = ctx_call(get_investment_case)
-    return classify(None if isinstance(body, Response) else body)
+    body = on(get_investment_case)
+    return classify(None if isinstance(body, Response) else body,
+                    workflow_tools.solve_freshness(ctx)["results_current"])
 
 
 def counterfactual_text(flags: Iterable[str]) -> list[str]:
