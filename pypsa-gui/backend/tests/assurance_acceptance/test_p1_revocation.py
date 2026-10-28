@@ -14,7 +14,6 @@ import pytest
 import app_paths
 from db.models import OrgMembership, User
 from harness.providers.fake import FakeProvider
-from services.pypsa_service import PyPSAService
 from tests.assurance_acceptance.test_p1_evidence import page_draft
 from tests.assurance_acceptance.support import (
     approval,
@@ -102,6 +101,8 @@ PAGE_DRAFT = page_draft()
 
 def get_series():
     """Give L1 a p_set series, then read it (time-series evidence, issue 02)."""
+    from services.pypsa_service import PyPSAService
+
     network = PyPSAService.get_active_context().network
     network.loads_t.p_set["L1"] = [5.0] * len(network.snapshots)
     return tool_turn(
