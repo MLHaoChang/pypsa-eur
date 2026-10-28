@@ -103,7 +103,8 @@ def test_carrier_energy_matches_compare_dispatch(oj_grid):  # noqa: F811
     for c in d['storage_dispatch']['by_carrier']:
         energy[c['name']] = energy.get(c['name'], 0.0) + c['energy_out_mwh']
     compare = _compute_dispatch_summary(n, [], False, True).dispatch_gwh_by_carrier
-    assert {c: pytest.approx(v.total * 1000) for c, v in compare.items()} == energy
+    produced = {c: e for c, e in energy.items() if e}     # Compare leaves idle carriers out
+    assert {c: pytest.approx(v.total * 1000) for c, v in compare.items() if v.total} == produced
     assert energy['gas'] == pytest.approx(sum(GAS_T), rel=1e-6)
 
 
