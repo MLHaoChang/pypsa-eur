@@ -272,7 +272,7 @@ def _by_days(op: Mapping[str, Any], i: int) -> int:
         raise InvalidRefineOpError(
             f"op {i}: move_window.by must be a whole number of days (1-365, "
             f"\"14d\", \"-3d\") or weeks (1-52, \"2w\"), later or with - "
-            f"earlier, got {raw}")
+            f"earlier, got {str(raw)[:12]}{'…' if len(str(raw)) > 12 else ''}")
     return (-n if m.group(1) == "-" else n) * (7 if m.group(3) == "w" else 1)
 
 

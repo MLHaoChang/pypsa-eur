@@ -260,6 +260,13 @@ def test_by_is_bounded(by):
         _refine(s, meta, [{"op": "move_window", "by": by}])
 
 
+def test_a_long_by_is_not_echoed_in_full():
+    s, meta = _gen(ONE)
+    with pytest.raises(InvalidRefineOpError) as exc:
+        _refine(s, meta, [{"op": "move_window", "by": "0" * 100_000 + "d"}])
+    assert len(str(exc.value)) < 200
+
+
 @pytest.mark.parametrize("by", ["365d", "-365d", "52w", "+1d"])
 def test_by_at_its_bounds(by):
     s, meta = _gen(ONE)
