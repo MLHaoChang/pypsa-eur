@@ -240,7 +240,7 @@ def _dispatch_ready(n) -> bool:
     return _dispatch_status(n) == "fresh"
 
 
-def _result_df(n, accessor_name: str, attr: str, source: str = "lopf"):
+def _result_df(n, accessor_name: str, attr: str, source: str = "lopf", *, state=None):
     """
     Return the DataFrame for `<accessor>.<attr>` (e.g. 'lines_t', 'p0')
     from the source the user asked for.
@@ -257,10 +257,13 @@ def _result_df(n, accessor_name: str, attr: str, source: str = "lopf"):
     endpoint reads the live network exactly as before.
 
     Returns None if the attribute doesn't exist on the network.
+
+    `state` reads another run's solver state (a scenario's own context, in the
+    results workbook) instead of the active one.
     """
     key = f"{accessor_name}.{attr}"
     src = source if source in ("lopf", "ac_pf") else "lopf"
-    snap = _state.get(f"{src}_results")
+    snap = (_state if state is None else state).get(f"{src}_results")
     if isinstance(snap, dict) and key in snap:
         return snap[key]
     try:
@@ -2042,14 +2045,16 @@ def _ic_case_hash(case) -> str | None:
     return finance_case_hash(case)
 
 
-def _ic_assumptions(cfg, n, *, lock, extra_assets: str | None = None) -> tuple[str, dict]:
+def _ic_assumptions(cfg, n, *, lock, extra_assets: str | None = None,
+                   result_df=None) -> tuple[str, dict]:
     """(hash, parts) of the inputs a finance case is built from: the finance
     inputs, the value flows, the rest of the commercial config, the rest of
     the solver config (review B1), the dispatch digest of the solve, the
     pack versions (WP4.6b staleness key), the owner assets' investment
     columns (IC G3 F-2, read under `lock`, the network lock the request took:
     the runner's worker does not hold it, a GET re-enters it) and the campus
-    study's digest (`extra_assets`, IC G3 R-4: the request's source)."""
+    study's digest (`extra_assets`, IC G3 R-4: the request's source).
+    `result_df` reads another run's results (`_result_df` with its `state`)."""
     from pydantic import ValidationError as _VE
 
     from models.finance import FinanceInputs
@@ -2067,7 +2072,7 @@ def _ic_assumptions(cfg, n, *, lock, extra_assets: str | None = None) -> tuple[s
     with lock:
         owner_assets = owner_assets_digest(n, commercial)
     return assumptions_digest(finance=raw, commercial=commercial,
-                              dispatch=dispatch_digest(n, _result_df), packs=pack_versions(fin),
+                              dispatch=dispatch_digest(n, result_df or _result_df), packs=pack_versions(fin),
                               solver=solver, owner_assets=owner_assets,
                               extra_assets=extra_assets)
 
@@ -2200,9 +2205,48 @@ def get_investment_case_export():
                  f'attachment; filename="investment_case_{re.sub(r"[^A-Za-z0-9_-]", "_", report.case_id)[:40]}.xlsx"'})
 
 
+def _workbook_scenarios(cfg, n, freshness: dict):
+    """The open project's sensitivity runs for the results workbook (RW-SCEN-1),
+    each read from its own saved context, or None without any."""
+    import contextlib
+    import functools
+
+    import pandas as pd
+
+    from harness.experiment_comparison import basis_digests
+    from services import workflow_tools as wt
+    from services.results_workbook.scenarios import gather_scenarios
+
+    ctx = PyPSAService.get_active_context()
+    pid = getattr(ctx, "project_uuid", None)
+    if not pid:
+        return None
+    raw = cfg if isinstance(cfg, dict) else getattr(cfg, "__dict__", {})  # as the comparison reads it
+    base_basis = {"fingerprint": wt._network_input_fingerprint(ctx),
+                  "mode": (raw.get("mode"), isinstance(n.snapshots, pd.MultiIndex)),
+                  "basis": basis_digests(ctx), "ok": freshness.get("results_current") is True}
+
+    def ic_key(run_ctx, result_df):
+        try:
+            # A scenario's network is its own private copy: no lock to take.
+            return _ic_assumptions(run_ctx.solver_state.get("solver_config"), run_ctx.network,
+                                   lock=contextlib.nullcontext(), result_df=result_df), None
+        except Exception as exc:  # noqa: BLE001 — the case then reads stale, never current
+            logger.warning("results workbook: a scenario's case key not computable: %s", exc)
+            return None, "current_assumptions_not_established"
+
+    try:
+        return gather_scenarios(str(pid), base_basis, ic_key=ic_key,
+                                result_df_for=lambda state: functools.partial(_result_df, state=state))
+    except HTTPException as exc:
+        if exc.status_code == 404:  # no saved project row (a scratch network)
+            return None
+        raise
+
+
 @results_router.get("/workbook.xlsx")
 def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="all"),
-                         stored: bool = False):
+                         stored: bool = False, user: User = Depends(require_user)):
     """The run's results as one workbook (results-workbook spec; RW-TABS-1):
     About, Overview (investment-grade KPIs with native charts) and a sheet per
     included result view — the project's selected cards, plus `views`
@@ -2211,8 +2255,9 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
     match the current inputs (changed, or no fingerprint recorded) unless
     `stored=true` exports the stored run (About says so); 422
     `unknown_result_view`; 413 `file_too_large` over 25 MB. Never solves and
-    never runs the investment case (RW-KPI-1)."""
-    from services import flow_scope, flow_service, network_lengths, run_evidence
+    never runs the investment case (RW-KPI-1). With sensitivity runs the user
+    may open, a Scenarios sheet compares them with this run (RW-SCEN-1)."""
+    from services import chat_tools, flow_scope, flow_service, network_lengths, run_evidence
     from services import results_workbook as RW
     from services.finance.report import load_ic_report
     from services.http_filenames import content_disposition
@@ -2264,12 +2309,18 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
 
         current, why = _ic_current_assumptions()
         case_state = staleness(report.model_dump(mode="json"), current, reason=why)
+    previous = chat_tools.acting_user_id()
+    chat_tools.set_acting_user(str(user.id))
+    try:
+        scenarios = _workbook_scenarios(cfg, n, freshness)
+    finally:
+        chat_tools.set_acting_user(previous)
     try:
         blob = RW.build_results_workbook(RW.WorkbookInputs(
             network=n, cfg=cfg, lost_load=_state.get("last_lost_load"),
             result_df=_result_df, views=included, ic_report=report, case_state=case_state,
             project=project, scope=scope, template=template, freshness=freshness,
-            stored=stored, run=runs[0] if runs else None))
+            stored=stored, run=runs[0] if runs else None, scenarios=scenarios))
     except RW.WorkbookTooLarge as exc:
         raise HTTPException(413, {"error_kind": "file_too_large", "message": str(exc)})
     return Response(

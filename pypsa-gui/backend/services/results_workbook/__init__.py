@@ -8,6 +8,8 @@ RW-KPI-1, RW-PLAN-1).
 * `About` — project, run, input fingerprint and freshness, workflow, cards
   and views included (each view's sheet, or "no results"), units, the
   `not_established` legend;
+* `Scenarios` — when the base has sensitivity runs, its key KPIs beside
+  theirs with deltas against the base (`scenarios.py`, RW-SCEN-1);
 * `Overview` — the investment-grade KPIs per period and over the horizon, and
   their native charts (`overview.py`);
 * one sheet (or set of sheets) per included result view that has a builder in
@@ -26,7 +28,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from services.results_workbook import registry
+from services.results_workbook import registry, scenarios
 from services.results_workbook.cells import NOT_ESTABLISHED, heading, put, width
 from services.results_workbook.overview import (
     RUN_THE_CASE, overview_figures, write_overview,
@@ -65,6 +67,8 @@ class WorkbookInputs:
     case_state: dict | None = None
     # The latest completed run's summary (`run_evidence.list_project_runs`), if any.
     run: dict | None = None
+    # The base's sensitivity runs (`scenarios.gather_scenarios`), if it has any.
+    scenarios: Any = None
 
 
 @dataclass
@@ -73,6 +77,8 @@ class WorkbookContext:
 
     inputs: WorkbookInputs
     sheets: dict[str, list[str]] = field(default_factory=dict)
+    # Every run, the base first (`scenarios.Run`).
+    runs: list = field(default_factory=list)
 
     def __getattr__(self, name):
         return getattr(self.inputs, name)
@@ -163,7 +169,11 @@ def build_results_workbook(inp: WorkbookInputs) -> bytes:
     overview = wb.create_sheet()
     figs = overview_figures(inp.network, inp.cfg, inp.lost_load, inp.result_df)
     write_overview(overview, figs, inp.ic_report, inp.case_state)
-    ctx = WorkbookContext(inp)
+    base = scenarios.Run(name=inp.project or "Base", figs=figs, ic_report=inp.ic_report,
+                         case_state=inp.case_state)
+    if inp.scenarios is not None:
+        scenarios.write_scenarios(wb.create_sheet(index=1), base, inp.scenarios)
+    ctx = WorkbookContext(inp, runs=[base, *(inp.scenarios.runs if inp.scenarios else [])])
     card_label = {c.id: c.label for c in flow_scope.CARDS}
     statuses: list[tuple[str, str, str]] = []
     for view_id in inp.views:
