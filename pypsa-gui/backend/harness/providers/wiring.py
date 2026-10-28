@@ -307,6 +307,9 @@ _SELECTION_INTENTS = (
     # Result plausibility (VS2 "do these results make sense?").
     (frozenset({"sense", "plausible", "plausibility", "realistic", "reasonable", "sanity", "believable"}),
      ("project_readiness", "validate_network", "diagnose_network")),
+    # A component's own values ("show L_hot's parameters").
+    (frozenset({"parameter", "parameters", "attribute", "attributes", "properties"}),
+     ("get_component", "list_components")),
 )
 
 
