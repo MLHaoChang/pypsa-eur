@@ -35,7 +35,7 @@ describe.each(['expert', 'guided'] as const)('navigation reach in %s', mode => {
     expect(ui.resultsOverlayEnabled).toBe(false)
     expect(ui.flowReturn).toBeNull()
     const origin = { label: 'Results', mode, section: null, panel: 'results' as const,
-      drawer: null, selected: null, scroll: null }
+      drawer: null, selected: null, scroll: null, mapMode: null, siteId: null, part: null, partSelection: null }
     useUIStore.setState({ flowReturn: origin })
     applyUiNavigate({ kind: 'set_snapshot', snapshot_iso: '2026-06-01T12:00:00' })
     expect(useUIStore.getState().flowReturn).toEqual(origin)
