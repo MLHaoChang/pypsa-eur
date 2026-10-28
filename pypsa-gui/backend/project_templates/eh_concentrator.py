@@ -452,7 +452,8 @@ def _ledger() -> list[dict]:
          "note": "linearised UC on 26,280 snapshots did not finish within the 30-min budget (ticket 09), "
                  "so the plan dispatches the mills and flotation without their minimum load and min "
                  "up / down; the binary operational check then re-solves one week per season of each "
-                 "period with them committable, and reports the gap"},
+                 "period with them committable, and reports the gap. The 12 weeks solve side by side in "
+                 "worker processes, one per core less the plan's (at least 1)"},
         {"item": "solver", "value": "HiGHS interior point (solver_options solver=ipm)",
          "source": "sourced",
          "note": "own measurement (g2p 10): 3-period year plain LP, 595,688 cols × 1,322,776 rows, 4 cores: dual simplex "

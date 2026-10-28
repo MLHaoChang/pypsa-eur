@@ -160,7 +160,7 @@
     },
     {
       "item": "unit commitment in planning",
-      "note": "linearised UC on 26,280 snapshots did not finish within the 30-min budget (ticket 09), so the plan dispatches the mills and flotation without their minimum load and min up / down; the binary operational check then re-solves one week per season of each period with them committable, and reports the gap",
+      "note": "linearised UC on 26,280 snapshots did not finish within the 30-min budget (ticket 09), so the plan dispatches the mills and flotation without their minimum load and min up / down; the binary operational check then re-solves one week per season of each period with them committable, and reports the gap. The 12 weeks solve side by side in worker processes, one per core less the plan's (at least 1)",
       "source": "demo",
       "value": "plain LP on the year base, then the binary check on sampled weeks"
     },
