@@ -30,7 +30,10 @@ Both are said in every judged row.
 
 The table values are IEEE Std 519-2014, 5.2, Tables 2–4. They were checked
 against published reproductions of those tables, not the licensed text, so
-every row stays assumed.
+every row stays assumed. The tests check the tables' shape, which needs no
+copy of the text: Table 3 is exactly half of Table 2, Table 4's middle row is
+Table 3's first, and each limit rises with Isc/IL and falls with the order.
+Their values are not checked.
 
 Pure pandas; no engine import.
 """

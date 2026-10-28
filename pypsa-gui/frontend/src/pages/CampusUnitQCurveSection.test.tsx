@@ -54,6 +54,14 @@ describe('CampusUnitQCurveSection', () => {
       .toBe('±6.00 Mvar available for −5.00 to +7.00 Mvar: 1.00 Mvar short to deliver')
   })
 
+  it('drops a side short only by float noise, as the engine does below 1e-9', () => {
+    const r = row({ p_pu: 0.5, q_min_req_mvar: -(6 + 1e-12), q_max_req_mvar: 7, available_mvar: 6, shortfall_mvar: 1,
+      status: 'fail' })
+    render(<CampusUnitQCurveSection rows={[r]} />)
+    expect(screen.getByTestId('qcurve-detail-BESS1-0.5').textContent)
+      .toBe('±6.00 Mvar available for −6.00 to +7.00 Mvar: 1.00 Mvar short to deliver')
+  })
+
   it('fails closed: a status other than pass, fail or reported shows Fail', () => {
     render(<CampusUnitQCurveSection rows={[row({ status: 'weird' as never })]} />)
     expect(within(screen.getByTestId('qcurve-BESS1-1')).getByTestId('gr-verdict').dataset.verdict).toBe('fail')

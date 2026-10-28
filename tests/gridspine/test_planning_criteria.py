@@ -833,7 +833,7 @@ def test_capacity_evaluate_refuses_compound_rows():
 
 @pytest.mark.parametrize("deg, match", [
     (float("nan"), "finite"), (float("inf"), "finite"), (0.0, "> 0"), (-5.0, "> 0"),
-    (True, "finite"), ("30", "finite"), (None, "finite"),
+    (True, "finite"), ("30", "finite"), (None, "finite"), (90.0, "below 90"), (180.0, "below 90"),
 ])
 def test_angle_limit_refuses_a_bad_figure(deg, match):
     with pytest.raises(ContractError, match=match):
@@ -889,7 +889,7 @@ def _angle_profile(value, source="code", **cite):
 
 
 def _worst_angle(net, cset):
-    res, _ = _screen(net, cset, angle_limit=AngleLimit(180.0, "assumed"))
+    res, _ = _screen(net, cset, angle_limit=AngleLimit(89.9, "assumed"))
     return float(res.loc[res["stage1_verdict"] != "not_solved", "angle_deg"].max())
 
 

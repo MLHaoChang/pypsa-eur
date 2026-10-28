@@ -518,3 +518,12 @@ def test_import_map_geometry_refuses_a_project_other_than_the_active_one(geo):
         T.import_map_geometry(name + "-other", file_id, apply=True)
     assert exc.value.status_code == 409
     assert exc.value.detail["error_kind"] == "upload_project_mismatch"
+    msg = exc.value.detail["message"]
+    assert "file_id" not in msg and "'" not in msg
+    assert name in msg and name + "-other" in msg
+
+
+def test_catalogue_has_no_leftover_tag_literature_text():
+    from harness import catalogue
+    import inspect
+    assert "(tag literature)" not in inspect.getsource(catalogue)
