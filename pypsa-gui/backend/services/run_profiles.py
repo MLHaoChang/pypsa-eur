@@ -135,6 +135,12 @@ def load(profile: dict) -> dict:
             rules = [run_gates.check_rule(r) for r in stage.get("rules", [])]
         except run_gates.RuleError as exc:
             raise ProfileError(f"Stage {name}: {exc}") from exc
+        # §9.2, §5: a stage inherits its generic rules; a profile adds rules
+        # (a tighter threshold is one more rule), never drops or loosens one.
+        own = {r["id"]: r for r in stage.get("rules", [])}
+        for core in GENERIC[name].get("rules", []):
+            if own.get(core["id"]) != core:
+                raise ProfileError(f"Stage {name}: rule {core['id']} is inherited and cannot be dropped or changed.")
         stages[name] = {"actions": actions, "rules": rules}
     return {**copy.deepcopy(profile), "stages": stages}
 

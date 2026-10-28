@@ -201,7 +201,8 @@ def test_version_1_and_2_files_read_unchanged(session, site):
 
 def big(stages):
     profile = copy.deepcopy(run_profiles.EH_SITE)
-    profile['stages'] = {name: {'actions': [{'tool': 'validate_network', 'args': {}}] * count, 'rules': []}
+    profile['stages'] = {name: {'actions': [{'tool': 'validate_network', 'args': {}}] * count,
+                                'rules': run_profiles.GENERIC[name].get('rules', [])}
                          for name, count in stages.items()}
     return profile
 
@@ -246,6 +247,22 @@ def test_a_never_tunable_attr_is_refused_at_load(entry):
     profile['tunable'] = [*profile['tunable'], entry]
     with pytest.raises(run_profiles.ProfileError, match='never tunable'):
         run_profiles.load(profile)
+
+
+@pytest.mark.parametrize('stage, rules', [
+    ('input_gate', []),  # drops every core input rule
+    ('result_gate', [{**run_profiles.CORE_RESULT_RULES[0], 'value': 'feasible'}, run_profiles.CORE_RESULT_RULES[1]]),
+    ('input_gate', [{**r, 'severity': 'warn'} for r in run_profiles.CORE_INPUT_RULES]),  # loosened to warn
+    ('solve', []),
+])
+def test_a_profile_cannot_drop_or_loosen_an_inherited_rule(stage, rules):
+    profile = copy.deepcopy(run_profiles.EH_SITE)
+    profile['stages'][stage] = {**run_profiles.GENERIC[stage], 'rules': rules}
+    with pytest.raises(run_profiles.ProfileError, match='inherited'):
+        run_profiles.load(profile)
+    extra = {'id': 'in.extra', 'fact': 'validate.errors', 'op': 'le', 'value': 0, 'severity': 'block', 'basis': 'x'}
+    profile['stages'][stage] = {**run_profiles.GENERIC[stage], 'rules': [*run_profiles.GENERIC[stage]['rules'], extra]}
+    run_profiles.load(profile)  # adding a rule is allowed
 
 
 def test_a_stage_tool_without_its_bound_context_test_is_refused():
@@ -453,11 +470,13 @@ def test_racing_evaluations_advance_once(session, site, monkeypatch):
         if not raced and rules and rules[0]['id'] == 'in.validate.errors':
             raced.append(True)
             tasks._advance_run(path)  # get_task's evaluation lands first
+            return {**real(rules, env), 'stale': True}  # the outer, now stale, evaluation
         return real(rules, env)
     monkeypatch.setattr(run_gates, 'gate', racing)
     until_paused_at_solve(session, monkeypatch, task, root)
     record = stored(root, task['task_id'])
     assert raced and record['run']['stages']['input_gate']['attempts'] == 1
+    assert 'stale' not in record['run']['stages']['input_gate']['gate']  # the stale write never landed
     assert [s['id'] for s in record['steps'] if s['id'].startswith('solve.')] == ['solve.1']
 
 

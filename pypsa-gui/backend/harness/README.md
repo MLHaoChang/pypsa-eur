@@ -1117,7 +1117,9 @@ only: no runner, no envelope, no loops.
 - **Profiles** (`services/run_profiles.py`) are data: per stage the actions
   the harness materialises on entry (`<stage>.<n>`, ≤ 24 steps and 32 000
   characters per stage) and the exit gate's rules. Stages a profile leaves out
-  take `GENERIC` (§9.2); `skip` carries a reason. The card scope is read from
+  take `GENERIC` (§9.2); `skip` carries a reason. A stage a profile does
+  set keeps every generic rule unchanged (refused at load): it may add rules,
+  never drop or loosen one. The card scope is read from
   `flow_scope.preset_for` at setup. `load` refuses an unknown fact, a wildcard,
   a unit that is not the fact's, a never-tunable attr (§6.0, `NEVER_TUNABLE`)
   and a stage tool outside `BOUND_CONTEXT_TOOLS` (the §6.6 sweep test).
