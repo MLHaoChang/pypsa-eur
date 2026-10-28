@@ -9,6 +9,7 @@ Blocked by: none (10 lists the gate as deferred until this lands; 10 is not bloc
 Gated: yes (GK A reviews the plan and the PR)
 Model tier: opus
 Owner decisions: SAGC-1 (G7a), D3-KEEP, SH-1
+Plan rulings: GK A, 28 Oct, on PR #834 (folded in below)
 Design: [design.md](../design.md) §9.3 "eh_datacenter" (P–V/Q–V, deferred), §11; the module's own spec, `.scratch/datacenter-grid-readiness/issues/14-pv-qv-voltage-stability.md` (done, PR #714)
 
 **Confidentiality (SAGC-1).** Cite only the public Saudi Arabian Grid Code (SAGC, May 2026) and generic engineering. Never name a client, its network, its MW figures or any scope-of-work text, here, in code, tests, fixtures or PR bodies.
@@ -29,17 +30,18 @@ Design: [design.md](../design.md) §9.3 "eh_datacenter" (P–V/Q–V, deferred),
 ## What to build
 
 1. **Driver** `campus_study.voltage_stability_campus(run_dir, profile, profile_dirs)` in `gridspine/drivers/campus_study.py`:
-   - builds the grid-side screening net: a source bus (the PCC's `vm_pu`) behind the Thevenin impedance from `pcc.sk_min_mva` and `rx_min` at the PCC voltage (the weakest grid is the binding case), the PCC as the PoC bus;
-   - `planned_mw` per period is the largest converged PCC import in `campus_lf_pcc.csv`, and the probe's power factor is that hour's P/Q (lagging; a leading or zero-Q hour falls back to `VoltageStabilitySettings().pf` and says so in the notes);
-   - intact only on the single-infeed equivalent (no grid branches to outage); the plan says whether a campus-internal N-1 adds anything and, if it does, uses `contingency_set.branch_contingencies` on the campus net with the PoC moved behind the equivalent;
-   - writes `campus_voltage_stability.csv` (one row per period and case) atomically, and returns the summary.
+   - builds the grid-side screening net: a source bus behind the Thevenin impedance Z = c·Un²/S_k''min, with c = c_min from `island_sc_seq.c_factor(vn, "min")` (1.0 above 1 kV, the standing rule, as in #827) and R/X from `pcc.rx_min`; the PCC is the PoC bus. The source EMF is 1.0 pu, or the PCC's `vm_pu` if that is lower; the ledger says which was used;
+   - `planned_mw` per period is the larger of (i) the largest converged PCC import in `campus_lf_pcc.csv` and (ii) the connection's rated import when one is stated; the note names which one bound (a probe below the contracted import would overstate the margin). The probe's power factor is that hour's P/Q (lagging; a leading or zero-Q hour falls back to `VoltageStabilitySettings().pf` and says so in the notes);
+   - intact only, one case on S_k''min: S_k''min is the user's weakest grid state, so the intact margin on the equivalent is the post-outage grid margin, and campus-internal outages do not change the grid-side nose at the PCC;
+   - writes `campus_voltage_stability.csv` (one row per period) atomically, and returns the summary.
 2. **Campus-run stage** `voltage_stability` after `harmonic_scan` in `RUN_STAGES`, as `_harmonic_scan` is: its meta in `campus_voltage_stability.json` (limits, their source, notes, ledger, `SCREENING_BASIS`), its failure in `voltage_stability_error.json`, never a failed run. `get_state` returns it beside `harmonic_scan`.
-3. **Profile keys** (optional, numeric, positive) in `grid_codes.py` and the profile editor: `pv_margin_min_pct` (intact), `pv_margin_min_n1_pct` (after an outage) and `qv_margin_min_mvar`. D3-KEEP: no profile ships values; the user enters them from their grid code.
+3. **Profile keys** (optional, numeric) in `grid_codes.py` and the profile editor: `pv_margin_min_pct` (positive) and `qv_margin_min_mvar` (≥ 0). No key that no row reads. D3-KEEP: no profile ships values; the user enters them from their grid code.
 4. **Grid-readiness rows** `voltage_stability_pv` and `voltage_stability_qv` in `grid_readiness.py`, section `connection`:
-   - limit through `_limit_from` (the user's limit, else the ledger row, else a generic placeholder marked assumed). The placeholder is proposed in the plan from generic planning practice and ruled by GK A; this issue asserts no SAGC clause. If the user's uploaded SAGC profile carries a figure, its clause is cited from the profile, never from this repo;
-   - project value the worst `margin_pct` (P–V) or `q_margin_mvar` (Q–V) over periods and cases, with the case named in the note;
+   - limit through `_limit_from` (the user's limit, else the ledger row, else the generic placeholder marked assumed). Placeholders (GK A, 28 Oct): P–V real-power margin ≥ 5 % of `planned_mw`; Q–V reactive margin ≥ 0 Mvar, meaning the Q–V curve's minimum stays at or below zero injection at the operating voltage. Each placeholder's source reads "planning practice placeholder, not a requirement of this project's grid code". This issue asserts no SAGC clause: a figure in the user's own profile replaces the placeholder and the row cites the profile;
+   - project value the worst `margin_pct` (P–V) or `q_margin_mvar` (Q–V) over periods, with the period named in the note;
    - verdict by a new `RULE_PV`/`RULE_QV` (`>=`, `otherwise: warn`): screening, so below the limit warns and never fails;
-   - `unknown` when no run, an error file, a `not_solved` intact case, or no S_k'' min entered, each with its reason; a `nose_is_lower_bound` or `qmin_at_sweep_edge` value is shown as a bound ("≥ …") and still judged;
+   - a `nose_is_lower_bound` (or `qmin_at_sweep_edge`) value at or above the limit reads `pass`, shown as "≥ x"; one below the limit reads `unknown` ("the sweep did not reach the nose"), never `warn`, since a bound below the limit says nothing about the margin;
+   - `unknown` when no run, an error file, a `not_solved` intact case, or no S_k''min entered, each with its reason;
    - every row `assumed` and its note reads "screening; binding answer is the RMS study". Wording: "within the screening margin", never "meets" a code.
 5. **Gate fact** for issue 10: `dc.readiness.voltage_stability_pv` and `dc.readiness.voltage_stability_qv` are ordinary readiness rows, so issue 10's row-id list gains them as `warn` (a margin is screening). Update issue 10's acceptance line on P–V/Q–V in the same PR that lands this.
 6. **Off-grid.** On an `off_grid` archetype both rows are excluded with the reason, as the S_k''-built rows are (issue 12): with the tie open there is no grid infeed to collapse against.
@@ -47,20 +49,22 @@ Design: [design.md](../design.md) §9.3 "eh_datacenter" (P–V/Q–V, deferred),
 ## Acceptance criteria
 
 - [ ] A campus run on `eh_datacenter` writes `campus_voltage_stability.csv` and its meta; the scorecard shows both rows with a margin, a limit and its source.
-- [ ] On the single-infeed equivalent the nose matches the analytic P_max = V² cos φ / (2X (1 + sin φ)) within 1 % (the DC 14 formula, X from S_k'' min).
+- [ ] On the equivalent held to R = 0 (rx = 0) the nose matches the analytic P_max = E² cos φ / (2X (1 + sin φ)) within 1 % (the DC 14 formula, X = c_min·Un²/S_k''min). With rx_min > 0 the nose is only checked to be finite and below the R = 0 value.
+- [ ] `planned_mw` is the larger of the LF peak import and the rated import, and the note names which bound.
+- [ ] A lower-bound nose below the limit reads `unknown` with "the sweep did not reach the nose"; one at or above reads `pass` shown as "≥ x" (same for `qmin_at_sweep_edge`).
 - [ ] No S_k'' min entered → both rows `unknown` with the reason; the run still succeeds.
 - [ ] A stage exception writes the error file, the run succeeds, the rows read `unknown` with the error.
 - [ ] Below the limit → `warn`, never `fail`; no row text says "compliant" or "meets".
-- [ ] A user limit in the profile replaces the placeholder and the row cites the profile.
+- [ ] With no user limit the rows show the placeholders (5 %, 0 Mvar) with the placeholder wording; a user limit in the profile replaces them and the row cites the profile.
 - [ ] `off_grid` → both rows excluded with the reason (test).
 - [ ] `tests/gridspine/test_sixty_hz.py` stays green (no 50 Hz literal added).
 
 ## Test plan
 
-- `tests/gridspine/test_campus_voltage_stability.py` (new): the driver on a prepared demo campus; the analytic-nose check on the equivalent; the lagging-pf fallback note.
-- `pypsa-gui/backend/tests/test_grid_readiness_voltage_stability.py` (new): rows from a written CSV/meta fixture for pass, warn, unknown (no run, error, `not_solved`, no S_k''), bound display, user limit, `off_grid` exclusion.
+- `tests/gridspine/test_campus_voltage_stability.py` (new): the driver on a prepared demo campus; the R = 0 analytic-nose check and the rx > 0 finite-and-below check; c_min and the EMF choice in the ledger; the rated-import bound; the lagging-pf fallback note.
+- `pypsa-gui/backend/tests/test_grid_readiness_voltage_stability.py` (new): rows from a written CSV/meta fixture for pass, warn, unknown (no run, error, `not_solved`, no S_k''min, lower bound below the limit), a bound at or above the limit passing as "≥ x", placeholders and user limit, `off_grid` exclusion.
 - The campus-run stage list test (wherever `RUN_STAGES` is asserted) gains `voltage_stability`.
-- `grid_codes.py` profile-key tests for the three new keys (positive, optional, unknown key still warns).
+- `grid_codes.py` profile-key tests for the two new keys (range, optional, unknown key still warns).
 
 ## Likely files
 
