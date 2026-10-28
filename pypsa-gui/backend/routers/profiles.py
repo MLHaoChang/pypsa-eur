@@ -802,8 +802,8 @@ def _replay_refinements(ctx, result, refinements, *, replay_stored: bool = False
         if stored and isinstance(exc, RefineError):
             # A refusal of the whole list (an hourly-only op on a coarser
             # series) names no op; the retry still drops them.
-            detail.update(error_kind="replay_refused", op=getattr(exc, "op", None),
-                          index=getattr(exc, "index", None), retry=_REPLAY_RETRY)
+            detail.update({"error_kind": "replay_refused", "op": getattr(exc, "op", None),
+                           "index": getattr(exc, "index", None), "retry": _REPLAY_RETRY})
         raise HTTPException(status_code=422, detail=detail) from exc
     meta["replay_warnings"] = warnings
     meta["replay"] = {"from": "stored" if stored else "request", "ops": len(refinements)}
