@@ -22,7 +22,7 @@ Plan verdict: GK A GO, 28 Oct (screening rows, verdict gating, never-tunable lis
 ## Acceptance criteria
 
 - [ ] A DC fixture with a published blank-schema profile (SAGC fields filled per project) runs to hand-off; each scorecard row is a gate result by verdict (only `pass` passes), with its `assumed` flag; screening rows read "within the screening limit", and a pass on assumed inputs is never "verified".
-- [ ] P–V/Q–V gates through the scorecard rows `dc.readiness.voltage_stability_pv` and `dc.readiness.voltage_stability_qv` as `warn` (a margin is screening; issue 18), read through `grid_readiness.readiness_fact`, so a row excluded off-grid is not evaluated with its reason, never a pass.
+- [ ] P–V/Q–V gates through the scorecard rows `dc.readiness.voltage_stability_pv` and `dc.readiness.voltage_stability_qv` as `warn` (a margin is screening; issue 18). dc.readiness.* reads through grid_readiness.readiness_fact, so a row excluded off-grid is not evaluated with its reason, never a pass.
 - [ ] Grid-code publish is always the user's own card; the envelope never admits it.
 - [ ] The profile has no `dc.readiness.*` wildcard: a table lists each row id or family with its severity (`block`/`warn`), a one-line basis and the run that produces its input (this also answers which run produces each SAGC study); a `warn` row that is `unknown` reads "not evaluated".
 - [ ] On the shipped template (19 of 20 rows `unknown`), the run does not end `needs_user` on `warn` rows.

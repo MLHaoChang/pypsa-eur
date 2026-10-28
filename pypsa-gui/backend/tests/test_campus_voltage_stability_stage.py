@@ -57,7 +57,7 @@ def test_no_sk_min_entered_writes_the_error_and_the_run_succeeds(user_and_db):  
     assert not (run / ce.cs.VOLTAGE_STABILITY_CSV).exists() and not (run / ce.VOLTAGE_STABILITY_META).exists()
     for rid in IDS:
         r = _rows(hub)[rid]
-        assert r["verdict"] == "unknown" and r["note"].startswith("No S_k''min entered at the PCC")
+        assert r["verdict"] == "unknown" and r["note"].startswith("No minimum short-circuit power entered at the PCC")
 
 
 def test_a_stage_exception_never_fails_the_run_and_clears_on_success(user_and_db, monkeypatch):  # noqa: F811

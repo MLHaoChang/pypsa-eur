@@ -104,8 +104,12 @@ def test_c_min_and_the_impedance_are_in_the_ledger_and_notes(tmp_path):
     summary = voltage_stability_campus(run)
     assert any("c_min" in line for line in summary["ledger"])
     assert any("source EMF" in line for line in summary["ledger"])
-    assert summary["notes"] == [f"S_k''min {SK:g} MVA, R/X 0.1, c_min 1 at 110 kV: "
-                                f"Z = c·Un²/S_k''min = {VN**2 / SK:.4g} Ω"]
+    assert summary["notes"][0] == (f"S_k''min {SK:g} MVA, R/X 0.1, c_min 1 at 110 kV: "
+                                   f"Z = c·Un²/S_k''min = {VN**2 / SK:.4g} Ω")
+    # Each period's operating point is named: the planned load and what bound it, the power factor and E.
+    periods = pd.read_csv(run / VOLTAGE_STABILITY_CSV)["period"]
+    assert [n.split(":")[0] for n in summary["notes"][1:]] == [f"period {p}" for p in periods]
+    assert all("binds" in n and "power factor" in n and "E = " in n for n in summary["notes"][1:])
 
 
 # ── the operating point per period ──────────────────────────────────────────
@@ -140,7 +144,7 @@ def test_a_larger_rated_import_binds_with_the_max_import_hours_power_factor(tmp_
     run = _prepared(tmp_path, [(0, True, 40.0, 10.0, 1.0)], p_connection_mw=60.0)
     voltage_stability_campus(run)
     r, _ = _one(run)
-    assert r["planned_mw"] == 60.0 and "the rated import (p_connection_mw) binds" in r["note"]
+    assert r["planned_mw"] == 60.0 and "the rated import (the connection capacity) binds" in r["note"]
     assert r["pf"] == pytest.approx(40.0 / math.hypot(40.0, 10.0))
 
 
@@ -165,7 +169,7 @@ def test_no_converged_hour_and_no_rated_import_has_no_operating_point(tmp_path):
     voltage_stability_campus(run)
     r, _ = _one(run)
     assert r["verdict"] == VS_NO_OPERATING_POINT
-    assert r["note"] == "no converged hour and no rated import (p_connection_mw)"
+    assert r["note"] == "no converged hour and no rated import (the connection capacity)"
     assert math.isnan(r["nose_mw"])
 
 

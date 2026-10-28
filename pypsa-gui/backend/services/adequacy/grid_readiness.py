@@ -1080,14 +1080,14 @@ _VS_SCREENING = "screening; binding answer is the RMS study"
 _VS_NO_NOSE = "the sweep did not reach the nose"
 _VS_NO_QMIN = "the sweep did not reach the Q–V minimum"
 #: Why both rows leave the scorecard on an off-grid project.
-VS_OFF_GRID = "Off-grid project: with the tie open there is no grid infeed to collapse against"
+VS_OFF_GRID = "off-grid, so there is no grid connection to check"
 _VS = {
-    "voltage_stability_pv": {"req": "P–V real-power margin at the PoC (screening)", "key": "pv_margin_min_pct",
+    "voltage_stability_pv": {"req": "Voltage stability margin (P–V)", "key": "pv_margin_min_pct",
                              "generic": GENERIC_PV_MARGIN_PCT, "unit": "% of planned load", "rule": RULE_PV,
                              "value": "margin_pct", "bound": "nose_is_lower_bound", "no_bound": _VS_NO_NOSE,
                              "placeholder": f"P–V margin of at least {GENERIC_PV_MARGIN_PCT:g} % of the planned "
                                             f"load, {_VS_PLACEHOLDER}"},
-    "voltage_stability_qv": {"req": "Q–V reactive margin at the PoC (screening)", "key": "qv_margin_min_mvar",
+    "voltage_stability_qv": {"req": "Voltage stability margin (Q–V)", "key": "qv_margin_min_mvar",
                              "generic": GENERIC_QV_MARGIN_MVAR, "unit": "Mvar", "rule": RULE_QV,
                              "value": "q_margin_mvar", "bound": "qmin_at_sweep_edge", "no_bound": _VS_NO_QMIN,
                              "placeholder": "Q–V margin of at least 0 Mvar (the Q–V curve's minimum at or below "
@@ -1126,16 +1126,17 @@ def _vs_rows(inp: _Inputs) -> list[dict]:
     import pandas as pd
 
     from gridspine.drivers.campus_study import NO_SK_MIN, VOLTAGE_STABILITY_CSV, VS_NO_OPERATING_POINT
+    from services import campus_electrical_service as ce
 
-    run = inp.dir / "campus_electrical" / "run"
+    run = inp.dir / ce.SUBDIR / "run"
     target = _target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"), "eh_sk_mva")
-    error = _read_json(run / "voltage_stability_error.json")
+    error = _read_json(run / ce.VOLTAGE_STABILITY_ERROR)
     reason, frame = None, None
     if isinstance(error, dict):
         text = str(error.get("error") or "")
-        reason = ("No S_k''min entered at the PCC: the screen needs the grid's minimum short-circuit level"
+        reason = ("No minimum short-circuit power entered at the PCC: the screen needs the grid's weakest state"
                   if text == NO_SK_MIN else f"The P–V/Q–V screen could not run: {text}")
-    elif not (run / "campus_voltage_stability.json").is_file() or not (run / VOLTAGE_STABILITY_CSV).is_file():
+    elif not (run / ce.VOLTAGE_STABILITY_META).is_file() or not (run / VOLTAGE_STABILITY_CSV).is_file():
         reason = "No campus run with the P–V/Q–V screen yet: run the campus study"
     else:
         frame = pd.read_csv(run / VOLTAGE_STABILITY_CSV)
@@ -1156,9 +1157,11 @@ def _vs_rows(inp: _Inputs) -> list[dict]:
             rows.append(_row(rid, spec["req"], project_value=None, verdict="unknown",
                              note=f"{reason}; {_VS_SCREENING}", **common))
             continue
-        periods = [(int(r["period"]), float(r[spec["value"]]), bool(r[spec["bound"]]))
+        # A flag read back as anything but True/False (a blank cell) is no answer, never a bound.
+        blank = [int(r["period"]) for _, r in frame.iterrows()
+                 if not math.isfinite(float(r[spec["value"]])) or str(r[spec["bound"]]) not in ("True", "False")]
+        periods = [(int(r["period"]), float(r[spec["value"]]), str(r[spec["bound"]]) == "True")
                    for _, r in frame.iterrows()]
-        blank = [per for per, v, _ in periods if not math.isfinite(v)]
         if blank:
             rows.append(_row(rid, spec["req"], project_value=None, verdict="unknown",
                              note=f"Period {blank[0]}: the screen gives no value; {_VS_SCREENING}", **common))

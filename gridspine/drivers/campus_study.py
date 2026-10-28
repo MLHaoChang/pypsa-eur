@@ -1122,7 +1122,7 @@ def _vs_period(lf, bus, period, rated_mw):
     pcc = lf["pcc"]
     rows = pcc[(pcc["period"] == period) & (pcc["case"] == "intact") & pcc["converged"].astype(bool)]
     if rows.empty and rated_mw is None:
-        return "no converged hour and no rated import (p_connection_mw)"
+        return "no converged hour and no rated import (the connection capacity)"
     pf_default = VoltageStabilitySettings().pf
     peak = hour = None
     pf, pf_note = pf_default, f"no converged hour: probe power factor {pf_default:g} (lagging, the default)"
@@ -1146,9 +1146,9 @@ def _vs_period(lf, bus, period, rated_mw):
     if peak is not None and peak > 0 and (rated_mw is None or peak >= rated_mw):
         planned, frm = peak, f"planned load {peak:.4g} MW: the largest converged PCC import (hour {hour}) binds"
     elif rated_mw is not None:
-        planned, frm = rated_mw, f"planned load {rated_mw:.4g} MW: the rated import (p_connection_mw) binds"
+        planned, frm = rated_mw, f"planned load {rated_mw:.4g} MW: the rated import (the connection capacity) binds"
     else:
-        return "no converged hour imports from the grid and no rated import (p_connection_mw) is entered"
+        return "no converged hour imports from the grid and no rated import (the connection capacity) is entered"
     return planned, frm, pf, pf_note, e_pu, e_note, hour
 
 
@@ -1220,8 +1220,9 @@ def voltage_stability_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_di
                                                       "qmin_at_sweep_edge", "v_poc_pu", "basis")},
                      "planned_mw": planned, "hour": hour, "pf": pf, "e_pu": e_pu,
                      "note": "; ".join(x for x in (frm, pf_note, e_note, r.get("note") or "") if x)})
+        notes.append(f"period {period}: {frm}; {pf_note}; {e_note}")
     _write_text_atomic(run_dir / VOLTAGE_STABILITY_CSV, pd.DataFrame(rows, columns=list(VS_COLUMNS)).to_csv(index=False))
-    notes.append(f"S_k''min {sk:g} MVA, R/X {rx:g}, c_min {c:g} at {vn:g} kV: "
+    notes.insert(0, f"S_k''min {sk:g} MVA, R/X {rx:g}, c_min {c:g} at {vn:g} kV: "
                  f"Z = c·Un²/S_k''min = {c * vn**2 / sk:.4g} Ω")
     ledger = [*VOLTAGE_STABILITY_LEDGER,
               "grid-side equivalent: source behind Z = c_min·Un²/S_k''min (IEC 60909 c_min) with the PCC's "

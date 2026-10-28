@@ -281,9 +281,9 @@ describe('GridReadinessScorecard', () => {
 describe('the P–V/Q–V rows (study harness 18)', () => {
   const vs = (excluded?: GridReadiness['excluded']): GridReadiness => ({ ...DATA, excluded, rows: [
     ...DATA.rows,
-    row({ id: 'voltage_stability_pv', requirement: 'P–V real-power margin at the PoC (screening)', limit: 5,
+    row({ id: 'voltage_stability_pv', requirement: 'Voltage stability margin (P–V)', limit: 5,
       unit: '% of planned load', project_value: 812.4, verdict: 'pass', project_value_is_lower_bound: true }),
-    row({ id: 'voltage_stability_qv', requirement: 'Q–V reactive margin at the PoC (screening)', limit: 0,
+    row({ id: 'voltage_stability_qv', requirement: 'Voltage stability margin (Q–V)', limit: 0,
       unit: 'Mvar', project_value: 120, verdict: 'pass' }),
   ] })
 
@@ -296,15 +296,15 @@ describe('the P–V/Q–V rows (study harness 18)', () => {
 
   it.each(['expert', 'guided'] as const)('lists the rows that do not apply with their reason, without a verdict (%s)',
     mode => {
-      const reason = 'Off-grid project: with the tie open there is no grid infeed to collapse against'
+      const reason = 'off-grid, so there is no grid connection to check'
       const data = { ...DATA, excluded: [
-        { id: 'voltage_stability_pv', requirement: 'P–V real-power margin at the PoC (screening)', reason },
-        { id: 'voltage_stability_qv', requirement: 'Q–V reactive margin at the PoC (screening)', reason }] }
+        { id: 'voltage_stability_pv', requirement: 'Voltage stability margin (P–V)', reason },
+        { id: 'voltage_stability_qv', requirement: 'Voltage stability margin (Q–V)', reason }] }
       render(<GridReadinessScorecard data={data} mode={mode} />)
       const box = screen.getByTestId('gr-excluded')
       expect(within(box).getByText('Not applicable to this project')).toBeTruthy()
       expect(screen.getByTestId('gr-excluded-voltage_stability_pv').textContent)
-        .toBe(`P–V real-power margin at the PoC (screening): ${reason}`)
+        .toBe(`Voltage stability margin (P–V): ${reason}`)
       expect(screen.getByTestId('gr-excluded-voltage_stability_qv').textContent).toContain(reason)
       expect(screen.queryByTestId('gr-row-voltage_stability_pv')).toBeNull()
     })

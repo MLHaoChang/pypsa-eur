@@ -159,7 +159,7 @@ def test_no_sk_min_entered_is_unknown_with_the_reason(tmp_path):
 
     _write(tmp_path, error=NO_SK_MIN)
     for r in _vs(tmp_path)[:2]:
-        assert r["verdict"] == "unknown" and r["note"].startswith("No S_k''min entered at the PCC")
+        assert r["verdict"] == "unknown" and r["note"].startswith("No minimum short-circuit power entered at the PCC")
 
 
 def test_a_stage_error_is_unknown_with_the_error(tmp_path):
@@ -177,11 +177,20 @@ def test_a_not_solved_intact_case_is_unknown(tmp_path):
         assert "Period 2035: the intact case does not solve" in r["note"]
 
 
+def test_a_blank_bound_flag_is_no_answer_never_a_bound(tmp_path):
+    p = _period(2030, margin_pct=1.0)
+    p["nose_is_lower_bound"] = None
+    _write(tmp_path, [p])
+    pv, qv, _ = _vs(tmp_path)
+    assert pv["verdict"] == "unknown" and "Period 2030: the screen gives no value" in pv["note"]
+    assert qv["verdict"] == "pass"
+
+
 def test_a_period_with_no_operating_point_is_unknown(tmp_path):
     from gridspine.drivers.campus_study import VS_NO_OPERATING_POINT
 
     p = {**_period(2030), "verdict": VS_NO_OPERATING_POINT,
-         "note": "no converged hour and no rated import (p_connection_mw)"}
+         "note": "no converged hour and no rated import (the connection capacity)"}
     _write(tmp_path, [p])
     for r in _vs(tmp_path)[:2]:
         assert r["verdict"] == "unknown" and "Period 2030: no operating point" in r["note"]
@@ -255,6 +264,13 @@ def test_a_present_row_is_its_verdict(tmp_path, monkeypatch):
     assert G.readiness_fact(card, IDS[0]) == "pass"
     assert _gate(monkeypatch, card, IDS[0])["verdict"] == "pass"
     assert G.readiness_fact(card, "no_such_row").value == "missing"
+
+
+def test_a_present_unknown_row_still_reads_its_verdict(tmp_path, monkeypatch):
+    """An unknown row is a verdict, not an exclusion: the existing unknown semantics stay as they were."""
+    card = _vs(tmp_path)[2]                      # no run: both rows unknown
+    assert G.readiness_fact(card, IDS[0]) == "unknown"
+    assert _gate(monkeypatch, card, IDS[0])["verdict"] == "fail"           # eq pass on "unknown"
 
 
 # ── the harness's checked-results reader ───────────────────────────────────
