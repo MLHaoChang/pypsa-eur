@@ -1218,7 +1218,14 @@ lifespan after the solve queue and is off under pytest (tests build their own
 - **One holder per step.** A run step's `claim` is set by compare-and-set
   under the task lock: the chat's `admit` takes it before its card, the
   runner's `claim_step` before its own. Another holder's live claim refuses
-  `task_step_claimed`. A claim lasts the card TTL plus 60 s.
+  `task_step_claimed`. A claim lasts the card TTL plus 60 s. It guards only
+  pending → running: once a step runs, its `running` status is the authority,
+  so `admit` refuses another session `task_step_claimed` before any card
+  even after the claim lapses. Plans of file version 1 (no `run` block) keep
+  the chat's old path: no claim, and a repeat is refused at `begin_step`
+  (`task_step_uncertain`; pinned by
+  `test_oj07_edit_relaunch_walk_journey.py::test_a_process_restart_loses_the_job_and_continues_once_uncertain`
+  and `test_assistant_capabilities.py::test_interrupted_write_requires_confirmed_reconciliation`).
 - **The hold.** While an effectful step is decided, running or waiting on its
   job, `services/harness_locks.py` holds the project. The write middleware and
   `chat_tools._check_foreign_lock` refuse 409 `project_locked` ("a harness run

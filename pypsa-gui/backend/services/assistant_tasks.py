@@ -862,6 +862,10 @@ def admit(session, tool, args):
             _gate_brief(task, step)
             if len(json.dumps(expected, default=str)) > ARGS_CHARS:
                 _refuse("task_reference_too_large", "Resolved arguments exceed the step's limit; use file IDs or smaller result references.")
+            if task.get("run") and step["status"] == "running" and step.get("session_id") != session.session_id:
+                # past pending -> running the step's status is the authority, not its (lapsing) claim
+                _refuse("task_step_claimed", f"Step {step['id']} is being run by another session of this plan; "
+                        "wait for it, then read the plan again.")
             if task.get("run") and step["status"] == "pending":
                 _check_claim(task, step, session.session_id)
                 _take_claim(step, session.session_id)

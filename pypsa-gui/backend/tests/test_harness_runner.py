@@ -359,10 +359,18 @@ def test_a_carded_effectful_step_dispatches_without_deadlock_when_its_handler_lo
     task = detached()
     path = task_path(root, task)
     real = tools.DISPATCHERS['solve_queue_enqueue']
+    bound, seen = [], []
+    dispatch = harness_runner.Runner.dispatch
+
+    def spied(self, path, ctx, *rest):
+        bound.append(ctx)
+        return dispatch(self, path, ctx, *rest)
 
     def locking(*args, **kwargs):
+        seen.append((threading.current_thread().name, tasks.RUN_CONTEXT.get(), PyPSAService.get_active_context()))
         with PyPSAService.get_lock():
             return real(*args, **kwargs)
+    monkeypatch.setattr(harness_runner.Runner, 'dispatch', spied)
     monkeypatch.setitem(tools.DISPATCHERS, 'solve_queue_enqueue', locking)
     monkeypatch.setattr(harness_runner, 'LOCK_TIMEOUT_SECONDS', 2.0)
     runner = harness_runner.Runner('a', decisions=Clicks())
@@ -373,6 +381,51 @@ def test_a_carded_effectful_step_dispatches_without_deadlock_when_its_handler_lo
     flight.join(30)
     assert not flight.is_alive()
     assert json.loads(path.read_text())['steps'][-1]['status'] in ('waiting', 'completed')
+    # GK B (a): the handler ran on the tool executor, bound to the run's own context
+    assert len(seen) == 1
+    thread, run_ctx, active = seen[0]
+    assert thread.startswith('chat-tool') and run_ctx is bound[-1] and active is bound[-1]
+    assert str(active.project_uuid) == json.loads(path.read_text())['project_id']
+
+
+def test_a_claim_that_lapses_while_the_handler_runs_still_lets_no_one_else_dispatch(detached, site, monkeypatch):
+    """GK B (c): the claim only guards pending -> running; once the step runs,
+    its `running` status is the authority, however late the clock reads."""
+    from services import chat_tools as tools
+    _, root = site
+    task = detached()
+    path = task_path(root, task)
+    real = tools.DISPATCHERS['solve_queue_enqueue']
+    entered, release = threading.Event(), threading.Event()
+
+    def held(*args, **kwargs):
+        entered.set()
+        release.wait(60)
+        return real(*args, **kwargs)
+    monkeypatch.setitem(tools.DISPATCHERS, 'solve_queue_enqueue', held)
+    runner = harness_runner.Runner('a', decisions=Clicks())
+    until_waiting_on(harness_runner.Runner('a'), path, task['task_id'], 'solve')
+    runner.tick(path)  # the COP-1 Continue
+    runner.tick(path)  # the solve's card, decided, dispatched
+    try:
+        assert entered.wait(30)
+        record = json.loads(path.read_text())
+        step = record['steps'][-1]
+        assert step['status'] == 'running'
+        late = time.time() + tasks.CLAIM_SECONDS + 1
+        monkeypatch.setattr(tasks, 'time', type('Clock', (), {'time': staticmethod(lambda: late)}))
+        rows = queue_rows()
+        assert not tasks.claim_step(path, step['id'], 'chat-other')
+        session = harness_session.ChatSession(owner_user_id=record['owner_id'])
+        chat_tools.set_chat_session(session)
+        session.task_id = task['task_id']
+        frames, _ = dispatch(session, monkeypatch, 'solve_queue_enqueue', step['args'])
+        assert [p['error_kind'] for e, p in frames if e == 'tool_error'] == ['task_step_claimed']
+        assert 'tool_pending_confirmation' not in [e for e, _ in frames] and queue_rows() == rows
+    finally:
+        release.set()
+        runner._inflight[task['task_id']][1].join(30)
+    assert queue_rows() == rows + 1
 
 
 def test_a_foreground_request_completes_while_the_runner_waits_on_a_live_card(detached, site, client):
