@@ -1,6 +1,6 @@
 # Move a maintenance window
 
-Status: in progress (claude/tsg07-move-window, #857; plan GO from GK B 2026-10-28)
+Status: done (#857, 5dc797db)
 Type: task
 Blocked by: none (02 done, #512; 04 done, #576)
 Gated: yes (apply path)
