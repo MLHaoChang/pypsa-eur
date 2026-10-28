@@ -129,12 +129,21 @@ def test_a_runner_write_lands_in_the_run_project_as_the_same_tool_does_from_chat
     path.write_text(json.dumps(record))
     revision, undo = dirty_state.revision(ctx), len(ctx.undo.stack)
     runner = harness_runner.Runner('a', decisions=Clicks(refs={'inputs.2'}))
-    with foreground(two_buses()) as front:
+    from services import change_log_service
+    logged, user_ts = len(change_log_service.get_all()), dict(ctx.user_ts)
+    bus = {'component_class': 'Bus', 'name': 'F1', 'attrs': {'v_nom': 20.0}}
+    with foreground(two_buses()) as front:  # the user switched project mid-stage
+        front_frames, _ = dispatch(harness_session.ChatSession(), monkeypatch, 'update_component', bus)
         settle(runner, path, task['task_id'], lambda r: r['steps'][1]['status'] != 'pending')
-        assert not front.network_revision and 'G1' not in front.network.generators.index
+        assert 'G1' not in front.network.generators.index and front.network.buses.at['F1', 'v_nom'] == 20.0
+        assert front.user_ts == {} and len(front.undo.stack) == 1
+    assert 'tool_error' not in [e for e, _ in front_frames]
     assert json.loads(path.read_text())['steps'][1]['status'] == 'completed'
-    assert ctx.network.generators.at['G1', 'marginal_cost'] == 25.0
+    assert ctx.network.generators.at['G1', 'marginal_cost'] == 25.0 and 'F1' not in ctx.network.buses.index
     assert (dirty_state.revision(ctx) - revision, len(ctx.undo.stack) - undo) == chat_delta == (1, 1)
+    assert ctx.user_ts == user_ts
+    entries = change_log_service.get_all()[:len(change_log_service.get_all()) - logged]  # newest first
+    assert sorted((e['name'], e['org_id']) for e in entries) == sorted([('F1', front.org_id), ('G1', ctx.org_id)])
 
 
 # ── Restart (design §6.6; GK B condition 8) ──────────────────────────────────
@@ -317,12 +326,9 @@ def test_each_dispatch_rechecks_under_the_lock_and_refuses_with_no_effect(detach
 
 def test_a_foreground_write_during_the_solve_is_refused_409_and_none_is_lost(detached, site, client, monkeypatch):
     _, root = site
-    task, path, record = until_solve_waits(detached, site, monkeypatch, follow=True)
-    harness_runner.Runner('a').tick(path)  # the step waits on its job: the project stays held
-    if json.loads(path.read_text())['steps'][-1]['status'] == 'waiting':
-        assert harness_locks.holder(record['project_id']) == task['task_id']
-    else:
-        harness_locks.hold(record['project_id'], task['task_id'])  # the solve already settled: hold as it did
+    task, path, record = until_solve_waits(detached, site, monkeypatch)  # its follower never settles it
+    assert json.loads(path.read_text())['steps'][-1]['status'] == 'waiting'
+    assert harness_locks.holder(record['project_id']) == task['task_id']  # the runner's own hold
     body = {'name': 'G1', 'bus': 'B1', 'marginal_cost': 30}
     refused = client.put('/api/network/generators/G1', json=body,
                          headers={'X-Harness-Run': task['task_id']})  # no header reaches the runner's marker
@@ -597,7 +603,7 @@ def test_no_email_unless_configured_and_opted_in(detached, site, monkeypatch, co
     assert sent == [] and [r['native_status'] for r in run_records(record)] == ['needs_user']
 
 
-def test_at_most_ten_emails_per_run_and_titles_are_plain(detached, site, monkeypatch):
+def test_at_most_ten_emails_per_run_and_no_model_text_reaches_them(detached, site, monkeypatch):
     _, root = site
     task = detached()
     path = task_path(root, task)
@@ -610,8 +616,8 @@ def test_at_most_ten_emails_per_run_and_titles_are_plain(detached, site, monkeyp
         harness_runner._update(path, lambda t, n=n: t['run'].update(status='needs_user' if n % 2 == 0 else 'paused'))
         harness_runner._notify(path)
     assert len(sent) == harness_runner.MAX_EMAILS
-    line = next(l for l in sent[0]['body_text'].splitlines() if l.startswith('Run: '))
-    assert '<' not in line and 'State: completed' in line and sent[0]['body_text'].count('\n') == 7
+    assert all('evil' not in m['body_text'] and 'Own' not in m['body_text'] for m in sent)  # the title is the model's
+    assert sent[0]['body_text'].count('\n') == 6 and 'State: completed' not in sent[0]['body_text']
     assert all(m['body_html'] is None and 'evil' not in m['subject'] for m in sent)
 
 

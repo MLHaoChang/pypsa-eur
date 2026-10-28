@@ -1252,7 +1252,8 @@ lifespan after the solve queue and is off under pytest (tests build their own
   - An email through `email_service` only when the deployment is configured
     and the envelope's `notify.email` is true (issue 03's file). At most one
     per change and 10 per run, with a server-built plain text: project,
-    title, state and the app link, never values.
+    state and the app link. It leaves out the run title, which the model
+    wrote, and never carries values.
   - `run.notices` keeps the log.
 
 ## Recorded runs, load flow, and experiment plans

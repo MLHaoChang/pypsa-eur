@@ -277,7 +277,8 @@ def _email(path, task, status):
         address, name = user.email, project.name
     link = f"{get_settings().public_base_url.rstrip('/')}/?project={task['project_id']}&run={task['task_id']}"
     words = _STATE_WORDS[status]
-    body = (f"Your harness run {words}.\n\nProject: {_plain(name, 120)}\nRun: {_plain(task['title'], 120)}\n"
+    # No run title: the model wrote it (criterion 11, no researched value in a mail).
+    body = (f"Your harness run {words}.\n\nProject: {_plain(name, 120)}\n"
             f"State: {status}\n\nOpen it: {link}\n")
     try:
         email_service.send_email(to=address, subject=f"PyPSA Studio: a harness run {words}", body_text=body,

@@ -9406,11 +9406,7 @@ def _check_foreign_lock(tool_name: str) -> None:
     import local_mode
     from services import harness_locks
 
-    try:
-        held = harness_locks.refuses(PyPSAService.get_active_context().project_uuid)
-    except Exception:  # noqa: BLE001
-        held = False  # unbound scratch context — nothing to guard
-    if held:  # a harness run holds the project, in local mode too (§6.6)
+    if harness_locks.refuses_active():  # a harness run holds the project, in local mode too (§6.6)
         raise HTTPException(status_code=409, detail=harness_locks.detail())
     if local_mode.is_local_mode():
         return  # D7 — one identity, no lock semantics

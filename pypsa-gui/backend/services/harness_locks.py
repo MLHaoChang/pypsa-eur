@@ -58,6 +58,12 @@ def refuses(project_uuid) -> bool:
     return task is not None and in_run() != task
 
 
+def refuses_active() -> bool:
+    """`refuses` for the active context; an unbound one has no uuid, so no hold."""
+    from services.pypsa_service import PyPSAService
+    return refuses(PyPSAService.get_active_context().project_uuid)
+
+
 def detail() -> dict:
     return {"error_kind": "project_locked", "message": MESSAGE, "lock": None}
 

@@ -951,12 +951,7 @@ async def undo_snapshot_middleware(request: Request, call_next):
             and any(path.startswith(p) for p in _FOREIGN_LOCK_GATE_PREFIXES)
             and not _foreign_lock_gate_exempt(path)):
         from services import harness_locks
-        from services.pypsa_service import PyPSAService
-        try:
-            held = harness_locks.refuses(PyPSAService.get_active_context().project_uuid)
-        except Exception:  # noqa: BLE001 — unbound scratch context, nothing to guard
-            held = False
-        if held:
+        if harness_locks.refuses_active():
             return JSONResponse(status_code=409, content={"detail": harness_locks.detail(),
                                                           "code": "project_locked"})
 
