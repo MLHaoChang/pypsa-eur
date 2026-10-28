@@ -307,6 +307,56 @@ Branch `claude/lc06-d12-standard-mc`, stacked on S3. GK A reviews. Session LC-06
      runs, after the oracle is taken. LOLE 2702.8 h, CI (2673.9, 2731.7), excludes
      1927.2; EUE 85,970 excludes 54,312. Both tests fail.
 
+### S5, LC-D12 zonal MC and common-mode (2026-10-29)
+
+Branch `claude/lc06-d12-zonal-mc`, stacked on S4. GK A reviews. Session LC-06 (3).
+
+- The seam: only `run_eh_study` reaches the zonal engine. It runs when a live
+  import Link's grid side carries outage data (eh_study.py:480). The weak_flexible
+  pack sets the import cap itself (`import_overlay.import_p_nom_mw`, default 50 MW)
+  and overrides the Link's p_nom. The test passes it through `pack_overrides`.
+  The project needs a VOLL (`update_solver_config(voll=…)`), or ens_solve is
+  infeasible.
+- `tests/test_lc06_d12_zonal_mc.py`, all through the chat tools:
+  - Deterministic zonal case (every q = 0): EUE = 1095 x 2 x (15 + 42 + 60)
+    = 256,230 MWh exactly, LOLE 6570 h, CI width 0. The oracle is
+    `zonal_oracle(n, cap)` = sum_h max(L − own − min(cap·eff,
+    max(surplus, 0)·eff), 0). The fixture has hours bound by the Link, by the
+    surplus and by zero surplus, plus hours with no deficit.
+  - Common-mode (base q 0.1, cm 0.05 / 30 h, seed 3, 200 draws), Link useless
+    (zero surplus): EUE and LOLE are bitwise equal with and without the common
+    mode, so the hub draws do not shift.
+  - Common-mode, Link useful: EUE_cm > EUE_base.
+- Fixture-input mutations, each red on its own test:
+  1. Z1: cap 25: EUE 305,505, only the Link hours move (+2·1095·22.5).
+  2. Z2: grid load 190 on the surplus hours: 275,940 (+2·1095·9).
+  3. Z3: one hour of surplus in the useless case: 410,241.75 ≠ 407,285.25.
+  4. Z4: no surplus in the useful case: equal, so the strict > fails.
+- Open with GK A: the per-draw conditions (per-draw EUE_cm ≥ EUE_base, per-hour
+  import on binding hours) are not visible through the chat surface. Plan
+  option A adds an engine-level test (simulate_zonal_blocks on the frozen
+  inputs) for them. That is not built yet; it waits on GK A's ruling (A, B or C,
+  sent 2026-10-28 ~23:45 UTC).
+
+## Hand-off 3 (2026-10-29, LC-06 (3) near 230k)
+
+State (all stacked: S1 #873 ← S2 #877 ← S3 #878 ← S4 #880 ← S5, each against master):
+- S1 #873 @4d1218fe60aecc937fdf89112e2de936f40faa71: GK B OK, CI was running. Send premerge ok when green.
+- S2 #877 @78f751d50fcd2273c9f7ddc1a0e9573f9a0b1317: GK B OK @78f751d5, CI pending. Send premerge ok when green.
+- S3 #878 @9042eb2b: review requested from GK B through the coordinator.
+- S4 #880 @abd52b35: review requested from GK A (told about the abd52b35 head directly).
+- S5 (this commit): PR to open if not open. GK A's ruling on the S5 plan (A/B/C) is pending.
+  On A: add the engine-level per-draw test.
+- After #873 merges: merge master into #877, then each later PR in turn (no rebase).
+  If #869 lands first, merge master too (solver_service.py).
+
+Next: S6 (D13 energization and eh_dtc, GK A conditions under ## Comments), then
+S7 (D15), S8 (D16), S9 (D17), then the GK B D-rows as in Hand-off 1.
+
+Env: as in Hand-off 2. The mutation runner is an easy recreate: copy the test with
+one replacement to tests/test_zz_mutant.py, run `-k`, delete. EH studies via chat
+need `seam(n, voll=…)` and `pack_overrides` for the ENS cap and import cap.
+
 ## Hand-off (2026-10-28, context near 300k)
 
 State:

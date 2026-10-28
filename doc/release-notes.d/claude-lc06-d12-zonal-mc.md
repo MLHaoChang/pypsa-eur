@@ -1,0 +1,1 @@
+* Test(pypsa-gui): LC-06 checks the Energy Hub study's zonal Monte Carlo through its chat tool: the import is exactly the lesser of the Link cap and the grid's surplus in every hour, and a common-mode Link outage draws on its own random stream, so it raises unserved energy only where the Link can help.
