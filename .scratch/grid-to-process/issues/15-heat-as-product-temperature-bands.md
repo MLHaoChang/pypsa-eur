@@ -3,9 +3,9 @@
 
 # Heat as a modelled product: temperature bands and pressure levels
 
-Status: needs-triage (owner 2026-10-23, Q15: wait for issue 10)
+Status: ready-for-agent (triage 2026-10-28: owner Q15 answered, wait for issue 10; gatekeeper triage of 2026-10-23 stands; gated, plan to GK A first)
 Type: task
-Blocked by: 02, 03, 10 (owner Q15)
+Blocked by: 10 (owner Q15); 02 and 03 are done
 Gated: **yes** (schema and validator: send the gatekeeper the plan first)
 Model tier: opus
 Size: M–L
@@ -125,3 +125,15 @@ Owner question (send it as these options):
   - Start with a named refinery template (for example the paper's crude-unit heater). This needs
     sourced refinery data first, or the template ships as `demo` values that look like a real
     plant.
+
+## Triage (2026-10-28)
+
+**Verified on master (41ade3be):** not built. No `temperature_c`, `pressure_bar` or `max_supply_temp_c` exists in the backend.
+- The owner answered Q15 on 2026-10-23: wait for issue 10.
+- The gatekeeper's design answers above (numeric level on the Bus, reach as a Link field, a `steam` catalogue entry, unset means as today) stand and are the contract.
+
+This is now `ready-for-agent`, blocked by 10, and gated: send GK A the plan, including the §2.6 and §7 design edit, before code. The brief is the sections above: "What to build" as amended by "Triage (gatekeeper, 2026-10-23)", "Acceptance", and "Later / out of scope".
+
+**Likely files:** `pypsa-gui/backend/services/carrier_catalog.py`, `pypsa-gui/backend/services/asset_schema/fields.py`, `pypsa-gui/backend/services/validation_service.py`, `pypsa-gui/backend/models/process_unit.py`, `pypsa-gui/backend/services/profile_gen/load_archetypes.py` (read only), `.scratch/grid-to-process/design.md` (§2.6, §7), new tests under `pypsa-gui/backend/tests/`.
+**Blocked by:** 10 (owner Q15). This blocks 16.
+**Model:** Opus (schema and validator, gated).

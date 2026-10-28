@@ -1049,6 +1049,14 @@ class Turn:
                 receipt["chart"] = checked_charts.for_answer(
                     ctx, self.request_scope, None if draft_failed else self.request_evidence)
             records.save(record, answer_id)
+            # Access revoked between the check above and the save (REVOKE-TOCTOU)
+            # must not leave a committed answer: re-check, and withdraw it on
+            # any refusal or failure (answer_id is fresh, so nothing older).
+            try:
+                records.authorize(self.owner, self.project_id)
+            except Exception:
+                records.discard(self.owner, answer_id)
+                raise
         self.approved = record
         return [{"type": "text", "text": text}]
 

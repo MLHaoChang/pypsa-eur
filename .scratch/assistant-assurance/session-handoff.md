@@ -901,3 +901,11 @@ Regressions: assurance_acceptance, test_answer_assurance, test_checked_answer_pi
 Pending in A1.2: CSRF on a stateful ACK (no assurance ACK route before P3) and a reviewer cache hit (the reviewer is withheld, so no cache). Follow-ups REVOKE-TOCTOU and REVOKE-KIND are in issue 02.
 
 Remaining for P1: A1.3 historical as-of runs, A1.4 corruption/restart, A1.5 complete-source aggregates, A1.6/A1.7 validity and masks, the other `read_unvalidated` families, frontend `assurance_state`. Next runnable tracer: `get_timeseries` (a time-series source) as the third checked read.
+
+### 2026-10-28 — P1 tracer: REVOKE-TOCTOU (issue 02)
+
+Policy version 1. Commit checked access under `network_guard` and then saved, so a revocation landing between the two left the answer record on disk; a later step reloaded it, got 404, and the turn ended with `internal_error` ("404: Record not found"). Commit now re-checks `records.authorize` after `records.save`, still under `network_guard`, and on refusal removes the file (`records.discard`, under the per-owner transaction lock) and re-raises, so the turn ends as `assurance_publication_failed` with nothing published. A revocation after that re-check is ordered after a completed commit; `load` refuses every later read.
+
+`test_access_revoked_during_commit_publishes_nothing` (membership/disabled × get_component/list_components × removed/stuck) wraps `records.save` to revoke right after the answer lands. It checks the record file first, then that the stream has no `answer_approved`, no token and no value, and that no log record carries a value or the draft. "stuck" makes the removal fail (`TimeoutError` from the lock): the refusal still ends the turn, the warning names only the record id, and `load()` refuses the leftover. Red/green: on master the 8 new cases are red, 11 / 19 overall (removed: the record is kept; stuck: nothing is withdrawn or logged); after the fix 19 / 19 (`python -m pytest -q -o addopts='' tests/assurance_acceptance/test_p1_revocation.py`). Mutants: removing the post-save re-check gives 8 red, with the record kept in the removed cases and no warning in the stuck cases; removing the OSError catch in `discard` gives 4 red, the stuck cases with no warning.
+
+Next runnable tracer: `get_timeseries` as the third checked read. REVOKE-KIND stays open.
