@@ -1,0 +1,14 @@
+D06 mutation checks (GK B plan condition 7). Run from pypsa-gui/backend on the D06 branch:
+  python -m pytest -q tests/test_site_identity.py::test_delete_then_same_name_recreate_inherits_nothing \
+    tests/test_site_identity.py::test_clustering_unbinds_every_former_placement \
+    tests/test_site_identity.py::test_a_failed_delete_hook_still_leaves_nothing_to_inherit
+
+M1  site_bindings._resolved_key resolves by name (uid ignored)
+    -> delete+recreate RED (_absent False: the old placement shows on the new "gas")
+    -> clustering RED ({'Generator:G0': {...}} == {} : the placement shows on the cluster's G0)
+M2  routers/clustering.py: component_identity.forget_all(new_n) removed
+    -> clustering RED (same assertion: the carried uid binds the same-named G0)
+M3  network_crud.purge_component_side_data: component_identity.drop removed
+    -> delete+recreate RED, failed-delete-hook RED (the kept uid binds the recreation)
+Restored: all three GREEN.
+Each red comes from the uid check: under M1 the names still resolve, under M2/M3 the uid is the only thing that changed.

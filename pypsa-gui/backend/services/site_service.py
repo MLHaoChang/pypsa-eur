@@ -27,6 +27,7 @@ import os
 import pathlib
 import re
 import shutil
+import uuid
 from collections.abc import Callable
 
 from services.atomic_io import atomic_write_text
@@ -42,7 +43,7 @@ SCHEMA_VERSION = 1
 # Presentation envelopes only; no cable/line, building-load or bus footprint.
 FOOTPRINT_CLASSES = frozenset({"Generator", "StorageUnit", "Store", "Transformer", "Link"})
 MAX_FOOTPRINT_DIMENSION_M = 100_000
-MAX_BINDING_UID = 64
+MAX_BINDING_UID = 36
 
 # The PyPSA classes a placement key may name. `Bus` is included: the site
 # view draws a switchyard per bus and the user may move it.
@@ -141,12 +142,18 @@ def _validate_bindings(value: object) -> None:
     """`bindings`: `<Class>:<name>` -> the uid of the instance it was authored against (D06)."""
     if not isinstance(value, dict):
         raise SitesInvalid("bindings must be an object")
+    seen: set[str] = set()
     for key, uid in value.items():
         cls, sep, name = key.partition(":") if isinstance(key, str) else ("", "", "")
         if not sep or not name or cls not in PLACEABLE_CLASSES:
             raise SitesInvalid("bindings key must be <Class>:<name> with a placeable class")
-        if not isinstance(uid, str) or not 0 < len(uid) <= MAX_BINDING_UID:
-            raise SitesInvalid(f"bindings[{key!r}] must be a uid string of at most {MAX_BINDING_UID} characters")
+        try:
+            uuid.UUID(uid if isinstance(uid, str) and len(uid) <= MAX_BINDING_UID else "")
+        except ValueError:
+            raise SitesInvalid(f"bindings[{key!r}] must be a uuid") from None
+        if uid in seen:
+            raise SitesInvalid(f"bindings[{key!r}]: a uid binds one key only")
+        seen.add(uid)
 
 
 def validate_sites(doc: object) -> None:
@@ -291,6 +298,31 @@ def rename_component_on_disk(project_dir: pathlib.Path | str | None, component_c
     except Exception as exc:  # noqa: BLE001 — best-effort by design
         log.warning("sites.json rename hook failed for %s %r→%r: %s", component_class, old, new, exc)
     _scene_hook("rename", scene_store.rename_component, pdir, component_class, old, new)
+    try:
+        _rename_binding(pdir, component_class, old, new)
+    except Exception as exc:  # noqa: BLE001 — best-effort: a lost binding reads unbound, never aliased
+        log.warning("sites.json binding rename failed for %s %r→%r: %s", component_class, old, new, exc)
+
+
+def _rename_binding(pdir: pathlib.Path, component_class: str, old: str, new: str) -> None:
+    """
+    Move the D06 binding with the renamed entries. Not when a scene still shows
+    the old key (its rename failed): that key keeps the binding and reads
+    unbound, and the renamed entries are bound by the next PUT.
+    """
+    from services.site_scene import store as scene_store
+
+    old_key, new_key = f"{component_class}:{old}", f"{component_class}:{new}"
+    doc = read_sites(pdir)
+    bindings = doc.get("bindings")
+    if not isinstance(bindings, dict) or old_key not in bindings or new_key in bindings:
+        return
+    shown = scene_store.project_sites(pdir)
+    if old_key in (shown.get("asset_footprints") or {}) or any(
+            old_key in (s.get("placements") or {}) for s in shown.get("sites") or []):
+        return
+    bindings[new_key] = bindings.pop(old_key)
+    write_sites(pdir, doc)
 
 
 # ── thumbnail (visual-layers plan 3, S5) ────────────────────────────────────

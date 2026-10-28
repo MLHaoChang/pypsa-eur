@@ -19,11 +19,12 @@ A uid is never re-attached by name. A binding whose uid the network does not
 hold (deleted, replaced, or minted after the last save and then discarded) is
 lost, never aliased.
 
-This module is the only writer.
+Callers hold the network's write lock (`PyPSAService.get_lock()`). This
+module is the only writer. A uid is a uuid4, never derived from a name.
 """
 from __future__ import annotations
 
-import secrets
+import uuid
 
 _KEY = "component_ids"
 
@@ -67,7 +68,7 @@ def uid_for(n, component_class: str, name: str) -> str | None:
         return None
     uid = get(n, component_class, name)
     if uid is None:
-        uid = secrets.token_hex(12)
+        uid = str(uuid.uuid4())
         _root(n).setdefault("uids", {}).setdefault(component_class, {})[name] = uid
     return uid
 
@@ -89,3 +90,13 @@ def rename(n, component_class: str, old: str, new: str) -> None:
 
 def drop(n, component_class: str, name: str) -> None:
     _uids(n, component_class).pop(name, None)
+
+
+def forget_all(n) -> None:
+    """
+    A network rebuilt from another (clustering) holds new components, some
+    under old names: no uid may carry across, so every binding reads unbound.
+    """
+    meta = getattr(n, "meta", None)
+    if isinstance(meta, dict):
+        meta.pop(_KEY, None)

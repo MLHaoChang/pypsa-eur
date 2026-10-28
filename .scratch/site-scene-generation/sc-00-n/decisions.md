@@ -104,20 +104,26 @@ The prototype's generation-scoped re-keying (`scene_store.rename_component`/`rem
 
 ### Closure (proposed)
 
+Plan verdict: GK B GO on option 1 (strict: never re-attach by name), with conditions. Accepted only through GK B's OK on the D06 PR's merged head.
+
 **Accepted contract.**
 
-- **Identity.** A component instance has a random uid in `n.meta["component_ids"]["uids"][Class][name]` (`services/component_identity.py`, the sole writer). It travels with the network through netCDF, undo, saves, Save-As, scenario copies and imports, and it changes under the same lock as the network edit.
-  - **Mint.** Lazily, on the first binding (`uid_for`). The mint marks the network dirty.
+- **Identity.** A component instance has a uuid4 in `n.meta["component_ids"]["uids"][Class][name]` (`services/component_identity.py`, the sole writer; callers hold `PyPSAService.get_lock()`). It travels with the network through netCDF, undo, saves, Save-As and scenario copies. A solve and a reload keep it.
+  - **Mint.** Only on a write: the PUT, on first binding. The mint marks the network dirty.
   - **Rename.** The uid moves (`network_crud._update_component`, `network_buses.apply_rename_bus`).
-  - **Removal.** `network_crud.purge_component_side_data`, the path every removal takes, drops the uid. A same-name recreation gets a fresh one.
-  - **No re-attachment.** A uid is never re-attached by name.
-- **Bindings.** `sites.json` has a top-level `bindings: {"<Class>:<name>": uid}`. Validation: placeable-class keys, uid strings of at most 64 characters (422 otherwise). A binding never moves on disk; a rename shows up in the projection. Correctness never depends on a sidecar hook.
-- **First sight.** Each key gets a binding the first time the open network sees it, on GET or PUT. The binding is the live component's uid, or a uid no component holds when the name has none. A pre-D06 key is therefore bound by name exactly once, at migration, and a key naming no component is never taken by a later one.
-- **Resolution** (`services/site_bindings.py`, open project only).
-  - The uid is held by a live component: bound. If the instance has a new name (an undo of a rename, or a failed sidecar rename), the entry is re-keyed in the projection.
-  - Otherwise the entry is stale. GET `/sites` hides it on a legacy Site and lists it in `unbound_keys`. It stays on disk, and a PUT carries it forward, so an undo of the delete brings it back.
-  - An enabled Site's entries and the footprints its scene owns are the scene's (D03). They are never hidden or re-keyed here. One that is stale, or whose instance now has another name, is listed. Scene GET `unbound_keys` applies the same rule.
-- **PUT `/sites`.** A key the client sends without a binding (a new placement) is bound at first sight, and the bindings the client echoes are kept. Another project's document reads and writes as stored: no binding decision is made without its network.
+  - **Removal.** `network_crud.purge_component_side_data` drops the uid, so a same-name recreation gets a fresh one.
+  - **Clustering.** `forget_all` drops every uid, because a cluster can reuse an old name.
+  - **No re-attachment.** A uid is never re-attached by name. No `retired` list exists: a dropped uid is simply gone.
+- **Bindings.** `sites.json` has a top-level `bindings: {"<Class>:<name>": uuid}`. A request is rejected with 422 for a non-placeable key, a uid that is not a uuid, or one uid on two keys. A well-formed unknown uid is accepted and reads unbound (the undo case).
+  - **Rename hook.** It moves the binding after the scene hook, and not when a scene still shows the old key. That key keeps the binding and reads unbound, and the PUT gives each uid to the key of the instance's current name only.
+- **GET never writes** (`/sites` and the scene GET). It mints nothing, marks nothing dirty and writes no `sites.json`.
+  - A bound entry follows its instance: shown under its current name (re-keyed in the response only), or, when its uid is gone, hidden on a legacy Site and listed in `unbound_keys`.
+  - An enabled Site's entries and the footprints its scene owns are the scene's (D03). A stale one, or one whose instance now has another name, is listed and never hidden.
+  - A key with no binding (pre-D06, or newly placed) keeps name semantics until the first PUT binds it.
+- **PUT `/sites`**, under the network lock:
+  - It binds each unbound key, to the live component's uid or to a uuid no component holds. A key naming no component is therefore never taken by a later one.
+  - It keeps the bindings the client echoes, and carries hidden stale entries forward so an undo restores them.
+  - Another project's document reads and writes as stored.
 
 **Lifecycle trace.**
 
@@ -126,57 +132,39 @@ The prototype's generation-scoped re-keying (`scene_store.rename_component`/`rem
 | Rename (Properties, chat) | `_update_component` moves the uid | Bound under the new name |
 | Bus rename | `apply_rename_bus` moves the uid | Bound under the new name |
 | Delete, including the bus cascade | `purge_component_side_data` drops the uid | Stale |
-| Failed `sites.json` or scene hook | None needed | The uid changed with the network: stale or re-keyed |
+| Failed `sites.json` or scene hook | None needed | The uid changed with the network |
 | Undo | `network_undo.apply_undo` re-imports the netCDF with its meta | Bound again |
 | Redo | No redo endpoint exists in the backend or the frontend | Nothing to trace |
-| Import or replace, then save over the project | The foreign network does not hold the uids | Stale |
-| Save-As | Saves the in-memory network | The copy keeps the uids |
+| Import or replace, then save over the project | The foreign network has no uids | Stale |
+| Clustering | `forget_all` | Stale |
+| Save-As | Saves the in-memory network | The copy keeps the uids; a PUT in the copy leaves the source byte-identical |
 | Scenario copy, snapshot, bundle | `_copy_bundle_dirs` copies the project as saved | The copy keeps the saved uids |
 
-**Copy mapping.** A copy's component holds the same uid in a separate project. Save-As and scenario copy are tested. Snapshot and bundle are covered in `test_sites_routes.py`.
+**Meta rewriters.** `git grep -nE "\.meta\s*=[^=]"` finds four. Clustering is handled above. `asset_schema/provenance._root` and `vintage_service._ensure_meta_bucket` replace `n.meta` only when it is not a dict, so they keep `component_ids` (tested with a solve and a reload). `component_identity._root` follows the same rule.
+
+**Fingerprint.** `workflow_tools._network_input_fingerprint`, normal and exact, is unchanged by a mint, a rename or a drop (tested). Placing an asset never makes a solve stale.
+
+**Removals that skip `purge_component_side_data`.** The vintage expansion (`vintage_service`, `routers/vintage.py`), the solve and adequacy copies (`ac_pf_service`, `solver/assumptions`, `solver/lost_production`, `adequacy/*`) and `network_global_constraints`. They act on generated or copied components, or on non-placeable classes.
 
 **Alternatives rejected.**
 
-- A sidecar-only generation ledger with a sites snapshot in each undo entry: it fails open on a hook error and changes the undo stack.
-- A uid column on the component tables: every update is a remove plus add, and the column leaks into tables and exports.
-- A scope amendment to bind by `Class:name`: the register forbids it.
-- Lineage-prefixed uids with re-adoption of a uid minted after the last save: withdrawn. A lineage-less network adopts any uid, and an undo past a recreate adopts a later instance's uid. Both alias.
+- A sidecar ledger with an undo snapshot: it fails open on a hook error.
+- A uid column: remove plus add on every update, and it leaks into tables and exports.
+- A scope amendment to bind by `Class:name`: forbidden by the register.
+- Lineage-prefixed uids with re-adoption: withdrawn. A lineage-less network adopts any uid, and an undo past a recreate adopts a later instance's uid.
+- Writing each mint into `network.nc`, or saving on first mint: rejected by GK B. The first adds a second writer; the second saves as a side effect.
 
-**Evidence.** `pypsa-gui/backend/tests/test_site_identity.py` runs 16 tests through the real routes:
+**Evidence.**
 
-| # | Test |
-|---|---|
-| 1 | A PUT binds |
-| 2 | Delete, then same-name recreate |
-| 3 | A failed `write_sites` delete hook |
-| 4 | Rename, and undo of the rename |
-| 5 | Undo of a delete |
-| 6 | A PUT carries hidden entries forward |
-| 7 | Replace the network, then save over the project |
-| 8 | Save-As: the copy only, and the source after reload |
-| 9 | Scenario copy |
-| 10 | Legacy adoption once, then delete and recreate |
-| 11 | Malformed binding returns 422 |
-| 12 | A binding never saved is lost, not re-attached by name |
-| 13 | A saved delete and recreate survives a reload |
-| 14 | A key naming no component is never taken by a later one |
-| 15 | A failed scene delete hook flags the recreation |
-| 16 | A scene key left by a failed scene rename keeps its binding through a PUT |
-
-Tests 1–11 were written first. On master, 10 of 11 failed; scenario copy already held. Command:
-
-```
-cd pypsa-gui/backend && python -m pytest -q tests/test_site_identity.py
-```
-
-`test_sites_routes.py` now places an existing component, and saves before a snapshot or bundle.
+- `pypsa-gui/backend/tests/test_site_identity.py` runs 21 tests. They cover every row above, plus: a GET never writes; legacy name semantics until the first PUT; 422 validation; the loss window (hidden and listed, kept on disk); a key naming no component; the scene delete and rename hook failures; fingerprint; the meta writers with a solve and a reload; clustering.
+- Mutation checks are in [../d06/evidence/mutation-checks.txt](../d06/evidence/mutation-checks.txt). Resolving by name, carrying uids through clustering, or keeping the uid on delete each turns the delete-and-recreate and clustering tests red.
+- The first 11 tests were written first; 10 failed on master. Command: `cd pypsa-gui/backend && python -m pytest -q tests/test_site_identity.py`.
 
 **Residual risk.**
 
-- **Unsaved mint (lost, never aliased).** A uid minted since the last save lives only in the in-memory network until that save; autosave runs every 5 minutes. A scenario branch, a snapshot, a bundle export, the Save-As source or a discarded session in that window shows those placements as unbound. They stay on disk and listed, for an SC-02 re-bind offer. See the GK B question on durability.
-- **Unretired removals.** The removals that skip `purge_component_side_data` (the vintage expansion, and the solve and study copies) act on generated or copied components, not placeable live ones.
-- **Legacy migration** binds a pre-D06 key by name once, which is today's behaviour.
-- **Failed write.** If the GET write-back of a first-sight binding fails, it is logged and retried on the next read.
+- **The loss window (lost, never aliased).** A placement bound since the last save reads unbound after a scenario branch, snapshot, bundle, Save-As (in the source) or discard. It stays on disk and is listed. Follow-up: [../d06/follow-up-rebind.md](../d06/follow-up-rebind.md).
+- **Legacy keys** keep name semantics until their first PUT, as today.
+- **Another project's document** reads as stored.
 
 ## D08: native source, fixture and licence policy
 

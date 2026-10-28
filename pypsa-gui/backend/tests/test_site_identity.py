@@ -8,6 +8,8 @@ sidecar hook did.
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from services import site_service as ss
@@ -136,6 +138,19 @@ def test_save_as_keeps_the_binding_in_the_copy_only(client, placed):
     assert _bound(_sites(client, name))              # the source's component was never touched
 
 
+def test_a_put_in_a_copy_leaves_the_source_untouched(client, placed, project_storage_dir):
+    name, project = placed
+    _save(client, name)
+    before = (project / ss.SITES_FILE).read_bytes()
+    assert client.post("/api/projects/copy", params={"rebind": "true"}).status_code == 200
+    moved = _sites(client, "copy")
+    moved["sites"][0]["placements"][KEY] = {"x": 99.0, "y": 0.0, "heading": 0}
+    moved["sites"][0]["placements"]["Generator:solar"] = PLACE
+    assert client.put("/api/projects/copy/sites", json=moved).status_code == 200
+    assert (project / ss.SITES_FILE).read_bytes() == before
+    assert ss.read_sites(project_storage_dir("copy"))["bindings"][KEY] == ss.read_sites(project)["bindings"][KEY]
+
+
 def test_scenario_copy_keeps_the_binding(client, placed):
     name, _project = placed
     _save(client, name)                              # a branch copies the project as saved
@@ -145,20 +160,44 @@ def test_scenario_copy_keeps_the_binding(client, placed):
     assert _bound(_sites(client, "child"))
 
 
-def test_a_legacy_document_is_adopted_once_then_identity_holds(client, api_project, project_storage_dir):
+def test_a_legacy_document_reads_by_name_until_the_first_put_binds_it(client, api_project, project_storage_dir):
     name = api_project("legacy")
     project = project_storage_dir(name)
     ss.write_sites(project, {**DOC, "sites": [dict(SITE)]})          # pre-D06: no bindings
-    assert _bound(_sites(client, name))
+    doc = _sites(client, name)
+    assert _bound(doc) and "bindings" not in ss.read_sites(project)  # a read keeps name semantics, writes nothing
+    assert client.put(f"/api/projects/{name}/sites", json=doc).status_code == 200
     assert KEY in ss.read_sites(project)["bindings"]
     _delete_and_recreate(client)
     assert _absent(_sites(client, name))
 
 
+def test_a_get_never_writes(client, api_project, project_storage_dir):
+    from services import dirty_state
+    from services.pypsa_service import PyPSAService
+
+    name = api_project("readonly")
+    project = project_storage_dir(name)
+    ss.write_sites(project, {**DOC, "sites": [dict(SITE)]})
+    dirty_state.clear()
+    before = (project / ss.SITES_FILE).read_bytes()
+    meta = json.dumps(PyPSAService.get_network().meta, sort_keys=True, default=str)
+    _sites(client, name)
+    client.get(f"/api/projects/{name}/sites/campus/scene")
+    assert (project / ss.SITES_FILE).read_bytes() == before
+    assert json.dumps(PyPSAService.get_network().meta, sort_keys=True, default=str) == meta
+    assert not dirty_state.is_dirty()
+
+
 def test_a_malformed_binding_is_refused(client, placed):
     name, _project = placed
-    r = client.put(f"/api/projects/{name}/sites", json={**DOC, "bindings": {KEY: 7}})
-    assert r.status_code == 422 and "bindings" in r.text
+    for bad in ({KEY: 7}, {KEY: "not-a-uuid"}, {"Carrier:gas": "0f8fad5b-d9cb-469f-a165-70867728950e"},
+                {KEY: "0f8fad5b-d9cb-469f-a165-70867728950e", "Bus:B1": "0f8fad5b-d9cb-469f-a165-70867728950e"}):
+        r = client.put(f"/api/projects/{name}/sites", json={**DOC, "bindings": bad})
+        assert r.status_code == 422 and "bindings" in r.text, bad
+    # Well-formed but unknown (an undo can bring it back): accepted, and reads unbound.
+    r = client.put(f"/api/projects/{name}/sites", json={**DOC, "bindings": {KEY: "0f8fad5b-d9cb-469f-a165-70867728950e"}})
+    assert r.status_code == 200 and _sites(client, name)["unbound_keys"] == [KEY]
 
 
 def test_a_binding_never_saved_is_lost_not_re_attached_by_name(client, placed):
@@ -166,6 +205,8 @@ def test_a_binding_never_saved_is_lost_not_re_attached_by_name(client, placed):
     assert client.get(f"/api/projects/{name}").status_code == 200
     doc = _sites(client, name)
     assert _absent(doc) and doc["unbound_keys"] == [KEY]
+    stored = ss.read_sites(_project)                 # kept, for an explicit re-bind (SC-02)
+    assert KEY in stored["sites"][0]["placements"] and KEY in stored["bindings"]
 
 
 def test_a_saved_delete_and_recreate_stays_unbound_after_reload(client, placed):
@@ -216,14 +257,80 @@ def test_a_scene_entry_left_by_a_failed_rename_keeps_its_binding_through_a_put(c
     def boom(*_a, **_k):
         raise OSError("disk full")
 
+    old = ss.read_sites(project)["bindings"][KEY]
     monkeypatch.setattr(store, "_commit", boom)
     assert client.put("/api/network/generators/gas", json={"name": "gas2", "bus": "B1"}).status_code == 200
     monkeypatch.undo()
     r = client.post("/api/network/generators", json={"name": "gas", "bus": "B1", "carrier": "gas"})
     assert r.status_code in (200, 201), r.text
     doc = _sites(client, name)
-    assert doc["bindings"][KEY] == doc["bindings"]["Generator:gas2"]   # still the renamed instance, not the new "gas"
+    assert doc["bindings"][KEY] == old                # still the renamed instance, not the new "gas"
     assert KEY in doc["unbound_keys"]
     assert client.put(f"/api/projects/{name}/sites", json=doc).status_code == 200
     scene = client.get(f"/api/projects/{name}/sites/campus/scene").json()
     assert KEY in scene["unbound_keys"]              # the new "gas" never takes the old entry
+
+
+# ── what else touches n.meta (GK B plan conditions 2 and 3) ─────────────────
+
+def _small():
+    import pypsa
+
+    n = pypsa.Network()
+    n.set_snapshots(range(2))
+    n.add("Bus", "B1")
+    n.add("Generator", "gas", bus="B1", p_nom=10, marginal_cost=1)
+    n.add("Load", "L1", bus="B1", p_set=5)
+    return n
+
+
+def test_identity_never_changes_the_input_fingerprint():
+    from types import SimpleNamespace
+
+    from services import component_identity as ci
+    from services import workflow_tools as wt
+    from services.solver_service import SolverConfig
+
+    ctx = SimpleNamespace(network=_small(), solver_state={"solver_config": SolverConfig()}, user_ts={})
+    before = [wt._network_input_fingerprint(ctx), wt._network_input_fingerprint(ctx, exact=True)]
+    ci.uid_for(ctx.network, "Generator", "gas")
+    ci.uid_for(ctx.network, "Bus", "B1")
+    ci.rename(ctx.network, "Generator", "gas", "gas2")    # the meta side of a rename
+    ci.drop(ctx.network, "Bus", "B1")                     # the meta side of a delete
+    assert [wt._network_input_fingerprint(ctx), wt._network_input_fingerprint(ctx, exact=True)] == before
+
+
+def test_identity_survives_the_meta_writers_a_solve_and_a_reload(tmp_path):
+    import pypsa
+
+    from services import component_identity as ci
+    from services import vintage_service
+    from services.asset_schema import provenance
+
+    n = _small()
+    uid = ci.uid_for(n, "Generator", "gas")
+    provenance.record(n, "Generator", "gas", "p_nom", status="customised")
+    vintage_service.set_bounds_for_asset(n, "Generator", "gas", {2030: {"p_nom_min": 0.0, "p_nom_max": 20.0}})
+    n.optimize(solver_name="highs")
+    n.export_to_netcdf(str(tmp_path / "n.nc"))
+    m = pypsa.Network(str(tmp_path / "n.nc"))
+    assert ci.name_of(m, "Generator", uid) == "gas"
+
+
+def test_clustering_unbinds_every_former_placement(install_network):
+    from routers.clustering import ClusterRequest, apply_clustering
+    from services import component_identity as ci
+    from services import site_bindings
+    from services.pypsa_service import PyPSAService
+    from tests.test_clustering_meta_carry import _two_zone_network
+
+    live = install_network(_two_zone_network())
+    bindings = {"Generator:G0": ci.uid_for(live, "Generator", "G0"), "Bus:B0": ci.uid_for(live, "Bus", "B0")}
+    apply_clustering(ClusterRequest(mode="region"))
+    clustered = PyPSAService.get_network()
+    assert "G0" in clustered.generators.index      # the name survives clustering ...
+    doc = {"version": 1, "bindings": bindings,
+           "sites": [{**SITE, "placements": {"Generator:G0": PLACE, "Bus:B0": PLACE}}]}
+    view = site_bindings.project_view(doc, clustered, set(), set())
+    assert view["sites"][0]["placements"] == {}     # ... the instance does not
+    assert view["unbound_keys"] == ["Bus:B0", "Generator:G0"]

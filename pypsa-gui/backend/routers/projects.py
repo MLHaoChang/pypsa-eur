@@ -4390,29 +4390,20 @@ def _bound_sites(src: pathlib.Path, doc: dict) -> dict:
     """
     The open project's document as its network sees it (D06): an entry whose
     component instance is gone is hidden and listed in `unbound_keys`. Another
-    project's document is returned as stored. A key with no binding yet is
-    bound here, once, and that binding is saved.
+    project's document is returned as stored. Read-only: binding a new key is
+    the PUT's job.
     """
-    from services import site_bindings, site_service
+    from services import site_bindings
     from services.pypsa_service import PyPSAService
     from services.site_scene import store as scene_store
 
     n = site_bindings.open_network(src)
     if n is None:
         return doc
-    with scene_store.project_lock(src):
-        enabled = scene_store.enabled_site_ids(src)
-        with PyPSAService.get_lock():
-            out, added = site_bindings.project(doc, n, enabled, site_bindings.owned_footprints(src, enabled))
-        if added is not None:
-            try:
-                stored = site_service.read_sites(src)
-                stored["bindings"] = {**(stored.get("bindings") or {}), **added}
-                site_service.write_sites(src, stored)
-            except (OSError, ValueError):
-                # The projection is still right; the binding is recorded on the next read or save.
-                logger.warning("sites: recording bindings failed for %s", src.name, exc_info=True)
-    return out
+    enabled = scene_store.enabled_site_ids(src)
+    owned = site_bindings.owned_footprints(src, enabled)
+    with PyPSAService.get_lock():
+        return site_bindings.project_view(doc, n, enabled, owned)
 
 
 @router.put("/{name}/sites")
