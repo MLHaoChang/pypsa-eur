@@ -107,7 +107,8 @@ def baseline_keeps(n, cfg, existing: tuple[str, ...] | None, owner: str | None =
     if plan is None:
         return {"state": NOT_ESTABLISHED, "kept": [], "reasons": ["no_baseline_plan"]}
     kept = [name for _comp, name in plan.kept]
-    missing = [a for a in existing or () if a not in set(kept)]
+    kept_set = set(kept)
+    missing = [a for a in existing or () if a not in kept_set]
     if missing:
         return {"state": NOT_ESTABLISHED, "kept": kept,
                 "reasons": [f"baseline_drops:{a}" for a in missing]}
