@@ -90,8 +90,44 @@ def test_the_load_grows_by_period(staged):
 def test_the_single_year_templates_are_unchanged():
     n = T.build_eh_h2_hub()
     assert "wind_new" in n.generators.index and bool(n.links.at["fuel_cell", "p_nom_extendable"])
+    # Study harness 19: the single-year hub's existing rows are sunk for its
+    # investment case (overnight 0, in service), as the plain microgrid's.
+    # None is extendable, so the solve is unchanged.
+    for name in T.H2_HUB_EXISTING:
+        df = next(df for df in (n.generators, n.storage_units, n.links, n.stores)
+                  if name in df.index)
+        assert df.at[name, "overnight_cost"] == 0.0 and df.at[name, "lifetime"] == float("inf")
+        assert not bool(df.at[name, "e_nom_extendable" if df is n.stores else "p_nom_extendable"])
     m = T.build_eh_microgrid()
     assert "diesel_new" in m.generators.index and len(m.investment_periods) == 0
+
+
+def test_the_single_year_h2_hub_ships_the_staged_hubs_case_on_its_own_network():
+    """Study harness 19: the staged hub's grey-H2 purchase, CO2 path, tariff
+    and finance on one period; every owned row but the PoC has the one COD.
+    The offtake stays demand: nothing makes it tunable (design §6.0)."""
+    from models.commercial import CommercialConfig
+    from models.finance import FinanceInputs
+
+    n = T.build_eh_h2_hub()
+    cfg = T.solver_config("eh_h2_hub")
+    com = CommercialConfig.model_validate(cfg["commercial"])
+    staged = CommercialConfig.model_validate(T.solver_config("eh_h2_hub_staged")["commercial"])
+    assert com.poc_link == "grid_import" and com.timezone == "UTC"
+    assert com.reference_purchases == staged.reference_purchases
+    assert com.co2_price == staged.co2_price and com.import_tariff == staged.import_tariff
+    fin = FinanceInputs.model_validate(cfg["finance"])
+    owned = {o["asset_id"] for o in cfg["commercial"]["value_flows"]["asset_owners"]}
+    assert owned - {"grid_import"} == set(fin.cod_by_asset)
+    assert set(fin.cod_by_asset.values()) == {date(2030, 1, 1)}
+    assert (fin.financial_close, fin.analysis_years, fin.annualise) == (date(2029, 1, 1), 15, False)
+    assert float(n.snapshot_weightings.objective.sum()) == pytest.approx(8760.0)
+    # The offtake is fixed demand; the block names it only as what the
+    # counterfactual buys.
+    assert n.loads.at["h2_offtake", "p_set"] == 25.0
+    assert "h2_offtake" not in json.dumps({**cfg["commercial"], "reference_purchases": None})
+    items = {r["item"] for r in T.TEMPLATE_META["eh_h2_hub"]["ledger"]}
+    assert {"investment case", "grey H2 reference price", "CO2 price"} <= items
 
 
 def test_the_blocks_validate_and_say_what_is_missing():
@@ -241,6 +277,44 @@ def test_the_h2_hub_plans_electrolysis_for_the_growing_offtake(reset_backend, mo
     # Re-measured 2026-10-21 (GS-2b): the electrolysers cost the row's price per MW of electrical
     # input, not x0.68; the demo NPV was +14.6 M EUR, is -2.65 M (same tolerance).
     assert r.metrics["project_pre_tax_npv"] == pytest.approx(-2_645_035.0, rel=0.01)
+
+
+def _h2_case(n, cfg, state):
+    """(baseline, case) of a solved H2 hub, as the IC route builds them."""
+    import routers.results as R
+    from models.finance import FinanceInputs
+    from services.results import baseline as Bl
+    from services.results.finance_case import baseline_plan, build_finance_case
+
+    Bl.clear_cache()
+    base = Bl.solve_baseline(n, cfg, baseline_plan(n, cfg))
+    case = build_finance_case(n, cfg, FinanceInputs.model_validate(cfg.finance),
+                              result_df=R._result_df, lost_load=state.get("last_lost_load"),
+                              baseline=base)
+    Bl.clear_cache()
+    return base, case
+
+
+@pytest.mark.live_solve
+def test_the_single_year_h2_hub_case_buys_grey_h2_in_its_counterfactual(reset_backend,
+                                                                       monkeypatch, tmp_path):
+    """Study harness 19: the single-year hub ships the staged hub's grey-H2
+    basis, so its case compares with the hub as it stands today, which buys
+    grey H2 whenever that is cheaper than running its own electrolyser."""
+    from services.finance.engine import run_case
+
+    n, cfg, state = _solve("eh_h2_hub", monkeypatch, tmp_path)
+    base, case = _h2_case(n, cfg, state)
+    assert "counterfactual_basis:site_today" in case.flags
+    assert "counterfactual_buys:h2_offtake" in case.flags
+    assert not any(f.startswith("counterfactual_not_established") for f in case.flags)
+    bn = base.network
+    bought = float((bn.snapshot_weightings.objective
+                    * bn.generators_t.p["reference_supply:h2_offtake"]).sum())
+    assert bought == pytest.approx(64_120.0, rel=0.05)              # MWh of H2 a year
+    # The demo's NPV, pinned (measured 2026-10-28, live solve): re-derive it if the
+    # baseline or the solver changes, never loosen the tolerance.
+    assert run_case(case).metrics["project_pre_tax_npv"] == pytest.approx(7_823_212.0, rel=0.01)
 
 
 @pytest.mark.live_solve
