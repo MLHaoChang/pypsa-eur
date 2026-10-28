@@ -8532,8 +8532,9 @@ def import_map_geometry(name: str, file_id: str, apply: bool = False, tolerance_
         # would apply one project's file to the other (GK B follow-up on #769).
         raise HTTPException(status_code=409, detail={
             "error_kind": "upload_project_mismatch",
-            "message": f"file_id is an upload of the active project {active!r}; "
-                       f"import into that project, or switch to {name!r} and upload there"})
+            "message": f"That file was uploaded to the open project ({active}), so it "
+                       f"can only be imported there. To import it into {name}, "
+                       f"open {name} and upload the file again."})
     data = upload_service.get_upload_bytes(active, file_id)
     request = _b2b_body_request(data, f"/api/projects/{name}/map_layout/import")
     with _acting() as (db, user):
