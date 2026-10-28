@@ -448,7 +448,13 @@ def _readiness_key(revision: int, voll: float, template: dict, cfg_hash: str) ->
 
 def _validation_items(issues, connection_links: frozenset[str]) -> list[dict]:
     out = []
+    # A line with r = x = 0 trips `line_x_invalid` and Stage 2's
+    # `stage2_zero_impedance`: one problem, so one item. The reactance item
+    # stays and also blocks the load flow's verdict (`_blocks_loadflow`).
+    bad_x = {i.name for i in issues if i.code == "line_x_invalid"}
     for i in issues:
+        if i.code == "stage2_zero_impedance" and i.name in bad_x:
+            continue
         section = F.file_issue(i.code, i.component_class or "", i.name or "", connection_links)
         # Stage 2's own refusals are the load flow's items (W4b): they block its
         # verdict, not the optimisation's; /run still refuses on them.
@@ -456,6 +462,9 @@ def _validation_items(issues, connection_links: frozenset[str]) -> list[dict]:
         out.append(_item(i.code, i.severity, i.message, source, section,
                          component=i.component_class or "", entity=i.name or "",
                          blocking=i.severity == "error", title=ISSUE_TITLES.get(i.code)))
+        if i.code == "line_x_invalid" and any(
+                j.code == "stage2_zero_impedance" and j.name == i.name for j in issues):
+            out[-1]["_blocks_loadflow"] = True
     return out
 
 
@@ -1144,9 +1153,16 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
     # optimisation from `validate_for_run`, the study from its start refusal,
     # the load flow from Stage 2's own refusals in `validate_for_run`.
     # `run_ready` is the AND over the kinds the Run requests (R1).
+    also_loadflow = {(it["code"], it["target"]["entity"])
+                     for it in items if it.get("_blocks_loadflow")}
+
     def first_blocking(sources: tuple[str, ...]) -> dict | None:
         return next((_pointer(r["label"], it) for r in rows for it in r["items"]
-                     if it["blocking"] and it["in_scope"] and it["source"] in sources), None)
+                     if it["blocking"] and it["in_scope"]
+                     and (it["source"] in sources
+                          or ("loadflow" in sources
+                              and (it["code"], it["target"]["entity"]) in also_loadflow))),
+                    None)
 
     opt_blocker = first_blocking(("validation",))
     study_blocker = first_blocking(("eh_study",))

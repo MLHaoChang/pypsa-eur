@@ -15,7 +15,6 @@ shown.
 from __future__ import annotations
 
 import json
-import os
 import threading
 import time
 
@@ -241,8 +240,9 @@ def test_the_outcomes_are_a_closed_set():
 
 
 def test_the_new_error_kinds_are_registered():
-    path = os.path.join(os.path.dirname(__file__), "..", "..", "tool-error-kinds.json")
-    kinds = json.load(open(path))["kinds"]
+    from smoke.json_fragments import tool_error_kinds
+
+    kinds = tool_error_kinds()
     assert "approval_unavailable" in kinds and "confirmation_revoked" in kinds
 
 

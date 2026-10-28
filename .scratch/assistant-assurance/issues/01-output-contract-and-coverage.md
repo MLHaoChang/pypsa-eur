@@ -3,7 +3,7 @@
 
 # P0: output contracts and complete coverage
 
-Status: ready-for-agent
+Status: in progress — A0.1–A0.3 done in #796; A0.4 open
 Progress: A0.1–A0.3 executable and passing; every tool/tab/panel/output channel mapped to a v1 adapter (`harness/assurance_coverage.py`); A0.4 reviewed schemas pending tickets 09–11
 Type: task
 Blocked by: None

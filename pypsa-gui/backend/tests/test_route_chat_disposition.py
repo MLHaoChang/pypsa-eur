@@ -215,8 +215,18 @@ def _buckets():
         for route in entry['routes']:
             buckets[route].add('ui_internal:' + name)
     for route in KNOWN_GAPS:
-        buckets[route].add('known_gap')
+        if not buckets[route] & {'tool_routes', 'served_by_tool'}:
+            buckets[route].add('known_gap')
     return buckets
+
+
+def stale_known_gaps() -> list[tuple[str, str]]:
+    """KNOWN_GAPS rows a tool now serves. They pass: the PR that serves a route
+    leaves its row, so two such PRs never edit the same lines. The coordinator's
+    sweep deletes them and lowers the ceiling (smoke/prune_stale_declarations.py)."""
+    served = {row for rows in TOOL_ROUTES.values() for row in rows
+              if isinstance(row, tuple) and len(row) == 2} | set(SERVED_BY_TOOL)
+    return sorted(set(KNOWN_GAPS) & served)
 
 
 def _unclassified(routes):
@@ -275,6 +285,16 @@ def test_ui_internal_stays_small():
 
 def test_known_gaps_only_shrink():
     assert len(KNOWN_GAPS) <= _KNOWN_GAPS_CEILING
+    assert list(KNOWN_GAPS) == sorted(KNOWN_GAPS), 'keep KNOWN_GAPS sorted by (method, path)'
+
+
+def test_a_known_gap_a_tool_now_serves_passes_as_stale(monkeypatch):
+    route = next(iter(KNOWN_GAPS))
+    monkeypatch.setitem(SERVED_BY_TOOL, route, TOOLS[0]['name'])
+    assert _buckets()[route] == {'served_by_tool'}
+    assert route in stale_known_gaps()
+    routes = _routes()
+    assert not _unclassified(routes)
 
 
 def test_a_planted_route_is_reported():

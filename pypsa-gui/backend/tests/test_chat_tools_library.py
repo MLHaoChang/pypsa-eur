@@ -270,9 +270,7 @@ def test_switching_between_library_tariffs_needs_no_confirmation(
 
 def test_the_mapped_route_codes_are_in_the_manifest():
     """Round 2 N1: the manifest guard sees the kinds the Library tools map."""
-    import json as _json
-    from pathlib import Path
+    from smoke.json_fragments import tool_error_kinds
 
-    kinds = _json.loads((Path(__file__).resolve().parents[2] / "tool-error-kinds.json")
-                        .read_text())["kinds"]
+    kinds = tool_error_kinds()
     assert set(chat_tools._LIBRARY_CODES) <= set(kinds)

@@ -1,6 +1,6 @@
 """Issue 08 slice A: GUI-route to typed-tool parity contracts (V1-V6).
 
-The committed matrix itself is checked by ``assistant_route_parity.py --check``
+The real matrix is built in memory by ``assistant_route_parity.py --check``
 in the assistant-route-parity workflow; these tests pin each fail-closed rule on
 small fixture apps and scans.
 """
@@ -212,12 +212,36 @@ def test_invalid_or_stale_declarations_fail(decl, expected):
     assert any(expected in p for p in problems), problems
 
 
-def test_declaration_for_a_tool_covered_route_is_stale():
+@pytest.mark.parametrize('name, row', [
+    ('needs_tool', {'family': 'projects'}),
+    ('limitations', {'reason': 'admin'}),
+])
+def test_declaration_for_a_tool_covered_route_is_stale_but_passes(name, row):
+    # The PR that serves a route leaves its declaration (no two PRs edit the same
+    # lines); the matrix lists it for the sweep, and --check still passes.
     key = ('GET', '/api/projects/{name}/uploads')  # list_uploads declares it
-    decl = _decl(needs_tool=[{'method': key[0], 'path': key[1], 'family': 'projects'}])
-    rows, problems = _build(_app(key), decl, _scan(('GET', '/api/projects/{}/uploads')))
+    decl = _decl(**{name: [{'method': key[0], 'path': key[1], **row}]})
+    matrix, problems = parity.build(app=_app(key), declarations=decl, frontend=_scan(('GET', '/api/projects/{}/uploads')))
+    rows = {(r['method'], r['path']): r for r in matrix['rows']}
     assert rows[key]['class'] == 'tool' and 'list_uploads' in rows[key]['tools']
-    assert any('route is now tool-covered' in p for p in problems)
+    assert not problems
+    assert matrix['stale_declarations'] == [{'method': key[0], 'path': key[1], 'tools': rows[key]['tools']}]
+
+
+def test_a_route_declared_twice_fails():
+    row = {'method': 'GET', 'path': '/api/things', 'family': 'projects'}
+    _, problems = _build(_app(('GET', '/api/things')), _decl(needs_tool=[row, dict(row, note='again')]),
+                         _scan(('GET', '/api/things')))
+    assert any('declared more than once' in p for p in problems), problems
+
+
+def test_declarations_merge_fragments_from_the_d_directory(tmp_path):
+    base = tmp_path / 'decl.json'
+    base.write_text(json.dumps(_decl(needs_tool=[{'method': 'GET', 'path': '/a', 'family': 'projects'}])))
+    (tmp_path / 'decl.d').mkdir()
+    (tmp_path / 'decl.d/claude-x.json').write_text(json.dumps(
+        {'needs_tool': [{'method': 'GET', 'path': '/b', 'family': 'projects'}]}))
+    assert [d['path'] for d in parity.load_declarations(base)['needs_tool']] == ['/a', '/b']
 
 
 def test_families_match_the_capability_matrix_journeys():

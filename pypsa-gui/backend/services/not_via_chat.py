@@ -203,6 +203,27 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
     },
     {
+        'id': 'site_scene',
+        'title': 'Site 3D scene: coordinates, buildings and proposals',
+        'disposition': 'unbuilt',
+        'reason': 'The 3D site scene is not available from chat yet. Set the site coordinates in Project & site, then generate and correct buildings in Site 3D.',
+        'page': 'Site 3D',
+        'panel': 'map',
+        'keywords': frozenset({
+            'scene',
+        }),
+        'routes': frozenset({
+            ('GET', '/api/projects/{name}/site-anchor'),
+            ('PUT', '/api/projects/{name}/site-anchor'),
+            ('GET', '/api/projects/{name}/sites/{site_id}/scene'),
+            ('POST', '/api/projects/{name}/sites/{site_id}/scene/adopt'),
+            ('POST', '/api/projects/{name}/sites/{site_id}/scene/proposals'),
+            ('GET', '/api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}'),
+            ('POST', '/api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/apply'),
+            ('POST', '/api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/cancel'),
+        }),
+    },
+    {
         'id': 'library_uploads_and_tariff_edit',
         'title': 'Library series sent as JSON values',
         'disposition': 'manual',

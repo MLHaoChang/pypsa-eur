@@ -13,8 +13,8 @@ Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sh
 ## Delta reviews
 
 - List the files both sides changed since the old merge-base (`comm -12`) and test those. For hand resolutions, read `git diff <merge-tree> <head>`.
-- `tool-error-kinds.json`: its kinds must be the union of both parents.
-- Inventory: `smoke/assistant_inventory.py --check`; regenerate with `--write`, never hand-merge.
+- Error kinds: a PR adds new kinds only in its own `pypsa-gui/tool-error-kinds.d/<name>.json` fragment, and edits the base `tool-error-kinds.json` only to change an existing kind. Two fragments never conflict as files, so a kind defined twice is caught only by `smoke/json_fragments.py`, which refuses it. Run `tests/test_tool_error_kind_manifest.py` and `ChatPanel.manifest.test.tsx` at the trial merge, not only on the PR head.
+- Inventory, route parity, control matrix: their `--check`s build in memory and nothing generated is committed, so there is nothing to regenerate or hand-merge. At the trial merge, run `smoke/assistant_inventory.py --check`, plus `assistant_route_parity.py --check` and `assistant_control_matrix.py --check` when routes, chat tools or the frontend changed. A `stale (sweep prunes)` line is fine; a `FAIL` line is not.
 
 - Run root `tests/` and `pypsa-gui/backend` tests in separate pytest invocations: mixing them fails on the `tests._shard` plugin.
 - A PR that adds an import of gridspine or another third-party module to `pypsa-gui/backend`: run `tests/test_packaging_requirements.py` at the trial merge (the frozen-app pin test; #707 missed it).
@@ -39,6 +39,8 @@ Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sh
 ## Test quality
 
 Probe tests that monkeypatch `_probe` can hide dispatcher-signature bugs: ask for a test against the real signature.
+
+When a PR changes a validation guard, confirm by mutation that its test fails for the guard, not for a downstream check (#807's decoy case).
 
 ## Rulings
 

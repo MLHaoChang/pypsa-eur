@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A line with r = x = 0 is reported once, as the reactance check, and still blocks both the optimisation and the load flow. The header Run shows "(n stale)" for the requested run kinds whose results are out of date, and the assistant's project-flow tool describes the per-kind run request, verdicts and freshness.

@@ -855,3 +855,38 @@ Policy version 1. `harness/assurance_coverage.py` maps every catalogue tool (341
 Red/green: `tests/assurance_acceptance/test_p0_public_contract.py` 5 red / 31 green before the change, 36 / 36 after; `tests/test_assistant_inventory.py` 20 passed. Regressions: assurance acceptance, `test_answer_assurance`, `test_checked_answer_pilot`, `test_chat_history_per_user` passed.
 
 Remaining: A0.4 reviewed request/profile/metric/computed/guard schemas (tickets 09–11); per-family behavioral fixtures for every `*_unvalidated` adapter (P1–P5); summary/compaction channels (P6); the frontend does not render `assurance_state` yet. Next runnable tracer: issue 02 evidence identity against a `read_unvalidated` family.
+
+### 2026-10-28 — P1 tracer: list_components page evidence (issue 02)
+
+Policy version 1, adapter `static_input_page_evidence` (`static-input-page/1`). `list_components` joins `harness.assurance.CHECKED_TOOLS`. A page's evidence holds the exact static inputs (`INPUT_METRICS`) of the rows it showed, by entity name at RFC 6901 paths `/<name>/<metric>`, bound to owner/org/project and `records.page_source_digest` (project id, class, every row name and its `INPUT_METRICS` raw values; GK B ruled out the whole-network fingerprint at 1.5–4.3 s per call). The digest is taken in `tool_guard` before the handler and must match at capture under `network_guard`, and again on every `/api/chat/evidence` lookup (else 409 `evidence_unavailable`). `tool_guard` refuses limit outside 1..`chat_tools.MAX_PAGE_SIZE`, negative or non-int offset (`capability_unsupported`, handler not run). A shown value certifies only on exact numeric equality with a finite raw value. Answers read "(page rows a..b of N, not the whole class)".
+
+Red/green: the first tracer `test_listed_input_row_has_page_scoped_project_evidence` was red (verdict `limited`) before the change; `tests/assurance_acceptance/test_p1_evidence.py` 34 / 34 after (`test_page_evidence_does_not_compute_the_network_fingerprint` red, then green, after the GK NOT OK). Disabling either digest check fails the edit-after-capture and edit-between-handler-and-capture cases. Regressions: assurance_acceptance, test_answer_assurance, test_checked_answer_pilot, test_assistant_inventory, test_openai_tool_selection, test_tool_error_kind_manifest, test_harness_reliability, test_assurance_storage, test_checked_results_dispositions, frame contract, spill, live-network, profile binding, exact fingerprint.
+
+Cost: two class digests per checked `list_components` call and one per lookup, linear in the class's rows. An edit to another class or a time series leaves page evidence valid: the page asserts static inputs only, and says so.
+
+Remaining for P1: retained/historical runs (A1.3 as-of), A1.2 ACL revocation before publish, A1.4 corruption/restart, A1.5 complete-source aggregates, A1.6/A1.7 validity and masks, every other `read_unvalidated` family, frontend `assurance_state`. Next runnable tracer: a second `read_unvalidated` family with a time-series source (`get_timeseries`), or A1.2 revocation between capture and publish.
+
+### 2026-10-28 — P1 tracer: A1.2 revocation (issue 02)
+
+Policy version 1. The probes found A1.2 already enforced, except for one existence leak. The checks are `records.authorize` at commit (twice, the second under `network_guard`), `records.load` on every lookup, the acting-user/restriction check in `tool_guard`, and the `unavailable` history projection. The leak: `records.load` answered a revoked project with 404 `Project not found`, while an unknown id got `Record not found`. It now answers both with `Record not found`. `tests/assurance_acceptance/test_p1_revocation.py` (11 cases) makes all of this executable. A fixture removes the seeded user's `OrgMembership` or disables the user; its yield teardown restores both and asserts the restore, and the module's last test checks it again. The late-tool-call case first shows the same call returns values without revocation. `RevokingProvider` (a `FakeProvider`) revokes just before a chosen model turn.
+
+Red/green: on master, 10 / 11. The red case was `test_reads_after_revocation_look_like_unknown_records[membership]`, where the bodies differed. After the fix, 11 / 11. Mutants, one at a time:
+- Removing commit's first `authorize` alone: green.
+- Removing commit's second `authorize` alone: green. Each covers the other.
+- Removing both: 8 red. The evidence lookup during validation then fails with `internal_error`, and nothing is published.
+- Removing `load()`'s project `authorize`: the membership read case goes red.
+- Removing `load()`'s first `authorize(owner)`: green. Global auth and the project `authorize` that follows both cover it.
+
+Regressions: assurance_acceptance, test_answer_assurance, test_checked_answer_pilot, test_assistant_inventory, test_project_route_acl_policy, test_assurance_storage: 183 passed.
+
+Pending in A1.2: CSRF on a stateful ACK (no assurance ACK route before P3) and a reviewer cache hit (the reviewer is withheld, so no cache). Follow-ups REVOKE-TOCTOU and REVOKE-KIND are in issue 02.
+
+Remaining for P1: A1.3 historical as-of runs, A1.4 corruption/restart, A1.5 complete-source aggregates, A1.6/A1.7 validity and masks, the other `read_unvalidated` families, frontend `assurance_state`. Next runnable tracer: `get_timeseries` (a time-series source) as the third checked read.
+
+### 2026-10-28 — P1 tracer: REVOKE-TOCTOU (issue 02)
+
+Policy version 1. Commit checked access under `network_guard` and then saved, so a revocation landing between the two left the answer record on disk; a later step reloaded it, got 404, and the turn ended with `internal_error` ("404: Record not found"). Commit now re-checks `records.authorize` after `records.save`, still under `network_guard`, and on refusal removes the file (`records.discard`, under the per-owner transaction lock) and re-raises, so the turn ends as `assurance_publication_failed` with nothing published. A revocation after that re-check is ordered after a completed commit; `load` refuses every later read.
+
+`test_access_revoked_during_commit_publishes_nothing` (membership/disabled × get_component/list_components × removed/stuck) wraps `records.save` to revoke right after the answer lands. It checks the record file first, then that the stream has no `answer_approved`, no token and no value, and that no log record carries a value or the draft. "stuck" makes the removal fail (`TimeoutError` from the lock): the refusal still ends the turn, the warning names only the record id, and `load()` refuses the leftover. Red/green: on master the 8 new cases are red, 11 / 19 overall (removed: the record is kept; stuck: nothing is withdrawn or logged); after the fix 19 / 19 (`python -m pytest -q -o addopts='' tests/assurance_acceptance/test_p1_revocation.py`). Mutants: removing the post-save re-check gives 8 red, with the record kept in the removed cases and no warning in the stuck cases; removing the OSError catch in `discard` gives 4 red, the stuck cases with no warning.
+
+Next runnable tracer: `get_timeseries` as the third checked read. REVOKE-KIND stays open.

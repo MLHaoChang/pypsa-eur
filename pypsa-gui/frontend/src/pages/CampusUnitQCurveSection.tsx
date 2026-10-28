@@ -8,8 +8,6 @@ import { VerdictChip } from '../components/gridReadiness/GridReadinessScorecard'
 import { TableScroll } from './CampusInvestmentSection'
 
 const TITLE = 'Unit reactive capability'
-const BASIS = "screening at unit terminals: √(S² − P²) per inverter against the grid code's per-unit curve × rated P, "
-  + 'at each checked active power; collector and transformer reactive losses are not included.'
 
 function fig(v: number | null | undefined, digits = 3): string {
   return v == null || !isFinite(v) ? '—' : `${Number(v.toPrecision(digits))}`
@@ -26,9 +24,18 @@ function mvar(v: number): string {
   return v.toFixed(2)
 }
 
+/** A real shortfall that rounds to 0.00 is "under 0.01", never "0.00 Mvar short". */
+function shortMvar(v: number): string {
+  return mvar(v) === '0.00' ? 'under 0.01' : mvar(v)
+}
+
 function signed2(v: number): string {
   return v > 0 ? `+${mvar(v)}` : v < 0 ? `−${mvar(-v)}` : mvar(v)
 }
+
+/** A side counts as short only above this many Mvar, as in gridspine's campus_reactive: a band edge equal to the
+ * circle up to float noise is met, never "0.00 Mvar short". */
+const SHORT_EPS = 1e-9
 
 /** A fail row's detail in the table's own number style; the other rows keep the engine's words. */
 function detailText(r: IbrQCurveRow): string {
@@ -36,9 +43,10 @@ function detailText(r: IbrQCurveRow): string {
     || r.q_min_req_mvar == null || r.q_max_req_mvar == null) return r.detail
   const deliver = Math.max(0, r.q_max_req_mvar - r.available_mvar)
   const absorb = Math.max(0, -r.q_min_req_mvar - r.available_mvar)
-  const short = mvar(deliver) === mvar(absorb) && deliver > 0 ? `${mvar(deliver)} Mvar short each way`
-    : [deliver > 0 && `${mvar(deliver)} Mvar short to deliver`, absorb > 0 && `${mvar(absorb)} Mvar short to absorb`]
-      .filter(Boolean).join(' and ') || `${mvar(r.shortfall_mvar)} Mvar short`
+  const short = shortMvar(deliver) === shortMvar(absorb) && deliver > SHORT_EPS && absorb > SHORT_EPS ? `${shortMvar(deliver)} Mvar short each way`
+    : [deliver > SHORT_EPS && `${shortMvar(deliver)} Mvar short to deliver`,
+      absorb > SHORT_EPS && `${shortMvar(absorb)} Mvar short to absorb`]
+      .filter(Boolean).join(' and ') || `${shortMvar(r.shortfall_mvar)} Mvar short`
   return `±${mvar(r.available_mvar)} Mvar available for ${signed2(r.q_min_req_mvar)} to ${signed2(r.q_max_req_mvar)} Mvar: ${short}`
 }
 
@@ -133,7 +141,7 @@ export default function CampusUnitQCurveSection({ rows, notComputed }: {
           <Tag tone={first.source === 'code' ? 'accent' : 'warn'}>{first.source}</Tag>
           <span>Curve: {first.clause}</span>
         </div>
-        <p className="text-[11px] text-muted">Basis: {BASIS}</p>
+        <p className="text-[11px] text-muted">Basis: {first.basis}</p>
       </div>
     </PageSection>
   )

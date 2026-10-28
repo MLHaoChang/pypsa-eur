@@ -633,36 +633,10 @@ def _input_fingerprint(ctx: Any) -> str | None:
         return None
 
 
-def _loadflow_section(ctx: Any, token: dict) -> dict | None:
-    """LC-03: the run's load flow, captured while its results are current.
-
-    The same oracle get_loadflow_summary reads, bound to the run's own project
-    context and actor (this runs on the solver monitor thread). Kept only when
-    it answers ok; any other outcome records no section, so the run refuses
-    past-run reads instead of storing a guess.
-    """
-    from services import chat_tools
-    from services.loadflow_summary import MAX_LIMIT, get_loadflow_summary
-    from services.pypsa_service import PyPSAService
-
-    binding = PyPSAService.bind_request_context(ctx)
-    previous = chat_tools.acting_user_id()
-    chat_tools.set_acting_user(token.get('actor_id'))
-    try:
-        source = 'ac_pf' if token.get('solver_kind') == 'ac_pf' else 'lopf'
-        out = get_loadflow_summary(source=source, limit=MAX_LIMIT)
-    except Exception:  # noqa: BLE001 — a capture failure never breaks a solve
-        import logging
-        logging.getLogger(__name__).exception('load-flow capture failed for %s', token.get('run_id'))
-        return None
-    finally:
-        chat_tools.set_acting_user(previous)
-        PyPSAService.reset_request_context(binding)
-    return out if isinstance(out, dict) and out.get('status') == 'ok' else None
-
-
 def publish_foreground_run(token: dict | None, ctx: Any) -> dict | None:
     """Publish the terminal manifest once the solver state is terminal; else do nothing."""
+    from services import retained_results
+
     if not token:
         return None
     with ctx.solver_state_lock:
@@ -703,16 +677,18 @@ def publish_foreground_run(token: dict | None, ctx: Any) -> dict | None:
         live = _input_fingerprint(ctx)
         solved = (getattr(ctx.network, 'meta', None) or {}).get('assistant_solve_input_fingerprint')
         fingerprint = solved or live
+        # LC-03: each family's retained section (retained_results), read
+        # while this run's results are the current ones. An edit landing
+        # before or during the capture drops them all.
+        missed = [a.section for a in retained_results.ADAPTERS]
         if solved is not None and live != solved:
             warnings.append('inputs_changed_before_publish')
-            warnings.append('loadflow_not_captured')
         else:
-            # An edit landing during the capture also drops it.
-            loadflow = _loadflow_section(ctx, token)
-            if loadflow is not None and _input_fingerprint(ctx) == fingerprint:
-                sections['loadflow'] = loadflow
-            else:
-                warnings.append('loadflow_not_captured')
+            kept, not_kept = retained_results.capture(ctx, token)
+            if _input_fingerprint(ctx) == fingerprint:
+                sections.update(kept)
+                missed = not_kept
+        warnings.extend(f'{name}_not_captured' for name in missed)
     try:
         return publish_run(
             token['root'], token['project_id'], run_id=token['run_id'], kind=token['kind'],
