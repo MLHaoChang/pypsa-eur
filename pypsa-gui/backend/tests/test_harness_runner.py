@@ -345,6 +345,63 @@ def test_a_foreground_write_during_the_solve_is_refused_409_and_none_is_lost(det
     assert PyPSAService.get_active_context().network.generators.at['G1', 'marginal_cost'] == 30
 
 
+def test_project_route_writes_to_the_held_project_are_refused_409_until_it_is_let_go(detached, site, client, monkeypatch):
+    """GK B: `_enforce_project_lock` checks the hold by the path's project."""
+    name = 'Tool Baseline'
+    sid = client.post(f'/api/projects/{name}/snapshots', json={'label': 'base'}).json()['id']
+    from routers.simulation import _solver_in_flight
+    task, path, record = until_solve_waits(detached, site, monkeypatch)
+    wait_until(lambda: not _solver_in_flight())  # the solver's own gate would answer first
+    assert harness_locks.holder(record['project_id']) == task['task_id']
+    snapshots = len(client.get(f'/api/projects/{name}/snapshots').json())
+    for refused in (client.post(f'/api/projects/{name}/snapshots/{sid}/restore'),
+                    client.post(f'/api/projects/{name}/snapshots', json={'label': 'during'}),
+                    client.post(f'/api/projects/{name}', params={'force': True})):
+        assert refused.status_code == 409, refused.text
+        assert refused.json()['detail']['error_kind'] == 'project_locked', refused.text
+    assert len(client.get(f'/api/projects/{name}/snapshots').json()) == snapshots
+    harness_locks.release(record['project_id'], task['task_id'])
+    assert client.post(f'/api/projects/{name}', params={'force': True}).status_code == 200
+
+
+def test_the_user_can_cancel_a_run_that_holds_the_project(detached, site, monkeypatch):
+    """GK B plan condition 4: stop, resume and reconcile stay open to the run's
+    owner during the hold; another task id is still refused."""
+    task, path, record = until_solve_waits(detached, site, monkeypatch)
+    assert harness_locks.holder(record['project_id']) == task['task_id']
+    session = chat_tools.chat_session() or harness_session.ChatSession()
+    frames, _ = dispatch(session, monkeypatch, 'resume_task', {'task_id': 'not-a-task'})
+    assert [p['error_kind'] for e, p in frames if e == 'tool_error'] == ['project_locked']
+    frames, _ = dispatch(session, monkeypatch, 'cancel_task', {'task_id': task['task_id']})
+    assert 'tool_error' not in [e for e, _ in frames]
+    assert json.loads(path.read_text())['run']['status'] == 'cancelled'
+    harness_runner.Runner('a').tick(path)  # what cancel's wake does
+    assert harness_locks.holder(record['project_id']) is None
+    from db.models import SolveJobRow
+    from db.session import SessionLocal
+    with SessionLocal() as db:  # the queued job keeps its own abort path: cancel does not abort it
+        assert not [r for r in db.query(SolveJobRow).all() if r.status in ('cancelled', 'aborted')]
+
+
+def test_the_runner_imports_and_leases_without_fcntl(detached, site, monkeypatch):
+    """GK B: Windows has no fcntl; the lease uses harness/durable's lock."""
+    import os
+    import subprocess
+    import sys
+    probe = "import sys; sys.modules['fcntl'] = None; import harness.runner"
+    assert subprocess.run([sys.executable, '-c', probe], cwd=Path(harness_runner.__file__).parent.parent,
+                          capture_output=True, timeout=120).returncode == 0
+    _, root = site
+    task = detached()
+    path = task_path(root, task)
+    msvcrt = type('msvcrt', (), {'LK_NBLCK': 2, 'LK_UNLCK': 0, 'locking': staticmethod(lambda *a: None)})
+    monkeypatch.setitem(sys.modules, 'fcntl', None)
+    monkeypatch.setitem(sys.modules, 'msvcrt', msvcrt)
+    from harness import durable
+    monkeypatch.setattr(durable, 'os', type('os', (), {'name': 'nt', 'chmod': staticmethod(os.chmod)}))
+    assert harness_runner.Runner('a')._lease(path) is not None
+
+
 def test_a_request_never_runs_as_the_runner():
     assert harness_locks.in_run() is None
     harness_locks.hold('p', 't')

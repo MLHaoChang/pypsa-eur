@@ -42,44 +42,54 @@ def transaction(directory, *, timeout=5):
         if key in held:
             yield
             return
-        with (directory / ".owner.lock").open("a+b") as stream:
-            os.chmod(stream.name, 0o600)
-            if os.name == "nt":
-                import msvcrt
-
-                stream.write(b"\0")
-                stream.flush()
-
-                def acquire():
-                    stream.seek(0)
-                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
-
-                def release():
-                    stream.seek(0)
-                    msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                import fcntl
-
-                def acquire():
-                    fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-
-                def release():
-                    fcntl.flock(stream, fcntl.LOCK_UN)
-
-            deadline = time.monotonic() + timeout
-            while True:
-                try:
-                    acquire()
-                    break
-                except OSError:
-                    if time.monotonic() >= deadline:
-                        raise TimeoutError("assurance storage busy") from None
-                    time.sleep(0.02)
+        with file_lock(directory / ".owner.lock", timeout=timeout, busy="assurance storage busy"):
             _LOCAL.held = held | {key}
             try:
                 yield
             finally:
                 _LOCAL.held = held
-                release()
     finally:
         lock.release()
+
+
+@contextmanager
+def file_lock(path, *, timeout=5, busy="file lock busy"):
+    """An exclusive cross-process lock on the file at `path` (msvcrt on
+    Windows, flock elsewhere); TimeoutError when it stays busy."""
+    with open(path, "a+b") as stream:
+        os.chmod(stream.name, 0o600)
+        if os.name == "nt":
+            import msvcrt
+
+            stream.write(b"\0")
+            stream.flush()
+
+            def acquire():
+                stream.seek(0)
+                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+
+            def release():
+                stream.seek(0)
+                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            def acquire():
+                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+            def release():
+                fcntl.flock(stream, fcntl.LOCK_UN)
+
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                acquire()
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(busy) from None
+                time.sleep(0.02)
+        try:
+            yield
+        finally:
+            release()

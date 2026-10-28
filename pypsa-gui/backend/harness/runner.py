@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
-import fcntl
 import hashlib
 import json
 import logging
@@ -92,12 +91,9 @@ def _read(path):
 @contextlib.contextmanager
 def _file_lock(path):
     """The lease's cross-process guard: an exclusive lock on a sidecar file."""
-    with open(Path(path).with_name(Path(path).name + ".lease"), "a") as handle:
-        fcntl.flock(handle, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(handle, fcntl.LOCK_UN)
+    from harness import durable
+    with durable.file_lock(Path(path).with_name(Path(path).name + ".lease"), timeout=LEASE_SECONDS):
+        yield
 
 
 def _update(path, change):

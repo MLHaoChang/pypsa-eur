@@ -1230,7 +1230,13 @@ lifespan after the solve queue and is off under pytest (tests build their own
   job, `services/harness_locks.py` holds the project. The write middleware and
   `chat_tools._check_foreign_lock` refuse 409 `project_locked` ("a harness run
   is editing this project"), in local mode too, unless the caller is the
-  runner itself. Reads and the chat routes stay open.
+  runner itself. Reads and the chat routes stay open. `_enforce_project_lock`
+  (the `/api/projects/...` writes: save, snapshots, studies) checks the hold by
+  the path's project. `cancel_task`, `resume_task` and `resolve_task_step`
+  naming a task the caller owns pass the hold, so the user can always stop
+  the run; the runner's next tick lets the project go.
+- **The lease file lock** is `harness/durable.file_lock` (msvcrt on Windows,
+  flock elsewhere); `runner.py` imports no `fcntl`.
 - **Restart.** On a takeover:
   - a waiting queue step whose rows are terminal settles from them;
   - a live one is followed again;
