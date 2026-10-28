@@ -866,6 +866,25 @@ Cost: two class digests per checked `list_components` call and one per lookup, l
 
 Remaining for P1: retained/historical runs (A1.3 as-of), A1.2 ACL revocation before publish, A1.4 corruption/restart, A1.5 complete-source aggregates, A1.6/A1.7 validity and masks, every other `read_unvalidated` family, frontend `assurance_state`. Next runnable tracer: a second `read_unvalidated` family with a time-series source (`get_timeseries`), or A1.2 revocation between capture and publish.
 
+### 2026-10-28 — P1 tracer: get_timeseries series steps (issue 02)
+
+Policy version 1. `get_timeseries` is the third checked read (`series_input_evidence`), for `loads/p_set` and `generators/p_max_pu`. `routers.network_time_axis.resolve_series` and `index_labels` were extracted from the handler, and the handler and the evidence both read through them. The time-series route tests (b3_solver_timeseries, chat_tools_profiles, network_time_axis_surface, user_ts_tenancy, profiles_router, e1_set_growth_placeholders, line_rescale, profile_batch_apply) gave 213 passed after the extraction. The source digest hashes raw bytes (index int64 ns plus tz, values float64), never repr.
+
+The guard refuses a series of more than 744 steps, or one whose facts would exceed 120 KiB, with the typed `series_too_long_to_check`. It is `inline` in `tool-error-kinds.d/claude-assurance-02-timeseries.json`; that kind's text is the only guard refusal the checked projection passes through.
+
+`tests/assurance_acceptance/test_p1_timeseries.py` has 36 cases: 17 red and 19 green on master (the green ones are refusals, which master gives anyway), and 36 / 36 after the change. `test_p1_revocation.py` gains the `get_timeseries` read in its revoked-after-capture cases (membership, disabled). Run it with `python -m pytest -q -o addopts='' tests/assurance_acceptance/test_p1_timeseries.py`.
+
+Mutants, one at a time, each red on its own case:
+- digest over `repr(series)`: the middle-step edit (rows 32/64 and 372/744);
+- plain `==` for `_certified`: non-finite ±inf;
+- no comma check: the comma args case;
+- subset instead of exact keys: the period and extra args cases;
+- no period in the path: the multi-period case;
+- no series re-check at lookup: the edit-after-capture and time-zone cases;
+- no size guard: the long-name case.
+
+Next: SERIES-WINDOW (issue 02) for full-year series. REVOKE-KIND stays open.
+
 ### 2026-10-28 — P1 tracer: A1.2 revocation (issue 02)
 
 Policy version 1. The probes found A1.2 already enforced, except for one existence leak. The checks are `records.authorize` at commit (twice, the second under `network_guard`), `records.load` on every lookup, the acting-user/restriction check in `tool_guard`, and the `unavailable` history projection. The leak: `records.load` answered a revoked project with 404 `Project not found`, while an unknown id got `Record not found`. It now answers both with `Record not found`. `tests/assurance_acceptance/test_p1_revocation.py` (11 cases) makes all of this executable. A fixture removes the seeded user's `OrgMembership` or disables the user; its yield teardown restores both and asserts the restore, and the module's last test checks it again. The late-tool-call case first shows the same call returns values without revocation. `RevokingProvider` (a `FakeProvider`) revokes just before a chosen model turn.
@@ -882,3 +901,11 @@ Regressions: assurance_acceptance, test_answer_assurance, test_checked_answer_pi
 Pending in A1.2: CSRF on a stateful ACK (no assurance ACK route before P3) and a reviewer cache hit (the reviewer is withheld, so no cache). Follow-ups REVOKE-TOCTOU and REVOKE-KIND are in issue 02.
 
 Remaining for P1: A1.3 historical as-of runs, A1.4 corruption/restart, A1.5 complete-source aggregates, A1.6/A1.7 validity and masks, the other `read_unvalidated` families, frontend `assurance_state`. Next runnable tracer: `get_timeseries` (a time-series source) as the third checked read.
+
+### 2026-10-28 — P1 tracer: REVOKE-TOCTOU (issue 02)
+
+Policy version 1. Commit checked access under `network_guard` and then saved, so a revocation landing between the two left the answer record on disk; a later step reloaded it, got 404, and the turn ended with `internal_error` ("404: Record not found"). Commit now re-checks `records.authorize` after `records.save`, still under `network_guard`, and on refusal removes the file (`records.discard`, under the per-owner transaction lock) and re-raises, so the turn ends as `assurance_publication_failed` with nothing published. A revocation after that re-check is ordered after a completed commit; `load` refuses every later read.
+
+`test_access_revoked_during_commit_publishes_nothing` (membership/disabled × get_component/list_components × removed/stuck) wraps `records.save` to revoke right after the answer lands. It checks the record file first, then that the stream has no `answer_approved`, no token and no value, and that no log record carries a value or the draft. "stuck" makes the removal fail (`TimeoutError` from the lock): the refusal still ends the turn, the warning names only the record id, and `load()` refuses the leftover. Red/green: on master the 8 new cases are red, 11 / 19 overall (removed: the record is kept; stuck: nothing is withdrawn or logged); after the fix 19 / 19 (`python -m pytest -q -o addopts='' tests/assurance_acceptance/test_p1_revocation.py`). Mutants: removing the post-save re-check gives 8 red, with the record kept in the removed cases and no warning in the stuck cases; removing the OSError catch in `discard` gives 4 red, the stuck cases with no warning.
+
+Next runnable tracer: `get_timeseries` as the third checked read. REVOKE-KIND stays open.

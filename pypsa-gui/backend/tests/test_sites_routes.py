@@ -29,9 +29,14 @@ DOC = {
         "buses": ["B1"],
         "boundary": [[6.83, 53.44], [6.84, 53.44], [6.84, 53.43], [6.83, 53.43]],
         "origin": {"lng": 6.835, "lat": 53.435},
-        "placements": {"Generator:G1": {"x": 10.0, "y": -5.0, "heading": 45}},
+        "placements": {"Generator:gas": {"x": 10.0, "y": -5.0, "heading": 45}},
     }],
 }
+
+
+def _stored(r):
+    """A GET body without the D06 `bindings` record (asserted in test_site_identity)."""
+    return {k: v for k, v in r.json().items() if k != "bindings"}
 
 
 def _with_site_id(doc, sid):
@@ -65,7 +70,7 @@ def test_put_then_get_round_trip(client, api_project):
     r = client.put(f"/api/projects/{name}/sites", json=DOC)
     assert r.status_code == 200, r.text
     assert r.json() == {"saved": name, "sites": 1}
-    assert client.get(f"/api/projects/{name}/sites").json() == DOC
+    assert _stored(client.get(f"/api/projects/{name}/sites")) == DOC
 
 
 def test_put_invalid_422_names_the_field(client, api_project):
@@ -115,7 +120,7 @@ def test_put_succeeds_when_orphan_prune_fails(client, api_project, monkeypatch):
 
     monkeypatch.setattr(ss, "prune_site_dirs", boom)
     assert client.put(f"/api/projects/{name}/sites", json=DOC).status_code == 200
-    assert client.get(f"/api/projects/{name}/sites").json() == DOC
+    assert _stored(client.get(f"/api/projects/{name}/sites")) == DOC
 
 
 def test_get_permission_denied_is_access_error(client, api_project, monkeypatch):
@@ -189,17 +194,19 @@ def test_scenario_copies_sites_and_context_dir(client, api_project, project_stor
     cdir = project_storage_dir(child)
     assert (cdir / ss.SITES_FILE).exists()
     assert (cdir / ss.SITES_DIR / "site_a" / "context.json").exists()
-    assert client.get(f"/api/projects/{child}/sites").json() == DOC
+    assert _stored(client.get(f"/api/projects/{child}/sites")) == DOC
     # Diverge the child; the base is untouched.
     moved = copy.deepcopy(DOC)
-    moved["sites"][0]["placements"]["Generator:G1"]["x"] = 999.0
+    moved["sites"][0]["placements"]["Generator:gas"]["x"] = 999.0
     assert client.put(f"/api/projects/{child}/sites", json=moved).status_code == 200
-    assert client.get(f"/api/projects/{name}/sites").json() == DOC
+    assert _stored(client.get(f"/api/projects/{name}/sites")) == DOC
 
 
 def test_export_import_round_trips_sites(client, api_project, project_storage_dir):
     name = api_project("exp")
     assert client.put(f"/api/projects/{name}/sites", json=DOC).status_code == 200
+    # The bundle and the snapshot carry the project as saved: save the uid the PUT minted (D06).
+    assert client.post(f"/api/projects/{name}", params={"force": True, "rebind": True}).status_code == 200
     _seed_context(project_storage_dir(name))
     r = client.get(f"/api/projects/{name}/bundle")
     assert r.status_code == 200
@@ -210,20 +217,22 @@ def test_export_import_round_trips_sites(client, api_project, project_storage_di
                     files={"file": ("exp.pypsaproj.zip", r.content, "application/zip")})
     assert r.status_code in (200, 201), r.text
     imported = r.json().get("imported") or r.json().get("name") or "exp_imported"
-    assert client.get(f"/api/projects/{imported}/sites").json() == DOC
+    assert _stored(client.get(f"/api/projects/{imported}/sites")) == DOC
     assert (project_storage_dir(imported) / ss.SITES_DIR / "site_a" / "context.json").exists()
 
 
 def test_snapshot_restore_brings_sites_back(client, api_project):
     name = api_project("snap")
     assert client.put(f"/api/projects/{name}/sites", json=DOC).status_code == 200
+    # The bundle and the snapshot carry the project as saved: save the uid the PUT minted (D06).
+    assert client.post(f"/api/projects/{name}", params={"force": True, "rebind": True}).status_code == 200
     r = client.post(f"/api/projects/{name}/snapshots", json={"label": "v1"})
     assert r.status_code in (200, 201), r.text
     snap_id = r.json()["id"]
     assert client.put(f"/api/projects/{name}/sites", json={"version": 1, "sites": []}).status_code == 200
     assert client.get(f"/api/projects/{name}/sites").json()["sites"] == []
     assert client.post(f"/api/projects/{name}/snapshots/{snap_id}/restore").status_code == 200
-    assert client.get(f"/api/projects/{name}/sites").json() == DOC
+    assert _stored(client.get(f"/api/projects/{name}/sites")) == DOC
 
 
 # ── rename hook (Task 1.6, D14) ─────────────────────────────────────────────

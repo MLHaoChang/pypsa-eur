@@ -211,6 +211,14 @@ def _empty(name: str, description: str) -> dict[str, Any]:
     return _t(name, description, {}, [])
 
 
+# LC-19: the re-run rule the solve tools and the load flow share (harness/run_lifecycle.py).
+_RERUN_NOTE = (
+    "When the current project's results already match its inputs, the call is refused with "
+    "results_current before any card: tell the user and ask; only on their yes call it again "
+    "with rerun_current: true. "
+)
+
+
 TOOLS: list[dict[str, Any]] = [
     _t(
         "resolve_project_target",
@@ -470,13 +478,18 @@ TOOLS: list[dict[str, Any]] = [
         "has nothing to serve — an unsolved or stale network, or a solve that "
         "produced none of this kind (lost_load on a run that shed nothing). "
         "Read `message` and check dispatch_status; do NOT report it as a zero. "
-        "run_id (statistics and cost_breakdown only) answers for one run as "
+        "run_id (statistics, cost_breakdown, economics_by_carrier, generators and "
+        "storage_dispatch only) answers for one run as "
         "{status, scope, result_kind, data, run}: the newest completed run whose "
         "inputs are still current answers with the current read (scope current); "
         "any other run answers from the results kept when it finished (scope "
         "historical; the Results tabs still show the current results), or "
         "unavailable for a run without them. Never quote current results for "
-        "another run. With run_id, source, detail, offset and limit are ignored. "
+        "another run. With run_id, source, detail, offset and limit are ignored, "
+        "except that generators and storage_dispatch answer a digest (shape "
+        "'digest': per carrier and per unit weighted energy, peak and its "
+        "snapshot, weighted mean and running hours; storage discharge and charge "
+        "apart) for every run and refuse those arguments. "
         "Safety: read.",
         {
             "result_kind": {"type": "string", "enum": RESULTS_ENUM},
@@ -903,14 +916,15 @@ TOOLS: list[dict[str, Any]] = [
         "run_simulation",
         "Start LOPF in a worker thread. Long-running (minutes to hours). "
         "[PHASE] / [VALIDATION] / TRACEBACK lines stream via the chat tool-"
-        "progress SSE bridge. Safety: execution.",
-        {},
+        "progress SSE bridge. " + _RERUN_NOTE + "Safety: execution.",
+        {"rerun_current": {"type": "boolean"}},
     ),
-    _empty(
+    _t(
         "run_ac_pf_stage",
         "Run Stage 2 AC PF using the most recent LOPF dispatch as the seed. "
         "Long-running. dispatch_status must be 'fresh' before calling. "
-        "Safety: execution.",
+        + _RERUN_NOTE + "Safety: execution.",
+        {"rerun_current": {"type": "boolean"}},
     ),
     _empty(
         "abort_simulation",
@@ -1420,8 +1434,8 @@ TOOLS: list[dict[str, Any]] = [
         "if the project already has a queued or running job the response is 200 "
         "with THAT job and `already_queued: true`, and no second job is created "
         "— this is not an error, so do not retry. A new job returns "
-        "`already_queued: false`. Safety: execution.",
-        {"project_id": {"type": "string"}},
+        "`already_queued: false`. " + _RERUN_NOTE + "Safety: execution.",
+        {"project_id": {"type": "string"}, "rerun_current": {"type": "boolean"}},
         ["project_id"],
     ),
     _empty(
@@ -1479,12 +1493,13 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "solve_queue_requeue",
-        "Run a FINISHED job again as a NEW queued job for the same project "
+        "Retry or re-run a FINISHED job (failed, aborted, interrupted or done) as a NEW queued job for the same project "
         "(the job then solves and saves that project). A queued or running "
         "job is refused (409); a project another user holds the edit lock on "
-        "is refused. Returns the new job and `already_queued`. "
-        "Safety: execution.",
-        {"job_id": {"type": "string"}},
+        "is refused. Returns the new job and `already_queued`. It solves the "
+        "project's saved inputs with the job's own solver settings. "
+        + _RERUN_NOTE + "Safety: execution.",
+        {"job_id": {"type": "string"}, "rerun_current": {"type": "boolean"}},
         ["job_id"],
     ),
 
@@ -1810,7 +1825,11 @@ TOOLS: list[dict[str, Any]] = [
         "peak MW, its source-year annual MWh, the MWh this model's snapshots "
         "will see (modelled_mwh: a sampled template sees less), any "
         "warnings to relay (energy_mismatch, an assumed UTC clock), and the "
-        "job_id to apply. On a project made "
+        "job_id to apply. "
+        "The same archetype re-generates a refined load with its stored ops "
+        "(answer: replay); replay_refinements false drops them, and "
+        "replay_refused names the op and its index. "
+        "On a project made "
         "with a data-centre dc_load spec, that spec owns the DC load: apply "
         "refuses a data_centre profile there. `project_id` is the project "
         "NAME and must be the open project. Safety: execution.",
@@ -1821,7 +1840,8 @@ TOOLS: list[dict[str, Any]] = [
                                 "library"]},
          "loads": {"type": "array", "items": {"type": "string"}},
          "params": {"type": "object"},
-         "year": {"type": "integer"}},
+         "year": {"type": "integer"},
+         "replay_refinements": {"type": "boolean"}},
         ["project_id", "archetype", "loads"],
     ),
     _t(
@@ -1845,6 +1865,9 @@ TOOLS: list[dict[str, Any]] = [
         "act on process links (bounds on p0): a shutdown on a two-way link "
         "closes both directions; a floor on a two-way or point-of-connection "
         "link is refused. `generators` then names the links. "
+        "The same kind re-generates a refined series with its stored ops "
+        "(answer: replay); replay_refinements false drops them, and "
+        "replay_refused names the op and its index. "
         "`project_id` is the project NAME and must be the open project. "
         "Safety: execution.",
         {"project_id": {"type": "string"},
@@ -1854,7 +1877,8 @@ TOOLS: list[dict[str, Any]] = [
          "generators": {"type": "array", "items": {"type": "string"}},
          "component_type": {"type": "string", "enum": ["generators", "links"]},
          "params": {"type": "object"},
-         "year": {"type": "integer"}},
+         "year": {"type": "integer"},
+         "replay_refinements": {"type": "boolean"}},
         ["project_id", "kind", "generators"],
     ),
     _t(
@@ -1900,14 +1924,19 @@ TOOLS: list[dict[str, Any]] = [
         "COP falls below 1 are raised to 1 and warned. market is refused until "
         "market price bundles exist; part_load is refused (it depends on "
         "the dispatch). A price on a point-of-connection link is refused: "
-        "set the tariff. `project_id` is the project NAME and must be the "
+        "set the tariff. "
+        "The same kind re-generates a refined series with its stored ops "
+        "(answer: replay); replay_refinements false drops them, and "
+        "replay_refused names the op and its index. "
+        "`project_id` is the project NAME and must be the "
         "open project. Safety: execution.",
         {"project_id": {"type": "string"},
          "kind": {"type": "string",
                   "enum": ["tou", "inflow", "cop", "market", "part_load"]},
          "components": {"type": "array", "items": {"type": "string"}},
          "params": {"type": "object"},
-         "year": {"type": "integer"}},
+         "year": {"type": "integer"},
+         "replay_refinements": {"type": "boolean"}},
         ["project_id", "kind", "components"],
     ),
 
@@ -2421,7 +2450,11 @@ TOOLS: list[dict[str, Any]] = [
         "project_readiness",
         "Check project kind, saved/dirty state, network validation, time-series store, solver availability, "
         "and result freshness without running a solve. Defaults to the active project. "
-        "Returns ready, blockers, and next_tools; GridSpine returns run/config/source freshness. Safety: read.",
+        "Returns ready, blockers, and next_tools; GridSpine returns run/config/source freshness. "
+        "engines lists what this project can run from chat, each {kind, label, tool, ready}; "
+        "ask_engine lists the ready kinds when more than one is ready. A bare \"run\" then asks "
+        "once with ask_user, one option per listed engine, before any run tool; with one ready "
+        "engine it runs that one. Safety: read.",
         {"project_id": {"type": "string"}}, [],
     ),
     _t(
@@ -2432,7 +2465,8 @@ TOOLS: list[dict[str, Any]] = [
         "investment_case), or report job (rpt:… from generate_report / "
         "regenerate_report_section / propose_report_mapping), "
         "avoiding repeated model status polls. "
-        "Returns job, terminal, completed, timed_out, wait_cancelled, waited_seconds. "
+        "Returns job, terminal, completed, timed_out, wait_cancelled, waited_seconds; a failed solve "
+        "adds triage: the reads to make (its log, diagnose_network, validate_network) and what to say. "
         "Default 20 seconds, maximum 25. On timeout report pending and end the turn; never busy-poll. "
         "A cancelled wait leaves the job running; solve_queue_abort, abort_simulation, "
         "abort_adequacy_study, or abort_report_generation stops it. Safety: read.",
@@ -4814,7 +4848,7 @@ TOOLS.extend([
     _t("get_loadflow_summary", "Summarise the CURRENT load-flow results of the active project: lines and transformers ranked by peak utilisation = flow / (rating * s_max_pu), computed by software from the same results the Load flow tab reads. Per branch (default 5, max 25, trimmed to a bounded payload): both-terminal peak flow, rating (optimized s_nom_opt or configured s_nom), s_max_pu range, peak/mean utilisation, weighted hours at/over the limit. Returns the exact source, snapshot window, freshness, solve state, ranking convention, skipped branches (missing or zero rating, no flow data) and missing_evidence. LOPF results are an ACTIVE-POWER PROXY, not an AC apparent-power assessment; source='ac_pf' uses apparent power where reactive flows exist and excludes unconverged snapshots. Never proof of full AC thermal compliance (no N-1, no voltage limits). Unsolved, stale, running, infeasible or failed results return status unavailable with a typed unavailable_kind; never invent values. window_from/window_to are inclusive snapshot indexes for follow-ups. run_id: the newest completed run whose inputs are still current answers as the current results (run.is_current true); any other run answers from the load flow captured when it finished (scope historical, run.is_current false; the Load flow tab still shows the current results), or unavailable for a run without a captured section. Safety: read.", {"source": {"type": "string", "enum": ["lopf", "ac_pf"]}, "limit": {"type": "integer", "minimum": 1, "maximum": 25}, "window_from": {"type": "integer", "minimum": 0}, "window_to": {"type": "integer", "minimum": 0}, "run_id": {"type": "string", "maxLength": 64}}, []),
     _t("list_tasks", "List up to 20 most recently updated durable tasks owned by you in the active project. Use a returned ID to resume in a new chat or provider. Safety: read.", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}, []),
     _t("find_capabilities", "Find relevant supported tools for a goal. Returns required inputs, safety and current project/toolset eligibility. With overview=true (no goal) answers \"what can you do here?\": the core-feature families (projects, results, checks, edits, sensitivities, studies, reports), each available or not for this project, role, mode and personal rule, with the reason, an example sentence and its offered tools. Cached catalogue search grants no authority. Safety: read.", {"goal": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 8}, "overview": {"type": "boolean"}}, []),
-    _t("start_task", "Persist a project/user-scoped plan of 1–12 ordinary tools (1–24 with a study brief). Create/activate the project first; rebinding and task-control tools cannot be steps. Each step has unique id, tool, args. Whole-value $earlier_step.path references resolve saved results. Stable request_id deduplicates identical plans. Optional brief (decision study goal the user approved on a plan-review Choice card): objective, cards in scope, case names, and phases that split the steps in order, one card each; it grants nothing, the plan pauses before each new card until the user continues, and inputs changed outside the plan stop its next effect. Returns task_id, status, next_step. Execute next_step via an ordinary offered call; this tool runs no hidden actions. Safety: write.", {"title": {"type": "string", "maxLength": 120}, "request_id": {"type": "string", "maxLength": 64}, "steps": {"type": "array", "minItems": 1, "maxItems": 24, "items": {"type": "object", "additionalProperties": False, "properties": {"id": {"type": "string"}, "tool": {"type": "string"}, "args": {"type": "object"}}, "required": ["id", "tool", "args"]}}, "brief": {"type": "object", "additionalProperties": False, "properties": {"objective": {"type": "string", "maxLength": 240}, "cards": {"type": "array", "maxItems": 6, "items": {"type": "string", "enum": ["capacity", "grid", "control", "reliability", "commercial", "hand-off"]}}, "cases": {"type": "array", "maxItems": 8, "items": {"type": "object", "additionalProperties": False, "properties": {"name": {"type": "string", "maxLength": 60}, "experiment": {"type": "string", "maxLength": 64}}, "required": ["name"]}}, "phases": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": False, "properties": {"card": {"type": "string"}, "steps": {"type": "array", "minItems": 1, "items": {"type": "string"}}}, "required": ["card", "steps"]}}}, "required": ["objective", "cards", "phases"]}}, ["title", "steps", "request_id"]),
+    _t("start_task", "Persist a project/user-scoped plan of 1–12 ordinary tools (1–24 with a study brief). Create/activate the project first; rebinding and task-control tools cannot be steps. Each step has unique id, tool, args. Whole-value $earlier_step.path references resolve saved results. Stable request_id deduplicates identical plans. Optional brief (decision study goal the user approved on a plan-review Choice card): objective, cards in scope, case names, and phases that split the steps in order, one card each; it grants nothing, the plan pauses before each new card until the user continues, and inputs changed outside the plan stop its next effect. Optional run (a harness study run of a template profile, step by step): pass steps [] and a brief without phases; the harness adds each stage's steps and checks each stage's gate itself. Returns task_id, status, next_step. Execute next_step via an ordinary offered call; this tool runs no hidden actions. Safety: write.", {"title": {"type": "string", "maxLength": 120}, "request_id": {"type": "string", "maxLength": 64}, "steps": {"type": "array", "minItems": 0, "maxItems": 24, "items": {"type": "object", "additionalProperties": False, "properties": {"id": {"type": "string"}, "tool": {"type": "string"}, "args": {"type": "object"}}, "required": ["id", "tool", "args"]}}, "brief": {"type": "object", "additionalProperties": False, "properties": {"objective": {"type": "string", "maxLength": 240}, "cards": {"type": "array", "maxItems": 6, "items": {"type": "string", "enum": ["capacity", "grid", "control", "reliability", "commercial", "hand-off"]}}, "cases": {"type": "array", "maxItems": 8, "items": {"type": "object", "additionalProperties": False, "properties": {"name": {"type": "string", "maxLength": 60}, "experiment": {"type": "string", "maxLength": 64}}, "required": ["name"]}}, "phases": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": False, "properties": {"card": {"type": "string"}, "steps": {"type": "array", "minItems": 1, "items": {"type": "string"}}}, "required": ["card", "steps"]}}}, "required": ["objective", "cards"]}, "run": {"type": "object", "additionalProperties": False, "properties": {"profile": {"type": "string", "enum": ["eh_site@1"]}, "mode": {"type": "string", "enum": ["stepwise"]}}, "required": ["profile", "mode"]}}, ["title", "steps", "request_id"]),
     _t("get_task", "Read a durable task in the active project owned by the caller. Returns completed steps and the next exact call; no completed step is replayed. Safety: read.", {"task_id": {"type": "string"}}, ["task_id"]),
     _t("resume_task", "Attach a durable task to this chat and return next_step. Execute it as an ordinary offered tool call; all normal gates apply. Interrupted writes become uncertain and require explicit review. No implicit tool execution or job polling. Safety: write.", {"task_id": {"type": "string"}}, ["task_id"]),
     _t("cancel_task", "Stop future task steps; retain its checkpoint. Does not abort a running queue job or solver. Use solve_queue_abort separately for a job. Safety: write.", {"task_id": {"type": "string"}}, ["task_id"]),

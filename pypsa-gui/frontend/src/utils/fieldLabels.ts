@@ -6,6 +6,7 @@ import type { EhTemplateMeta } from '../api/simulation'
 export const FIELD_LABELS: Record<string, string> = {
   efficiency: 'Efficiency',
   eh_sk_mva: 'Short-circuit level (MVA)',
+  site_anchor: 'Site coordinates',
   target_lole_h: 'LOLE target',
   p_nom: 'Capacity',
   eh_process: 'Process unit',

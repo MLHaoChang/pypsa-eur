@@ -40,8 +40,10 @@ docs_only_re='^({{RELEASE_NOTES_DIR}}/.*|docs/.*\.md|(.*/)?(CONTEXT|GLOSSARY)\.m
 semantic_re=''
 semantic_cmd=(python3 -m pytest -q -p no:cacheprovider)
 # Overlap only in paths matching waive_overlap_re does not block when the trial
-# merge is clean and semantic_cmd passes on it (e.g. a generated inventory that
-# many PRs touch). Leave empty to treat every non-docs overlap as code.
+# merge is clean and semantic_cmd passes on it. Leave empty to treat every
+# non-docs overlap as code. Better than both waivers below: commit no generated
+# file (build it in the check) and give each shared append-only file a `.d/`
+# fragment directory, one new file per PR (see LEARNINGS.md, 27 Oct 2026).
 waive_overlap_re=''
 # Overlap only in a manifest matching append_only_overlap_re does not block when
 # both sides only add lines to it, the trial merge is clean and
@@ -287,7 +289,7 @@ if verdicts=$(command -v gh >/dev/null &&
     elif verdict_carries "$full"; then
       echo "$who OK @$full: carries (clean $base_branch merge)"
     else
-      files=$(git diff --name-only "$full" "$head" 2>/dev/null | head -15 | paste -sd' ')
+      files=$(git diff --name-only "$full" "$head" 2>/dev/null | sed -n 1,15p | paste -sd' ')
       echo "$who OK @$full: stale: changed since: ${files:-unreadable}"
     fi
   done

@@ -120,8 +120,18 @@ def _label(value):
 # The only tools a checked turn may run. Every results read, chart and export
 # is refused before its handler runs; checked results come from the bounded
 # profiles, computed by software from the request scope.
+# tool_guard refusals the stream names by kind; any other guard failure is
+# the generic capability_unsupported.
+GUARD_REFUSAL_KINDS = frozenset({"series_too_long_to_check"})
+
 CHECKED_TOOLS = frozenset(
-    {"get_component", "list_components", "ui_open_panel", "update_component"}
+    {
+        "get_component",
+        "get_timeseries",
+        "list_components",
+        "ui_open_panel",
+        "update_component",
+    }
 )
 
 
@@ -150,6 +160,8 @@ class Turn:
         # list_components: class source digests taken before each handler run,
         # in call order per args digest, so repeated identical calls keep their own.
         self.page_digests = {}
+        # get_timeseries: series source digests, kept the same way.
+        self.series_digests = {}
 
     def review_interpretations(self, blocks, provider, model, ctx):
         if self.clarification is not None:
@@ -629,6 +641,40 @@ class Turn:
                 records.active_page_source_digest(args["component_class"])
             )
             return True
+        if tool_name == "get_timeseries":
+            if self.request_scope is not None or not isinstance(args, dict):
+                return False
+            # Exact args only: `period` is ignored by the handler, and a comma or
+            # padding in a name would make its `columns` filter pick other columns.
+            name = args.get("name")
+            if (
+                set(args) != {"component", "name", "attribute"}
+                or (args.get("component"), args.get("attribute"))
+                not in records.SERIES_METRICS
+                or not isinstance(name, str)
+                or not 1 <= len(name) <= 128
+                or name != name.strip()
+                or "," in name
+            ):
+                return False
+            source_digest, points, size = records.active_series_source(args)
+            if size is None or size > records.MAX_SERIES_FACT_BYTES:
+                raise HTTPException(
+                    409,
+                    {
+                        "error_kind": "series_too_long_to_check",
+                        "message": (
+                            f"This series ({points} steps) is too long to check; a "
+                            f"checked answer covers at most {records.MAX_SERIES_POINTS} "
+                            "steps of a short-named series. Ask without checking to "
+                            "see it as unchecked data."
+                        ),
+                    },
+                )
+            self.series_digests.setdefault(records.digest(args), []).append(
+                source_digest
+            )
+            return True
         if tool_name == "ui_open_panel":
             # The existing typed handler owns target validation. Supported
             # mounts subsequently receive a separate issued browser ACK.
@@ -641,6 +687,9 @@ class Turn:
             record = records.capture_input_page(
                 self.owner, args, result, pending.pop(0)
             )
+        elif tool_name == "get_timeseries":
+            pending = self.series_digests.get(records.digest(args)) or [None]
+            record = records.capture_series(self.owner, args, result, pending.pop(0))
         elif tool_name == "get_component":
             record = records.capture_input(self.owner, args, result)
         else:
@@ -691,6 +740,20 @@ class Turn:
                     key: scope[key]
                     for key in ("offset", "returned", "total_count", "has_more")
                 },
+                "_assurance": metadata,
+            }
+        if scope.get("kind") == "series":
+            return {
+                "name": scope["entity_id"],
+                "attribute": scope["attribute"],
+                "unit": record["facts"][0]["unit"],
+                # [timestep, value] or [period, timestep, value], certified only.
+                "points": [
+                    [*records.unpointer(fact["path"])[1:], fact["value"]]
+                    for fact in record["facts"]
+                ],
+                "steps": scope["points"],
+                "certified_steps": scope["certified"],
                 "_assurance": metadata,
             }
         return {
@@ -755,7 +818,7 @@ class Turn:
             draft.blocks
         ):
             raise ValueError("invalid version or repeated claim")
-        public_blocks, evidence_ids, lines = [], [], []
+        public_blocks, evidence_ids, lines, notes = [], [], [], set()
         for block in draft.blocks:
             source = block.source
             if (source.tool_use_id is None) == (source.evidence_id is None):
@@ -804,13 +867,31 @@ class Turn:
                 if scope.get("kind") == "static_page"
                 else ""
             )
+            if scope.get("kind") == "series":
+                *period, step = records.unpointer(fact["path"])[1:]
+                when = _label(step) + (f" (period {_label(period[0])})" if period else "")
+                lines.append(
+                    f"Configured {scope['component_class']} time series "
+                    f"{_label(fact['entity_id'])}: {fact['metric']} at {when} = "
+                    f"{value_text} {fact['unit']} (one step, not the whole series)."
+                )
+                notes.add("series")
+                continue
             lines.append(
                 f"Configured {scope['component_class']} input {_label(fact['entity_id'])}: "
                 f"{fact['metric']} = {value_text} {fact['unit']}{page}."
             )
+            notes.add("static")
         return (
             "\n".join(lines)
-            + "\nStatic inputs; time-series overrides are not checked.",
+            + "".join(
+                {
+                    "static": "\nStatic inputs; time-series overrides are not checked.",
+                    "series": "\nTime-series steps; other steps are not checked.",
+                }[note]
+                for note in ("static", "series")
+                if note in (notes or {"static"})
+            ),
             public_blocks,
             evidence_ids,
         )
@@ -968,6 +1049,14 @@ class Turn:
                 receipt["chart"] = checked_charts.for_answer(
                     ctx, self.request_scope, None if draft_failed else self.request_evidence)
             records.save(record, answer_id)
+            # Access revoked between the check above and the save (REVOKE-TOCTOU)
+            # must not leave a committed answer: re-check, and withdraw it on
+            # any refusal or failure (answer_id is fresh, so nothing older).
+            try:
+                records.authorize(self.owner, self.project_id)
+            except Exception:
+                records.discard(self.owner, answer_id)
+                raise
         self.approved = record
         return [{"type": "text", "text": text}]
 
@@ -1045,6 +1134,8 @@ class Turn:
                 "kind": "INFO",
             }
         if event == "tool_error":
+            if payload.get("error_kind") in GUARD_REFUSAL_KINDS:
+                return payload  # server-built text, no tool values
             return {
                 **payload,
                 "message": "The tool did not complete. No completed effect is verified.",

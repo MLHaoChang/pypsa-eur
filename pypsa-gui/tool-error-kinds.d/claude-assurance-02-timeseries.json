@@ -1,0 +1,1 @@
+{"kinds": {"series_too_long_to_check": {"surface": "inline", "why": "A checked answer asked for a time series longer than one checked read can cover (MAX_SERIES_POINTS). Nothing ran; the message gives the step count and the limit, and the assistant offers an unchecked answer, per call."}}}

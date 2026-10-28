@@ -193,3 +193,50 @@ Remaining gates: LC-T08 ACL recheck at navigation and download for past-run
 sections (read is rechecked); the other families (capacity, dispatch, prices, emissions)
 one adapter per PR, which LC-21's chapters read; UI/export parity for past
 runs; LC-T09/T10 browser cases for historical views.
+
+### PR-E, capacity family (2026-10-28)
+
+Rebaselined on master `069a1d81`. Branch `claude/lc03-retained-capacity`.
+Plan GO from GK B (option 1, kind→section map).
+
+- `Retained.kinds`: the get_results kinds a section keeps; `KEPT_KINDS`
+  (kind → section) is built from the adapters and each kind has one owner.
+  `_capture_summary` became `_capture_kinds(kinds)` with the same rules.
+- Capacity family: section `results_capacity` keeps `economics_by_carrier`;
+  the Capacity Expansion tab's `cost_breakdown` stays kept once, with
+  Summary. Capex view `historical_section="results_capacity"`. A run without
+  it refuses `historical_results_unavailable` naming capacity results.
+  `economics_by_carrier` takes no arguments, so no argument can reshape it.
+- RED/oracle: older oj-grid run (Gas 50) read after the Gas 60 solve:
+  gas opex_meur = 50 x sum(90 - 80 pu_t) / 1e6, LCOE 50, dispatch_gwh.
+  Mutation check: every kind sent to `results_summary` fails the capacity
+  test at its section assert and the legacy-refusal test.
+- Commands: `pytest tests/test_retained_summary.py tests/test_retained_loadflow.py
+  tests/test_result_views.py tests/test_run_evidence_*.py
+  tests/test_vs2_results_walk_journey.py tests/test_oj01_latest_loadflow_journey.py` pass.
+
+Next: dispatch and prices need a plan first (per-snapshot payloads far exceed
+16 KB at 8760 h: bounded summary vs larger cap); then emissions.
+
+### PR-F, dispatch family (2026-10-28)
+
+Branch `claude/lc03-retained-dispatch` (stacked on PR-E). Plan GO from GK B
+(option 1, bounded digest), with its eight conditions.
+
+- `services/results/dispatch_digest.py`: per carrier and per unit, energy
+  (MWh), peak and its snapshot, weighted mean, running hours, weighted by
+  `snapshot_weightings.generators`; storage `energy_out_mwh`/`energy_in_mwh`,
+  peak discharge and peak charge apart. Units by energy then name, trimmed
+  from the tail (then carriers) until the digest is under 12 KB as the
+  store writes it, counted in `units_omitted`/`carriers_omitted`.
+  NaN/inf are null; multi-period refuses `multi_period_not_digested`.
+- `Retained.digest`: section `results_dispatch` keeps the digest; a run_id
+  read of `generators`/`storage_dispatch` answers it for the current and
+  past runs alike (`shape: 'digest'`), and refuses `source`/`detail`/
+  `offset`/`limit` with `historical_scope_mismatch` and `digest_fields`.
+  The plain read is unchanged.
+- Tests: `tests/test_retained_dispatch.py` (2 h weighting, storage split,
+  ordering, 500 units x 8760 h under the budget, non-finite, multi-period,
+  parity with Compare's `dispatch_gwh_by_carrier`, oj-grid hand oracle
+  gas = sum(90 - 80 pu_t), current = kept digest, legacy refusal).
+  Mutation: dropping the argument refusal fails its test at the refusal.

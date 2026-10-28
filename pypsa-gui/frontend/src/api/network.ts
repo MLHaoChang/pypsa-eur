@@ -73,6 +73,17 @@ async function deleteBusWithFootprints(name: string) {
   return result
 }
 
+/** What a profile-upload route answers: the names, and per column how a
+ *  matched series changed (peak/mean, null when there was none) or why an
+ *  unmatched column was ignored. */
+export interface ProfileUploadResult {
+  matched: string[]; unmatched: string[]; rows: number; snapshot_count: number
+  matched_detail?: { name: string; old: { peak: number | null; mean: number | null } | null
+    new: { peak: number | null; mean: number | null } | null }[]
+  unmatched_detail?: { name: string; reason: 'no_such_component' | 'other_kind' | 'duplicate'
+    kind?: string; of?: string }[]
+}
+
 export const networkApi = {
   // Buses
   getBuses: () => client.get<Bus[]>('/network/buses').then(r => r.data),
@@ -397,8 +408,8 @@ export const networkApi = {
   uploadLoadProfile: (file: File) => {
     const fd = new FormData()
     fd.append('file', file)
-    return client.post<{ matched: string[]; unmatched: string[]; rows: number; snapshot_count: number }>(
-      '/network/loads/upload_profile', fd
+    return client.post<ProfileUploadResult>(
+      '/network/loads/upload_profile', fd, { skipErrorToast: true }
     ).then(r => r.data)
   },
   // Sum of load p_set across the chosen loads. Either `names` (explicit) or
@@ -436,7 +447,7 @@ export const networkApi = {
     fd.append('file', file)
     // The Time Series page shows a refusal itself: under the row, or as its
     // own toast for a whole-tab upload.
-    return client.post<{ matched: string[]; unmatched: string[]; rows: number; snapshot_count: number }>(
+    return client.post<ProfileUploadResult>(
       `/network/generators/upload_profile?attribute=${attribute}`, fd, { skipErrorToast: true }
     ).then(r => r.data)
   },
@@ -461,8 +472,8 @@ export const networkApi = {
   uploadLinkProfile: (file: File, attribute = 'p_max_pu') => {
     const fd = new FormData()
     fd.append('file', file)
-    return client.post<{ matched: string[]; unmatched: string[]; rows: number; snapshot_count: number }>(
-      `/network/links/upload_profile?attribute=${attribute}`, fd
+    return client.post<ProfileUploadResult>(
+      `/network/links/upload_profile?attribute=${attribute}`, fd, { skipErrorToast: true }
     ).then(r => r.data)
   },
 

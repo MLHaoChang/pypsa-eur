@@ -18,6 +18,7 @@ tool, and that the chat lock seam answers like the HTTP middleware.
 """
 from __future__ import annotations
 
+import functools
 import time
 import uuid
 from datetime import datetime, timezone
@@ -51,6 +52,14 @@ B3_TOOLS = {
 # ── Registration, tiers, routes ─────────────────────────────────────────────
 
 
+@functools.cache
+def _parity_rows(parity):
+    # Built in memory: route-parity.json is not committed (RETRO-COST-1).
+    matrix, problems = parity.build()
+    assert not problems, problems
+    return matrix["rows"]
+
+
 @pytest.mark.parametrize("name", sorted(B3_TOOLS))
 def test_each_tool_is_registered_once_with_its_tier_and_route(name):
     tier, route = B3_TOOLS[name]
@@ -63,21 +72,19 @@ def test_each_tool_is_registered_once_with_its_tier_and_route(name):
 
 
 def test_clear_finished_is_write_tier_and_parity_counts_its_route_as_tool():
-    import json
     from smoke import assistant_route_parity as parity
 
     assert safety_tier_for("solve_queue_clear_finished") == "write"
-    rows = json.loads(parity.DEFAULT_OUTPUT.read_text())["rows"]
+    rows = _parity_rows(parity)
     row = next(r for r in rows if r["path"] == "/api/simulation/queue/clear_finished")
     assert row["class"] == "tool" and row["tools"] == ["solve_queue_clear_finished"]
 
 
 def test_every_b3_route_is_tool_covered_in_the_parity_matrix():
-    import json
     from smoke import assistant_route_parity as parity
 
     rows = {(r["method"], r["path"]): r
-            for r in json.loads(parity.DEFAULT_OUTPUT.read_text())["rows"]}
+            for r in _parity_rows(parity)}
     for name, (_tier, route) in B3_TOOLS.items():
         assert rows[route]["class"] == "tool", (name, rows[route])
 
@@ -205,12 +212,11 @@ def test_clear_finished_is_super_admin_only_for_a_plain_caller(
 def test_pause_and_resume_have_no_tool_and_are_an_admin_limitation():
     """Owner call (coordinator, LV08 B3): the instance-wide controls stay
     out of chat, as `not_via_chat.solve_queue_instance_controls` says."""
-    import json
     from smoke import assistant_route_parity as parity
 
     names = {t["name"] for t in TOOLS}
     rows = {(r["method"], r["path"]): r
-            for r in json.loads(parity.DEFAULT_OUTPUT.read_text())["rows"]}
+            for r in _parity_rows(parity)}
     for verb in ("pause", "resume"):
         assert f"solve_queue_{verb}" not in names
         route = ("POST", f"/api/simulation/queue/{verb}")

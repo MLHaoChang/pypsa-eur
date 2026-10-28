@@ -3,7 +3,8 @@
 
 # LC-21 — "create a report" for a network study
 
-Status: ready-for-agent. Owner decision Q6 = A (2026-10-19): add
+Status: folded into the study harness (owner decision SH-FOLD-1, 2026-10-28): built as the report stage in `.scratch/study-harness/issues/07-report-handoff-and-pilot.md`; option A below stays its spec.
+Previous status: ready-for-agent. Owner decision Q6 = A (2026-10-19): add
 network-study chapters to the existing report pipeline, built in LC-06 after
 LC-05 (after LC-20, whose findings feed the plausibility chapter). This is new
 application scope; humans get the chapters in the Reports panel too.

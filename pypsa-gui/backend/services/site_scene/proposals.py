@@ -124,7 +124,7 @@ def get(project_key: str, owner: str | None, site_id: str, pid: str) -> dict[str
         _evict(time.monotonic())
         entry = _entries.get((project_key, pid))
     if entry is None or entry["owner"] != owner or entry["site_id"] != site_id:
-        raise SceneError("proposal_expired", "This proposal expired: generate the site again")
+        raise SceneError("proposal_expired", "This preview expired: generate again")
     return entry
 
 
@@ -158,7 +158,7 @@ def apply(project_dir, project_key: str, owner: str | None, site_id: str, pid: s
         # Check and claim under one lock, so a concurrent cancel cannot land
         # between the check and the commit.
         if entry["status"] == "cancelled":
-            raise SceneError("proposal_cancelled", "This proposal was cancelled: generate the site again")
+            raise SceneError("proposal_cancelled", "This preview was discarded: generate again")
         claimed = entry["status"] == "ready"
         if claimed:
             entry["status"] = "applying"
@@ -179,7 +179,7 @@ def _apply_entry(project_dir, site_id: str, pid: str, entry: dict[str, Any], bod
     stored = input_hash(site_id, entry["action"], entry["base_revision"], entry["inputs"])
     reviewed = body.get("input_hash", entry["input_hash"])
     if stored != entry["input_hash"] or reviewed != entry["input_hash"]:
-        raise SceneError("revision_conflict", "This proposal changed since you reviewed it: review it again",
+        raise SceneError("revision_conflict", "This preview changed since you reviewed it: review it again",
                          {"current_revision": None})
     with store.project_lock(project_dir):
         scene = store.read_scene(project_dir, site_id)

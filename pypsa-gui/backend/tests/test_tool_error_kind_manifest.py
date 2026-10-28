@@ -1,5 +1,6 @@
 """
-The backend half of the `tool_error` kind manifest (`pypsa-gui/tool-error-kinds.json`).
+The backend half of the `tool_error` kind manifest (`pypsa-gui/tool-error-kinds.json`
+plus the fragments in `pypsa-gui/tool-error-kinds.d/`).
 
 THE HOLE THIS FILLS. `ChatPanel.profile.test.tsx` proves every kind in
 `TOOL_ERROR_BANNER_KINDS` has `KIND_COPY` — it catches a routed kind losing
@@ -30,10 +31,11 @@ a line of JSON.
 from __future__ import annotations
 
 import ast
-import json
 import pathlib
 
 import pytest
+
+from smoke.json_fragments import tool_error_kinds
 
 BACKEND = pathlib.Path(__file__).resolve().parent.parent
 MANIFEST = BACKEND.parent / "tool-error-kinds.json"
@@ -51,6 +53,14 @@ _REFUSE_HELPER_MODULES: tuple[str, ...] = (
     "services/assistant_tasks.py",
     "services/experiments.py",
     "services/run_evidence.py",
+)
+# Modules that import `harness.edit_card._refuse` instead of defining it: scanned the same way.
+_REFUSE_IMPORTING_MODULES: tuple[str, ...] = (
+    "harness/edit_card_campus.py",
+    "harness/edit_card_library.py",
+    "harness/edit_card_records.py",
+    "harness/edit_card_reports.py",
+    "harness/edit_card_site.py",
 )
 _NON_LITERAL_REFUSE_CALLS: list[tuple[int, str]] = []
 
@@ -152,13 +162,14 @@ def derive_tool_error_kinds() -> set[str]:
         kinds |= _yielded_tool_error_kinds(tree)
         kinds |= _error_kind_dict_kinds(tree)
         kinds |= _workflow_refuse_kinds(tree)
-        if path.relative_to(BACKEND).as_posix() in _REFUSE_HELPER_MODULES:
+        if path.relative_to(BACKEND).as_posix() in (*_REFUSE_HELPER_MODULES, *_REFUSE_IMPORTING_MODULES):
             kinds |= _refuse_helper_kinds(tree)
     return kinds
 
 
 def _manifest() -> dict:
-    return json.loads(MANIFEST.read_text(encoding="utf-8"))
+    # The base file plus tool-error-kinds.d/ fragments (RETRO-COST-1).
+    return {"kinds": tool_error_kinds()}
 
 
 def test_the_manifest_still_describes_the_backend():
@@ -170,7 +181,8 @@ def test_the_manifest_still_describes_the_backend():
     assert not missing, (
         "these error_kinds can reach a tool_error frame and the manifest does "
         f"not classify them: {missing}. Add each to "
-        f"{MANIFEST.name} with a `surface` ('banner' or 'inline') and a `why`. "
+        f"a new fragment in {MANIFEST.with_suffix('.d').name}/ (named after your branch) "
+        "with a `surface` ('banner' or 'inline') and a `why`. "
         "Choosing 'banner' means the frontend must also give it KIND_COPY and "
         "TOOL_ERROR_BANNER_KINDS membership — its own test will say so."
     )
@@ -258,7 +270,7 @@ def test_each_refuse_helper_module_still_raises_its_kind(module):
 
 def test_refuse_helper_calls_use_literal_kinds():
     failures = []
-    for module in _REFUSE_HELPER_MODULES:
+    for module in (*_REFUSE_HELPER_MODULES, *_REFUSE_IMPORTING_MODULES):
         _NON_LITERAL_REFUSE_CALLS.clear()
         _refuse_helper_kinds(ast.parse((BACKEND / module).read_text(encoding="utf-8")))
         failures.extend((module, line, call) for line, call in _NON_LITERAL_REFUSE_CALLS)

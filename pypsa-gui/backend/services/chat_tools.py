@@ -688,7 +688,8 @@ def get_results(result_kind: str, source: str = "lopf", detail: str | None = Non
     `run_id` (LC-03) answers for one run: see `_results_for_run`.
     """
     if run_id is not None:
-        return _results_for_run(result_kind, run_id)
+        return _results_for_run(result_kind, run_id, reshaped=(
+            source != "lopf" or detail is not None or offset != 0 or limit is not None))
     handler = _resolve_results_handler(result_kind)
     # Some handlers take `source` as a query param; pass via kwargs if the
     # function accepts it, else call bare. Inspect via __code__.co_varnames.
@@ -703,24 +704,36 @@ def get_results(result_kind: str, source: str = "lopf", detail: str | None = Non
     return _with_freshness(result)
 
 
-def _results_for_run(result_kind: str, run_id: Any) -> dict:
+def _results_for_run(result_kind: str, run_id: Any, *, reshaped: bool = False) -> dict:
     """LC-03: one run's results, never another run's.
 
     The run the current results came from answers with the current read; any
     other run answers from the section kept when it finished
     (`retained_results`), or a typed unavailable naming the run. Only the
-    kinds a family keeps take a run_id.
+    kinds a family keeps take a run_id. A digest family answers its bounded
+    digest for every run, and refuses any argument (`reshaped`) that asks for
+    something else, such as the per-snapshot series or another source.
     """
     from services import retained_results, run_evidence
+    from services.results import dispatch_digest
 
     if not isinstance(run_id, str) or not run_evidence._valid_run_id(run_id):
         raise HTTPException(422, {"error_kind": "invalid_results_argument",
                                   "message": "run_id must be a run id from list_project_runs."})
-    if result_kind not in retained_results.SUMMARY_KINDS:
+    section = retained_results.KEPT_KINDS.get(result_kind)
+    if section is None:
         return retained_results.unavailable(
             "historical_scope_mismatch",
             f"result_kind {result_kind!r} is not kept per run; run_id reads only these kinds.",
-            run_id=run_id, scope="historical", kept_kinds=list(retained_results.SUMMARY_KINDS))
+            run_id=run_id, scope="historical", kept_kinds=list(retained_results.KEPT_KINDS))
+    digest = retained_results.adapter(section).digest
+    if digest is not None and reshaped:
+        return retained_results.unavailable(
+            "historical_scope_mismatch",
+            f"A run keeps a digest of {result_kind!r} (the default LOPF read over all snapshots), "
+            "not its per-snapshot series or another source; call it with run_id alone.",
+            run_id=run_id, scope="historical", result_kind=result_kind,
+            digest_fields=list(dispatch_digest.FIELDS))
     from services.workflow_tools import solve_freshness
 
     run_evidence._authority()
@@ -728,15 +741,26 @@ def _results_for_run(result_kind: str, run_id: Any) -> dict:
     # The current read answers for its run only while it is that run's own
     # optimal solve (as at capture); otherwise the kept section answers.
     if run is not None and solve_freshness().get("results_current") is True:
+        if digest is None:
+            data = get_results(result_kind)
+        else:
+            live = digest()
+            if live.get("status") != "ok":
+                return retained_results.unavailable(
+                    "historical_scope_mismatch", "This run's results cannot be digested.",
+                    reason=live.get("reason"), result_kind=result_kind, run_id=run_id,
+                    run=run, **facts)
+            data = dispatch_digest.for_kind(live, result_kind)
         return {"status": "ok", "scope": "current", "result_kind": result_kind,
-                "data": get_results(result_kind), "run_id": run_id, "run": run, **facts}
-    record, refused = retained_results.historical(retained_results.SUMMARY_SECTION, run_id)
+                "data": data, "run_id": run_id, "run": run, **facts}
+    record, refused = retained_results.historical(section, run_id)
     if refused is not None:
         return {**refused, "result_kind": result_kind, "run_id": run_id, **facts,
                 "next_step": "Say this run is not the current result and offer to re-run."}
     return {"status": "ok", "scope": "historical", "result_kind": result_kind,
-            "data": (record.get("data") or {}).get(result_kind),
-            "section": retained_results.SUMMARY_SECTION, "run_id": run_id,
+            "data": (dispatch_digest.for_kind(record["data"], result_kind) if digest is not None
+                     else (record.get("data") or {}).get(result_kind)),
+            "section": section, "run_id": run_id,
             "run": retained_results.run_ref(run_id, record, current=False), **facts,
             "scope_note": "This run's results as kept when it finished; the Results tabs "
                           "show the current results, not this run."}
@@ -1977,12 +2001,13 @@ def _urdb_rate(data, item_index: int | None = None):
     return data
 
 
-def import_urdb_tariff(file_id: str, name: str, cyclic_year: bool = False,
-                       accept_partial: bool = False, valid_from: str | None = None,
-                       item_index: int | None = None, tariff_id: str | None = None,
-                       jurisdiction: str | None = None) -> dict:
-    """An UPLOADED URDB JSON file (never an LLM-emitted blob) → a Library tariff."""
-    from routers.library import UrdbImportIn, import_urdb as _h
+def _urdb_request(file_id: str, name: str, cyclic_year: bool = False,
+                  accept_partial: bool = False, valid_from: str | None = None,
+                  item_index: int | None = None, tariff_id: str | None = None,
+                  jurisdiction: str | None = None):
+    """The import body for an UPLOADED URDB JSON file, or the tool's refusal. Reads the
+    upload and writes nothing (the edit card calls it too)."""
+    from routers.library import UrdbImportIn
     from services import upload_service
 
     with _acting():   # identity before the file is read (review L4)
@@ -2007,6 +2032,18 @@ def import_urdb_tariff(file_id: str, name: str, cyclic_year: bool = False,
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={
             "error_kind": "urdb_invalid", "message": _safe_text(exc, 300)}) from exc
+    return body
+
+
+def import_urdb_tariff(file_id: str, name: str, cyclic_year: bool = False,
+                       accept_partial: bool = False, valid_from: str | None = None,
+                       item_index: int | None = None, tariff_id: str | None = None,
+                       jurisdiction: str | None = None) -> dict:
+    """An UPLOADED URDB JSON file (never an LLM-emitted blob) → a Library tariff."""
+    from routers.library import import_urdb as _h
+
+    body = _urdb_request(file_id, name, cyclic_year, accept_partial, valid_from, item_index,
+                         tariff_id, jurisdiction)
     out = _library_call(_h, body).model_dump(mode="json")
     refusals = out.get("refusals") or []
     out["refusals_total"] = len(refusals)
@@ -2018,13 +2055,11 @@ def import_urdb_tariff(file_id: str, name: str, cyclic_year: bool = False,
     return out
 
 
-def attach_tariff(name: str, version: int | None = None, replace_inline: bool = False) -> dict:
-    """Set `commercial.import_tariff_ref` to a Library tariff through the
-    solver-config route (which resolves and pins it). An inline tariff that is
-    not this item is never replaced silently (review M2)."""
-    from models.schemas import SolverConfigSchema
+def _attach_tariff_plan(name: str, version: int | None, replace_inline: bool) -> tuple[dict, dict, dict | None]:
+    """The Library ref, the commercial config and what an inline tariff loses, as
+    `attach_tariff` would store them. Pure: the Library is only read (the edit card calls it too)."""
     from routers.library import ItemKind, get_item as _get
-    from routers.simulation import get_solver_config as _cfg, update_solver_config as _put
+    from routers.simulation import get_solver_config as _cfg
 
     ref = _library_call(_get, ItemKind.tariff, name, version=version).ref.model_dump(mode="json")
     commercial = dict((_cfg() or {}).get("commercial") or {})
@@ -2064,6 +2099,17 @@ def attach_tariff(name: str, version: int | None = None, replace_inline: bool = 
     commercial.pop("import_tariff", None)
     commercial.pop("import_tariff_id", None)
     commercial["import_tariff_ref"] = ref
+    return ref, commercial, replaced
+
+
+def attach_tariff(name: str, version: int | None = None, replace_inline: bool = False) -> dict:
+    """Set `commercial.import_tariff_ref` to a Library tariff through the
+    solver-config route (which resolves and pins it). An inline tariff that is
+    not this item is never replaced silently (review M2)."""
+    from models.schemas import SolverConfigSchema
+    from routers.simulation import update_solver_config as _put
+
+    ref, commercial, replaced = _attach_tariff_plan(name, version, replace_inline)
     out = _library_call(_put, SolverConfigSchema(commercial=commercial))
     bound = (out.get("commercial") or {}).get("import_tariff") or {}
     return {"import_tariff_ref": ref,
@@ -2212,11 +2258,10 @@ def get_finance_inputs() -> dict:
     return _h()
 
 
-def set_finance_inputs(if_match: str, finance: dict | None = None, clear: bool = False) -> dict:
-    """Replace (or, with clear=true, remove) the finance inputs through
-    `PUT /api/simulation/finance`, always with the digest the model read
-    (gatekeeper F1: no '*', no implicit clear)."""
-    from routers.simulation import FinanceIn, put_finance as _h
+def _finance_request(if_match: str, finance: dict | None, clear: bool):
+    """The `PUT /finance` body and `If-Match` tag for `set_finance_inputs`, or the tool's
+    refusal (gatekeeper F1: no '*', no implicit clear). Pure (the edit card calls it too)."""
+    from routers.simulation import FinanceIn
 
     tag = (if_match or "").strip()
     if tag.strip('"').strip() in ("", "*"):
@@ -2233,7 +2278,17 @@ def set_finance_inputs(if_match: str, finance: dict | None = None, clear: bool =
             "error_kind": "finance_clear_invalid",
             "message": "pass the whole `finance` object, or clear=true to remove every "
                        "finance input"})
-    return _h(FinanceIn(finance=None if clear else finance), if_match=tag)
+    return FinanceIn(finance=None if clear else finance), tag
+
+
+def set_finance_inputs(if_match: str, finance: dict | None = None, clear: bool = False) -> dict:
+    """Replace (or, with clear=true, remove) the finance inputs through
+    `PUT /api/simulation/finance`, always with the digest the model read
+    (gatekeeper F1: no '*', no implicit clear)."""
+    from routers.simulation import put_finance as _h
+
+    body, tag = _finance_request(if_match, finance, clear)
+    return _h(body, if_match=tag)
 
 
 def get_poc_state() -> dict:
@@ -2348,22 +2403,15 @@ class _Unset:
 _UNSET = _Unset()
 
 
-def set_site_connection(poc_link: str, export_link: str | None | _Unset = _UNSET,
-                        timezone: str | None | _Unset = _UNSET) -> dict:
-    """Set the commercial root (`poc_link`, `export_link`, `timezone`) through
-    the solver-config route, keeping every other key of a stored commercial
-    config (the route keeps the value flows itself). An OMITTED `export_link`
-    or `timezone` keeps the stored value; an explicit null clears it. The
-    Links are checked first (`binding.check_site_connection`): they exist, are
-    one-way and point grid → site (PoC) and site → grid (export)."""
+def _site_connection_plan(poc_link: str, export_link, timezone) -> tuple[dict, object, bool]:
+    """The commercial config `set_site_connection` would store, checked and validated, and
+    whether none was stored before. Pure: nothing is written (the edit card calls it too)."""
     from pydantic import ValidationError
 
     from models.schemas import SolverConfigSchema
-    from routers.simulation import get_solver_config as _cfg, update_solver_config as _put
+    from routers.simulation import get_solver_config as _cfg
     from services.commercial import binding
 
-    with _acting():   # identity before the network is read
-        pass
     stored = (_cfg() or {}).get("commercial")
     created = not (isinstance(stored, dict) and stored.get("poc_link"))
     commercial = dict(stored) if isinstance(stored, dict) else {}
@@ -2386,6 +2434,23 @@ def set_site_connection(poc_link: str, export_link: str | None | _Unset = _UNSET
         message = str(errors[0].get("msg")) if errors else str(exc)
         raise HTTPException(status_code=422, detail={
             "error_kind": "site_connection_invalid", "message": message[:300]}) from exc
+    return commercial, body, created
+
+
+def set_site_connection(poc_link: str, export_link: str | None | _Unset = _UNSET,
+                        timezone: str | None | _Unset = _UNSET) -> dict:
+    """Set the commercial root (`poc_link`, `export_link`, `timezone`) through
+    the solver-config route, keeping every other key of a stored commercial
+    config (the route keeps the value flows itself). An OMITTED `export_link`
+    or `timezone` keeps the stored value; an explicit null clears it. The
+    Links are checked first (`binding.check_site_connection`): they exist, are
+    one-way and point grid → site (PoC) and site → grid (export)."""
+    from routers.simulation import update_solver_config as _put
+    from services.commercial import binding
+
+    with _acting():   # identity before the network is read
+        pass
+    commercial, body, created = _site_connection_plan(poc_link, export_link, timezone)
     try:
         out = _library_call(_put, body)
     except HTTPException as exc:
@@ -3567,7 +3632,8 @@ def dispatch_status() -> dict:
 # ── Simulation execution (4) ────────────────────────────────────────────────
 
 
-def run_simulation() -> dict:
+def run_simulation(rerun_current: bool = False) -> dict:
+    # `rerun_current` is read before the card (harness/run_lifecycle.py), never here.
     # The route handler is `run`, NOT `run_simulation` — the latter is
     # `services.solver_service.run_simulation` re-exported via the router
     # module's `from services.solver_service import run_simulation` import.
@@ -3579,7 +3645,8 @@ def run_simulation() -> dict:
     return _h()
 
 
-def run_ac_pf_stage() -> dict:
+def run_ac_pf_stage(rerun_current: bool = False) -> dict:
+    # `rerun_current` is read before the card (harness/run_lifecycle.py), never here.
     # Same shape as run_simulation — `run_ac_pf` is the route handler. The
     # router module re-exports `run_ac_pf_stage` from solver_service as the
     # service-level entry point; we want the HTTP-equivalent handler.
@@ -4086,7 +4153,7 @@ def abort_adequacy_study(study: str) -> dict:
 # ── Solve queue (4) ─────────────────────────────────────────────────────────
 
 
-def solve_queue_enqueue(project_id: str) -> dict:
+def solve_queue_enqueue(project_id: str, rerun_current: bool = False) -> dict:
     # Handler is enqueue_solve(req: EnqueueRequest) — wrap the id in the model.
     from routers.solve_queue import enqueue_solve as _h, EnqueueRequest
     return _route(_h, EnqueueRequest(project_id=project_id))
@@ -4147,7 +4214,7 @@ def solve_queue_dismiss(job_id: str) -> dict:
     return _route(_h, job_id)
 
 
-def solve_queue_requeue(job_id: str) -> dict:
+def solve_queue_requeue(job_id: str, rerun_current: bool = False) -> dict:
     from routers.solve_queue import requeue_job as _h
     return _route(_h, job_id)
 
@@ -4395,24 +4462,27 @@ def list_load_profile_archetypes() -> dict:
 
 def generate_load_profile(project_id: str, archetype: str, loads: list,
                           params: dict | None = None,
-                          year: int | None = None) -> dict:
+                          year: int | None = None,
+                          replay_refinements: bool = True) -> dict:
     from routers.profiles import LoadGenerateRequest, generate_load_profiles as _h
     body = LoadGenerateRequest(archetype=archetype, loads=loads, params=params,
-                               year=year)
+                               year=year, replay_refinements=replay_refinements)
     return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
 def generate_availability_profile(project_id: str, kind: str, generators: list,
                                   params: dict | None = None,
                                   year: int | None = None,
-                                  component_type: str = "generators") -> dict:
+                                  component_type: str = "generators",
+                                  replay_refinements: bool = True) -> dict:
     from routers.profiles import (
         AvailabilityGenerateRequest,
         generate_availability_profiles as _h,
     )
     body = AvailabilityGenerateRequest(kind=kind, components=generators,
                                        component_type=component_type,
-                                       params=params, year=year)
+                                       params=params, year=year,
+                                       replay_refinements=replay_refinements)
     return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
@@ -4424,10 +4494,11 @@ def refine_generated_profile(project_id: str, job_id: str, ops: list) -> dict:
 
 def generate_series_profile(project_id: str, kind: str, components: list,
                             params: dict | None = None,
-                            year: int | None = None) -> dict:
+                            year: int | None = None,
+                            replay_refinements: bool = True) -> dict:
     from routers.profiles import SeriesGenerateRequest, generate_series_profiles as _h
     body = SeriesGenerateRequest(kind=kind, components=components, params=params,
-                                 year=year)
+                                 year=year, replay_refinements=replay_refinements)
     return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
@@ -4549,17 +4620,22 @@ def gridspine_create_study(name: str, config: dict | None = None) -> dict:
         return _h(db, user, name, config=config)
 
 
+def dispatch_source_arg(from_dispatch: str | None, from_project: str | None):
+    """The `source` the service takes, from the tool's two optional arguments (the
+    edit card reads it the same way)."""
+    if from_project is not None:
+        return {"from_project": from_project}
+    if from_dispatch is not None:
+        return {"from_dispatch": from_dispatch}
+    return "generate"
+
+
 def gridspine_set_dispatch_source(
     project_id: str, from_dispatch: str | None = None, from_project: str | None = None,
 ) -> dict:
     from services.gridspine_service import set_dispatch_source as _h
     with _acting() as (db, user):
-        if from_project is not None:
-            source = {"from_project": from_project}
-        elif from_dispatch is not None:
-            source = {"from_dispatch": from_dispatch}
-        else:
-            source = "generate"
+        source = dispatch_source_arg(from_dispatch, from_project)
         return _h(db, _gridspine_project(db, user, project_id), source, user=user)
 
 
@@ -6751,6 +6827,10 @@ def apply_demand_from_excel(
         if _user_ts is not None and _user_ts_lock is not None:
             with _user_ts_lock:
                 _user_ts[("loads", "p_set", load_name)] = aligned
+                # The upload replaces the series, so the meta recorded for the
+                # old one (generator, refinements) no longer describes it.
+                from services.user_timeseries import _user_ts_meta
+                _user_ts_meta.pop(("loads", "p_set", load_name), None)
         # A user's load profile sets the growth placeholders it covers (E1 follow-up).
         growth_placeholders.mark_set(n, "loads", "p_set", {load_name: aligned}, prior)
 
@@ -8573,13 +8653,8 @@ def _b2b_body_request(data: bytes, path: str):
                     "query_string": b""}, receive)
 
 
-def import_map_geometry(name: str, file_id: str, apply: bool = False, tolerance_m: float = 50.0) -> dict:
-    """
-    An UPLOADED GeoJSON/KML file of the active project through the map's import
-    route. The bytes are the upload's (never model-emitted); the route parses,
-    caps, lock-checks on apply and writes.
-    """
-    from routers.projects import import_map_geometry as _h
+def _map_geometry_upload(name: str, file_id: str) -> tuple[str, bytes]:
+    """`(active project, bytes)` of the geometry upload `file_id`; the edit card reads it the same way."""
     from services import upload_service
 
     with _acting():   # identity before the file is read
@@ -8593,7 +8668,18 @@ def import_map_geometry(name: str, file_id: str, apply: bool = False, tolerance_
             "message": f"That file was uploaded to the open project ({active}), so it "
                        f"can only be imported there. To import it into {name}, "
                        f"open {name} and upload the file again."})
-    data = upload_service.get_upload_bytes(active, file_id)
+    return active, upload_service.get_upload_bytes(active, file_id)
+
+
+def import_map_geometry(name: str, file_id: str, apply: bool = False, tolerance_m: float = 50.0) -> dict:
+    """
+    An UPLOADED GeoJSON/KML file of the active project through the map's import
+    route. The bytes are the upload's (never model-emitted); the route parses,
+    caps, lock-checks on apply and writes.
+    """
+    from routers.projects import import_map_geometry as _h
+
+    active, data = _map_geometry_upload(name, file_id)
     request = _b2b_body_request(data, f"/api/projects/{name}/map_layout/import")
     with _acting() as (db, user):
         # Async handler: driven inside the identity scope, so its db stays open.

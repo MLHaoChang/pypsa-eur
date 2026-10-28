@@ -231,8 +231,9 @@ def test_chatbot_md_documents_every_template_tool_and_the_data_rule():
 
 
 def test_the_manifest_classifies_every_template_kind():
-    manifest = json.loads((pathlib.Path(__file__).resolve().parents[2]
-                           / "tool-error-kinds.json").read_text("utf-8"))["kinds"]
+    from smoke.json_fragments import tool_error_kinds
+
+    manifest = tool_error_kinds()
     for kind in ("unsupported_upload_kind", "template_not_a_template", "template_unreadable",
                  "no_template", "template_not_untagged", "invalid_mapping_plan",
                  "tagged_render_error"):
