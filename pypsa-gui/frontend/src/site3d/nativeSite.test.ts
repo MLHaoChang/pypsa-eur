@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { boundaryAround, boundaryErrors, BOUNDARY_DEFAULTS, greenfieldFromBuilding, osmSourcesInside, rectangleLocal } from './nativeSite'
+import { boundaryAround, boundaryErrors, BOUNDARY_DEFAULTS, greenfieldFromBuilding, heightEvidenceWords, osmSourcesInside, rectangleLocal } from './nativeSite'
 import { toLocal } from './geo'
 import type { SceneBuilding } from '../api/siteScene'
 import type { ContextBuilding, Site } from './types'
@@ -50,5 +50,11 @@ describe('native site helpers', () => {
     expect(out[1]).toMatchObject({ levels: 3 })
     expect(out[1].height_m).toBeUndefined()
     expect(out[2].height_m).toBeUndefined()
+  })
+
+  it('words where a height came from', () => {
+    expect(heightEvidenceWords({ height_evidence: 'tagged', levels: null })).toBe('height from its map tag')
+    expect(heightEvidenceWords({ height_evidence: 'levels', levels: 3 })).toBe('from 3 levels at 3 m')
+    expect(heightEvidenceWords({ height_evidence: 'fallback', levels: null })).toBe('estimated (6 m default)')
   })
 })

@@ -295,6 +295,16 @@ export function openSiteEntry(opts: { fromSite3D?: boolean } = {}): void {
   }, !!opts.fromSite3D)
 }
 
+/** "Draw the boundary on the Satellite map ›" from New 3D site: the Satellite
+ *  view with its "New site" tool started; Back reads "Back to Site 3D". */
+export function openSiteBoundaryDraw(): void {
+  withReturnFromSite3D(() => {
+    const ui = useUIStore.getState()
+    ui.setCanvasView('satellite')
+    ui.requestSiteDraw()
+  })
+}
+
 /** Show one flow item's field in Expert: its panel, or the component's own
  *  Properties. An item with no known field opens its section. */
 export function openFlowTarget(target: FlowTarget): void {

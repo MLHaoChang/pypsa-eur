@@ -5,7 +5,7 @@ import { client } from './client'
 // site anchor (compare-and-swap on `expected_revision`), a Site's scene, its
 // explicit adoption and the in-memory proposals (create → review → apply or
 // cancel). Every call is quiet: the caller shows `sceneErrorCopy(err)` where
-// the action is, never the server's own message (UX, #807 review).
+// the action is.
 
 export interface SiteAnchor { lat: number; lng: number; source: 'manual' | 'geocode'; confirmed: boolean }
 export interface SiteAnchorDoc { version: 1; revision: number; anchor: SiteAnchor | null }
@@ -122,25 +122,10 @@ const FIELD_WORDS: Record<string, string> = {
   action: 'The action', base_revision: 'The revision', inputs: 'The building inputs',
 }
 
-const LIMIT_WORDS: Record<string, string> = {
-  buildings: 'buildings', footprint_vertices: 'footprint corners', segment_pairs: 'edge pairs to check',
-  triangles: 'triangles',
-}
-
-const BYTE_LIMITS: Record<string, string> = { preview_bytes: 'the preview', request_bytes: 'the request' }
-const mb = (v: number) => `${(v / 1_000_000).toFixed(1)} MB`
-
-const n = (v: number) => v.toLocaleString('en-US')
-
-/** The geometry refusal's subject ("Building 3", "Mapped building 2") and its rule, rebuilt as copy. */
-function geometryCopy(message: string): string {
+/** The refused building's name ("Building 3", "Mapped building 2") at the start of a server message. */
+function subjectOf(message: string): string {
   const who = /^(Mapped building|Building) (\d+)/.exec(message)
-  const subject = who ? `${who[1]} ${who[2]}` : 'A building'
-  if (message.includes('crosses itself')) return `${subject}: the footprint crosses itself`
-  if (message.includes('no area')) return `${subject}: the footprint has no area`
-  if (message.includes('three vertices')) return `${subject}: a footprint needs at least three corners`
-  if (message.includes('height')) return `${subject}: height must be above 0 m and at most 1000 m`
-  return `${subject}: the footprint is not valid`
+  return who ? `${who[1]} ${who[2]}` : 'A building'
 }
 
 function invalidInputCopy(d: SceneErrorDetail): string {
@@ -149,16 +134,17 @@ function invalidInputCopy(d: SceneErrorDetail): string {
   if (d.field === 'lng') return 'Longitude: enter a number between −180 and 180'
   if (d.field === 'boundary') return 'No campus boundary: draw it to generate buildings'
   const msg = d.message ?? ''
-  if (msg.includes('heading')) return geometryCopy(msg).replace(/:.*$/, ': heading must be a number')
+  if (msg.includes('heading')) return `${subjectOf(msg)}: heading must be a number`
   if (msg.includes('duplicate')) return 'Two buildings share an id: remove the duplicate'
-  if (msg.includes('namespace')) return geometryCopy(msg).replace(/:.*$/, ': its source is not recognised')
+  if (msg.includes('namespace')) return `${subjectOf(msg)}: its source is not recognised`
   const field = d.field ? FIELD_WORDS[d.field] : undefined
   return field ? `${field} is not valid: check it and try again` : 'The request was not valid: check the values and try again'
 }
 
 /**
- * UI copy for a refused scene call: built from `error_kind` and the detail
- * fields (field, hint, limit, max, actual), never the server's message as is.
+ * UI copy for a refused scene call. The server's own text shows as is for
+ * invalid_geometry, resource_limit and the proposal kinds (UX SC-01b plan,
+ * condition 2); the other kinds map from `error_kind` and the detail fields.
  */
 export function sceneErrorCopy(err: unknown): string {
   const d = sceneErrorDetail(err)
@@ -168,23 +154,16 @@ export function sceneErrorCopy(err: unknown): string {
   }
   switch (d.error_kind) {
     case 'invalid_input': return invalidInputCopy(d)
-    case 'invalid_geometry': return geometryCopy(d.message ?? '')
-    case 'revision_conflict': return 'Changed elsewhere since you opened it: reload to see the latest'
+    case 'invalid_geometry': return d.message || 'A building footprint is not valid'
+    case 'revision_conflict': return d.message || 'Changed elsewhere since you opened it: reload to see the latest'
     case 'project_locked': return 'Another user is editing this project: try again when they finish'
     case 'scene_managed_site': return 'This site is managed by its 3D scene: reload to edit it'
-    case 'proposal_expired': return 'This preview expired: generate again'
-    case 'proposal_cancelled': return 'This preview was discarded: generate again'
-    case 'resource_limit': {
-      const whole = d.limit ? BYTE_LIMITS[d.limit] : undefined
-      if (whole && d.max !== undefined && d.actual !== undefined) return `Too large: ${whole} is ${mb(d.actual)}, at most ${mb(d.max)}`
-      const what = (d.limit && LIMIT_WORDS[d.limit]) || 'items'
-      return d.max !== undefined && d.actual !== undefined
-        ? `Too large: ${n(d.actual)} ${what}, at most ${n(d.max)}`
-        : `Too large: too many ${what}`
-    }
+    case 'proposal_expired': return d.message || 'This preview expired: generate again'
+    case 'proposal_cancelled': return d.message || 'This preview was discarded: generate again'
+    case 'resource_limit': return d.message || 'Too large: reduce the number of buildings'
     case 'not_found': return 'This site no longer exists: reload'
     case 'forbidden': return 'You cannot change this project: ask an editor'
-    case 'integrity_error': return 'This site’s 3D scene could not be read: restore a snapshot of the project'
+    case 'integrity_error': return 'This site’s 3D scene could not be read: restore a snapshot'
     default: return 'Something went wrong: try again'
   }
 }

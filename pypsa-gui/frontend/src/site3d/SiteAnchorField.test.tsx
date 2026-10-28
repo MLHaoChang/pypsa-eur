@@ -15,7 +15,7 @@ import SiteAnchorField, { anchorInputErrors, anchorSummary } from './SiteAnchorF
 const conflict = () => {
   const headers = new AxiosHeaders()
   return new AxiosError('c', 'ERR_BAD_REQUEST', { headers }, null, { status: 409, statusText: '', headers: {}, config: { headers },
-    data: { detail: { error_kind: 'revision_conflict', message: 'raw server text', current_revision: 3 } } })
+    data: { detail: { error_kind: 'revision_conflict', message: 'Site coordinates changed since you opened them: reload them and try again', current_revision: 3 } } })
 }
 const view = () => render(<QueryClientProvider client={new QueryClient()}><SiteAnchorField /></QueryClientProvider>)
 const type = (id: string, v: string) => fireEvent.change(screen.getByTestId(id), { target: { value: v } })
@@ -50,15 +50,14 @@ describe('site coordinates', () => {
     await waitFor(() => expect(screen.getByTestId('site-anchor-state').textContent).toBe('47.3, 8.5 · confirmed'))
   })
 
-  it('a refused write shows mapped copy and Reload, never the server text', async () => {
+  it('a refused write shows the server conflict text and Reload', async () => {
     vi.mocked(siteSceneApi.putAnchor).mockRejectedValue(conflict())
     view()
     await waitFor(() => expect(screen.getByTestId('site-anchor-state').textContent).toBe('Not set'))
     type('site-anchor-lat', '47.3'); type('site-anchor-lng', '8.5')
     fireEvent.click(screen.getByTestId('site-anchor-confirm'))
     const err = await screen.findByTestId('site-anchor-error')
-    expect(err.textContent).toContain('Changed elsewhere since you opened it: reload to see the latest')
-    expect(err.textContent).not.toContain('raw server text')
+    expect(err.textContent).toContain('Site coordinates changed since you opened them: reload them and try again')
     expect(screen.getByText('Reload')).toBeTruthy()
   })
 

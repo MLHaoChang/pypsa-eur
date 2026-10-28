@@ -105,7 +105,16 @@ export function greenfieldFromBuilding(b: SceneBuilding): GreenfieldInput | null
 }
 
 export const HEIGHT_MAX_M = 1000
-export const HEIGHT_EVIDENCE_WORDS: Record<SceneBuilding['height_evidence'], string> = {
-  tagged: 'height from its tag', levels: 'height from its levels', fallback: 'height not mapped: 6 m assumed',
-  greenfield: 'proposed building',
+/** native.py's LEVEL_HEIGHT_M and FALLBACK_HEIGHT_M. */
+export const LEVEL_HEIGHT_M = 3
+export const FALLBACK_HEIGHT_M = 6
+
+/** Where a building's height came from, for the OSM source line (UX SC-01b plan, condition 5). */
+export function heightEvidenceWords(b: Pick<SceneBuilding, 'height_evidence' | 'levels'>): string {
+  switch (b.height_evidence) {
+    case 'tagged': return 'height from its map tag'
+    case 'levels': return b.levels ? `from ${b.levels} levels at ${LEVEL_HEIGHT_M} m` : 'height from its levels'
+    case 'fallback': return `estimated (${FALLBACK_HEIGHT_M} m default)`
+    default: return 'proposed building'
+  }
 }

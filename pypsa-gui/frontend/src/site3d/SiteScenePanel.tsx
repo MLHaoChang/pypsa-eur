@@ -12,14 +12,14 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { useProjectFlow } from '../hooks/useProjectFlow'
 import { openSectionInExpert, openSectionInGuided, openSiteAnchor, withReturnFromSite3D } from '../layout/flowNavigation'
-import { sceneErrorCopy, sceneErrorWantsReload, type GreenfieldInput, type SceneBuilding, type SourceInput } from '../api/siteScene'
+import { sceneErrorCopy, sceneErrorDetail, sceneErrorWantsReload, type GreenfieldInput, type SceneBuilding, type SourceInput } from '../api/siteScene'
 import type { SceneAction, SitePart } from '../api/flow'
 import { evaluateMutation } from '../utils/mutationGuard'
 import NumberField from './NumberField'
 import { useSitesStore } from './sitesStore'
 import { applyProposal, discardProposal, propose, SitesNotSaved } from './sceneActions'
 import { useSceneProposal, useSiteScene } from './useSiteScene'
-import { HEIGHT_EVIDENCE_WORDS, HEIGHT_MAX_M, greenfieldFromBuilding, osmSourcesInside } from './nativeSite'
+import { heightEvidenceWords, HEIGHT_MAX_M, greenfieldFromBuilding, osmSourcesInside } from './nativeSite'
 import { fromLocal } from './geo'
 import type { ContextBuilding, Site } from './types'
 
@@ -28,6 +28,7 @@ const PARTS: { id: SitePart; label: string }[] = [
 ]
 const ADOPT_NOTE = 'Generating makes this site a 3D scene: its boundary and equipment positions are then managed by the scene'
 const NO_SOURCES = 'No mapped buildings: refresh the site context or add buildings by hand'
+const FIX_FIELDS = 'Correct the field marked in red to continue'
 const n = (v: number) => v.toLocaleString('en-US')
 
 /** The "›" home of a blocker that leaves Site 3D (rule 4), through withReturn. */
@@ -43,14 +44,28 @@ function goHome(home: unknown): void {
   })
 }
 
-function Blocker({ action }: { action: SceneAction | undefined }) {
+const RESULTS_NOT_YET = 'Not available yet: 3D results come in a later version'
+
+/** "› Snapshots" beside an unreadable scene (UX SC-01b plan, condition 3). */
+function SnapshotsLink() {
+  return (
+    <button type="button" data-testid="scene-snapshots-link" className="text-accent hover:underline"
+      onClick={() => withReturnFromSite3D(() => useUIStore.getState().setSlidePanel('snapshots'))}>
+      › Snapshots
+    </button>
+  )
+}
+
+const unreadable = (err: unknown) => sceneErrorDetail(err)?.error_kind === 'integrity_error'
+
+function Blocker({ action, reason }: { action: SceneAction | undefined; reason?: string }) {
   if (!action || action.available || !action.blocker) return null
   const leaves = !('site_part' in (action.blocker.home as object))
   const where = (action.blocker.home as { guided?: { section: string } }).guided?.section
   const words: Record<string, string> = { project: 'Site coordinates', loads: 'Loads', results: 'Results' }
   return (
     <span className="text-[11px] text-muted" data-testid={`scene-blocker-${action.action}`}>
-      {action.blocker.reason}
+      {reason ?? action.blocker.reason}
       {leaves && where && (
         <> <button type="button" onClick={() => goHome(action.blocker!.home)} className="text-accent hover:underline">
           {action.blocker.link} {words[where] ?? where}
@@ -68,14 +83,15 @@ function GreenfieldRow({ g, onChange, onRemove, disabled }: {
   const f = (k: 'width' | 'depth' | 'height' | 'heading') => (v: number) => onChange({ ...g, [k]: v })
   const heightErr = !(g.height > 0 && g.height <= HEIGHT_MAX_M) ? `Enter above 0 and at most ${n(HEIGHT_MAX_M)} m` : null
   const sideErr = (v: number) => (v > 0 ? null : 'Enter above 0 m')
+  const numErr = (v: number) => (Number.isFinite(v) ? null : 'Enter a number')
   return (
     <div className="flex flex-wrap items-end gap-2" data-testid={`greenfield-${g.id}`}>
-      <NumberField label="East" unit="m" value={g.center[0]} onChange={v => onChange({ ...g, center: [v, g.center[1]] })} width="w-16" disabled={disabled} />
-      <NumberField label="North" unit="m" value={g.center[1]} onChange={v => onChange({ ...g, center: [g.center[0], v] })} width="w-16" disabled={disabled} />
+      <NumberField label="East" unit="m" value={g.center[0]} onChange={v => onChange({ ...g, center: [v, g.center[1]] })} error={numErr(g.center[0])} width="w-16" disabled={disabled} />
+      <NumberField label="North" unit="m" value={g.center[1]} onChange={v => onChange({ ...g, center: [g.center[0], v] })} error={numErr(g.center[1])} width="w-16" disabled={disabled} />
       <NumberField label="Width" unit="m" value={g.width} onChange={f('width')} error={sideErr(g.width)} width="w-16" disabled={disabled} />
       <NumberField label="Depth" unit="m" value={g.depth} onChange={f('depth')} error={sideErr(g.depth)} width="w-16" disabled={disabled} />
       <NumberField label="Height" unit="m" value={g.height} onChange={f('height')} error={heightErr} width="w-16" disabled={disabled} testId={`greenfield-${g.id}-height`} />
-      <NumberField label="Heading" unit="°" value={g.heading} onChange={f('heading')} width="w-16" disabled={disabled} />
+      <NumberField label="Heading" unit="°" value={g.heading} onChange={f('heading')} error={numErr(g.heading)} width="w-16" disabled={disabled} />
       {onRemove && <button type="button" onClick={onRemove} disabled={disabled} className="mb-1 text-[11px] text-muted hover:text-accent">Remove</button>}
     </div>
   )
@@ -101,7 +117,7 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
   const [drafts, setDrafts] = useState<GreenfieldInput[]>([])
   const [edit, setEdit] = useState<{ id: string; g: GreenfieldInput | null; height: number } | null>(null)
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<{ copy: string; reload: boolean } | null>(null)
+  const [error, setError] = useState<{ copy: string; reload: boolean; snapshots: boolean } | null>(null)
 
   const actions = flow?.scene?.actions ?? []
   const action = (name: string) => actions.find(a => a.action === name)
@@ -118,7 +134,9 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
     if (!project) return
     setBusy(true); setError(null)
     try { await fn() } catch (e) {
-      setError(e instanceof SitesNotSaved ? { copy: e.message, reload: false } : { copy: sceneErrorCopy(e), reload: sceneErrorWantsReload(e) })
+      setError(e instanceof SitesNotSaved
+        ? { copy: e.message, reload: false, snapshots: false }
+        : { copy: sceneErrorCopy(e), reload: sceneErrorWantsReload(e), snapshots: unreadable(e) })
     } finally { setBusy(false) }
   }
   const generate = () => run(async () => {
@@ -193,11 +211,15 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
 
       {part === 'generate' && (
         <div className="flex flex-col gap-2" data-testid="site-part-generate-body">
-          {scene.isError && <span className="text-[11px] text-danger">{sceneErrorCopy(scene.error)}</span>}
+          {scene.isError && (
+            <span className="text-[11px] text-danger" data-testid="scene-read-error">
+              {sceneErrorCopy(scene.error)}{unreadable(scene.error) && <> <SnapshotsLink /></>}
+            </span>
+          )}
           {mine ? (
             <div className="flex flex-col gap-1.5" data-testid="scene-proposal">
               <span className="text-text">
-                Preview: {n(mine.preview.stats.buildings)} buildings · {n(mine.preview.stats.triangles)} triangles
+                Preview: {n(mine.preview.stats.buildings)} {mine.preview.stats.buildings === 1 ? 'building' : 'buildings'}
               </span>
               <span className="text-[11px] text-muted">Shown in red in the scene. Nothing is saved until Apply.</span>
               <div className="flex gap-2">
@@ -211,7 +233,7 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
             <div className="flex flex-col gap-1.5" data-testid="scene-correction">
               <span className="text-text font-medium">
                 {selected.source.namespace === 'osm' ? `OSM building ${selected.source.source_id}` : `Proposed building ${selected.source.source_id}`}
-                <span className="text-muted font-normal"> · {HEIGHT_EVIDENCE_WORDS[selected.height_evidence]}</span>
+                <span className="text-muted font-normal"> · {heightEvidenceWords(selected)}</span>
               </span>
               {!editing ? (
                 <div className="flex gap-2 items-center">
@@ -234,6 +256,7 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
                       className="px-3 py-1 rounded bg-accent text-white font-semibold hover:bg-accent/90 disabled:opacity-50">Preview change</button>
                     <button type="button" onClick={() => setEdit(null)} className="px-3 py-1 rounded border border-border text-text hover:border-accent">Cancel</button>
                   </div>
+                  {!editOk && <span className="text-[11px] text-muted" data-testid="scene-preview-reason">{FIX_FIELDS}</span>}
                 </>
               )}
             </div>
@@ -263,6 +286,7 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
                   {accepted.length ? 'Generate again' : 'Generate buildings'}
                 </button>
               </div>
+              {!draftsOk && <span className="text-[11px] text-muted" data-testid="scene-generate-reason">{FIX_FIELDS}</span>}
               {accepted.length > 0 && <span className="text-[11px] text-muted">Generating again replaces the accepted buildings after you review it.</span>}
               {sources.length + drafts.length === 0 && genAction?.available && (
                 <span className="text-[11px] text-muted">Nothing to generate: add a building or refresh the site context</span>
@@ -281,7 +305,7 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
       )}
       {part === 'results' && (
         <div className="flex flex-col gap-1" data-testid="site-part-results-body">
-          <Blocker action={action('play_results')} />
+          <Blocker action={action('play_results')} reason={RESULTS_NOT_YET} />
         </div>
       )}
 
@@ -289,6 +313,7 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
         <div role="alert" data-testid="scene-error" className="flex items-center gap-2 text-[11px] text-danger">
           <span>{error.copy}</span>
           {error.reload && <button type="button" onClick={reload} className="underline text-text hover:text-accent">Reload</button>}
+          {error.snapshots && <SnapshotsLink />}
         </div>
       )}
     </div>

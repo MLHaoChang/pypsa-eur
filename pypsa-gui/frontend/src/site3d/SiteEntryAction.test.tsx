@@ -44,7 +44,7 @@ describe('the rule-3 entry', () => {
     expect(screen.getByTestId('site-entry-label').textContent).toBe('Save project first')
     expect(screen.queryByTestId('site-entry-action')).toBeNull()
     expect(screen.getByTestId('site-entry-reason').textContent).toContain(REASON_SAVE_FIRST)
-    fireEvent.click(screen.getByText('› Save project'))
+    fireEvent.click(screen.getByText('› Save in the header'))
     expect(document.activeElement).toBe(save)
     save.remove()
   })

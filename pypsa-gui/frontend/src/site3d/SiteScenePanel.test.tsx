@@ -65,7 +65,7 @@ describe('Site 3D scene panel', () => {
     const [, , siteId, action, inputs] = vi.mocked(propose).mock.calls[0]
     expect([siteId, action]).toEqual(['campus', 'generate_native'])
     expect(inputs.greenfield).toHaveLength(1)
-    expect(screen.getByTestId('scene-proposal').textContent).toContain('Preview: 1 buildings · 16 triangles')
+    expect(screen.getByTestId('scene-proposal').textContent).toContain('Preview: 1 building')
   })
 
   it('Apply commits the proposal under review; Discard cancels it', async () => {
@@ -84,10 +84,11 @@ describe('Site 3D scene panel', () => {
     vi.mocked(propose).mockResolvedValue({ ...proposal, action: 'edit_buildings' })
     useUIStore.setState({ sitePartSelection: { kind: 'building', id: 'osm:7' } })
     view()
-    expect((await screen.findByTestId('scene-correction')).textContent).toContain('OSM building 7 · height not mapped: 6 m assumed')
+    expect((await screen.findByTestId('scene-correction')).textContent).toContain('OSM building 7 · estimated (6 m default)')
     fireEvent.click(screen.getByTestId('scene-correct'))
     fireEvent.change(screen.getByTestId('scene-correct-height'), { target: { value: '0' } })
     expect((screen.getByTestId('scene-preview-change') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTestId('scene-preview-reason').textContent).toBe('Correct the field marked in red to continue')
     fireEvent.change(screen.getByTestId('scene-correct-height'), { target: { value: '14' } })
     fireEvent.click(screen.getByTestId('scene-preview-change'))
     await waitFor(() => expect(propose).toHaveBeenCalled())
@@ -103,6 +104,37 @@ describe('Site 3D scene panel', () => {
     view()
     fireEvent.click(await screen.findByTestId('scene-correct'))
     expect((screen.getByTestId('greenfield-b1-height') as HTMLInputElement).value).toBe('9')
+  })
+
+  it('the preview names its building count only', () => {
+    useSceneProposal.setState({ proposal })
+    view()
+    expect(screen.getByTestId('scene-proposal').textContent).toContain('Preview: 1 building')
+    expect(screen.getByTestId('scene-proposal').textContent).not.toContain('triangles')
+  })
+
+  it('Results says 3D results come later, with one › link to Results', () => {
+    useUIStore.setState({ sitePart: 'results' })
+    const flow = flowState.flow as { scene: { actions: unknown[] } }
+    flow.scene.actions.push({ action: 'play_results', available: false, required_inputs: [], computes: '',
+      blocker: { code: 'not_in_this_slice', reason: 'Not available yet: arrives with a later Site 3D slice', link: '›',
+        home: { guided: { section: 'results', drawer: null, open: 'request_then_scroll' }, expert: { panel: 'results' } } } })
+    view()
+    expect(screen.getByTestId('scene-blocker-play_results').textContent)
+      .toBe('Not available yet: 3D results come in a later version › Results')
+  })
+
+  it('an unreadable scene offers › Snapshots', async () => {
+    const { AxiosError, AxiosHeaders } = await import('axios')
+    const headers = new AxiosHeaders()
+    vi.mocked(siteSceneApi.getScene).mockRejectedValue(new AxiosError('x', 'ERR_BAD_RESPONSE', { headers }, null,
+      { status: 500, statusText: '', headers: {}, config: { headers }, data: { detail: { error_kind: 'integrity_error' } } }))
+    view()
+    expect((await screen.findByTestId('scene-read-error')).textContent)
+      .toBe('This site’s 3D scene could not be read: restore a snapshot › Snapshots')
+    fireEvent.click(screen.getByTestId('scene-snapshots-link'))
+    expect(useUIStore.getState().activeSlidePanel).toBe('snapshots')
+    expect(useUIStore.getState().flowReturn?.label).toBe('Site 3D')
   })
 
   it('read-only: the reason is visible and nothing can be generated', () => {

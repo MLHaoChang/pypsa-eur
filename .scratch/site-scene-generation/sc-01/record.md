@@ -3,7 +3,7 @@
 
 # SC-01 implementation record
 
-Status: SC-01a (backend) in review; SC-01b (UI) not started. Copied from [implementation-record-template.md](../implementation-record-template.md).
+Status: SC-01a (backend) merged (#807); SC-01b (UI) in review. Copied from [implementation-record-template.md](../implementation-record-template.md).
 
 ## Assignment contract
 
@@ -100,3 +100,43 @@ UX (session `01G7qCuipbbh…`):
 - **Undo.** Undo of a rename or delete does not reach the scene (D06 item 3).
 - **Proposals and workers.** Proposals are per process: with more than one worker, a proposal served elsewhere answers 410.
 - **Copies.** The scene mutex is per process, so copies and applies in two processes are not ordered. The desktop app runs one worker.
+
+## SC-01b (the UI)
+
+Branch `claude/site3d-sc01b`, from master `41ade3be`, master `2a8f43fd` merged in.
+
+### Plan verdicts and where each condition lands
+
+GK B (plan GO on the backend part, five conditions, commit `010d9d05`):
+
+| # | Condition | Proof |
+|---|---|---|
+| 1 | One function: `store.legacy_site_digest` | `routers/site_scene.py::get_scene` |
+| 2 | The GET writes nothing | `test_site_scene_digest.py` checks bytes and mtime |
+| 3 | Unknown site: 404, no digest | `test_site_scene_digest.py` |
+| 4 | D06 interplay | whoever merges second re-runs `test_a_changed_site_refuses_the_old_digest_and_a_fresh_get_adopts` on the merged tree |
+| 5 | Mutation check | dropping the key fails the adopt test on the missing digest ([evidence/sc01b-digest-red.txt](evidence/sc01b-digest-red.txt)) |
+
+UX (plan GO with conditions; addendum GO):
+
+| # | Condition | Where |
+|---|---|---|
+| a | Link reads "› Save in the header" | `SiteEntryAction.tsx` |
+| 1 | "›" for links, "·" for data | the panels' links |
+| 2 | Server text as is for invalid_geometry, resource_limit, the height limit, revision_conflict and the proposal kinds; the client maps invalid_input, the swapped hint, project_locked, integrity_error, not_found, scene_managed_site | `api/siteScene.ts::sceneErrorCopy`; backend strings in `services/site_scene/proposals.py` ("This preview expired: generate again", "This preview was discarded: generate again", "This preview changed since you reviewed it: review it again"), pinned in `test_site_scene_routes.py` |
+| 3 | integrity_error copy plus "› Snapshots" | `SiteScenePanel.tsx` (`SnapshotsLink`, through `withReturnFromSite3D`) |
+| 4 | Results part: "Not available yet: 3D results come in a later version" with "› Results" | overridden on the client (`RESULTS_NOT_YET`), so the frozen `verdicts.py` table stays as is |
+| 5 | OSM height source words | `nativeSite.ts::heightEvidenceWords` |
+| 6 | Preview shows the building count only | `SiteScenePanel.tsx` |
+| 7 | Fixed-boundary note in Map | `SiteScenePanel.tsx`, part Map |
+| 8 | Units beside inputs; a visible reason while a field is invalid | `NumberField`; `scene-generate-reason`, `scene-preview-reason` |
+| 9 | Extra shots | the PR's shot list |
+| add. 1 | Limits under each field; Save's reason | `SiteCreationPanel.tsx::saveBlockedReason` |
+| add. 2 | Scale bar, north mark, marker label "47.3769, 8.5417" | `PlanPreview` |
+| add. 4 | "Need another shape? Draw the boundary on the Satellite map ›" | `flowNavigation.ts::openSiteBoundaryDraw`, `uiStore.siteDrawRequest`, consumed by `MapCanvas.tsx` |
+
+### Risks left
+
+- Rule 2 is partly met: the Satellite "New site" tool still creates legacy Sites (UX: it keeps its 2D wording and stays).
+- Proposals are per process (from 01a).
+- The boundary is fixed once a Site is adopted.

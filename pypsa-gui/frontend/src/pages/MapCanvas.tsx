@@ -764,6 +764,14 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   // A project switch drops any site UI left open for the previous project
   // (the store already resets the draft itself).
   useEffect(() => { setDraftBoundary(null); setEditSite(null); setSitePopover(null) }, [currentProject])
+  // "Draw the boundary on the Satellite map ›" (New 3D site): start the tool
+  // once, then drop the request whether or not it could start.
+  const siteDrawRequest = useUIStore(s => s.siteDrawRequest)
+  useEffect(() => {
+    if (!siteDrawRequest) return
+    useUIStore.getState().clearSiteDrawRequest()
+    if (!draw.drawing && !draw.start()) toast.error(readOnly ? 'Project is read-only' : 'Finish placing buses first')
+  }, [siteDrawRequest, draw, readOnly])
   // Keyboard while drawing: Enter closes, Escape cancels. Not while the user
   // is typing somewhere else, and not while a panel hides the map.
   useEffect(() => {

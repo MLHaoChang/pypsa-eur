@@ -70,7 +70,7 @@ export default function SiteEntryAction() {
       {saveFirst && (
         <span data-testid="site-entry-reason" className="text-[11px] text-muted">
           {entry.reason}{' '}
-          <button type="button" onClick={pointAtHeaderSave} className="text-accent hover:underline">› Save project</button>
+          <button type="button" onClick={pointAtHeaderSave} className="text-accent hover:underline">› Save in the header</button>
         </span>
       )}
       {!entry.enabled && entry.blocker && (

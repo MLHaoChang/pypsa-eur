@@ -9,7 +9,7 @@ const refused = (status: number, detail: Record<string, unknown>) => {
 }
 
 describe('sceneErrorCopy', () => {
-  it('never shows the server message as is', () => {
+  it('maps invalid_input on the client, never the server message as is', () => {
     const msg = 'Site coordinates: latitude must be between -90 and 90'
     expect(sceneErrorCopy(refused(422, { error_kind: 'invalid_input', message: msg, field: 'lat' }))).not.toBe(msg)
   })
@@ -39,16 +39,27 @@ describe('sceneErrorCopy', () => {
     }
   })
 
-  it('rebuilds a geometry refusal from its subject and rule', () => {
+  it('shows a geometry refusal as the server words it', () => {
     expect(sceneErrorCopy(refused(422, { error_kind: 'invalid_geometry', message: 'Mapped building 2: the footprint has no area' })))
       .toBe('Mapped building 2: the footprint has no area')
   })
 
-  it('states a limit with its numbers', () => {
-    expect(sceneErrorCopy(refused(413, { error_kind: 'resource_limit', limit: 'buildings', max: 2000, actual: 2400 })))
-      .toBe('Too large: 2,400 buildings, at most 2,000')
-    expect(sceneErrorCopy(refused(413, { error_kind: 'resource_limit', limit: 'preview_bytes', max: 4194304, actual: 5000000 })))
-      .toBe('Too large: the preview is 5.0 MB, at most 4.2 MB')
+  it('shows the server text for a limit and for the proposal kinds', () => {
+    const limit = 'Too large: 2400 buildings, the limit is 2000'
+    expect(sceneErrorCopy(refused(413, { error_kind: 'resource_limit', message: limit, limit: 'buildings', max: 2000, actual: 2400 })))
+      .toBe(limit)
+    const height = 'Building 1: height must be above 0 m and at most 1000 m'
+    expect(sceneErrorCopy(refused(422, { error_kind: 'invalid_geometry', message: height }))).toBe(height)
+    for (const [kind, message] of [
+      ['proposal_expired', 'This preview expired: generate again'],
+      ['proposal_cancelled', 'This preview was discarded: generate again'],
+      ['revision_conflict', 'This preview changed since you reviewed it: review it again'],
+    ]) expect(sceneErrorCopy(refused(409, { error_kind: kind, message }))).toBe(message)
+  })
+
+  it('maps an unreadable scene to the snapshot copy', () => {
+    expect(sceneErrorCopy(refused(500, { error_kind: 'integrity_error', message: 'x' })))
+      .toBe('This site’s 3D scene could not be read: restore a snapshot')
   })
 
   it('offers Reload only where a reload resolves it', () => {
