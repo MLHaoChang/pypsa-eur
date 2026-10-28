@@ -68,7 +68,14 @@ def lp(client, session_ctx, install_network, monkeypatch):
 
 
 def test_probe(lp):
-    lp()
+    try:
+        lp()
+    except AssertionError:
+        import json as j
+        st = PyPSAService.get_solver_state()
+        print('STATE', j.dumps({k: st.get(k) for k in ('status', 'error', 'message', 'error_kind')}, default=str)[:1500])
+        print('LOG', str(chat_tools.get_simulation_log_history())[-1500:])
+        raise
     import json
     print(json.dumps(chat_tools.get_results('economics_by_carrier'), default=str)[:1500])
     print(json.dumps(chat_tools.explain_investment('Generator', 'Cheap'), default=str)[:1500])
