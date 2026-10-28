@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+
 ROOT = Path(__file__).resolve().parents[3]
 COMMAND = ROOT / 'pypsa-gui/backend/smoke/assistant_inventory.py'
 
@@ -16,7 +17,7 @@ def run(*args):
                           capture_output=True, text=True, timeout=20)
 
 
-def test_committed_inventory_passes_the_public_check_command():
+def test_inventory_passes_the_public_check_command():
     result = run('--check')
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'navigation' in result.stdout.lower()
@@ -44,28 +45,12 @@ def test_written_inventory_is_complete_and_explicit_about_unverified_behavior(tm
     assert 'pending' in data['status']
 
 
-@pytest.mark.parametrize('damage', ['schema', 'route', 'toolset', 'tab', 'panel', 'missing_tool'])
-def test_check_rejects_stale_inventory_without_rewriting_it(tmp_path, damage):
+def test_check_builds_in_memory_and_never_touches_an_inventory_file(tmp_path):
+    # The inventory is not committed (RETRO-COST-1): tool PRs never regenerate it.
     path = tmp_path / 'inventory.json'
-    assert run('--write', '--output', str(path)).returncode == 0
-    data = json.loads(path.read_text())
-    if damage == 'schema': data['tools'][0]['schema_sha256'] = 'stale'
-    elif damage == 'route': data['tools'][0]['route'] = [['GET', '/wrong']]
-    elif damage == 'toolset': data['tools'][0]['toolsets'] = []
-    elif damage == 'tab': data['result_tabs'].pop()
-    elif damage == 'panel': data['slide_panels'].pop()
-    else: data['tools'].pop()
-    path.write_text(json.dumps(data))
-    before = path.read_bytes()
     result = run('--check', '--output', str(path))
-    assert result.returncode == 1 and 'stale' in result.stdout.lower()
-    assert path.read_bytes() == before
-
-
-def test_check_reports_missing_inventory_actionably(tmp_path):
-    result = run('--check', '--output', str(tmp_path / 'missing.json'))
-    assert result.returncode == 1
-    assert '--write' in result.stdout
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not path.exists()
 
 
 def test_inventory_cli_needs_no_site_packages_or_application_startup():
@@ -122,6 +107,17 @@ export type SlidePanel =
     data = json.loads((tmp_path / '.scratch/live-voice/capability-inventory.json').read_text())
     assert data['result_tabs'] == [{'id': 'fmea', 'label': 'FMEA'}, {'id': 'adequacy', 'label': 'Adequacy'}]
     assert data['slide_panels'] == ['results', 'reports']
+
+
+def test_check_rejects_a_gui_target_the_tool_schema_does_not_offer(tmp_path):
+    result = isolated_reader(tmp_path, """
+const TABS: Array<{id: string; label: string}> = [
+  { id: 'fmea', label: 'FMEA' },
+  { id: 'not_offered', label: 'Not offered' },
+]
+""", "export type SlidePanel = 'results' | 'not_a_panel'\n")
+    assert result.returncode == 1
+    assert 'absent from shared tool schema: not_offered, not_a_panel' in result.stdout
 
 
 def test_inventory_refuses_unrecognized_targets_instead_of_silently_omitting_them(tmp_path):
@@ -186,13 +182,3 @@ def test_unknown_or_unmapped_adapter_cannot_reach_a_checked_label(tmp_path, edit
     assert result.returncode == 1, result.stdout + result.stderr
     assert 'adapter' in result.stdout.lower() or 'checked' in result.stdout.lower()
     assert not (tmp_path / '.scratch/live-voice/capability-inventory.json').exists()
-
-
-def test_check_rejects_an_inventory_whose_adapter_map_is_stale(tmp_path):
-    path = tmp_path / 'inventory.json'
-    assert run('--write', '--output', str(path)).returncode == 0
-    data = json.loads(path.read_text())
-    data['tools'][0]['assurance_adapter'] = 'static_input_evidence'
-    path.write_text(json.dumps(data))
-    result = run('--check', '--output', str(path))
-    assert result.returncode == 1 and 'stale' in result.stdout.lower()
