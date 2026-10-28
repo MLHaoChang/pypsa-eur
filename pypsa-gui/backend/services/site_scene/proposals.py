@@ -27,11 +27,18 @@ import uuid
 from collections import OrderedDict
 from typing import Any
 
-from services.site_scene import native, store
+from services.site_scene import associations, native, store
 from services.site_scene.contract import SceneError
 from services.site_scene.verdicts import REASON_NO_BOUNDARY
 
-ACTIONS = ("generate_native", "edit_buildings")
+ACTIONS = ("generate_native", "edit_buildings", "bind_targets", "rebind", "place_existing")
+# SC-02a: the inputs each action takes. The model actions read the open network.
+INPUT_KEYS = {"generate_native": {"greenfield", "sources"}, "edit_buildings": {"greenfield", "sources"},
+              "bind_targets": {"associations", "groups"}, "rebind": {"association", "target", "confirmed"},
+              "place_existing": {"placements"}}
+MODEL_ACTIONS = {"bind_targets": (associations.prepare_bind, associations.apply_bind),
+                 "rebind": (associations.prepare_rebind, associations.apply_rebind),
+                 "place_existing": (associations.prepare_place, associations.apply_place)}
 MAX_PROPOSALS = 64
 MAX_TOTAL_BYTES = 64 * 1024 * 1024
 TTL_SECONDS = 30 * 60
@@ -74,12 +81,12 @@ def _parse(body: Any) -> tuple[str, int, dict[str, Any]]:
         raise SceneError("invalid_input", "Proposal: send an object with action, base_revision and inputs")
     action, base, inputs = body.get("action"), body.get("base_revision"), body.get("inputs")
     if action not in ACTIONS:
-        raise SceneError("invalid_input", "Proposal: action must be generate_native or edit_buildings",
+        raise SceneError("invalid_input", f"Proposal: action must be one of {', '.join(ACTIONS)}",
                          {"field": "action"})
     if not isinstance(base, int) or isinstance(base, bool):
         raise SceneError("invalid_input", "Proposal: base_revision is required", {"field": "base_revision"})
-    if not isinstance(inputs, dict) or set(inputs) - {"greenfield", "sources"}:
-        raise SceneError("invalid_input", "Proposal: inputs may hold greenfield and sources lists",
+    if not isinstance(inputs, dict) or set(inputs) - INPUT_KEYS[action]:
+        raise SceneError("invalid_input", f"Proposal: {action} inputs may hold {', '.join(sorted(INPUT_KEYS[action]))}",
                          {"field": "inputs"})
     return action, base, inputs
 
@@ -93,18 +100,47 @@ def create(project_dir, project_key: str, owner: str | None, site_id: str, body:
     if base != scene["revision"]:
         raise SceneError("revision_conflict", "This site changed since you opened it: reload it and try again",
                          {"current_revision": scene["revision"]})
-    if len(scene["site"].get("boundary") or []) < 3:
-        raise SceneError("invalid_input", REASON_NO_BOUNDARY, {"field": "boundary"})
-    buildings, stats = _buildings(action, scene["buildings"], scene["site"], inputs)
+    stored = None
+    if action in MODEL_ACTIONS:
+        stored, preview = _prepare_model(project_dir, action, scene, inputs)
+        size = len(store.canonical(preview)) + len(store.canonical(stored))
+        if size > native.MAX_PREVIEW_BYTES:
+            raise SceneError("resource_limit", f"Too large: the preview is over the "
+                             f"{native.size_text(native.MAX_PREVIEW_BYTES)} limit",
+                             {"limit": "preview_bytes", "max": native.MAX_PREVIEW_BYTES, "actual": size})
+    else:
+        if len(scene["site"].get("boundary") or []) < 3:
+            raise SceneError("invalid_input", REASON_NO_BOUNDARY, {"field": "boundary"})
+        buildings, stats = _buildings(action, scene["buildings"], scene["site"], inputs)
+        preview, size = {"buildings": buildings, "stats": stats}, stats["bytes"]
     pid = f"p-{uuid.uuid4().hex}"
     entry = {"id": pid, "site_id": site_id, "owner": owner, "action": action, "base_revision": base,
              "inputs": copy.deepcopy(inputs), "input_hash": input_hash(site_id, action, base, inputs),
-             "status": "ready", "created": time.monotonic(), "bytes": stats["bytes"],
-             "preview": {"buildings": buildings, "stats": stats}}
+             "status": "ready", "created": time.monotonic(), "bytes": size,
+             "preview": preview, "stored": stored}
     with _lock:
         _entries[(project_key, pid)] = entry
         _evict(entry["created"])
     return view(entry)
+
+
+def _open_network(project_dir):
+    from services import site_bindings
+
+    n = site_bindings.open_network(project_dir)
+    if n is None:
+        raise SceneError("invalid_input", "Open this project to attach or place model items",
+                         {"code": "project_not_open"})
+    return n
+
+
+def _prepare_model(project_dir, action: str, scene: dict[str, Any], inputs: dict[str, Any]):
+    """Prepare reads the open network under its lock; it never writes or mints (SC-02a)."""
+    from services.pypsa_service import PyPSAService
+
+    n = _open_network(project_dir)
+    with PyPSAService.get_lock():
+        return MODEL_ACTIONS[action][0](scene, n, inputs)
 
 
 def view(entry: dict[str, Any]) -> dict[str, Any]:
@@ -181,23 +217,64 @@ def _apply_entry(project_dir, site_id: str, pid: str, entry: dict[str, Any], bod
     if stored != entry["input_hash"] or reviewed != entry["input_hash"]:
         raise SceneError("revision_conflict", "This preview changed since you reviewed it: review it again",
                          {"current_revision": None})
+    if entry["action"] in MODEL_ACTIONS:
+        # One lock order everywhere (D06): the network lock, then the scene mutex.
+        from services.pypsa_service import PyPSAService
+
+        n = _open_network(project_dir)
+        with PyPSAService.get_lock(), store.project_lock(project_dir):
+            return _commit_entry(project_dir, site_id, pid, entry, expected, n)
     with store.project_lock(project_dir):
-        scene = store.read_scene(project_dir, site_id)
-        if scene["state"] != "enabled":
-            raise SceneError("not_found", "This site has no 3D scene yet: create it first")
-        if scene["last_receipt"] and scene["last_receipt"]["proposal_id"] == pid:
-            receipt = scene["last_receipt"]
-        elif scene["revision"] != entry["base_revision"]:
-            # A receipt further back in the chain is still read back (store.apply); otherwise refuse.
-            receipt = store.apply(project_dir, site_id, {"id": pid, "base_revision": entry["base_revision"],
-                                                         "input_hash": entry["input_hash"], "changes": {}},
-                                  expected)
-        else:
-            buildings, _ = _buildings(entry["action"], scene["buildings"], scene["site"], entry["inputs"])
-            receipt = store.apply(project_dir, site_id, {"id": pid, "base_revision": entry["base_revision"],
-                                                         "input_hash": entry["input_hash"],
-                                                         "changes": {"buildings": buildings}}, expected)
-    return receipt
+        return _commit_entry(project_dir, site_id, pid, entry, expected, None)
+
+
+def _commit_entry(project_dir, site_id: str, pid: str, entry: dict[str, Any], expected: int, n) -> dict[str, Any]:
+    scene = store.read_scene(project_dir, site_id)
+    if scene["state"] != "enabled":
+        raise SceneError("not_found", "This site has no 3D scene yet: create it first")
+    if scene["last_receipt"] and scene["last_receipt"]["proposal_id"] == pid:
+        return scene["last_receipt"]
+    proposal = {"id": pid, "base_revision": entry["base_revision"], "input_hash": entry["input_hash"]}
+    if scene["revision"] != entry["base_revision"]:
+        # A receipt further back in the chain is still read back (store.apply); otherwise refuse.
+        return store.apply(project_dir, site_id, {**proposal, "changes": {}}, expected)
+    if n is None:
+        buildings, _ = _buildings(entry["action"], scene["buildings"], scene["site"], entry["inputs"])
+        return store.apply(project_dir, site_id, {**proposal, "changes": {"buildings": buildings}}, expected)
+    if expected != scene["revision"]:
+        return store.apply(project_dir, site_id, {**proposal, "changes": {}}, expected)
+    # Apply re-validates every target against the live network before anything is written.
+    if entry["action"] == "place_existing":
+        result = associations.apply_place(scene, n, entry["stored"], _recorded_bindings(project_dir))
+    else:
+        result = MODEL_ACTIONS[entry["action"]][1](scene, n, entry["stored"])
+    changes, bindings = result if isinstance(result, tuple) else (result, {})
+    if bindings:
+        _record_bindings(project_dir, bindings)
+    return store.apply(project_dir, site_id, {**proposal, "changes": changes}, expected)
+
+
+def _recorded_bindings(project_dir) -> dict[str, str]:
+    from services import site_service
+
+    value = site_service.read_sites(project_dir).get("bindings")
+    return value if isinstance(value, dict) else {}
+
+
+def _record_bindings(project_dir, bindings: dict[str, str]) -> None:
+    """
+    D06 bindings of newly placed keys, written before the generation so a
+    placement never exists without one. A commit that then fails leaves only a
+    binding to the same instance, which the retry reuses.
+    """
+    from services import site_service
+
+    doc = site_service.read_sites(project_dir)
+    current = _recorded_bindings(project_dir)
+    if all(current.get(k) == v for k, v in bindings.items()):
+        return
+    doc["bindings"] = {**current, **bindings}
+    site_service.write_sites(project_dir, doc)
 
 
 def has_ready(project_key: str, owner: str | None) -> bool:

@@ -1,0 +1,29 @@
+SC-02a mutation checks (GK B plan condition 9). Run from pypsa-gui/backend on claude/site3d-sc02a:
+  python3 <scratch>/mutate.py  (each mutation applied alone, the named tests run, then restored)
+
+M1 read-back resolves by name (uid ignored)
+  exit 1
+  FAILED tests/test_site_scene_associations.py::test_delete_unbinds_and_a_same_name_recreation_stays_unbound
+  FAILED tests/test_site_scene_associations.py::test_a_replaced_network_leaves_every_association_unbound
+M2 Apply stores no uid
+  exit 1
+  FAILED tests/test_site_scene_associations.py::test_rename_keeps_the_binding
+M3 no cycle check
+  exit 1
+  FAILED tests/test_site_scene_associations.py::test_a_cycle_and_an_orphan_member_are_refused
+M4 no allocation sum check
+  exit 1
+  FAILED tests/test_site_scene_associations.py::test_allocation_weights_are_finite_positive_and_sum_to_one[weights1-False]
+M5 prepare-only validation (Apply does not re-check)
+  exit 1
+  FAILED tests/test_site_scene_associations.py::test_a_target_deleted_between_prepare_and_apply_refuses_and_writes_nothing
+  FAILED tests/test_site_scene_associations.py::test_a_target_whose_carrier_changed_between_prepare_and_apply_refuses
+M5b Apply skips the instance (uid) check
+  exit 1
+  FAILED tests/test_site_scene_associations.py::test_a_rebind_prepared_before_a_recreation_refuses_at_apply
+M6 legacy delete hook writes without the scene mutex
+  exit 1
+  FAILED tests/test_site_scene_associations.py::test_every_legacy_sites_write_holds_the_scene_mutex_and_never_the_reverse[crud_delete]
+Restored: exit 0
+
+Each red comes from the named guard: M1/M5b the uid, M2 the stored uid, M3 the cycle DFS, M4 the sum tolerance, M5 the Apply-time re-validation, M6 the scene mutex in the legacy hook.

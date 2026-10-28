@@ -157,8 +157,21 @@ def get_scene(site_id: str, project: AuthorizedProject = ProjectAccessDep) -> di
             # The browser cannot rebuild Python's canonical JSON (47.0 reads as 47).
             scene = {**scene, "digest": store.legacy_site_digest(site_service.read_sites(project.directory), site_id)}
     if scene["state"] == "enabled":
-        scene = {**scene, "unbound_keys": _unbound_keys(project, scene)}
+        scene = {**scene, "unbound_keys": _unbound_keys(project, scene), **_read_back(project, scene)}
     return scene
+
+
+def _read_back(project: AuthorizedProject, scene: dict) -> dict:
+    """SC-02a: each association by its uid, with live name and status; `not_checked` when the project is not open."""
+    from services import site_bindings
+    from services.pypsa_service import PyPSAService
+    from services.site_scene import associations
+
+    n = site_bindings.open_network(project.directory)
+    if n is None:
+        return associations.read_back(scene, None)
+    with PyPSAService.get_lock():
+        return associations.read_back(scene, n)
 
 
 @router.post("/{name}/sites/{site_id}/scene/adopt")
