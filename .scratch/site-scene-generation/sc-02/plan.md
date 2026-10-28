@@ -85,3 +85,18 @@ This is the size of SC-01, which shipped as a backend PR (a) and a UI PR (b). Th
 ## Not in this package
 
 SC-07 tools and conversational binding (V93–V98), V80–V86 coordinate-first mapping, the SC-01b follow-ups (footer Overpass URL, pill overlap, empty dark pill, Satellite "New site"), result projection (SC-03).
+
+## Plan verdicts
+
+**UX (session `01G7qCukgawg573GcenNwGsX`), 2026-10-28: GO with conditions** (covers the UI PR if SC-02 splits):
+
+1. Names, not refs: Guided never shows `Class:name`; Expert writes "cooling_1 · Load" (kind via the panel's word map); carrier and unit from the existing label maps; weights as % with their total, and a total other than 100 % is a visible finding.
+2. Each "Not attached: …" / "Unavailable: …" that has a fix carries one ">" link to it, opened mode-aware (`openFlowTargetInPlace` in Guided, `openFlowTarget` in Expert) through `withReturn`.
+3. "Attach to…" is a user picker, never preselected by name; with no candidates it is disabled with a visible reason. Confirm stays disabled with a visible reason until there is something to confirm.
+4. Add model asset in Guided opens the asset's Guided home, not Expert; "Back to Site 3D" returns; then "Place it" is the one next step. Never jump on its own after a placement or check: offer a ">" link.
+5. Findings name the user's objects and selecting one highlights both; "No rule checked: <which rule>"; "Approximate size" on the item itself.
+6. Wording: ">" for links only, "·" between data, a colon between clauses, "out of date"; Guided task "Attach buildings to loads and processes"; one verb (Attach) throughout.
+7. Guided and Expert screenshots: unbound, attached, unavailable, picker open, weights not 100 %, add asset → place it, placement pass, overlap, no rule checked, approximate size, confirm and refusal.
+8. Fold in two SC-01b follow-ups in `SiteScenePanel`: (a) the footer that shows the Overpass URL / "ConnectError" / `PYPSAGUI_OVERPASS_URL` becomes "Site context unavailable: the map data service could not be reached" + "> Retry", details behind Details or in the log; (b) the empty dark pill under "Library dimensions". The "Back to …" overlap and Satellite "New site" stay out.
+
+GK B: pending. Coordinator split question: pending.
