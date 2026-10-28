@@ -95,9 +95,9 @@ const CONV_ATTRS: ConvAttrConfig[] = [
   { id: 'p_max_pu',      label: 'Availability', Icon: Gauge, unit: 'pu',
     description: 'Time-varying upper bound on dispatch (e.g. nuclear refuelling, coal outages, hydro derating).' },
   { id: 'p_min_pu',      label: 'Must-run',     Icon: ArrowDownToLine, unit: 'pu',
-    description: 'Time-varying minimum dispatch — forces the plant to produce at least this share of its capacity every hour.' },
+    description: 'Time-varying minimum dispatch: forces the plant to produce at least this share of its capacity every hour.' },
   { id: 'marginal_cost', label: 'Marginal cost', Icon: Coins, unit: '€/MWh',
-    description: 'Hourly dispatch cost (€/MWh). Overrides the static price per hour — fuel-price traces, market scenarios. Cleared via uploading a profile of all-NaN cells.' },
+    description: 'Hourly dispatch cost (€/MWh). Overrides the static price per hour: fuel-price traces, market scenarios. To clear it, upload a profile with empty cells.' },
 ]
 
 // Demand-Response sub-attributes. PyPSA-Eur models DR as a Generator that
@@ -2156,8 +2156,8 @@ export default function TimeSeriesManager() {
             ) : activeTab === 'links' ? (
               <>
                 <p>• Remaining columns: one per link, named exactly as the link name</p>
-                <p>• Values: {fieldLabel(activeAttrCfg.id)}{' '}in{' '}
-                  {activeAttrCfg.unit === 'pu' ? 'a share from 0 to 1' : <span className="font-mono">{activeAttrCfg.unit}</span>}</p>
+                <p>• Values: {fieldLabel(activeAttrCfg.id)}
+                  {activeAttrCfg.unit === 'pu' ? ', as a share of capacity from 0 to 1' : <>{' '}in <span className="font-mono">{activeAttrCfg.unit}</span></>}</p>
                 <p className="pt-1 text-[10px]">{activeAttrCfg.description}</p>
                 {linkAttr === 'p_min_pu' && (
                   <p className="text-[10px] text-amber-600">
@@ -2170,15 +2170,15 @@ export default function TimeSeriesManager() {
             ) : activeTab === 'dr' ? (
               <>
                 <p>• Remaining columns: one per DR generator, named exactly as the generator name</p>
-                <p>• Values: {fieldLabel(activeAttrCfg.id)}{' '}in{' '}
-                  {activeAttrCfg.unit === 'pu' ? 'a share from 0 to 1' : <span className="font-mono">{activeAttrCfg.unit}</span>}</p>
+                <p>• Values: {fieldLabel(activeAttrCfg.id)}
+                  {activeAttrCfg.unit === 'pu' ? ', as a share of capacity from 0 to 1' : <>{' '}in <span className="font-mono">{activeAttrCfg.unit}</span></>}</p>
                 <p className="pt-1 text-[10px]">{activeAttrCfg.description}</p>
               </>
             ) : activeTab === 'conventional' ? (
               <>
                 <p>• Remaining columns: one per generator, named exactly as the generator name</p>
-                <p>• Values: {fieldLabel(activeAttrCfg.id)}{' '}in{' '}
-                  {activeAttrCfg.unit === 'pu' ? 'a share from 0 to 1' : <span className="font-mono">{activeAttrCfg.unit}</span>}</p>
+                <p>• Values: {fieldLabel(activeAttrCfg.id)}
+                  {activeAttrCfg.unit === 'pu' ? ', as a share of capacity from 0 to 1' : <>{' '}in <span className="font-mono">{activeAttrCfg.unit}</span></>}</p>
                 <p className="pt-1 text-[10px]">{activeAttrCfg.description}</p>
                 {convAttr === 'p_min_pu' && (
                   <p className="text-[10px] text-amber-600">
