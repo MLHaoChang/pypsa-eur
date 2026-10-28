@@ -479,7 +479,7 @@ TOOLS: list[dict[str, Any]] = [
         "produced none of this kind (lost_load on a run that shed nothing). "
         "Read `message` and check dispatch_status; do NOT report it as a zero. "
         "run_id (statistics, cost_breakdown, economics_by_carrier, generators, "
-        "storage_dispatch, prices and price_drivers only) answers for one run as "
+        "storage_dispatch, prices, price_drivers and emissions only) answers for one run as "
         "{status, scope, result_kind, data, run}: the newest completed run whose "
         "inputs are still current answers with the current read (scope current); "
         "any other run answers from the results kept when it finished (scope "
