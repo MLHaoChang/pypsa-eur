@@ -498,11 +498,28 @@ function moveDays(by: unknown): string {
   return `${m[1] === '-' ? '−' : '+'}${days} ${days === 1 ? 'day' : 'days'}`
 }
 
+const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** A recorded weekday or month list in words: a run reads "Mon–Fri". */
+function runWords(raw: unknown, names: string[], first: number): string {
+  if (!Array.isArray(raw) || !raw.length) return ''
+  const xs = [...raw as number[]].sort((a, b) => a - b)
+  const run = xs.every((x, i) => i === 0 || x === xs[i - 1] + 1)
+  return run && xs.length > 2 ? ` ${names[xs[0] - first]}–${names[xs[xs.length - 1] - first]}`
+    : ` ${xs.map(x => names[x - first]).join(', ')}`
+}
+
+// What the server records beside an op's own parameters.
+const RECORDED = new Set(['op', 'target', 'connection', 'resolved_mw', 'window', 'moved', 'converted_from_rule'])
+
 function describe(op: RefineOp, windows: MaintenanceWindow[] = []): string {
   const o = op as Record<string, unknown>
   switch (op.op) {
     case 'move_window': {
-      const w = windows[Number(o.window ?? 0)]
+      // A recorded move names the dates it moved from.
+      const moved = o.moved as { from: string[]; to: string[] } | undefined
+      const w = moved ? { from: moved.from[0], to: moved.to[0] } : windows[Number(o.window ?? 0)]
       return `Move maintenance ${w ? `${windowDates(w)} ` : ''}by ${moveDays(o.by)}`
     }
     case 'scale_peak_to':
@@ -510,10 +527,11 @@ function describe(op: RefineOp, windows: MaintenanceWindow[] = []): string {
         : `peak to ${o.mw ?? o.value}`
     case 'scale_window': {
       const [s, e] = o.hours as number[]
-      return `${String(s).padStart(2, '0')}–${String(e).padStart(2, '0')} h × ${o.factor}`
+      return `${String(s).padStart(2, '0')}–${String(e).padStart(2, '0')} h`
+        + `${runWords(o.weekdays, WEEKDAYS, 0)}${runWords(o.months, MONTHS, 1)} × ${o.factor}`
     }
     default:
-      return `${OP_LABELS[op.op as OpKind] ?? op.op} ${Object.entries(o).filter(([k]) => k !== 'op').map(([, v]) => v).join(' ')}`
+      return `${OP_LABELS[op.op as OpKind] ?? op.op} ${Object.entries(o).filter(([k]) => !RECORDED.has(k)).map(([, v]) => v).join(' ')}`
   }
 }
 
@@ -532,6 +550,12 @@ export function RefinePanel({
     mutationFn: () => seriesApi.refine(project, pending.job_id, ops),
     onSuccess: r => { setOps([]); onRefined(r) },
   })
+  // TSG 05: a new pending series without one recorded edit.
+  const undo = useMutation({
+    mutationFn: (index: number) => seriesApi.refine(project, pending.job_id, [], index),
+    onSuccess: r => onRefined(r),
+  })
+  const recorded = (pending.refinements ?? []) as RefineOp[]
   // A series read from a snapshot window knows no hours outside it: no
   // shift or smoothing, and its energy target is the window's MWh.
   const windowSource = pending.profile_annual_basis === 'window_mean'
@@ -554,6 +578,22 @@ export function RefinePanel({
         Refine: each edit is applied in order. Put a peak or energy target last.
         {windowSource && ' Read from the snapshot window: energy is the window\'s MWh.'}
       </p>
+      {recorded.length > 0 && (
+        <div className="mb-1">
+          <p className="text-[11px] text-muted">Edits in this series: Undo makes a new series without that edit.</p>
+          <ol className="text-[11px] list-decimal pl-5" data-testid="refine-edits">
+            {recorded.map((op, i) => (
+              <li key={i} className="flex items-center gap-1">
+                <span>{describe(op, outages)}</span>
+                <button type="button" aria-label={`Undo edit ${i + 1}`} disabled={undo.isPending}
+                  className="text-accent hover:underline disabled:text-muted"
+                  onClick={() => undo.mutate(i)}>Undo</button>
+              </li>
+            ))}
+          </ol>
+          {undo.isError && <span className="text-[11px] text-red-600" data-testid="refine-undo-error">{errorText(undo.error)}</span>}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-1">
         <select aria-label="Refinement" className={INPUT} value={d.kind}
           onChange={e => setD({ ...d, kind: e.target.value as OpKind })}>
