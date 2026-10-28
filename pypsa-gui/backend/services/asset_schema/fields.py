@@ -185,6 +185,9 @@ GENERATOR: tuple[FieldSpec, ...] = (
         "Bus the generator injects into.",
         "Technology carrier (solar, onwind, OCGT, …). Drives CO₂ accounting, grouping and canvas colours.",
     ),
+    FieldSpec("process_role", "identity", "Process role", "Marks a generator on a product bus: buy_in is bought "
+              "product, shortfall is the priced lost-production slack. Empty for an ordinary generator.",
+              kind="enum", options=("buy_in", "shortfall")),
     FieldSpec("p_nom", "size", "Capacity", "Installed active-power capacity. With extendable ticked, the existing "
               "capacity the optimiser starts from.", "MW", "MW", key_param=True),
     *_size_bounds(),
@@ -215,9 +218,6 @@ GENERATOR: tuple[FieldSpec, ...] = (
               "modelled horizon, e.g. a fuel or water budget. Empty for no upper bound.", "MWh", "MWh"),
     FieldSpec("control", "performance", "AC control", "Control type in the AC power flow only: PQ fixes P and Q, "
               "PV holds the voltage, Slack absorbs the imbalance.", kind="enum", options=("PQ", "PV", "Slack")),
-    FieldSpec("process_role", "identity", "Process role", "Marks a generator on a product bus: buy_in is bought "
-              "product, shortfall is the priced lost-production slack. Empty for an ordinary generator.",
-              kind="enum", options=("buy_in", "shortfall")),
     *_outages(with_cf_flag=True),
 )
 
