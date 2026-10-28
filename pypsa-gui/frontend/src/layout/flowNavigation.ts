@@ -296,12 +296,13 @@ export function openSiteEntry(opts: { fromSite3D?: boolean } = {}): void {
 }
 
 /** "Draw the boundary on the Satellite map ›" from New 3D site: the Satellite
- *  view with its "New site" tool started; Back reads "Back to Site 3D". */
-export function openSiteBoundaryDraw(): void {
+ *  view centred on the site coordinates with its "New site" tool started;
+ *  Back reads "Back to Site 3D". */
+export function openSiteBoundaryDraw(at: { lat: number; lng: number } | null): void {
   withReturnFromSite3D(() => {
     const ui = useUIStore.getState()
     ui.setCanvasView('satellite')
-    ui.requestSiteDraw()
+    ui.requestSiteDraw(at ? [at.lat, at.lng] : null)
   })
 }
 

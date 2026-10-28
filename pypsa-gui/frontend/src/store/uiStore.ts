@@ -666,8 +666,11 @@ interface UIStore {
   clearSiteAnchorRequest: () => void
   /** Start the Satellite map's "New site" boundary tool; the map clears it once started. */
   siteDrawRequest: boolean
-  requestSiteDraw: () => void
+  /** Where the map centres for that tool ([lat, lng], the site coordinates); the map clears it once applied. */
+  siteDrawCenter: [number, number] | null
+  requestSiteDraw: (center: [number, number] | null) => void
   clearSiteDrawRequest: () => void
+  clearSiteDrawCenter: () => void
   // 3D site view (Phase 2 E6): draw extendable assets at their installed
   // size or at the optimum. Takes effect only while dispatch is fresh
   // (site3d/sizing.ts effectiveSizing). A view setting, not a mutation.
@@ -982,8 +985,10 @@ export const useUIStore = create<UIStore>((set, get) => ({
   requestSiteAnchor: () => set({ siteAnchorRequest: true }),
   clearSiteAnchorRequest: () => set({ siteAnchorRequest: false }),
   siteDrawRequest: false,
-  requestSiteDraw: () => set({ siteDrawRequest: true }),
+  siteDrawCenter: null,
+  requestSiteDraw: (center) => set({ siteDrawRequest: true, siteDrawCenter: center }),
   clearSiteDrawRequest: () => set({ siteDrawRequest: false }),
+  clearSiteDrawCenter: () => set({ siteDrawCenter: null }),
   setSiteSizing: (m) => set({ siteSizing: m }),
   setSlidePanel: (requested) => {
     navigationChanged()

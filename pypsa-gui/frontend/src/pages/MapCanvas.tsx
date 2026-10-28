@@ -1069,6 +1069,13 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   const mapRef = useRef<L.Map | null>(null)
   const [mapHandle, setMapHandle] = useState<L.Map | null>(null)
   const captureMapForMini = useCallback((m: L.Map) => { mapRef.current = m; setMapHandle(m) }, [])
+  // The boundary tool's landing centres on the site coordinates once the map exists.
+  const siteDrawCenter = useUIStore(s => s.siteDrawCenter)
+  useEffect(() => {
+    if (!siteDrawCenter || !mapHandle) return
+    mapHandle.setView(siteDrawCenter, 16)
+    useUIStore.getState().clearSiteDrawCenter()
+  }, [siteDrawCenter, mapHandle])
   const linkCarriers = useMemo(() => [...new Set((links as LinkT[]).map(l => l.carrier).filter(Boolean))], [links])
   const legendAssetRows = useMemo(() => {
     const members = (buses as Bus[]).map(b => b.name)

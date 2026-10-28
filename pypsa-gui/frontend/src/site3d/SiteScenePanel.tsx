@@ -7,7 +7,7 @@
 //   Apply commits it (a new scene revision) or Discard cancels it.
 // - Correction: a selected accepted building gets numeric controls; "Preview
 //   change" is an `edit_buildings` proposal reviewed the same way.
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { useProjectFlow } from '../hooks/useProjectFlow'
@@ -16,7 +16,7 @@ import { sceneErrorCopy, sceneErrorDetail, sceneErrorWantsReload, type Greenfiel
 import type { SceneAction, SitePart } from '../api/flow'
 import { evaluateMutation } from '../utils/mutationGuard'
 import NumberField from './NumberField'
-import { useSitesStore } from './sitesStore'
+import { adoptServerDocument, useSitesStore } from './sitesStore'
 import { applyProposal, discardProposal, propose, SitesNotSaved } from './sceneActions'
 import { useSceneProposal, useSiteScene } from './useSiteScene'
 import { heightEvidenceWords, HEIGHT_MAX_M, greenfieldFromBuilding, osmSourcesInside } from './nativeSite'
@@ -130,10 +130,15 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
   const selected = selection?.kind === 'building' ? accepted.find(b => b.id === selection.id) ?? null : null
   const moved = flow?.scene?.anchor_moved.includes(site.id) ?? false
 
+  // An error belongs to the part it was raised in.
+  useEffect(() => { setError(null) }, [part])
+
   const run = async (fn: () => Promise<void>) => {
     if (!project) return
     setBusy(true); setError(null)
     try { await fn() } catch (e) {
+      // A preview the server no longer holds cannot be applied: drop it with the error.
+      if (['proposal_expired', 'proposal_cancelled'].includes(sceneErrorDetail(e)?.error_kind ?? '')) setProposal(null)
       setError(e instanceof SitesNotSaved
         ? { copy: e.message, reload: false, snapshots: false }
         : { copy: sceneErrorCopy(e), reload: sceneErrorWantsReload(e), snapshots: unreadable(e) })
@@ -147,7 +152,10 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
     setProposal(null); setDrafts([]); setEdit(null)
   })
   const discard = () => run(async () => {
-    try { await discardProposal(project!, mine!) } finally { setProposal(null) }
+    try { await discardProposal(project!, mine!) } catch (e) {
+      // Discarding a preview the server already dropped is done, not an error.
+      if (sceneErrorDetail(e)?.error_kind !== 'proposal_expired') throw e
+    } finally { setProposal(null) }
   })
   const previewEdit = () => run(async () => {
     if (!selected || !edit) return
@@ -192,6 +200,10 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
       {refusal && (
         <div role="alert" className="flex items-center gap-2 text-[11px] text-danger">
           <span>{refusal}</span>
+          {project && (
+            <button type="button" data-testid="scene-refusal-reload" className="underline text-text hover:text-accent"
+              onClick={() => { void adoptServerDocument(project).then(() => clearRefusal(project)); reload() }}>Reload</button>
+          )}
           <button type="button" onClick={() => clearRefusal(project)} className="text-muted hover:text-text">Dismiss</button>
         </div>
       )}
@@ -232,8 +244,8 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
           ) : selected && enabled ? (
             <div className="flex flex-col gap-1.5" data-testid="scene-correction">
               <span className="text-text font-medium">
-                {selected.source.namespace === 'osm' ? `OSM building ${selected.source.source_id}` : `Proposed building ${selected.source.source_id}`}
-                <span className="text-muted font-normal"> · {heightEvidenceWords(selected)}</span>
+                {selected.source.namespace === 'osm' ? `OSM building ${selected.source.source_id}` : 'Proposed building'}
+                {selected.source.namespace === 'osm' && <span className="text-muted font-normal"> · {heightEvidenceWords(selected)}</span>}
               </span>
               {!editing ? (
                 <div className="flex gap-2 items-center">
@@ -264,7 +276,7 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
             <div className="flex flex-col gap-2">
               {enabled && accepted.length > 0 && (
                 <span className="text-text" data-testid="scene-accepted">
-                  {n(accepted.length)} buildings accepted · click one to correct it
+                  {n(accepted.length)} {accepted.length === 1 ? 'building' : 'buildings'} accepted · click one to correct it
                 </span>
               )}
               {!enabled && scene.data?.state === 'unadopted' && <span className="text-[11px] text-muted">{ADOPT_NOTE}</span>}
@@ -288,9 +300,6 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
               </div>
               {!draftsOk && <span className="text-[11px] text-muted" data-testid="scene-generate-reason">{FIX_FIELDS}</span>}
               {accepted.length > 0 && <span className="text-[11px] text-muted">Generating again replaces the accepted buildings after you review it.</span>}
-              {sources.length + drafts.length === 0 && genAction?.available && (
-                <span className="text-[11px] text-muted">Nothing to generate: add a building or refresh the site context</span>
-              )}
               <Blocker action={genAction} />
             </div>
           )}

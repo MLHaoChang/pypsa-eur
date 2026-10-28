@@ -45,6 +45,7 @@ describe('New 3D site', () => {
     expect(ui.canvasView).toBe('satellite')
     expect(ui.siteDrawRequest).toBe(true)
     expect(ui.flowReturn?.label).toBe('Site 3D')
+    expect(ui.siteDrawCenter).toEqual([47.37689, 8.54169])
     expect(useSiteCreation.getState().open).toBe(false)
   })
 })

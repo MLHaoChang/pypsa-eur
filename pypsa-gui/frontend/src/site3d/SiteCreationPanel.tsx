@@ -47,11 +47,12 @@ function PlanPreview({ v, at }: { v: BoundaryInputs; at: { lat: number; lng: num
       aria-label={`Boundary ${v.width} by ${v.depth} m about the site coordinates`}>
       <polygon points={pts} fill="var(--color-accent)" fillOpacity={0.12} stroke="var(--color-accent)" strokeWidth={1} />
       <circle cx={0} cy={0} r={2} fill="var(--color-text)" />
-      <text data-testid="site-create-marker" x={0} y={9} fontSize={6} textAnchor="middle" fill="var(--color-text)">
+      <text data-testid="site-create-marker" x={0} y={10} fontSize={7} textAnchor="middle" fill="var(--color-text)"
+        stroke="var(--color-bg)" strokeWidth={2} paintOrder="stroke">
         {at.lat.toFixed(4)}, {at.lng.toFixed(4)}
       </text>
       <line x1={-50} y1={50} x2={-50 + bar * s} y2={50} stroke="var(--color-text)" strokeWidth={1} />
-      <text x={-50} y={46} fontSize={7} fill="var(--color-muted)">{bar.toLocaleString('en-US')} m</text>
+      <text x={-50} y={46} fontSize={7} fill="var(--color-muted)" stroke="var(--color-bg)" strokeWidth={2} paintOrder="stroke">{bar.toLocaleString('en-US')} m</text>
       <text x={0} y={-48} fontSize={7} textAnchor="middle" fill="var(--color-muted)">N</text>
     </svg>
   )
@@ -124,7 +125,7 @@ export default function SiteCreationPanel() {
                 </div>
                 <div className="text-[11px] text-muted" data-testid="site-create-draw">
                   Need another shape?{' '}
-                  <button type="button" onClick={() => { close(); openSiteBoundaryDraw() }} className="text-accent hover:underline">
+                  <button type="button" onClick={() => { close(); openSiteBoundaryDraw(confirmed) }} className="text-accent hover:underline">
                     Draw the boundary on the Satellite map ›
                   </button>
                 </div>

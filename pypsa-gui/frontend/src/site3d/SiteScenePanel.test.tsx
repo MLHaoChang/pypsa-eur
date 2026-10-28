@@ -124,6 +124,30 @@ describe('Site 3D scene panel', () => {
       .toBe('Not available yet: 3D results come in a later version › Results')
   })
 
+  it('an expired preview is dropped with its error, and the error clears on a part change', async () => {
+    const { AxiosError, AxiosHeaders } = await import('axios')
+    const headers = new AxiosHeaders()
+    vi.mocked(applyProposal).mockRejectedValue(new AxiosError('x', 'ERR_BAD_REQUEST', { headers }, null,
+      { status: 410, statusText: '', headers: {}, config: { headers },
+        data: { detail: { error_kind: 'proposal_expired', message: 'This preview expired: generate again' } } }))
+    useSceneProposal.setState({ proposal })
+    view()
+    fireEvent.click(screen.getByTestId('scene-apply'))
+    expect((await screen.findByTestId('scene-error')).textContent).toBe('This preview expired: generate again')
+    expect(useSceneProposal.getState().proposal).toBeNull()
+    expect(screen.queryByTestId('scene-apply')).toBeNull()
+    fireEvent.click(screen.getByTestId('site-part-results'))
+    await waitFor(() => expect(screen.queryByTestId('scene-error')).toBeNull())
+  })
+
+  it('one accepted building reads in the singular; a proposed one is not named by its id', async () => {
+    vi.mocked(siteSceneApi.getScene).mockResolvedValue(enabled([gf]))
+    view()
+    expect((await screen.findByTestId('scene-accepted')).textContent).toContain('1 building accepted')
+    useUIStore.setState({ sitePartSelection: { kind: 'building', id: 'greenfield:b1' } })
+    expect((await screen.findByTestId('scene-correction')).textContent).toMatch(/^Proposed building(Height|$)/)
+  })
+
   it('an unreadable scene offers › Snapshots', async () => {
     const { AxiosError, AxiosHeaders } = await import('axios')
     const headers = new AxiosHeaders()
