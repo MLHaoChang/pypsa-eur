@@ -29,6 +29,11 @@
   [
    "session_init",
    {
+    "assurance": {
+     "mode": "legacy",
+     "state": "unvalidated",
+     "version": 1
+    },
     "model": "claude-sonnet-5",
     "profile_id": "anthropic-sonnet",
     "profile_label": "Claude Sonnet",
@@ -60,6 +65,11 @@
   [
    "session_init",
    {
+    "assurance": {
+     "mode": "legacy",
+     "state": "unvalidated",
+     "version": 1
+    },
     "model": "claude-sonnet-5",
     "profile_id": "anthropic-sonnet",
     "profile_label": "Claude Sonnet",
