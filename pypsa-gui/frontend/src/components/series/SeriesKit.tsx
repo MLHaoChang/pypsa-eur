@@ -24,7 +24,7 @@ export const INPUT =
 
 export type EditorMode = 'guided' | 'expert'
 
-const fmt = (v: number | undefined | null, digits = 1) =>
+export const fmt = (v: number | undefined | null, digits = 1) =>
   v == null || Number.isNaN(v) ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: digits })
 
 /** A series field in plain words, never its PyPSA attribute. */

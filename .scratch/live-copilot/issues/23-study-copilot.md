@@ -3,7 +3,8 @@
 
 # LC-23 — study copilot: goal → study brief → approved steps → Hand-off
 
-Status: design (phase 1), awaiting gatekeeper plan OK and UX placement OK
+Status: folded into the study harness (owner decision SH-FOLD-1, 2026-10-28): the core continues as `.scratch/study-harness/issues/01-run-skeleton-eh-site.md`; slice 3 (plan card UI) → `.scratch/study-harness/issues/08-run-monitor-and-envelope-card.md`; slice 4 (hand-off) → `.scratch/study-harness/issues/07-report-handoff-and-pilot.md`. Its cases SC-01–SC-16 stay binding there.
+Previous status: design (phase 1), awaiting gatekeeper plan OK and UX placement OK
 Progress: Slices 1 (#573) and 2 (#582) merged; slice 3 plan card UI and slice 4 hand-off not on master.
 Type: task
 Baseline: master `49791da` plus #542 (LC-05 slice 3, chat-panel continuation), which merges first
