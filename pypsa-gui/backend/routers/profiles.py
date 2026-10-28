@@ -81,6 +81,7 @@ from services.profile_gen.availability import (
 )
 from services.profile_gen.refine import (
     AnnualEnergyOnWindowSourceError,
+    connection_share,
     InvalidRefineOpError,
     RefineError,
     RefineReplayError,
@@ -911,6 +912,13 @@ def _preview_week(n, prepared) -> dict:
     }
 
 
+def _with_connection_share(ctx, stats: dict[str, dict]) -> None:
+    """The peak's share of the grid connection beside each peak_mw (omitted
+    with no connection link)."""
+    for st in stats.values():
+        st.update(connection_share(ctx, st["peak_mw"]))
+
+
 def _load_stats(frame: pd.DataFrame, scale: float, year: int) -> dict[str, dict]:
     hours = 8784 if pd.Timestamp(year=year, month=1, day=1).is_leap_year else 8760
     return {col: {"peak_mw": float(frame[col].max()) * scale,
@@ -976,6 +984,7 @@ def generate_load_profiles(
 
     stats = _load_stats(result.series, float(record.get("scale_mw") or 1.0),
                         int(record["weather_year"]))
+    _with_connection_share(ctx, stats)
     warnings = _preview_load_energy(ctx, result.series, record, stats)
     dry, weeks = _dry_run(ctx, result.series, record)
     replayed = record.get("replay_warnings") or []
@@ -1032,6 +1041,7 @@ async def upload_load_profiles(
     record["qa_warnings"] = up.warnings  # timeseries_qa findings, per column
     write_pending(str(proj.directory), job_id, frame, record)
     stats = _load_stats(frame, 1.0, int(record["weather_year"]))
+    _with_connection_share(ctx, stats)
     preview = _preview_load_energy(ctx, frame, record, stats)
     dry, weeks = _dry_run(ctx, frame, record)
     return {**record, "unmatched": unmatched, "stats": stats,
@@ -1340,6 +1350,7 @@ def _pending_series_response(ctx, proj, component_type: str, component: str,
                                           day=1).is_leap_year else 365)
         stats[component].update(peak_mw=float(v.max()),
                                 annual_mwh=float(v.mean()) * hours)
+        stats[component].update(connection_share(ctx, stats[component]["peak_mw"]))
         if component_type == "loads":
             _preview_load_energy(ctx, frame, record, stats)  # modelled_mwh, as generated loads show
     warnings, weeks = _dry_run(ctx, frame, record)
