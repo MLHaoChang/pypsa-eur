@@ -40,7 +40,6 @@ SERVED_BY_TOOL: dict[tuple[str, str], str] = {
     ('GET', '/api/campus-electrical/{name}/island/cuts'): 'campus_island_cuts',
     ('GET', '/api/campus-electrical/{name}/island/cuts/apply'): 'campus_island_cuts',
     ('GET', '/api/campus-electrical/{name}/island/gfm-settings'): 'campus_island_gfm_settings',
-    ('GET', '/api/campus-electrical/{name}/island/gfm-settings/card'): 'campus_apply_gfm_settings',
     ('GET', '/api/campus-electrical/{name}/library'): 'campus_get_library',
     ('GET', '/api/gridspine/{name}/bundles/{hour}'): 'gridspine_export_handoff_bundle',
     ('GET', '/api/gridspine/{name}/capacity'): 'gridspine_get_capacity',
@@ -179,12 +178,7 @@ UI_INTERNAL: dict[str, dict] = {
 
 # Each gap names its existing manual surface; this is an explicit reviewed baseline.
 KNOWN_GAPS: dict[tuple[str, str], str] = {
-    ('DELETE', '/api/campus-electrical/{name}/grid-readiness/limits/{item}'): 'Campus electrical panel',
-    ('DELETE', '/api/campus-electrical/{name}/island/cuts'): 'Campus electrical panel',
-    ('DELETE', '/api/campus-electrical/{name}/island/cuts/{period}/{hour}/{kind}'): 'Campus electrical panel',
     ('DELETE', '/api/projects/{name}/profiles/weather'): 'Time series panel',
-    ('GET', '/api/campus-electrical/{name}/island/report'): 'Campus electrical panel',
-    ('GET', '/api/campus-electrical/{name}/milp'): 'Campus electrical panel',
     ('GET', '/api/campus-electrical/{name}/owner-assets'): 'Campus electrical panel',
     ('GET', '/api/guides'): 'Help, guides panel',
     ('GET', '/api/projects/{name}/reports/{report_id}/figures/{figure_id}'): 'Reports panel',
@@ -194,17 +188,9 @@ KNOWN_GAPS: dict[tuple[str, str], str] = {
     ('GET', '/api/results/investment_case/export.xlsx'): 'Results panel',
     ('GET', '/api/results/process_uc_check'): 'Results panel',
     ('GET', '/api/results/process_view'): 'Results panel',
-    ('POST', '/api/campus-electrical/{name}/island/cuts/apply/cancel'): 'Campus electrical panel',
     ('POST', '/api/campus-electrical/{name}/island/preset'): 'Campus electrical panel',
-    ('POST', '/api/campus-electrical/{name}/library/reset'): 'Campus electrical panel',
-    ('POST', '/api/campus-electrical/{name}/milp'): 'Campus electrical panel',
-    ('POST', '/api/campus-electrical/{name}/milp/cancel'): 'Campus electrical panel',
-    ('POST', '/api/gridspine/{name}/dispatch-source/external'): 'Control strategy, planning-to-dynamics study',
-    ('POST', '/api/gridspine/{name}/readback/{hour}'): 'Control strategy, planning-to-dynamics study',
     ('POST', '/api/projects/{name}/flow/ack'): 'Projects page / Workspace panel',
     ('POST', '/api/projects/{name}/profiles/shape'): 'Time series panel',
-    ('PUT', '/api/campus-electrical/{name}/campus'): 'Campus electrical panel',
-    ('PUT', '/api/campus-electrical/{name}/grid-readiness/limits/{item}'): 'Campus electrical panel',
 }
 _KNOWN_GAPS_CEILING = 70
 
