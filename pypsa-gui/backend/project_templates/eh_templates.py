@@ -271,7 +271,7 @@ NATIVE_PLANNING: dict[str, Planning] = {
 #: The single-year examples (E1d): one period, the start year, which dates the
 #: modelled week (or year); the end year is the horizon. True where the
 #: example ships an investment case, which needs a later end year.
-SINGLE_YEAR: dict[str, bool] = {"eh_datacenter": False, "eh_h2_hub": False,
+SINGLE_YEAR: dict[str, bool] = {"eh_datacenter": False, "eh_h2_hub": True,
                                 "eh_microgrid": True}
 
 
@@ -687,6 +687,10 @@ def dc_load_meta(template_id: str, spec) -> dict:
 # ── Industrial Hydrogen Hub (strong_grid) ──────────────────────────────────
 
 
+#: The single-year hub's existing rows; the rest are candidates.
+H2_HUB_EXISTING = ("wind_farm", "solar_park", "site_battery", "electrolyser", "h2_storage")
+
+
 def build_eh_h2_hub(load_spec=None, planning=None) -> pypsa.Network:
     """Grid-connected industrial site with wind, PV and an H₂ chain.
 
@@ -766,6 +770,14 @@ def build_eh_h2_hub(load_spec=None, planning=None) -> pypsa.Network:
     _outage(n, "links", "grid_import", 0.002, 12.0)
     _outage(n, "links", "electrolyser", 0.04, 48.0)
     _outage(n, "links", "fuel_cell", 0.05, 36.0)
+    # The hub as it stands is in service and sunk, as the island's below:
+    # the investment case's site today. None is extendable, so the LP is
+    # unchanged; the fuel cell is a candidate (its 10 MW floor included).
+    for frame in ("generators", "storage_units", "links", "stores"):
+        df = getattr(n, frame)
+        rows = [a for a in H2_HUB_EXISTING if a in df.index]
+        df.loc[rows, ["overnight_cost", "discount_rate"]] = [0.0, 0.07]
+        df.loc[rows, "lifetime"] = float("inf")
     return n
 
 
@@ -1371,17 +1383,19 @@ _SINGLE_YEAR_META = {tid: dict(TEMPLATE_META[tid]) for tid in ("eh_datacenter", 
 
 def _single_year_meta(template_id: str, planning: Planning) -> dict:
     """The data center's or H2 hub's metadata for entered years (E1d): the
-    shipped metadata and a ledger row for the dated week. One period and no
-    investment case, so the end year is recorded only."""
+    shipped metadata and a ledger row for the dated week. One period; the end
+    year is the investment case's where the example ships one (the H2 hub),
+    else recorded only."""
     import copy
 
     meta = copy.deepcopy(_SINGLE_YEAR_META[template_id])
+    end = ("the investment case runs to the end year" if SINGLE_YEAR[template_id]
+           else "a single period with no investment case, so the end year is recorded only")
     meta["ledger"] = [
         {"item": "planning period",
          "value": f"{planning.start_year} → {planning.end_year} (entered)", "source": "entered",
          "note": f"the representative week is dated {_week(planning)[0].date()} (the "
-                 f"example's {SNAPSHOTS[0].date()}); a single period with no investment case, "
-                 "so the end year is recorded only"},
+                 f"example's {SNAPSHOTS[0].date()}); {end}"},
         *meta.get("ledger", [])]
     return meta
 
