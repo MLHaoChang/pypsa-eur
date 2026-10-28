@@ -1978,12 +1978,13 @@ def _urdb_rate(data, item_index: int | None = None):
     return data
 
 
-def import_urdb_tariff(file_id: str, name: str, cyclic_year: bool = False,
-                       accept_partial: bool = False, valid_from: str | None = None,
-                       item_index: int | None = None, tariff_id: str | None = None,
-                       jurisdiction: str | None = None) -> dict:
-    """An UPLOADED URDB JSON file (never an LLM-emitted blob) → a Library tariff."""
-    from routers.library import UrdbImportIn, import_urdb as _h
+def _urdb_request(file_id: str, name: str, cyclic_year: bool = False,
+                  accept_partial: bool = False, valid_from: str | None = None,
+                  item_index: int | None = None, tariff_id: str | None = None,
+                  jurisdiction: str | None = None):
+    """The import body for an UPLOADED URDB JSON file, or the tool's refusal. Reads the
+    upload and writes nothing (the edit card calls it too)."""
+    from routers.library import UrdbImportIn
     from services import upload_service
 
     with _acting():   # identity before the file is read (review L4)
@@ -2008,6 +2009,18 @@ def import_urdb_tariff(file_id: str, name: str, cyclic_year: bool = False,
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={
             "error_kind": "urdb_invalid", "message": _safe_text(exc, 300)}) from exc
+    return body
+
+
+def import_urdb_tariff(file_id: str, name: str, cyclic_year: bool = False,
+                       accept_partial: bool = False, valid_from: str | None = None,
+                       item_index: int | None = None, tariff_id: str | None = None,
+                       jurisdiction: str | None = None) -> dict:
+    """An UPLOADED URDB JSON file (never an LLM-emitted blob) → a Library tariff."""
+    from routers.library import import_urdb as _h
+
+    body = _urdb_request(file_id, name, cyclic_year, accept_partial, valid_from, item_index,
+                         tariff_id, jurisdiction)
     out = _library_call(_h, body).model_dump(mode="json")
     refusals = out.get("refusals") or []
     out["refusals_total"] = len(refusals)
@@ -2019,13 +2032,11 @@ def import_urdb_tariff(file_id: str, name: str, cyclic_year: bool = False,
     return out
 
 
-def attach_tariff(name: str, version: int | None = None, replace_inline: bool = False) -> dict:
-    """Set `commercial.import_tariff_ref` to a Library tariff through the
-    solver-config route (which resolves and pins it). An inline tariff that is
-    not this item is never replaced silently (review M2)."""
-    from models.schemas import SolverConfigSchema
+def _attach_tariff_plan(name: str, version: int | None, replace_inline: bool) -> tuple[dict, dict, dict | None]:
+    """The Library ref, the commercial config and what an inline tariff loses, as
+    `attach_tariff` would store them. Pure: the Library is only read (the edit card calls it too)."""
     from routers.library import ItemKind, get_item as _get
-    from routers.simulation import get_solver_config as _cfg, update_solver_config as _put
+    from routers.simulation import get_solver_config as _cfg
 
     ref = _library_call(_get, ItemKind.tariff, name, version=version).ref.model_dump(mode="json")
     commercial = dict((_cfg() or {}).get("commercial") or {})
@@ -2065,6 +2076,17 @@ def attach_tariff(name: str, version: int | None = None, replace_inline: bool = 
     commercial.pop("import_tariff", None)
     commercial.pop("import_tariff_id", None)
     commercial["import_tariff_ref"] = ref
+    return ref, commercial, replaced
+
+
+def attach_tariff(name: str, version: int | None = None, replace_inline: bool = False) -> dict:
+    """Set `commercial.import_tariff_ref` to a Library tariff through the
+    solver-config route (which resolves and pins it). An inline tariff that is
+    not this item is never replaced silently (review M2)."""
+    from models.schemas import SolverConfigSchema
+    from routers.simulation import update_solver_config as _put
+
+    ref, commercial, replaced = _attach_tariff_plan(name, version, replace_inline)
     out = _library_call(_put, SolverConfigSchema(commercial=commercial))
     bound = (out.get("commercial") or {}).get("import_tariff") or {}
     return {"import_tariff_ref": ref,
@@ -2213,11 +2235,10 @@ def get_finance_inputs() -> dict:
     return _h()
 
 
-def set_finance_inputs(if_match: str, finance: dict | None = None, clear: bool = False) -> dict:
-    """Replace (or, with clear=true, remove) the finance inputs through
-    `PUT /api/simulation/finance`, always with the digest the model read
-    (gatekeeper F1: no '*', no implicit clear)."""
-    from routers.simulation import FinanceIn, put_finance as _h
+def _finance_request(if_match: str, finance: dict | None, clear: bool):
+    """The `PUT /finance` body and `If-Match` tag for `set_finance_inputs`, or the tool's
+    refusal (gatekeeper F1: no '*', no implicit clear). Pure (the edit card calls it too)."""
+    from routers.simulation import FinanceIn
 
     tag = (if_match or "").strip()
     if tag.strip('"').strip() in ("", "*"):
@@ -2234,7 +2255,17 @@ def set_finance_inputs(if_match: str, finance: dict | None = None, clear: bool =
             "error_kind": "finance_clear_invalid",
             "message": "pass the whole `finance` object, or clear=true to remove every "
                        "finance input"})
-    return _h(FinanceIn(finance=None if clear else finance), if_match=tag)
+    return FinanceIn(finance=None if clear else finance), tag
+
+
+def set_finance_inputs(if_match: str, finance: dict | None = None, clear: bool = False) -> dict:
+    """Replace (or, with clear=true, remove) the finance inputs through
+    `PUT /api/simulation/finance`, always with the digest the model read
+    (gatekeeper F1: no '*', no implicit clear)."""
+    from routers.simulation import put_finance as _h
+
+    body, tag = _finance_request(if_match, finance, clear)
+    return _h(body, if_match=tag)
 
 
 def get_poc_state() -> dict:
@@ -2349,22 +2380,15 @@ class _Unset:
 _UNSET = _Unset()
 
 
-def set_site_connection(poc_link: str, export_link: str | None | _Unset = _UNSET,
-                        timezone: str | None | _Unset = _UNSET) -> dict:
-    """Set the commercial root (`poc_link`, `export_link`, `timezone`) through
-    the solver-config route, keeping every other key of a stored commercial
-    config (the route keeps the value flows itself). An OMITTED `export_link`
-    or `timezone` keeps the stored value; an explicit null clears it. The
-    Links are checked first (`binding.check_site_connection`): they exist, are
-    one-way and point grid → site (PoC) and site → grid (export)."""
+def _site_connection_plan(poc_link: str, export_link, timezone) -> tuple[dict, object, bool]:
+    """The commercial config `set_site_connection` would store, checked and validated, and
+    whether none was stored before. Pure: nothing is written (the edit card calls it too)."""
     from pydantic import ValidationError
 
     from models.schemas import SolverConfigSchema
-    from routers.simulation import get_solver_config as _cfg, update_solver_config as _put
+    from routers.simulation import get_solver_config as _cfg
     from services.commercial import binding
 
-    with _acting():   # identity before the network is read
-        pass
     stored = (_cfg() or {}).get("commercial")
     created = not (isinstance(stored, dict) and stored.get("poc_link"))
     commercial = dict(stored) if isinstance(stored, dict) else {}
@@ -2387,6 +2411,23 @@ def set_site_connection(poc_link: str, export_link: str | None | _Unset = _UNSET
         message = str(errors[0].get("msg")) if errors else str(exc)
         raise HTTPException(status_code=422, detail={
             "error_kind": "site_connection_invalid", "message": message[:300]}) from exc
+    return commercial, body, created
+
+
+def set_site_connection(poc_link: str, export_link: str | None | _Unset = _UNSET,
+                        timezone: str | None | _Unset = _UNSET) -> dict:
+    """Set the commercial root (`poc_link`, `export_link`, `timezone`) through
+    the solver-config route, keeping every other key of a stored commercial
+    config (the route keeps the value flows itself). An OMITTED `export_link`
+    or `timezone` keeps the stored value; an explicit null clears it. The
+    Links are checked first (`binding.check_site_connection`): they exist, are
+    one-way and point grid → site (PoC) and site → grid (export)."""
+    from routers.simulation import update_solver_config as _put
+    from services.commercial import binding
+
+    with _acting():   # identity before the network is read
+        pass
+    commercial, body, created = _site_connection_plan(poc_link, export_link, timezone)
     try:
         out = _library_call(_put, body)
     except HTTPException as exc:
@@ -4552,17 +4593,22 @@ def gridspine_create_study(name: str, config: dict | None = None) -> dict:
         return _h(db, user, name, config=config)
 
 
+def dispatch_source_arg(from_dispatch: str | None, from_project: str | None):
+    """The `source` the service takes, from the tool's two optional arguments (the
+    edit card reads it the same way)."""
+    if from_project is not None:
+        return {"from_project": from_project}
+    if from_dispatch is not None:
+        return {"from_dispatch": from_dispatch}
+    return "generate"
+
+
 def gridspine_set_dispatch_source(
     project_id: str, from_dispatch: str | None = None, from_project: str | None = None,
 ) -> dict:
     from services.gridspine_service import set_dispatch_source as _h
     with _acting() as (db, user):
-        if from_project is not None:
-            source = {"from_project": from_project}
-        elif from_dispatch is not None:
-            source = {"from_dispatch": from_dispatch}
-        else:
-            source = "generate"
+        source = dispatch_source_arg(from_dispatch, from_project)
         return _h(db, _gridspine_project(db, user, project_id), source, user=user)
 
 
@@ -8580,13 +8626,8 @@ def _b2b_body_request(data: bytes, path: str):
                     "query_string": b""}, receive)
 
 
-def import_map_geometry(name: str, file_id: str, apply: bool = False, tolerance_m: float = 50.0) -> dict:
-    """
-    An UPLOADED GeoJSON/KML file of the active project through the map's import
-    route. The bytes are the upload's (never model-emitted); the route parses,
-    caps, lock-checks on apply and writes.
-    """
-    from routers.projects import import_map_geometry as _h
+def _map_geometry_upload(name: str, file_id: str) -> tuple[str, bytes]:
+    """`(active project, bytes)` of the geometry upload `file_id`; the edit card reads it the same way."""
     from services import upload_service
 
     with _acting():   # identity before the file is read
@@ -8600,7 +8641,18 @@ def import_map_geometry(name: str, file_id: str, apply: bool = False, tolerance_
             "message": f"That file was uploaded to the open project ({active}), so it "
                        f"can only be imported there. To import it into {name}, "
                        f"open {name} and upload the file again."})
-    data = upload_service.get_upload_bytes(active, file_id)
+    return active, upload_service.get_upload_bytes(active, file_id)
+
+
+def import_map_geometry(name: str, file_id: str, apply: bool = False, tolerance_m: float = 50.0) -> dict:
+    """
+    An UPLOADED GeoJSON/KML file of the active project through the map's import
+    route. The bytes are the upload's (never model-emitted); the route parses,
+    caps, lock-checks on apply and writes.
+    """
+    from routers.projects import import_map_geometry as _h
+
+    active, data = _map_geometry_upload(name, file_id)
     request = _b2b_body_request(data, f"/api/projects/{name}/map_layout/import")
     with _acting() as (db, user):
         # Async handler: driven inside the identity scope, so its db stays open.
