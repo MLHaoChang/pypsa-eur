@@ -111,6 +111,16 @@ describe('RefinePanel per-step removal', () => {
     expect(onRefined).not.toHaveBeenCalled()
   })
 
+  it('drops a refusal once the preview changes', async () => {
+    const user = userEvent.setup()
+    api.refine.mockRejectedValue(refusal({ error_kind: 'refine_replay', op: 'scale_peak_to', index: 1, message: 'x' }))
+    const { rerender } = renderPanel(REFINED)
+    await user.click(screen.getByRole('button', { name: 'Remove step 1 (scale an hour window)' }))
+    await screen.findByTestId('refine-undo-error')
+    rerender({ ...REFINED, job_id: 'job-9' })
+    await waitFor(() => expect(screen.queryByTestId('refine-undo-error')).toBeNull())
+  })
+
   it('says plainly when the series before the step is no longer kept', async () => {
     const user = userEvent.setup()
     api.refine.mockRejectedValue(refusal({

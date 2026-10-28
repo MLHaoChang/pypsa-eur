@@ -575,6 +575,9 @@ export function RefinePanel({
     onSuccess: r => { setFocusFor(r.job_id); onRefined(r) },
   })
   const recorded = (pending.refinements ?? []) as RefineOp[]
+  // A refusal belongs to the preview it was asked of.
+  const resetUndo = undo.reset
+  useEffect(() => resetUndo(), [pending.job_id, resetUndo])
   // After a removal the new preview replaces this one in place: focus stays
   // on the step list (or the panel, once no step is left).
   const [focusFor, setFocusFor] = useState<string | null>(null)
