@@ -21,8 +21,8 @@ units:
   ticket: issues/01-prototype-and-contracts.md
   depends_on: []
   decision_gates: []
-  status: not_started
-  accepted_evidence: null
+  status: in_review
+  accepted_evidence: null  # proposed evidence: sc-00-n/record.md; set on merge with the reviewed head
   primary_cases: []
   additional_applicable_cases: [V05, V06, V07, V08, V49, V53, V54, V55, V56, V57, V58, V59, V60, V64, V65, V67,
     V73, V74, V79, V91]
