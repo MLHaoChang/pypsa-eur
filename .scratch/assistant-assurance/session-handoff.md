@@ -872,7 +872,7 @@ Policy version 1. `get_timeseries` is the third checked read (`series_input_evid
 
 The guard refuses a series of more than 744 steps, or one whose facts would exceed 120 KiB, with the typed `series_too_long_to_check`. It is `inline` in `tool-error-kinds.json`; that kind's text is the only guard refusal the checked projection passes through.
 
-`tests/assurance_acceptance/test_p1_timeseries.py` has 38 cases: 19 red and 19 green on master (the green ones are refusals, which master gives anyway), and 38 / 38 after the change. Run it with `python -m pytest -q -o addopts='' tests/assurance_acceptance/test_p1_timeseries.py`.
+`tests/assurance_acceptance/test_p1_timeseries.py` has 36 cases: 17 red and 19 green on master (the green ones are refusals, which master gives anyway), and 36 / 36 after the change. `test_p1_revocation.py` gains the `get_timeseries` read in its revoked-after-capture cases (membership, disabled). Run it with `python -m pytest -q -o addopts='' tests/assurance_acceptance/test_p1_timeseries.py`.
 
 Mutants, one at a time, each red on its own case:
 - digest over `repr(series)`: the middle-step edit (rows 32/64 and 372/744);
