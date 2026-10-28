@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Site 3D can attach buildings to existing loads, process units and inventory, split an aggregate load across buildings, and place existing equipment on the ground or a roof through a reviewed preview; scene buildings now count as obstacles in the placement check, and an unreachable map data service shows a plain message with Retry.

@@ -385,22 +385,57 @@ def period_years(years: list[int], horizon_end: int) -> dict[int, int]:
     return {y: e - y for y, e in zip(years, ends)}
 
 
+#: What one period's snapshots stand for: one representative week repeated
+#: 8760/168 times (every staged template today), or one chronological year of
+#: hours (grid-to-process 09).
+TIME_BASES = ("week", "year")
+
+
+def year_snapshots(snapshots: pd.Index) -> pd.DatetimeIndex:
+    """The ``year`` base's timesteps: exactly 8,760 consecutive hourly
+    timestamps. A leap year (8,784 h) or any span holding 29 February is
+    refused, never tiled or trimmed, and so is any other step: min up and down times and a delivery interval are in
+    hours, so one snapshot must be one hour."""
+    idx = pd.DatetimeIndex(snapshots)
+    if len(idx) == 8784:
+        raise ValueError(f"time_base='year': the year {idx[0].year} has 8,784 hourly snapshots "
+                         "(a leap year); supply a 365-day year of 8,760 hours")
+    if len(idx) != 8760:
+        raise ValueError(f"time_base='year' needs 8,760 hourly snapshots, the network has {len(idx)}")
+    if ((idx.month == 2) & (idx.day == 29)).any():
+        raise ValueError("time_base='year': the snapshots include 29 February; supply a span of 8,760 hours "
+                         "without a leap day")
+    if not (idx[1:] - idx[:-1] == pd.Timedelta(hours=1)).all():
+        raise ValueError("time_base='year' needs consecutive hourly snapshots (1 h apart); "
+                         f"the network's step is {pd.infer_freq(idx) or 'irregular'}")
+    return idx
+
+
 def stage_network(n: pypsa.Network, years: list[int], *, load_scale: dict[int, dict[str, float]],
                   energization: dict[str, list[float]], weights: dict[int, int],
-                  existing: tuple[str, ...], candidates) -> pypsa.Network:
+                  existing: tuple[str, ...], candidates,
+                  time_base: str = "week") -> pypsa.Network:
     """A single-period network ``n`` (one representative week) as a plan over
     ``years``: the week repeated per period with each load scaled by
     ``load_scale[year][load]``, the import Links capped per period by
     ``energization[link]`` (MW, one per year), ``existing`` typed at an
     overnight cost of 0, and ``candidates(n, year)`` adding that period's
-    candidate rows (``build_year`` = year)."""
+    candidate rows (``build_year`` = year).
+
+    ``time_base="year"`` (grid-to-process 09, design §4.2, D4): ``n`` holds one
+    chronological year of 8,760 hourly snapshots instead, repeated per period
+    with every weighting 1 (one snapshot is one hour), so an inventory carries
+    product across weeks (``year_snapshots`` says what it accepts)."""
+    if time_base not in TIME_BASES:
+        raise ValueError(f"time_base: {time_base!r} is not one of {TIME_BASES}")
+    timesteps = SNAPSHOTS if time_base == "week" else year_snapshots(n.snapshots)
     flat = {(frame, attr): getattr(n, frame)[attr].copy()
             for frame, attr in (("generators_t", "p_max_pu"), ("generators_t", "marginal_cost"),
                                 ("loads_t", "p_set"))}
-    snaps = pd.MultiIndex.from_product([years, SNAPSHOTS], names=["period", "timestep"])
+    snaps = pd.MultiIndex.from_product([years, timesteps], names=["period", "timestep"])
     n.set_snapshots(snaps)
     n.investment_periods = years
-    n.snapshot_weightings.loc[:, ["objective", "generators"]] = WEIGHT
+    n.snapshot_weightings.loc[:, ["objective", "generators"]] = WEIGHT if time_base == "week" else 1.0
     n.snapshot_weightings.loc[:, "stores"] = 1.0                    # hours per snapshot (S0)
     n.investment_period_weightings["years"] = [float(weights[y]) for y in years]
     n.investment_period_weightings["objective"] = [float(weights[y]) for y in years]
@@ -414,7 +449,7 @@ def stage_network(n: pypsa.Network, years: list[int], *, load_scale: dict[int, d
         for load, scale in load_scale[y].items():
             p_set.loc[y, load] = (p_set.loc[y, load] * scale).to_numpy()
     n.links_t["eh_energization_mw"] = pd.DataFrame(
-        {link: np.repeat(mw, len(SNAPSHOTS)) for link, mw in energization.items()}, index=snaps)
+        {link: np.repeat(mw, len(timesteps)) for link, mw in energization.items()}, index=snaps)
     for frame in ("generators", "storage_units", "links"):
         df = getattr(n, frame)
         rows = [a for a in existing if a in df.index]

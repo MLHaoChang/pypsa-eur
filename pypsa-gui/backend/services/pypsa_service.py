@@ -257,6 +257,23 @@ class PyPSAService:
     def bind_request_scratch(cls, key: str | None):
         return cls._request_scratch.set(key)
 
+    @classmethod
+    def bind_request_scope(cls, ctx: ProjectContext | None, slot: str | None, scratch: str | None) -> tuple:
+        """The four request bindings together: context, P33b box, registry
+        slot and scratch slot. The request middleware and the harness runner
+        (`harness/runner.py`) both bind through here, so a step that swaps
+        context lands in the right slot either way."""
+        return (cls.bind_request_context(ctx), cls.bind_request_box([ctx]),
+                cls.bind_request_slot(slot), cls.bind_request_scratch(scratch))
+
+    @classmethod
+    def reset_request_scope(cls, tokens: tuple) -> None:
+        ctx, box, slot, scratch = tokens
+        cls._request_scratch.reset(scratch)
+        cls._request_slot.reset(slot)
+        cls._request_ctx_box.reset(box)
+        cls._request_ctx.reset(ctx)
+
     # A chat turn's binding CELL — a one-element list shared by reference.
     #
     # `_request_ctx` is a ContextVar, and a `set()` only reaches code running

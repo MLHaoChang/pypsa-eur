@@ -5283,6 +5283,7 @@ _COMPARE_FOCUS_TO_TAB = {
     "overview": "overview",
     "capacity": "capacity",
     "dispatch": "dispatch",
+    "loading": "loading",
     "economics": "economics",
     "emissions": "emissions",
     "prices": "prices",
@@ -5295,6 +5296,7 @@ _COMPARE_FOCUS_TO_TAB = {
 _FOCUS_SUMMARY_KEYS = {
     "capacity": "capacity",
     "dispatch": "dispatch",
+    "loading": "loading",
     "economics": "economics",
     "emissions": "emissions",
     "prices": "prices",
@@ -9070,6 +9072,7 @@ from services.experiments import start_experiment, prepare_experiment, list_expe
 from harness.experiment_execution import advance_experiment, refresh_experiment, cancel_experiment
 from harness.experiment_reconciliation import reconcile_experiment
 from harness.experiment_comparison import compare_experiments, export_experiment_comparison
+from harness.sensitivity_comparison import compare_sensitivities, export_sensitivity_comparison
 from services.assistant_tasks import list_tasks, start_task, get_task, resume_task, cancel_task, resolve_task_step
 from services.assistant_tools import (find_capabilities, get_file_delivery, inspect_import, import_uploaded_network,
                                       preview_project_changes, apply_project_changes, create_chart, build_delivery)
@@ -9098,6 +9101,8 @@ DISPATCHERS: dict[str, Any] = {
     "reconcile_experiment": reconcile_experiment,
     "compare_experiments": compare_experiments,
     "export_experiment_comparison": export_experiment_comparison,
+    "compare_sensitivities": compare_sensitivities,
+    "export_sensitivity_comparison": export_sensitivity_comparison,
     "list_experiments": list_experiments,
     "get_experiment": get_experiment,
     "list_tasks": list_tasks,
@@ -9716,7 +9721,22 @@ def _lock_gated_tool_names() -> frozenset[str]:
     return frozenset(gated)
 
 
-def _check_foreign_lock(tool_name: str) -> None:
+_RUN_CONTROLS = frozenset({"cancel_task", "resume_task", "resolve_task_step"})
+
+
+def _owns_task(task_id) -> bool:
+    """The caller can read `task_id` in the active project (owner and project match)."""
+    from services import assistant_tasks
+    if not isinstance(task_id, str):
+        return False
+    try:
+        assistant_tasks._read(task_id)
+    except HTTPException:
+        return False
+    return True
+
+
+def _check_foreign_lock(tool_name: str, task_id=None) -> None:
     """
     Raise 409 `project_locked` when another user holds the active project's
     edit lock. Same predicate as the middleware gate in `main.py`.
@@ -9724,9 +9744,16 @@ def _check_foreign_lock(tool_name: str) -> None:
     CHECK ONLY — never an acquire. A free or expired lock, the acting user's
     own lock, local mode, an unbound scratch context and a tool call with no
     acting identity all pass through untouched.
+
+    A harness run's hold also refuses, except a task control (`_RUN_CONTROLS`)
+    naming a task the caller owns: the user can always stop, resume or
+    reconcile their run (GK B plan condition 4).
     """
     import local_mode
+    from services import harness_locks
 
+    if harness_locks.refuses_active() and not (tool_name in _RUN_CONTROLS and _owns_task(task_id)):
+        raise HTTPException(status_code=409, detail=harness_locks.detail())
     if local_mode.is_local_mode():
         return  # D7 — one identity, no lock semantics
     user_id = _ACTING_USER_ID.get()
@@ -9795,7 +9822,7 @@ def _lock_gated(tool_name: str, handler):
 
     @functools.wraps(handler)
     def _wrapped(*args, **kwargs):
-        _check_foreign_lock(tool_name)
+        _check_foreign_lock(tool_name, kwargs.get("task_id", args[0] if args else None))
         return handler(*args, **kwargs)
 
     return _wrapped

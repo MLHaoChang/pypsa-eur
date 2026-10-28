@@ -273,3 +273,18 @@ Branch `claude/lc03-retained-prices` (stacked on PR-F). Plan GO from GK B
   tests/test_result_views.py tests/test_compare_facade_surface.py` (148) and
   `tests/test_retained_summary.py tests/test_retained_loadflow.py
   tests/test_loadflow_navigation.py tests/test_openai_tool_selection.py` (419) pass.
+
+### PR-H, emissions family (2026-10-28)
+
+Branch `claude/lc03-retained-emissions` (stacked on PR-G). A plain kept kind,
+like capacity: `_results_family('results_emissions', ..., ('emissions',))`,
+the Emissions view's `historical_section`, the catalogue's run_id list.
+
+- RED/oracle (`tests/test_retained_emissions.py`): oj-grid with gas at
+  0.2 tCO2/MWh, solved, then Gas efficiency 0.5 and solved again; the
+  dispatch is unchanged, so the older run keeps 0.2 x sum(90 - 80 pu_t) and the
+  current read is twice that. Current run = current read; legacy refusal.
+- Mutation: the family keeping another kind fails the older-run test
+  (unavailable instead of ok).
+- Oversized emissions (thousands of generators) take the existing rule: the
+  section is not stored and the run refuses.

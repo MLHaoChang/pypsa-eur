@@ -42,6 +42,8 @@ Probe tests that monkeypatch `_probe` can hide dispatcher-signature bugs: ask fo
 
 When a PR changes a validation guard, confirm by mutation that its test fails for the guard, not for a downstream check (#807's decoy case).
 
+`test_json_fragments`' real-file assertion must not depend on any declaration list being non-empty.
+
 ## Rulings
 
 - `profile_location_missing` skips uploaded and network_native profiles (`readiness.profile_kind`).

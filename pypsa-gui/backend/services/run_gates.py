@@ -128,6 +128,17 @@ def _ic_counterfactual(env):
     return NoEvidence(fact["state"], f"{fact['state']}: {', '.join(fact['reasons'])}")
 
 
+def _ic_baseline_keeps(env):
+    """The owned existing assets the case's baseline keeps (study harness
+    20): the names, else no evidence with the state and the reasons (an
+    asset of the template's declared set the baseline drops)."""
+    from services import ic_counterfactual as ic
+    fact = ic.read_baseline_keeps(env.ctx, lambda fn: _on(env.ctx, fn), _template(env))
+    if fact["state"] == ic.ESTABLISHED:
+        return fact["kept"]
+    return NoEvidence(fact["state"], f"{fact['state']}: {', '.join(fact['reasons'])}")
+
+
 def _run(key):
     return lambda env: env.task.get("run", {}).get(key)
 
@@ -150,6 +161,8 @@ FACTS: dict[str, Fact] = {
     "solve.status": Fact("routers.solve_queue._visible_job_or_404", "condition", None, _solve_status),
     "fresh": Fact("services.workflow_tools.solve_freshness", "results_current", None, _fresh),
     "ic.counterfactual": Fact("services.ic_counterfactual.read", "state", None, _ic_counterfactual),
+    "ic.baseline_keeps": Fact("services.ic_counterfactual.read_baseline_keeps", "kept", None,
+                              _ic_baseline_keeps),
 }
 
 

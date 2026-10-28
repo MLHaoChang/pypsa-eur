@@ -658,9 +658,14 @@ def _network_copy(network):
 def _record_solve_inputs(network, config):
     """Called under the existing solve lock, after modelling inputs restore."""
     active = PyPSAService.get_active_context()
-    if active.network is network:
-        ctx = copy.copy(active)
-        ctx.solver_state = {**active.solver_state, "solver_config": config}
+    # A queued solve of another project runs in `solving_context(ctx)`: its
+    # own uploaded series (user_ts) belong in the fingerprint, as every later
+    # read hydrates them from disk (LC-18).
+    solving = PyPSAService._transient_target(ensure=False)
+    owner = next((c for c in (active, solving) if c is not None and c.network is network), None)
+    if owner is not None:
+        ctx = copy.copy(owner)
+        ctx.solver_state = {**owner.solver_state, "solver_config": config}
     else:
         ctx = PyPSAService.build_context()
         ctx.network = network

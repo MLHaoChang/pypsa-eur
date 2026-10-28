@@ -80,6 +80,7 @@ SUMMARY_SECTION = 'results_summary'
 CAPACITY_SECTION = 'results_capacity'
 DISPATCH_SECTION = 'results_dispatch'
 PRICES_SECTION = 'results_prices'
+EMISSIONS_SECTION = 'results_emissions'
 
 
 def _capture_kinds(kinds: tuple[str, ...]) -> dict | None:
@@ -155,6 +156,8 @@ ADAPTERS: tuple[Retained, ...] = (
                    _dispatch_digest, dispatch_digest),
     _digest_family(PRICES_SECTION, 'price results', ('prices', 'price_drivers'),
                    _prices_digest, prices_digest),
+    _results_family(EMISSIONS_SECTION, 'historical_results_unavailable', 'emissions results',
+                    ('emissions',)),
 )
 
 # get_results kind -> the one section that keeps it.
