@@ -240,3 +240,29 @@ Branch `claude/lc03-retained-dispatch` (stacked on PR-E). Plan GO from GK B
   parity with Compare's `dispatch_gwh_by_carrier`, oj-grid hand oracle
   gas = sum(90 - 80 pu_t), current = kept digest, legacy refusal).
   Mutation: dropping the argument refusal fails its test at the refusal.
+
+### PR-G, prices family (2026-10-28)
+
+Branch `claude/lc03-retained-prices` (stacked on PR-F). Plan GO from GK B
+(bounded digest, option 1), with its conditions.
+
+- `services/results/prices_digest.py`: merit-order-corrected prices (the
+  shared `corrected_marginal_prices`), weights `snapshot_weightings.objective`.
+  Overall and per bus carrier: weighted mean, median, p90 (Compare's rule,
+  lifted to `compare.prices.weighted_stats`), max, min; per bus: mean, max
+  and its snapshot, min. Load-weighted mean = sum(p x load x w) / sum(load x w)
+  over finite cells, load from `loads_t.p` (negative counted as none); a bus
+  without load is out of it but in the plain stats; no load gives null with
+  `load_weighted_mean_reason: no_load`. inf is null (a NaN dual is 0 on every
+  price surface: the shared correction fills it). Multi-period refuses.
+- `price_drivers` is kept beside it as the route serves it, plus `rows_omitted`.
+  Buses (by max price, then name) and price_drivers rows are trimmed from the
+  tail, the longer list first, then carriers, under 12 KB.
+- `Retained.digest` is now a `Digest(build, for_kind, fields)` row; dispatch
+  and prices both use `_digest_family`, and `_results_for_run` reads
+  `digest.for_kind`/`digest.fields` (no family-specific import).
+- Tests: `tests/test_retained_prices.py` (objective vs generators weighting,
+  load shape, no load, unloaded bus, ordering, inf, multi-period, 2,000 buses
+  x 8,760 h + 200 driver rows under the budget, Compare parity overall and per
+  carrier, oj-grid hand oracle 50 EUR/MWh at every bus with B1/B2 out of the
+  load weighting, current = kept digest, argument refusal, legacy refusal).
