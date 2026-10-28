@@ -36,12 +36,14 @@ The refine ops are `scale_peak_to`, `scale_window`, `set_floor`, `set_cap`, `shi
 - A `rule` window is moved as the explicit MM-DD window the rule produces, and the record says it was converted.
 - A dated window (YYYY-MM-DD) moved outside the source year, or a move that produces an MM-DD window refused by the generator's own rules (longer than half a year when wrapping), is refused with the generator's reason.
 - Any other series (load, must-run, derating, prices) refuses the op: "this series has no maintenance window to move".
+- The re-generation is deterministic (GK B, binding, 2026-10-28): it reuses the recorded parameters and seed, so moving a window and moving it back reproduces the original series bit for bit. The plan says how.
 - The op is recorded in `refinements` like the others, so undo (05) and replay (06) work on it.
 - The copilot can propose it ("move the maintenance window two weeks later") behind the old→new card, and the editor's op controls offer it on maintenance series.
 
 **Acceptance criteria:**
 - [ ] On an availability series with one planned outage, "two weeks later" moves only that outage. Every hour outside the old and new windows is unchanged.
 - [ ] With two windows and no index, the op is refused and the refusal names both.
+- [ ] Moving a window by +14d and then −14d returns the original series exactly.
 - [ ] On a load series, the op is refused.
 - [ ] A dated window pushed past the source year is refused.
 - [ ] Engine tests cover each case, and a chat-tool test covers the proposal path.
