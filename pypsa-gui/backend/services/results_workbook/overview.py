@@ -13,7 +13,8 @@ One column per investment period and a Horizon column, from the optimisation:
 * fuel: PyPSA's marginal cost does not separate fuel from variable O&M, so the
   row is `not_established` rather than a guessed split;
 * total system cost (`cost_breakdown.total`, which reconciles with the LP
-  objective), energy served (load less lost load, energy weighting) and the
+  objective) with a reconciliation row against capex + opex, energy served
+  (load less lost load, on the same weighting as the costs) and the
   system LCOE as a live formula over those two cells;
 * LCOE per carrier and period (`economics_by_carrier.lcoe_eur_per_mwh`).
 
@@ -38,7 +39,7 @@ from typing import Any
 from openpyxl.utils import get_column_letter
 
 from services.results_workbook import charts
-from services.results_workbook.cells import NOT_ESTABLISHED, formula, heading, put, width
+from services.results_workbook.cells import formula, heading, put, width
 
 __all__ = ["CASE_ROWS", "OverviewFigures", "Line", "RUN_THE_CASE", "TITLE",
            "overview_figures", "write_overview"]
@@ -97,7 +98,11 @@ def _econ_sum(by_carrier: dict, key: str, periods: list[str]) -> tuple[float | N
 
 
 def _energy_served(n, lost_load: dict | None, result_df) -> tuple[float | None, dict[str, float]]:
-    """MWh of load served: Σ load × energy weight, less the lost-load capture."""
+    """MWh of load served: Σ load less the lost-load capture, on the COST
+    columns' weighting (snapshot objective weighting × the period's years), so
+    the system LCOE divides like by like (GK B plan condition 3). A capture
+    whose lost energy is unknown makes the figure unknown, never "demand
+    minus 0"."""
     import pandas as pd
 
     from services.compare.support import _per_period_groupby
@@ -105,12 +110,14 @@ def _energy_served(n, lost_load: dict | None, result_df) -> tuple[float | None, 
 
     sns = n.snapshots
     is_multi = isinstance(sns, pd.MultiIndex)
-    w = snapshot_weights(n, "generators")
+    w = snapshot_weights(n, "objective")
     p = result_df(n, "loads_t", "p")
     if p is None or getattr(p, "empty", True):
         return None, {}
     served = p.reindex(sns).fillna(0.0).astype(float).sum(axis=1)
     ll = (lost_load or {}).get("lost_load_t")
+    if isinstance(lost_load, dict) and ll is None and lost_load.get("lost_load_total_mwh", 0.0) is None:
+        return None, {}
     if ll is not None and not getattr(ll, "empty", True):
         served = served - ll.reindex(sns).fillna(0.0).astype(float).sum(axis=1)
     weighted = served.mul(w, axis=0)
@@ -179,7 +186,7 @@ def overview_figures(n, cfg, lost_load: dict | None, result_df) -> OverviewFigur
         Line("energy_served", "Energy served", "GWh",
              None if energy_mwh is None else energy_mwh / 1e3,
              {p: (energy_pp[p] / 1e3 if p in energy_pp else None) for p in periods},
-             "load less lost load, energy weighting"),
+             "load less lost load, on the cost columns' weighting"),
         # The value is a formula over the two cells above (write_overview).
         Line("system_lcoe", "System LCOE", "EUR/MWh", None, {p: None for p in periods},
              "total system cost / energy served (live formula)"),
@@ -240,38 +247,86 @@ def _cash_flow(report) -> tuple[list[int], list[float], float] | None:
 
 # ── writing ──────────────────────────────────────────────────────────────
 
-def write_overview(ws, figs: OverviewFigures, report) -> dict[str, Any]:
-    """Write the sheet; returns the cell map the tests and About read."""
+def _num(ws, row: int, col: int, value: float | None) -> bool:
+    """A number, or an EMPTY cell (the reason goes in the row's note): a
+    formula or a SUM never reads `not_established` text or a 0 for it."""
+    if value is None:
+        return False
+    ws.cell(row=row, column=col).value = value
+    return True
+
+
+def _is_num(ws, row: int, col: int) -> bool:
+    v = ws.cell(row, col).value
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _missing(note: str, cols: list[str]) -> str:
+    return f"{note}; not_established: {', '.join(cols)}" if cols else note
+
+
+def write_overview(ws, figs: OverviewFigures, report, case_state: dict | None = None
+                   ) -> dict[str, Any]:
+    """Write the sheet; returns the cell map the tests and About read.
+    `case_state` is `investment_case_runner.staleness(...)` for the stored
+    report: a stale case's figures are not shown beside this run's."""
     ws.title = TITLE
-    P = figs.periods
-    ncol = 1 + len(P) + 1
-    horizon_col = ncol
-    unit_col, src_col = ncol + 1, ncol + 2
+    periods = figs.periods
+    headers = periods + ["Horizon"]
+    horizon_col = 1 + len(headers)
+    unit_col, src_col = horizon_col + 1, horizon_col + 2
     heading(ws, 1, ["Overview: investment-grade KPIs over the simulation horizon"])
-    put(ws, 2, 1, "Costs in M EUR as the optimisation counts them (period columns: the "
-                  "period's years; Horizon: their sum). not_established: the figure could "
-                  "not be computed from this run, and no number stands in for it.")
-    heading(ws, _HEADER_ROW, ["Metric"] + P + ["Horizon", "Unit", "Source / note"])
+    put(ws, 2, 1, "Costs in M EUR, undiscounted: each period column is the period's cost "
+                  "(snapshot objective weighting × the period's years); Horizon is the sum of "
+                  "the periods. Energy uses the same weighting, so each LCOE divides like by "
+                  "like. An empty cell is not_established: the note on its row says why, and "
+                  "no number stands in for it.")
+    heading(ws, _HEADER_ROW, ["Metric"] + headers + ["Unit", "Source / note"])
     rows: dict[str, int] = {}
     r = _HEADER_ROW + 1
     for ln in figs.lines:
         rows[ln.key] = r
         put(ws, r, 1, ln.label)
-        for j, p in enumerate(P, start=2):
-            put(ws, r, j, ln.by_period.get(p))
-        put(ws, r, horizon_col, ln.total)
+        values = [ln.by_period.get(p) for p in periods] + [ln.total]
+        absent = [h for j, (h, v) in enumerate(zip(headers, values), start=2)
+                  if not _num(ws, r, j, v)]
         put(ws, r, unit_col, ln.unit)
-        put(ws, r, src_col, ln.source if not ln.note else f"{ln.source}: {ln.note}")
+        note = ln.source if not ln.note else f"{ln.source}: {ln.note}"
+        put(ws, r, src_col, note if ln.key == "system_lcoe" else _missing(note, absent))
         r += 1
-    # System LCOE: M EUR / GWh × 1000 = EUR/MWh, live over the two cells above.
-    lr, cr, er = rows["system_lcoe"], rows["system_cost"], rows["energy_served"]
-    for j in range(2, horizon_col + 1):
-        L = get_column_letter(j)
-        c, e = ws.cell(cr, j).value, ws.cell(er, j).value
-        if isinstance(c, (int, float)) and isinstance(e, (int, float)) and e > 0:
-            formula(ws, lr, j, f"={L}{cr}*1000/{L}{er}")
-        else:
-            put(ws, lr, j, None)
+
+    def live(row: int, expr_of, inputs: tuple[int, ...], why: str, positive: int | None = None):
+        """A formula per column over `inputs` rows, only where every input is a
+        number (and `positive` > 0); elsewhere the cell stays empty."""
+        absent = []
+        for j, h in enumerate(headers, start=2):
+            col = get_column_letter(j)
+            ok = all(_is_num(ws, i, j) for i in inputs) and (
+                positive is None or ws.cell(positive, j).value > 0)
+            if ok:
+                formula(ws, row, j, expr_of(col))
+            else:
+                absent.append(h)
+        if absent:
+            put(ws, row, src_col, f"{ws.cell(row, src_col).value}; not_established "
+                                  f"({why}): {', '.join(absent)}")
+
+    cost, energy = rows["system_cost"], rows["energy_served"]
+    live(rows["system_lcoe"], lambda c: f"={c}{cost}*1000/{c}{energy}", (cost, energy),
+         "cost or energy served not established", positive=energy)
+    # Reconciliation: what the component rows leave unexplained in the total.
+    rec = r
+    rows["reconciliation"] = rec
+    cap, op = rows["capex_annualised"], rows["opex"]
+    put(ws, rec, 1, "Reconciliation: total system cost − (annualised capex + opex)")
+    put(ws, rec, unit_col, "M EUR")
+    put(ws, rec, src_col, "residual between cost_breakdown.total (n.statistics, the LP's "
+                          "costs) and economics_by_carrier's capex + opex: opex there also "
+                          "counts storage charging at bus prices, the curtailment penalty and "
+                          "lost load at VOLL; a non-zero residual is these, not a lost cost")
+    live(rec, lambda c: f"={c}{cost}-({c}{cap}+{c}{op})", (cost, cap, op),
+         "an input row is not established")
+    r += 1
     for note in figs.notes:
         put(ws, r, 1, note)
         r += 1
@@ -281,39 +336,50 @@ def write_overview(ws, figs: OverviewFigures, report) -> dict[str, Any]:
     put(ws, r, 1, "LCOE by carrier (EUR/MWh; source economics_by_carrier.lcoe_eur_per_mwh)")
     r += 1
     lcoe_header = r
-    heading(ws, r, ["Carrier"] + P + ["Horizon"])
+    heading(ws, r, ["Carrier"] + headers + ["Unit", "Note"])
     for carrier, (total, pp) in figs.lcoe_by_carrier.items():
         r += 1
         put(ws, r, 1, carrier)
-        for j, p in enumerate(P, start=2):
-            put(ws, r, j, pp.get(p))
-        put(ws, r, horizon_col, total)
+        values = [pp.get(p) for p in periods] + [total]
+        absent = [h for j, (h, v) in enumerate(zip(headers, values), start=2)
+                  if not _num(ws, r, j, v)]
+        put(ws, r, unit_col, "EUR/MWh")
+        if absent:
+            put(ws, r, src_col, _missing("no LCOE where the carrier served no energy", absent))
     lcoe_last = r
 
     # Investment case.
+    stale = bool(report is not None and case_state and case_state.get("stale"))
     r += 2
     put(ws, r, 1, "Investment case")
+    if stale:
+        changed = ", ".join(case_state.get("changed") or []) or case_state.get("reason") or "?"
+        put(ws, r, 2, f"investment case from an earlier run (changed since: {changed}); its "
+                      f"figures are not shown beside this run's. {RUN_THE_CASE} again.")
     r += 1
     heading(ws, r, ["KPI", "Value", "Unit", "Source / note"])
     case_rows: dict[str, int] = {}
-    src = (f"investment case report {report.case_id}" if report is not None else None)
+    src = f"investment case report {report.case_id}" if report is not None else None
     for key, label, unit, read in CASE_ROWS:
         r += 1
         case_rows[key] = r
         put(ws, r, 1, label)
         put(ws, r, 3, unit)
         if report is None:
-            put(ws, r, 2, None)
-            put(ws, r, 4, RUN_THE_CASE)
+            put(ws, r, 4, f"not_established: {RUN_THE_CASE}")
+            continue
+        if stale:
+            put(ws, r, 4, f"not_established: the stored case is from an earlier run; "
+                          f"{RUN_THE_CASE} again")
             continue
         value = _finite(read(report))
-        put(ws, r, 2, value)
+        _num(ws, r, 2, value)
         put(ws, r, 4, src if value is not None
-            else f"{src}: not established by the case (see Case About)")
+            else f"{src}: not_established by the case (see Case About)")
 
     cash: dict[str, Any] = {}
-    flow = _cash_flow(report) if report is not None else None
-    if report is not None and flow is None:
+    flow = _cash_flow(report) if report is not None and not stale else None
+    if report is not None and not stale and flow is None:
         r += 2
         put(ws, r, 1, "Cash flow: the case's project post-tax cash or WACC is not "
                       "established, so no live NPV formula is written.")
@@ -338,6 +404,8 @@ def write_overview(ws, figs: OverviewFigures, report) -> dict[str, Any]:
             formula(ws, r, 5, f"=C{r}*D{r}")
             formula(ws, r, 6, f"=E{r}" if i == 0 else f"=F{r - 1}+E{r}")
         last = r
+        # finance.metrics.npv: index 0 undiscounted, end-of-year; Excel's NPV
+        # discounts its first value one period, so CF0 stays outside it.
         npv = f"=C{first}" + (f"+NPV({rate_cell},C{first + 1}:C{last})" if last > first else "")
         r += 2
         put(ws, r, 1, "NPV (live formula)")
@@ -348,9 +416,8 @@ def write_overview(ws, figs: OverviewFigures, report) -> dict[str, Any]:
         formula(ws, r, 2, f"=SUM(E{first}:E{last})")
         r += 1
         put(ws, r, 1, "NPV in the stored report")
-        put(ws, r, 2, _finite(report.npv_at_wacc))
+        _num(ws, r, 2, _finite(report.npv_at_wacc))
         put(ws, r, 3, "static: does not move when the rate or a cash flow is edited")
-        # The KPI row reads the live NPV.
         formula(ws, case_rows["npv_project_post_tax"], 2, f"=B{npv_row}")
         put(ws, case_rows["npv_project_post_tax"], 4,
             f"{src}: live formula over the cash flow below")
@@ -359,9 +426,8 @@ def write_overview(ws, figs: OverviewFigures, report) -> dict[str, Any]:
 
     # Charts, to the right of the tables.
     anchor_col = get_column_letter(src_col + 2)
-    data_last = 1 + len(P) if P else horizon_col
-    data_first_col = 2 if P else horizon_col
-    cap, op = rows["capex_annualised"], rows["opex"]
+    data_last = 1 + len(periods) if periods else horizon_col
+    data_first_col = 2 if periods else horizon_col
     made = [charts.bar(ws, title="Capex (annualised) vs opex by period", stacked=True,
                        from_rows=True, data=(1, cap, data_last, op),
                        cats=(data_first_col, _HEADER_ROW, data_last, _HEADER_ROW),
@@ -379,6 +445,6 @@ def write_overview(ws, figs: OverviewFigures, report) -> dict[str, Any]:
                                     anchor=f"{anchor_col}{_HEADER_ROW + 40}",
                                     y_title="EUR", line_title="cumulative discounted, EUR"))
     width(ws, {"A": 52, get_column_letter(src_col): 60})
-    return {"rows": rows, "horizon_col": horizon_col, "periods": P,
+    return {"rows": rows, "horizon_col": horizon_col, "periods": periods,
             "lcoe": (lcoe_header, lcoe_last), "case_rows": case_rows, "cash": cash,
-            "charts": len(made), "not_established": NOT_ESTABLISHED}
+            "charts": len(made), "case_stale": stale}

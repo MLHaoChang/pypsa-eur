@@ -60,6 +60,9 @@ class WorkbookInputs:
     # stored run although its inputs changed since the solve.
     freshness: dict = field(default_factory=dict)
     stored: bool = False
+    # `investment_case_runner.staleness(...)` of the stored report against the
+    # current inputs: a stale case is labelled, its figures not shown.
+    case_state: dict | None = None
     # The latest completed run's summary (`run_evidence.list_project_runs`), if any.
     run: dict | None = None
 
@@ -83,6 +86,17 @@ def _freshness_text(inp: WorkbookInputs) -> str:
         return ("stored run: the inputs changed since the solve (or the solve recorded no "
                 "fingerprint); these are the stored results, exported on request")
     return NOT_ESTABLISHED
+
+
+def _case_text(rep, state: dict | None) -> str:
+    if rep is None:
+        return f"none stored: {RUN_THE_CASE} (the export never runs it)"
+    if state and state.get("stale"):
+        changed = ", ".join(state.get("changed") or []) or state.get("reason") or "?"
+        return (f"report {rep.case_id} is from an earlier run (changed since: {changed}); "
+                f"the Overview does not show its figures and its Case sheets describe that "
+                f"earlier run. {RUN_THE_CASE} again")
+    return f"report {rep.case_id}, current with this run's inputs"
 
 
 def _about(ws, inp: WorkbookInputs, statuses: list[tuple[str, str, str]], figs) -> None:
@@ -119,8 +133,7 @@ def _about(ws, inp: WorkbookInputs, statuses: list[tuple[str, str, str]], figs) 
                   "IRR per unit; DSCR ratio"),
         ("not_established", "the figure could not be computed from this run; no number "
                             "stands in for it"),
-        ("Investment case", f"report {rep.case_id}" if rep is not None
-         else f"none stored: {RUN_THE_CASE} (the export never runs it)"),
+        ("Investment case", _case_text(rep, inp.case_state)),
     ]
     heading(ws, 1, ["Item", "Value"])
     r = 2
@@ -149,7 +162,7 @@ def build_results_workbook(inp: WorkbookInputs) -> bytes:
     about = wb.active
     overview = wb.create_sheet()
     figs = overview_figures(inp.network, inp.cfg, inp.lost_load, inp.result_df)
-    write_overview(overview, figs, inp.ic_report)
+    write_overview(overview, figs, inp.ic_report, inp.case_state)
     ctx = WorkbookContext(inp)
     card_label = {c.id: c.label for c in flow_scope.CARDS}
     statuses: list[tuple[str, str, str]] = []

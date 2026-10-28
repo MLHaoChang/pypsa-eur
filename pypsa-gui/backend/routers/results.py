@@ -2256,10 +2256,18 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
         logger.info("results workbook: no run record for the About sheet", exc_info=True)
         runs = []
     project = PyPSAService.get_loaded_project()
+    report = load_ic_report(_state)
+    case_state = None
+    if report is not None:
+        # The same staleness key GET /investment_case reports (IC P4 WP4.6b).
+        from services.finance.investment_case_runner import staleness
+
+        current, why = _ic_current_assumptions()
+        case_state = staleness(report.model_dump(mode="json"), current, reason=why)
     try:
         blob = RW.build_results_workbook(RW.WorkbookInputs(
             network=n, cfg=cfg, lost_load=_state.get("last_lost_load"),
-            result_df=_result_df, views=included, ic_report=load_ic_report(_state),
+            result_df=_result_df, views=included, ic_report=report, case_state=case_state,
             project=project, scope=scope, template=template, freshness=freshness,
             stored=stored, run=runs[0] if runs else None))
     except RW.WorkbookTooLarge as exc:

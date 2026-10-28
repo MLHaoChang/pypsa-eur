@@ -31,6 +31,7 @@ from services.solver_service import SolverConfig
 
 URL = "/api/results/workbook.xlsx"
 EVIL = '=HYPERLINK("http://x","y")'
+PLUS = "+cmd|' /C calc'!A0"
 PERIODS = ["2030", "2040"]
 
 
@@ -40,8 +41,12 @@ def _network() -> pypsa.Network:
     mi = pd.MultiIndex.from_product([[2030, 2040], hours], names=["period", "timestep"])
     n.set_snapshots(mi)
     n.investment_periods = [2030, 2040]
-    n.snapshot_weightings.loc[:, :] = 2190.0  # four hours stand for a year
-    n.add("Carrier", ["gas", "solar", EVIL, "AC"])
+    # Stated weights (GK B condition 2): each snapshot stands for 2190 h, each
+    # period for 10 years, undiscounted.
+    n.snapshot_weightings.loc[:, :] = 2190.0
+    n.investment_period_weightings.loc[:, "years"] = 10.0
+    n.investment_period_weightings.loc[:, "objective"] = 1.0
+    n.add("Carrier", ["gas", "solar", EVIL, PLUS, "AC"])
     n.add("Bus", "A", carrier="AC")
     n.add("Load", "L", bus="A", p_set=[50.0, 60.0, 70.0, 55.0] * 2)
     n.add("Generator", "gas", bus="A", carrier="gas", p_nom_extendable=True,
@@ -50,6 +55,8 @@ def _network() -> pypsa.Network:
           capital_cost=25_000.0, marginal_cost=0.5, p_max_pu=[0.0, 0.6, 0.9, 0.3] * 2)
     n.add("Generator", "evil", bus="A", carrier=EVIL, p_nom=5.0, capital_cost=1_000.0,
           marginal_cost=20.0)
+    n.add("Generator", "plus", bus="A", carrier=PLUS, p_nom=3.0, capital_cost=1_000.0,
+          marginal_cost=10.0)
     n.optimize(solver_name="highs", multi_investment_periods=True)
     return n
 
@@ -129,24 +136,35 @@ def test_overview_matches_the_services_per_period_and_over_the_horizon(solved):
     assert _approx(_row(ws, "Capex, overnight (present value of the upfront investment)")[3].value,
                    cb["capex_lifetime"] / 1e6)
 
-    # Energy served: load × the energy weighting (no lost load in this fixture).
-    w = n.snapshot_weightings.generators * n.investment_period_weightings.years.reindex(
-        n.snapshots.get_level_values(0)).to_numpy()
-    load = n.loads_t.p.sum(axis=1) * w
+    # Energy served, by hand: (50+60+70+55) MWh × 2190 × 10 years per period, in
+    # GWh, on the cost columns' weighting (no lost load in this fixture).
     served = _row(ws, "Energy served")
-    for j, p in enumerate(PERIODS, start=1):
-        assert _approx(served[j].value, load.xs(int(p), level=0).sum() / 1e3)
-    assert _approx(served[3].value, load.sum() / 1e3)
+    for j in (1, 2):
+        assert _approx(served[j].value, 235.0 * 2190.0 * 10.0 / 1e3)
+    assert _approx(served[3].value, 2 * 235.0 * 2190.0 * 10.0 / 1e3)
 
     # The per-asset economics (Σ VOM == variable opex: generators only here).
     ae = compute_asset_economics(n, SolverConfig(), result_df=_rdf)
     vom = sum(a["vom_cost_eur"] for a in ae["generators"])
     assert _approx(_row(ws, "  of which variable opex (marginal cost)")[3].value, vom / 1e6)
 
-    # System LCOE is a live formula over the cost and energy cells.
+    # System LCOE is a live formula over the cost and energy cells; by hand,
+    # undiscounted cost over undiscounted energy: M EUR × 1000 / GWh = EUR/MWh.
     lcoe = _row(ws, "System LCOE")
-    c, e = total[3].coordinate, served[3].coordinate
-    assert lcoe[3].value == f"={c}*1000/{e}"
+    for j in (1, 2, 3):
+        assert lcoe[j].value == f"={total[j].coordinate}*1000/{served[j].coordinate}"
+    hand = cb["total"] / (2 * 235.0 * 2190.0 * 10.0)
+    assert _approx(total[3].value * 1000 / served[3].value, hand)
+
+    # Reconciliation: the residual the services' own totals imply.
+    rec = _row(ws, "Reconciliation: total system cost − (annualised capex + opex)")
+    cap, op = _row(ws, "Capex, annualised (incl. fixed O&M)"), _row(ws, "Opex")
+    for j in (1, 2, 3):
+        assert rec[j].value == (f"={total[j].coordinate}-({cap[j].coordinate}"
+                                f"+{op[j].coordinate})")
+    residual = cb["total"] / 1e6 - sum(v["capex_meur"]["total"] + v["opex_meur"]["total"]
+                                       for v in econ.values())
+    assert _approx(total[3].value - (cap[3].value + op[3].value), residual)
 
     # Per-carrier LCOE.
     for carrier in ("gas", "solar"):
@@ -156,8 +174,38 @@ def test_overview_matches_the_services_per_period_and_over_the_horizon(solved):
             assert _approx(row[j].value, cell["by_period"][p])
         assert _approx(row[3].value, cell["total"])
 
-    # Fuel is not separable in PyPSA: stated, not invented.
-    assert _row(ws, "Fuel")[3].value == RW.NOT_ESTABLISHED
+    # Fuel is not separable in PyPSA: an empty cell and the reason, not a 0.
+    fuel = _row(ws, "Fuel")
+    assert [fuel[j].value for j in (1, 2, 3)] == [None, None, None]
+    assert "not_established: 2030, 2040, Horizon" in fuel[5].value
+
+
+def _refs(expr: str) -> list[str]:
+    """Every cell a formula reads, ranges expanded (same-sheet refs only)."""
+    import re
+
+    from openpyxl.utils import range_boundaries
+    from openpyxl.utils.cell import get_column_letter as L
+
+    out = []
+    for a, b in re.findall(r"\$?([A-Z]{1,3}\$?\d+)(?::\$?([A-Z]{1,3}\$?\d+))?", expr):
+        a = a.replace("$", "")
+        b = (b or a).replace("$", "")
+        c0, r0, c1, r1 = range_boundaries(f"{a}:{b}")
+        out += [f"{L(c)}{r}" for c in range(c0, c1 + 1) for r in range(r0, r1 + 1)]
+    return out
+
+
+@pytest.mark.parametrize("with_case", [False, True])
+def test_no_overview_formula_reads_an_empty_or_text_cell(solved, with_case):
+    ws = _wb(_build(solved, report=_report() if with_case else None))["Overview"]
+    formulas = [c for row in ws.iter_rows() for c in row if c.data_type == "f"]
+    assert formulas
+    for c in formulas:
+        for ref in _refs(c.value):
+            v = ws[ref].value
+            assert v is not None and not (isinstance(v, str) and not v.startswith("=")), \
+                f"{c.coordinate} {c.value} reads {ref}={v!r}"
 
 
 # ── the investment case ──────────────────────────────────────────────────
@@ -170,7 +218,7 @@ def test_without_a_case_every_kpi_is_not_established_and_nothing_is_run(solved, 
     ws = wb["Overview"]
     for _key, label, _unit, _read in CASE_ROWS:
         row = _row(ws, label)
-        assert row[1].value == RW.NOT_ESTABLISHED and row[3].value == RUN_THE_CASE
+        assert row[1].value is None and row[3].value == f"not_established: {RUN_THE_CASE}"
     assert not [s for s in wb.sheetnames if s.startswith("Case ")]
     assert len(ws._charts) == 2
     about = {r[0].value: r[2].value for r in wb["About"].iter_rows() if r[0].value}
@@ -227,8 +275,9 @@ def test_the_charts_reference_the_overviews_own_cells(solved):
 
 def test_formula_like_text_is_stored_as_text(solved):
     wb = _wb(_build(solved, project=EVIL))
-    row = _row(wb["Overview"], EVIL.lower())  # economics_by_carrier lower-cases carriers
-    assert row[0].data_type == "s"
+    for name in (EVIL, PLUS):  # economics_by_carrier lower-cases carriers
+        row = _row(wb["Overview"], name.lower())
+        assert row[0].data_type == "s" and row[0].value == name.lower()
     about = _row(wb["About"], "Project")
     assert about[1].value == EVIL and about[1].data_type == "s"
 
@@ -287,6 +336,14 @@ def test_route_refuses_a_stale_run_and_exports_the_stored_one_on_request(client,
     assert r.status_code == 409 and r.json()["detail"]["error_kind"] == "results_workbook_stale"
     assert "no input fingerprint" in r.json()["detail"]["message"]
     with pytest.MonkeyPatch.context() as mp:
+        import services.workflow_tools as wt
+
+        mp.setattr(wt, "solve_freshness", lambda ctx=None: {
+            "inputs_changed_since_solve": True, "results_current": False})
+        r = client.get(URL)
+        assert r.status_code == 409
+        assert r.json()["detail"]["message"].startswith("The inputs changed since the solve")
+    with pytest.MonkeyPatch.context() as mp:
         mp.setattr(results_router, "_solver_in_flight", lambda: True)
         r = client.get(URL, params={"stored": "true"})
         assert r.status_code == 409 and r.json()["detail"]["error_kind"] == "results_workbook_stale"
@@ -315,3 +372,41 @@ def test_route_exports_a_current_run_with_the_stored_case(client, install_networ
         assert r.status_code == 413 and r.json()["detail"]["error_kind"] == "file_too_large"
     finally:
         results_router._state.pop(IC_REPORT_STORE_KEY, None)
+
+
+def test_a_stale_case_is_labelled_and_its_figures_not_shown(solved):
+    state = {"present": True, "stale": True, "changed": ["dispatch"], "reason": "inputs_changed"}
+    wb = _wb(_build(solved, report=_report(), case_state=state, views=["investment"]))
+    ws = wb["Overview"]
+    assert "investment case from an earlier run (changed since: dispatch)" in \
+        _row(ws, "Investment case")[1].value
+    for _key, label, _unit, _read in CASE_ROWS:
+        row = _row(ws, label)
+        assert row[1].value is None and row[3].value.startswith("not_established")
+    assert len(ws._charts) == 2  # no cash-flow chart for a case not shown
+    assert "from an earlier run" in _row(wb["About"], "Investment case")[1].value
+
+
+def test_case_sheets_equal_the_standalone_case_export(solved):
+    from services.finance.export_xlsx import build_workbook
+
+    rep = _report()
+    wb = _wb(_build(solved, report=rep, views=["investment"]))
+    alone = _wb(build_workbook(rep))
+    assert not wb.defined_names
+    titles = set(wb.sheetnames)
+    for ws in alone.worksheets:
+        copy = wb[f"Case {ws.title}"[:31]]
+        for row in ws.iter_rows():
+            for c in row:
+                d = copy[c.coordinate]
+                if ws.title == "About" and ws.cell(c.row, 1).value == "Generated at":
+                    continue  # the build's own clock
+                assert (d.value, d.data_type, d.number_format) == \
+                    (c.value, c.data_type, c.number_format), (ws.title, c.coordinate)
+    # No formula anywhere names a sheet that is not in the workbook.
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for c in row:
+                if c.data_type == "f" and "!" in c.value:
+                    assert c.value.split("!")[0].strip("='") in titles, c.value
