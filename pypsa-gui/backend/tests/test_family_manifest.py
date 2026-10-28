@@ -54,6 +54,7 @@ def test_each_variant_has_an_explicit_disposition(variant):
     assert variant['status'] in ('covered', 'pending', 'unavailable')
     if variant['status'] == 'covered':
         assert variant['tests'] and variant['oracle'] and all('::' in t for t in variant['tests'])
+        assert variant['tools'] or variant['seam'] == fm.CHECKED_STREAM
     else:
         assert variant['reason']
     if variant['status'] == 'unavailable':
@@ -65,7 +66,7 @@ def test_a_covered_node_id_that_does_not_collect_is_refused():
     bogus = real.split('::')[0] + '::test_no_such_test'
     assert fm.uncollected_nodes([real, bogus]) == [bogus]
     variant = {'id': 'LC-D04.bogus', 'suite': 'LC-D04', 'status': 'covered', 'oracle': 'x',
-               'tools': [], 'tests': [bogus]}
+               'tools': ['get_results'], 'tests': [bogus]}
     assert f'{bogus}: does not collect' in fm.manifest_problems(variants=[*fm.VARIANTS, variant])
 
 
@@ -91,3 +92,10 @@ def test_a_new_tool_stays_in_the_denominator_as_unmapped():
     assert after['unmapped_tools'] == ['brand_new_tool']
     assert after['counts']['covered_tools'] == before['counts']['covered_tools']
     assert 'brand_new_tool' in fm.report(after) and '(1 unmapped)' in fm.report(after)
+
+
+def test_a_covered_row_names_its_tools_or_the_checked_stream():
+    bare = {'id': 'LC-D04.bare', 'suite': 'LC-D04', 'status': 'covered', 'oracle': 'x', 'tools': [],
+            'tests': [fm.VARIANTS[[v['status'] for v in fm.VARIANTS].index('covered')]['tests'][0]]}
+    problems = fm.manifest_problems(variants=[*fm.VARIANTS, bare], collect=False)
+    assert 'LC-D04.bare: covered needs its tools or the checked-stream seam' in problems

@@ -125,3 +125,32 @@ rows; a UI slice also needs UX. GK A's plan GO came with these per-slice conditi
 GK B on S1: fill `tools` for LC-D04.bound_build/units. The perturbation delta is
 computed in the test, not read from the result. S2's unavailable-solver refusal
 goes through the real dispatcher, not a monkeypatched `_probe`.
+
+### S1, LC-D04 unique LP (2026-10-28)
+
+Branch `claude/lc06-d04-capacity-lp`, stacked on S0. GK B reviews.
+
+- The RED first run found two app rules the annex fixture ignored. The
+  validator refuses an unbounded extendable generator
+  (`generator_p_nom_bounds`), and capital cost is periodised by nyears = Σ
+  weight × hours / 8760. So the fixture weights two snapshots 4380 h each
+  (nyears = 1) and bounds Backup at 100 MW. The oracle computes nyears itself.
+- `tests/test_lc06_d04_capacity_lp.py` (3 tests, real `run_simulation` and
+  HiGHS) checks:
+  - objective 2,717,600 = 6 × 147,600 + 4 × 458,000, read through
+    `get_results('objective_decomposition')`;
+  - per-carrier capex/opex/GWh;
+  - `explain_investment`: Cheap existing 0 / optimised 6 / added 6,
+    at_upper_bound; Backup 4, interior;
+  - the cap edit through `PUT /api/network/generators/Cheap`: 6 → 7 lowers
+    the objective by 458,000 − 147,600 (computed in the test), Cheap 7 /
+    Backup 3, and the older run keeps 0.36 M EUR capex (historical scope);
+  - single period: `get_vintage_results` answers no vintages.
+- Manifest: LC-D04.unique_lp covered. LC-D04.vintage_results stays pending
+  for the LC-D05 multi-period fixture. A covered row names its tools or the
+  checked-stream seam (GK B's S0 note: those rows call no catalogue tool, so
+  their tools stay uncovered rather than invented). 19 / 367 tools covered.
+- Limit: with nyears = 1 the periodisation factor is not discriminated; a
+  partial-year case belongs with the LC-D05 horizon-vs-annual work.
+- Reads `get_study_evidence` 409 `unsaved_results` before a save, by design,
+  so the objective is read from the unsaved current solve instead.
