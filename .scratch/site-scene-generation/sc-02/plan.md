@@ -80,7 +80,7 @@ Domain fixtures: the existing synthetic eh_site template (process Links, Invento
 
 ## Package size
 
-This is the size of SC-01, which shipped as a backend PR (a) and a UI PR (b). The coordinator brief asks for one PR; the split question went to the coordinator.
+Split like SC-01 (coordinator, see Plan verdicts): SC-02a backend, then SC-02b UI.
 
 ## Not in this package
 
@@ -99,4 +99,6 @@ SC-07 tools and conversational binding (V93–V98), V80–V86 coordinate-first m
 7. Guided and Expert screenshots: unbound, attached, unavailable, picker open, weights not 100 %, add asset → place it, placement pass, overlap, no rule checked, approximate size, confirm and refusal.
 8. Fold in two SC-01b follow-ups in `SiteScenePanel`: (a) the footer that shows the Overpass URL / "ConnectError" / `PYPSAGUI_OVERPASS_URL` becomes "Site context unavailable: the map data service could not be reached" + "> Retry", details behind Details or in the log; (b) the empty dark pill under "Library dimensions". The "Back to …" overlap and Satellite "New site" stay out.
 
-GK B: pending. Coordinator split question: pending.
+Coordinator, 2026-10-28: split as SC-01 did. SC-02a = backend (associations, groups, allocation, lifecycle, rebind, site_service lock fix), reviewed by GK B; SC-02b = UI placement/association panel with browser evidence, reviewed by UX, after a. The Done line is met when b merges. No chat tool (SC-07 held on an open owner question) and V80–V86 out are accepted; both are stated in each PR body and the hand-off.
+
+GK B: pending.
