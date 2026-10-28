@@ -44,13 +44,13 @@ describe('a past run under navigation (LC-T10)', () => {
   })
 
   it("a model turn's Results navigation shows the current results, not the past run", () => {
-    applyUiNavigate({ kind: 'navigate', panel_id: 'results', results_tab: 'capex' }, navigationEpoch(), { turn: true })
+    applyUiNavigate({ kind: 'navigate', panel_id: 'results', results_tab: 'capex' }, navigationEpoch(), { fromModelTurn: true })
     expect(useUIStore.getState().discussedRun).toBeNull()
     expect(useUIStore.getState().resultsTabRequest).toBe('capex')
   })
 
   it("a model turn's open_run_result still opens the past run", () => {
-    applyUiNavigate({ kind: 'open_run_result', run_id: 'fg-other', results_tab: 'dispatch' }, navigationEpoch(), { turn: true })
+    applyUiNavigate({ kind: 'open_run_result', run_id: 'fg-other', results_tab: 'dispatch' }, navigationEpoch(), { fromModelTurn: true })
     expect(useUIStore.getState().discussedRun?.runId).toBe('fg-other')
   })
 
@@ -60,7 +60,7 @@ describe('a past run under navigation (LC-T10)', () => {
   })
 
   it('a model turn elsewhere leaves the past run alone', () => {
-    applyUiNavigate({ kind: 'navigate', panel_id: 'timeseries' }, navigationEpoch(), { turn: true })
+    applyUiNavigate({ kind: 'navigate', panel_id: 'timeseries' }, navigationEpoch(), { fromModelTurn: true })
     expect(useUIStore.getState().discussedRun?.runId).toBe('fg-old')
   })
 })

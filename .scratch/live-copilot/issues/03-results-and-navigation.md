@@ -5,7 +5,8 @@ Progress: Result-view registry #407, walk #410, retained load flow #416, common 
 capacity, dispatch, prices and emissions families (#848, #861 and earlier) merged; LC-T08 ACL
 recheck and LC-T09/T10 browser cases (PR-I, below) open. Remaining, after the results
 workbook's RW-03 (LC03-SCOPE-1): UI/export parity for past runs; queue/study/report sections;
-undigestable prices; sections over 16 KB. LC-14 reach fixes outsourced.
+undigestable prices; sections over 16 KB; the remaining LC-T09/T10 browser cases (PR-I list). LC-14
+reach fixes outsourced.
 Type: task
 Baseline: master `c75ca5584b873418f10f1bca42f868255d445b7b`
 Dependencies: LC-01/02 and current native evidence stores
@@ -323,7 +324,7 @@ Owner scope LC03-SCOPE-1. Branch `claude/lc03-acl-historical`, from master `fcf2
   past-run view.
 - RED found (LC-T10): a newer turn's `ui_open_panel(results, …)` left the past
   run's view on screen under an answer about the current results. Fix: a model
-  turn's Results navigation drops the discussed run (`applyUiNavigate(…, {turn:
+  turn's Results navigation drops the discussed run (`applyUiNavigate(…, {fromModelTurn:
   true})` from ChatPanel); a past run opens only by `open_run_result`, and the
   live walk's own steps keep it (vitest for each).
 
@@ -331,4 +332,15 @@ Kept, with reasons:
 - The past-run view's Results chrome still says "From the latest run" above the
   retained section: UI parity for past runs is out of scope until RW-03.
 - Queue, study and report runs still refuse until each gets its own capture.
+- The exported file's own route (uploads `ProjectAccessDep`) refuses with its
+  shared bare 404; only the export tool and the run view carry the plain reason.
+- The plain reason is one `_refuse` for any 404 from `resolve_project`, so a
+  deleted project reads the same as revoked access; only revocation is tested.
+- A view already on screen when access is lost is rechecked on its next read
+  (`staleTime: 0`, remount), not pushed; not tested.
+
+Remaining LC-T09/T10 browser cases (this PR covers capacity only, and Clear,
+a newer turn and a project switch): the other five families' past-run views;
+filter, entity and time selection; an unrelated or legacy mount ACK; Guided vs
+Expert; run/generation change, pending ACK, highlight, speech and stale captions.
 

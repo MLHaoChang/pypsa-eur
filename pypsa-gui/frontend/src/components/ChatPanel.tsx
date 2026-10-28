@@ -2401,7 +2401,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
           evidence_available?: boolean
         }>(frame)
         try {
-          if (!applyUiNavigate(d, streamNavigationEpoch.current, { turn: true })) break
+          if (!applyUiNavigate(d, streamNavigationEpoch.current, { fromModelTurn: true })) break
           // LC-03: every turn's source-bound navigation is acknowledged, so an
           // ordinary answer can say "showing" only for data actually shown.
           if (d.acknowledgement) {
