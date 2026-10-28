@@ -270,3 +270,49 @@ it('says no load was shed without a VOLL figure when the VOLL is unknown', async
   expect(copy).toMatch(/No load was shed in this solve: the plan served all demand/)
   expect(copy).not.toMatch(/€\/MWh/)
 })
+
+// ── UX review: the empty state claims "served all demand" only for a real 0 ──
+it('a recorded total of 0 says the plan served all demand', async () => {
+  vi.mocked(resultsApi.getLostLoad).mockReset().mockResolvedValue({
+    index: [], columns: [], data: [],
+    total_mwh: 0, total_cost_eur: 0, voll_eur_per_mwh: 4000, voll_applied: true, bus_carriers: {},
+  } as never)
+  renderPage()
+  const copy = (await screen.findByTestId('lostload-empty-copy')).textContent ?? ''
+  expect(copy).toMatch(/the plan served all demand/)
+  expect(screen.queryByTestId('lostload-not-recorded')).toBeNull()
+})
+
+it('an unrecorded (null) total says so and never claims all demand was served', async () => {
+  vi.mocked(resultsApi.getLostLoad).mockReset().mockResolvedValue({
+    index: [], columns: [], data: [],
+    total_mwh: null, total_cost_eur: null, voll_eur_per_mwh: 4000, voll_applied: true, bus_carriers: {},
+  } as never)
+  renderPage()
+  const copy = (await screen.findByTestId('lostload-empty-copy')).textContent ?? ''
+  expect(copy).toBe('Lost load not recorded by this solve')
+  expect(copy).not.toMatch(/served all demand|No unserved energy/)
+})
+
+it('labels each unknown — and explains it once under the KPI row', async () => {
+  vi.mocked(resultsApi.getLostLoad).mockReset().mockResolvedValue({
+    index: ['2026-01-01T00:00:00'], columns: ['Bus 0'], data: [[424.24]],
+    total_mwh: null, total_cost_eur: null, voll_eur_per_mwh: null, bus_carriers: {},
+  } as never)
+  renderPage()
+  expect((await screen.findAllByTestId('not-recorded-note')).length).toBe(1)
+  // Two KPI tiles + the by-carrier and per-bus cost cells.
+  expect(screen.getAllByLabelText('Not recorded by this solve').length).toBe(4)
+  expect(screen.getAllByTitle('Not recorded by this solve').length).toBe(4)
+  expect(screen.getByTitle('MWh × VOLL (VOLL not recorded)')).toBeTruthy()
+})
+
+it('shows no — note when the VOLL is recorded', async () => {
+  vi.mocked(resultsApi.getLostLoad).mockReset().mockResolvedValue({
+    index: ['2026-01-01T00:00:00'], columns: ['Bus 0'], data: [[424.24]],
+    total_mwh: 424.24, total_cost_eur: 1696960, voll_eur_per_mwh: 4000, bus_carriers: {},
+  } as never)
+  renderPage()
+  expect(await findKpiValue('424 MWh')).toBeTruthy()
+  expect(screen.queryByTestId('not-recorded-note')).toBeNull()
+})

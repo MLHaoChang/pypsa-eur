@@ -18,6 +18,7 @@ import {
 import { resolveRange, useResultsFilter } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
 import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableTable'
+import { NOT_RECORDED_KPI, NotRecordedDash, NotRecordedNote } from './NotRecorded'
 
 // ── Lost-load result tab ────────────────────────────────────────────────────
 // Unserved demand via the LP's VOLL slack generators. The backend already
@@ -189,6 +190,11 @@ export default function LostLoadTab() {
     // without it fall back to the VoLL the capture carries.
     const vollApplied = lostLoad != null
       && (lostLoad.voll_applied ?? (lostLoad.voll_eur_per_mwh ?? 0) > 0)
+    // A payload whose total is null did not record lost load: nothing here
+    // says demand was served. Only a solve known to have had no VoLL
+    // (`voll_applied: false`) still reads as not modelled.
+    const notRecorded = lostLoad != null && lostLoad.total_mwh == null
+      && lostLoad.voll_applied !== false
     return (
       <div className="flex flex-col h-full overflow-auto p-4 gap-4">
         <header>
@@ -198,7 +204,9 @@ export default function LostLoadTab() {
           {ADEQUACY_CROSSLINK}
         </p>
         <div className="text-[12px] text-muted space-y-2" data-testid="lostload-empty-copy">
-          {targeted ? (
+          {notRecorded ? (
+            <p data-testid="lostload-not-recorded">Lost load not recorded by this solve</p>
+          ) : targeted ? (
             <p>
               No unserved energy in this solve — the plan served all demand, so there is no
               lost-load breakdown to chart. A reliability target WAS applied: what it bound,
@@ -258,11 +266,14 @@ export default function LostLoadTab() {
       <div className="grid grid-cols-3 gap-3">
         <Kpi label="Total lost load" value={fmtEnergy(totals.mwh)}
              hint="Σ slack-generator dispatch × weights across every carrier" />
-        <Kpi label="Lost-load cost" value={fmtCurrency(totals.cost)}
-             hint={totals.voll != null ? `MWh × VOLL (${totals.voll.toFixed(0)} €/MWh)` : 'MWh × VOLL (VOLL unknown)'} />
-        <Kpi label="VOLL price" value={totals.voll != null ? `${totals.voll.toFixed(0)} €/MWh` : '—'}
+        <Kpi label="Lost-load cost"
+             {...(totals.cost != null ? { value: fmtCurrency(totals.cost) } : NOT_RECORDED_KPI)}
+             hint={totals.voll != null ? `MWh × VOLL (${totals.voll.toFixed(0)} €/MWh)` : 'MWh × VOLL (VOLL not recorded)'} />
+        <Kpi label="VOLL price"
+             {...(totals.voll != null ? { value: `${totals.voll.toFixed(0)} €/MWh` } : NOT_RECORDED_KPI)}
              hint="The Value-Of-Lost-Load price the LP paid for unserved demand" />
       </div>
+      <NotRecordedNote show={totals.voll == null} />
 
       <section className="rounded-[10px] border border-border bg-bg overflow-hidden">
         <header className="px-4 py-2.5 border-b border-border bg-bg-2">
@@ -283,7 +294,7 @@ export default function LostLoadTab() {
                   <tr key={b.carrier} className="border-b border-border/40">
                     <td className="py-1 text-text font-mono">{carrierLabel(b.carrier)}</td>
                     <td className="py-1 text-right font-mono text-text">{fmtEnergy(b.mwh)}</td>
-                    <td className="py-1 text-right font-mono text-muted">{fmtCurrency(b.cost)}</td>
+                    <td className="py-1 text-right font-mono text-muted">{b.cost != null ? fmtCurrency(b.cost) : <NotRecordedDash />}</td>
                   </tr>
                 ))}
               </tbody>
@@ -372,7 +383,7 @@ function PerBusLostLoadSection({
                   <td className="py-1 text-text font-mono">{r.bus}</td>
                   <td className="py-1 text-right font-mono text-muted">{r.carrier}</td>
                   <td className="py-1 text-right font-mono text-text">{fmtEnergy(r.mwh)}</td>
-                  <td className="py-1 text-right font-mono text-muted">{fmtCurrency(r.cost)}</td>
+                  <td className="py-1 text-right font-mono text-muted">{r.cost != null ? fmtCurrency(r.cost) : <NotRecordedDash />}</td>
                 </tr>
               ))}
             </tbody>

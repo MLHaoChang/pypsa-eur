@@ -23,6 +23,7 @@ import {
   parseSeasonStamp, useSeasonalViewMode, colourForCarrier, isAllZero, ChartZero,
 } from './shared'
 import { type LostLoadMeta, vollOf } from './summary'
+import { NOT_RECORDED_KPI, NotRecordedDash, NotRecordedNote } from './NotRecorded'
 import { useResultsFilter, resolveRange } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
 import DispatchStack from './DispatchStack'
@@ -1370,7 +1371,7 @@ export default function Dispatch() {
               key={`lostload-${b.carrier}`}
               label={`Lost load · ${loadCarrierLabel(b.carrier)}`}
               value={fmtEnergy(b.mwh)}
-              hint={`VOLL slack dispatched at ${loadCarrierLabel(b.carrier).toLowerCase()} buses — ${fmtCurrency(b.cost)} at the configured VOLL price.` + scaleHint}
+              hint={`VOLL slack dispatched at ${loadCarrierLabel(b.carrier).toLowerCase()} buses — ${b.cost != null ? `${fmtCurrency(b.cost)} at the configured VOLL price` : 'cost not recorded by this solve'}.` + scaleHint}
             />
           ))}
         </div>
@@ -2636,7 +2637,8 @@ export function CarrierKpiPanel({
                          : zeroOr(econ.curt))}
                      hint="Σ curtailment_cost × curtailed-energy × weights" />
                 <KPI label="Lost-load cost"
-                     value={lostLoadCostUnknown && !(econ.lost > 0) ? '—' : fmtCurrency(Math.max(econ.lost * 1e6, lostLoadCostFromCarrier))}
+                     {...(lostLoadCostUnknown && !(econ.lost > 0) ? NOT_RECORDED_KPI
+                       : { value: fmtCurrency(Math.max(econ.lost * 1e6, lostLoadCostFromCarrier)) })}
                      {...(lostLoadNotModelled ? lostLoadOff
                        : lostLoadCostUnknown && !(econ.lost > 0) ? {}
                        : zeroOr(Math.max(econ.lost, lostLoadCostFromCarrier / 1e6)))}
@@ -2651,6 +2653,7 @@ export function CarrierKpiPanel({
           })()}
         </div>
       )}
+      <NotRecordedNote show={econ !== null && lostLoadCostUnknown && !(econ.lost > 0)} />
     </section>
   )
 }
@@ -3261,7 +3264,13 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
                 <span className="font-medium text-danger">Lost load</span>
                 <span>
                   MW unmet per snapshot
-                  {lostLoadTotals && ` · Σ ${fmtEnergy(lostLoadTotals.mwh)} · ${fmtCurrency(lostLoadTotals.cost)}`}
+                  {lostLoadTotals && (
+                    <>
+                      {' · Σ '}{lostLoadTotals.mwh != null ? fmtEnergy(lostLoadTotals.mwh) : <NotRecordedDash />}
+                      {' · '}{lostLoadTotals.cost != null ? fmtCurrency(lostLoadTotals.cost) : <NotRecordedDash />}
+                      {(lostLoadTotals.mwh == null || lostLoadTotals.cost == null) && ' (—: not recorded by this solve)'}
+                    </>
+                  )}
                 </span>
                 <span className="ml-auto flex items-center gap-2">
                   <button onClick={() => {

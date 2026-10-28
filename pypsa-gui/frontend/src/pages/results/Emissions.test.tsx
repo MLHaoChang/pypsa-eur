@@ -202,3 +202,25 @@ it('shows an unknown μ as — in the caps table and keeps a real 0 as 0.00', as
   expect(mu('Unknown')).toBe('—')
   expect(mu('Slack')).toBe('0.00')
 })
+
+it('explains an unknown shadow price once, and labels the —', async () => {
+  mockCaps([cap('CO2Limit', null)])
+  renderPage()
+  expect((await screen.findAllByTestId('not-recorded-note')).length).toBe(1)
+  expect(screen.getAllByLabelText('Not recorded by this solve').length).toBe(1)
+})
+
+it('explains an unknown μ in the caps table under the table', async () => {
+  mockCaps([cap('Known', 12), cap('Unknown', null)])
+  renderPage()
+  const note = await screen.findByTestId('not-recorded-note')
+  expect(note.closest('section')?.textContent).toMatch(/μ \(€\/tCO₂\)/)
+  expect(screen.getAllByTestId('not-recorded-note').length).toBe(1)
+})
+
+it('shows no — note when every shadow price is recorded', async () => {
+  mockCaps([cap('CO2Limit', 12)])
+  renderPage()
+  expect(await findKpiValue('12.0 €/tCO₂')).toBeTruthy()
+  expect(screen.queryByTestId('not-recorded-note')).toBeNull()
+})

@@ -8,6 +8,18 @@ import AggregatedOverview, { isPartialPayload } from './AggregatedOverview'
 import type { WeightCtx, SnapshotWeightRow } from './shared'
 import { getKpiValueWithin } from '../../test/kpi'
 
+// A fixed-size chart, so recharts draws its axes in jsdom (its
+// ResponsiveContainer measures 0 × 0 there and renders nothing).
+vi.mock('recharts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('recharts')>()
+  const { cloneElement } = await import('react')
+  return {
+    ...actual,
+    ResponsiveContainer: ({ children }: { children: React.ReactElement<{ width?: number; height?: number }> }) =>
+      cloneElement(children, { width: 600, height: 220 }),
+  }
+})
+
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
   return {
@@ -275,5 +287,56 @@ describe('AggregatedOverview lost-load KPIs with unknown totals', () => {
     renderOverview()
     expect(getKpiValueWithin(await kpi('Lost load'), '—')).toBeTruthy()
     expect(getKpiValueWithin(await kpi('Lost-load cost'), '—')).toBeTruthy()
+  })
+})
+
+// UX review: "—" is explained once on the page, and labelled where it shows.
+describe('AggregatedOverview explains a value this solve did not record', () => {
+  it('labels each — and shows the note once', async () => {
+    vi.mocked(resultsApi.getLostLoad).mockReset().mockResolvedValue({
+      index: [], columns: [], data: [],
+      total_mwh: null, total_cost_eur: null, voll_eur_per_mwh: null,
+    })
+    renderOverview()
+    expect((await screen.findAllByTestId('not-recorded-note')).length).toBe(1)
+    expect(screen.getByTestId('not-recorded-note').textContent).toBe('—: not recorded by this solve')
+    expect(screen.getAllByLabelText('Not recorded by this solve').length).toBe(2)
+  })
+
+  it('shows no note when every lost-load figure is recorded', async () => {
+    renderOverview()
+    await screen.findByText('Lost-load cost')
+    expect(screen.queryByTestId('not-recorded-note')).toBeNull()
+  })
+})
+
+// UX review: a chart whose VOLL bars are left out says so, never silently.
+describe('AggregatedOverview economics chart with an unknown VOLL', () => {
+  function mockCostAndShed(voll: number | null) {
+    vi.mocked(resultsApi.getCostBreakdown).mockReset().mockResolvedValue({
+      capex: 1000, capex_lifetime: 0, capex_expansion: 0, capex_expansion_lifetime: 0,
+      opex: 500, total: 1500, curtailment_cost: 0,
+      storage_capex_expansion: 0, storage_capex_expansion_lifetime: 0,
+      by_component: [], by_carrier: [], by_period: [],
+    })
+    vi.mocked(resultsApi.getLostLoad).mockReset().mockResolvedValue({
+      index: ['2026-01-01T00:00:00'], columns: ['Bus 0'], data: [[42]],
+      total_mwh: null, total_cost_eur: null, voll_eur_per_mwh: voll,
+    })
+  }
+
+  it('keeps its axes and says VOLL was not recorded', async () => {
+    mockCostAndShed(null)
+    const { container } = renderOverview()
+    expect(await screen.findByText('VOLL not recorded by this solve')).toBeTruthy()
+    expect(container.querySelector('.recharts-xAxis')).not.toBeNull()
+    expect(container.querySelector('.recharts-yAxis')).not.toBeNull()
+  })
+
+  it('says nothing about VOLL when it is recorded', async () => {
+    mockCostAndShed(4000)
+    renderOverview()
+    await screen.findByText('Economics — system cost per period')
+    expect(screen.queryByText('VOLL not recorded by this solve')).toBeNull()
   })
 })

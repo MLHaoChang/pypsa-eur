@@ -190,6 +190,8 @@ describe('the Summary tab with unknown lost-load totals and shadow price', () =>
     expect(within(card).queryByText(/0(\.0)? MWh/)).toBeNull()
     expect(within(card).queryByText(/^€0/)).toBeNull()
     expect(screen.queryByText(/unserved$/)).toBeNull()
+    expect(within(card).getAllByLabelText('Not recorded by this solve').length).toBe(2)
+    expect(screen.getAllByTestId('not-recorded-note').length).toBe(1)
   })
 
   it('a binding cap with an unknown shadow price shows —, not €0', async () => {
@@ -197,7 +199,9 @@ describe('the Summary tab with unknown lost-load totals and shadow price', () =>
       shadow_price_eur_per_tCO2: null }] })
     renderTab()
     const card = await screen.findByTestId('summary-emissions')
-    expect(await within(card).findByText('binding · —/t')).toBeTruthy()
+    expect(await within(card).findByLabelText('Not recorded by this solve')).toBeTruthy()
+    expect(card.textContent).toMatch(/binding · —\/t/)
     expect(within(card).queryByText(/€0/)).toBeNull()
+    expect(screen.getByTestId('not-recorded-note').textContent).toBe('—: not recorded by this solve')
   })
 })

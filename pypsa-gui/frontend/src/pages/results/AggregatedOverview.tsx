@@ -21,6 +21,7 @@ import {
 import { storageCarrierKey, loadCarrierKey } from './carrierAliases'
 import NotSolved from './NotSolved'
 import { type LostLoadMeta, vollOf } from './summary'
+import { NOT_RECORDED_KPI, NotRecordedNote } from './NotRecorded'
 
 // ── Aggregated overview ────────────────────────────────────────────────────
 // Shown when the user picks the "Aggregated" period sub-tab. Replaces the
@@ -446,7 +447,9 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
       const capex = bp ? bp.capex : evenCapex
       const opex  = bp ? bp.opex  : evenOpex
       const curt  = curtPenaltyPerPeriod[i] ?? 0
-      const vollCost = voll != null ? (vollPerPeriod[i] ?? 0) : null
+      // No lost-load payload: VOLL was not modelled, nothing to price (0).
+      // A payload with an unknown VOLL leaves the bar out (null).
+      const vollCost = !llTs ? 0 : voll != null ? (vollPerPeriod[i] ?? 0) : null
       return {
         period: p,
         CAPEX: capex,
@@ -530,14 +533,18 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
                  : '—'}
                hint={'Σ max(p_max_pu × p_nom − p, 0) over renewable generators' + scaleHint} />
           <KPI label="Lost load" sub="this dispatch solve, no outages"
-               value={lostLoadTotals ? fmtEnergy(lostLoadTotals.mwh) : '—'}
+               {...(lostLoadTotals && lostLoadTotals.mwh == null ? NOT_RECORDED_KPI
+                 : { value: lostLoadTotals ? fmtEnergy(lostLoadTotals.mwh) : '—' })}
                hint={"Demand the LP couldn't serve — absorbed by VOLL slack generators per bus. Set Solver Settings → VOLL > 0 to enable." + scaleHint} 
                {...lostLoadState} />
           <KPI label="Lost-load cost"
-               value={lostLoadTotals ? fmtCurrency(lostLoadTotals.cost) : '—'}
+               {...(lostLoadTotals && lostLoadTotals.cost == null ? NOT_RECORDED_KPI
+                 : { value: lostLoadTotals ? fmtCurrency(lostLoadTotals.cost) : '—' })}
                hint={'MWh of lost load × the VOLL set in Solver Settings (e.g. 3000–10000 €/MWh).' + scaleHint} 
                {...lostLoadState} />
         </div>
+        <NotRecordedNote show={lostLoadTotals != null
+          && (lostLoadTotals.mwh == null || lostLoadTotals.cost == null)} />
       </section>
 
       {/* ── Operational expenditure (OPEX) — whole-horizon totals ── */}
@@ -589,7 +596,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
       {/* Hide entirely when every bar would be 0 — keeps the layout clean on
           test networks where no cost data is configured. */}
       {economicsBars && economicsBars.length > 0
-        && economicsBars.some(r => r.CAPEX > 0 || r.OPEX > 0 || (r.VOLL ?? 0) > 0) && (
+        && economicsBars.some(r => r.CAPEX > 0 || r.OPEX > 0 || r.VOLL == null || r.VOLL > 0) && (
         <ChartCard
           title="Economics — system cost per period"
           hint="CAPEX · OPEX · VOLL"
@@ -619,6 +626,12 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
                 <Bar dataKey="VOLL"  stackId="cost" fill="#dc2626" radius={[3, 3, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
+            {/* The VOLL bars are left out, never drawn as €0: say so. */}
+            {economicsBars.some(r => r.VOLL == null) && (
+              <p className="text-[11px] text-muted mt-2" data-testid="economics-voll-not-recorded">
+                VOLL not recorded by this solve
+              </p>
+            )}
             <p className="text-[10px] text-muted mt-2">
               Each bar's CAPEX/OPEX is the period's full LP-objective contribution
               (PyPSA's <code>n.statistics()</code> per-period values × <code>investment_period_weightings.years</code>).

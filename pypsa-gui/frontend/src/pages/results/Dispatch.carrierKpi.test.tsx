@@ -121,5 +121,12 @@ describe('CarrierKpiPanel — result states', () => {
     const cost = tile('Lost-load cost')
     expect(cost.textContent).toContain('—')
     expect(cost.textContent).not.toMatch(/€\s*0/)
+    expect(cost.querySelector('[aria-label="Not recorded by this solve"]')).not.toBeNull()
+    expect(screen.getAllByTestId('not-recorded-note').length).toBe(1)
+  })
+
+  it('shows no — note when the lost-load cost is known', () => {
+    renderPanel({ lostLoadByCarrier: [{ carrier: 'electrical', mwh: 5, cost: 20000 }] })
+    expect(screen.queryByTestId('not-recorded-note')).toBeNull()
   })
 })

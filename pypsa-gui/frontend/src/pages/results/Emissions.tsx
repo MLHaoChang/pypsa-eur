@@ -8,6 +8,7 @@ import { nk } from '../../utils/queryKeys'
 import { KPI } from './shared'
 import { useResultsFilter } from './filterContext'
 import NotSolved from './NotSolved'
+import { NOT_RECORDED_KPI, NotRecordedDash, NotRecordedNote } from './NotRecorded'
 
 // ── Emissions tab ───────────────────────────────────────────────────────────
 // Surfaces PyPSA's CO₂ totals from LP dispatch × per-carrier intensity /
@@ -94,6 +95,11 @@ export default function Emissions() {
     : `period ${view.period}`
   const allCaps = emissions.caps
   const hasPerPeriodCaps = allCaps.some(c => c.scope === 'period')
+  // A cap whose dual the solve did not record shows "—"; the page explains
+  // it once, under the KPI row when that is where it shows, else the table.
+  const kpiPriceUnknown = scopeCaps.length === 1 && scopeCaps[0].shadow_price_eur_per_tCO2 == null
+  const tablePriceUnknown = (allCaps.length > 1 || hasPerPeriodCaps)
+    && allCaps.some(c => c.shadow_price_eur_per_tCO2 == null)
 
   // A bare "0 tCO2" cannot distinguish "this system is clean" from "nobody
   // told me what this fuel emits", and those call for opposite actions.
@@ -142,9 +148,9 @@ export default function Emissions() {
           {scopeCaps.length === 1 && (
             <>
               <KPI label="Shadow price (marginal abatement)"
-                   value={scopeCaps[0].shadow_price_eur_per_tCO2 != null
-                     ? `${scopeCaps[0].shadow_price_eur_per_tCO2.toFixed(2)} €/tCO₂`
-                     : '—'}
+                   {...(scopeCaps[0].shadow_price_eur_per_tCO2 != null
+                     ? { value: `${scopeCaps[0].shadow_price_eur_per_tCO2.toFixed(2)} €/tCO₂` }
+                     : NOT_RECORDED_KPI)}
                    hint={`LP dual on the CO₂ cap. Reads as the marginal cost of avoiding one tCO₂. Cap scope: ${scopeCaps[0].scope}${scopeCaps[0].binding ? ' — currently BINDING.' : ''}`} />
               <KPI label="Cap slack"
                    value={scopeCaps[0].slack_tCO2 != null
@@ -154,6 +160,7 @@ export default function Emissions() {
             </>
           )}
         </div>
+        <NotRecordedNote show={kpiPriceUnknown} />
       </section>
 
       {/* ── All CO₂ caps table (when multiple exist OR per-period caps) ── */}
@@ -207,13 +214,14 @@ export default function Emissions() {
                     <td className="px-2 py-1 font-mono text-[11px] text-right">
                       {c.shadow_price_eur_per_tCO2 != null
                         ? c.shadow_price_eur_per_tCO2.toFixed(2)
-                        : '—'}
+                        : <NotRecordedDash />}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          <div className="mt-1"><NotRecordedNote show={tablePriceUnknown && !kpiPriceUnknown} /></div>
         </section>
       )}
 
