@@ -94,6 +94,29 @@ def test_set_limit_fault_level_is_source_only_and_a_bad_value_is_the_writes_refu
     assert exc.value.detail["error_kind"] == "invalid_limit_value"
 
 
+def test_set_limit_receipt_verifies_a_long_note_and_a_note_cut_at_the_same_place(hub, monkeypatch):
+    long_note = "x" * 400
+    args = {**P, "item": "oscillation", "source": "measured", "value": 1, "note": long_note}
+    card = edit_card.preview("campus_set_grid_limit", args)
+    chat_tools.campus_set_grid_limit(**args)
+    assert edit_card.receipt(card, args)["outcome"] == "verified"
+    # an edit past the cut: the card says "(changed)" and the receipt still tells written from unwritten
+    again = {**args, "note": long_note + "y"}
+    card = edit_card.preview("campus_set_grid_limit", again)
+    assert _typed(card)["note"]["new"].endswith(" (changed)")
+    assert edit_card.receipt(card, again)["outcome"] == "uncertain"
+    chat_tools.campus_set_grid_limit(**again)
+    assert edit_card.receipt(card, again)["outcome"] == "verified"
+
+
+def test_reset_limit_receipt_verifies_a_long_note(hub):
+    args = {**P, "item": "oscillation"}
+    chat_tools.campus_set_grid_limit(**args, source="measured", value=1, note="n" * 400)
+    card = edit_card.preview("campus_reset_grid_limit", args)
+    chat_tools.campus_reset_grid_limit(**args)
+    assert edit_card.receipt(card, args)["outcome"] == "verified"
+
+
 # ── campus_reset_grid_limit ─────────────────────────────────────────────────
 
 

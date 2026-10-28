@@ -620,7 +620,18 @@ def _limit_row(item: str, field: str, old, new) -> dict:
     row = {**_row(_limit_name(item), field, label, old, new), "unit": ITEM_UNITS[item] if field == "value" else ""}
     if field == "source":
         row["words"] = {"old": SOURCE_WORDS.get(old, old), "new": SOURCE_WORDS.get(new, new)}
+    if row["old"] == row["new"] and old != new:  # a long note cut at the same place
+        row["new"] = f"{row['new']} (changed)"
+        row["fingerprint"] = ec._value_fingerprint(new)
     return row
+
+
+def _limit_cell(row: dict, value):
+    """The stored value as the card's cell holds it: cut like `_short`, or the row's "(changed)"
+    cell when the stored value is the one the card fingerprinted."""
+    if str(row["new"]).endswith(" (changed)") and row.get("fingerprint") == ec._value_fingerprint(value):
+        return row["new"]
+    return _short(value)
 
 
 def _limit_fields(item: str) -> tuple[str, ...]:
@@ -664,7 +675,7 @@ def _set_limit_back(args: dict, rows: list[dict]) -> list:
 
     def run(project, db, user):
         own, _ = _limit_state(project, _limit_item(args))
-        return [None if own is None else own.get(row["field"]) for row in rows]
+        return [None if own is None else _limit_cell(row, own.get(row["field"])) for row in rows]
 
     return ecc._with_project(args, run, lock="campus")
 
@@ -704,7 +715,7 @@ def _reset_limit_back(args: dict, rows: list[dict]) -> list:
         item = _limit_item(args)
         own, now = _limit_state(project, item)
         return [(_OWN if own is not None else _NOT_SET) if row["field"] == "entry"
-                else None if row["role"] == "note" else now[row["field"]] for row in rows]
+                else None if row["role"] == "note" else _limit_cell(row, now[row["field"]]) for row in rows]
 
     return ecc._with_project(args, run, lock="campus")
 
