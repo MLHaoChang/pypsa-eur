@@ -3,7 +3,7 @@
 
 # 20 — Microgrid diesel-fleet IC baseline: the investment gate fact for eh_microgrid
 
-Status: ready-for-agent
+Status: done (#855, eb019970)
 Type: task
 Blocked by: 19 (the `ic.counterfactual` fact reader)
 Gated: yes (GK A reviews the plan and the PR)
