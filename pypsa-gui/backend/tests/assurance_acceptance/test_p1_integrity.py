@@ -237,8 +237,9 @@ def test_answer_with_a_malformed_receipt_is_unavailable(baseline, harness, recei
         assert response.json()["detail"]["error_kind"] == "answer_evidence_unavailable"
 
 
+@pytest.mark.parametrize("stored", ["profile", None])
 def test_scoped_evidence_from_an_unregistered_profile_is_unavailable(
-    baseline, harness, client, session_state, monkeypatch
+    baseline, harness, client, session_state, monkeypatch, stored
 ):
     """A result profile this server no longer registers is not re-read."""
     from harness import calculations
@@ -266,6 +267,10 @@ def test_scoped_evidence_from_an_unregistered_profile_is_unavailable(
     profiles = dict(calculations.PROFILES)
     del profiles[PROFILE]
     monkeypatch.setattr(calculations, "PROFILES", profiles)
+    if stored is None:
+        # A null adapter version must not match "no registered profile".
+        for evidence_id in approved["receipt"]["evidence_ids"]:
+            rewrite(evidence_id, lambda r: r.update(adapter_version=None))
     for path in paths:
         response = harness.client.get(path)
         assert response.status_code == 409, response.text

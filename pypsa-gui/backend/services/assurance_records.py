@@ -614,7 +614,9 @@ def _expected_adapter_version(record):
 
         profile = record["request_scope"]["profile"]
         # A profile this server no longer registers is not re-read as checked.
-        return profile if profile in calculations.PROFILES else None
+        if profile not in calculations.PROFILES:
+            unavailable("evidence_unavailable")
+        return profile
     if record["source_kind"] == "calculated_result":
         from services import assurance_metrics
 

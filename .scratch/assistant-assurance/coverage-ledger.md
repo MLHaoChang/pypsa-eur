@@ -100,7 +100,7 @@ stems from the directories above; “UI” means the ChatPanel acceptance file.
 | A1.1 | Partial: p1 project/entity/unit, cross-org; p2 entity mismatch | Run/section/metric/window identity, forged pointers and traversal, same-org ACL denial |
 | A1.2 | Partial: p1 anonymous; p5 missing CSRF | Post-collection/review/cache revocation, disabled identity, publish/read races, invalid CSRF and cross-owner ACK |
 | A1.3 | None | Real immutable historical run fixture, failed/newer run choice, current input invalidation |
-| A1.4 | Partial: p4 legacy provenance corruption; p1 integrity (corrupt/lost/expired/duplicate/rewritten records, policy/adapter versions, reload with saved and unsaved inputs) | Evidence retention/loss/corruption/restart; unsaved inputs, source/policy/cache versions |
+| A1.4 | Partial: p4 legacy provenance corruption; p1 integrity (corrupt/lost/expired/duplicate/rewritten records, policy/adapter versions, reload with saved and unsaved inputs); not retained scoped results, still certified by an unkeyed hash (A1.4-RETAINED: needs a server-keyed MAC) | Evidence retention/loss/corruption/restart; unsaved inputs, source/policy/cache versions |
 | A1.5 | None | Capture-before-truncation/omission, complete aggregates vs page extrema |
 | A1.6 | Existing unsolved chart refusal control only | Real partial/infeasible/nonconverged/missing/low-fidelity adapters and null semantics |
 | A2.1 | Partial: p2 unsafe fragments; p6 replay/export; UI text/thinking/TTS/link | Caption/tool-summary scope, summary/compaction, cold reload and actual speech transport |

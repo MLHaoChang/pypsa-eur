@@ -918,5 +918,5 @@ Mutants, one at a time, each red: `_require_current_facts` a no-op (13), no empt
 
 Regressions: `tests/assurance_acceptance` 205 passed; `tests/test_*assur*.py` with the checked-answer pilot and dispositions: see the PR.
 
-Remaining for P1: A1.3 historical as-of runs, A1.5 complete-source aggregates, A1.6/A1.7 validity and masks, the other `read_unvalidated` families, frontend `assurance_state`, SERIES-WINDOW, REVOKE-KIND.
+Remaining for P1: A1.4-RETAINED (retained scoped results are still certified by an unkeyed hash; a server-keyed MAC on the envelope closes it), A1.3 historical as-of runs, A1.5 complete-source aggregates, A1.6/A1.7 validity and masks, the other `read_unvalidated` families, frontend `assurance_state`, SERIES-WINDOW, REVOKE-KIND.
 
