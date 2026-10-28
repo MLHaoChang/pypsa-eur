@@ -11,11 +11,11 @@ function answer(r) {
   const ok = r.cases.filter(c => c.comparable);
   const head = `| Metric | ${r.base.name} | ${ok.map(c => c.name).join(' | ')} |`;
   const sep = '|' + ' --- |'.repeat(ok.length + 2);
-  const rows = r.metrics.filter(m => r.base.values[m.metric].display).map(m => {
-    const cells = ok.map(c => { const v = c.values[m.metric]; return v.display ? `${v.display} (${v.delta_display})` : '—' });
-    return `| ${m.label} (${m.unit}) | ${r.base.values[m.metric].display} | ${cells.join(' | ')} |`;
+  const rows = r.metrics.filter(m => r.base.values[m.metric].cell).map(m => {
+    const cells = ok.map(c => c.values[m.metric].cell ?? '—');
+    return `| ${m.header} | ${r.base.values[m.metric].cell} | ${cells.join(' | ')} |`;
   });
-  const missing = r.metrics.filter(m => !r.base.values[m.metric].display).map(m => m.label);
+  const missing = r.metrics.filter(m => !r.base.values[m.metric].cell).map(m => m.label);
   const lines = [head, sep, ...rows, ''];
   if (missing.length) lines.push(`Not saved for these runs: ${missing.join(', ')}.`, '');
   lines.push('**Not compared:**', ...r.cases.filter(c => !c.comparable).flatMap(c => c.not_comparable.map(t => `- ${t}`)), '');
