@@ -34,7 +34,7 @@ from services.site_scene.verdicts import REASON_NO_BOUNDARY
 ACTIONS = ("generate_native", "edit_buildings", "bind_targets", "rebind", "place_existing")
 # SC-02a: the inputs each action takes. The model actions read the open network.
 INPUT_KEYS = {"generate_native": {"greenfield", "sources"}, "edit_buildings": {"greenfield", "sources"},
-              "bind_targets": {"associations", "groups"}, "rebind": {"association", "target", "confirmed"},
+              "bind_targets": {"associations", "groups"}, "rebind": {"association", "placement", "target", "confirmed"},
               "place_existing": {"placements"}}
 MODEL_ACTIONS = {"bind_targets": (associations.prepare_bind, associations.apply_bind),
                  "rebind": (associations.prepare_rebind, associations.apply_rebind),
@@ -140,7 +140,7 @@ def _prepare_model(project_dir, action: str, scene: dict[str, Any], inputs: dict
 
     n = _open_network(project_dir)
     with PyPSAService.get_lock():
-        return MODEL_ACTIONS[action][0](scene, n, inputs)
+        return MODEL_ACTIONS[action][0](scene, n, inputs, _recorded_bindings(project_dir))
 
 
 def view(entry: dict[str, Any]) -> dict[str, Any]:
@@ -244,36 +244,34 @@ def _commit_entry(project_dir, site_id: str, pid: str, entry: dict[str, Any], ex
     if expected != scene["revision"]:
         return store.apply(project_dir, site_id, {**proposal, "changes": {}}, expected)
     # Apply re-validates every target against the live network before anything is written.
-    if entry["action"] == "place_existing":
-        result = associations.apply_place(scene, n, entry["stored"], _recorded_bindings(project_dir))
-    else:
-        result = MODEL_ACTIONS[entry["action"]][1](scene, n, entry["stored"])
-    changes, bindings = result if isinstance(result, tuple) else (result, {})
+    changes, bindings = MODEL_ACTIONS[entry["action"]][1](scene, n, entry["stored"], _recorded_bindings(project_dir))
     if bindings:
         _record_bindings(project_dir, bindings)
     return store.apply(project_dir, site_id, {**proposal, "changes": changes}, expected)
 
 
-def _recorded_bindings(project_dir) -> dict[str, str]:
+def _recorded_bindings(project_dir, doc: dict[str, Any] | None = None) -> dict[str, str]:
+    """The sites.json D06 `bindings` map (`services/site_bindings.py`)."""
     from services import site_service
 
-    value = site_service.read_sites(project_dir).get("bindings")
-    return value if isinstance(value, dict) else {}
+    value = (doc if doc is not None else site_service.read_sites(project_dir)).get("bindings")
+    return dict(value) if isinstance(value, dict) else {}
 
 
-def _record_bindings(project_dir, bindings: dict[str, str]) -> None:
+def _record_bindings(project_dir, updates: dict[str, str | None]) -> None:
     """
-    D06 bindings of newly placed keys, written before the generation so a
-    placement never exists without one. A commit that then fails leaves only a
-    binding to the same instance, which the retry reuses.
+    D06 bindings of placed keys (None drops one), written before the
+    generation so a placement never exists without one. A commit that then
+    fails leaves only a binding to the same instance, which the retry reuses.
     """
     from services import site_service
 
     doc = site_service.read_sites(project_dir)
-    current = _recorded_bindings(project_dir)
-    if all(current.get(k) == v for k, v in bindings.items()):
+    current = _recorded_bindings(project_dir, doc)
+    merged = {k: v for k, v in {**current, **updates}.items() if v is not None}
+    if merged == current:
         return
-    doc["bindings"] = {**current, **bindings}
+    doc["bindings"] = merged
     site_service.write_sites(project_dir, doc)
 
 
