@@ -62,6 +62,14 @@ describe('CampusUnitQCurveSection', () => {
       .toBe('±6.00 Mvar available for −6.00 to +7.00 Mvar: 1.00 Mvar short to deliver')
   })
 
+  it('prints a real shortfall below 0.005 Mvar as under 0.01, not 0.00', () => {
+    const r = row({ p_pu: 0.5, q_min_req_mvar: -6, q_max_req_mvar: 6.003, available_mvar: 6, shortfall_mvar: 0.003,
+      status: 'fail' })
+    render(<CampusUnitQCurveSection rows={[r]} />)
+    expect(screen.getByTestId('qcurve-detail-BESS1-0.5').textContent)
+      .toBe('±6.00 Mvar available for −6.00 to +6.00 Mvar: under 0.01 Mvar short to deliver')
+  })
+
   it('fails closed: a status other than pass, fail or reported shows Fail', () => {
     render(<CampusUnitQCurveSection rows={[row({ status: 'weird' as never })]} />)
     expect(within(screen.getByTestId('qcurve-BESS1-1')).getByTestId('gr-verdict').dataset.verdict).toBe('fail')

@@ -26,6 +26,11 @@ function mvar(v: number): string {
   return v.toFixed(2)
 }
 
+/** A real shortfall that rounds to 0.00 is "under 0.01", never "0.00 Mvar short". */
+function shortMvar(v: number): string {
+  return mvar(v) === '0.00' ? 'under 0.01' : mvar(v)
+}
+
 function signed2(v: number): string {
   return v > 0 ? `+${mvar(v)}` : v < 0 ? `−${mvar(-v)}` : mvar(v)
 }
@@ -40,10 +45,10 @@ function detailText(r: IbrQCurveRow): string {
     || r.q_min_req_mvar == null || r.q_max_req_mvar == null) return r.detail
   const deliver = Math.max(0, r.q_max_req_mvar - r.available_mvar)
   const absorb = Math.max(0, -r.q_min_req_mvar - r.available_mvar)
-  const short = mvar(deliver) === mvar(absorb) && deliver > SHORT_EPS ? `${mvar(deliver)} Mvar short each way`
-    : [deliver > SHORT_EPS && `${mvar(deliver)} Mvar short to deliver`,
-      absorb > SHORT_EPS && `${mvar(absorb)} Mvar short to absorb`]
-      .filter(Boolean).join(' and ') || `${mvar(r.shortfall_mvar)} Mvar short`
+  const short = shortMvar(deliver) === shortMvar(absorb) && deliver > SHORT_EPS && absorb > SHORT_EPS ? `${shortMvar(deliver)} Mvar short each way`
+    : [deliver > SHORT_EPS && `${shortMvar(deliver)} Mvar short to deliver`,
+      absorb > SHORT_EPS && `${shortMvar(absorb)} Mvar short to absorb`]
+      .filter(Boolean).join(' and ') || `${shortMvar(r.shortfall_mvar)} Mvar short`
   return `±${mvar(r.available_mvar)} Mvar available for ${signed2(r.q_min_req_mvar)} to ${signed2(r.q_max_req_mvar)} Mvar: ${short}`
 }
 
