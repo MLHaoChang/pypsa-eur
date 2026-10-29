@@ -6,8 +6,9 @@ GK B conditions (`.scratch/results-workbook/issues/02-result-view-sheets.md`):
 1 the lifted `/adequacy` body changes nothing; 2 keys equal the route and each
 scenario reads its own state and network; 3 a period-2 figure (Adequacy) or
 the no-period note (FMEA); 5 no results vs an error; 6 FMEA's criticality and
-severity are labelled per study horizon (ticket 30); 9 charts read number
-cells on their own sheet.
+severity are labelled by each row's own basis (per study horizon for class
+A/B until ticket 30 lands, per year for C), the horizon's length is given, and
+no key compares two bases; 9 charts read number cells on their own sheet.
 """
 from __future__ import annotations
 
@@ -30,7 +31,9 @@ from services.adequacy.report import adequacy_payload
 from services.pypsa_service import PyPSAService
 from services.results_workbook import scenarios as S
 from services.results_workbook.views import HORIZON
-from services.results_workbook.views_adequacy import CRITICALITY, PER_HORIZON, SEVERITY
+from services.results_workbook.views_adequacy import (
+    CRITICALITY, CRITICALITY_PER_YEAR, PER_HORIZON, SEVERITY, SEVERITY_PER_EVENT,
+)
 from services.results_workbook.views_grid import NO_PERIODS
 from services.solver_service import SolverConfig
 
@@ -215,6 +218,15 @@ def test_a_single_period_system_cost_is_per_year(active):
     assert _key(ws, "System cost excluding shed, per year", HORIZON) == report["cost"][
         "total_system_cost_eur"]
     assert "discounted over the plan" not in _text(ws)
+    # Per year only on a full-year horizon: the sheet says how long this one is.
+    assert "per year only when the horizon is a full year" in _text(ws)
+    assert "Study horizon: 2 h of modelled time" in _text(ws)
+
+
+def test_a_multi_period_cost_has_no_per_year_caveat_but_the_horizon_note(active):
+    ws = _wb(_build(active, ["adequacy"]))[TITLES["adequacy"]]
+    assert "per year only when" not in _text(ws)
+    assert "Study horizon: 2 h of modelled time" in _text(ws)
 
 
 def test_a_scenario_without_a_target_beside_a_base_with_one_says_not_modelled(active):
@@ -232,7 +244,8 @@ def test_fmea_keys_equal_the_route_and_each_scenario_reads_its_own_network(activ
     mine = build_fmea_modes_payload(run.network, CFG, sweep_record=None,
                                     get_lock=PyPSAService.get_lock)
     top, top_mine = base["per_mode"][0], mine["per_mode"][0]
-    label = f"Highest criticality ({PER_HORIZON})"
+    label = "Highest criticality, classes A/B"
+    assert _key(ws, label, HORIZON, col=2) == f"EUR {PER_HORIZON}"
     assert _key(ws, label, HORIZON) == pytest.approx(top["criticality_eur_per_year"]) and top[
         "criticality_eur_per_year"] > 0
     assert _key(ws, "Failure modes", HORIZON) == len(base["per_mode"])
@@ -245,15 +258,18 @@ def test_fmea_keys_equal_the_route_and_each_scenario_reads_its_own_network(activ
     assert sum(1 for r in rows if r[0] == "High load") == len(mine["per_mode"])
 
 
-def test_fmea_criticality_and_severity_are_labelled_per_study_horizon(active):
+def test_fmea_class_a_rows_without_a_basis_are_labelled_per_study_horizon(active):
     ws = _wb(_build(active, ["fmea"]))[TITLES["fmea"]]
     cells = [str(c) for row in ws.iter_rows(values_only=True) for c in row if isinstance(c, str)]
     assert CRITICALITY in cells and SEVERITY in cells
     assert PER_HORIZON == "per study horizon (ticket 30)"
-    # Nothing on the sheet calls them per year: not a key, a header or a chart.
+    # No route field name, which says "per year", reaches the sheet.
     assert not any("criticality_eur_per_year" in c or "severity_eur" in c for c in cells)
-    assert not any("criticality" in c.lower() and "per year" in c.lower()
-                   and PER_HORIZON not in c for c in cells)
+    # Every row is class A without a basis: per horizon, and its per-year cells are empty.
+    rows = _fmea_rows(ws)
+    assert rows and all(r["criticality basis"] == PER_HORIZON for r in rows)
+    assert all(_number(r[CRITICALITY]) and not _number(r[CRITICALITY_PER_YEAR]) for r in rows)
+    assert "Study horizon: 2 h of modelled time" in _text(ws)
     titles = [_chart_title(ch) for ch in ws._charts]
     assert any("Criticality" in t for t in titles)
     assert all(PER_HORIZON in t for t in titles if "riticality" in t)
@@ -262,6 +278,80 @@ def test_fmea_criticality_and_severity_are_labelled_per_study_horizon(active):
             name = ws[s.tx.strRef.f.split("!")[1].replace("$", "")].value
             if "riticality" in str(name) or "everity" in str(name):
                 assert PER_HORIZON in str(name)
+
+
+def _mode(mode_id: str, cls: str, crit: float, basis: str | None = None) -> dict:
+    m = {"mode_id": mode_id, "name": mode_id, "failure_class": cls,
+         "occurrence_per_year": 2.0, "criticality_eur_per_year": crit,
+         "severity_eur": crit / 2.0, "delta_eue_mwh": crit / 1000.0}
+    return {**m, "criticality_basis": basis} if basis else m
+
+
+def _fmea_sheet(active, monkeypatch, modes):
+    monkeypatch.setattr("services.adequacy.copt_endpoint.build_fmea_modes_payload",
+                        lambda *a, **k: {"per_mode": modes, "voll_eur_per_mwh": 1000.0})
+    return _wb(_build(active, ["fmea"]))[TITLES["fmea"]]
+
+
+def _number(v) -> bool:
+    """A filled cell: the sheet writes an empty one as a "not_established" label."""
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _fmea_rows(ws) -> list[dict]:
+    rows = list(ws.iter_rows(values_only=True))
+    h = next(i for i, r in enumerate(rows) if "criticality basis" in r)
+    head = rows[h]
+    return [dict(zip(head, r)) for r in rows[h + 1:] if r[0] == "Base"]
+
+
+@pytest.mark.parametrize("cls,basis,crit_col,sev_col,says", [
+    ("A", None, CRITICALITY, SEVERITY, PER_HORIZON),
+    ("A", "annualised", CRITICALITY_PER_YEAR, SEVERITY_PER_EVENT, "per year (annualised)"),
+    ("C", None, CRITICALITY_PER_YEAR, SEVERITY_PER_EVENT, "per year (frequency × severity)"),
+    ("C", "per_event", CRITICALITY_PER_YEAR, SEVERITY_PER_EVENT,
+     "per year (frequency × severity)"),
+])
+def test_each_fmea_row_is_labelled_by_its_own_basis(active, monkeypatch, cls, basis, crit_col,
+                                                    sev_col, says):
+    ws = _fmea_sheet(active, monkeypatch, [_mode("m1", cls, 400.0, basis)])
+    (row,) = _fmea_rows(ws)
+    assert row["criticality basis"] == says
+    assert row[crit_col] == pytest.approx(400.0) and row[sev_col] == pytest.approx(200.0)
+    # Its figures sit in no other basis's column.
+    others = {CRITICALITY, CRITICALITY_PER_YEAR, SEVERITY, SEVERITY_PER_EVENT} - {crit_col, sev_col}
+    assert not any(_number(row[c]) for c in others)
+    family = "class C" if cls == "C" else "classes A/B"
+    key = f"Highest criticality, {family}"
+    assert _key(ws, key, HORIZON) == pytest.approx(400.0)
+    assert _key(ws, key, HORIZON, col=2) == f"EUR {says}"
+
+
+def test_mixed_bases_get_one_highest_key_each_and_no_chart_mixes_them(active, monkeypatch):
+    ws = _fmea_sheet(active, monkeypatch, [
+        _mode("c1", "C", 9000.0), _mode("a1", "A", 500.0), _mode("a2", "A", 700.0)])
+    # The per-year C row does not outrank the per-horizon A rows' key.
+    assert _key(ws, "Highest criticality, classes A/B", HORIZON) == pytest.approx(700.0)
+    assert _key(ws, "Highest criticality, class C", HORIZON) == pytest.approx(9000.0)
+    assert not any(str(r[0]).startswith("Highest criticality (")
+                   for r in ws.iter_rows(min_row=4, values_only=True))
+    # Neither criticality column is full, so neither is charted.
+    assert not any("riticality" in _chart_title(ch) for ch in ws._charts)
+
+
+def test_a_family_on_two_bases_has_no_highest(active, monkeypatch):
+    ws = _fmea_sheet(active, monkeypatch, [
+        _mode("a1", "A", 500.0, "annualised"), _mode("b1", "B", 700.0)])
+    assert not _number(_key(ws, "Highest criticality, classes A/B", HORIZON))
+    assert _key(ws, "Highest criticality, classes A/B", HORIZON, col=2) == \
+        "EUR (rows on different bases)"
+
+
+def test_per_year_rows_chart_on_the_per_year_chart(active, monkeypatch):
+    ws = _fmea_sheet(active, monkeypatch, [_mode("c1", "C", 9000.0), _mode("c2", "C", 10.0)])
+    titles = [_chart_title(ch) for ch in ws._charts]
+    assert "Criticality by failure mode, EUR per year" in titles
+    assert not any(PER_HORIZON in t for t in titles)
 
 
 def _chart_title(chart) -> str:

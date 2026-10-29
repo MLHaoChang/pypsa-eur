@@ -150,11 +150,15 @@ CHARTS: dict[str, tuple[Chart, ...]] = {
         Chart("bar", "Firm and required capacity at peak by period", "Reserve margin by period",
               "MW", cats=0, columns=("required_mw", "firm_mw")),
     ),
-    # Ticket 30 (condition 6): criticality is per study horizon, never per year.
+    # Ticket 30 (condition 6): one chart per criticality basis. A column is
+    # charted only when every base row has a number in it, so no chart mixes
+    # a per-horizon row with a per-year one.
     "fmea": (
         Chart("bar", "Criticality by failure mode, EUR per study horizon (ticket 30)",
               "Failure modes", "EUR per study horizon (ticket 30)", cats=0,
               columns=("criticality, EUR per study horizon (ticket 30)",)),
+        Chart("bar", "Criticality by failure mode, EUR per year", "Failure modes",
+              "EUR per year", cats=0, columns=("criticality, EUR per year",)),
         Chart("bar", "ΔEUE by failure mode", "Failure modes", "MWh", cats=0,
               columns=("ΔEUE, MWh",)),
     ),
