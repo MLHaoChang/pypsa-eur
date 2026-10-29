@@ -48,16 +48,16 @@ Design: [design.md](../design.md) §9.3 "eh_datacenter" (P–V/Q–V, deferred),
 
 ## Acceptance criteria
 
-- [ ] A campus run on `eh_datacenter` writes `campus_voltage_stability.csv` and its meta; the scorecard shows both rows with a margin, a limit and its source.
-- [ ] On the equivalent held to R = 0 (rx = 0) the nose matches the analytic P_max = E² cos φ / (2X (1 + sin φ)) within 1 % (the DC 14 formula, X = c_min·Un²/S_k''min). With rx_min > 0 the nose is only checked to be finite and below the R = 0 value.
-- [ ] `planned_mw` is the larger of the LF peak import and the rated import, and the note names which bound.
-- [ ] A lower-bound nose below the limit reads `unknown` with "the sweep did not reach the nose"; one at or above reads `pass` shown as "≥ x" (same for `qmin_at_sweep_edge`).
-- [ ] No S_k'' min entered → both rows `unknown` with the reason; the run still succeeds.
-- [ ] A stage exception writes the error file, the run succeeds, the rows read `unknown` with the error.
-- [ ] Below the limit → `warn`, never `fail`; no row text says "compliant" or "meets".
-- [ ] With no user limit the rows show the placeholders (5 %, 0 Mvar) with the placeholder wording; a user limit in the profile replaces them and the row cites the profile.
-- [ ] `off_grid` → both rows excluded with the reason (test).
-- [ ] `tests/gridspine/test_sixty_hz.py` stays green (no 50 Hz literal added).
+- [x] A campus run on `eh_datacenter` writes `campus_voltage_stability.csv` and its meta; the scorecard shows both rows with a margin, a limit and its source.
+- [x] On the equivalent held to R = 0 (rx = 0) the nose matches the analytic P_max = E² cos φ / (2X (1 + sin φ)) within 1 % (the DC 14 formula, X = c_min·Un²/S_k''min). With rx_min > 0 the nose is only checked to be finite and below the R = 0 value.
+- [x] `planned_mw` is the larger of the LF peak import and the rated import, and the note names which bound.
+- [x] A lower-bound nose below the limit reads `unknown` with "the sweep did not reach the nose"; one at or above reads `pass` shown as "≥ x" (same for `qmin_at_sweep_edge`).
+- [x] No S_k'' min entered → both rows `unknown` with the reason; the run still succeeds.
+- [x] A stage exception writes the error file, the run succeeds, the rows read `unknown` with the error.
+- [x] Below the limit → `warn`, never `fail`; no row text says "compliant" or "meets".
+- [x] With no user limit the rows show the placeholders (5 %, 0 Mvar) with the placeholder wording; a user limit in the profile replaces them and the row cites the profile.
+- [x] `off_grid` → both rows excluded with the reason (test).
+- [x] `tests/gridspine/test_sixty_hz.py` stays green (no 50 Hz literal added).
 
 ## Test plan
 
@@ -71,3 +71,11 @@ Design: [design.md](../design.md) §9.3 "eh_datacenter" (P–V/Q–V, deferred),
 `gridspine/drivers/campus_study.py`, `gridspine/templates/grid_codes.py`, `pypsa-gui/backend/services/campus_electrical_service.py`, `pypsa-gui/backend/services/campus_grid_code_service.py`, `pypsa-gui/backend/services/adequacy/grid_readiness.py`, the tests above, a release-note fragment.
 
 ## Comments
+
+- 2026-10-28, build plan (sent to GK A as the draft PR): follows every ruling above as written. Files:
+  - `gridspine/drivers/campus_study.py`: `voltage_stability_campus(run_dir, profile, profile_dirs)` and `VOLTAGE_STABILITY_CSV`. A 3-bus pandapower net (source bus + `ext_grid` at E, an impedance with Z = c_min·Un²/S_k''min from `island_sc_seq.c_factor(vn, "min")` and R/X from `pcc.rx_min`, the PCC bus as PoC); intact only. `planned_mw` per period = max(largest converged PCC import in `campus_lf_pcc.csv`, `pcc.p_connection_mw` when stated), the note naming which bound; probe pf from that hour's P/Q, lagging only, else `VoltageStabilitySettings().pf` with a note; E = min(1.0, PCC `vm_pu`) named in the ledger.
+  - `pypsa-gui/backend/services/campus_electrical_service.py`: stage `voltage_stability` after `harmonic_scan` in `RUN_STAGES`; `_voltage_stability` / `_voltage_stability_results` as `_harmonic_scan`; meta `campus_voltage_stability.json`, error `voltage_stability_error.json`; `get_state` returns it.
+  - `gridspine/templates/grid_codes.py` + `services/campus_grid_code_service.py` `_limits`: optional numeric `pv_margin_min_pct` (> 0) and `qv_margin_min_mvar` (≥ 0); no profile ships values (D3-KEEP).
+  - `services/adequacy/grid_readiness.py`: `RULE_PV`/`RULE_QV` (`>=`, warn) and `_voltage_stability_rows` (`voltage_stability_pv`, `voltage_stability_qv`, section `connection`) with the placeholders, lower-bound handling, unknown reasons and wording above. Off-grid: no exclusion mechanism exists yet (issue 12 is unbuilt), so on a project whose `eh_template.json` `recommended_archetype` is `off_grid` the two rows leave `rows` for a new scorecard list `excluded: [{id, reason}]`, not counted in the summary; issue 12 reuses it for its S_k''-built rows.
+  - `.scratch/study-harness/issues/10-profile-datacenter.md`: the P–V/Q–V acceptance line becomes the two `dc.readiness.*` rows as `warn`.
+  - Tests: `tests/gridspine/test_campus_voltage_stability.py`, `pypsa-gui/backend/tests/test_grid_readiness_voltage_stability.py`, the `RUN_STAGES` test, the profile-key tests; a release-note fragment.
