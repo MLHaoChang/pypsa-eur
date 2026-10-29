@@ -40,3 +40,26 @@ Each PR adds tests only (plus a release-note fragment). The manifest flips (`_pe
 A variant that needs engine work to be testable goes to the coordinator with options instead.
 
 ## Comments
+
+### GK A (6), 2026-10-29: plan @33f6119e is a GO with conditions
+
+- General: each mutation runs in the test (parametrised case or a second solve); each file finishes
+  under 590 s alone with `-x`. A hand number the engine gets wrong is not pinned at the engine's value:
+  assert what is right, add a `_pending` row naming a new ticket, tell the coordinator (no xfail, no
+  skip). A release-note fragment per PR; manifest/OWNERS flips wait for #918/#920/#922.
+- D06.sclopf: gens at A and B fixed (non-extendable, p_nom >= 100), snapshot weight 1. Assert the base
+  flows are 30/30 under SCLOPF and 50/50 with it off, and the post-outage flow equals s_nom.
+- D06.ac_stage: the oracle is the independent Ybus/NR from LC-D07, never pypsa's pf. The slack
+  generator is named; non-slack generators keep their LP setpoints exactly; slack = LP + losses; the LP
+  objective is unchanged under the r-doubling mutation to 1e-9 relative.
+- D13.margin_loop: the code's formula (`margin_loop_runner.py` x0: base = max(m_tight, 0),
+  m_start = base x (1 + STEP_OVERSHOOT) or STEP_OVERSHOOT at base 0, clamped to
+  [PROBE_MARGIN, ceiling]), constants imported. Both branches pinned (m_tight > 0 and <= 0). One q > 0
+  step pinned on a fixed seed, LC-D12.standard_mc style: each iterate's MC LOLE inside the seed CI
+  around a hand/independent COPT LOLE; met/not-met asserted only where the COPT LOLE clears the target
+  by more than the CI half-width; the step direction follows not-met -> raise; `lever_star` asserted.
+- D13.reserve_margin_coupling: the extendable unit has q != 0 (e.g. 0.1); weighted and unweighted
+  peaks differ in the fixture.
+- D13.elcc_frontier_campaign: the ELCC tolerance is the engine's named bisection tolerance, imported;
+  the identity total_system_cost = objective - VoLL x ENS is asserted separately from the hand numbers.
+- EH trio and multi_energy: GO as written; multi_energy asserts AC ENS under the mutation exactly.
