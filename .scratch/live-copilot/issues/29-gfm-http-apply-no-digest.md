@@ -3,7 +3,7 @@
 
 # LC-29 — the HTTP GFM apply checks no card when no digest is sent
 
-Status: needs-triage
+Status: ready-for-agent
 
 Found by LC-06 (7) while building S9 (LC-D17); GK A (4) asked for the ticket.
 `POST /api/campus-electrical/{name}/island/gfm-settings/apply`

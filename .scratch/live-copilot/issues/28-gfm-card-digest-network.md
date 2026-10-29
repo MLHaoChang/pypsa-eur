@@ -3,7 +3,7 @@
 
 # LC-28 — the GFM apply card's digest does not hash the network
 
-Status: needs-triage
+Status: ready-for-agent
 
 Found by LC-06 (7) while building S9 (LC-D17); GK A (4) asked for the ticket.
 The card for `campus_apply_gfm_settings` (`harness/edit_card.py`, its adapter
