@@ -59,6 +59,10 @@ class Run:
     lost_load: dict | None = None
     result_df: Callable | None = None
     solved_settings: Callable[[], dict | None] | None = None
+    # The run's own saved context (`workflow_tools._load_context`), for the
+    # views whose route reads a whole context (Load flow). None for the base,
+    # whose context is the active one.
+    context: Any = None
 
 
 @dataclass
@@ -128,6 +132,7 @@ def gather_scenarios(base_project_id: str, base_basis: dict, *,
             run.figs = overview_figures(ctx.network, state.get("solver_config"),
                                         state.get("last_lost_load"), result_df)
             run.network, run.cfg, run.result_df = ctx.network, state.get("solver_config"), result_df
+            run.context = ctx
             run.lost_load = state.get("last_lost_load")
             run.solved_settings = (solved_settings_for(state, ctx.network) if solved_settings_for
                                    else lambda state=state: state.get("last_solve_settings"))
