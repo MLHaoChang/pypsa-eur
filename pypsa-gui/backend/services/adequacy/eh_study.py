@@ -229,6 +229,9 @@ def _stage_apply_pack(st: _Study) -> None:
     st.pack_h = result.pack_hash
     st.mark("apply_pack", "run",
             note="; ".join(list(result.warnings) + st.pack_notes) or None)
+    # The report's own ``notes`` is what the user reads: carry the apply
+    # warnings there too (LC-26).
+    st.pack_notes.extend(result.warnings)
 
 
 def _stage_ens_solve(st: _Study) -> None:
