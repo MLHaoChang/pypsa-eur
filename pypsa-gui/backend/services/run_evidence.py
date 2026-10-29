@@ -41,6 +41,7 @@ from __future__ import annotations
 import contextvars
 import copy
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -282,11 +283,46 @@ def publish_run(root: Path, project_id: str, *, run_id: str, kind: str, status: 
             manifest['started_at'] = marker.get('started_at', manifest['started_at'])
         for name, blob in blobs.items():
             _atomic_write(section_paths[name], blob)
-        _atomic_write(manifest_path, _json_bytes(manifest))
+        _atomic_write(manifest_path, _json_bytes(_sealed(manifest)))
         marker_path.unlink(missing_ok=True)
         _LIVE.discard(_live_key(root, run_id))
         _enforce_retention(root)
     return copy.deepcopy(manifest)
+
+
+RUN_MAC_DOMAIN = b'pypsa-gui run-manifest/1'
+
+
+def _manifest_mac(manifest: dict) -> str:
+    """HMAC under the server key (SECRET_KEY and the install key, the run
+    domain), bound to the run's project and id, so a manifest written without
+    the key, or copied to another run or project, never verifies."""
+    from services import assurance_records as records
+
+    body = {k: v for k, v in manifest.items() if k != 'mac'}
+    message = records._canonical({'domain': RUN_MAC_DOMAIN.decode(),
+                                  'project_id': body.get('project_id'),
+                                  'run_id': body.get('run_id'), 'manifest': body})
+    return hmac.new(records.server_key(RUN_MAC_DOMAIN), message, hashlib.sha256).hexdigest()
+
+
+def _sealed(manifest: dict) -> dict:
+    """The manifest as written: with its MAC, or without one (never checkable,
+    still history) when the server key cannot be read."""
+    try:
+        return {**manifest, 'mac': _manifest_mac(manifest)}
+    except (OSError, ValueError):
+        import logging
+        logging.getLogger(__name__).exception('run manifest %s published unsealed',
+                                              manifest.get('run_id'))
+        return manifest
+
+
+def _seal_verifies(manifest: dict, mac: Any) -> bool:
+    try:
+        return isinstance(mac, str) and hmac.compare_digest(_manifest_mac(manifest), mac)
+    except (OSError, ValueError, TypeError):
+        return False
 
 
 def _same_completion(existing: dict, new: dict, started_at: str | None,
@@ -308,11 +344,16 @@ def _read_json(path: Path) -> dict | None:
     return value if isinstance(value, dict) else None
 
 
-def _read_manifest_file(path: Path) -> dict | None:
-    return _read_json(path)
+def _read_manifest_file(path: Path, sealed: bool = False) -> dict | None:
+    """A manifest as every reader has always seen it; its MAC only when
+    ``sealed`` (checked_run_manifest alone verifies it)."""
+    record = _read_json(path)
+    if record is not None and not sealed:
+        record.pop('mac', None)
+    return record
 
 
-def _load_run(root: Path, project_id: str, run_id: str) -> dict | None:
+def _load_run(root: Path, project_id: str, run_id: str, sealed: bool = False) -> dict | None:
     """Manifest (terminal) or running marker for THIS project; None otherwise."""
     if not _valid_run_id(run_id):
         return None
@@ -321,7 +362,7 @@ def _load_run(root: Path, project_id: str, run_id: str) -> dict | None:
         marker = _evidence_path(root, run_id, 'running.json')
     except (HTTPException, OSError, RuntimeError):
         return None
-    record = _read_manifest_file(manifest) or _read_json(marker)
+    record = _read_manifest_file(manifest, sealed) or _read_json(marker)
     if record is None or record.get('project_id') != project_id or record.get('run_id') != run_id:
         return None
     if record.get('status') == 'running' and _live_key(root, run_id) not in _LIVE:
@@ -487,16 +528,19 @@ def checked_run_manifest(run_id: Any) -> tuple[str, dict | None, str]:
     """(project id, manifest, status) for a checked answer about one run.
 
     The manifest is returned only for a well-formed completed run of the
-    active project whose recorded sections all verify; otherwise None with the
-    run's status ('not_found' when there is no such run, 'corrupt' when its
-    manifest is malformed, 'unverified' when a section fails to verify).
+    active project whose recorded sections all verify and whose manifest
+    carries this server's MAC; otherwise None with the run's status
+    ('not_found' when there is no such run, 'corrupt' when its manifest is
+    malformed, 'unverified' when a section or the MAC fails to verify).
+    The manifest comes back without its MAC, as every other read shows it.
     Raises like every run read when there is no active project.
     """
     root, project_id, _owner = _authority()
     with _LOCK:
-        record = _load_run(root, project_id, run_id)
+        record = _load_run(root, project_id, run_id, sealed=True)
         if record is None:
             return project_id, None, 'not_found'
+        mac = record.pop('mac', None)
         status = record.get('status')
         if status != 'completed':
             known = isinstance(status, str) and status in STATUSES
@@ -507,6 +551,9 @@ def checked_run_manifest(run_id: Any) -> tuple[str, dict | None, str]:
             return project_id, None, 'corrupt'
         if any(_section_state(root, record, name)[1] is not None
                for name in list(record.get('sections') or {})):
+            return project_id, None, 'unverified'
+        # Last, so a malformed or unfinished run keeps naming its status.
+        if not _seal_verifies(record, mac):
             return project_id, None, 'unverified'
         return project_id, copy.deepcopy(record), 'completed'
 
