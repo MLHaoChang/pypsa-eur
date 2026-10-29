@@ -31,6 +31,7 @@ import { mismatchSentence } from '../utils/projectMismatch'
 import { flushPendingEdgeDeletes } from '../utils/pendingEdgeDeletes'
 import { flushPendingSitesToServer } from '../site3d/sitesStore'
 import { SItem, SectionHdr, SubHdr } from './sidebar/SidebarRows'
+import { ResultsWorkbookPicker, WORKBOOK_DEFAULT, type WorkbookChoice } from './sidebar/ResultsWorkbookPicker'
 import { STEPS, type StepId } from './sidebar/steps'
 import { flushPendingMapLayoutToServer } from '../pages/mapLayoutStore'
 
@@ -45,7 +46,8 @@ function IoModal({ onClose, initialTab = 'import', projectName }: {
   onClose: () => void; initialTab?: 'import' | 'export'; projectName: string
 }) {
   const [tab, setTab] = useState<'import' | 'export'>(initialTab)
-  const [exportFmt, setExportFmt] = useState<'bundle' | 'netcdf' | 'csv' | 'excel' | 'matpower'>('bundle')
+  const [exportFmt, setExportFmt] = useState<'bundle' | 'netcdf' | 'csv' | 'excel' | 'matpower' | 'workbook'>('bundle')
+  const [workbook, setWorkbook] = useState<WorkbookChoice>(WORKBOOK_DEFAULT)
   const [exportFilename, setExportFilename] = useState(slugify(projectName))
   const [exporting, setExporting] = useState(false)
   const qc = useQueryClient()
@@ -88,6 +90,14 @@ function IoModal({ onClose, initialTab = 'import', projectName }: {
         }
         blob = await projectsApi.downloadBundle(currentProject)
         ext = '.pypsaproj.zip'
+      } else if (exportFmt === 'workbook') {
+        const wb = await ioApi.exportResultsWorkbook(workbook.extra, workbook.all)
+        if (!wb) {
+          toast.error('Run the model first: the results workbook holds the solved results.')
+          return
+        }
+        blob = wb
+        ext = '.xlsx'
       } else {
         const fns = { netcdf: ioApi.exportNetcdf, csv: ioApi.exportCsv, excel: ioApi.exportExcel, matpower: ioApi.exportMatpower }
         const exts = { netcdf: '.nc', csv: '.zip', excel: '.xlsx', matpower: '.m' }
@@ -100,7 +110,9 @@ function IoModal({ onClose, initialTab = 'import', projectName }: {
       a.href = url; a.download = fname; a.click()
       URL.revokeObjectURL(url)
       toast.success(`Downloaded ${fname}`)
-    } catch { toast.error('Export failed') } finally { setExporting(false) }
+    } catch (e) {
+      toast.error(exportFmt === 'workbook' && e instanceof Error && !('isAxiosError' in e) ? e.message : 'Export failed')
+    } finally { setExporting(false) }
   }
 
   return (
@@ -108,7 +120,7 @@ function IoModal({ onClose, initialTab = 'import', projectName }: {
       style={{ background: 'rgba(0,0,0,0.45)' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className="bg-bg rounded-xl shadow-2xl w-[480px] max-w-[95vw] overflow-hidden">
+      <div className="bg-bg rounded-xl shadow-2xl w-[480px] max-w-[95vw] max-h-[92vh] overflow-y-auto">
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
           <div>
             <p className="text-[9px] font-bold text-accent uppercase tracking-widest">NETWORK</p>
@@ -151,7 +163,7 @@ function IoModal({ onClose, initialTab = 'import', projectName }: {
                     className="flex-1 px-2.5 py-1.5 text-xs border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20"
                   />
                   <span className="text-[10px] text-muted font-mono">
-                    {exportFmt === 'bundle' ? '.pypsaproj.zip' : exportFmt === 'netcdf' ? '.nc' : exportFmt === 'csv' ? '.zip' : exportFmt === 'excel' ? '.xlsx' : '.m'}
+                    {exportFmt === 'bundle' ? '.pypsaproj.zip' : exportFmt === 'netcdf' ? '.nc' : exportFmt === 'csv' ? '.zip' : exportFmt === 'excel' || exportFmt === 'workbook' ? '.xlsx' : '.m'}
                   </span>
                 </div>
               </label>
@@ -161,17 +173,23 @@ function IoModal({ onClose, initialTab = 'import', projectName }: {
                   { id: 'bundle',   label: 'Project bundle (.pypsaproj.zip)', desc: 'Network + solve results + time series + solver config + layout — full round-trip' },
                   { id: 'netcdf',   label: 'NetCDF (.nc)',   desc: 'Native PyPSA format — lossless' },
                   { id: 'excel',    label: 'Excel (.xlsx)',  desc: 'One sheet per component' },
+                  { id: 'workbook', label: 'Results workbook (Excel)', desc: 'The solved results: overview, key charts and one sheet per result tab' },
                   { id: 'csv',      label: 'CSV zip (.zip)', desc: 'Folder of CSVs' },
                   { id: 'matpower', label: 'MATPOWER (.m)',  desc: 'AC-only, for MATLAB/Octave' },
                 ] as const).map(f => (
-                  <label key={f.id} className="flex items-center gap-3 cursor-pointer p-2.5 rounded-lg border border-border hover:border-accent/50 transition-colors">
-                    <input type="radio" name="fmt" value={f.id} checked={exportFmt === f.id}
-                      onChange={() => setExportFmt(f.id)} className="accent-accent" />
-                    <div>
-                      <div className="text-xs font-semibold text-text">{f.label}</div>
-                      <div className="text-[10px] text-muted">{f.desc}</div>
-                    </div>
-                  </label>
+                  <div key={f.id}>
+                    <label className="flex items-center gap-3 cursor-pointer p-2.5 rounded-lg border border-border hover:border-accent/50 transition-colors">
+                      <input type="radio" name="fmt" value={f.id} checked={exportFmt === f.id}
+                        onChange={() => setExportFmt(f.id)} className="accent-accent" />
+                      <div>
+                        <div className="text-xs font-semibold text-text">{f.label}</div>
+                        <div className="text-[10px] text-muted">{f.desc}</div>
+                      </div>
+                    </label>
+                    {f.id === 'workbook' && exportFmt === 'workbook' && (
+                      <ResultsWorkbookPicker value={workbook} onChange={setWorkbook} />
+                    )}
+                  </div>
                 ))}
               </div>
               <p className="text-[10px] text-muted mb-4 flex items-start gap-1.5">

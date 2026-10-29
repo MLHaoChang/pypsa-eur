@@ -2270,6 +2270,42 @@ def _workbook_project(run):
             return None
 
 
+def _workbook_template():
+    from services import flow_service, network_lengths
+
+    project_dir = network_lengths.active_project_dir()
+    return flow_service.read_template(project_dir) if project_dir else None
+
+
+def _workbook_scope(n, template) -> dict:
+    """The cards the project has switched on, as Flow reads them (RW-TABS-1)."""
+    from services import flow_scope, network_lengths
+
+    project_dir = network_lengths.active_project_dir()
+    no_load = flow_scope.no_load_plant(template, len(n.loads))
+    if project_dir:
+        # The live config decides the sub-options it owns (load flow, N-1), as Flow does.
+        cfg = _state.get("solver_config")
+        settings = dataclasses.asdict(cfg) if dataclasses.is_dataclass(cfg) else None
+        return flow_scope.read_scope(project_dir, template, settings, no_load=no_load)
+    return flow_scope.effective_preset(flow_scope.preset_for(None)[1],
+                                       has_template=False, no_load=no_load)
+
+
+@results_router.get("/workbook/views")
+def get_results_workbook_views(user: User = Depends(require_user)):
+    """The result views a workbook can hold, in the panel's order, with the ones
+    the project's switched-on cards include by default (`selected`): the Export
+    chooser's picker pre-ticks those (RW-TABS-1)."""
+    from services.flow_scope import CARD_BY_ID
+    from services.results_workbook.registry import resolve_views, workbook_views
+
+    default = set(resolve_views(_workbook_scope(PyPSAService.get_network(), _workbook_template())))
+    return {"views": [{"view_id": v.view_id, "label": v.label, "card": v.card,
+                       "card_label": CARD_BY_ID[v.card].label, "selected": v.view_id in default}
+                      for v in workbook_views()]}
+
+
 @results_router.get("/workbook.xlsx")
 def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="all"),
                          stored: bool = False, user: User = Depends(require_user)):
@@ -2283,7 +2319,7 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
     `unknown_result_view`; 413 `file_too_large` over 25 MB. Never solves and
     never runs the investment case (RW-KPI-1). With sensitivity runs the user
     may open, a Scenarios sheet compares them with this run (RW-SCEN-1)."""
-    from services import chat_tools, flow_scope, flow_service, network_lengths, run_evidence
+    from services import chat_tools, run_evidence
     from services import results_workbook as RW
     from services.finance.report import load_ic_report
     from services.http_filenames import content_disposition
@@ -2306,17 +2342,9 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
         raise HTTPException(409, {
             "error_kind": "results_workbook_stale",
             "message": f"{why} Run the model again, or export the stored run instead."})
-    project_dir = network_lengths.active_project_dir()
-    template = flow_service.read_template(project_dir) if project_dir else None
-    no_load = flow_scope.no_load_plant(template, len(n.loads))
+    template = _workbook_template()
     cfg = _state.get("solver_config")
-    if project_dir:
-        # The live config decides the sub-options it owns (load flow, N-1), as Flow does.
-        settings = dataclasses.asdict(cfg) if dataclasses.is_dataclass(cfg) else None
-        scope = flow_scope.read_scope(project_dir, template, settings, no_load=no_load)
-    else:
-        scope = flow_scope.effective_preset(flow_scope.preset_for(None)[1],
-                                            has_template=False, no_load=no_load)
+    scope = _workbook_scope(n, template)
     try:
         included = resolve_views(scope, views.split(","), all_views)
     except UnknownView as exc:
