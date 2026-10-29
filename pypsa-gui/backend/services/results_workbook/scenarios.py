@@ -32,7 +32,7 @@ from services.results_workbook.overview import (
     CASE_ROWS, RUN_THE_CASE, OverviewFigures, overview_figures,
 )
 
-__all__ = ["TITLE", "Run", "Scenarios", "gather_scenarios", "write_scenarios"]
+__all__ = ["TITLE", "Run", "Scenarios", "gather_experiments", "gather_scenarios", "write_scenarios"]
 
 TITLE = "Scenarios"
 HORIZON = "horizon"
@@ -75,18 +75,44 @@ class Scenarios:
     base_unsaved: bool = False
     # The base's own results are current (else no run is compared with it).
     base_current: bool = True
+    # Children named as experiment cases (`experiment_execution._name`): never
+    # sensitivity runs; `gather_experiments` shows the acting user's own and
+    # counts the others in `unlisted`, never naming them. Child id → name.
+    experiment_children: dict[str, str] = field(default_factory=dict)
+    unlisted: int = 0
+    # The experiment store could not be read: no experiment case is shown.
+    experiments_unreadable: bool = False
+
+    @property
+    def not_shown(self) -> int:
+        return self.no_access + self.over_cap + self.unlisted
 
 
-def _cases(base_project_id: str) -> tuple[Any, list[tuple[Any, dict]], int]:
-    """(base, [(case, spec)] the acting user may open, by name, count of the others)."""
+# The Scenarios sheet's own reasons for an experiment case, beside
+# `sensitivity_comparison._REASONS` (the shared vocabulary, GK B (11) condition 3).
+EXPERIMENT_REASONS = {
+    "evidence_tampered": "its run evidence changed since its receipt",
+    "case_failed": "its solve failed",
+    "case_not_completed": "it has not completed",
+    "case_unavailable": "its recorded result cannot be read back (see the experiment)",
+}
+
+
+def _cases(base_project_id: str) -> tuple[Any, list[tuple[Any, dict]], int, set[str]]:
+    """(base, [(case, spec)] the acting user may open, by name, count of the
+    others, the ids of the children named as experiment cases)."""
     from fastapi import HTTPException
 
     from harness import sensitivity_comparison as sc
+    from harness.experiment_execution import is_case_project_name
     from services import chat_tools, project_registry, workflow_tools as wt
     with chat_tools._acting() as (db, user):
         base = sc._resolve(db, user, base_project_id)
-        cases, no_access = [], 0
+        cases, no_access, experiment_children = [], 0, {}
         for child in project_registry.direct_children(db, base):
+            if is_case_project_name(child.name):  # an experiment case: shown once, as one
+                experiment_children[str(child.id)] = child.name
+                continue
             try:  # access first: nothing of a child the user cannot open is read
                 child = project_registry.resolve_project(db, user, str(child.id))
             except HTTPException:
@@ -95,7 +121,35 @@ def _cases(base_project_id: str) -> tuple[Any, list[tuple[Any, dict]], int]:
             spec = wt._read_json(project_registry.project_dir(child) / wt.SENSITIVITY_CASE_FILE)
             if spec:
                 cases.append((child, spec))
-    return base, sorted(cases, key=lambda pair: pair[0].name.lower()), no_access
+    return base, sorted(cases, key=lambda pair: pair[0].name.lower()), no_access, experiment_children
+
+
+def _fill(run: Run, read: dict, *, result_df_for, ic_key, solved_settings_for, dispatch_ready) -> None:
+    """A comparable run's figures from its own saved context (`read`, as
+    `sensitivity_comparison._read` gives it); a run whose dispatch the routes
+    would not serve gets `case_unsolved` and no figures."""
+    from services.finance.investment_case_runner import staleness
+    from services.finance.report import load_ic_report
+    from harness import sensitivity_comparison as sc
+    if not run.reasons and dispatch_ready is not None and not dispatch_ready(read["ctx"].network):
+        run.reasons = ["case_unsolved"]
+    if run.reasons:
+        return
+    ctx = read["ctx"]
+    state = ctx.solver_state
+    result_df = result_df_for(state)
+    run.figs = overview_figures(ctx.network, state.get("solver_config"),
+                                state.get("last_lost_load"), result_df)
+    run.network, run.cfg, run.result_df = ctx.network, state.get("solver_config"), result_df
+    run.context = ctx
+    run.lost_load = state.get("last_lost_load")
+    run.solved_settings = (solved_settings_for(state, ctx.network) if solved_settings_for
+                           else lambda state=state: state.get("last_solve_settings"))
+    run.headline = sc._values(read)
+    run.ic_report = load_ic_report(state)
+    if run.ic_report is not None:
+        current, why = ic_key(ctx, result_df)
+        run.case_state = staleness(run.ic_report.model_dump(mode="json"), current, reason=why)
 
 
 def gather_scenarios(base_project_id: str, base_basis: dict, *,
@@ -111,10 +165,8 @@ def gather_scenarios(base_project_id: str, base_basis: dict, *,
     routes' own reads (`_solved_settings`, `_dispatch_ready`) over a run's
     context: a run whose dispatch the routes would not serve shows no figures."""
     from harness import sensitivity_comparison as sc
-    from services.finance.investment_case_runner import staleness
-    from services.finance.report import load_ic_report
-    base, cases, no_access = _cases(base_project_id)
-    if not cases and not no_access:
+    base, cases, no_access, experiment_children = _cases(base_project_id)
+    if not cases and not no_access and not experiment_children:
         return None
     shown, over_cap = cases[:sc.MAX_CASES], max(0, len(cases) - sc.MAX_CASES)
     runs = []
@@ -123,30 +175,190 @@ def gather_scenarios(base_project_id: str, base_basis: dict, *,
         reasons = ([] if base_basis["ok"] else ["baseline_unavailable"]) + sc._reasons(
             base_basis, read, spec, base_basis["fingerprint"])
         run = Run(name=project.name, project_id=str(project.id), reasons=reasons)
-        if not reasons and dispatch_ready is not None and not dispatch_ready(read["ctx"].network):
-            run.reasons = reasons = ["case_unsolved"]
-        if not reasons:
-            ctx = read["ctx"]
-            state = ctx.solver_state
-            result_df = result_df_for(state)
-            run.figs = overview_figures(ctx.network, state.get("solver_config"),
-                                        state.get("last_lost_load"), result_df)
-            run.network, run.cfg, run.result_df = ctx.network, state.get("solver_config"), result_df
-            run.context = ctx
-            run.lost_load = state.get("last_lost_load")
-            run.solved_settings = (solved_settings_for(state, ctx.network) if solved_settings_for
-                                   else lambda state=state: state.get("last_solve_settings"))
-            run.headline = sc._values(read)
-            run.ic_report = load_ic_report(state)
-            if run.ic_report is not None:
-                current, why = ic_key(ctx, result_df)
-                run.case_state = staleness(run.ic_report.model_dump(mode="json"), current, reason=why)
+        _fill(run, read, result_df_for=result_df_for, ic_key=ic_key,
+              solved_settings_for=solved_settings_for, dispatch_ready=dispatch_ready)
         runs.append(run)
+    return _with_base(base, base_basis, Scenarios(
+        runs=runs, no_access=no_access, over_cap=over_cap, experiment_children=experiment_children))
+
+
+def _with_base(base, base_basis: dict, scen: Scenarios) -> Scenarios:
+    from harness import sensitivity_comparison as sc
     base_read = sc._read(base)
-    return Scenarios(runs=runs, no_access=no_access, over_cap=over_cap,
-                     base_headline=sc._values(base_read),
-                     base_unsaved=base_read["fingerprint"] != base_basis["fingerprint"],
-                     base_current=bool(base_basis["ok"]))
+    scen.base_headline = sc._values(base_read)
+    scen.base_unsaved = base_read["fingerprint"] != base_basis["fingerprint"]
+    scen.base_current = bool(base_basis["ok"])
+    return scen
+
+
+def _experiment_cases(base_project_id: str):
+    """Under `experiments._LOCK`: (root, [(case record, ledger copy or None,
+    ledger readable)]) of the acting user's own experiments on the base,
+    in index order, each two-case plan as its two cases. Reads only the base's
+    experiment store: no case project is opened here."""
+    from fastapi import HTTPException
+
+    from harness import experiment_execution as engine
+    from harness.durable import network_guard
+    from harness.experiment_two_case import select_case
+    from services import experiments as ex
+    root, project, owner = ex._authority()   # the open project, as the acting user may open it
+    if project != str(base_project_id):
+        return None
+    out = []
+    with network_guard(), ex._LOCK, ex._transaction(root):
+        for experiment_id in ex._load_index(root)["order"]:
+            try:  # the owner and project are `_read_record`'s own scope (GK B condition 1)
+                record = ex._read_record(root, experiment_id, project, owner)
+            except HTTPException as exc:
+                if exc.status_code == 404:
+                    continue
+                raise
+            if record["domain"] != "network":
+                continue
+            cases = ([select_case(record, c["id"]) for c in record["cases"]]
+                     if len(record["cases"]) == 2 else [record])
+            for case in cases:
+                if not case.get("operations"):  # never armed: no ledger
+                    out.append((case, None, True))
+                    continue
+                try:
+                    out.append((case, engine._read(root, case), True))
+                except (ValueError, KeyError, TypeError, OSError, HTTPException):
+                    out.append((case, None, False))
+    return root, out
+
+
+def _unique(name: str, experiment_id: str, taken: set[str]) -> str:
+    out = name if name not in taken else f"{name} ({experiment_id[:8]})"
+    i = 2
+    while out in taken:
+        out = f"{name} ({experiment_id[:8]}, {i})"
+        i += 1
+    taken.add(out)
+    return out
+
+
+def _experiment_run(root, record, ledger, readable, base_basis, name, fill) -> Run | int:
+    """One experiment case's run, outside `experiments._LOCK`, or 1 when the
+    acting user may not open its project (counted, never named): access, then
+    the receipt observed on the ledger copy, the baseline checks, the load and
+    the post-load checks against the receipt."""
+    from fastapi import HTTPException
+
+    from harness import experiment_comparison as xc
+    from harness import sensitivity_comparison as sc
+    from services import chat_tools, project_registry
+    prefix = [] if base_basis["ok"] else ["baseline_unavailable"]
+    case_project_id = (ledger or {}).get("case_project_id")
+    run = Run(name=name, project_id=case_project_id)
+    if not readable or not xc.adapter_available(record) or ledger is None:
+        run.reasons = prefix + ["case_unavailable" if not readable else "case_not_completed"]
+        return run
+    project = None
+    if case_project_id:
+        with chat_tools._acting() as (db, user):
+            try:  # access first: nothing of a case the user cannot open is read
+                project = project_registry.resolve_project(db, user, str(case_project_id))
+            except HTTPException:
+                return 1
+    out = xc._start(record)
+    try:
+        data = xc._verify(root, record, ledger, out)
+    except xc.BaselineEvidenceChanged:
+        run.reasons = prefix + ["baseline_changed"]
+        return run
+    except (ValueError, KeyError, TypeError, OSError, RuntimeError, HTTPException):
+        run.reasons = prefix + ["case_unavailable"]
+        return run
+    if data is None or project is None:
+        status = out["status"]
+        run.reasons = prefix + ["case_failed" if status == "failed" else
+                                "case_unavailable" if status == "unavailable" else "case_not_completed"]
+        return run
+    baseline_fingerprint = record["preflight"]["input_fingerprint"]
+    reasons = prefix + (["baseline_changed"] if baseline_fingerprint != base_basis["fingerprint"] else [])
+    if reasons:
+        run.reasons = reasons
+        return run
+    try:
+        read = sc._read(project)
+        xc._load_case(record, data, saved=read["ctx"])
+    except xc.ReceiptMismatch:
+        run.reasons = ["case_inputs_changed"]
+        return run
+    except xc.EvidenceChanged:
+        run.reasons = ["evidence_tampered"]
+        return run
+    except (ValueError, KeyError, TypeError, OSError, RuntimeError, HTTPException):
+        run.reasons = ["case_unavailable"]
+        return run
+    # The receipt fixed the case's inputs; the base's are checked above.
+    run.reasons = sc._reasons(base_basis, read, {"input_fingerprint": read["fingerprint"],
+                                                 "baseline_fingerprint": baseline_fingerprint},
+                              base_basis["fingerprint"])
+    fill(run, read)
+    return run
+
+
+def gather_experiments(base_project_id: str, base_basis: dict, scen: Scenarios | None, *,
+                       result_df_for: Callable[[dict], Callable],
+                       ic_key: Callable[[Any, Callable], tuple[tuple[str, dict] | None, str | None]],
+                       solved_settings_for: Callable[[dict, Any], Callable[[], dict | None]] | None = None,
+                       dispatch_ready: Callable[[Any], bool] | None = None,
+                       ) -> Scenarios | None:
+    """`scen` (the sensitivity runs, or None) with the acting user's own
+    experiment cases on the base after them, in plan order: the cases left
+    after the sensitivity runs take their `MAX_CASES` slots are counted before
+    any is opened; each shown case is observed and loaded outside
+    `experiments._LOCK` and checked against its receipt. Experiment-case
+    children that are not one of these cases are counted, never named. None
+    when there is nothing to show or count."""
+    from fastapi import HTTPException
+
+    from harness import experiment_execution as engine
+    from harness import sensitivity_comparison as sc
+    try:
+        gathered = _experiment_cases(base_project_id)
+        unreadable = False
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            raise
+        gathered, unreadable = None, True
+    root, cases = gathered if gathered else (None, [])
+    mine = {str(ledger["case_project_id"]) for _c, ledger, _ok in cases
+            if ledger and ledger.get("case_project_id")}
+    # A case whose ledger cannot be read is shown as unavailable: its child,
+    # known by the engine's name for it, is that case's, not another's.
+    unread = {engine._name(c) for c, _ledger, ok in cases if not ok}
+    children = scen.experiment_children if scen else {}
+    unlisted = sum(1 for cid, name in children.items() if cid not in mine and name not in unread)
+    if not cases and not unlisted and not unreadable:
+        return scen
+    if scen is None:
+        from services import chat_tools
+        with chat_tools._acting() as (db, user):
+            row = sc._resolve(db, user, str(base_project_id))
+        scen = _with_base(row, base_basis, Scenarios(runs=[]))
+    scen.unlisted += unlisted
+    scen.experiments_unreadable = unreadable
+    slots = max(0, sc.MAX_CASES - len(scen.runs))
+    shown, scen.over_cap = cases[:slots], scen.over_cap + max(0, len(cases) - slots)
+    from services.pypsa_service import PyPSAService
+    taken = {PyPSAService.get_loaded_project() or "Base", *(r.name for r in scen.runs)}
+
+    def fill(run, read):
+        _fill(run, read, result_df_for=result_df_for, ic_key=ic_key,
+              solved_settings_for=solved_settings_for, dispatch_ready=dispatch_ready)
+    for record, ledger, readable in shown:
+        name = _unique(f"{record['title']}: {record['cases'][0]['id']}", record["experiment_id"], taken)
+        run = _experiment_run(root, record, ledger, readable, base_basis, name, fill)
+        if isinstance(run, Run):
+            scen.runs.append(run)
+        else:
+            taken.discard(name)
+            scen.no_access += run
+    return scen
 
 
 # ── the sheet ────────────────────────────────────────────────────────────
@@ -155,7 +367,10 @@ def _results_text(run: Run) -> str:
     from harness import sensitivity_comparison as sc
     if not run.reasons:
         return "current"
-    return sc._not_comparable(run.name, run.reasons).split(": ", 1)[1]
+    known = [r for r in run.reasons if r in sc._REASONS]
+    # The run's own name may hold ": " (an experiment case's "<title>: <case>").
+    texts = [sc._not_comparable("", known).split(": ", 1)[1]] if known else []
+    return "; ".join(texts + [EXPERIMENT_REASONS[r] for r in run.reasons if r not in sc._REASONS])
 
 
 def _base_results_text(scen: Scenarios) -> str:
@@ -239,17 +454,23 @@ def write_scenarios(ws, base: Run, scen: Scenarios) -> dict:
     ws.title = TITLE
     runs = scen.runs
     every = [base, *runs]
-    put(ws, 1, 1, "Scenarios: the base run and its sensitivity runs")
+    put(ws, 1, 1, "Scenarios: the base run, its sensitivity runs and its experiment cases")
     ws.cell(1, 1).font = BOLD
     put(ws, 2, 1, "Deltas are run − base, live formulas between two number cells; a run "
                   "that cannot be compared with the base shows why and no figures.")
     notes = []
     if scen.no_access:
-        notes.append(f"{scen.no_access} scenario(s) not shown: no access")
+        notes.append(f"{scen.no_access} scenario(s) or experiment case(s) not shown: no access")
     if scen.over_cap:
         from harness import sensitivity_comparison as sc
-        notes.append(f"{scen.over_cap} scenario(s) not shown: the sheet compares up to "
-                     f"{sc.MAX_CASES}, by name")
+        notes.append(f"{scen.over_cap} scenario(s) or experiment case(s) not shown: the sheet "
+                     f"compares up to {sc.MAX_CASES}, sensitivity runs by name, then "
+                     "experiment cases in plan order")
+    if scen.unlisted:
+        notes.append(f"{scen.unlisted} experiment case project(s) not shown: not a case of "
+                     "your own experiments on this base")
+    if scen.experiments_unreadable:
+        notes.append("Experiment cases not shown: the experiment store needs repair.")
     if scen.base_unsaved:
         notes.append("The open base has unsaved changes: its Compare-view rows read its saved run.")
     for i, text in enumerate(notes):

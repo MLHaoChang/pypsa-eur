@@ -13,10 +13,11 @@ base's are the active ones), and hands the payloads to `views.write_view`:
 * FMEA: `adequacy.copt_endpoint.build_fmea_modes_payload`
   (`GET /results/fmea_modes`), every computed failure-mode row. It has no
   per-period split. Each row's criticality and severity are labelled by their
-  own basis (`_basis`): the row's `criticality_basis` when it has one (ticket
-  30 adds it), else by class: A and B are per study horizon until ticket 30
-  lands, whatever the route's field names say; C is per year (frequency ×
-  the damage of one event). No figure mixes two bases.
+  own basis (`_basis`): the row's `criticality_basis` (LC-30: A and B are
+  annualised, per year), else by class: an A or B row without one was saved
+  before LC-30 and is per study horizon, whatever the route's field names
+  say; C is per year (frequency × the damage of one event). No figure mixes
+  two bases.
 
 Neither reads a project's files: a scenario run's state and network are its
 saved context, which `gather_scenarios` loaded after resolving its project.
@@ -33,9 +34,10 @@ from services.results_workbook.views_network import _view
 
 __all__: list[str] = []
 
-#: Ticket 30 (condition 6): class A and B rows' `criticality_eur_per_year`
-#: and `severity_eur` are over the study horizon, not per year, until it lands.
-PER_HORIZON = "per study horizon (ticket 30)"
+#: Condition 6: a class A or B row on a horizon basis (`per_horizon`, or one
+#: saved before LC-30) has its `criticality_eur_per_year` and `severity_eur`
+#: over the study horizon, not per year.
+PER_HORIZON = "per study horizon"
 PER_YEAR = "per year"
 PER_EVENT = "per event"
 CRITICALITY = f"criticality, EUR {PER_HORIZON}"
@@ -150,6 +152,8 @@ _FMEA_VALUES = {"occurrence_per_year": OCCURRENCE, "delta_eue_mwh": DELTA_EUE}
 #: criticality basis as said, the severity basis as said).
 _BASES = {
     "per_horizon": (CRITICALITY, SEVERITY, PER_HORIZON, PER_HORIZON),
+    "per_horizon_legacy": (CRITICALITY, SEVERITY, f"{PER_HORIZON} (saved before annualising)",
+                           f"{PER_HORIZON} (saved before annualising)"),
     "annualised": (CRITICALITY_PER_YEAR, SEVERITY_PER_EVENT,
                    f"{PER_YEAR} (annualised)", f"{PER_EVENT} (criticality ÷ occurrence)"),
     "per_event": (CRITICALITY_PER_YEAR, SEVERITY_PER_EVENT,
@@ -160,16 +164,18 @@ _FAMILIES = (("classes A/B", ("A", "B")), ("class C", ("C",)))
 
 
 def _basis(m: dict) -> str:
-    """The row's own basis: its `criticality_basis` (ticket 30), else by class.
+    """The row's own basis: its `criticality_basis` (LC-30), else by class.
 
-    Without the field, A (`copt.attribute_criticality`) and B (`sweep`) are
-    ΔEUE × VoLL over the horizon; C (`stress`) is frequency per year × the
-    damage of one event, so already per year with a per-event severity.
+    Without the field, an A (`copt.attribute_criticality`) or B (`sweep`) row
+    predates LC-30: ΔEUE × VoLL over the horizon, `per_horizon_legacy` as
+    `adequacy.eh_report.mark_legacy_fmea_top` marks it; C (`stress`) is
+    frequency per year × the damage of one event, so already per year with a
+    per-event severity.
     """
     b = m.get("criticality_basis")
     if b:
         return str(b)
-    return "per_event" if m.get("failure_class") == "C" else "per_horizon"
+    return "per_event" if m.get("failure_class") == "C" else "per_horizon_legacy"
 
 
 def _fmea_row(m: dict) -> dict:
@@ -240,7 +246,8 @@ def _fmea(run) -> ViewData | None:
     notes = [NO_PERIODS,
              "Each row's criticality and severity sit in the column of their own basis "
              "(its basis columns say which), whatever the route's field names say: class "
-             f"A and B rows are {PER_HORIZON} until ticket 30 lands; class C rows are "
+             "A and B rows are per year (the horizon's ΔEUE × VoLL ÷ its years), and those "
+             f"saved before that are {PER_HORIZON}; class C rows are "
              "frequency per year × the damage of one event. Rows are the route's order; "
              "the worksheet's expert class-D rows are not here (see the tab).",
              _horizon_note(run.network)]

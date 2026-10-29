@@ -62,3 +62,10 @@ Read [the design](../design.md) §3.B (the IC paragraph) first.
 ## Comments
 
 - 2026-10-28, from 10 (GK A, plan condition): `eh_concentrator_staged` carries 2027's non-firm connection (`non_firm_dynamic`: two 150-h winter events, as `grid_import` p_max_pu) in the network only. Its commercial block keeps the preset's firm ConnectionAgreement (one per project), so the per-period connection kind is not in the commercial block. 11 must not value 2027 as firm without saying so.
+- 2026-10-29, GK A plan verdict: GO with conditions.
+  - On master the case refuses `cod_missing` before `owner_conversion_load`: `grid_import` is in `EXISTING`, which `stage_network` types at overnight cost 0, so the PoC meter reads as an investable asset. Drop it from `EXISTING`, regenerate the sidecars with `_build.py`, run the byte-identity check (only grid_import's overnight_cost and discount_rate change), and test that the meter is skipped by `_uncosted_meter_links`.
+  - (a) The network-only non-firm envelope is a flag, not a refusal. It reaches the IC report caveats as "valued under the network's non-firm envelope in <periods>, while the agreement is firm". It fires for p_max_pu < 1 with a firm agreement; it does not fire at p_max_pu = 1 or with a non-firm agreement; NPV is identical with and without it.
+  - (b) With no baseline, a product Load fed by the owner's process blocks with `product_load_needs_baseline` (the flag names the loads). Heat loads keep `owner_conversion_load`, and their existing tests stay unchanged.
+  - Lost tonnes: Σp·w per period covers the whole period (its `years`). Report per year (÷ the period's years), or label the field per period (N years). Take the unit from the product bus. Pin a hand value on a period whose years ≠ 1.
+  - The split: list the stream ids that count as `energy_bill` (tariff class) in code and in the PR. Use the same sign and basis as `op_incremental.net` (actual − counterfactual, per year, undiscounted). In the with-candidates reconciliation, `energy_bill` and `lost_production` are both nonzero.
+  - Regression: the staged-template cases' NPV is unchanged to the unit.
