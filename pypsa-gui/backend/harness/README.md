@@ -1264,6 +1264,52 @@ lifespan after the solve queue and is off under pytest (tests build their own
     wrote, and never carries values.
   - `run.notices` keeps the log.
 
+### The approval envelope (study harness issue 03)
+
+`services/run_envelope.py` (design §7; SH-ENVELOPE-1). "Approve once, run
+unattended inside it" for a harness run only; COP-1 is unchanged everywhere
+else.
+
+- **File.** `<task_id>.envelope.json` beside the task: owner, project, task,
+  `edits` (tool, `{component, name glob, attr}`, numeric `bounds` or an
+  `enum`, `at_grant` per matched instance), `runs`, `budget`, `research`,
+  `notify`, `state` and its own `audit` (`granted|used|refused|expired|revoked`).
+- **Proposal.** `_start_run` writes the profile's `envelope` block
+  (`run_profiles.load` validates it: §6.0 attrs, write-tier edit tools only,
+  no grid-code publish, one component class per glob) as `proposed`;
+  `start_task` and `get_task` return it under `envelope`, `detail` being the
+  plan-review card's text.
+- **Grant.** Only the `/stream` request's `envelope_decision` (verdict
+  `unattended`, `stepwise` or `revoke`, the user's narrowing) reaches
+  `run_envelope.decide`; no tool can. A grant is `approvals.decided(by="user")`
+  with `envelope_id`, fails closed, and is never wider than the profile
+  (`invalid_envelope`). `stepwise` grants nothing.
+- **Admission.** `confirm._confirm_destructive_tool` asks `run_envelope.admit`
+  before issuing a card. Only the runner's own session `run:<task_id>` is
+  asked. Every dispatch re-checks, in order: native (not external, known),
+  not grid-code publish, not a delete, not `destructive`, no researched value,
+  `granted`, owner/project/task, `expires_at`, budget, the freshness chain,
+  `brief_stale`, any `project*` argument naming a project but the run's
+  (`wrong_project`: its uuid, or its name where that is not a uuid), then the tool and the edit card's typed rows (listed instance
+  at grant, within bounds relative to `at_grant`). The runner's
+  `decision_guard` then takes the locks and re-checks ACL and holds. A match
+  is `approvals.decided(by="envelope:<id>")` plus `used`; a refusal is
+  `refused` with its reason and the card path.
+- **Runner.** A step the envelope lists dispatches without waiting
+  (`decision="envelope"`); a refusal waits for the user's card on that step
+  (`waiting.envelope_refused`). COP-1 card boundaries are crossed inside a
+  live envelope (`continue_at_card`, on record). Expiry, an exhausted budget,
+  a revoke, drift, an unreadable fingerprint or a stale brief pause the run
+  (`reason: envelope_<why>`) and notify; nothing re-grants itself. Under an
+  effectful step's locks the runner reads `chain_head`: an uncarded step
+  (one the envelope never admits) that starts off the chain's last link
+  pauses the run with `envelope_drift`. After the step, `settle` appends the
+  chain's next fingerprint only when the step started on the last link.
+  Known limit: a user edit that lands *during* a step (its handler takes its
+  own locks after the runner's are released) is taken into the chain.
+- **End.** `cancel_task` revokes; the plan card's revoke pauses the run.
+
+
 ## Recorded runs, load flow, and experiment plans
 
 These tools live in `services/run_evidence.py`, `services/loadflow_summary.py`,

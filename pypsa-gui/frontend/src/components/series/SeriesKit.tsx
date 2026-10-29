@@ -5,7 +5,7 @@
 // Properties panel, the Time Series drawer, later the asset form's
 // Availability block): host-agnostic props, no store reads besides the
 // query client.
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { AxiosError } from 'axios'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
@@ -214,8 +214,23 @@ export function replayRefusalText(error: unknown): string {
   const op = typeof detail?.op === 'string' ? detail.op : null
   const index = typeof detail?.index === 'number' ? detail.index : null
   if (op == null || index == null) return 'The refinements no longer fit the new series.'
+  return `Step ${index + 1} of the refinements (${stepLabel(op)}) no longer fits the new series.`
+}
+
+const stepLabel = (op: string) => {
   const label = OP_LABELS[op as OpKind] ?? 'a refinement'
-  return `Step ${index + 1} of the refinements (${label.charAt(0).toLowerCase()}${label.slice(1)}) no longer fits the new series.`
+  return `${label.charAt(0).toLowerCase()}${label.slice(1)}`
+}
+
+/** A refused removal (TSG 05): a later step that no longer fits names it in
+ *  the replay's own words; any other refusal is the backend's sentence. */
+export function removalRefusalText(error: unknown, removed: number): string {
+  const detail = ((error as AxiosError)?.response?.data as { detail?: { op?: unknown; index?: unknown } } | undefined)?.detail
+  const op = typeof detail?.op === 'string' ? detail.op : null
+  const index = typeof detail?.index === 'number' ? detail.index : null
+  if (op == null || index == null) return sentence(errorText(error))
+  return `Step ${index + 1} of the refinements (${stepLabel(op)}) no longer fits without step ${removed + 1}: `
+    + `remove step ${index + 1} first, or keep step ${removed + 1}.`
 }
 
 /** A generate's refusal in place. A refused replay names the op and its
@@ -359,11 +374,14 @@ export function PendingCard({
   onApplied?: (r: SeriesApplyResult) => void
 }) {
   const qc = useQueryClient()
-  const [applied, setApplied] = useState<SeriesApplyResult | null>(null)
+  // The receipt belongs to the series it applied: a new preview (a refine or
+  // a removed step) needs its own Apply.
+  const [receipt, setReceipt] = useState<{ job: string; result: SeriesApplyResult } | null>(null)
+  const applied = receipt?.job === pending.job_id ? receipt.result : null
   const apply = useMutation({
     mutationFn: () => seriesApi.apply(project, { job_id: pending.job_id, component }),
     onSuccess: r => {
-      setApplied(r)
+      setReceipt({ job: pending.job_id, result: r })
       onApplied?.(r)
       void qc.invalidateQueries()
     },
@@ -498,22 +516,41 @@ function moveDays(by: unknown): string {
   return `${m[1] === '-' ? '−' : '+'}${days} ${days === 1 ? 'day' : 'days'}`
 }
 
+const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** A recorded weekday or month list in words: a run reads "Mon–Fri". */
+function runWords(raw: unknown, names: string[], first: number): string {
+  if (!Array.isArray(raw) || !raw.length) return ''
+  const xs = [...raw as number[]].sort((a, b) => a - b)
+  const run = xs.every((x, i) => i === 0 || x === xs[i - 1] + 1)
+  return run && xs.length > 2 ? ` ${names[xs[0] - first]}–${names[xs[xs.length - 1] - first]}`
+    : ` ${xs.map(x => names[x - first]).join(', ')}`
+}
+
+// What the server records beside an op's own parameters.
+const RECORDED = new Set(['op', 'target', 'connection', 'resolved_mw', 'window', 'moved', 'converted_from_rule'])
+
 function describe(op: RefineOp, windows: MaintenanceWindow[] = []): string {
   const o = op as Record<string, unknown>
   switch (op.op) {
     case 'move_window': {
-      const w = windows[Number(o.window ?? 0)]
+      // A recorded move names the dates it moved from.
+      const moved = o.moved as { from: string[]; to: string[] } | undefined
+      const w = moved ? { from: moved.from[0], to: moved.to[0] } : windows[Number(o.window ?? 0)]
       return `Move maintenance ${w ? `${windowDates(w)} ` : ''}by ${moveDays(o.by)}`
     }
     case 'scale_peak_to':
       return o.of ? `peak to ${Number(o.fraction) * 100} % of the ${o.of === 'connection' ? 'grid connection' : 'current peak'}`
         : `peak to ${o.mw ?? o.value}`
     case 'scale_window': {
+      if (!Array.isArray(o.hours)) return OP_LABELS.scale_window
       const [s, e] = o.hours as number[]
-      return `${String(s).padStart(2, '0')}–${String(e).padStart(2, '0')} h × ${o.factor}`
+      return `${String(s).padStart(2, '0')}–${String(e).padStart(2, '0')} h`
+        + `${runWords(o.weekdays, WEEKDAYS, 0)}${runWords(o.months, MONTHS, 1)} × ${o.factor}`
     }
     default:
-      return `${OP_LABELS[op.op as OpKind] ?? op.op} ${Object.entries(o).filter(([k]) => k !== 'op').map(([, v]) => v).join(' ')}`
+      return `${OP_LABELS[op.op as OpKind] ?? op.op} ${Object.entries(o).filter(([k]) => !RECORDED.has(k)).map(([, v]) => v).join(' ')}`
   }
 }
 
@@ -532,6 +569,26 @@ export function RefinePanel({
     mutationFn: () => seriesApi.refine(project, pending.job_id, ops),
     onSuccess: r => { setOps([]); onRefined(r) },
   })
+  // TSG 05: a new pending series without one recorded step.
+  const undo = useMutation({
+    mutationFn: (index: number) => seriesApi.refine(project, pending.job_id, [], index),
+    onSuccess: r => { setFocusFor(r.job_id); onRefined(r) },
+  })
+  const recorded = (pending.refinements ?? []) as RefineOp[]
+  // A refusal belongs to the preview it was asked of.
+  const resetUndo = undo.reset
+  useEffect(() => resetUndo(), [pending.job_id, resetUndo])
+  // After a removal the new preview replaces this one in place: focus stays
+  // on the step list (or the panel, once no step is left).
+  const [focusFor, setFocusFor] = useState<string | null>(null)
+  const stepsRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (focusFor == null || focusFor !== pending.job_id) return
+    setFocusFor(null)
+    const target = stepsRef.current ?? panelRef.current
+    target?.focus({ preventScroll: true })
+  }, [focusFor, pending.job_id])
   // A series read from a snapshot window knows no hours outside it: no
   // shift or smoothing, and its energy target is the window's MWh.
   const windowSource = pending.profile_annual_basis === 'window_mean'
@@ -549,11 +606,40 @@ export function RefinePanel({
     && !(windowSource && (k === 'shift' || k === 'smooth')) && (k !== 'move_window' || outages.length > 0))
 
   return (
-    <div className="mt-2 border-t border-border pt-2" data-testid="refine-panel">
+    <div ref={panelRef} tabIndex={-1} className="mt-2 border-t border-border pt-2 outline-none" data-testid="refine-panel">
       <p className="text-[11px] text-muted mb-1">
         Refine: each edit is applied in order. Put a peak or energy target last.
         {windowSource && ' Read from the snapshot window: energy is the window\'s MWh.'}
       </p>
+      {recorded.length > 0 && (
+        <div ref={stepsRef} tabIndex={-1} className="mb-1 outline-none" data-testid="refine-steps">
+          <p className="text-[11px] font-medium">Refinements in this preview</p>
+          <p className="text-[11px] text-muted">
+            Remove builds a new preview without that step; nothing changes until you apply it.
+          </p>
+          <ol className="text-[11px] list-decimal pl-5" data-testid="refine-edits">
+            {recorded.map((op, i) => (
+              <li key={i}>
+                <span data-testid="refine-step-words">{describe(op, outages)}</span>{' '}
+                <button type="button" aria-label={`Remove step ${i + 1} (${stepLabel(op.op)})`}
+                  disabled={undo.isPending || refine.isPending}
+                  className="text-muted enabled:hover:text-danger disabled:opacity-50"
+                  onClick={() => undo.mutate(i)}>Remove</button>
+              </li>
+            ))}
+          </ol>
+          {undo.isPending && (
+            <span className="text-[11px] text-muted" data-testid="refine-undo-pending">
+              Removing step {(undo.variables ?? 0) + 1}: building the new preview.
+            </span>
+          )}
+          {undo.isError && (
+            <span className="text-[11px] text-red-600" data-testid="refine-undo-error">
+              {removalRefusalText(undo.error, undo.variables ?? 0)}
+            </span>
+          )}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-1">
         <select aria-label="Refinement" className={INPUT} value={d.kind}
           onChange={e => setD({ ...d, kind: e.target.value as OpKind })}>
@@ -609,7 +695,7 @@ export function RefinePanel({
         </ol>
       )}
       <div className="flex items-center gap-2 mt-1">
-        <Btn onClick={() => refine.mutate()} disabled={!ops.length || refine.isPending}>
+        <Btn onClick={() => refine.mutate()} disabled={!ops.length || refine.isPending || undo.isPending}>
           <Wand2 size={12} /> Refine
         </Btn>
         {!ops.length && <span className="text-[11px] text-muted">Add an edit above to refine.</span>}

@@ -444,7 +444,7 @@ export interface CampusState {
 }
 
 /** The run's stages, as the backend names them (`RUN_STAGES`), then `done`. */
-export type CampusRunStage = 'prepare' | 'rank' | 'island_checks' | 'cuts' | 'size' | 'harmonic_scan' | 'invest'
+export type CampusRunStage = 'prepare' | 'rank' | 'island_checks' | 'cuts' | 'size' | 'harmonic_scan' | 'voltage_stability' | 'invest'
   | 'gfm_settings' | 'done'
 
 /** The campus run's solve-queue job, with the stage it reached. */
@@ -523,6 +523,10 @@ export interface GridCodeProfile {
   /** Voltage-control deadband, % of nominal voltage either side. Reported, never checked. */
   voltage_deadband_pct?: GridLimit
   angle_limit_deg?: GridLimit
+  /** Least P–V real-power margin at the PCC, % of the planned import (screening). */
+  pv_margin_min_pct?: GridLimit
+  /** Least Q–V reactive margin at the PCC, Mvar (screening). */
+  qv_margin_min_mvar?: GridLimit
   document?: { sha256: string; filename: string; title: string }
 }
 
@@ -789,7 +793,13 @@ export interface GridReadinessRow {
   harmonics?: GridReadinessHarmonics
   /** The flicker row only (grid-to-process issue 17): the screen's figures at the PoC. */
   flicker?: GridReadinessFlicker
+  /** The P–V/Q–V rows only (study harness 18): the value is a lower bound (the sweep did not reach the
+   *  nose or the Q–V minimum), shown as "≥ x". */
+  project_value_is_lower_bound?: boolean
 }
+
+/** A row the scorecard leaves out for this project, with why (study harness 18: P–V/Q–V off-grid). */
+export interface GridReadinessExcluded { id: string; requirement: string; reason: string }
 
 export interface GridReadinessFlicker {
   sk_mva: number
@@ -854,6 +864,8 @@ export interface GridReadiness {
   template_id: string | null
   envelope: boolean
   rows: GridReadinessRow[]
+  /** Rows that do not apply to this project, outside the summary counts. */
+  excluded?: GridReadinessExcluded[]
   summary: Record<GridReadinessVerdict, number> & { assumed: number; red_flags: number
     /** Rows that fail or warn before mitigation and pass after the battery/UPS (DC 03). */
     pass_after_mitigation?: number }

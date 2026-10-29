@@ -45,6 +45,18 @@ logger = logging.getLogger("pypsa_gui.chat")
 router = APIRouter()
 
 
+class EnvelopeDecision(BaseModel):
+    """Study harness issue 03: the user's verdict on a run's plan-review
+    card. Only this request grants, narrows or revokes an approval
+    envelope; the server writes the message."""
+
+    model_config = ConfigDict(extra="forbid")
+    task_id: str = Field(min_length=36, max_length=36)
+    verdict: Literal["unattended", "stepwise", "revoke"]
+    envelope: dict | None = None  # the user's narrowing; never wider than the profile's
+    notify_email: StrictBool = False
+
+
 class StreamRequest(BaseModel):
     """
     Body for POST /api/chat/stream.
@@ -109,6 +121,7 @@ class StreamRequest(BaseModel):
     # LC-23 COP-1: the user's "Continue to <card>" on the plan card. Only this
     # request clears a plan's card pause; the server writes the message.
     continue_task_id: str | None = Field(default=None, min_length=36, max_length=36)
+    envelope_decision: EnvelopeDecision | None = None
 
 
 class ConfirmRequest(BaseModel):
@@ -1831,11 +1844,12 @@ async def chat_stream(
                 or body.generation is not None or body.input_mode not in (None, 'text')
                 or body.message != FOLLOWUP_MESSAGE):
             raise HTTPException(422, {'error_kind': 'invalid_source_gap_followup'})
-    if (body.continuation_job_id is not None or body.continue_task_id is not None) and (
+    harness_turns = [body.continuation_job_id, body.continue_task_id, body.envelope_decision]
+    if any(v is not None for v in harness_turns) and (
             body.message or body.attachment_file_ids or body.script or body.source_gap_ref is not None
             or body.checked_scope is not None or body.checked_operation is not None
             or body.utterance_id is not None or body.generation is not None
-            or (body.continuation_job_id is not None and body.continue_task_id is not None)):
+            or sum(v is not None for v in harness_turns) > 1):
         raise HTTPException(422, {"error_kind": "invalid_continuation"})
     if body.checked_scope is not None:
         from harness.assurance_scope import validate
@@ -2101,6 +2115,8 @@ async def chat_stream(
                     ui_ack=body.ui_ack,
                     continuation_job_id=body.continuation_job_id,
                     continue_task_id=body.continue_task_id,
+                    envelope_decision=(body.envelope_decision.model_dump()
+                                       if body.envelope_decision is not None else None),
                 )
             for event_name, payload in events:
                 yield chat_service.sse_frame(event_name, payload)

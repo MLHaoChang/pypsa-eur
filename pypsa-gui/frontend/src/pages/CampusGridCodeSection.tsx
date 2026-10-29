@@ -57,7 +57,7 @@ function limitPaths(profile: GridCodeDraft['profile']): string[] {
   for (const key of ['rvc_limit_infrequent_pct', 'q_capability_pq', 'pf_min_lagging', 'pf_min_leading',
     'thd_limit_pct', 'harmonic_limits_pct', 'harmonic_resonance_clearance_h', 'pst_limit', 'plt_limit',
     'unbalance_limit_pct', 'current_tdd_standard', 'q_capability_unit', 'voltage_deadband_pct',
-    'angle_limit_deg'] as const) {
+    'angle_limit_deg', 'pv_margin_min_pct', 'qv_margin_min_mvar'] as const) {
     if (profile[key]) paths.push(key)
   }
   return paths
@@ -89,6 +89,8 @@ function limitLabel(path: string): string {
     q_capability_unit: 'Reactive capability per generating unit (pu of the unit\'s rated P; positive = the unit exports reactive power)',
     voltage_deadband_pct: 'Voltage-control deadband per unit (reported, not checked)',
     angle_limit_deg: 'Voltage-angle difference across a branch',
+    pv_margin_min_pct: 'P–V real-power margin at the PCC (screening)',
+    qv_margin_min_mvar: 'Q–V reactive margin at the PCC (screening)',
   }[path] ?? path
 }
 
@@ -109,6 +111,8 @@ function limitValue(path: string, lim: GridLimit): string {
   }
   if (path === 'voltage_deadband_pct') return `±${lim.value}\u00A0%`
   if (path === 'angle_limit_deg') return `${lim.value}°`
+  if (path === 'pv_margin_min_pct') return `≥\u00A0${lim.value}\u00A0% of the planned import`
+  if (path === 'qv_margin_min_mvar') return `≥\u00A0${lim.value}\u00A0Mvar`
   if (path === 'harmonic_resonance_clearance_h') return `±${lim.value}\u00A0h`
   if (path === 'unbalance_limit_pct') return `${lim.value}\u00A0%\u00A0of\u00A0positive\u00A0sequence`
   if (path === 'current_tdd_standard') {

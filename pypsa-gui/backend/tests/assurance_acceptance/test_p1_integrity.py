@@ -47,11 +47,11 @@ def record_path(record_id):
 
 
 def rewrite(record_id, change):
-    """Change the stored record and keep its checksum consistent."""
+    """Change the stored record and re-seal it as this server would."""
     path = record_path(record_id)
     envelope = json.loads(path.read_text(encoding="utf-8"))
     change(envelope["record"])
-    envelope["sha256"] = records.digest(envelope["record"])
+    envelope.update(records.seal(envelope["record"], record_id))
     path.write_text(json.dumps(envelope), encoding="utf-8")
 
 
