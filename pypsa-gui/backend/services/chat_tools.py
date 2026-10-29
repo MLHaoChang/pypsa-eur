@@ -581,11 +581,12 @@ _RESULTS_ENUM = (
     "losses", "carrier_kpis", "emissions", "transformers", "unit_commitment",
     "line_duals", "voltages", "line_reactive", "transformer_reactive",
     "prices", "price_drivers", "curtailment", "lost_load", "loads",
-    "asset_economics", "billing", "cfe_score", "value_flows",
+    "asset_economics", "billing", "cfe_score", "value_flows", "plausibility",
 )
 
 
 _RESULTS_HANDLER_NAMES: dict[str, str] = {
+    "plausibility": "get_plausibility",
     # Names verified against `grep ^def routers/results.py` (Phase 1 recon).
     "cost_breakdown": "get_cost_breakdown",
     "objective_decomposition": "get_objective_decomposition",

@@ -191,6 +191,62 @@ def _not_solved():
     return Response(status_code=204)
 
 
+@results_router.get('/plausibility')
+def get_plausibility(source: Literal['lopf'] = 'lopf'):
+    """Native read-only screening on the bound project's result, never certification."""
+    from services.results.plausibility import evaluate
+    from services.workflow_tools import solve_freshness
+    from services.run_evidence import _authority
+    import pandas as pd
+
+    def unavailable(message):
+        raise HTTPException(409, {'error_kind': 'plausibility_results_unavailable', 'message': message})
+
+    if source != 'lopf':
+        unavailable('Plausibility screening reads LOPF results only; AC power-flow screening is not covered.')
+
+    ctx = PyPSAService._scoped()
+    if ctx is None or not ctx.project_uuid or not ctx.loaded_project:
+        unavailable('Save and activate a project before screening its results.')
+    _authority()  # The existing project resolver rechecks acting-user ownership.
+    lock = PyPSAService.get_lock()
+    if not lock.acquire(blocking=False):
+        unavailable('Results are being changed: wait for the run to finish.')
+    try:
+        if _solver_in_flight() or _state.get('status') in ('running', 'solving'):
+            unavailable('Results are being changed: wait for the run to finish.')
+        n = ctx.network
+        if not _dispatch_ready(n):
+            unavailable('Solve the current network before screening its results.')
+        state = _state_snapshot()
+        if state.get('ac_pf_results') is not None or state.get('lopf_results') is not None:
+            unavailable('Run LOPF again before screening: AC power flow replaced the live LOPF frames.')
+        freshness = solve_freshness(ctx)
+        if freshness['inputs_changed_since_solve'] is True:
+            unavailable('These results are out of date: run LOPF again before screening.')
+        # This is the solve-time ENS denominator, assembled by the same native
+        # report as the coupling loop; a live config/goal is not result evidence.
+        target = (state.get('adequacy_report') or {}).get('target') or {}
+        caps = {}
+        if target.get('energy_target_set'):
+            for row in (target.get('system') or {}).get('by_period', []):
+                period = row['period'] if isinstance(n.snapshots, pd.MultiIndex) else None
+                caps[period] = {'cap_mwh': row['cap_mwh'], 'source': 'services.adequacy.report.build_adequacy_report:target.system.by_period'}
+        result_source = 'lopf' if state.get('condition') == 'optimal' and state.get('ac_pf_results') is None and state.get('lopf_results') is None else 'unknown'
+        raw = None
+        # A loaded network has no raw duals. Multi-period automatic discount
+        # weights are restored after solve, so do not guess their solve-time basis.
+        if result_source == 'lopf' and not isinstance(n.snapshots, pd.MultiIndex):
+            model = getattr(n, '_model', None)
+            if model is not None and 'Bus-nodal_balance' in model.constraints:
+                raw = model.constraints['Bus-nodal_balance'].dual.to_pandas()
+        out = evaluate(n, capture=state.get('last_lost_load'), ens_targets=caps, raw_prices=raw, source=result_source)
+        return {'status': 'ok', 'scope': 'native_screening', 'source': result_source, **out, **freshness,
+                'scope_note': 'Screening only; loaded/unverified results are not a current verified optimum. See coverage/freshness.'}
+    finally:
+        lock.release()
+
+
 def _solved_settings() -> dict | None:
     """
     The settings the last successful solve used, or None when nothing is

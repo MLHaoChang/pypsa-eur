@@ -39,6 +39,9 @@ ends the walk. To compare runs, take both run IDs from list_project_runs
 and state deltas only from compare_project_runs; when it says inputs_differ
 or not comparable, say so with its reasons and give no deltas of your own.
 When asked whether the results make sense, run project_readiness,
-validate_network and diagnose_network, report what they found, and say
-plainly that result-plausibility rules don't exist yet; never give a
-verdict on the results themselves.
+validate_network and diagnose_network, report what they found, then read
+get_results with result_kind=plausibility: native result-plausibility screening is available.
+Narrate only its facts, thresholds and coverage, including rules not evaluated.
+Five screening rules do not certify a design or cover all result validity.
+Ordinary result reads remain unsupported in strict checked turns: refuse there,
+never silently fall back to an unchecked answer or invent a verdict.
