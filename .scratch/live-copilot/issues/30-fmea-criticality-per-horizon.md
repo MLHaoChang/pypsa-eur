@@ -21,8 +21,14 @@ mixes the two. Example: the `test_copt_assurance` classical fleet, 2 snapshots
 1000, and severity 1 643.8 EUR. Annualised, the criticality would be
 28.8 × 8760/6 × 1000.
 
-`tests/test_lc06_d11_fmea_health.py` pins today's numbers (ΔEUE·VoLL) and
-cites this ticket.
+Sites (GK B (9), 2026-10-29): class A `copt.py:1160`; the class A/B aggregation
+`copt.py:1292`; class C `eh_stages.py:1023` (and `tests/test_adequacy_stress.py`);
+the cross-class ranking consumers `copt_endpoint.py:187` and `eh_review.py:273`.
+This is adequacy-engine code, so GK A reviews the fix (GK-SPLIT-1). GK B recommends
+annualising by × 8760/Σw, matching the per-year occurrence, with the basis stated in
+a field. `tests/test_lc06_d11_fmea_health.py` asserts ΔEUE, occurrence and
+severity × occurrence = criticality only. The manifest row `LC-D11.fmea_criticality`
+stays pending until the fix lands; S11 then adds the annualised assertions.
 
 Options for whoever takes this:
 - Annualise: multiply ΔEUE by 8760/Σ snapshot weights in all three classes, then

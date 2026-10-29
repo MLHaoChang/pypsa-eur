@@ -30,7 +30,7 @@ export interface EmissionsPayload {
   total_tCO2: number
   caps: Array<{
     name: string; investment_period: number | null; scope: 'period' | 'horizon'
-    cap_tCO2: number | null; used_tCO2: number; shadow_price_eur_per_tCO2: number; binding: boolean
+    cap_tCO2: number | null; used_tCO2: number; shadow_price_eur_per_tCO2: number | null; binding: boolean | null
   }>
   by_period: Array<{ period: number | string; total_tCO2: number }>
 }
@@ -100,10 +100,22 @@ export function capacityRows(stats: StatsRow[] | null | undefined, period: Perio
 }
 
 export interface LostLoadPayload {
-  total_mwh: number
-  total_cost_eur: number
-  voll_eur_per_mwh: number
+  total_mwh: number | null
+  total_cost_eur: number | null
+  voll_eur_per_mwh: number | null
   shed_hours?: { total: number; by_period: Record<string, number> }
+}
+
+/** The lost-load totals a reader may hold (any of them null or absent). */
+export type LostLoadMeta = Partial<Pick<LostLoadPayload, 'total_mwh' | 'total_cost_eur' | 'voll_eur_per_mwh'>>
+
+/** The lost-load payload's VOLL (€/MWh), else cost / MWh from two known
+ *  totals with MWh > 0 (pre-fix payloads, stale caches); null when neither is
+ *  known — an unknown VOLL prices nothing, never at €0. */
+export function vollOf(ll: LostLoadMeta | null | undefined): number | null {
+  if (ll?.voll_eur_per_mwh != null) return ll.voll_eur_per_mwh
+  return ll?.total_mwh != null && ll.total_mwh > 0 && ll.total_cost_eur != null
+    ? ll.total_cost_eur / ll.total_mwh : null
 }
 
 export interface ReserveMarginSummary {

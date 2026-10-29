@@ -20,6 +20,8 @@ import {
 } from './shared'
 import { storageCarrierKey, loadCarrierKey } from './carrierAliases'
 import NotSolved from './NotSolved'
+import { type LostLoadMeta, vollOf } from './summary'
+import { NOT_RECORDED_KPI, NotRecordedNote } from './NotRecorded'
 
 // ── Aggregated overview ────────────────────────────────────────────────────
 // Shown when the user picks the "Aggregated" period sub-tab. Replaces the
@@ -153,16 +155,15 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
     if (!lostLoad) return null
     const ts = lostLoad as TSPayload | null | undefined
     if (!ts || ts.data.length === 0) {
-      const ll = lostLoad as unknown as { total_mwh?: number; total_cost_eur?: number }
-      return ll ? { mwh: ll.total_mwh ?? 0, cost: ll.total_cost_eur ?? 0 } : null
+      // A null total is unknown ('—'), never 0.
+      const ll = lostLoad as unknown as LostLoadMeta
+      return ll ? { mwh: ll.total_mwh ?? null, cost: ll.total_cost_eur ?? null } : null
     }
     const cols = new Set(ts.columns)
     const split = weightedSumSplit(ts, cols, weightCtx, fullRange, 'generators')
     const mwh = split.positive ?? 0
-    const llMeta = lostLoad as unknown as { total_mwh?: number; total_cost_eur?: number }
-    const voll = (llMeta.total_mwh && llMeta.total_mwh > 0)
-      ? ((llMeta.total_cost_eur ?? 0) / llMeta.total_mwh) : 0
-    return { mwh, cost: mwh * voll }
+    const voll = vollOf(lostLoad as unknown as LostLoadMeta)
+    return { mwh, cost: voll != null ? mwh * voll : null }
   }, [lostLoad, weightCtx, fullRange])
   // UX overhaul S2b: null lost load inside a solved results tab means the
   // solve had no VOLL — not modelled, never "—"; a VOLL solve that shed
@@ -172,6 +173,13 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
     : lostLoadTotals && lostLoadTotals.mwh === 0 ? { state: 'zero' as const } : {}
 
   // Curtailment cost (whole horizon, weighted by objective column).
+  // Whether any renewable opts into the curtailment penalty, and whether the
+  // solve returned the curtailment series it is priced on.
+  const hasCurtailmentCost = useMemo(() => (generators as Generator[]).some(g => {
+    const c = (g as unknown as { curtailment_cost?: number }).curtailment_cost
+    return c != null && Number.isFinite(c) && c > 0
+  }), [generators])
+  const curtailmentRecorded = ((curtailTS as TSPayload | null)?.data.length ?? 0) > 0
   const curtailmentCost = useMemo(() => {
     const ts = curtailTS as TSPayload | null
     if (!ts || ts.data.length === 0) return 0
@@ -389,17 +397,11 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
     // is €100 × VOLL = €10M+ — off by ~5 orders of magnitude on typical
     // VOLL = 10,000-100,000 €/MWh.
     const llTs = lostLoad as TSPayload | null | undefined
-    const llMeta = lostLoad as unknown as {
-      total_mwh?: number; total_cost_eur?: number; voll_eur_per_mwh?: number
-    }
-    // Prefer backend-provided voll_eur_per_mwh. Fall back to ratio for
-    // pre-fix payloads / stale caches.
-    const voll = llMeta?.voll_eur_per_mwh
-      ?? ((llMeta?.total_mwh && llMeta.total_mwh > 0)
-        ? ((llMeta.total_cost_eur ?? 0) / llMeta.total_mwh) : 0)
-    const vollPerPeriod = llTs
+    // An unknown VOLL leaves the VOLL bars out (null), never €0.
+    const voll = vollOf(lostLoad as unknown as LostLoadMeta | null | undefined)
+    const vollPerPeriod: Array<number | null> = llTs
       ? perPeriodWeightedSumSplit(llTs, new Set(llTs.columns), weightCtx, 'generators')
-          .map(r => r.positive * voll)
+          .map(r => (voll != null ? r.positive * voll : null))
       : []
     // Curtailment penalty per period: only generators with curtailment_cost > 0.
     const curtTs = curtailTS as TSPayload | null
@@ -452,17 +454,21 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
       const capex = bp ? bp.capex : evenCapex
       const opex  = bp ? bp.opex  : evenOpex
       const curt  = curtPenaltyPerPeriod[i] ?? 0
-      const voll  = vollPerPeriod[i] ?? 0
+      // No lost-load payload: VOLL was not modelled, nothing to price (0).
+      // A payload with an unknown VOLL leaves the bar out (null).
+      const vollCost = !llTs ? 0 : voll != null ? (vollPerPeriod[i] ?? 0) : null
       return {
         period: p,
         CAPEX: capex,
         // Bundle dispatch OPEX + curtailment penalty so the OPEX bar
         // matches the "Total OPEX" KPI in the per-period Dispatch view.
         OPEX: opex + curt,
-        VOLL: voll,
+        VOLL: vollCost,
       }
     })
   }, [cost, lostLoad, curtailTS, generators, gensTS, loadTS, weightCtx])
+  // Every period's VOLL is unknown together (one VOLL price): drop the series.
+  const vollNotRecorded = economicsBars?.some(r => r.VOLL == null) ?? false
 
   if (!gensTS && !loadTS && !cost) {
     return (
@@ -536,14 +542,19 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
                  : '—'}
                hint={'Σ max(p_max_pu × p_nom − p, 0) over renewable generators' + scaleHint} />
           <KPI label="Lost load" sub="this dispatch solve, no outages"
-               value={lostLoadTotals ? fmtEnergy(lostLoadTotals.mwh) : '—'}
+               {...(lostLoadTotals && lostLoadTotals.mwh == null ? NOT_RECORDED_KPI
+                 : { value: lostLoadTotals ? fmtEnergy(lostLoadTotals.mwh) : '—' })}
                hint={"Demand the LP couldn't serve — absorbed by VOLL slack generators per bus. Set Solver Settings → VOLL > 0 to enable." + scaleHint} 
                {...lostLoadState} />
           <KPI label="Lost-load cost"
-               value={lostLoadTotals ? fmtCurrency(lostLoadTotals.cost) : '—'}
+               {...(lostLoadTotals && lostLoadTotals.cost == null ? NOT_RECORDED_KPI
+                 : { value: lostLoadTotals ? fmtCurrency(lostLoadTotals.cost) : '—' })}
                hint={'MWh of lost load × the VOLL set in Solver Settings (e.g. 3000–10000 €/MWh).' + scaleHint} 
                {...lostLoadState} />
         </div>
+        <NotRecordedNote show={(lostLoadTotals != null
+          && (lostLoadTotals.mwh == null || lostLoadTotals.cost == null))
+          || (cost != null && hasCurtailmentCost && !curtailmentRecorded)} />
       </section>
 
       {/* ── Operational expenditure (OPEX) — whole-horizon totals ── */}
@@ -578,7 +589,12 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
             <KPI label="Dispatch OPEX" value={fmtCurrency(cost.opex)}
               hint="Σ marginal_cost × dispatch over horizon (PyPSA n.statistics() 'Operational Expenditure')" />
             <KPI label="Curtailment penalty"
-              value={curtailmentCost > 0 ? fmtCurrency(curtailmentCost) : '—'}
+              {...(!hasCurtailmentCost
+                ? { value: fmtCurrency(0), state: 'not_modelled' as const,
+                    reason: 'No renewable has a curtailment cost set.' }
+                : !curtailmentRecorded ? NOT_RECORDED_KPI
+                : { value: fmtCurrency(curtailmentCost),
+                    ...(curtailmentCost > 0 ? {} : { state: 'zero' as const }) })}
               hint="Σ curtailment_t × curtailment_cost over renewable generators that opted in. Set curtailment_cost > 0 on a renewable to start charging the optimiser for spilled energy." />
             {cost.by_component
               .filter(b => b.opex > 0)
@@ -595,10 +611,10 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
       {/* Hide entirely when every bar would be 0 — keeps the layout clean on
           test networks where no cost data is configured. */}
       {economicsBars && economicsBars.length > 0
-        && economicsBars.some(r => r.CAPEX > 0 || r.OPEX > 0 || r.VOLL > 0) && (
+        && economicsBars.some(r => r.CAPEX > 0 || r.OPEX > 0 || r.VOLL == null || r.VOLL > 0) && (
         <ChartCard
           title="Economics — system cost per period"
-          hint="CAPEX · OPEX · VOLL"
+          hint={vollNotRecorded ? 'CAPEX · OPEX' : 'CAPEX · OPEX · VOLL'}
           right={
             <ChartActions
               chartRef={economicsRef}
@@ -622,9 +638,17 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
                 <Legend {...CHART_LEGEND} />
                 <Bar dataKey="CAPEX" stackId="cost" fill="#0369a1" />
                 <Bar dataKey="OPEX"  stackId="cost" fill="#d97706" />
-                <Bar dataKey="VOLL"  stackId="cost" fill="#dc2626" radius={[3, 3, 0, 0]} />
+                {!vollNotRecorded && (
+                  <Bar dataKey="VOLL"  stackId="cost" fill="#dc2626" radius={[3, 3, 0, 0]} />
+                )}
               </BarChart>
             </ResponsiveContainer>
+            {/* The VOLL bars are left out, never drawn as €0: say so. */}
+            {vollNotRecorded && (
+              <p className="text-[11px] text-muted mt-2" data-testid="economics-voll-not-recorded">
+                VOLL bars left out: VOLL not recorded by this solve.
+              </p>
+            )}
             <p className="text-[10px] text-muted mt-2">
               Each bar's CAPEX/OPEX is the period's full LP-objective contribution
               (PyPSA's <code>n.statistics()</code> per-period values × <code>investment_period_weightings.years</code>).
