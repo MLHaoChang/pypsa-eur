@@ -55,7 +55,7 @@ variant id; tests are in `pypsa-gui/backend/tests/`.
 | 16 | All navigation acknowledgements | partly | `test_assistant_navigation_coverage.py`, `test_assistant_navigation_provider_parity.py`, `test_lc14_navigation_reach_journey.py` (text path). Spoken acknowledgements are voice-only (R4). |
 | 17 | Matrix regeneration/check in CI | covers | LV 08 workflows `assistant-control-matrix.yaml`, `assistant-route-parity.yaml`; LC-06 `family_manifest.py --check` has its own tests. Two ledgers: R1. |
 | 18 | Every required interaction has a mapping and passing contract | partly | Mapped yes (matrix, manifest). Passing contract: see rows 2, 4–8. |
-| 19 | Every family has a real journey assigned to issue 05 | not | The 14 `pending:issue-05-*` ids are unchanged. Issue 05 text names no family journeys beyond load flow and GridSpine; it is blocked by 01–11 and has not started. LC-06's manifest covers 12 of 14 families' suites only in part (see below). |
+| 19 | Every family has a real journey assigned to issue 05 | not | The 14 `pending:issue-05-*` ids are unchanged. Issue 05 text names no family journeys beyond load flow and GridSpine; it is blocked by 01–11 and has not started. LC-06's manifest does not name issue-05 journeys (see the family table below). |
 | 20 | Remaining limitations block the full-coverage claim explicitly | covers (both) | `full_coverage: not_established` with 14 journey blockers, 3 standing blockers and 2 `route-parity:needs-tool` blockers in the matrix; the manifest prints `full_coverage=not_established`. Keep both. |
 
 ### Slice C (behavioural journeys on issue 05) by family
