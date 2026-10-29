@@ -91,9 +91,10 @@ def main():
                  *SITES[site]],
                 plugins=[Patch(at_site(site, mutant))],
             )
-            status = "killed" if rc not in (0, 5) else "SURVIVED"
+            # Only a test failure kills; a collection or usage error proves nothing.
+            status = {1: "killed", 0: "SURVIVED", 5: "SURVIVED"}.get(rc, f"ERROR rc={rc}")
             print(f"{name} @ {site}: {status}", file=sys.stderr)
-            if status == "SURVIVED":
+            if status != "killed":
                 survivors.append((name, site))
     print(f"{len(survivors)} surviving mutants: {survivors}", file=sys.stderr)
     return 1 if survivors else 0
