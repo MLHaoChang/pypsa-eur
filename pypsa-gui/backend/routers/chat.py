@@ -2144,6 +2144,60 @@ async def chat_stream(
     )
 
 
+class RunResumeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+def _run_call(actor: User, call):
+    """Study harness issue 08: the plan card's run monitor. The caller's own
+    run in the active project only; anything else is `task_not_found`."""
+    from services import chat_tools
+    chat_tools.set_acting_user(actor.id)
+    return call()
+
+
+@router.get("/runs/{task_id}")
+def run_view(task_id: str, actor: User = Depends(require_user)) -> dict[str, Any]:
+    """The run's stages, gates, budgets, envelope and the card it waits on.
+    Reading advances nothing."""
+    from services import run_monitor
+    ready = _profile_chat_ready(llm_config.resolve_active())
+    return _run_call(actor, lambda: run_monitor.view(task_id, provider_ready=ready))
+
+
+@router.post("/runs/{task_id}/present")
+def run_present(task_id: str, actor: User = Depends(require_user)) -> dict[str, Any]:
+    """The user has the plan card open: a card the run waits on is issued
+    now, its TTL starting at display. It approves nothing."""
+    from services import run_monitor
+    return _run_call(actor, lambda: run_monitor.present(task_id))
+
+
+@router.post("/runs/{task_id}/pause")
+def run_pause(task_id: str, actor: User = Depends(require_user)) -> dict[str, Any]:
+    from services import run_monitor
+    _run_call(actor, lambda: run_monitor.pause(task_id))
+    return run_view(task_id, actor)
+
+
+@router.post("/runs/{task_id}/resume")
+def run_resume(task_id: str, body: RunResumeRequest | None = None,
+               actor: User = Depends(require_user)) -> dict[str, Any]:
+    from services import run_monitor
+    session = _resolve_owned_session(body.session_id, actor) if body and body.session_id else None
+    _run_call(actor, lambda: run_monitor.resume(task_id, session))
+    return run_view(task_id, actor)
+
+
+@router.post("/runs/{task_id}/stop")
+def run_stop(task_id: str, actor: User = Depends(require_user)) -> dict[str, Any]:
+    """Revokes the envelope and cancels the run; nothing is reverted."""
+    from services import run_monitor
+    _run_call(actor, lambda: run_monitor.stop(task_id))
+    return run_view(task_id, actor)
+
+
 @router.post("/{session_id}/confirm")
 def chat_confirm(session_id: str, body: ConfirmRequest,
                  actor: User | None = Depends(optional_user)) -> dict[str, Any]:

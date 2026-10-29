@@ -1246,7 +1246,8 @@ lifespan after the solve queue and is off under pytest (tests build their own
   - any uncertain step makes the run `needs_user` (`reason: uncertain`).
 - **Stops.** `run.reason` names why the runner stopped the run:
   `waiting_card`, `budget`, `uncertain`, `locked`, `access`, `recheck`,
-  `restarts` or `runner_errors`. `resume_task` clears a runner stop, and the
+  `restarts`, `runner_errors` or `brief_stale` (a step the plan refused on a
+  stale brief is not dispatched again, issue 08). `resume_task` clears a runner stop, and the
   runner's checks decide again.
 - **Model cost.** `runner.charge(path, usage, model)` meters provider usage
   (input, cache read, cache write, output) in EUR on `run.budget`. The limit
