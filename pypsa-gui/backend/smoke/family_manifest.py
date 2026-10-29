@@ -88,7 +88,7 @@ TOOLS_BY_FAMILY: dict[str, frozenset[str]] = {f: frozenset(names.split()) for f,
         get_project_sites set_project_sites get_project_layout update_project_layout get_project_flow
         get_project_flow_scope update_project_flow_scope get_project_network_meta get_meta update_meta
         project_readiness get_site_template_form fetch_site_context geocode_place get_osm_suggestions
-        list_project_network_component set_site_connection""",
+        list_project_network_component set_site_connection get_site_anchor set_site_anchor""",
     'network-topology': """
         batch_create_components batch_delete_components bulk_update_components cascade_delete_bus
         create_carrier create_component delete_component get_component get_component_schema list_carriers
@@ -120,7 +120,7 @@ TOOLS_BY_FAMILY: dict[str, frozenset[str]] = {f: frozenset(names.split()) for f,
         compare_project_runs discuss_project_run get_asset_results get_curtailment_by_cause get_energy_flows
         get_load_shape get_loadflow_summary get_project_results_bundle get_project_results_summary
         get_project_statistics get_project_compare_state get_results get_run_evidence get_vintage_results
-        list_project_runs list_result_assets list_result_views read_result""",
+        list_project_runs list_result_assets list_result_views read_result get_process_view""",
     'reliability-adequacy': """
         abort_adequacy_study get_adequacy_results get_asset_health record_asset_health get_fmea_worksheet
         save_fmea_worksheet run_fmea_sweep get_reliability_goal get_stress_scenarios put_stress_scenarios
@@ -191,8 +191,16 @@ def _unavailable(vid: str, reason: str, pointer: str) -> dict:
 # Rebaselined on master a6d73f57; see the slice log in
 # .scratch/live-copilot/issues/06-family-adapters.md.
 VARIANTS: list[dict] = [
-    _pending('LC-D01.projects', 'seam tests check identity/ACL; no independent file/ID oracle'),
-    _pending('LC-D02.topology', 'seam tests check shape; no reference-count/KCL oracle'),
+    _covered('LC-D01.projects', 'copy = new registry id + own network.nc (1 bus, 20 MW, 2 snapshots read with pypsa alone); rename keeps '
+             'the id and the file bytes; refused Save-As leaves the target file byte-identical; delete removes that directory only',
+             'list_projects save_project_a_copy rename_project save_project_as delete_project',
+             B + 'test_lc06_d01_projects.py::test_copy_rename_refused_overwrite_and_delete_keep_each_projects_id_and_files'),
+    _covered('LC-D02.topology', 'chain B1-B2-B3: G1 serves 10 MW, Ln1 5 MW and Ln2 2 MW by sign; bus B2 has 4 references (G2, L2, Ln1, Ln2): '
+             'a plain delete dangles exactly those 4 in validate_network, a cascade leaves B1 B3 G1 L1 L3 in memory and in the saved file',
+             'create_component delete_component cascade_delete_bus validate_network save_project',
+             B + 'test_lc06_d02_topology.py::test_the_built_topology_carries_the_hand_kirchhoff_flows',
+             B + 'test_lc06_d02_topology.py::test_a_plain_bus_delete_leaves_exactly_the_four_references_dangling',
+             B + 'test_lc06_d02_topology.py::test_a_cascade_delete_removes_the_bus_and_its_four_references_and_nothing_else'),
     _covered('LC-D03.dynamic_weights', 'objective = 10 EUR/MWh x (5 MW x 2 h + 7 MW x 3 h) = 310, after an import round trip',
              'import_uploaded_network save_project_as run_simulation save_project get_study_evidence',
              B + 'test_assistant_capabilities.py::test_native_dynamic_roundtrip_solves_and_persists_evidence'),
@@ -332,7 +340,15 @@ VARIANTS: list[dict] = [
              B + 'test_lc06_d11_fmea_health.py::test_class_a_moves_with_one_units_rate',
              B + 'test_lc06_d11_fmea_health.py::test_class_b_one_link_outage_sheds_its_load',
              B + 'test_lc06_d11_fmea_health.py::test_class_b_moves_with_the_load_behind_the_tie'),
-    _pending('LC-D11.fmea_criticality', 'criticality and severity are per horizon, labelled per year (ticket 30)'),
+    _covered('LC-D11.fmea_criticality', 'criticality per year: dEUE x 8760/6 h x VoLL 1000 (thermal1 42,048,000 EUR/yr, '
+             'severity 2,400,000 EUR; thermal2 46,428,000); a year-long horizon is unscaled; class B tie 0.02 x 30 MWh '
+             'x 1460 x 1000 = 876,000 EUR/yr; on a year-long horizon both classes are unscaled',
+             'update_solver_config get_adequacy_results run_fmea_sweep',
+             B + 'test_lc06_d11_fmea_health.py::test_class_a_criticality_is_per_year[thermal1]',
+             B + 'test_lc06_d11_fmea_health.py::test_class_a_criticality_is_per_year[thermal2]',
+             B + 'test_lc06_d11_fmea_health.py::test_class_a_criticality_on_a_year_is_the_horizons',
+             B + 'test_lc06_d11_fmea_health.py::test_class_b_criticality_is_per_year',
+             B + 'test_lc06_d11_fmea_health.py::test_class_b_criticality_on_a_year_is_the_horizons'),
     _covered('LC-D11.health', 'ledger read back from storage and the route; provenance 1 sourced, 1 drifted (0.25 vs 0.2), '
              '1 orphaned; four invalid fields refused with the field named, the file byte-identical',
              'record_asset_health get_asset_health',
@@ -458,15 +474,20 @@ VARIANTS: list[dict] = [
     _covered('LC-D17.recommend_apply_restudy', 'gfm_vsm BESS (H_v 1 s, 4 %) beside a 5 % droop genset, band 0.25 Hz: '
              'the card sets droop and H_v within the search bounds; both files read back the card exactly, tagged '
              'assumed; the re-study puts E2 RoCoF0 and df_qss on the applied values; without it the old figures stand; '
-             'a network edit (refused by the recommendation\'s own staleness, not the digest: ticket 28) or a wrong '
-             'digest after the card is edit_preview_stale with nothing written; the HTTP apply with no digest is '
-             'still 409 (ticket 29)',
+             'a network edit after the card (saved, saved with the run manifest agreeing, or unsaved in the active '
+             'project) or a wrong digest is edit_preview_stale with nothing written, and an edit to another active '
+             'project refuses nothing (ticket 28); the HTTP apply needs the card\'s digest, a 422 without it, and '
+             'refuses a network edit after the card (ticket 29)',
              D17_TOOLS,
              B + 'test_lc06_d17_recommend_apply.py::test_the_applied_card_is_read_back_and_the_restudy_runs_on_it',
              B + 'test_lc06_d17_recommend_apply.py::test_without_the_restudy_the_old_figures_stand_and_no_study_is_made',
              B + 'test_lc06_d17_recommend_apply.py::test_a_network_edit_after_the_card_refuses_the_apply',
              B + 'test_lc06_d17_recommend_apply.py::test_a_digest_that_is_not_the_cards_refuses_the_apply',
-             B + 'test_lc06_d17_recommend_apply.py::test_the_http_apply_without_a_digest_still_refuses_a_stale_network'),
+             B + 'test_lc06_d17_recommend_apply.py::test_a_saved_network_edit_refuses_the_apply_by_the_cards_binding',
+             B + 'test_lc06_d17_recommend_apply.py::test_an_unsaved_network_edit_of_the_active_project_refuses_the_apply',
+             B + 'test_lc06_d17_recommend_apply.py::test_an_edit_to_another_active_project_does_not_refuse_the_apply',
+             B + 'test_lc06_d17_recommend_apply.py::test_the_http_apply_requires_the_cards_digest',
+             B + 'test_lc06_d17_recommend_apply.py::test_the_http_apply_refuses_a_network_edit_after_the_card'),
     _covered('LC-D18.investment', 'equity NPV 4.1322314 at cost of equity 10 %, WACC 7 %; financial close undiscounted',
              '',
              B + 'test_investment_assurance.py::test_hand_cash_with_a_nonzero_first_year'),

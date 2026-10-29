@@ -3,7 +3,7 @@
 
 # LC-28 — the GFM apply card's digest does not hash the network
 
-Status: needs-triage
+Status: done
 
 Found by LC-06 (7) while building S9 (LC-D17); GK A (4) asked for the ticket.
 The card for `campus_apply_gfm_settings` (`harness/edit_card.py`, its adapter
@@ -26,3 +26,15 @@ Options for whoever takes this:
 - Put the network fingerprint in the card's binding, so the digest moves with
   the network and the refusal no longer leans on the run manifest.
 - Leave it, and record that the run manifest is the network guard for this card.
+
+## Comments
+
+- GK B (10) plan GO, 29 Oct, with conditions: bind `network_file` (the named
+  project's saved `network.nc` digest) and `network_live` (`_fingerprint()`, only
+  when the named project is the active context), both read through `_campus`;
+  tests for a saved edit with the run manifest made to agree (binding alone
+  refuses), an unsaved edit of the active project, and an edit to another active
+  project that must not refuse, each mutation-checked; the stale reason replaces
+  "no recommendation" (not_run unchanged); refusals assert file bytes and mtime.
+- Done in PR `claude/lc-28-29-gfm-apply-digest`: `harness/edit_card.py`
+  `_gfm_binding`, `campus_island_tuning._plan_apply`.

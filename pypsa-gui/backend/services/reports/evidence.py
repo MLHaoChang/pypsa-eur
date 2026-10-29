@@ -531,9 +531,12 @@ def fmea_top_modes(payload: dict | None) -> list[dict]:
     present, else the class-B rows then the class-A rows, each ranked by
     position within its class (the two criticalities come from different
     engines, which is why they are not interleaved). Rows are copied; the
-    report is never mutated.
+    report is never mutated. A payload saved before LC-30 has its rows
+    marked ``criticality_basis="per_horizon_legacy"`` (``mark_legacy_fmea_top``).
     """
-    payload = payload if isinstance(payload, dict) else {}
+    from services.adequacy.eh_report import mark_legacy_fmea_top
+
+    payload = mark_legacy_fmea_top(payload if isinstance(payload, dict) else {})
     top = payload.get("top")
     if isinstance(top, list):
         return [dict(r) for r in top if isinstance(r, dict)]
@@ -559,6 +562,14 @@ def fmea_top_modes(payload: dict | None) -> list[dict]:
             + _ranked(class_a_rows, "A"))
 
 
+def _legacy_caveat(payload: dict) -> str:
+    from services.adequacy.eh_report import mark_legacy_fmea_top
+
+    marked = mark_legacy_fmea_top(payload) or {}
+    caveat = marked.get("criticality_caveat")
+    return f"{caveat} " if caveat else ""
+
+
 def _t_fmea_top(payload: dict) -> EvidenceTable:
     rows = []
     for r in fmea_top_modes(payload):
@@ -578,7 +589,8 @@ def _t_fmea_top(payload: dict) -> EvidenceTable:
         columns=["Rank", "Class", "Component", "Name", "Occurrence",
                  "Severity", "Criticality", "ΔEUE (MWh)", "Engine / fidelity"],
         rows=rows,
-        caption=(f"Ranked by criticality (€/yr) then mode id; classes "
+        caption=(_legacy_caveat(payload)
+                 + f"Ranked by criticality (€/yr) then mode id; classes "
                  f"included: {F.fmt_text(payload.get('classes_included'))}; "
                  f"{F.fmt_number(payload.get('n_total_modes'))} modes in "
                  f"total; VoLL "

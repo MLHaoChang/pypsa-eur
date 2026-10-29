@@ -1,0 +1,1 @@
+* Test(pypsa-gui): Assistant behaviour coverage for the project (LC-D01) and network-topology (LC-D02) families: copy/rename/refused-overwrite/delete checked against registry ids and files on disk, and Kirchhoff flows plus bus-reference counts checked against a hand network; both capability-matrix rows move from pending to covered.

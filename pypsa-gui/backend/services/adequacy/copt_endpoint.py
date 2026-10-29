@@ -187,7 +187,7 @@ def build_fmea_modes_payload(
     per_mode.sort(key=lambda r: (-float(r.get("criticality_eur_per_year", 0.0)),
                                  str(r.get("mode_id", ""))))
     # VOLL travels with the rows so the worksheet can say WHY every
-    # criticality is zero. Criticality is ΔEUE × VoLL × occurrence, so with
+    # criticality is zero. Criticality is ΔEUE × VoLL (per year), so with
     # no VoLL set the whole ranking collapses to €0/yr — modes whose ΔEUE
     # differs by 4× tie at zero, and the table reads "these failure modes
     # cost nothing" when the truth is "these failure modes cannot be priced".

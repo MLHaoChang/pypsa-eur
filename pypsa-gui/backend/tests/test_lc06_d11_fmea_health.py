@@ -17,13 +17,16 @@ two snapshots weighted 3 h. Capacity states: 100 MW p 0.72, 60 MW p 0.18,
 * thermal2 never out (100 MW p 0.9, 40 MW p 0.1):
   EUE = 3·(30·0.1) + 3·(60·0.1) = 27 MWh, so ΔEUE = 31.8 MWh.
 * Occurrence 8760·q/MTTR: 8760·0.1/50 = 17.52 /yr and 8760·0.2/40 = 43.8 /yr.
-* Criticality and severity are not asserted at their values: the engine gives
-  the horizon's ΔEUE·VoLL, labelled per year (ticket 30). Only the identity
-  severity × occurrence = criticality is checked.
+* Criticality is per year, like occurrence (ticket 30): the horizon's ΔEUE
+  scaled to a year by 8760/Σw = 8760/6 = 1460, times VoLL. thermal1:
+  28.8·1460·1000 = 42 048 000 EUR/yr, severity 42 048 000/17.52 = 2 400 000 EUR.
+  thermal2: 31.8·1460·1000 = 46 428 000 EUR/yr, severity 1 060 000 EUR.
 
 Class B: bus B1 with 200 MW firm and 100 MW load, and bus B2 with 5 MW load
 fed only by the 10 MW tie (FOR 0.02, MTTR 24 h). The base serves all the load.
 With the tie out, B2 sheds 5 MW in both snapshots: ΔEUE = 5·2·3 = 30 MWh.
+Criticality q·ΔEUE·(8760/6)·VoLL = 0.02·30·1460·1000 = 876 000 EUR/yr over
+occurrence 8760·0.02/24 = 7.3 /yr: severity 120 000 EUR.
 
 Tolerance: ``rel=1e-9``. COPT is exact arithmetic on four states, and the
 LP's shed load is a bound that HiGHS returns to its precision. The mutations
@@ -69,6 +72,28 @@ def test_class_a_prices_each_units_outages_by_hand(classical, name, delta_eue, o
     assert m["delta_eue_mwh"] == pytest.approx(delta_eue, rel=REL)
     assert m["occurrence_per_year"] == pytest.approx(occurrence, rel=REL)
     assert m["severity_eur"] * m["occurrence_per_year"] == pytest.approx(m["criticality_eur_per_year"], rel=REL)
+
+
+@pytest.mark.parametrize("name, criticality, severity", [
+    ("thermal1", 28.8 * 1460 * VOLL, 28.8 * 1460 * VOLL / 17.52),
+    ("thermal2", 31.8 * 1460 * VOLL, 31.8 * 1460 * VOLL / 43.8),
+], ids=["thermal1", "thermal2"])
+def test_class_a_criticality_is_per_year(classical, name, criticality, severity):
+    m = _modes()[name]
+    assert m["criticality_eur_per_year"] == pytest.approx(criticality, rel=REL)
+    assert m["severity_eur"] == pytest.approx(severity, rel=REL)
+    assert m["criticality_basis"] == "annualised"
+    assert m["horizon_years"] == pytest.approx(6 / 8760, rel=REL)
+
+
+def test_class_a_criticality_on_a_year_is_the_horizons(classical):
+    """Mutation: each snapshot weighted 4380 h, so the horizon is a year and
+    nothing is scaled. ΔEUE = 28.8/3·4380 = 42 048 MWh; criticality 42 048·1000."""
+    classical.network.snapshot_weightings.loc[:, :] = 4380.0
+    m = _modes()["thermal1"]
+    assert m["delta_eue_mwh"] == pytest.approx(28.8 / 3 * 4380, rel=REL)
+    assert m["criticality_eur_per_year"] == pytest.approx(28.8 / 3 * 4380 * VOLL, rel=REL)
+    assert m["horizon_years"] == pytest.approx(1.0, rel=REL)
 
 
 def test_class_a_moves_with_one_units_rate(classical):
@@ -121,6 +146,26 @@ def test_class_b_one_link_outage_sheds_its_load(tied):
     assert row["delta_eue_mwh"] == pytest.approx(5.0 * 2 * 3.0, rel=REL)          # 30 MWh, not 0
     assert fm["occurrence_per_year"] == pytest.approx(8760 * 0.02 / 24, rel=REL)
     assert tied.network.links.at["tie", "p_nom"] == 10.0                          # the outage was undone
+
+
+def test_class_b_criticality_is_per_year(tied):
+    (row,) = _sweep(tied.network).values()
+    fm = row["failure_mode"]
+    assert fm["criticality_eur_per_year"] == pytest.approx(0.02 * 30.0 * 1460 * VOLL, rel=REL)
+    assert fm["severity_eur"] == pytest.approx(0.02 * 30.0 * 1460 * VOLL / 7.3, rel=REL)
+    assert fm["criticality_basis"] == "annualised"
+    assert fm["horizon_years"] == pytest.approx(6 / 8760, rel=REL)
+
+
+def test_class_b_criticality_on_a_year_is_the_horizons(tied):
+    """Mutation: each snapshot weighted 4380 h, a year. ΔEUE = 5·2·4380 =
+    43 800 MWh and the criticality is q·ΔEUE·VoLL unscaled, as before LC-30."""
+    tied.network.snapshot_weightings.loc[:, :] = 4380.0
+    (row,) = _sweep(tied.network).values()
+    fm = row["failure_mode"]
+    assert row["delta_eue_mwh"] == pytest.approx(5.0 * 2 * 4380.0, rel=REL)
+    assert fm["criticality_eur_per_year"] == pytest.approx(0.02 * 43800.0 * VOLL, rel=REL)
+    assert fm["horizon_years"] == pytest.approx(1.0, rel=REL)
 
 
 def test_class_b_moves_with_the_load_behind_the_tie(tied):

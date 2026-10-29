@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant capability matrix now reads family coverage from the LC-06 family manifest, so coverage is counted in one ledger; the families LC-06 leaves out (D01, D02, D20–D24) keep an explicit blocker and full coverage stays not established.

@@ -344,6 +344,10 @@ class FailureModeResult(BaseModel):
     # "break the electrolyser" as beneficial is wrong, not insightful.
     severity_eur: float = Field(ge=0)
     criticality_eur_per_year: float = Field(ge=0)
+    # LC-30: "annualised" (A, B), "per_event" (C), "per_horizon" (no horizon
+    # to scale by); absent on expert rows, which are entered per year.
+    criticality_basis: str | None = None
+    horizon_years: float | None = None
     in_metric_scope: bool = True
     mitigability: str | None = None  # expert-entered (worksheet, Phase 3)
     # P7: rate library vs typed override. Optional so class-B/C/D rows stay valid.

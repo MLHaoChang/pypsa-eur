@@ -618,7 +618,14 @@ def run_class_c_sweep(network, lock, cfg, scenarios: list[dict], *,
     """
     Class-C rows via the shared driver. occurrence = the scenario's
     empirical ``frequency_per_year``; severity = ΔEUE × VoLL per event;
-    criticality = the product (f×S by construction).
+    criticality = the product (f×S by construction), already €/yr.
+
+    LC-30: classes A and B annualise their horizon's ΔEUE; class C does
+    NOT. A scenario mutates the whole modelled horizon and has no duration of
+    its own, so the event is ASSUMED to last the horizon and its ΔEUE is one
+    event's damage (``criticality_basis="per_event"``). When
+    frequency × horizon hours exceeds a year, the events would overlap the
+    year: the row says so in a ``note`` and keeps the number.
 
     Provenance is loud:
     * parametric → ``occurrence_basis="scenario:parametric"``
@@ -629,6 +636,9 @@ def run_class_c_sweep(network, lock, cfg, scenarios: list[dict], *,
 
     _validate(scenarios)
     voll = float(getattr(cfg, "voll", 0.0) or 0.0)
+    from services.adequacy.metrics import HOURS_PER_YEAR, horizon_years
+    nyears = horizon_years(network)
+    horizon_hours = nyears * HOURS_PER_YEAR
     # Horizon for fail-closed length checks. Missing on stub networks used by
     # unit tests that monkeypatch the sweep — those skip the length gate.
     try:
@@ -736,6 +746,8 @@ def run_class_c_sweep(network, lock, cfg, scenarios: list[dict], *,
                 "occurrence_basis": c["occurrence_basis"],
                 "severity_eur": severity,
                 "criticality_eur_per_year": freq * severity,
+                "criticality_basis": "per_event",
+                "horizon_years": nyears,
                 "in_metric_scope": True,
                 "engine": "lp_proxy",
                 "fidelity": "deterministic_scenario",
@@ -747,6 +759,12 @@ def run_class_c_sweep(network, lock, cfg, scenarios: list[dict], *,
             },
             "meta": meta,
         })
+        if freq * horizon_hours > HOURS_PER_YEAR:
+            rows[-1]["note"] = (
+                f"each event is assumed to last the modelled horizon "
+                f"({horizon_hours:g} h); at {freq:g} /yr the events add up to "
+                f"{freq * horizon_hours:g} h, more than a year, so they overlap "
+                "within the year")
     rows.sort(key=lambda r: (r["delta_eue_mwh"] or 0.0), reverse=True)
     return rows, {"base_restored": swept.get("base_restored"),
                   "base_restore_status": swept.get("base_restore_status"),

@@ -329,6 +329,8 @@ GET     /api/projects/{name}/results-summary                                    
 GET     /api/projects/{name}/results_bundle                                        -> get_results_bundle_api_projects__name__results_bundle_get
 PATCH   /api/projects/{name}/scenario                                              -> update_scenario_metadata_api_projects__name__scenario_patch
 PATCH   /api/projects/{name}/settings                                              -> update_project_settings_api_projects__name__settings_patch
+GET     /api/projects/{name}/site-anchor                                           -> get_site_anchor_api_projects__name__site_anchor_get
+PUT     /api/projects/{name}/site-anchor                                           -> put_site_anchor_api_projects__name__site_anchor_put
 GET     /api/projects/{name}/sites                                                 -> get_sites_api_projects__name__sites_get
 PUT     /api/projects/{name}/sites                                                 -> put_sites_api_projects__name__sites_put
 DELETE  /api/projects/{name}/sites/{site_id}/context                               -> delete_site_context_api_projects__name__sites__site_id__context_delete

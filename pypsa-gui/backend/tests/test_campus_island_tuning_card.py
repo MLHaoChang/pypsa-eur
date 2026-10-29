@@ -163,10 +163,12 @@ def test_the_apply_route_refuses_a_stale_digest_and_writes_nothing(client, draft
     assert _sidecar_of(drafted) == before
 
 
-def test_the_bare_apply_route_still_works(client, drafted):  # noqa: F811
+def test_the_bare_apply_route_is_refused_and_writes_nothing(client, drafted):  # noqa: F811
     _recommend(drafted)
+    before = _sidecar_of(drafted)
     resp = client.post(_APPLY)
-    assert resp.status_code == 200 and "receipt" not in resp.json()
+    assert resp.status_code == 422, resp.text                   # the card's digest is required (ticket 29)
+    assert _sidecar_of(drafted) == before
 
 
 # ── the copilot's path ──────────────────────────────────────────────────────

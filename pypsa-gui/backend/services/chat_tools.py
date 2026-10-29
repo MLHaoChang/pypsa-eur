@@ -1387,6 +1387,70 @@ def fetch_site_context(name: str, site_id: str) -> dict:
     return _route(_h, name, site_id)
 
 
+# ── LV08 R2: the site anchor (Site 3D, SC-01a) and the process view ─────────
+#
+# The five Site 3D scene routes stay held for SC-07 (route parity `held-by-spec`).
+
+
+def _scene_refusal(exc) -> HTTPException:
+    """A `SceneError` as the status and `{error_kind, message, …}` its route answers with."""
+    return HTTPException(exc.status, exc.to_body()["detail"])
+
+
+def get_site_anchor(name: str) -> dict:
+    """`GET .../site-anchor`: `{version, revision, anchor}` (revision 0 and anchor null when unset)."""
+    from routers.site_scene import get_site_anchor as _h
+    from services.site_scene.contract import SceneError
+
+    project = _authorized_project(name)  # 404 for a project the caller may not see, as the route
+    try:
+        return _h(project=project)
+    except SceneError as exc:
+        raise _scene_refusal(exc) from None
+
+
+def set_site_anchor(name: str, lat: float, lng: float, source: str, confirmed: bool,
+                    expected_revision: int) -> dict:
+    """`PUT .../site-anchor` through `anchor.write_anchor` only, behind a card
+    (harness/edit_card_site_anchor.py). The route's own checks run here at
+    confirm: the project's ACL, the native edit lock (409 `project_locked`), the
+    anchor's validation and the revision compare-and-swap."""
+    from routers.site_scene import _check_lock
+    from services.site_scene import anchor
+    from services.site_scene.contract import SceneError
+
+    body = {"lat": lat, "lng": lng, "source": source, "confirmed": confirmed}
+    with _acting() as (db, user):
+        from routers.deps import require_project_access
+
+        project = require_project_access(name, db=db, user=user)
+        _check_lock(project, db, user)
+        try:  # write_anchor validates the anchor and compares the revision under the scene mutex
+            return anchor.write_anchor(project.directory, body, expected_revision)
+        except SceneError as exc:
+            raise _scene_refusal(exc) from None
+
+
+def get_process_view() -> dict:
+    """`GET /api/results/process_view` on the network the route reads: the
+    caller's foreground project, resolved per request as the route's is. A
+    foreground project the caller may not access is refused, never read."""
+    from routers.results import get_process_view as _h
+    from services import project_registry
+
+    project_uuid = PyPSAService.get_active_context().project_uuid
+    if project_uuid:
+        with _acting() as (db, user):
+            try:
+                project_registry.resolve_project(db, user, project_uuid)
+            except HTTPException:
+                raise HTTPException(404, {
+                    "error_kind": "not_authorized",
+                    "message": "The open project is not one you may read; open one of your own projects "
+                               "and ask again."}) from None
+    return _h()
+
+
 # ── Snapshots (4) ───────────────────────────────────────────────────────────
 
 
@@ -9538,6 +9602,9 @@ DISPATCHERS.update({
 })
 # ── LV08 B-campus (live-voice issue 08 slice B): campus and gridspine routes
 DISPATCHERS.update({
+    "get_site_anchor": get_site_anchor,
+    "set_site_anchor": set_site_anchor,
+    "get_process_view": get_process_view,
     "campus_save_campus": campus_save_campus,
     "campus_milp_status": campus_milp_status,
     "campus_start_milp": campus_start_milp,
