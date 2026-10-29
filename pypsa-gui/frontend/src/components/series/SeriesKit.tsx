@@ -5,7 +5,7 @@
 // Properties panel, the Time Series drawer, later the asset form's
 // Availability block): host-agnostic props, no store reads besides the
 // query client.
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { AxiosError } from 'axios'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
@@ -214,8 +214,23 @@ export function replayRefusalText(error: unknown): string {
   const op = typeof detail?.op === 'string' ? detail.op : null
   const index = typeof detail?.index === 'number' ? detail.index : null
   if (op == null || index == null) return 'The refinements no longer fit the new series.'
+  return `Step ${index + 1} of the refinements (${stepLabel(op)}) no longer fits the new series.`
+}
+
+const stepLabel = (op: string) => {
   const label = OP_LABELS[op as OpKind] ?? 'a refinement'
-  return `Step ${index + 1} of the refinements (${label.charAt(0).toLowerCase()}${label.slice(1)}) no longer fits the new series.`
+  return `${label.charAt(0).toLowerCase()}${label.slice(1)}`
+}
+
+/** A refused removal (TSG 05): a later step that no longer fits names it in
+ *  the replay's own words; any other refusal is the backend's sentence. */
+export function removalRefusalText(error: unknown, removed: number): string {
+  const detail = ((error as AxiosError)?.response?.data as { detail?: { op?: unknown; index?: unknown } } | undefined)?.detail
+  const op = typeof detail?.op === 'string' ? detail.op : null
+  const index = typeof detail?.index === 'number' ? detail.index : null
+  if (op == null || index == null) return sentence(errorText(error))
+  return `Step ${index + 1} of the refinements (${stepLabel(op)}) no longer fits without step ${removed + 1}: `
+    + `remove step ${index + 1} first, or keep step ${removed + 1}.`
 }
 
 /** A generate's refusal in place. A refused replay names the op and its
@@ -299,6 +314,19 @@ export function weekDates(week: PreviewWeek): string {
   return `${DAY_MONTH.format(a)} – ${FULL.format(b)}`
 }
 
+/** A planned outage as the availability generator records it (TSG-07). */
+export interface MaintenanceWindow { from: string; to: string; available?: number; dated?: boolean }
+
+/** "1–7 Jul", or "28 Jun–4 Jul" across a month; its ends are MM-DD or YYYY-MM-DD. */
+export function windowDates(w: MaintenanceWindow): string {
+  const day = (s: string) => new Date(`2000-${s.slice(-5)}T00:00Z`)
+  const a = day(w.from)
+  const b = day(w.to)
+  return a.getUTCMonth() === b.getUTCMonth() && a <= b
+    ? `${DAY.format(a)}–${DAY_MONTH.format(b)}`
+    : `${DAY_MONTH.format(a)}–${DAY_MONTH.format(b)}`
+}
+
 /** The preview week: what apply would write, the current series faint
  *  behind it, labelled with the week it shows and described in text. */
 export function WeekChart({ week, unit }: { week: PreviewWeek; unit?: string }) {
@@ -346,11 +374,14 @@ export function PendingCard({
   onApplied?: (r: SeriesApplyResult) => void
 }) {
   const qc = useQueryClient()
-  const [applied, setApplied] = useState<SeriesApplyResult | null>(null)
+  // The receipt belongs to the series it applied: a new preview (a refine or
+  // a removed step) needs its own Apply.
+  const [receipt, setReceipt] = useState<{ job: string; result: SeriesApplyResult } | null>(null)
+  const applied = receipt?.job === pending.job_id ? receipt.result : null
   const apply = useMutation({
     mutationFn: () => seriesApi.apply(project, { job_id: pending.job_id, component }),
     onSuccess: r => {
-      setApplied(r)
+      setReceipt({ job: pending.job_id, result: r })
       onApplied?.(r)
       void qc.invalidateQueries()
     },
@@ -397,6 +428,13 @@ export function PendingCard({
           )}
         </dl>
       )}
+      {power && stats.peak_share_of_connection != null && (
+        <div className={`text-[11px] mt-1 ${stats.peak_share_of_connection > 1 ? 'text-amber-700 font-medium' : 'text-muted'}`}
+             data-testid="stat-connection-share"
+             title={stats.connection_link ? `Peak ÷ the rated power of ${stats.connection_link}` : undefined}>
+          {fmt(stats.peak_share_of_connection * 100, 0)} % of the grid connection{stats.peak_share_of_connection > 1 ? ': above it' : ''}
+        </div>
+      )}
       {pending.weeks?.[component] && (
         <WeekChart week={pending.weeks[component]} unit={power ? 'MW' : unit} />
       )}
@@ -431,6 +469,7 @@ export function PendingCard({
 // ── Refinement ops (TS-04): the same deterministic edits the copilot emits ──
 
 type OpKind = 'scale_peak_to' | 'scale_window' | 'set_floor' | 'set_cap' | 'shift' | 'smooth' | 'rescale_energy'
+  | 'move_window'
 
 const OP_LABELS: Record<OpKind, string> = {
   scale_peak_to: 'Scale the peak to',
@@ -440,6 +479,7 @@ const OP_LABELS: Record<OpKind, string> = {
   shift: 'Shift by hours',
   smooth: 'Smooth',
   rescale_energy: 'Rescale the annual energy',
+  move_window: 'Move the maintenance window',
 }
 
 interface Draft { kind: OpKind; a: string; b: string; c: string; of: string }
@@ -460,21 +500,57 @@ function draftToOp(d: Draft, power: boolean, windowSource = false): RefineOp {
       return { op: d.kind, window_h: Math.trunc(n(d.a)) }
     case 'rescale_energy':
       return windowSource ? { op: d.kind, mwh: n(d.a), basis: 'window' } : { op: d.kind, mwh: n(d.a) }
+    case 'move_window': {
+      // d.a: signed days; d.b: the window's index, left empty when there is one.
+      const by = `${n(d.a) > 0 ? '+' : ''}${n(d.a)}d`
+      return d.b === '' ? { op: d.kind, by } : { op: d.kind, window: n(d.b), by }
+    }
   }
 }
 
-function describe(op: RefineOp): string {
+/** A move's days, signed: "+3 days", "−14 days" ("2w" is 14 days). */
+function moveDays(by: unknown): string {
+  const m = /^([+-]?)(\d+)([dw])$/.exec(String(by))
+  if (!m) return String(by)
+  const days = Number(m[2]) * (m[3] === 'w' ? 7 : 1)
+  return `${m[1] === '-' ? '−' : '+'}${days} ${days === 1 ? 'day' : 'days'}`
+}
+
+const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** A recorded weekday or month list in words: a run reads "Mon–Fri". */
+function runWords(raw: unknown, names: string[], first: number): string {
+  if (!Array.isArray(raw) || !raw.length) return ''
+  const xs = [...raw as number[]].sort((a, b) => a - b)
+  const run = xs.every((x, i) => i === 0 || x === xs[i - 1] + 1)
+  return run && xs.length > 2 ? ` ${names[xs[0] - first]}–${names[xs[xs.length - 1] - first]}`
+    : ` ${xs.map(x => names[x - first]).join(', ')}`
+}
+
+// What the server records beside an op's own parameters.
+const RECORDED = new Set(['op', 'target', 'connection', 'resolved_mw', 'window', 'moved', 'converted_from_rule'])
+
+function describe(op: RefineOp, windows: MaintenanceWindow[] = []): string {
   const o = op as Record<string, unknown>
   switch (op.op) {
+    case 'move_window': {
+      // A recorded move names the dates it moved from.
+      const moved = o.moved as { from: string[]; to: string[] } | undefined
+      const w = moved ? { from: moved.from[0], to: moved.to[0] } : windows[Number(o.window ?? 0)]
+      return `Move maintenance ${w ? `${windowDates(w)} ` : ''}by ${moveDays(o.by)}`
+    }
     case 'scale_peak_to':
       return o.of ? `peak to ${Number(o.fraction) * 100} % of the ${o.of === 'connection' ? 'grid connection' : 'current peak'}`
         : `peak to ${o.mw ?? o.value}`
     case 'scale_window': {
+      if (!Array.isArray(o.hours)) return OP_LABELS.scale_window
       const [s, e] = o.hours as number[]
-      return `${String(s).padStart(2, '0')}–${String(e).padStart(2, '0')} h × ${o.factor}`
+      return `${String(s).padStart(2, '0')}–${String(e).padStart(2, '0')} h`
+        + `${runWords(o.weekdays, WEEKDAYS, 0)}${runWords(o.months, MONTHS, 1)} × ${o.factor}`
     }
     default:
-      return `${OP_LABELS[op.op as OpKind] ?? op.op} ${Object.entries(o).filter(([k]) => k !== 'op').map(([, v]) => v).join(' ')}`
+      return `${OP_LABELS[op.op as OpKind] ?? op.op} ${Object.entries(o).filter(([k]) => !RECORDED.has(k)).map(([, v]) => v).join(' ')}`
   }
 }
 
@@ -493,26 +569,99 @@ export function RefinePanel({
     mutationFn: () => seriesApi.refine(project, pending.job_id, ops),
     onSuccess: r => { setOps([]); onRefined(r) },
   })
+  // TSG 05: a new pending series without one recorded step.
+  const undo = useMutation({
+    mutationFn: (index: number) => seriesApi.refine(project, pending.job_id, [], index),
+    onSuccess: r => { setFocusFor(r.job_id); onRefined(r) },
+  })
+  const recorded = (pending.refinements ?? []) as RefineOp[]
+  // A refusal belongs to the preview it was asked of.
+  const resetUndo = undo.reset
+  useEffect(() => resetUndo(), [pending.job_id, resetUndo])
+  // After a removal the new preview replaces this one in place: focus stays
+  // on the step list (or the panel, once no step is left).
+  const [focusFor, setFocusFor] = useState<string | null>(null)
+  const stepsRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (focusFor == null || focusFor !== pending.job_id) return
+    setFocusFor(null)
+    const target = stepsRef.current ?? panelRef.current
+    target?.focus({ preventScroll: true })
+  }, [focusFor, pending.job_id])
   // A series read from a snapshot window knows no hours outside it: no
   // shift or smoothing, and its energy target is the window's MWh.
   const windowSource = pending.profile_annual_basis === 'window_mean'
-  const addMissing = !d.a ? (d.kind === 'scale_window' ? 'Enter the hours and the factor to add this edit.' : 'Enter a value to add this edit.')
-    : d.kind === 'scale_window' && (!d.b || !d.c) ? 'Enter the hours and the factor to add this edit.' : null
+  // A maintenance series' planned outages, which move_window moves (TSG-07).
+  const outages = pending.family === 'availability' && pending.kind === 'maintenance'
+    && Array.isArray(pending.windows) ? pending.windows as MaintenanceWindow[] : []
+  const days = d.a.trim()
+  const moveMissing = outages.length > 1 && d.b === '' ? 'Pick a window to move'
+    : !/^[+\-−]?\d+$/.test(days) || Number(days.replace('−', '-')) === 0 ? 'Enter a whole number of days other than 0'
+      : Math.abs(Number(days.replace('−', '-'))) > 365 ? 'Move by at most 365 days' : null
+  const addMissing = d.kind === 'move_window' ? moveMissing
+    : !d.a ? (d.kind === 'scale_window' ? 'Enter the hours and the factor to add this edit.' : 'Enter a value to add this edit.')
+      : d.kind === 'scale_window' && (!d.b || !d.c) ? 'Enter the hours and the factor to add this edit.' : null
   const kinds = (Object.keys(OP_LABELS) as OpKind[]).filter(k => (power || k !== 'rescale_energy')
-    && !(windowSource && (k === 'shift' || k === 'smooth')))
+    && !(windowSource && (k === 'shift' || k === 'smooth')) && (k !== 'move_window' || outages.length > 0))
 
   return (
-    <div className="mt-2 border-t border-border pt-2" data-testid="refine-panel">
+    <div ref={panelRef} tabIndex={-1} className="mt-2 border-t border-border pt-2 outline-none" data-testid="refine-panel">
       <p className="text-[11px] text-muted mb-1">
         Refine: each edit is applied in order. Put a peak or energy target last.
         {windowSource && ' Read from the snapshot window: energy is the window\'s MWh.'}
       </p>
+      {recorded.length > 0 && (
+        <div ref={stepsRef} tabIndex={-1} className="mb-1 outline-none" data-testid="refine-steps">
+          <p className="text-[11px] font-medium">Refinements in this preview</p>
+          <p className="text-[11px] text-muted">
+            Remove builds a new preview without that step; nothing changes until you apply it.
+          </p>
+          <ol className="text-[11px] list-decimal pl-5" data-testid="refine-edits">
+            {recorded.map((op, i) => (
+              <li key={i}>
+                <span data-testid="refine-step-words">{describe(op, outages)}</span>{' '}
+                <button type="button" aria-label={`Remove step ${i + 1} (${stepLabel(op.op)})`}
+                  disabled={undo.isPending || refine.isPending}
+                  className="text-muted enabled:hover:text-danger disabled:opacity-50"
+                  onClick={() => undo.mutate(i)}>Remove</button>
+              </li>
+            ))}
+          </ol>
+          {undo.isPending && (
+            <span className="text-[11px] text-muted" data-testid="refine-undo-pending">
+              Removing step {(undo.variables ?? 0) + 1}: building the new preview.
+            </span>
+          )}
+          {undo.isError && (
+            <span className="text-[11px] text-red-600" data-testid="refine-undo-error">
+              {removalRefusalText(undo.error, undo.variables ?? 0)}
+            </span>
+          )}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-1">
         <select aria-label="Refinement" className={INPUT} value={d.kind}
           onChange={e => setD({ ...d, kind: e.target.value as OpKind })}>
           {kinds.map(k => <option key={k} value={k}>{OP_LABELS[k]}</option>)}
         </select>
-        {d.kind === 'scale_window' ? (
+        {d.kind === 'move_window' ? (
+          <>
+            {outages.length > 1 ? (
+              <select aria-label="Window" className={INPUT} value={d.b} onChange={e => setD({ ...d, b: e.target.value })}>
+                <option value="" disabled>Pick a window</option>
+                {outages.map((w, i) => <option key={i} value={String(i)}>{windowDates(w)}</option>)}
+              </select>
+            ) : outages.length === 1 && (
+              <span className="text-[11px]" data-testid="move-window-dates">Window {windowDates(outages[0])}</span>
+            )}
+            <label className="flex items-center gap-1 text-[11px] text-muted">
+              By days (+ later, − earlier)
+              <input aria-label="By days (+ later, − earlier)" className={`${INPUT} w-16`} value={d.a}
+                onChange={e => setD({ ...d, a: e.target.value })} placeholder="e.g. 7" />
+            </label>
+          </>
+        ) : d.kind === 'scale_window' ? (
           <>
             <input aria-label="From hour" className={`${INPUT} w-14`} value={d.a} onChange={e => setD({ ...d, a: e.target.value })} placeholder="5" />
             <input aria-label="To hour" className={`${INPUT} w-14`} value={d.b} onChange={e => setD({ ...d, b: e.target.value })} placeholder="10" />
@@ -528,7 +677,7 @@ export function RefinePanel({
             {power && <option value="connection">% of the grid connection</option>}
           </select>
         )}
-        <Btn onClick={() => { setOps([...ops, draftToOp(d, power, windowSource)]); setD({ ...d, a: '', b: '', c: '' }) }}
+        <Btn onClick={() => { setOps([...ops, draftToOp({ ...d, a: d.a.trim().replace('−', '-') }, power, windowSource)]); setD({ ...d, a: '', b: '', c: '' }) }}
           disabled={!!addMissing}>
           <Plus size={12} /> Add
         </Btn>
@@ -538,7 +687,7 @@ export function RefinePanel({
         <ol className="mt-1 text-[11px] list-decimal pl-5" data-testid="refine-ops">
           {ops.map((op, i) => (
             <li key={i} className="flex items-center gap-1">
-              <span>{describe(op)}</span>
+              <span>{describe(op, outages)}</span>
               <button type="button" aria-label={`Remove edit ${i + 1}`} className="text-muted hover:text-danger"
                 onClick={() => setOps(ops.filter((_, j) => j !== i))}><Trash2 size={11} /></button>
             </li>
@@ -546,7 +695,7 @@ export function RefinePanel({
         </ol>
       )}
       <div className="flex items-center gap-2 mt-1">
-        <Btn onClick={() => refine.mutate()} disabled={!ops.length || refine.isPending}>
+        <Btn onClick={() => refine.mutate()} disabled={!ops.length || refine.isPending || undo.isPending}>
           <Wand2 size={12} /> Refine
         </Btn>
         {!ops.length && <span className="text-[11px] text-muted">Add an edit above to refine.</span>}

@@ -22,21 +22,21 @@ Plan verdict: GK B GO, 28 Oct (B2)
 
 ## Acceptance criteria
 
-- [ ] A listed edit within bounds runs without a card; the approvals log says `by=envelope:<id>`.
-- [ ] Out of bounds, unlisted tool, `destructive` tier, MCP/external, unknown tool → card path, audit `refused` with the reason.
-- [ ] An ordinary chat session with a granted envelope on the same project still cards every write (COP-1 untouched).
-- [ ] After `expires_at` the next call cards and the run is `paused`.
-- [ ] If the approval record cannot be written, the call is denied (fail closed).
-- [ ] Narrowing at grant is kept; a model-supplied envelope wider than the profile's is `invalid_envelope`.
-- [ ] `brief_stale` or an ACL change after the grant → no envelope match.
-- [ ] Refusal matrix, one test per row: destructive tier, delete, MCP/external, unknown tool, outside the entry, out of bounds, expired, revoked, ACL loss, wrong project, foreign drift.
-- [ ] Bounds are absolute or relative to the value at grant: three rounds of +40 % with `rel: 0.5` are refused at the second round.
-- [ ] Freshness chain: a user edit between two runner changes pauses the run; an unreadable fingerprint pauses it too.
-- [ ] Grid-code publish is never admitted, even when listed.
-- [ ] The grant is recorded as `approvals.decided(by="user")` with the envelope id; each admitted dispatch as `by="envelope:<id>"`.
-- [ ] Tool-error kinds added here go in a `tool-error-kinds.d` fragment once #798 lands.
-- [ ] Glob targets: `at_grant` is recorded per matched instance; an instance created after the grant (including by the run) gets a card; a glob never matches another component class.
-- [ ] An edit entry without numeric `bounds` or an enum of allowed values (e.g. `carrier`, `bus`) is `invalid_envelope`.
+- [x] A listed edit within bounds runs without a card; the approvals log says `by=envelope:<id>`.
+- [x] Out of bounds, unlisted tool, `destructive` tier, MCP/external, unknown tool → card path, audit `refused` with the reason.
+- [x] An ordinary chat session with a granted envelope on the same project still cards every write (COP-1 untouched).
+- [x] After `expires_at` the next call cards and the run is `paused`.
+- [x] If the approval record cannot be written, the call is denied (fail closed).
+- [x] Narrowing at grant is kept; a model-supplied envelope wider than the profile's is `invalid_envelope`.
+- [x] `brief_stale` or an ACL change after the grant → no envelope match.
+- [x] Refusal matrix, one test per row: destructive tier, delete, MCP/external, unknown tool, outside the entry, out of bounds, expired, revoked, ACL loss, wrong project, foreign drift.
+- [x] Bounds are absolute or relative to the value at grant: three rounds of +40 % with `rel: 0.5` are refused at the second round.
+- [x] Freshness chain: a user edit between two runner changes pauses the run; an unreadable fingerprint pauses it too.
+- [x] Grid-code publish is never admitted, even when listed.
+- [x] The grant is recorded as `approvals.decided(by="user")` with the envelope id; each admitted dispatch as `by="envelope:<id>"`.
+- [x] Tool-error kinds added here go in a `tool-error-kinds.d` fragment once #798 lands.
+- [x] Glob targets: `at_grant` is recorded per matched instance; an instance created after the grant (including by the run) gets a card; a glob never matches another component class.
+- [x] An edit entry without numeric `bounds` or an enum of allowed values (e.g. `carrier`, `bus`) is `invalid_envelope`.
 
 ## Likely files
 
@@ -47,3 +47,5 @@ Plan verdict: GK B GO, 28 Oct (B2)
 The envelope section on the card (08).
 
 ## Comments
+
+- 28 Oct (builder): built on `claude/sh-03-approval-envelope`. `services/run_envelope.py`; admission in `harness/confirm.py`; runner dispatch, COP-1 crossing and pauses in `harness/runner.py`; proposal and cancel in `services/assistant_tasks.py`; grant only via the `/stream` `envelope_decision`. Tests: `pypsa-gui/backend/tests/test_harness_envelope.py`. Left for later: rounds and research spend are recorded and capped here but counted by issues 04 and 09; data-gap tools (`attach_tariff`, `set_weather_choice`) whose card has no component rows get a card (`unresolved_target`).

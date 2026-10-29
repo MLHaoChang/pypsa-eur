@@ -1010,7 +1010,14 @@ def _enforce_project_lock(db: DBSession, project, user) -> None:
     holder and succeeds on a free slot, so a holder whose heartbeat lapsed
     (laptop sleep) is re-armed by their next write instead of stranded. Only a
     live lock held by a DIFFERENT user raises.
+
+    A harness run's hold on the project (study harness §6.6) refuses first, by
+    the path's project rather than the active one, in local mode too.
     """
+    from services import harness_locks
+
+    if project is not None and harness_locks.refuses(project.id):
+        raise HTTPException(status_code=409, detail=harness_locks.detail())
     if local_mode.is_local_mode():
         return
     if project is None or user is None:

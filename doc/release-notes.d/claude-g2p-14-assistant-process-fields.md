@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant's attribute docs and create schemas now name Bus `lost_production_value` and Generator `process_role` (`buy_in` | `shortfall`), so the chat can build every process-unit field; the attrs-doc cap rises to 4400 (G2P-14-DOCCAP).

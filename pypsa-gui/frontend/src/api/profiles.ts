@@ -227,6 +227,11 @@ export interface LoadPreset {
 
 export interface SeriesStats {
   peak_mw?: number
+  /** The peak as a fraction of the point-of-connection link's p_nom (absent
+   *  with no connection link). */
+  peak_share_of_connection?: number
+  /** That link's display name. */
+  connection_link?: string
   annual_mwh?: number
   // What this model's snapshots will count (Σ value × weighting) — a sampled
   // template sees less than the year. null when apply could not align it.
@@ -391,8 +396,10 @@ export const seriesApi = {
     client.post<DefaultsApplyResult>(`${projectPath(project)}/defaults/apply`, { job_ids: jobIds })
       .then(r => r.data),
 
-  refine: (project: string, jobId: string, ops: RefineOp[]) =>
-    client.post<PendingSeries>(`${projectPath(project)}/refine`, { job_id: jobId, ops })
+  /** Refine by `ops`, or with `undoIndex` re-refine without that recorded op (TSG 05). */
+  refine: (project: string, jobId: string, ops: RefineOp[], undoIndex?: number) =>
+    client.post<PendingSeries>(`${projectPath(project)}/refine`,
+      undoIndex == null ? { job_id: jobId, ops } : { job_id: jobId, undo_index: undoIndex })
       .then(r => r.data),
 
   apply: (project: string, body: {

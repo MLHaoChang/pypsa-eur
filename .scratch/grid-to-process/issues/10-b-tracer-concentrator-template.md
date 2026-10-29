@@ -57,3 +57,13 @@ Design §3.B, "Acceptance checks (B)", except:
 **Likely files:** new `pypsa-gui/backend/project_templates/eh_concentrator.py` and `pypsa-gui/backend/project_templates/eh_concentrator_staged/`, `pypsa-gui/backend/project_templates/eh_templates.py`, `pypsa-gui/backend/routers/projects.py`, `pypsa-gui/backend/services/flow_scope.py`, `pypsa-gui/backend/harness/catalogue.py`, new tests under `pypsa-gui/backend/tests/`.
 **Blocked by:** 09, and 09's measurement within the ≤ 30 min budget. If 09 reports over budget, this goes back to the owner.
 **Model:** Opus.
+
+## Notes from 09 (2026-10-28)
+
+- Set `delivery_interval_h = 504` on the shed; the validator then refuses the week build of the same network
+  (`inventory_cadence_needs_year`, naming the shed).
+- The binary UC check (`services/solver/process_uc.py`, `CHECK_WINDOW = 168`) re-solves the first 168 snapshots of
+  each period. On the year base that is the first week of January (from 2030-01-01), so it holds no shipment of a
+  cycle loaded out at hours 480–503; say so in the template's ledger, or choose the year's start.
+- The campus island report (`services/campus_electrical_service`, `campus_island_report.py:259-264`) lists every
+  failing hourly E1 row uncapped; on 26,280 hours that table can run to thousands of rows.

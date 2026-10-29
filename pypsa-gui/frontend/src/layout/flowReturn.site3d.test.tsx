@@ -33,6 +33,29 @@ describe('Back to Site 3D', () => {
     expect(back.sitePart).toBe('generate')
     expect(back.sitePartSelection).toEqual({ kind: 'building', id: 'osm:42' })
     expect(back.fieldDrawer).toBeNull()
+    expect(back.activeSlidePanel).toBeNull()
+  })
+
+  it('Guided: Back to Site 3D restores the panel that was open, and none when none was', () => {
+    render(<FlowReturnButton />)
+    act(() => openSiteEntry({ fromSite3D: true }))
+    expect(useUIStore.getState().activeSlidePanel).toBe('hubDesign')
+    fireEvent.click(screen.getByTestId('flow-return'))
+    expect(useUIStore.getState().activeSlidePanel).toBeNull()
+    expect(useUIStore.getState().canvasView).toBe('site')
+    inSite3D('guided')
+    useUIStore.setState({ activeSlidePanel: 'results' })
+    act(() => openSiteEntry({ fromSite3D: true }))
+    fireEvent.click(screen.getByTestId('flow-return'))
+    expect(useUIStore.getState().activeSlidePanel).toBe('results')
+  })
+
+  it('Guided: a return not from Site 3D still lands on the hub when no panel was open', () => {
+    useUIStore.setState({ canvasView: 'blank', activeSlidePanel: null })
+    render(<FlowReturnButton />)
+    act(() => openSiteEntry())
+    fireEvent.click(screen.getByTestId('flow-return'))
+    expect(useUIStore.getState().activeSlidePanel).toBe('hubDesign')
   })
 
   it('Expert: the coordinate field opens the horizon panel; Back closes it', () => {

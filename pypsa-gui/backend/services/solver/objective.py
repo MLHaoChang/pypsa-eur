@@ -733,6 +733,27 @@ def _wrap_with_objective_scale(network: "pypsa.Network", user_fn, cfg, log_queue
     return wrapper
 
 
+def _no_solution_is_a_failure(network: "pypsa.Network", status: str, condition: str,
+                              phase) -> tuple[str, str]:
+    """A solver can stop on a limit (time, iterations) before it finds any
+    feasible point. linopy still returns status "ok" with that condition
+    (e.g. "time_limit"), and the objective is then not finite. That is no
+    solution: return status "warning" with the solver's condition, so the run
+    is a failure (`classify_failure` names the limit) and never reads as
+    completed. A stop WITH an incumbent (finite objective) keeps its status
+    and its condition, so the record still says it is not proven optimal."""
+    if status not in ("ok", "optimal") or str(condition) in ("ok", "optimal"):
+        return status, condition
+    try:
+        objective = float(network.objective)
+    except (TypeError, ValueError, AttributeError):
+        objective = math.nan
+    if math.isfinite(objective):
+        return status, condition
+    phase(f"Solver stopped ({condition}) without a feasible solution — there is no result.")
+    return "warning", condition
+
+
 def _rescale_results_for_objective(network: "pypsa.Network", log_queue=None) -> None:
     """
     Reverse the LP-objective scaling on reported result fields.

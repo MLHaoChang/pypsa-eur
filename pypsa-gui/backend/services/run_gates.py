@@ -7,7 +7,8 @@ gate silently. The model never supplies a fact or a verdict: only harness
 code calls `evaluate`, and only harness code writes its result.
 
 Fail closed: a fact that is unknown, cannot be read, or reads as None or NaN
-is `not_evaluated`, which a `block` rule counts as a fail.
+is `not_evaluated`, which a `block` rule counts as a fail; so is a reading the
+reader itself marks as no evidence (`NoEvidence`: its state and reason kept).
 """
 from __future__ import annotations
 
@@ -53,6 +54,16 @@ class Fact:
     key: str  # the key of that function's result the value is
     unit: str | None
     read: Callable[[Env], Any]
+
+
+@dataclass(frozen=True)
+class NoEvidence:
+    """A reading that is no evidence for a verdict: the rule is
+    `not_evaluated` with `reason`, and the gate record keeps `value` (the
+    state the fact read)."""
+
+    value: Any
+    reason: str
 
 
 def _validate(env):
@@ -106,6 +117,28 @@ def _template(env):
     return (flow_service.read_template(env.project_dir) or {}).get("id")
 
 
+def _ic_counterfactual(env):
+    """The investment case's counterfactual (study harness 19), read from the
+    stored case: `established`, else no evidence with the state and the
+    case's own flags or refusal code as the reason."""
+    from services import ic_counterfactual as ic
+    fact = ic.read(env.ctx, lambda fn: _on(env.ctx, fn))
+    if fact["state"] == ic.ESTABLISHED:
+        return fact["state"]
+    return NoEvidence(fact["state"], f"{fact['state']}: {', '.join(fact['reasons'])}")
+
+
+def _ic_baseline_keeps(env):
+    """The owned existing assets the case's baseline keeps (study harness
+    20): the names, else no evidence with the state and the reasons (an
+    asset of the template's declared set the baseline drops)."""
+    from services import ic_counterfactual as ic
+    fact = ic.read_baseline_keeps(env.ctx, lambda fn: _on(env.ctx, fn), _template(env))
+    if fact["state"] == ic.ESTABLISHED:
+        return fact["kept"]
+    return NoEvidence(fact["state"], f"{fact['state']}: {', '.join(fact['reasons'])}")
+
+
 def _run(key):
     return lambda env: env.task.get("run", {}).get(key)
 
@@ -127,6 +160,9 @@ FACTS: dict[str, Fact] = {
     "solve.state": Fact("routers.solve_queue._visible_job_or_404", "status", None, _solve_state),
     "solve.status": Fact("routers.solve_queue._visible_job_or_404", "condition", None, _solve_status),
     "fresh": Fact("services.workflow_tools.solve_freshness", "results_current", None, _fresh),
+    "ic.counterfactual": Fact("services.ic_counterfactual.read", "state", None, _ic_counterfactual),
+    "ic.baseline_keeps": Fact("services.ic_counterfactual.read_baseline_keeps", "kept", None,
+                              _ic_baseline_keeps),
 }
 
 
@@ -194,10 +230,13 @@ def evaluate(rules: list[dict], env: Env) -> list[dict]:
                 except Exception as exc:  # noqa: BLE001 — an unreadable fact is no evidence (fail closed)
                     values[rule["fact"]] = (None, f"the reader failed: {type(exc).__name__}")
         value, problem = values[rule["fact"]]
-        if problem is None and _missing(value):
+        shown = None
+        if isinstance(value, NoEvidence):
+            shown, problem = value.value, value.reason
+        elif problem is None and _missing(value):
             problem = "the fact reads as none"
         result = {"rule": rule["id"], "severity": rule["severity"],
-                  "facts": [{"fact": rule["fact"], "value": None if problem else value,
+                  "facts": [{"fact": rule["fact"], "value": shown if problem else value,
                              "unit": fact.unit if fact else None, "source": rule.get("reads")}]}
         if problem is None:
             try:

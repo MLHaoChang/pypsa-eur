@@ -87,6 +87,8 @@ class BusCreate(BaseModel):
     mwh_per_t: float | None = None
     # Value of one unit of the product, EUR per bus unit (ticket 04); written only when sent.
     product_value: float | None = None
+    # Price of one undelivered unit of the product, EUR per bus unit (ticket 08); written only when sent.
+    lost_production_value: float | None = None
 
 
 class CarrierCreate(BaseModel):
@@ -186,8 +188,9 @@ class LengthsFromGeometryRequest(BaseModel):
 LINK_LAZY_COLUMNS = frozenset({"eh_process", "criticality_tier", "throughput_unit", "specific_energy_kwh_per_t",
                                "rated_mva", "harmonic_source", "harmonic_spectrum", "spectrum_post_filter",
                                "flicker_step_mva", "flicker_changes_per_min",
-                               "single_phase_share"})
-BUS_LAZY_COLUMNS = frozenset({"mwh_per_t", "product_value"})
+                               "single_phase_share", "motor_kw", "start_method", "i_start_pu"})
+BUS_LAZY_COLUMNS = frozenset({"mwh_per_t", "product_value", "lost_production_value"})
+GENERATOR_LAZY_COLUMNS = frozenset({"process_role"})
 
 
 class LinkCreate(BaseModel):
@@ -270,6 +273,10 @@ class LinkCreate(BaseModel):
     flicker_changes_per_min: float | None = None
     # The unbalance screen's input, lazy the same way.
     single_phase_share: float | None = None
+    # The motor-start screen's inputs (grid-to-process issue 18), lazy the same way.
+    motor_kw: float | None = None
+    start_method: str | None = None
+    i_start_pu: float | None = None
 
     @model_validator(mode="after")
     def _process_unit_ports_state_their_efficiency(self):
@@ -316,6 +323,8 @@ class GeneratorCreate(BaseModel):
     # Typed `bool | None` so an explicit `null` from a scripted PUT or the
     # chat tools is 200 and means the default rather than a 422.
     p_max_pu_includes_outages: bool | None = None
+    # `buy_in` | `shortfall` on a product bus's Generator (ticket 08); written only when sent.
+    process_role: str | None = None
     bus: str
     carrier: str = ""
     # PyPSA control mode for power flow / unit commitment. PQ = fixed P & Q,

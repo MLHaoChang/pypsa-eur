@@ -113,7 +113,8 @@ export function returnToOrigin(): void {
   ui.setUiMode(o.mode)
   ui.setActiveSection(o.section)
   if (o.mode === 'guided') {
-    ui.setSlidePanel(o.panel ?? 'hubDesign')
+    // Site 3D with no panel open goes back to the bare canvas, not the hub.
+    ui.setSlidePanel(o.mapMode === 'site' ? o.panel : (o.panel ?? 'hubDesign'))
     if (o.selected) ui.setSelectedComponent(o.selected as never)
     ui.setFieldDrawer(o.drawer)
   } else {

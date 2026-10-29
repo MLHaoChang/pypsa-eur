@@ -77,7 +77,7 @@ def test_a_legacy_run_without_the_section_refuses_with_its_id(rerated):
 
 def test_the_registry_declares_the_retained_section():
     assert rv.view('loadflow').historical_section == 'loadflow'
-    assert {v.view_id for v in rv.RESULT_VIEWS if v.historical_section} == {'loadflow', 'summary', 'capex', 'dispatch'}
+    assert {v.view_id for v in rv.RESULT_VIEWS if v.historical_section} == {'loadflow', 'summary', 'capex', 'dispatch', 'prices', 'emissions'}
 
 
 def test_a_past_run_is_not_rewindowed_or_resourced(rerated):

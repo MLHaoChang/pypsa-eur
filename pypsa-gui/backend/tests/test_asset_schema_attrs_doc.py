@@ -106,4 +106,5 @@ def test_the_outage_flag_is_a_generator_column_only():
 def test_the_docs_stay_compact():
     """They ride in the tool catalogue on every turn."""
     # 4300 (owner G2P-17A-DOCCAP): room for the Link's harmonic-screen fields, harmonic_source's list in full.
-    assert len(attrs_doc()) < 4300
+    # 4400 (owner G2P-14-DOCCAP): room for Bus lost_production_value and Generator process_role.
+    assert len(attrs_doc()) < 4400

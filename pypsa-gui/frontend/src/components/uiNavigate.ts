@@ -184,8 +184,11 @@ function apply(d: NavigationRequest) {
     // Expand bottom panel on a default tab if none specified below.
     if (!d.bottom_tab) ui.requestBottomTab('Buses')
   } else if (panel === 'compare') {
-    ui.setSlidePanel('results')
-    ui.setCompareRailOpen(true)
+    // LC-18 (UX): Compare opened from chat keeps "Back to <origin>".
+    withReturnFrom(() => {
+      useUIStore.getState().setSlidePanel('results')
+      useUIStore.getState().setCompareRailOpen(true)
+    })
   } else if (panel === 'chat') {
     // 'chat' is no longer a SlidePanel member — it resolves to the dock. The
     // agent can still be asked to open the assistant, and doing so no longer

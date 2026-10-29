@@ -115,6 +115,13 @@ RULE_TDD = {"comparator": "<=", "otherwise": "warn", "tolerance": 1e-9}
 #: The oscillation row's after-mitigation value only (the before verdict also
 #: reads the band of concern, which is not a scalar): in band, ≤ the limit.
 RULE_OSC = {"comparator": "<=", "otherwise": "fail", "tolerance": 1e-9}
+#: A motor-start row's voltage change against the rapid-voltage-change limit (grid-to-process issue 18): a
+#: screening estimate, so over it warns, as the rapid-voltage-change row.
+RULE_MOTOR_START = {"comparator": "<=", "otherwise": "warn", "tolerance": 1e-9}
+#: The P–V and Q–V margins at the PoC against their least margin (study harness issue 18): screening, so below
+#: the limit warns and never fails.
+RULE_PV = {"comparator": ">=", "otherwise": "warn", "tolerance": 1e-9}
+RULE_QV = {"comparator": ">=", "otherwise": "warn", "tolerance": 1e-9}
 
 
 def _judge(value: float, limit: float, rule: dict) -> str:
@@ -242,6 +249,14 @@ def _marking_source(row: dict) -> tuple[str, bool]:
 
 
 # ── rows ───────────────────────────────────────────────────────────────────
+
+
+def _archetype(inp: _Inputs) -> str:
+    """The project's site type as the study runs it (``flow_service._archetype``): a stored reliability goal
+    first, then the template's recommendation."""
+    from services.flow_service import _archetype as archetype
+
+    return archetype(inp.meta or None, _read_json(inp.dir / "solver_config.json") or {})
 
 
 def _scr_rows(inp: _Inputs) -> list[dict]:
@@ -926,6 +941,282 @@ def _flicker_row(inp: _Inputs) -> dict:
     return row
 
 
+_MOTOR_START_SCREENING = ("a screening estimate (dU = (S_start · sin φ_start − Q_gfm) / S_sc, the grid's R ignored, "
+                          "one motor starting at a time); the start current multiples and starting power factors are "
+                          "demo values; above the limit a motor-start load-flow or RMS study is needed")
+_MOTOR_FIELDS = ("motor_kw", "start_method", "i_start_pu")
+
+
+def _poc_sk_min(inp: _Inputs):
+    """``(S_k''min MVA, PoC kV)`` from the project's campus description when it states a minimum case of its own
+    for a PoC bus (``campus_study._sk_source`` reads SK_CAMPUS: not the bus's S_k'' copied, not the typical
+    fallback), else ``(None, None)``."""
+    try:
+        import yaml
+        from gridspine.drivers.campus_study import SK_CAMPUS, _pcc_sk_min, _sk_source
+    except ImportError:  # pragma: no cover - build-shape branch
+        return None, None
+    try:
+        campus = yaml.safe_load((inp.dir / "campus_electrical" / "campus_input.yaml").read_text())
+        pcc = campus["campus"]["pcc"]
+        bus = pcc.get("pypsa_name")
+        if bus not in inp.n.buses.index or not _truthy(inp.n.buses.at[bus, "eh_poc"]):
+            return None, None
+        if _sk_source(campus, inp.n)[0] != SK_CAMPUS:
+            return None, None
+        return _pcc_sk_min(pcc), _num(pcc.get("vn_kv"))
+    except (OSError, yaml.YAMLError, KeyError, TypeError, ValueError):
+        # No, or no readable, campus description: the entered S_k'' is used, and the row says so.
+        return None, None
+
+
+def _truthy(v) -> bool:
+    return v is True or str(v).lower() in ("true", "1")
+
+
+def _q_gfm_mvar(inp: _Inputs) -> tuple[float | None, str | None]:
+    """The reactive power the grid-forming storage at the PoC can give, Mvar: Σ rating · tan(acos pf_rated) over
+    the island's battery units offering grid forming, as the reactive-range row counts it; None when the project
+    has no island requirements. A unit without a size or rated power factor counts zero, named in the note."""
+    services = _services(inp)
+    if services is None:
+        return None, None
+    have, parts, unstated = 0.0, [], []
+    for name, u in services["units"].items():
+        if u["kind"] != "bess" or "grid_forming" not in u["services"]:
+            continue
+        pf = _num(inp.island["units"][name].get("values", {}).get("pf_rated"))
+        rating, _ = _unit_rating(inp.n, name)
+        if pf is None or not rating or not 0 < pf <= 1:
+            unstated.append(name)
+            continue
+        q = rating * math.tan(math.acos(pf))
+        have += q
+        parts.append(f"{name} {q:.3g} Mvar")
+    note = (f"Q_gfm {have:.4g} Mvar ({', '.join(parts) or 'no grid-forming storage'}) as rating × tan(acos rated "
+            "power factor), an assumed capability")
+    if unstated:
+        note += f"; {', '.join(unstated)} counted zero: no size or no rated power factor"
+    return have, note
+
+
+def _motor_start_rows(inp: _Inputs) -> list[dict]:
+    """The voltage change at the PoC when each process unit's motor starts (grid-to-process issue 18,
+    ``gridspine.static.motor_start``): one row per process unit, for its own start method, judged on the
+    profile's ``rvc_limit_pct``. With no process unit, one ``unknown`` row says so."""
+    req = "Voltage change at the PoC when the unit's motor starts"
+    unit_target = _target("assets", "Link", None, "motor_kw")
+    try:
+        import pandas as pd
+        from gridspine.schema.contracts import ContractError
+        from gridspine.static import motor_start as ms
+    except ImportError as exc:  # pragma: no cover - build-shape branch
+        note = f"The motor-start screen needs gridspine ({exc})"
+        return [_row("motor_start", req, rule=RULE_MOTOR_START, limit=None, unit="% of nominal", source=note,
+                     project_value=None, verdict="unknown", assumed=True, note=note, section="assets",
+                     target=unit_target)]
+    limit, clause = ms.limit_from_profile(inp.profile)
+    source = (f"{_profile_title(inp)}: {clause}" if limit is not None
+              else inp.profile_error or "The grid code sets no rapid-voltage-change limit")
+    lim = (inp.profile or {}).get("rvc_limit_pct")
+    lim_assumed = limit is None or lim.get("source") != "code"
+    links = inp.n.links if inp.n is not None else None
+    process = ([] if links is None or "eh_process" not in links.columns
+               else [u for u in links.index if _truthy(links.at[u, "eh_process"])])
+    if not process:
+        return [_row("motor_start", req, rule=RULE_MOTOR_START, limit=limit, unit="% of nominal", source=source,
+                     project_value=None, verdict="unknown", assumed=True,
+                     note="No process unit on this project: the screen reads each unit's Motor rating and Start "
+                          "method",
+                     section="assets", target=_target("assets", "Link", None, "eh_process"))]
+    units = pd.DataFrame({"unit": process, "poc": "PoC",
+                          **{c: [links.at[u, c] if c in links.columns else None for u in process]
+                             for c in _MOTOR_FIELDS}})
+    sk_min, vn = _poc_sk_min(inp)
+    sources = {"PoC": ms.Source(sk_mva=_poc_sk_mva(inp.n), sk_min_mva=sk_min,
+                                vn_kv=vn if vn is not None else _poc_vn_kv(inp.n))}
+    q_gfm, q_note = _q_gfm_mvar(inp)
+    fault_assumed = _marking_assumed(inp.marking("fault_level"))
+    rows = []
+    for rec in units.to_dict("records"):
+        rid, name = f"motor_start:{rec['unit']}", rec["unit"]
+        try:
+            r = ms.motor_start_table(pd.DataFrame([rec]), sources, {"PoC": q_gfm}, limit).iloc[0]
+        except ContractError as exc:
+            # One unit's malformed stored input reads as unknown on its own row, not a failed scorecard.
+            rows.append(_row(rid, f"{req}: {name}", rule=RULE_MOTOR_START, limit=limit, unit="% of nominal",
+                             source=source, project_value=None, verdict="unknown", assumed=True, note=str(exc),
+                             section="assets", target=_target("assets", "Link", name, "motor_kw")))
+            continue
+        d = _num(r["du_pct"])
+        if r["note"] == ms.NO_SK:
+            target = _target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"), "eh_sk_mva")
+        else:
+            # A missing input first, else the start method: the lever on the voltage change.
+            field = "motor_kw" if d is None and _num(rec["motor_kw"]) is None else "start_method"
+            target = _target("assets", "Link", name, field)
+        notes = [r["note"]]
+        if d is not None:
+            notes += [q_note] if q_note else []
+            notes.append(_MOTOR_START_SCREENING)
+        verdict = {"pass": "pass", "fail": RULE_MOTOR_START["otherwise"]}.get(r["verdict"], "unknown")
+        # A computed value rests on the demo start multiples and power factors, so it is always assumed.
+        row = _row(rid, f"{req}: {name}", rule=RULE_MOTOR_START, limit=limit, unit="% of nominal", source=source,
+                   project_value=None if d is None else round(d, 4), verdict=verdict,
+                   assumed=lim_assumed or fault_assumed or d is not None, note="; ".join(notes), section="assets",
+                   target=target)
+        row["motor_start"] = {k: (r[k] if isinstance(r[k], str) or r[k] is None else _num(r[k]))
+                              for k in ("motor_kw", "start_method", "start_multiple", "start_pf", "s_start_mva",
+                                        "q_gfm_mvar", "sk_mva", "sk_case", "c", "s_sc_mva", "du_pct")}
+        rows.append(row)
+    return rows
+
+
+#: The P–V/Q–V placeholders when neither the profile nor the user sets a least margin (GK A, 28 Oct).
+GENERIC_PV_MARGIN_PCT = 5.0
+GENERIC_QV_MARGIN_MVAR = 0.0
+_VS_PLACEHOLDER = "planning practice placeholder, not a requirement of this project's grid code"
+_VS_SCREENING = "A screening estimate: an RMS study gives the binding answer."
+_VS_NO_NOSE = "the sweep did not reach the nose"
+_VS_NO_QMIN = "the sweep did not reach the Q–V minimum"
+#: Why both rows leave the scorecard on an off-grid project.
+VS_OFF_GRID = "off-grid, so there is no grid connection to check"
+_VS = {
+    "voltage_stability_pv": {"req": "Voltage stability margin (P–V)", "key": "pv_margin_min_pct",
+                             "generic": GENERIC_PV_MARGIN_PCT, "unit": "% of planned load", "rule": RULE_PV,
+                             "value": "margin_pct", "bound": "nose_is_lower_bound", "no_bound": _VS_NO_NOSE,
+                             "placeholder": f"P–V margin of at least {GENERIC_PV_MARGIN_PCT:g} % of the planned "
+                                            f"load, {_VS_PLACEHOLDER}"},
+    "voltage_stability_qv": {"req": "Voltage stability margin (Q–V)", "key": "qv_margin_min_mvar",
+                             "generic": GENERIC_QV_MARGIN_MVAR, "unit": "Mvar", "rule": RULE_QV,
+                             "value": "q_margin_mvar", "bound": "qmin_at_sweep_edge", "no_bound": _VS_NO_QMIN,
+                             "placeholder": "Q–V margin of at least 0 Mvar (the Q–V curve's minimum at or below "
+                                            f"zero injection at the operating voltage), {_VS_PLACEHOLDER}"},
+}
+
+
+def _vs_blank_reason(rid: str, row) -> str:
+    """Why a period has no value for the row, in plain words, from the period's own record: the nose below the
+    planned load, the load flow at the planned load not solving (the engine's note), else that no Q–V point solved."""
+    if rid != "voltage_stability_qv":
+        return "the check gave no P–V margin"
+    engine = row["engine_note"] if isinstance(row.get("engine_note"), str) else ""
+    if str(row["nose_below_planned"]) == "True":
+        cause = "the grid connection can't carry the planned load (its maximum power is below it)"
+    elif "did not converge" in engine:
+        cause = "the load flow at the planned load did not solve"
+    else:
+        cause = "no Q–V point could be solved"
+    return f"no Q–V margin, because {cause}"
+
+
+def _vs_limit(inp: _Inputs, spec: dict) -> tuple[float | None, str, bool]:
+    """(least margin, its source, assumed): the profile's own key (the row cites the profile), else
+    ``_limit_from`` (the user's limit, the ledger row, else the placeholder)."""
+    lim = (inp.profile or {}).get(spec["key"])
+    if isinstance(lim, dict) and _num(lim.get("value")) is not None:
+        return (float(lim["value"]), f"{_profile_title(inp)}: {lim.get('clause') or spec['key']}",
+                lim.get("source") != "code")
+    return _limit_from(inp, spec["key"], spec["generic"], spec["placeholder"])
+
+
+def judge_bounded(periods: list[tuple], limit: float, rule: dict) -> tuple[str, tuple]:
+    """The verdict of per-period margins ``[(period, value, is_lower_bound)]`` against ``limit``, worst period
+    first: a found value is judged by ``rule``; a lower bound at or above the limit passes (the margin is at
+    least that), one below it is ``unknown``, never ``otherwise``, since it says nothing about the margin.
+    Returns ``(verdict, the period shown)``: the worst warning period, else the worst bound below the limit,
+    else the worst period."""
+    judged = [(per, v, b, (("pass" if v >= limit - rule["tolerance"] else "unknown") if b
+                           else _judge(v, limit, rule))) for per, v, b in periods]
+    for want in (rule["otherwise"], "unknown", "pass"):
+        hit = [j for j in judged if j[3] == want]
+        if hit:
+            return want, min(hit, key=lambda j: j[1])[:3]
+    raise ValueError("no period to judge")
+
+
+def _vs_rows(inp: _Inputs) -> list[dict]:
+    """The P–V and Q–V margins at the PoC (study harness issue 18, ``campus_study.voltage_stability_campus``),
+    worst over the campus run's periods, each against its least margin: screening, so below warns."""
+    import pandas as pd
+
+    target = _target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"), "eh_sk_mva")
+    try:
+        from gridspine.drivers.campus_study import NO_SK_MIN, VOLTAGE_STABILITY_CSV, VS_NO_OPERATING_POINT
+    except ImportError as exc:  # pragma: no cover - build-shape branch
+        note = f"The voltage stability screen needs gridspine ({exc})"
+        return [_row(rid, spec["req"], rule=spec["rule"], limit=None, unit=spec["unit"], source=note,
+                     project_value=None, verdict="unknown", assumed=True, note=note, section="connection",
+                     target=target) for rid, spec in _VS.items()]
+    from services import campus_electrical_service as ce
+
+    run = inp.dir / ce.SUBDIR / "run"
+    error = _read_json(run / ce.VOLTAGE_STABILITY_ERROR)
+    reason, frame = None, None
+    if isinstance(error, dict):
+        text = str(error.get("error") or "")
+        reason = ("No minimum short-circuit power entered at the PCC: the screen needs the grid's weakest state"
+                  if text == NO_SK_MIN else f"The P–V/Q–V screen could not run: {text}")
+    elif not (run / ce.VOLTAGE_STABILITY_META).is_file() or not (run / VOLTAGE_STABILITY_CSV).is_file():
+        reason = "No grid study with the voltage stability check yet: run the grid study"
+    else:
+        frame = pd.read_csv(run / VOLTAGE_STABILITY_CSV)
+        bad = frame[frame["verdict"] != "solved"]
+        if not bad.empty:
+            r = bad.iloc[0]
+            why = ("no operating point" if r["verdict"] == VS_NO_OPERATING_POINT
+                   else "the intact case does not solve")
+            reason = f"Period {int(r['period'])}: {why} ({r['note']})"
+        elif frame.empty:
+            reason = "The campus run has no period to screen"
+    rows = []
+    for rid, spec in _VS.items():
+        limit, source, _ = _vs_limit(inp, spec)
+        common = dict(rule=spec["rule"], limit=limit, unit=spec["unit"], source=source, assumed=True,
+                      section="connection", target=target)
+        if reason is not None:
+            rows.append(_row(rid, spec["req"], project_value=None, verdict="unknown",
+                             note=f"{reason}. {_VS_SCREENING}", **common))
+            continue
+        # A flag read back as anything but True/False (a blank cell) is no answer, never a bound.
+        blank = [int(r["period"]) for _, r in frame.iterrows()
+                 if not math.isfinite(float(r[spec["value"]])) or str(r[spec["bound"]]) not in ("True", "False")]
+        periods = [(int(r["period"]), float(r[spec["value"]]), str(r[spec["bound"]]) == "True")
+                   for _, r in frame.iterrows()]
+        if blank:
+            gap = _vs_blank_reason(rid, frame[frame["period"] == blank[0]].iloc[0])
+            rows.append(_row(rid, spec["req"], project_value=None, verdict="unknown",
+                             note=f"Period {blank[0]}: {gap}. {_VS_SCREENING}", **common))
+            continue
+        verdict, (period, value, bound) = judge_bounded(periods, limit, spec["rule"])
+        shown = f"≥ {value:.4g}" if bound else f"{value:.4g}"
+        words = {"pass": "within the screening margin", "warn": "below the screening margin",
+                 "unknown": spec["no_bound"]}[verdict]
+        r = frame[frame["period"] == period].iloc[0]
+        note = (f"Worst period {period}: {shown} {spec['unit']}, {words}; planned load {r['planned_mw']:.4g} MW "
+                f"({r['note']}). {_VS_SCREENING}")
+        row = _row(rid, spec["req"], project_value=round(value, 4), verdict=verdict, note=note, **common)
+        row["project_value_is_lower_bound"] = bound
+        row["period"] = period
+        rows.append(row)
+    return rows
+
+
+def readiness_fact(card: dict, row_id: str):
+    """A scorecard row as a gate fact (study harness 10's ``dc.readiness.<id>``): the row's verdict, or
+    ``run_gates.NoEvidence`` with the reason when the row was excluded or is not on the scorecard, so an
+    excluded row never passes and never raises."""
+    from services.run_gates import NoEvidence
+
+    for r in card.get("rows") or []:
+        if r["id"] == row_id:
+            return r["verdict"]
+    for r in card.get("excluded") or []:
+        if r["id"] == row_id:
+            return NoEvidence("excluded", f"excluded: {r['reason']}")
+    return NoEvidence("missing", f"no scorecard row {row_id!r}")
+
+
 def _poc_sk_mva(n) -> float | None:
     if "eh_poc" not in n.buses.columns or "eh_sk_mva" not in n.buses.columns:
         return None
@@ -1277,8 +1568,13 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
     inp = _Inputs(project_dir, network, profile, error, eh_study, study_edited)
     rows = [*_scr_rows(inp), *_peak_rows(inp), _ramp_row(inp), _oscillation_row(inp),
             _rvc_row(inp), _rvc_infrequent_row(inp), _harmonic_row(inp), _tdd_row(inp), _flicker_row(inp),
-            _unbalance_row(inp),
+            *_motor_start_rows(inp), _unbalance_row(inp), *_vs_rows(inp),
             _reactive_row(inp), *_support_rows(inp), *_island_rows(inp), _lole_row(inp)]
+    excluded = []
+    if _archetype(inp) == "off_grid":
+        excluded = [{"id": r["id"], "requirement": r["requirement"], "reason": VS_OFF_GRID}
+                    for r in rows if r["id"] in _VS]
+        rows = [r for r in rows if r["id"] not in _VS]
     _after_battery(inp, rows)
     settings = {"ramp_rate": ("connection_ramp", _generic_ramp(inp)),
                 "oscillation": ("oscillation", GENERIC_OSCILLATION_PCT),
@@ -1292,7 +1588,7 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
     return {"schema": SCHEMA, "profile": {"id": profile_id, "title": (profile or {}).get("title"),
                                           "error": error},
             "template_id": inp.meta.get("id"), "envelope": inp.envelope is not None,
-            "rows": rows, "summary": {**counts, "assumed": sum(r["assumed"] for r in rows),
+            "rows": rows, "excluded": excluded, "summary": {**counts, "assumed": sum(r["assumed"] for r in rows),
                                       "red_flags": counts["fail"] + counts["warn"],
                                       "pass_after_mitigation": after},
             "basis": ("advisory screening of the saved network and its sidecars; never blocks Run. "

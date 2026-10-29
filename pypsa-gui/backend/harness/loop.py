@@ -1020,6 +1020,7 @@ def run_turn(
     ui_ack: bool = False,
     continuation_job_id: str | None = None,
     continue_task_id: str | None = None,
+    envelope_decision: dict | None = None,
     _held_lease: str | None = None,
     _held_generation: int | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
@@ -1228,6 +1229,26 @@ def run_turn(
                 yield "error", {"error_kind": "plan_continue_unavailable",
                                 "message": "This plan is not paused at a card."}
                 yield "session_done", {"reason": "plan_continue_unavailable"}
+                return
+        if envelope_decision is not None:
+            # Study harness issue 03: the user's verdict on a run's plan-review
+            # card grants, narrows or revokes its approval envelope. The
+            # harness writes the message; no tool call reaches this.
+            from services import run_envelope
+            try:
+                if message or attachment_file_ids or strict_assurance or source_gap_ref is not None:
+                    raise ValueError("an envelope decision is not a user message")
+                message = run_envelope.decide(session, **envelope_decision)
+            except HTTPException as exc:
+                detail = exc.detail if isinstance(exc.detail, dict) else {}
+                kind = detail.get("error_kind", "envelope_decision_unavailable")
+                yield "error", {"error_kind": kind, "message": str(detail.get("message", ""))[:300]}
+                yield "session_done", {"reason": kind}
+                return
+            except (ValueError, TypeError, OSError):
+                yield "error", {"error_kind": "envelope_decision_unavailable",
+                                "message": "This plan's envelope cannot be decided now."}
+                yield "session_done", {"reason": "envelope_decision_unavailable"}
                 return
         if strict_assurance or assurance.strict_configured():
             session.assurance_turn = assurance.Turn(session, PyPSAService.get_active_context())
@@ -2777,7 +2798,7 @@ def _dispatch_real_tool_call(
         # fails partway can still have mutated the network, so marking on success
         # only would under-report. Over-marking costs a prompt about already-clean
         # work; under-marking costs the work itself.
-        if effect_fresh and tier != "read" and not external and tool_name not in {"run_sensitivity_sweep", "start_experiment", "prepare_experiment", "advance_experiment", "refresh_experiment", "cancel_experiment", "reconcile_experiment", "export_experiment_comparison", "start_task", "resume_task", "cancel_task", "resolve_task_step", "preview_project_changes", "create_chart", "build_delivery"}:
+        if effect_fresh and tier != "read" and not external and tool_name not in {"run_sensitivity_sweep", "start_experiment", "prepare_experiment", "advance_experiment", "refresh_experiment", "cancel_experiment", "reconcile_experiment", "export_experiment_comparison", "export_sensitivity_comparison", "start_task", "resume_task", "cancel_task", "resolve_task_step", "preview_project_changes", "create_chart", "build_delivery"}:
             from services import dirty_state
             dirty_state.mark_dirty()
             # ★ P33b B2: the chat seam of the edit counter. Same placement and

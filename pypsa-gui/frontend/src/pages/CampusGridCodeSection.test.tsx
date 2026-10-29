@@ -251,7 +251,7 @@ describe('grid codes: extract', () => {
     for (const path of ['rvc_limit_infrequent_pct', 'q_capability_pq', 'pf_min_lagging', 'pf_min_leading',
       'thd_limit_pct', 'harmonic_limits_pct', 'harmonic_resonance_clearance_h', 'pst_limit', 'plt_limit',
       'unbalance_limit_pct', 'current_tdd_standard', 'q_capability_unit', 'voltage_deadband_pct',
-      'angle_limit_deg']) {
+      'angle_limit_deg', 'pv_margin_min_pct', 'qv_margin_min_mvar']) {
       expect(screen.queryByTestId(`limit-${path}`)).toBeNull()
     }
   })
@@ -332,6 +332,20 @@ describe('grid codes: extract', () => {
     const angle = (await screen.findByTestId('limit-angle_limit_deg')).textContent
     expect(angle).toContain('Voltage-angle difference across a branch')
     expect(angle).toContain('30°')
+  })
+
+  it('shows the P–V and Q–V least margins (study harness 18) a profile sets', async () => {
+    const base = draft()
+    api.extractGridCode.mockResolvedValue(draft({ profile: { ...base.profile,
+      pv_margin_min_pct: { value: 5, clause: 'generic clause', source: 'code' as const },
+      qv_margin_min_mvar: { value: 0, clause: 'generic clause', source: 'code' as const } } }))
+    renderPanel()
+    const row = await screen.findByTestId(`document-${DOC_ID}`)
+    await userEvent.click(within(row).getByRole('button', { name: 'Extract limits' }))
+    const pv = (await screen.findByTestId('limit-pv_margin_min_pct')).textContent
+    expect(pv).toContain('P–V real-power margin at the PCC (screening)')
+    expect(pv).toContain('≥\u00A05\u00A0% of the planned import')
+    expect((await screen.findByTestId('limit-qv_margin_min_mvar')).textContent).toContain('≥\u00A00\u00A0Mvar')
   })
 
   it('confirms the per-unit curve and the deadband by their own paths', async () => {
