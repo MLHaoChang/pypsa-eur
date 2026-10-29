@@ -74,6 +74,14 @@ class WorkbookInputs:
     scenarios: scenarios.Scenarios | None = None
     # The settings the base's last solve used (the route's `_solved_settings`).
     solved_settings: Callable[[], dict | None] | None = None
+    # The base's saved project row id (None for a scratch network).
+    project_id: str | None = None
+    # `project_for(run)`: the run's project row for the acting user
+    # (`project_registry.resolve_project`, before any file of it is read), or
+    # None when the run has no project or the user may not open it. The views
+    # whose routes read the project's files (grid code, electrical design,
+    # island, grid-forming) call it once per run; without it they have no data.
+    project_for: Callable[[Any], Any] | None = None
 
 
 @dataclass
@@ -177,7 +185,7 @@ def build_results_workbook(inp: WorkbookInputs) -> bytes:
     base = scenarios.Run(name=inp.project or "Base", figs=figs, ic_report=inp.ic_report,
                          case_state=inp.case_state, network=inp.network, cfg=inp.cfg,
                          lost_load=inp.lost_load, result_df=inp.result_df,
-                         solved_settings=inp.solved_settings)
+                         solved_settings=inp.solved_settings, project_id=inp.project_id)
     if inp.scenarios is not None:
         scenarios.write_scenarios(wb.create_sheet(index=1), base, inp.scenarios)
     ctx = WorkbookContext(inp, runs=[base, *(inp.scenarios.runs if inp.scenarios else [])])
