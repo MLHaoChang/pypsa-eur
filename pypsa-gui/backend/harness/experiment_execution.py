@@ -38,6 +38,16 @@ def _name(record):
     return name
 
 
+# `_name`'s output in full: "exp-", the experiment id's 32 hex digits, the case
+# id's first 24 characters (`experiments._CASE_ID`), and "-<n>" for a two-case plan.
+CASE_PROJECT_NAME = re.compile(r"exp-[0-9a-f]{32}-[A-Za-z][A-Za-z0-9_-]{0,23}(?:-[12])?")
+
+
+def is_case_project_name(name) -> bool:
+    """Whether a project name is an experiment case's child (`_name`)."""
+    return isinstance(name, str) and CASE_PROJECT_NAME.fullmatch(name) is not None
+
+
 def _submission(record):
     changes = []
     for change in record["cases"][0]["changes"]:

@@ -158,6 +158,14 @@ def _about(ws, inp: WorkbookInputs, statuses: list[tuple[str, str, str]], figs) 
                             "stands in for it"),
         ("Investment case", _case_text(rep, inp.case_state)),
     ]
+    scen = inp.scenarios
+    if scen is not None and scen.not_shown:
+        from harness.sensitivity_comparison import MAX_CASES
+        parts = [f"{what}: {n}" for what, n in (
+            ("no access", scen.no_access), (f"over the {MAX_CASES}-run cap", scen.over_cap),
+            ("other users' or plans' experiment cases", scen.unlisted)) if n]
+        rows.append(("Scenarios not shown", f"{scen.not_shown} not shown ({'; '.join(parts)}); "
+                                            "none of them is named"))
     heading(ws, 1, ["Item", "Value"])
     r = 2
     for k, v in rows:

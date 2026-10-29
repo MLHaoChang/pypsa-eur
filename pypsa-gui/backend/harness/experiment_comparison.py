@@ -16,17 +16,33 @@ _ERRORS = {
 }
 
 
-def _basis(record, data):
+class ReceiptMismatch(ValueError):
+    """The case's saved network no longer has its receipt's exact input fingerprint."""
+
+
+class EvidenceChanged(ValueError):
+    """The case's run evidence no longer has its receipt's digest."""
+
+
+class BaselineEvidenceChanged(ValueError):
+    """The recorded baseline run's evidence no longer matches the preflight."""
+
+
+def _load_case(record, data, saved=None):
+    """(saved, basis): the case's saved context (loaded here, or `saved` when the
+    caller loaded it after resolving access), checked against the receipt: its
+    exact input fingerprint, then its run evidence digest."""
     from services import chat_tools, project_registry, run_evidence, workflow_tools as wt
     with chat_tools._acting() as (db, user):
         child = project_registry.resolve_project(db, user, data['case_project_id'])
-        saved = wt._load_context(child)
+        if saved is None:
+            saved = wt._load_context(child)
         if wt._network_input_fingerprint(saved, exact=True) != record['preflight']['case_checks'][0]['exact_input_fingerprint']:
-            raise ValueError()
+            raise ReceiptMismatch()
         manifest = run_evidence._load_run(project_registry.project_dir(child), str(child.id), data['run_id'])
         if not manifest or ex._digest(manifest) != data['evidence_sha256']:
-            raise ValueError()
-        return dict(mode=manifest['mode'], objective_basis='recorded_solver_objective',
+            raise EvidenceChanged()
+        return saved, dict(mode=manifest['mode'], objective_basis='recorded_solver_objective',
             window='full_prepared_horizon', objective_unit=data['objective_unit'], **basis_digests(saved))
 
 
@@ -42,7 +58,7 @@ def basis_digests(saved):
         solver_config_sha256=ex._digest(goal_free_config(saved.solver_state['solver_config'])))
 
 
-def _case(root, record):
+def _start(record):
     out = dict(experiment_id=record['experiment_id'], plan_sha256=record.get('plan_sha256'),
         preflight_sha256=ex._digest(record.get('preflight')), status='planned',
         result_available=False, case_project_id=None, job_id=None, run_id=None,
@@ -51,27 +67,47 @@ def _case(root, record):
         declared_cases=copy.deepcopy(ex._plan(record)['cases']))
     if '_case_id' in record:
         out['case_id'] = record['_case_id']
+    return out
+
+
+def adapter_available(record):
+    return record['domain'] == 'network' and len(record['cases']) == 1 and bool(record.get('preflight'))
+
+
+def _verify(root, record, ledger, out):
+    """Observe the case from its ledger copy (`engine._observe` resolves the case
+    project before it reads anything of it) into `out`; the observed receipt
+    when it completed and its recorded baseline evidence is intact, else None.
+    Writes nothing, so it may run without `experiments._LOCK` on a copy."""
+    data = engine._observe(record, ledger)
+    view = engine._view(record, data, root=root, ledger=ledger)
+    out.update({k: view[k] for k in ('status', 'case_project_id', 'job_id', 'run_id',
+        'evidence_sha256', 'cancelled', 'last_error', 'case_effects_reserved')})
+    if data['status'] != 'completed':
+        return None
+    if record.get('baseline_run_id'):
+        from services import run_evidence
+        source = run_evidence.get_run_evidence(record['baseline_run_id'])
+        expected = record['preflight']['baseline']
+        if (source['status'] != 'completed' or not source['evidence_available']
+                or source['fingerprint'] != expected['input_fingerprint']
+                or ex._digest(source) != expected['evidence_sha256']):
+            raise BaselineEvidenceChanged()
+    return data
+
+
+def _case(root, record):
+    out = _start(record)
     basis = None
-    if record['domain'] != 'network' or len(record['cases']) != 1 or not record.get('preflight'):
+    if not adapter_available(record):
         out.update(status='unavailable', last_error='experiment_adapter_unavailable')
         return out, basis
     try:
         ledger = engine._read(root, record)
         if ledger is not None:
-            data = engine._observe(record, ledger)
-            view = engine._view(record, data, root=root, ledger=ledger)
-            out.update({k: view[k] for k in ('status', 'case_project_id', 'job_id', 'run_id',
-                'evidence_sha256', 'cancelled', 'last_error', 'case_effects_reserved')})
-            if data['status'] == 'completed':
-                if record.get('baseline_run_id'):
-                    from services import run_evidence
-                    source = run_evidence.get_run_evidence(record['baseline_run_id'])
-                    expected = record['preflight']['baseline']
-                    if (source['status'] != 'completed' or not source['evidence_available']
-                            or source['fingerprint'] != expected['input_fingerprint']
-                            or ex._digest(source) != expected['evidence_sha256']):
-                        raise ValueError()
-                basis = _basis(record, data)
+            data = _verify(root, record, ledger, out)
+            if data is not None:
+                _saved, basis = _load_case(record, data)
                 out.update(result_available=True, objective=data['objective'], objective_unit=data['objective_unit'])
     except (ValueError, KeyError, TypeError, OSError, RuntimeError, ex.HTTPException):
         out.update(status='unavailable', result_available=False, last_error='experiment_source_unavailable')

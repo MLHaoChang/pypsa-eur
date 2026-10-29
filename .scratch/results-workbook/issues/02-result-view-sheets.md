@@ -127,3 +127,18 @@ Option A, with three conditions. I read `_observe` (experiment_execution.py:155â
 Condition 1, revised. `ex._read_record` already refuses a record whose owner or project differ (experiments.py:269), so don't add a redundant filter just to make a mutant killable. Keep the two exclusion tests: another project of the same user, and another user on a shared project. Replace the two filter mutants with one mutant that passes the wrong project or owner into `_read_record`, or skips it. It must fail one of those tests.
 
 Condition 9: your answer is noted. The unique-name test still stands.
+
+### 2026-10-29 â€” GK B (11): R5 second ruling (an experiment case's child is also a sensitivity run): Option A
+
+GK B (11) on R5, second ruling (15:16Z, answering: each experiment case's child is also listed as a sensitivity run): Option A. Show each experiment case once, as an experiment case, checked against its receipt. Record this with the points below.
+
+1. The marker. Use the strongest marker that exists.
+   - If the experiment path writes anything identifying into the child's `sensitivity_case.json` or the registry row, such as an experiment id, use that.
+   - Otherwise use an anchored full match of `_name`'s output: `exp-[0-9a-f]{32}-<case>` with the optional `-<n>` suffix. Build the regex next to `_name`, or derive it from `_name`, so the two can't drift. No loose `startswith("exp-")`.
+2. No silent drop. A child the marker excludes from the sensitivity list that matches no case gathered for the acting user's own experiments on this base still gets counted in the Scenarios note and the About "not shown" row, and is never named. That covers other users' experiment children and a sensitivity case that happens to look like an experiment name.
+3. Tests.
+   - An experiment child never appears as a sensitivity run.
+   - An experiment case of another user is counted, not named.
+   - Condition 8 becomes 6 true sensitivity runs plus 4 experiment cases: 8 shown, 2 not shown.
+   - Mutant: drop the marker filter in `_cases`. The never-listed-twice test must kill it.
+4. Scope. The change stays in `scenarios._cases`. Leave `sensitivity_comparison._read` and the chat tool `compare_sensitivity` alone; if they also list experiment children, report that as a follow-up rather than widening R5.
