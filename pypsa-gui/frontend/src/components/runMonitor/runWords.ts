@@ -113,6 +113,7 @@ export const UNATTENDED_BLOCK_WORDS: Record<string, string> = {
   runner_off: 'Unattended runs are off on this server',
   no_provider: 'Needs a model key: chat is off',
   locked: 'Another user is editing this project',
+  no_notice: 'Unattended needs a way to tell you when the run stops: email is not set up on this server, and in-app notices cannot be saved right now.',
 }
 
 /** The fix a stopped run offers: a link in words (UX condition 8).

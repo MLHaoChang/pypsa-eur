@@ -1,7 +1,7 @@
 // Study harness issue 08: one run in each state the plan card shows, as
 // `/api/chat/runs/{task_id}` serves it. Used by the tests and by
 // `scripts/run-monitor-shots.mjs` (the PR's screenshots).
-import type { Envelope, RunMonitorView, RunStage } from '../../api/runMonitor'
+import type { Envelope, RunAction, RunMonitorView, RunStage } from '../../api/runMonitor'
 
 export const TASK_ID = '019a5b49-3a72-5681-92f2-6fcc38f99cd7'
 
@@ -45,8 +45,18 @@ const MONITOR = {
 const GRANTED = { ...ENVELOPE, state: 'granted' as const, expires_at: '2026-10-28T17:00:00Z', used: 3 }
 const GRANTED_BUDGETS = { ...MONITOR.budgets, solves: { used: 3, of: 6 }, expires_at: '2026-10-28T17:00:00Z' }
 
+/** `run_monitor._actions`: the run buttons that can work now. */
+function actions(status: string, run: RunMonitorView['run']): RunAction[] {
+  const over = status === 'cancelled' || status === 'completed'
+  const resumable = !over && ['paused', 'needs_user'].includes(run.status)
+    && (Boolean(run.reason) || run.stages.find(s => s.stage === run.stage)?.status === 'failed')
+  return ([['pause', !over && ['running', 'waiting_job', 'needs_user'].includes(run.status)],
+    ['resume', resumable], ['stop', !over]] as const).filter(([, ok]) => ok).map(([name]) => name)
+}
+
 function view(over: Partial<RunMonitorView> & { run: RunMonitorView['run'] }): RunMonitorView {
-  return { task_id: TASK_ID, title: 'Own site study', status: 'ready', monitor: MONITOR, ...over } as RunMonitorView
+  const out = { task_id: TASK_ID, title: 'Own site study', status: 'ready', monitor: MONITOR, ...over } as RunMonitorView
+  return { ...out, monitor: { ...out.monitor, actions: actions(out.status, out.run) } }
 }
 
 const run = (stage: string, extra: Partial<RunMonitorView['run']> & { stages: RunStage[] }) =>

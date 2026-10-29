@@ -191,6 +191,8 @@ export default function RunMonitor({ task, disabled, onRequest }: {
   </div>
 
   const stages = run.stages
+  // The run buttons that work now, as the server says (`monitor.actions`).
+  const can = new Set(view.monitor.actions ?? [])
   // The Reports panel has no per-report selection yet: the link lands on the panel.
   const hasReport = stages.some(s => s.stage === 'report' && s.status === 'passed')
   const current = stages.find(s => s.stage === run.stage)
@@ -229,11 +231,11 @@ export default function RunMonitor({ task, disabled, onRequest }: {
       {stoppedAt} failed: {failedRules} {failedRules === 1 ? 'rule' : 'rules'} did not pass ·{' '}
       <Link onClick={() => fix(run.stage === 'result_gate' ? 'results' : 'issues')}>
         {run.stage === 'result_gate' ? 'Open results' : 'See the issues'}</Link>{' '}
-      <span className="text-muted">then</span>{' '}
-      <Action disabled={busy} onClick={() => fix('resume')}>Check again</Action>
+      {can.has('resume') && <><span className="text-muted">then</span>{' '}
+        <Action disabled={busy} onClick={() => fix('resume')}>Check again</Action></>}
     </div>}
     {stop && !cancelled && <div data-testid="run-failure">
-      {stop.words}{stop.fix && <>: {stop.fix === 'resume'
+      {stop.words}{stop.fix && (stop.fix !== 'resume' || can.has('resume')) && <>: {stop.fix === 'resume'
         ? <Action disabled={busy} onClick={() => fix('resume')}>{stop.fixWords}</Action>
         : <Link disabled={busy} onClick={() => fix(stop.fix!)}>{stop.fixWords}</Link>}</>}
       {run.status === 'paused' && <p className="text-muted" data-testid="run-resume-note">
@@ -266,16 +268,16 @@ export default function RunMonitor({ task, disabled, onRequest }: {
       Stopped at {stoppedAt}: the edits applied so far and the results so far are kept.
       A stopped run cannot be restarted; start a new one from the composer.
     </p>}
-    {finished && <p data-testid="run-finished">Finished: the report is in Reports.</p>}
+    {finished && <p data-testid="run-finished">{hasReport ? 'Finished: the report is in Reports.' : 'Finished.'}</p>}
 
     {failed && <p className="text-amber-400">{failed}</p>}
-    {!cancelled && !finished && <div className="mt-1 flex flex-wrap items-baseline gap-2">
-      {going && <button type="button" disabled={busy} className="text-accent disabled:opacity-40" data-testid="run-pause"
+    {(can.has('pause') || can.has('stop')) && <div className="mt-1 flex flex-wrap items-baseline gap-2">
+      {can.has('pause') && <button type="button" disabled={busy} className="text-accent disabled:opacity-40" data-testid="run-pause"
         onClick={() => void act(() => pauseRun(taskId))}>Pause</button>}
-      {!stopping && <button type="button" disabled={busy} className="text-muted hover:text-text disabled:opacity-40" data-testid="run-stop"
+      {can.has('stop') && !stopping && <button type="button" disabled={busy} className="text-muted hover:text-text disabled:opacity-40" data-testid="run-stop"
         onClick={() => setStopping(true)}>Stop</button>}
     </div>}
-    {stopping && !cancelled && !finished && <div role="group" aria-label="Stop the run?" data-testid="run-stop-confirm">
+    {stopping && can.has('stop') && <div role="group" aria-label="Stop the run?" data-testid="run-stop-confirm">
       <div className="flex flex-wrap items-baseline gap-1">
         <span className="font-medium">Stop the run?</span>
         <button type="button" disabled={busy} className="text-amber-400 hover:underline disabled:opacity-40" data-testid="run-stop-yes"

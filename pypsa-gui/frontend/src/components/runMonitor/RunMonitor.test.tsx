@@ -209,6 +209,23 @@ describe('RunMonitor', () => {
     expect(screen.queryByTestId('run-pause')).toBeNull()
   })
 
+  it('Pause, Resume and Stop show only when the view lists them in monitor.actions', async () => {
+    const paused = STATES.paused
+    vi.mocked(api.getRun).mockResolvedValue({ ...paused, monitor: { ...paused.monitor, actions: ['stop'] } })
+    useUIStore.setState({ uiMode: 'guided' })
+    render(<AssistantResultCard result={START} disabled={false} onRequest={vi.fn()} />)
+    await screen.findByTestId('run-failure')
+    expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull()
+    expect(screen.queryByTestId('run-pause')).toBeNull()
+    expect(screen.getByTestId('run-stop')).toBeTruthy()
+    cleanup()
+    vi.mocked(api.getRun).mockResolvedValue({ ...STATES.gate_pass, monitor: { ...STATES.gate_pass.monitor, actions: [] } })
+    render(<AssistantResultCard result={START} disabled={false} onRequest={vi.fn()} />)
+    await screen.findByTestId('run-state')
+    expect(screen.queryByTestId('run-pause')).toBeNull()
+    expect(screen.queryByTestId('run-stop')).toBeNull()
+  })
+
   it('Pause asks the server and shows the paused card', async () => {
     vi.mocked(api.pauseRun).mockResolvedValue(STATES.paused)
     show('gate_pass')

@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { COMPONENT_LABEL } from '../../utils/componentLabels'
 import { FIELD_LABELS } from '../../utils/fieldLabels'
 import { ENVELOPE } from './runFixtures'
-import { COMPONENT_WORDS, FACT_UNITS, FACT_WORDS, FIELD_WORDS, RUN_WORDS, STAGE_WORDS, editSubject } from './runWords'
+import { COMPONENT_WORDS, FACT_UNITS, FACT_WORDS, FIELD_WORDS, RUN_WORDS, STAGE_WORDS, UNATTENDED_BLOCK_WORDS, editSubject } from './runWords'
 
 describe('runWords', () => {
   it('names an envelope field by the panels’ FIELD_LABELS, with a unit', () => {
@@ -44,5 +44,9 @@ describe('runWords', () => {
   it('words only the runs an envelope may list (GK B 8: no sweep or site study)', () => {
     expect(Object.keys(RUN_WORDS)).not.toContain('run_sensitivity_sweep')
     expect(Object.keys(RUN_WORDS)).not.toContain('run_eh_study')
+  })
+
+  it('words every reason unattended cannot work, including no notice surface', () => {
+    expect(UNATTENDED_BLOCK_WORDS.no_notice).toBe('Unattended needs a way to tell you when the run stops: email is not set up on this server, and in-app notices cannot be saved right now.')
   })
 })

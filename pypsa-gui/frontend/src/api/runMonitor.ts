@@ -36,7 +36,9 @@ export interface RunCard {
   confirmation_token: string; ttl_seconds: number; session_id: string; expires_at_epoch_ms: number
   edit_card?: unknown; sweep_card?: unknown
 }
-export type UnattendedBlock = 'runner_off' | 'no_provider' | 'locked'
+export type UnattendedBlock = 'runner_off' | 'no_provider' | 'locked' | 'no_notice'
+/** A run button that can work now (`run_monitor._actions`), in this order. */
+export type RunAction = 'pause' | 'resume' | 'stop'
 export interface RunMonitorView {
   task_id: string; title: string; status: string
   run: {
@@ -55,6 +57,8 @@ export interface RunMonitorView {
     }
     unattended: { available: boolean; reason?: UnattendedBlock }
     email: { available: boolean }
+    /** The run buttons that can work now, in the fixed order pause, resume, stop. */
+    actions?: RunAction[]
     card?: RunCard
     waiting?: { kind: string; ref: string }
   }
