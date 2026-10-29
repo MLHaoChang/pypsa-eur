@@ -203,3 +203,17 @@ Smallest first; each goes to GK B as a plan before it is built.
 5. **Rows don't grow forever:** they are pruned in the save sweep, and a re-created id gets a new epoch. Met: tests for the sweep and the pruned chain.
 6. **Mutable kinds only.** The immutable no-op test is kept. There are no new error kinds (409 `evidence_unavailable`, as for any unavailable record). Mutation: `tests/assurance_acceptance/replay_mutation.py` makes load() accept any mutable record it can read and unseal; each of the 21 red cases then fails. Met.
 7. These conditions are recorded here.
+
+### 2026-10-29 — S3: one shared fact builder
+
+- `assurance_records._fact(entity_id, metric, value, unit, *tokens)` builds every fact dict; its path is `pointer(*tokens)`. Six sites use it: static (`_raw_facts`), static_page capture (`capture_input_page`) and recheck (`_page_facts`), series (`_series_steps`), aggregate (`_aggregate_facts`) and run (`_run_facts`). Each site keeps its own value normalisation. The results kinds (`scoped_calculate`, `assurance_metrics.calculate`) are out of scope.
+- One spelling changed: static's `"/" + metric` is now `pointer(metric)`. It is equal for every INPUT_METRICS name, since none holds '~' or '/'; `test_p1_fact_builder` pins that on the live table.
+- No change of behaviour: see the conditions below.
+
+#### GK B (10) plan GO conditions (2026-10-29)
+
+1. `_fact` builds the dict in today's key order: path, entity_id, metric, value, unit. Normalisation stays at each call site.
+2. A dump (`tests/assurance_acceptance/fact_record_dump.py`) covers all six sites, with the static_page capture and recheck dumped separately. It includes a static record for every INPUT_METRICS class, and a name holding both '~' and '/' for the page and series kinds. It is byte-equal between master and the PR tree, and the PR body gives both outputs' sha256.
+3. Mutation (`tests/assurance_acceptance/fact_builder_mutations.py`): breaking the builder at any one of the six sites fails a test.
+4. The pin test reads the live INPUT_METRICS.
+5. The PR is opened from master after #895 and #898 merge, so its diff is S3 alone. The A1.x suites and `test_p1_replay` run unchanged at the PR head.
