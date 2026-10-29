@@ -283,6 +283,8 @@ def test_a_route_held_by_an_open_issue_naming_it_is_a_limitation(tmp_path, monke
     ('Status: wontfix — dropped\n- GET /api/things\n', HELD, 'is wontfix'),
     ('- GET /api/things\n', HELD, 'without a Status: line'),
     (None, 'docs/elsewhere.md', 'is not a .scratch/<feature>/issues/<file>.md path'),
+    (None, '.scratch/feat/../../etc/issues/x.md', 'is not a .scratch/<feature>/issues/<file>.md path'),
+    (None, '.scratch/feat/issues/../x.md', 'is not a .scratch/<feature>/issues/<file>.md path'),
     (None, None, 'is not a .scratch/<feature>/issues/<file>.md path'),
 ])
 def test_a_held_route_needs_an_open_issue_that_names_it(tmp_path, monkeypatch, text, issue, expected):

@@ -70,7 +70,7 @@ LIMITATION_REASONS = (
 # A ``held-by-spec`` limitation's ``issue``: a repo-relative issue file that names
 # the route as ``METHOD path`` and is not closed (its ``Status:`` is not done or
 # wontfix). Each held issue is one full_coverage blocker (assistant_control_matrix).
-HELD_ISSUE_RE = re.compile(r'\.scratch/[\w./-]+/issues/[\w.-]+\.md')
+HELD_ISSUE_RE = re.compile(r'\.scratch/(?:[\w-]+/)+issues/[\w-]+(?:\.[\w-]+)*\.md')  # no `..` segment
 CLOSED_STATUSES = ('done', 'wontfix')
 # The issue-05 coverage families (capability-matrix.json ``family_journeys``).
 FAMILIES = (
