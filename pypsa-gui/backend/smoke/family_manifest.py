@@ -440,7 +440,12 @@ VARIANTS: list[dict] = [
     _covered('LC-D19.single_case', 'objective 200 = 5 MW x 2 h x 20 EUR/MWh, same in the exported evidence',
              'prepare_experiment advance_experiment refresh_experiment wait_for_job export_run_evidence',
              B + 'test_experiment_case_advancement.py::test_real_case_finishes_only_with_terminal_and_intact_evidence'),
-    _pending('LC-D19.two_case_compare', 'two independently solved cases and signed deltas'),
+    _covered('LC-D19.two_case_compare', 'two solved cases at 3 h weighting: 20 and 30 EUR/MWh x 5 MW x 6 h = 600 and 900 EUR, '
+             'each its own run evidence; compare +300 EUR (+50 %), reversed -300 EUR; the export downloads the same report',
+             'start_experiment prepare_experiment advance_experiment refresh_experiment wait_for_job export_run_evidence '
+             'compare_experiments export_experiment_comparison',
+             B + 'test_lc06_d19_two_case_compare.py::test_two_weighted_cases_compare_their_own_solved_objectives',
+             B + 'test_lc06_d19_two_case_compare.py::test_the_signed_delta_flips_with_the_order'),
     _pending('LC-D20.delivery', 'seam only; delivered bytes not independently parsed'),
     _pending('LC-D21.reports', 'seam only; document facts not independently inspected'),
     _pending('LC-D22.undo_checkpoints', 'seam only; no before/after fingerprint oracle'),

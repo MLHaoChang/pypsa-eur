@@ -1,0 +1,1 @@
+* Test(pypsa-gui): LC-06 checks the copilot's comparison of two experiment cases, each solved separately. Each case's objective is checked against its own run evidence at a non-unit snapshot weighting, and the signed difference is checked both ways round. The test also checks that the exported comparison is the report the copilot inspected.
