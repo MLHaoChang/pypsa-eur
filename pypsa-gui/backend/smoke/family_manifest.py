@@ -498,8 +498,16 @@ VARIANTS: list[dict] = [
     _pending('LC-D20.delivery', 'seam only; delivered bytes not independently parsed'),
     _pending('LC-D21.reports', 'seam only; document facts not independently inspected'),
     _pending('LC-D22.undo_checkpoints', 'seam only; no before/after fingerprint oracle'),
-    _pending('LC-D23.provider_parity', 'dispatch parity only (test_assistant_provider_parity.py)'),
-    _pending('LC-D24.ui', 'frontend e2e; not re-audited in LC-06'),
+    _covered('LC-D23.provider_parity', 'one journey on the Claude wire only (LC32-OPEN-1), read from the request bodies: toolset results offers a strict subset without update_component; '
+             'the unoffered call is refused tool_not_offered with G1 still 20 MW; toolset all restores the first offer; approved write gives G1 35 MW and a 20 -> 35 receipt, denied leaves 20 MW',
+             'use_toolset update_component',
+             B + 'test_lc06_d23_claude_wire_journey.py::test_the_claude_wire_journey_grants_only_what_was_offered'),
+    _covered('LC-D24.ui', 'the four ui_* tools only (the Playwright 6 pass / 2 fail baseline is not re-audited): ui_event frames carry the hand snapshot index (01:00 = 1), asset and panel as asked; '
+             'an off-axis time, unknown asset or panel moves nothing; frontend uiNavigate.lc06.test.ts drives the store from those frames and drops a frame older than a manual navigation',
+             'ui_set_snapshot ui_select_component ui_open_asset_detail ui_open_panel',
+             B + 'test_lc06_d24_ui_events.py::test_a_snapshot_is_addressed_by_its_hand_index',
+             B + 'test_lc06_d24_ui_events.py::test_component_asset_and_panel_events_carry_exactly_what_was_asked',
+             B + 'test_lc06_d24_ui_events.py::test_a_wrong_target_is_refused_without_moving_the_screen'),
 ]
 
 
