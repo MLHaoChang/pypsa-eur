@@ -150,6 +150,21 @@ means oracle discrimination; no new refusal or warning.
    wrong-base case asserts |correct − wrong| ≫ tol.
 7. Land these here under S7.
 
+### GK A (4), GO conditions for S8 (2026-10-29)
+
+Split A: S8a now (E1, E2, E3, isochronous, dt halving, 60 Hz); S8b (E4–E6) with its
+own plan (genset, PV and UPS figures; UPS L·T/2/3600 and E6 ramp oracles).
+1. dt halving: assert the order, ratio ≥ 0.75·2⁴ = 12 for RK4, error = max over time
+   points spanning several M/K, coarse error > 1e-9; report the measured ratio.
+2. Assert the oracle against the reported metric: 0⁺ RoCoF, or the windowed closed form.
+3. D = 0 and no isochronous unit in the Δf_qss case, asserted from the read-back.
+4. E1: ΔP between 40 MW and 40 MW plus a stated loss bound.
+5. Isochronous: |Δf(t_end)| below the band with t_end ≥ 5·T_i; the nadir nonzero.
+6. E3: the collapse row names the tripped unit and the reason.
+7. Mutations: H_v halved → twice the RoCoF; droop 8 % → twice Δf_qss; each fails its assert.
+8. The EMT/PLL/voltage unavailable row stays; E4–E6 stay pending naming S8b.
+9. Land these here under S8.
+
 ## Slice log
 
 ### S0, execution manifest (2026-10-28)
@@ -438,6 +453,66 @@ Branch `claude/lc06-d15-control-models`, stacked on S6. GK A reviews. Session LC
   str(exc) through; no tool-error kind or harness parser reads these messages.
 - f0 provenance: the study reports `facts.instant.f0_hz` only. The 60 Hz case shows f0
   comes from the campus file (no file → 50); a separate source tag would be an engine field.
+
+### S8a, LC-D16 E1–E3 (2026-10-29)
+
+Branch `claude/lc06-d16-frequency-events`, stacked on S7. GK A reviews. Session LC-06 (5).
+Test only; no engine edit. The plan, and the A/B/C split question, went to GK A (4).
+
+- `pypsa-gui/backend/tests/test_lc06_d16_frequency_events.py`. The seam is
+  `campus_set_island_config` → `campus_draft_campus` → `campus_run_study` (the queued
+  Run, waited on) → `GET …/island/report`, table `freq_events`. The hub has a 40 MW
+  load on a 40 MW import, a 100 MW gfm_vsm BESS (H_v 5, pf 0.95, droop 4 %), no PV
+  and D = 0.
+  - E2, a 40 MW step: RoCoF₀ −1.900 Hz/s and Δf_qss −0.800 Hz, both exact to 1e-6.
+    At 60 Hz (campus file): −2.280 and −0.960.
+  - E1: the same formulas on the row's own I4 ΔP (40 < ΔP < 40/0.99).
+  - E3: tripping the BESS collapses the island at t = 0, named "no grid-forming headroom".
+  - Isochronous: a spinning 200 MW genset adds H·S to RoCoF₀ (−1.1095) and brings Δf
+    back to 0 within 1e-3. At 60 MW the I4 plan loads it to 40, so it saturates at
+    +20 MW and Δf settles at −0.40.
+  - dt halving: engine `simulate` against the closed form at t = 1 s, dt 0.1 → 0.05.
+    The integrator is RK4, so the ratio is about 16 (asserted ≥ 1.8).
+  - Mutations: H_v halved and droop 8 % (in-file tests). The default fixture with both
+    halved/doubled fails the E2 and E1 oracles (run, red).
+- Found: the chat tool `campus_island_report` trims the 21 tables to the first 2 under
+  the result cap, so the events never reach the copilot. Ticket 27. S8a reads the route.
+- Manifest: LC-D16.E1, E2 and E3 covered; E4–E6 pending (S8b).
+- GK A (4)'s S8 conditions: (1) dt halving takes the max error over the trace to 2 s
+  (4.75 τ), dt 0.05 → 0.025: ratio 16.8, coarse 5.4e-7 Hz, asserted ≥ 12 and > 1e-9.
+  (2) `rocof0_hz_per_s` is dΔf/dt at 0⁺ (`Trace.rocof0`); the 500 ms windowed column is
+  also asserted on the closed form (−1.11200). (3) The ledger's "load damping D = 0" and
+  the read-back sidecar's kinds {bess, load}. (4) 40 < ΔP < 40/0.99 (the Link's 1 %).
+  (5) t_end 20 s ≥ 5·T_i, |Δf| < 1e-3, nadir < −0.1 (−0.345). (6) E3 names BESS and
+  "no grid-forming headroom". (7) In-file tests, plus the default fixture mutated red.
+  (8) The EMT row stays; E4–E6 pending, "S8b".
+
+## Hand-off 5 (2026-10-29, LC-06 (5) at 300k)
+
+PR stack (each against master, stacked; all merges clean):
+- S2 #877 @0122e16e57d0af8a6e51a7bf94b8647cf389567f: GK B OK @78f751d5 carries. CI was on its last shard.
+- S3 #878 @d4cc3f00a3c5a43b50c4581d08ffbfc684b6fcbd: GK B (9) OK.
+- S4 #880 @4356ec68603633441c9a79aa044511435272cd00: GK A OK @abd52b35 carries.
+- S5 #881 @76b46f4e3831f567fe2ca016023d8d57d3c274a7: GK A (4) OK @bdba756a carries.
+  "GUI backend shard 2/4" (run 40804860617) died to a runner shutdown at 52 % with no
+  test failure. Re-run that failed job once the run completes (403 while it runs).
+- S6 #884 @aa64ab5e2f51a58f78336e0cc8835880522a2cb4: GK A (4) OK.
+- S7 #885 @7b72e519c7b75c16e9274cfc5a0fa52ceabeb0cd: GK A (4) review running.
+- S8a #886 @cdda3bf58dbdd0ab4d7951d4f0a69affcf73047d: review requested from GK A (4).
+No premerge ok has been sent yet; send them in stack order (#877 first) as CI goes green.
+
+Next:
+- S8b (E4–E6): send GK A (4) its own plan first, with the genset, PV and UPS figures
+  and the hand oracles for UPS L·T/2/3600 and the E6 ramp. Reuse `make_hub`, `_network`
+  and `_sidecar` in test_lc06_d16_frequency_events.py. The I4 plan pre-loads a spinning
+  genset to the load, so size it with room for the step.
+- Then S9 (D17 chain) and the GK B D-rows as in Hand-off 1.
+
+Follow-ups: ticket 26 (with #881), and ticket 27 (the chat island report trims the
+frequency tables; new in S8a).
+
+Env: as in Hand-off 2. A whole tests/gridspine run is over 580 s; run island files.
+Last merged SHA: afc2bee1 (#873).
 
 ## Hand-off 4 (2026-10-29, LC-06 (4) at 300k)
 
