@@ -1,0 +1,1 @@
+* Test(pypsa-gui): Assistant behaviour coverage for delivery (LC-D20: network, CSV, Excel, MATPOWER and bundle bytes parsed independently) and reports (LC-D21: exported Word document tables and audit flags, regenerated prose cannot change admitted numbers); both capability-matrix rows move from pending to covered.
