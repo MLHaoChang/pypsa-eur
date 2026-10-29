@@ -7,21 +7,32 @@ Status: ready-for-agent
 Type: task
 
 Read [the plan](../../../docs/superpowers/plans/2026-10-10-live-voice-conversation.md)
-and [coverage contract](../application-coverage.md). Generate a matrix from tools,
-routes, service schemas and GUI bindings. The [inventory](../capability-inventory.json)
-records 220 tools, 14 result tabs and 17 panels; behavioral/control mapping is pending.
-Map every eligible tool, panel/subview/filter/editor, parameter type, job adapter,
-evidence section, import/export/report operation and fixture. Resolve AR against
-actual UI/module vocabulary. Fix adequacy/fmea navigation parity and audit other
-aliases. Add missing shared typed tools over services. Respect ACL/mode/project
-eligibility; no browser-click or provider-only workaround.
+and [coverage contract](../application-coverage.md). Owner decision LV08-SHRINK-1
+(29 Oct) shrinks this issue to the remainder below. LC-06 now builds the behavioural
+family journeys with hand oracles (`smoke/family_manifest.py`, `tests/test_lc06_*.py`);
+the requirement-by-requirement comparison is in
+[08-lc06-comparison.md](08-lc06-comparison.md). Do not build slice C's solver,
+reliability, gridspine or experiment journeys again.
 
-Test discovery and subsequent schema offering/execution for every eligible tool
-under OpenAI's current 128-tool offer bound and verify Claude parity. Test all
-navigation acknowledgments and parameter types/units/previews/freshness.
-Keep matrix regeneration/check in CI. Done when every required interaction has a
-mapping and passing contract, every family has a real journey assigned to issue
-05, and remaining limitations block the full-coverage claim explicitly.
+The matrix, route parity, navigation parity, typed tools and the 128-tool/Claude offer
+test are done (see Comments). Open scope is R1–R4 only:
+
+- **R1. One ledger.** Replace the 14 `pending:issue-05-*` journey ids in
+  `assistant_control_matrix.FAMILY_JOURNEYS` by references to the LC-06 manifest variants,
+  and make the `full_coverage` guard read variant status from `family_manifest`.
+  The claim stays `not_established` until the blockers clear.
+- **R2. Route-parity drift.** 8 GUI routes read `needs-tool` again: `GET /api/results/process_view`,
+  `GET`/`PUT /api/projects/{name}/site-anchor` and the four `sites/{site_id}/scene` routes
+  (adopt, proposals, apply, cancel). Close each by a typed tool or a declaration
+  (`assistant_route_parity_declarations.d/`), coordinating with the packages that added the routes.
+- **R3.** Families LC-06 leaves out (D01/02/20–24) moved to
+  [LC-32](../../live-copilot/issues/32-uncovered-families-d01-d02-d20-d24.md) (needs-triage).
+- **R4. Voice-only gates stay with issue 05:** hosted profile/device/latency, the prolonged
+  mixed-domain conversation, spoken navigation acknowledgements and client-only UI-control parity
+  (`ui-local-control-parity-unaudited`).
+
+Done when R1 and R2 are merged with their checks in CI, R3 has an owner, and R4's blockers
+remain explicit in `full_coverage`.
 
 ## Comments
 

@@ -199,3 +199,69 @@ def test_timezone_aware_member_is_a_gap_not_an_error(read, monkeypatch):
     assert out["gaps"] == ["the loads do not share the network's snapshots"]
     assert out["values"] == []
     assert_blocked(out)
+
+
+
+# The full ordered gap list the handler reports for each SCENARIOS case
+# (byte-equal to master's before the shared helper; see aggregate_json_dump).
+SNAPSHOTS = "the loads do not share the network's snapshots"
+EXPECTED_GAPS = {
+    "unknown": ["no load named ghost"],
+    "only unknown": ["no load named ghost"],
+    "no loads match": ["no loads match"],
+    "no profile": ["1 of 3 loads have no profile"],
+    "no profile at all": ["1 of 1 loads have no profile"],
+    "missing step": ["1 missing or non-finite step"],
+    "infinite step": ["1 missing or non-finite step"],
+    "other snapshots": [SNAPSHOTS, "6 missing or non-finite steps"],
+    "both off snapshots": [SNAPSHOTS],
+    "bool": ["a step that is not a number", "3 missing or non-finite steps"],
+    "numeric string": ["a step that is not a number", "3 missing or non-finite steps"],
+    "repeated timestamp": [SNAPSHOTS],
+    "timezone-aware": [SNAPSHOTS],
+    "many gaps": [
+        "no load named ghost",
+        "1 of 3 loads have no profile",
+        SNAPSHOTS,
+        "a step that is not a number",
+        "9 missing or non-finite steps",
+    ],
+    "empty upload": [
+        "no load named ghost",
+        "1 of 2 loads have no profile",
+        SNAPSHOTS,
+        "a step that is not a number",
+        "no steps",
+    ],
+}
+
+
+@pytest.mark.parametrize("case", sorted(EXPECTED_GAPS))
+def test_both_paths_name_the_same_first_gap(case, monkeypatch):
+    """One helper names the gaps: the checked path refuses on the first,
+    the handler reports them all, in order, and neither raises."""
+    from tests.assurance_acceptance.aggregate_json_dump import SCENARIOS
+
+    setup, kwargs = SCENARIOS[case]
+    setup(monkeypatch)
+    ctx = PyPSAService.get_active_context()
+    with records.network_guard():
+        _digest, gap, totals, _targets = records.aggregate_source(ctx, kwargs)
+    out = aggregate_load_profile(**kwargs)
+    assert out["gaps"] == EXPECTED_GAPS[case]
+    assert gap == out["gaps"][0]
+    assert totals is None
+    assert_blocked(out)
+
+
+def test_gap_helper_names_no_steps_alone():
+    """An empty member on empty snapshots gives "no steps" and nothing else.
+
+    PyPSA refuses empty snapshots, so only the helper reaches this case;
+    "empty upload" reaches "no steps" through both paths.
+    """
+    empty = pd.DatetimeIndex([])
+    gaps, frame, values = records.aggregate_gaps(empty, [], [pd.Series([], index=empty, dtype=float)])
+    assert gaps == ["no steps"]
+    assert frame is not None and frame.empty
+    assert values.shape == (0, 1)

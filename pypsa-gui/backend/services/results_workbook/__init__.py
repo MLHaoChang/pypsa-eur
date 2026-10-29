@@ -23,6 +23,7 @@ state, so a test drives it with a network and a stored report.
 from __future__ import annotations
 
 import io
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -33,6 +34,8 @@ from services.results_workbook.cells import NOT_ESTABLISHED, heading, put, width
 from services.results_workbook.overview import (
     RUN_THE_CASE, overview_figures, write_overview,
 )
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["MAX_BYTES", "WorkbookInputs", "WorkbookTooLarge", "build_results_workbook"]
 
@@ -69,6 +72,8 @@ class WorkbookInputs:
     run: dict | None = None
     # The base's sensitivity runs (`scenarios.gather_scenarios`), if it has any.
     scenarios: scenarios.Scenarios | None = None
+    # The settings the base's last solve used (the route's `_solved_settings`).
+    solved_settings: Callable[[], dict | None] | None = None
 
 
 @dataclass
@@ -170,7 +175,9 @@ def build_results_workbook(inp: WorkbookInputs) -> bytes:
     figs = overview_figures(inp.network, inp.cfg, inp.lost_load, inp.result_df)
     write_overview(overview, figs, inp.ic_report, inp.case_state)
     base = scenarios.Run(name=inp.project or "Base", figs=figs, ic_report=inp.ic_report,
-                         case_state=inp.case_state)
+                         case_state=inp.case_state, network=inp.network, cfg=inp.cfg,
+                         lost_load=inp.lost_load, result_df=inp.result_df,
+                         solved_settings=inp.solved_settings)
     if inp.scenarios is not None:
         scenarios.write_scenarios(wb.create_sheet(index=1), base, inp.scenarios)
     ctx = WorkbookContext(inp, runs=[base, *(inp.scenarios.runs if inp.scenarios else [])])
@@ -181,10 +188,19 @@ def build_results_workbook(inp: WorkbookInputs) -> bytes:
         build = builders.get(view_id)
         if build is None:
             status = "not exported to Excel yet"
-        elif build(wb, ctx):
-            status = "sheets: " + ", ".join(ctx.sheets.get(view_id) or [])
         else:
-            status = registry.NO_RESULTS.get(view_id, "no results for this run")
+            before = set(wb.sheetnames)
+            try:
+                wrote = build(wb, ctx)
+            except Exception as exc:  # noqa: BLE001 — an error is reported, never "no results"
+                logger.exception("results workbook: the %s sheet failed", view_id)
+                for title in set(wb.sheetnames) - before:
+                    del wb[title]
+                ctx.sheets.pop(view_id, None)
+                status = f"error: the sheet could not be written ({type(exc).__name__})"
+            else:
+                status = ("sheets: " + ", ".join(ctx.sheets.get(view_id) or []) if wrote
+                          else registry.NO_RESULTS.get(view_id, "no results for this run"))
         statuses.append((view_id, card_label.get(v.card, v.card or ""), status))
     _about(about, inp, statuses, figs)
     buf = io.BytesIO()
