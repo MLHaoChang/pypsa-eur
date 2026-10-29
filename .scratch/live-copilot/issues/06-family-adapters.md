@@ -132,6 +132,24 @@ Link edit would be overwritten by the pack on the run.
 5. DtC: 140 and 40 MWh on the same inputs; assert bus ≠ per_load and priority_exact.
 6. Land these here with the S6 entry.
 
+### GK A (4), GO conditions for S7 (2026-10-29)
+
+Option A: the model goes into `where` in gridspine/schema/island.py. Wrong base
+means oracle discrimination; no new refusal or warning.
+1. Put the model in `where` for converter units and governors, e.g.
+   "units.g1 (governor droop): missing ['droop_pct']".
+2. The missing-'control' refusal stays as it is; assert that it lists the allowed controls.
+3. A field from another model: the refusal names that field and the unit's own model.
+4. Grep every consumer of the old text before changing it. Update only what
+   breaks. Run tests/gridspine and the campus/island backend tests at the head,
+   root tests/ and backend tests in separate pytest runs.
+5. Read-back is exact for every {value, source}, including preset-expanded
+   fields and the f0 source on the 60 Hz case.
+6. Mutations: S_n scale; droop read as pu, which must fail the droop assert; the
+   model removed from `where`, which must fail the refusal tests. Each
+   wrong-base case asserts |correct − wrong| ≫ tol.
+7. Land these here under S7.
+
 ## Slice log
 
 ### S0, execution manifest (2026-10-28)
@@ -380,6 +398,84 @@ Test only; no engine edit.
     per_load 40 MWh, priority_exact. The mutation (local 40 MW) gives 80 against 0.
 - Planted fault: the schedule applied as a fraction of a fixed 100 MW rating
   (rescaled by the new p_nom) gives 130,400 at the first step, so the test is red.
+
+### S7, LC-D15 control models (2026-10-29)
+
+Branch `claude/lc06-d15-control-models`, stacked on S6. GK A reviews. Session LC-06 (5).
+
+- Engine edit (option A, TDD: the refusal tests were red first): `gridspine/schema/island.py`
+  `validate_unit_island` puts the model in `where`, `units.bess (control gfm_droop)` once
+  the control enum passes and `units.g (governor droop)` when the governor is a valid one.
+  The missing-'control' and bad-enum refusals keep their text. No consumer parses these
+  messages (grep of services, harness, frontend and tests); test_island_schema.py matches
+  field names only.
+- `pypsa-gui/backend/tests/test_lc06_d15_control_models.py`, all through
+  `campus_set_island_config` / `campus_island_config` / `campus_run_island_study`:
+  - Refusals: a missing field per model, a field from another model, gfl_pf's one-of,
+    k_gfm_min > i_max_pu, both governors; each names the field and the unit's own model.
+  - Read-back: the six models x both governors read back equal to the written config,
+    every {value, source}; the grid_forming_support preset reads back as written and
+    validates to its fields, each `assumed`.
+  - Oracles on the seamless objective (400 import energy + 100 x p_nom). VSM RoCoF row:
+    47.5 MW, 4750 at 50 Hz, 5700 at 60 Hz (f0 from the campus file, read back as
+    facts.instant.f0_hz); H on P gives 5000/6000. Preset H_v 4 s: 5937.5.
+    gfm_droop QSS row with an isochronous genset: 40 MW, 4000; droop read as pu 400,000.
+    A 4 % droop genset adds K = 10 MW/Hz: 20 MW, 2000. A gfl BESS enters no GFM row: the
+    genset carries 10 MW x 1000 x 4 h = 40,000, only Island-headroom-up binds.
+  - The predecessor's 4000 for the droop case assumed `cost_of_seamless`; with the QSS
+    row live, ups_bridged also builds BESS (its objective 800), so the tests read the
+    seamless variant's objective instead.
+- Mutations (each run, each red): H_v on p_nom (solver island.py RoCoF coef) fails the
+  VSM and preset tests; droop_pct as pu in the GFM K (island.py ΣK) fails both droop
+  tests; the `where` edit reverted fails all 13 model-naming refusal tests.
+- Manifest: LC-D15.gfl_pq/qu/pf/fw, gfm_droop, gfm_vsm, governors covered.
+- Runs at the head, separate pytest runs: root tests/gridspine island files (test_island_schema,
+  test_campus_island, test_island_presets, test_campus_draft_island, test_sixty_hz): 118 passed;
+  backend test_island_config, test_island_presets, test_chat_tools_campus_island,
+  test_campus_island_service, test_family_manifest, test_edit_card_campus, test_island_f0: pass;
+  the new file: 39 passed. The whole tests/gridspine exceeds the 580 s local cap (46 % clean
+  when cut off); CI runs it. Consumers checked per GK A (4)'s list: `_unprocessable` passes
+  str(exc) through; no tool-error kind or harness parser reads these messages.
+- f0 provenance: the study reports `facts.instant.f0_hz` only. The 60 Hz case shows f0
+  comes from the campus file (no file → 50); a separate source tag would be an engine field.
+
+## Hand-off 4 (2026-10-29, LC-06 (4) at 300k)
+
+PR stack (each against master, stacked; all merges clean, no rebase):
+- S2 #877 @0122e16e57d0af8a6e51a7bf94b8647cf389567f: GK B OK @78f751d5 carries (clean master merge, GK B confirmed). CI was running. Next: premerge ok when green.
+- S3 #878 @d4cc3f00a3c5a43b50c4581d08ffbfc684b6fcbd: GK OK @d4cc3f00 (GK B (9)). CI pending. Next: premerge ok when green.
+- S4 #880 @4356ec68603633441c9a79aa044511435272cd00: GK A OK @abd52b35 carries (clean merges only since). CI pending.
+- S5 #881 @76b46f4e3831f567fe2ca016023d8d57d3c274a7: the GK A NOT OK @96b7f680 was answered at bdba756a (engine-level tests, Z1/Z2, manifest, ticket 26). Re-review by GK A (4) is requested; 76b46f4e is a clean merge of #878 onto it.
+- S6 #884 @aa64ab5e2f51a58f78336e0cc8835880522a2cb4: built to GK A (4)'s S6 conditions (above). GK A (4) is reviewing it.
+- S7: branch `claude/lc06-d15-control-models` (this commit), stacked on S6. GK A (4) gave GO (conditions above). Nothing is built yet.
+
+S7 build notes (verified by probe):
+- Seam: chat_tools.campus_set_island_config(project, config), campus_island_config
+  (read-back: config/study/...) and campus_run_island_study, on a project made like
+  tests/test_campus_island_service.py (`_hub(load=10, gensets=[("g", 20)])`, network.nc,
+  with _auth_db + seeded_identity as in tests/test_campus_limit_dispatch_cards.py; `_config`, `_BESS` and
+  `_GENSET` there). A refusal is HTTPException 422 with the message as detail, e.g.
+  "island_config.units.bess: unknown field(s) ['H_v_s']; allowed [...]" (no model yet).
+- Engine edit: island.py `validate_unit_island`, the converter branch after the `control`
+  enum, and the genset branch once `governor` is known. Grep found no consumer
+  parsing these messages; tests/gridspine/test_island_schema.py matches on field
+  names only. TDD: refusal test first.
+- Wrong-base oracles from the seamless sizing (cost_of_seamless = 100 x BESS p_nom; ΔP = 10 MW import):
+  - RoCoF row 2M ≥ f0·ΔP/rocof_max, with M_vsm = H_v_s/pf_rated·p_nom. With rocof 1 Hz/s,
+    H_v_s 5, pf 0.95 and f0 50: p_nom 47.5, cost 4750 (60 Hz: 57, cost 5700). A mutant reading
+    H on P rather than S_n gives 50, cost 5000.
+  - QSS row ΣK·qss_band ≥ ΔP, with K = p_nom/(droop/100·f0). gfm_droop 4 % with qss_band 0.5 Hz:
+    p_nom 40, cost 4000. Droop read as pu gives 400,000.
+  - Set the other limits slack (rocof 1e6 / qss 1e6 in the row you are not testing).
+    Check the headroom, mva and energy rows don't bind (headroom ≥ 10 MW).
+- f0: the campus file (SUBDIR/CAMPUS_FILE, campus.f_hz); the study shows it in
+  variants.*.instant.f0_hz.
+- gfl_* models and governors: read-back, refusals and study status (gfl does not
+  enter the GFM rows). Example blocks are in tests/gridspine/test_island_schema.py:40-60.
+- The release-note fragment, the manifest rows LC-D15.*, then mp-code-review, then the PR.
+
+Also open: ticket 26 (weak_flexible import cap not disclosed). Then S8, S9 and the GK B
+D-rows as in Hand-off 1. Env: as in Hand-off 2; one pytest at a time.
 
 ## Hand-off 3 (2026-10-29, LC-06 (3) near 230k)
 
