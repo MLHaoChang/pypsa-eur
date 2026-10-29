@@ -27,13 +27,13 @@ itself, and Δf_qss is read at t_end = 20 s, over 40 of the slowest time
 constant (the governor's T_g 0.5 s) after the step. The apply moves them
 by about 0.15 Hz/s and 0.1 Hz, far beyond it.
 
-Stale: a network edit (the copilot's ``update_component`` on the genset,
-then ``save_project``) between the card and the apply is refused as
-``edit_preview_stale`` and writes nothing, through the chat tool and through
-the HTTP apply with no digest. Known gaps (tickets 28, 29): the card's digest
-does not hash the network, so the refusal comes from the recommendation's own
-staleness (``campus_electrical_service._stale``); the HTTP apply skips the
-digest check when none is sent.
+Stale: a network edit between the card and the apply is refused as
+``edit_preview_stale`` and writes nothing (ticket 28). The card binds the saved
+network file and, when the project is the active one, its in-memory network,
+so either moving refuses even where the run manifest agrees; a saved edit also
+makes the recommendation stale, and the refusal says so. An edit to another
+project's network refuses nothing. The HTTP apply requires the card's digest
+(ticket 29): with none it is a 422 and writes nothing.
 """
 from __future__ import annotations
 
@@ -42,6 +42,7 @@ import time
 import uuid
 
 import pytest
+import pypsa
 import yaml
 
 from gridspine.static.gfm_tuning import GFM_BOUNDS
@@ -107,7 +108,8 @@ class Hub:
         self.applied = ce.campus_dir(project) / cit.APPLIED_FILE
 
     def files(self):
-        return {p.name: p.read_bytes() if p.is_file() else None
+        """Each file's bytes and mtime: a refusal rewrites neither."""
+        return {p.name: (p.read_bytes(), p.stat().st_mtime_ns) if p.is_file() else None
                 for p in (self.sidecar, self.campus, self.applied, self.study)}
 
     def bess(self):
@@ -223,8 +225,71 @@ def test_a_network_edit_after_the_card_refuses_the_apply(hub):
     assert hub.files() == files                                 # the edit touches none of them
     with pytest.raises(Exception) as exc:
         _apply(card["digest"])
-    _assert_stale(exc, "recommend GFM settings again")          # the recommendation is stale (ticket 28)
+    # The recommendation went stale (ticket 28): the reason names the network, not "no recommendation".
+    _assert_stale(exc, "the network or the library changed since the campus run")
+    assert "no recommendation" not in exc.value.detail["message"]
     assert hub.files() == files
+
+
+def _network_file(hub):
+    return project_registry.project_dir(hub.project) / ce.NETWORK_FILE
+
+
+def _manifest_agrees(hub):
+    """Make the run manifest hash the network file as it now is, so the
+    recommendation reads ``ready`` and only the card's binding can refuse."""
+    path = ce.campus_dir(hub.project) / "run" / ce.cs.CAMPUS_MANIFEST
+    m = json.loads(path.read_text())
+    m["network_sha256"] = ce._file_digest(_network_file(hub))
+    path.write_text(json.dumps(m))
+    assert chat_tools.campus_island_gfm_settings(P)["state"] == "ready"
+
+
+def test_a_saved_network_edit_refuses_the_apply_by_the_cards_binding(hub):
+    """The network file moves outside the active context and the manifest is made to agree:
+    the card's ``network_file`` binding alone refuses (without it, this applies)."""
+    card = chat_tools.campus_gfm_settings_card(P)
+    files = hub.files()
+    n = pypsa.Network(str(_network_file(hub)))
+    n.generators.loc["gen", "marginal_cost"] = 400.0
+    n.export_to_netcdf(str(_network_file(hub)))
+    _manifest_agrees(hub)
+    with pytest.raises(Exception) as exc:
+        _apply(card["digest"])
+    _assert_stale(exc, "The values changed since the card was shown")
+    assert hub.files() == files
+
+
+def test_an_unsaved_network_edit_of_the_active_project_refuses_the_apply(hub):
+    """The project is active; an in-memory edit after the card leaves the file as it was:
+    the card's ``network_live`` binding alone refuses (without it, this applies)."""
+    chat_tools.load_project(P)
+    card = chat_tools.campus_gfm_settings_card(P)
+    files, saved = hub.files(), _network_file(hub).read_bytes()
+    chat_tools.update_component("Generator", "gen", {"marginal_cost": 400.0})
+    assert _network_file(hub).read_bytes() == saved             # not saved
+    assert chat_tools.campus_island_gfm_settings(P)["state"] == "ready"
+    with pytest.raises(Exception) as exc:
+        _apply(card["digest"])
+    _assert_stale(exc, "The values changed since the card was shown")
+    assert hub.files() == files
+
+
+def test_an_edit_to_another_active_project_does_not_refuse_the_apply(hub, user_and_db):
+    """A card for this project while another is active: an edit to that other network is not
+    this card's input, and the apply goes through (binding the active network whatever the
+    project, this refuses)."""
+    db, user = user_and_db
+    other = project_registry.create_root(db, user, "Other Hub")
+    d16._network(genset_mw=GEN_MW).export_to_netcdf(str(project_registry.ensure_project_dir(other) / "network.nc"))
+    chat_tools.load_project("Other Hub")
+    card = chat_tools.campus_gfm_settings_card(P)
+    files = hub.files()
+    chat_tools.update_component("Generator", "gen", {"marginal_cost": 400.0})
+    _apply(card["digest"])
+    side, _block = hub.bess()
+    assert {f: side[f]["value"] for f in _typed(card)} == {f: r["new"] for f, r in _typed(card).items()}
+    assert hub.files() != files
 
 
 def test_a_digest_that_is_not_the_cards_refuses_the_apply(hub):
@@ -239,11 +304,20 @@ def test_a_digest_that_is_not_the_cards_refuses_the_apply(hub):
     assert hub.files() != files
 
 
-def test_the_http_apply_without_a_digest_still_refuses_a_stale_network(hub):
-    """Pins today's guard while ticket 29 is open: with no digest the route
-    checks no card, and the refusal is the recommendation's own staleness."""
+def test_the_http_apply_requires_the_cards_digest(hub):
+    """Ticket 29: with no digest the route refuses (422), even on a ready recommendation."""
+    files = hub.files()
+    for kwargs in ({}, {"json": {}}):
+        resp = hub.client.post(f"/api/campus-electrical/{P}/island/gfm-settings/apply", **kwargs)
+        assert resp.status_code == 422, resp.text
+    assert hub.files() == files
+
+
+def test_the_http_apply_refuses_a_network_edit_after_the_card(hub):
+    card = hub.client.get(f"/api/campus-electrical/{P}/island/gfm-settings/card").json()
     files = hub.files()
     _edit_network()
-    resp = hub.client.post(f"/api/campus-electrical/{P}/island/gfm-settings/apply")
+    resp = hub.client.post(f"/api/campus-electrical/{P}/island/gfm-settings/apply", json={"digest": card["digest"]})
     assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["error_kind"] == "edit_preview_stale"
     assert hub.files() == files

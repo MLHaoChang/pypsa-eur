@@ -327,11 +327,14 @@ component (`frontend/src/components/EditCard.tsx`).
   already authorised it (never from a model argument). Rows are each changed
   setting current → recommended, then notes (the recommendation's time, the
   island study discarded, the hub re-solve). The digest binds the recommendation's
-  time and values; the loop rechecks it before the handler, and the handler once
-  more right before the write. The panel reads the card at
+  time and values, and the network (`binding`: the saved file's digest, and the
+  in-memory network's fingerprint when the project is the active one); the loop
+  rechecks it before the handler, and the handler once more right before the
+  write. The panel reads the card at
   `GET /api/campus-electrical/{name}/island/gfm-settings/card` and sends its
-  digest to `POST …/gfm-settings/apply` (which then answers with the `receipt`;
-  without a digest the route applies as before). `apply_settings`' refusals
+  digest to `POST …/gfm-settings/apply`, which requires it (422 without) and
+  answers with the `receipt`. A stale recommendation refuses with its own
+  reason (what changed since the run). `apply_settings`' refusals
   map to the card's kinds: 409 `edit_preview_stale`, nothing to change
   `nothing_to_change`, a refused value `invalid_edit_value`.
 - **Flow section (PR-2).** Each component row carries a FlowTarget

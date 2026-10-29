@@ -1412,8 +1412,29 @@ def _gfm_readback(args: dict, rows: list[dict]) -> list[Any]:
     return _campus(args, lambda project: cit.card_readback(project, rows))
 
 
+def _gfm_binding(args: dict) -> dict:
+    """The network the recommendation was made on (ticket 28): the saved file, and the in-memory
+    network when this project is the active one (an unsaved edit leaves the file as it was). Another
+    project's network is not this card's input."""
+    from services import campus_electrical_service as ce
+    from services import project_registry
+    from services.pypsa_service import PyPSAService
+
+    def network(project) -> dict:
+        nc = project_registry.project_dir(project) / ce.NETWORK_FILE
+        try:
+            active = PyPSAService.get_active_context().registry_key == project_registry.registry_key(project)
+        except Exception:  # noqa: BLE001 — no active context to compare binds no live network
+            active = False
+        return {"network_file": ce._file_digest(nc) if nc.is_file() else None,
+                "network_live": _fingerprint() if active else None}
+
+    return _campus(args, network)
+
+
 # Section 5: the Controls block of each converter-coupled asset (card-workspaces.md §3.3).
-register("campus_apply_gfm_settings", Adapter("settings_edit", _gfm_preview, _gfm_readback, section_id="assets"))
+register("campus_apply_gfm_settings", Adapter("settings_edit", _gfm_preview, _gfm_readback, section_id="assets",
+                                              binding=_gfm_binding))
 
 
 # The campus and grid-code cards register themselves on this module.

@@ -3,7 +3,7 @@
 
 # LC-29 — the HTTP GFM apply checks no card when no digest is sent
 
-Status: ready-for-agent
+Status: done
 
 Found by LC-06 (7) while building S9 (LC-D17); GK A (4) asked for the ticket.
 `POST /api/campus-electrical/{name}/island/gfm-settings/apply`
@@ -20,3 +20,11 @@ Options for whoever takes this:
 - Require the digest on the route (a 422 without it). The Results tab's apply
   button must then send the card's digest; check the frontend caller first.
 - Keep it optional, and record that the route's callers are trusted to have shown the card.
+
+## Comments
+
+- GK B (10) plan GO, 29 Oct, with conditions: `digest` is required (422 without
+  it); every caller of the route checked (only the frontend's
+  `campusApi.applyGfmSettings`, which always sends the card's digest);
+  `require_current` before any write, the lock checked first.
+- Done in PR `claude/lc-28-29-gfm-apply-digest`.
