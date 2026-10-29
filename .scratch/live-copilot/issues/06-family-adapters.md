@@ -487,6 +487,33 @@ Test only; no engine edit. The plan, and the A/B/C split question, went to GK A 
   "no grid-forming headroom". (7) In-file tests, plus the default fixture mutated red.
   (8) The EMT row stays; E4–E6 pending, "S8b".
 
+## Hand-off 5 (2026-10-29, LC-06 (5) at 300k)
+
+PR stack (each against master, stacked; all merges clean):
+- S2 #877 @0122e16e57d0af8a6e51a7bf94b8647cf389567f: GK B OK @78f751d5 carries. CI was on its last shard.
+- S3 #878 @d4cc3f00a3c5a43b50c4581d08ffbfc684b6fcbd: GK B (9) OK.
+- S4 #880 @4356ec68603633441c9a79aa044511435272cd00: GK A OK @abd52b35 carries.
+- S5 #881 @76b46f4e3831f567fe2ca016023d8d57d3c274a7: GK A (4) OK @bdba756a carries.
+  "GUI backend shard 2/4" (run 40804860617) died to a runner shutdown at 52 % with no
+  test failure. Re-run that failed job once the run completes (403 while it runs).
+- S6 #884 @aa64ab5e2f51a58f78336e0cc8835880522a2cb4: GK A (4) OK.
+- S7 #885 @7b72e519c7b75c16e9274cfc5a0fa52ceabeb0cd: GK A (4) review running.
+- S8a #886 @cdda3bf58dbdd0ab4d7951d4f0a69affcf73047d: review requested from GK A (4).
+No premerge ok has been sent yet; send them in stack order (#877 first) as CI goes green.
+
+Next:
+- S8b (E4–E6): send GK A (4) its own plan first, with the genset, PV and UPS figures
+  and the hand oracles for UPS L·T/2/3600 and the E6 ramp. Reuse `make_hub`, `_network`
+  and `_sidecar` in test_lc06_d16_frequency_events.py. The I4 plan pre-loads a spinning
+  genset to the load, so size it with room for the step.
+- Then S9 (D17 chain) and the GK B D-rows as in Hand-off 1.
+
+Follow-ups: ticket 26 (with #881), and ticket 27 (the chat island report trims the
+frequency tables; new in S8a).
+
+Env: as in Hand-off 2. A whole tests/gridspine run is over 580 s; run island files.
+Last merged SHA: afc2bee1 (#873).
+
 ## Hand-off 4 (2026-10-29, LC-06 (4) at 300k)
 
 PR stack (each against master, stacked; all merges clean, no rebase):
