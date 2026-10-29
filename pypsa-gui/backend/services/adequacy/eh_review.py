@@ -449,7 +449,10 @@ def review_latest(store: dict, record: dict | None, *,
     a later solve cleared the store — ``stale`` is then true (a boolean, so
     no client parses the ``source`` prose); ``no_data`` when neither exists.
     """
-    from services.adequacy.eh_report import eh_reference_design_http_payload
+    from services.adequacy.eh_report import (
+        eh_reference_design_http_payload,
+        mark_legacy_report,
+    )
 
     record = record if isinstance(record, dict) else None
     if record and record.get("status") == "running":
@@ -458,6 +461,8 @@ def review_latest(store: dict, record: dict | None, *,
     source, stale = "stored report", False
     if status == 204 or not isinstance(body, dict):
         body = (record or {}).get("report")
+        if isinstance(body, dict):
+            body = mark_legacy_report(body)          # LC-30, as the route does
         source, stale = _STALE_SOURCE, True
     if not isinstance(body, dict):
         return {"status": "no_data", "message": no_data_message}

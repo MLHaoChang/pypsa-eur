@@ -306,8 +306,9 @@ def test_attribution_prices_outages_not_capacity():
     assert by["u2"]["delta_eue_mwh"] == pytest.approx((EXACT_EUE_H - 3.0) * 6)
     # Ranking: u1's outages cost more → first.
     assert rows[0]["name"] == "u1"
+    # Per year (LC-30): the 6 h horizon's ΔEUE × 8760/6 × VoLL.
     assert by["u1"]["criticality_eur_per_year"] == pytest.approx(
-        (EXACT_EUE_H - 2.0) * 6 * 1000.0)
+        (EXACT_EUE_H - 2.0) * 6 * 8760.0 / 6 * 1000.0)
 
 
 def test_failure_mode_rows_validate_against_the_contract():

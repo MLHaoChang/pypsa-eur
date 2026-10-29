@@ -529,6 +529,35 @@ def test_slice_for_adequacy_section_carries_caveat_and_its_disclosures():
     assert "margin" not in keys and "top" not in keys
 
 
+def test_a_legacy_fmea_top_is_captioned_and_charted_per_horizon(monkeypatch):
+    """LC-30: a report saved before the per-year basis says so in the table
+    caption and on the Pareto axis; a current one reads €/yr."""
+    from services.reports.evidence import fmea_top_modes
+    from services.reports.figures import fmea_pareto_png
+    import services.reports.figures as FIG
+
+    legacy = {"rows": [{"mode_id": "link:L1:forced_outage", "name": "L1",
+                        "criticality_eur_per_year": 5.0}]}
+    current = {"rows": [{**legacy["rows"][0], "criticality_basis": "annualised"}]}
+    assert _t_fmea_top(legacy).caption.startswith(
+        "Saved before FMEA criticality was put on a per-year basis")
+    assert "per-year basis" not in _t_fmea_top(current).caption
+    assert [m["criticality_basis"] for m in fmea_top_modes(legacy)] == ["per_horizon_legacy"]
+
+    seen = []
+    real = FIG._style_axis
+
+    def spy(ax, mpl, **kw):
+        seen.append(kw.get("xlabel"))
+        return real(ax, mpl, **kw)
+
+    monkeypatch.setattr(FIG, "_style_axis", spy)
+    fmea_pareto_png(fmea_top_modes(legacy))
+    fmea_pareto_png(fmea_top_modes(current))
+    assert seen == ["Criticality (€ per modelled horizon, saved before the per-year basis)",
+                    "Criticality (€/yr)"]
+
+
 def test_fmea_top_modes_reads_the_per_class_shape_master_writes():
     """
     Master 19e9460 stores the class-B ranking under `rows` and the class-A

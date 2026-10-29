@@ -136,6 +136,11 @@ def fmea_pareto_png(top: list[dict] | None) -> bytes | None:
     if not rows:
         return None
     total = sum(c for _, c in rows) or 1.0
+    # LC-30: a report saved before the per-year basis is per horizon.
+    legacy = any((r or {}).get("criticality_basis") == "per_horizon_legacy"
+                 for r in (top or []))
+    xlabel = ("Criticality (€ per modelled horizon, saved before the per-year "
+              "basis)" if legacy else "Criticality (€/yr)")
 
     matplotlib, plt = _matplotlib()
     with matplotlib.rc_context(_RC):
@@ -145,7 +150,7 @@ def fmea_pareto_png(top: list[dict] | None) -> bytes | None:
         values = [c for _, c in rows][::-1]
         ax.barh(labels, values, color=_SERIES_BLUE, height=0.62)
         _style_axis(ax, matplotlib, title="Residual failure modes by criticality",
-                    xlabel="Criticality (€/yr)", grid="x")
+                    xlabel=xlabel, grid="x")
         cumulative = 0.0
         shares = []
         for _, c in rows:

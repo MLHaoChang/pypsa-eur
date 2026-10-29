@@ -273,9 +273,68 @@ def load_eh_report(store: dict) -> ReferenceDesignReport | None:
     return ReferenceDesignReport.model_validate(raw)
 
 
+LEGACY_CRITICALITY_NOTE = (
+    "Saved before FMEA criticality was put on a per-year basis: these "
+    "criticality and severity figures are per modelled horizon, not per "
+    "year. Re-run the study for per-year figures.")
+
+
+def mark_legacy_fmea_top(payload: dict | None) -> dict | None:
+    """
+    LC-30: a saved ``fmea_top`` payload whose engine rows carry no
+    ``criticality_basis`` predates the annualising — its criticality is the
+    horizon's ΔEUE × VoLL. Never show it as per-year: return a copy with each
+    such row marked ``criticality_basis="per_horizon_legacy"``, the payload's
+    ``criticality_caveat`` set, and the caveat leading the class-A
+    ``copt_fidelity_note`` (the note the panel shows beside the table).
+    Current payloads come back unchanged.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    class_a = payload.get("class_a") if isinstance(payload.get("class_a"), dict) else None
+    # ``top``: the one merged list builds before the per-class ranks wrote.
+    groups = [payload.get("rows"), payload.get("top"), (class_a or {}).get("rows")]
+    def _legacy(r) -> bool:
+        # Class C was always per event, so an old class-C row is not legacy.
+        return (isinstance(r, dict) and "criticality_basis" not in r
+                and r.get("criticality_eur_per_year") is not None
+                and r.get("failure_class") != "C")
+
+    if not any(_legacy(r) for g in groups if isinstance(g, list) for r in g):
+        return payload
+
+    def _mark(rows):
+        if not isinstance(rows, list):
+            return rows
+        return [{**r, "criticality_basis": "per_horizon_legacy"} if _legacy(r) else r
+                for r in rows]
+
+    out = {**payload, "criticality_caveat": LEGACY_CRITICALITY_NOTE}
+    for key in ("rows", "top"):
+        if key in payload:
+            out[key] = _mark(payload[key])
+    if class_a is not None:
+        note = class_a.get("copt_fidelity_note")
+        out["class_a"] = {**class_a, "rows": _mark(class_a.get("rows")),
+                          "copt_fidelity_note": "; ".join(
+                              x for x in (LEGACY_CRITICALITY_NOTE, note) if x)}
+    return out
+
+
+def mark_legacy_report(body: dict) -> dict:
+    """An exported report with its ``fmea_top`` payload through
+    ``mark_legacy_fmea_top`` (a copy; the input is not mutated)."""
+    sections = body.get("sections") if isinstance(body, dict) else None
+    fmea = sections.get("fmea_top") if isinstance(sections, dict) else None
+    if not (isinstance(fmea, dict) and isinstance(fmea.get("payload"), dict)):
+        return body
+    return {**body, "sections": {**sections, "fmea_top": {
+        **fmea, "payload": mark_legacy_fmea_top(fmea["payload"])}}}
+
+
 def eh_reference_design_http_payload(store: dict) -> tuple[dict | None, int]:
     """Return (body, status) for GET /results/eh_reference_design."""
     report = load_eh_report(store)
     if report is None:
         return None, 204
-    return export_reference_design(report), 200
+    return mark_legacy_report(export_reference_design(report)), 200

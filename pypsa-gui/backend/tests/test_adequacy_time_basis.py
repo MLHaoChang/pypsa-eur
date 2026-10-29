@@ -24,6 +24,7 @@ import pytest
 from services.adequacy.metrics import (
     HOURS_PER_YEAR,
     NYEARS_TOLERANCE,
+    criticality_scale,
     horizon_years,
     resolve_time_basis,
 )
@@ -105,3 +106,17 @@ def test_an_unknown_horizon_never_claims_a_year():
     bare = horizon_years(pypsa.Network())
     assert 0.0 <= bare < NYEARS_TOLERANCE
     assert resolve_time_basis(bare) == "hours_per_horizon"
+
+
+@pytest.mark.parametrize("nyears, scale, basis", [
+    (H / HOURS_PER_YEAR, HOURS_PER_YEAR / H, "annualised"),   # a week → × 52.14
+    (2.0, 0.5, "annualised"),
+    (0.0, 1.0, "per_horizon"),                              # no horizon: unscaled, and says so
+    (float("nan"), 1.0, "per_horizon"),
+])
+def test_criticality_scale_turns_a_horizon_into_a_year(nyears, scale, basis):
+    """LC-30: FMEA criticality is scaled by 1/nyears to match the annual
+    occurrence; a horizon with no length is never divided by."""
+    got_scale, got_basis = criticality_scale(nyears)
+    assert got_scale == pytest.approx(scale, rel=1e-12)
+    assert got_basis == basis

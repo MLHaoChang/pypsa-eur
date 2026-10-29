@@ -327,7 +327,15 @@ VARIANTS: list[dict] = [
              B + 'test_lc06_d11_fmea_health.py::test_class_a_moves_with_one_units_rate',
              B + 'test_lc06_d11_fmea_health.py::test_class_b_one_link_outage_sheds_its_load',
              B + 'test_lc06_d11_fmea_health.py::test_class_b_moves_with_the_load_behind_the_tie'),
-    _pending('LC-D11.fmea_criticality', 'criticality and severity are per horizon, labelled per year (ticket 30)'),
+    _covered('LC-D11.fmea_criticality', 'criticality per year: dEUE x 8760/6 h x VoLL 1000 (thermal1 42,048,000 EUR/yr, '
+             'severity 2,400,000 EUR; thermal2 46,428,000); a year-long horizon is unscaled; class B tie 0.02 x 30 MWh '
+             'x 1460 x 1000 = 876,000 EUR/yr; on a year-long horizon both classes are unscaled',
+             'update_solver_config get_adequacy_results run_fmea_sweep',
+             B + 'test_lc06_d11_fmea_health.py::test_class_a_criticality_is_per_year[thermal1]',
+             B + 'test_lc06_d11_fmea_health.py::test_class_a_criticality_is_per_year[thermal2]',
+             B + 'test_lc06_d11_fmea_health.py::test_class_a_criticality_on_a_year_is_the_horizons',
+             B + 'test_lc06_d11_fmea_health.py::test_class_b_criticality_is_per_year',
+             B + 'test_lc06_d11_fmea_health.py::test_class_b_criticality_on_a_year_is_the_horizons'),
     _covered('LC-D11.health', 'ledger read back from storage and the route; provenance 1 sourced, 1 drifted (0.25 vs 0.2), '
              '1 orphaned; four invalid fields refused with the field named, the file byte-identical',
              'record_asset_health get_asset_health',
