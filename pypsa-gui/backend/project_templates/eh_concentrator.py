@@ -103,8 +103,9 @@ STOCKPILE_MAX_T = 60_000.0
 #: crossover) did in about 20 (ledgered under "solver").
 SOLVER_OPTIONS = {"solver": "ipm"}
 
-#: The sunk flowsheet, in service from its build year.
-EXISTING = ("grid_import", "mine", "crusher", *MILLS, *FLOTATION, "coarse_ore_stockpile",
+#: The sunk flowsheet, in service from its build year. The PoC meter (``grid_import``) is not in it: it is the
+#: connection, priced by the connection lines, so it stays untyped (the investment case skips it as a meter).
+EXISTING = ("mine", "crusher", *MILLS, *FLOTATION, "coarse_ore_stockpile",
             "concentrate_shed")
 
 
@@ -338,7 +339,7 @@ def _finance(T) -> dict:
     S = _site()
     fin = S.finance_inputs(S.site_params({"site_type": "industrial"}))
     first = YEARS[0]
-    owned = [a for a in EXISTING if a != "grid_import"]
+    owned = list(EXISTING)
     cand = [f"{k}_new_{y}" for y in YEARS for k in ("pv", "bess")]
     fin["cod_by_asset"] = {a: f"{max(first, MILLS.get(a, first), FLOTATION.get(a, (0, first))[1])}-01-01"
                            for a in owned}

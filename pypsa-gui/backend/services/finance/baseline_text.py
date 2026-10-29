@@ -19,6 +19,12 @@ _PLAIN = {
     "counterfactual_baseline_shed_unknown": "Whether the site as it stands today serves {a} is "
                                             "not known (no record of its shed), so the "
                                             "comparison is not established.",
+    "connection_envelope_network_only": "Valued under the network's non-firm envelope in {a}, "
+                                        "while the connection agreement is firm (or not "
+                                        "stated): the connection lines price no curtailment.",
+    "counterfactual_product_loads": "{a} is a product the site makes with its own process: "
+                                    "there is nothing to buy in, so the comparison needs the "
+                                    "site as it stands today (a baseline re-solve).",
     "co2_price_not_applied": "The CO2 price cannot be applied to this comparison, so the "
                              "avoided CO2 cost is not established.",
 }
