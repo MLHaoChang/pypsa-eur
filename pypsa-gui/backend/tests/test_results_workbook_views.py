@@ -132,8 +132,11 @@ def test_each_views_key_figures_equal_its_routes_payload(client, install_network
         ws = wb["Capacity Expansion"]
         assert _approx(_key(ws, "Capex (annualised)", HORIZON), cb["capex"])
         assert _approx(_key(ws, "Total system cost", HORIZON), cb["total"])
-        assert _approx(_key(ws, "Capex, all carriers (economics by carrier)", P2),
-                       sum(v["capex_meur"]["by_period"].get(P2, 0.0) for v in ebc["by_carrier"].values()))
+        cb2 = next(b for b in cb["by_period"] if b["period"] == 2040)
+        assert _approx(_key(ws, "Capex (annualised)", P2), cb2["capex"])
+        assert _approx(_key(ws, "Opex", P2), cb2["opex"])
+        assert ebc["available"] and "Economics by carrier (MEUR, GWh, EUR/MWh)" in \
+            [c.value for c in ws["A"]]
 
         gen = get("generators")
         rows, gas = _period_rows(gen, 2040), gen["columns"].index("gas")
@@ -148,9 +151,13 @@ def test_each_views_key_figures_equal_its_routes_payload(client, install_network
         a2 = next(a for a in shape["annual"] if a["period"] == 2040)
         assert _approx(_key(wb["Load shape"], "Load served", P2), a2["load_served"])
 
-        soc = get("storage")
-        assert _approx(_key(wb["Storage cycling"], "Peak state of charge — bat", P2),
-                       max(soc["data"][i][0] for i in _period_rows(soc, 2040)))
+        # The tab's cycles: Σ |p| × w (per solved year) ÷ (2 × p_nom_opt × max_hours).
+        sd = get("storage_dispatch")
+        wy = n.snapshot_weightings.generators.loc[2040].tolist()
+        tp = sum(abs(sd["data"][i][0]) * wi for i, wi in zip(_period_rows(sd, 2040), wy))
+        assert tp > 0
+        assert _approx(_key(wb["Storage cycling"], "Throughput — bat", P2), tp)
+        assert _approx(_key(wb["Storage cycling"], "Cycles — bat", P2), tp / (2 * 20.0 * 2.0))
 
         curt, cause = get("curtailment"), get("curtailment/by_cause")
         assert _approx(_key(wb["Curtailment"], "Curtailed energy — solar", HORIZON),
@@ -243,7 +250,7 @@ def test_each_scenario_column_comes_from_that_runs_own_network(solved, other):
     # The delta is a live formula; with no figures for a run there is none.
     assert re.fullmatch(r"=E(\d+)-D\1", _key(ws, "Total emissions", HORIZON, col=7))
     assert _key(ws, "Total emissions", HORIZON, col=8) == "not_established"
-    assert "Different horizon: not comparable with the base (horizon_differs)" in ws["A2"].value
+    assert "Different horizon: not comparable with the base (a different time horizon" in ws["A2"].value
     # The long tables carry the run's own rows under its name.
     disp = wb["Dispatch"]
     names = {r[0] for r in disp.iter_rows(min_row=5, values_only=True)}
@@ -333,3 +340,18 @@ def test_formula_like_names_stay_text():
         for c in row:
             if c.data_type == "f":
                 assert re.fullmatch(r"=[A-Z]+\d+-[A-Z]+\d+", c.value), c.value
+
+
+def test_a_period_total_with_an_unknown_part_is_not_established(solved, monkeypatch):
+    """ADR-0001: no partial sum stands in for a total."""
+    from services.results import asset_economics
+    real = asset_economics.compute_asset_economics
+
+    def blanked(*a, **k):
+        out = real(*a, **k)
+        out["generators"][0]["by_period"][1]["net_profit_eur"] = None
+        return out
+    monkeypatch.setattr(asset_economics, "compute_asset_economics", blanked)
+    ws = _wb(_build(solved, ["economics"]))["Economics"]
+    assert _key(ws, "Net profit (all assets)", P2) == "not_established"
+    assert isinstance(_key(ws, "Net profit (all assets)", "2030"), (int, float))

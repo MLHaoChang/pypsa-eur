@@ -130,47 +130,75 @@ def _frame(run, accessor: str, attr: str) -> pd.DataFrame | None:
 
 # ── Capacity Expansion ───────────────────────────────────────────────────
 
+def _sum_or_none(values) -> float | None:
+    """A total only when every part is known (ADR-0001: no partial sums)."""
+    values = list(values)
+    if any(v is None or (isinstance(v, float) and v != v) for v in values):
+        return None
+    return float(sum(values))
+
+
+def _capacity_by_period(n) -> pd.DataFrame | None:
+    """Optimal capacity (MW) of the assets active in each period, by carrier."""
+    if not _multi(n):
+        return None
+    rows = {}
+    for comp, attr in (("Generator", "p_nom_opt"), ("StorageUnit", "p_nom_opt")):
+        static = n.components[comp].static
+        if static.empty or attr not in static:
+            continue
+        for p in _periods(n):
+            active = n.components[comp].get_active_assets(p).reindex(static.index).fillna(False)
+            mw = static.loc[active.astype(bool), attr].groupby(
+                static.loc[active.astype(bool), "carrier"].astype(str)).sum()
+            for carrier, v in mw.items():
+                rows.setdefault(p, {})[carrier] = rows.get(p, {}).get(carrier, 0.0) + float(v)
+    return pd.DataFrame.from_dict(rows, orient="index").fillna(0.0) if rows else None
+
+
 def _capex(run) -> ViewData | None:
-    from services.results.asset_economics import compute_asset_economics
     from services.results.cost_breakdown import compute_cost_breakdown
     from services.results.economics_by_carrier import compute_economics_by_carrier
     n = run.network
     cb = compute_cost_breakdown(n, run.cfg)
     ebc = compute_economics_by_carrier(n, run.cfg, run.lost_load, result_df=run.result_df)
-    ae = compute_asset_economics(n, run.cfg, result_df=run.result_df)
     if cb is None and not ebc.get("available"):
         return None
-    d = ViewData(notes=["Cost breakdown and economics by carrier as the Capacity Expansion "
-                        "tab reads them (/results/cost_breakdown, /economics_by_carrier)."])
+    d = ViewData(notes=["Costs as the Capacity Expansion tab reads them (cost breakdown and "
+                        "economics by carrier); capacity is each asset's optimal size, counted in "
+                        "the periods it is active."])
     if cb is not None:
-        for key, label in (("capex", "Capex (annualised)"), ("capex_expansion", "Capex of new build"),
-                           ("opex", "Opex"), ("fom", "Fixed O&M"), ("total", "Total system cost")):
-            d.keys.append(Key(label, "EUR", {HORIZON: cb.get(key)}))
+        by_period = cb.get("by_period") or []
+        for key, label in (("capex", "Capex (annualised)"), ("opex", "Opex"),
+                           ("fom", "Fixed O&M"), ("total", "Total system cost")):
+            d.keys.append(Key(label, "EUR", _by(n, {b["period"]: b.get(key) for b in by_period},
+                                                cb.get(key))))
+        d.keys.append(Key("Capex of new build", "EUR", {HORIZON: cb.get("capex_expansion")}))
+        if by_period:
+            d.tables.append(_rows("Cost by period", "EUR", by_period, ["period"],
+                                  ["capex", "opex", "fom", "total"]))
+            for metric, label in (("capex", "Capex"), ("opex", "Opex")):
+                frame = pd.DataFrame({b["period"]: {c["carrier"]: c.get(metric)
+                                                    for c in b.get("by_carrier") or []}
+                                      for b in by_period}).T
+                if not frame.empty:
+                    d.tables.append(_per_period_table(f"{label} by carrier and period", "EUR",
+                                                      frame))
         d.tables += [t for t in (
             _rows("Cost by component", "EUR", cb.get("by_component") or [], ["component"]),
             _rows("Cost by carrier", "EUR", cb.get("by_carrier") or [], ["component", "carrier"]),
         ) if t]
     by_carrier = ebc.get("by_carrier") or {}
-    for metric, label in (("capex_meur", "Capex"), ("opex_meur", "Opex")):
-        if not by_carrier:
-            break
-        frame = pd.DataFrame({c: (v.get(metric) or {}).get("by_period") or {}
-                              for c, v in by_carrier.items()})
-        totals = [(v.get(metric) or {}).get("total") for v in by_carrier.values()]
-        per = {}
-        if _periods(n) and not frame.empty:
-            frame = frame.reindex([str(p) for p in _periods(n)])
-            frame.index = _periods(n)
-            d.tables.append(_per_period_table(f"{label} by carrier and period", "MEUR", frame))
-            per = {p: float(frame.loc[p].sum()) for p in frame.index}
-        d.keys.append(Key(f"{label}, all carriers (economics by carrier)", "MEUR",
-                          _by(n, per, sum(totals) if None not in totals else None)))
-    rows = [dict(r, component=comp) for comp in ("generators", "storage_units", "stores", "links")
-            for r in ae.get(comp) or []]
-    cap = _rows("Optimal capacity", "MW", rows, ["name", "component", "carrier", "bus"],
-                ["p_nom_opt_mw"])
+    if by_carrier:
+        rows = [{"carrier": c, **{m: (v.get(m) or {}).get("total") for m in v}}
+                for c, v in by_carrier.items()]
+        d.tables.append(_rows("Economics by carrier", "MEUR, GWh, EUR/MWh", rows, ["carrier"]))
+    cap = _capacity_by_period(n)
     if cap is not None:
-        d.tables.append(cap)
+        d.tables.append(_per_period_table("Optimal capacity by carrier and period", "MW", cap))
+        for carrier in cap.columns:
+            d.keys.append(Key(f"Optimal capacity — {carrier}", "MW",
+                              {str(p): float(v) for p, v in cap[carrier].items()}))
     return d
 
 
@@ -188,10 +216,14 @@ def _dispatch(run) -> ViewData | None:
     d.keys += _keys_per_column("Generation", "MWh", energy, n)
     d.tables.append(_per_period_table("Energy by carrier and period", "MWh", energy))
     d.tables.append(Table("Generator dispatch", "MW", _ts_frame(gen), _labels(gen)))
-    sto = _ts(run, "storage_units_t", "p")
-    if sto is not None:
-        d.tables.append(Table("Storage dispatch", "MW (+ discharge, − charge)",
-                              _ts_frame(sto), _labels(sto)))
+    for accessor, attr, name, unit in (
+            ("storage_units_t", "p", "Storage dispatch", "MW (+ discharge, − charge)"),
+            ("stores_t", "p", "Store dispatch", "MW (+ discharge, − charge)"),
+            ("links_t", "p0", "Link flow (bus0)", "MW"),
+            ("loads_t", "p", "Load", "MW")):
+        ts = _ts(run, accessor, attr)
+        if ts is not None:
+            d.tables.append(Table(name, unit, _ts_frame(ts), _labels(ts)))
     return d
 
 
@@ -215,7 +247,7 @@ def _flows(run) -> ViewData | None:
     if not rows:
         return ViewData(notes=notes) if notes else None
     d = ViewData(notes=["Source → via → destination MWh per period, as the Energy flow tab "
-                        "(/results/energy_flows) reads them; each period's energy per modelled "
+                        "reads them; each period's energy per modelled "
                         "year of that period.", *notes])
 
     def tot(x):
@@ -247,7 +279,7 @@ def _loadshape(run) -> ViewData | None:
     annual = [a for a in first.get("annual") or [] if a.get("status") == "ok"]
     if first.get("status") != "ok" or not annual:
         return None
-    d = ViewData(notes=["Annual and monthly totals as the Load shape tab (/results/load_shape) "
+    d = ViewData(notes=["Annual and monthly totals as the Load shape tab "
                         "reads them, per modelled year of each period; the per-snapshot series "
                         "are on the Dispatch sheet."])
     for k in _SHAPE:
@@ -278,20 +310,36 @@ def _loadshape(run) -> ViewData | None:
 # ── Storage cycling ──────────────────────────────────────────────────────
 
 def _storage(run) -> ViewData | None:
+    from services.compare.storage_cycling import _compute_storage_cycling_summary
     n = run.network
-    soc = _ts(run, "storage_units_t", "state_of_charge")
-    if soc is None:
+    dispatch = _ts(run, "storage_units_t", "p")
+    if dispatch is None:
         return None
-    df = _frame(run, "storage_units_t", "state_of_charge").astype(float)
-    peak = df.groupby(level=0).max() if _multi(n) else df.max().to_frame().T.set_axis([None])
-    d = ViewData(notes=["State of charge per snapshot as the Storage cycling tab "
-                        "(/results/storage) reads it."])
-    for col in df.columns:
-        d.keys.append(Key(f"Peak state of charge — {col}", "MWh",
-                          _by(n, {p: float(v) for p, v in peak[col].items()},
-                              float(df[col].max()))))
-    d.tables.append(_per_period_table("Peak state of charge by period", "MWh", peak))
-    d.tables.append(Table("State of charge", "MWh", _ts_frame(soc), _labels(soc)))
+    cyc = _compute_storage_cycling_summary(n, _periods(n), _multi(n), True)
+    if not cyc.available:
+        return None
+    d = ViewData(notes=["Equivalent full cycles = throughput ÷ (2 × energy capacity), the "
+                        "Storage cycling tab's convention: per solved year of each period, the "
+                        "horizon figure is the mean over the periods."])
+    for u in cyc.by_unit:
+        d.keys.append(Key(f"Cycles — {u.name}", "cycles",
+                          {**u.cycles.by_period, HORIZON: u.cycles.total}))
+        d.keys.append(Key(f"Throughput — {u.name}", "MWh",
+                          {**u.throughput_mwh.by_period, HORIZON: u.throughput_mwh.total}))
+    rows = [{"name": u.name, "carrier": u.carrier, "p_nom_mw": u.p_nom_mw,
+             "energy_mwh": u.energy_mwh, "cycles": u.cycles.total,
+             "throughput_mwh": u.throughput_mwh.total} for u in cyc.by_unit]
+    if rows:
+        d.tables.append(_rows("Storage units", "MW, MWh, cycles", rows, ["name", "carrier"]))
+    if _periods(n) and cyc.by_unit:
+        frame = pd.DataFrame({u.name: {p: u.cycles.by_period.get(str(p)) for p in _periods(n)}
+                              for u in cyc.by_unit})
+        d.tables.append(_per_period_table("Cycles by unit and period", "cycles", frame))
+    d.tables.append(Table("Storage dispatch", "MW (+ discharge, − charge)",
+                          _ts_frame(dispatch), _labels(dispatch)))
+    soc = _ts(run, "storage_units_t", "state_of_charge")
+    if soc is not None:
+        d.tables.append(Table("State of charge", "MWh", _ts_frame(soc), _labels(soc)))
     return d
 
 
@@ -306,7 +354,7 @@ def _curtailment(run) -> ViewData | None:
     d = ViewData(notes=[ENERGY_RULE])
     energy = _energy(n, _payload_frame(n, payload))
     d.keys += _keys_per_column("Curtailed energy", "MWh", energy, n)
-    d.tables.append(_per_period_table("Curtailed energy by carrier and period", "MWh", energy))
+    d.tables.append(_per_period_table("Curtailed energy by plant and period", "MWh", energy))
     d.tables.append(Table("Curtailment", "MW", _ts_frame(payload), _labels(payload)))
     cause = curtailment_by_cause(n, getattr(run.cfg, "commercial", None))
     if cause and cause.get("plants"):
@@ -327,18 +375,20 @@ def _lostload(run) -> ViewData | None:
     p = lost_load_payload(n, run.lost_load, run.solved_settings or (lambda: None))
     if p is None:
         return None
-    d = ViewData(notes=["Lost load as the Lost load tab (/results/lost_load) reads it. "
+    d = ViewData(notes=["Lost load as the Lost load tab reads it. "
                         + ("VoLL was applied in the solve." if p.get("voll_applied") else
                            "VoLL was not applied in the solve: lost load was not modelled.")])
-    d.keys += [Key("Lost load", "MWh", {HORIZON: p.get("total_mwh")}),
+    energy = _energy(n, _payload_frame(n, p)) if p.get("columns") else None
+    per = ({k: float(v) for k, v in energy.sum(axis=1).items()} if energy is not None and _multi(n)
+           else {})
+    d.keys += [Key("Lost load", "MWh", _by(n, per, p.get("total_mwh"))),
                Key("Lost-load cost", "EUR", {HORIZON: p.get("total_cost_eur")}),
                Key("VoLL", "EUR/MWh", {HORIZON: p.get("voll_eur_per_mwh")})]
     sh = p.get("shed_hours")
     d.keys.append(Key("Shed hours (electrical buses)", "h",
                       _by(n, (sh or {}).get("by_period") or {}, (sh or {}).get("total"))))
     if p.get("columns"):
-        d.tables.append(_per_period_table("Lost load by bus and period", "MWh",
-                                          _energy(n, _payload_frame(n, p))))
+        d.tables.append(_per_period_table("Lost load by bus and period", "MWh", energy))
         d.tables.append(Table("Lost load", "MW", _ts_frame(p), _labels(p)))
     return d
 
@@ -352,7 +402,7 @@ def _prices(run) -> ViewData | None:
     if p is None or not p.get("columns"):
         return None
     d = ViewData(notes=["Marginal prices per bus and snapshot as the Prices tab "
-                        "(/results/prices) reads them; the mean is the plain mean over the "
+                        "reads them; the mean is the plain mean over the "
                         "snapshots."])
     periods = p.get("periods") or [None] * len(p["index"])
     df = pd.DataFrame(p["data"], columns=[str(c) for c in p["columns"]], dtype=float)
@@ -402,18 +452,17 @@ def _economics(run) -> ViewData | None:
               for r in ae.get(comp) or []]
     if not assets:
         return None
-    d = ViewData(notes=["Per-asset economics as the Economics tab (/results/asset_economics) "
+    d = ViewData(notes=["Per-asset economics as the Economics tab "
                         "reads them.", *(ae.get("reading_notes") or [])])
     by_period = [{"period": b.get("period"), "name": a["name"], **b}
                  for a in assets for b in a.get("by_period") or []]
     for metric, label in (("revenue_eur", "Revenue"), ("net_profit_eur", "Net profit")):
-        per = {}
+        parts: dict = {}
         for b in by_period:
-            if b.get(metric) is not None:
-                per[b["period"]] = per.get(b["period"], 0.0) + b[metric]
-        whole = [a.get(metric) for a in assets]
+            parts.setdefault(b["period"], []).append(b.get(metric))
+        per = {k: _sum_or_none(v) for k, v in parts.items()}
         d.keys.append(Key(f"{label} (all assets)", "EUR",
-                          _by(n, per, sum(whole) if None not in whole else None)))
+                          _by(n, per, _sum_or_none(a.get(metric) for a in assets))))
     if by_period:
         frame = pd.DataFrame(by_period).pivot_table(index="period", columns="name",
                                                     values="net_profit_eur", sort=False)
@@ -434,7 +483,7 @@ def _emissions(run) -> ViewData | None:
     e = compute_emissions(n, "lopf", result_df=run.result_df)
     if e is None:
         return None
-    d = ViewData(notes=["Emissions as the Emissions tab (/results/emissions) reads them."])
+    d = ViewData(notes=["Emissions as the Emissions tab reads them."])
     per = {b["period"]: b.get("total_tCO2") for b in e.get("by_period") or []}
     d.keys.append(Key("Total emissions", "tCO2", _by(n, per, e.get("total_tCO2"))))
     for c in e.get("by_carrier") or []:

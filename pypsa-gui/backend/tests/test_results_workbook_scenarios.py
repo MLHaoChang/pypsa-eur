@@ -346,3 +346,50 @@ def test_system_lcoe_is_a_per_run_formula_per_period_and_the_charts_read_numbers
     assert series
     for ref in series:
         assert ws[ref].data_type == "f" or _is_num(ws[ref].value), (ref, ws[ref].value)
+
+
+# ── per-view scenario columns (package 02, R1) ───────────────────────────
+
+def _view_keys(ws, label: str) -> dict[str, object]:
+    """Run name → the key's horizon value, from the view sheet's key block."""
+    head = next(r for r in ws.iter_rows(min_row=4) if r[0].value == "Key result")
+    names = [c.value for c in head[3:] if c.value and not str(c.value).startswith("Δ")]
+    row = next(r for r in ws.iter_rows(min_row=head[0].row + 1)
+               if r[0].value == label and r[2].value == "horizon")
+    return {name: row[3 + i].value for i, name in enumerate(names)}
+
+
+def test_each_view_column_reads_that_cases_own_saved_run(client, swept):
+    """Through the route: each case's Capacity Expansion column equals the cost
+    breakdown of its own saved network and config, not the base's."""
+    from services import project_registry
+    from services.results.cost_breakdown import compute_cost_breakdown
+    _base_id, ids = swept
+    r = client.get(URL, params={"views": "capex"})
+    assert r.status_code == 200, r.text
+    values = _view_keys(load_workbook(io.BytesIO(r.content))["Capacity Expansion"], "Opex")
+    assert set(ids) <= set(values)
+    with chat_tools._acting() as (db, user):
+        for name, pid in ids.items():
+            ctx = wt._load_context(project_registry.resolve_project(db, user, pid))
+            expected = compute_cost_breakdown(ctx.network, ctx.solver_state.get("solver_config"))
+            assert values[name] == pytest.approx(expected["opex"], rel=1e-9), name
+    # The runs differ, so a column read from the base would fail.
+    assert len({round(v, 3) for v in values.values()}) == len(values)
+
+
+def test_a_case_whose_dispatch_the_routes_would_not_serve_has_no_figures(client, swept, monkeypatch):
+    from services.pypsa_service import PyPSAService
+    active = PyPSAService.get_network()
+    real = results_router._dispatch_ready
+    monkeypatch.setattr(results_router, "_dispatch_ready",
+                        lambda n: real(n) if n is active else False)
+    r = client.get(URL, params={"views": "dispatch"})
+    assert r.status_code == 200, r.text
+    wb = load_workbook(io.BytesIO(r.content))
+    ws = wb["Dispatch"]
+    assert "not solved yet" in ws["A2"].value
+    label = next(c.value for c in ws["A"] if str(c.value).startswith("Generation — "))
+    values = _view_keys(ws, label)
+    assert [v for k, v in values.items() if k != next(iter(values))] == \
+        [NOT_ESTABLISHED] * (len(values) - 1)

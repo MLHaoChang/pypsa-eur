@@ -78,10 +78,10 @@ class Chart:
 #: The charts of every view, chosen here in one place (spec item 5).
 CHARTS: dict[str, tuple[Chart, ...]] = {
     "capex": (
-        Chart("stacked", "Capex by carrier by period", "Capex by carrier and period", "MEUR"),
-        Chart("stacked", "Opex by carrier by period", "Opex by carrier and period", "MEUR"),
-        Chart("bar", "Optimal capacity by asset", "Optimal capacity", "MW", cats=0,
-              columns=("p_nom_opt_mw",)),
+        Chart("stacked", "Optimal capacity by carrier by period",
+              "Optimal capacity by carrier and period", "MW"),
+        Chart("stacked", "Capex by carrier by period", "Capex by carrier and period", "EUR"),
+        Chart("stacked", "Opex by carrier by period", "Opex by carrier and period", "EUR"),
     ),
     "dispatch": (
         Chart("stacked", "Generation by carrier by period", "Energy by carrier and period", "MWh"),
@@ -94,12 +94,13 @@ CHARTS: dict[str, tuple[Chart, ...]] = {
         Chart("stacked", "Annual load served and supply by period", "Annual totals", "MWh"),
     ),
     "storage": (
+        Chart("bar", "Equivalent full cycles by unit by period", "Cycles by unit and period",
+              "cycles"),
         Chart("line", "State of charge (base, every snapshot)", "State of charge", "MWh"),
-        Chart("bar", "Peak state of charge by period", "Peak state of charge by period", "MWh"),
     ),
     "curtailment": (
-        Chart("stacked", "Curtailed energy by carrier by period",
-              "Curtailed energy by carrier and period", "MWh"),
+        Chart("stacked", "Curtailed energy by plant by period",
+              "Curtailed energy by plant and period", "MWh"),
         Chart("line", "Curtailment (base, every snapshot)", "Curtailment", "MW"),
     ),
     "lostload": (
@@ -280,8 +281,9 @@ def _why_missing(ctx, datas: list[ViewData | None]) -> list[str | None]:
     for run, d in zip(ctx.runs, datas):
         if d is not None:
             out.append(None)
-        elif getattr(run, "reasons", None):
-            out.append("not comparable with the base (" + ", ".join(run.reasons) + ")")
+        elif run.reasons:
+            from services.results_workbook.scenarios import _results_text
+            out.append("not comparable with the base (" + _results_text(run) + ")")
         else:
             out.append("no results for this view")
     return out

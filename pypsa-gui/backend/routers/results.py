@@ -191,7 +191,7 @@ def _not_solved():
     return Response(status_code=204)
 
 
-def _solved_settings() -> dict | None:
+def _solved_settings(state=None, n=None) -> dict | None:
     """
     The settings the last successful solve used, or None when nothing is
     solved (UX overhaul S2b). Lets lost_load / adequacy / reserve_margin say
@@ -202,20 +202,26 @@ def _solved_settings() -> dict | None:
     Projects solved before the stash existed carry none; for those the
     existing stashes decide, which is exact because each is published only by
     a successful solve that enforced its standard.
+
+    `state` / `n` read another run's solver state and network (a scenario's
+    own context, in the results workbook) instead of the active ones.
     """
-    settings = _state.get("last_solve_settings")
+    if state is None:
+        state = _state
+    settings = state.get("last_solve_settings")
     if settings:
         return settings
-    if _state.get("status") == "failed" or not _dispatch_ready(PyPSAService.get_network()):
+    if state.get("status") == "failed" or not _dispatch_ready(
+            PyPSAService.get_network() if n is None else n):
         return None
-    capture = _state.get("last_lost_load") or {}
-    report = _state.get("adequacy_report") or {}
+    capture = state.get("last_lost_load") or {}
+    report = state.get("adequacy_report") or {}
     return {
         "voll_eur_per_mwh": float(capture.get("voll_eur_per_mwh") or 0.0)
         if capture.get("lost_load_t") is not None else 0.0,
         "ens_target_applied": report.get("target") is not None,
         "ens_cap_permyriad": None,
-        "reserve_margin_applied": bool(_state.get("last_reserve_margin")),
+        "reserve_margin_applied": bool(state.get("last_reserve_margin")),
         "reserve_margin": None,
     }
 
@@ -2237,7 +2243,10 @@ def _workbook_scenarios(cfg, n, freshness: dict):
 
     try:
         return gather_scenarios(str(pid), base_basis, ic_key=ic_key,
-                                result_df_for=lambda state: functools.partial(_result_df, state=state))
+                                result_df_for=lambda state: functools.partial(_result_df, state=state),
+                                solved_settings_for=lambda state, net: functools.partial(
+                                    _solved_settings, state, net),
+                                dispatch_ready=_dispatch_ready)
     except HTTPException as exc:
         if exc.status_code == 404:  # no saved project row (a scratch network)
             return None
