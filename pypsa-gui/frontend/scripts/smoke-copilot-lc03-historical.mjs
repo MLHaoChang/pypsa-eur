@@ -165,9 +165,11 @@ try {
   }
   assert.notEqual(runs[0], runs[1])
 
-  const openProject = async name => {
+  const openProject = async (name, { reload = false } = {}) => {
     await page.getByRole('button', { name: /^Projects$/ }).first().click()
     await page.waitForURL(/\/projects/)
+    // The list may still be the one cached while access was gone (10 s stale time).
+    if (reload) await page.reload()
     // The whole card is its link: a pointer click on the card's name opens it
     // (the visible one: the tab strip may still carry the name off-screen).
     await page.getByText(name, { exact: true }).locator('visible=true').first().click({ timeout: 30000 })
@@ -247,7 +249,7 @@ try {
   await control('restore-access')
   await page.getByRole('button', { name: 'Guided', exact: true }).click()
   // Access back, the project is opened again from Projects, as the words say.
-  await openProject('oj-grid')
+  await openProject('oj-grid', { reload: true })
 
   // LC-T10 (3): a project switch leaves nothing of the past run behind.
   await openPast(3)
