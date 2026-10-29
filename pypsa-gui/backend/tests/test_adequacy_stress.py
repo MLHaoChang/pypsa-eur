@@ -103,9 +103,15 @@ def test_cold_snap_prices_exactly(tmp_path):
     fm = r["failure_mode"]
     assert fm["failure_class"] == "C"
     assert fm["occurrence_per_year"] == pytest.approx(0.05)
-    # criticality €/yr = frequency × ΔEUE × VoLL; f×S identity.
+    # criticality €/yr = frequency × ΔEUE × VoLL, the 6 h horizon's ΔEUE
+    # scaled to a year by 8760/6 (LC-30): 0.05 × 180 × 1460 × 3000 and a
+    # severity of 180 × 1460 × 3000 per scenario year; f×S identity.
     assert fm["criticality_eur_per_year"] == pytest.approx(
-        0.05 * (SNAP_EUE - BASE_EUE) * VOLL, rel=1e-3)
+        0.05 * (SNAP_EUE - BASE_EUE) * 8760.0 / (N * WEIGHT) * VOLL, rel=1e-3)
+    assert fm["severity_eur"] == pytest.approx(
+        (SNAP_EUE - BASE_EUE) * 8760.0 / (N * WEIGHT) * VOLL, rel=1e-3)
+    assert fm["criticality_basis"] == "annualised"
+    assert fm["horizon_years"] == pytest.approx(N * WEIGHT / 8760.0)
     assert fm["severity_eur"] * fm["occurrence_per_year"] == pytest.approx(
         fm["criticality_eur_per_year"], rel=1e-9)
     # Parametric provenance is loud: the basis names it.

@@ -617,8 +617,10 @@ def run_class_c_sweep(network, lock, cfg, scenarios: list[dict], *,
                       stop_event=None) -> tuple[list[dict], dict]:
     """
     Class-C rows via the shared driver. occurrence = the scenario's
-    empirical ``frequency_per_year``; severity = ΔEUE × VoLL per event;
-    criticality = the product (f×S by construction).
+    empirical ``frequency_per_year``; severity = ΔEUE × VoLL per event,
+    the scenario held over a year: the horizon's ΔEUE / horizon_years (LC-30,
+    the horizon represents the year the frequency counts); criticality = the
+    product (f×S by construction).
 
     Provenance is loud:
     * parametric → ``occurrence_basis="scenario:parametric"``
@@ -629,6 +631,9 @@ def run_class_c_sweep(network, lock, cfg, scenarios: list[dict], *,
 
     _validate(scenarios)
     voll = float(getattr(cfg, "voll", 0.0) or 0.0)
+    from services.adequacy.metrics import criticality_scale, horizon_years
+    nyears = horizon_years(network)
+    scale, basis = criticality_scale(nyears)
     # Horizon for fail-closed length checks. Missing on stub networks used by
     # unit tests that monkeypatch the sweep — those skip the length gate.
     try:
@@ -722,7 +727,7 @@ def run_class_c_sweep(network, lock, cfg, scenarios: list[dict], *,
             continue
         delta = float(res["delta_eue_mwh"] or 0.0)
         freq = meta["frequency_per_year"]
-        severity = delta * voll
+        severity = delta * voll * scale
         rows.append({
             "id": c["id"],
             "status": res["status"],
@@ -736,6 +741,8 @@ def run_class_c_sweep(network, lock, cfg, scenarios: list[dict], *,
                 "occurrence_basis": c["occurrence_basis"],
                 "severity_eur": severity,
                 "criticality_eur_per_year": freq * severity,
+                "criticality_basis": basis,
+                "horizon_years": nyears,
                 "in_metric_scope": True,
                 "engine": "lp_proxy",
                 "fidelity": "deterministic_scenario",

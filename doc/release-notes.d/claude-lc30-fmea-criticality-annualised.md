@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): FMEA criticality is now per year on every horizon. Classes A, B and C scale the horizon's ΔEUE × VoLL by 8760 / Σ snapshot weights, matching the annual occurrence, so severity (criticality / occurrence) no longer mixes a per-horizon and a per-year figure. Each failure mode states `criticality_basis` and `horizon_years`.

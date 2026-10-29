@@ -11,6 +11,8 @@ bug class period_utils exists to prevent.
 """
 from __future__ import annotations
 
+import math
+
 import pandas as pd
 
 
@@ -195,6 +197,21 @@ def horizon_years(n, column: str = "generators", sns=None) -> float:
     if not (total == total and total not in (float("inf"), float("-inf"))):
         return 0.0
     return total / HOURS_PER_YEAR
+
+
+def criticality_scale(nyears: float) -> tuple[float, str]:
+    """
+    The factor that turns a horizon's ΔEUE·VoLL into a per-YEAR criticality,
+    and the basis to state beside it (ticket LC-30). Occurrence is annual
+    (8760·q/MTTR), so criticality must be too, or severity = criticality /
+    occurrence mixes a per-horizon numerator with a per-year denominator.
+
+    ``1/nyears`` when the horizon has length; an empty or unreadable horizon
+    is left unscaled and says ``"per_horizon"`` rather than guessing.
+    """
+    if nyears > 0 and math.isfinite(nyears):
+        return 1.0 / nyears, "annualised"
+    return 1.0, "per_horizon"
 
 
 def resolve_time_basis(nyears: float) -> str:
