@@ -35,7 +35,17 @@ def test_no_result_kind_serialises_as_a_response_repr(install_network):
     install_network(_unsolved())
     leaked = []
     for kind in RESULTS_ENUM:
-        body = json.dumps(T.get_results(kind), default=str)
+        if kind == "plausibility":
+            from fastapi import HTTPException
+
+            with pytest.raises(HTTPException) as refused:
+                T.get_results(kind)
+            assert refused.value.status_code == 409
+            assert refused.value.detail["error_kind"] == "plausibility_results_unavailable"
+            payload = refused.value.detail
+        else:
+            payload = T.get_results(kind)
+        body = json.dumps(payload, default=str)
         if "Response object" in body:
             leaked.append(kind)
     assert not leaked, f"result kinds leaked a Response repr: {leaked}"
