@@ -106,16 +106,20 @@ def _route_parity() -> dict:
         raise ValueError('route parity fails; run assistant_route_parity.py --check: ' + '; '.join(problems))
     needs: dict[str, list[str]] = {}
     reasons: dict[str, int] = {}
+    held: dict[str, list[str]] = {}
     for row in data['rows']:
         if row['class'] == 'needs-tool':
             needs.setdefault(row['family'], []).append(f'{row["method"]} {row["path"]}')
         elif row['class'] == 'limitation':
             reasons[row['reason']] = reasons.get(row['reason'], 0) + 1
+            if row['reason'] == 'held-by-spec':
+                held.setdefault(row['issue'], []).append(f'{row["method"]} {row["path"]}')
     return {
         'source': 'pypsa-gui/backend/smoke/assistant_route_parity.py (built in memory)',
         'counts': data['counts'],
         'limitations_by_reason': dict(sorted(reasons.items())),
         'needs_tool_by_family': {f: sorted(r) for f, r in sorted(needs.items())},
+        'held_by_issue': {i: sorted(r) for i, r in sorted(held.items())},
     }
 
 
@@ -152,6 +156,12 @@ def _full_coverage(journeys: list[dict], route_parity: dict | None = None,
             {'id': f'route-parity:needs-tool:{family}', 'issue': '08', 'family': family,
              'summary': f'{len(routes)} GUI routes have no typed assistant tool (route_parity.needs_tool_by_family).'}
             for family, routes in route_parity['needs_tool_by_family'].items()
+        ]
+        # A held route is a limitation, never a tool: its issue stays open until it serves them.
+        blockers += [
+            {'id': f'route-parity:held:{issue}', 'issue': '08', 'pointer': issue,
+             'summary': f'{len(routes)} GUI routes are held for this issue (route_parity.held_by_issue).'}
+            for issue, routes in route_parity.get('held_by_issue', {}).items()
         ]
     return {
         'claimed': not blockers,

@@ -69,6 +69,8 @@ SETTINGS_EDITS = frozenset({
     "campus_save_campus", "campus_set_grid_limit", "campus_reset_grid_limit",
     "gridspine_upload_external_dispatch", "campus_extract_grid_code", "campus_new_grid_code_draft",
     "campus_save_grid_code_draft",
+    # LV08 R2: the site anchor (Site 3D coordinates), through anchor.write_anchor
+    "set_site_anchor",
 })
 
 # Destructive- and execution-tier tools that show a content card too (owner decision
