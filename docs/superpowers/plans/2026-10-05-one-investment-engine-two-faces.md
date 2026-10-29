@@ -248,6 +248,11 @@ only when it is set, so a case without a campus study reports as before.
 purchase so none becomes an asset of its own), `service_to: float | None = None` and `existing_renewal: bool = False`
 (the first entry is an existing asset's first renewal, a P5 stage that `staged_cod_not_active_period` exempts). With
 the defaults an extra asset behaves as before.
+**Additions (2026-10-29, grid-to-process 11):** `FinanceCase` gains the trailing field
+`product_shortfall: tuple[ProductShortfall, ...] = ()` (after `asset_cod`): each shortfall slack's lost product per
+period, on the project solve and on the site-today baseline, per year of the period in the product bus's unit. It is a
+quantity for the report (`counterfactual.lost_product`), never a cash line. Empty without a baseline or a shortfall
+slack, and then left out of the case hash, so other cases keep their hash.
 
 ## 7. Coordination protocol
 

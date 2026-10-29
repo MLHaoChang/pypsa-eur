@@ -15,6 +15,7 @@ from typing import Any
 import numpy as np
 
 from models.finance import InvestmentCaseReport, export_investment_case
+from services.finance.cashflow import STREAM_CLASS
 from services.finance.debt import CFADS_DEFINITION
 
 IC_REPORT_STORE_KEY = "investment_case_report"
@@ -581,12 +582,70 @@ def _counterfactual_block(result, case) -> dict[str, Any]:
         "avoided_co2_cost": None
         if any(f.startswith("co2_price_not_applied:") for f in result.flags)
         else _avoided_co2(result),
+        # Grid-to-process 11: the incremental operating cash per year split
+        # into the energy bill, the lost production and the rest (they sum to
+        # it), and the lost product behind the lost-production line.
+        "incremental_split": _incremental_split(result),
+        "lost_product": _lost_product(case),
         # Whether the case prices CO2 at all, so a None above reads "not
         # established", never "none" (gatekeeper review of #305).
         "co2_priced": any(ln.key.startswith("co2:")
                           for t in (*case.templates, *case.counterfactual) for ln in t.lines)
         or any(f.startswith("co2_price_not_applied:") for f in result.flags),
     }
+
+
+#: The streams the incremental split counts as the energy bill: the tariff
+#: class (`cashflow.STREAM_CLASS`), the commodity and the network charges.
+ENERGY_BILL_STREAMS = tuple(sorted(k for k, v in STREAM_CLASS.items() if v == "tariff"))
+#: Each split part's streams; any other stream is `other`.
+_SPLIT_PART = {**dict.fromkeys(ENERGY_BILL_STREAMS, "energy_bill"), "lost_production": "lost_production"}
+
+
+def _incremental_split(result) -> dict[str, list[float]] | None:
+    """Grid-to-process 11: the incremental operating cash per year (actual −
+    counterfactual, undiscounted, `op_incremental.net`'s sign and basis) split
+    by stream: `energy_bill` (ENERGY_BILL_STREAMS), `lost_production` (the
+    shortfall's ledgered value: the line is split out of the opex delta,
+    never added beside it) and `other` (the rest), which sum to `net`
+    exactly. None when either side's operating cash is not established."""
+    cf_op = getattr(result, "op_counterfactual", None)
+    net = (getattr(result, "op_incremental", None) or {}).get("net")
+    if cf_op is None or net is None:
+        return None
+    parts = {"energy_bill": np.zeros(len(net)), "lost_production": np.zeros(len(net))}
+    for op, sign in ((result.op, 1.0), (cf_op, -1.0)):
+        for key, arr in (op.lines or {}).items():
+            meta = op.line_meta.get(key)
+            if arr is None or meta is None:
+                continue
+            part = _SPLIT_PART.get(meta.stream)
+            if part is not None:
+                parts[part] += sign * np.asarray(arr, dtype=float)
+    net = np.asarray(net, dtype=float)
+    other = net - parts["energy_bill"] - parts["lost_production"]
+    return {"net": [float(x) for x in net],
+            "energy_bill": [float(x) for x in parts["energy_bill"]],
+            "lost_production": [float(x) for x in parts["lost_production"]],
+            "other": [float(x) for x in other],
+            "energy_bill_streams": list(ENERGY_BILL_STREAMS)}
+
+
+def _lost_product(case) -> list[dict[str, Any]] | None:
+    """Grid-to-process 11: each shortfall slack's lost product per period and
+    per year of it, project and site-today baseline, and the delta (project −
+    baseline: < 0 = the investment loses less). None without a record."""
+    rows = getattr(case, "product_shortfall", ()) or ()
+    if not rows:
+        return None
+    out = []
+    for r in rows:
+        project, base = r.project_per_year, r.counterfactual_per_year
+        out.append({"period": r.period, "generator": r.generator, "bus": r.bus, "unit": r.unit,
+                    "years": _num(r.years),
+                    "project_per_year": _num(project), "counterfactual_per_year": _num(base),
+                    "delta_per_year": None if project is None or base is None else _num(project - base)})
+    return out
 
 
 def _avoided_co2(result) -> list[float] | None:
