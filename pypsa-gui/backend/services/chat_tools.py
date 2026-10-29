@@ -8876,11 +8876,33 @@ def campus_reset_grid_limit(project_id: str, item: str) -> dict:
     return _campus_route(_h, project_id, item)
 
 
-def campus_island_report(project_id: str) -> dict:
-    """`GET …/island/report`, trimmed under the result cap."""
+def campus_island_report(project_id: str, table: str | None = None) -> dict:
+    """`GET …/island/report`, trimmed under the result cap. The whole payload
+    keeps its first two tables; `table` (an id) returns that one table with
+    its rows, trimmed only when the rows alone exceed the cap."""
     from routers.campus_electrical import island_report as _h
+    from services.campus_island_report import TABLE_IDS
 
-    return _b2b_fit(_campus_route(_h, project_id))
+    payload = _campus_route(_h, project_id)  # resolves the campus first
+    tables = payload.get("tables")
+    tables = tables if isinstance(tables, list) else []
+    available = [t["id"] for t in tables]
+    if table is None:
+        return {**_b2b_fit(payload), "table_ids": available}
+    if not isinstance(table, str) or table not in TABLE_IDS:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "invalid_tool_args",
+            "message": f"table must be one of {list(TABLE_IDS)}, got {_cut(table, 40)!r}"})
+    one = next((t for t in tables if t["id"] == table), None)
+    out = _b2b_fit({"caveat": payload.get("caveat"), "missing": payload.get("missing"),
+                    "table": one})
+    out["table_ids"] = available
+    if one is None:
+        out["not_in_report"] = f"{table} is not in this report: see `missing` and `table_ids`."
+    if "truncated" in out:
+        out["truncated_note"] = ("Rows beyond `shown` are cut; GET "
+                                 "/api/campus-electrical/{name}/island/report returns the full table.")
+    return out
 
 
 def campus_cancel_island_cuts(project_id: str) -> dict:

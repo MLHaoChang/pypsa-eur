@@ -3,7 +3,7 @@
 
 # LC-27 — the copilot's island report never shows the frequency events
 
-Status: needs-triage
+Status: done
 
 Found by LC-06 (5) while building S8a (LC-D16). `campus_island_report` returns
 `island_report(project)` through `_b2b_fit` (`services/chat_tools.py`). On a hub
@@ -25,3 +25,7 @@ Options for whoever takes this:
   that lists the ids. The catalogue, the route parity and the tool-list tests change.
 - Trim rows inside each table rather than whole tables, so every table keeps
   its first rows. No schema change, but a 21-table payload may still not fit.
+
+## Comments
+
+GK B plan GO, first option, conditions (all met in `test_lc27_island_report_table_arg.py`): one `TABLE_IDS` literal feeds the schema enum, the description and the refusal, and a real full report's ids are a subset of it; rows over the cap say shown of total and point at the route; an unknown, empty, wrong-case or non-string id is `invalid_tool_args` (no new kind); `table` is checked after the campus resolution, so a missing campus is refused identically with or without it; the no-argument answer keeps its two tables and adds `table_ids`.
