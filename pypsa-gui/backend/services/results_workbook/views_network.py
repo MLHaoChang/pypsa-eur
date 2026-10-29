@@ -65,6 +65,17 @@ def _labels(payload: dict) -> int:
     return 2 if "periods" in payload else 1
 
 
+def _ts_table(run, name: str, unit: str, payload: dict, time: str = "mean") -> Table:
+    """A snapshot table, with each row's hours (`snapshot_weights(n, "generators")`)
+    so `budget.coarsen` can aggregate it; no hours when the payload does not
+    cover the network's snapshots (then it is never coarsened)."""
+    from services.period_utils import snapshot_weights
+    n = run.network
+    w = (snapshot_weights(n, "generators").to_numpy(dtype=float)
+         if len(payload["index"]) == len(n.snapshots) else None)
+    return Table(name, unit, _ts_frame(payload), _labels(payload), time=time, weights=w)
+
+
 def _energy(n, df: pd.DataFrame) -> pd.DataFrame:
     """Σ p·w per period (rows) per column; one row labelled HORIZON-less
     period `None` for a single-period run."""
@@ -215,7 +226,7 @@ def _dispatch(run) -> ViewData | None:
     energy = _energy(n, df.T.groupby(carrier.values).sum().T)
     d.keys += _keys_per_column("Generation", "MWh", energy, n)
     d.tables.append(_per_period_table("Energy by carrier and period", "MWh", energy))
-    d.tables.append(Table("Generator dispatch", "MW", _ts_frame(gen), _labels(gen)))
+    d.tables.append(_ts_table(run, "Generator dispatch", "MW", gen))
     for accessor, attr, name, unit in (
             ("storage_units_t", "p", "Storage dispatch", "MW (+ discharge, − charge)"),
             ("stores_t", "p", "Store dispatch", "MW (+ discharge, − charge)"),
@@ -223,7 +234,7 @@ def _dispatch(run) -> ViewData | None:
             ("loads_t", "p", "Load", "MW")):
         ts = _ts(run, accessor, attr)
         if ts is not None:
-            d.tables.append(Table(name, unit, _ts_frame(ts), _labels(ts)))
+            d.tables.append(_ts_table(run, name, unit, ts))
     return d
 
 
@@ -335,11 +346,11 @@ def _storage(run) -> ViewData | None:
         frame = pd.DataFrame({u.name: {p: u.cycles.by_period.get(str(p)) for p in _periods(n)}
                               for u in cyc.by_unit})
         d.tables.append(_per_period_table("Cycles by unit and period", "cycles", frame))
-    d.tables.append(Table("Storage dispatch", "MW (+ discharge, − charge)",
-                          _ts_frame(dispatch), _labels(dispatch)))
+    d.tables.append(_ts_table(run, "Storage dispatch", "MW (+ discharge, − charge)",
+                                    dispatch))
     soc = _ts(run, "storage_units_t", "state_of_charge")
     if soc is not None:
-        d.tables.append(Table("State of charge", "MWh", _ts_frame(soc), _labels(soc)))
+        d.tables.append(_ts_table(run, "State of charge", "MWh", soc, "state"))
     return d
 
 
@@ -355,7 +366,7 @@ def _curtailment(run) -> ViewData | None:
     energy = _energy(n, _payload_frame(n, payload))
     d.keys += _keys_per_column("Curtailed energy", "MWh", energy, n)
     d.tables.append(_per_period_table("Curtailed energy by plant and period", "MWh", energy))
-    d.tables.append(Table("Curtailment", "MW", _ts_frame(payload), _labels(payload)))
+    d.tables.append(_ts_table(run, "Curtailment", "MW", payload))
     cause = curtailment_by_cause(n, getattr(run.cfg, "commercial", None))
     if cause and cause.get("plants"):
         rows = [{"plant": g, "total_mwh": v.get("total_mwh"), "available_mwh": v.get("available_mwh"),
@@ -389,7 +400,7 @@ def _lostload(run) -> ViewData | None:
                       _by(n, (sh or {}).get("by_period") or {}, (sh or {}).get("total"))))
     if p.get("columns"):
         d.tables.append(_per_period_table("Lost load by bus and period", "MWh", energy))
-        d.tables.append(Table("Lost load", "MW", _ts_frame(p), _labels(p)))
+        d.tables.append(_ts_table(run, "Lost load", "MW", p))
     return d
 
 
@@ -429,7 +440,7 @@ def _prices(run) -> ViewData | None:
     dur = pd.DataFrame(curve)
     dur.insert(0, "Rank", range(1, len(dur) + 1))
     d.tables.append(Table("Price duration", "EUR/MWh", dur))
-    d.tables.append(Table("Prices", "EUR/MWh", _ts_frame(p), _labels(p)))
+    d.tables.append(_ts_table(run, "Prices", "EUR/MWh", p, "price"))
     drivers = compute_price_drivers(n, 2000.0, 200)  # the route's defaults
     if drivers and drivers.get("rows"):
         d.tables.append(_rows(f"Price drivers (price ≥ {drivers['threshold']:g})", "EUR/MWh",
