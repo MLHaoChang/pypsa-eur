@@ -176,6 +176,21 @@ def test_loadflow_keys_equal_the_route_and_each_scenario_reads_its_own_context(a
     assert any(r[0] == "Base" and r[1] == 2040 and r[3] == l1 for r in rows)
 
 
+
+def test_a_branch_list_the_tab_cuts_short_says_so(active_lf, monkeypatch):
+    from services import loadflow_summary as lf
+
+    def capped(*a, **k):
+        out = get_loadflow_view(*a, **k)
+        if out.get("status") == "ok":
+            out = {**out, "rows": out["rows"][:1], "rows_truncated": True}
+        return out
+    monkeypatch.setattr(lf, "get_loadflow_view", capped)
+    ws = _wb(_build(active_lf, ["loadflow"]))[TITLES["loadflow"]]
+    notes = " ".join(str(r[0]) for r in ws.iter_rows(values_only=True) if r[0])
+    ranked = get_loadflow_view("lopf")["counts"]["ranked"]
+    assert f"ranks at most 1 of {ranked} branches" in notes
+
 def test_a_loadflow_the_tab_cannot_show_is_no_results(install_network, monkeypatch):
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2030-01-01", periods=2, freq="h"))
@@ -364,6 +379,36 @@ def test_electrical_design_costs_per_period_with_the_second_period(net, projects
     tables = [r[1] for r in ws.iter_rows(values_only=True) if r[0] == "Base"]
     assert 2040 in tables  # the long tables carry the second period's rows
 
+
+
+def test_electrical_design_sums_only_whole_capex_and_never_annualised_cost(net, projects,
+                                                                          monkeypatch):
+    from services import campus_electrical_service as ce
+    ws = _wb(_build(net, ["electrical_design"], project_for=projects.project_for))[
+        TITLES["electrical_design"]]
+    assert _key(ws, "Electrical cost, annualised", HORIZON) == "not_established"
+    first_only = _hub_state(1.0)
+    first_only["results"]["cost"] = first_only["results"]["cost"][:1]
+    monkeypatch.setattr(ce, "get_state", lambda p: first_only)
+    ws = _wb(_build(net, ["electrical_design"], project_for=projects.project_for))[
+        TITLES["electrical_design"]]
+    assert _key(ws, "Electrical capex", "2030") == first_only["results"]["cost"][0]["capex_eur"]
+    assert _key(ws, "Electrical capex", HORIZON) == "not_established"  # 2040 unknown
+
+
+def test_grid_forming_counts_cases_no_capacity_fixes(net, projects, monkeypatch):
+    from services import campus_island_tuning
+    got = _gfm()
+    cap = got["recommendation"]["capacity"]
+    cap.append({**cap[0], "case": "2040 h2 seamless E1", "delta": float("inf")})
+    monkeypatch.setattr(campus_island_tuning, "get_settings", lambda p: got)
+    wb = _wb(_build(net, ["grid_forming"], project_for=projects.project_for))
+    ws = wb[TITLES["grid_forming"]]
+    assert _key(ws, "Capacity needed — inertia", HORIZON) == 40.0
+    assert _key(ws, "Cases no capacity fixes — inertia", HORIZON) == 1
+    rows = list(ws.iter_rows(values_only=True))
+    assert any("not achievable by capacity" in r for r in rows)
+    assert ws._charts  # the capacity chart keeps its all-number column
 
 def test_electrical_design_of_a_planning_study_is_no_results(net, projects):
     wb = _wb(_build(net, ["electrical_design"], project_id="study",

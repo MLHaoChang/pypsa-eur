@@ -185,6 +185,15 @@ def _loadflow(run) -> ViewData | None:
         d.tables.append(Table("Peak loading by branch and period", "%",
                               peak.reset_index(drop=True)))
     d.tables.append(_records("Branch loading", "%, MW, h", rows))
+    for lab, p in payloads.items():
+        if p.get("status") != "ok":
+            continue
+        if p.get("rows_truncated"):
+            d.notes.append(f"Branch loading ({lab}): the tab ranks at most {len(p.get('rows') or [])}"
+                           f" of {p['counts']['ranked']} branches; the rest are not listed.")
+        if p.get("skipped_truncated"):
+            d.notes.append(f"Branches not ranked ({lab}): {len(p.get('skipped') or [])} of "
+                           f"{p.get('skipped_total', 'more')} listed, as in the tab.")
     skipped = _records("Branches not ranked", "", whole.get("skipped"))
     if skipped is not None:
         d.tables.append(skipped)
@@ -259,7 +268,8 @@ def _grid_code(run, project) -> ViewData | None:
     if state.get("stale"):
         d.notes.append(f"{run.name}: the campus changed since this study ran.")
     comp = res.get("compliance") or []
-    for status in ("fail", "pass"):
+    for status in sorted({str(r.get(f)) for r in comp
+                          for f in ("status_as_is", "status_with_measures")}):
         d.keys.append(Key(f"Checks {status} as is", "count",
                           {HORIZON: _count(comp, "status_as_is", status)}))
         d.keys.append(Key(f"Checks {status} with measures", "count",
@@ -299,18 +309,23 @@ def _electrical_design(run, project) -> ViewData | None:
     d = ViewData(notes=["The campus study's electrical design as the Electrical design tab "
                         "reads it: proposals at its critical hours, nothing adopted into the "
                         "model. Costs per investment period from the study's cost table; "
-                        "the horizon is their sum only when every period's cost is known."])
+                        "the horizon is their sum only when every period's cost is known; the annualised "
+                        "cost has no horizon value (EUR/a of different periods do not add)."])
     if state.get("stale"):
         d.notes.append(f"{run.name}: the campus changed since this study ran.")
     cost = res.get("cost") or []
     if cost:
+        periods = {str(p) for p in _periods(n)}
         for field, label, unit in (("capex_eur", "Electrical capex", "EUR"),
                                    ("capex_replacement_eur", "Electrical capex, renewals", "EUR"),
                                    ("annualised_eur_per_a", "Electrical cost, annualised",
                                     "EUR/a")):
             per = {r.get("period"): r.get(field) for r in cost}
             by = {str(p): v for p, v in per.items()}
-            by[HORIZON] = _sum_or_none(per.values())
+            # EUR/a of different periods do not add up; a sum needs every period.
+            whole = not periods or {str(p) for p in per} >= periods
+            by[HORIZON] = (_sum_or_none(per.values())
+                           if unit == "EUR" and whole else None)
             d.keys.append(Key(label, unit, by if _periods(n) else {HORIZON: by[HORIZON]}))
     elif res.get("investment") is None:
         d.notes.append(f"{run.name}: the last run did not invest; no costs.")
@@ -344,16 +359,18 @@ def _island(run, project) -> ViewData | None:
     tables = [t for t in report.get("tables") or [] if t.get("group") != "inputs"]
     if not tables:  # no island study and no island-hours results: nothing has run
         return None
-    d = ViewData(notes=[report.get("caveat") or "", NO_PERIODS])
+    d = ViewData(notes=[x for x in (report.get("caveat"), NO_PERIODS) if x])
     if island.get("study_at"):
         d.notes.append(f"{run.name}: island study run {island['study_at']}.")
     if report.get("missing"):
         d.notes.append(f"{run.name}: not in the report: {', '.join(report['missing'])}.")
     seen: set[str] = set()
     for t in report.get("tables") or []:
-        name = t.get("title") or t.get("id")
+        base = name = t.get("title") or t.get("id")
+        k = 1
         while name in seen:
-            name += " (2)"
+            k += 1
+            name = f"{base} ({k})"
         seen.add(name)
         rows = [dict(zip(t.get("columns") or [], r)) for r in t.get("rows") or []]
         table = _records(name, "", rows, list(t.get("columns") or []))
@@ -391,9 +408,13 @@ def _grid_forming(run, project) -> ViewData | None:
     capacity = rec.get("capacity") or []
     for kind in sorted({str(r.get("kind")) for r in capacity}):
         of = [r for r in capacity if str(r.get("kind")) == kind and _is_number(r.get("delta"))]
+        # gfm_tuning writes an infinite delta for a case no capacity fixes.
+        finite = [r for r in of if not _unfixable(r)]
         unit = next((r.get("unit") for r in of), "") or ""
         d.keys.append(Key(f"Capacity needed — {kind}", unit,
-                          {HORIZON: float(max(r["delta"] for r in of)) if of else None}))
+                          {HORIZON: float(max(r["delta"] for r in finite)) if finite else None}))
+        d.keys.append(Key(f"Cases no capacity fixes — {kind}", "count",
+                          {HORIZON: len(of) - len(finite)}))
     settings = [{"unit": unit, "model": s.get("model"), "parameter": param,
                  "current": (s.get("current") or {}).get(param),
                  "recommended": (s.get("recommended") or {}).get(param)}
@@ -403,9 +424,15 @@ def _grid_forming(run, project) -> ViewData | None:
         _records("Recommended settings", "", settings,
                  ["unit", "model", "parameter", "current", "recommended"]),
         _records("Cases before and after", "", cases),
-        _records("Capacity needed", "", capacity),
+        _records("Capacity needed", "", [r for r in capacity if not _unfixable(r)]),
+        _records("Cases no capacity fixes", "", [{**r, "delta": "not achievable by capacity"}
+                                                 for r in capacity if _unfixable(r)]),
     ) if t is not None]
     return d
+
+
+def _unfixable(r: dict) -> bool:
+    return _is_number(r.get("delta")) and not np.isfinite(float(r["delta"]))
 
 
 def _union_keys(*dicts) -> list[str]:
