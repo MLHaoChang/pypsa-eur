@@ -2320,7 +2320,8 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
             network=n, cfg=cfg, lost_load=_state.get("last_lost_load"),
             result_df=_result_df, views=included, ic_report=report, case_state=case_state,
             project=project, scope=scope, template=template, freshness=freshness,
-            stored=stored, run=runs[0] if runs else None, scenarios=scenarios))
+            stored=stored, run=runs[0] if runs else None, scenarios=scenarios,
+            solved_settings=_solved_settings))
     except RW.WorkbookTooLarge as exc:
         raise HTTPException(413, {"error_kind": "file_too_large", "message": str(exc)})
     return Response(
@@ -2540,32 +2541,10 @@ def get_lost_load(
     settings (UX overhaul S2b). 204 only when nothing is solved; a solve with
     voll=0 answers `voll_applied: false` with null totals.
     """
-    from services.results.lost_load import compute_lost_load
-    payload = compute_lost_load(
-        PyPSAService.get_network(),
-        _state.get("last_lost_load"),
-        from_,
-        to_,
-    )
-    if payload is not None:
-        return {**payload, "voll_applied": True}
-    # S2b: 204 only when nothing is solved. Otherwise say whether VoLL was in
-    # the solve: with it and nothing captured, the totals are a computed zero;
-    # without it, lost load was not modelled and the totals are null — never 0.
-    settings = _solved_settings()
-    if settings is None:
-        return Response(status_code=204)
-    voll = float(settings.get("voll_eur_per_mwh") or 0.0)
-    applied = voll > 0
-    return {
-        "index": [], "columns": [], "data": [],
-        "voll_applied": applied,
-        "voll_eur_per_mwh": voll if applied else None,
-        "total_mwh": 0.0 if applied else None,
-        "total_cost_eur": 0.0 if applied else None,
-        "bus_carriers": {},
-        "shed_hours": {"total": 0.0, "by_period": {}} if applied else None,
-    }
+    from services.results.lost_load import lost_load_payload
+    payload = lost_load_payload(PyPSAService.get_network(), _state.get("last_lost_load"),
+                                _solved_settings, from_, to_)
+    return Response(status_code=204) if payload is None else payload
 
 
 

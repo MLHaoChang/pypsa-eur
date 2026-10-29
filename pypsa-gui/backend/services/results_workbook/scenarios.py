@@ -51,6 +51,14 @@ class Run:
     case_state: dict | None = None
     # `sensitivity_comparison` reason codes; empty when comparable with the base.
     reasons: list[str] = field(default_factory=list)
+    # The run's own results, which the result-view sheets read (package 02):
+    # its network, solver config, lost-load capture, result lookup over its own
+    # solver state, and the settings its solve used. None when not comparable.
+    network: Any = None
+    cfg: Any = None
+    lost_load: dict | None = None
+    result_df: Callable | None = None
+    solved_settings: Callable[[], dict | None] | None = None
 
 
 @dataclass
@@ -112,6 +120,9 @@ def gather_scenarios(base_project_id: str, base_basis: dict, *,
             result_df = result_df_for(state)
             run.figs = overview_figures(ctx.network, state.get("solver_config"),
                                         state.get("last_lost_load"), result_df)
+            run.network, run.cfg, run.result_df = ctx.network, state.get("solver_config"), result_df
+            run.lost_load = state.get("last_lost_load")
+            run.solved_settings = lambda state=state: state.get("last_solve_settings")
             run.headline = sc._values(read)
             run.ic_report = load_ic_report(state)
             if run.ic_report is not None:
