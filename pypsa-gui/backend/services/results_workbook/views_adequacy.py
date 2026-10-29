@@ -60,9 +60,9 @@ def _num(v) -> float | None:
 
 def _horizon_note(n) -> str:
     """The study horizon's length, so a reader can scale per-horizon figures."""
-    from services.adequacy.metrics import horizon_years
+    from services.adequacy.metrics import HOURS_PER_YEAR, horizon_years
     years = horizon_years(n)
-    return (f"Study horizon: {years * 8760:,.6g} h of modelled time "
+    return (f"Study horizon: {years * HOURS_PER_YEAR:,.6g} h of modelled time "
             f"({years:.6g} years; the snapshot weights' sum).")
 
 
