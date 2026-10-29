@@ -84,7 +84,7 @@ def test_picker_lists_every_view_and_pre_ticks_the_cards(client, solved_project)
 
     rows = client.get("/api/results/workbook/views").json()["views"]
     assert [r["view_id"] for r in rows] == [v.view_id for v in workbook_views()]
-    assert {"view_id", "label", "card", "card_label", "selected"} <= set(rows[0])
+    assert {"view_id", "label", "card", "card_label", "selected", "available", "reason"} <= set(rows[0])
     ticked = [r["view_id"] for r in rows if r["selected"]]
     assert ticked and set(ticked) < {r["view_id"] for r in rows}
     sheets = _sheets(client.get(URL).content)
@@ -92,3 +92,24 @@ def test_picker_lists_every_view_and_pre_ticks_the_cards(client, solved_project)
     # Each pre-ticked view that has results is a sheet of the default workbook.
     assert any(view(v).label in sheets for v in ticked)
     assert resolve_views(None, ["dispatch"]) == ["dispatch"]
+
+
+def test_picker_marks_a_view_without_data_unavailable_with_a_reason(client, solved_project):
+    rows = {r["view_id"]: r for r in client.get("/api/results/workbook/views").json()["views"]}
+    assert rows["dispatch"]["available"] is True and rows["dispatch"]["reason"] is None
+    # The test network was solved without an AC load flow.
+    assert rows["loadflow"]["available"] is False
+    assert rows["loadflow"]["reason"]
+
+
+def test_every_workbook_view_has_a_results_tab_label():
+    """The picker words each view as the Results panel does (UX: no raw ids)."""
+    import re
+    from pathlib import Path
+
+    from services.results_workbook.registry import workbook_views
+
+    src = (Path(__file__).resolve().parents[2] / "frontend/src/pages/Results.tsx").read_text()
+    tabs = dict(re.findall(r"\{ id: '(\w+)',\s*label: '([^']+)'", src))
+    missing = [v.view_id for v in workbook_views() if v.view_id not in tabs]
+    assert not missing, f"workbook views with no Results tab label: {missing}"

@@ -3,6 +3,7 @@ import type { ImportSummary } from './types'
 
 export interface ResultsWorkbookView {
   view_id: string; label: string; card: string; card_label: string; selected: boolean
+  available: boolean; reason: string | null
 }
 
 export const ioApi = {

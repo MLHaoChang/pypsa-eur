@@ -31,7 +31,9 @@ import { mismatchSentence } from '../utils/projectMismatch'
 import { flushPendingEdgeDeletes } from '../utils/pendingEdgeDeletes'
 import { flushPendingSitesToServer } from '../site3d/sitesStore'
 import { SItem, SectionHdr, SubHdr } from './sidebar/SidebarRows'
-import { ResultsWorkbookPicker, WORKBOOK_DEFAULT, type WorkbookChoice } from './sidebar/ResultsWorkbookPicker'
+import {
+  ResultsWorkbookPicker, WORKBOOK_DEFAULT, useWorkbookViews, workbookBlock, type WorkbookChoice,
+} from './sidebar/ResultsWorkbookPicker'
 import { STEPS, type StepId } from './sidebar/steps'
 import { flushPendingMapLayoutToServer } from '../pages/mapLayoutStore'
 
@@ -48,6 +50,8 @@ function IoModal({ onClose, initialTab = 'import', projectName }: {
   const [tab, setTab] = useState<'import' | 'export'>(initialTab)
   const [exportFmt, setExportFmt] = useState<'bundle' | 'netcdf' | 'csv' | 'excel' | 'matpower' | 'workbook'>('bundle')
   const [workbook, setWorkbook] = useState<WorkbookChoice>(WORKBOOK_DEFAULT)
+  const workbookViews = useWorkbookViews(tab === 'export' && exportFmt === 'workbook')
+  const workbookOff = exportFmt === 'workbook' && workbookBlock(workbookViews.data, workbook) !== null
   const [exportFilename, setExportFilename] = useState(slugify(projectName))
   const [exporting, setExporting] = useState(false)
   const qc = useQueryClient()
@@ -198,7 +202,7 @@ function IoModal({ onClose, initialTab = 'import', projectName }: {
               </p>
               <div className="flex gap-2 justify-end">
                 <button onClick={onClose} className="px-3 py-1.5 border border-border rounded text-xs text-muted hover:text-text transition-colors">Cancel</button>
-                <button onClick={handleExport} disabled={exporting}
+                <button onClick={handleExport} disabled={exporting || workbookOff}
                   className="flex items-center gap-1.5 px-4 py-1.5 bg-accent text-white rounded text-xs font-semibold hover:bg-accent/90 disabled:opacity-50 transition-colors">
                   <Download size={12} /> {exporting ? 'Downloading…' : 'Download File'}
                 </button>

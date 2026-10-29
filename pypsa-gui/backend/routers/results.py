@@ -2292,18 +2292,41 @@ def _workbook_scope(n, template) -> dict:
                                        has_template=False, no_load=no_load)
 
 
+_WORKBOOK_NO_DATA = {
+    "no_data": "No results for this view in this solve",
+    "not_applicable": "Needs a run with several investment periods",
+}
+
+
 @results_router.get("/workbook/views")
 def get_results_workbook_views(user: User = Depends(require_user)):
-    """The result views a workbook can hold, in the panel's order, with the ones
-    the project's switched-on cards include by default (`selected`): the Export
-    chooser's picker pre-ticks those (RW-TABS-1)."""
+    """The result views a workbook can hold, in the panel's order. `selected`: the
+    project's switched-on cards include it by default (RW-TABS-1; the Export
+    chooser pre-ticks those). `available` false with a plain-words `reason`:
+    the view has no data in this solve (the same probe `list_result_views`
+    runs), so the chooser shows it disabled."""
+    from services import chat_tools
     from services.flow_scope import CARD_BY_ID
+    from services.result_views import _probe
     from services.results_workbook.registry import resolve_views, workbook_views
 
-    default = set(resolve_views(_workbook_scope(PyPSAService.get_network(), _workbook_template())))
-    return {"views": [{"view_id": v.view_id, "label": v.label, "card": v.card,
-                       "card_label": CARD_BY_ID[v.card].label, "selected": v.view_id in default}
-                      for v in workbook_views()]}
+    n = PyPSAService.get_network()
+    default = set(resolve_views(_workbook_scope(n, _workbook_template())))
+    solved = _dispatch_ready(n)  # before a solve every tab is empty, whatever its probe reads
+    previous = chat_tools.acting_user_id()
+    chat_tools.set_acting_user(str(user.id))  # the probes read through the chat tools
+    try:
+        rows = []
+        for v in workbook_views():
+            status = _probe(v)[0] if solved else "no_data"
+            rows.append({"view_id": v.view_id, "label": v.label, "card": v.card,
+                         "card_label": CARD_BY_ID[v.card].label, "selected": v.view_id in default,
+                         "available": status == "available",
+                         "reason": None if status == "available" else _WORKBOOK_NO_DATA.get(
+                             status, "Not available for this project")})
+    finally:
+        chat_tools.set_acting_user(previous)
+    return {"views": rows}
 
 
 @results_router.get("/workbook.xlsx")
