@@ -167,10 +167,16 @@ def compute_objective_decomposition(n, cost_breakdown, cfg=None):
         "cost_breakdown_total": None,
         "gap_eur": None,
         "gap_pct": None,
+        # What `lp_total` covers: "horizon" (one LP priced the whole run),
+        # "last_period" (myopic: the final period's LP only) or "last_window"
+        # (rolling: the final window's LP only). Only "horizon" is the run's cost.
+        "lp_total_scope": "horizon",
         # Multi-period myopic mode only: per-period (variable, constant) captured
-        # by _run_myopic_foresight. Sum gives the full horizon LP total.
+        # by _run_myopic_foresight. Their sum is NOT the horizon cost: capacity
+        # frozen by an earlier period carries no capex in later LPs (see
+        # routers/simulation._compute_run_objective), so it is named for what it is.
         "myopic_period_objectives": None,
-        "myopic_horizon_total": None,
+        "myopic_lp_sum": None,
         # Reconciliation bridge: gap_eur = −nonextendable_fixed_cost_eur
         #   + period_weighting_adjustment_eur + residual_gap_eur.
         "nonextendable_fixed_cost_eur": None,
@@ -179,6 +185,8 @@ def compute_objective_decomposition(n, cost_breakdown, cfg=None):
         "residual_gap_eur": None,
         "residual_gap_pct": None,
     }
+    if getattr(cfg, "solve_strategy", "full") == "rolling":
+        out["lp_total_scope"] = "last_window"
     # Per-period myopic objectives, if present.
     me = getattr(n, "_myopic_period_objectives", None)
     if isinstance(me, list) and me:
@@ -187,7 +195,8 @@ def compute_objective_decomposition(n, cost_breakdown, cfg=None):
                 {"period": int(p), "variable": float(v), "constant": float(c), "total": float(v + c)}
                 for (p, v, c) in me
             ]
-            out["myopic_horizon_total"] = sum(v + c for (_, v, c) in me)
+            out["myopic_lp_sum"] = sum(v + c for (_, v, c) in me)
+            out["lp_total_scope"] = "last_period"
         except Exception:
             pass
     try:
@@ -220,11 +229,12 @@ def compute_objective_decomposition(n, cost_breakdown, cfg=None):
                     out["gap_pct"] = gap / out["cost_breakdown_total"] * 100.0
     except Exception:
         pass
-    # Bridge the gap. Skipped under myopic foresight: `n.objective` is then
-    # only the last period's LP (see `myopic_horizon_total`), so there is no
-    # single LP total to reconcile against — see services/cost_totals.py.
+    # Bridge the gap. Skipped under myopic foresight and rolling horizon:
+    # `n.objective` is then only the last period's or window's LP (see
+    # `lp_total_scope`), so there is no single LP total to reconcile against —
+    # see services/cost_totals.py.
     if (isinstance(cost_breakdown, dict) and "total" in cost_breakdown
-            and out["lp_total"] is not None and not out["myopic_period_objectives"]):
+            and out["lp_total"] is not None and out["lp_total_scope"] == "horizon"):
         try:
             b = _bridge(n, cost_breakdown, cfg)
             out["nonextendable_fixed_cost_eur"] = b["nonextendable_fixed_cost_eur"]

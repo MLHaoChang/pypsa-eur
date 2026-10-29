@@ -155,6 +155,48 @@ Branch `claude/lc06-d04-capacity-lp`, stacked on S0. GK B reviews.
 - Reads `get_study_evidence` 409 `unsaved_results` before a save, by design,
   so the objective is read from the unsaved current solve instead.
 
+### S2, LC-D05 foresight and LC-D06 solver outcomes (2026-10-28)
+
+Branch `claude/lc06-d05-foresight`, stacked on S1. GK B reviews. Successor
+session session_01G7qCun3kha23YVZyoEFDuW.
+
+- `tests/test_lc06_d05_foresight.py`: every solve goes through `run_simulation`,
+  with the strategy set by `update_solver_config` and the outcome read through
+  `get_simulation_status`. Hand oracles:
+  - perfect, myopic and limited foresight on the `test_myopic_horizon_cost.py`
+    network: 33,000, never the per-period LP sum of 13,000;
+  - two periods at r = 0.05 with years 10, discounted as the app's
+    auto-discount defines it, and Old retiring before 2040: G@2030 = 6,
+    G@2040 = 4, objective = the hand PV;
+  - a half-year horizon charges 0.5 x the annual capex;
+  - rolling windows of 2 give 200;
+  - an unbounded LP and an unavailable solver are refused by the real
+    validator before the solver runs;
+  - a MIP gap of 0.25 bounds the brute-forced UC optimum of 640;
+  - a real HiGHS time limit with no incumbent (1 ms, stopped in presolve) is a
+    failed run. The other limit stops cannot be produced deterministically:
+    no incumbent at the SCLOPF and myopic call sites, and a stop with an
+    incumbent. For those, only PyPSA's optimize return is stubbed; the app's
+    solve path runs as is.
+- The RED run found two engine defects and one misleading field:
+  - D-a: a rolling solve reported only the last window's LP (140 for 200).
+  - D-b: a MIP stopped by its time limit with no incumbent read
+    `completed` / `time_limit` with objective inf (linopy returns status ok).
+    Fix: `solver/objective._no_solution_is_a_failure` (a `math.isfinite`
+    test) at the full-horizon, SCLOPF and myopic per-period call sites.
+    It returns status "warning" with the condition kept, so the run fails
+    with the `time_limit` card. A stop with an incumbent stays completed,
+    and its run record keeps condition `time_limit`.
+  - D-a fix: `_compute_run_objective` prices a rolling run on the
+    statistics basis (`horizon_system_cost`), as it already does for myopic.
+    The status, the run record and the solve queue's reader all read 200,
+    with overlap 1.
+  - `objective_decomposition.myopic_horizon_total` was the per-period LP sum.
+    It is renamed `myopic_lp_sum`, and `lp_total_scope` (horizon, last_period
+    or last_window) says what `lp_total` covers.
+- Limit: a rolling window that stops on a limit without an incumbent is
+  not caught, because PyPSA only logs it.
+
 ## Hand-off (2026-10-28, context near 300k)
 
 State:
@@ -172,3 +214,32 @@ Families left without any covered variant: Projects (D01), Network/topology (D02
 Env notes: the `lp` fixture in `test_lc06_d04_capacity_lp.py` is the solve pattern to reuse. `get_study_evidence` needs a saved project, so read objectives through `get_results('objective_decomposition')`. A past run's `get_results(run_id=…)` wraps the payload in `{status, scope, data}`. The validator refuses unbounded extendables and periodises capex by nyears.
 
 Reviewer ids at hand-off: coordinator session_01G7qCuj4ML7V5FccYz7NghF; GK B session_01G7qCumomaAxyuvAgo3oVss (S0–S3, D-rows); GK A session_01G7qCum3HtNvhuPbBnJhiuB (S4–S9); UX (4) session_01G7qCumtovuejQkxqdLJRZD for any UI slice.
+
+## Hand-off 2 (2026-10-28, LC-06 (2) near 300k)
+
+State:
+- S1 #873 (head 4d1218fe60aecc937fdf89112e2de936f40faa71) is open against master. GK B (8)
+  has the review request (relayed by the coordinator). CI was running at hand-off.
+- S2 #877 (head 3104c2334479a0e71f5d9eccf19439b50137f54b) is open, stacked on S1. It went to
+  GK B (8) with conditions 1–7 addressed in the body. It carries two engine fixes:
+  the rolling objective and a limit stop with no incumbent.
+- After #873 merges, merge master into #877 (it then shows only S2). If #869
+  lands first, merge master too: both edit `solver_service.py` (GK B condition 7).
+
+Next: S3 (GK B): LC-D07 P=60/Q=80 → 100 MVA and an independently solved
+3-bus AC PF. Then S4–S9 (GK A conditions restated in GK A's 22:09 message: one
+mutation per oracle, stated tolerances, f0 from the network, SAGC-1). Then the
+GK B D-rows as in Hand-off 1.
+
+Env notes:
+- There is no `.pixi` here. Use `/root/.venv-pypsa-gui/bin/python` from `pypsa-gui/backend`.
+  Test collection is slow (1–3 min), so run in the background with a log file
+  and never two pytest runs at once: the container was OOM-restarted once.
+- `test_lc06_d05_foresight.py`'s `seam` fixture is the reusable solve pattern.
+  `get_simulation_status` gives status/condition/objective/failure, and
+  `get_run_evidence(run_id, section='summary')` gives the run record.
+- The mutation runner lives in the session scratchpad; it is easy to
+  recreate: copy the test with one replacement and run `-k` on the target.
+
+Ids: coordinator session_01G7qCuj4ML7V5FccYz7NghF; GK B (8)
+session_01G7qCumQA1s15bnCz8WyJuA; GK A session_01G7qCum3HtNvhuPbBnJhiuB.
