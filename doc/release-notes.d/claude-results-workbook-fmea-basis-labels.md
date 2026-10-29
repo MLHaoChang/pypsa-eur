@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The results workbook's FMEA sheet labels class A and B rows by LC-30's annualised basis, labels rows saved before it "per study horizon (saved before annualising)", and drops the stale "(ticket 30)" wording.
