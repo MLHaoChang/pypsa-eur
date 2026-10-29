@@ -166,7 +166,7 @@
     },
     {
       "item": "solver",
-      "note": "own measurement: 3-period year plain LP, 595,688 cols \u00d7 1,322,776 rows, 4 cores: dual simplex hit its 1,500 s limit unsolved; IPM with crossover optimal in 1,212 s at 2.6 GB (shared machine); IPM without crossover, alone, optimal in 1,137 s at 2.3 GB",
+      "note": "own measurement: 3-period year plain LP, 595,688 cols \u00d7 1,322,776 rows, 4 cores: dual simplex hit its 1,500 s limit unsolved; IPM with crossover optimal in 1,212 s at 2.6 GB (shared machine); IPM without crossover, alone, optimal in 1,137 s at 2.3 GB. The whole year-base run (plan plus the 12-week check) took 2,346 s, the check 54 s on 3 workers, peaking at 4.62 GB on 4 cores, inside its 45-minute budget",
       "source": "sourced",
       "value": "HiGHS interior point (solver_options solver=ipm)"
     }
@@ -178,6 +178,7 @@
     "2030": 5,
     "2035": 10
   },
+  "process_load": true,
   "projected_load": [
     {
       "note": "crushing, grinding and flotation at the period's feed, plus site services; demo",

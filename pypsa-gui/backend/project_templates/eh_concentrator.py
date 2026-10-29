@@ -233,6 +233,7 @@ def build_eh_concentrator_staged(T, *, years=YEARS, time_base: str = "year") -> 
     n.links.at["grid_import", "eh_role"] = "grid_import"
     T._outage(n, "links", "grid_import", 0.002, 12.0)
     n.buses.at["grid", "eh_poc"] = True
+    n.buses.at["site", "eh_critical"] = True
     n.buses.at["grid", "eh_sk_mva"] = FAULT_LEVEL_MVA
     n.buses.at["site", "eh_sk_mva"] = 0.9 * FAULT_LEVEL_MVA
     n.buses.at["grid", "eh_ibr_mva"] = PV_MAX_MW + BESS_MAX_MW
@@ -458,7 +459,9 @@ def _ledger() -> list[dict]:
          "source": "sourced",
          "note": "own measurement: 3-period year plain LP, 595,688 cols × 1,322,776 rows, 4 cores: dual simplex "
                  "hit its 1,500 s limit unsolved; IPM with crossover optimal in 1,212 s at 2.6 GB "
-                 "(shared machine); IPM without crossover, alone, optimal in 1,137 s at 2.3 GB"},
+                 "(shared machine); IPM without crossover, alone, optimal in 1,137 s at 2.3 GB. The whole "
+                 "year-base run (plan plus the 12-week check) took 2,346 s, the check 54 s on 3 workers, "
+                 "peaking at 4.62 GB on 4 cores, inside its 45-minute budget"},
     ]
 
 
@@ -504,6 +507,7 @@ def _meta(T) -> dict:
                          for y in YEARS],
         "period_years": {str(y): S_py[y] for y in YEARS},
         "time_base": "year",
+        "process_load": True,
         "ledger": _ledger(),
         "study_notes": [
             "Each period is one chronological year of hours, so the concentrate shed fills over 21 "

@@ -36,8 +36,8 @@ from services.solver import process_uc  # noqa: E402
 
 TID = "eh_concentrator_staged"
 YEARS = C.YEARS
-#: The solve budget of ticket 09 (design §3.B): 30 minutes.
-BUDGET_S = 30 * 60
+#: The year-base solve budget (owner decision G2P-10-BUDGET-1): 45 minutes.
+BUDGET_S = 45 * 60
 _PLANS: dict[str, tuple] = {}
 MILLS = list(C.MILLS)
 

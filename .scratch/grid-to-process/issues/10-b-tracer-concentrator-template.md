@@ -84,3 +84,5 @@ Design §3.B, "Acceptance checks (B)", except:
   - (b) the mine-as-ceiling and fixed-shed records above;
   - (c) `test_an_abort_during_the_parallel_check_leaves_no_live_worker` (it fails without the terminate), and the budget run prints peak memory with the check's workers in it (`RUSAGE_SELF` and `RUSAGE_CHILDREN`);
   - item 7, the year-base budget, waits on the owner (options A/B/C, through the coordinator).
+- 2026-10-29, owner decisions (rows in PR #893). G2P-10-BUDGET-1 = A: the year-base budget is 45 min (`BUDGET_S = 45 * 60`); the ledger's solver row records 2,346 s in all, the check 54 s on 3 workers, peak 4.62 GB on 4 cores. G2P-10-SUGGEST-1 = D: `eh_critical` on the `site` bus, `process_load: true` in the metadata, and the suggester tests skip flagged templates; the suggester gap is issue 19.
+- 2026-10-29, follow-up (plan speed, owner decision G2P-10-BUDGET-1). The year-base plan took 2,346 s (about 39 min) of its 45 on HiGHS IPM. To bring it back under 30: try a HiPO build of HiGHS, or a commercial solver where the user has one, and re-measure with `PYPSA_GUI_YEAR_BUDGET_LIVE=1`. Not built here.
