@@ -514,5 +514,6 @@ def _meta(T) -> dict:
             "the solve re-solves one week per season with their minimum load and min up / down.",
             "A shortfall at a vessel is lost concentrate, valued at 1,300 EUR/t.",
         ],
-        "provenance": T.PROVENANCE,
+        "provenance": ("synthetic illustrative data — an hourly chronological year per period, "
+                       "public-catalogue-range costs; replace with project data before any decision"),
     }

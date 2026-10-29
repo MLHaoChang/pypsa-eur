@@ -36,7 +36,7 @@ const PURPOSE: Record<string, string> = {
   eh_datacenter_staged: 'A data center that grows over the years: plan what to build, and when, as its load and grid connection grow.',
   eh_h2_hub_staged: 'A hydrogen-making industrial site whose customers buy more each year: plan what to build, and when.',
   eh_ammonia_staged: 'An industrial site that makes ammonia from wind and solar power for a delivery contract that grows: plan what to build, and when.',
-  eh_concentrator_staged: 'A mine that grinds its ore into concentrate for ships, on a weak grid connection while its output grows: plan what to build, and when.',
+  eh_concentrator_staged: 'A mine that grinds its ore into concentrate for export, on a weak grid connection while its output grows: plan what to build, and when.',
   eh_ipp_hybrid: 'A wind and solar plant with an optional battery behind one grid connection: size the battery and weigh PPA against merchant revenue.',
   eh_microgrid_staged: 'An island whose demand grows over the years: plan what to build, and when, without the mainland link.',
 }
