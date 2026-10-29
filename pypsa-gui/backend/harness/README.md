@@ -473,7 +473,9 @@ publication through `assurance.py`; the default remains `disabled`. `pilot`
 admits an explicit version-1 strict request. The chat's **Check answers** option
 uses the shared harness when the server enables pilot
 mode. Checking defaults off for new pilot chats and project bindings; strict
-server mode requires it. Browser publication is armed before dispatch and refuses
+server mode requires it. A checked result is never spilled, so a long one is cut
+for the model; `_assurance` is its first key, so the cut keeps the outcome and
+evidence ids. Browser publication is armed before dispatch and refuses
 an omitted/downgraded acknowledgement. Retries, edits and clarification choices
 preserve checked policy, including a conservative history hint when an earlier
 answer is unavailable. That hint is never approval. Read the

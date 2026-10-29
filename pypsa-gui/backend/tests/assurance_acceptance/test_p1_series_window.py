@@ -243,3 +243,29 @@ def test_the_mask_is_one_bit_per_row_least_significant_first():
     assert window["values_sha256"] == records._series_digest(
         "series-values/1", [0.0, None, 2.0, 3.0, None, None, None, None, None, 9.0]
     )
+
+
+def model_tool_result(provider, tool_use_id):
+    """The tool_result content the model receives on the request after the call."""
+    for request in provider.requests[1:]:
+        for message in request.messages:
+            for block in message.get("content") or []:
+                if isinstance(block, dict) and block.get("tool_use_id") == tool_use_id:
+                    content = block["content"]
+                    return content if isinstance(content, str) else json.dumps(content)
+    raise AssertionError("the model never received the tool result")
+
+
+@pytest.mark.parametrize("steps", [744, records.MAX_SERIES_POINTS])
+def test_a_full_year_reaches_the_model_bounded_with_its_assurance(baseline, harness, steps):
+    full_year(steps, LONG_NAME)
+    frames = read_series(harness, args={**ARGS, "name": LONG_NAME})
+    (evidence_id,) = evidence_ids(frames)
+    content = model_tool_result(harness.provider, "read-series")
+    # Bounded: the model sees a cut preview, not every one of 8784 points.
+    assert len(content) < 8 * 1024
+    # The checked outcome and the evidence id survive the cut.
+    assert '"_assurance"' in content
+    assert evidence_id in content
+    record = harness.client.get(f"/api/chat/evidence/{evidence_id}").json()
+    assert len(record["facts"]) == steps

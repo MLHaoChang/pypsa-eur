@@ -3366,7 +3366,12 @@ def _dispatch_real_tool_call(
 
     if session.assurance_turn is not None:
         projection = session.assurance_turn.result_projection(tool_name, result_for_model, tool_use_id)
-        result_for_model = {**result_for_model, "_assurance": projection["_assurance"]} if isinstance(result_for_model, dict) else projection
+        # `_assurance` goes first: a checked result is never spilled, so a long
+        # one is cut for the model, and the cut must keep the outcome and ids.
+        result_for_model = {
+            "_assurance": projection["_assurance"],
+            **{k: v for k, v in result_for_model.items() if k != "_assurance"},
+        } if isinstance(result_for_model, dict) else projection
         if tool_name == "ui_open_panel":
             result_for_model["ui_navigated"] = False
 
