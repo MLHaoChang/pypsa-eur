@@ -94,3 +94,81 @@ Branch `claude/lc06-family-manifest`.
   `assistant_inventory.py --check` passes at the master merge (2d8779ca).
 - Covered rows are the rebaseline's PS+O tests. Their oracles were read from
   the tests and were not re-derived here. `full_coverage=not_established`.
+
+### Reviewers and standing conditions (2026-10-28)
+
+The coordinator named GK A to lead S4–S9 (adequacy/EH MC, common-mode, island
+control/GFM, frequency oracles). GK B keeps S0–S3 and the D11/D14/D19/D01–23
+rows; a UI slice also needs UX. GK A's plan GO came with these per-slice conditions:
+
+- Every slice: one mutation per oracle (a perturbed input fails the assert);
+  each tolerance stated and justified; f0 from the network/profile, never a
+  literal (`test_sixty_hz` stays green); generic demo figures in campus fixtures (SAGC-1).
+- S4 standard MC: exact LOLE = Σ_h P(cap < L_h) and EUE = Σ_h E[max(L_h − cap, 0)]
+  from the two-unit COPT. Fixed seed. CI half-width ≤ 10 % of the oracle LOLE,
+  with both that and oracle-in-CI asserted. Handle the bias of all units starting
+  available (horizon ≫ MTTR, or a stationary start), and say which.
+- S5: zonal per-hour min(available Link, max(surplus, 0) × delivery ratio) on hours
+  where both bounds bind. Common-mode: equal per-draw unit states across runs, so
+  removing a Link does not shift the RNG stream. EUE_cm ≥ EUE_base per draw,
+  and strictly greater in total where the Link matters.
+- S7: each refusal names the field and model; one case per wrong-base class;
+  exact read-back.
+- S8: RoCoF at 0+ with D = 0. Settled Δf = −ΔP/(ΣK + D), with no isochronous
+  unit in that case; an isochronous case of its own (Δf → 0). UPS L·T/2/3600 MWh.
+  Halving dt must cut the error by the scheme's order (≥ ~1.8). EMT row stays explicit.
+- S9: stale = a network edit between preview and apply; the re-study is
+  required and runs on the applied values.
+- S6: energization survives capacity edits up and down; bus and per-Load VoLL
+  each change the result.
+
+GK B on S1: fill `tools` for LC-D04.bound_build/units. The perturbation delta is
+computed in the test, not read from the result. S2's unavailable-solver refusal
+goes through the real dispatcher, not a monkeypatched `_probe`.
+
+### S1, LC-D04 unique LP (2026-10-28)
+
+Branch `claude/lc06-d04-capacity-lp`, stacked on S0. GK B reviews.
+
+- The RED first run found two app rules the annex fixture ignored. The
+  validator refuses an unbounded extendable generator
+  (`generator_p_nom_bounds`), and capital cost is periodised by nyears = Σ
+  weight × hours / 8760. So the fixture weights two snapshots 4380 h each
+  (nyears = 1) and bounds Backup at 100 MW. The oracle computes nyears itself.
+- `tests/test_lc06_d04_capacity_lp.py` (3 tests, real `run_simulation` and
+  HiGHS) checks:
+  - objective 2,717,600 = 6 × 147,600 + 4 × 458,000, read through
+    `get_results('objective_decomposition')`;
+  - per-carrier capex/opex/GWh;
+  - `explain_investment`: Cheap existing 0 / optimised 6 / added 6,
+    at_upper_bound; Backup 4, interior;
+  - the cap edit through `PUT /api/network/generators/Cheap`: 6 → 7 lowers
+    the objective by 458,000 − 147,600 (computed in the test), Cheap 7 /
+    Backup 3, and the older run keeps 0.36 M EUR capex (historical scope);
+  - single period: `get_vintage_results` answers no vintages.
+- Manifest: LC-D04.unique_lp covered. LC-D04.vintage_results stays pending
+  for the LC-D05 multi-period fixture. A covered row names its tools or the
+  checked-stream seam (GK B's S0 note: those rows call no catalogue tool, so
+  their tools stay uncovered rather than invented). 19 / 367 tools covered.
+- Limit: with nyears = 1 the periodisation factor is not discriminated; a
+  partial-year case belongs with the LC-D05 horizon-vs-annual work.
+- Reads `get_study_evidence` 409 `unsaved_results` before a save, by design,
+  so the objective is read from the unsaved current solve instead.
+
+## Hand-off (2026-10-28, context near 300k)
+
+State:
+- S0 #867 (manifest) has GK OK and premerge ok @9398fa61, waiting on the coordinator's merge.
+- S1 is done on `claude/lc06-d04-capacity-lp` (stacked on S0) with all tests green. Its PR is not opened yet: after #867 merges, merge master in and open it against master for GK B. Run `smoke/family_manifest.py --check`, `tests/test_family_manifest.py` and `tests/test_lc06_d04_capacity_lp.py` (background, ~4 min) first.
+
+Next slices, in order (each a separate PR; the conditions are above):
+- S2 (GK B): LC-D05 myopic/limited/perfect foresight and LC-D06 rolling/myopic through the seam, against `test_myopic_horizon_cost.py` hand costs; unbounded, time limit, MIP gap; unavailable solver via the real dispatcher (no monkeypatched `_probe`); LC-D04.vintage_results on a two-period fixture; a partial-year nyears case.
+- S3 (GK B): LC-D07 P=60/Q=80 → 100 MVA and an independently solved 3-bus AC PF.
+- S4–S9 (GK A, GO with conditions): D12 standard MC, D12 zonal and common-mode, D15 control models, D16 E1–E6, D17 chain, then D13 EH variants.
+- Then (GK B): D11 FMEA/health, D14 static campus, D19 two-case, D09 inflow/spill, and the oracle-less D01/02/20–23 rows. D24 needs UX.
+
+Families left without any covered variant: Projects (D01), Network/topology (D02), Reliability beyond COPT (D11 FMEA/health, D12, D13 EH), GridSpine/campus (D14–17), Experiments beyond one case (D19), Import/export (D20), Reports (D21), Audit/undo (D22), Harness parity (D23), UI (D24).
+
+Env notes: the `lp` fixture in `test_lc06_d04_capacity_lp.py` is the solve pattern to reuse. `get_study_evidence` needs a saved project, so read objectives through `get_results('objective_decomposition')`. A past run's `get_results(run_id=…)` wraps the payload in `{status, scope, data}`. The validator refuses unbounded extendables and periodises capex by nyears.
+
+Reviewer ids at hand-off: coordinator session_01G7qCuj4ML7V5FccYz7NghF; GK B session_01G7qCumomaAxyuvAgo3oVss (S0–S3, D-rows); GK A session_01G7qCum3HtNvhuPbBnJhiuB (S4–S9); UX (4) session_01G7qCumtovuejQkxqdLJRZD for any UI slice.

@@ -164,9 +164,15 @@ TOOLS_BY_FAMILY: dict[str, frozenset[str]] = {f: frozenset(names.split()) for f,
 }.items()}
 
 
+CHECKED_STREAM = 'checked stream (/api/chat/answers): ledger from run evidence, no catalogue tool'
+
+
 def _covered(vid: str, oracle: str, tools: str, *tests: str) -> dict:
+    """``tools`` empty means the checked stream, which answers from run
+    evidence without calling a catalogue tool; its tools stay uncovered."""
     return {'id': vid, 'suite': vid.split('.')[0], 'status': 'covered', 'oracle': oracle,
-            'tools': tools.split(), 'tests': list(tests)}
+            'tools': tools.split(), 'seam': 'chat tools' if tools.split() else CHECKED_STREAM,
+            'tests': list(tests)}
 
 
 def _pending(vid: str, reason: str) -> dict:
@@ -194,8 +200,14 @@ VARIANTS: list[dict] = [
              '',
              B + 'test_capacity_cycles_assurance.py::test_a_line_states_mva_and_an_unbounded_build_never_reads_as_at_its_bound',
              B + 'test_capacity_cycles_assurance.py::test_a_store_counts_only_energy_leaving_it'),
-    _pending('LC-D04.unique_lp', '10 MW demand, 6 MW cheap cap, 4 MW backup: hand objective and cap perturbation'),
-    _pending('LC-D04.vintage_results', 'no test calls get_vintage_results'),
+    _covered('LC-D04.unique_lp', 'one-year horizon: Cheap 6 MW at 60,000 + 8760 x 10, Backup 4 MW at 20,000 + 8760 x 50, '
+             'objective 2,717,600; cap 6 -> 7 lowers it by 458,000 - 147,600 = 310,400; capex/opex/GWh per carrier',
+             'run_simulation get_results explain_investment',
+             B + 'test_lc06_d04_capacity_lp.py::test_the_unique_optimum_matches_the_hand_solution',
+             B + 'test_lc06_d04_capacity_lp.py::test_raising_the_cap_lowers_the_objective_by_the_cost_difference'),
+    _pending('LC-D04.vintage_results', 'single period answers no vintages '
+             '(test_lc06_d04_capacity_lp.py::test_a_single_period_network_reports_no_vintages); '
+             'per-vintage capacity needs the LC-D05 multi-period fixture'),
     _pending('LC-D05.perfect_foresight', 'engine seed only: test_myopic_horizon_cost.py'),
     _pending('LC-D05.myopic', 'engine seed only: test_myopic_horizon_cost.py'),
     _pending('LC-D05.limited_foresight', 'engine seed only: test_myopic_horizon_cost.py'),
@@ -365,6 +377,8 @@ def manifest_problems(*, tools_by_family: dict | None = None, variants: list[dic
         if v['status'] == 'covered':
             if not v.get('tests') or not v.get('oracle'):
                 problems.append(f'{v["id"]}: covered needs tests and an oracle')
+            if not v.get('tools') and v.get('seam') != CHECKED_STREAM:
+                problems.append(f'{v["id"]}: covered needs its tools or the checked-stream seam')
             if any('::' not in t for t in v.get('tests', [])):
                 problems.append(f'{v["id"]}: covered tests must be node ids (file::test)')
             problems += [f'{v["id"]}: {t} is not an inventory tool' for t in v.get('tools', []) if t not in known]
