@@ -242,6 +242,8 @@ export function ConfirmationCard() {
   const setPending = useChatStore((s) => s.setPending)
   const setError = useChatStore((s) => s.setError)
   const sessionId = useChatStore((s) => s.sessionId)
+  // Study harness 08: a run's card is answered on the run's own session.
+  const target = pending?.session_id ?? sessionId
   const appendMessage = useChatStore((s) => s.appendMessage)
   const uiMode = useUIStore((s) => s.uiMode)
   // P27b gate note 6: approving runs the write on the BACKEND's project — while
@@ -317,25 +319,25 @@ export function ConfirmationCard() {
   }, [setPending])
 
   const onApprove = useCallback(async () => {
-    if (!pending || !sessionId) return
+    if (!pending || !target) return
     if (reviewUnavailable) return
     if (useUIStore.getState().projectMismatch) return
     const token = pending.confirmation_token
     try {
-      await postChatConfirm(sessionId, {
+      await postChatConfirm(target, {
         token, decision: 'approve',
       })
       clearIfStill(token)
     } catch (err) {
       toast.error(`confirmation failed: ${(err as Error).message}`)
     }
-  }, [pending, sessionId, clearIfStill, reviewUnavailable])
+  }, [pending, target, clearIfStill, reviewUnavailable])
 
   const onDeny = useCallback(async () => {
-    if (!pending || !sessionId) return
+    if (!pending || !target) return
     const token = pending.confirmation_token
     try {
-      await postChatConfirm(sessionId, {
+      await postChatConfirm(target, {
         token, decision: 'deny',
       })
       // P25 gate: a denial ends that card's run — the card's remaining
@@ -350,7 +352,7 @@ export function ConfirmationCard() {
     } catch (err) {
       toast.error(`confirmation failed: ${(err as Error).message}`)
     }
-  }, [pending, sessionId, clearIfStill, appendMessage])
+  }, [pending, target, clearIfStill, appendMessage])
 
   if (!pending) return null
 

@@ -146,8 +146,8 @@ def _historical(run_id: str, source: str | None = None, limit: int | None = None
                           "shows the current results, not this run."}
 
 
-def _solve_state() -> dict:
-    state = PyPSAService.get_solver_state()
+def _solve_state(state: dict | None = None) -> dict:
+    state = PyPSAService.get_solver_state() if state is None else state
     return {
         "status": state.get("status"),
         "condition": None if state.get("condition") is None else str(state.get("condition"))[:60],
@@ -155,8 +155,11 @@ def _solve_state() -> dict:
     }
 
 
-def _gate(n: Any, solve: dict, source: str) -> dict | None:
+def _gate(n: Any, solve: dict, source: str, state: dict | None = None) -> dict | None:
     from services.dispatch_status import dispatch_status
+
+    def solver_state() -> dict:
+        return PyPSAService.get_solver_state() if state is None else state
 
     status = solve["status"]
     condition = (solve["condition"] or "").lower()
@@ -177,13 +180,13 @@ def _gate(n: Any, solve: dict, source: str) -> dict | None:
             "stale_results", "The topology changed after the last solve; re-run the simulation "
             "before reading load flow.", solve=solve, freshness="stale")
     if source == "ac_pf":
-        state = PyPSAService.get_solver_state()
-        if state.get("ac_pf_results") is None or state.get("ac_pf_convergence") is None:
+        st = solver_state()
+        if st.get("ac_pf_results") is None or st.get("ac_pf_convergence") is None:
             return _unavailable("ac_pf_not_available",
                                 "No AC power-flow result exists; run the AC PF stage or use source='lopf'.",
                                 solve=solve)
-    elif PyPSAService.get_solver_state().get("ac_pf_results") is not None:
-        if not isinstance(PyPSAService.get_solver_state().get("lopf_results"), dict):
+    elif solver_state().get("ac_pf_results") is not None:
+        if not isinstance(solver_state().get("lopf_results"), dict):
             return _unavailable("lopf_snapshot_unavailable",
                                 "The LOPF snapshot is missing after AC PF; live AC flows are not substituted.")
     return None
@@ -201,8 +204,9 @@ def _window(n: Any, window_from: int | None, window_to: int | None) -> tuple[pd.
     return sns[start:end + 1], start, end
 
 
-def _ac_convergence(n: Any, win_index: pd.Index, start: int, end: int) -> tuple[np.ndarray | None, dict]:
-    state = PyPSAService.get_solver_state()
+def _ac_convergence(n: Any, win_index: pd.Index, start: int, end: int,
+                    state: dict | None = None) -> tuple[np.ndarray | None, dict]:
+    state = PyPSAService.get_solver_state() if state is None else state
     entries = state.get("ac_pf_convergence_list") or []
     info = {"converged_count": state.get("ac_pf_converged_count"),
             "total_snapshots": state.get("ac_pf_total_snapshots")}
@@ -217,15 +221,16 @@ def _ac_convergence(n: Any, win_index: pd.Index, start: int, end: int) -> tuple[
 
 
 def _frame(n: Any, accessor: str, attr: str, source: str, names: pd.Index,
-           win_index: pd.Index) -> pd.DataFrame | None:
+           win_index: pd.Index, state: dict | None = None) -> pd.DataFrame | None:
     from routers.results import _result_df
 
-    state = PyPSAService.get_solver_state()
+    run_state = state
+    state = PyPSAService.get_solver_state() if state is None else state
     if source == "ac_pf" or state.get("ac_pf_results") is not None:
         snapshot = state.get(f"{source}_results")
         if not isinstance(snapshot, dict) or f"{accessor}.{attr}" not in snapshot:
             return None
-    df = _result_df(n, accessor, attr, source)
+    df = _result_df(n, accessor, attr, source, state=run_state)
     if df is None or getattr(df, "empty", True):
         return None
     try:
@@ -263,7 +268,8 @@ def _rating(row: pd.Series) -> tuple[float | None, str | None]:
 
 def _summarise_class(n: Any, cls: str, comp: str, t_accessor: str, source: str,
                      win_index: pd.Index, weights: pd.Series, valid_mask: np.ndarray | None,
-                     missing: list[str], series_names: set[str] | None = None) -> tuple[list[dict], list[dict]]:
+                     missing: list[str], series_names: set[str] | None = None,
+                     state: dict | None = None) -> tuple[list[dict], list[dict]]:
     comp_df = getattr(n, comp)
     if comp_df is None or comp_df.empty:
         return [], []
@@ -272,15 +278,15 @@ def _summarise_class(n: Any, cls: str, comp: str, t_accessor: str, source: str,
         if comp_df.empty:
             return [], []
     names = comp_df.index
-    p0 = _frame(n, t_accessor, "p0", source, names, win_index)
+    p0 = _frame(n, t_accessor, "p0", source, names, win_index, state)
     if p0 is None:
         missing.append(f"{cls} active-power flows (p0) are not populated for source '{source}'.")
         return [], [{"name": _name(nm), "class": cls, "reason": "no_flow_data"} for nm in names]
-    p1 = _frame(n, t_accessor, "p1", source, names, win_index)
+    p1 = _frame(n, t_accessor, "p1", source, names, win_index, state)
     q0 = q1 = None
     if source == "ac_pf":
-        q0 = _frame(n, t_accessor, "q0", source, names, win_index)
-        q1 = _frame(n, t_accessor, "q1", source, names, win_index)
+        q0 = _frame(n, t_accessor, "q0", source, names, win_index, state)
+        q1 = _frame(n, t_accessor, "q1", source, names, win_index, state)
     smax = _smax_matrix(n, comp_df, t_accessor, names, win_index)
     mask = pd.Series(True if valid_mask is None else valid_mask, index=win_index)
     w = weights.reindex(win_index).fillna(0.0)
@@ -364,7 +370,7 @@ def _summarise_class(n: Any, cls: str, comp: str, t_accessor: str, source: str,
 
 
 def _evidence_token(project_id: str, source: str, start: int, end: int, solve: dict,
-                    n: Any, weights: pd.Series, input_sha256: str) -> str:
+                    n: Any, weights: pd.Series, input_sha256: str, state: dict | None = None) -> str:
     """Hash the exact evidence, including non-peak values; never rounded rows."""
     digest = hashlib.sha256(json.dumps(
         [project_id, source, start, end, solve, input_sha256],
@@ -373,7 +379,7 @@ def _evidence_token(project_id: str, source: str, start: int, end: int, solve: d
         frames = [getattr(n, comp)]
         for attr in ("p0", "p1", "q0", "q1"):
             from routers.results import _result_df
-            frames.append(_result_df(n, accessor, attr, source))
+            frames.append(_result_df(n, accessor, attr, source, state=state))
         frames.append(getattr(getattr(n, accessor), "s_max_pu", None))
         for frame in frames:
             if frame is None:
@@ -382,7 +388,8 @@ def _evidence_token(project_id: str, source: str, start: int, end: int, solve: d
                 digest.update(str(getattr(frame, "columns", [])).encode())
                 digest.update(pd.util.hash_pandas_object(frame, index=True).values.tobytes())
     digest.update(pd.util.hash_pandas_object(weights, index=True).values.tobytes())
-    digest.update(json.dumps(PyPSAService.get_solver_state().get("ac_pf_convergence_list"),
+    digest.update(json.dumps((PyPSAService.get_solver_state() if state is None else state)
+                             .get("ac_pf_convergence_list"),
                              sort_keys=True, default=str).encode())
     return digest.hexdigest()
 
@@ -397,19 +404,30 @@ def get_loadflow_summary(source: str = "lopf", limit: int = DEFAULT_LIMIT,
 
 
 def get_loadflow_view(source: str = "lopf", window_from: int | None = None,
-                      window_to: int | None = None) -> dict:
-    """Bounded native UI projection of the same oracle as the chat tool."""
+                      window_to: int | None = None, *, context: Any = None) -> dict:
+    """Bounded native UI projection of the same oracle as the chat tool.
+
+    `context` reads another run's saved context (its own network and solver
+    state: a scenario's, in the results workbook) instead of the active one;
+    it is that run's private copy, so no network lock is taken."""
     from harness.durable import network_guard
 
+    if context is not None:
+        return _loadflow(source, MAX_LIMIT, window_from, window_to, None, view=True,
+                         context=context)
     with network_guard():
         return _loadflow(source, MAX_LIMIT, window_from, window_to, None, view=True)
 
 
 def _loadflow(source: str, limit: int, window_from: int | None,
               window_to: int | None, run_id: str | None, *, view: bool = False,
-              run: dict | None = None) -> dict:
+              run: dict | None = None, context: Any = None) -> dict:
     _check_args(source, limit, window_from, window_to, run_id)
     _root, project_id, _owner = run_evidence._authority()
+    if context is not None:
+        if run_id is not None:
+            raise ValueError("a run's context and a run_id cannot be read together")
+        project_id = str(context.project_uuid)
     if run_id is not None:
         run, facts = retained_results.run_binding(run_id)
         if run is not None:
@@ -421,9 +439,12 @@ def _loadflow(source: str, limit: int, window_from: int | None,
             out["next_step"] = "Say this run is not the current result and offer to re-run."
         return {**out, "run_id": run_id, **facts}
 
-    n = PyPSAService.get_network()
-    solve = _solve_state()
-    blocked = _gate(n, solve, source)
+    # A run's own saved context (`context`), or the active one.
+    active = PyPSAService.get_active_context() if context is None else context
+    state = None if context is None else context.solver_state
+    n = PyPSAService.get_network() if context is None else context.network
+    solve = _solve_state(state)
+    blocked = _gate(n, solve, source, state)
     if blocked is not None:
         return blocked
 
@@ -454,7 +475,7 @@ def _loadflow(source: str, limit: int, window_from: int | None,
     if not isinstance(recorded, str) or len(recorded) != 64:
         return _unavailable("solve_provenance_missing",
                             "Exact solve-input provenance is missing. Re-solve before reading load flow.")
-    input_sha256 = workflow_tools._network_input_fingerprint(PyPSAService.get_active_context(), exact=True)
+    input_sha256 = workflow_tools._network_input_fingerprint(active, exact=True)
     if recorded != input_sha256:
         return _unavailable("solve_inputs_changed",
                             "Inputs changed after the recorded solve. Re-solve before reading load flow.")
@@ -463,7 +484,7 @@ def _loadflow(source: str, limit: int, window_from: int | None,
     ac_info = None
     excluded = 0
     if source == "ac_pf":
-        valid_mask, ac_info = _ac_convergence(n, win_index, start, end)
+        valid_mask, ac_info = _ac_convergence(n, win_index, start, end, state)
         if valid_mask is None:
             return _unavailable("ac_pf_convergence_unavailable",
                                 "AC convergence is not aligned; no loading can be certified.",
@@ -479,7 +500,7 @@ def _loadflow(source: str, limit: int, window_from: int | None,
     skipped: list[dict] = []
     for cls, comp, t_accessor in _BRANCH_CLASSES:
         r, s = _summarise_class(n, cls, comp, t_accessor, source, win_index, weights,
-                                valid_mask, missing)
+                                valid_mask, missing, state=state)
         rows += r
         skipped += s
     if not rows and not skipped:
@@ -491,7 +512,7 @@ def _loadflow(source: str, limit: int, window_from: int | None,
                             skipped=skipped[:MAX_LISTED_NAMES])
 
     rows.sort(key=lambda r: (-r["_rank"], r["name"]))
-    token = _evidence_token(project_id, source, start, end, solve, n, weights, input_sha256)
+    token = _evidence_token(project_id, source, start, end, solve, n, weights, input_sha256, state)
     series = []
     view_rows = []
     if view:
@@ -506,7 +527,7 @@ def _loadflow(source: str, limit: int, window_from: int | None,
         for cls, comp, t_accessor in _BRANCH_CLASSES:
             selected = {r["_native_name"] for r in rows[:10] if r["class"] == cls}
             chart_rows, _ = _summarise_class(n, cls, comp, t_accessor, source, win_index,
-                                            weights, valid_mask, [], selected)
+                                            weights, valid_mask, [], selected, state=state)
             series.extend({"name": r["_native_name"][:512], "class": r["class"],
                            "asset_key": hashlib.sha256((r["class"] + "/" + r["_native_name"]).encode()).hexdigest(),
                            "name_truncated": len(r["_native_name"]) > 512, **r["_series"]}
@@ -584,7 +605,7 @@ def _loadflow(source: str, limit: int, window_from: int | None,
         out["series_truncated"] = len(win_index) > 800 or ranked_total > 10
         out["binding"] = {
             "version": 1, "project_id": project_id, "scope": "current",
-            "project_name": PyPSAService.get_active_context().loaded_project,
+            "project_name": active.loaded_project,
             "input_sha256": input_sha256,
             "source": source, "window_from": start, "window_to": end,
             "data_sha256": token,

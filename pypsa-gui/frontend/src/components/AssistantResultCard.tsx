@@ -3,6 +3,7 @@ import { formatElapsed, useElapsed } from '../hooks/useElapsed'
 import { useUIStore } from '../store/uiStore'
 import { openScenariosHighlight } from './uiNavigate'
 import { CARD_GROUPS } from '../pages/results/groups'
+import RunMonitor from './runMonitor/RunMonitor'
 
 /** LC-12: where a plan's waiting job stands in this view. */
 export type ContinuationLine =
@@ -88,8 +89,10 @@ function WaitingLine({ line }: { line: ContinuationLine }) {
   </div>
 }
 
-export default function AssistantResultCard({ result, disabled, onRequest, continuation, toolWords }: {
+export default function AssistantResultCard({ result, disabled, disabledReason, onRequest, continuation, toolWords }: {
   result: unknown; disabled: boolean; onRequest: (text: string) => void
+  /** Why `disabled` holds, in words, when it is not passing (chat off, project mismatch). */
+  disabledReason?: string
   /** LC-02: names a plan step's tool in words (Guided); the tool name otherwise. */
   toolWords?: (tool: string) => string
   /** LC-12: set while this card's plan waits on its job. */
@@ -117,7 +120,8 @@ export default function AssistantResultCard({ result, disabled, onRequest, conti
     ? data.cases.map(object).map(c => c?.project_id).filter((id): id is string => typeof id === 'string').slice(0, 4) : []
   if (!taskId && !link && !preview && !sweepCases.length) return null
   return <div className="mt-1 rounded border border-border p-2 font-sans text-xs" data-testid="assistant-result-card">
-    {taskId && <div data-testid="assistant-task-card">
+    {taskId && object(task?.run) && <RunMonitor task={task!} disabled={disabled} disabledReason={disabledReason} onRequest={onRequest} />}
+    {taskId && !object(task?.run) && <div data-testid="assistant-task-card">
       <div className="font-medium">{String(task?.title ?? 'Task')}</div>
       <div>{(guided && TASK_WORDS[status]) || status} · {Number(task?.completed_steps ?? 0)} / {Number(task?.total_steps ?? 0)} steps</div>
       {next && (guided
@@ -166,7 +170,7 @@ export default function AssistantResultCard({ result, disabled, onRequest, conti
       {preview.diff_truncated === true && <p>Some change details are omitted. Review the full requested changes before applying.</p>}
       <p className="text-muted">No network changes applied. Applying requires confirmation.</p>
     </div>}
-    {next && typeof next.error === 'string' && <p className="text-amber-400">{next.error}</p>}
+    {next && !object(task?.run) && typeof next.error === 'string' && <p className="text-amber-400">{next.error}</p>}
     {sweepCases.length > 0 && <button type="button" className="text-accent hover:underline" data-testid="assistant-sweep-open"
       onClick={() => openScenariosHighlight(sweepCases)}>
       Open the new case{sweepCases.length === 1 ? '' : 's'} in Scenarios ›

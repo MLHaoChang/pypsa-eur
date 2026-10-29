@@ -191,7 +191,7 @@ def _not_solved():
     return Response(status_code=204)
 
 
-def _solved_settings() -> dict | None:
+def _solved_settings(state=None, n=None) -> dict | None:
     """
     The settings the last successful solve used, or None when nothing is
     solved (UX overhaul S2b). Lets lost_load / adequacy / reserve_margin say
@@ -202,20 +202,26 @@ def _solved_settings() -> dict | None:
     Projects solved before the stash existed carry none; for those the
     existing stashes decide, which is exact because each is published only by
     a successful solve that enforced its standard.
+
+    `state` / `n` read another run's solver state and network (a scenario's
+    own context, in the results workbook) instead of the active ones.
     """
-    settings = _state.get("last_solve_settings")
+    if state is None:
+        state = _state
+    settings = state.get("last_solve_settings")
     if settings:
         return settings
-    if _state.get("status") == "failed" or not _dispatch_ready(PyPSAService.get_network()):
+    if state.get("status") == "failed" or not _dispatch_ready(
+            PyPSAService.get_network() if n is None else n):
         return None
-    capture = _state.get("last_lost_load") or {}
-    report = _state.get("adequacy_report") or {}
+    capture = state.get("last_lost_load") or {}
+    report = state.get("adequacy_report") or {}
     return {
         "voll_eur_per_mwh": float(capture.get("voll_eur_per_mwh") or 0.0)
         if capture.get("lost_load_t") is not None else 0.0,
         "ens_target_applied": report.get("target") is not None,
         "ens_cap_permyriad": None,
-        "reserve_margin_applied": bool(_state.get("last_reserve_margin")),
+        "reserve_margin_applied": bool(state.get("last_reserve_margin")),
         "reserve_margin": None,
     }
 
@@ -2237,11 +2243,30 @@ def _workbook_scenarios(cfg, n, freshness: dict):
 
     try:
         return gather_scenarios(str(pid), base_basis, ic_key=ic_key,
-                                result_df_for=lambda state: functools.partial(_result_df, state=state))
+                                result_df_for=lambda state: functools.partial(_result_df, state=state),
+                                solved_settings_for=lambda state, net: functools.partial(
+                                    _solved_settings, state, net),
+                                dispatch_ready=_dispatch_ready)
     except HTTPException as exc:
         if exc.status_code == 404:  # no saved project row (a scratch network)
             return None
         raise
+
+
+def _workbook_project(run):
+    """A workbook run's project row for the acting user, or None when the run
+    has no saved project or the user may not open it: access is resolved
+    (`project_registry.resolve_project`, as `gather_scenarios` does) before any
+    file of the project is read (results-workbook 02, GK B condition 8)."""
+    from services import chat_tools, project_registry
+
+    if not run.project_id:
+        return None
+    with chat_tools._acting() as (db, user):
+        try:
+            return project_registry.resolve_project(db, user, str(run.project_id))
+        except HTTPException:
+            return None
 
 
 @results_router.get("/workbook.xlsx")
@@ -2309,20 +2334,24 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
 
         current, why = _ic_current_assumptions()
         case_state = staleness(report.model_dump(mode="json"), current, reason=why)
+    # The acting user covers the build too: the views whose routes read a
+    # project's files resolve each run's project for this user first.
     previous = chat_tools.acting_user_id()
     chat_tools.set_acting_user(str(user.id))
     try:
         scenarios = _workbook_scenarios(cfg, n, freshness)
-    finally:
-        chat_tools.set_acting_user(previous)
-    try:
         blob = RW.build_results_workbook(RW.WorkbookInputs(
             network=n, cfg=cfg, lost_load=_state.get("last_lost_load"),
             result_df=_result_df, views=included, ic_report=report, case_state=case_state,
             project=project, scope=scope, template=template, freshness=freshness,
-            stored=stored, run=runs[0] if runs else None, scenarios=scenarios))
+            stored=stored, run=runs[0] if runs else None, scenarios=scenarios,
+            solved_settings=_solved_settings,
+            project_id=getattr(PyPSAService.get_active_context(), "project_uuid", None),
+            project_for=_workbook_project))
     except RW.WorkbookTooLarge as exc:
         raise HTTPException(413, {"error_kind": "file_too_large", "message": str(exc)})
+    finally:
+        chat_tools.set_acting_user(previous)
     return Response(
         content=blob,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -2540,32 +2569,10 @@ def get_lost_load(
     settings (UX overhaul S2b). 204 only when nothing is solved; a solve with
     voll=0 answers `voll_applied: false` with null totals.
     """
-    from services.results.lost_load import compute_lost_load
-    payload = compute_lost_load(
-        PyPSAService.get_network(),
-        _state.get("last_lost_load"),
-        from_,
-        to_,
-    )
-    if payload is not None:
-        return {**payload, "voll_applied": True}
-    # S2b: 204 only when nothing is solved. Otherwise say whether VoLL was in
-    # the solve: with it and nothing captured, the totals are a computed zero;
-    # without it, lost load was not modelled and the totals are null — never 0.
-    settings = _solved_settings()
-    if settings is None:
-        return Response(status_code=204)
-    voll = float(settings.get("voll_eur_per_mwh") or 0.0)
-    applied = voll > 0
-    return {
-        "index": [], "columns": [], "data": [],
-        "voll_applied": applied,
-        "voll_eur_per_mwh": voll if applied else None,
-        "total_mwh": 0.0 if applied else None,
-        "total_cost_eur": 0.0 if applied else None,
-        "bus_carriers": {},
-        "shed_hours": {"total": 0.0, "by_period": {}} if applied else None,
-    }
+    from services.results.lost_load import lost_load_payload
+    payload = lost_load_payload(PyPSAService.get_network(), _state.get("last_lost_load"),
+                                _solved_settings, from_, to_)
+    return Response(status_code=204) if payload is None else payload
 
 
 

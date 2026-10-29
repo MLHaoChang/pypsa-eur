@@ -59,10 +59,11 @@ def _verify_feasible(n: pypsa.Network, label: str, solver_config: dict | None = 
     from services.adequacy.energization import apply_energization
 
     apply_energization(test)
-    # A committable process unit is planned linearised, as the app does (process_uc auto): the
-    # binary MILP is the operational check's job and takes minutes on the staged plan.
-    from services.solver.process_uc import planning_uc_kwargs
+    # A committable process unit is planned as the app does (process_uc auto): linearised, or plain on
+    # the year base; the binary MILP is the operational check's job and takes minutes on the staged plan.
+    from services.solver.process_uc import planning_uc_kwargs, relax_for_plan
 
+    relax_for_plan(test, None)
     uc = planning_uc_kwargs(test, None)
     status, condition = test.optimize(solver_name="highs", multi_investment_periods=multi, **uc)
     if status != "ok" or condition != "optimal":

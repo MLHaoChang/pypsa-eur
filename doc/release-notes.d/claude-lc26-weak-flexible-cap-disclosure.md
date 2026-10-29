@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): the weak_flexible pack now warns, in the apply_pack note and the report, when it replaces an import Link's own rating with the pack cap, naming the Link, its rating and the cap; the run_eh_study description says what the pack sets.

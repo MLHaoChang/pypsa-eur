@@ -221,3 +221,18 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **2026-10-28: lettered issue files never reached the frontier.** `frontier.py` matched only `NN-`, so about a dozen `04b-`, `05a-`, `06a-` issues were skipped by the frontier, `--stages` and the Feature progress dashboard (grid-to-process 12a had to be renumbered 18).
   - Fix: the number is kept as written (`04b`), `Blocked by 04b` and `Blocked by 04, 06a` parse, plain-numbered output is unchanged; test in `tests/test_coord_frontier.py`.
   - Lives in: `scripts/coord/frontier.py` (live and template copies).
+
+## 29 Oct 2026: retro "hand-off churn" (owner decision RETRO-1029-1)
+
+- **Reviewer briefs lowered the hand-off to 250k by hand.** Eight sessions rotated in one pass, and every rotation re-read the same files (sessions also start at 75–80k).
+  - Fix: briefs keep "Hand off at 300k" (USE-2) for builders and reviewers alike; never lower it per brief.
+  - Lives in: coordinator (Opening a session), live and template copies; `session-brief.md` already said 300k.
+- **Notification wakes were 32% of tool-result chars.** Each read carries a fixed ~2.5k-char preamble; new-id messages and status messages each caused a wake.
+  - Fix: a rotated session's new id goes only to the sessions that send it work, folded into the next message due anyway; builders send only `premerge ok <sha>`, questions, PERMISSION requests and hand-offs; reviewers message only for a blocking NOT OK, a disputed NO-GO or a ruling.
+  - Lives in: coordinator (Rotation), steward (Messages to the coordinator), review-gk and review-ux (live and template copies).
+- **Each `subscribe_pr_activity` cost a 13k-char wake.** A builder driving a stack subscribed to every PR.
+  - Fix: subscribe only to the PR whose CI you are driving now; run `scripts/coord/ciwait.sh 118 <pr>` in the background for the rest.
+  - Lives in: steward (Driving a PR, step 3), live and template copies.
+- **Reviewers read code inline.** Two reviewers pulled 112k and 142k chars of `git show`/`git diff` (single outputs to 24k) with no subagent calls; builders that delegated reads stayed small. 13 full-size screenshots cost ~15k tokens.
+  - Fix: read `git diff --stat` first, then one hunk or file at a time capped with `| head -c 6000`; whole-file or cross-file reads go to an Explore subagent that returns file:line findings; open screenshots downscaled to at most 1000 px wide.
+  - Lives in: review-gk (Review setup), review-ux (Review setup), live and template copies.

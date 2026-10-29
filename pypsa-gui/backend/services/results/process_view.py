@@ -112,13 +112,15 @@ def _product(view: _View, bus: str) -> dict:
 
     gens = n.generators.index[n.generators["bus"] == bus]
     gen_p = getattr(n.generators_t, "p", None)
-    buy, role_flags = [], set()
+    buy, sources, role_flags = [], [], set()
     for g in gens:
         role, flag = generator_role(n, g)
         if role == BUY_IN:
             buy.append(g)
             if flag:
                 role_flags.add(flag)
+        elif not role:
+            sources.append(g)
     # The shortfall from the one accessor: a role Generator, else the solve's capture (ticket 08).
     lost = [s for s in view.shortfalls if s.bus == str(bus)]
     role_flags |= {s.flag for s in lost if s.flag == "role_from_name"}
@@ -169,9 +171,24 @@ def _product(view: _View, bus: str) -> dict:
         "buy_in": view.amount([s.clip(lower=0) for s in (_frame_col(gen_p, g, sns) for g in buy) if s is not None],
                               unit, tf),
         "lost": lost_amount,
+        "unused_supply": view.amount([u for u in (_unused(view, g) for g in sources) if u is not None], unit, tf),
         "inventory": inventory,
         "role_flag": sorted(role_flags)[0] if role_flags else None,
     }
+
+
+def _unused(view: _View, gen: str):
+    """A product source's available supply it did not take (a mine's scheduled ore left unmined, G2P-10): the
+    p_max_pu × capacity ceiling less its dispatch, never below 0."""
+    n, sns = view.n, view.sns
+    p = _frame_col(getattr(n.generators_t, "p", None), gen, sns)
+    if p is None:
+        return None
+    col = "p_nom_opt" if _as_bool(n.generators.at[gen, "p_nom_extendable"]) else "p_nom"
+    cap = float(n.generators.at[gen, col])
+    pu = _frame_col(getattr(n.generators_t, "p_max_pu", None), gen, sns)
+    pu = pu if pu is not None else float(n.generators.at[gen, "p_max_pu"])
+    return (pu * cap - p).clip(lower=0)
 
 
 def _process_unit(view: _View, link: str) -> dict:

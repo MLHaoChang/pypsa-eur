@@ -319,6 +319,7 @@ jobs:
       OJ01_ARTIFACTS: ${{ github.workspace }}/oj-artifacts/oj01
       OJ05_ARTIFACTS: ${{ github.workspace }}/oj-artifacts/oj05
       OJ21_ARTIFACTS: ${{ github.workspace }}/oj-artifacts/oj21
+      LC03H_ARTIFACTS: ${{ github.workspace }}/oj-artifacts/lc03h
 
     steps:
     - uses: actions/checkout@v7
@@ -368,18 +369,19 @@ jobs:
         npm install --no-save --no-audit --no-fund --prefix "$RUNNER_TEMP/pw" "playwright@$PLAYWRIGHT_VERSION"
         "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps chromium
 
-    - name: Run the owner journeys (OJ-01, OJ-05, OJ-21)
+    - name: Run the owner journeys (OJ-01, OJ-05, OJ-21, LC-03 past runs)
       if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       working-directory: pypsa-gui/frontend
       env:
         PLAYWRIGHT_MODULE_PATH: ${{ runner.temp }}/pw/node_modules/playwright/package.json
         PYPSA_COMPOSER_PYTHON: ${{ github.workspace }}/.pixi/envs/test/bin/python
       run: |
-        mkdir -p "$OJ01_ARTIFACTS" "$OJ05_ARTIFACTS" "$OJ21_ARTIFACTS"
+        mkdir -p "$OJ01_ARTIFACTS" "$OJ05_ARTIFACTS" "$OJ21_ARTIFACTS" "$LC03H_ARTIFACTS"
         status=0
         node scripts/smoke-copilot-oj01.mjs || status=1
         node scripts/smoke-copilot-oj05.mjs || status=1
         node scripts/smoke-copilot-oj21.mjs || status=1
+        node scripts/smoke-copilot-lc03-historical.mjs || status=1
         exit $status
 
     - name: Upload journey screenshots

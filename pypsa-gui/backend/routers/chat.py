@@ -2144,6 +2144,68 @@ async def chat_stream(
     )
 
 
+class RunResumeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+def _run_call(actor: User, call):
+    """Study harness issue 08: the plan card's run monitor. The caller's own
+    run in the active project only; anything else is `task_not_found`."""
+    from services import chat_tools
+    chat_tools.set_acting_user(actor.id)
+    return call()
+
+
+@router.get("/runs/{task_id}/view")
+def run_view(task_id: str, actor: User = Depends(require_user)) -> dict[str, Any]:
+    """The run's stages, gates, budgets, envelope and the card it waits on.
+    Reading advances nothing."""
+    return _run_call(actor, lambda: _run_view(task_id))
+
+
+def _run_act(actor: User, task_id: str, act):
+    """A click on the plan card, then the run as it now is."""
+    def call():
+        act()
+        return _run_view(task_id)
+    return _run_call(actor, call)
+
+
+def _run_view(task_id):
+    from services import run_monitor
+    return run_monitor.view(task_id, provider_ready=_profile_chat_ready(llm_config.resolve_active()))
+
+
+@router.post("/runs/{task_id}/present")
+def run_present(task_id: str, actor: User = Depends(require_user)) -> dict[str, Any]:
+    """The user has the plan card open: a card the run waits on is issued
+    now, its TTL starting at display. It approves nothing."""
+    from services import run_monitor
+    return _run_call(actor, lambda: run_monitor.present(task_id))
+
+
+@router.post("/runs/{task_id}/pause")
+def run_pause(task_id: str, actor: User = Depends(require_user)) -> dict[str, Any]:
+    from services import run_monitor
+    return _run_act(actor, task_id, lambda: run_monitor.pause(task_id))
+
+
+@router.post("/runs/{task_id}/resume")
+def run_resume(task_id: str, body: RunResumeRequest | None = None,
+               actor: User = Depends(require_user)) -> dict[str, Any]:
+    from services import run_monitor
+    session = _resolve_owned_session(body.session_id, actor) if body and body.session_id else None
+    return _run_act(actor, task_id, lambda: run_monitor.resume(task_id, session))
+
+
+@router.post("/runs/{task_id}/stop")
+def run_stop(task_id: str, actor: User = Depends(require_user)) -> dict[str, Any]:
+    """Revokes the envelope and cancels the run; nothing is reverted."""
+    from services import run_monitor
+    return _run_act(actor, task_id, lambda: run_monitor.stop(task_id))
+
+
 @router.post("/{session_id}/confirm")
 def chat_confirm(session_id: str, body: ConfirmRequest,
                  actor: User | None = Depends(optional_user)) -> dict[str, Any]:
@@ -2167,6 +2229,15 @@ def chat_confirm(session_id: str, body: ConfirmRequest,
     # answered with a 403: that keeps this route from confirming the session
     # exists, and matches the existing never-404 contract below. Wrong-replica
     # is a distinct 409 so failover cannot clear another worker's tokens.
+    from harness import runner
+    if session_id.startswith(runner.SESSION_PREFIX):
+        # Study harness issue 08: the plan card answers a run's card here. The
+        # run is re-checked at the click (GK B (1), (2)): a run the caller no
+        # longer reaches is `task_not_found`, a paused or stopped one refused.
+        from services import run_monitor
+        if actor is None:
+            run_monitor.not_found()
+        _run_call(actor, lambda: run_monitor.confirm(session_id.removeprefix(runner.SESSION_PREFIX)))
     session = _resolve_owned_session(session_id, actor)
     if session is None:
         raise HTTPException(

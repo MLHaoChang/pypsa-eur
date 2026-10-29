@@ -111,6 +111,8 @@ export interface PendingConfirmationCard {
   sweep_card?: unknown
   /** Issue 19: set when the tool comes from an admin's MCP server (harness/confirm.py). */
   external?: { server: string }
+  /** Study harness 08: a run's card, answered on the run's own session (`run:<task_id>`). */
+  session_id?: string
 }
 
 export interface ChatUsageAcc {
@@ -158,6 +160,18 @@ export interface QueuedRequest {
   /** Requests from one card click (Improve: one per action). A denial of
    *  one drops the rest of its group (P25 gate). */
   group?: string
+  /** A plan card's verdict the server writes the message for (COP-1
+   *  Continue, study harness 08's envelope decision); `text` is never sent. */
+  harness?: HarnessTurn
+}
+
+/** The `/stream` fields of a turn the harness writes the message for. */
+export interface HarnessTurn {
+  continue_task_id?: string
+  envelope_decision?: {
+    task_id: string; verdict: 'unattended' | 'stepwise' | 'revoke'
+    envelope?: Record<string, unknown>; notify_email?: boolean
+  }
 }
 
 /** Identical text within this window is a double click, not a new request. */
@@ -272,7 +286,7 @@ interface ChatState {
    * REQUEST_DEDUPE_MS. Live busy corrections pass `openDock: false` so the
    * console stays closed. */
   sendRequest: (text: string,
-    opts?: { source?: string; label?: string; group?: string; openDock?: boolean; requiresChecked?: boolean }) => string | null
+    opts?: { source?: string; label?: string; group?: string; openDock?: boolean; requiresChecked?: boolean; harness?: HarnessTurn }) => string | null
   /** ChatPanel only: remove and return the oldest queued request; it
    *  becomes `activeRequest`. */
   takeNextRequest: () => QueuedRequest | null
@@ -463,6 +477,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (opts?.label) req.label = opts.label
     if (opts?.group) req.group = opts.group
     if (opts?.requiresChecked) req.requiresChecked = true
+    if (opts?.harness) req.harness = opts.harness
     const openDock = opts?.openDock !== false
     set((s) => {
       // Live: at most one pending correction (latest wins), matching the

@@ -1,0 +1,12 @@
+{
+  "kinds": {
+    "run_not_pausable": {
+      "surface": "inline",
+      "why": "The plan card's Pause on a harness run that is not going on (already paused, stopped, completed or failed; services/run_monitor.py, study harness issue 08). A user click, never a tool call; nothing changes and the card reads the run again."
+    },
+    "run_paused_or_stopped": {
+      "surface": "inline",
+      "why": "The plan card's present, or its answer to the run's card on /chat/run:<id>/confirm, on a paused or stopped harness run (services/run_monitor.py, study harness issue 08). Nothing is issued or approved and nothing runs; the user resumes a paused run first, and a stopped run cannot go on."
+    }
+  }
+}

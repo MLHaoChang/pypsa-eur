@@ -81,15 +81,31 @@ def _refuse(kind: str, message: str, status: int = 409, **extra: Any) -> None:
     raise HTTPException(status, detail)
 
 
+# LC03-ACCESS-1: a run-evidence read with no project bound. Access loss clears
+# the session's project pointer, so the server cannot tell lost access from a
+# project never opened; the words cover both without claiming either.
+NO_PROJECT_OPEN = ("No project is open for you now, so this run's kept results are not shown. "
+                   "If the project was closed elsewhere or your access was removed, open it "
+                   "again from Projects.")
+
+
 def _authority() -> tuple[Path, str, str]:
     from services import chat_tools, project_registry
 
     ctx = PyPSAService.get_active_context()
     if not ctx.loaded_project or not ctx.project_uuid:
-        _refuse('run_project_required',
-                'Create, save and activate a project before reading run evidence.')
+        _refuse('run_project_required', NO_PROJECT_OPEN)
     with chat_tools._acting() as (db, user):
-        project = project_registry.resolve_project(db, user, ctx.project_uuid)
+        try:
+            project = project_registry.resolve_project(db, user, ctx.project_uuid)
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            # Rechecked on every read, navigation and download: access lost since
+            # the run refuses here. Deleted and revoked read the same, as the 404 does.
+            _refuse('project_unavailable',
+                    'This project is not available to you: your access was removed or the '
+                    'project was deleted. Its runs and their kept results are not shown.', 404)
         return project_registry.project_dir(project), str(project.id), str(user.id)
 
 

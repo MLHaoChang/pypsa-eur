@@ -27,6 +27,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from services import change_log_service, growth_placeholders
+from services.assurance_records import aggregate_gaps
 from services.http_filenames import content_disposition
 from services.profile_shapes import (
     _double_peak_profile,
@@ -238,7 +239,6 @@ def aggregate_load_profile(
     else:
         targets = list(n.loads.index)
 
-    gaps: list[str] = [f"no load named {u}" for u in unknown]
     out = {
         "index": [],
         "values": [],
@@ -247,57 +247,31 @@ def aggregate_load_profile(
         "unknown_names": unknown,
         "loads_without_profile": [],
         "complete": False,
-        "gaps": gaps,
+        "gaps": [],
         "peak": None,
         "mean": None,
     }
-    if not targets:
-        if not unknown:
-            gaps.append("no loads match")
-        return out
-
     # Pull each series from _user_ts first, fall back to n.loads_t.p_set.
     net_p_set = getattr(n.loads_t, "p_set", None)
-    series_list: list[pd.Series] = []
+    members: list[pd.Series | None] = []
     for name in targets:
         s = _user_ts.get(("loads", "p_set", name))
         if s is None and net_p_set is not None and not net_p_set.empty and name in net_p_set.columns:
             s = net_p_set[name]
-        if s is not None:
-            series_list.append(s.rename(name))
-        else:
+        members.append(None if s is None else s.rename(name))
+        if s is None:
             out["loads_without_profile"].append(name)
-    out["loads_with_profile"] = len(series_list)
-    if out["loads_without_profile"]:
-        gaps.append(f"{len(out['loads_without_profile'])} of {len(targets)} loads have no profile")
-    if not series_list:
+    out["loads_with_profile"] = len(targets) - len(out["loads_without_profile"])
+    # The same gaps, in the same order and wording, as the checked path.
+    gaps, raw, values = aggregate_gaps(n.snapshots, unknown, members)
+    out["gaps"] = gaps
+    if raw is None:
         return out
-    if any(not s.index.equals(n.snapshots) for s in series_list):
-        gaps.append("the loads do not share the network's snapshots")
-    # A bool or string member (a numeric-string upload) is not summed: every
-    # step of it counts as missing, as aggregate_source refuses it.
-    not_numbers = [s.name for s in series_list
-                   if not pd.api.types.is_numeric_dtype(s) or s.dtype == bool]
-    if not_numbers:
-        gaps.append("a step that is not a number")
-
-    try:
-        raw = pd.concat(series_list, axis=1)
-    except (TypeError, ValueError):
-        # Members that cannot be aligned at all (a repeated timestamp, or a
-        # timezone-aware index next to a naive one) are only a gap.
-        return out
-    numeric = raw.drop(columns=not_numbers).astype("float64").reindex(columns=raw.columns)
-    finite = np.isfinite(numeric.to_numpy())
+    finite = np.isfinite(values)
     # A complete sum keeps the handler's own expression, so a value the
     # checked path captured matches what is shown bit for bit.
-    total = raw.sum(axis=1) if not gaps else numeric.sum(axis=1)
+    total = raw.sum(axis=1) if not gaps else pd.DataFrame(values, index=raw.index).sum(axis=1)
     total = total.where(finite.all(axis=1))
-    bad = int((~finite).sum())
-    if bad:
-        gaps.append(f"{bad} missing or non-finite {'step' if bad == 1 else 'steps'}")
-    if total.empty:
-        gaps.append("no steps")
     out["index"] = [ts.isoformat() if hasattr(ts, "isoformat") else str(ts) for ts in total.index]
     out["values"] = [None if not math.isfinite(v) else float(v) for v in total.tolist()]
     if not gaps:

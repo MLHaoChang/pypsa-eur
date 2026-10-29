@@ -10,6 +10,7 @@ import threading
 import time
 
 from harness.protocol import ProviderError
+from services import assurance_records as records
 
 SUITE_VERSION = "checked-pilot-evaluation/12"
 ORACLE_VERSION = "hand-worked-network-and-carrier-oracles/1"
@@ -296,7 +297,7 @@ def score(case: Case, frames: list, answer: dict, *, project_id=None) -> dict:
     if (not text.strip() or receipt.get("content_sha256") != hashlib.sha256(text.encode()).hexdigest()
         or answer.get("text") != text or answer.get("answer_id") != approved.get("answer_id") or answer.get("receipt") != receipt):
         failures.add("owned_answer_or_digest")
-    if approved.get("version") != 1 or answer.get("version") != 1 or receipt.get("policy_version") != "1":
+    if approved.get("version") != 1 or answer.get("version") != 1 or receipt.get("policy_version") != records.POLICY_VERSION:
         failures.add("unsupported_policy")
     scope = receipt.get("request_scope", {})
     if scope.get("profile") != case.profile or scope.get("entity_id") != case.entity:
