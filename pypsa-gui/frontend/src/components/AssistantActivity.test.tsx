@@ -29,15 +29,23 @@ describe('AssistantActivity', () => {
     expect(get.mock.calls[0].slice(0, 2)).toEqual(['Project A', 'all'])
     expect(screen.queryByRole('button', { name: /cancel|approve|retry job/i })).toBeNull()
   })
+  it('prints plain status and family words and no raw source id', async () => {
+    get.mockResolvedValue(snapshot('epoch:1', 'waiting_for_approval'))
+    render(<AssistantActivity onConversation={vi.fn()} />)
+    await screen.findByText('Network solve')
+    expect(screen.getByText(/Waiting for your approval/)).toBeTruthy()
+    expect(screen.getByText(/Simulation/)).toBeTruthy()
+    expect(screen.queryByText(/foreground_simulation|Source: j1/)).toBeNull()
+  })
   it('never shows late project data after a switch', async () => {
     let finish!: (value: ActivitySnapshot) => void
     get.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
     get.mockResolvedValue(snapshot('b:1', 'failed'))
     render(<AssistantActivity onConversation={vi.fn()} />)
     act(() => useUIStore.setState({ currentProject: 'Project B' }))
-    expect(await screen.findByText('failed')).toBeTruthy()
+    expect(await screen.findByText('Failed')).toBeTruthy()
     await act(async () => finish(snapshot('old:1', 'completed')))
-    expect(screen.queryByText('completed')).toBeNull()
+    expect(screen.queryByText('Done')).toBeNull()
   })
   it('marks disconnected states stale and recovers a fresh snapshot', async () => {
     get.mockResolvedValueOnce(snapshot()).mockRejectedValueOnce(new Error('offline'))

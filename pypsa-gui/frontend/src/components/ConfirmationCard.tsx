@@ -425,11 +425,13 @@ export function ConfirmationCard() {
       ) : (
         <>
           <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text">
-            {pending.external ? shortMcpToolName(pending.tool_name) : pending.tool_name}
+            {pending.external ? shortMcpToolName(pending.tool_name) : guidedCardSummary(pending.tool_name, pending.args)}
           </div>
-          <pre className="text-[10px] text-muted bg-bg-2 p-2 rounded overflow-x-auto mb-2 whitespace-pre-wrap break-all">
-            {JSON.stringify(pending.args, null, 2)}
-          </pre>
+          {Object.keys(pending.args ?? {}).length > 0 && (
+            <pre className="text-[10px] text-muted bg-bg-2 p-2 rounded overflow-x-auto mb-2 whitespace-pre-wrap break-all">
+              {JSON.stringify(pending.args, null, 2)}
+            </pre>
+          )}
         </>
       )}
       {edit && <EditCardTable card={edit} guided={Boolean(guidedWording)} />}

@@ -105,7 +105,7 @@ it('announces a pending destructive confirmation as an alert dialog', async () =
   // The role is meaningless without a name; the tool being confirmed is it.
   const labelledBy = card.getAttribute('aria-labelledby')
   expect(labelledBy).toBeTruthy()
-  expect(document.getElementById(labelledBy!)?.textContent).toContain('delete_project')
+  expect(document.getElementById(labelledBy!)?.textContent).toContain('Delete the project Demo')
 })
 
 it('announces an error banner as an alert', async () => {
