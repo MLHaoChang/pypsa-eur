@@ -133,7 +133,7 @@ Not covered: replay of an older, validly sealed version of a mutable record (`op
 
 ### 2026-10-29 — REPLAY closed: a DB high-water mark on every mutable record
 
-`tests/assurance_acceptance/test_p1_replay.py`: 29 cases.
+`tests/assurance_acceptance/test_p1_replay.py`: 30 cases.
 
 **Threat model.**
 - In scope: an attacker who can write the record store, up to restoring the whole store directory. They cannot read `SECRET_KEY` or the key file, and cannot write the DB.
@@ -148,7 +148,7 @@ Not covered: replay of an older, validly sealed version of a mutable record (`op
   - no mark at all.
 
   The mark is stripped before the record is returned, so callers see the record as before.
-- **Write order.** The mark is bumped (`UPDATE … SET seq = seq + 1 RETURNING`) and committed inside the store's file lock. Only then is the file sealed and written. A crash between the two leaves the file one behind its mark, which reads as unavailable and never as the older version. The next save writes a current version again. `load()` takes no lock, because an effect holds the store lock while its handler runs. A reader that finds the file one step behind its mark re-reads for up to 0.5 s (`_MARK_SETTLE_SECONDS`), so a save in flight lands and reads as the new version (tested). A crash or replay stays mismatched and reads 409 after that wait.
+- **Write order.** The mark is bumped (`UPDATE … SET seq = seq + 1 RETURNING`) and committed inside the store's file lock. Only then is the file sealed and written. A crash between the two leaves the file one behind its mark, which reads as unavailable and never as the older version. The next save writes a current version again. `load()` takes no lock, because an effect holds the store lock while its handler runs. A reader that finds the file one step behind its mark re-reads for up to 2 s (`_MARK_SETTLE_SECONDS`), so a save in flight lands and reads as the new version (tested). A reader that already holds the store lock skips the wait, because no save can land then. A crash or replay stays mismatched and reads 409. Two first saves of a new id that race on the insert take seqs 1 and 2: the loser retries the update (tested outside the lock).
 - **Pruning.** A pruned row starts a new epoch when its id is written again, so no copy sealed under the old chain matches. The save sweep deletes the marks of reclaimed records, and of expired records whose file is gone. An unresolved operation reservation keeps its file, so it keeps its mark.
 - **Immutable kinds** (answer, evidence) take no mark; an identical re-save is still a no-op.
 
@@ -164,9 +164,9 @@ Not covered: replay of an older, validly sealed version of a mutable record (`op
 #### GK B (9) plan GO conditions (2026-10-29), option A
 
 1. **Exact match:** load() accepts only seq == mark, and both directions are refused. Met: tests for replay, rolled-back mark and epoch.
-2. **Write order:** the DB commit comes first, then seal and write. Pinned by a test that kills the write after the commit; two concurrent saves take distinct seqs (two-thread test). Met.
+2. **Write order:** the DB commit comes first, then seal and write. Pinned by a test that fails the file write after the commit; the process is not killed, so the test leaves file n with mark n+1 and checks that it reads 409. Two concurrent saves take distinct seqs (a two-thread test through save(), and a two-thread test of the first mark outside the lock). Met.
 3. **Migration 0010** after 0009, with a downgrade. Met: `test_alembic_sqlite` (head is now 0010) and a new upgrade → downgrade → upgrade round-trip test.
 4. **Upgrade effect** is fail-closed with no backfill, stated above. Met.
 5. **Rows don't grow forever:** they are pruned in the save sweep, and a re-created id gets a new epoch. Met: tests for the sweep and the pruned chain.
-6. **Mutable kinds only.** The immutable no-op test is kept. There are no new error kinds (409 `evidence_unavailable`, as for any unavailable record). Mutation: with load()'s comparison vacuous (`tests/assurance_acceptance/replay_mutation.py`), each of the 21 red cases fails. Met.
+6. **Mutable kinds only.** The immutable no-op test is kept. There are no new error kinds (409 `evidence_unavailable`, as for any unavailable record). Mutation: `tests/assurance_acceptance/replay_mutation.py` makes load() accept any mutable record it can read and unseal; each of the 21 red cases then fails. Met.
 7. These conditions are recorded here.

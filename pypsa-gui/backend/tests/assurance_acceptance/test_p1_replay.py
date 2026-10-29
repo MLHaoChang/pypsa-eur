@@ -265,3 +265,27 @@ def test_a_read_during_a_save_in_flight_gets_the_new_version(owner, kind, monkey
     assert mark_row(owner, rid).seq == 2  # the mark is ahead of the file here
     assert records.load(owner, rid, kind) == v2
     writer.join()
+
+
+def test_two_first_marks_for_a_new_id_never_share_a_seq(owner):
+    """Outside the store lock too, two first saves of one new id take 1 and 2
+    (the loser of the insert race takes the next mark)."""
+    rid = str(uuid.uuid4())
+    barrier = threading.Barrier(2)
+    marks, errors = [], []
+
+    def first():
+        try:
+            barrier.wait()
+            marks.append(records._bump_mark(owner, rid, time.time() + 60))
+        except Exception as exc:  # noqa: BLE001 -- surfaced below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=first) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert errors == []
+    assert sorted(m["seq"] for m in marks) == [1, 2]
+    assert marks[0]["epoch"] == marks[1]["epoch"]

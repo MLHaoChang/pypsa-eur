@@ -1,14 +1,12 @@
 """Dev helper: load() without its mark comparison fails every replay red test.
 
-GK B (9) condition 6 for the REPLAY slice. The mutant makes the comparison
-vacuous: the "current" mark load() reads is the one in the record file
-itself. Each red test in test_p1_replay must then fail on its own. Run from
+GK B (9) condition 6 for the REPLAY slice. The mutant drops the comparison:
+load() accepts any mutable record it can read and unseal. Each red test in test_p1_replay must then fail on its own. Run from
 pypsa-gui/backend:
 
     python tests/assurance_acceptance/replay_mutation.py
 """
 
-import json
 import sys
 
 import pytest
@@ -30,11 +28,13 @@ class SkipComparison:
     def pytest_configure(self, config):
         from services import assurance_records as records
 
-        def own_mark(owner, record_id):
-            envelope = json.loads(records._path(owner, record_id).read_text())
-            return envelope["record"].get(records.MARK_KEY)
+        def unchecked(path, owner, record_id, kind):
+            record = records._read(path, record_id)
+            if record.get("record_kind") != kind:
+                raise records.HTTPException(404, "Record not found")
+            return {k: v for k, v in record.items() if k != records.MARK_KEY}
 
-        records._current_mark = own_mark
+        records._read_marked = unchecked
 
 
 def main():

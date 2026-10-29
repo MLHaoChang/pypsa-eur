@@ -16,7 +16,7 @@ import uuid
 from fastapi import HTTPException
 
 import app_paths
-from harness.durable import network_guard, transaction
+from harness.durable import holds, network_guard, transaction
 from services import project_registry
 from services.pypsa_service import PyPSAService
 from settings import get_settings
@@ -162,23 +162,31 @@ _WIDEST_MARK = {"seq": 2**63 - 1, "epoch": str(uuid.UUID(int=0))}
 def _bump_mark(owner, record_id, expires_at):
     """Advance and commit the record's mark; call under its store lock."""
     from sqlalchemy import update
+    from sqlalchemy.exc import IntegrityError
 
     from db.models import AssuranceRecordSeq as Mark
     from db.session import SessionLocal
 
     key = {"owner_id": uuid.UUID(owner), "record_id": uuid.UUID(record_id)}
+    bump = (
+        update(Mark)
+        .where(Mark.owner_id == key["owner_id"], Mark.record_id == key["record_id"])
+        .values(seq=Mark.seq + 1, expires_at=expires_at)
+        .returning(Mark.seq, Mark.epoch)
+    )
     with SessionLocal() as db:
-        row = db.execute(
-            update(Mark)
-            .where(Mark.owner_id == key["owner_id"], Mark.record_id == key["record_id"])
-            .values(seq=Mark.seq + 1, expires_at=expires_at)
-            .returning(Mark.seq, Mark.epoch)
-        ).one_or_none()
+        row = db.execute(bump).one_or_none()
         if row is None:
             # A new id, or one whose mark was pruned: a fresh chain, so no
             # copy sealed under an earlier epoch can match.
             row = (1, uuid.uuid4())
             db.add(Mark(**key, seq=1, epoch=row[1], expires_at=expires_at))
+            try:
+                db.commit()
+            except IntegrityError:
+                # Another writer created the row first: take the next mark.
+                db.rollback()
+                row = db.execute(bump).one()
         db.commit()
     return {"seq": row[0], "epoch": str(row[1])}
 
@@ -368,7 +376,7 @@ def _read(path, record_id):
 # A save commits its mark a moment before its file lands, so a reader can
 # meet the file one behind. Readers do not take the store lock (an effect
 # holds it while its handler runs); they re-read for up to this long instead.
-_MARK_SETTLE_SECONDS = 0.5
+_MARK_SETTLE_SECONDS = 2.0
 
 
 def _read_marked(path, owner, record_id, kind):
@@ -379,7 +387,9 @@ def _read_marked(path, owner, record_id, kind):
     neither. Raises ValueError for any of those once a save in flight has had
     time to land.
     """
-    deadline = time.monotonic() + _MARK_SETTLE_SECONDS
+    # A reader holding the store lock cannot meet a save in flight.
+    settle = 0.0 if holds(path.parent) else _MARK_SETTLE_SECONDS
+    deadline = time.monotonic() + settle
     while True:
         record = _read(path, record_id)
         if record.get("record_kind") != kind:
