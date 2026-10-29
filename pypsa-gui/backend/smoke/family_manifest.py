@@ -363,7 +363,13 @@ VARIANTS: list[dict] = [
              B + 'test_lc06_d13_energization_dtc.py::test_the_schedule_composes_as_min_with_each_capacity_edit',
              B + 'test_lc06_d13_energization_dtc.py::test_dropping_the_schedule_moves_ens_by_the_hand_delta'),
     _pending('LC-D13.multi_energy', 'no H2/heat attribution test found'),
-    _pending('LC-D14.static_campus', 'chat tests stub the service; seed tests/gridspine/test_campus_ranking.py'),
+    _covered('LC-D14.static_campus', 'six untied hours through the queued Run: k 1 picks import/trafo h0, consumption h2, '
+             'export/renewable h3; k 2 adds h5 import/trafo, h0 consumption, h2 renewable; k read back from the job; '
+             '50 MW in h5 moves the import pick',
+             'campus_draft_campus campus_run_study',
+             B + 'test_lc06_d14_static_campus.py::test_k1_picks_each_criterions_extreme_hour_and_unions_the_reasons',
+             B + 'test_lc06_d14_static_campus.py::test_k2_adds_each_criterions_runner_up',
+             B + 'test_lc06_d14_static_campus.py::test_more_load_in_the_last_hour_moves_the_import_pick'),
     *[_covered(f'LC-D15.{m}', 'exact {value, source} read-back; refusals name the field and the unit\'s control; '
                'a gfl BESS enters no GFM row: the genset carries 10 MW x 1000 x 4 h = 40,000 with only headroom binding',
                D15_TOOLS,

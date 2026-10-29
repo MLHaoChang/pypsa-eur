@@ -597,6 +597,15 @@ byte-identical. Mutations as tests: thermal2 q 0.1 gives ΔEUE 15.9; 4 MW behind
 24 MWh; the drift itself. Finding: criticality_eur_per_year is per horizon (ticket 30), sent to
 GK B with options; the tests pin today's ΔEUE·VoLL.
 
+### S12, LC-D14 static campus (2026-10-29)
+
+Branch `claude/lc06-d14-static-campus`, stacked on S11. GK B (9) reviews. Session LC-06 (7).
+k survives the queue: `_settings` validates it, the job stores it in `solver_config_json`,
+`rank_campus(k=s["k"])` reads it back; the test reads `settings.k` from the route. Not a port of
+test_campus_ranking's spec (its tables are gridspine-level): a six-hour hub with the hand
+metrics in the docstring, picks read through `GET /api/campus-electrical/{name}`
+`results.selection`. Mutation: 50 MW in hour 5 moves import, trafo and consumption there.
+
 ## Hand-off 6 (2026-10-29, LC-06 (6), early)
 
 PR stack (each against master, stacked):
