@@ -84,8 +84,9 @@ def _recheck(path, task):
 
 def _refuse_stopped(task):
     if task["status"] == "cancelled" or task["run"]["status"] in _STOPPED:
-        assistant_tasks._refuse("run_paused_or_stopped", "This run is paused or stopped: resume a paused run "
-                                "first; a stopped run cannot go on.")
+        # `{"error_kind": ...}` literals, so tests/test_tool_error_kind_manifest.py sees each kind here.
+        raise HTTPException(409, {"error_kind": "run_paused_or_stopped", "message": "This run is paused or "
+                                  "stopped: resume a paused run first; a stopped run cannot go on."})
 
 
 def _budgets(task, envelope):
@@ -155,7 +156,8 @@ def pause(task_id):
         path, task = _task(task_id)
         run = task["run"]
         if task["status"] in ("cancelled", "completed") or run["status"] not in _PAUSABLE:
-            assistant_tasks._refuse("run_not_pausable", "This run is not going on, so there is nothing to pause.")
+            raise HTTPException(409, {"error_kind": "run_not_pausable",
+                                      "message": "This run is not going on, so there is nothing to pause."})
         run["status"], run["reason"], run["waiting"] = "paused", "user", None
         assistant_tasks._save(path, task)
     from harness import runner

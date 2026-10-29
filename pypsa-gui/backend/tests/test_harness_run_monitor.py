@@ -48,13 +48,16 @@ def test_an_uncarded_step_on_a_stale_brief_stops_the_run_instead_of_redispatchin
     chat_tools.set_acting_user(None)
     PyPSAService.get_active_context().network.loads.at["L1", "p_set"] = 6.0  # a user edit: the brief is stale
     runner = harness_runner.Runner("a", decisions=Clicks(refs=["inputs"]))
-    record = settle(runner, path, task["task_id"], lambda r: r["run"]["status"] != "running", limit=12)
-    assert record["run"]["status"] == "needs_user" and record["run"]["reason"] == "brief_stale", record["run"]
-    for _ in range(3):
+    for _ in range(12):  # well past the step's first dispatch
         runner.tick(path)
+        flight = runner._inflight.get(task["task_id"])
+        if flight is not None:
+            flight[1].join(120)
+    record = json.loads(path.read_text())
     calls = [f for f in frames_of(task["task_id"], record["owner_id"])
              if f["frame"] == "tool_error" and f.get("error_kind") == "task_brief_stale"]
-    assert len(calls) == 1
+    assert len(calls) == 1, calls  # 12 ticks, one dispatch
+    assert record["run"]["status"] == "needs_user" and record["run"]["reason"] == "brief_stale", record["run"]
 
 
 # ── The plan card's routes ───────────────────────────────────────────────────
@@ -224,6 +227,8 @@ def test_pause_stops_the_runner_and_resume_goes_on_with_the_envelope_still_grant
     paused = client.post(f"/api/chat/runs/{task['task_id']}/pause").json()
     assert paused["run"]["status"] == "paused" and paused["run"]["reason"] == "user"
     assert paused["envelope"]["state"] == "granted"
+    # Ruling (A): the expiry runs on while paused, and the monitor still shows it.
+    assert paused["monitor"]["budgets"]["expires_at"] == paused["envelope"]["expires_at"]
     chat_tools.set_acting_user(None)
     harness_runner.Runner("a").tick(path)  # the runner leaves a paused run alone
     assert json.loads(path.read_text())["run"]["status"] == "paused"
