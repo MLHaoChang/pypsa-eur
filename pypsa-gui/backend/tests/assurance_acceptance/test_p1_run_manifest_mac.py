@@ -15,6 +15,7 @@ import hashlib
 import json
 
 import pytest
+from fastapi import HTTPException
 
 from services import assurance_records as records
 from services import run_evidence
@@ -62,7 +63,9 @@ def forge(root, run_id, manifest, value=9999.5):
 
 def refused_before_handler(harness, monkeypatch, run_id, value=9999.5):
     calls = wrap_handler(monkeypatch)
-    frames = read_run(harness, run_draft(value=value, run_id=run_id), {"run_id": run_id})
+    frames = read_run(
+        harness, run_draft(value=value, run_id=run_id), {"run_id": run_id}
+    )
     assert not calls
     refused = run_result(frames)
     assert refused["error_kind"] == "run_not_checkable"
@@ -87,8 +90,12 @@ def test_a_mac_copied_from_another_run_is_refused(run, harness, monkeypatch):
     # Same metrics and sections as the sealed run: only the run id differs.
     original = read_manifest(run[2])
     forged = forge(run[2], "run-copy", original, value=1250.5)
-    blob = (run[2] / "run_evidence" / "run-old" / "sections" / "summary.json").read_bytes()
-    (run[2] / "run_evidence" / "run-copy" / "sections" / "summary.json").write_bytes(blob)
+    blob = (
+        run[2] / "run_evidence" / "run-old" / "sections" / "summary.json"
+    ).read_bytes()
+    (run[2] / "run_evidence" / "run-copy" / "sections" / "summary.json").write_bytes(
+        blob
+    )
     forged["sections"] = original["sections"]
     manifest_path(run[2], "run-copy").write_text(json.dumps(forged), encoding="utf-8")
     assert forged["mac"] == original["mac"]
@@ -97,7 +104,10 @@ def test_a_mac_copied_from_another_run_is_refused(run, harness, monkeypatch):
 
 def test_a_manifest_moved_to_another_project_is_refused(run, harness, monkeypatch):
     # The other project's directory receives a sealed manifest, project id rewritten.
-    for path in ("/api/projects/Another Baseline", "/api/projects/Another Baseline/activate"):
+    for path in (
+        "/api/projects/Another Baseline",
+        "/api/projects/Another Baseline/activate",
+    ):
         assert harness.client.post(path).status_code == 200
     from services.pypsa_service import PyPSAService
 
@@ -158,3 +168,56 @@ def test_republishing_the_same_completion_keeps_the_sealed_manifest(run):
     publish(run[2], run[1], "run-old", "completed", "2026-10-02T10:00:00+00:00")
     assert read_manifest(run[2]) == before
     assert run_evidence.checked_run_manifest("run-old")[2] == "completed"
+
+
+def test_a_different_republish_is_refused_and_keeps_the_sealed_manifest(run):
+    # One MAC per run id: an older, validly sealed manifest has no successor.
+    before = read_manifest(run[2])
+    with pytest.raises(HTTPException) as refused:
+        publish(
+            run[2],
+            run[1],
+            "run-old",
+            "completed",
+            "2026-10-02T10:00:00+00:00",
+            metrics={"objective": {"value": 1, "unit": "EUR"}},
+        )
+    assert refused.value.detail["error_kind"] == "run_already_finalized"
+    assert read_manifest(run[2]) == before
+
+
+# Sealed on master (561c5a6b) with this SECRET_KEY and install key: extracting
+# the server key leaves every record MAC's bytes as they were.
+PINNED_RECORD_MAC = "39f9764a9180e3bb91267fc7509c70faa599c942c6873ef565bbe8316737a051"
+
+
+@pytest.fixture
+def fixed_key(monkeypatch):
+    from settings import get_settings
+
+    monkeypatch.setenv("SECRET_KEY", "test-secret-not-a-real-key")
+    get_settings.cache_clear()
+    records.key_path().parent.mkdir(parents=True, exist_ok=True)
+    records.key_path().write_bytes(bytes(range(32)))
+    yield
+    get_settings.cache_clear()
+
+
+def test_record_macs_are_unchanged_by_the_shared_server_key(fixed_key):
+    record = {"version": 1, "facts": [{"value": 1.5}]}
+    assert records.seal(record, "rec-pinned")["mac"] == PINNED_RECORD_MAC
+
+
+def test_a_record_mac_and_a_run_mac_never_verify_as_each_other(run, fixed_key):
+    manifest = read_manifest(run[2])
+    manifest.pop("mac")
+    run_mac = run_evidence._manifest_mac(manifest)
+    assert run_evidence._seal_verifies(manifest, run_mac)
+    # The run's MAC presented as a record's, and a record's as the run's.
+    with pytest.raises(ValueError):
+        records.unseal(
+            {"record": manifest, "sha256": records.digest(manifest), "mac": run_mac},
+            manifest["run_id"],
+        )
+    record_mac = records.seal(manifest, manifest["run_id"])["mac"]
+    assert not run_evidence._seal_verifies(manifest, record_mac)
