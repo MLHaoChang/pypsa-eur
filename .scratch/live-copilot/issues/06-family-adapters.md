@@ -197,6 +197,22 @@ GO on the S8b plan, with conditions:
 - Mutations, one per oracle; skipping the re-study keeps the pre-apply figures
   and makes no new island study.
 
+### GK B (9), GO conditions for S10–S13 (2026-10-29)
+
+- S10 D19: non-unit weighting (3 h: 600/900, Δ 300, +50 %); case B's cost only through
+  the experiment override path; each objective is its own solve's record; the export
+  reads back; mutation: compare reading the baseline's objective for both gives Δ 0.
+- S11 D11: class A ΔLOLE/ΔEUE by hand from the remaining COPT, arithmetic in comments;
+  class B with nonzero unserved energy; health read back fresh from storage, provenance
+  tags, an invalid record refused with its field named and nothing stored.
+- S12 D14: first confirm k survives the queue settings (diagnosis to GK B if not); the
+  ported hub spec/tables equal the original, or the hand metrics are recomputed; pick
+  reasons through the report route.
+- S13 D09: reservoir held full, no other source for the 4 MW, spill 6 MW exactly;
+  non-unit weighting, spilled_mwh = 6·Σw; mutation inflow 9 → spill 5. Inflow
+  `_unavailable` with a ticket.
+- D01/02/20–23 stay out. Each PR goes to GK B with its mutation table.
+
 ## Slice log
 
 ### S0, execution manifest (2026-10-28)
@@ -561,6 +577,14 @@ GO with conditions (above). Session LC-06 (7).
 - Command: `pytest tests/test_lc06_d17_recommend_apply.py tests/test_family_manifest.py`,
   212 s, all pass. `test_packaging_requirements.py` passes but for the openpyxl/defusedxml
   case, which fails here only because this environment lacks defusedxml.
+
+### S10, LC-D19 two-case compare (2026-10-29)
+
+Branch `claude/lc06-d19-two-case-compare`, stacked on #888. GK B (9) reviews. Session LC-06 (7).
+`tests/test_lc06_d19_two_case_compare.py`: two real cases at 3 h weighting, 600 and 900 EUR,
+each equal to its own exported run evidence (from the case project); compare +300 (+50 %),
+reversed −300 (−33.3 %); the comparison export equals the report. Mutations run locally,
+each failed the test: unit weighting (Δ 100); compare reading the baseline for both (Δ 0).
 
 ## Hand-off 6 (2026-10-29, LC-06 (6), early)
 
