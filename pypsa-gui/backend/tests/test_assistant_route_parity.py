@@ -245,7 +245,7 @@ def test_declarations_merge_fragments_from_the_d_directory(tmp_path):
 
 
 def test_families_match_the_capability_matrix_journeys():
-    slugs = {j['journey_id'].removeprefix('pending:issue-05-') for j in control.FAMILY_JOURNEYS}
+    slugs = {j['journey_id'].removeprefix('manifest:') for j in control.FAMILY_JOURNEYS}
     assert set(parity.FAMILIES) == slugs
 
 

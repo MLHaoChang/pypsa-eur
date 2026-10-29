@@ -101,13 +101,32 @@ def test_ar_alias_resolves_to_inventory_ids_not_ardat(matrix):
     assert ar['expansion'] == 'Asset Reliability'
 
 
-def test_every_coverage_family_has_journey_assignment_row(matrix):
+def _manifest():
+    sys.path.insert(0, str(SMOKE.parent))
+    try:
+        import family_manifest
+    finally:
+        sys.path.remove(str(SMOKE.parent))
+    return family_manifest
+
+
+def test_every_coverage_family_journey_is_a_family_manifest_reference(matrix):
+    fm = _manifest()
     rows = matrix['family_journeys']
-    assert {r['family'] for r in rows} == EXPECTED_FAMILIES
+    assert {r['family'] for r in rows} == EXPECTED_FAMILIES == set(fm.FAMILIES.values())
     assert len(rows) == 14
+    by_suite: dict[str, dict[str, list[str]]] = {}
+    for v in fm.VARIANTS:
+        by_suite.setdefault(v['suite'], {}).setdefault(v['status'], []).append(v['id'])
     for row in rows:
-        assert row['status'] == 'assigned'
-        assert row['journey_id'].startswith('pending:issue-05-')
+        slug = row['journey_id'].removeprefix('manifest:')
+        assert row['journey_id'] == f'manifest:{slug}' and fm.FAMILIES[slug] == row['family']
+        suites = [f'LC-D{i:02d}' for i in fm.SUITES_BY_FAMILY[slug]]
+        assert row['suites'] == suites
+        for status in ('covered', 'pending', 'unavailable'):
+            assert row['variants'][status] == [i for s in suites for i in by_suite.get(s, {}).get(status, [])]
+        assert row['status'] == ('pending' if row['variants']['pending'] else 'covered')
+    assert 'pending:issue-05' not in json.dumps(matrix)
 
 
 def test_ineligible_ui_targets_mark_project_requirement(matrix):
@@ -127,24 +146,44 @@ def test_check_builds_in_memory_and_never_touches_a_matrix_file(tmp_path):
 
 # ── issue 08 close-out: explicit full-coverage limitation block ─────────
 
-def test_full_coverage_is_explicitly_not_claimed_while_journeys_are_pending(matrix):
+def test_full_coverage_is_explicitly_not_claimed_while_manifest_variants_are_pending(matrix):
     block = matrix['full_coverage']
-    pending = [r for r in matrix['family_journeys'] if r['journey_id'].startswith('pending:')]
-    assert pending, 'update this guard together with the claim once issue 05 journeys pass'
+    pending = [r for r in matrix['family_journeys'] if r['variants']['pending']]
+    assert pending, 'update this guard together with the claim once every manifest variant is covered'
     assert block['claimed'] is False and block['status'] == 'not_established'
     assert block['journeys_total'] == 14 and block['journeys_pending'] == len(pending)
     assert 'Tested subsets only' in block['permitted_statement']
-    blocker_ids = {b['id'] for b in block['blockers']}
+    blockers = {b['id']: b for b in block['blockers']}
+    r3 = {f'LC-D{i:02d}' for i in (1, 2, 20, 21, 22, 23, 24)}
     for row in pending:
-        assert f'family-journey:{row["journey_id"]}' in blocker_ids
-    assert {'behavioral-fixtures-pending', 'ui-local-control-parity-unaudited',
-            'hosted-gates-pending'} <= blocker_ids
+        lc06 = [v for v in row['variants']['pending'] if v.split('.')[0] not in r3]
+        if lc06:
+            assert blockers[f'family-manifest:{row["journey_id"].removeprefix("manifest:")}']['pending_variants'] == lc06
+    # The families LC-06 leaves out (R3) keep an explicit blocker each, owned by LC-32.
+    for suite in sorted(r3):
+        assert blockers[f'r3-uncovered:{suite}']['issue'] == 'LC-32'
+    assert 'behavioral-fixtures-pending' not in blockers
+    assert {'ui-local-control-parity-unaudited', 'hosted-gates-pending', 'manifest-tools-uncovered'} <= set(blockers)
     parity = matrix['route_parity']
     assert parity['counts']['unclassified'] == 0
     for family, routes in parity['needs_tool_by_family'].items():
-        assert routes and f'route-parity:needs-tool:{family}' in blocker_ids
+        assert routes and f'route-parity:needs-tool:{family}' in blockers
     for blocker in block['blockers']:
-        assert blocker['issue'] in {'05', '08'} and blocker['summary']
+        assert blocker['issue'] in {'05', '08', 'LC-06', 'LC-32'} and blocker['summary']
+
+
+def test_a_variant_going_pending_reopens_its_family_and_the_claim_reads_the_manifest():
+    gen, fm = _gen(), _manifest()
+    covered = [dict(v, status='covered') for v in fm.VARIANTS]
+    journeys = gen.family_journeys(covered)
+    block = gen._full_coverage(journeys)
+    assert block['journeys_pending'] == 0
+    assert not any(b['id'].startswith(('family-manifest:', 'r3-uncovered:')) for b in block['blockers'])
+    one = [dict(v, status='pending') if v['id'] == 'LC-D19.single_case' else v for v in covered]
+    block = gen._full_coverage(gen.family_journeys(one))
+    assert block['journeys_pending'] == 2       # LC-D19 is in projects and experiments
+    assert {b['id'] for b in block['blockers'] if b['id'].startswith('family-manifest:')} == {
+        'family-manifest:projects', 'family-manifest:experiments'}
 
 
 def test_matrix_never_asserts_whole_application_coverage_elsewhere(matrix):
@@ -155,8 +194,9 @@ def test_matrix_never_asserts_whole_application_coverage_elsewhere(matrix):
         assert phrase not in text
     doc = COVERAGE_DOC.read_text(encoding='utf-8')
     assert 'Whole-application coverage is NOT claimed.' in doc
-    assert (f'Pending family journeys: {matrix["full_coverage"]["journeys_pending"]} of '
-            f'{matrix["full_coverage"]["journeys_total"]}') in doc
+    # Variant counts change with every LC-06 slice, so the doc points at the build instead.
+    assert 'family_manifest.py' in doc and 'assistant_control_matrix.py --write' in doc
+    assert not re.search(r'Pending family journeys: \d+ of', doc)
     # Route counts change with every tool PR, so the doc points at the build instead.
     assert 'assistant_route_parity.py --write' in doc
     assert not re.search(r'\d+ of \d+ GUI-reached routes', doc)
@@ -194,9 +234,19 @@ def test_claim_guard_rejects_claim_even_if_artifact_was_regenerated():
     forged = json.loads(json.dumps(built))
     forged['full_coverage'].update(claimed=True, status='established')
     assert 'claimed is true' in gen._full_coverage_problem(forged)
-    journeys = [dict(r, journey_id=r['journey_id'].replace('pending:', '')) for r in built['family_journeys']]
-    block = gen._full_coverage(journeys)
+    covered = [dict(v, status='covered') for v in _manifest().VARIANTS]
+    block = gen._full_coverage(gen.family_journeys(covered))
     assert block['journeys_pending'] == 0
-    # Passing journeys alone are not enough: standing blockers need an explicit edit.
+    # Covered variants alone are not enough: standing blockers need an explicit edit.
     assert block['claimed'] is False
-    assert {b['id'] for b in block['blockers']} == {b['id'] for b in gen.STANDING_BLOCKERS}
+    assert {b['id'] for b in gen.STANDING_BLOCKERS} <= {b['id'] for b in block['blockers']}
+
+
+def test_claim_guard_reads_pending_from_the_manifest_not_the_matrix_copy(matrix):
+    # Editing the matrix's own journey rows cannot hide a pending manifest variant.
+    forged = json.loads(json.dumps(matrix))
+    for row in forged['family_journeys']:
+        row['variants']['pending'] = []
+        row['status'] = 'covered'
+    forged['full_coverage']['journeys_pending'] = 0
+    assert 'journeys_pending disagrees with family_manifest' in (_gen().matrix_problem(forged) or '')

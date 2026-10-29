@@ -46,7 +46,7 @@ def test_the_written_manifest_names_every_tool_and_variant(tmp_path):
 
 def test_families_are_the_control_matrix_families():
     from assistant_control_matrix import FAMILY_JOURNEYS
-    assert [j['journey_id'].removeprefix('pending:issue-05-') for j in FAMILY_JOURNEYS] == list(fm.FAMILIES)
+    assert [j['journey_id'].removeprefix('manifest:') for j in FAMILY_JOURNEYS] == list(fm.FAMILIES)
 
 
 @pytest.mark.parametrize('variant', fm.VARIANTS, ids=lambda v: v['id'])
