@@ -190,6 +190,41 @@ def test_a_saved_fmea_top_from_before_lc30_is_not_served_as_per_year():
     assert payload["rows"][0]["criticality_eur_per_year"] == 5.0
 
 
+def test_a_saved_class_c_row_is_not_legacy():
+    """Class C was per event before LC-30 and still is: an old C row is left
+    alone, and a payload of only C rows carries no caveat."""
+    c_row = {"mode_id": "cold_snap", "failure_class": "C",
+             "criticality_eur_per_year": 7.0}
+    payload = _fmea_report([c_row], [])
+    assert payload["rows"] == [c_row] and "criticality_caveat" not in payload
+
+
+def test_the_review_marks_a_legacy_report_read_from_the_study_record(monkeypatch):
+    """`review_latest` falls back to the study record's copy when the store
+    was cleared; that copy is marked the same way as the route's."""
+    from services.adequacy.eh_review import review_latest
+
+    sections = empty_section_map(default="skipped")
+    sections["fmea_top"] = SectionState(status="ok", payload={"rows": [
+        {"mode_id": "link:L1:forced_outage", "name": "L1",
+         "criticality_eur_per_year": 5.0}]})
+    report = ReferenceDesignReport(archetype="strong_grid", pack_hash="a",
+                                   assumptions_hash="b", sections=sections)
+    seen = {}
+    real = R.mark_legacy_report
+
+    def spy(body):
+        seen["out"] = real(body)
+        return seen["out"]
+
+    monkeypatch.setattr(R, "mark_legacy_report", spy)
+    out = review_latest({}, {"status": "done",
+                             "report": R.export_reference_design(report)})
+    assert out["stale"] is True
+    rows = seen["out"]["sections"]["fmea_top"]["payload"]["rows"]
+    assert [r["criticality_basis"] for r in rows] == ["per_horizon_legacy"]
+
+
 def test_a_current_fmea_top_is_served_unchanged():
     rows = [{"mode_id": "link:L1:forced_outage", "criticality_eur_per_year": 5.0,
              "criticality_basis": "annualised", "horizon_years": 0.5}]

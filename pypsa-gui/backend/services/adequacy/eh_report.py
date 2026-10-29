@@ -294,16 +294,19 @@ def mark_legacy_fmea_top(payload: dict | None) -> dict | None:
     class_a = payload.get("class_a") if isinstance(payload.get("class_a"), dict) else None
     # ``top``: the one merged list builds before the per-class ranks wrote.
     groups = [payload.get("rows"), payload.get("top"), (class_a or {}).get("rows")]
-    if not any(isinstance(r, dict) and r.get("criticality_eur_per_year") is not None
-               and "criticality_basis" not in r
-               for g in groups if isinstance(g, list) for r in g):
+    def _legacy(r) -> bool:
+        # Class C was always per event, so an old class-C row is not legacy.
+        return (isinstance(r, dict) and "criticality_basis" not in r
+                and r.get("criticality_eur_per_year") is not None
+                and r.get("failure_class") != "C")
+
+    if not any(_legacy(r) for g in groups if isinstance(g, list) for r in g):
         return payload
 
     def _mark(rows):
         if not isinstance(rows, list):
             return rows
-        return [({**r, "criticality_basis": "per_horizon_legacy"}
-                 if isinstance(r, dict) and "criticality_basis" not in r else r)
+        return [{**r, "criticality_basis": "per_horizon_legacy"} if _legacy(r) else r
                 for r in rows]
 
     out = {**payload, "criticality_caveat": LEGACY_CRITICALITY_NOTE}
@@ -318,14 +321,20 @@ def mark_legacy_fmea_top(payload: dict | None) -> dict | None:
     return out
 
 
+def mark_legacy_report(body: dict) -> dict:
+    """An exported report with its ``fmea_top`` payload through
+    ``mark_legacy_fmea_top`` (a copy; the input is not mutated)."""
+    sections = body.get("sections") if isinstance(body, dict) else None
+    fmea = sections.get("fmea_top") if isinstance(sections, dict) else None
+    if not (isinstance(fmea, dict) and isinstance(fmea.get("payload"), dict)):
+        return body
+    return {**body, "sections": {**sections, "fmea_top": {
+        **fmea, "payload": mark_legacy_fmea_top(fmea["payload"])}}}
+
+
 def eh_reference_design_http_payload(store: dict) -> tuple[dict | None, int]:
     """Return (body, status) for GET /results/eh_reference_design."""
     report = load_eh_report(store)
     if report is None:
         return None, 204
-    body = export_reference_design(report)
-    fmea = ((body.get("sections") or {}).get("fmea_top"))
-    if isinstance(fmea, dict) and isinstance(fmea.get("payload"), dict):
-        body["sections"] = {**body["sections"], "fmea_top": {
-            **fmea, "payload": mark_legacy_fmea_top(fmea["payload"])}}
-    return body, 200
+    return mark_legacy_report(export_reference_design(report)), 200
