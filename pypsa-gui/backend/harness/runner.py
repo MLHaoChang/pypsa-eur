@@ -585,12 +585,14 @@ class Runner:
             return self._decisions(task["task_id"], ref, None if args is None else _args_hash(args))
         return None
 
-    def _wait_for_user(self, path, kind, ref):
+    def _wait_for_user(self, path, kind, ref, envelope_refused=False):
         def change(task):
             run = task["run"]
             if (run.get("waiting") or {}).get("ref") == ref and run["status"] == "needs_user":
                 return False
             run["waiting"] = {"kind": kind, "ref": ref, "since": self.clock()}
+            if envelope_refused:
+                run["waiting"]["envelope_refused"] = True  # the envelope said no to this call: a card only
             run["status"], run["reason"] = "needs_user", "waiting_" + kind
         _update(path, change)
 
@@ -604,7 +606,7 @@ class Runner:
         _update(path, change)
 
     def _step(self, path, ctx, session):
-        from services import run_profiles
+        from services import run_envelope, run_profiles
         tasks = _tasks()
         taken = {}
 
@@ -618,6 +620,8 @@ class Runner:
             return "idle"
         if budget_spent(task):
             raise _Stop("needs_user", "budget")
+        if run_envelope.lapsed(path) and run_envelope.end(path, "expired", "expires_at"):
+            raise _Stop("paused", "envelope_expired")  # issue 03: nothing re-grants itself
         if any(s["status"] == "uncertain" for s in task["steps"]):
             raise _Stop("needs_user", "uncertain")
         if not tasks._may_write(task):
@@ -627,7 +631,12 @@ class Runner:
             step = tasks._next(task)
             args = tasks._resolve(step["args"], task["steps"]) if step and step["id"] == waiting["ref"] else None
             decision = decide(task, waiting["ref"], args)
-            if decision is None or (decision == "live" and waiting["ref"] in run_profiles.STAGES):
+            stage = waiting["ref"] in run_profiles.STAGES
+            # Issue 03: an envelope granted meanwhile goes on for what it covers.
+            inside = not waiting.get("envelope_refused") and (
+                run_envelope.live(path) if stage else
+                bool(step) and step["id"] == waiting["ref"] and run_envelope.covers(path, step["tool"]))
+            if not inside and (decision is None or (decision == "live" and stage)):
                 return "waiting"  # a stage's Continue comes only from the plan card (COP-1)
             self._go_on(path)
         if run["status"] == "waiting_job":
@@ -640,11 +649,15 @@ class Runner:
         if task["status"] == "paused_at_card":
             card = task["pause"]["card"]
             decision = decide(task, card, None)
-            if decision == "approve":
+            crossed = None if decision == "approve" else run_envelope.cross(session, path, card, ctx)
+            if decision == "approve" or crossed == "crossed":
                 tasks.continue_at_card(session, task["task_id"])
                 self.wake(path)
                 return "continued"
-            self._wait_for_user(path, "card", card)
+            if crossed in run_envelope.PAUSING:
+                self._envelope_refused(path, {"id": card})  # drift, a stale brief, expiry: pause, not wait
+                return "paused"
+            self._wait_for_user(path, "card", card, envelope_refused=crossed is not None)
             return "waiting"
         step = tasks._next(task)
         if step is None:
@@ -661,6 +674,8 @@ class Runner:
         decision = None
         if self._policy(session, step["tool"]) != "none":
             decision = decide(task, step["id"], args)
+            if decision is None and run_envelope.covers(path, step["tool"]):
+                decision = "envelope"  # the envelope decides at dispatch; a refusal waits for the user
             if decision is None:
                 self._wait_for_user(path, "card", step["id"])
                 return "waiting"
@@ -699,6 +714,7 @@ class Runner:
         tool_use_id = f"run-{step['id']}-{uuid.uuid4().hex[:8]}"
         locks = contextlib.ExitStack()
         refused = []
+        before = []  # the project's fingerprint under this step's locks, before it runs
 
         def take_locks(*_):
             if not ctx.mutation_lock.acquire(timeout=LOCK_TIMEOUT_SECONDS):
@@ -711,9 +727,21 @@ class Runner:
                 locks.close()
                 return False
             self._hold_if_effectful(_read(path), step)  # decided: the project is the run's until the step ends
+            if _tasks()._effectful(step["tool"]):
+                from services import run_envelope
+                fingerprint, reason = run_envelope.chain_head(path, ctx)
+                before[:] = [fingerprint]
+                if reason and decision is None:
+                    # Uncarded, so the envelope never admits it: a change the chain never saw stops it
+                    # here (issue 03). An envelope's own step is refused by its admission instead.
+                    run_envelope.refused_before_gate(path, tool_use_id, step["tool"], reason)
+                    refused.append("envelope")
+                    locks.close()
+                    return False
             return True
 
         results = []
+        carded, ran, errors = [], [], []
         session._undo_snapshotted = []  # each runner step is its own undo step, as a chat turn is
         session._turn_in_flight = True
         try:
@@ -727,12 +755,16 @@ class Runner:
             for kind, payload in frames:
                 eventlog.record(session, "runner/frame", frame=kind, step=step["id"], tool_use_id=tool_use_id,
                                 **({"error_kind": payload["error_kind"]} if payload.get("error_kind") else {}))
+                if kind == "tool_error":
+                    errors.append(payload.get("error_kind"))
                 if kind == "tool_pending_confirmation":
+                    carded.append(step["id"])
                     if decision in ("approve", "deny"):
                         session.record_decision(payload["confirmation_token"], decision)
                     elif decision != "live":
                         session.withdraw_confirmation(payload["confirmation_token"])  # nobody is there
                 elif kind == "tool_running":
+                    ran.append(step["id"])
                     locks.close()  # the handler takes its own locks on the tool executor
         finally:
             locks.close()
@@ -741,9 +773,41 @@ class Runner:
             if results:
                 eventlog.message(session, {"role": "user", "content": [results[-1]]})
             _tasks().release_claim(path, step["id"], session.session_id)
-            if refused:
+            if ran and _tasks()._effectful(step["tool"]):
+                # The freshness chain's next link: only a runner change moves it, and only from
+                # the chain's last link; a read never does, so a change seen after one, or before
+                # an uncarded step, is someone else's (drift, issue 03).
+                from services import run_envelope
+                run_envelope.settle(path, tool_use_id, ctx, before[0] if before else None)
+            if refused == ["envelope"]:
+                self._envelope_refused(path, step)
+            elif refused:
                 _update(path, lambda t: _stop_in(t, "needs_user", "locked" if refused == ["busy"] else "recheck"))
+            elif decision == "envelope" and carded:
+                self._envelope_refused(path, step)
+            elif decision == "envelope" and errors and not ran:
+                # Refused before the gate (the plan's own admission): never retried unattended.
+                if "task_brief_stale" in errors:
+                    from services import run_envelope
+                    run_envelope.refused_before_gate(path, tool_use_id, step["tool"], "brief_stale")
+                    _update(path, lambda t: _stop_in(t, "paused", "envelope_brief_stale")
+                            if t["run"]["status"] in _DRIVEN else False)
+                else:
+                    self._wait_for_user(path, "card", step["id"], envelope_refused=True)
             self.wake(path)
+
+    def _envelope_refused(self, path, step):
+        """The envelope did not admit the step (issue 03): an ended envelope
+        or a broken freshness chain pauses the run and notifies; any other
+        refusal waits for the user's card on that step."""
+        from services import run_envelope
+        reason = run_envelope.last_refusal(path)
+        if reason in run_envelope.PAUSING:
+            if reason in ("expired", "exhausted"):
+                run_envelope.end(path, reason, reason)
+            _update(path, lambda t: _stop_in(t, "paused", "envelope_" + reason) if t["run"]["status"] in _DRIVEN else False)
+        else:
+            self._wait_for_user(path, "card", step["id"], envelope_refused=True)
 
     # restart
 

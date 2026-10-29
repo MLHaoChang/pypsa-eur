@@ -25,6 +25,7 @@ Read [the spec](../spec.md) first; its owner decisions RW-CHARTS-1, RW-TABS-1, R
 - [ ] The Overview has per-period and horizon capex (overnight and annualised), opex, system cost, energy served and system/per-carrier LCOE, matching `compute_asset_economics` / `economics_by_carrier` within 1e-9 relative on a fixture network with two investment periods.
 - [ ] With an investment case: NPV, IRR, payback, DSCR and financial LCOE equal `load_ic_report`'s values; the finance sheets reuse `finance/export_xlsx.py`; NPV cells are live formulas. Without one: each shows `not_established` and "run the investment case"; nothing is computed or run.
 - [ ] The Overview has three native charts (capex vs opex by period; LCOE by carrier by period; cash flow with cumulative NPV when the case exists), each referencing the sheet's own cells (tests read `ws._charts` and the series refs).
+- [ ] RW-SCEN-1: the engine API takes the set of runs (base plus every sensitivity/experiment run); with more than one, the first sheet after About compares their key KPIs (Overview KPIs, IC KPIs where present) with deltas vs base, per period and over the horizon, with native charts, reusing the existing experiment/sensitivity comparison services. A test on a fixture with a base and two sensitivities checks the values against those services.
 - [ ] A stale run is refused with a named error kind; formula-like text is neutralised; the 25 MB cap holds.
 - [ ] The workbook opens in openpyxl (load_workbook round trip) and in LibreOffice headless if available in CI; otherwise say so.
 

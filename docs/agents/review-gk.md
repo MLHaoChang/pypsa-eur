@@ -56,3 +56,4 @@ When a PR changes a validation guard, confirm by mutation that its test fails fo
 - A shipped demo limit that is an IEC planning level says so in its clause: "planning level, not an emission limit allocated to this installation".
 - A new scorecard input read from a component is registered as an editable field end to end (FieldSpec, model, schemas, attrs_doc, fieldLabels, fixture) in the same PR.
 - E1 growth placeholders: setting `nh3_delivery_tpd` converts t/d to MWh_NH3/h (× 5.166/24), with a test.
+- A handler that `pd.concat()`s user-uploaded series survives members that cannot be aligned (a tz-aware index next to a naive one, a repeated timestamp) and reports a gap, never a 500 (#868). Test both.

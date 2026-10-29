@@ -278,6 +278,38 @@ describe('GridReadinessScorecard', () => {
   })
 })
 
+describe('the P–V/Q–V rows (study harness 18)', () => {
+  const vs = (excluded?: GridReadiness['excluded']): GridReadiness => ({ ...DATA, excluded, rows: [
+    ...DATA.rows,
+    row({ id: 'voltage_stability_pv', requirement: 'Voltage stability margin (P–V)', limit: 5,
+      unit: '% of planned load', project_value: 812.4, verdict: 'pass', project_value_is_lower_bound: true }),
+    row({ id: 'voltage_stability_qv', requirement: 'Voltage stability margin (Q–V)', limit: 0,
+      unit: 'Mvar', project_value: 120, verdict: 'pass' }),
+  ] })
+
+  it('shows a lower bound as "≥ x" and a found margin as it is', () => {
+    render(<GridReadinessScorecard data={vs()} mode="expert" />)
+    expect(screen.getByTestId('gr-row-voltage_stability_pv').textContent).toContain('Project:\u00A0≥\u00A0812.4\u00A0% of planned load')
+    expect(screen.getByTestId('gr-row-voltage_stability_qv').textContent).toContain('Project:\u00A0120\u00A0Mvar')
+    expect(screen.queryByTestId('gr-excluded')).toBeNull()
+  })
+
+  it.each(['expert', 'guided'] as const)('lists the rows that do not apply with their reason, without a verdict (%s)',
+    mode => {
+      const reason = 'off-grid, so there is no grid connection to check'
+      const data = { ...DATA, excluded: [
+        { id: 'voltage_stability_pv', requirement: 'Voltage stability margin (P–V)', reason },
+        { id: 'voltage_stability_qv', requirement: 'Voltage stability margin (Q–V)', reason }] }
+      render(<GridReadinessScorecard data={data} mode={mode} />)
+      const box = screen.getByTestId('gr-excluded')
+      expect(within(box).getByText('Not applicable to this project')).toBeTruthy()
+      expect(screen.getByTestId('gr-excluded-voltage_stability_pv').textContent)
+        .toBe(`Voltage stability margin (P–V): ${reason}`)
+      expect(screen.getByTestId('gr-excluded-voltage_stability_qv').textContent).toContain(reason)
+      expect(screen.queryByTestId('gr-row-voltage_stability_pv')).toBeNull()
+    })
+})
+
 describe('fmt', () => {
   it('joins a value and its unit with a non-breaking space, so Guided never breaks them apart', () => {
     expect(fmt(4.95, '% of positive sequence')).toBe('4.95 % of positive sequence')

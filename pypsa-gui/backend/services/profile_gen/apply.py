@@ -1541,7 +1541,9 @@ def assign_profile(
     if align_meta.get("window"):
         desc += ", sliced to the snapshot window"
     if meta.get("refinements"):
-        desc += ", refined by " + ", ".join(str(r.get("op")) for r in meta["refinements"])
+        from services.profile_gen.refine import op_words
+
+        desc += ", refined by " + "; ".join(op_words(r) for r in meta["refinements"])
     change_log_service.log("timeseries", target.display, component, desc)
 
     return {

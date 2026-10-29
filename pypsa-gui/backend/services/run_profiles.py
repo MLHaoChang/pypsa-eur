@@ -144,7 +144,20 @@ def load(profile: dict) -> dict:
             if own.get(core["id"]) != core:
                 raise ProfileError(f"Stage {name}: rule {core['id']} is inherited and cannot be dropped or changed.")
         stages[name] = {"actions": actions, "rules": rules}
-    return {**copy.deepcopy(profile), "stages": stages}
+    loaded = {**copy.deepcopy(profile), "stages": stages}
+    if "envelope" in profile:
+        # Issue 03: what a run of this profile may propose; a grant narrows it, never widens it.
+        from services import run_envelope
+        try:
+            loaded["envelope"] = run_envelope.check_block(profile["envelope"])
+        except run_envelope.EnvelopeError as exc:
+            raise ProfileError(f"Envelope: {exc}") from exc
+        tunable = {(t["component"], t["attr"]) for t in profile.get("tunable", [])}
+        for edit in loaded["envelope"]["edits"]:
+            if (edit["target"]["component"], edit["target"]["attr"]) not in tunable:
+                raise ProfileError(f"Envelope: {edit['target']['component']}.{edit['target']['attr']} is not "
+                                   "one of the profile's tunable attributes (§6.0).")
+    return loaded
 
 
 def scope_for(template: dict | None) -> dict:
@@ -173,7 +186,27 @@ EH_SITE = {
     "tunable": [{"component": "candidate:genset", "attr": "max_mw"},
                 {"component": "candidate:bess", "attr": "max_mw"},
                 {"component": "candidate:pv", "attr": "max_mw"},
-                {"component": "candidate:bess", "attr": "hours"}],
+                {"component": "candidate:bess", "attr": "hours"},
+                # The same levers as the network columns the envelope's edits write (issue 03).
+                {"component": "Generator", "attr": "p_nom_max"},
+                {"component": "StorageUnit", "attr": "p_nom_max"},
+                {"component": "StorageUnit", "attr": "max_hours"}],
+    # Issue 03 (§7): the edits and runs a granted envelope covers. The
+    # candidates' size caps within ±50 % of their value at grant, and the
+    # run's own queued solve.
+    "envelope": {
+        "edits": [{"tool": "update_component", "target": {"component": "Generator", "name": "genset_new_*", "attr": "p_nom_max"},
+                   "bounds": {"min": 0.0, "rel": 0.5}},
+                  {"tool": "update_component", "target": {"component": "Generator", "name": "pv_new_*", "attr": "p_nom_max"},
+                   "bounds": {"min": 0.0, "rel": 0.5}},
+                  {"tool": "update_component", "target": {"component": "StorageUnit", "name": "bess_new_*", "attr": "p_nom_max"},
+                   "bounds": {"min": 0.0, "rel": 0.5}},
+                  {"tool": "update_component", "target": {"component": "StorageUnit", "name": "bess_new_*", "attr": "max_hours"},
+                   "bounds": {"min": 1.0, "max": 8.0}}],
+        "runs": [{"tool": "solve_queue_enqueue"}],
+        "budget": {"solves": 6, "rounds": 6, "wall_time_h": 8.0},
+        "research": {"allowed": False, "cost_cap_eur": 2.0},
+    },
     "kpis": [],
     "chapters": [],
     "missing_tools": [],

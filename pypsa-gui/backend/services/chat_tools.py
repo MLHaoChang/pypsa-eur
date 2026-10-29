@@ -4485,9 +4485,10 @@ def generate_availability_profile(project_id: str, kind: str, generators: list,
     return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
-def refine_generated_profile(project_id: str, job_id: str, ops: list) -> dict:
+def refine_generated_profile(project_id: str, job_id: str, ops: list | None = None,
+                             undo_index: int | None = None) -> dict:
     from routers.profiles import RefineRequest, refine_profile as _h
-    body = RefineRequest(job_id=job_id, ops=ops)
+    body = RefineRequest(job_id=job_id, ops=ops or [], undo_index=undo_index)
     return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 

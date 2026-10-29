@@ -1,7 +1,8 @@
 """
 The confirmation gate: which safety tiers get a card (and the Guided
 write-tier rule), the auto-approve exemption, the parallel-destructive
-refusal, and the blocking gate itself.
+refusal, the harness run's approval envelope (`services/run_envelope.py`,
+study harness issue 03) and the blocking gate itself.
 
 Moved from harness/loop.py (the former services/chat_service.py) on
 2026-10-05, chat harness issue 08, by AST selection of whole top-level
@@ -213,6 +214,21 @@ def _confirm_destructive_tool(
         if approvals.decided(session, call_id=tool_use_id, tool=tool_name, tier=tier,
                              outcome="approved", by="policy", link=link):
             return True
+        yield from _deny(tool_use_id, tool_name, _UNAVAILABLE["error_kind"],
+                         f"approval for {tool_name!r} could not be recorded",
+                         tool_results_collector)
+        return False
+
+    # Study harness issue 03: on a harness run's own session only, a granted
+    # approval envelope may stand in for the card (the `policy` path, on
+    # record as `by="envelope:<id>"`, fail closed). It returns None for every
+    # other session and for a call it does not cover: the card below.
+    from services import run_envelope
+    admitted = run_envelope.admit(session, call_id=tool_use_id, tool=tool_name, args=args, tier=tier,
+                                  external=external, edit_card=edit_card)
+    if admitted == "admitted":
+        return True
+    if admitted == "unavailable":
         yield from _deny(tool_use_id, tool_name, _UNAVAILABLE["error_kind"],
                          f"approval for {tool_name!r} could not be recorded",
                          tool_results_collector)
