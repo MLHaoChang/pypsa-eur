@@ -34,7 +34,8 @@ NO_RESULTS: dict[str, str] = {}
 #: Modules whose import registers builders (`load_builders`); 02 appends its own.
 BUILDER_MODULES: tuple[str, ...] = ("services.results_workbook.finance",
                                     "services.results_workbook.views_network",
-                                    "services.results_workbook.views_grid")
+                                    "services.results_workbook.views_grid",
+                                    "services.results_workbook.views_adequacy")
 
 
 class UnknownView(ValueError):

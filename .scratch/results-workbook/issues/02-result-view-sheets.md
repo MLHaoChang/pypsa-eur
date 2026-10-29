@@ -64,3 +64,18 @@ GK OK @14f6bee94c7d3a50352348b2c3575559a4933eac on R1 (#896). Condition 5, rulin
 10. `test_route_chat_disposition`, `test_project_route_acl_policy` green; no new third-party imports. Fragment `doc/release-notes.d/claude-results-workbook-02-loadflow.md`.
 
 Not in the sheets: the campus harmonic scan and voltage-stability blocks (nested; the sheet note points to the tab), and the hub cost comparison.
+
+### 2026-10-29 — R3 built (Adequacy, FMEA)
+
+`services/results_workbook/views_adequacy.py`; tests in `tests/test_results_workbook_views_adequacy.py`.
+
+1. The `/adequacy` body is now `adequacy.report.adequacy_payload(state, solved_settings)`; the route passes `_state` and `_solved_settings`, so its reads are the same. Departure: both are required arguments, not defaulted to the active ones, because `_solved_settings` lives in the router and services never import routers. Tests: `test_adequacy_route_json_equals_the_lifted_function_in_every_state` (204, `configured: false`, report); master's `test_adequacy_http`, `test_result_configured_fields`, `test_chat_adequacy_tools` unchanged and green; a one-off check against master's route body gave byte-equal rendered JSON in all four states (nothing solved, settings only, report, legacy stash). FMEA already read `copt_endpoint.build_fmea_modes_payload`, unchanged: `test_fmea_route_json_is_the_function_the_sheet_reads`.
+2. Each scenario column reads its own saved context's solver state (Adequacy) and its own network and config (FMEA); the base reads the active ones: `test_adequacy_keys_equal_the_route_per_period_and_each_scenario_reads_its_own_state`, `test_fmea_keys_equal_the_route_and_each_scenario_reads_its_own_network`.
+3. Adequacy: ENS cap and achieved ENS per period (`2040` asserted) and the horizon (their sum, as the report's system figure); MW and the margin per period only, never summed. FMEA has no period split: `NO_PERIODS` in the note, asserted, and every run's rows listed.
+5. False only on the route's 204 (nothing solved; no failure mode from any source); solved without a target writes a "not modelled" sheet, as the tab shows: `test_nothing_solved_and_no_failure_mode_are_no_results`, `test_adequacy_solved_without_a_target_writes_not_modelled`, `test_a_failing_read_is_an_error_in_about_not_no_results[adequacy|fmea]`.
+6. FMEA's `criticality_eur_per_year` and `severity_eur` appear only as "criticality / severity, EUR per study horizon (ticket 30)" in the column headers, the key label and the chart title and series; no total of criticality (class A and the sweep's B/C can describe the same outage): `test_fmea_criticality_and_severity_are_labelled_per_study_horizon`.
+8. Neither view reads a project's files; scenario runs come from `gather_scenarios`, which resolves each project first.
+9. `CHARTS` entries for both views; `test_every_chart_reads_number_cells_on_its_own_sheet[adequacy|fmea]`.
+10. `test_route_chat_disposition`, `test_project_route_acl_policy` green; `test_packaging_requirements` green but for the known defusedxml failure; no new third-party imports. Fragment `doc/release-notes.d/claude-results-workbook-02-adequacy.md`.
+
+Not in the sheets: the Adequacy tab's other study surfaces (COPT screening, frontier, Monte Carlo, planning loops) and the FMEA worksheet's expert class-D rows and overlays (per-project sidecar; the FMEA note points to the tab).

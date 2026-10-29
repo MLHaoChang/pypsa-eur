@@ -144,6 +144,20 @@ CHARTS: dict[str, tuple[Chart, ...]] = {
         Chart("bar", "Grid-forming settings: current and recommended", "Recommended settings",
               None, cats=2),
     ),
+    "adequacy": (
+        Chart("bar", "ENS cap and achieved ENS by period", "ENS target by period", "MWh",
+              cats=0, columns=("cap_mwh", "achieved_ens_mwh")),
+        Chart("bar", "Firm and required capacity at peak by period", "Reserve margin by period",
+              "MW", cats=0, columns=("required_mw", "firm_mw")),
+    ),
+    # Ticket 30 (condition 6): criticality is per study horizon, never per year.
+    "fmea": (
+        Chart("bar", "Criticality by failure mode, EUR per study horizon (ticket 30)",
+              "Failure modes", "EUR per study horizon (ticket 30)", cats=0,
+              columns=("criticality, EUR per study horizon (ticket 30)",)),
+        Chart("bar", "ΔEUE by failure mode", "Failure modes", "MWh", cats=0,
+              columns=("ΔEUE, MWh",)),
+    ),
 }
 
 _KEY_ROW = 4

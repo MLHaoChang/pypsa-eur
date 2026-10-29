@@ -589,3 +589,20 @@ def build_adequacy_report(n, cfg, targets: dict, captured: dict,
         ),
     )
     return report.model_dump()
+
+
+def adequacy_payload(state, solved_settings) -> dict | None:
+    """The ``GET /results/adequacy`` JSON body over a run's solver ``state``,
+    or None for the route's 204 (nothing solved). Lifted from the route
+    (results-workbook 02, R3) so the workbook reads each run's own state.
+
+    ``solved_settings()`` is the route's ``_solved_settings`` over that same
+    run, called only when no report is stashed: a solve without a target
+    answers ``{"configured": false}``, not "not solved".
+    """
+    report = state.get("adequacy_report")
+    if not report:
+        if solved_settings() is None:
+            return None
+        return {"configured": False, "engine": "lp_proxy"}
+    return {**report, "configured": True}
