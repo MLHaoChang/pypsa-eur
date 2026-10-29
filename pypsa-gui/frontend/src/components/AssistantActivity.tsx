@@ -4,7 +4,6 @@ import { getAssistantActivity, getAssistantDecision, type ActivityFilter, type A
 import { useUIStore } from '../store/uiStore'
 import { useChatStore } from '../store/chatStore'
 import { withReturnFrom } from '../layout/flowNavigation'
-import RunMonitor from './runMonitor/RunMonitor'
 
 const FILTERS: [ActivityFilter, string][] = [
   ['all', 'All'], ['running', 'Running'], ['needs_you', 'Needs you'],
@@ -18,22 +17,29 @@ function observationTime(value: number | null | undefined) {
 }
 
 /** Study harness 08: a run's attention notice opens the companion on its
- *  plan card (with "Back to …"); with no plan card in this conversation,
- *  the plan card opens here. */
+ *  plan card (with "Back to …"). With no plan card in this conversation, a
+ *  local turn carrying the run is added there first, so "Open the run ›"
+ *  stays the only run link in Activity (UX plan verdict 9). */
+const runCard = (taskId: string) =>
+  [...document.querySelectorAll('[data-run-task]')].find(e => e.getAttribute('data-run-task') === taskId)
+
 function OpenRun({ taskId, title, onConversation }: { taskId: string; title: string; onConversation: () => void }) {
-  const [inline, setInline] = useState(false)
   const open = () => {
-    const card = [...document.querySelectorAll('[data-run-task]')].find(e => e.getAttribute('data-run-task') === taskId)
-    if (!card) { setInline(true); return }
+    if (!runCard(taskId)) {
+      useChatStore.getState().appendMessage({ role: 'tool', content: '', tool_use_id: `run-open-${taskId}`,
+        tool_name: 'get_task', tool_result: { task_id: taskId, title, run: {} } })
+    }
     withReturnFrom(onConversation)
-    window.setTimeout(() => card.scrollIntoView({ block: 'nearest' }), 0)
+    // The companion renders the card on its next frames: scroll once it is there.
+    let tries = 0
+    const scroll = () => {
+      const card = runCard(taskId)
+      if (card) card.scrollIntoView({ block: 'nearest' })
+      else if (++tries < 40) window.setTimeout(scroll, 50)
+    }
+    window.setTimeout(scroll, 0)
   }
-  return <>
-    {!inline && <button type="button" className="text-accent" data-testid="activity-open-run" onClick={open}>Open the run ›</button>}
-    {inline && <div className="rounded border border-border p-2 text-xs">
-      <RunMonitor task={{ task_id: taskId, title }} disabled={false} onRequest={() => onConversation()} />
-    </div>}
-  </>
+  return <button type="button" className="text-accent" data-testid="activity-open-run" onClick={open}>Open the run ›</button>
 }
 
 function DecisionInspector({ item, close, onConversation, projectName }: {
@@ -212,8 +218,8 @@ export default function AssistantActivity({ onConversation }: { onConversation: 
         return <article key={item.id} className="border border-border rounded p-3 space-y-1">
         <p className="font-medium break-words">{item.title}</p>
         <p>{item.status.replace(/_/g, ' ')} <span className="text-muted">· {item.family.replace(/_/g, ' ')}</span></p>
-        <p className="text-xs text-muted">Native status: {item.native_status}{item.stage ? ` · ${item.stage}` : ''}</p>
-        {item.observation === 'retained' && item.last_observed_status &&
+        {item.family !== 'run' && <p className="text-xs text-muted">Native status: {item.native_status}{item.stage ? ` · ${item.stage}` : ''}</p>}
+        {item.family !== 'run' && item.observation === 'retained' && item.last_observed_status &&
           <p className="text-xs text-muted">Last recorded native status: {item.last_observed_status}</p>}
         {item.observation && <p className="text-xs text-muted">
           {item.observation === 'retained' ? 'Retained observation' : 'Current native observation'}

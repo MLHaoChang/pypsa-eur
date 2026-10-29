@@ -45,9 +45,23 @@ describe('a run notice', () => {
     }
   })
 
-  it('with no plan card in this conversation, the plan card opens in the notice', async () => {
-    render(<AssistantActivity onConversation={vi.fn()} />)
+  it('with no plan card in this conversation, adds the run to the conversation and opens it there', async () => {
+    useChatStore.setState({ messages: [] })
+    const onConversation = vi.fn()
+    render(<AssistantActivity onConversation={onConversation} />)
     fireEvent.click(await screen.findByTestId('activity-open-run'))
-    expect((await screen.findByTestId('run-failure')).textContent).toMatch(/^Check inputs failed/)
+    expect(onConversation).toHaveBeenCalledTimes(1)
+    expect(useUIStore.getState().flowReturn).not.toBeNull()
+    const [turn] = useChatStore.getState().messages
+    expect(turn).toMatchObject({ role: 'tool', tool_name: 'get_task', tool_result: { task_id: TASK_ID, title: 'harness run' } })
+    expect(screen.queryByTestId('run-monitor')).toBeNull()
+  })
+
+  it('"Open the run ›" is the only run link in Activity, and a run shows no internal status', async () => {
+    render(<AssistantActivity onConversation={vi.fn()} />)
+    const open = await screen.findByTestId('activity-open-run')
+    const row = open.closest('article')!
+    expect([...row.querySelectorAll('button')].map(b => b.textContent)).toEqual(['Open the run ›'])
+    expect(row.textContent).not.toMatch(/Native status|needs_user/)
   })
 })

@@ -73,16 +73,16 @@ export default function EnvelopeSection({ taskId, proposed, disabled, onVerdict 
         <label className="inline-flex items-start gap-1.5">
           <input type="checkbox" checked={edits[i] ?? false} disabled={disabled}
             onChange={() => setEdits(cur => cur.map((v, j) => (j === i ? !v : v)))} />
-          <span className={edits[i] ? undefined : 'text-muted line-through'}>{editSubject(e)}: {editLimits(e)}</span>
-          {!edits[i] && <span className="text-muted" data-testid="envelope-removed">{' · removed'}</span>}
+          <span><span className={edits[i] ? undefined : 'text-muted line-through'}>{editSubject(e)}: {editLimits(e)}</span>
+            {!edits[i] && <span className="text-muted" data-testid="envelope-removed">{' · removed'}</span>}</span>
         </label>
       </li>)}
       {envelope.runs.map((r, i) => <li key={`r${i}`} data-testid="envelope-run">
         <label className="inline-flex items-start gap-1.5">
           <input type="checkbox" checked={runs[i] ?? false} disabled={disabled}
             onChange={() => setRuns(cur => cur.map((v, j) => (j === i ? !v : v)))} />
-          <span className={runs[i] ? undefined : 'text-muted line-through'}>{runWords(r)}</span>
-          {!runs[i] && <span className="text-muted" data-testid="envelope-removed">{' · removed'}</span>}
+          <span><span className={runs[i] ? undefined : 'text-muted line-through'}>{runWords(r)}</span>
+            {!runs[i] && <span className="text-muted" data-testid="envelope-removed">{' · removed'}</span>}</span>
         </label>
       </li>)}
     </ul>

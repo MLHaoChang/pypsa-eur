@@ -209,7 +209,7 @@ export default function RunMonitor({ task, disabled, onRequest }: {
         Unattended approval expires {when(view.envelope.expires_at ?? view.monitor.budgets.expires_at)}</p>}
     </div>}
 
-    {going && (pausedAt || run.status === 'needs_user') && <div data-testid="run-waiting">
+    {going && (pausedAt || card || view.monitor.waiting) && <div data-testid="run-waiting">
       <div className="font-medium">Waiting for you</div>
       <ul className="list-disc pl-5">
         {pausedAt && <li>
