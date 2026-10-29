@@ -289,3 +289,49 @@ def test_two_first_marks_for_a_new_id_never_share_a_seq(owner):
     assert errors == []
     assert sorted(m["seq"] for m in marks) == [1, 2]
     assert marks[0]["epoch"] == marks[1]["epoch"]
+
+
+def test_refusals_that_cannot_be_a_save_in_flight_come_back_at_once(owner, monkeypatch):
+    """Only a file exactly one step behind in the same epoch waits to settle;
+    every other mismatch is refused without waiting."""
+    monkeypatch.setattr(records, "_MARK_SETTLE_SECONDS", 30.0)
+    kind = "ui_action"
+
+    def timed_refusal(rid):
+        started = time.monotonic()
+        unavailable(owner, rid, kind)
+        return time.monotonic() - started
+
+    # Two or more behind: an older copy put back.
+    rid = str(uuid.uuid4())
+    records.save(record(owner, kind, 1), rid)
+    v1 = path_of(owner, rid).read_bytes()
+    records.save(record(owner, kind, 2), rid)
+    records.save(record(owner, kind, 3), rid)
+    path_of(owner, rid).write_bytes(v1)
+    assert timed_refusal(rid) < 2
+    # Ahead of the mark, another epoch, no mark, no DB mark.
+    for change in ({"seq": 1}, {"epoch": uuid.uuid4()}):
+        rid, _, _ = two_versions(owner, kind)
+        set_mark(owner, rid, **change)
+        assert timed_refusal(rid) < 2
+    rid = str(uuid.uuid4())
+    path = path_of(owner, rid)
+    path.write_text(json.dumps(records.seal(record(owner, kind, 1), rid)))
+    assert timed_refusal(rid) < 2
+    rid, _, _ = two_versions(owner, kind)
+    with db_session.SessionLocal() as db:
+        db.delete(db.get(AssuranceRecordSeq, (uuid.UUID(owner), uuid.UUID(rid))))
+        db.commit()
+    assert timed_refusal(rid) < 2
+
+
+def test_one_step_behind_waits_out_the_settle_time(owner, monkeypatch):
+    """A file left one step behind (a failed write after the commit) is the
+    one case that waits, and is still refused once the time runs out."""
+    monkeypatch.setattr(records, "_MARK_SETTLE_SECONDS", 0.3)
+    rid, _, _ = two_versions(owner, "ui_action")
+    set_mark(owner, rid, seq=3)
+    started = time.monotonic()
+    unavailable(owner, rid, "ui_action")
+    assert time.monotonic() - started >= 0.3

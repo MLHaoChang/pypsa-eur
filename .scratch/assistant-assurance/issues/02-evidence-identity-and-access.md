@@ -133,7 +133,7 @@ Not covered: replay of an older, validly sealed version of a mutable record (`op
 
 ### 2026-10-29 — REPLAY closed: a DB high-water mark on every mutable record
 
-`tests/assurance_acceptance/test_p1_replay.py`: 30 cases.
+`tests/assurance_acceptance/test_p1_replay.py`: 32 cases.
 
 **Threat model.**
 - In scope: an attacker who can write the record store, up to restoring the whole store directory. They cannot read `SECRET_KEY` or the key file, and cannot write the DB.
@@ -148,7 +148,7 @@ Not covered: replay of an older, validly sealed version of a mutable record (`op
   - no mark at all.
 
   The mark is stripped before the record is returned, so callers see the record as before.
-- **Write order.** The mark is bumped (`UPDATE … SET seq = seq + 1 RETURNING`) and committed inside the store's file lock. Only then is the file sealed and written. A crash between the two leaves the file one behind its mark, which reads as unavailable and never as the older version. The next save writes a current version again. `load()` takes no lock, because an effect holds the store lock while its handler runs. A reader that finds the file one step behind its mark re-reads for up to 2 s (`_MARK_SETTLE_SECONDS`), so a save in flight lands and reads as the new version (tested). A reader that already holds the store lock skips the wait, because no save can land then. A crash or replay stays mismatched and reads 409. Two first saves of a new id that race on the insert take seqs 1 and 2: the loser retries the update (tested outside the lock).
+- **Write order.** The mark is bumped (`UPDATE … SET seq = seq + 1 RETURNING`) and committed inside the store's file lock. Only then is the file sealed and written. A crash between the two leaves the file one behind its mark, which reads as unavailable and never as the older version. The next save writes a current version again. `load()` takes no lock, because an effect holds the store lock while its handler runs. A reader that finds the file one step behind its mark re-reads for up to 2 s (`_MARK_SETTLE_SECONDS`), so a save in flight lands and reads as the new version (tested). A reader that already holds the store lock skips the wait, because no save can land then. Only a file exactly one seq behind in the same epoch waits; every other mismatch is refused at once (GK B (10) NOT OK fix, tested with the settle time patched to 30 s). A crash or replay stays mismatched and reads 409. Two first saves of a new id that race on the insert take seqs 1 and 2: the loser retries the update (tested outside the lock).
 - **Pruning.** A pruned row starts a new epoch when its id is written again, so no copy sealed under the old chain matches. The save sweep deletes the marks of reclaimed records, and of expired records whose file is gone. An unresolved operation reservation keeps its file, so it keeps its mark.
 - **Immutable kinds** (answer, evidence) take no mark; an identical re-save is still a no-op.
 

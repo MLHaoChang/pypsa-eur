@@ -384,8 +384,9 @@ def _read_marked(path, owner, record_id, kind):
 
     Exactly the mark: below it is a replay, above it a mark rolled back, and
     a record with no mark (saved before marks existed) or no DB mark is
-    neither. Raises ValueError for any of those once a save in flight has had
-    time to land.
+    neither. Raises ValueError for any of those: at once, unless the file is
+    exactly one step behind in the same epoch (a save in flight), which is
+    re-read until it lands or the settle time runs out.
     """
     # A reader holding the store lock cannot meet a save in flight.
     settle = 0.0 if holds(path.parent) else _MARK_SETTLE_SECONDS
@@ -395,9 +396,19 @@ def _read_marked(path, owner, record_id, kind):
         if record.get("record_kind") != kind:
             raise HTTPException(404, "Record not found")
         mark = _current_mark(owner, record_id)
-        if mark is not None and record.get(MARK_KEY) == mark:
+        sealed = record.get(MARK_KEY)
+        if mark is not None and sealed == mark:
             return {k: v for k, v in record.items() if k != MARK_KEY}
-        if time.monotonic() >= deadline:
+        # Only a file exactly one step behind in the same chain can be a save
+        # in flight; anything else is refused at once.
+        in_flight = (
+            mark is not None
+            and isinstance(sealed, dict)
+            and sealed.get("epoch") == mark["epoch"]
+            and type(sealed.get("seq")) is int
+            and sealed["seq"] == mark["seq"] - 1
+        )
+        if not in_flight or time.monotonic() >= deadline:
             raise ValueError()
         time.sleep(0.02)
 
