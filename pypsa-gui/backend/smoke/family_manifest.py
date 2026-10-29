@@ -36,6 +36,8 @@ DEFAULT_OUTPUT = ROOT / '.scratch/live-copilot/family-manifest.json'
 B = 'pypsa-gui/backend/tests/'
 G = 'tests/gridspine/'
 D15_TOOLS = 'campus_set_island_config campus_island_config campus_run_island_study'
+#: E1-E6 read through GET .../island/report: the chat tool trims the events away (ticket 27).
+D16_TOOLS = 'campus_set_island_config campus_draft_campus campus_run_study'
 
 # The capability-matrix families, in `assistant_control_matrix.FAMILY_JOURNEYS`
 # order, keyed by their journey slug.
@@ -375,8 +377,25 @@ VARIANTS: list[dict] = [
              B + 'test_lc06_d15_control_models.py::test_gfm_droop_gain_reads_droop_in_percent',
              B + 'test_lc06_d15_control_models.py::test_a_droop_governor_without_droop_pct_names_the_governor',
              B + 'test_lc06_d15_control_models.py::test_a_field_of_a_converter_on_an_isochronous_genset_names_the_governor'),
-    *[_pending(f'LC-D16.{e}', 'engine seed only (test_frequency*.py); campus_run_island_study tests stub it')
-      for e in ('E1', 'E2', 'E3', 'E4', 'E5', 'E6')],
+    _covered('LC-D16.E1', 'islanding: RoCoF0 = -dP f0/(2 H_v S_n) and settled df = -dP/sum K on the row\'s own I4 import '
+             '(40 MW plus losses), D = 0; E2 oracles below hold on it',
+             D16_TOOLS,
+             B + 'test_lc06_d16_frequency_events.py::test_e1_islanding_rocof_holds_on_the_rows_own_import'),
+    _covered('LC-D16.E2', '40 MW step on a 100 MW gfm_vsm BESS (H_v 5 s, pf 0.95, 4 %): RoCoF0 -1.900 Hz/s, df_qss -0.800 Hz; '
+             '60 Hz from the campus file -2.280 / -0.960; H_v halved -3.800; droop 8 % -1.600; an isochronous spinning '
+             'genset adds its H S to RoCoF0 (-1.1095) and returns df to 0; RK4 dt halving cuts the error >= 1.8x',
+             D16_TOOLS,
+             B + 'test_lc06_d16_frequency_events.py::test_e2_rocof_and_settled_frequency_are_the_hand_values',
+             B + 'test_lc06_d16_frequency_events.py::test_halving_h_doubles_the_rocof_and_leaves_the_settled_frequency',
+             B + 'test_lc06_d16_frequency_events.py::test_doubling_the_droop_doubles_the_settled_frequency',
+             B + 'test_lc06_d16_frequency_events.py::test_at_60_hz_both_figures_scale_with_f0',
+             B + 'test_lc06_d16_frequency_events.py::test_an_isochronous_genset_returns_the_frequency_to_nominal',
+             B + 'test_lc06_d16_frequency_events.py::test_halving_dt_cuts_the_error_against_the_closed_form'),
+    _covered('LC-D16.E3', 'tripping the only grid former collapses the island at t = 0, named "no grid-forming headroom"',
+             D16_TOOLS,
+             B + 'test_lc06_d16_frequency_events.py::test_e3_tripping_the_only_grid_former_collapses_the_island'),
+    *[_pending(f'LC-D16.{e}', 'engine seed only (test_frequency*.py); S8b')
+      for e in ('E4', 'E5', 'E6')],
     _unavailable('LC-D16.emt_pll_voltage', 'single-bus aggregate frequency screening only; no EMT/RMS/PLL/voltage dynamics',
                  'gridspine/static/frequency.py LABEL'),
     _pending('LC-D17.recommend_apply_restudy', 'apply digest checked by equality; no chain through the seam'),

@@ -1,0 +1,1 @@
+* Test(pypsa-gui): LC-06 checks the island frequency events E1–E3 through the campus Run. The test compares RoCoF at the first step and the settled frequency against hand values at 50 and 60 Hz, for a grid-forming BESS alone and with an isochronous genset. It also checks a collapse when the only grid former trips, and the integrator against the closed form as dt halves.

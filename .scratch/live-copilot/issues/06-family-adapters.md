@@ -439,6 +439,31 @@ Branch `claude/lc06-d15-control-models`, stacked on S6. GK A reviews. Session LC
 - f0 provenance: the study reports `facts.instant.f0_hz` only. The 60 Hz case shows f0
   comes from the campus file (no file → 50); a separate source tag would be an engine field.
 
+### S8a, LC-D16 E1–E3 (2026-10-29)
+
+Branch `claude/lc06-d16-frequency-events`, stacked on S7. GK A reviews. Session LC-06 (5).
+Test only; no engine edit. The plan, and the A/B/C split question, went to GK A (4).
+
+- `pypsa-gui/backend/tests/test_lc06_d16_frequency_events.py`. The seam is
+  `campus_set_island_config` → `campus_draft_campus` → `campus_run_study` (the queued
+  Run, waited on) → `GET …/island/report`, table `freq_events`. The hub has a 40 MW
+  load on a 40 MW import, a 100 MW gfm_vsm BESS (H_v 5, pf 0.95, droop 4 %), no PV
+  and D = 0.
+  - E2, a 40 MW step: RoCoF₀ −1.900 Hz/s and Δf_qss −0.800 Hz, both exact to 1e-6.
+    At 60 Hz (campus file): −2.280 and −0.960.
+  - E1: the same formulas on the row's own I4 ΔP (40 < ΔP < 40/0.99).
+  - E3: tripping the BESS collapses the island at t = 0, named "no grid-forming headroom".
+  - Isochronous: a spinning 200 MW genset adds H·S to RoCoF₀ (−1.1095) and brings Δf
+    back to 0 within 1e-3. At 60 MW the I4 plan loads it to 40, so it saturates at
+    +20 MW and Δf settles at −0.40.
+  - dt halving: engine `simulate` against the closed form at t = 1 s, dt 0.1 → 0.05.
+    The integrator is RK4, so the ratio is about 16 (asserted ≥ 1.8).
+  - Mutations: H_v halved and droop 8 % (in-file tests). The default fixture with both
+    halved/doubled fails the E2 and E1 oracles (run, red).
+- Found: the chat tool `campus_island_report` trims the 21 tables to the first 2 under
+  the result cap, so the events never reach the copilot. Ticket 27. S8a reads the route.
+- Manifest: LC-D16.E1, E2 and E3 covered; E4–E6 pending (S8b).
+
 ## Hand-off 4 (2026-10-29, LC-06 (4) at 300k)
 
 PR stack (each against master, stacked; all merges clean, no rebase):
