@@ -328,7 +328,22 @@ Owner scope LC03-SCOPE-1. Branch `claude/lc03-acl-historical`, from master `fcf2
   true})` from ChatPanel); a past run opens only by `open_run_result`, and the
   live walk's own steps keep it (vitest for each).
 
+- GK B plan conditions (N5a): no existence oracle (`test_no_existence_oracle`:
+  a never-existed project's run id, a never-member, revoked and deleted refuse
+  byte-equal on `get_run_evidence` and the run view; `resolve_project` raises
+  only 404, so no 403 reaches these paths); nothing held outlives revocation
+  (`test_nothing_held_outlives_revocation`: discussed run and held evidence,
+  then `discuss_project_run`, `export_run_evidence()` of the discussed run, the
+  run view and the exported file refuse). Frontend precedence: one model turn
+  that opens a past run and then `ui_open_panel(results)` keeps that run, so
+  the view matches the answer's run; the next turn's Results navigation drops
+  it (vitest; RED before the per-turn check).
+
 Kept, with reasons:
+- Open, pending the owner's choice on past-run reads after access loss: in the
+  real app access loss clears the session's active-project pointer, so reads
+  refuse `run_project_required`; the browser smoke's LC-T08 phase fails on that.
+  The backend HTTP run-view cases run on the test harness's bound context.
 - The past-run view's Results chrome still says "From the latest run" above the
   retained section: UI parity for past runs is out of scope until RW-03.
 - Queue, study and report runs still refuse until each gets its own capture.

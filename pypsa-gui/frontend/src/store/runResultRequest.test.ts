@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useUIStore } from './uiStore'
 import { applyUiNavigate } from '../components/uiNavigate'
-import { navigationEpoch } from '../utils/navigationEpoch'
+import { manualNavigation, navigationEpoch } from '../utils/navigationEpoch'
 
 describe('requestRunResult', () => {
   beforeEach(() => {
@@ -52,6 +52,19 @@ describe('a past run under navigation (LC-T10)', () => {
   it("a model turn's open_run_result still opens the past run", () => {
     applyUiNavigate({ kind: 'open_run_result', run_id: 'fg-other', results_tab: 'dispatch' }, navigationEpoch(), { fromModelTurn: true })
     expect(useUIStore.getState().discussedRun?.runId).toBe('fg-other')
+  })
+
+  it('one turn that opens a past run and then Results shows that run, as its answer does', () => {
+    manualNavigation()
+    const turn = navigationEpoch()
+    applyUiNavigate({ kind: 'open_run_result', run_id: 'fg-asked', results_tab: 'capex', section: 'results_capacity' }, turn, { fromModelTurn: true })
+    applyUiNavigate({ kind: 'navigate', panel_id: 'results', results_tab: 'capex' }, turn, { fromModelTurn: true })
+    expect(useUIStore.getState().discussedRun?.runId).toBe('fg-asked')
+    expect(useUIStore.getState().resultsTabRequest).toBe('capex')
+    // The next turn's Results navigation is about the current results again.
+    manualNavigation()
+    applyUiNavigate({ kind: 'navigate', panel_id: 'results', results_tab: 'capex' }, navigationEpoch(), { fromModelTurn: true })
+    expect(useUIStore.getState().discussedRun).toBeNull()
   })
 
   it("the live walk's own step keeps the past run it walks", () => {

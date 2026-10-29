@@ -110,11 +110,15 @@ export function applyUiNavigate(d: NavigationRequest, expectedEpoch?: number,
   if (expectedEpoch !== undefined && expectedEpoch !== navigationEpoch()) return false
   if (d.kind === 'set_snapshot' && typeof d.snapshot_index !== 'number') return true
   if (expectedEpoch === undefined) manualNavigation()
-  withAssistantNavigation(() => apply(d, opts?.fromModelTurn === true))
+  // A model turn is the stream's epoch: each turn starts with a manual navigation.
+  withAssistantNavigation(() => apply(d, opts?.fromModelTurn === true ? expectedEpoch ?? null : null))
   return true
 }
 
-function apply(d: NavigationRequest, fromModelTurn = false) {
+// The model turn (its epoch) whose open_run_result put the past run on screen.
+let pastRunTurn: number | null = null
+
+function apply(d: NavigationRequest, modelTurn: number | null = null) {
   const ui = useUIStore.getState()
   // A highlight lasts until the next navigation.
   ui.setResultsHighlight(null)
@@ -145,6 +149,7 @@ function apply(d: NavigationRequest, fromModelTurn = false) {
     return
   }
   if (d.kind === 'open_run_result' && d.run_id) {
+    pastRunTurn = modelTurn
     ui.requestRunResult({
       runId: d.run_id,
       status: d.status,
@@ -168,8 +173,11 @@ function apply(d: NavigationRequest, fromModelTurn = false) {
   const panel = d.panel_id ? _normalizePanelId(d.panel_id) : null
   // LC-T10: a model turn's Results navigation shows the current results (a past
   // run opens only through open_run_result), so it ends a past run's view rather
-  // than leave it under a newer answer. The live walk's own steps keep it.
-  if (fromModelTurn && panel === 'results' && ui.discussedRun) ui.clearDiscussedRun()
+  // than leave it under a newer answer. The turn that opened the past run keeps
+  // it, so the view matches that answer's run; so do the live walk's own steps.
+  if (modelTurn !== null && modelTurn !== pastRunTurn && panel === 'results' && ui.discussedRun) {
+    ui.clearDiscussedRun()
+  }
   if (panel === 'topology' || panel === 'map') {
     if (ui.activeSlidePanel) closePanelWithReturn()
     const view = d.canvas_view && ['blank', 'satellite', 'hybrid', 'site'].includes(d.canvas_view)

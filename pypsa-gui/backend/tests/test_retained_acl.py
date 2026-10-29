@@ -163,3 +163,82 @@ def test_the_answer_path_gives_the_same_plain_reason(past_run):
     with pytest.raises(HTTPException) as listed:
         chat_tools.list_project_runs()
     _plain_refusal(listed.value)
+
+
+def _refusal(call) -> tuple:
+    with pytest.raises(HTTPException) as refused:
+        call()
+    return refused.value.status_code, refused.value.detail
+
+
+def _view(browser, run_id) -> tuple:
+    view = browser.get('/api/results/run-view', params={'run_id': run_id, 'section': 'results_capacity'})
+    return view.status_code, view.json()['detail']
+
+
+def test_no_existence_oracle(past_run, client, session_ctx, _auth_db, seeded_identity, monkeypatch):
+    """Never existed, never a member, revoked and deleted refuse byte-equal."""
+    run_id, browser = past_run['run_id'], past_run['browser']
+    ctx = session_ctx(client)
+    read = lambda: run_evidence.get_run_evidence(run_id)  # noqa: E731
+    _engine, session_local = _auth_db
+    outsider_id = uuid.uuid4()
+    with session_local() as db:
+        db.add(User(id=outsider_id, email=f'outsider-{outsider_id.hex[:8]}@example.com',
+                    password_hash=None, status='active', is_super_admin=False,
+                    created_at=datetime.now(tz=timezone.utc)))
+        db.flush()
+        db.add(OrgMembership(id=uuid.uuid4(), user_id=outsider_id,
+                             org_id=seeded_identity['org_id'], role='member'))
+        db.commit()
+    outsider = attach_session(TestClient(main.app), session_local, outsider_id)
+    member = chat_tools.acting_user_id()
+    seen = {}
+    try:
+        with monkeypatch.context() as m:
+            m.setattr(ctx, 'project_uuid', str(uuid.uuid4()))
+            seen['never existed'] = (_refusal(read), _view(browser, run_id))
+        chat_tools.set_acting_user(str(outsider_id))
+        seen['never a member'] = (_refusal(read), _view(outsider, run_id))
+        chat_tools.set_acting_user(member)
+        past_run['revoke']()
+        seen['revoked'] = (_refusal(read), _view(browser, run_id))
+        assert client.delete(f'/api/projects/{NAME}').status_code in (200, 204)
+        seen['deleted'] = (_refusal(read), _view(browser, run_id))
+    finally:
+        chat_tools.set_acting_user(member)
+        with session_local() as db:
+            db.execute(delete(OrgMembership).where(OrgMembership.user_id == outsider_id))
+            row = db.get(User, outsider_id)
+            if row is not None:
+                db.delete(row)
+            db.commit()
+    first = seen['revoked']
+    assert first[0][0] == 404 and first[0][1]['error_kind'] == 'project_unavailable'
+    assert first[0][1]['message'].startswith(REASON)
+    for case, got in seen.items():
+        assert got == (first[0], first[0]), case
+
+
+def test_nothing_held_outlives_revocation(past_run):
+    """A past run already opened and its evidence held: the next read refuses."""
+    run_id, browser = past_run['run_id'], past_run['browser']
+    opened = chat_tools.DISPATCHERS['discuss_project_run'](run_id=run_id, section='results_capacity')
+    assert opened['kind'] == 'open_run_result'
+    held = run_evidence.get_run_evidence(run_id, section='results_capacity')
+    assert held['run_id'] == run_id
+    exported = chat_tools.DISPATCHERS['export_run_evidence']()  # the discussed run
+    blob = f"/api/projects/{NAME}/uploads/{exported['file_id']}/blob"
+    assert browser.get(blob).status_code == 200
+    assert browser.get('/api/results/run-view',
+                       params={'run_id': run_id, 'section': 'results_capacity'}).status_code == 200
+
+    past_run['revoke']()
+
+    for call in (lambda: chat_tools.DISPATCHERS['discuss_project_run'](run_id=run_id, section='results_capacity'),
+                 lambda: chat_tools.DISPATCHERS['export_run_evidence'](),
+                 lambda: run_evidence.get_run_evidence(run_id, section='results_capacity')):
+        _plain_refusal(pytest.raises(HTTPException, call).value)
+    view = browser.get('/api/results/run-view', params={'run_id': run_id, 'section': 'results_capacity'})
+    assert view.status_code == 404 and view.json()['detail']['error_kind'] == 'project_unavailable'
+    assert browser.get(blob).status_code == 404
