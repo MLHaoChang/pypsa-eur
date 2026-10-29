@@ -237,6 +237,20 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
             ('POST', '/api/library/series'),
         }),
     },
+    {
+        'id': 'results_workbook',
+        'title': 'Results workbook (Excel export of the run with charts)',
+        'disposition': 'unbuilt',
+        'reason': 'The results workbook cannot be made from chat yet. Its export choice is being added to Hand-off › Exports; until then use export_to_excel for tables.',
+        'page': 'Hand-off › Exports',
+        'panel': None,
+        'keywords': frozenset({
+            'workbook',
+        }),
+        'routes': frozenset({
+            ('GET', '/api/results/workbook.xlsx'),
+        }),
+    },
 )
 
 NOTE = ("not_via_chat lists features you cannot do from chat. Tell the user the reason and the page; "
