@@ -146,3 +146,115 @@ def test_a_common_mode_outage_raises_eue_where_the_link_matters(seam):
     base, cm = _common_mode_pair(seam, [50.0] * 8)
     assert cm['eue_mwh'] > base['eue_mwh']
     assert cm['lole_h_per_horizon'] >= base['lole_h_per_horizon']
+
+
+@pytest.mark.parametrize('mutation, kw, delta', [
+    # Z1: the cap halved moves only the two Link-bound hours, by 45 - 22.5 MW each.
+    ('Z1', {'import_cap': IMPORT_CAP / 2}, 2 * 1095 * 22.5),
+    # Z2: grid load 190 on the surplus-bound hours cuts the import by 10 x 0.9 MW.
+    ('Z2', {'grid_load': GRID_LOAD[:2] + [190.0, 190.0] + GRID_LOAD[4:]}, 2 * 1095 * 9.0),
+])
+def test_each_mutation_moves_eue_by_the_hand_delta(seam, mutation, kw, delta):
+    cap = kw.pop('import_cap', IMPORT_CAP)
+    n = zonal_network(**kw)
+    assert zonal_oracle(n, cap)['eue'] == pytest.approx(256230.0 + delta, abs=1e-6), mutation
+    cert = certify(seam, n, cap)
+    assert cert['eue_mwh'] == pytest.approx(256230.0 + delta, rel=EUE_REL), mutation
+    assert cert['eue_ci'][0] == cert['eue_ci'][1] == cert['eue_mwh']
+
+
+# The engine layer: GK A's per-draw and per-hour checks, which the chat
+# surface cannot show (it reports totals only). `simulate_zonal_blocks` runs on
+# the inputs `freeze_fixed_plan` builds from the same networks, with the
+# weak_flexible overlay, and the same seed and draw count as the seam.
+
+def _frozen(n):
+    import threading
+
+    from models.energy_hub import default_weak_flexible_pack
+    from services.adequacy import eh_stages as ST
+    from services.solver_service import SolverConfig
+
+    frozen = ST.freeze_fixed_plan(n, SolverConfig(voll=VOLL), threading.Lock(),
+                                  overlay=default_weak_flexible_pack().import_overlay)
+    assert frozen.zonal_inputs is not None
+    return frozen.zonal_inputs
+
+
+def _engine_run(monkeypatch, z, *, hook: bool):
+    """One run of the engine; with ``hook`` the area's ``offer`` is wrapped
+    (call through, values unchanged) to record each hour's offer, import and
+    grid surplus. The first ``sample_capacity`` call is the hub's units."""
+    import numpy as np
+
+    from services.adequacy import mc_zonal as Z
+
+    seen = {'hub': [], 'hours': []}
+    sample = Z.sample_capacity
+
+    def sample_spy(*a, **k):
+        out = sample(*a, **k)
+        seen['hub'].append(np.array(out, copy=True))
+        return out
+
+    monkeypatch.setattr(Z, 'sample_capacity', sample_spy)
+    if hook:
+        offer = Z._AreaState.offer
+
+        def offer_hook(self, h):
+            offered, imp = offer(self, h)
+            surplus = None if self.surplus_g is None else self.surplus_g.copy()
+            seen['hours'].append((h, offered.copy(), imp.copy(), surplus, float(self.ratio[h])))
+            return offered, imp
+
+        monkeypatch.setattr(Z._AreaState, 'offer', offer_hook)
+    blocks = Z.simulate_zonal_blocks(z, draws=DRAWS, seed=SEED)
+    monkeypatch.undo()
+    eue = sum(v[1] for v in blocks.values())
+    return blocks, eue, seen['hub'][0], seen['hours']
+
+
+def _same_blocks(a, b):
+    import numpy as np
+
+    assert a.keys() == b.keys()
+    for k in a:
+        np.testing.assert_array_equal(a[k][0], b[k][0])
+        np.testing.assert_array_equal(a[k][1], b[k][1])
+
+
+def test_the_engine_imports_the_lesser_bound_per_hour_and_the_hook_changes_nothing(monkeypatch):
+    import numpy as np
+
+    n = zonal_network()
+    z = _frozen(n)
+    oracle = zonal_oracle(n)
+    plain, _, _, _ = _engine_run(monkeypatch, z, hook=False)
+    hooked, eue, _, hours = _engine_run(monkeypatch, z, hook=True)
+    _same_blocks(plain, hooked)
+    assert np.all(eue == eue[0]) and eue[0] == pytest.approx(oracle['eue'], rel=EUE_REL)
+    link = n.links.loc['import_poc']
+    grid_cap = n.generators.loc[n.generators.bus == 'grid', 'p_nom'].sum()
+    assert [h for h, *_ in hours] == list(range(len(n.snapshots)))
+    for (h, offered, imp, surplus, ratio), bind in zip(hours, oracle['binds']):
+        # Hand value: min(cap x p_max_pu x eff, max(grid surplus, 0) x eff).
+        hand = min(IMPORT_CAP * link.p_max_pu * LINK_EFF,
+                   max(grid_cap - GRID_LOAD[h], 0.0) * LINK_EFF)
+        np.testing.assert_allclose(imp, hand, rtol=0, atol=1e-9, err_msg=f'hour {h} ({bind})')
+        np.testing.assert_array_equal(imp, np.minimum(offered, np.maximum(surplus, 0.0) * ratio))
+
+
+def test_the_engine_common_mode_raises_eue_draw_by_draw_and_leaves_the_hub_draws(monkeypatch):
+    import numpy as np
+
+    z_base = _frozen(zonal_network(grid_load=[50.0] * 8, base_q=0.1))
+    z_cm = _frozen(zonal_network(grid_load=[50.0] * 8, base_q=0.1, common_mode=(0.05, 30.0)))
+    plain_cm, _, _, _ = _engine_run(monkeypatch, z_cm, hook=False)
+    _, eue_base, hub_base, _ = _engine_run(monkeypatch, z_base, hook=True)
+    blocks_cm, eue_cm, hub_cm, hours = _engine_run(monkeypatch, z_cm, hook=True)
+    _same_blocks(plain_cm, blocks_cm)
+    np.testing.assert_array_equal(hub_cm, hub_base)
+    assert np.all(eue_cm >= eue_base)
+    assert eue_cm.sum() > eue_base.sum()
+    for h, offered, imp, surplus, ratio in hours:
+        np.testing.assert_array_equal(imp, np.minimum(offered, np.maximum(surplus, 0.0) * ratio))

@@ -332,11 +332,23 @@ Branch `claude/lc06-d12-zonal-mc`, stacked on S4. GK A reviews. Session LC-06 (3
   2. Z2: grid load 190 on the surplus hours: 275,940 (+2·1095·9).
   3. Z3: one hour of surplus in the useless case: 410,241.75 ≠ 407,285.25.
   4. Z4: no surplus in the useful case: equal, so the strict > fails.
-- Open with GK A: the per-draw conditions (per-draw EUE_cm ≥ EUE_base, per-hour
-  import on binding hours) are not visible through the chat surface. Plan
-  option A adds an engine-level test (simulate_zonal_blocks on the frozen
-  inputs) for them. That is not built yet; it waits on GK A's ruling (A, B or C,
-  sent 2026-10-28 ~23:45 UTC).
+- GK A ruled option A (NOT OK @96b7f680 asked for it). LC-06 (4) added, on
+  `simulate_zonal_blocks` with the `freeze_fixed_plan` inputs of the same
+  networks (weak_flexible overlay, seed 3, 200 draws):
+  - deterministic case: each hour's import equals the hand
+    min(cap x p_max_pu x eff, max(surplus, 0) x eff) on every draw, and EUE is
+    256,230 on every draw;
+  - common mode: EUE_cm >= EUE_base per draw and strictly greater in total;
+    the hub's unit availability (the first `sample_capacity` call) is bitwise
+    equal across the two runs; per-hour import = min(offered, max(surplus, 0) x ratio);
+  - an `_AreaState.offer` hook that calls through: results bitwise equal with
+    and without it.
+  Z1/Z2 are now a test at the chat seam, asserting the hand delta exactly.
+  Planted faults: a hook that halves the import, and an engine that ignores
+  the surplus, each turn the engine tests red. The manifest rows name the layer
+  of each check.
+- `import_p_nom_mw`: the override is the pack's intent (spec §6), but it is not
+  disclosed when it differs from the Link's rating. Ticket: `26-weak-flexible-import-cap-disclosure.md`.
 
 ## Hand-off 3 (2026-10-29, LC-06 (3) near 230k)
 
