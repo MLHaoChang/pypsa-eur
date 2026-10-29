@@ -89,7 +89,11 @@ What it builds:
   flagged `counterfactual_keeps_contract:<id>`). Contracts on the owner's
   assets are absent. An owner conversion Link beside a non-electric site
   load (the owner's heat pump) → `counterfactual_not_established:
-  owner_conversion_load` — unless every such load has a
+  owner_conversion_load` — a product Load (its bus carries a shortfall
+  slack) with no purchase → `counterfactual_not_established:
+  product_load_needs_baseline` instead (its counterfactual is the site-today
+  re-solve, `counterfactual_product_loads:<loads>`; grid-to-process ticket
+  11) — unless every such load has a
   `CommercialConfig.reference_purchases` entry (H2e): the counterfactual then
   buys it, `counterfactual:purchase:<load>` = −Σ w·L/lhv × price per kg
   (base-year money, stream `fuel`), flagged `counterfactual_buys:<loads>`. A
@@ -199,6 +203,7 @@ import pandas as pd
 
 from models.process_unit import product_roles
 from services.adequacy.slack import lost_slack_name
+from services.process_products import bus_unit, shortfalls
 from services.asset_schema import schema as _schema
 from services.asset_schema.access import upfront_parts
 from services.asset_schema.derive import has_parts, number
@@ -209,7 +214,8 @@ from services.commercial import participants as P
 from services.commercial.lp_bindings import same_party
 from services.finance.case import (
     CONTRACT_CLASS, DEGRADATION_SOURCE, UPFRONT_FROM_CAPITAL_COST, AssetFinance, AssetPart,
-    ExtraOwnerAsset, FinanceCase, FinanceRefused, LpBasis, StorageYear, Template, TemplateLine,
+    ExtraOwnerAsset, FinanceCase, FinanceRefused, LpBasis, ProductShortfall, StorageYear, Template,
+    TemplateLine,
 )
 from services.finance.cashflow import esc_class_for
 
@@ -1126,6 +1132,15 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
         fed = non_electric          # the owner's conversion feeds them indirectly (storage)
     if owner_conv and fed:
         missing = [ld for ld in fed if ld not in purchases]
+        # A product Load (its bus carries a shortfall slack) has nothing to buy
+        # in: its counterfactual is the site-today baseline re-solve, which
+        # this analytic basis does not have (grid-to-process ticket 11).
+        product_buses = {sf.bus for sf in shortfalls(n, lost_load)}
+        products = [ld for ld in missing if str(n.loads.at[ld, "bus"]) in product_buses]
+        missing = [ld for ld in missing if ld not in products]
+        if products:
+            blockers.append("counterfactual_not_established:product_load_needs_baseline")
+            flags.append("counterfactual_product_loads:" + ",".join(products))
         if missing:
             # The owner's heat pump (say) serves a non-electric load: the site
             # without it has no stated source for that load.
@@ -1133,7 +1148,7 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
             flags.append("counterfactual_owner_conversion_links:" + ",".join(owner_conv))
             if purchases:
                 flags.append("counterfactual_reference_purchase_missing:" + ",".join(missing))
-        else:
+        elif not products:
             # H2e: the site without the investment buys each such load's
             # energy at its stated reference price (grey H2, say).
             bought = fed
@@ -1369,6 +1384,68 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
     cf_hash = hashlib.sha256(json.dumps(blob, sort_keys=True, default=str).encode()) \
         .hexdigest()[:16]
     return out, avoided, cf_hash
+
+
+# ── grid-to-process 11: the lost product and the connection envelope ────────
+
+def _per_year(n, p_t, p) -> float | None:
+    """Σ p · snapshot_weights("generators") of a dispatch series over period
+    `p`, ÷ the period's years: its quantity per year (None when not read)."""
+    from services.period_utils import snapshot_weights
+
+    if p_t is None:
+        return None
+    m = _mask(n, p)
+    w = snapshot_weights(n, "generators").to_numpy(dtype=float)[m]
+    x = p_t.reindex(n.snapshots).fillna(0.0).to_numpy(dtype=float)[m]
+    return float((x * w).sum()) / _years(n, p)
+
+
+def _years(n, p) -> float:
+    if p is None:
+        return 1.0
+    return float(n.investment_period_weightings.at[p, "years"])
+
+
+def _product_shortfall(n, lost_load, baseline) -> tuple[ProductShortfall, ...]:
+    """Each product shortfall's lost product per period (`process_products.
+    shortfalls`, the one accessor), on the project solve and on the
+    baseline (None: no site-today comparison, so nothing to report)."""
+    if baseline is None:
+        return ()
+    base = {sf.bus: sf for sf in shortfalls(baseline.network, baseline.lost_load)}
+    out = []
+    for sf in shortfalls(n, lost_load):
+        b = base.get(sf.bus)
+        for p in _periods(n):
+            out.append(ProductShortfall(
+                period=_key(p), generator=sf.name, bus=sf.bus, unit=bus_unit(n, sf.bus), years=_years(n, p),
+                project_per_year=_per_year(n, sf.p, p),
+                counterfactual_per_year=None if b is None else _per_year(baseline.network, b.p, p)))
+    return tuple(out)
+
+
+def _envelope_flags(n, parsed) -> list[str]:
+    """`connection_envelope_network_only:<periods>`: the PoC's `p_max_pu`
+    varies within a period (a curtailment envelope, not a constant staged
+    cap) while the commercial connection is firm or not stated. The case
+    values that period under the network's envelope; the connection lines
+    price a firm one (ticket 10's comment, GK A on ticket 11). NPV is
+    unchanged: both sides share the envelope and the lines."""
+    conn = getattr(parsed, "connection", None)
+    if conn is not None and conn.kind != "firm":
+        return []
+    poc = getattr(parsed, "poc_link", None)
+    if poc is None or poc not in n.links_t.p_max_pu.columns:
+        return []
+    pu = n.links_t.p_max_pu[poc].reindex(n.snapshots).to_numpy(dtype=float)
+    hit = []
+    for p in _periods(n):
+        x = pu[_mask(n, p)]
+        x = x[np.isfinite(x)]
+        if x.size and float(x.max() - x.min()) > 1e-9:
+            hit.append(_key(p))
+    return ["connection_envelope_network_only:" + ",".join(hit)] if hit else []
 
 
 # ── the baseline counterfactual (owner decision 2026-10-15) ──────────────────
@@ -2357,6 +2434,11 @@ def _build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
                                                          accs, actual, owned, contracts,
                                                          lost_load, base_year, flags, fin=fin)
 
+    # Grid-to-process 11: the lost product behind the `lost_production` lines,
+    # on both sides of a site-today comparison.
+    shortfall = _product_shortfall(n, lost_load, baseline if cf_lines else None)
+    flags += _envelope_flags(n, parsed)
+
     # The storage LCOS's throughput and charging cost (owner decision 6).
     storage_years = _storage_years(n, parsed, P.classify_buses(n, parsed), owned_list,
                                    result_df, accs, flags, factors) \
@@ -2468,7 +2550,8 @@ def _build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
                        flags=tuple(dict.fromkeys(flags)),
                        counterfactual=tuple(counterfactual), lp_basis=lp,
                        counterfactual_hash=cf_hash, conservation_ok=conservation.ok,
-                       extra_assets=extras, asset_cod=asset_cod)
+                       extra_assets=extras, asset_cod=asset_cod,
+                       product_shortfall=shortfall)
 
 
 # ── the hash ─────────────────────────────────────────────────────────────────
@@ -2496,6 +2579,9 @@ def _canon(o):
         if isinstance(o, FinanceCase):
             if not o.asset_cod:
                 del out["asset_cod"]
+            # Grid-to-process 11: a case without a product shortfall keeps its hash.
+            if not o.product_shortfall:
+                del out["product_shortfall"]
             if o.inputs.stage_capex_lead_years == 1 and isinstance(out.get("inputs"), dict):
                 out["inputs"].pop("stage_capex_lead_years", None)
             # The island break-even's outage hours (2026-10-15): not stated, the
