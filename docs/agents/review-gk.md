@@ -44,6 +44,8 @@ When a PR changes a validation guard, confirm by mutation that its test fails fo
 
 `test_json_fragments`' real-file assertion must not depend on any declaration list being non-empty.
 
+A test never asserts a value a known defect produces as if it were correct. Assert the parts that are right, leave the wrong field to a `_pending` manifest row that names the ticket, and keep any identity that holds before and after the fix. No xfail, no skip, and no fixture chosen to hide the defect (#890, ticket 30).
+
 ## Rulings
 
 - `profile_location_missing` skips uploaded and network_native profiles (`readiness.profile_kind`).
