@@ -118,3 +118,14 @@ content card, GRIDCODE-CHAT-1).
   and `_full_coverage_problem`); a family with no covered variant is a `family-manifest:<slug>` blocker.
   Test: `test_a_family_whose_manifest_rows_are_gone_is_open_not_covered` (LC-D20 rows removed); it fails
   under both mutations (the old pending-only rule everywhere, and in the claim guard alone).
+
+2026-10-29: R2 built (session_01G7qCukn8KpPCqXtzidyFhy, stacked on R1 #906). `get_process_view` (read;
+the route's foreground project, a foreground project the caller may not read is 404 `not_authorized`),
+`get_site_anchor` (read) and `set_site_anchor` (write, carded in `harness/edit_card_site.py`: through
+`anchor.write_anchor` only; the digest binds project, stored revision, expected_revision and the
+validated anchor; a stale expected_revision is `file_changed_since_read` before any card and
+`edit_preview_stale` at confirm; the receipt reads the stored sidecar). The five scene routes are
+`held-by-spec` limitations naming SC-07 (`.scratch/site-scene-generation/issues/08-ai-guided-project-flow.md`,
+which now lists them); `assistant_route_parity.py --check` fails on any needs-tool row and on a held
+route whose issue is missing, does not name it, or is done/wontfix. route-parity: 0 needs-tool.
+Tests: `tests/test_lv08_r2_tools.py`, `tests/test_assistant_route_parity.py`.

@@ -88,7 +88,7 @@ TOOLS_BY_FAMILY: dict[str, frozenset[str]] = {f: frozenset(names.split()) for f,
         get_project_sites set_project_sites get_project_layout update_project_layout get_project_flow
         get_project_flow_scope update_project_flow_scope get_project_network_meta get_meta update_meta
         project_readiness get_site_template_form fetch_site_context geocode_place get_osm_suggestions
-        list_project_network_component set_site_connection""",
+        list_project_network_component set_site_connection get_site_anchor set_site_anchor""",
     'network-topology': """
         batch_create_components batch_delete_components bulk_update_components cascade_delete_bus
         create_carrier create_component delete_component get_component get_component_schema list_carriers
@@ -120,7 +120,7 @@ TOOLS_BY_FAMILY: dict[str, frozenset[str]] = {f: frozenset(names.split()) for f,
         compare_project_runs discuss_project_run get_asset_results get_curtailment_by_cause get_energy_flows
         get_load_shape get_loadflow_summary get_project_results_bundle get_project_results_summary
         get_project_statistics get_project_compare_state get_results get_run_evidence get_vintage_results
-        list_project_runs list_result_assets list_result_views read_result""",
+        list_project_runs list_result_assets list_result_views read_result get_process_view""",
     'reliability-adequacy': """
         abort_adequacy_study get_adequacy_results get_asset_health record_asset_health get_fmea_worksheet
         save_fmea_worksheet run_fmea_sweep get_reliability_goal get_stress_scenarios put_stress_scenarios
@@ -191,8 +191,16 @@ def _unavailable(vid: str, reason: str, pointer: str) -> dict:
 # Rebaselined on master a6d73f57; see the slice log in
 # .scratch/live-copilot/issues/06-family-adapters.md.
 VARIANTS: list[dict] = [
-    _pending('LC-D01.projects', 'seam tests check identity/ACL; no independent file/ID oracle'),
-    _pending('LC-D02.topology', 'seam tests check shape; no reference-count/KCL oracle'),
+    _covered('LC-D01.projects', 'copy = new registry id + own network.nc (1 bus, 20 MW, 2 snapshots read with pypsa alone); rename keeps '
+             'the id and the file bytes; refused Save-As leaves the target file byte-identical; delete removes that directory only',
+             'list_projects save_project_a_copy rename_project save_project_as delete_project',
+             B + 'test_lc06_d01_projects.py::test_copy_rename_refused_overwrite_and_delete_keep_each_projects_id_and_files'),
+    _covered('LC-D02.topology', 'chain B1-B2-B3: G1 serves 10 MW, Ln1 5 MW and Ln2 2 MW by sign; bus B2 has 4 references (G2, L2, Ln1, Ln2): '
+             'a plain delete dangles exactly those 4 in validate_network, a cascade leaves B1 B3 G1 L1 L3 in memory and in the saved file',
+             'create_component delete_component cascade_delete_bus validate_network save_project',
+             B + 'test_lc06_d02_topology.py::test_the_built_topology_carries_the_hand_kirchhoff_flows',
+             B + 'test_lc06_d02_topology.py::test_a_plain_bus_delete_leaves_exactly_the_four_references_dangling',
+             B + 'test_lc06_d02_topology.py::test_a_cascade_delete_removes_the_bus_and_its_four_references_and_nothing_else'),
     _covered('LC-D03.dynamic_weights', 'objective = 10 EUR/MWh x (5 MW x 2 h + 7 MW x 3 h) = 310, after an import round trip',
              'import_uploaded_network save_project_as run_simulation save_project get_study_evidence',
              B + 'test_assistant_capabilities.py::test_native_dynamic_roundtrip_solves_and_persists_evidence'),
