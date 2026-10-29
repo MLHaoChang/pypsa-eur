@@ -98,7 +98,7 @@ EXPERIMENT_REASONS = {
 }
 
 
-def _cases(base_project_id: str) -> tuple[Any, list[tuple[Any, dict]], int, set[str]]:
+def _cases(base_project_id: str) -> tuple[Any, list[tuple[Any, dict]], int, dict[str, str]]:
     """(base, [(case, spec)] the acting user may open, by name, count of the
     others, the ids of the children named as experiment cases)."""
     from fastapi import HTTPException

@@ -3,7 +3,7 @@
 
 # 02 — One sheet and native charts per result view, over the whole horizon
 
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: 01
 Gated: yes (results data; GK B, GK A for the adequacy, island and grid-forming views' numbers)
@@ -18,11 +18,11 @@ Fill 01's sheet-builder registry for every result view the app's result tabs sho
 
 ## Acceptance
 
-- [ ] Every view in the registry has a test on a fixture run: the sheet's key numbers equal its route's payload; its charts reference its own cells.
-- [ ] A view with no results for the run is listed in About as "no results", with no empty sheet.
-- [ ] A table over Excel's row limit or the 25 MB cap is written at the coarsest resolution that fits, and the sheet says which.
-- [ ] RW-SCEN-1: each view sheet carries a scenario column for every run; when that would exceed the row limit or the 25 MB cap, the base case is written in full and the other scenarios at key-results level, and the sheet says so.
-- [ ] Multi-period runs show every period; nothing is limited to the first period.
+- [x] Every view in the registry has a test on a fixture run: the sheet's key numbers equal its route's payload; its charts reference its own cells.
+- [x] A view with no results for the run is listed in About as "no results", with no empty sheet.
+- [x] A table over Excel's row limit or the 25 MB cap is written at the coarsest resolution that fits, and the sheet says which.
+- [x] RW-SCEN-1: each view sheet carries a scenario column for every run; when that would exceed the row limit or the 25 MB cap, the base case is written in full and the other scenarios at key-results level, and the sheet says so.
+- [x] Multi-period runs show every period; nothing is limited to the first period.
 
 ## Out of scope
 
@@ -161,3 +161,9 @@ GK B (11) on R5, second ruling (15:16Z, answering: each experiment case's child 
 Ruling 2 (duplicates, Option A): `CASE_PROJECT_NAME` sits next to `_name`, `test_the_case_project_name_marker_is_exactly_the_engines_name`; a case's child is shown once, never as a sensitivity run; other children are counted, never named. A case whose ledger cannot be read is shown as `case_unavailable` and its child (matched by `_name`) is not also counted as another's: `test_a_case_whose_ledger_cannot_be_read_is_unavailable_and_its_child_not_counted`. An unreadable store gives a note, no case: `test_an_unreadable_experiment_store_is_said_and_names_no_case`.
 
 Not built: experiments of other domains than network; `sensitivity_comparison._projects` still lists experiment children (follow-up, per ruling 2 point 4).
+
+### 2026-10-29 — Done: R1 #896, R2 #899, R3 #900, R4 #907, R5 #919 merged
+
+Acceptance by slice: every view's key figures equal its route and its charts read its own cells (R1–R3, conditions 2 and 9); "no results" vs a reported error (condition 5); the cell budget, period-safe coarsening and fallback (b) (R4); scenario columns for sensitivity runs (R1) and the acting user's experiment cases (R5); a period-2 figure on every view (condition 3). Follow-up #926 labels FMEA rows by LC-30's annualised basis.
+
+Left open, logged: `sensitivity_comparison._projects` (`compare_sensitivities` with no case ids) still lists experiment case projects as sensitivity cases and counts them toward its cap; only network-domain experiments are gathered; an unreadable experiment store gives a note, not a 409; `CELL_BUDGET` is uncalibrated (MAX_BYTES is the backstop); `scenarios._cases`' return annotation still says `set[str]` (GK B nit on #919).
