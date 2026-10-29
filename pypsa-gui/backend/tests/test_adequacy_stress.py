@@ -91,6 +91,26 @@ def _network() -> pypsa.Network:
     return n
 
 
+def test_events_that_overlap_the_year_are_noted_and_kept(tmp_path):
+    """LC-30: 365 events/yr, each assumed to last the 2 × 24 h horizon, add
+    up to 17 520 h, more than a year. The row says so and keeps its number:
+    criticality = 365 × the horizon's ΔEUE (30 MW short × 48 h) × VoLL."""
+    n = _network()
+    n.snapshot_weightings.loc[:, :] = 24.0
+    PyPSAService.set_network(n)
+    rows, _restore = ST.run_class_c_sweep(
+        n, PyPSAService.get_lock(), SolverConfig(voll=VOLL),
+        [_scenario(frequency_per_year=365.0)], log_queue=queue.SimpleQueue())
+    (r,) = rows
+    fm = r["failure_mode"]
+    assert r["delta_eue_mwh"] == pytest.approx(30.0 * N * 24.0, rel=1e-3)
+    assert fm["severity_eur"] == pytest.approx(30.0 * N * 24.0 * VOLL, rel=1e-3)
+    assert fm["criticality_eur_per_year"] == pytest.approx(
+        365.0 * 30.0 * N * 24.0 * VOLL, rel=1e-3)
+    assert fm["criticality_basis"] == "per_event"
+    assert "17520 h" in r["note"] and "overlap" in r["note"]
+
+
 def test_cold_snap_prices_exactly(tmp_path):
     n = _network()
     PyPSAService.set_network(n)
@@ -103,15 +123,16 @@ def test_cold_snap_prices_exactly(tmp_path):
     fm = r["failure_mode"]
     assert fm["failure_class"] == "C"
     assert fm["occurrence_per_year"] == pytest.approx(0.05)
-    # criticality €/yr = frequency × ΔEUE × VoLL, the 6 h horizon's ΔEUE
-    # scaled to a year by 8760/6 (LC-30): 0.05 × 180 × 1460 × 3000 and a
-    # severity of 180 × 1460 × 3000 per scenario year; f×S identity.
+    # criticality €/yr = frequency × ΔEUE × VoLL; f×S identity. LC-30: the
+    # event lasts the 6 h horizon, so the severity is that horizon's ΔEUE ×
+    # VoLL, NOT scaled to a year (× 8760/6 would be 1460× too large).
     assert fm["criticality_eur_per_year"] == pytest.approx(
-        0.05 * (SNAP_EUE - BASE_EUE) * 8760.0 / (N * WEIGHT) * VOLL, rel=1e-3)
+        0.05 * (SNAP_EUE - BASE_EUE) * VOLL, rel=1e-3)
     assert fm["severity_eur"] == pytest.approx(
-        (SNAP_EUE - BASE_EUE) * 8760.0 / (N * WEIGHT) * VOLL, rel=1e-3)
-    assert fm["criticality_basis"] == "annualised"
+        (SNAP_EUE - BASE_EUE) * VOLL, rel=1e-3)
+    assert fm["criticality_basis"] == "per_event"
     assert fm["horizon_years"] == pytest.approx(N * WEIGHT / 8760.0)
+    assert "note" not in r                      # 0.05 × 6 h is far below a year
     assert fm["severity_eur"] * fm["occurrence_per_year"] == pytest.approx(
         fm["criticality_eur_per_year"], rel=1e-9)
     # Parametric provenance is loud: the basis names it.

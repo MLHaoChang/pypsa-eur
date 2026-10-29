@@ -160,6 +160,47 @@ def test_get_eh_reference_design_payload_204_when_missing():
     assert body is None
 
 
+def _fmea_report(rows, class_a_rows):
+    sections = empty_section_map(default="skipped")
+    sections["fmea_top"] = SectionState(status="ok", payload={
+        "rows": rows, "class_a": {"status": "ok", "rows": class_a_rows,
+                                  "copt_fidelity_note": "netted: wind"}})
+    store: dict = {}
+    R.store_eh_report(store, ReferenceDesignReport(
+        archetype="strong_grid", pack_hash="a", assumptions_hash="b",
+        sections=sections))
+    body, status = R.eh_reference_design_http_payload(store)
+    assert status == 200
+    return body["sections"]["fmea_top"]["payload"]
+
+
+def test_a_saved_fmea_top_from_before_lc30_is_not_served_as_per_year():
+    """LC-30: rows saved without `criticality_basis` hold the horizon's
+    ΔEUE × VoLL. The route marks every such row, sets the caveat, and puts
+    it first in the class-A note the panel shows beside the table."""
+    payload = _fmea_report(
+        [{"mode_id": "link:L1:forced_outage", "criticality_eur_per_year": 5.0}],
+        [{"mode_id": "generator:g:forced_outage", "criticality_eur_per_year": 9.0}])
+    assert [r["criticality_basis"] for r in payload["rows"]] == ["per_horizon_legacy"]
+    assert [r["criticality_basis"] for r in payload["class_a"]["rows"]] == ["per_horizon_legacy"]
+    assert payload["criticality_caveat"] == R.LEGACY_CRITICALITY_NOTE
+    assert payload["class_a"]["copt_fidelity_note"] == (
+        R.LEGACY_CRITICALITY_NOTE + "; netted: wind")
+    # the numbers are kept as stored; only their basis is stated
+    assert payload["rows"][0]["criticality_eur_per_year"] == 5.0
+
+
+def test_a_current_fmea_top_is_served_unchanged():
+    rows = [{"mode_id": "link:L1:forced_outage", "criticality_eur_per_year": 5.0,
+             "criticality_basis": "annualised", "horizon_years": 0.5}]
+    a_rows = [{"mode_id": "generator:g:forced_outage", "criticality_eur_per_year": 9.0,
+               "criticality_basis": "annualised", "horizon_years": 0.5}]
+    payload = _fmea_report(rows, a_rows)
+    assert payload["rows"] == rows and payload["class_a"]["rows"] == a_rows
+    assert "criticality_caveat" not in payload
+    assert payload["class_a"]["copt_fidelity_note"] == "netted: wind"
+
+
 def test_get_eh_reference_design_payload_200_when_present():
     sections = empty_section_map(default="skipped")
     sections["cost"] = SectionState(status="ok", payload={"x": 1})

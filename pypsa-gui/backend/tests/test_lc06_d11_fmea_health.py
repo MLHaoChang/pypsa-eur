@@ -157,6 +157,17 @@ def test_class_b_criticality_is_per_year(tied):
     assert fm["horizon_years"] == pytest.approx(6 / 8760, rel=REL)
 
 
+def test_class_b_criticality_on_a_year_is_the_horizons(tied):
+    """Mutation: each snapshot weighted 4380 h, a year. ΔEUE = 5·2·4380 =
+    43 800 MWh and the criticality is q·ΔEUE·VoLL unscaled, as before LC-30."""
+    tied.network.snapshot_weightings.loc[:, :] = 4380.0
+    (row,) = _sweep(tied.network).values()
+    fm = row["failure_mode"]
+    assert row["delta_eue_mwh"] == pytest.approx(5.0 * 2 * 4380.0, rel=REL)
+    assert fm["criticality_eur_per_year"] == pytest.approx(0.02 * 43800.0 * VOLL, rel=REL)
+    assert fm["horizon_years"] == pytest.approx(1.0, rel=REL)
+
+
 def test_class_b_moves_with_the_load_behind_the_tie(tied):
     """Mutation: 4 MW behind the tie sheds 4·2·3 = 24 MWh."""
     tied.network.loads.at["L2", "p_set"] = 4.0
