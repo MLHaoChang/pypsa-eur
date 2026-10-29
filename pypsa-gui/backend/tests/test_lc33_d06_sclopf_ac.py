@@ -22,7 +22,13 @@ losses and voltages come from the independent Ybus/Newton solve of
 `test_lc06_d07_static_pf.py` with GenB's 30 MW injected at B, never from
 pypsa's pf. The mutation doubles every line's resistance: the LP (which sees
 x only) keeps its objective to 1e-9 relative, and the losses move to the
-independent solve's new value.
+independent solve's new value, observed on the engine between the two solves.
+
+Tolerances. The LPs have integer data and vertex optima, so objectives (1e-6
+EUR) and flows (1e-6 MW) are far looser than HiGHS's error and far tighter than
+any modelling difference (one MW moved across the corridor is 40 EUR). The AC
+values reuse LC-D07's tolerances and its X_TOL; that file records the measured
+agreement of the two Newton solves (2e-16 p.u., 3e-13 MW).
 """
 import math
 
@@ -32,7 +38,7 @@ import pytest
 
 from services import chat_tools
 from tests import test_lc06_d07_static_pf as d07
-from tests.test_lc06_d05_foresight import seam  # noqa: F401
+from tests.test_lc06_d05_foresight import run_record, seam  # noqa: F401
 from tests.test_workflow_tools import helpers_state  # noqa: F401
 
 # ── SCLOPF ───────────────────────────────────────────────────────────────
@@ -79,16 +85,23 @@ def test_n1_limits_the_corridor_to_one_lines_rating(seam, s_nom, secure):
                                  (80.0, True): (1800.0, 40.0)}[(s_nom, secure)]
     state, p0 = solve_lines(seam, s_nom, secure)
     assert state['objective'] == pytest.approx(objective, abs=OBJ_TOL)
+    assert run_record()['objective'] == pytest.approx(objective, abs=OBJ_TOL)
     for line in ('L1', 'L2'):
         assert p0[line].iloc[0] == pytest.approx(flow, abs=FLOW_TOL)
-    if secure:
-        # Outage of either line: BODF 1, so the survivor carries both base flows.
-        assert p0['L1'].iloc[0] + p0['L2'].iloc[0] == pytest.approx(s_nom, abs=FLOW_TOL)
+    # Post-outage flow on the survivor: f + BODF x f_out, with BODF = x_out / x_out = 1
+    # for two lines of equal reactance in parallel (the outaged line's flow
+    # has no other path). N-1 holds it at s_nom; without N-1 it is 100 > 60.
+    lines = parallel_network(s_nom).lines
+    bodf = lines.at['L1', 'x'] / lines.at['L2', 'x']
+    post = p0['L2'].iloc[0] + bodf * p0['L1'].iloc[0]
+    assert post == pytest.approx(s_nom if secure else LOAD_MW, abs=FLOW_TOL)
 
 
 # ── the chained AC stage ─────────────────────────────────────────────────
 
 GEN_B_MW, GEN_B_COST = 30.0, 5.0
+GRID_COST = float(d07.network().generators.at['Grid', 'marginal_cost'])
+LOADS_MW = [d07.LOADS['B'][0][t] + d07.LOADS['C'][0][t] for t in range(2)]
 REL = 1e-9
 
 
@@ -100,27 +113,17 @@ def ac_network(r_scale: float) -> pypsa.Network:
 
 
 @pytest.fixture
-def with_gen_b(monkeypatch):
-    """The LC-D07 oracle with GenB's LP setpoint injected at B and resistances scaled."""
+def independent_oracle(monkeypatch):
+    """`independent_oracle(r_scale)`: the LC-D07 Newton solve per snapshot,
+    with GenB's 30 MW netted off B's load and every resistance scaled."""
     lines, loads = dict(d07.LINES), dict(d07.LOADS)
 
-    def use(r_scale: float):
-        monkeypatch.setattr(d07, 'LOADS', {**loads, 'B': ([p - GEN_B_MW for p in loads['B'][0]], loads['B'][1])})
-        monkeypatch.setattr(d07, 'LINES', {k: (b0, b1, r * r_scale, x, b)
-                                           for k, (b0, b1, r, x, b) in lines.items()})
-        try:
+    def solve(r_scale: float) -> list[dict]:
+        with monkeypatch.context() as m:
+            m.setattr(d07, 'LOADS', {**loads, 'B': ([p - GEN_B_MW for p in loads['B'][0]], loads['B'][1])})
+            m.setattr(d07, 'LINES', {k: (b0, b1, r * r_scale, x, b) for k, (b0, b1, r, x, b) in lines.items()})
             return [d07.independent_pf(t) for t in range(2)]
-        finally:
-            monkeypatch.setattr(d07, 'LINES', lines)
-            monkeypatch.setattr(d07, 'LOADS', loads)
-    return use
-
-
-LOAD_B, LOAD_C = d07.LOADS['B'][0], d07.LOADS['C'][0]
-
-
-def load_mw(t: int) -> float:
-    return LOAD_B[t] + LOAD_C[t]
+    return solve
 
 
 def solve_chained(seam, r_scale: float) -> dict:
@@ -140,33 +143,42 @@ def losses_of(oracle: dict) -> float:
 
 
 def lp_objective() -> float:
-    return sum(GEN_B_MW * GEN_B_COST + (load_mw(t) - GEN_B_MW) * 10.0 for t in range(2))
+    return sum(GEN_B_MW * GEN_B_COST + (load - GEN_B_MW) * GRID_COST for load in LOADS_MW)
 
 
-def test_the_chained_ac_stage_keeps_the_lp_setpoints_and_the_slack_takes_the_losses(seam, with_gen_b):
-    lp_obj = lp_objective()
-    assert lp_obj == 30 * 5 * 2 + (70 + 20) * 10
-    run = solve_chained(seam, 1.0)
-    oracle = with_gen_b(1.0)
-    assert run['objective'] == pytest.approx(lp_obj, rel=REL)
+def check_against(run: dict, oracle: list[dict]) -> list[float]:
+    """GenB keeps its LP setpoint exactly; the slack takes LP + losses; voltages
+    match. Returns the engine's losses per snapshot."""
+    losses = []
     for t, snap in enumerate(run['ac'].index):
         assert run['lp'].at[snap, 'GenB'] == pytest.approx(GEN_B_MW, abs=FLOW_TOL)
-        assert run['lp'].at[snap, 'Grid'] == pytest.approx(load_mw(t) - GEN_B_MW, abs=FLOW_TOL)
+        assert run['lp'].at[snap, 'Grid'] == pytest.approx(LOADS_MW[t] - GEN_B_MW, abs=FLOW_TOL)
         assert run['ac'].at[snap, 'GenB'] == run['lp'].at[snap, 'GenB']
-        losses = losses_of(oracle[t])
-        assert losses > 0
-        assert run['ac'].at[snap, 'Grid'] == pytest.approx(load_mw(t) - GEN_B_MW + losses, abs=FLOW_TOL)
+        assert run['ac'].at[snap, 'Grid'] == pytest.approx(LOADS_MW[t] - GEN_B_MW + losses_of(oracle[t]),
+                                                          abs=FLOW_TOL)
         for bus in d07.BUSES:
             assert run['v_mag'].at[snap, bus] == pytest.approx(oracle[t]['v_mag'][bus], abs=d07.V_TOL)
+        losses.append(run['ac'].at[snap, 'Grid'] - run['lp'].at[snap, 'Grid'])
+    return losses
 
 
-def test_doubling_the_resistance_moves_only_the_losses(seam, with_gen_b):
-    """The mutation, against the same independent solve: losses rise, the LP does not move."""
-    base, doubled = with_gen_b(1.0), with_gen_b(2.0)
-    run = solve_chained(seam, 2.0)
-    assert math.isclose(run['objective'], lp_objective(), rel_tol=REL)
-    for t, snap in enumerate(run['ac'].index):
-        delta = losses_of(doubled[t]) - losses_of(base[t])
+def test_the_chained_ac_stage_keeps_the_lp_setpoints_and_the_slack_takes_the_losses(seam, independent_oracle):
+    assert lp_objective() == 30 * 5 * 2 + (100 - 30 + 50 - 30) * 10   # d07 loads 100 and 50 MW
+    run = solve_chained(seam, 1.0)
+    assert run['objective'] == pytest.approx(lp_objective(), rel=REL)
+    assert all(loss > 0 for loss in check_against(run, independent_oracle(1.0)))
+
+
+def test_doubling_the_resistance_moves_only_the_losses(seam, independent_oracle):
+    """The mutation: two engine solves; the LP objective stays, the losses move
+    by the independent solve's delta."""
+    base_oracle, doubled_oracle = independent_oracle(1.0), independent_oracle(2.0)
+    base = solve_chained(seam, 1.0)
+    base_losses = check_against(base, base_oracle)
+    doubled = solve_chained(seam, 2.0)
+    doubled_losses = check_against(doubled, doubled_oracle)
+    assert math.isclose(doubled['objective'], base['objective'], rel_tol=REL)
+    for t in range(2):
+        delta = losses_of(doubled_oracle[t]) - losses_of(base_oracle[t])
         assert delta > 1e-3
-        assert run['ac'].at[snap, 'Grid'] - (load_mw(t) - GEN_B_MW) == pytest.approx(
-            losses_of(base[t]) + delta, abs=FLOW_TOL)
+        assert doubled_losses[t] - base_losses[t] == pytest.approx(delta, abs=2 * FLOW_TOL)
