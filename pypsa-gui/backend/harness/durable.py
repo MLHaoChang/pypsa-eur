@@ -52,6 +52,11 @@ def transaction(directory, *, timeout=5):
         lock.release()
 
 
+
+def holds(directory):
+    """Whether this thread is inside transaction(directory)."""
+    return str(directory) in getattr(_LOCAL, "held", set())
+
 @contextmanager
 def file_lock(path, *, timeout=5, busy="file lock busy"):
     """An exclusive cross-process lock on the file at `path` (msvcrt on
