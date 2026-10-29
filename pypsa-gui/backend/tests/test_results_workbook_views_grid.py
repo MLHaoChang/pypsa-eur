@@ -410,6 +410,41 @@ def test_grid_forming_counts_cases_no_capacity_fixes(net, projects, monkeypatch)
     assert any("not achievable by capacity" in r for r in rows)
     assert ws._charts  # the capacity chart keeps its all-number column
 
+
+def _gfm_capacity(rows):
+    got = _gfm()
+    got["recommendation"]["capacity"] = [
+        {"case": c, "kind": k, "delta": v, "unit": u, "binding": "rocof", "derivation": "",
+         "feasible": True, "note": ""} for c, k, v, u in rows]
+    return got
+
+
+def test_grid_forming_capacity_is_the_largest_delta_of_each_kind(net, projects, monkeypatch):
+    from services import campus_island_tuning
+    monkeypatch.setattr(campus_island_tuning, "get_settings", lambda p: _gfm_capacity([
+        ("2030 h5", "inertia", 40.0, "MW·s"), ("2040 h2", "inertia", 25.0, "MW·s"),
+        ("2030 h5", "headroom_up", 3.0, "MW")]))
+    ws = _wb(_build(net, ["grid_forming"], project_for=projects.project_for))[
+        TITLES["grid_forming"]]
+    assert _key(ws, "Capacity needed — inertia", HORIZON) == 40.0
+    assert _key(ws, "Capacity needed — headroom_up", HORIZON) == 3.0
+
+
+def test_grid_forming_charts_capacity_only_for_a_single_kind(net, projects, monkeypatch):
+    from services import campus_island_tuning
+    titles = lambda ws: [c.title.tx.rich.p[0].r[0].t for c in ws._charts]  # noqa: E731
+    monkeypatch.setattr(campus_island_tuning, "get_settings", lambda p: _gfm_capacity([
+        ("2030 h5", "inertia", 40.0, "MW·s"), ("2030 h5", "headroom_up", 3.0, "MW")]))
+    ws = _wb(_build(net, ["grid_forming"], project_for=projects.project_for))[
+        TITLES["grid_forming"]]
+    assert "Capacity needed by case" not in titles(ws)  # MW·s and MW share no axis
+    assert any("not charted" in str(r[0]) for r in ws.iter_rows(values_only=True))
+    monkeypatch.setattr(campus_island_tuning, "get_settings", lambda p: _gfm_capacity([
+        ("2030 h5", "inertia", 40.0, "MW·s"), ("2040 h2", "inertia", 25.0, "MW·s")]))
+    ws = _wb(_build(net, ["grid_forming"], project_for=projects.project_for))[
+        TITLES["grid_forming"]]
+    assert "Capacity needed by case" in titles(ws)
+
 def test_electrical_design_of_a_planning_study_is_no_results(net, projects):
     wb = _wb(_build(net, ["electrical_design"], project_id="study",
                     project_for=projects.project_for))
