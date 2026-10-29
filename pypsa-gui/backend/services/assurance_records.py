@@ -41,9 +41,9 @@ SERIES_METRICS = {
     ("loads", "p_set"): ("Load", "MW"),
     ("generators", "p_max_pu"): ("Generator", "p.u."),
 }
-# Larger series are refused before the handler. A step's fact carries the
-# name twice, so the facts' encoded size is bounded too, under save()'s
-# 128 KiB record cap with room for the rest of the record.
+# Larger series are refused before the handler. The stored window (row mask
+# and digests) and the name are bounded too, under save()'s 128 KiB record
+# cap with room for the rest of the record.
 MAX_SERIES_POINTS = 8784  # an hourly leap year
 MAX_SERIES_FACT_BYTES = 120 * 1024
 # get_aggregate_load's `section` or `names` argument, at most.

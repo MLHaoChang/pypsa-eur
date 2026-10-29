@@ -260,6 +260,19 @@ def test_series_over_the_step_limit_is_refused_with_its_kind(
     assert approval(frames)["verdict"] == "limited"
 
 
+def test_series_whose_window_would_overflow_the_record_is_refused(
+    series, harness, monkeypatch
+):
+    # A window of at most 8784 rows and a 128-character name stay far under the
+    # bound, so lower it to reach the size refusal.
+    monkeypatch.setattr(records, "MAX_SERIES_FACT_BYTES", 16)
+    calls = wrap_handler(monkeypatch, lambda result: None)
+    frames = read_series(harness, series_draft(value=1, step=STEPS[0]))
+    assert not calls
+    assert series_result(frames)["error_kind"] == "series_too_long_to_check"
+    assert approval(frames)["verdict"] == "limited"
+
+
 def test_longest_series_stays_under_the_record_cap(baseline, harness):
     # Values whose repr is as long as a float's gets.
     set_series([-1.2345678901234567e-300 * (i + 1) for i in range(744)])
