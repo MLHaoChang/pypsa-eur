@@ -52,6 +52,9 @@ RESEARCH_DEFAULT_EUR, RESEARCH_CAP_EUR = 2.0, 10.0  # SH-RESEARCH-CAP-1
 # The run tools an envelope may list (`runs`); each admitted one counts as a solve.
 RUN_TOOLS = frozenset({"run_simulation", "run_ac_pf_stage", "solve_queue_enqueue",
                        "run_sensitivity_sweep", "run_eh_study"})
+# Counted as solves when admitted, but no envelope lists them (issue 08, GK B (8)):
+# a sweep or an EH study is always the user's own card.
+NEVER_LISTED = frozenset({"run_sensitivity_sweep", "run_eh_study"})
 # Always its own card, even when listed: others rely on the publication (§7).
 NEVER_ADMITTED = frozenset({"campus_publish_grid_code"})
 # A researched value is never written without the user's card (SH-RESEARCH-1).
@@ -150,6 +153,8 @@ def _check_run(entry):
     if not isinstance(entry, dict) or "tool" not in entry or not set(entry) <= {"tool", "kind"} \
             or entry["tool"] not in RUN_TOOLS or not isinstance(entry.get("kind", ""), str):
         raise EnvelopeError(f"A run names one of {sorted(RUN_TOOLS)} and an optional kind: {entry!r}")
+    if entry["tool"] in NEVER_LISTED:
+        raise EnvelopeError(f"{entry['tool']} is never in an envelope; it is always its own card.")
     return dict(entry)
 
 

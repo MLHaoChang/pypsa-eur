@@ -86,7 +86,8 @@ UI_INTERNAL: dict[str, dict] = {
         }),
     },
     'chat_panel': {
-        "reason": 'The chat panel itself: stream, cards, history, checked-answer records and Activity.',
+        "reason": ('The chat panel itself: stream, cards, history, checked-answer records, Activity and the '
+                   "plan card's run monitor."),
         "routes": frozenset({
             ('GET', '/api/chat/access'),
             ('GET', '/api/chat/activity'),
@@ -105,12 +106,17 @@ UI_INTERNAL: dict[str, dict] = {
             ('GET', '/api/chat/reliability/capabilities'),
             ('GET', '/api/chat/reliability/context'),
             ('GET', '/api/chat/reliability/contracts'),
+            ('GET', '/api/chat/runs/{task_id}/view'),
             ('GET', '/api/chat/skills'),
             ('GET', '/api/chat/workflows'),
             ('GET', '/api/chat/{session_id}/continuations'),
             ('GET', '/api/chat/{session_id}/progress'),
             ('POST', '/api/chat/import'),
             ('POST', '/api/chat/operations/{operation_id}/reconcile'),
+            ('POST', '/api/chat/runs/{task_id}/pause'),
+            ('POST', '/api/chat/runs/{task_id}/present'),
+            ('POST', '/api/chat/runs/{task_id}/resume'),
+            ('POST', '/api/chat/runs/{task_id}/stop'),
             ('POST', '/api/chat/skills/reload'),
             ('POST', '/api/chat/stream'),
             ('POST', '/api/chat/ui-ack'),

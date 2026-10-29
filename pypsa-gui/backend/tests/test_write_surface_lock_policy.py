@@ -149,6 +149,22 @@ _R_CHAT_OWNED = (
     "OPEN-ITEMS item 3). Any tool a turn runs is lock-checked at the chat seam, "
     "per tool; that is the second half of this file."
 )
+_R_RUN_STOP = (
+    "the plan card's Pause or Stop on the caller's own harness run (study "
+    "harness issue 08): the runner stops at its next tick and the run's live "
+    "card is dropped. Writes only the run's own status (`cancel_task` for "
+    "Stop), no project data, and stays open under another user's edit lock "
+    "for the reason every abort does (`_R_STOP`)."
+)
+_R_RUN_CLICK = (
+    "the plan card's Present or Resume on the caller's own harness run, its "
+    "cards decided on the run's own chat session `run:<task_id>` (study "
+    "harness issue 08). Lock-checked at the click: `run_monitor._recheck` "
+    "refuses `project_locked` through `assistant_tasks._may_write` "
+    "(`_check_project_lock`), behind the `_run_call` lambda the call-follower "
+    "does not follow; each step the run then dispatches is checked again by "
+    "`Runner.recheck`."
+)
 _R_CHAT_HISTORY = (
     "chat history is per-project and DOES travel into snapshots "
     "(`routers/snapshots.py`) and moves on Save-As, but it is not edit-lock "
@@ -287,6 +303,10 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/chat/{session_id}/abort"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/{session_id}/continuations/{job_id}/dismiss"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/{session_id}/goal"): (CHAT_SESSION, _R_CHAT_OWNED),
+    ("POST", "/api/chat/runs/{task_id}/pause"): (STOPS_WORK, _R_RUN_STOP),
+    ("POST", "/api/chat/runs/{task_id}/stop"): (STOPS_WORK, _R_RUN_STOP),
+    ("POST", "/api/chat/runs/{task_id}/present"): (CHAT_SESSION, _R_RUN_CLICK),
+    ("POST", "/api/chat/runs/{task_id}/resume"): (CHAT_SESSION, _R_RUN_CLICK),
     ("POST", "/api/chat/import"): (CHAT_SESSION, _R_CHAT_HISTORY),
     ("POST", "/api/chat/skills/reload"): (NOT_PROJECT_DATA, _R_SKILL_REGISTRY),
     ("POST", "/api/durable-conversations"): (CHAT_SESSION, _R_DURABLE_THREAD),

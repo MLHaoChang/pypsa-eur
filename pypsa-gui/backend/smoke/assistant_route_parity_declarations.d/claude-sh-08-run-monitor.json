@@ -1,0 +1,29 @@
+{
+ "limitations": [
+  {
+   "method": "GET",
+   "path": "/api/chat/runs/{task_id}/view",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/runs/{task_id}/present",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/runs/{task_id}/pause",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/runs/{task_id}/resume",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/runs/{task_id}/stop",
+   "reason": "conversation-transport"
+  }
+ ]
+}
