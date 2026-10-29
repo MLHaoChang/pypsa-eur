@@ -168,15 +168,13 @@ try {
   const openProject = async name => {
     await page.getByRole('button', { name: /^Projects$/ }).first().click()
     await page.waitForURL(/\/projects/)
-    // The whole card is its link: a pointer click on the card's name opens it.
-    // The tab strip may still carry the name off-screen; the card is the visible one.
-    const named = page.getByText(name, { exact: true }).locator('visible=true').first()
-    await named.waitFor({ timeout: 30000 }).catch(async error => {
-      await page.screenshot({ path: path.join(artifacts, `lc03h-failed-card-${name}.png`) })
-      throw error
-    })
-    const card = await named.boundingBox()
-    await page.mouse.click(card.x + card.width / 2, card.y + card.height / 2)
+    // The whole card is its link: a pointer click on the card's name opens it
+    // (the visible one: the tab strip may still carry the name off-screen).
+    await page.getByText(name, { exact: true }).locator('visible=true').first().click({ timeout: 30000 })
+      .catch(async error => {
+        await page.screenshot({ path: path.join(artifacts, `lc03h-failed-card-${name}.png`) })
+        throw error
+      })
     await page.waitForURL(/\/app/)
     await page.getByTestId('chat-input').waitFor({ state: 'attached' }).catch(async error => {
       await page.screenshot({ path: path.join(artifacts, `lc03h-failed-open-${name}.png`) })
