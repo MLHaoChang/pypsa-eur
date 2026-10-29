@@ -101,11 +101,13 @@ def _map_csv_folder(folder, fn) -> None:
             csv.writer(fh, lineterminator="\n").writerows(rows)
 
 
-def _map_xlsx_strings(path, fn) -> None:
+def _map_xlsx_strings(path, fn, data_only: bool = False) -> None:
     """Apply `fn` to every text cell; a formula cell counts as text, so a
-    formula the export would have written becomes an escaped string."""
+    formula the export would have written becomes an escaped string. An
+    import passes `data_only`: a workbook saved by Excel keeps each formula's
+    cached value, as PyPSA's own reader would see it."""
     import openpyxl
-    wb = openpyxl.load_workbook(str(path))
+    wb = openpyxl.load_workbook(str(path), data_only=data_only)
     for ws in wb.worksheets:
         for row in ws.iter_rows():
             for cell in row:
@@ -389,7 +391,7 @@ async def import_excel(
             with tempfile.TemporaryDirectory() as directory:
                 native_file = pathlib.Path(directory) / "network.xlsx"
                 native_file.write_bytes(data)
-                _map_xlsx_strings(native_file, _unescape_formula)
+                _map_xlsx_strings(native_file, _unescape_formula, data_only=True)
                 n.import_from_excel(str(native_file), engine="openpyxl")
         else:
             for sheet_name in wb.sheetnames:

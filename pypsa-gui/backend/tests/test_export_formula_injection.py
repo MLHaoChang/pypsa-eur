@@ -134,3 +134,46 @@ def test_an_export_imports_back_unchanged(
     assert list(n.lines.index) == ["-L1"]
     assert n.lines.at["-L1", "bus0"] == BAD
     assert "@wind" in n.carriers.index
+
+
+def _with_cached_formula(
+    xlsx: bytes, sheet: str, column: str, formula: str, cached: str
+) -> bytes:
+    """Put `formula` in the first data row of `column`, with the cached value
+    Excel would have stored beside it (openpyxl writes none)."""
+    wb = openpyxl.load_workbook(io.BytesIO(xlsx))
+    ws = wb[sheet]
+    header = [c.value for c in ws[1]]
+    ws.cell(row=2, column=header.index(column) + 1).value = "=" + formula
+    buf = io.BytesIO()
+    wb.save(buf)
+    src = zipfile.ZipFile(buf)
+    out = io.BytesIO()
+    patched = 0
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+        for item in src.infolist():
+            data = src.read(item)
+            old = f"<f>{formula}</f><v></v>".encode()
+            patched += data.count(old)
+            dst.writestr(
+                item, data.replace(old, f"<f>{formula}</f><v>{cached}</v>".encode())
+            )
+    assert patched == 1
+    return out.getvalue()
+
+
+def test_an_excel_formula_imports_as_its_cached_value(
+    client, install_network, session_ctx
+):
+    """GK B on #925: a workbook saved by Excel keeps a formula and its cached
+    value; the import reads the value, as PyPSA's own reader does."""
+    install_network(_network())
+    data = _with_cached_formula(
+        client.get("/api/io/export/excel").content, "generators", "p_nom", "10*2", "20"
+    )
+    mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    r = client.post("/api/io/import/excel", files={"file": ("x.xlsx", data, mime)})
+    assert r.status_code == 200, r.text
+    n = session_ctx(client).network
+    assert n.generators.at["+G1", "p_nom"] == 20
+    assert BAD in n.buses.index
