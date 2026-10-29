@@ -3,7 +3,7 @@
 
 # 02 — One sheet and native charts per result view, over the whole horizon
 
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: 01
 Gated: yes (results data; GK B, GK A for the adequacy, island and grid-forming views' numbers)
@@ -18,11 +18,11 @@ Fill 01's sheet-builder registry for every result view the app's result tabs sho
 
 ## Acceptance
 
-- [ ] Every view in the registry has a test on a fixture run: the sheet's key numbers equal its route's payload; its charts reference its own cells.
-- [ ] A view with no results for the run is listed in About as "no results", with no empty sheet.
-- [ ] A table over Excel's row limit or the 25 MB cap is written at the coarsest resolution that fits, and the sheet says which.
-- [ ] RW-SCEN-1: each view sheet carries a scenario column for every run; when that would exceed the row limit or the 25 MB cap, the base case is written in full and the other scenarios at key-results level, and the sheet says so.
-- [ ] Multi-period runs show every period; nothing is limited to the first period.
+- [x] Every view in the registry has a test on a fixture run: the sheet's key numbers equal its route's payload; its charts reference its own cells.
+- [x] A view with no results for the run is listed in About as "no results", with no empty sheet.
+- [x] A table over Excel's row limit or the 25 MB cap is written at the coarsest resolution that fits, and the sheet says which.
+- [x] RW-SCEN-1: each view sheet carries a scenario column for every run; when that would exceed the row limit or the 25 MB cap, the base case is written in full and the other scenarios at key-results level, and the sheet says so.
+- [x] Multi-period runs show every period; nothing is limited to the first period.
 
 ## Out of scope
 
@@ -93,3 +93,77 @@ R4 adds `Table.time` ("mean" | "sum") on the snapshot tables and a resolution la
 7. If MAX_BYTES is still hit after fallback (b), About reports an error and no truncated sheet is written. Test with a tiny monkeypatched MAX_BYTES.
 8. Mutations that must each fail a named test: an unweighted mean; the period key dropped from the bucket (the straddling day becomes one row); the NaN rule dropped.
 9. Stacked on #900: trial-merge with master, and run every test_results_workbook* file plus the route-policy tests (condition 10).
+
+### 2026-10-29 — GK B (11): R5 plan verdict GO, with conditions
+
+1. Scope: only this base's experiments. Include only records whose `project_id` equals the open base project's id and whose `owner_id` is the acting user. Test that an experiment of another project owned by the same user never appears, and neither does another user's experiment on the same shared project.
+2. Baseline check against the open base.
+   - When `base_basis["ok"]` is false, every experiment case gets `baseline_unavailable`.
+   - When the preflight's base `input_fingerprint` differs from `base_basis["fingerprint"]`, the case gets `baseline_changed`.
+   - When the record has a `baseline_run_id`, keep `_case`'s baseline evidence check in `_verify`.
+3. One reason vocabulary. The Scenarios sheet already uses `sc._reasons`' names: `case_inputs_changed`, `baseline_changed`, `mode_differs`, `horizon_differs`, `solver_settings_differ` and `case_unsolved`. Use those for experiment cases instead of a new `comparison_basis_differs`; one sheet should not have two spellings for the same refusal. Add new names only for what has no equivalent (`evidence_tampered`, failed or not-run cases), and give them the same note or About treatment.
+4. `compare_experiments` unchanged. `_case` must keep exactly today's exception set and its collapse to `experiment_source_unavailable`; an HTTPException from `resolve_project` inside `_load_case` is still caught. Prove it by copying master's `test_experiment_comparison.py` into the PR tree and running it there (review-gk byte-identity rule).
+5. The lock is really released. `ex._LOCK` is an RLock, so leaving an inner `with` does not release it if a caller further up already holds it. The `_load_context` spy asserts `not ex._LOCK._is_owned()`. Show that the workbook route enters `gather_experiments` without holding `ex._LOCK`. Keep the plan's case mutated between verify and load.
+6. Access before anything is read. For a case the user can't open, a spy shows that neither `_load_context` nor `run_evidence._load_run` is called and nothing in its directory is read. Asserting only that the name is absent is not enough.
+7. Same filling as sensitivity runs. `_fill` applies the same `dispatch_ready`, `result_df_for` and `solved_settings_for` reads. A case whose dispatch the routes would not serve gets `case_unsolved` and no figures. Test it.
+8. Cap. The cap is applied before any load. A case excluded after loading still holds its slot, so the cut is deterministic. Test that 6 sensitivity runs plus 4 experiment cases give 8 shown and "2 not shown", and that `_load_context` is never called for the 2 over-cap cases.
+9. Unique run names. "<title>: <case id>" can repeat (two experiments with the same title) or match a sensitivity project's name. Make the names unique, for example by suffixing a short experiment id on a clash, and test it. Check that no view keys a dict by run name.
+10. Mutation, one mutant per refusal, each killing a test:
+    - skip the post-load fingerprint check;
+    - skip the evidence digest check;
+    - resolve after loading;
+    - drop the `project_id` filter;
+    - drop the owner filter.
+
+At the trial merge, run `test_results_workbook*`, `test_experiment_comparison` and the routers/results tests. Keep the `routers/results.py` edit inside `_workbook_scenarios` because of #851. Send me the PR head when it's open.
+
+### 2026-10-29 — GK B (11): R5 ruling on condition 5 (`_observe` loads under the lock): Option A
+
+Option A, with three conditions. I read `_observe` (experiment_execution.py:155–200). It works on `copy.deepcopy(ledger)`, resolves access before it loads, and writes nothing, so running it outside the lock on the copy is sound. The post-load exact-fingerprint and evidence-digest checks still close the gap. Loading each case twice is accepted at a cap of 8.
+- (a) No writes in that window. A test runs the gather and shows that each case's ledger file and record file are byte-identical before and after.
+- (b) A concurrent change is caught. Change one case's ledger between the lock release and that case's load (for example, a cancel or refresh that rewrites it). That case must be excluded, or shown consistently with the ledger copy, never with figures from a network that differs from its receipt. Assert it.
+- (c) The spy is strict. Condition 5's spy covers every `_load_context` and `_load_run` call made during the gather, including the ones inside `_observe`.
+
+Condition 1, revised. `ex._read_record` already refuses a record whose owner or project differ (experiments.py:269), so don't add a redundant filter just to make a mutant killable. Keep the two exclusion tests: another project of the same user, and another user on a shared project. Replace the two filter mutants with one mutant that passes the wrong project or owner into `_read_record`, or skips it. It must fail one of those tests.
+
+Condition 9: your answer is noted. The unique-name test still stands.
+
+### 2026-10-29 — GK B (11): R5 second ruling (an experiment case's child is also a sensitivity run): Option A
+
+GK B (11) on R5, second ruling (15:16Z, answering: each experiment case's child is also listed as a sensitivity run): Option A. Show each experiment case once, as an experiment case, checked against its receipt. Record this with the points below.
+
+1. The marker. Use the strongest marker that exists.
+   - If the experiment path writes anything identifying into the child's `sensitivity_case.json` or the registry row, such as an experiment id, use that.
+   - Otherwise use an anchored full match of `_name`'s output: `exp-[0-9a-f]{32}-<case>` with the optional `-<n>` suffix. Build the regex next to `_name`, or derive it from `_name`, so the two can't drift. No loose `startswith("exp-")`.
+2. No silent drop. A child the marker excludes from the sensitivity list that matches no case gathered for the acting user's own experiments on this base still gets counted in the Scenarios note and the About "not shown" row, and is never named. That covers other users' experiment children and a sensitivity case that happens to look like an experiment name.
+3. Tests.
+   - An experiment child never appears as a sensitivity run.
+   - An experiment case of another user is counted, not named.
+   - Condition 8 becomes 6 true sensitivity runs plus 4 experiment cases: 8 shown, 2 not shown.
+   - Mutant: drop the marker filter in `_cases`. The never-listed-twice test must kill it.
+4. Scope. The change stays in `scenarios._cases`. Leave `sensitivity_comparison._read` and the chat tool `compare_sensitivity` alone; if they also list experiment children, report that as a follow-up rather than widening R5.
+
+### 2026-10-29 — R5 built (experiment cases as scenario runs), PR #919
+
+`services/results_workbook/scenarios.py` (`gather_experiments`, `_experiment_run`, shared `_fill`); tests in `tests/test_results_workbook_experiments.py`.
+
+1. Scope: `_read_record(root, id, project, owner)` is the filter: `test_another_users_or_another_projects_experiments_never_appear`.
+2. Baseline: `test_a_case_of_a_changed_base_is_baseline_changed`, `test_without_current_base_results_every_case_is_baseline_unavailable`, `test_a_changed_recorded_baseline_run_is_baseline_changed`.
+3. One vocabulary: `sc._REASONS` names, plus only `evidence_tampered`, `case_failed`, `case_not_completed`, `case_unavailable`: `test_failed_and_not_completed_cases_say_so_on_the_sheet_and_the_view_sheets`.
+4. `compare_experiments` unchanged: master's `test_experiment_comparison.py` byte-identical to the tree's (`cmp`), 26 passed.
+5. Lock (ruling: Option A): `test_every_case_load_is_outside_the_lock_and_nothing_is_written` (spies on `_load_context` and `_load_run` assert `not ex._LOCK._is_owned()`; the route enters unlocked); mutated between verify and load: `test_a_network_changed_after_the_ledger_copy_is_excluded`, `test_run_evidence_changed_after_the_receipt_is_evidence_tampered`.
+6. Access first: `test_a_case_the_user_cannot_open_is_counted_and_nothing_of_it_is_read`.
+7. Same filling: `test_a_case_whose_dispatch_the_routes_would_not_serve_is_unsolved`.
+8. Cap: `test_six_sensitivity_runs_and_four_cases_show_eight_and_count_two`.
+9. Unique names: `test_run_names_are_unique`.
+10. Mutants, each applied by hand and killed (table in the PR body): post-load fingerprint skip, evidence digest skip, resolve after load, wrong owner, wrong project, raw JSON instead of `_read_record`, and (ruling 2) the marker filter dropped in `_cases`.
+
+Ruling 2 (duplicates, Option A): `CASE_PROJECT_NAME` sits next to `_name`, `test_the_case_project_name_marker_is_exactly_the_engines_name`; a case's child is shown once, never as a sensitivity run; other children are counted, never named. A case whose ledger cannot be read is shown as `case_unavailable` and its child (matched by `_name`) is not also counted as another's: `test_a_case_whose_ledger_cannot_be_read_is_unavailable_and_its_child_not_counted`. An unreadable store gives a note, no case: `test_an_unreadable_experiment_store_is_said_and_names_no_case`.
+
+Not built: experiments of other domains than network; `sensitivity_comparison._projects` still lists experiment children (follow-up, per ruling 2 point 4).
+
+### 2026-10-29 — Done: R1 #896, R2 #899, R3 #900, R4 #907, R5 #919 merged
+
+Acceptance by slice: every view's key figures equal its route and its charts read its own cells (R1–R3, conditions 2 and 9); "no results" vs a reported error (condition 5); the cell budget, period-safe coarsening and fallback (b) (R4); scenario columns for sensitivity runs (R1) and the acting user's experiment cases (R5); a period-2 figure on every view (condition 3). Follow-up #926 labels FMEA rows by LC-30's annualised basis.
+
+Left open, logged: `sensitivity_comparison._projects` (`compare_sensitivities` with no case ids) still lists experiment case projects as sensitivity cases and counts them toward its cap; only network-domain experiments are gathered; an unreadable experiment store gives a note, not a 409; `CELL_BUDGET` is uncalibrated (MAX_BYTES is the backstop); `scenarios._cases`' return annotation still says `set[str]` (GK B nit on #919).

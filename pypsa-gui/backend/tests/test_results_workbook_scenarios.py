@@ -191,7 +191,7 @@ def test_a_case_of_another_org_is_counted_never_shown(client, swept, second_iden
         db.commit()
     _wb, ws = _sheet(_export(client))
     texts = _texts(ws)
-    assert "1 scenario(s) not shown: no access" in texts
+    assert "1 scenario(s) or experiment case(s) not shown: no access" in texts
     assert not any("Gas 5" in t for t in texts)
     _header_row, cols = _header(ws)
     assert "Gas 20" in cols
@@ -300,9 +300,10 @@ def test_not_comparable_reasons_are_written_and_hidden_runs_counted(solved):
     texts = _texts(ws)
     base_row = next(r for r in range(1, ws.max_row + 1) if ws.cell(r, 1).value == "Base (base)")
     assert ws.cell(base_row, 2).value.startswith(sc._BASE_REASONS["case_stale"])
-    assert f"1 scenario(s) not shown: the sheet compares up to {sc.MAX_CASES}, by name" in texts
-    assert "2 scenario(s) not shown: no access" in texts
-    assert any(t.startswith("1 scenario(s) not shown") for t in texts)
+    assert (f"1 scenario(s) or experiment case(s) not shown: the sheet compares up to {sc.MAX_CASES}, "
+            "sensitivity runs by name, then experiment cases in plan order") in texts
+    assert "2 scenario(s) or experiment case(s) not shown: no access" in texts
+    assert any(t.startswith("1 scenario(s) or experiment case(s) not shown") for t in texts)
     assert any(sc._REASONS["horizon_differs"] in t for t in texts)
     _assert_deltas_read_two_numbers(ws)
     _h, cols = _header(ws)
