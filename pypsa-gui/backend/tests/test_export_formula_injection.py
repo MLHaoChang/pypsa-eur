@@ -177,3 +177,27 @@ def test_an_excel_formula_imports_as_its_cached_value(
     n = session_ctx(client).network
     assert n.generators.at["+G1", "p_nom"] == 20
     assert BAD in n.buses.index
+
+
+def test_a_legacy_sheet_workbook_strips_only_the_escape_quote(client, session_ctx):
+    """GK B on #925: a workbook without a `network` sheet goes through the
+    legacy per-sheet reader, which strips the quote the same way."""
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    buses = wb.create_sheet("buses")
+    buses.append(["name", "v_nom"])
+    buses.append(["B1", 110.0])
+    gens = wb.create_sheet("generators")
+    gens.append(["name", "bus", "p_nom"])
+    gens.append(["'" + BAD, "B1", 5.0])
+    gens.append(["'-5", "B1", 6.0])
+    buf = io.BytesIO()
+    wb.save(buf)
+    mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    r = client.post(
+        "/api/io/import/excel", files={"file": ("x.xlsx", buf.getvalue(), mime)}
+    )
+    assert r.status_code == 200, r.text
+    n = session_ctx(client).network
+    assert sorted(n.generators.index) == sorted([BAD, "'-5"])
+    assert n.generators.at[BAD, "p_nom"] == 5.0
