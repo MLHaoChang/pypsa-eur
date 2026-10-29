@@ -238,10 +238,10 @@ Smallest first; each goes to GK B as a plan before it is built.
 
 #### GK B (10) plan GO conditions (2026-10-29)
 
-1. The 8760 and 8784 step tests use seeded random full-precision float64 values and a 128-character name, and assert the sealed record's encoded size.
-2. Refusals for each of these: a relabelled or reordered index, an edited value, one step short or long, a mask bit flipped and resealed, `rows` ≠ the live count, a mask length ≠ ceil(rows/8), and stray bits past `rows`.
-3. The canonical digest input is pinned and the same at capture and read, with domain separation between the two digests.
-4. evidence()'s expanded facts are byte-equal to S3's for series of 744 steps or fewer.
-5. The old adapter_version reads unavailable, fail-closed, with no migration.
-6. Mutants that drop the index digest, the rows check, the values digest or the mask-length check each fail a named test (`series_window_mutations.py`).
-7. The guard still runs before the handler, and `harness/assurance.py` is unchanged. test_tool_error_kind_manifest and the A1.x suites run at the PR head.
+1. The 8760 and 8784 step tests use seeded random full-precision float64 values and a 128-character name, and assert the sealed record's encoded size. Met: under 16 KiB for 8760 and 8784 steps.
+2. Refusals for each of these: a relabelled or reordered index, an edited value, one step short or long, a mask bit flipped and resealed, `rows` ≠ the live count, a mask length ≠ ceil(rows/8), and stray bits past `rows`. Met, plus a missing or extra key, a non-int `rows`, a mask that is not base64, a cleared or empty mask, and a digest rewritten in a resealed record.
+3. The canonical digest input is pinned and the same at capture and read, with domain separation between the two digests. Met: `test_the_digest_input_is_pinned_and_domain_separated`, `test_the_mask_is_one_bit_per_row_least_significant_first`.
+4. evidence()'s expanded facts are byte-equal to S3's for series of 744 steps or fewer. Met: the `fact_record_dump` plugin now also records what evidence() and capture_series return. Over timeseries, revocation, integrity, fact_builder and replay, the 258 series lines are equal on both trees (sha256 `1d80c11a…f478`).
+5. The old adapter_version reads unavailable, fail-closed, with no migration. Met: `test_the_old_per_step_record_is_unavailable`.
+6. Mutants that drop the index digest, the rows check, the values digest or the mask-length check each fail a named test (`series_window_mutations.py`). Met, 5 of 5: index digest by `test_a_rewritten_digest_is_unavailable[index_sha256]`, values digest by `test_a_cleared_mask_bit_is_unavailable`, rows by `test_a_row_count_other_than_the_live_one_is_unavailable[5]`, mask length by `test_a_mask_of_the_wrong_length_is_unavailable[octets0]`, stray bits by `test_stray_bits_past_the_last_row_are_unavailable`.
+7. The guard still runs before the handler, and `harness/assurance.py` is unchanged. test_tool_error_kind_manifest and the A1.x suites run at the PR head. Met: all green on the branch.
