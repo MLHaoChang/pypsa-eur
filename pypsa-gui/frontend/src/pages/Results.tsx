@@ -101,7 +101,7 @@ function solveSignature(s: SimulationStatus | undefined): string | null {
 // on a flat single-period run. `expertOnly` tabs are hidden in Guided mode
 // (guided-mode spec §3.5): Guided keeps adequacy and FMEA, the two the
 // hub-design flow reads.
-const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingUp; tip: string; multiOnly?: boolean; expertOnly?: boolean }> = [
+export const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingUp; tip: string; multiOnly?: boolean; expertOnly?: boolean }> = [
   { id: 'summary',    label: 'Summary',            Icon: Gauge,            tip: 'The solve at a glance: cost, emissions, adequacy and the key capacities, each linking to its tab' },
   { id: 'overview',   label: 'Overview',           Icon: Layers,           tip: 'Per-period economics, generation mix & storage — the whole horizon at a glance', multiOnly: true, expertOnly: true },
   { id: 'capex',      label: 'Capacity Expansion', Icon: TrendingUp,       tip: 'CAPEX, OPEX, sized assets', expertOnly: true },
@@ -804,7 +804,7 @@ export default function Results() {
             {discussedRun.mode ? ` · ${discussedRun.mode}` : ''}
           </span>
           {discussedRun.section && (
-            <span className="text-muted">Section: {sectionWords(discussedRun.section)}</span>
+            <span className="text-muted">Section: {sectionWords(discussedRun.section, id => TABS.find(t => t.id === id)?.label)}</span>
           )}
           {discussedRun.baselineRunId && (
             <span className="text-muted">baseline {discussedRun.baselineRunId}</span>
