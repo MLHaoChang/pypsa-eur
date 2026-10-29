@@ -46,7 +46,7 @@ from tests.test_workflow_tools import helpers_state  # noqa: F401
 
 REL = 1e-6
 MW_TOL = 1e-6
-ENS_CAP = 10                                   # permyriad of 87,600 MWh
+ENS_CAP = 10                                   # permyriad of 876,000 MWh: 876 MWh
 WEIGHT = 1095.0
 PACK_IMPORT_MW = 50.0
 SPARE_MC, PEAKER_MC = 180.0, 300.0
@@ -105,7 +105,7 @@ def test_the_n1_spare_is_priced_built_and_selected_by_hand(seam, peak_hour_mw):
     assert options['base']['achieved_ens_mwh'] == pytest.approx(0.0, abs=MW_TOL)
     spare = options['n1_generation']
     [applied] = spare['applied']
-    assert applied['name'] == 'eh_spare_gen'
+    assert applied['name'] == 'eh_spare_gen' and applied['marginal_cost'] == SPARE_MC
     assert applied['annualised_cost_eur_per_mw_yr'] == pytest.approx(annualised, rel=1e-12)
     assert spare['cost_at_target_eur'] == pytest.approx(n1, rel=REL)
     assert spare['meets_target'] is True
