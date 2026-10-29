@@ -15,11 +15,14 @@ vi.mock('../../api/runMonitor', () => ({
 
 const START = { task_id: TASK_ID, title: 'Own site study', status: 'ready', run: { stage: 'inputs' } }
 
-function show(state: keyof typeof STATES, mode: 'guided' | 'expert' = 'guided') {
+function show(state: keyof typeof STATES, mode: 'guided' | 'expert' = 'guided', onRequest = vi.fn()) {
   useUIStore.setState({ uiMode: mode })
   vi.mocked(api.getRun).mockResolvedValue(STATES[state])
-  return render(<AssistantResultCard result={START} disabled={false} onRequest={vi.fn()} />)
+  return render(<AssistantResultCard result={START} disabled={false} onRequest={onRequest} />)
 }
+
+/** No internal task, run or stage status, reason or id in the card's text. */
+const INTERNAL = /cancelled|needs_user|needs_review|waiting_job|completed|paused_at|envelope_\w+|step_failed|input_gate|result_gate|handoff|\{/
 
 const card = () => screen.getByTestId('run-monitor').textContent ?? ''
 
@@ -28,7 +31,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(api.presentRun).mockResolvedValue()
   useChatStore.setState({ pending: null, streaming: false, requestQueue: [], lastRequest: null, sessionId: 's1' })
-  useUIStore.setState({ activeSlidePanel: null, flowReturn: null })
+  useUIStore.setState({ activeSlidePanel: null, flowReturn: null, fieldDrawer: null })
 })
 afterEach(() => cleanup())
 
@@ -46,7 +49,7 @@ describe('RunMonitor', () => {
     show('gate_pass')
     await screen.findByTestId('run-current-stage')
     expect(screen.getAllByTestId('run-gate-rule').map(r => r.textContent)).toEqual(
-      ['The model has no errors · 0 · pass', 'The model is ready to solve · pass'])
+      ['The model has no errors · 0 errors · pass', 'The model is ready to solve · pass'])
     expect(screen.getByTestId('run-budgets').textContent).toMatch(/^Cost €0\.42 of €5\.00 · Solves 3 of 6 · Expires \d+ Oct \d\d:\d\d$/)
     cleanup()
     show('loop')
@@ -65,10 +68,28 @@ describe('RunMonitor', () => {
     expect(screen.getByText('Details').closest('details')?.open).toBe(false)
   })
 
+  it.each(Object.keys(STATES).filter(k => !k.startsWith('envelope_')))(
+    'says the status in words, never an internal status; only Expert Details shows the ids (%s)', async (state) => {
+      show(state, 'guided')
+      await screen.findByTestId('run-state')
+      expect(card()).not.toMatch(INTERNAL)
+      expect(card()).not.toContain(TASK_ID)
+      expect(screen.getByTestId('run-state').textContent).toMatch(/^[A-Z][a-z]/)
+      cleanup()
+      show(state, 'expert')
+      await screen.findByTestId('run-state')
+      const details = screen.getByText('Details').closest('details')!.textContent ?? ''
+      expect(details).toContain(`Task ${TASK_ID}`)
+      expect(details).toMatch(/Stage [a-z_]+$/)
+      expect(card().replace(details, '')).not.toMatch(INTERNAL)
+      expect(details).not.toMatch(/cancelled|needs_user|needs_review|completed|running|paused|budget|step_failed/)
+    })
+
   it.each([
-    ['gate_fail', /^Check inputs failed: 1 rule did not pass · Fix in Inputs › then Check again ›$/],
-    ['over_budget', /^Cost budget used up: the run stopped: Review the results so far ›$/],
-    ['expired', /^Unattended approval expired: Continue step by step ›$/],
+    ['gate_fail', /^Check inputs failed: 1 rule did not pass · See the issues › then Check again ›$/],
+    ['over_budget', /^Cost budget used up: the run stopped: Change the budget ›$/],
+    ['solves_used_up', /^Solve budget used up: the run stopped: Change the budget ›$/],
+    ['expired', /^Unattended approval expired: Continue step by step ›Nothing runs until you resume: it picks up at Solve\.$/],
     ['solver_error', /^Solve did not finish: Open the solve log ›$/],
     ['out_of_date', /^Inputs out of date: Review a new brief ›$/],
   ] as const)('says the %s failure in words with a › fix', async (state, words) => {
@@ -76,30 +97,85 @@ describe('RunMonitor', () => {
     expect((await screen.findByTestId('run-failure')).textContent).toMatch(words)
   })
 
-  it('a fix link opens its panel on the click, with Back to the origin; the card never switches on its own', async () => {
-    show('finished')
+  it('Expert: a › link opens its panel through openFlowTarget, with Back to the origin; never on its own', async () => {
+    show('finished', 'expert')
     await screen.findByTestId('run-finished')
     expect(useUIStore.getState().activeSlidePanel).toBeNull()
     fireEvent.click(screen.getByTestId('run-report-link'))
     expect(useUIStore.getState().activeSlidePanel).toBe('reports')
+    expect(useUIStore.getState().uiMode).toBe('expert')
     expect(useUIStore.getState().flowReturn).not.toBeNull()
+  })
+
+  it('Guided: a › link opens its panel in place over the cards (openFlowTargetInPlace), never flipping the mode', async () => {
+    show('solver_error', 'guided')
+    fireEvent.click(await screen.findByRole('button', { name: 'Open the solve log ›' }))
+    const ui = useUIStore.getState()
+    expect(ui.uiMode).toBe('guided')
+    expect(ui.fieldDrawer).toMatchObject({ panel: 'solveQueue', section: 'readiness' })
+    expect(ui.activeSlidePanel).toBeNull()
+    expect(ui.flowReturn).not.toBeNull()
+    cleanup()
+    useUIStore.setState({ fieldDrawer: null, flowReturn: null })
+    show('gate_fail', 'expert')
+    fireEvent.click(await screen.findByRole('button', { name: 'See the issues ›' }))
+    expect(useUIStore.getState().activeSlidePanel).toBe('issues')
+  })
+
+  it('budget used up: "Change the budget ›" asks for the envelope, not Resume', async () => {
+    const onRequest = vi.fn()
+    show('over_budget', 'guided', onRequest)
+    fireEvent.click(await screen.findByRole('button', { name: 'Change the budget ›' }))
+    expect(onRequest).toHaveBeenCalledWith(expect.stringContaining('change the budget'))
+    expect(api.resumeRun).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: /Resume/ })).toBeNull()
+  })
+
+  it('links use ›, never >', async () => {
+    for (const state of Object.keys(STATES).filter(k => !k.startsWith('envelope_'))) {
+      show(state)
+      await screen.findByTestId('run-state')
+      expect(card()).not.toContain('>')
+      for (const link of screen.getByTestId('run-monitor').querySelectorAll('button.text-accent')) {
+        if (link.textContent?.match(/[a-z]$/) && link.getAttribute('data-testid') !== 'run-continue'
+          && link.getAttribute('data-testid') !== 'run-pause' && link.getAttribute('data-testid') !== 'run-stop-keep') {
+          throw new Error(`link without ›: ${link.textContent}`)
+        }
+      }
+      cleanup()
+    }
   })
 
   it('paused: names the stage and how to resume; Resume goes on', async () => {
     vi.mocked(api.resumeRun).mockResolvedValue(STATES.gate_pass)
     show('paused')
     const failure = await screen.findByTestId('run-failure')
-    expect(failure.textContent).toMatch(/^Paused at Solve: Resume ›The unattended approval keeps running until it expires\.$/)
+    expect(failure.textContent).toMatch(/^Paused at Solve: Resume ›Nothing runs until you resume: it picks up at Solve\.Unattended approval expires/)
+    expect(screen.getByTestId('run-paused-expiry').textContent).toMatch(/^Unattended approval expires \d{1,2} Oct \d\d:\d\d$/)
     fireEvent.click(screen.getByRole('button', { name: 'Resume ›' }))
     await waitFor(() => expect(api.resumeRun).toHaveBeenCalledWith(TASK_ID, 's1'))
+  })
+
+  it('Stop is an inline second step: Keep running calls nothing', async () => {
+    show('stop_confirm')
+    fireEvent.click(await screen.findByTestId('run-stop'))
+    const step = screen.getByTestId('run-stop-confirm')
+    expect(step.textContent).toBe('Stop the run?Stop·Keep runningThe edits applied so far and the results so far are kept. A stopped run cannot be restarted.')
+    expect(screen.queryByTestId('run-stop')).toBeNull()
+    fireEvent.click(screen.getByTestId('run-stop-keep'))
+    expect(screen.queryByTestId('run-stop-confirm')).toBeNull()
+    expect(api.stopRun).not.toHaveBeenCalled()
   })
 
   it('Stop says what it keeps; a stopped card names the stage, never an internal status', async () => {
     vi.mocked(api.stopRun).mockResolvedValue(STATES.stopped)
     show('gate_pass')
-    expect((await screen.findByTestId('run-stop-note')).textContent)
-      .toBe('Stop keeps the edits applied so far and the results so far; it cannot be undone.')
-    fireEvent.click(screen.getByTestId('run-stop'))
+    fireEvent.click(await screen.findByTestId('run-stop'))
+    expect(api.stopRun).not.toHaveBeenCalled()
+    expect(screen.getByTestId('run-stop-note').textContent)
+      .toBe('The edits applied so far and the results so far are kept. A stopped run cannot be restarted.')
+    fireEvent.click(screen.getByTestId('run-stop-yes'))
+    await waitFor(() => expect(api.stopRun).toHaveBeenCalledWith(TASK_ID))
     const stopped = await screen.findByTestId('run-stopped')
     expect(stopped.textContent).toMatch(/^Stopped at Solve: the edits applied so far and the results so far are kept\./)
     expect(card()).not.toMatch(/cancelled/i)

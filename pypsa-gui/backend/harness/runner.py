@@ -356,10 +356,24 @@ class Runner:
 
     def present(self, task_id):
         """The user opened the run: a card it waits on is issued now, its TTL
-        starting at display, and decided on the run's own session."""
+        starting at display, and decided on the run's own session. One live
+        card per run: a card already live is dropped and issued again (issue
+        08, GK B (4))."""
         from harness import session as harness_session
+        self.drop_card(task_id)
         self._present[task_id] = self.clock() + harness_session.CONFIRMATION_TTL_SECONDS
         self.wake()
+
+    def drop_card(self, task_id):
+        """The user is no longer at the run's card (pause, stop, a re-issue):
+        its token is revoked, so the waiting gate ends and the step stays to
+        do, and nothing is issued live until the next `present`."""
+        from harness import session as harness_session
+        self._present.pop(task_id, None)
+        session = harness_session.get_session(SESSION_PREFIX + task_id)
+        if session is not None:
+            session.revoke_confirmations()  # the run's own session holds only the run's cards
+        self._cards.pop(task_id, None)
 
     def live_card(self, task_id):
         """The card a step of the run waits on while the user is there (issue
@@ -769,7 +783,7 @@ class Runner:
                     carded.append(step["id"])
                     if decision in ("approve", "deny"):
                         session.record_decision(payload["confirmation_token"], decision)
-                    elif decision == "live":
+                    elif decision == "live" and task_id in self._present:  # not dropped meanwhile
                         self._cards[task_id] = {**copy.deepcopy(payload), "session_id": session.session_id,
                                                 "expires_at_epoch_ms": time.time() * 1000 + payload["ttl_seconds"] * 1000}
                     else:
@@ -892,3 +906,9 @@ def present(task_id):
 def live_card(task_id):
     """The card the run waits on while the user is there, or None."""
     return _DEFAULT.live_card(task_id) if _DEFAULT is not None else None
+
+
+def drop_card(task_id):
+    """Pause and stop drop the run's live card (issue 08, GK B (3))."""
+    if _DEFAULT is not None:
+        _DEFAULT.drop_card(task_id)

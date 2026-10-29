@@ -10,6 +10,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 
 from harness import confirm, runner as harness_runner
 from services import chat_tools
@@ -311,3 +312,254 @@ def test_every_reason_unattended_cannot_work_has_words():
     from services import run_monitor
     source = Path(run_monitor.__file__).read_text()
     assert set(re.findall(r'return "([a-z_]+)"', source)) == words_keys("UNATTENDED_BLOCK_WORDS")
+
+
+# ── GK B (2): every click re-checks at call time ────────────────────────────
+
+
+def test_resume_after_the_caller_was_removed_from_the_project_is_task_not_found_and_nothing_runs(
+        client, session, site, member_only):
+    from services import run_envelope
+    project_id, root = site
+    task = start()
+    path = task_path(root, task)
+    with_steps(path, [edit_step(2, 25.0)])
+    add, remove = member_only
+    add(project_id)
+    run_envelope.decide(session, task["task_id"], "unattended")
+    assert client.post(f"/api/chat/runs/{task['task_id']}/pause").json()["run"]["status"] == "paused"
+    remove(project_id)
+    resumed = client.post(f"/api/chat/runs/{task['task_id']}/resume")
+    assert resumed.status_code == 404 and resumed.json()["detail"]["error_kind"] == "task_not_found"
+    chat_tools.set_acting_user(None)
+    runner = harness_runner.Runner("a")
+    for _ in range(3):
+        runner.tick(path)
+    assert json.loads(path.read_text())["run"]["status"] == "paused"
+    assert frames_of(task["task_id"], task_owner(path)) == [] and task["task_id"] not in runner._inflight
+    assert PyPSAService.get_active_context().network.generators.at["G1", "p_nom"] != 25.0
+
+
+def task_owner(path):
+    return json.loads(path.read_text())["owner_id"]
+
+
+def expire(path):
+    from services import run_envelope
+    envelope = json.loads(run_envelope.path_for(path).read_text())
+    envelope["expires_at"] = run_envelope._iso(run_envelope._now() - 60)
+    run_envelope.path_for(path).write_text(json.dumps(envelope))
+
+
+def test_resume_past_the_envelopes_expiry_ends_it_and_the_run_stays_paused(client, session, site):
+    """Paused past `expires_at`, then Resume: the envelope ends `expired` at
+    the click and the run stays paused (`envelope_expired`), as the runner
+    pauses a run whose envelope lapsed; no step runs unattended. A second
+    Resume goes on step by step (cards), as after any runner stop."""
+    from services import run_envelope
+    project_id, root = site
+    task = start()
+    path = task_path(root, task)
+    with_steps(path, [edit_step(2, 25.0)])
+    run_envelope.decide(session, task["task_id"], "unattended")
+    client.post(f"/api/chat/runs/{task['task_id']}/pause")
+    expire(path)
+    resumed = client.post(f"/api/chat/runs/{task['task_id']}/resume").json()
+    assert (resumed["run"]["status"], resumed["run"]["reason"]) == ("paused", "envelope_expired")
+    assert resumed["envelope"]["state"] == "expired" and "solves" not in resumed["monitor"]["budgets"]
+    chat_tools.set_acting_user(None)
+    runner = harness_runner.Runner("a")
+    for _ in range(3):
+        runner.tick(path)
+    assert json.loads(path.read_text())["run"]["status"] == "paused"
+    assert frames_of(task["task_id"], task_owner(path)) == []
+    assert PyPSAService.get_active_context().network.generators.at["G1", "p_nom"] != 25.0
+    assert not run_envelope.live(path)
+
+
+def test_present_and_confirm_end_an_expired_envelope_and_refuse_the_paused_run(client, session, site):
+    from services import run_envelope
+    project_id, root = site
+    task = start()
+    path = task_path(root, task)
+    run_envelope.decide(session, task["task_id"], "unattended")
+    expire(path)
+    for action in ("present", "confirm"):
+        response = run_call(client, task["task_id"], action)
+        assert response.status_code == 409 and response.json()["detail"]["error_kind"] == "run_paused_or_stopped"
+    record = json.loads(path.read_text())
+    assert (record["run"]["status"], record["run"]["reason"]) == ("paused", "envelope_expired")
+    assert json.loads(run_envelope.path_for(path).read_text())["state"] == "expired"
+
+
+def test_a_click_on_a_run_another_user_has_locked_is_refused(client, session, site, monkeypatch):
+    task = start()
+    monkeypatch.setattr(tasks_module(), "_may_write", lambda task: False)
+    for action in ("present", "resume", "confirm"):
+        response = run_call(client, task["task_id"], action)
+        assert response.status_code == 409 and response.json()["detail"]["error_kind"] == "project_locked", action
+
+
+def test_resume_with_the_budget_spent_stops_the_run_instead(client, session, site):
+    project_id, root = site
+    task = start()
+    path = task_path(root, task)
+    client.post(f"/api/chat/runs/{task['task_id']}/pause")
+    record = json.loads(path.read_text())
+    harness_runner._budget(record)["used"]["cost_eur"] = 99.0
+    path.write_text(json.dumps(record))
+    resumed = client.post(f"/api/chat/runs/{task['task_id']}/resume").json()
+    assert (resumed["run"]["status"], resumed["run"]["reason"]) == ("needs_user", "budget")
+
+
+# ── GK B (3), (4): the live card ─────────────────────────────────────────────
+
+
+def a_live_card(client, task, path, monkeypatch):
+    """The run waits on a card and the user has the plan card open."""
+    with_steps(path, [edit_step(2, 25.0)])
+    chat_tools.set_acting_user(None)
+    runner = harness_runner.Runner("a", decisions=Clicks(refs=["inputs"]))
+    monkeypatch.setattr(harness_runner, "_DEFAULT", runner)
+    settle(runner, path, task["task_id"], lambda r: r["run"]["status"] == "needs_user", limit=12)
+    assert client.post(f"/api/chat/runs/{task['task_id']}/present").json() == {"ok": True}
+    return runner, issued(client, runner, path, task)
+
+
+def issued(client, runner, path, task, old=None):
+    runner.tick(path)
+
+    def card():
+        found = client.get(f"/api/chat/runs/{task['task_id']}/view").json()["monitor"].get("card")
+        return found if found and found["confirmation_token"] != old else None
+    assert wait_until(lambda: card() is not None, 30)
+    return card()
+
+
+def gate_ended(runner, task):
+    flight = runner._inflight[task["task_id"]][1]
+    flight.join(10)  # a revoked card ends its gate at once; a kept one waits for its TTL
+    return not flight.is_alive()
+
+
+def p_nom():
+    return PyPSAService.get_active_context().network.generators.at["G1", "p_nom"]
+
+
+def test_stop_drops_the_live_card_and_its_token_runs_nothing(client, session, site, detached, monkeypatch):
+    from harness import session as harness_session
+    project_id, root = site
+    task = detached()
+    path = task_path(root, task)
+    runner, card = a_live_card(client, task, path, monkeypatch)
+    run_session = harness_session.get_session("run:" + task["task_id"])
+    assert card["confirmation_token"] in run_session.pending_confirmations
+    assert client.post(f"/api/chat/runs/{task['task_id']}/stop").json()["status"] == "cancelled"
+    assert gate_ended(runner, task)
+    assert card["confirmation_token"] not in run_session.pending_confirmations
+    assert runner.live_card(task["task_id"]) is None
+    assert "card" not in client.get(f"/api/chat/runs/{task['task_id']}/view").json()["monitor"]
+    answer = client.post(f"/api/chat/run:{task['task_id']}/confirm",
+                         json={"token": card["confirmation_token"], "decision": "approve"})
+    assert answer.status_code == 409 and answer.json()["detail"]["error_kind"] == "run_paused_or_stopped"
+    runner.tick(path)
+    assert p_nom() != 25.0
+
+
+def test_pause_drops_the_live_card_too_and_resume_issues_a_new_one(client, session, site, detached, monkeypatch):
+    """After pause the old card is refused, as after stop (it does not stay
+    answerable): the step it waited on stays to do, and after Resume the
+    plan card is issued a new card for it."""
+    from harness import session as harness_session
+    project_id, root = site
+    task = detached()
+    path = task_path(root, task)
+    runner, card = a_live_card(client, task, path, monkeypatch)
+    assert client.post(f"/api/chat/runs/{task['task_id']}/pause").json()["run"]["status"] == "paused"
+    assert gate_ended(runner, task)
+    assert card["confirmation_token"] not in harness_session.get_session("run:" + task["task_id"]).pending_confirmations
+    assert "card" not in client.get(f"/api/chat/runs/{task['task_id']}/view").json()["monitor"]
+    answer = client.post(f"/api/chat/run:{task['task_id']}/confirm",
+                         json={"token": card["confirmation_token"], "decision": "approve"})
+    assert answer.status_code == 409 and answer.json()["detail"]["error_kind"] == "run_paused_or_stopped"
+    runner.tick(path)
+    assert p_nom() != 25.0 and json.loads(path.read_text())["run"]["status"] == "paused"
+    client.post(f"/api/chat/runs/{task['task_id']}/resume")
+    assert client.post(f"/api/chat/runs/{task['task_id']}/present").json() == {"ok": True}
+    again = issued(client, runner, path, task, old=card["confirmation_token"])
+    stale = client.post(f"/api/chat/run:{task['task_id']}/confirm",
+                        json={"token": card["confirmation_token"], "decision": "approve"})
+    assert stale.status_code == 404 and stale.json()["detail"]["error_kind"] == "unknown_confirmation_token"
+    answer = client.post(f"/api/chat/run:{task['task_id']}/confirm",
+                         json={"token": again["confirmation_token"], "decision": "approve"})
+    assert answer.status_code == 200, answer.text
+    runner._inflight[task["task_id"]][1].join(60)
+    assert p_nom() == 25.0
+
+
+def test_a_second_present_reissues_the_card_and_the_first_token_is_refused(client, session, site, detached,
+                                                                          monkeypatch):
+    project_id, root = site
+    task = detached()
+    path = task_path(root, task)
+    runner, first = a_live_card(client, task, path, monkeypatch)
+    assert client.post(f"/api/chat/runs/{task['task_id']}/present").json() == {"ok": True}
+    assert gate_ended(runner, task)
+    second = issued(client, runner, path, task, old=first["confirmation_token"])
+    old = client.post(f"/api/chat/run:{task['task_id']}/confirm",
+                      json={"token": first["confirmation_token"], "decision": "approve"})
+    assert old.status_code == 404 and old.json()["detail"]["error_kind"] == "unknown_confirmation_token"
+    assert p_nom() != 25.0
+    answer = client.post(f"/api/chat/run:{task['task_id']}/confirm",
+                         json={"token": second["confirmation_token"], "decision": "approve"})
+    assert answer.status_code == 200, answer.text
+    runner._inflight[task["task_id"]][1].join(60)
+    assert p_nom() == 25.0
+
+
+def test_present_refuses_a_paused_or_a_stopped_run(client, session, site):
+    task = start()
+    client.post(f"/api/chat/runs/{task['task_id']}/pause")
+    for stop in (False, True):
+        if stop:
+            client.post(f"/api/chat/runs/{task['task_id']}/stop")
+        response = client.post(f"/api/chat/runs/{task['task_id']}/present")
+        assert response.status_code == 409 and response.json()["detail"]["error_kind"] == "run_paused_or_stopped"
+
+
+# ── GK B (5): solves used are this run's own ─────────────────────────────────
+
+
+def test_solves_used_counts_only_this_runs_own_audit_rows(client, session, site):
+    from services import run_envelope
+    project_id, root = site
+    mine, other = start("run-1"), start("run-2")
+    for task in (mine, other):
+        run_envelope.decide(session, task["task_id"], "unattended")
+    theirs = run_envelope.path_for(task_path(root, other))
+    envelope = json.loads(theirs.read_text())
+    envelope["audit"] += [{"at": envelope["granted_at"], "event": "used", "call_id": f"c{i}",
+                           "tool": "solve_queue_enqueue"} for i in range(2)]
+    theirs.write_text(json.dumps(envelope))
+
+    def used(task):
+        return client.get(f"/api/chat/runs/{task['task_id']}/view").json()["monitor"]["budgets"]["solves"]["used"]
+    assert (used(mine), used(other)) == (0, 2)
+
+
+# ── GK B (8): what an envelope may list ──────────────────────────────────────
+
+
+def test_no_envelope_lists_the_sweep_or_the_eh_study():
+    from services import run_envelope, run_profiles
+    for ref in run_profiles.PROFILES:
+        runs = (run_profiles.resolve(ref).get("envelope") or {}).get("runs", [])
+        assert not {r["tool"] for r in runs} & {"run_sensitivity_sweep", "run_eh_study"}, ref
+    block = run_profiles.resolve("eh_site@1")["envelope"]
+    for tool in ("run_sensitivity_sweep", "run_eh_study"):
+        with pytest.raises(run_envelope.EnvelopeError):
+            run_envelope.check_block({**block, "runs": [{"tool": tool}]})
+        with pytest.raises(HTTPException) as refused:
+            run_envelope.narrow({**block, "runs": [*block["runs"], {"tool": tool}]},
+                                {**block, "runs": [{"tool": tool}]})
+        assert refused.value.detail["error_kind"] == "invalid_envelope"

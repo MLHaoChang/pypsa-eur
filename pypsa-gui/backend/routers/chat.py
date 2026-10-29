@@ -2221,6 +2221,15 @@ def chat_confirm(session_id: str, body: ConfirmRequest,
     # answered with a 403: that keeps this route from confirming the session
     # exists, and matches the existing never-404 contract below. Wrong-replica
     # is a distinct 409 so failover cannot clear another worker's tokens.
+    from harness import runner
+    if session_id.startswith(runner.SESSION_PREFIX):
+        # Study harness issue 08: the plan card answers a run's card here. The
+        # run is re-checked at the click (GK B (1), (2)): a run the caller no
+        # longer reaches is `task_not_found`, a paused or stopped one refused.
+        from services import run_monitor
+        if actor is None:
+            run_monitor.not_found()
+        _run_call(actor, lambda: run_monitor.confirm(session_id.removeprefix(runner.SESSION_PREFIX)))
     session = _resolve_owned_session(session_id, actor)
     if session is None:
         raise HTTPException(

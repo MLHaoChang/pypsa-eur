@@ -52,8 +52,17 @@ function view(over: Partial<RunMonitorView> & { run: RunMonitorView['run'] }): R
 const run = (stage: string, extra: Partial<RunMonitorView['run']> & { stages: RunStage[] }) =>
   ({ profile: 'eh_site@1', mode: 'stepwise', status: 'running', stage, ...extra })
 
+const REVIEW = view({ status: 'ready', run: run('intake', { mode: 'unattended', status: 'needs_user', stages: stages('intake') }), envelope: ENVELOPE })
+
+/** Every state the PR's screenshots show, by key. The `envelope_*` keys render
+ *  in the plan-review Choice card's Envelope section; the others in the plan
+ *  card. `STATE_STEPS` says what to click after rendering one. */
 export const STATES: Record<string, RunMonitorView> = {
   proposal: view({ run: run('inputs', { stages: stages('inputs') }), envelope: ENVELOPE, paused_at_card: 'inputs' }),
+  envelope_approval: REVIEW,
+  envelope_narrowed: REVIEW,
+  envelope_unattended_disabled: { ...REVIEW, monitor: { ...MONITOR, unattended: { available: false, reason: 'no_provider' } } },
+  envelope_email_disabled: { ...REVIEW, monitor: { ...MONITOR, email: { available: false } } },
   gate_pass: view({ run: run('input_gate', { stages: stages('input_gate', { gate: PASS }) }), envelope: GRANTED,
     monitor: { ...MONITOR, budgets: GRANTED_BUDGETS } }),
   gate_fail: view({ status: 'needs_review', run: run('input_gate', { status: 'needs_user', stages: stages('input_gate', { status: 'failed', gate: FAIL }) }),
@@ -66,14 +75,24 @@ export const STATES: Record<string, RunMonitorView> = {
     confirmation_token: 'tok1', ttl_seconds: 300, session_id: `run:${TASK_ID}`, expires_at_epoch_ms: 4102444800000 } } }),
   paused: view({ run: run('solve', { status: 'paused', reason: 'user', stages: stages('solve') }), envelope: GRANTED,
     monitor: { ...MONITOR, budgets: GRANTED_BUDGETS } }),
+  stop_confirm: view({ run: run('solve', { stages: stages('solve') }), envelope: GRANTED,
+    monitor: { ...MONITOR, budgets: GRANTED_BUDGETS } }),
   stopped: view({ status: 'cancelled', run: run('solve', { status: 'cancelled', stages: stages('solve') }),
     envelope: { ...GRANTED, state: 'revoked' } }),
   finished: view({ status: 'completed', run: run('handoff', { status: 'completed', stages: stages('handoff', {}, true) }),
     envelope: GRANTED, monitor: { ...MONITOR, budgets: GRANTED_BUDGETS } }),
   over_budget: view({ status: 'needs_review', run: run('solve', { status: 'needs_user', reason: 'budget', stages: stages('solve') }),
     monitor: { ...MONITOR, budgets: { cost_eur: { used: 5.01, limit: 5, unmetered: false } } } }),
+  solves_used_up: view({ status: 'needs_review', run: run('solve', { status: 'needs_user', reason: 'envelope_exhausted', stages: stages('solve') }),
+    envelope: { ...GRANTED, state: 'exhausted', used: 6 }, monitor: { ...MONITOR, budgets: { ...GRANTED_BUDGETS, solves: { used: 6, of: 6 } } } }),
   expired: view({ status: 'needs_review', run: run('solve', { status: 'paused', reason: 'envelope_expired', stages: stages('solve') }),
     envelope: { ...GRANTED, state: 'expired' } }),
   solver_error: view({ status: 'needs_review', run: run('solve', { status: 'needs_user', reason: 'step_failed', stages: stages('solve') }) }),
   out_of_date: view({ status: 'needs_review', run: run('inputs', { status: 'needs_user', reason: 'brief_stale', stages: stages('inputs') }) }),
+}
+
+/** The clicks a screenshot makes after rendering a state, by test id. */
+export const STATE_STEPS: Partial<Record<keyof typeof STATES, { untickEdits?: number[]; solves?: number; click?: string }>> = {
+  envelope_narrowed: { untickEdits: [1], solves: 4 },
+  stop_confirm: { click: 'run-stop' },
 }
