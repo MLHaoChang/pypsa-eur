@@ -130,3 +130,43 @@ Consequences: records saved before this change, and every record after `SECRET_K
 
 Not covered: replay of an older, validly sealed version of a mutable record (`operation`, `ui_action`, `conversation_context`) within its 24 hours; a monotonic counter would close it. An unresolved `operation` reservation saved before this change no longer reads, and the reclaim loop still keeps unresolved reservations, so such a file holds a quota slot until removed by hand.
 
+
+### 2026-10-29 — REPLAY closed: a DB high-water mark on every mutable record
+
+`tests/assurance_acceptance/test_p1_replay.py`: 29 cases.
+
+**Threat model.**
+- In scope: an attacker who can write the record store, up to restoring the whole store directory. They cannot read `SECRET_KEY` or the key file, and cannot write the DB.
+- Out of scope: rolling back the store and the DB together (a backup restore); anyone who can read the key, since they can forge anything; and write access to the project or the DB, since that is project access.
+
+**What changed.**
+- **The mark.** Each save of a mutable record (`operation`, `ui_action`, `conversation_context`) takes the next value of a mark in a new DB table, `assurance_record_seq` (migration `0010_assurance_record_seq`). The table holds `owner_id`, `record_id`, `seq`, `epoch` and `expires_at`. The save seals `{seq, epoch}` into the record under its MAC.
+- **Load.** `load()` accepts a mutable record only when its sealed mark equals the DB row exactly. Each of these reads 409 `evidence_unavailable`:
+  - a lower seq (a replay);
+  - a higher seq (the mark was rolled back);
+  - another epoch;
+  - no mark at all.
+
+  The mark is stripped before the record is returned, so callers see the record as before.
+- **Write order.** The mark is bumped (`UPDATE … SET seq = seq + 1 RETURNING`) and committed inside the store's file lock. Only then is the file sealed and written. A crash between the two leaves the file one behind its mark, which reads as unavailable and never as the older version. The next save writes a current version again. `load()` takes no lock, because an effect holds the store lock while its handler runs. A reader that finds the file one step behind its mark re-reads for up to 0.5 s (`_MARK_SETTLE_SECONDS`), so a save in flight lands and reads as the new version (tested). A crash or replay stays mismatched and reads 409 after that wait.
+- **Pruning.** A pruned row starts a new epoch when its id is written again, so no copy sealed under the old chain matches. The save sweep deletes the marks of reclaimed records, and of expired records whose file is gone. An unresolved operation reservation keeps its file, so it keeps its mark.
+- **Immutable kinds** (answer, evidence) take no mark; an identical re-save is still a no-op.
+
+**Upgrade effect** (fail-closed, as #850 was).
+- A mutable record saved before the migration has no mark, so it reads as unavailable until rewritten. There is no backfill, because a backfill would trust a store that may have been rolled back.
+- What the user sees, for at most 24 hours (retention):
+  - a pending confirmed operation from before the upgrade can't be read back, so it is refused rather than re-run;
+  - a UI-action cursor or acknowledgement reads 409;
+  - a conversation checkpoint isn't recovered, so the conversation continues without checked recovery.
+
+**Not covered.** The store and the DB rolled back together. Marks for records whose files are removed by hand outside the sweep stay until a later mutable save by the same owner prunes them after expiry.
+
+#### GK B (9) plan GO conditions (2026-10-29), option A
+
+1. **Exact match:** load() accepts only seq == mark, and both directions are refused. Met: tests for replay, rolled-back mark and epoch.
+2. **Write order:** the DB commit comes first, then seal and write. Pinned by a test that kills the write after the commit; two concurrent saves take distinct seqs (two-thread test). Met.
+3. **Migration 0010** after 0009, with a downgrade. Met: `test_alembic_sqlite` (head is now 0010) and a new upgrade → downgrade → upgrade round-trip test.
+4. **Upgrade effect** is fail-closed with no backfill, stated above. Met.
+5. **Rows don't grow forever:** they are pruned in the save sweep, and a re-created id gets a new epoch. Met: tests for the sweep and the pruned chain.
+6. **Mutable kinds only.** The immutable no-op test is kept. There are no new error kinds (409 `evidence_unavailable`, as for any unavailable record). Mutation: with load()'s comparison vacuous (`tests/assurance_acceptance/replay_mutation.py`), each of the 21 red cases fails. Met.
+7. These conditions are recorded here.

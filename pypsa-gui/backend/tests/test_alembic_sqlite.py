@@ -44,6 +44,30 @@ def test_upgrade_creates_a_fresh_database(tmp_path):
     assert "organizations" in names
 
 
+
+def test_head_migration_downgrades_and_upgrades_again(tmp_path):
+    """The head migration's downgrade removes what it added, and the chain
+    upgrades back to head afterwards."""
+    import local_bootstrap
+    from alembic import command
+
+    url = f"sqlite+pysqlite:///{(tmp_path / 'roundtrip.db').as_posix()}"
+    cfg = local_bootstrap._alembic_config(url)
+
+    def tables():
+        engine = create_engine(url)
+        try:
+            return set(inspect(engine).get_table_names())
+        finally:
+            engine.dispose()
+
+    command.upgrade(cfg, "head")
+    at_head = tables()
+    command.downgrade(cfg, "-1")
+    assert "assurance_record_seq" in at_head - tables()
+    command.upgrade(cfg, "head")
+    assert tables() == at_head
+
 def test_upgrade_or_stamp_handles_a_create_all_database(tmp_path):
     """Spec G4: a database built by create_all has no alembic_version row."""
     from local_bootstrap import ensure_schema
@@ -245,7 +269,8 @@ def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
     # NEW_COLUMN below.
     #
     # 0009 adds personal restrictions. Existing Library rows must survive too.
-    NEW_TABLE_NAME = "chat_restrictions"
+    # 0010 adds the replay marks of mutable assurance records (no backfill).
+    NEW_TABLE_NAME = "assurance_record_seq"
     NEW_COLUMN = None                           # (table, column) or None
     # `solve_jobs` joined this list with 0007: the column under test is on it,
     # and a QUEUED job row surviving the migration is the thing that matters —

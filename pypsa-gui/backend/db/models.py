@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.base import Base
@@ -116,6 +116,23 @@ class ChatRestriction(Base):
     project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('projects.id', ondelete='CASCADE'), primary_key=True)
     revision: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     mode: Mapped[str] = mapped_column(String(32), nullable=False)
+
+
+class AssuranceRecordSeq(Base):
+    """High-water mark of a mutable assistant-assurance record (issue 02, REPLAY).
+
+    Kept in the DB, outside the record store, so restoring an older sealed
+    record file, or the whole store, cannot pass for the current version.
+    `epoch` starts a fresh chain when a pruned record id is written again.
+    """
+
+    __tablename__ = 'assurance_record_seq'
+
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'), primary_key=True)
+    record_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    epoch: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    expires_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
 class ProjectLock(Base):

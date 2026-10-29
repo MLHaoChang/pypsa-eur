@@ -149,6 +149,81 @@ def unseal(envelope, record_id):
     return record
 
 
+# Kinds save() overwrites in place. Each carries a replay mark under its MAC
+# that must equal its high-water mark in the DB (AssuranceRecordSeq), so an
+# older, validly sealed copy put back in the store reads as unavailable.
+MUTABLE_KINDS = frozenset({"operation", "ui_action", "conversation_context"})
+MARK_KEY = "replay_mark"
+# The largest mark a save can write: the size limit is checked against it
+# before the mark is taken.
+_WIDEST_MARK = {"seq": 2**63 - 1, "epoch": str(uuid.UUID(int=0))}
+
+
+def _bump_mark(owner, record_id, expires_at):
+    """Advance and commit the record's mark; call under its store lock."""
+    from sqlalchemy import update
+
+    from db.models import AssuranceRecordSeq as Mark
+    from db.session import SessionLocal
+
+    key = {"owner_id": uuid.UUID(owner), "record_id": uuid.UUID(record_id)}
+    with SessionLocal() as db:
+        row = db.execute(
+            update(Mark)
+            .where(Mark.owner_id == key["owner_id"], Mark.record_id == key["record_id"])
+            .values(seq=Mark.seq + 1, expires_at=expires_at)
+            .returning(Mark.seq, Mark.epoch)
+        ).one_or_none()
+        if row is None:
+            # A new id, or one whose mark was pruned: a fresh chain, so no
+            # copy sealed under an earlier epoch can match.
+            row = (1, uuid.uuid4())
+            db.add(Mark(**key, seq=1, epoch=row[1], expires_at=expires_at))
+        db.commit()
+    return {"seq": row[0], "epoch": str(row[1])}
+
+
+def _current_mark(owner, record_id):
+    from db.models import AssuranceRecordSeq as Mark
+    from db.session import SessionLocal
+
+    with SessionLocal() as db:
+        row = db.get(Mark, (uuid.UUID(owner), uuid.UUID(record_id)))
+        return None if row is None else {"seq": row.seq, "epoch": str(row.epoch)}
+
+
+def _drop_marks(owner, directory, reclaimed, now):
+    """Remove the marks of reclaimed records, and of expired records whose file
+    is gone, so the table does not grow without bound. Call under the lock."""
+    from sqlalchemy import delete, or_
+
+    from db.models import AssuranceRecordSeq as Mark
+    from db.session import SessionLocal
+
+    def ids(names):
+        out = []
+        for name in names:
+            try:
+                out.append(uuid.UUID(name))
+            except ValueError:
+                continue  # Not a record file this module wrote.
+        return out
+
+    present = ids(candidate.stem for candidate in directory.glob("*.json"))
+    with SessionLocal() as db:
+        db.execute(
+            delete(Mark).where(
+                Mark.owner_id == uuid.UUID(owner),
+                or_(
+                    Mark.record_id.in_(ids(reclaimed)),
+                    Mark.expires_at <= now,
+                ),
+                Mark.record_id.not_in(present),
+            )
+        )
+        db.commit()
+
+
 def unavailable(kind):
     raise HTTPException(
         409, {"error_kind": kind, "message": "Checked evidence is unavailable."}
@@ -202,8 +277,11 @@ def _path(owner, record_id):
 def save(record, record_id):
     """Commit record, checksum and MAC together before anything public is emitted."""
     path = _path(record["owner_id"], record_id)
+    mutable = record["record_kind"] in MUTABLE_KINDS
     try:
-        envelope = seal(record, record_id)
+        envelope = seal(
+            {**record, MARK_KEY: _WIDEST_MARK} if mutable else record, record_id
+        )
     except (OSError, ValueError):
         unavailable("evidence_unavailable")
     encoded = json.dumps(envelope, ensure_ascii=False, allow_nan=False).encode()
@@ -211,17 +289,14 @@ def save(record, record_id):
         unavailable("assurance_record_too_large")
     with transaction(path.parent):
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        if path.exists() and record["record_kind"] not in {
-            "operation",
-            "ui_action",
-            "conversation_context",
-        }:
+        if path.exists() and not mutable:
             if path.read_bytes() != encoded:
                 unavailable("evidence_unavailable")
             return
         # Expired records cannot be replayed; reclaim them before applying the
         # quota so a long-running pilot does not permanently exhaust storage.
         now = time.time()
+        reclaimed = []
         for candidate in path.parent.glob("*.json"):
             if candidate.stat().st_mtime + RETENTION_SECONDS <= now:
                 try:
@@ -236,8 +311,21 @@ def save(record, record_id):
                     # A corrupt reservation cannot safely be treated as unused.
                     continue
                 candidate.unlink(missing_ok=True)
+                reclaimed.append(candidate.stem)
+        if mutable or reclaimed:
+            _drop_marks(record["owner_id"], path.parent, reclaimed, now)
         if not path.exists() and len(list(path.parent.glob("*.json"))) >= MAX_RECORDS:
             unavailable("assurance_storage_full")
+        if mutable:
+            # The mark is committed before the file is written: a crash in
+            # between leaves the file one behind its mark, which reads as
+            # unavailable, never as an older version accepted.
+            mark = _bump_mark(record["owner_id"], record_id, record["expires_at"])
+            encoded = json.dumps(
+                seal({**record, MARK_KEY: mark}, record_id),
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode()
         temp = path.with_suffix("." + uuid.uuid4().hex + ".tmp")
         try:
             with temp.open("xb") as stream:
@@ -271,13 +359,47 @@ def discard(owner, record_id):
         logger.warning("Revoked record %s could not be removed", record_id)
 
 
+def _read(path, record_id):
+    if path.stat().st_size > 128 * 1024:
+        raise ValueError()
+    return unseal(json.loads(path.read_text(encoding="utf-8")), record_id)
+
+
+# A save commits its mark a moment before its file lands, so a reader can
+# meet the file one behind. Readers do not take the store lock (an effect
+# holds it while its handler runs); they re-read for up to this long instead.
+_MARK_SETTLE_SECONDS = 0.5
+
+
+def _read_marked(path, owner, record_id, kind):
+    """The mutable record whose sealed mark equals its DB mark, without it.
+
+    Exactly the mark: below it is a replay, above it a mark rolled back, and
+    a record with no mark (saved before marks existed) or no DB mark is
+    neither. Raises ValueError for any of those once a save in flight has had
+    time to land.
+    """
+    deadline = time.monotonic() + _MARK_SETTLE_SECONDS
+    while True:
+        record = _read(path, record_id)
+        if record.get("record_kind") != kind:
+            raise HTTPException(404, "Record not found")
+        mark = _current_mark(owner, record_id)
+        if mark is not None and record.get(MARK_KEY) == mark:
+            return {k: v for k, v in record.items() if k != MARK_KEY}
+        if time.monotonic() >= deadline:
+            raise ValueError()
+        time.sleep(0.02)
+
+
 def load(owner, record_id, kind):
     path = _path(owner, record_id)
     authorize(owner)
     try:
-        if path.stat().st_size > 128 * 1024:
-            raise ValueError()
-        record = unseal(json.loads(path.read_text(encoding="utf-8")), record_id)
+        if kind in MUTABLE_KINDS:
+            record = _read_marked(path, owner, record_id, kind)
+        else:
+            record = _read(path, record_id)
         if record["owner_id"] != owner or record["record_kind"] != kind:
             raise HTTPException(404, "Record not found")
         if record["expires_at"] <= time.time():
