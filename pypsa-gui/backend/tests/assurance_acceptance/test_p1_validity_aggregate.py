@@ -201,49 +201,56 @@ def test_timezone_aware_member_is_a_gap_not_an_error(read, monkeypatch):
     assert_blocked(out)
 
 
-def _upload(monkeypatch, series):
-    from routers import network_profiles
 
-    monkeypatch.setitem(network_profiles._user_ts, ("loads", "p_set", "L2"), series)
-
-
-GAP_CASES = {
-    "missing step": lambda mp: network().loads_t.p_set.loc.__setitem__(
-        (network().snapshots[1], "L2"), np.nan
-    ),
-    "infinite step": lambda mp: network().loads_t.p_set.loc.__setitem__(
-        (network().snapshots[0], "L1"), np.inf
-    ),
-    "no profile": lambda mp: network().add("Load", "S1", bus="B1", p_set=3.0),
-    "other snapshots": lambda mp: _upload(
-        mp, pd.Series([1.0, 1.0, 1.0], index=pd.date_range("2030-01-01", periods=3, freq="h"))
-    ),
-    "bool": lambda mp: _upload(mp, pd.Series([True, False, True], index=network().snapshots)),
-    "numeric string": lambda mp: _upload(
-        mp, pd.Series(["1", "4", "5"], index=network().snapshots, dtype=object)
-    ),
+# The full ordered gap list the handler reports for each SCENARIOS case
+# (byte-equal to master's before the shared helper; see aggregate_json_dump).
+SNAPSHOTS = "the loads do not share the network's snapshots"
+EXPECTED_GAPS = {
+    "unknown": ["no load named ghost"],
+    "only unknown": ["no load named ghost"],
+    "no loads match": ["no loads match"],
+    "no profile": ["1 of 3 loads have no profile"],
+    "no profile at all": ["1 of 1 loads have no profile"],
+    "missing step": ["1 missing or non-finite step"],
+    "infinite step": ["1 missing or non-finite step"],
+    "other snapshots": [SNAPSHOTS, "6 missing or non-finite steps"],
+    "both off snapshots": [SNAPSHOTS],
+    "bool": ["a step that is not a number", "3 missing or non-finite steps"],
+    "numeric string": ["a step that is not a number", "3 missing or non-finite steps"],
+    "repeated timestamp": [SNAPSHOTS],
+    "timezone-aware": [SNAPSHOTS],
+    "many gaps": [
+        "no load named ghost",
+        "1 of 3 loads have no profile",
+        SNAPSHOTS,
+        "a step that is not a number",
+        "9 missing or non-finite steps",
+    ],
 }
 
 
-@pytest.mark.parametrize("args", [{"names": "ghost,L1"}, {"section": "heat"}])
-def test_selection_gap_is_the_checked_paths_gap(args):
+@pytest.mark.parametrize("case", sorted(EXPECTED_GAPS))
+def test_both_paths_name_the_same_first_gap(case, monkeypatch):
+    """One helper names the gaps: the checked path refuses on the first,
+    the handler reports them all, in order, and neither raises."""
+    from tests.assurance_acceptance.aggregate_json_dump import SCENARIOS
+
+    setup, kwargs = SCENARIOS[case]
+    setup(monkeypatch)
     ctx = PyPSAService.get_active_context()
     with records.network_guard():
-        _digest, gap, _totals, _targets = records.aggregate_source(ctx, args)
-    out = aggregate_load_profile(**args)
-    assert gap is not None
-    assert out["gaps"][0] == gap
-
-
-@pytest.mark.parametrize("case", sorted(GAP_CASES))
-def test_first_gap_is_the_checked_paths_gap(case, monkeypatch):
-    """One helper names the gaps on both paths, in the same order."""
-    GAP_CASES[case](monkeypatch)
-    names = "L1,L2,S1" if case == "no profile" else "L1,L2"
-    ctx = PyPSAService.get_active_context()
-    with records.network_guard():
-        _digest, gap, _totals, _targets = records.aggregate_source(ctx, {"names": names})
-    out = aggregate_load_profile(names=names)
-    assert gap is not None
-    assert out["gaps"][0] == gap
+        _digest, gap, totals, _targets = records.aggregate_source(ctx, kwargs)
+    out = aggregate_load_profile(**kwargs)
+    assert out["gaps"] == EXPECTED_GAPS[case]
+    assert gap == out["gaps"][0]
+    assert totals is None
     assert_blocked(out)
+
+
+def test_gap_helper_names_no_steps():
+    """PyPSA refuses empty snapshots, so no public path reaches this gap."""
+    empty = pd.DatetimeIndex([])
+    gaps, frame, values = records.aggregate_gaps(empty, [], [pd.Series([], index=empty, dtype=float)])
+    assert gaps == ["no steps"]
+    assert frame is not None and frame.empty
+    assert values.shape == (0, 1)

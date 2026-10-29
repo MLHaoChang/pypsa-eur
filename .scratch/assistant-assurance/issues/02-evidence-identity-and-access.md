@@ -140,9 +140,19 @@ Not covered: replay of an older, validly sealed version of a mutable record (`op
 ### 2026-10-29 — one aggregate gap helper; pilot POLICY_VERSION
 
 - `assurance_records.aggregate_gaps(snapshots, unknown, members)` now names the gaps of an aggregate load sum for both paths. The order is unknown names, no loads, no profile, other snapshots, not a number, missing or non-finite steps, no steps. `aggregate_source` refuses on the first gap, and the handler reports them all. Each path still reads its own source: `resolve_series` on the checked side, `_user_ts` then the network on the handler side.
-- One change of behaviour: members that cannot be aligned at all, with no gap found before, now read "the loads do not share the network's snapshots" rather than incomplete with no gap.
+- No change of behaviour: on 18 scenarios, the handler's response JSON (every gap, the null-step totals and the sum) is byte-equal to master's (`tests/assurance_acceptance/aggregate_json_dump.py`, run on both trees and compared with `cmp`). The helper also gives "the loads do not share the network's snapshots" when members cannot be aligned and no gap was found before. No public path reaches that case, because such a member already fails the snapshots check.
 - `harness/pilot_evaluation.py` checks the receipt against `records.POLICY_VERSION`, not a literal "1".
-- Tests: `test_p1_validity_aggregate.py` gets 8 parity cases. The first gap is the checked path's for a missing step, an infinite step, no profile, other snapshots, a bool member, a numeric string, an unknown name and an empty section.
+- Tests: `test_p1_validity_aggregate.py` pins the full ordered gap list on both paths for 14 cases: unknown, only unknown, no loads match, no profile, no profile at all, missing step, infinite step, other snapshots, both off snapshots, bool, numeric string, repeated timestamp, timezone-aware, and many gaps (five gaps at once). The checked path refuses on the first gap and never raises. "No steps" is tested on the helper alone, since pypsa refuses empty snapshots. `test_pilot_evaluation_scoring.py`: a receipt with policy version "2", 1 or None still gives `unsupported_policy`.
+- Mutation: `tools/aggregate_gap_mutations.py` makes each pair of gap kinds trade places in the helper's result. Every such swap fails a test. The exceptions are pairs that never appear together ("no loads match" with anything, "no steps" with a missing step); swapping those is an equivalent mutant.
+
+#### GK B (9) plan GO conditions (2026-10-29)
+
+1. No behaviour change, proved: master's `test_p1_aggregate`, `test_p1_validity_aggregate` and pilot_evaluation tests run unchanged and green on the PR tree, and the handler's response JSON is byte-equal to master's. Met: 107 passed for master's copies of the validity, aggregate and scoring files; `test_pilot_evaluation` is unchanged (212 passed, 21 skipped); JSON byte-equal on 18 scenarios.
+2. Parity parametrised over the six gap kinds (unknown, no profile, snapshots, not a number, missing/non-finite, no steps). The router keeps the full ordered list, and one case has several gaps. Met: the many-gaps case has five.
+3. Members that cannot be aligned (tz-aware next to naive, a repeated timestamp) give a gap on both paths, never a 500. Met.
+4. Swapping two gap checks fails a test. Met, except the equivalent mutants named above.
+5. A receipt with policy_version "2" still gives `unsupported_policy`. Met.
+6. These conditions are recorded here.
 
 ### Remaining P1 slices (2026-10-29)
 
