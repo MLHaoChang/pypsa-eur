@@ -226,6 +226,13 @@ EXPECTED_GAPS = {
         "a step that is not a number",
         "9 missing or non-finite steps",
     ],
+    "empty upload": [
+        "no load named ghost",
+        "1 of 2 loads have no profile",
+        SNAPSHOTS,
+        "a step that is not a number",
+        "no steps",
+    ],
 }
 
 
@@ -247,8 +254,12 @@ def test_both_paths_name_the_same_first_gap(case, monkeypatch):
     assert_blocked(out)
 
 
-def test_gap_helper_names_no_steps():
-    """PyPSA refuses empty snapshots, so no public path reaches this gap."""
+def test_gap_helper_names_no_steps_alone():
+    """An empty member on empty snapshots gives "no steps" and nothing else.
+
+    PyPSA refuses empty snapshots, so only the helper reaches this case;
+    "empty upload" reaches "no steps" through both paths.
+    """
     empty = pd.DatetimeIndex([])
     gaps, frame, values = records.aggregate_gaps(empty, [], [pd.Series([], index=empty, dtype=float)])
     assert gaps == ["no steps"]

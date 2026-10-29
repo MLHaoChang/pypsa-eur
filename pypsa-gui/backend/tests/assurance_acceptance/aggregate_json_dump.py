@@ -50,6 +50,13 @@ def many_gaps(mp):
     upload(mp, "L2", pd.Series([True, False, True], index=other_index()))
 
 
+def empty_upload(mp):
+    # An empty upload reaches "no steps", here next to every gap it can
+    # appear with.
+    no_profile(mp)
+    upload(mp, "L2", pd.Series([], index=pd.DatetimeIndex([]), dtype=object))
+
+
 # name -> (setup(monkeypatch), handler kwargs)
 SCENARIOS = {
     "complete section": (lambda mp: None, {"section": "electricity"}),
@@ -99,6 +106,7 @@ SCENARIOS = {
         {"names": "L1,L2"},
     ),
     "many gaps": (many_gaps, {"names": "ghost,L1,L2,S1"}),
+    "empty upload": (empty_upload, {"names": "ghost,L2,S1"}),
 }
 
 

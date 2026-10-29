@@ -1,11 +1,12 @@
 """Dev helper: swapping any two gap checks in aggregate_gaps fails a test.
 
 GK B (9) condition 4 for the S1 slice. For each pair of gap kinds, the helper
-is wrapped so those two kinds trade places in its result (the effect of
-swapping their checks), and the parity cases in test_p1_validity_aggregate
-must then fail. Run from pypsa-gui/backend:
+is wrapped so that, when both kinds are in its result, those two gaps trade
+places and every other gap stays where it is: the effect of swapping the two
+checks. The parity cases in test_p1_validity_aggregate must then fail. Run
+from pypsa-gui/backend:
 
-    python tools/aggregate_gap_mutations.py
+    python tests/assurance_acceptance/aggregate_gap_mutations.py
 """
 
 import itertools
@@ -18,7 +19,6 @@ sys.path.insert(0, ".")
 KINDS = ("no load named", "no loads match", "loads have no profile",
          "do not share the network's snapshots", "not a number",
          "missing or non-finite", "no steps")
-
 
 # Kinds that never appear together, so their relative order is not
 # observable and swapping them is an equivalent mutant: "no loads match" only
@@ -34,8 +34,12 @@ def kind(gap):
 def mutant(real, a, b):
     def swapped(*args, **kwargs):
         gaps, frame, values = real(*args, **kwargs)
-        rank = {a: b, b: a}
-        return sorted(gaps, key=lambda g: rank.get(kind(g), kind(g))), frame, values
+        kinds = [kind(g) for g in gaps]
+        if a in kinds and b in kinds:
+            i, j = kinds.index(a), kinds.index(b)
+            gaps = list(gaps)
+            gaps[i], gaps[j] = gaps[j], gaps[i]
+        return gaps, frame, values
     return swapped
 
 
