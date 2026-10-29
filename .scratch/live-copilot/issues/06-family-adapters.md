@@ -599,6 +599,15 @@ GK B, which ruled (NOT OK @5847400b): criticality and severity are not asserted,
 ΔEUE, occurrence and severity × occurrence = criticality; `LC-D11.fmea_criticality` pending
 on ticket 30, whose fix GK A reviews.
 
+### S12, LC-D14 static campus (2026-10-29)
+
+Branch `claude/lc06-d14-static-campus`, stacked on S11. GK B (9) reviews. Session LC-06 (7).
+k survives the queue: `_settings` validates it, the job stores it in `solver_config_json`,
+`rank_campus(k=s["k"])` reads it back; the test reads `settings.k` from the route. Not a port of
+test_campus_ranking's spec (its tables are gridspine-level): a six-hour hub with the hand
+metrics in the docstring, picks read through `GET /api/campus-electrical/{name}`
+`results.selection`. Mutation: 50 MW in hour 5 moves import, trafo and consumption there.
+
 ## Hand-off 6 (2026-10-29, LC-06 (6), early)
 
 PR stack (each against master, stacked):
