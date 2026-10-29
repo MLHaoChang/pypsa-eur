@@ -22,6 +22,10 @@ import {
   WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS, WEEKDAYS,
   parseSeasonStamp, useSeasonalViewMode, colourForCarrier, isAllZero, ChartZero,
 } from './shared'
+import { type LostLoadMeta, vollOf } from './summary'
+import {
+  NOT_RECORDED_KPI, NotRecordedDash, NotRecordedNote, NotRecordedSectionNote, useNotRecordedScope,
+} from './NotRecorded'
 import { useResultsFilter, resolveRange } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
 import DispatchStack from './DispatchStack'
@@ -234,6 +238,7 @@ function isElectrolyzerCarrier(c: string | undefined | null): boolean {
 }
 
 export default function Dispatch() {
+  const notRecorded = useNotRecordedScope()
   // Result source (LOPF vs AC PF) — the same global toggle LoadFlow exposes.
   // Put it in EVERY dispatch query key AND pass it to the getter so flipping
   // the source on Load Flow also re-fetches the Dispatch tab against the
@@ -704,18 +709,17 @@ export default function Dispatch() {
     if (!ts || ts.data.length === 0) {
       // No filter movement, no series — fall back to whatever the backend
       // reported (it's already an annualised number when present).
-      const ll = lostLoad as unknown as { total_mwh?: number; total_cost_eur?: number }
-      return ll ? { mwh: ll.total_mwh ?? 0, cost: ll.total_cost_eur ?? 0 } : null
+      // A null total is unknown ('—'), never 0.
+      const ll = lostLoad as unknown as LostLoadMeta
+      return ll ? { mwh: ll.total_mwh ?? null, cost: ll.total_cost_eur ?? null } : null
     }
     // Σ max(p,0) × weight — slack generators only inject so values are ≥ 0,
     // but clip defensively in case PyPSA writes a small negative.
     const cols = new Set(ts.columns)
     const split = weightedSumSplit(ts, cols, weightCtx, range, 'generators')
     const mwh = split.positive ?? 0
-    const llMeta = lostLoad as unknown as { total_mwh?: number; total_cost_eur?: number }
-    const voll = (llMeta.total_mwh && llMeta.total_mwh > 0)
-      ? ((llMeta.total_cost_eur ?? 0) / llMeta.total_mwh) : 0
-    return { mwh, cost: mwh * voll }
+    const voll = vollOf(lostLoad as unknown as LostLoadMeta)
+    return { mwh, cost: voll != null ? mwh * voll : null }
   }, [lostLoad, weightCtx, range.from, range.to])
   // UX overhaul S2b: null lost load inside a solved results tab means the
   // solve had no VOLL — not modelled, never "—"; a VOLL solve that shed
@@ -745,14 +749,12 @@ export default function Dispatch() {
       bucket.add(col)
       groups.set(carrier, bucket)
     }
-    const llMeta = lostLoad as unknown as { total_mwh?: number; total_cost_eur?: number }
-    const voll = (llMeta.total_mwh && llMeta.total_mwh > 0)
-      ? ((llMeta.total_cost_eur ?? 0) / llMeta.total_mwh) : 0
-    const out: Array<{ carrier: string; mwh: number; cost: number }> = []
+    const voll = vollOf(lostLoad as unknown as LostLoadMeta)
+    const out: Array<{ carrier: string; mwh: number; cost: number | null }> = []
     for (const [carrier, cols] of groups) {
       const split = weightedSumSplit(ts, cols, weightCtx, range, 'generators')
       const mwh = split.positive ?? 0
-      if (mwh > 0) out.push({ carrier, mwh, cost: mwh * voll })
+      if (mwh > 0) out.push({ carrier, mwh, cost: voll != null ? mwh * voll : null })
     }
     out.sort((a, b) => loadCarrierSortKey(a.carrier).localeCompare(loadCarrierSortKey(b.carrier)))
     return out
@@ -1243,7 +1245,11 @@ export default function Dispatch() {
   // it, flexbox compresses each child section to fit the viewport; sections
   // with `overflow-hidden` then clip their charts to a thin sliver.
   return (
+    <notRecorded.Provider value={notRecorded.report}>
     <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm [&>*]:shrink-0">
+
+      {/* One "—" note for the whole page; the sections below report theirs. */}
+      <NotRecordedNote show={notRecorded.show} />
 
       {/* ── Truncated-window banner (FIX 1 secondary, results-tabs-window
           final review) — a genuinely narrow-but-wide window can still hit
@@ -1372,7 +1378,7 @@ export default function Dispatch() {
               key={`lostload-${b.carrier}`}
               label={`Lost load · ${loadCarrierLabel(b.carrier)}`}
               value={fmtEnergy(b.mwh)}
-              hint={`VOLL slack dispatched at ${loadCarrierLabel(b.carrier).toLowerCase()} buses — ${fmtCurrency(b.cost)} at the configured VOLL price.` + scaleHint}
+              hint={`VOLL slack dispatched at ${loadCarrierLabel(b.carrier).toLowerCase()} buses: ${b.cost != null ? `${fmtCurrency(b.cost)} at the configured VOLL price` : 'cost not recorded by this solve'}.` + scaleHint}
             />
           ))}
         </div>
@@ -1983,6 +1989,7 @@ export default function Dispatch() {
       </>
       )}
     </div>
+    </notRecorded.Provider>
   )
 }
 
@@ -2266,7 +2273,7 @@ export function CarrierKpiPanel({
   // memo — already weighted by snapshot × ipw.years and keyed by canonical
   // load carrier (electrical / hydrogen / heat / …). Single source of truth
   // avoids the panel re-computing with different (unweighted) semantics.
-  lostLoadByCarrier: Array<{ carrier: string; mwh: number; cost: number }> | null
+  lostLoadByCarrier: Array<{ carrier: string; mwh: number; cost: number | null }> | null
   econByCarrier: Record<string, {
     revenue_meur: { total: number; by_period: Record<string, number> }
     opex_meur:    { total: number; by_period: Record<string, number> }
@@ -2450,6 +2457,8 @@ export function CarrierKpiPanel({
   }, [lostLoadByCarrier, carrier])
   const lostLoadEnergy = lostLoadRow?.mwh ?? 0
   const lostLoadCostFromCarrier = lostLoadRow?.cost ?? 0
+  // Shed energy with no known cost (VOLL unknown): show "—", never €0.
+  const lostLoadCostUnknown = lostLoadRow != null && lostLoadRow.cost == null && lostLoadEnergy > 0
 
   // Economic KPIs — aggregate `econByCarrier` (keyed by COMPONENT carrier,
   // e.g., "gas", "solar", "heat-pump-waste") across all component carriers
@@ -2635,8 +2644,12 @@ export function CarrierKpiPanel({
                          ? { state: 'not_modelled' as const, reason: `No renewable on ${where} buses has a curtailment cost set.` }
                          : zeroOr(econ.curt))}
                      hint="Σ curtailment_cost × curtailed-energy × weights" />
-                <KPI label="Lost-load cost" value={fmtCurrency(Math.max(econ.lost * 1e6, lostLoadCostFromCarrier))}
-                     {...(lostLoadNotModelled ? lostLoadOff : zeroOr(Math.max(econ.lost, lostLoadCostFromCarrier / 1e6)))}
+                <KPI label="Lost-load cost"
+                     {...(lostLoadCostUnknown && !(econ.lost > 0) ? NOT_RECORDED_KPI
+                       : { value: fmtCurrency(Math.max(econ.lost * 1e6, lostLoadCostFromCarrier)) })}
+                     {...(lostLoadNotModelled ? lostLoadOff
+                       : lostLoadCostUnknown && !(econ.lost > 0) ? {}
+                       : zeroOr(Math.max(econ.lost, lostLoadCostFromCarrier / 1e6)))}
                      hint="VOLL × unserved demand on this carrier's buses" />
                 <KPI label="CAPEX (annuitised)" value={fmtCurrency(econ.capex * 1e6)}
                      hint="Σ ((overnight × annuity, or capital_cost) + fom_cost) × p_nom_opt × years_in_horizon — annuitised CAPEX plus fixed O&M, the fixed cost the LP objective paid; same gens/storage basis as Economics Fixed cost (excludes line CAPEX)." />
@@ -2648,6 +2661,7 @@ export function CarrierKpiPanel({
           })()}
         </div>
       )}
+      <NotRecordedSectionNote show={econ !== null && lostLoadCostUnknown && !(econ.lost > 0)} />
     </section>
   )
 }
@@ -2687,7 +2701,7 @@ interface GroupSectionProps<T> {
   // totals (MWh + €) come from `lostLoadTotals` so a single header line
   // shows Σ over the horizon at a glance.
   lostLoadSeries?: ReturnType<typeof aggregateTS>
-  lostLoadTotals?: { mwh: number; cost: number } | null
+  lostLoadTotals?: { mwh: number | null; cost: number | null } | null
   // Vintage results + per-snapshot period array — only needed for the
   // energy-reservoir SoC % view in multi-period runs, so the denominator
   // shrinks to the period-active capacity instead of the cumulative final
@@ -2736,7 +2750,7 @@ interface CarrierTabbedSectionProps<T extends { name: string }> {
   unitOverride?: string
   extraPropsForCarrier?: (carrierId: string) => Partial<{
     lostLoadSeries: ReturnType<typeof aggregateTS>
-    lostLoadTotals: { mwh: number; cost: number } | null
+    lostLoadTotals: { mwh: number | null; cost: number | null } | null
     curtailmentSeries: ReturnType<typeof aggregateTS>
   }>
 }
@@ -3258,8 +3272,14 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
                 <span className="font-medium text-danger">Lost load</span>
                 <span>
                   MW unmet per snapshot
-                  {lostLoadTotals && ` · Σ ${fmtEnergy(lostLoadTotals.mwh)} · ${fmtCurrency(lostLoadTotals.cost)}`}
+                  {lostLoadTotals && (
+                    <>
+                      {' · Σ '}{lostLoadTotals.mwh != null ? fmtEnergy(lostLoadTotals.mwh) : <NotRecordedDash />}
+                      {' · '}{lostLoadTotals.cost != null ? fmtCurrency(lostLoadTotals.cost) : <NotRecordedDash />}
+                    </>
+                  )}
                 </span>
+                <NotRecordedSectionNote show={lostLoadTotals != null && (lostLoadTotals.mwh == null || lostLoadTotals.cost == null)} />
                 <span className="ml-auto flex items-center gap-2">
                   <button onClick={() => {
                       const ok = downloadSVG(lostLoadChartRef.current, `${fileBase}_lost_load.svg`)

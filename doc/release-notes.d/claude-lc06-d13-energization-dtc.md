@@ -1,0 +1,1 @@
+* Test(pypsa-gui): LC-06 checks the Energy Hub study's staged energization and its critical-load stress through the chat tool: unserved energy follows the lesser of the energized MW and the import cap as the cap is edited down and back up, and the critical unserved energy matches the hand value under both the bus-level and the per-Load VoLL attribution.

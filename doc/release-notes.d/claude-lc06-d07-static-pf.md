@@ -1,0 +1,1 @@
+* Test(pypsa-gui): LC-06 checks the AC power flow stage against an independently solved 3-bus network (voltages, both line terminals, losses, the slack and the load-flow summary), and pins the summary's apparent-power arithmetic at exactly 100 MVA for 60 MW and 80 Mvar.

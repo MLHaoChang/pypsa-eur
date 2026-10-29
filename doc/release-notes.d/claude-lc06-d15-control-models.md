@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Island config refusals now name the unit's control model or governor, e.g. ``units.bess (control gfm_droop): missing ['droop_pct']``. New public-seam tests cover all six converter control models and both governors through the copilot's island tools, with hand oracles for the inertia base (H on S_n) and the droop base (percent), at 50 and 60 Hz.

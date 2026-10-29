@@ -487,6 +487,7 @@ def validate_unit_island(where, kind, spec, sidecar=False, preset=None) -> dict:
         if not isinstance(spec, dict) or "control" not in spec:
             raise ContractError(f"{where}: missing 'control'; allowed {list(CONTROLS)}")
         control = _enum(where, "control", spec["control"], CONTROLS)
+        where = f"{where} (control {control})"            # refusals name the unit's model
         needs = _CONTROL_FIELDS[control]
         pf_fields = _PF_CHOICE if control == "gfl_pf" else ()
         _allowed(where, spec, ("control", "pf_rated", *needs, *pf_fields, *_CONVERTER_OPTIONAL))
@@ -501,6 +502,8 @@ def validate_unit_island(where, kind, spec, sidecar=False, preset=None) -> dict:
                 f"i_max_pu ({out['values']['i_max_pu']:g})")
 
     elif kind == "genset":
+        if isinstance(spec, dict) and spec.get("governor") in GOVERNORS:
+            where = f"{where} (governor {spec['governor']})"   # refusals name the unit's model
         _allowed(where, spec, (*_GENSET_REQUIRED, *_GENSET_OPTIONAL, *_GENSET_ENUMS, *_GENSET_FLAGS, *extra))
         _require(where, spec, (*_GENSET_REQUIRED, *_GENSET_ENUMS))
         for f, allowed in _GENSET_ENUMS.items():

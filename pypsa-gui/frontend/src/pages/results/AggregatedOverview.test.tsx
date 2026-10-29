@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
@@ -7,6 +7,18 @@ import { networkApi } from '../../api/network'
 import AggregatedOverview, { isPartialPayload } from './AggregatedOverview'
 import type { WeightCtx, SnapshotWeightRow } from './shared'
 import { getKpiValueWithin } from '../../test/kpi'
+
+// A fixed-size chart, so recharts draws its axes in jsdom (its
+// ResponsiveContainer measures 0 × 0 there and renders nothing).
+vi.mock('recharts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('recharts')>()
+  const { cloneElement } = await import('react')
+  return {
+    ...actual,
+    ResponsiveContainer: ({ children }: { children: React.ReactElement<{ width?: number; height?: number }> }) =>
+      cloneElement(children, { width: 600, height: 220 }),
+  }
+})
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
@@ -249,5 +261,129 @@ describe('AggregatedOverview partial-payload guard covers curtailTS and lostLoad
     })
     renderOverview()
     expect(await screen.findByText(/reports whole-horizon totals/)).toBeTruthy()
+  })
+})
+
+// A1.7: a null lost-load total or VOLL is unknown — '—', never 0.
+describe('AggregatedOverview lost-load KPIs with unknown totals', () => {
+  const kpi = async (label: string) =>
+    ((await screen.findByText(label)).parentElement as HTMLElement)
+
+  it('shows — for the cost of a shed series whose VOLL is unknown', async () => {
+    vi.mocked(resultsApi.getLostLoad).mockReset().mockResolvedValue({
+      index: ['2026-01-01T00:00:00'], columns: ['Bus 0'], data: [[42]],
+      total_mwh: null, total_cost_eur: null, voll_eur_per_mwh: null,
+    })
+    renderOverview()
+    expect(getKpiValueWithin(await kpi('Lost load'), '42.0 MWh')).toBeTruthy()
+    expect(getKpiValueWithin(await kpi('Lost-load cost'), '—')).toBeTruthy()
+  })
+
+  it('shows — for null totals on an empty series', async () => {
+    vi.mocked(resultsApi.getLostLoad).mockReset().mockResolvedValue({
+      index: [], columns: [], data: [],
+      total_mwh: null, total_cost_eur: null, voll_eur_per_mwh: null,
+    })
+    renderOverview()
+    expect(getKpiValueWithin(await kpi('Lost load'), '—')).toBeTruthy()
+    expect(getKpiValueWithin(await kpi('Lost-load cost'), '—')).toBeTruthy()
+  })
+})
+
+// UX review: "—" is explained once on the page, and labelled where it shows.
+describe('AggregatedOverview explains a value this solve did not record', () => {
+  it('labels each — and shows the note once', async () => {
+    vi.mocked(resultsApi.getLostLoad).mockReset().mockResolvedValue({
+      index: [], columns: [], data: [],
+      total_mwh: null, total_cost_eur: null, voll_eur_per_mwh: null,
+    })
+    renderOverview()
+    expect((await screen.findAllByTestId('not-recorded-note')).length).toBe(1)
+    expect(screen.getByTestId('not-recorded-note').textContent).toBe('—: not recorded by this solve')
+    expect(screen.getAllByLabelText('Not recorded by this solve').length).toBe(2)
+  })
+
+  it('shows no note when every lost-load figure is recorded', async () => {
+    renderOverview()
+    await screen.findByText('Lost-load cost')
+    expect(screen.queryByTestId('not-recorded-note')).toBeNull()
+  })
+})
+
+// UX review: a chart whose VOLL bars are left out says so, never silently.
+describe('AggregatedOverview economics chart with an unknown VOLL', () => {
+  function mockCostAndShed(voll: number | null) {
+    vi.mocked(resultsApi.getCostBreakdown).mockReset().mockResolvedValue({
+      capex: 1000, capex_lifetime: 0, capex_expansion: 0, capex_expansion_lifetime: 0,
+      opex: 500, total: 1500, curtailment_cost: 0,
+      storage_capex_expansion: 0, storage_capex_expansion_lifetime: 0,
+      by_component: [], by_carrier: [], by_period: [],
+    })
+    vi.mocked(resultsApi.getLostLoad).mockReset().mockResolvedValue({
+      index: ['2026-01-01T00:00:00'], columns: ['Bus 0'], data: [[42]],
+      total_mwh: null, total_cost_eur: null, voll_eur_per_mwh: voll,
+    })
+  }
+
+  it('keeps its axes and says the VOLL bars were left out', async () => {
+    mockCostAndShed(null)
+    const { container } = renderOverview()
+    expect(await screen.findByText('VOLL bars left out: VOLL not recorded by this solve.')).toBeTruthy()
+    expect(container.querySelector('.recharts-xAxis')).not.toBeNull()
+    expect(container.querySelector('.recharts-yAxis')).not.toBeNull()
+    // Neither the subtitle nor the legend offers a VOLL series to look for.
+    expect(screen.getByText('CAPEX · OPEX')).toBeTruthy()
+    expect(container.querySelector('.recharts-legend-wrapper')?.textContent).not.toMatch(/VOLL/)
+  })
+
+  it('says nothing about VOLL when it is recorded', async () => {
+    mockCostAndShed(4000)
+    const { container } = renderOverview()
+    await screen.findByText('Economics — system cost per period')
+    expect(screen.queryByTestId('economics-voll-not-recorded')).toBeNull()
+    expect(screen.getByText('CAPEX · OPEX · VOLL')).toBeTruthy()
+    expect(container.querySelector('.recharts-legend-wrapper')?.textContent).toMatch(/VOLL/)
+  })
+})
+
+// UX review: every "—" on the Overview means "not recorded"; a penalty no
+// renewable opted into is "not modelled", with its reason.
+describe('AggregatedOverview curtailment penalty tile', () => {
+  const tile = async () =>
+    (await screen.findByText('Curtailment penalty')).closest('[data-state]') as HTMLElement
+
+  async function withCurtailmentCost(data: number[][]) {
+    const [gen] = await networkApi.getGenerators()
+    vi.mocked(networkApi.getGenerators).mockReset().mockResolvedValue([
+      { ...gen, name: 'PV', carrier: 'solar', curtailment_cost: 50 },
+    ])
+    vi.mocked(resultsApi.getCurtailment).mockReset().mockResolvedValue({
+      index: data.map((_, i) => `2026-01-01T0${i}:00:00`), columns: ['PV'], data,
+    })
+  }
+
+  it('reads not modelled, with its reason, when no renewable has a curtailment cost', async () => {
+    renderOverview()
+    const t = await tile()
+    expect(t.dataset.state).toBe('not_modelled')
+    expect(t.textContent).toContain('No renewable has a curtailment cost set.')
+    expect(t.textContent).not.toContain('—')
+    expect(screen.queryByTestId('not-recorded-note')).toBeNull()
+  })
+
+  it('reads a real zero when the opted-in renewables curtailed nothing', async () => {
+    await withCurtailmentCost([[0], [0]])
+    renderOverview()
+    expect((await tile()).dataset.state).toBe('zero')
+    expect(screen.queryByTestId('not-recorded-note')).toBeNull()
+  })
+
+  it('reads — with the page note when the curtailment series was not recorded', async () => {
+    await withCurtailmentCost([])
+    renderOverview()
+    const t = await tile()
+    expect(t.dataset.state).toBe('ready')
+    expect(within(t).getByLabelText('Not recorded by this solve')).toBeTruthy()
+    expect((await screen.findAllByTestId('not-recorded-note')).length).toBe(1)
   })
 })

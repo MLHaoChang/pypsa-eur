@@ -1,0 +1,1 @@
+* Test(pypsa-gui): LC-06 checks the island frequency events E4–E6 through the campus Run. A UPS-bridged genset start is checked block by block against a closed form, and the UPS autonomy is checked, including at N+1. The test also checks a PV loss, the energy a UPS gives as it walks its load back in, and the ramp time and shortfall of a planned islanding.

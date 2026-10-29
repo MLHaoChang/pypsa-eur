@@ -35,6 +35,9 @@ ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUTPUT = ROOT / '.scratch/live-copilot/family-manifest.json'
 B = 'pypsa-gui/backend/tests/'
 G = 'tests/gridspine/'
+D15_TOOLS = 'campus_set_island_config campus_island_config campus_run_island_study'
+#: E1-E6 read through GET .../island/report: the chat tool trims the events away (ticket 27).
+D16_TOOLS = 'campus_set_island_config campus_draft_campus campus_run_study'
 
 # The capability-matrix families, in `assistant_control_matrix.FAMILY_JOURNEYS`
 # order, keyed by their journey slug.
@@ -270,7 +273,15 @@ VARIANTS: list[dict] = [
     _covered('LC-D07.missing_q', 'LOPF line values equal the test LINE dict despite Q left by an earlier PF',
              'get_loadflow_summary',
              B + 'test_branch_loading_assurance.py::test_q_left_by_an_earlier_power_flow_is_never_mixed_into_lopf_flow'),
-    _pending('LC-D07.static_pf_oracle', 'P=60/Q=80 -> 100 MVA and an independently solved static PF'),
+    _covered('LC-D07.static_pf_oracle', 'meshed 3-bus AC PF equals an independent scipy solve of the hand-built Ybus (V 1e-9 pu, flows 1e-6 MW); KCL 60+j80 -> 100 MVA at the load bus; exact 100.00 MVA on the LC-T07 fixture',
+             'run_simulation run_ac_pf_stage update_solver_config get_simulation_status get_results get_loadflow_summary',
+             B + 'test_lc06_d07_static_pf.py::test_the_independent_solve_closes_kcl_and_meets_the_100_mva_load',
+             B + 'test_lc06_d07_static_pf.py::test_bus_voltages_equal_the_independent_solve',
+             B + 'test_lc06_d07_static_pf.py::test_line_flows_at_bus0_equal_the_independent_solve',
+             B + 'test_lc06_d07_static_pf.py::test_both_terminals_close_kcl_at_the_100_mva_load_bus',
+             B + 'test_lc06_d07_static_pf.py::test_losses_and_the_slack_equal_the_independent_solve',
+             B + 'test_lc06_d07_static_pf.py::test_the_summary_ranks_on_the_independent_apparent_power',
+             B + 'test_lc06_d07_static_pf.py::test_p60_q80_at_both_terminals_is_exactly_100_mva'),
     _unavailable('LC-D07.n1_voltage', 'no N-1 or voltage compliance claim is made',
                  'pypsa-gui/backend/services/loadflow_summary.py LIMITS_CLAIM'),
     _covered('LC-D08.dispatch', 'lost load and curtailment equal the values hand-computed in each test',
@@ -301,9 +312,22 @@ VARIANTS: list[dict] = [
              B + 'test_copt_assurance.py::test_the_classical_fleet_by_hand_and_as_the_tab_has_it'),
     _pending('LC-D11.fmea', 'seam checks shape only; engine seeds test_energy_hub_fmea_top.py'),
     _pending('LC-D11.health', 'validation only'),
-    _pending('LC-D12.standard_mc', 'engine seed only: thermal-only MC vs exact convolution (test_adequacy_mc.py)'),
-    _pending('LC-D12.zonal_mc', 'engine seed only: test_energy_hub_zonal_*.py'),
-    _pending('LC-D12.common_mode', 'engine seed only: test_energy_hub_common_mode.py'),
+    _covered('LC-D12.standard_mc', 'exact two-unit COPT LOLE 1927.2 h / EUE 54,312 MWh inside the seed-1 95 % CI; LOLE half-width <= 10 % of the oracle; stationary start',
+             'run_mc_study get_adequacy_results',
+             B + 'test_lc06_d12_standard_mc.py::test_the_oracle_is_the_hand_copt',
+             B + 'test_lc06_d12_standard_mc.py::test_lole_contains_the_exact_copt_within_a_tight_ci',
+             B + 'test_lc06_d12_standard_mc.py::test_eue_contains_the_exact_copt'),
+    _covered('LC-D12.zonal_mc', 'deterministic zonal EUE 256,230 MWh = sum_h max(L - own - min(cap x eff, max(surplus, 0) x eff), 0), CI width 0; Link-, surplus- and zero-surplus-bound hours each present; mutations Z1 (cap halved) and Z2 (grid load +10 MW on the surplus hours) move EUE by the hand deltas. Chat seam: totals. Engine layer (simulate_zonal_blocks on the freeze_fixed_plan inputs): the per-hour import equals the hand min(offered, max(surplus, 0) x ratio), and the pass-through offer hook leaves the result bitwise unchanged',
+             'run_eh_study get_adequacy_results',
+             B + 'test_lc06_d12_zonal_mc.py::test_the_fixture_has_every_binding_case',
+             B + 'test_lc06_d12_zonal_mc.py::test_the_zonal_import_is_the_lesser_bound_every_hour',
+             B + 'test_lc06_d12_zonal_mc.py::test_each_mutation_moves_eue_by_the_hand_delta',
+             B + 'test_lc06_d12_zonal_mc.py::test_the_engine_imports_the_lesser_bound_per_hour_and_the_hook_changes_nothing'),
+    _covered('LC-D12.common_mode', 'same seed. Chat seam (totals): EUE/LOLE bitwise equal where the Link cannot help (own RNG stream, EUE > 0); EUE strictly higher where it can. Engine layer (simulate_zonal_blocks on the freeze_fixed_plan inputs): EUE_cm >= EUE_base per draw and strictly greater in total, hub unit availability bitwise equal across the two runs, per-hour import = min(offered, max(surplus, 0) x ratio)',
+             'run_eh_study get_adequacy_results',
+             B + 'test_lc06_d12_zonal_mc.py::test_a_common_mode_outage_draws_on_its_own_stream',
+             B + 'test_lc06_d12_zonal_mc.py::test_a_common_mode_outage_raises_eue_where_the_link_matters',
+             B + 'test_lc06_d12_zonal_mc.py::test_the_engine_common_mode_raises_eue_draw_by_draw_and_leaves_the_hub_draws'),
     _covered('LC-D13.copt_screening', 'EUE/LOLE from the hand two-unit COPT distribution',
              '',
              B + 'test_copt_assurance.py::test_the_classical_fleet_by_hand_and_as_the_tab_has_it'),
@@ -312,15 +336,88 @@ VARIANTS: list[dict] = [
     _pending('LC-D13.elcc_frontier_campaign', 'seam checks contract keys only'),
     _pending('LC-D13.eh_redundancy', 'engine seed only'),
     _pending('LC-D13.eh_levers', 'engine seed only'),
-    _pending('LC-D13.eh_dtc', 'engine seed only'),
+    _covered('LC-D13.eh_dtc', 'P16 shared bus, 2 h at weight 1: critical unserved 140 MWh under the bus aggregate (bus VoLL) and 40 MWh under per_load (per-Load VoLL priority, priority_exact); local 40 MW gives 80 against 0',
+             'run_eh_study get_adequacy_results',
+             B + 'test_lc06_d13_energization_dtc.py::test_bus_and_per_load_voll_each_set_the_critical_unserved'),
     _pending('LC-D13.eh_dtc_planning', 'engine seed only'),
-    _pending('LC-D13.energization', 'engine seed only: min(schedule, capacity)'),
+    _covered('LC-D13.energization', 'ENS = sum_h w_h max(L - G - min(E_h, cap), 0) at each cap step 80 -> 30 -> 80 MW (97,000 / 158,000 / 97,000 MWh, non-uniform weights); the solve sees the edited p_nom; dropping the schedule moves ENS by -82,000 MWh',
+             'run_eh_study get_adequacy_results',
+             B + 'test_lc06_d13_energization_dtc.py::test_the_fixture_binds_each_way_at_the_low_cap',
+             B + 'test_lc06_d13_energization_dtc.py::test_the_schedule_composes_as_min_with_each_capacity_edit',
+             B + 'test_lc06_d13_energization_dtc.py::test_dropping_the_schedule_moves_ens_by_the_hand_delta'),
     _pending('LC-D13.multi_energy', 'no H2/heat attribution test found'),
     _pending('LC-D14.static_campus', 'chat tests stub the service; seed tests/gridspine/test_campus_ranking.py'),
-    *[_pending(f'LC-D15.{m}', 'engine seed only (test_island_schema.py); chat tests stub the service')
-      for m in ('gfl_pq', 'gfl_qu', 'gfl_pf', 'gfl_fw', 'gfm_droop', 'gfm_vsm', 'governors')],
-    *[_pending(f'LC-D16.{e}', 'engine seed only (test_frequency*.py); campus_run_island_study tests stub it')
-      for e in ('E1', 'E2', 'E3', 'E4', 'E5', 'E6')],
+    *[_covered(f'LC-D15.{m}', 'exact {value, source} read-back; refusals name the field and the unit\'s control; '
+               'a gfl BESS enters no GFM row: the genset carries 10 MW x 1000 x 4 h = 40,000 with only headroom binding',
+               D15_TOOLS,
+               B + 'test_lc06_d15_control_models.py::test_each_model_and_governor_reads_back_exactly',
+               B + 'test_lc06_d15_control_models.py::test_a_grid_following_bess_does_not_enter_the_gfm_rows',
+               B + f'test_lc06_d15_control_models.py::{refusal}')
+      for m, refusal in (('gfl_pq', 'test_a_missing_field_is_refused_naming_it_and_the_model'),
+                         ('gfl_qu', 'test_a_missing_field_is_refused_naming_it_and_the_model'),
+                         ('gfl_pf', 'test_gfl_pf_needs_one_power_factor_choice_and_says_so_with_its_model'),
+                         ('gfl_fw', 'test_a_field_of_another_model_is_refused_naming_it_and_the_units_own_model'))],
+    _covered('LC-D15.gfm_droop', 'QSS row sum K x 0.5 Hz >= 10 MW with K = p_nom/(R f0), R = droop_pct/100: p_nom 40 MW, 4000 '
+             '(droop read as pu: 400,000); refusals name the field and gfm_droop; exact read-back',
+             D15_TOOLS,
+             B + 'test_lc06_d15_control_models.py::test_gfm_droop_gain_reads_droop_in_percent',
+             B + 'test_lc06_d15_control_models.py::test_a_value_out_of_range_names_the_model_and_the_field',
+             B + 'test_lc06_d15_control_models.py::test_each_model_and_governor_reads_back_exactly'),
+    _covered('LC-D15.gfm_vsm', 'RoCoF row 2 H_v p_nom/pf >= f0 dP/RoCoF_max: p_nom 47.5 MW, 4750 at 50 Hz and 5700 at 60 Hz '
+             '(f0 from the campus file; H on P: 5000/6000); the grid_forming_support preset expands to its assumed '
+             'fields and gives 5937.5; refusals name the field and gfm_vsm',
+             D15_TOOLS,
+             B + 'test_lc06_d15_control_models.py::test_vsm_inertia_is_on_the_apparent_power_base',
+             B + 'test_lc06_d15_control_models.py::test_a_preset_reads_back_as_written_and_expands_to_its_tagged_fields',
+             B + 'test_lc06_d15_control_models.py::test_a_field_of_another_model_is_refused_naming_it_and_the_units_own_model'),
+    _covered('LC-D15.governors', 'a 20 MW 4 % droop genset adds K = 10 MW/Hz to the QSS row (BESS 20 MW, 2000) where an '
+             'isochronous one adds none (40 MW, 4000); refusals name the governor; exact read-back of both',
+             D15_TOOLS,
+             B + 'test_lc06_d15_control_models.py::test_a_droop_genset_adds_its_gain_to_the_qss_row',
+             B + 'test_lc06_d15_control_models.py::test_gfm_droop_gain_reads_droop_in_percent',
+             B + 'test_lc06_d15_control_models.py::test_a_droop_governor_without_droop_pct_names_the_governor',
+             B + 'test_lc06_d15_control_models.py::test_a_field_of_a_converter_on_an_isochronous_genset_names_the_governor'),
+    _covered('LC-D16.E1', 'islanding: RoCoF0 = -dP f0/(2 H_v S_n) and settled df = -dP/sum K on the row\'s own I4 import '
+             '(40 MW plus losses), D = 0; E2 oracles below hold on it',
+             D16_TOOLS,
+             B + 'test_lc06_d16_frequency_events.py::test_e1_islanding_rocof_holds_on_the_rows_own_import'),
+    _covered('LC-D16.E2', '40 MW step on a 100 MW gfm_vsm BESS (H_v 5 s, pf 0.95, 4 %): RoCoF0 -1.900 Hz/s, df_qss -0.800 Hz; '
+             '60 Hz from the campus file -2.280 / -0.960; H_v halved -3.800; droop 8 % -1.600; an isochronous spinning '
+             'genset adds its H S to RoCoF0 (-1.1095) and returns df to 0; RK4 dt halving cuts the error >= 1.8x',
+             D16_TOOLS,
+             B + 'test_lc06_d16_frequency_events.py::test_e2_rocof_and_settled_frequency_are_the_hand_values',
+             B + 'test_lc06_d16_frequency_events.py::test_halving_h_doubles_the_rocof_and_leaves_the_settled_frequency',
+             B + 'test_lc06_d16_frequency_events.py::test_doubling_the_droop_doubles_the_settled_frequency',
+             B + 'test_lc06_d16_frequency_events.py::test_at_60_hz_both_figures_scale_with_f0',
+             B + 'test_lc06_d16_frequency_events.py::test_an_isochronous_genset_returns_the_frequency_to_nominal',
+             B + 'test_lc06_d16_frequency_events.py::test_halving_dt_cuts_the_error_against_the_closed_form'),
+    _covered('LC-D16.E3', 'tripping the only grid former collapses the island at t = 0, named "no grid-forming headroom"',
+             D16_TOOLS,
+             B + 'test_lc06_d16_frequency_events.py::test_e3_tripping_the_only_grid_former_collapses_the_island'),
+    _covered('LC-D16.E4', 'ups_bridged: a cold 60 MW droop genset alone picks up 20 + 20 MW, each block from f0: windowed '
+             'RoCoF on the two-state matrix exponential, df_qss -0.6667 Hz (droop 8 % doubles it), block 2 at ready + '
+             'the settling instant; UPS autonomy e 3600/L = 900 s, 0.05 MWh short; N+1 drops the largest, named',
+             D16_TOOLS,
+             B + 'test_lc06_d16_frequency_events.py::test_e4_each_block_steps_the_genset_alone_from_nominal[4.0]',
+             B + 'test_lc06_d16_frequency_events.py::test_e4_each_block_steps_the_genset_alone_from_nominal[8.0]',
+             B + 'test_lc06_d16_frequency_events.py::test_e4_at_n_plus_1_drops_the_largest_genset_and_waits_for_the_rest',
+             B + 'test_lc06_d16_frequency_events.py::test_e4_the_ups_bridges_the_start_only_with_the_energy[10.0-True]',
+             B + 'test_lc06_d16_frequency_events.py::test_e4_the_ups_bridges_the_start_only_with_the_energy[0.05-False]'),
+    _covered('LC-D16.E5', 'PV loss: a 20 MW gfl_pq PV lost on the gfm_vsm BESS, RoCoF0 -0.950 Hz/s and df_qss -0.400 Hz, D = 0; '
+             '10 MW halves both; UPS walk-in on E1: energy L T/2/3600 = 0.055556 MWh, T halved halves it, a 0.1 Hz '
+             'window drops the UPS',
+             D16_TOOLS,
+             B + 'test_lc06_d16_frequency_events.py::test_e5_losing_the_pv_is_a_step_of_its_output[20.0]',
+             B + 'test_lc06_d16_frequency_events.py::test_e5_losing_the_pv_is_a_step_of_its_output[10.0]',
+             B + 'test_lc06_d16_frequency_events.py::test_the_ups_walk_in_energy_is_half_load_times_walk_in[10.0]',
+             B + 'test_lc06_d16_frequency_events.py::test_the_ups_walk_in_energy_is_half_load_times_walk_in[5.0]',
+             B + 'test_lc06_d16_frequency_events.py::test_a_narrow_window_drops_the_ups_off_line'),
+    _covered('LC-D16.E6', 'planned: a 30 MW BESS at once plus a 60 MW genset ramping 6 MW/s from p_min cover the import at '
+             '(import - 30)/6 s, ramp halved doubles it; a 5 MW genset leaves shortfall import - (30 + 4.5)',
+             D16_TOOLS,
+             B + 'test_lc06_d16_frequency_events.py::test_e6_the_ramp_time_is_the_genset_covering_what_the_bess_cannot[0.1]',
+             B + 'test_lc06_d16_frequency_events.py::test_e6_the_ramp_time_is_the_genset_covering_what_the_bess_cannot[0.05]',
+             B + 'test_lc06_d16_frequency_events.py::test_e6_short_of_room_is_infeasible_with_the_shortfall'),
     _unavailable('LC-D16.emt_pll_voltage', 'single-bus aggregate frequency screening only; no EMT/RMS/PLL/voltage dynamics',
                  'gridspine/static/frequency.py LABEL'),
     _pending('LC-D17.recommend_apply_restudy', 'apply digest checked by equality; no chain through the seam'),

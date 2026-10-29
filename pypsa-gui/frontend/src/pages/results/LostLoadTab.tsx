@@ -18,6 +18,7 @@ import {
 import { resolveRange, useResultsFilter } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
 import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableTable'
+import { NOT_RECORDED_KPI, NotRecordedDash, NotRecordedNote } from './NotRecorded'
 
 // ── Lost-load result tab ────────────────────────────────────────────────────
 // Unserved demand via the LP's VOLL slack generators. The backend already
@@ -92,9 +93,11 @@ export default function LostLoadTab() {
   const range = resolveRange(refIndex, filter, refPeriods)
 
   const llMeta = lostLoad as unknown as {
-    total_mwh?: number
-    total_cost_eur?: number
-    voll_eur_per_mwh?: number
+    total_mwh?: number | null
+    total_cost_eur?: number | null
+    // null when the capture holds no VOLL and none can be derived: unknown,
+    // so every cost below is unknown ('—'), never 0.
+    voll_eur_per_mwh?: number | null
     bus_carriers?: Record<string, string>
   } | null
 
@@ -111,12 +114,12 @@ export default function LostLoadTab() {
       bucket.add(col)
       groups.set(k, bucket)
     }
-    const voll = llMeta?.voll_eur_per_mwh ?? 0
-    const out: Array<{ carrier: string; mwh: number; cost: number }> = []
+    const voll = llMeta?.voll_eur_per_mwh ?? null
+    const out: Array<{ carrier: string; mwh: number; cost: number | null }> = []
     for (const [c, cols] of groups) {
       const split = weightedSumSplit(ts, cols, weightCtx, range, 'generators')
       const mwh = split.positive ?? 0
-      if (mwh > 0) out.push({ carrier: c, mwh, cost: mwh * voll })
+      if (mwh > 0) out.push({ carrier: c, mwh, cost: voll != null ? mwh * voll : null })
     }
     out.sort((a, b) => b.mwh - a.mwh)
     return out
@@ -127,9 +130,9 @@ export default function LostLoadTab() {
   const byBus = useMemo(() => {
     const ts = lostLoad as TSPayload | null
     if (!ts || ts.data.length === 0) return null
-    const voll = llMeta?.voll_eur_per_mwh ?? 0
+    const voll = llMeta?.voll_eur_per_mwh ?? null
     const busCarriers = llMeta?.bus_carriers ?? {}
-    const rows: Array<{ bus: string; carrier: string; mwh: number; cost: number }> = []
+    const rows: Array<{ bus: string; carrier: string; mwh: number; cost: number | null }> = []
     for (const col of ts.columns) {
       const split = weightedSumSplit(ts, new Set([col]), weightCtx, range, 'generators')
       const mwh = split.positive ?? 0
@@ -138,7 +141,7 @@ export default function LostLoadTab() {
         bus: col,
         carrier: carrierLabel(carrierKey(busCarriers[col] ?? '')),
         mwh,
-        cost: mwh * voll,
+        cost: voll != null ? mwh * voll : null,
       })
     }
     rows.sort((a, b) => b.mwh - a.mwh)
@@ -162,8 +165,8 @@ export default function LostLoadTab() {
     if (!ts) return null
     const split = weightedSumSplit(ts, new Set(ts.columns), weightCtx, range, 'generators')
     const mwh = split.positive ?? 0
-    const voll = llMeta?.voll_eur_per_mwh ?? 0
-    return { mwh, cost: mwh * voll, voll }
+    const voll = llMeta?.voll_eur_per_mwh ?? null
+    return { mwh, cost: voll != null ? mwh * voll : null, voll }
   }, [lostLoad, llMeta, weightCtx, range])
 
   // No lost load is not the same as nothing to report. This early return used
@@ -187,6 +190,11 @@ export default function LostLoadTab() {
     // without it fall back to the VoLL the capture carries.
     const vollApplied = lostLoad != null
       && (lostLoad.voll_applied ?? (lostLoad.voll_eur_per_mwh ?? 0) > 0)
+    // A payload whose total is null did not record lost load: nothing here
+    // says demand was served. Only a solve known to have had no VoLL
+    // (`voll_applied: false`) still reads as not modelled.
+    const notRecorded = lostLoad != null && lostLoad.total_mwh == null
+      && lostLoad.voll_applied !== false
     return (
       <div className="flex flex-col h-full overflow-auto p-4 gap-4">
         <header>
@@ -196,7 +204,9 @@ export default function LostLoadTab() {
           {ADEQUACY_CROSSLINK}
         </p>
         <div className="text-[12px] text-muted space-y-2" data-testid="lostload-empty-copy">
-          {targeted ? (
+          {notRecorded ? (
+            <p data-testid="lostload-not-recorded">Lost load not recorded by this solve</p>
+          ) : targeted ? (
             <p>
               No unserved energy in this solve — the plan served all demand, so there is no
               lost-load breakdown to chart. A reliability target WAS applied: what it bound,
@@ -207,9 +217,16 @@ export default function LostLoadTab() {
             // UX overhaul S2b: VoLL WAS in the solve and nothing was shed — a
             // computed zero, not a missing setting.
             <p>
-              No load was shed in this solve: with a VOLL of{' '}
-              {Math.round(lostLoad?.voll_eur_per_mwh ?? 0).toLocaleString('en-US')} €/MWh the plan
-              served all demand, so there is no lost-load breakdown to chart.
+              {lostLoad?.voll_eur_per_mwh != null ? (
+                <>
+                  No load was shed in this solve: with a VOLL of{' '}
+                  {Math.round(lostLoad.voll_eur_per_mwh).toLocaleString('en-US')} €/MWh the plan
+                  served all demand, so there is no lost-load breakdown to chart.
+                </>
+              ) : (
+                // The VOLL is unknown (not captured): say nothing about its value.
+                'No load was shed in this solve: the plan served all demand, so there is no lost-load breakdown to chart.'
+              )}
             </p>
           ) : (
             <ResultState
@@ -249,11 +266,14 @@ export default function LostLoadTab() {
       <div className="grid grid-cols-3 gap-3">
         <Kpi label="Total lost load" value={fmtEnergy(totals.mwh)}
              hint="Σ slack-generator dispatch × weights across every carrier" />
-        <Kpi label="Lost-load cost" value={fmtCurrency(totals.cost)}
-             hint={`MWh × VOLL (${totals.voll.toFixed(0)} €/MWh)`} />
-        <Kpi label="VOLL price" value={`${totals.voll.toFixed(0)} €/MWh`}
+        <Kpi label="Lost-load cost"
+             {...(totals.cost != null ? { value: fmtCurrency(totals.cost) } : NOT_RECORDED_KPI)}
+             hint={totals.voll != null ? `MWh × VOLL (${totals.voll.toFixed(0)} €/MWh)` : 'MWh × VOLL (VOLL not recorded)'} />
+        <Kpi label="VOLL price"
+             {...(totals.voll != null ? { value: `${totals.voll.toFixed(0)} €/MWh` } : NOT_RECORDED_KPI)}
              hint="The Value-Of-Lost-Load price the LP paid for unserved demand" />
       </div>
+      <NotRecordedNote show={totals.voll == null} />
 
       <section className="rounded-[10px] border border-border bg-bg overflow-hidden">
         <header className="px-4 py-2.5 border-b border-border bg-bg-2">
@@ -274,7 +294,7 @@ export default function LostLoadTab() {
                   <tr key={b.carrier} className="border-b border-border/40">
                     <td className="py-1 text-text font-mono">{carrierLabel(b.carrier)}</td>
                     <td className="py-1 text-right font-mono text-text">{fmtEnergy(b.mwh)}</td>
-                    <td className="py-1 text-right font-mono text-muted">{fmtCurrency(b.cost)}</td>
+                    <td className="py-1 text-right font-mono text-muted">{b.cost != null ? fmtCurrency(b.cost) : <NotRecordedDash />}</td>
                   </tr>
                 ))}
               </tbody>
@@ -329,9 +349,9 @@ export default function LostLoadTab() {
 // to this section.
 function PerBusLostLoadSection({
   rows,
-}: { rows: Array<{ bus: string; carrier: string; mwh: number; cost: number }> | null }) {
+}: { rows: Array<{ bus: string; carrier: string; mwh: number; cost: number | null }> | null }) {
   type K = 'bus' | 'carrier' | 'mwh' | 'cost'
-  const ft = useFilterableTable<{ bus: string; carrier: string; mwh: number; cost: number }, K>({
+  const ft = useFilterableTable<{ bus: string; carrier: string; mwh: number; cost: number | null }, K>({
     rows: rows ?? [],
     getSearchText: r => [r.bus, r.carrier].join(' ').toLowerCase(),
     getValue: (r, k) => (k === 'bus' || k === 'carrier') ? r[k] : r[k],
@@ -363,7 +383,7 @@ function PerBusLostLoadSection({
                   <td className="py-1 text-text font-mono">{r.bus}</td>
                   <td className="py-1 text-right font-mono text-muted">{r.carrier}</td>
                   <td className="py-1 text-right font-mono text-text">{fmtEnergy(r.mwh)}</td>
-                  <td className="py-1 text-right font-mono text-muted">{fmtCurrency(r.cost)}</td>
+                  <td className="py-1 text-right font-mono text-muted">{r.cost != null ? fmtCurrency(r.cost) : <NotRecordedDash />}</td>
                 </tr>
               ))}
             </tbody>
@@ -382,8 +402,8 @@ function fmtEnergy(mwh: number): string {
   return `${mwh.toFixed(1)} MWh`
 }
 
-function fmtCurrency(eur: number): string {
-  if (!Number.isFinite(eur)) return '—'
+function fmtCurrency(eur: number | null): string {
+  if (eur == null || !Number.isFinite(eur)) return '—'
   const a = Math.abs(eur)
   if (a >= 1e9) return `€${(eur / 1e9).toFixed(2)} B`
   if (a >= 1e6) return `€${(eur / 1e6).toFixed(2)} M`
