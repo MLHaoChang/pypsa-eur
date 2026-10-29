@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import copy
 import hashlib
 import json
 import logging
@@ -322,6 +323,7 @@ class Runner:
         self._inflight = {}
         self._errors = {}
         self._present = {}
+        self._cards = {}  # task id -> the live card a dispatch waits on (issue 08)
         self._thread = None
         self._last_scan = 0.0
 
@@ -354,10 +356,30 @@ class Runner:
 
     def present(self, task_id):
         """The user opened the run: a card it waits on is issued now, its TTL
-        starting at display, and decided on the run's own session."""
+        starting at display, and decided on the run's own session. One live
+        card per run: a card already live is dropped and issued again (issue
+        08, GK B (4))."""
         from harness import session as harness_session
+        self.drop_card(task_id)
         self._present[task_id] = self.clock() + harness_session.CONFIRMATION_TTL_SECONDS
         self.wake()
+
+    def drop_card(self, task_id):
+        """The user is no longer at the run's card (pause, stop, a re-issue):
+        its token is revoked, so the waiting gate ends and the step stays to
+        do, and nothing is issued live until the next `present`."""
+        from harness import session as harness_session
+        self._present.pop(task_id, None)
+        session = harness_session.get_session(SESSION_PREFIX + task_id)
+        if session is not None:
+            session.revoke_confirmations()  # the run's own session holds only the run's cards
+        self._cards.pop(task_id, None)
+
+    def live_card(self, task_id):
+        """The card a step of the run waits on while the user is there (issue
+        08: the plan card shows it as today's Confirmation card), or None."""
+        card = self._cards.get(task_id)
+        return copy.deepcopy(card) if card and card["expires_at_epoch_ms"] > time.time() * 1000 else None
 
     def _loop(self):
         while not self._stopping.is_set():
@@ -761,12 +783,16 @@ class Runner:
                     carded.append(step["id"])
                     if decision in ("approve", "deny"):
                         session.record_decision(payload["confirmation_token"], decision)
-                    elif decision != "live":
+                    elif decision == "live" and task_id in self._present:  # not dropped meanwhile
+                        self._cards[task_id] = {**copy.deepcopy(payload), "session_id": session.session_id,
+                                                "expires_at_epoch_ms": time.time() * 1000 + payload["ttl_seconds"] * 1000}
+                    else:
                         session.withdraw_confirmation(payload["confirmation_token"])  # nobody is there
                 elif kind == "tool_running":
                     ran.append(step["id"])
                     locks.close()  # the handler takes its own locks on the tool executor
         finally:
+            self._cards.pop(task_id, None)
             locks.close()
             session.decision_guard = None
             session._turn_in_flight = False
@@ -794,6 +820,11 @@ class Runner:
                             if t["run"]["status"] in _DRIVEN else False)
                 else:
                     self._wait_for_user(path, "card", step["id"], envelope_refused=True)
+            elif errors and not ran and "task_brief_stale" in errors:
+                # Any other step the plan refused on a stale brief: dispatching it again on each
+                # tick changes nothing, so the run stops for the user's new brief (issue 08).
+                _update(path, lambda t: _stop_in(t, "needs_user", "brief_stale")
+                        if t["run"]["status"] in _DRIVEN else False)
             self.wake(path)
 
     def _envelope_refused(self, path, step):
@@ -870,3 +901,14 @@ def present(task_id):
     """The user opened the run (issue 08 wires the companion to this)."""
     if _DEFAULT is not None:
         _DEFAULT.present(task_id)
+
+
+def live_card(task_id):
+    """The card the run waits on while the user is there, or None."""
+    return _DEFAULT.live_card(task_id) if _DEFAULT is not None else None
+
+
+def drop_card(task_id):
+    """Pause and stop drop the run's live card (issue 08, GK B (3))."""
+    if _DEFAULT is not None:
+        _DEFAULT.drop_card(task_id)

@@ -1,0 +1,1 @@
+* Test(pypsa-gui): LC-06 checks a hydro StorageUnit's spill through the copilot's solve and asset-results tools. A reservoir held full spills its inflow less its dispatch, at a non-unit snapshot weighting. No tool reports the inflow itself, so the family manifest marks it unavailable.

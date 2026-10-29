@@ -483,8 +483,10 @@ def test_every_template_and_redundancy_asset_keeps_its_price_but_the_electrolyse
     from services.adequacy.redundancy import apply_redundancy_scenario
 
     before = json.loads((FIXTURES / "template_prices_before_typed_units.json").read_text())
-    now = {tid: _dump_priced(T.BUILDERS[tid]())
-           for tid in sorted(k for k in T.BUILDERS if k.startswith("eh_"))}
+    # The templates the fixture recorded; a template added since (eh_concentrator_staged) has no price before.
+    recorded = sorted(k for k in before if not k.startswith("redundancy:"))
+    assert set(recorded) <= set(T.BUILDERS)
+    now = {tid: _dump_priced(T.BUILDERS[tid]()) for tid in recorded}
     for sid in ("n1_generation", "n1_conversion", "parallel_storage@2"):
         n = T.BUILDERS["eh_datacenter"]()
         apply_redundancy_scenario(n, sid)

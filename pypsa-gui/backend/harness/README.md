@@ -1215,7 +1215,11 @@ lifespan after the solve queue and is off under pytest (tests build their own
   alone, so the chat's stepwise path goes on, and the chat's `begin_step` or
   `continue_at_card` clears `waiting`.
   - `present(task_id)` (the companion, issue 08) issues the card with its TTL
-    starting then.
+    starting then. One live card per run: presenting again revokes the live
+    one (its token is refused) and issues it anew. `drop_card(task_id)` (the
+    plan card's Pause and Stop) revokes it and issues nothing until the next
+    `present`; the step it waited on stays to do. The captured card
+    (`live_card`) goes on resolve, expiry, pause, stop and re-issue.
   - `Runner(decisions=...)` is a test-only seam; the app's runner has none.
 - **One holder per step.** A run step's `claim` is set by compare-and-set
   under the task lock: the chat's `admit` takes it before its card, the
@@ -1246,7 +1250,8 @@ lifespan after the solve queue and is off under pytest (tests build their own
   - any uncertain step makes the run `needs_user` (`reason: uncertain`).
 - **Stops.** `run.reason` names why the runner stopped the run:
   `waiting_card`, `budget`, `uncertain`, `locked`, `access`, `recheck`,
-  `restarts` or `runner_errors`. `resume_task` clears a runner stop, and the
+  `restarts`, `runner_errors` or `brief_stale` (a step the plan refused on a
+  stale brief is not dispatched again, issue 08). `resume_task` clears a runner stop, and the
   runner's checks decide again.
 - **Model cost.** `runner.charge(path, usage, model)` meters provider usage
   (input, cache read, cache write, output) in EUR on `run.budget`. The limit
@@ -1276,7 +1281,8 @@ else.
   `notify`, `state` and its own `audit` (`granted|used|refused|expired|revoked`).
 - **Proposal.** `_start_run` writes the profile's `envelope` block
   (`run_profiles.load` validates it: §6.0 attrs, write-tier edit tools only,
-  no grid-code publish, one component class per glob) as `proposed`;
+  no grid-code publish, one component class per glob, and no
+  `run_sensitivity_sweep` or `run_eh_study` in `runs`, issue 08) as `proposed`;
   `start_task` and `get_task` return it under `envelope`, `detail` being the
   plan-review card's text.
 - **Grant.** Only the `/stream` request's `envelope_decision` (verdict

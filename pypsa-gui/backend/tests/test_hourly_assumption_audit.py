@@ -83,6 +83,9 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "results/asset_economics.py": (1, "capacity factor = energy / (8760 × p_nom × years) — a unit"),
     "serialization.py": (1, "prose about payload size"),
     "solver/myopic.py": (1, "prose: nyears = Σ hours / 8760"),
+    "solver/process_uc.py": (1, "YEAR_HOURS: the year time base is 8,760 hourly snapshots per period by "
+                                "construction (eh_site.stage_network); is_year_base counts snapshots, so a "
+                                "sub-hourly year is not taken for it and keeps linearised UC"),
     "solver/objective.py": (2, "prose: PyPSA's nyears = Σ weights / 8760"),
     "time_aggregation_service.py": (3, "prose about tsam's 8760-hour year; the period length "
                                        "is converted to STEPS via the axis step hours and weights "
@@ -158,6 +161,7 @@ def test_the_inventory_is_pinned():
     # TS 01 B1: profile_gen/load_archetypes.py (1) added.
     # G-a: profile_gen/compare.py (1) annualises weighted CF in calendar-year hours.
     # LC-18: harness/sensitivity_comparison.py (1) annualises in h/yr.
-    assert sum(c for c, _ in ALLOWED.values()) == 87
-    assert len(ALLOWED) == 46
+    # G2P-10: solver/process_uc.py (1) recognises the hourly year time base.
+    assert sum(c for c, _ in ALLOWED.values()) == 88
+    assert len(ALLOWED) == 47
     assert all(reason for _, reason in ALLOWED.values())

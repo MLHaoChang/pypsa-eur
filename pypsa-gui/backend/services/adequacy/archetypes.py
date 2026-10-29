@@ -326,7 +326,15 @@ def apply_archetype_pack_detailed(n, pack: ArchetypePack) -> ApplyResult:
             raise ArchetypePackError(
                 "weak_flexible pack requires import_overlay.import_p_nom_mw")
         each = float(total) / float(len(selected))
+        split = (f"import_p_nom_mw {float(total):g} MW split over "
+                 f"{len(selected)} Link{'s' if len(selected) != 1 else ''}")
         for name in selected:
+            rating = float(n.links.at[name, "p_nom"])
+            if abs(rating - each) > 1e-9:
+                verb = "lowered" if each < rating else "raised"
+                warnings.append(
+                    f"weak_flexible {verb} import Link {name!r} p_nom from "
+                    f"{rating:g} MW to {each:g} MW ({split})")
             n.links.at[name, "p_nom"] = each
             if "p_nom_max" in n.links.columns:
                 try:
@@ -334,8 +342,23 @@ def apply_archetype_pack_detailed(n, pack: ArchetypePack) -> ApplyResult:
                     # Only tighten an existing finite max; leave NaN alone.
                     if cur == cur:  # not NaN
                         n.links.at[name, "p_nom_max"] = each
+                        if abs(cur - each) > 1e-9:
+                            warnings.append(
+                                f"weak_flexible set import Link {name!r} "
+                                f"p_nom_max from {cur:g} MW to {each:g} MW "
+                                f"({split})")
                 except (TypeError, ValueError):
                     pass
+            if "p_nom_min" in n.links.columns:
+                try:
+                    floor = float(n.links.at[name, "p_nom_min"])
+                except (TypeError, ValueError):
+                    floor = 0.0
+                if floor == floor and floor > each + 1e-9:
+                    warnings.append(
+                        f"import Link {name!r} p_nom_min {floor:g} MW is "
+                        f"above the weak_flexible cap {each:g} MW; the "
+                        "solve may be infeasible")
     else:
         raise ArchetypePackError(f"unknown archetype {pack.archetype!r}")
 

@@ -1676,6 +1676,25 @@ def _register_ammonia() -> None:
 
 _register_ammonia()
 
+
+def _register_concentrator() -> None:
+    """The mining concentrator (``eh_concentrator.py``, grid-to-process ticket 10) adds itself to the
+    registries."""
+    import importlib.util
+    import pathlib
+    import types
+
+    path = pathlib.Path(__file__).resolve().with_name("eh_concentrator.py")
+    if not path.is_file():           # this module copied on its own (a test's tmp dir)
+        return
+    spec = importlib.util.spec_from_file_location("_eh_concentrator", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.register(types.SimpleNamespace(**globals()))
+
+
+_register_concentrator()
+
 #: Templates that ship price series (`price_series/`, minted at create; IPP ticket 02): id →
 #: a writer of the directory, called by `write_sidecars`.
 PRICE_SERIES: dict = {}

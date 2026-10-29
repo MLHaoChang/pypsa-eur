@@ -3,6 +3,7 @@ import { getAssistantActivity, getAssistantDecision, type ActivityFilter, type A
   type ActivityItem, type DecisionObservation } from '../api/assistantActivity'
 import { useUIStore } from '../store/uiStore'
 import { useChatStore } from '../store/chatStore'
+import { withReturnFrom } from '../layout/flowNavigation'
 
 const FILTERS: [ActivityFilter, string][] = [
   ['all', 'All'], ['running', 'Running'], ['needs_you', 'Needs you'],
@@ -13,6 +14,32 @@ function observationTime(value: number | null | undefined) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null
   const date = new Date(value * 1000)
   return Number.isFinite(date.getTime()) ? date : null
+}
+
+/** Study harness 08: a run's attention notice opens the companion on its
+ *  plan card (with "Back to …"). With no plan card in this conversation, a
+ *  local turn carrying the run is added there first, so "Open the run ›"
+ *  stays the only run link in Activity (UX plan verdict 9). */
+const runCard = (taskId: string) =>
+  [...document.querySelectorAll('[data-run-task]')].find(e => e.getAttribute('data-run-task') === taskId)
+
+function OpenRun({ taskId, title, onConversation }: { taskId: string; title: string; onConversation: () => void }) {
+  const open = () => {
+    if (!runCard(taskId)) {
+      useChatStore.getState().appendMessage({ role: 'tool', content: '', tool_use_id: `run-open-${taskId}`,
+        tool_name: 'get_task', tool_result: { task_id: taskId, title, run: {} } })
+    }
+    withReturnFrom(onConversation)
+    // The companion renders the card on its next frames: scroll once it is there.
+    let tries = 0
+    const scroll = () => {
+      const card = runCard(taskId)
+      if (card) card.scrollIntoView({ block: 'nearest' })
+      else if (++tries < 40) window.setTimeout(scroll, 50)
+    }
+    window.setTimeout(scroll, 0)
+  }
+  return <button type="button" className="text-accent" data-testid="activity-open-run" onClick={open}>Open the run ›</button>
 }
 
 function DecisionInspector({ item, close, onConversation, projectName }: {
@@ -191,8 +218,8 @@ export default function AssistantActivity({ onConversation }: { onConversation: 
         return <article key={item.id} className="border border-border rounded p-3 space-y-1">
         <p className="font-medium break-words">{item.title}</p>
         <p>{item.status.replace(/_/g, ' ')} <span className="text-muted">· {item.family.replace(/_/g, ' ')}</span></p>
-        <p className="text-xs text-muted">Native status: {item.native_status}{item.stage ? ` · ${item.stage}` : ''}</p>
-        {item.observation === 'retained' && item.last_observed_status &&
+        {item.family !== 'run' && <p className="text-xs text-muted">Native status: {item.native_status}{item.stage ? ` · ${item.stage}` : ''}</p>}
+        {item.family !== 'run' && item.observation === 'retained' && item.last_observed_status &&
           <p className="text-xs text-muted">Last recorded native status: {item.last_observed_status}</p>}
         {item.observation && <p className="text-xs text-muted">
           {item.observation === 'retained' ? 'Retained observation' : 'Current native observation'}
@@ -207,6 +234,7 @@ export default function AssistantActivity({ onConversation }: { onConversation: 
         {item.decision_id && inspecting === item.id && <DecisionInspector
           key={JSON.stringify([key, item.decision_id, item.decision_revision, item.decision_digest])}
           item={item} close={() => setInspecting(null)} onConversation={onConversation} projectName={project} />}
+        {item.family === 'run' && item.tool_use_id && <OpenRun taskId={item.tool_use_id} title={item.title} onConversation={onConversation} />}
         {item.family === 'confirmation' && item.status === 'waiting_for_approval' && (item.session_id === session && item.live_approval_available !== false
           ? <button type="button" className="text-accent" onClick={onConversation}>Open originating chat</button>
           : <p className="text-xs">This decision belongs to another conversation. Return there to inspect it; no approval is granted here.</p>)}

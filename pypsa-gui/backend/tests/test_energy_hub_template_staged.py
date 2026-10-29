@@ -19,6 +19,7 @@ BACKEND = pathlib.Path(__file__).resolve().parents[1]
 TPL_DIR = BACKEND / "project_templates"
 sys.path.insert(0, str(TPL_DIR))
 import eh_templates as T  # noqa: E402
+from tests._year_base import build_for_solve  # noqa: E402
 
 TID = "eh_datacenter_staged"
 YEARS = [2027, 2030, 2035]
@@ -189,7 +190,7 @@ def test_the_build_scripts_verify_step_solves_every_template(tid):
     spec = importlib.util.spec_from_file_location("_tpl_build", TPL_DIR / "_build.py")
     build = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(build)
-    build._verify_feasible(T.BUILDERS[tid](), tid, T.solver_config(tid))
+    build._verify_feasible(build_for_solve(T, tid), tid, T.solver_config(tid))
 
 
 def test_with_the_island_rows_the_plan_stages():
