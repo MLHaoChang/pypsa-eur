@@ -33,6 +33,7 @@ import AssetDetail from './results/asset/AssetDetail'
 import SummaryTab from './results/SummaryTab'
 import type { SimulationStatus } from '../api/types'
 import { PageHeader } from '../components/PageKit'
+import { activityModeWord, activityStatusWord } from '../components/activityWords'
 import {
   desiredFromDrag,
   renderedRailWidth as constrainRailWidth,
@@ -104,7 +105,7 @@ function solveSignature(s: SimulationStatus | undefined): string | null {
 export const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingUp; tip: string; multiOnly?: boolean; expertOnly?: boolean }> = [
   { id: 'summary',    label: 'Summary',            Icon: Gauge,            tip: 'The solve at a glance: cost, emissions, adequacy and the key capacities, each linking to its tab' },
   { id: 'overview',   label: 'Overview',           Icon: Layers,           tip: 'Per-period economics, generation mix & storage — the whole horizon at a glance', multiOnly: true, expertOnly: true },
-  { id: 'capex',      label: 'Capacity Expansion', Icon: TrendingUp,       tip: 'CAPEX, OPEX, sized assets', expertOnly: true },
+  { id: 'capex',      label: 'Capacity expansion', Icon: TrendingUp,       tip: 'CAPEX, OPEX, sized assets', expertOnly: true },
   { id: 'dispatch',   label: 'Dispatch',           Icon: Activity,         tip: 'Per-snapshot generation, storage, loads', expertOnly: true },
   { id: 'loadflow',   label: 'Load Flow',          Icon: NetworkIcon,      tip: 'Line flows, voltages, losses', expertOnly: true },
   { id: 'grid_code',  label: 'Grid code & connection', Icon: ShieldCheck, tip: 'The grid study: campus PCC compliance against the grid code, and a planning → dynamics study\'s connection capacity and connection-point assessment', expertOnly: true },
@@ -800,8 +801,8 @@ export default function Results() {
         >
           <span className="font-mono text-foreground">
             Discussed run {discussedRun.runId}
-            {discussedRun.status ? ` · ${discussedRun.status}` : ''}
-            {discussedRun.mode ? ` · ${discussedRun.mode}` : ''}
+            {discussedRun.status ? ` · ${activityStatusWord(discussedRun.status)}` : ''}
+            {discussedRun.mode ? ` · ${activityModeWord(discussedRun.mode)}` : ''}
           </span>
           {discussedRun.section && (
             <span className="text-muted">Section: {sectionWords(discussedRun.section, id => TABS.find(t => t.id === id)?.label)}</span>
