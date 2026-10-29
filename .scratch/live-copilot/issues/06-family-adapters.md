@@ -119,6 +119,19 @@ S6:
 - min(schedule, capacity) survives capacity edits up and down.
 - eh_dtc: bus VoLL and per-Load VoLL each change the result.
 
+### GK A (4), GO conditions for S6 (2026-10-29)
+
+Option A: the pack override (`import_p_nom_mw`) is the capacity edit. A direct
+Link edit would be overwritten by the pack on the run.
+1. At each of the three cap steps, assert the solved import Link's p_nom equals
+   the override, and ENS equals the oracle at that step.
+2. Non-uniform snapshot weights (w_h ≠ 1 on at least two hours); one Link.
+3. In the cap-binding step, at least one short hour with E_h > cap and one
+   with E_h < cap.
+4. The schedule-drop mutation asserts the exact hand delta.
+5. DtC: 140 and 40 MWh on the same inputs; assert bus ≠ per_load and priority_exact.
+6. Land these here with the S6 entry.
+
 ## Slice log
 
 ### S0, execution manifest (2026-10-28)
@@ -349,6 +362,24 @@ Branch `claude/lc06-d12-zonal-mc`, stacked on S4. GK A reviews. Session LC-06 (3
   of each check.
 - `import_p_nom_mw`: the override is the pack's intent (spec §6), but it is not
   disclosed when it differs from the Link's rating. Ticket: `26-weak-flexible-import-cap-disclosure.md`.
+
+### S6, LC-D13 energization and eh_dtc (2026-10-29)
+
+Branch `claude/lc06-d13-energization-dtc`, stacked on S5. GK A reviews. Session LC-06 (4).
+Test only; no engine edit.
+
+- `tests/test_lc06_d13_energization_dtc.py`, all through `run_eh_study`:
+  - Energization: E = (50, 50, 20, 20, 50, 50, 20, 20) MW, L = (150, 120, 95,
+    90, 100, 60, 70, 60), G = 60, weights (1500, 1000, 1200, 900, 1100, 1000,
+    1060, 1000). Cap steps 80 → 30 → 80 give ENS 97,000 / 158,000 / 97,000 MWh.
+    That is the hand value at each step, and the third equals the first bitwise.
+    A pass-through spy on `run_simulation` shows p_nom = the cap at each solve.
+    At 30, the cap binds in short hours 0, 1 and 4, and E binds in short hours 2 and 3.
+  - Schedule dropped at cap 80: ENS 15,000, a delta of −82,000 by hand.
+  - DtC, the P16 shared bus (2 h, w 1): bus aggregate 140 MWh critical against
+    per_load 40 MWh, priority_exact. The mutation (local 40 MW) gives 80 against 0.
+- Planted fault: the schedule applied as a fraction of a fixed 100 MW rating
+  (rescaled by the new p_nom) gives 130,400 at the first step, so the test is red.
 
 ## Hand-off 3 (2026-10-29, LC-06 (3) near 230k)
 
