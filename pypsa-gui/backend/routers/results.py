@@ -2253,6 +2253,22 @@ def _workbook_scenarios(cfg, n, freshness: dict):
         raise
 
 
+def _workbook_project(run):
+    """A workbook run's project row for the acting user, or None when the run
+    has no saved project or the user may not open it: access is resolved
+    (`project_registry.resolve_project`, as `gather_scenarios` does) before any
+    file of the project is read (results-workbook 02, GK B condition 8)."""
+    from services import chat_tools, project_registry
+
+    if not run.project_id:
+        return None
+    with chat_tools._acting() as (db, user):
+        try:
+            return project_registry.resolve_project(db, user, str(run.project_id))
+        except HTTPException:
+            return None
+
+
 @results_router.get("/workbook.xlsx")
 def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="all"),
                          stored: bool = False, user: User = Depends(require_user)):
@@ -2318,21 +2334,24 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
 
         current, why = _ic_current_assumptions()
         case_state = staleness(report.model_dump(mode="json"), current, reason=why)
+    # The acting user covers the build too: the views whose routes read a
+    # project's files resolve each run's project for this user first.
     previous = chat_tools.acting_user_id()
     chat_tools.set_acting_user(str(user.id))
     try:
         scenarios = _workbook_scenarios(cfg, n, freshness)
-    finally:
-        chat_tools.set_acting_user(previous)
-    try:
         blob = RW.build_results_workbook(RW.WorkbookInputs(
             network=n, cfg=cfg, lost_load=_state.get("last_lost_load"),
             result_df=_result_df, views=included, ic_report=report, case_state=case_state,
             project=project, scope=scope, template=template, freshness=freshness,
             stored=stored, run=runs[0] if runs else None, scenarios=scenarios,
-            solved_settings=_solved_settings))
+            solved_settings=_solved_settings,
+            project_id=getattr(PyPSAService.get_active_context(), "project_uuid", None),
+            project_for=_workbook_project))
     except RW.WorkbookTooLarge as exc:
         raise HTTPException(413, {"error_kind": "file_too_large", "message": str(exc)})
+    finally:
+        chat_tools.set_acting_user(previous)
     return Response(
         content=blob,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

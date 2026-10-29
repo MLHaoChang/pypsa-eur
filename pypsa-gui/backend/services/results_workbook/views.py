@@ -118,6 +118,32 @@ CHARTS: dict[str, tuple[Chart, ...]] = {
     "emissions": (
         Chart("stacked", "Emissions by carrier by period", "Emissions by carrier and period", "tCO2"),
     ),
+    "loadflow": (
+        Chart("bar", "Peak loading by branch by period", "Peak loading by branch and period", "%",
+              cats=0),
+        Chart("line", "Line flow (base, every snapshot)", "Line flow (bus0)", "MW"),
+    ),
+    "grid_code": (
+        Chart("bar", "PCC reactive power at the critical hours", "PCC reactive power", "Mvar",
+              columns=("q_final_mvar",)),
+        Chart("bar", "DC capacity estimate by bus", "DC capacity estimate by bus", "MW", cats=0),
+    ),
+    "electrical_design": (
+        Chart("bar", "Electrical capex by period", "Electrical cost by period", "EUR", cats=0,
+              columns=("capex_eur",)),
+        Chart("bar", "Transformer utilisation (worst hour)", "Transformers", "per unit",
+              cats=0, columns=("utilisation",)),
+    ),
+    "island": (
+        Chart("bar", "Cost of island capability by scenario", "Cost of island capability", "EUR",
+              cats=0, columns=("cost of island capability",)),
+    ),
+    "grid_forming": (
+        Chart("bar", "Capacity needed by case", "Capacity needed", None, cats=0,
+              columns=("delta",)),
+        Chart("bar", "Grid-forming settings: current and recommended", "Recommended settings",
+              None, cats=2),
+    ),
 }
 
 _KEY_ROW = 4

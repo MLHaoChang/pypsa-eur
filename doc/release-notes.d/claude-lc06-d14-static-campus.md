@@ -1,0 +1,1 @@
+* Test(pypsa-gui): LC-06 checks the copilot's static campus ranking through the queued campus Run. On six hours with no ties, each picked hour and its reasons are checked against hand metrics at k = 1 and k = 2. The test also checks that k reaches the job.
