@@ -367,7 +367,7 @@ def _ledger() -> list[dict]:
     return [
         {"item": "time base", "value": f"hourly chronological year ({HOURS} h from {YEAR_START}) per period",
          "source": "demo",
-         "note": "stage_network(time_base='year') (ticket 09, D4): every weighting 1, so the shed carries "
+         "note": "stage_network(time_base='year'): every weighting 1, so the shed carries "
                  "concentrate across the 21-day cycle; the representative-week build is refused "
                  "(inventory_cadence_needs_year). The same synthetic year repeats in each period"},
         {"item": "ore feed (mine)", "value": f"{feed} t/h ({' / '.join(map(str, YEARS))})", "source": "demo",
@@ -437,7 +437,7 @@ def _ledger() -> list[dict]:
                  "connection agreement is one per project, so the commercial block keeps the industrial "
                  "preset's"},
         {"item": "PoC fault level", "value": f"{FAULT_LEVEL_MVA:g} MVA (SCR about 6 against 25 MW)",
-         "source": "demo", "note": "weak, so the motor-start check (ticket 12) bites"},
+         "source": "demo", "note": "weak, so the motor-start check bites"},
         {"item": "PV, BESS candidates", "value": "pack prices (solar-utility, battery)", "source": "sourced",
          "note": f"defaults pack {T_PACK}; per period, PV up to {PV_MAX_MW:g} MW, BESS up to "
                  f"{BESS_MAX_MW:g} MW × {BESS_HOURS:g} h"},
@@ -447,16 +447,16 @@ def _ledger() -> list[dict]:
         {"item": "tariff, finance", "value": "as the generic site's industrial preset", "source": "demo",
          "note": "eh_site.py (SITE_TARIFF, finance_inputs)"},
         {"item": "unit commitment in planning",
-         "value": "plain LP on the year base, then the binary check on sampled weeks",
+         "value": "plan solved as LP; unit commitment checked in 4 sampled weeks per period",
          "source": "demo",
-         "note": "linearised UC on 26,280 snapshots did not finish within the 30-min budget (ticket 09), "
+         "note": "linearised UC on 26,280 snapshots did not finish within the 30-min budget on the year base, "
                  "so the plan dispatches the mills and flotation without their minimum load and min "
                  "up / down; the binary operational check then re-solves one week per season of each "
                  "period with them committable, and reports the gap. The 12 weeks solve side by side in "
                  "worker processes, one per core less the plan's (at least 1)"},
         {"item": "solver", "value": "HiGHS interior point (solver_options solver=ipm)",
          "source": "sourced",
-         "note": "own measurement (g2p 10): 3-period year plain LP, 595,688 cols × 1,322,776 rows, 4 cores: dual simplex "
+         "note": "own measurement: 3-period year plain LP, 595,688 cols × 1,322,776 rows, 4 cores: dual simplex "
                  "hit its 1,500 s limit unsolved; IPM with crossover optimal in 1,212 s at 2.6 GB "
                  "(shared machine); IPM without crossover, alone, optimal in 1,137 s at 2.3 GB"},
     ]

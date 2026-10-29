@@ -28,7 +28,7 @@
   "ledger": [
     {
       "item": "time base",
-      "note": "stage_network(time_base='year') (ticket 09, D4): every weighting 1, so the shed carries concentrate across the 21-day cycle; the representative-week build is refused (inventory_cadence_needs_year). The same synthetic year repeats in each period",
+      "note": "stage_network(time_base='year'): every weighting 1, so the shed carries concentrate across the 21-day cycle; the representative-week build is refused (inventory_cadence_needs_year). The same synthetic year repeats in each period",
       "source": "demo",
       "value": "hourly chronological year (8760 h from 2030-01-01) per period"
     },
@@ -136,7 +136,7 @@
     },
     {
       "item": "PoC fault level",
-      "note": "weak, so the motor-start check (ticket 12) bites",
+      "note": "weak, so the motor-start check bites",
       "source": "demo",
       "value": "150 MVA (SCR about 6 against 25 MW)"
     },
@@ -160,13 +160,13 @@
     },
     {
       "item": "unit commitment in planning",
-      "note": "linearised UC on 26,280 snapshots did not finish within the 30-min budget (ticket 09), so the plan dispatches the mills and flotation without their minimum load and min up / down; the binary operational check then re-solves one week per season of each period with them committable, and reports the gap. The 12 weeks solve side by side in worker processes, one per core less the plan's (at least 1)",
+      "note": "linearised UC on 26,280 snapshots did not finish within the 30-min budget on the year base, so the plan dispatches the mills and flotation without their minimum load and min up / down; the binary operational check then re-solves one week per season of each period with them committable, and reports the gap. The 12 weeks solve side by side in worker processes, one per core less the plan's (at least 1)",
       "source": "demo",
-      "value": "plain LP on the year base, then the binary check on sampled weeks"
+      "value": "plan solved as LP; unit commitment checked in 4 sampled weeks per period"
     },
     {
       "item": "solver",
-      "note": "own measurement (g2p 10): 3-period year plain LP, 595,688 cols \u00d7 1,322,776 rows, 4 cores: dual simplex hit its 1,500 s limit unsolved; IPM with crossover optimal in 1,212 s at 2.6 GB (shared machine); IPM without crossover, alone, optimal in 1,137 s at 2.3 GB",
+      "note": "own measurement: 3-period year plain LP, 595,688 cols \u00d7 1,322,776 rows, 4 cores: dual simplex hit its 1,500 s limit unsolved; IPM with crossover optimal in 1,212 s at 2.6 GB (shared machine); IPM without crossover, alone, optimal in 1,137 s at 2.3 GB",
       "source": "sourced",
       "value": "HiGHS interior point (solver_options solver=ipm)"
     }

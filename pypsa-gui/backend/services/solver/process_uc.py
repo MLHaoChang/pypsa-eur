@@ -37,7 +37,7 @@ import multiprocessing
 import os
 import tempfile
 import time
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, wait
 
 import numpy as np
 import pandas as pd
@@ -382,8 +382,8 @@ def _start_from_plan(m, n, period, first: int) -> None:
         m.generators_t.p_max_pu.loc[sns[first:first + CHECK_WINDOW], g] = 1.0
     for u in process_committable(m):
         p_nom = float(m.links.at[u, "p_nom"]) or 1.0
-        p_min = float(m.links.at[u, "p_min_pu"]) * p_nom
-        on = n.links_t.p0[u].loc[before].to_numpy() >= max(p_min * (1 - 1e-6), 1e-6 * p_nom)
+        p_min = n.get_switchable_as_dense("Link", "p_min_pu", before)[u].to_numpy() * p_nom
+        on = n.links_t.p0[u].loc[before].to_numpy() >= np.maximum(p_min * (1 - 1e-6), 1e-6 * p_nom)
         hours = _runs_before(on)
         m.links.at[u, "up_time_before"] = hours if on[-1] else 0
         m.links.at[u, "down_time_before"] = 0 if on[-1] else hours
@@ -482,10 +482,10 @@ def _ledger(rows, cfg, plain: bool = False, worst: dict | None = None) -> list[d
     if worst is not None and len(rows) > 1:
         out.append({"item": "worst window", "value": f"{worst['window']}: {result_line(worst)}"})
     per_period = pd.Series([r["period"] for r in rows], dtype=object).value_counts(dropna=False)
-    for r in rows:
+    for i, r in enumerate(rows):
         label = f"period {r['period']}" if r["period"] is not None else "window"
         if per_period.get(r["period"], 1) > 1:          # several weeks a period (the year base)
-            label += f", week {sum(1 for q in rows[:rows.index(r) + 1] if q['period'] == r['period'])}"
+            label += f", week {sum(1 for q in rows[:i + 1] if q['period'] == r['period'])}"
         out.append({"item": f"{label}: window", "value": r["window"]})
         out.append({"item": f"{label}: result", "value": result_line(r)})
     return out
@@ -596,7 +596,11 @@ def _solve_in_workers(n, cfg, solver_options: dict, slots: list, workers: int) -
         pool = ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("spawn"),
                                    initializer=_init_worker, initargs=(path, cfg, solver_options))
         try:
-            rows = list(pool.map(_row_in_worker, slots))
+            futures = [pool.submit(_row_in_worker, slot) for slot in slots]
+            pending = set(futures)
+            while pending:      # a timed wait, so an abort's KeyboardInterrupt lands within a second
+                _, pending = wait(pending, timeout=1.0)
+            rows = [f.result() for f in futures]
         except BaseException:
             for proc in list(getattr(pool, "_processes", {}).values()):
                 proc.terminate()

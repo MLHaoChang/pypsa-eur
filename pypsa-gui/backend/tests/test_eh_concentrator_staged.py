@@ -363,10 +363,11 @@ def test_2027_with_every_candidate_off_loses_concentrate_and_a_bess_lowers_it(re
     bare, _, _ = _bare()
     bess, _, _ = _plan("2027-bess", years=(2027,), edit=_bess_installed)
     lost_bare, lost_bess = _lost(bare)[2027], _lost(bess)[2027]
-    # (i) every 2027 candidate off (PV, BESS, the pile extension): the curtailment loses concentrate;
-    assert lost_bare > 1.0
-    # (ii) the same with a 20 MW × 4 h BESS installed: lower, which pins the sign.
-    assert lost_bess < lost_bare - 1.0
+    # (i) every 2027 candidate off (PV, BESS, the pile extension): the curtailment loses concentrate,
+    # measured 221 t;
+    assert lost_bare == pytest.approx(221.0, abs=3.0)
+    # (ii) the same with a 20 MW × 4 h BESS installed: lower, measured 69 t.
+    assert lost_bess == pytest.approx(69.0, abs=3.0)
     # The ore the mine could not send is reported per period beside it (the mine's schedule is a ceiling).
     view = {p["bus"]: p for p in compute_process_view(bare)["products"]}
     unmined = view["ore_rom"]["unused_supply"]["by_period"]
