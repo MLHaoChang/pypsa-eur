@@ -180,6 +180,39 @@ GO on the S8b plan, with conditions:
 8. Mutations: PV, T halved, e 0.05 → ok false, droop 8 %, ramp halved; each turns red.
 9. Land these here under S8b.
 
+### GK A (4), GO conditions for S9 (2026-10-29)
+
+- The card is non-trivial: each "sets" value is inside gfm_tuning's bounds and
+  moves from the current value by more than the tolerance.
+- RoCoF at 0+ holds with the applied tau_f, or tau_f is pinned. The fixture is
+  gfm_vsm, whose M = 2 H_v S_n / f0 has no tau_f (`frequency._gfm_m`); the card
+  sets none, asserted. Settled from the applied droop, D = 0.
+- Read-back: exact equality of the sidecar and the campus file with the card,
+  source tag included.
+- Stale: network edit, then apply: edit_preview_stale (409), sidecar, campus
+  file and APPLIED_FILE byte-identical; the same for a wrong digest.
+- Known gaps filed as tickets 28 (digest without the network) and 29 (HTTP apply
+  with no digest); one HTTP test pins today's guard (no digest, network edited:
+  still 409).
+- Mutations, one per oracle; skipping the re-study keeps the pre-apply figures
+  and makes no new island study.
+
+### GK B (9), GO conditions for S10–S13 (2026-10-29)
+
+- S10 D19: non-unit weighting (3 h: 600/900, Δ 300, +50 %); case B's cost only through
+  the experiment override path; each objective is its own solve's record; the export
+  reads back; mutation: compare reading the baseline's objective for both gives Δ 0.
+- S11 D11: class A ΔLOLE/ΔEUE by hand from the remaining COPT, arithmetic in comments;
+  class B with nonzero unserved energy; health read back fresh from storage, provenance
+  tags, an invalid record refused with its field named and nothing stored.
+- S12 D14: first confirm k survives the queue settings (diagnosis to GK B if not); the
+  ported hub spec/tables equal the original, or the hand metrics are recomputed; pick
+  reasons through the report route.
+- S13 D09: reservoir held full, no other source for the 4 MW, spill 6 MW exactly;
+  non-unit weighting, spilled_mwh = 6·Σw; mutation inflow 9 → spill 5. Inflow
+  `_unavailable` with a ticket.
+- D01/02/20–23 stay out. Each PR goes to GK B with its mutation table.
+
 ## Slice log
 
 ### S0, execution manifest (2026-10-28)
@@ -526,6 +559,45 @@ freq_bridge, freq_planned.
   the genset alone changed to 5 MW (p0 0.5): I4 is not viable, so the import is the
   lossless 39.5 (`dp_e1`); shortfall = import − (30 + 4.5).
 - Manifest: LC-D16.E4, E5 and E6 covered; the EMT/PLL/voltage unavailable row stays.
+
+### S9, LC-D17 recommend → apply → re-study (2026-10-29)
+
+Branch `claude/lc06-d17-recommend-apply`, PR #888, stacked on #887. GK A (4) reviews; plan
+GO with conditions (above). Session LC-06 (7).
+
+- Fixture: the S8a hub with a 200 MW 5 % droop genset (H_s 1.5 s), BESS gfm_vsm H_v 1 s,
+  droop 4 %; band 0.25 Hz, RoCoF 4 Hz/s over 20 ms. With the BESS as the only grid
+  former, E3 collapses and the search returns `not_achievable`, so the genset is needed.
+- The card sets droop 4 → 1.8203125 % and H_v 1 → 1.3515625 s (no τ_f: a VSM has none).
+  Read-back exact in both files, tagged `assumed`. The re-study's E2 RoCoF0 and Δf_qss
+  equal the hand values on the applied settings (abs 1e-6). Without the re-study the old
+  figures stand (the mutation: they differ from the applied oracles by > 1e3 TOL).
+- Stale (network edit via `update_component` + `save_project`), wrong digest and HTTP apply
+  with no digest: 409, nothing written. Tickets 28 and 29 for the gaps.
+- Command: `pytest tests/test_lc06_d17_recommend_apply.py tests/test_family_manifest.py`,
+  212 s, all pass. `test_packaging_requirements.py` passes but for the openpyxl/defusedxml
+  case, which fails here only because this environment lacks defusedxml.
+
+### S10, LC-D19 two-case compare (2026-10-29)
+
+Branch `claude/lc06-d19-two-case-compare`, stacked on #888. GK B (9) reviews. Session LC-06 (7).
+`tests/test_lc06_d19_two_case_compare.py`: two real cases at 3 h weighting, 600 and 900 EUR,
+each equal to its own exported run evidence (from the case project); compare +300 (+50 %),
+reversed −300 (−33.3 %); the comparison export equals the report. Mutations run locally,
+each failed the test: unit weighting (Δ 100); compare reading the baseline for both (Δ 0).
+
+### S11, LC-D11 FMEA and health (2026-10-29)
+
+Branch `claude/lc06-d11-fmea-health`, stacked on S10. GK B (9) reviews. Session LC-06 (7).
+`tests/test_lc06_d11_fmea_health.py`. Class A on the test_copt_assurance fleet: ΔEUE 28.8
+and 31.8 MWh, occurrence 17.52 and 43.8 per yr, arithmetic in the docstring. Class B: a 10 MW
+tie out sheds 30 MWh. Health: the ledger is read back from `asset_health.json` and the route;
+provenance 1 sourced, 1 drifted, 1 orphaned; 4 invalid fields refused with the file
+byte-identical. Mutations as tests: thermal2 q 0.1 gives ΔEUE 15.9; 4 MW behind the tie gives
+24 MWh; the drift itself. Finding: criticality_eur_per_year is per horizon (ticket 30), sent to
+GK B, which ruled (NOT OK @5847400b): criticality and severity are not asserted, only
+ΔEUE, occurrence and severity × occurrence = criticality; `LC-D11.fmea_criticality` pending
+on ticket 30, whose fix GK A reviews.
 
 ## Hand-off 6 (2026-10-29, LC-06 (6), early)
 

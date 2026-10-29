@@ -194,6 +194,19 @@ describe('the Summary tab with unknown lost-load totals and shadow price', () =>
     expect(screen.getAllByTestId('not-recorded-note').length).toBe(1)
   })
 
+  it('a cap whose binding is null shows —, not "not binding"; false still reads not binding', async () => {
+    api.getEmissions.mockResolvedValue({ ...EMISSIONS, caps: [
+      { ...EMISSIONS.caps[0], name: 'cap_unknown', binding: null, shadow_price_eur_per_tCO2: null },
+      { ...EMISSIONS.caps[0], name: 'cap_slack', binding: false, shadow_price_eur_per_tCO2: 0 }] })
+    renderTab()
+    const card = await screen.findByTestId('summary-emissions')
+    expect(await within(card).findByLabelText('Not recorded by this solve')).toBeTruthy()
+    expect(card.textContent).toMatch(/Cap cap_unknown.*—/)
+    expect(card.textContent).toMatch(/Cap cap_slack.*not binding/)
+    expect(card.textContent?.match(/not binding/g)?.length).toBe(1)
+    expect(screen.getByTestId('not-recorded-note').textContent).toBe('—: not recorded by this solve')
+  })
+
   it('a binding cap with an unknown shadow price shows —, not €0', async () => {
     api.getEmissions.mockResolvedValue({ ...EMISSIONS, caps: [{ ...EMISSIONS.caps[0],
       shadow_price_eur_per_tCO2: null }] })

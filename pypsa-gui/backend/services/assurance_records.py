@@ -768,6 +768,61 @@ def aggregate_selector(args):
     return "names", value, names
 
 
+def aggregate_gaps(snapshots, unknown, members):
+    """(gaps, frame, values) for an aggregate load sum, shared by both paths.
+
+    `unknown` are requested names the network lacks; `members` holds each
+    known target's raw series, None where it has no profile. `gaps` lists
+    every reason the sum is not complete, in one order: unknown names, no
+    loads, no profile, other snapshots, not a number, missing or non-finite
+    steps, no steps. aggregate_source refuses on the first; the
+    /network/loads/aggregate handler reports them all. `frame` is the
+    present members side by side (None when none are present or they cannot
+    be aligned) and `values` its float64 array with a non-number member's
+    steps as NaN.
+    """
+    import numpy as np
+    import pandas as pd
+
+    gaps = [f"no load named {u}" for u in unknown]
+    if not members:
+        if not unknown:
+            gaps.append("no loads match")
+        return gaps, None, None
+    present = [s for s in members if s is not None]
+    missing = len(members) - len(present)
+    if missing:
+        gaps.append(f"{missing} of {len(members)} loads have no profile")
+    if not present:
+        return gaps, None, None
+    if any(not s.index.equals(snapshots) for s in present):
+        gaps.append("the loads do not share the network's snapshots")
+    # A bool or numeric-string member would convert below but join, not add,
+    # in sum(): every step of it counts as missing.
+    numbers = [
+        pd.api.types.is_numeric_dtype(s) and s.dtype != bool for s in present
+    ]
+    if not all(numbers):
+        gaps.append("a step that is not a number")
+    try:
+        frame = pd.concat(present, axis=1)
+    except (TypeError, ValueError):
+        # Members that cannot be aligned at all (a repeated timestamp, or a
+        # timezone-aware index next to a naive one).
+        if not gaps:
+            gaps.append("the loads do not share the network's snapshots")
+        return gaps, None, None
+    values = np.full(frame.shape, np.nan)
+    cols = [i for i, ok in enumerate(numbers) if ok]
+    values[:, cols] = frame.iloc[:, cols].to_numpy(dtype="float64")
+    bad = int((~np.isfinite(values)).sum())
+    if bad:
+        gaps.append(f"{bad} missing or non-finite {'step' if bad == 1 else 'steps'}")
+    if frame.empty:
+        gaps.append("no steps")
+    return gaps, frame, values
+
+
 def aggregate_source(ctx, args):
     """(source digest, gap, totals, target names) for get_aggregate_load args.
 
@@ -781,9 +836,6 @@ def aggregate_source(ctx, args):
     The digest covers the project, the normalised selection, the ordered
     target names and each member's series digest.
     """
-    import numpy as np
-    import pandas as pd
-
     from services.profile_shapes import _load_section
 
     n = ctx.network
@@ -806,8 +858,8 @@ def aggregate_source(ctx, args):
     )
     unknown = [t for t in targets if t not in n.loads.index]
     if not targets or unknown:
-        gap = f"no load named {unknown[0]}" if unknown else "no loads match"
-        return hashed.hexdigest(), gap, None, targets
+        gaps, _, _ = aggregate_gaps(n.snapshots, unknown, [])
+        return hashed.hexdigest(), gaps[0], None, targets
     members = []
     for name in targets:
         member_digest, series = _series_source(
@@ -815,33 +867,9 @@ def aggregate_source(ctx, args):
         )
         hashed.update(member_digest.encode())
         members.append(series)
-    missing = sum(s is None for s in members)
-    if missing:
-        return (
-            hashed.hexdigest(),
-            f"{missing} of {len(targets)} loads have no profile",
-            None,
-            targets,
-        )
-    if any(not s.index.equals(n.snapshots) for s in members):
-        return (
-            hashed.hexdigest(),
-            "the loads do not share the network's snapshots",
-            None,
-            targets,
-        )
-    # A numeric-string upload would convert below but join, not add, in sum().
-    if any(not pd.api.types.is_numeric_dtype(s) or s.dtype == bool for s in members):
-        return hashed.hexdigest(), "a step that is not a number", None, targets
-    frame = pd.concat(members, axis=1)
-    try:
-        bad = int((~np.isfinite(frame.to_numpy(dtype="float64"))).sum())
-    except (TypeError, ValueError):
-        return hashed.hexdigest(), "a step that is not a number", None, targets
-    if bad or frame.empty:
-        step = "step" if bad == 1 else "steps"
-        gap = f"{bad} missing or non-finite {step}" if bad else "no steps"
-        return hashed.hexdigest(), gap, None, targets
+    gaps, frame, _ = aggregate_gaps(n.snapshots, [], members)
+    if gaps:
+        return hashed.hexdigest(), gaps[0], None, targets
     return hashed.hexdigest(), None, frame.sum(axis=1).tolist(), targets
 
 

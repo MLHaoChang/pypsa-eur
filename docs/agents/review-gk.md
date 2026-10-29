@@ -44,10 +44,14 @@ When a PR changes a validation guard, confirm by mutation that its test fails fo
 
 `test_json_fragments`' real-file assertion must not depend on any declaration list being non-empty.
 
+A test never asserts a value a known defect produces as if it were correct. Assert the parts that are right, leave the wrong field to a `_pending` manifest row that names the ticket, and keep any identity that holds before and after the fix. No xfail, no skip, and no fixture chosen to hide the defect (#890, ticket 30).
+
 ## Rulings
 
 - `profile_location_missing` skips uploaded and network_native profiles (`readiness.profile_kind`).
 - A project-scoped result-view read carries `project_id` = the active project, and 404/409 count as `no_data`.
+- A run profile whose approval envelope lists `run_sensitivity_sweep` or `run_eh_study` needs its own GK review. A sweep's cases[].changes create child projects with arbitrary edits that no edit bound limits; admit such a run only with per-case bounds or a card per case. An envelope admission must also refuse any `*project*` argument that is not the run's own project (#875).
+- Builders record a GK plan GO's conditions in the issue file's `## Comments`, so a rotation does not drop them.
 
 ## Engineering rules
 

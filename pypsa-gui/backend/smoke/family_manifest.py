@@ -38,6 +38,8 @@ G = 'tests/gridspine/'
 D15_TOOLS = 'campus_set_island_config campus_island_config campus_run_island_study'
 #: E1-E6 read through GET .../island/report: the chat tool trims the events away (ticket 27).
 D16_TOOLS = 'campus_set_island_config campus_draft_campus campus_run_study'
+D17_TOOLS = (D16_TOOLS + ' campus_run_island_study campus_recommend_gfm_settings campus_island_gfm_settings '
+             'campus_gfm_settings_card campus_apply_gfm_settings')
 
 # The capability-matrix families, in `assistant_control_matrix.FAMILY_JOURNEYS`
 # order, keyed by their journey slug.
@@ -310,8 +312,24 @@ VARIANTS: list[dict] = [
     _covered('LC-D11.copt', 'two-unit capacity distribution 0.72/0.18/0.08/0.02 (sums to 1), equal to GET /results/copt',
              '',
              B + 'test_copt_assurance.py::test_the_classical_fleet_by_hand_and_as_the_tab_has_it'),
-    _pending('LC-D11.fmea', 'seam checks shape only; engine seeds test_energy_hub_fmea_top.py'),
-    _pending('LC-D11.health', 'validation only'),
+    _covered('LC-D11.fmea', 'class A leave-one-out on the two-unit COPT fleet: dEUE 28.8 / 31.8 MWh, 17.52 / 43.8 per yr, '
+             'q 0.2 -> 0.1 gives 15.9; class B: a 10 MW tie out sheds 5 MW x 2 x 3 h = 30 MWh (4 MW: 24); '
+             'dEUE and occurrence only',
+             'update_solver_config get_adequacy_results run_fmea_sweep',
+             B + 'test_lc06_d11_fmea_health.py::test_class_a_prices_each_units_outages_by_hand[thermal1]',
+             B + 'test_lc06_d11_fmea_health.py::test_class_a_prices_each_units_outages_by_hand[thermal2]',
+             B + 'test_lc06_d11_fmea_health.py::test_class_a_moves_with_one_units_rate',
+             B + 'test_lc06_d11_fmea_health.py::test_class_b_one_link_outage_sheds_its_load',
+             B + 'test_lc06_d11_fmea_health.py::test_class_b_moves_with_the_load_behind_the_tie'),
+    _pending('LC-D11.fmea_criticality', 'criticality and severity are per horizon, labelled per year (ticket 30)'),
+    _covered('LC-D11.health', 'ledger read back from storage and the route; provenance 1 sourced, 1 drifted (0.25 vs 0.2), '
+             '1 orphaned; four invalid fields refused with the field named, the file byte-identical',
+             'record_asset_health get_asset_health',
+             B + 'test_lc06_d11_fmea_health.py::test_health_reads_back_from_storage_and_reconciles_with_the_network',
+             B + 'test_lc06_d11_fmea_health.py::test_an_invalid_record_names_its_field_and_stores_nothing[outage_rate_value-1.0]',
+             B + 'test_lc06_d11_fmea_health.py::test_an_invalid_record_names_its_field_and_stores_nothing[mttr_hours-0.0]',
+             B + 'test_lc06_d11_fmea_health.py::test_an_invalid_record_names_its_field_and_stores_nothing[measured_at-01/01/2026]',
+             B + 'test_lc06_d11_fmea_health.py::test_an_invalid_record_names_its_field_and_stores_nothing[confidence-certain]'),
     _covered('LC-D12.standard_mc', 'exact two-unit COPT LOLE 1927.2 h / EUE 54,312 MWh inside the seed-1 95 % CI; LOLE half-width <= 10 % of the oracle; stationary start',
              'run_mc_study get_adequacy_results',
              B + 'test_lc06_d12_standard_mc.py::test_the_oracle_is_the_hand_copt',
@@ -420,14 +438,30 @@ VARIANTS: list[dict] = [
              B + 'test_lc06_d16_frequency_events.py::test_e6_short_of_room_is_infeasible_with_the_shortfall'),
     _unavailable('LC-D16.emt_pll_voltage', 'single-bus aggregate frequency screening only; no EMT/RMS/PLL/voltage dynamics',
                  'gridspine/static/frequency.py LABEL'),
-    _pending('LC-D17.recommend_apply_restudy', 'apply digest checked by equality; no chain through the seam'),
+    _covered('LC-D17.recommend_apply_restudy', 'gfm_vsm BESS (H_v 1 s, 4 %) beside a 5 % droop genset, band 0.25 Hz: '
+             'the card sets droop and H_v within the search bounds; both files read back the card exactly, tagged '
+             'assumed; the re-study puts E2 RoCoF0 and df_qss on the applied values; without it the old figures stand; '
+             'a network edit (refused by the recommendation\'s own staleness, not the digest: ticket 28) or a wrong '
+             'digest after the card is edit_preview_stale with nothing written; the HTTP apply with no digest is '
+             'still 409 (ticket 29)',
+             D17_TOOLS,
+             B + 'test_lc06_d17_recommend_apply.py::test_the_applied_card_is_read_back_and_the_restudy_runs_on_it',
+             B + 'test_lc06_d17_recommend_apply.py::test_without_the_restudy_the_old_figures_stand_and_no_study_is_made',
+             B + 'test_lc06_d17_recommend_apply.py::test_a_network_edit_after_the_card_refuses_the_apply',
+             B + 'test_lc06_d17_recommend_apply.py::test_a_digest_that_is_not_the_cards_refuses_the_apply',
+             B + 'test_lc06_d17_recommend_apply.py::test_the_http_apply_without_a_digest_still_refuses_a_stale_network'),
     _covered('LC-D18.investment', 'equity NPV 4.1322314 at cost of equity 10 %, WACC 7 %; financial close undiscounted',
              '',
              B + 'test_investment_assurance.py::test_hand_cash_with_a_nonzero_first_year'),
     _covered('LC-D19.single_case', 'objective 200 = 5 MW x 2 h x 20 EUR/MWh, same in the exported evidence',
              'prepare_experiment advance_experiment refresh_experiment wait_for_job export_run_evidence',
              B + 'test_experiment_case_advancement.py::test_real_case_finishes_only_with_terminal_and_intact_evidence'),
-    _pending('LC-D19.two_case_compare', 'two independently solved cases and signed deltas'),
+    _covered('LC-D19.two_case_compare', 'two solved cases at 3 h weighting: 20 and 30 EUR/MWh x 5 MW x 6 h = 600 and 900 EUR, '
+             'each its own run evidence; compare +300 EUR (+50 %), reversed -300 EUR; the export downloads the same report',
+             'start_experiment prepare_experiment advance_experiment refresh_experiment wait_for_job export_run_evidence '
+             'compare_experiments export_experiment_comparison',
+             B + 'test_lc06_d19_two_case_compare.py::test_two_weighted_cases_compare_their_own_solved_objectives',
+             B + 'test_lc06_d19_two_case_compare.py::test_the_signed_delta_flips_with_the_order'),
     _pending('LC-D20.delivery', 'seam only; delivered bytes not independently parsed'),
     _pending('LC-D21.reports', 'seam only; document facts not independently inspected'),
     _pending('LC-D22.undo_checkpoints', 'seam only; no before/after fingerprint oracle'),

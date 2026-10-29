@@ -1,5 +1,5 @@
 import { applyUiNavigate } from './uiNavigate'
-import { resultsEvidenceApi } from '../api/resultsEvidence'
+import { projectUnavailableReason, resultsEvidenceApi } from '../api/resultsEvidence'
 import { displayedResultsSource, sameResultsSource } from '../utils/resultsSource'
 import { manualNavigation, navigationEpoch, onManualNavigation } from '../utils/navigationEpoch'
 import { useUIStore } from '../store/uiStore'
@@ -126,7 +126,8 @@ export function startKeyResultsWalk(opts?: {
         && (initial.uiMode === 'expert' || ['summary', 'adequacy', 'fmea'].includes(t.id)))
       if (!tabs.length) stop('This retained run has no eligible results evidence.')
       else open()
-    }).catch(() => stop('Retained run evidence unavailable. Current results were not substituted.'))
+    }).catch(error => stop(projectUnavailableReason(error)
+      ?? 'Retained run evidence unavailable. Current results were not substituted.'))
   } else if (initial.uiMode === 'expert') {
     // Current load flow has a shared, source-attested adapter. Other tabs
     // remain manually available; a mount alone cannot certify their data.

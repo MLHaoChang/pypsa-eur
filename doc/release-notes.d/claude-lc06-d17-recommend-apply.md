@@ -1,0 +1,1 @@
+* Test(pypsa-gui): LC-06 checks the copilot's recommend → apply → re-study chain for grid-forming settings. The applied card is read back from the island data and the campus file. The re-study's RoCoF and settled frequency match the applied droop and inertia. The test also checks that a network edit or a wrong digest after the card refuses the apply and writes nothing.
