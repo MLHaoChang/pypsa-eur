@@ -46,3 +46,7 @@ Slices, each its own PR with its own tests: **R1** network views (capex, dispatc
 10. Per PR: `test_route_chat_disposition`, `test_project_route_acl_policy`, `test_packaging_requirements` when imports change; a release fragment; these conditions recorded here.
 
 Accepted not-done: overnight capex by period and fuel stay `not_established`; a campus-study scenario's IC key leaves out the extra_assets digest; the cell budget is a heuristic with `MAX_BYTES` as the backstop.
+
+### 2026-10-29 — GK B: condition 5 ruling, and GK OK on R1
+
+GK OK @14f6bee94c7d3a50352348b2c3575559a4933eac on R1 (#896). Condition 5, ruling A: R1 leaves `compute_prices`, `compute_curtailment` and `compute_cost_breakdown` swallowing exceptions as master does. Follow-up: [04](04-result-services-raise.md).
