@@ -238,6 +238,27 @@ def test_a_section_over_the_fact_cap_is_refused(run, harness, monkeypatch):
     refused(harness, monkeypatch, args, "more than 4 numbers with units")
 
 
+def test_a_section_whose_facts_outgrow_the_record_is_refused(run, harness, monkeypatch):
+    # Within the section size and the fact count cap, but one long key sits
+    # in every fact's path.
+    wide = {
+        "k" * 8000: {
+            f"m{i}": {"value": i, "unit": "MW"}
+            for i in range(records.MAX_SECTION_FACTS)
+        }
+    }
+    publish(
+        run[2],
+        run[1],
+        "run-wide",
+        "completed",
+        "2026-10-02T11:00:00+00:00",
+        sections={"wide": wide},
+    )
+    args = {"run_id": "run-wide", "section": "wide"}
+    refused(harness, monkeypatch, args, "too large to check")
+
+
 def test_a_section_of_a_failed_run_is_refused(run, harness, monkeypatch):
     publish(run[2], run[1], "run-failed", "failed", "2026-10-03T10:00:00+00:00")
     args = {"run_id": "run-failed", "section": "summary"}

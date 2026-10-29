@@ -1358,9 +1358,11 @@ def capture_run(owner, args, result, digest_before):
     return record
 
 
-# A checked section answer certifies at most this many numbers, so its record
-# stays well under save()'s 128 KiB.
+# A checked section answer certifies at most this many numbers, and their
+# encoded size is bounded too (a long key repeats in every path under it), so
+# the record stays under save()'s 128 KiB.
 MAX_SECTION_FACTS = 200
+MAX_SECTION_FACT_BYTES = 120 * 1024
 
 
 def _number(value):
@@ -1405,6 +1407,8 @@ def run_section_facts(manifest, section, data):
         return [], "this section records no number with a unit"
     if len(facts) > MAX_SECTION_FACTS:
         return [], f"this section records more than {MAX_SECTION_FACTS} numbers with units"
+    if len(json.dumps(facts, ensure_ascii=False).encode()) > MAX_SECTION_FACT_BYTES:
+        return [], "this section's numbers are too large to check"
     return facts, None
 
 

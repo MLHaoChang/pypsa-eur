@@ -32,6 +32,12 @@ MUTANTS = {
         """                or _run_section_scope""",
         [f"{SECTIONS}::test_another_sealed_manifest_for_the_run_makes_it_unavailable"],
     ),
+    "section_facts_skip_byte_cap": (
+        "services/assurance_records.py",
+        """    if len(json.dumps(facts, ensure_ascii=False).encode()) > MAX_SECTION_FACT_BYTES:""",
+        """    if False:""",
+        [f"{SECTIONS}::test_a_section_whose_facts_outgrow_the_record_is_refused"],
+    ),
     "section_guard_accepts_extra_args": (
         "harness/assurance.py",
         """            if set(args) == {"run_id", "section"}:""",
