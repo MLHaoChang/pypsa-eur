@@ -122,6 +122,18 @@ def test_another_users_or_another_projects_experiments_never_appear(client, solv
     assert "2 experiment case project(s) not shown: not a case of your own experiments on this base" in texts
 
 
+def test_a_case_whose_ledger_cannot_be_read_is_unavailable_and_its_child_not_counted(client, solved_base):
+    from harness import experiment_execution as engine
+    _base_id, root = solved_base
+    eid, _ = completed_case(20, "Corrupt")
+    engine._path(root, eid).write_text("{not json")
+    _wb, ws = _sheet(_export(client))
+    texts = _texts(ws)
+    assert _runs(ws)["Corrupt: case"] == S.EXPERIMENT_REASONS["case_unavailable"]
+    # Its child is this case's, shown once as unavailable: not another user's.
+    assert not any("not a case of your own experiments" in t for t in texts)
+
+
 # ── baseline checks against the open base (2) and the reason vocabulary (3) ──
 
 def test_a_case_of_a_changed_base_is_baseline_changed(client, solved_base):

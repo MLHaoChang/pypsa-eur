@@ -142,3 +142,22 @@ GK B (11) on R5, second ruling (15:16Z, answering: each experiment case's child 
    - Condition 8 becomes 6 true sensitivity runs plus 4 experiment cases: 8 shown, 2 not shown.
    - Mutant: drop the marker filter in `_cases`. The never-listed-twice test must kill it.
 4. Scope. The change stays in `scenarios._cases`. Leave `sensitivity_comparison._read` and the chat tool `compare_sensitivity` alone; if they also list experiment children, report that as a follow-up rather than widening R5.
+
+### 2026-10-29 — R5 built (experiment cases as scenario runs), PR #919
+
+`services/results_workbook/scenarios.py` (`gather_experiments`, `_experiment_run`, shared `_fill`); tests in `tests/test_results_workbook_experiments.py`.
+
+1. Scope: `_read_record(root, id, project, owner)` is the filter: `test_another_users_or_another_projects_experiments_never_appear`.
+2. Baseline: `test_a_case_of_a_changed_base_is_baseline_changed`, `test_without_current_base_results_every_case_is_baseline_unavailable`, `test_a_changed_recorded_baseline_run_is_baseline_changed`.
+3. One vocabulary: `sc._REASONS` names, plus only `evidence_tampered`, `case_failed`, `case_not_completed`, `case_unavailable`: `test_failed_and_not_completed_cases_say_so_on_the_sheet_and_the_view_sheets`.
+4. `compare_experiments` unchanged: master's `test_experiment_comparison.py` byte-identical to the tree's (`cmp`), 26 passed.
+5. Lock (ruling: Option A): `test_every_case_load_is_outside_the_lock_and_nothing_is_written` (spies on `_load_context` and `_load_run` assert `not ex._LOCK._is_owned()`; the route enters unlocked); mutated between verify and load: `test_a_network_changed_after_the_ledger_copy_is_excluded`, `test_run_evidence_changed_after_the_receipt_is_evidence_tampered`.
+6. Access first: `test_a_case_the_user_cannot_open_is_counted_and_nothing_of_it_is_read`.
+7. Same filling: `test_a_case_whose_dispatch_the_routes_would_not_serve_is_unsolved`.
+8. Cap: `test_six_sensitivity_runs_and_four_cases_show_eight_and_count_two`.
+9. Unique names: `test_run_names_are_unique`.
+10. Mutants, each applied by hand and killed (table in the PR body): post-load fingerprint skip, evidence digest skip, resolve after load, wrong owner, wrong project, raw JSON instead of `_read_record`, and (ruling 2) the marker filter dropped in `_cases`.
+
+Ruling 2 (duplicates, Option A): `CASE_PROJECT_NAME` sits next to `_name`, `test_the_case_project_name_marker_is_exactly_the_engines_name`; a case's child is shown once, never as a sensitivity run; other children are counted, never named. A case whose ledger cannot be read is shown as `case_unavailable` and its child (matched by `_name`) is not also counted as another's: `test_a_case_whose_ledger_cannot_be_read_is_unavailable_and_its_child_not_counted`. An unreadable store gives a note, no case: `test_an_unreadable_experiment_store_is_said_and_names_no_case`.
+
+Not built: experiments of other domains than network; `sensitivity_comparison._projects` still lists experiment children (follow-up, per ruling 2 point 4).

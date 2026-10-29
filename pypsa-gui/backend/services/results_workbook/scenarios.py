@@ -77,8 +77,8 @@ class Scenarios:
     base_current: bool = True
     # Children named as experiment cases (`experiment_execution._name`): never
     # sensitivity runs; `gather_experiments` shows the acting user's own and
-    # counts the others in `unlisted`, never naming them.
-    experiment_children: set[str] = field(default_factory=set)
+    # counts the others in `unlisted`, never naming them. Child id → name.
+    experiment_children: dict[str, str] = field(default_factory=dict)
     unlisted: int = 0
     # The experiment store could not be read: no experiment case is shown.
     experiments_unreadable: bool = False
@@ -108,10 +108,10 @@ def _cases(base_project_id: str) -> tuple[Any, list[tuple[Any, dict]], int, set[
     from services import chat_tools, project_registry, workflow_tools as wt
     with chat_tools._acting() as (db, user):
         base = sc._resolve(db, user, base_project_id)
-        cases, no_access, experiment_children = [], 0, set()
+        cases, no_access, experiment_children = [], 0, {}
         for child in project_registry.direct_children(db, base):
             if is_case_project_name(child.name):  # an experiment case: shown once, as one
-                experiment_children.add(str(child.id))
+                experiment_children[str(child.id)] = child.name
                 continue
             try:  # access first: nothing of a child the user cannot open is read
                 child = project_registry.resolve_project(db, user, str(child.id))
@@ -316,6 +316,7 @@ def gather_experiments(base_project_id: str, base_basis: dict, scen: Scenarios |
     when there is nothing to show or count."""
     from fastapi import HTTPException
 
+    from harness import experiment_execution as engine
     from harness import sensitivity_comparison as sc
     try:
         gathered = _experiment_cases(base_project_id)
@@ -327,8 +328,11 @@ def gather_experiments(base_project_id: str, base_basis: dict, scen: Scenarios |
     root, cases = gathered if gathered else (None, [])
     mine = {str(ledger["case_project_id"]) for _c, ledger, _ok in cases
             if ledger and ledger.get("case_project_id")}
-    children = scen.experiment_children if scen else set()
-    unlisted = len(children - mine)
+    # A case whose ledger cannot be read is shown as unavailable: its child,
+    # known by the engine's name for it, is that case's, not another's.
+    unread = {engine._name(c) for c, _ledger, ok in cases if not ok}
+    children = scen.experiment_children if scen else {}
+    unlisted = sum(1 for cid, name in children.items() if cid not in mine and name not in unread)
     if not cases and not unlisted and not unreadable:
         return scen
     if scen is None:
