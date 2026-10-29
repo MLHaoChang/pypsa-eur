@@ -1030,8 +1030,14 @@ export interface LoadAggregate {
   values: (number | null)[]
   total_loads: number
   loads_with_profile: number
-  peak: number
-  mean: number
+  unknown_names: string[]
+  loads_without_profile: string[]
+  /** False when any target is unknown, has no profile or has a bad step. */
+  complete: boolean
+  gaps: string[]
+  /** Null unless `complete`. */
+  peak: number | null
+  mean: number | null
 }
 
 // Per-attribute metadata block. Used both for the top-level p_max_pu fields

@@ -154,7 +154,7 @@ def test_after_its_evidence_expires_a_chart_says_it_was_not_re_verified(solved, 
     path = assurance_records._path(assurance_records.actor_id(), receipt["evidence_ids"][0])
     envelope = json.loads(path.read_text())
     envelope["record"]["expires_at"] = 0
-    envelope["sha256"] = assurance_records.digest(envelope["record"])
+    envelope.update(assurance_records.seal(envelope["record"], path.stem))
     path.write_text(json.dumps(envelope))
     old = checked.client.get(chart["download_url"])
     assert old.status_code == 200

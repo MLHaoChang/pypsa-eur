@@ -500,7 +500,8 @@ def _absolute(series: pd.Series, meta: Mapping[str, Any], power: bool) -> pd.Ser
     return series.astype(float) * float(scale) if scale else series.astype(float)
 
 
-def _run(ctx, series, meta, ops, component_type, attribute, *, replaying: bool) -> Refined:
+def _run(ctx, series, meta, ops, component_type, attribute, *, replaying: bool,
+         numbers: list[int] | None = None, after: list | None = None) -> Refined:
     t = _Target(ctx, meta, component_type, attribute)
     if t.resolution != "hourly":
         raise InvalidRefineOpError("only an hourly series can be refined; regenerate it hourly")
@@ -508,10 +509,14 @@ def _run(ctx, series, meta, ops, component_type, attribute, *, replaying: bool) 
         raise InvalidRefineOpError("ops must be a non-empty list")
     s = _absolute(series, meta, t.power)
     records, stats, warnings = [], [], []
-    if not replaying:  # the series already carries its recorded ops
-        t.history = [dict(r) for r in meta.get("refinements") or []
+    # The ops the series already carries: its recorded ones, or on an undo's
+    # replay (``after``) the base's.
+    carried = meta.get("refinements") if not replaying else after
+    if carried:
+        t.history = [dict(r) for r in carried
                      if isinstance(r, Mapping) and r.get("op") != "move_window"]
-    for i, op in enumerate(ops):
+    # ``numbers``: each op's index in the list it was recorded in (an undo).
+    for i, op in zip(numbers if numbers is not None else range(len(ops)), ops):
         if not isinstance(op, Mapping):
             raise InvalidRefineOpError(f"op {i} must be an object")
         smuggled = [k for k in _RESOLVED if k in op]
@@ -587,7 +592,7 @@ def _run(ctx, series, meta, ops, component_type, attribute, *, replaying: bool) 
         new_meta.pop("scale_mw", None)
         new_meta.pop("per_unit_mean_of", None)
     new_meta["refinements"] = [*list(meta.get("refinements") or []), *records] \
-        if not replaying else records
+        if not replaying else [*list(after or []), *records]
     prov = str(meta.get("provenance") or "synthetic/assumed")
     new_meta["provenance"] = prov if prov.endswith("user-refined") else f"{prov}, user-refined"
     return Refined(series=s, meta=new_meta, stats=stats, warnings=warnings)
@@ -600,6 +605,131 @@ def refine_series(ctx, series: pd.Series, meta: Mapping[str, Any], ops: list,
 
 
 def replay(ctx, series: pd.Series, meta: Mapping[str, Any], refinements: list,
-           *, component_type: str, attribute: str) -> Refined:
-    """Re-run a recorded op list over a regenerated series."""
-    return _run(ctx, series, meta, refinements, component_type, attribute, replaying=True)
+           *, component_type: str, attribute: str, numbers: list[int] | None = None,
+           after: list | None = None) -> Refined:
+    """Re-run a recorded op list over a regenerated series, or (an undo) over
+    a base that already carries the ops ``after``; ``numbers`` names each op
+    by its recorded index."""
+    return _run(ctx, series, meta, refinements, component_type, attribute, replaying=True,
+                numbers=numbers, after=after)
+
+
+# ---------------------------------------------------------------- undo (TSG 05)
+
+UNDO_BASE_GONE = ("the series before step {n} is no longer kept: generate it again "
+                  "without the refinements, or undo the whole apply")
+UNDO_BASE_CHANGED = ("the series before step {n} no longer holds this series' earlier "
+                     "refinements: generate it again without the refinements, or undo "
+                     "the whole apply")
+
+
+def _canon(ops: Any) -> str:
+    return json.dumps(ops, sort_keys=True, default=str)
+
+
+def undo_base(meta: Mapping[str, Any], k: Any, load) -> tuple[str, Any, dict[str, Any]]:
+    """The base an undo of op ``k`` re-refines: the nearest ancestor along
+    ``based_on`` whose ``refinements`` EQUAL the artifact's first j <= k ops.
+    ``load(job_id)`` returns that pending artifact's ``(frame, meta)``, or None
+    when it is not kept. Returns (job id, frame, meta)."""
+    ops = list(meta.get("refinements") or [])
+    if not ops:
+        raise InvalidRefineOpError("this series has no refinements to undo")
+    if not isinstance(k, int) or isinstance(k, bool) or not 0 <= k < len(ops):
+        raise InvalidRefineOpError(
+            f"this series has {len(ops)} refinements; there is no step {_echo(k)}"
+            if not isinstance(k, int) or isinstance(k, bool) else
+            f"this series has {len(ops)} refinements; there is no step {k + 1}")
+    gone = InvalidRefineOpError(UNDO_BASE_GONE.format(n=k + 1))
+    changed = InvalidRefineOpError(UNDO_BASE_CHANGED.format(n=k + 1))
+    cur, seen = meta, set()
+    while True:
+        job = cur.get("based_on")
+        if not isinstance(job, str) or job in seen:
+            raise gone
+        seen.add(job)
+        loaded = load(job)
+        if loaded is None:
+            raise gone
+        frame, cur = loaded
+        mine = list(cur.get("refinements") or [])
+        if _canon(mine) != _canon(ops[:len(mine)]):
+            raise changed
+        if len(mine) <= k:
+            return job, frame, cur
+
+
+def undo_plan(refinements: list, k: int, base: list) -> tuple[list, list[int]]:
+    """The ops an undo of op ``k`` replays on a base carrying ``base``: every
+    later recorded op but ``k``, with their recorded indices."""
+    keep = [i for i in range(len(base), len(refinements)) if i != k]
+    return [refinements[i] for i in keep], keep
+
+
+def _echo(raw: Any, n: int = 12) -> str:
+    """A user value echoed back, cut to ``n`` characters (as TSG-07's ``by``)."""
+    text = str(raw)
+    return text[:n] + ("…" if len(text) > n else "")
+
+
+def _val(raw: Any) -> str:
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        return f"{raw:g}"
+    return _echo(raw)
+
+
+_WEEKDAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+_MONTH_NAMES = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
+                "Nov", "Dec")
+
+
+def _run_words(raw: Any, names: tuple[str, ...], first: int) -> str:
+    """[0, 1, 2, 3, 4] → 'Mon–Fri'; [0, 2] → 'Mon, Wed'."""
+    if not isinstance(raw, list) or not raw or not all(
+            isinstance(x, int) and 0 <= x - first < len(names) for x in raw):
+        return ""
+    xs = sorted(raw)
+    if len(xs) > 2 and xs == list(range(xs[0], xs[-1] + 1)):
+        return f"{names[xs[0] - first]}–{names[xs[-1] - first]}"
+    return ", ".join(names[x - first] for x in xs)
+
+
+def op_words(op: Mapping[str, Any]) -> str:
+    """An op with its parameters, for the change log: 'scale_window ×1.3,
+    05:00–10:00 Mon–Fri', 'scale_peak_to 60 MW'."""
+    name = _echo(op.get("op"), 20)
+    if name == "scale_peak_to":
+        f = op.get("fraction")
+        pct = _val(f * 100 if isinstance(f, (int, float)) and not isinstance(f, bool) else f)
+        if op.get("of") == "connection":
+            mw = op.get("resolved_mw")
+            return (f"{name} {pct} % of the grid connection"
+                    + (f" ({_val(mw)} MW)" if mw is not None else ""))
+        if op.get("of") == "current_peak":
+            return f"{name} {pct} % of the current peak"
+        return f"{name} {_val(op['mw'])} MW" if "mw" in op else f"{name} {_val(op.get('value'))}"
+    if name == "scale_window":
+        hours = op.get("hours")
+        span = (f"{hours[0]:02d}:00–{hours[1]:02d}:00" if isinstance(hours, list)
+                and len(hours) == 2 and all(isinstance(h, int) for h in hours) else _echo(hours))
+        when = " ".join(w for w in (_run_words(op.get("weekdays"), _WEEKDAY_NAMES, 0),
+                                    _run_words(op.get("months"), _MONTH_NAMES, 1)) if w)
+        return f"{name} ×{_val(op.get('factor'))}, {span}" + (f" {when}" if when else "")
+    if name in ("set_floor", "set_cap"):
+        return f"{name} {_val(op.get('value'))}"
+    if name == "shift":
+        h = op.get("hours")
+        return f"{name} {h:+d} h" if isinstance(h, int) and not isinstance(h, bool) else f"{name} {_val(h)} h"
+    if name == "smooth":
+        return f"{name} {_val(op.get('window_h'))} h"
+    if name == "rescale_energy":
+        return f"{name} {_val(op.get('mwh'))} MWh"
+    if name == "move_window":
+        moved = op.get("moved")
+        try:
+            (f0, f1), (t0, t1) = moved["from"], moved["to"]
+            return (f"{name} {_window_words({'from': f0, 'to': t0})} to "
+                    f"{_window_words({'from': f1, 'to': t1})}")
+        except (TypeError, KeyError, ValueError):
+            return f"{name} by {_echo(op.get('by'))}"
+    return name

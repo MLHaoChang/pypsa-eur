@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Seal every assistant assurance record with a MAC under a server key (`SECRET_KEY` plus a per-install key kept beside the record store), so a retained-run record rewritten together with all of its hashes no longer reads as checked. Records saved before this change, or after `SECRET_KEY` changes, read as unavailable.

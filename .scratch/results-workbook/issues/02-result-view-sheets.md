@@ -21,6 +21,7 @@ Fill 01's sheet-builder registry for every result view the app's result tabs sho
 - [ ] Every view in the registry has a test on a fixture run: the sheet's key numbers equal its route's payload; its charts reference its own cells.
 - [ ] A view with no results for the run is listed in About as "no results", with no empty sheet.
 - [ ] A table over Excel's row limit or the 25 MB cap is written at the coarsest resolution that fits, and the sheet says which.
+- [ ] RW-SCEN-1: each view sheet carries a scenario column for every run; when that would exceed the row limit or the 25 MB cap, the base case is written in full and the other scenarios at key-results level, and the sheet says so.
 - [ ] Multi-period runs show every period; nothing is limited to the first period.
 
 ## Out of scope
