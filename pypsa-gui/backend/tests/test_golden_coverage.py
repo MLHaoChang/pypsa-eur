@@ -114,6 +114,8 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/results.py", "get_loadflow_view"): frozenset(),  # loading, no economics
     # Retained metrics/sections are verbatim evidence, not a new economics roll-up.
     ("routers/results.py", "get_run_view"): frozenset(),
+    # Native physics/VoLL screening; no CAPEX or fixed-cost economics roll-up.
+    ("routers/results.py", "get_plausibility"): frozenset(),
     ("routers/results.py", "get_cost_breakdown"):          frozenset({"cost_breakdown"}),
     ("routers/results.py", "get_objective_decomposition"):  frozenset(),
     ("routers/results.py", "get_economics_by_carrier"):     frozenset({"economics_by_carrier"}),

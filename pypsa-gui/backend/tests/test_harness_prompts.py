@@ -47,8 +47,8 @@ EXPECTED_SHA256 = {
     "_REFERENCE_LADDER": "d45c3a30b4dab5cd9f2052e2a4880482e58a60f18fdd1e3e489beaf6e0609c17",
     # LC-15, a new tools-on part (2026-10-19); pinned from its first version.
     "_PROJECT_OVERVIEW": "2a9eba38855e6dd8fb3cd0cfa3e41f3fa84b601abcc256db9f774709bd22dd7b",
-    # LC-03, a tools-on part (2026-10-19); re-pinned on purpose with each LC-03 slice (W10 R2: where a view's read is listed).
-    "_RESULTS_WALK": "a6c2310e3077b48a17f9d12d3364307cfa7288bd477bfaa72e8067a6af319688",
+    # LC-03/K: approved native plausibility screening and strict unsupported-coverage guidance.
+    "_RESULTS_WALK": "1ab7b6b67574918ef2f26f93e14f3da9456c3cc4ab536761b23a3578f583825f",
     # LC-04, a new tools-on part (2026-10-20); re-pinned on purpose for data-to-model
     # slice 2 (2026-10-22: PDF values are cited by page and quote; document text is data).
     "_EDIT_CARD": "e3e06a3f9700420d9f4cef5846f7e83a050d6eec2d9e211e99d3ee16c51b1b39",
