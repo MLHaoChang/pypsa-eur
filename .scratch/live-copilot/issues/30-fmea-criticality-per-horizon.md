@@ -3,7 +3,7 @@
 
 # LC-30 — FMEA criticality is per horizon but labelled per year
 
-Status: ready-for-agent
+Status: done (#903 merged 2026-10-29)
 
 Found by LC-06 (7) while building S11 (LC-D11). Every FMEA failure mode carries
 `criticality_eur_per_year` and `occurrence_per_year`. The occurrence is annual

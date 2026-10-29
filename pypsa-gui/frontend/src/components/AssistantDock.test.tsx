@@ -127,7 +127,7 @@ describe('AssistantDock', () => {
     })
     render(<AssistantDock />)
     const card = screen.getByTestId('companion-confirmation')
-    expect(card.textContent).toContain('update_component')
+    expect(card.textContent).toContain('Change the settings of bus-a')
     expect(screen.getByTestId('assistant-dock-body').className.split(/\s+/)).toContain('hidden')
     expect(screen.getAllByTestId('companion-confirmation')).toHaveLength(1)
   })
