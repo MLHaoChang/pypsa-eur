@@ -169,7 +169,13 @@ try {
     await page.getByRole('button', { name: /^Projects$/ }).first().click()
     await page.waitForURL(/\/projects/)
     // The whole card is its link: a pointer click on the card's name opens it.
-    const card = await page.getByText(name, { exact: true }).first().boundingBox()
+    // The tab strip may still carry the name off-screen; the card is the visible one.
+    const named = page.getByText(name, { exact: true }).locator('visible=true').first()
+    await named.waitFor({ timeout: 30000 }).catch(async error => {
+      await page.screenshot({ path: path.join(artifacts, `lc03h-failed-card-${name}.png`) })
+      throw error
+    })
+    const card = await named.boundingBox()
     await page.mouse.click(card.x + card.width / 2, card.y + card.height / 2)
     await page.waitForURL(/\/app/)
     await page.getByTestId('chat-input').waitFor({ state: 'attached' }).catch(async error => {
@@ -236,6 +242,9 @@ try {
   await send(page, PAST)
   const refusedAnswer = await answer(page, 'LC03H_REFUSED')
   assert(refusedAnswer.includes(REASON), refusedAnswer)
+  // The companion folds the answer; open it so the refusal card is on screen.
+  const showAnswer = page.getByRole('button', { name: 'Show answer' }).last()
+  if (await showAnswer.isVisible()) await showAnswer.click()
   await page.screenshot({ path: path.join(artifacts, 'lc03h-refused-chat.png') })
   await control('restore-access')
   await page.getByRole('button', { name: 'Guided', exact: true }).click()
