@@ -2065,7 +2065,7 @@ def _run_turn_body(
                     # REVOKE-KIND: the account or project access ended; expected, not a fault.
                     logger.warning("checked answer withdrawn: project access was revoked")
                     yield "error", {"error_kind": "assurance_access_revoked",
-                                    "message": "You no longer have access to this project. No answer was published."}
+                                    "message": "No answer was published. If your access comes back, open the project again from Projects."}
                     yield "session_done", {"reason": "assurance_access_revoked"}
                     return
                 except Exception:  # noqa: BLE001 — fail closed, including uncertain storage

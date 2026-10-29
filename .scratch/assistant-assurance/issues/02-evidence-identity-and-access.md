@@ -67,7 +67,7 @@ A1.2 is now executable in `tests/assurance_acceptance/test_p1_revocation.py`, co
 #### Follow-ups
 
 - **REVOKE-TOCTOU** (closed 2026-10-28: commit re-checks access after the save and discards the record if it was revoked; `test_access_revoked_during_commit_publishes_nothing`). The project ACL is not held under `network_guard`. A revocation that lands between commit's last `records.authorize` (`harness/assurance.py`, inside the `network_guard` block) and `records.save` can still commit the answer; the next read refuses it. Closing the window needs the ACL check and the save inside one DB transaction, or a re-check after save that deletes the record.
-- **REVOKE-KIND.** Revocation surfaces as the generic `assurance_publication_failed` ("could not be saved"), and `harness/loop.py` logs it as an ERROR traceback. A typed kind (for example `assurance_access_revoked`) and a warning-level log need a ChatPanel change and UX review.
+- **REVOKE-KIND** (built 2026-10-29, PR #929; see `## Comments`). Revocation surfaced as the generic `assurance_publication_failed` ("could not be saved"), and `harness/loop.py` logged it as an ERROR traceback. It now has its own kind, `assurance_access_revoked`, and a WARNING.
 
 ### 2026-10-28 — get_timeseries series-step evidence
 
@@ -161,7 +161,8 @@ Smallest first; each goes to GK B as a plan before it is built.
 - **REPLAY.** A monotonic per-record sequence for mutable records (`operation`, `ui_action`, `conversation_context`), so an older, validly sealed copy reads unavailable. Only `assurance_records` changes.
 - **Shared fact builder.** One builder for the fact dicts of the static, static_page, series, run and aggregate kinds. Refactor only, behind the A1.x suites.
 - **SERIES-WINDOW.** A compact series record: a values array plus an index digest, with facts resolved on lookup. It lifts the 744-step cap without new args. Windowed args would need `harness/catalogue.py`; blocked while #851/#869 hold it.
-- **REVOKE-KIND** and **frontend assurance_state.** Blocked: both need `ChatPanel.tsx` (held by #883) and UX review.
+- **REVOKE-KIND.** In review as #929.
+- **Frontend assurance_state.** Queued until REVOKE-KIND merges; needs `ChatPanel.tsx` and UX review.
 - **Run sections, compare_project_runs, run manifest MAC.** Blocked: all go through `services/run_evidence.py` (LC-03 (6), #883).
 
 ### 2026-10-29 — REPLAY closed: a DB high-water mark on every mutable record
@@ -221,7 +222,7 @@ Smallest first; each goes to GK B as a plan before it is built.
 ### 2026-10-29 — REVOKE-KIND: a typed kind for revoked access during commit
 
 - `assurance_records.authorize` raises `AccessRevoked`, an `HTTPException` subclass with the refusal's own status and detail, for `_user`'s 401 and `resolve_project`'s 403 or 404. `evidence()` keeps answering a revoked project's record as "Record not found" (404), now as `AccessRevoked`. Routes answer exactly as before.
-- `harness/loop.py` catches `AccessRevoked` before the generic handler around commit. It sends `assurance_access_revoked` ("You no longer have access to this project. No answer was published.") and the same `session_done` reason, and logs one WARNING with no traceback and no ids. Every other commit failure stays `assurance_publication_failed` with its ERROR.
+- `harness/loop.py` catches `AccessRevoked` before the generic handler around commit. It sends `assurance_access_revoked` (banner title "You no longer have access to this project"; message "No answer was published. If your access comes back, open the project again from Projects.", the copy from UX (5)) and the same `session_done` reason, and logs one WARNING with no traceback and no ids. Every other commit failure stays `assurance_publication_failed` with its ERROR.
 - ChatPanel gives the kind a banner title and lists it among the banner kinds. It has no retry. The kind is in `pypsa-gui/tool-error-kinds.d/claude-assurance-02-revoke-kind.json`.
 
 #### GK B (12) plan GO conditions (2026-10-29)
@@ -240,4 +241,4 @@ Smallest first; each goes to GK B as a plan before it is built.
 5. Kind manifest and smokes. Met: own fragment; `test_tool_error_kind_manifest`, `ChatPanel.manifest.test.tsx`, `smoke/json_fragments.py`, `assistant_inventory.py --check`, `assistant_route_parity.py --check` and `assistant_control_matrix.py --check` all pass.
 6. ChatPanel ends the turn as for `assurance_publication_failed`: no spinner, no retry. Met: `ChatPanel.assuranceAcceptance.test.tsx` "a commit refusal %s ends the turn with its banner and no retry", for both kinds.
 7. The WARNING names no project or user id. Met: `test_revocation_logs_carry_no_values` pins the one WARNING line's exact text and that it has no traceback.
-8. The UX copy goes to UX (5) before merge.
+8. The UX copy goes to UX (5) before merge. UX (5) asked that the message not repeat the title; `assert_nothing_published` pins both messages.

@@ -136,11 +136,19 @@ SERIES_DRAFT = json.dumps(
 )
 
 
+MESSAGES = {
+    # The banner title already says access is gone (UX (5)), so the message doesn't repeat it.
+    "assurance_access_revoked":
+        "No answer was published. If your access comes back, open the project again from Projects.",
+    "assurance_publication_failed": "The checked answer could not be saved. No answer was published.",
+}
+
+
 def assert_nothing_published(frames, owner, before, kind="assurance_access_revoked"):
     assert not any(event == "answer_approved" for event, _ in frames)
     assert public_text(frames) == ""
     errors = [d for event, d in frames if event == "error"]
-    assert [e["error_kind"] for e in errors] == [kind]
+    assert [(e["error_kind"], e["message"]) for e in errors] == [(kind, MESSAGES[kind])]
     assert "5 MW" not in json.dumps(errors) and "p_set" not in json.dumps(errors)
     done = [d for event, d in frames if event == "session_done"]
     assert done == [{"reason": kind}]
@@ -332,7 +340,8 @@ def test_revocation_logs_carry_no_values(
     formatter = logging.Formatter()
     for record in caplog.records:
         logged = formatter.format(record)
-        for value in ("5 MW", "5.0", "p_set", draft):
+        for value in ("5 MW", "5.0", "p_set", draft,
+                      str(seeded_identity["user_id"]), str(seeded_identity["org_id"])):
             assert value not in logged, (value, record.name)
 
 
@@ -399,8 +408,9 @@ def test_other_project_refusals_in_commit_stay_publication_failures(
 
 
 def test_unavailable_evidence_in_commit_stays_a_publication_failure(
-    baseline, harness, seeded_identity, monkeypatch
+    baseline, harness, seeded_identity, monkeypatch, caplog
 ):
+    caplog.set_level(logging.DEBUG)
     owner = str(seeded_identity["user_id"])
     before = answer_records(owner)
 
@@ -410,6 +420,8 @@ def test_unavailable_evidence_in_commit_stays_a_publication_failure(
     response = harness.request(
         in_commit_guard(monkeypatch, lambda: monkeypatch.setattr(records, "evidence", gone)))
     assert_nothing_published(parse_sse(response.text), owner, before, "assurance_publication_failed")
+    failure = [r for r in caplog.records if "checked answer could not be committed" in r.message]
+    assert len(failure) == 1 and failure[0].levelname == "ERROR"
 
 
 @pytest.mark.parametrize("kind", KINDS)
