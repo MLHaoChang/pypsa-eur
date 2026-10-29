@@ -8,6 +8,7 @@ with no value in any body. A record that is intact reads the same after a
 reload of the saved project and a new chat session.
 """
 
+import base64
 import json
 import time
 import uuid
@@ -160,6 +161,23 @@ def test_every_current_input_kind_re_derives_its_facts(
     assert harness.client.get(path).status_code == 200
 
     def edit(record):
+        if "series" in record:
+            # A series record stores a certified-row mask, not its facts.
+            series = record["series"]
+            rows = series["rows"]
+            mask = bytearray(base64.b64decode(series["certified"]))
+            if change == "value":
+                series["values_sha256"] = records._series_digest(
+                    "series-values/1", [7.0] * rows
+                )
+            elif change == "added":
+                # One certified row past the last.
+                mask += bytes(rows // 8 + 1 - len(mask))
+                mask[rows // 8] |= 1 << (rows % 8)
+            else:
+                mask = bytearray(len(mask))
+            series["certified"] = base64.b64encode(bytes(mask)).decode("ascii")
+            return
         facts = record["facts"]
         if change == "value":
             facts[0]["value"] = 7.0
