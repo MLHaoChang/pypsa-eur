@@ -94,6 +94,43 @@ def test_unattended_is_available_only_with_the_runner_a_provider_and_the_edit_ri
     assert run_monitor.view(task["task_id"], provider_ready=True)["monitor"]["unattended"]["reason"] == "locked"
 
 
+def test_unattended_needs_a_way_to_tell_the_user_the_run_stopped(client, session, site, monkeypatch):
+    """UX condition 3: with no email set up and the in-app notice failing to
+    be written for this owner and project, unattended cannot work."""
+    from collections import OrderedDict
+
+    from harness import attention
+    from services import email_service, run_monitor
+    task = start()
+    monkeypatch.setenv("PYPSA_GUI_HARNESS_RUNNER", "1")
+    monkeypatch.setattr(attention, "_FAILURES", OrderedDict())
+    status = {**email_service.get_status(), "configured": False}
+    monkeypatch.setattr(email_service, "get_status", lambda: status)
+    assert run_monitor.view(task["task_id"], provider_ready=True)["monitor"]["unattended"] == {"available": True}
+    attention._failed(task_owner(task_path(site[1], task)), task_project(site, task), True)  # a failed write
+    assert run_monitor.view(task["task_id"], provider_ready=True)["monitor"]["unattended"]["reason"] == "no_notice"
+    status["configured"] = True  # email still reaches the user
+    assert run_monitor.view(task["task_id"], provider_ready=True)["monitor"]["unattended"] == {"available": True}
+
+
+def task_project(site, task):
+    return json.loads(task_path(site[1], task).read_text())["project_id"]
+
+
+def test_the_view_says_which_run_buttons_can_work(client, session, site):
+    task = start()
+
+    def actions():
+        return client.get(f"/api/chat/runs/{task['task_id']}/view").json()["monitor"]["actions"]
+    assert actions() == ["pause", "stop"]
+    client.post(f"/api/chat/runs/{task['task_id']}/pause")
+    assert actions() == ["resume", "stop"]
+    client.post(f"/api/chat/runs/{task['task_id']}/resume")
+    assert actions() == ["pause", "stop"]
+    client.post(f"/api/chat/runs/{task['task_id']}/stop")
+    assert actions() == []
+
+
 def tasks_module():
     from services import assistant_tasks
     return assistant_tasks
@@ -303,7 +340,7 @@ def test_the_plan_card_names_every_stage_and_gate_fact_in_words():
 def test_the_envelope_section_names_every_profile_edit_and_run_in_words():
     from services import run_envelope, run_profiles
     components, names, fields, runs = (words_keys(n) for n in ("COMPONENT_WORDS", "NAME_WORDS", "FIELD_WORDS", "RUN_WORDS"))
-    assert run_envelope.RUN_TOOLS <= runs
+    assert run_envelope.RUN_TOOLS - run_envelope.NEVER_LISTED <= runs  # what an envelope may list (GK B (8))
     for ref in run_profiles.PROFILES:
         envelope = run_profiles.resolve(ref).get("envelope")
         for granted in (envelope or {}).get("edits", []):

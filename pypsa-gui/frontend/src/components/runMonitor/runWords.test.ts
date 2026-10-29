@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { COMPONENT_LABEL } from '../../utils/componentLabels'
 import { FIELD_LABELS } from '../../utils/fieldLabels'
 import { ENVELOPE } from './runFixtures'
-import { COMPONENT_WORDS, FACT_UNITS, FACT_WORDS, FIELD_WORDS, STAGE_WORDS, editSubject, euros } from './runWords'
+import { COMPONENT_WORDS, FACT_UNITS, FACT_WORDS, FIELD_WORDS, RUN_WORDS, STAGE_WORDS, editSubject } from './runWords'
 
 describe('runWords', () => {
   it('names an envelope field by the panels’ FIELD_LABELS, with a unit', () => {
@@ -29,7 +29,7 @@ describe('runWords', () => {
       expect(editSubject(edit)).not.toMatch(/p_nom|max_hours|_new_|Generator|StorageUnit/)
     }
     expect(editSubject({ tool: 'update_component', target: { component: 'StorageUnit', name: 'bess_a', attr: 'max_hours' } }))
-      .toBe("Storage 'bess_a' · Storage hours")
+      .toBe('Storage “BESS a” · Storage hours')
   })
 
   it('a counted gate fact has a plain name and a unit', () => {
@@ -41,7 +41,8 @@ describe('runWords', () => {
       'Brief · Set up · Inputs · Check inputs · Solve · Check results · Explore options · Report · Hand-off')
   })
 
-  it('money uses the KPI currency format', () => {
-    expect(euros(2)).toBe('€2.00')
+  it('words only the runs an envelope may list (GK B 8: no sweep or site study)', () => {
+    expect(Object.keys(RUN_WORDS)).not.toContain('run_sensitivity_sweep')
+    expect(Object.keys(RUN_WORDS)).not.toContain('run_eh_study')
   })
 })

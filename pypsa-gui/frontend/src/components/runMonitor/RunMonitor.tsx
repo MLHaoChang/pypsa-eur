@@ -14,27 +14,29 @@ import {
 } from '../../api/runMonitor'
 import { useChatStore } from '../../store/chatStore'
 import { useUIStore, type SlidePanel } from '../../store/uiStore'
-import type { FlowTarget } from '../../api/flow'
-import { openFlowTarget, openFlowTargetInPlace } from '../../layout/flowNavigation'
+import { openPanel } from '../../pages/results/openPanel'
 import { PANEL_SECTION } from '../../layout/flowSections'
 import { manualNavigation } from '../../utils/navigationEpoch'
 import {
-  FACT_UNITS, FACT_WORDS, STAGE_STATUS_WORDS, euros, stageWords, stopWords, when, type RunFix,
+  FACT_UNITS, FACT_WORDS, STAGE_STATUS_WORDS, stageWords, stopWords, when, type RunFix,
 } from './runWords'
+import { runUnderReview } from './planReview'
+import { fmtCurrency } from '../../utils/format'
 
 const POLL_MS = 4000
 const PRESENT_EVERY_MS = 60_000
 const OVER = new Set(['completed', 'cancelled'])
 
-/** Open a panel on the user's click, through the mode-aware opener (in place
- *  over the cards in Guided, the panel in Expert), with "Back to <origin>". */
-export function openPanel(panel: SlidePanel): void {
+/** Open a panel on the user's click, through the shared mode-aware opener
+ *  (in place over the cards in Guided, the panel in Expert), with "Back to <origin>". */
+function open(panel: SlidePanel): void {
   manualNavigation()
-  const target: FlowTarget = {
-    section: PANEL_SECTION[panel] ?? 'results', panel, component: null, entity: null, field: null,
-  }
-  if (useUIStore.getState().uiMode === 'guided') openFlowTargetInPlace(target)
-  else openFlowTarget(target)
+  openPanel(PANEL_SECTION[panel] ?? 'results', panel)
+}
+
+/** The `error_kind` of a refused run call, or null (network error, other shape). */
+function errorKind(err: unknown): string | null {
+  return isAxiosError(err) ? (err.response?.data as { detail?: { error_kind?: string } })?.detail?.error_kind ?? null : null
 }
 
 function ruleWords(r: GateRule): string {
@@ -47,8 +49,8 @@ function ruleWords(r: GateRule): string {
 function Budgets({ view }: { view: RunMonitorView }) {
   const b = view.monitor.budgets
   const parts = [b.cost_eur.unmetered ? 'Cost could not be counted'
-    : b.cost_eur.limit > 0 ? `Cost ${euros(b.cost_eur.used)} of ${euros(b.cost_eur.limit)}`
-    : `Cost ${euros(b.cost_eur.used)} · no cost cap`]
+    : b.cost_eur.limit > 0 ? `Cost ${fmtCurrency(b.cost_eur.used)} of ${fmtCurrency(b.cost_eur.limit)}`
+    : `Cost ${fmtCurrency(b.cost_eur.used)} · no cost cap`]
   if (b.solves) parts.push(`Solves ${b.solves.used} of ${b.solves.of}`)
   if (b.expires_at) parts.push(`Expires ${when(b.expires_at)}`)
   return <div data-testid="run-budgets">{parts.join(' · ')}</div>
@@ -65,11 +67,18 @@ function CurrentStage({ stage, view }: { stage: RunStage; view: RunMonitorView }
   </div>
 }
 
+/** A link that goes somewhere (a panel, the Envelope section, the assistant): "›". */
 function Link({ children, onClick, disabled, testId }: {
   children: string; onClick: () => void; disabled?: boolean; testId?: string
 }) {
-  return <button type="button" disabled={disabled} onClick={onClick} data-testid={testId}
+  return <button type="button" disabled={disabled} onClick={onClick} data-testid={testId} data-run-link=""
     className="text-accent hover:underline disabled:opacity-40">{children} ›</button>
+}
+
+/** An action in place (resume, retry): no "›". */
+function Action({ children, onClick, disabled }: { children: string; onClick: () => void; disabled?: boolean }) {
+  return <button type="button" disabled={disabled} onClick={onClick}
+    className="text-accent hover:underline disabled:opacity-40">{children}</button>
 }
 
 export default function RunMonitor({ task, disabled, onRequest }: {
@@ -91,7 +100,7 @@ export default function RunMonitor({ task, disabled, onRequest }: {
       setView(await getRun(taskId))
       setFailed(null)
     } catch (err) {
-      const kind = isAxiosError(err) ? (err.response?.data as { detail?: { error_kind?: string } })?.detail?.error_kind : null
+      const kind = errorKind(err)
       if (kind === 'task_not_found') setGone(true)
       else setFailed('The run could not be read just now; it goes on on the server.')
     }
@@ -135,7 +144,7 @@ export default function RunMonitor({ task, disabled, onRequest }: {
     try {
       setView(await call())
     } catch (err) {
-      const kind = isAxiosError(err) ? (err.response?.data as { detail?: { error_kind?: string } })?.detail?.error_kind : null
+      const kind = errorKind(err)
       if (kind === 'task_not_found') setGone(true)
       else setFailed(kind === 'no_chat_session' ? 'Open the chat once, then try again.' : 'That did not go through; try again.')
     } finally {
@@ -145,12 +154,32 @@ export default function RunMonitor({ task, disabled, onRequest }: {
   const sessionId = useChatStore((s) => s.sessionId)
   const fix = (which: RunFix) => {
     if (which === 'resume') void act(() => resumeRun(taskId, sessionId))
-    else if (which === 'issues') openPanel('issues')
-    else if (which === 'results') openPanel('results')
-    else if (which === 'solve_log') openPanel('solveQueue')
-    else if (which === 'budget') onRequest(`Use get_task with task_id ${taskId}. The run used up its budget: show me its envelope so I can change the budget.`)
+    else if (which === 'issues') open('issues')
+    else if (which === 'results') open('results')
+    else if (which === 'solve_log') open('solveQueue')
+    else if (which === 'budget') changeBudget()
     else if (which === 'new_brief') onRequest('The inputs changed outside the run. Draft a new brief for me to review.')
-    else onRequest(`Use get_task with task_id ${taskId}. Inspect the uncertain step's effects and explain what needs verification before reconciliation.`)
+    else ask('Review the step', `Use get_task with task_id ${taskId}. Inspect the uncertain step's effects and explain what needs verification before reconciliation.`)
+  }
+  /** A request to the assistant whose transcript line is `label`: no tool name or id shows. */
+  const ask = (label: string, text: string) =>
+    useChatStore.getState().sendRequest(text, { source: 'run-monitor', label })
+  /** "Change the budget ›": this run's Envelope section, in a local plan review,
+   *  when its envelope can be granted again (used up, expired, withdrawn);
+   *  otherwise (the cost cap of a run whose envelope still holds) the assistant. */
+  const changeBudget = () => {
+    const envelope = view?.envelope
+    if (!envelope || envelope.state === 'granted') {
+      ask('Change the budget', `Use get_task with task_id ${taskId}. The run used up its cost budget: explain what I can change and how.`)
+      return
+    }
+    const chat = useChatStore.getState()
+    if (runUnderReview(chat.messages)?.taskId !== taskId) {
+      chat.appendMessage({ role: 'tool', content: '', tool_use_id: `run-change-${taskId}`, tool_name: 'get_task',
+        tool_result: { task_id: taskId, title: view.title, run: {}, envelope } })
+    }
+    chat.setChoice({ tool_use_id: `run-change-${taskId}`, intent: 'plan_review', title: view.title,
+      question: 'Change the budget, then approve again', options: [], allow_free_text: false })
   }
 
   if (gone) return <p data-testid="run-gone">This run is no longer available to you.</p>
@@ -162,6 +191,8 @@ export default function RunMonitor({ task, disabled, onRequest }: {
   </div>
 
   const stages = run.stages
+  // The Reports panel has no per-report selection yet: the link lands on the panel.
+  const hasReport = stages.some(s => s.stage === 'report' && s.status === 'passed')
   const current = stages.find(s => s.stage === run.stage)
   const stoppedAt = stageWords(run.stage)
   const cancelled = view.status === 'cancelled'
@@ -189,9 +220,9 @@ export default function RunMonitor({ task, disabled, onRequest }: {
           {now && !cancelled && <CurrentStage stage={s} view={view} />}
         </li>
       })}
-      <li data-testid="run-report-row">
-        <Link testId="run-report-link" onClick={() => openPanel('reports')}>Report</Link>
-      </li>
+      {hasReport && <li data-testid="run-report-row">
+        <Link testId="run-report-link" onClick={() => open('reports')}>Open the report</Link>
+      </li>}
     </ol>
 
     {gateFailed && <div data-testid="run-failure">
@@ -199,10 +230,12 @@ export default function RunMonitor({ task, disabled, onRequest }: {
       <Link onClick={() => fix(run.stage === 'result_gate' ? 'results' : 'issues')}>
         {run.stage === 'result_gate' ? 'Open results' : 'See the issues'}</Link>{' '}
       <span className="text-muted">then</span>{' '}
-      <Link disabled={busy} onClick={() => fix('resume')}>Check again</Link>
+      <Action disabled={busy} onClick={() => fix('resume')}>Check again</Action>
     </div>}
     {stop && !cancelled && <div data-testid="run-failure">
-      {stop.words}{stop.fix && <>: <Link disabled={busy} onClick={() => fix(stop.fix!)}>{stop.fixWords}</Link></>}
+      {stop.words}{stop.fix && <>: {stop.fix === 'resume'
+        ? <Action disabled={busy} onClick={() => fix('resume')}>{stop.fixWords}</Action>
+        : <Link disabled={busy} onClick={() => fix(stop.fix!)}>{stop.fixWords}</Link>}</>}
       {run.status === 'paused' && <p className="text-muted" data-testid="run-resume-note">
         Nothing runs until you resume: it picks up at {stoppedAt}.</p>}
       {run.status === 'paused' && view.envelope?.state === 'granted' && <p className="text-muted" data-testid="run-paused-expiry">

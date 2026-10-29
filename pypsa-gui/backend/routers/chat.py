@@ -2161,9 +2161,20 @@ def _run_call(actor: User, call):
 def run_view(task_id: str, actor: User = Depends(require_user)) -> dict[str, Any]:
     """The run's stages, gates, budgets, envelope and the card it waits on.
     Reading advances nothing."""
+    return _run_call(actor, lambda: _run_view(task_id))
+
+
+def _run_act(actor: User, task_id: str, act):
+    """A click on the plan card, then the run as it now is."""
+    def call():
+        act()
+        return _run_view(task_id)
+    return _run_call(actor, call)
+
+
+def _run_view(task_id):
     from services import run_monitor
-    ready = _profile_chat_ready(llm_config.resolve_active())
-    return _run_call(actor, lambda: run_monitor.view(task_id, provider_ready=ready))
+    return run_monitor.view(task_id, provider_ready=_profile_chat_ready(llm_config.resolve_active()))
 
 
 @router.post("/runs/{task_id}/present")
@@ -2177,8 +2188,7 @@ def run_present(task_id: str, actor: User = Depends(require_user)) -> dict[str, 
 @router.post("/runs/{task_id}/pause")
 def run_pause(task_id: str, actor: User = Depends(require_user)) -> dict[str, Any]:
     from services import run_monitor
-    _run_call(actor, lambda: run_monitor.pause(task_id))
-    return run_view(task_id, actor)
+    return _run_act(actor, task_id, lambda: run_monitor.pause(task_id))
 
 
 @router.post("/runs/{task_id}/resume")
@@ -2186,16 +2196,14 @@ def run_resume(task_id: str, body: RunResumeRequest | None = None,
                actor: User = Depends(require_user)) -> dict[str, Any]:
     from services import run_monitor
     session = _resolve_owned_session(body.session_id, actor) if body and body.session_id else None
-    _run_call(actor, lambda: run_monitor.resume(task_id, session))
-    return run_view(task_id, actor)
+    return _run_act(actor, task_id, lambda: run_monitor.resume(task_id, session))
 
 
 @router.post("/runs/{task_id}/stop")
 def run_stop(task_id: str, actor: User = Depends(require_user)) -> dict[str, Any]:
     """Revokes the envelope and cancels the run; nothing is reverted."""
     from services import run_monitor
-    _run_call(actor, lambda: run_monitor.stop(task_id))
-    return run_view(task_id, actor)
+    return _run_act(actor, task_id, lambda: run_monitor.stop(task_id))
 
 
 @router.post("/{session_id}/confirm")

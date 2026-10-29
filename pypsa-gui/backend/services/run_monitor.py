@@ -103,16 +103,31 @@ def _budgets(task, envelope):
     return out
 
 
-def _unattended(task, provider_ready):
-    """Why "Approve and run unattended" cannot work here, or None."""
-    from harness import runner
+def _unattended(task, provider_ready, email):
+    """Why "Approve and run unattended" cannot work here, or None: no runner,
+    no provider (chat off, no API key), no way to tell the user the run
+    stopped (no email set up and the in-app notice cannot be written), or
+    another user's edit lock."""
+    from harness import attention, runner
     if not runner.enabled():
         return "runner_off"
     if not provider_ready:
         return "no_provider"
+    if not email and attention.unavailable(task["owner_id"], task["project_id"]):
+        return "no_notice"
     if not assistant_tasks._may_write(task):
         return "locked"
     return None
+
+
+def _actions(task):
+    """The plan card's run buttons that can work now, in this order."""
+    run, status = task["run"], task["status"]
+    over = status in ("cancelled", "completed")
+    resumable = not over and status != "paused_at_card" and run["status"] in ("paused", "needs_user") and (
+        bool(run.get("reason")) or run["stages"][run["stage"]]["status"] == "failed")
+    return [name for name, ok in (("pause", not over and run["status"] in _PAUSABLE),
+                                  ("resume", resumable), ("stop", not over)) if ok]
 
 
 def view(task_id, provider_ready):
@@ -122,13 +137,15 @@ def view(task_id, provider_ready):
         path, task = _task(task_id)
         out = assistant_tasks._with_envelope(path, assistant_tasks._view(task, fresh=True))
         envelope = run_envelope._load(path)
-    reason = _unattended(task, provider_ready)
+    email = bool(email_service.get_status()["configured"])
+    reason = _unattended(task, provider_ready, email)
     card = runner.live_card(task_id)
     waiting = task["run"].get("waiting")
     out["monitor"] = {
         "budgets": _budgets(task, envelope),
         "unattended": {"available": reason is None, **({"reason": reason} if reason else {})},
-        "email": {"available": bool(email_service.get_status()["configured"])},
+        "email": {"available": email},
+        "actions": _actions(task),
         **({"card": card} if card else {}),
         **({"waiting": {k: waiting[k] for k in ("kind", "ref")}} if waiting else {}),
     }

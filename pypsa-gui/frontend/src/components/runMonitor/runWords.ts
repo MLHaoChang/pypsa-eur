@@ -5,7 +5,7 @@
 import type { EnvelopeEdit, EnvelopeRun } from '../../api/runMonitor'
 import { COMPONENT_LABEL } from '../../utils/componentLabels'
 import { FIELD_LABELS } from '../../utils/fieldLabels'
-import { fmtCurrency } from '../../utils/format'
+import { displayName } from '../../utils/displayName'
 
 /** The stage names (design §10), in run order. */
 export const STAGE_WORDS: Record<string, string> = {
@@ -71,7 +71,6 @@ export const FIELD_WORDS: Record<string, { words: string; unit: string }> = {
 /** The runs an envelope can cover. */
 export const RUN_WORDS: Record<string, string> = {
   solve_queue_enqueue: 'Queued solves', run_simulation: 'Solves', run_ac_pf_stage: 'Load-flow checks',
-  run_sensitivity_sweep: 'Sensitivity sweeps', run_eh_study: 'Site studies',
 }
 
 const number = (x: number) => (Number.isInteger(x) ? String(x) : x.toFixed(2).replace(/\.?0+$/, ''))
@@ -79,7 +78,7 @@ const number = (x: number) => (Number.isInteger(x) ? String(x) : x.toFixed(2).re
 /** "New gensets · Maximum capacity" */
 export function editSubject(edit: EnvelopeEdit): string {
   const { component, name, attr } = edit.target
-  const who = NAME_WORDS[name] ?? `${COMPONENT_WORDS[component]?.words ?? 'Asset'} '${name}'`
+  const who = NAME_WORDS[name] ?? `${COMPONENT_WORDS[component]?.words ?? 'Asset'} “${displayName(name)}”`
   return `${who} · ${FIELD_WORDS[attr]?.words ?? 'A design value'}`
 }
 
@@ -98,9 +97,6 @@ export function editLimits(edit: EnvelopeEdit): string {
 }
 
 export const runWords = (run: EnvelopeRun): string => RUN_WORDS[run.tool] ?? 'Other runs'
-
-/** "€2.00", the KPI currency format. */
-export const euros = (x: number): string => fmtCurrency(x)
 
 /** "28 Oct 18:00", in the viewer's time zone. */
 export function when(iso: string | null | undefined): string {

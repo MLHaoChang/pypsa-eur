@@ -6,7 +6,8 @@
 // widen it: the server checks again (`run_envelope.narrow`).
 import { useEffect, useState } from 'react'
 import { getRun, type Envelope, type RunMonitorView } from '../../api/runMonitor'
-import { UNATTENDED_BLOCK_WORDS, editLimits, editSubject, euros, runWords } from './runWords'
+import { UNATTENDED_BLOCK_WORDS, editLimits, editSubject, runWords } from './runWords'
+import { fmtCurrency } from '../../utils/format'
 
 export type EnvelopeVerdict =
   | { verdict: 'unattended'; envelope: Record<string, unknown>; notify_email: boolean }
@@ -93,10 +94,10 @@ export default function EnvelopeSection({ taskId, proposed, disabled, onVerdict 
       <span>·</span>
       <Stepper label="Expires after" name="Hours until it expires, at most" value={hours} max={proposed.budget.wall_time_h} unit="h" onChange={setHours} testId="envelope-hours" />
       <span>·</span>
-      <span>{costCap !== undefined && costCap > 0 ? `Cost cap ${euros(costCap)}` : 'no cost cap'}</span>
+      <span>{costCap !== undefined && costCap > 0 ? `Cost cap ${fmtCurrency(costCap)}` : 'no cost cap'}</span>
     </div>
     <div data-testid="envelope-research">
-      {envelope.research.allowed ? `Research cost cap ${euros(envelope.research.cost_cap_eur)}` : 'No research'}
+      {envelope.research.allowed ? `Research cost cap ${fmtCurrency(envelope.research.cost_cap_eur)}` : 'No research'}
     </div>
     <p className="text-muted">Always asks you first: deletes, publishing a grid code, outside tools, researched values,
       and anything not listed here.</p>

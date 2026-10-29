@@ -81,6 +81,9 @@ export const STATES: Record<string, RunMonitorView> = {
     envelope: { ...GRANTED, state: 'revoked' } }),
   finished: view({ status: 'completed', run: run('handoff', { status: 'completed', stages: stages('handoff', {}, true) }),
     envelope: GRANTED, monitor: { ...MONITOR, budgets: GRANTED_BUDGETS } }),
+  finished_report: view({ status: 'completed', run: run('handoff', { status: 'completed',
+    stages: stages('handoff', {}, true).map(s => (s.stage === 'report' ? { stage: 'report', status: 'passed' } : s)) }),
+    envelope: GRANTED, monitor: { ...MONITOR, budgets: GRANTED_BUDGETS } }),
   over_budget: view({ status: 'needs_review', run: run('solve', { status: 'needs_user', reason: 'budget', stages: stages('solve') }),
     monitor: { ...MONITOR, budgets: { cost_eur: { used: 5.01, limit: 5, unmetered: false } } } }),
   solves_used_up: view({ status: 'needs_review', run: run('solve', { status: 'needs_user', reason: 'envelope_exhausted', stages: stages('solve') }),
@@ -88,6 +91,7 @@ export const STATES: Record<string, RunMonitorView> = {
   expired: view({ status: 'needs_review', run: run('solve', { status: 'paused', reason: 'envelope_expired', stages: stages('solve') }),
     envelope: { ...GRANTED, state: 'expired' } }),
   solver_error: view({ status: 'needs_review', run: run('solve', { status: 'needs_user', reason: 'step_failed', stages: stages('solve') }) }),
+  uncertain: view({ status: 'needs_review', run: run('solve', { status: 'needs_user', reason: 'step_uncertain', stages: stages('solve') }) }),
   out_of_date: view({ status: 'needs_review', run: run('inputs', { status: 'needs_user', reason: 'brief_stale', stages: stages('inputs') }) }),
 }
 

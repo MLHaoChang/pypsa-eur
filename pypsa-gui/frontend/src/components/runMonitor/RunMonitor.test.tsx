@@ -8,6 +8,7 @@ import { useUIStore } from '../../store/uiStore'
 import * as api from '../../api/runMonitor'
 import { STATES, TASK_ID } from './runFixtures'
 import { STAGE_WORDS } from './runWords'
+import { runUnderReview } from './planReview'
 
 vi.mock('../../api/runMonitor', () => ({
   getRun: vi.fn(), presentRun: vi.fn(), pauseRun: vi.fn(), resumeRun: vi.fn(), stopRun: vi.fn(),
@@ -74,7 +75,7 @@ describe('RunMonitor', () => {
       await screen.findByTestId('run-state')
       expect(card()).not.toMatch(INTERNAL)
       expect(card()).not.toContain(TASK_ID)
-      expect(screen.getByTestId('run-state').textContent).toMatch(/^[A-Z][a-z]/)
+      expect(screen.getByTestId('run-state').textContent).toMatch(/^[A-Z][a-z ]/)
       cleanup()
       show(state, 'expert')
       await screen.findByTestId('run-state')
@@ -86,10 +87,10 @@ describe('RunMonitor', () => {
     })
 
   it.each([
-    ['gate_fail', /^Check inputs failed: 1 rule did not pass · See the issues › then Check again ›$/],
+    ['gate_fail', /^Check inputs failed: 1 rule did not pass · See the issues › then Check again$/],
     ['over_budget', /^Cost budget used up: the run stopped: Change the budget ›$/],
     ['solves_used_up', /^Solve budget used up: the run stopped: Change the budget ›$/],
-    ['expired', /^Unattended approval expired: Continue step by step ›Nothing runs until you resume: it picks up at Solve\.$/],
+    ['expired', /^Unattended approval expired: Continue step by stepNothing runs until you resume: it picks up at Solve\.$/],
     ['solver_error', /^Solve did not finish: Open the solve log ›$/],
     ['out_of_date', /^Inputs out of date: Review a new brief ›$/],
   ] as const)('says the %s failure in words with a › fix', async (state, words) => {
@@ -98,7 +99,7 @@ describe('RunMonitor', () => {
   })
 
   it('Expert: a › link opens its panel through openFlowTarget, with Back to the origin; never on its own', async () => {
-    show('finished', 'expert')
+    show('finished_report', 'expert')
     await screen.findByTestId('run-finished')
     expect(useUIStore.getState().activeSlidePanel).toBeNull()
     fireEvent.click(screen.getByTestId('run-report-link'))
@@ -122,13 +123,39 @@ describe('RunMonitor', () => {
     expect(useUIStore.getState().activeSlidePanel).toBe('issues')
   })
 
-  it('budget used up: "Change the budget ›" asks for the envelope, not Resume', async () => {
-    const onRequest = vi.fn()
-    show('over_budget', 'guided', onRequest)
+  it('solve budget used up: "Change the budget ›" reopens this run\u2019s Envelope section, not Resume', async () => {
+    useChatStore.setState({ messages: [], choice: null })
+    show('solves_used_up')
     fireEvent.click(await screen.findByRole('button', { name: 'Change the budget ›' }))
-    expect(onRequest).toHaveBeenCalledWith(expect.stringContaining('change the budget'))
+    expect(useChatStore.getState().choice).toMatchObject({ intent: 'plan_review', title: 'Own site study' })
+    expect(runUnderReview(useChatStore.getState().messages)?.taskId).toBe(TASK_ID)
+    expect(useChatStore.getState().requestQueue).toHaveLength(0)
     expect(api.resumeRun).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: /Resume/ })).toBeNull()
+  })
+
+  it.each([
+    ['over_budget', 'Change the budget ›', 'Change the budget'],
+    ['uncertain', 'Review the step ›', 'Review the step'],
+  ] as const)('%s: the request the fix sends shows in words, never a tool name or id', async (state, link, label) => {
+    show(state)
+    fireEvent.click(await screen.findByRole('button', { name: link }))
+    const [request] = useChatStore.getState().requestQueue
+    expect(request.label).toBe(label)
+    expect(request.label).not.toMatch(/get_task|_task|[0-9a-f]{8}-/)
+  })
+
+  it('the Report row shows only once the run has a report', async () => {
+    show('gate_pass')
+    await screen.findByTestId('run-state')
+    expect(screen.queryByTestId('run-report-link')).toBeNull()
+    cleanup()
+    show('finished')
+    await screen.findByTestId('run-finished')
+    expect(screen.queryByTestId('run-report-link')).toBeNull()
+    cleanup()
+    show('finished_report')
+    expect((await screen.findByTestId('run-report-link')).textContent).toBe('Open the report ›')
   })
 
   it('links use ›, never >', async () => {
@@ -136,11 +163,11 @@ describe('RunMonitor', () => {
       show(state)
       await screen.findByTestId('run-state')
       expect(card()).not.toContain('>')
-      for (const link of screen.getByTestId('run-monitor').querySelectorAll('button.text-accent')) {
-        if (link.textContent?.match(/[a-z]$/) && link.getAttribute('data-testid') !== 'run-continue'
-          && link.getAttribute('data-testid') !== 'run-pause' && link.getAttribute('data-testid') !== 'run-stop-keep') {
-          throw new Error(`link without ›: ${link.textContent}`)
-        }
+      // › only on a link that goes somewhere; an action in place has none.
+      for (const button of screen.getByTestId('run-monitor').querySelectorAll('button')) {
+        const marked = button.textContent?.endsWith(' ›') ?? false
+        expect(marked, button.textContent ?? '').toBe(button.hasAttribute('data-run-link'))
+        if (/^(Resume|Check again|Try again|Continue step by step)/.test(button.textContent ?? '')) expect(marked).toBe(false)
       }
       cleanup()
     }
@@ -150,9 +177,9 @@ describe('RunMonitor', () => {
     vi.mocked(api.resumeRun).mockResolvedValue(STATES.gate_pass)
     show('paused')
     const failure = await screen.findByTestId('run-failure')
-    expect(failure.textContent).toMatch(/^Paused at Solve: Resume ›Nothing runs until you resume: it picks up at Solve\.Unattended approval expires/)
+    expect(failure.textContent).toMatch(/^Paused at Solve: ResumeNothing runs until you resume: it picks up at Solve\.Unattended approval expires/)
     expect(screen.getByTestId('run-paused-expiry').textContent).toMatch(/^Unattended approval expires \d{1,2} Oct \d\d:\d\d$/)
-    fireEvent.click(screen.getByRole('button', { name: 'Resume ›' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Resume' }))
     await waitFor(() => expect(api.resumeRun).toHaveBeenCalledWith(TASK_ID, 's1'))
   })
 
