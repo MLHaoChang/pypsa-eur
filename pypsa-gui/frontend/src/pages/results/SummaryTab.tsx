@@ -142,7 +142,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
   const scope = selectedPeriod != null ? `period ${selectedPeriod}` : 'horizon'
   // Any "—" below for a value this solve did not record (A1.6 / A1.7).
   const notRecorded = (ll != null && (ll.total_mwh == null || ll.total_cost_eur == null))
-    || (e != null && e.caps.some(cap => cap.binding && cap.shadow_price_eur_per_tCO2 == null))
+    || (e != null && e.caps.some(cap => cap.binding == null || (cap.binding && cap.shadow_price_eur_per_tCO2 == null)))
   const shedHours = ll?.shed_hours == null ? null
     : selectedPeriod != null ? ll.shed_hours.by_period[String(selectedPeriod)] ?? null : ll.shed_hours.total
 
@@ -201,8 +201,9 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
               <Headline value={`${e.total_tCO2} tCO₂`} />
               {e.caps.length ? e.caps.map(cap => (
                 <Line key={cap.name} label={`Cap ${cap.name}${cap.cap_tCO2 != null ? ` (${fmtTonnes(cap.cap_tCO2)})` : ''}`}
-                  tone={cap.binding ? 'warn' : 'ok'}
-                  value={!cap.binding ? 'not binding'
+                  tone={cap.binding == null ? undefined : cap.binding ? 'warn' : 'ok'}
+                  value={cap.binding == null ? <NotRecordedDash />
+                    : !cap.binding ? 'not binding'
                     : cap.shadow_price_eur_per_tCO2 != null ? `binding · ${fmtCurrency(cap.shadow_price_eur_per_tCO2)}/t`
                     : <>binding · <NotRecordedDash />/t</>} />
               )) : <Absent>No CO₂ cap set.</Absent>}

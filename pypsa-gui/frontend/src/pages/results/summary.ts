@@ -30,7 +30,7 @@ export interface EmissionsPayload {
   total_tCO2: number
   caps: Array<{
     name: string; investment_period: number | null; scope: 'period' | 'horizon'
-    cap_tCO2: number | null; used_tCO2: number; shadow_price_eur_per_tCO2: number | null; binding: boolean
+    cap_tCO2: number | null; used_tCO2: number; shadow_price_eur_per_tCO2: number | null; binding: boolean | null
   }>
   by_period: Array<{ period: number | string; total_tCO2: number }>
 }
