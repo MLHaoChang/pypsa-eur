@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The CSV bundle and Excel exports escape text cells starting with `=`, `+`, `-`, `@`, tab or carriage return with a leading single quote, so a component named like a formula no longer runs in a spreadsheet; numbers stay numbers, and the app's own CSV and Excel imports strip the quote again.
