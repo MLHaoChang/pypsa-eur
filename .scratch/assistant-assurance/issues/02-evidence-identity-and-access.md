@@ -227,6 +227,7 @@ Smallest first; each goes to GK B as a plan before it is built.
 #### GK B (12) plan GO conditions (2026-10-29)
 
 1. Narrow mapping: only `_user`'s 401 and `resolve_project`'s 403 or 404 are `AccessRevoked`. Other `resolve_project` statuses and `unavailable()`'s refusals stay `assurance_publication_failed` + ERROR. Met:
+   - `_user` raises `AccessRevoked(401)` itself, and `authorize` maps only `resolve_project`'s 403 and 404, so a 401 from `resolve_project` passes through (`test_authorize_passes_other_project_refusals_through[401]`, `test_authorize_marks_an_inactive_account`);
    - `test_authorize_passes_other_project_refusals_through[409, 500]`;
    - `test_other_project_refusals_in_commit_stay_publication_failures[409, 500]`;
    - `test_unavailable_evidence_in_commit_stays_a_publication_failure`;

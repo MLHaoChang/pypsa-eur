@@ -421,7 +421,8 @@ def test_revocation_seen_by_the_evidence_recheck_in_commit_is_typed(
     response = harness.request(in_commit_guard(monkeypatch, revoke[kind]))
     assert_nothing_published(parse_sse(response.text), owner, before)
 
-@pytest.mark.parametrize("status", [409, 500])
+
+@pytest.mark.parametrize("status", [401, 409, 500])
 def test_authorize_passes_other_project_refusals_through(seeded_identity, monkeypatch, status):
     monkeypatch.setattr(records.project_registry, "resolve_project", resolve_refusing(status))
     with pytest.raises(HTTPException) as refused:
@@ -439,3 +440,9 @@ def test_authorize_marks_project_access_refusals(seeded_identity, monkeypatch, s
     with pytest.raises(records.AccessRevoked) as refused:
         records.authorize(str(seeded_identity["user_id"]), "Demo")
     assert (refused.value.status_code, refused.value.detail) == (status, "Project not found")
+
+
+def test_authorize_marks_an_inactive_account():
+    with pytest.raises(records.AccessRevoked) as refused:
+        records.authorize(str(uuid.uuid4()))
+    assert (refused.value.status_code, refused.value.detail) == (401, "Authentication required")

@@ -250,7 +250,7 @@ def _user(db, owner):
 
     user = db.get(User, uuid.UUID(owner))
     if user is None or user.status != "active":
-        raise HTTPException(401, "Authentication required")
+        raise AccessRevoked(401, "Authentication required")
     return user
 
 
@@ -265,13 +265,14 @@ def authorize(owner, project_id=None):
     from db.session import SessionLocal
 
     with SessionLocal() as db:
+        user = _user(db, owner)
+        if project_id is None:
+            return
         try:
-            user = _user(db, owner)
-            if project_id is not None:
-                project_registry.resolve_project(db, user, project_id)
+            project_registry.resolve_project(db, user, project_id)
         except HTTPException as refused:
             # Only the access refusals; any other status keeps its own path.
-            if refused.status_code in (401, 403, 404):
+            if refused.status_code in (403, 404):
                 raise AccessRevoked(
                     refused.status_code, refused.detail, refused.headers
                 ) from refused
