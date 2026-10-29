@@ -19,8 +19,10 @@ At 30 the cap binds in hours 0, 1 and 4 (E = 50) and the schedule in hours
 `run_simulation` reads the import Link's p_nom at the ens solve, so the edit is
 shown to reach the solve. The mutation drops the schedule at cap 80, and ENS
 falls by the hand delta. The ENS cap is lifted (10000 permyriad), so the LP
-sheds exactly the shortfall; all inputs are integers, so ENS is compared at
-abs 1e-6 MWh.
+sheds exactly the shortfall. All inputs are integers and the LP's optimum is a
+vertex, so every shed is an integer MW; the solver returns them exactly here
+(observed), and ENS is compared at abs 1e-6 MWh, so a shed off by even 1e-9 MW
+in a 1500 h hour would show.
 
 DtC. The P16 shared bus: a 30 MW critical Load and a 50 MW non-critical Load
 on the hub, 10 MW of local generation, and the import islanded by the
@@ -78,8 +80,9 @@ def energized_network(*, schedule=SCHEDULE) -> pypsa.Network:
     n = certifiable_weak_network()
     n.remove('Generator', 'peaker')
     n.generators.at['base', 'p_nom'] = OWN_MW
-    for c in n.snapshot_weightings.columns:
-        n.snapshot_weightings[c] = WEIGHTS
+    # ENS is weighted by the `generators` column; the other columns keep the
+    # fixture's uniform 1095 h, so an oracle on the wrong column fails.
+    n.snapshot_weightings['generators'] = WEIGHTS
     n.loads_t.p_set['hub_load'] = HUB_LOAD
     if schedule is not None:
         n.links_t['eh_energization_mw'] = pd.DataFrame({'import_poc': schedule}, index=n.snapshots)
@@ -135,13 +138,17 @@ def test_the_schedule_composes_as_min_with_each_capacity_edit(seam, solve_p_nom)
     hand = {CAP_HIGH: 1500 * 40 + 1000 * 10 + 1200 * 15 + 900 * 10,
             CAP_LOW: 1500 * 60 + 1000 * 30 + 1200 * 15 + 900 * 10 + 1100 * 10}
     assert hand == {CAP_HIGH: 97000, CAP_LOW: 158000}
+    steps = (CAP_HIGH, CAP_LOW, CAP_HIGH)
     got = []
-    for step, cap in enumerate((CAP_HIGH, CAP_LOW, CAP_HIGH)):
+    for step, cap in enumerate(steps):
         assert ens_oracle(n, cap) == pytest.approx(hand[cap], abs=ENS_ABS)
         ens = ens_at(seam, n, cap)
-        assert solve_p_nom[-1] == cap, (step, solve_p_nom)
         assert ens == pytest.approx(hand[cap], abs=ENS_ABS), (step, cap, ens)
         got.append(ens)
+    # One ens solve per step, each at that step's cap.
+    assert solve_p_nom == list(steps)
+    # Steps 1 and 3 solve the same LP on the same inputs: the result is the
+    # same vertex, so equal bit for bit, not just within ENS_ABS.
     assert got[2] == got[0]
 
 
@@ -149,7 +156,7 @@ def test_dropping_the_schedule_moves_ens_by_the_hand_delta(seam, solve_p_nom):
     with_e = ens_at(seam, energized_network(), CAP_HIGH)
     n = energized_network(schedule=None)
     without = ens_at(seam, n, CAP_HIGH)
-    assert solve_p_nom[-1] == CAP_HIGH
+    assert solve_p_nom == [CAP_HIGH, CAP_HIGH]
     # Without the schedule only hour 0 is short: 150 - 60 - 80 = 10 MW.
     assert ens_oracle(n, CAP_HIGH) == pytest.approx(1500 * 10, abs=ENS_ABS)
     assert without - with_e == pytest.approx(1500 * 10 - 97000, abs=ENS_ABS)
@@ -207,5 +214,9 @@ def test_bus_and_per_load_voll_each_set_the_critical_unserved(seam, local_mw, bu
     assert per_load['critical_unserved_mwh'] == pytest.approx(per_load_mwh, abs=ENS_ABS)
     assert per_load['noncritical_unserved_mwh'] == pytest.approx(bus_mwh - per_load_mwh, abs=ENS_ABS)
     assert per_load['critical_unserved_by_load'] == pytest.approx({'hospital': per_load_mwh}, abs=ENS_ABS)
-    assert bus['critical_unserved_mwh'] != pytest.approx(per_load['critical_unserved_mwh'], abs=1.0)
+    # The two VoLL attributions differ by exactly the non-critical demand shed
+    # on the critical bus (nonzero in both cases).
+    assert bus['critical_unserved_mwh'] - per_load['critical_unserved_mwh'] == pytest.approx(
+        bus_mwh - per_load_mwh, abs=ENS_ABS)
+    assert bus_mwh - per_load_mwh > 0
     assert table['priority_exact'] is True
