@@ -1,0 +1,1 @@
+{"kinds": {"assurance_access_revoked": {"surface": "banner", "why": "The owner's account or project access ended while a checked answer was being committed (REVOKE-KIND). Nothing was published, any saved answer was withdrawn, and the turn ends; there is no retry, since access is gone."}}}

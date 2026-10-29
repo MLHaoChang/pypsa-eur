@@ -136,14 +136,14 @@ SERIES_DRAFT = json.dumps(
 )
 
 
-def assert_nothing_published(frames, owner, before):
+def assert_nothing_published(frames, owner, before, kind="assurance_access_revoked"):
     assert not any(event == "answer_approved" for event, _ in frames)
     assert public_text(frames) == ""
     errors = [d for event, d in frames if event == "error"]
-    assert [e["error_kind"] for e in errors] == ["assurance_publication_failed"]
+    assert [e["error_kind"] for e in errors] == [kind]
     assert "5 MW" not in json.dumps(errors) and "p_set" not in json.dumps(errors)
     done = [d for event, d in frames if event == "session_done"]
-    assert done == [{"reason": "assurance_publication_failed"}]
+    assert done == [{"reason": kind}]
     assert answer_records(owner) == before
 
 
@@ -301,6 +301,8 @@ def test_reads_after_revocation_look_like_unknown_records(
         assert response.status_code == refused, path
         # A revoked record is indistinguishable from one that never existed.
         assert (absent.status_code, absent.text) == (refused, response.text), path
+        if kind == "membership":
+            assert response.json() == {"detail": "Record not found"}, path
         assert "L1" not in response.text and "5 MW" not in response.text
     history = harness.client.get(f"/api/chat/history?session_id={session_id}")
     if kind == "disabled":
@@ -321,12 +323,12 @@ def test_revocation_logs_carry_no_values(
     turns = [get_component(), text_turn(draft), text_turn(draft)]
     response = harness.request(RevokingProvider(turns, revoke[kind]))
     assert not any(e == "answer_approved" for e, _ in parse_sse(response.text))
-    failure = [
-        r
-        for r in caplog.records
-        if "checked answer could not be committed" in r.message
+    # REVOKE-KIND: an expected refusal, logged once as a warning with no ids.
+    failure = [r for r in caplog.records if r.name == "pypsa_gui.chat" and r.levelno >= logging.WARNING]
+    assert [(r.levelname, r.getMessage()) for r in failure] == [
+        ("WARNING", "checked answer withdrawn: project access was revoked")
     ]
-    assert len(failure) == 1, "the revocation path no longer logs its failure"
+    assert failure[0].exc_info is None
     formatter = logging.Formatter()
     for record in caplog.records:
         logged = formatter.format(record)
@@ -347,3 +349,93 @@ def test_revocations_are_undone_after_each_test(_auth_db, seeded_identity):
             .role
             == "admin"
         )
+
+
+def in_commit_guard(monkeypatch, act):
+    """A provider that runs `act` once commit takes the network guard.
+
+    Armed when the model drafts its answer (turn 1), so the capture's own
+    guard runs untouched; commit's evidence re-check then sees the change.
+    """
+    from harness import durable
+
+    guard, armed = durable.network_guard, []
+
+    @contextlib.contextmanager
+    def acting_guard(*args, **kwargs):
+        with guard(*args, **kwargs):
+            if armed == [True]:
+                armed.append("done")
+                act()
+            yield
+
+    monkeypatch.setattr(durable, "network_guard", acting_guard)
+    draft = observed_draft()
+    return RevokingProvider(
+        [get_component(), text_turn(draft), text_turn(draft)], lambda: armed.append(True)
+    )
+
+
+def resolve_refusing(status):
+    def resolve(db, user, project_id, **kwargs):
+        raise HTTPException(status, "refused")
+
+    return resolve
+
+
+@pytest.mark.parametrize("status", [409, 500])
+def test_other_project_refusals_in_commit_stay_publication_failures(
+    baseline, harness, seeded_identity, monkeypatch, caplog, status
+):
+    """REVOKE-KIND keeps its mapping narrow: only access refusals are revocations."""
+    caplog.set_level(logging.DEBUG)
+    owner = str(seeded_identity["user_id"])
+    before = answer_records(owner)
+    response = harness.request(in_commit_guard(monkeypatch, lambda: monkeypatch.setattr(
+        records.project_registry, "resolve_project", resolve_refusing(status))))
+    assert_nothing_published(parse_sse(response.text), owner, before, "assurance_publication_failed")
+    failure = [r for r in caplog.records if "checked answer could not be committed" in r.message]
+    assert len(failure) == 1 and failure[0].levelname == "ERROR"
+
+
+def test_unavailable_evidence_in_commit_stays_a_publication_failure(
+    baseline, harness, seeded_identity, monkeypatch
+):
+    owner = str(seeded_identity["user_id"])
+    before = answer_records(owner)
+
+    def gone(*args, **kwargs):
+        records.unavailable("evidence_unavailable")
+
+    response = harness.request(
+        in_commit_guard(monkeypatch, lambda: monkeypatch.setattr(records, "evidence", gone)))
+    assert_nothing_published(parse_sse(response.text), owner, before, "assurance_publication_failed")
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_revocation_seen_by_the_evidence_recheck_in_commit_is_typed(
+    baseline, harness, revoke, seeded_identity, monkeypatch, kind
+):
+    owner = str(seeded_identity["user_id"])
+    before = answer_records(owner)
+    response = harness.request(in_commit_guard(monkeypatch, revoke[kind]))
+    assert_nothing_published(parse_sse(response.text), owner, before)
+
+@pytest.mark.parametrize("status", [409, 500])
+def test_authorize_passes_other_project_refusals_through(seeded_identity, monkeypatch, status):
+    monkeypatch.setattr(records.project_registry, "resolve_project", resolve_refusing(status))
+    with pytest.raises(HTTPException) as refused:
+        records.authorize(str(seeded_identity["user_id"]), "Demo")
+    assert refused.value.status_code == status
+    assert not isinstance(refused.value, records.AccessRevoked)
+
+
+@pytest.mark.parametrize("status", [403, 404])
+def test_authorize_marks_project_access_refusals(seeded_identity, monkeypatch, status):
+    def resolve(db, user, project_id):
+        raise HTTPException(status, "Project not found")
+
+    monkeypatch.setattr(records.project_registry, "resolve_project", resolve)
+    with pytest.raises(records.AccessRevoked) as refused:
+        records.authorize(str(seeded_identity["user_id"]), "Demo")
+    assert (refused.value.status_code, refused.value.detail) == (status, "Project not found")
