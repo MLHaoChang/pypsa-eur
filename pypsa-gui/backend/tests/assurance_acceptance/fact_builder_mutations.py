@@ -20,9 +20,9 @@ A = "tests/assurance_acceptance/"
 EVIDENCE = A + "test_p1_evidence.py"
 BUILDER = A + "test_p1_fact_builder.py"
 SITES = {
-    "_raw_facts": [EVIDENCE, BUILDER, "-k", "not page"],
-    "capture_input_page": [EVIDENCE, "-k", "page"],
-    "_page_facts": [EVIDENCE, "-k", "page"],
+    "_raw_facts": [EVIDENCE, BUILDER, "-k", "not page and not pointer_characters"],
+    "capture_input_page": [EVIDENCE, "-k", "page or pointer_characters"],
+    "_page_facts": [EVIDENCE, "-k", "page or pointer_characters"],
     "_series_steps": [A + "test_p1_timeseries.py", BUILDER],
     "_aggregate_facts": [A + "test_p1_aggregate.py"],
     "_run_facts": [A + "test_p1_run_as_of.py"],
