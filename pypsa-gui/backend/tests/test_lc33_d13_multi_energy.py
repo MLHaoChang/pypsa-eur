@@ -13,10 +13,13 @@ H2. H2 unmet = 2 x (40 - 18) = 44 MWh, by carrier and by Load; electrical
 unmet = 0, and the electrical ENS target sees none of it. The mutation raises
 the H2 Load by 5 MW: H2 unmet +10 MWh, electrical unmet exactly 0 again.
 
-Shared bus. The same two Loads both sit on the AC hub with the 80 MW of gas:
-10 MW short, 20 MWh over 2 h. The per-Load slacks are equally priced on one
-bus, so the LP is indifferent to which Load sheds: the total is pinned, both
-by Load and by carrier, and the split is not.
+Shared bus. A 5 MW AC Load and the 40 MW H2 Load both sit on the AC hub with
+30 MW of gas: 15 MW short, 30 MWh over 2 h. The per-Load slacks are equally
+priced on one bus, so the LP may shed either Load; but the shortfall exceeds
+the AC Load, so at least 10 MW (20 MWh) must be H2. Pinned: the total, that
+H2 floor, and that the by-carrier and by-Load readers agree Load by Load (a
+roll-up by the bus's carrier instead of the Load's would book H2 as
+electrical).
 
 Live solves always capture per-Load slacks, so both cases report
 `per_load_slack`; the dedicated-bus roll-up path is not reached from the seam.
@@ -38,7 +41,7 @@ AC_MW, GAS_MW = 50.0, 80.0
 ELY_MW, ELY_EFF = 50.0, 0.6
 
 
-def hub(h2_mw: float, *, shared: bool) -> pypsa.Network:
+def hub(h2_mw: float, *, shared: bool, ac_mw: float = AC_MW, gas_mw: float = GAS_MW) -> pypsa.Network:
     n = pypsa.Network()
     n.set_snapshots(pd.date_range('2030-01-01', periods=HOURS, freq='h'))
     n.snapshot_weightings.loc[:, :] = 1.0
@@ -48,9 +51,9 @@ def hub(h2_mw: float, *, shared: bool) -> pypsa.Network:
     if not shared:
         n.add('Bus', 'h2', carrier='H2')
         n.add('Link', 'electrolyser', bus0='hub', bus1='h2', p_nom=ELY_MW, efficiency=ELY_EFF, carrier='H2')
-    n.add('Load', 'l_elec', bus='hub', carrier='AC', p_set=AC_MW)
+    n.add('Load', 'l_elec', bus='hub', carrier='AC', p_set=ac_mw)
     n.add('Load', 'l_h2', bus='hub' if shared else 'h2', carrier='H2', p_set=h2_mw)
-    n.add('Generator', 'gas', bus='hub', carrier='gas', p_nom=GAS_MW, marginal_cost=20.0)
+    n.add('Generator', 'gas', bus='hub', carrier='gas', p_nom=gas_mw, marginal_cost=20.0)
     return n
 
 
@@ -101,11 +104,17 @@ def test_h2_unmet_on_its_own_bus_is_attributed_to_hydrogen_alone(seam, h2_mw):
     assert s['target']['payload']['system']['achieved_ens_mwh'] == 0.0
 
 
-def test_a_shared_bus_reports_the_shed_total_not_an_invented_split(seam):
-    payload = multi_energy(sections(seam, hub(40.0, shared=True)))
-    total = HOURS * (AC_MW + 40.0 - GAS_MW)
-    assert total == 20.0
-    by_carrier = payload['ens_by_carrier_mwh']
-    assert set(by_carrier) == {'electrical', 'hydrogen'}
+SHARED_AC_MW, SHARED_GAS_MW = 5.0, 30.0
+
+
+def test_a_shared_bus_reports_the_forced_h2_shed_and_its_readers_agree(seam):
+    payload = multi_energy(sections(seam, hub(40.0, shared=True, ac_mw=SHARED_AC_MW, gas_mw=SHARED_GAS_MW)))
+    short = SHARED_AC_MW + 40.0 - SHARED_GAS_MW
+    total, h2_floor = HOURS * short, HOURS * (short - SHARED_AC_MW)
+    assert (total, h2_floor) == (30.0, 20.0)
+    by_carrier, by_load = payload['ens_by_carrier_mwh'], payload['ens_by_load_mwh']
+    assert by_carrier['hydrogen'] >= h2_floor - MWH_TOL
+    assert by_carrier['hydrogen'] == pytest.approx(by_load.get('l_h2', 0.0), abs=MWH_TOL)
+    assert by_carrier.get('electrical', 0.0) == pytest.approx(by_load.get('l_elec', 0.0), abs=MWH_TOL)
     assert sum(by_carrier.values()) == pytest.approx(total, abs=MWH_TOL)
-    assert sum(payload['ens_by_load_mwh'].values()) == pytest.approx(total, abs=MWH_TOL)
+    assert sum(by_load.values()) == pytest.approx(total, abs=MWH_TOL)
