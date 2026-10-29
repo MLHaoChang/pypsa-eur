@@ -113,3 +113,20 @@ def test_every_workbook_view_has_a_results_tab_label():
     tabs = dict(re.findall(r"\{ id: '(\w+)',\s*label: '([^']+)'", src))
     missing = [v.view_id for v in workbook_views() if v.view_id not in tabs]
     assert not missing, f"workbook views with no Results tab label: {missing}"
+
+
+def test_chat_tool_refuses_an_unsolved_network_and_saves_nothing(install_network, tmp_projects_dir):
+    import pypsa
+
+    n = pypsa.Network()
+    n.set_snapshots(range(3))
+    n.add("Bus", "A")
+    n.add("Load", "L", bus="A", p_set=10.0)
+    n.add("Generator", "g", bus="A", p_nom=20.0, marginal_cost=1.0)
+    install_network(n, name="P")
+    (tmp_projects_dir / "P").mkdir(parents=True, exist_ok=True)
+    with pytest.raises(HTTPException) as exc:
+        T.export_results_workbook()
+    assert exc.value.status_code == 409
+    assert exc.value.detail["error_kind"] == "results_workbook_no_results"
+    assert not list((tmp_projects_dir / "P").rglob("*.xlsx"))
