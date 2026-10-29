@@ -35,6 +35,7 @@ ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUTPUT = ROOT / '.scratch/live-copilot/family-manifest.json'
 B = 'pypsa-gui/backend/tests/'
 G = 'tests/gridspine/'
+D15_TOOLS = 'campus_set_island_config campus_island_config campus_run_island_study'
 
 # The capability-matrix families, in `assistant_control_matrix.FAMILY_JOURNEYS`
 # order, keyed by their journey slug.
@@ -344,8 +345,36 @@ VARIANTS: list[dict] = [
              B + 'test_lc06_d13_energization_dtc.py::test_dropping_the_schedule_moves_ens_by_the_hand_delta'),
     _pending('LC-D13.multi_energy', 'no H2/heat attribution test found'),
     _pending('LC-D14.static_campus', 'chat tests stub the service; seed tests/gridspine/test_campus_ranking.py'),
-    *[_pending(f'LC-D15.{m}', 'engine seed only (test_island_schema.py); chat tests stub the service')
-      for m in ('gfl_pq', 'gfl_qu', 'gfl_pf', 'gfl_fw', 'gfm_droop', 'gfm_vsm', 'governors')],
+    *[_covered(f'LC-D15.{m}', 'exact {value, source} read-back; refusals name the field and the unit\'s control; '
+               'a gfl BESS enters no GFM row: the genset carries 10 MW x 1000 x 4 h = 40,000 with only headroom binding',
+               D15_TOOLS,
+               B + 'test_lc06_d15_control_models.py::test_each_model_and_governor_reads_back_exactly',
+               B + 'test_lc06_d15_control_models.py::test_a_grid_following_bess_does_not_enter_the_gfm_rows',
+               B + f'test_lc06_d15_control_models.py::{refusal}')
+      for m, refusal in (('gfl_pq', 'test_a_missing_field_is_refused_naming_it_and_the_model'),
+                         ('gfl_qu', 'test_a_missing_field_is_refused_naming_it_and_the_model'),
+                         ('gfl_pf', 'test_gfl_pf_needs_one_power_factor_choice_and_says_so_with_its_model'),
+                         ('gfl_fw', 'test_a_field_of_another_model_is_refused_naming_it_and_the_units_own_model'))],
+    _covered('LC-D15.gfm_droop', 'QSS row sum K x 0.5 Hz >= 10 MW with K = p_nom/(R f0), R = droop_pct/100: p_nom 40 MW, 4000 '
+             '(droop read as pu: 400,000); refusals name the field and gfm_droop; exact read-back',
+             D15_TOOLS,
+             B + 'test_lc06_d15_control_models.py::test_gfm_droop_gain_reads_droop_in_percent',
+             B + 'test_lc06_d15_control_models.py::test_a_value_out_of_range_names_the_model_and_the_field',
+             B + 'test_lc06_d15_control_models.py::test_each_model_and_governor_reads_back_exactly'),
+    _covered('LC-D15.gfm_vsm', 'RoCoF row 2 H_v p_nom/pf >= f0 dP/RoCoF_max: p_nom 47.5 MW, 4750 at 50 Hz and 5700 at 60 Hz '
+             '(f0 from the campus file; H on P: 5000/6000); the grid_forming_support preset expands to its assumed '
+             'fields and gives 5937.5; refusals name the field and gfm_vsm',
+             D15_TOOLS,
+             B + 'test_lc06_d15_control_models.py::test_vsm_inertia_is_on_the_apparent_power_base',
+             B + 'test_lc06_d15_control_models.py::test_a_preset_reads_back_as_written_and_expands_to_its_tagged_fields',
+             B + 'test_lc06_d15_control_models.py::test_a_field_of_another_model_is_refused_naming_it_and_the_units_own_model'),
+    _covered('LC-D15.governors', 'a 20 MW 4 % droop genset adds K = 10 MW/Hz to the QSS row (BESS 20 MW, 2000) where an '
+             'isochronous one adds none (40 MW, 4000); refusals name the governor; exact read-back of both',
+             D15_TOOLS,
+             B + 'test_lc06_d15_control_models.py::test_a_droop_genset_adds_its_gain_to_the_qss_row',
+             B + 'test_lc06_d15_control_models.py::test_gfm_droop_gain_reads_droop_in_percent',
+             B + 'test_lc06_d15_control_models.py::test_a_droop_governor_without_droop_pct_names_the_governor',
+             B + 'test_lc06_d15_control_models.py::test_a_field_of_a_converter_on_an_isochronous_genset_names_the_governor'),
     *[_pending(f'LC-D16.{e}', 'engine seed only (test_frequency*.py); campus_run_island_study tests stub it')
       for e in ('E1', 'E2', 'E3', 'E4', 'E5', 'E6')],
     _unavailable('LC-D16.emt_pll_voltage', 'single-bus aggregate frequency screening only; no EMT/RMS/PLL/voltage dynamics',

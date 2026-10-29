@@ -399,6 +399,37 @@ Test only; no engine edit.
 - Planted fault: the schedule applied as a fraction of a fixed 100 MW rating
   (rescaled by the new p_nom) gives 130,400 at the first step, so the test is red.
 
+### S7, LC-D15 control models (2026-10-29)
+
+Branch `claude/lc06-d15-control-models`, stacked on S6. GK A reviews. Session LC-06 (5).
+
+- Engine edit (option A, TDD: the refusal tests were red first): `gridspine/schema/island.py`
+  `validate_unit_island` puts the model in `where`, `units.bess (control gfm_droop)` once
+  the control enum passes and `units.g (governor droop)` when the governor is a valid one.
+  The missing-'control' and bad-enum refusals keep their text. No consumer parses these
+  messages (grep of services, harness, frontend and tests); test_island_schema.py matches
+  field names only.
+- `pypsa-gui/backend/tests/test_lc06_d15_control_models.py`, all through
+  `campus_set_island_config` / `campus_island_config` / `campus_run_island_study`:
+  - Refusals: a missing field per model, a field from another model, gfl_pf's one-of,
+    k_gfm_min > i_max_pu, both governors; each names the field and the unit's own model.
+  - Read-back: the six models x both governors read back equal to the written config,
+    every {value, source}; the grid_forming_support preset reads back as written and
+    validates to its fields, each `assumed`.
+  - Oracles on the seamless objective (400 import energy + 100 x p_nom). VSM RoCoF row:
+    47.5 MW, 4750 at 50 Hz, 5700 at 60 Hz (f0 from the campus file, read back as
+    facts.instant.f0_hz); H on P gives 5000/6000. Preset H_v 4 s: 5937.5.
+    gfm_droop QSS row with an isochronous genset: 40 MW, 4000; droop read as pu 400,000.
+    A 4 % droop genset adds K = 10 MW/Hz: 20 MW, 2000. A gfl BESS enters no GFM row: the
+    genset carries 10 MW x 1000 x 4 h = 40,000, only Island-headroom-up binds.
+  - The predecessor's 4000 for the droop case assumed `cost_of_seamless`; with the QSS
+    row live, ups_bridged also builds BESS (its objective 800), so the tests read the
+    seamless variant's objective instead.
+- Mutations (each run, each red): H_v on p_nom (solver island.py RoCoF coef) fails the
+  VSM and preset tests; droop_pct as pu in the GFM K (island.py ΣK) fails both droop
+  tests; the `where` edit reverted fails all 13 model-naming refusal tests.
+- Manifest: LC-D15.gfl_pq/qu/pf/fw, gfm_droop, gfm_vsm, governors covered.
+
 ## Hand-off 4 (2026-10-29, LC-06 (4) at 300k)
 
 PR stack (each against master, stacked; all merges clean, no rebase):
