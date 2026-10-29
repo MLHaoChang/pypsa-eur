@@ -15,6 +15,7 @@ Many sessions work on this repo in parallel. One **coordinator** session relays 
    Done when the PR diff contains one new fragment and no change to `doc/release_notes.md`.
    Shared JSON works the same way (RETRO-COST-1): a new error kind goes in `pypsa-gui/tool-error-kinds.d/<branch>.json`, a new route-parity declaration in `pypsa-gui/backend/smoke/assistant_route_parity_declarations.d/<branch>.json` (each folder's README has the format). Leave a declaration or `KNOWN_GAPS` row whose route your tool now serves: the checks list it as stale and the coordinator's sweep deletes it. Commit nothing the assistant smoke scripts generate; their `--check` builds in memory.
 3. **Wait for CI on the head.** You own CI for your PR: the coordinator does not watch it. Let every run on the current head finish. Each push cancels the ~2 h "GUI backend" run (concurrency cancel-in-progress), so batch fixes into one validated push.
+   `subscribe_pr_activity` only to the PR whose CI you are driving now: each subscription costs a ~13k-char wake. For the other PRs of a stack, run `scripts/coord/ciwait.sh 118 <pr>` with the Bash tool's `run_in_background` instead.
    Done when every check run on the head SHA is completed.
 4. **Fix red CI.** See [CI failures](#ci-failures); loop back to step 3 after each push.
    Done when every check run is success or skipped.
@@ -30,7 +31,7 @@ Many sessions work on this repo in parallel. One **coordinator** session relays 
 
 ## Messages to the coordinator
 
-Send the coordinator only: `premerge ok <full sha>`, a review request, a question, a hand-off note, `ci-only`. No "ready", FYI, resend or status update such as "PR open, CI pending". A new session reports ready by doing its first piece of work. Reviewers' verdicts are PR comments, not messages; you see them through your PR subscription.
+Send the coordinator only: `premerge ok <full sha>`, questions (as options), PERMISSION requests and hand-off notes (`ci-only` included). No progress or status messages: no "ready", FYI, resend or "PR open, CI pending". A new session reports ready by doing its first piece of work. Reviewers' verdicts are PR comments, not messages; you see them through your PR subscription.
 
 ## Merge gate
 
