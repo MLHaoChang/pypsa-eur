@@ -261,7 +261,10 @@ def _island_report(scale: float = 1.0) -> dict:
                  "columns": ["scenario", "status", "objective", "cost of island capability"],
                  "rows": [["baseline (no island rows)", "ok", 1.0e6, 0.0],
                           ["seamless", "ok", 1.0e6 + 5.0e4 * scale, 5.0e4 * scale]],
-                 "assumed_rows": [1]}]}
+                 "assumed_rows": [1]},
+                {"id": "island_hours", "group": "hours", "title": "Island critical hours",
+                 "columns": ["period", "hour", "island reasons"],
+                 "rows": [[2030, 5, "peak_import"], [2040, 17, "min_pf"]], "assumed_rows": []}]}
 
 
 def _gfm(scale: float = 1.0, state: str = "ready") -> dict:
@@ -273,7 +276,9 @@ def _gfm(scale: float = 1.0, state: str = "ready") -> dict:
                                        "current": {"droop_pct": 4.0, "tau_f_s": 0.1},
                                        "recommended": {"droop_pct": 2.0 * scale, "tau_f_s": 0.5}}},
         "cases": [{"key": "2030 h5 seamless E1", "ok_before": False, "binding_before": "rocof",
-                   "ok_after": scale > 1, "binding_after": "rocof"}],
+                   "ok_after": scale > 1, "binding_after": "rocof"},
+                  {"key": "2040 h17 seamless E1", "ok_before": True, "binding_before": None,
+                   "ok_after": True, "binding_after": None}],
         "capacity": [{"case": "2030 h5 seamless E1", "kind": "inertia", "delta": 40.0 * scale,
                       "unit": "MW·s", "binding": "rocof", "derivation": "f0·ΔP/RoCoF",
                       "feasible": True, "note": ""}]}}
@@ -409,6 +414,50 @@ def test_grid_forming_counts_cases_no_capacity_fixes(net, projects, monkeypatch)
     rows = list(ws.iter_rows(values_only=True))
     assert any("not achievable by capacity" in r for r in rows)
     assert ws._charts  # the capacity chart keeps its all-number column
+
+
+def _gfm_capacity(rows):
+    got = _gfm()
+    got["recommendation"]["capacity"] = [
+        {"case": c, "kind": k, "delta": v, "unit": u, "binding": "rocof", "derivation": "",
+         "feasible": True, "note": ""} for c, k, v, u in rows]
+    return got
+
+
+def test_grid_forming_capacity_is_the_largest_delta_of_each_kind(net, projects, monkeypatch):
+    from services import campus_island_tuning
+    monkeypatch.setattr(campus_island_tuning, "get_settings", lambda p: _gfm_capacity([
+        ("2030 h5", "inertia", 40.0, "MW·s"), ("2040 h2", "inertia", 25.0, "MW·s"),
+        ("2030 h5", "headroom_up", 3.0, "MW")]))
+    ws = _wb(_build(net, ["grid_forming"], project_for=projects.project_for))[
+        TITLES["grid_forming"]]
+    assert _key(ws, "Capacity needed — inertia", HORIZON) == 40.0
+    assert _key(ws, "Capacity needed — headroom_up", HORIZON) == 3.0
+
+
+def test_grid_forming_charts_capacity_only_for_a_single_kind(net, projects, monkeypatch):
+    from services import campus_island_tuning
+    titles = lambda ws: [c.title.tx.rich.p[0].r[0].t for c in ws._charts]  # noqa: E731
+    monkeypatch.setattr(campus_island_tuning, "get_settings", lambda p: _gfm_capacity([
+        ("2030 h5", "inertia", 40.0, "MW·s"), ("2030 h5", "headroom_up", 3.0, "MW")]))
+    ws = _wb(_build(net, ["grid_forming"], project_for=projects.project_for))[
+        TITLES["grid_forming"]]
+    assert "Capacity needed by case" not in titles(ws)  # MW·s and MW share no axis
+    assert any("not charted" in str(r[0]) for r in ws.iter_rows(values_only=True))
+    monkeypatch.setattr(campus_island_tuning, "get_settings", lambda p: _gfm_capacity([
+        ("2030 h5", "inertia", 40.0, "MW·s"), ("2040 h2", "inertia", 25.0, "MW·s")]))
+    ws = _wb(_build(net, ["grid_forming"], project_for=projects.project_for))[
+        TITLES["grid_forming"]]
+    assert "Capacity needed by case" in titles(ws)
+
+
+@pytest.mark.parametrize("view", ["grid_code", "island", "grid_forming"])
+def test_a_view_without_a_period_split_keeps_the_second_periods_rows(net, projects, view):
+    """GK B condition 3, ruling A: no per-period keys, but no first-period-only table."""
+    ws = _wb(_build(net, [view], project_for=projects.project_for))[TITLES[view]]
+    assert NO_PERIODS in ws["A2"].value
+    base = [r for r in ws.iter_rows(values_only=True) if r[0] == "Base"]
+    assert any(v == 2040 or str(v).startswith("2040 ") for r in base for v in r[1:])
 
 def test_electrical_design_of_a_planning_study_is_no_results(net, projects):
     wb = _wb(_build(net, ["electrical_design"], project_id="study",

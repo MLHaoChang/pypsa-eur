@@ -406,6 +406,10 @@ def _grid_forming(run, project) -> ViewData | None:
     d.keys.append(Key("Cases", "count", {HORIZON: len(cases)}))
     d.keys.append(Key("Simulations", "count", {HORIZON: rec.get("simulations")}))
     capacity = rec.get("capacity") or []
+    kinds = sorted({str(r.get("kind")) for r in capacity if not _unfixable(r)})
+    units = {str(r.get("unit") or "") for r in capacity if not _unfixable(r)}
+    if len(kinds) > 1:
+        d.notes.append("Capacity needed is not charted: its kinds have different units.")
     for kind in sorted({str(r.get("kind")) for r in capacity}):
         of = [r for r in capacity if str(r.get("kind")) == kind and _is_number(r.get("delta"))]
         # gfm_tuning writes an infinite delta for a case no capacity fixes.
@@ -424,7 +428,12 @@ def _grid_forming(run, project) -> ViewData | None:
         _records("Recommended settings", "", settings,
                  ["unit", "model", "parameter", "current", "recommended"]),
         _records("Cases before and after", "", cases),
-        _records("Capacity needed", "", [r for r in capacity if not _unfixable(r)]),
+        # One axis, one unit: the chart reads "Capacity needed" only when it
+        # holds a single kind (inertia MW·s, headroom MW and droop gain MW/Hz
+        # do not share an axis).
+        _records("Capacity needed" if len(kinds) == 1 else "Capacity needed by case and kind",
+                 next(iter(units)) if len(units) == 1 else "",
+                 [r for r in capacity if not _unfixable(r)]),
         _records("Cases no capacity fixes", "", [{**r, "delta": "not achievable by capacity"}
                                                  for r in capacity if _unfixable(r)]),
     ) if t is not None]
