@@ -146,7 +146,7 @@ def lose_owner(path):
 def member_only(seeded_identity, second_identity, _auth_db):
     """The caller reaches the project only through a project membership row:
     an org member (not admin) who did not create it. Yields (add, remove)."""
-    from datetime import datetime, timezone
+    from datetime import UTC, datetime
 
     from sqlalchemy import delete, update
 
@@ -160,7 +160,7 @@ def member_only(seeded_identity, second_identity, _auth_db):
             db.execute(update(Project).where(Project.id == uuid.UUID(project_id))
                        .values(created_by=second_identity["user_id"]))
             db.add(ProjectMembership(project_id=uuid.UUID(project_id), user_id=me, assigned_by=me,
-                                     assigned_at=datetime.now(tz=timezone.utc)))
+                                     assigned_at=datetime.now(tz=UTC)))
             db.commit()
 
     def remove(project_id):
@@ -306,8 +306,8 @@ def test_the_envelope_section_names_every_profile_edit_and_run_in_words():
     assert run_envelope.RUN_TOOLS <= runs
     for ref in run_profiles.PROFILES:
         envelope = run_profiles.resolve(ref).get("envelope")
-        for edit in (envelope or {}).get("edits", []):
-            target = edit["target"]
+        for granted in (envelope or {}).get("edits", []):
+            target = granted["target"]
             assert target["component"] in components and target["name"] in names and target["attr"] in fields, (ref, target)
         for run in (envelope or {}).get("runs", []):
             assert run["tool"] in runs, (ref, run)
