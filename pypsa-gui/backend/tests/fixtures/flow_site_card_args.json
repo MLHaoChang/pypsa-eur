@@ -12,6 +12,18 @@
   }
  },
  {
+  "id": "eh_concentrator_staged",
+  "meta": {
+   "dtc_attribution": null,
+   "pack_overrides": {},
+   "recommended_archetype": "weak_flexible",
+   "stages": null
+  },
+  "study_body": {
+   "archetype": "weak_flexible"
+  }
+ },
+ {
   "id": "eh_datacenter",
   "meta": {
    "dtc_attribution": "per_load",
