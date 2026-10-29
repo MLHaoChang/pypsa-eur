@@ -22,13 +22,13 @@ Wrong-base oracles, by hand from the seamless rows (``services/solver/island.py`
   4000 MW, cost 400,000.
 
 The row not under test is slack (RoCoF_max or Δf_qss 1e6 Hz). Headroom needs
-10 MW, MVA 0 (no critical load) and energy 10 MW·1 s, so neither binds below
+10 MW, MVA 0 (the critical load is 0 MW, gfm_margin 0) and energy 10 MW·1 s, so neither binds below
 the 40 MW the tighter rows ask for.
 
-Tolerance: costs are LP objectives of a few thousand; ``abs=1e-3`` is far
-inside the solver's feasibility tolerance on a 1e2-scale cost, and each
-wrong-base value is at least 250 away, so the assert separates them by
-more than five orders of magnitude.
+Tolerance: ``abs=1e-2``. The objectives are at most 6.4e3 (4.0e4 in the
+gfl case) and HiGHS solves to ~1e-7 relative, so solver noise is below
+~5e-3 even there. The nearest wrong-base value is 250 away (4750 vs 5000),
+2.5e4 times the tolerance.
 """
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ from services.campus_electrical_service import CAMPUS_FILE, SUBDIR
 from tests.test_island_rows import _hub
 
 P = "Island Hub"
-TOL = 1e-3
+TOL = 1e-2
 
 
 def t(value, source="assumed"):
@@ -243,7 +243,7 @@ def test_vsm_inertia_is_on_the_apparent_power_base(hub, f0, right, wrong):
     out = _seamless(_config(MODELS["gfm_vsm"], rocof=1.0))
     assert out["variants"]["seamless"]["facts"]["instant"]["f0_hz"] == f0
     assert out["variants"]["seamless"]["status"] == "ok"
-    assert abs(right - wrong) > 1e5 * TOL
+    assert abs(right - wrong) > 1e4 * TOL
     assert _bess_cost(out) == pytest.approx(right, abs=TOL)
 
 
@@ -254,7 +254,7 @@ def test_gfm_droop_gain_reads_droop_in_percent(hub):
     out = _seamless(_config(MODELS["gfm_droop"], genset, qss=0.5))
     right, wrong = 4000.0, 400_000.0
     assert out["variants"]["seamless"]["status"] == "ok"
-    assert abs(right - wrong) > 1e5 * TOL
+    assert abs(right - wrong) > 1e4 * TOL
     assert _bess_cost(out) == pytest.approx(right, abs=TOL)
 
 

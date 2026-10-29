@@ -429,6 +429,15 @@ Branch `claude/lc06-d15-control-models`, stacked on S6. GK A reviews. Session LC
   VSM and preset tests; droop_pct as pu in the GFM K (island.py ΣK) fails both droop
   tests; the `where` edit reverted fails all 13 model-naming refusal tests.
 - Manifest: LC-D15.gfl_pq/qu/pf/fw, gfm_droop, gfm_vsm, governors covered.
+- Runs at the head, separate pytest runs: root tests/gridspine island files (test_island_schema,
+  test_campus_island, test_island_presets, test_campus_draft_island, test_sixty_hz): 118 passed;
+  backend test_island_config, test_island_presets, test_chat_tools_campus_island,
+  test_campus_island_service, test_family_manifest, test_edit_card_campus, test_island_f0: pass;
+  the new file: 39 passed. The whole tests/gridspine exceeds the 580 s local cap (46 % clean
+  when cut off); CI runs it. Consumers checked per GK A (4)'s list: `_unprocessable` passes
+  str(exc) through; no tool-error kind or harness parser reads these messages.
+- f0 provenance: the study reports `facts.instant.f0_hz` only. The 60 Hz case shows f0
+  comes from the campus file (no file → 50); a separate source tag would be an engine field.
 
 ## Hand-off 4 (2026-10-29, LC-06 (4) at 300k)
 
