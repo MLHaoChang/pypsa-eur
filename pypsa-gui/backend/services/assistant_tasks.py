@@ -500,11 +500,21 @@ def _start_run(session, title, request_id, run, profile, brief):
                     "title": title.strip(), "status": "ready", "steps": [], "brief": brief, "fingerprint": fingerprint,
                     "run": {**run, "status": "running", "stage": "intake", "stages": stages}}
             _save(path, task)
+            from services import run_envelope
+            run_envelope.propose(path, task, profile)  # issue 03: the plan-review card's envelope
         session.task_id = task_id
     _advance_run(path)
     _wake(path)
     with _LOCK:
-        return _view(_read(task_id)[1])
+        return _with_envelope(path, _view(_read(task_id)[1]))
+
+
+def _with_envelope(path, view):
+    """A run's view carries its approval envelope (issue 03): what the
+    plan-review card proposes, or what was granted and how far it went."""
+    from services import run_envelope
+    envelope = run_envelope.read(path) if view.get("run") else None
+    return {**view, "envelope": envelope} if envelope is not None else view
 
 
 def _may_write(task):
@@ -654,6 +664,7 @@ def get_task(task_id: str) -> dict:
         _advance_run(path)
         with _LOCK:
             _, task = _read(task_id)
+        return _with_envelope(path, _view(task, fresh=True))
     return _view(task, fresh=True)
 
 
@@ -715,6 +726,9 @@ def cancel_task(task_id: str) -> dict:
                 if step.get("job", {}).get("continuation") in ("armed", "due"):
                     step["job"]["continuation"] = "withdrawn"  # never after a cancel
             _save(path, task)
+            if task.get("run"):
+                from services import run_envelope
+                run_envelope.end(path, "revoked", "cancel_task")  # issue 03: nothing outlives the run
         session = chat_tools.chat_session()
         if session and getattr(session, "task_id", None) == task_id:
             session.task_id = None

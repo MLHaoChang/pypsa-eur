@@ -54,6 +54,7 @@ _REFUSE_HELPER_MODULES: tuple[str, ...] = (
     "services/assistant_tasks.py",
     "services/experiments.py",
     "services/run_evidence.py",
+    "services/run_envelope.py",
 )
 # Modules that import `harness.edit_card._refuse` instead of defining it: scanned the same way.
 _REFUSE_IMPORTING_MODULES: tuple[str, ...] = (
