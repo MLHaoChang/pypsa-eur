@@ -1,7 +1,7 @@
 """Old → new edit cards for the site, commercial and finance settings tools (Q3-CARDS-1, slice 2, group `site`).
 
-set_site_connection, set_project_sites, set_finance_inputs, attach_tariff, import_urdb_tariff and
-define_participants each register an `Adapter` here, in the style of the slice-1 adapters in
+set_site_connection, set_project_sites, set_finance_inputs, attach_tariff, import_urdb_tariff,
+define_participants and set_site_anchor (LV08 R2) each register an `Adapter` here, in the style of the slice-1 adapters in
 `harness/edit_card.py`. A preview writes nothing; the new values come from the tool's own pure
 validator (`chat_tools._site_connection_plan`, `_attach_tariff_plan`, `_finance_request`,
 `_urdb_request`, `site_service.validate_sites`) or, for the participants, from the handler run on an
@@ -595,3 +595,90 @@ def _sites_readback(args: dict, rows: list[dict]) -> list[Any]:
 
 
 register("set_project_sites", Adapter("settings_edit", _sites_preview, _sites_readback, section_id="project"))
+
+
+# ── set_site_anchor: the project's confirmed site coordinates (LV08 R2) ──────
+#
+# The card binds the project, the anchor's stored revision, the model's
+# expected_revision and the validated new anchor. An expected_revision that is
+# not the stored one is refused before any card (`file_changed_since_read`); an
+# anchor written after the card (even with the same values) moves the revision,
+# so confirm refuses `edit_preview_stale` and writes nothing. The write is `anchor.write_anchor`
+# only (chat_tools.set_site_anchor), which validates again and compares the revision.
+
+_ANCHOR_WORDS = (("lat", "Latitude", "°"), ("lng", "Longitude", "°"), ("source", "Source", ""),
+                 ("confirmed", "Confirmed", ""))
+
+
+def _anchor_state(args: dict) -> tuple[Any, dict, dict]:
+    """(project, stored document, validated new anchor), checked as the route and the write check them."""
+    from routers.deps import require_project_access
+    from routers.site_scene import _check_lock
+    from services import chat_tools
+    from services.site_scene import anchor
+    from services.site_scene.contract import SceneError
+
+    name = args.get("name")
+    if not isinstance(name, str) or not name.strip():
+        _refuse("empty_edit", "Name the project whose site coordinates to set.")
+    body = {k: args.get(k) for k in ("lat", "lng", "source", "confirmed")}
+    with chat_tools._acting() as (db, user):
+        project = require_project_access(name, db=db, user=user)
+        _check_lock(project, db, user)
+        try:
+            new = anchor.validate_anchor(body)
+            stored = anchor.read_anchor(project.directory)
+        except SceneError as exc:
+            raise chat_tools._scene_refusal(exc) from None
+    expected = args.get("expected_revision")
+    if not isinstance(expected, int) or isinstance(expected, bool):
+        _refuse("invalid_edit_value", "Pass get_site_anchor's revision as expected_revision.")
+    if expected != stored["revision"]:
+        # The kind `require_current` turns into `edit_preview_stale` at confirm.
+        raise HTTPException(409, {"error_kind": "file_changed_since_read",
+                                  "message": "the site coordinates changed since they were read (expected_revision "
+                                             f"{expected}, stored revision {stored['revision']}); read them again "
+                                             "with get_site_anchor and redo the change on the current values"})
+    return project, stored, new
+
+
+def _anchor_preview(args: dict) -> list[dict]:
+    _, stored, new = _anchor_state(args)
+    old = stored.get("anchor") or {}
+    rows = [_settings_row("Site coordinates", field, label, old.get(field), new[field], unit)
+            for field, label, unit in _ANCHOR_WORDS]
+    if old == new:
+        _refuse("empty_edit", "The project already has these site coordinates.")
+    if old and (old.get("lat"), old.get("lng")) != (new["lat"], new["lng"]):
+        rows.append(_note("Settings", "Site coordinates", "note_0",
+                          "Moving the anchor does not move an existing Site; Sites far from it are flagged."))
+    return rows
+
+
+def _anchor_binding(args: dict) -> dict:
+    project, stored, new = _anchor_state(args)
+    return {"project": project.uuid or project.name, "revision": stored["revision"],
+            "expected_revision": args.get("expected_revision"), "anchor": new}
+
+
+def _anchor_readback(args: dict, rows: list[dict]) -> list[Any]:
+    """The stored anchor's values, read from the sidecar the write replaced."""
+    from routers.deps import require_project_access
+    from services import chat_tools
+    from services.site_scene import anchor
+
+    with chat_tools._acting() as (db, user):
+        stored = anchor.read_anchor(require_project_access(args.get("name"), db=db, user=user).directory)
+    now = stored.get("anchor") or {}
+    return [None if row["role"] == "note" else _setting(now.get(row["field"])) for row in rows]
+
+
+def _anchor_says(args: dict, rows: list[dict]) -> str:
+    new = {r["field"]: r["new"] for r in rows if r["role"] == "typed"}
+    state = "confirmed" if new.get("confirmed") else "a draft (admits no Site yet)"
+    return (f"Sets the site coordinates to {new.get('lat')}, {new.get('lng')} ({new.get('source')}), "
+            f"{state}")
+
+
+register("set_site_anchor", Adapter("settings_edit", _anchor_preview, _anchor_readback, section_id="project",
+                                    binding=_anchor_binding, says=_anchor_says))

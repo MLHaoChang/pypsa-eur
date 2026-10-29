@@ -34,9 +34,12 @@ sys.path.insert(0, str(BACKEND / "project_templates"))
 import eh_templates as TPL  # noqa: E402
 
 # The adequacy setup applies to a site with load: a generation-only template
-# (the IPP plant) has no critical bus and nothing to import for.
+# (the IPP plant) has no critical bus and nothing to import for. A process-load
+# template draws through process links the suggester does not read yet
+# (owner decision G2P-10-SUGGEST-1; grid-to-process issue for the gap).
 TEMPLATES = sorted(t for t in TPL.BUILDERS
-                   if not TPL.TEMPLATE_META.get(t, {}).get("generation_only"))
+                   if not TPL.TEMPLATE_META.get(t, {}).get("generation_only")
+                   and not TPL.TEMPLATE_META.get(t, {}).get("process_load"))
 
 
 def _strip(n: pypsa.Network) -> pypsa.Network:

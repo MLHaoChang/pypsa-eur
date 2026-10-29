@@ -1,11 +1,11 @@
 # Coordinator
 
-Current coordinator session: `session_01G7qCuncJH6MDPvMVLGb5Pj`
+Current coordinator session: `session_01G7qCumnfrGEafzRapQZhUb`
 
-Engine gatekeeper A (gridspine, DC, grid-to-process and IC/adequacy engine reviews; owner decision GK-SPLIT-1): `session_01G7qCujtqNAmNMjmEu89xkg`
+Engine gatekeeper A (gridspine, DC, grid-to-process and IC/adequacy engine reviews; owner decision GK-SPLIT-1): `session_01G7qCuj5fDFyF3Qycx4973F`
 
-Engine gatekeeper B (harness, app backend, investment/finance and outsourced reviews; GK-SPLIT-1): `session_01G7qCun1ggHQPR7ckbkXdJ9`
+Engine gatekeeper B (harness, app backend, investment/finance and outsourced reviews; GK-SPLIT-1): `session_01G7qCuifd6xF1TWEPjKunjw`
 
-UX reviewer (UI coherence gate, owner decision 2026-10-20): `session_01G7qCumtovuejQkxqdLJRZD`
+UX reviewer (UI coherence gate, owner decision 2026-10-20): `session_01G7qCummdM4ao5ctXNBdCjZ`
 
 Send every coordinator message to this id. A rotating coordinator (`.claude/skills/coordinator/SKILL.md`, "Rotation") replaces its line in a tiny PR (and does the same when a gatekeeper or UX reviewer rotates), and tells each live session the new id.

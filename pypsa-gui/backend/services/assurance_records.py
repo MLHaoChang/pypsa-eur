@@ -16,7 +16,7 @@ import uuid
 from fastapi import HTTPException
 
 import app_paths
-from harness.durable import network_guard, transaction
+from harness.durable import holds, network_guard, transaction
 from services import project_registry
 from services.pypsa_service import PyPSAService
 from settings import get_settings
@@ -149,6 +149,89 @@ def unseal(envelope, record_id):
     return record
 
 
+# Kinds save() overwrites in place. Each carries a replay mark under its MAC
+# that must equal its high-water mark in the DB (AssuranceRecordSeq), so an
+# older, validly sealed copy put back in the store reads as unavailable.
+MUTABLE_KINDS = frozenset({"operation", "ui_action", "conversation_context"})
+MARK_KEY = "replay_mark"
+# The largest mark a save can write: the size limit is checked against it
+# before the mark is taken.
+_WIDEST_MARK = {"seq": 2**63 - 1, "epoch": str(uuid.UUID(int=0))}
+
+
+def _bump_mark(owner, record_id, expires_at):
+    """Advance and commit the record's mark; call under its store lock."""
+    from sqlalchemy import update
+    from sqlalchemy.exc import IntegrityError
+
+    from db.models import AssuranceRecordSeq as Mark
+    from db.session import SessionLocal
+
+    key = {"owner_id": uuid.UUID(owner), "record_id": uuid.UUID(record_id)}
+    bump = (
+        update(Mark)
+        .where(Mark.owner_id == key["owner_id"], Mark.record_id == key["record_id"])
+        .values(seq=Mark.seq + 1, expires_at=expires_at)
+        .returning(Mark.seq, Mark.epoch)
+    )
+    with SessionLocal() as db:
+        row = db.execute(bump).one_or_none()
+        if row is None:
+            # A new id, or one whose mark was pruned: a fresh chain, so no
+            # copy sealed under an earlier epoch can match.
+            row = (1, uuid.uuid4())
+            db.add(Mark(**key, seq=1, epoch=row[1], expires_at=expires_at))
+            try:
+                db.commit()
+            except IntegrityError:
+                # Another writer created the row first: take the next mark.
+                db.rollback()
+                row = db.execute(bump).one()
+        db.commit()
+    return {"seq": row[0], "epoch": str(row[1])}
+
+
+def _current_mark(owner, record_id):
+    from db.models import AssuranceRecordSeq as Mark
+    from db.session import SessionLocal
+
+    with SessionLocal() as db:
+        row = db.get(Mark, (uuid.UUID(owner), uuid.UUID(record_id)))
+        return None if row is None else {"seq": row.seq, "epoch": str(row.epoch)}
+
+
+def _drop_marks(owner, directory, reclaimed, now):
+    """Remove the marks of reclaimed records, and of expired records whose file
+    is gone, so the table does not grow without bound. Call under the lock."""
+    from sqlalchemy import delete, or_
+
+    from db.models import AssuranceRecordSeq as Mark
+    from db.session import SessionLocal
+
+    def ids(names):
+        out = []
+        for name in names:
+            try:
+                out.append(uuid.UUID(name))
+            except ValueError:
+                continue  # Not a record file this module wrote.
+        return out
+
+    present = ids(candidate.stem for candidate in directory.glob("*.json"))
+    with SessionLocal() as db:
+        db.execute(
+            delete(Mark).where(
+                Mark.owner_id == uuid.UUID(owner),
+                or_(
+                    Mark.record_id.in_(ids(reclaimed)),
+                    Mark.expires_at <= now,
+                ),
+                Mark.record_id.not_in(present),
+            )
+        )
+        db.commit()
+
+
 def unavailable(kind):
     raise HTTPException(
         409, {"error_kind": kind, "message": "Checked evidence is unavailable."}
@@ -202,8 +285,11 @@ def _path(owner, record_id):
 def save(record, record_id):
     """Commit record, checksum and MAC together before anything public is emitted."""
     path = _path(record["owner_id"], record_id)
+    mutable = record["record_kind"] in MUTABLE_KINDS
     try:
-        envelope = seal(record, record_id)
+        envelope = seal(
+            {**record, MARK_KEY: _WIDEST_MARK} if mutable else record, record_id
+        )
     except (OSError, ValueError):
         unavailable("evidence_unavailable")
     encoded = json.dumps(envelope, ensure_ascii=False, allow_nan=False).encode()
@@ -211,17 +297,14 @@ def save(record, record_id):
         unavailable("assurance_record_too_large")
     with transaction(path.parent):
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        if path.exists() and record["record_kind"] not in {
-            "operation",
-            "ui_action",
-            "conversation_context",
-        }:
+        if path.exists() and not mutable:
             if path.read_bytes() != encoded:
                 unavailable("evidence_unavailable")
             return
         # Expired records cannot be replayed; reclaim them before applying the
         # quota so a long-running pilot does not permanently exhaust storage.
         now = time.time()
+        reclaimed = []
         for candidate in path.parent.glob("*.json"):
             if candidate.stat().st_mtime + RETENTION_SECONDS <= now:
                 try:
@@ -236,8 +319,21 @@ def save(record, record_id):
                     # A corrupt reservation cannot safely be treated as unused.
                     continue
                 candidate.unlink(missing_ok=True)
+                reclaimed.append(candidate.stem)
+        if mutable or reclaimed:
+            _drop_marks(record["owner_id"], path.parent, reclaimed, now)
         if not path.exists() and len(list(path.parent.glob("*.json"))) >= MAX_RECORDS:
             unavailable("assurance_storage_full")
+        if mutable:
+            # The mark is committed before the file is written: a crash in
+            # between leaves the file one behind its mark, which reads as
+            # unavailable, never as an older version accepted.
+            mark = _bump_mark(record["owner_id"], record_id, record["expires_at"])
+            encoded = json.dumps(
+                seal({**record, MARK_KEY: mark}, record_id),
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode()
         temp = path.with_suffix("." + uuid.uuid4().hex + ".tmp")
         try:
             with temp.open("xb") as stream:
@@ -271,13 +367,60 @@ def discard(owner, record_id):
         logger.warning("Revoked record %s could not be removed", record_id)
 
 
+def _read(path, record_id):
+    if path.stat().st_size > 128 * 1024:
+        raise ValueError()
+    return unseal(json.loads(path.read_text(encoding="utf-8")), record_id)
+
+
+# A save commits its mark a moment before its file lands, so a reader can
+# meet the file one behind. Readers do not take the store lock (an effect
+# holds it while its handler runs); they re-read for up to this long instead.
+_MARK_SETTLE_SECONDS = 2.0
+
+
+def _read_marked(path, owner, record_id, kind):
+    """The mutable record whose sealed mark equals its DB mark, without it.
+
+    Exactly the mark: below it is a replay, above it a mark rolled back, and
+    a record with no mark (saved before marks existed) or no DB mark is
+    neither. Raises ValueError for any of those: at once, unless the file is
+    exactly one step behind in the same epoch (a save in flight), which is
+    re-read until it lands or the settle time runs out.
+    """
+    # A reader holding the store lock cannot meet a save in flight.
+    settle = 0.0 if holds(path.parent) else _MARK_SETTLE_SECONDS
+    deadline = time.monotonic() + settle
+    while True:
+        record = _read(path, record_id)
+        if record.get("record_kind") != kind:
+            raise HTTPException(404, "Record not found")
+        mark = _current_mark(owner, record_id)
+        sealed = record.get(MARK_KEY)
+        if mark is not None and sealed == mark:
+            return {k: v for k, v in record.items() if k != MARK_KEY}
+        # Only a file exactly one step behind in the same chain can be a save
+        # in flight; anything else is refused at once.
+        in_flight = (
+            mark is not None
+            and isinstance(sealed, dict)
+            and sealed.get("epoch") == mark["epoch"]
+            and type(sealed.get("seq")) is int
+            and sealed["seq"] == mark["seq"] - 1
+        )
+        if not in_flight or time.monotonic() >= deadline:
+            raise ValueError()
+        time.sleep(0.02)
+
+
 def load(owner, record_id, kind):
     path = _path(owner, record_id)
     authorize(owner)
     try:
-        if path.stat().st_size > 128 * 1024:
-            raise ValueError()
-        record = unseal(json.loads(path.read_text(encoding="utf-8")), record_id)
+        if kind in MUTABLE_KINDS:
+            record = _read_marked(path, owner, record_id, kind)
+        else:
+            record = _read(path, record_id)
         if record["owner_id"] != owner or record["record_kind"] != kind:
             raise HTTPException(404, "Record not found")
         if record["expires_at"] <= time.time():
@@ -625,6 +768,61 @@ def aggregate_selector(args):
     return "names", value, names
 
 
+def aggregate_gaps(snapshots, unknown, members):
+    """(gaps, frame, values) for an aggregate load sum, shared by both paths.
+
+    `unknown` are requested names the network lacks; `members` holds each
+    known target's raw series, None where it has no profile. `gaps` lists
+    every reason the sum is not complete, in one order: unknown names, no
+    loads, no profile, other snapshots, not a number, missing or non-finite
+    steps, no steps. aggregate_source refuses on the first; the
+    /network/loads/aggregate handler reports them all. `frame` is the
+    present members side by side (None when none are present or they cannot
+    be aligned) and `values` its float64 array with a non-number member's
+    steps as NaN.
+    """
+    import numpy as np
+    import pandas as pd
+
+    gaps = [f"no load named {u}" for u in unknown]
+    if not members:
+        if not unknown:
+            gaps.append("no loads match")
+        return gaps, None, None
+    present = [s for s in members if s is not None]
+    missing = len(members) - len(present)
+    if missing:
+        gaps.append(f"{missing} of {len(members)} loads have no profile")
+    if not present:
+        return gaps, None, None
+    if any(not s.index.equals(snapshots) for s in present):
+        gaps.append("the loads do not share the network's snapshots")
+    # A bool or numeric-string member would convert below but join, not add,
+    # in sum(): every step of it counts as missing.
+    numbers = [
+        pd.api.types.is_numeric_dtype(s) and s.dtype != bool for s in present
+    ]
+    if not all(numbers):
+        gaps.append("a step that is not a number")
+    try:
+        frame = pd.concat(present, axis=1)
+    except (TypeError, ValueError):
+        # Members that cannot be aligned at all (a repeated timestamp, or a
+        # timezone-aware index next to a naive one).
+        if not gaps:
+            gaps.append("the loads do not share the network's snapshots")
+        return gaps, None, None
+    values = np.full(frame.shape, np.nan)
+    cols = [i for i, ok in enumerate(numbers) if ok]
+    values[:, cols] = frame.iloc[:, cols].to_numpy(dtype="float64")
+    bad = int((~np.isfinite(values)).sum())
+    if bad:
+        gaps.append(f"{bad} missing or non-finite {'step' if bad == 1 else 'steps'}")
+    if frame.empty:
+        gaps.append("no steps")
+    return gaps, frame, values
+
+
 def aggregate_source(ctx, args):
     """(source digest, gap, totals, target names) for get_aggregate_load args.
 
@@ -638,9 +836,6 @@ def aggregate_source(ctx, args):
     The digest covers the project, the normalised selection, the ordered
     target names and each member's series digest.
     """
-    import numpy as np
-    import pandas as pd
-
     from services.profile_shapes import _load_section
 
     n = ctx.network
@@ -663,8 +858,8 @@ def aggregate_source(ctx, args):
     )
     unknown = [t for t in targets if t not in n.loads.index]
     if not targets or unknown:
-        gap = f"no load named {unknown[0]}" if unknown else "no loads match"
-        return hashed.hexdigest(), gap, None, targets
+        gaps, _, _ = aggregate_gaps(n.snapshots, unknown, [])
+        return hashed.hexdigest(), gaps[0], None, targets
     members = []
     for name in targets:
         member_digest, series = _series_source(
@@ -672,33 +867,9 @@ def aggregate_source(ctx, args):
         )
         hashed.update(member_digest.encode())
         members.append(series)
-    missing = sum(s is None for s in members)
-    if missing:
-        return (
-            hashed.hexdigest(),
-            f"{missing} of {len(targets)} loads have no profile",
-            None,
-            targets,
-        )
-    if any(not s.index.equals(n.snapshots) for s in members):
-        return (
-            hashed.hexdigest(),
-            "the loads do not share the network's snapshots",
-            None,
-            targets,
-        )
-    # A numeric-string upload would convert below but join, not add, in sum().
-    if any(not pd.api.types.is_numeric_dtype(s) or s.dtype == bool for s in members):
-        return hashed.hexdigest(), "a step that is not a number", None, targets
-    frame = pd.concat(members, axis=1)
-    try:
-        bad = int((~np.isfinite(frame.to_numpy(dtype="float64"))).sum())
-    except (TypeError, ValueError):
-        return hashed.hexdigest(), "a step that is not a number", None, targets
-    if bad or frame.empty:
-        step = "step" if bad == 1 else "steps"
-        gap = f"{bad} missing or non-finite {step}" if bad else "no steps"
-        return hashed.hexdigest(), gap, None, targets
+    gaps, frame, _ = aggregate_gaps(n.snapshots, [], members)
+    if gaps:
+        return hashed.hexdigest(), gaps[0], None, targets
     return hashed.hexdigest(), None, frame.sum(axis=1).tolist(), targets
 
 

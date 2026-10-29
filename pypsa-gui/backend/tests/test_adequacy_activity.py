@@ -156,11 +156,38 @@ def test_E2_the_copt_evaluates_each_period_with_the_fleet_active_in_it():
         per_block[0]["base_a"] + per_block[1]["base_a"])
     assert per_block[0]["base_a"] == pytest.approx(76.8)
     assert per_block[1]["base_a"] == pytest.approx(23.04)
-    # merged rows keep the contract shape and the € follow the ΔEUE
+    # merged rows keep the contract shape and the € follow the ΔEUE, scaled
+    # to a year over the WHOLE horizon (LC-30): (76.8 + 23.04) · 8760/Σw ·
+    # 1000. Each block scaled by its own Σw would read twice this.
     fm = rows["base_a"]["failure_mode"]
-    assert fm["criticality_eur_per_year"] == pytest.approx(rows["base_a"]["delta_eue_mwh"] * 1000.0)
+    assert float(w.sum()) == pytest.approx(2 * H)
+    assert fm["criticality_eur_per_year"] == pytest.approx(
+        (76.8 + 23.04) * 8760.0 / (2 * H) * 1000.0)
+    assert fm["horizon_years"] == pytest.approx(2 * H / 8760.0)
+    # severity is re-derived from the merged criticality, not summed per
+    # block (two blocks summed would read twice this)
+    assert fm["occurrence_per_year"] == pytest.approx(8760.0 * 0.1 / 24.0)
+    assert fm["severity_eur"] == pytest.approx(
+        fm["criticality_eur_per_year"] / fm["occurrence_per_year"])
     assert set(an["dist"]) == {2030, 2035} and set(an["residual"]) == {2030, 2035}
     assert an["fidelity_note"] is None
+
+
+def test_E2c_criticality_counts_the_years_each_period_stands_for():
+    """LC-30: two periods weighted ``years`` = 5. Σw = 2 · 24 · 5 = 240 h, so
+    base_a's ΔEUE is (76.8 + 23.04) · 5 and its criticality is that ΔEUE ×
+    VoLL / (240/8760). Read without the years, Σw = 48 and the € would be
+    5× too large."""
+    n = activity_network()
+    n.investment_period_weightings.loc[:, "years"] = 5.0
+    units, res, w = C.fleet_and_residual(n)
+    assert float(w.sum()) == pytest.approx(240.0)
+    rows = {r["name"]: r for r in _screen(n)["rows"]}
+    fm = rows["base_a"]["failure_mode"]
+    assert rows["base_a"]["delta_eue_mwh"] == pytest.approx((76.8 + 23.04) * 5)
+    assert fm["criticality_eur_per_year"] == pytest.approx(
+        (76.8 + 23.04) * 5 * 1000.0 * 8760.0 / 240.0)
+    assert fm["horizon_years"] == pytest.approx(240.0 / 8760.0)
 
 
 def test_E2b_the_single_block_path_is_literally_the_old_call():

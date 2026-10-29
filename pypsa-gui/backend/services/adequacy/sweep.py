@@ -25,9 +25,10 @@ driver powers class B (Link outages) and class C (stress scenarios):
   tens of solves at most, never a Monte Carlo (spec §3.2).
 
 Severity semantics (documented once, used by both classes): the mutation is
-held for the WHOLE horizon, so ``delta_eue_mwh`` is the annual damage of
+held for the WHOLE horizon, so ``delta_eue_mwh`` is the horizon's damage of
 full unavailability. Expected annual criticality then first-orders as
-``unavailability × delta_eue × VoLL`` — no outage-window placement problem,
+``unavailability × delta_eue × VoLL / horizon_years`` (LC-30: scaled to a
+year, like the occurrence) — no outage-window placement problem,
 because the horizon covers every hour (spec §5.4's timing-expectation
 requirement, satisfied by integrating rather than sampling).
 """
@@ -655,7 +656,7 @@ def run_class_b_sweep(network, lock, cfg, *, log_queue=None,
     Class-B rows: sweep every eligible link outage and price it first-order
     (see the module docstring's severity semantics):
 
-        criticality €/yr = q × ΔEUE_full-horizon × VoLL
+        criticality €/yr = q × ΔEUE_full-horizon × VoLL / horizon_years
         occurrence /yr   = 8760·q / MTTR   (cycle frequency, occurrence.py)
         severity €       = criticality / occurrence   (f×S by construction)
 
@@ -675,6 +676,9 @@ def run_class_b_sweep(network, lock, cfg, *, log_queue=None,
         return [], {"base_restored": None, "base_restore_status": None,
                     "aborted": False}
     voll = float(getattr(cfg, "voll", 0.0) or 0.0)
+    from services.adequacy.metrics import criticality_scale, horizon_years
+    nyears = horizon_years(network)
+    scale, basis = criticality_scale(nyears)
     swept = run_contingency_sweep(
         network, lock, cfg, contingencies, stop_event=stop_event,
         log_queue=log_queue, final_state_update=final_state_update,
@@ -700,7 +704,7 @@ def run_class_b_sweep(network, lock, cfg, *, log_queue=None,
         # Spec §4.3: out-of-scope conversion / P2X rows keep a non-negative
         # zero criticality — never a "break the electrolyser" ranking.
         if in_scope:
-            crit = q * delta * voll
+            crit = q * delta * voll * scale
             occ = (8760.0 * q / meta["mttr_hours"]
                    if meta["mttr_hours"] and math.isfinite(meta["mttr_hours"])
                    and meta["mttr_hours"] > 0 else 0.0)
@@ -724,6 +728,8 @@ def run_class_b_sweep(network, lock, cfg, *, log_queue=None,
                 "occurrence_basis": meta["basis"],
                 "severity_eur": severity,
                 "criticality_eur_per_year": crit,
+                "criticality_basis": basis,
+                "horizon_years": nyears,
                 "in_metric_scope": in_scope,
                 "engine": "lp_proxy",
                 "fidelity": "deterministic_scenario",

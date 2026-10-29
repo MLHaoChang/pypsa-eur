@@ -7,21 +7,32 @@ Status: ready-for-agent
 Type: task
 
 Read [the plan](../../../docs/superpowers/plans/2026-10-10-live-voice-conversation.md)
-and [coverage contract](../application-coverage.md). Generate a matrix from tools,
-routes, service schemas and GUI bindings. The [inventory](../capability-inventory.json)
-records 220 tools, 14 result tabs and 17 panels; behavioral/control mapping is pending.
-Map every eligible tool, panel/subview/filter/editor, parameter type, job adapter,
-evidence section, import/export/report operation and fixture. Resolve AR against
-actual UI/module vocabulary. Fix adequacy/fmea navigation parity and audit other
-aliases. Add missing shared typed tools over services. Respect ACL/mode/project
-eligibility; no browser-click or provider-only workaround.
+and [coverage contract](../application-coverage.md). Owner decision LV08-SHRINK-1
+(29 Oct) shrinks this issue to the remainder below. LC-06 now builds the behavioural
+family journeys with hand oracles (`smoke/family_manifest.py`, `tests/test_lc06_*.py`);
+the requirement-by-requirement comparison is in
+[08-lc06-comparison.md](08-lc06-comparison.md). Do not build slice C's solver,
+reliability, gridspine or experiment journeys again.
 
-Test discovery and subsequent schema offering/execution for every eligible tool
-under OpenAI's current 128-tool offer bound and verify Claude parity. Test all
-navigation acknowledgments and parameter types/units/previews/freshness.
-Keep matrix regeneration/check in CI. Done when every required interaction has a
-mapping and passing contract, every family has a real journey assigned to issue
-05, and remaining limitations block the full-coverage claim explicitly.
+The matrix, route parity, navigation parity, typed tools and the 128-tool/Claude offer
+test are done (see Comments). Open scope is R1–R4 only:
+
+- **R1. One ledger.** Replace the 14 `pending:issue-05-*` journey ids in
+  `assistant_control_matrix.FAMILY_JOURNEYS` by references to the LC-06 manifest variants,
+  and make the `full_coverage` guard read variant status from `family_manifest`.
+  The claim stays `not_established` until the blockers clear.
+- **R2. Route-parity drift.** 8 GUI routes read `needs-tool` again: `GET /api/results/process_view`,
+  `GET`/`PUT /api/projects/{name}/site-anchor` and the four `sites/{site_id}/scene` routes
+  (adopt, proposals, apply, cancel). Close each by a typed tool or a declaration
+  (`assistant_route_parity_declarations.d/`), coordinating with the packages that added the routes.
+- **R3.** Families LC-06 leaves out (D01/02/20–24) moved to
+  [LC-32](../../live-copilot/issues/32-uncovered-families-d01-d02-d20-d24.md) (needs-triage).
+- **R4. Voice-only gates stay with issue 05:** hosted profile/device/latency, the prolonged
+  mixed-domain conversation, spoken navigation acknowledgements and client-only UI-control parity
+  (`ui-local-control-parity-unaudited`).
+
+Done when R1 and R2 are merged with their checks in CI, R3 has an owner, and R4's blockers
+remain explicit in `full_coverage`.
 
 ## Comments
 
@@ -79,3 +90,42 @@ so a missing effect is `uncertain`; delete, publish, confirm and the MILP start 
 words; a file moved after the card is `edit_preview_stale` (also when a whole-file base check trips
 at confirm); both saves run the service's own YAML checks at preview (`check_campus_text`,
 `check_draft_text`); the extract card names the extraction provider call.
+
+2026-10-29: R1/R2 plan, GK B GO with conditions (session_01G7qCuie2cD7SpMavjY6YZ4). Two PRs, R1 first.
+Coordinator (owner option 1): the five Site 3D scene routes are held for SC-07 under a new closed
+reason `held-by-spec`; R2 builds `get_process_view` and the site-anchor GET/PUT tools (PUT behind a
+content card, GRIDCODE-CHAT-1).
+- R1: trial-merge with #891 and #892 heads and master; run `test_assistant_control_matrix` and
+  `assistant_control_matrix --check`. `_full_coverage_problem` never reads `FAMILY_JOURNEYS` (a
+  mutation reading it fails a test). An unavailable variant is not a blocker, but its pointer resolves.
+- `held-by-spec`: the `issue` pointer names an existing file containing the route's method and path;
+  the guard fails when that issue's `Status:` is done or wontfix; each held row adds
+  `route-parity:held:<issue>` to the full_coverage blockers and counts as a limitation, never a tool.
+- R2 removes only the needs_tool rows it closes (a fragment file only when left empty). #853's
+  `GET /api/profiles/schema` row: whichever lands second carries the fix; master never goes red.
+- `get_process_view`: the route's project/ACL resolution, read tier; hand oracle, available:false and
+  a not-the-caller's-project refusal.
+- `set_site_anchor`: carded, through `anchor.write_anchor` only; the digest binds project,
+  expected_revision and the new lat/lng/source/confirmed; `validate_anchor` at preview and inside the
+  confirmed write; `_check_project_lock` and `_may_write` at confirm; a moved anchor is
+  `edit_preview_stale` and writes nothing; the receipt reads back the stored row. Mutations: no
+  revision binding fails the stale test; no confirm-time validation fails a tampered-args test.
+- New error kinds only in `tool-error-kinds.d/`. R2 trial merge runs the listed route/ACL/lock,
+  catalogue, prompt, selection and kind-manifest tests plus the inventory, route-parity, control-matrix
+  and json_fragments checks; any exact-count pin changed is named in the PR body.
+- GK B NOT OK @e99f930b fixed: a family is `covered` only with at least one covered and no pending
+  variant (`_open` in `smoke/assistant_control_matrix.py`, used by `family_journeys`, `_full_coverage`
+  and `_full_coverage_problem`); a family with no covered variant is a `family-manifest:<slug>` blocker.
+  Test: `test_a_family_whose_manifest_rows_are_gone_is_open_not_covered` (LC-D20 rows removed); it fails
+  under both mutations (the old pending-only rule everywhere, and in the claim guard alone).
+
+2026-10-29: R2 built (session_01G7qCukn8KpPCqXtzidyFhy, stacked on R1 #906). `get_process_view` (read;
+the route's foreground project, a foreground project the caller may not read is 404 `not_authorized`),
+`get_site_anchor` (read) and `set_site_anchor` (write, carded in `harness/edit_card_site.py`: through
+`anchor.write_anchor` only; the digest binds project, stored revision, expected_revision and the
+validated anchor; a stale expected_revision is `file_changed_since_read` before any card and
+`edit_preview_stale` at confirm; the receipt reads the stored sidecar). The five scene routes are
+`held-by-spec` limitations naming SC-07 (`.scratch/site-scene-generation/issues/08-ai-guided-project-flow.md`,
+which now lists them); `assistant_route_parity.py --check` fails on any needs-tool row and on a held
+route whose issue is missing, does not name it, or is done/wontfix. route-parity: 0 needs-tool.
+Tests: `tests/test_lv08_r2_tools.py`, `tests/test_assistant_route_parity.py`.

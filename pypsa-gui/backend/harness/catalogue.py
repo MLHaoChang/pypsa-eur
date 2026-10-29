@@ -165,6 +165,9 @@ ADEQUACY_RESTORE_ENUM = ["base", "final"]
 from models.energy_hub import MAX_EH_BUDGET_SOLVES as _MAX_EH_BUDGET_SOLVES  # noqa: E402
 from services.adequacy.mc import MAX_DRAWS as _MC_MAX_DRAWS  # noqa: E402
 
+# The island report's table ids: imported, never restated.
+from services.campus_island_report import TABLE_IDS as _ISLAND_TABLE_IDS  # noqa: E402
+
 # Energy Hub archetype packs — mirrors models.energy_hub.EnergyHubArchetype.
 EH_ARCHETYPE_ENUM = ["strong_grid", "weak_flexible", "off_grid"]
 # EH pipeline stages — mirrors models.energy_hub.EH_PIPELINE_STAGES (order
@@ -1266,6 +1269,11 @@ TOOLS: list[dict[str, Any]] = [
         "its own outage data, so certification is conservative for a "
         "strong grid. It runs by default for weak_flexible / off_grid and "
         "costs no LP solve. "
+        "weak_flexible sets each selected import Link's rating (`p_nom`, "
+        "and a finite `p_nom_max`) to `import_p_nom_mw` (default 50 MW) "
+        "divided by the number of import Links, replacing the Link's own "
+        "rating; when the two differ the `apply_pack` note and the report "
+        "name the Link, its rating and the cap used. "
         "`budget_solves` (1–120, default 30) is a hard ceiling on LP solves "
         "inside the study — stages that would exceed it are skipped and "
         "reported not_established. Returns {status:'running'} — poll "
@@ -2168,7 +2176,9 @@ TOOLS: list[dict[str, Any]] = [
         "eh_h2_hub (strong_grid), "
         "eh_microgrid (off_grid), eh_h2_hub_staged and eh_microgrid_staged "
         "(those two planned over 2027/2030/2035, multi-period), eh_ammonia_staged "
-        "(the H2 hub making ammonia for a contracted delivery, with a Haber-Bosch loop; multi-period), eh_ipp_hybrid "
+        "(the H2 hub making ammonia for a contracted delivery, with a Haber-Bosch loop; multi-period), "
+        "eh_concentrator_staged (a mining concentrator on a weak, staged connection, planned on the hourly "
+        "year 2027/2030/2035; its own years only), eh_ipp_hybrid "
         "(a wind and PV IPP with a battery candidate behind a 70 MW export limit; one hourly 2030 year, "
         "illustrative day-ahead prices, financial PPAs), eh_site (a generic site that is not a data "
         "center, parametrized by `params`: site_type industrial | commercial | "
@@ -2193,7 +2203,8 @@ TOOLS: list[dict[str, Any]] = [
                                      "eh_datacenter", "eh_datacenter_staged",
                                      "eh_h2_hub", "eh_microgrid", "eh_site",
                                      "eh_h2_hub_staged", "eh_microgrid_staged",
-                                     "eh_ammonia_staged", "eh_ipp_hybrid"]},
+                                     "eh_ammonia_staged", "eh_concentrator_staged",
+                                     "eh_ipp_hybrid"]},
             "new_name": {"type": "string"},
             "params": {"type": "object",
                        "description": "eh_site: the site's parameters (omit "
@@ -4817,6 +4828,35 @@ TOOLS: list[dict[str, Any]] = [
          "sites": {"type": "object"}},
         ["name", "sites"],
     ),
+    # LV08 R2: the confirmed site anchor (Site 3D, SC-01a); the scene itself is SC-07's.
+    _t(
+        "get_site_anchor",
+        "Read a project's confirmed site coordinates (the site anchor the Site 3D and Project & "
+        "site panels show): {version, revision, anchor: {lat, lng, source manual|geocode, "
+        "confirmed} or null when none is set}. Pass revision as set_site_anchor's "
+        "expected_revision. 404 for a project you may not see. Safety: read.",
+        {"name": {"type": "string"}},
+        ["name"],
+    ),
+    _t(
+        "set_site_anchor",
+        "Set a project's site coordinates (WGS84 lat/lng in degrees), as the Site 3D coordinate "
+        "form does; the user confirms a card of the old and new values first. Read "
+        "get_site_anchor first and pass its revision as expected_revision: 409 "
+        "revision_conflict when the anchor changed since. source is manual (typed) or geocode "
+        "(from a place search); confirmed true only when the user confirmed these exact "
+        "coordinates (only a confirmed anchor admits creating a Site). 422 names a bad field "
+        "(hint swapped when lat and lng look swapped: ask, never swap them yourself); 409 "
+        "project_locked under another user's edit lock. Moving the anchor never moves an "
+        "existing Site. Safety: write.",
+        {"name": {"type": "string"},
+         "lat": {"type": "number", "minimum": -90, "maximum": 90},
+         "lng": {"type": "number", "minimum": -180, "maximum": 180},
+         "source": {"type": "string", "enum": ["manual", "geocode"]},
+         "confirmed": {"type": "boolean"},
+         "expected_revision": {"type": "integer", "minimum": 0}},
+        ["name", "lat", "lng", "source", "confirmed", "expected_revision"],
+    ),
     _t(
         "fetch_site_context",
         "Fetch the context of one site's boundary (building footprints from OpenStreetMap "
@@ -4870,6 +4910,7 @@ TOOLS.extend([
     _t("list_experiments", "List up to 20 most recently created experiments you own in the active project. Returns status, domain, baseline_run_id and case_count; use get_experiment for case detail. Does not execute plans. Safety: read.", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}, []),
     _t("get_experiment", "Read one owned experiment in the active project. Returns typed cases, limits, preflight and any durable single-case execution receipt. Planned/queued is not completed; interrupted submissions have executed=null. Recorded objectives require matching completed job, exact solved inputs and intact evidence. No operation is started or replayed. Safety: read.", {"experiment_id": {"type": "string"}}, ["experiment_id"]),
     _t("get_energy_flows", "Read the CURRENT solve's Energy flow tab: where the site's energy came from (source), what it passed through (via: Direct, a storage, a conversion) and where it went (destination: loads, export, losses), in MWh per modelled year, exactly as the tab computes it (proportional mix at each bus, a proportional pool per storage). Returns the largest rows (default 12, max 40) with rows_total and rows_mwh_total, the conservation check (generation = destinations + storage change), flags, the period and snapshot window, inputs_changed_since_solve, and ui_reference for ui_open_panel(results_tab='flows'). not_delivered holds demand that was NOT delivered (process shortfall per load, shed load): missing energy, never supply; never add it to a source. Unsolved results, or flows the server cannot prove to conserve energy, return status unavailable with no rows; never invent values. period: an investment period (default the first); window_from/window_to: inclusive snapshot indexes. Safety: read.", {"period": {"type": "integer"}, "window_from": {"type": "integer", "minimum": 0}, "window_to": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 40}}, []),
+    _t("get_process_view", "Read the CURRENT solve's process view (grid-to-process), exactly as the Results process view shows it: per product bus, production, delivery, buy-in, inventory level and lost production (t, MWh, and EUR at the shortfall generator's lost-production value); per process unit (a Link with eh_process), running hours and starts. Every figure carries its unit and weighting basis; a figure that cannot be resolved is null with a flag beside it: say the flag, never read null as zero. available false (with empty lists) before a solve or when the dispatch cannot be read. Reads the open project's network; 404 not_authorized when the open project is not one you may read. Safety: read.", {}, []),
     _t("get_load_shape", "Read the CURRENT solve's Load shape tab: how the site's grid import, export, solar, wind, genset, EV, flexible load, battery state of charge and unserved load are shaped in time, exactly as the tab computes it. One view per call: summary (default: each heatmap's peak cell, the week and flag basis, whether monthly exists, annual energy per period), heatmap (mean MW by weekday and hour for import and export; null = no snapshot), week (one calendar week of one series, plus the flagged intervals: unserved load or import at the connection capacity), monthly (MWh per month and the daily-generation average, only for a full calendar year of snapshots), annual (MWh per period by solar, wind, genset, grid, export, excess, load served). Returns series_status (ok, not_modelled or unavailable, each with its reason), the period and snapshot window, inputs_changed_since_solve, claim_limits and ui_reference, the panel and tab to open with ui_open_panel. A group that is not_modelled or unavailable is NOT zero: say what its reason says; never invent values. Before a solve, or for a run whose dispatch cannot be read as energy, the status is unavailable. period: an investment period (default the first); window_from/window_to: inclusive snapshot indexes (heatmaps); week: index into the period's calendar weeks; series: which series the week view returns. Safety: read.", {"view": {"type": "string", "enum": ["summary", "heatmap", "week", "monthly", "annual"]}, "period": {"type": "integer"}, "window_from": {"type": "integer", "minimum": 0}, "window_to": {"type": "integer", "minimum": 0}, "week": {"type": "integer", "minimum": 0}, "series": {"type": "string", "enum": ["grid", "export", "solar", "wind", "genset", "ev", "flexible", "battery_soc", "unserved"]}}, []),
     _t("get_loadflow_summary", "Summarise the CURRENT load-flow results of the active project: lines and transformers ranked by peak utilisation = flow / (rating * s_max_pu), computed by software from the same results the Load flow tab reads. Per branch (default 5, max 25, trimmed to a bounded payload): both-terminal peak flow, rating (optimized s_nom_opt or configured s_nom), s_max_pu range, peak/mean utilisation, weighted hours at/over the limit. Returns the exact source, snapshot window, freshness, solve state, ranking convention, skipped branches (missing or zero rating, no flow data) and missing_evidence. LOPF results are an ACTIVE-POWER PROXY, not an AC apparent-power assessment; source='ac_pf' uses apparent power where reactive flows exist and excludes unconverged snapshots. Never proof of full AC thermal compliance (no N-1, no voltage limits). Unsolved, stale, running, infeasible or failed results return status unavailable with a typed unavailable_kind; never invent values. window_from/window_to are inclusive snapshot indexes for follow-ups. run_id: the newest completed run whose inputs are still current answers as the current results (run.is_current true); any other run answers from the load flow captured when it finished (scope historical, run.is_current false; the Load flow tab still shows the current results), or unavailable for a run without a captured section. Safety: read.", {"source": {"type": "string", "enum": ["lopf", "ac_pf"]}, "limit": {"type": "integer", "minimum": 1, "maximum": 25}, "window_from": {"type": "integer", "minimum": 0}, "window_to": {"type": "integer", "minimum": 0}, "run_id": {"type": "string", "maxLength": 64}}, []),
     _t("list_tasks", "List up to 20 most recently updated durable tasks owned by you in the active project. Use a returned ID to resume in a new chat or provider. Safety: read.", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}, []),
@@ -4910,7 +4951,7 @@ TOOLS.extend([
     _t("campus_cancel_milp", "Ask a hub project's running joint optimisation (MILP) to stop; it keeps the best choice found so far. Returns {state, cancelling}; 404 when no job ran since the backend started. Safety: write.", {"project_id": {"type": "string"}}, ["project_id"]),
     _t("campus_set_grid_limit", "Set the user's own grid-readiness limit for one scorecard item a grid code does not fix (item connection_ramp|oscillation|fault_level), as the scorecard's limit editor does: source code|datasheet|measured|assumed (only assumed leaves the limit to check), value in the item's unit (fault_level takes a source only), note (<= 500 chars) says where it comes from. Returns the stored entry {value, source, note, set_by, set_at, default}; campus_grid_readiness then shows it. 422 naming the field for a bad item, source or value; 409 project_locked under another user's edit lock. Safety: write.", {"project_id": {"type": "string"}, "item": {"type": "string", "enum": ["connection_ramp", "oscillation", "fault_level"]}, "source": {"type": "string", "enum": ["code", "datasheet", "measured", "assumed"]}, "value": {"type": "number"}, "note": {"type": "string", "maxLength": 500}}, ["project_id", "item", "source"]),
     _t("campus_reset_grid_limit", "Reset one grid-readiness limit (connection_ramp|oscillation|fault_level) to the template's value or the generic placeholder, dropping the user's own entry. Returns {item, cleared} (false when there was none). Safety: write.", {"project_id": {"type": "string"}, "item": {"type": "string", "enum": ["connection_ramp", "oscillation", "fault_level"]}}, ["project_id", "item"]),
-    _t("campus_island_report", "The island report of a hub project, as the Island tab shows it: its tables (each with the model behind it), the screening caveat, and the rows that rest on assumed values. Say the caveat and the assumed rows with the numbers. Long lists are trimmed and `truncated` names each one's total. Safety: read.", {"project_id": {"type": "string"}}, ["project_id"]),
+    _t("campus_island_report", "The island report of a hub project, as the Island tab shows it: its tables (each with the model behind it), the screening caveat, and the rows that rest on assumed values. Say the caveat and the assumed rows with the numbers. Long lists are trimmed and `truncated` names each one's total: without `table` only the first two tables are shown, and `table_ids` lists every table the report holds. Pass `table` (an id) to read one table with all its rows, for example `freq_events` for the frequency events. The ids are `" + "`, `".join(_ISLAND_TABLE_IDS) + "`. A table whose rows still exceed the cap says rows shown of total in `truncated`. Safety: read.", {"project_id": {"type": "string"}, "table": {"type": "string", "enum": list(_ISLAND_TABLE_IDS)}}, ["project_id"]),
     _t("campus_cancel_island_cuts", "Stop a hub project's running island-cuts apply job after the trial in hand. Returns {job}: the job record, or null when none ran. Safety: write.", {"project_id": {"type": "string"}}, ["project_id"]),
     _t("campus_remove_island_cut", "Take one applied frequency cut back (period, hour and kind from campus_island_cuts' applied rows); the next solve no longer has it. 404 when no such cut is applied; 409 project_locked under another user's edit lock. Returns the cuts as campus_island_cuts does. Safety: destructive.", {"project_id": {"type": "string"}, "period": {"type": "integer"}, "hour": {"type": "integer", "minimum": 0}, "kind": {"type": "string", "enum": ["inertia", "headroom_up", "headroom_down", "droop_gain"]}}, ["project_id", "period", "hour", "kind"]),
     _t("campus_clear_island_cuts", "Take EVERY applied frequency cut of a hub project back, and the trials with them. Ask the user first: the trials are lost. Returns the cuts as campus_island_cuts does. Safety: destructive.", {"project_id": {"type": "string"}}, ["project_id"]),
@@ -5022,6 +5063,7 @@ TOOL_ROUTES: dict[str, list] = {
     "get_loadflow_summary": [("GET", "/api/results/loadflow-view")],
     "get_energy_flows": [("GET", "/api/results/energy_flows")],
     "get_load_shape": [("GET", "/api/results/load_shape")],
+    "get_process_view": [("GET", "/api/results/process_view")],
     "list_tasks": _SERVICE_CALL,
     "find_capabilities": _SERVICE_CALL,
     "get_component_schema": _SERVICE_CALL,
@@ -5109,6 +5151,8 @@ TOOL_ROUTES: dict[str, list] = {
     "get_project_sites": [("GET", "/api/projects/{name}/sites"),
                           ("GET", "/api/projects/{name}/sites/{site_id}/context")],
     "set_project_sites": [("PUT", "/api/projects/{name}/sites")],
+    "get_site_anchor": [("GET", "/api/projects/{name}/site-anchor")],
+    "set_site_anchor": [("PUT", "/api/projects/{name}/site-anchor")],
     "fetch_site_context": [("POST", "/api/projects/{name}/sites/{site_id}/context")],
     # write_snapshots (4)
     "set_snapshots": [("POST", "/api/network/snapshots")],

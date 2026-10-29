@@ -59,3 +59,14 @@ export const resultsEvidenceApi = {
   run: (runId: string, section?: string, baselineRunId?: string) => client.get<RunView>(
     '/results/run-view', { params: { run_id: runId, section, baseline_run_id: baselineRunId }, skipErrorToast: true }).then(r => r.data),
 }
+
+/** The server's own words when a run read refuses because the project is no
+ * longer available to this user (LC-T08), or none is open for them now, as after
+ * access loss (LC03-ACCESS-1); null for any other failure. */
+export function projectUnavailableReason(error: unknown): string | null {
+  const detail = (error as { response?: { data?: { detail?: { error_kind?: string; message?: string } } } } | null)
+    ?.response?.data?.detail
+  const kind = detail?.error_kind
+  return (kind === 'project_unavailable' || kind === 'run_project_required') && detail?.message
+    ? detail.message : null
+}

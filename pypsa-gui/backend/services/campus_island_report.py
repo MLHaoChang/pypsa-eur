@@ -59,6 +59,20 @@ _FREQ_TITLES = {
 }
 
 
+#: Every table id the report can hold, in report order; a hub shows the ones
+#: its run produced. A plain literal: the assistant inventory reads it without
+#: importing this module. The chat tool's `table` argument reads this list, and
+#: a test pins it to the builders' title maps.
+TABLE_IDS = (
+    "requirements", "units", "costs", "binding", "facts", "island_hours",
+    "static_summary", "static_flow", "static_flow_units", "static_flow_bus",
+    "static_flow_branch", "static_sc", "static_relays", "static_relays_imax",
+    "static_unbalanced", "static_earth", "static_earth_relays",
+    "freq_summary", "freq_e1_hourly", "freq_events", "freq_losses",
+    "freq_bridge", "freq_planned", "freq_ups",
+)
+
+
 def _table(tid, title, model, columns, rows, assumed_rows=(), group="inputs"):
     return {"id": tid, "group": group, "title": title, "model": model, "caveat": CAVEAT,
             "columns": list(columns), "rows": [list(r) for r in rows],
@@ -232,6 +246,10 @@ def _static_tables(run_dir, missing) -> list:
     return tables
 
 
+#: The every-hour E1 table shows at most this many failing rows (grid-to-process 10).
+E1_ROWS_SHOWN = 200
+
+
 def _freq_tables(run_dir, missing) -> list:
     try:
         from gridspine.drivers import campus_study as cs
@@ -259,10 +277,20 @@ def _freq_tables(run_dir, missing) -> list:
         key = fname.removeprefix("campus_freq_").removesuffix(".csv")
         title = _FREQ_TITLES[key]
         if fname == cs.FREQ_E1_HOURLY_CSV:
-            # Every hour is too long to show; its failing rows are the verdict.
+            # Every hour is too long to show; its failing rows are the verdict. On the year base a period has
+            # 8,760 hours, so thousands may fail: the table shows the E1_ROWS_SHOWN worst (``worst``, the
+            # binding limit's relative exceedance) and names the file that holds them all.
             total = len(df)
             df = df[df["ok"].map(lambda v: str(v).lower() in ("false", "0"))]
-            title = f"{title} ({len(df)} of {total} rows)"
+            failing = len(df)
+            title = f"{title} ({failing} of {total} rows"
+            if failing > E1_ROWS_SHOWN:
+                exceed = pd.to_numeric(df["worst"], errors="coerce").fillna(-math.inf) if "worst" in df else None
+                df = (df.loc[exceed.sort_values(ascending=False, kind="stable").index[:E1_ROWS_SHOWN]]
+                      if exceed is not None else df.head(E1_ROWS_SHOWN))
+                title += (f"; the {E1_ROWS_SHOWN} worst by exceedance shown, all of them in the run's "
+                          f"{fname}")
+            title += ")"
         tables.append(_table(f"freq_{key}", title, model, columns, df.values.tolist(), group="frequency"))
     return tables
 

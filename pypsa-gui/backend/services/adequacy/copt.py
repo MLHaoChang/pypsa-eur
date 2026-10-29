@@ -67,6 +67,7 @@ from services.adequacy.occurrence import (
     _as_float,
     rate_is_usable,
 )
+from services.adequacy.metrics import HOURS_PER_YEAR, criticality_scale
 from services.adequacy.worksheet import zero_reason
 
 
@@ -1053,11 +1054,17 @@ def _eue_binned(dist: CapacityDistribution, cells) -> float:
 def attribute_criticality(units: list[CoptUnit], dist: CapacityDistribution,
                           residual_load: pd.Series, *, weights: pd.Series,
                           voll: float, mixed=(), netted=(),
-                          deterministic=()) -> list[dict]:
+                          deterministic=(),
+                          horizon_hours: float | None = None) -> list[dict]:
     """
     Leave-one-out outage attribution (spec §3.3): for each unit i,
 
         ΔEUE_i = EUE(fleet as-is) − EUE(fleet with unit i PERFECTLY available)
+
+    ``criticality_eur_per_year`` is ΔEUE_i · VoLL scaled to a year by
+    ``HOURS_PER_YEAR / horizon_hours`` (LC-30), matching the annual occurrence.
+    ``horizon_hours`` defaults to Σ ``weights``; a per-block call passes the
+    WHOLE horizon's, so the blocks' criticalities sum to the annual figure.
 
     computed by deconvolving i out and convolving back a deterministic
     capacity of the same size. This prices the unit's OUTAGES over the full
@@ -1091,6 +1098,10 @@ def attribute_criticality(units: list[CoptUnit], dist: CapacityDistribution,
     deterministic = tuple(deterministic)
     r = residual_load.to_numpy(dtype=np.float64)
     w = weights.reindex(residual_load.index).fillna(0.0).to_numpy(dtype=np.float64)
+    if horizon_hours is None:
+        horizon_hours = float(w.sum())
+    nyears = float(horizon_hours) / HOURS_PER_YEAR
+    scale, basis = criticality_scale(nyears)
 
     def _eue(d, res, fixed_up=frozenset()) -> float:
         _lolp, eue_h = mixture_hourly(d, res, mixed, fixed_up=fixed_up)
@@ -1159,7 +1170,7 @@ def attribute_criticality(units: list[CoptUnit], dist: CapacityDistribution,
         todo.append((u, base_eue, deterministic_row_note(u)))
     for u, eue_perfect, note in todo:
         delta_eue = max(base_eue - eue_perfect, 0.0)
-        crit_eur = delta_eue * max(float(voll), 0.0)
+        crit_eur = delta_eue * max(float(voll), 0.0) * scale
         occ = (8760.0 * u.q / u.mttr_hours
                if math.isfinite(u.mttr_hours) and u.mttr_hours > 0 else 0.0)
         severity = crit_eur / occ if occ > 0 else 0.0
@@ -1172,6 +1183,8 @@ def attribute_criticality(units: list[CoptUnit], dist: CapacityDistribution,
             "occurrence_basis": u.basis or "FOR",
             "severity_eur": severity,
             "criticality_eur_per_year": crit_eur,
+            "criticality_basis": basis,
+            "horizon_years": nyears,
             "in_metric_scope": True,
             "engine": "copt",
             "fidelity": "analytic_convolution",
@@ -1256,6 +1269,9 @@ def screening_analysis(units, residual_load: pd.Series, *, weights: pd.Series,
 
     blocks = period_blocks(residual_load.index)
     w_full = weights.reindex(residual_load.index).fillna(0.0)
+    # LC-30: every block annualises over the WHOLE horizon, so the by-name
+    # merge below sums to ΣΔEUE_b · VoLL / nyears, not one year per block.
+    horizon_hours = float(w_full.sum())
     per: dict = {}
     for label, start, end in blocks:
         block_units: list[CoptUnit] = []
@@ -1270,7 +1286,7 @@ def screening_analysis(units, residual_load: pd.Series, *, weights: pd.Series,
         per[label] = _screen_block(
             block_units, residual_load.iloc[start:end],
             weights=w_full.iloc[start:end], voll=voll, delta_mw=delta_mw,
-            k_exact=k_exact)
+            k_exact=k_exact, horizon_hours=horizon_hours)
 
     lole = sum(a["metrics"]["lole_hours"] for a in per.values())
     eue = sum(a["metrics"]["eue_mwh"] for a in per.values())
@@ -1334,7 +1350,8 @@ def screening_analysis(units, residual_load: pd.Series, *, weights: pd.Series,
 
 
 def _screen_block(units, residual_load: pd.Series, *, weights: pd.Series,
-                  voll: float, delta_mw: float, k_exact: int) -> dict:
+                  voll: float, delta_mw: float, k_exact: int,
+                  horizon_hours: float | None = None) -> dict:
     """One fleet at constant capacities over one residual series — the
     12c-pre pipeline, unchanged (``screening_analysis`` before Phase 12d)."""
     split = split_fleet(units, k_exact=k_exact)
@@ -1350,7 +1367,8 @@ def _screen_block(units, residual_load: pd.Series, *, weights: pd.Series,
     rows = attribute_criticality(list(split.table), dist, res, weights=weights,
                                  voll=voll, mixed=split.mixed,
                                  netted=split.netted,
-                                 deterministic=split.deterministic)
+                                 deterministic=split.deterministic,
+                                 horizon_hours=horizon_hours)
     return {"metrics": metrics, "rows": rows, "split": split, "dist": dist,
             "residual": res,
             "fidelity_note": fidelity_note(split, k_exact=k_exact)}

@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): `campus_island_report` takes a `table` id so the copilot can read any island report table whole, such as the frequency events; without it the answer still shows the first two tables and now lists every table id.

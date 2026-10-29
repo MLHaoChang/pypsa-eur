@@ -6,5 +6,7 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 
 ## Rules
 
+- Read a PR with `git diff --stat` first, then one hunk or file at a time, each capped with `| head -c 6000`. Whole-file or cross-file reads go to an Explore subagent that returns file:line findings only.
+- Open screenshots downscaled: resize to at most 1000 px wide before `Read` (13 full PNGs cost ~15k tokens).
 - <navigation, wording and layout rules>
 - A base-branch merge carries an OK when the head tree equals `git merge-tree --write-tree <old> <base>`; any difference needs a real look.

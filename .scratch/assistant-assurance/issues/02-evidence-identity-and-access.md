@@ -3,7 +3,7 @@
 
 # P1: authorized evidence identity and validity
 
-Status: in progress — list_components page evidence (A1.1, current-input part of A1.3, A1.5 page capture) in #806; A1.2 revocation cases executable (#813), REVOKE-TOCTOU closed (#818); get_timeseries steps (#826); A1.4 integrity cases executable (#840); A1.4-RETAINED closed by a record MAC (#850); A1.3 run as-of cases executable (#856); A1.5 complete-source load aggregate (#864); rest of P1 open (A1.6/A1.7 validity and masks, other read_unvalidated families, frontend assurance_state)
+Status: in progress — list_components page evidence (A1.1, current-input part of A1.3, A1.5 page capture) in #806; A1.2 revocation cases executable (#813), REVOKE-TOCTOU closed (#818); get_timeseries steps (#826); A1.4 integrity cases executable (#840); A1.4-RETAINED closed by a record MAC (#850); A1.3 run as-of cases executable (#856); A1.5 complete-source load aggregate (#864); A1.6/A1.7 aggregate handler validity (#868) and emissions/lost-load null-not-zero (#879); one aggregate gap helper and pilot POLICY_VERSION (2026-10-29 slice); rest of P1 open (see "Remaining P1 slices")
 Progress: Authorized retained evidence, ACL rechecks shipped; status says whole phase open, displayed-data revision proof pending
 Type: task
 Blocked by: 01; live-voice issue 06 for retained-run guarantees
@@ -130,3 +130,76 @@ Consequences: records saved before this change, and every record after `SECRET_K
 
 Not covered: replay of an older, validly sealed version of a mutable record (`operation`, `ui_action`, `conversation_context`) within its 24 hours; a monotonic counter would close it. An unresolved `operation` reservation saved before this change no longer reads, and the reclaim loop still keeps unresolved reservations, so such a file holds a quota slot until removed by hand.
 
+
+### 2026-10-28 — A1.6/A1.7 slices a and b (#868, #879)
+
+- **a (#868).** `aggregate_load_profile` (route and `get_aggregate_load`) no longer fills a missing step with 0, counts a repeated name twice or drops an unknown one. It reports `complete`, `gaps`, `unknown_names` and `loads_without_profile`, and returns null peak and mean unless the sum is complete. Tests: `test_p1_validity_aggregate.py`.
+- **b (#879).** Emissions and lost-load results return null, not 0, for a value the solve didn't record: the CO₂ shadow price, lost-load totals, and a VOLL that was not derivable. The results pages show "—" with "not recorded by this solve". Tests: `test_p1_validity_results.py`, `test_retained_emissions.py`, results vitests.
+- Follow-ups from #879, outside P1: SummaryTab shows a cap whose binding is null as "not binding"; Dispatch's hidden lost-load tiles are unlabelled; the LostLoad tables clip rows at about 1000 px.
+
+### 2026-10-29 — one aggregate gap helper; pilot POLICY_VERSION
+
+- `assurance_records.aggregate_gaps(snapshots, unknown, members)` now names the gaps of an aggregate load sum for both paths. The order is unknown names, no loads, no profile, other snapshots, not a number, missing or non-finite steps, no steps. `aggregate_source` refuses on the first gap, and the handler reports them all. Each path still reads its own source: `resolve_series` on the checked side, `_user_ts` then the network on the handler side.
+- No change of behaviour: on 19 scenarios, the handler's response JSON (every gap, the null-step totals and the sum) is byte-equal to master's (`tests/assurance_acceptance/aggregate_json_dump.py`, run on both trees and compared with `cmp`). The helper also gives "the loads do not share the network's snapshots" when members cannot be aligned and no gap was found before. No public path reaches that case, because such a member already fails the snapshots check.
+- `harness/pilot_evaluation.py` checks the receipt against `records.POLICY_VERSION`, not a literal "1".
+- Tests: `test_p1_validity_aggregate.py` pins the full ordered gap list on both paths for 15 cases: unknown, only unknown, no loads match, no profile, no profile at all, missing step, infinite step, other snapshots, both off snapshots, bool, numeric string, repeated timestamp, timezone-aware, many gaps (five gaps at once) and empty upload (five gaps ending in "no steps"). The checked path refuses on the first gap and never raises. "No steps" alone is tested on the helper, since pypsa refuses empty snapshots. `test_pilot_evaluation_scoring.py`: a receipt with policy version "2", 1 or None still gives `unsupported_policy`.
+- Mutation: `tests/assurance_acceptance/aggregate_gap_mutations.py` swaps each pair of gap kinds in the helper's result and leaves every other gap in place. Each of the 14 pairs that can appear together fails a test. The other 7 pairs never appear together ("no loads match" with anything, "no steps" with a missing step), so swapping them is an equivalent mutant.
+
+#### GK B (9) plan GO conditions (2026-10-29)
+
+1. No behaviour change, proved: master's `test_p1_aggregate`, `test_p1_validity_aggregate` and pilot_evaluation tests run unchanged and green on the PR tree, and the handler's response JSON is byte-equal to master's. Met: 107 passed for master's copies of the validity, aggregate and scoring files; `test_pilot_evaluation` is unchanged (212 passed, 21 skipped); JSON byte-equal on 19 scenarios.
+2. Parity parametrised over the six gap kinds (unknown, no profile, snapshots, not a number, missing/non-finite, no steps). The router keeps the full ordered list, and one case has several gaps. Met: two cases have five gaps each, and "no steps" is reached through both paths (empty upload).
+3. Members that cannot be aligned (tz-aware next to naive, a repeated timestamp) give a gap on both paths, never a 500. Met.
+4. Swapping two gap checks fails a test. Met, except the equivalent mutants named above.
+5. A receipt with policy_version "2" still gives `unsupported_policy`. Met.
+6. These conditions are recorded here.
+
+### Remaining P1 slices (2026-10-29)
+
+Smallest first; each goes to GK B as a plan before it is built.
+
+- **REPLAY.** A monotonic per-record sequence for mutable records (`operation`, `ui_action`, `conversation_context`), so an older, validly sealed copy reads unavailable. Only `assurance_records` changes.
+- **Shared fact builder.** One builder for the fact dicts of the static, static_page, series, run and aggregate kinds. Refactor only, behind the A1.x suites.
+- **SERIES-WINDOW.** A compact series record: a values array plus an index digest, with facts resolved on lookup. It lifts the 744-step cap without new args. Windowed args would need `harness/catalogue.py`; blocked while #851/#869 hold it.
+- **REVOKE-KIND** and **frontend assurance_state.** Blocked: both need `ChatPanel.tsx` (held by #883) and UX review.
+- **Run sections, compare_project_runs, run manifest MAC.** Blocked: all go through `services/run_evidence.py` (LC-03 (6), #883).
+
+### 2026-10-29 — REPLAY closed: a DB high-water mark on every mutable record
+
+`tests/assurance_acceptance/test_p1_replay.py`: 32 cases.
+
+**Threat model.**
+- In scope: an attacker who can write the record store, up to restoring the whole store directory. They cannot read `SECRET_KEY` or the key file, and cannot write the DB.
+- Out of scope: rolling back the store and the DB together (a backup restore); anyone who can read the key, since they can forge anything; and write access to the project or the DB, since that is project access.
+
+**What changed.**
+- **The mark.** Each save of a mutable record (`operation`, `ui_action`, `conversation_context`) takes the next value of a mark in a new DB table, `assurance_record_seq` (migration `0010_assurance_record_seq`). The table holds `owner_id`, `record_id`, `seq`, `epoch` and `expires_at`. The save seals `{seq, epoch}` into the record under its MAC.
+- **Load.** `load()` accepts a mutable record only when its sealed mark equals the DB row exactly. Each of these reads 409 `evidence_unavailable`:
+  - a lower seq (a replay);
+  - a higher seq (the mark was rolled back);
+  - another epoch;
+  - no mark at all.
+
+  The mark is stripped before the record is returned, so callers see the record as before.
+- **Write order.** The mark is bumped (`UPDATE … SET seq = seq + 1 RETURNING`) and committed inside the store's file lock. Only then is the file sealed and written. A crash between the two leaves the file one behind its mark, which reads as unavailable and never as the older version. The next save writes a current version again. `load()` takes no lock, because an effect holds the store lock while its handler runs. A reader that finds the file one step behind its mark re-reads for up to 2 s (`_MARK_SETTLE_SECONDS`), so a save in flight lands and reads as the new version (tested). A reader that already holds the store lock skips the wait, because no save can land then. Only a file exactly one seq behind in the same epoch waits; every other mismatch is refused at once (GK B (10) NOT OK fix, tested with the settle time patched to 30 s). A crash or replay stays mismatched and reads 409. Two first saves of a new id that race on the insert take seqs 1 and 2: the loser retries the update (tested outside the lock).
+- **Pruning.** A pruned row starts a new epoch when its id is written again, so no copy sealed under the old chain matches. The save sweep deletes the marks of reclaimed records, and of expired records whose file is gone. An unresolved operation reservation keeps its file, so it keeps its mark.
+- **Immutable kinds** (answer, evidence) take no mark; an identical re-save is still a no-op.
+
+**Upgrade effect** (fail-closed, as #850 was).
+- A mutable record saved before the migration has no mark, so it reads as unavailable until rewritten. There is no backfill, because a backfill would trust a store that may have been rolled back.
+- What the user sees, for at most 24 hours (retention):
+  - a pending confirmed operation from before the upgrade can't be read back, so it is refused rather than re-run;
+  - a UI-action cursor or acknowledgement reads 409;
+  - a conversation checkpoint isn't recovered, so the conversation continues without checked recovery.
+
+**Not covered.** The store and the DB rolled back together. Marks for records whose files are removed by hand outside the sweep stay until a later mutable save by the same owner prunes them after expiry.
+
+#### GK B (9) plan GO conditions (2026-10-29), option A
+
+1. **Exact match:** load() accepts only seq == mark, and both directions are refused. Met: tests for replay, rolled-back mark and epoch.
+2. **Write order:** the DB commit comes first, then seal and write. Pinned by a test that fails the file write after the commit; the process is not killed, so the test leaves file n with mark n+1 and checks that it reads 409. Two concurrent saves take distinct seqs (a two-thread test through save(), and a two-thread test of the first mark outside the lock). Met.
+3. **Migration 0010** after 0009, with a downgrade. Met: `test_alembic_sqlite` (head is now 0010) and a new upgrade → downgrade → upgrade round-trip test.
+4. **Upgrade effect** is fail-closed with no backfill, stated above. Met.
+5. **Rows don't grow forever:** they are pruned in the save sweep, and a re-created id gets a new epoch. Met: tests for the sweep and the pruned chain.
+6. **Mutable kinds only.** The immutable no-op test is kept. There are no new error kinds (409 `evidence_unavailable`, as for any unavailable record). Mutation: `tests/assurance_acceptance/replay_mutation.py` makes load() accept any mutable record it can read and unseal; each of the 21 red cases then fails. Met.
+7. These conditions are recorded here.

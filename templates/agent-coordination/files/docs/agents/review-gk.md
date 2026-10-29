@@ -6,6 +6,7 @@ Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sh
 
 ## Rules
 
+- Read a PR with `git diff --stat` first, then one hunk or file at a time, each capped with `| head -c 6000`. Whole-file or cross-file reads go to an Explore subagent that returns file:line findings only.
 - <how to set up a review checkout and run the tests, with timeouts>
 - <how to review a delta after a base-branch merge>
 - <known environment-only failures>

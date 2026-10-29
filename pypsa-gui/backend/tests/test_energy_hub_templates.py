@@ -7,7 +7,6 @@ stress registry, solver settings (VOLL) and study metadata.
 """
 from __future__ import annotations
 
-import json
 import pathlib
 import sys
 
@@ -18,6 +17,7 @@ BACKEND = pathlib.Path(__file__).resolve().parents[1]
 TPL_DIR = BACKEND / "project_templates"
 sys.path.insert(0, str(TPL_DIR))
 import eh_templates as T  # noqa: E402
+from tests._year_base import build_for_solve  # noqa: E402
 
 IDS = sorted(T.BUILDERS)
 #: The templates that carry the Energy Hub adequacy study: a generation-only site (the IPP) has
@@ -39,9 +39,11 @@ def _optimize(n):
     from services.adequacy.energization import apply_energization
 
     apply_energization(probe)                     # as run_simulation does
-    # A committable process unit is planned linearised, as the app does (process_uc auto).
-    from services.solver.process_uc import planning_uc_kwargs
+    # A committable process unit is planned as the app does (process_uc auto): linearised, or plain on the
+    # year base.
+    from services.solver.process_uc import planning_uc_kwargs, relax_for_plan
 
+    relax_for_plan(probe, None)
     status, cond = probe.optimize(solver_name="highs", multi_investment_periods=_multi(n),
                                   **planning_uc_kwargs(probe, None))
     return probe, status, cond
@@ -55,7 +57,7 @@ def _year_sums(n, column):
 
 @pytest.mark.parametrize("tid", IDS)
 def test_template_is_feasible_tagged_and_mttr_safe(tid):
-    n = T.BUILDERS[tid]()
+    n = build_for_solve(T, tid)
     _probe, status, cond = _optimize(n)
     assert (status, cond) == ("ok", "optimal")
     assert all(abs(x - 8760.0) < 1e-6 for x in _year_sums(n, "generators"))
@@ -211,7 +213,7 @@ def test_storage_integrates_physical_hours_while_costs_still_scale_to_a_year(tid
     and generators weightings 8760/168), but a battery's state of charge moves
     by one hour of power per hourly snapshot. PyPSA uses the ``stores``
     weighting as elapsed hours in the SoC balance, so it must be 1."""
-    n = T.BUILDERS[tid]()
+    n = build_for_solve(T, tid)
     for column in ("objective", "generators"):
         assert all(abs(x - 8760.0) < 1e-6 for x in _year_sums(n, column))
     # pinned directly: a template whose storage happens to sit idle in the

@@ -21,7 +21,7 @@ def main():
     parser.add_argument("--storage", type=Path, required=True)
     parser.add_argument("--decisions", action="store_true")
     parser.add_argument("--no-model", action="store_true", help="configure no model profile (the no-key path)")
-    parser.add_argument("--journey", choices=["oj01", "oj05", "oj21", "oj22", "lc16c"],
+    parser.add_argument("--journey", choices=["oj01", "oj05", "oj21", "oj22", "lc16c", "lc03h"],
                         help="script a finite owner journey on the loopback wire (LC-03 OJ-01)")
     args = parser.parse_args()
     storage = args.storage.resolve()
@@ -136,6 +136,20 @@ def main():
                          ("get_loadflow_summary", {"run_id": ((results[0].get("items") or [{}])[0].get("run_id")
                                                               if results else None)}),
                          ("ui_open_panel", {"panel_id": "results", "results_tab": "loadflow"})]
+            elif "capacity results of the first run" in said:
+                # LC-03 LC-T09: a past run is opened from its kept section, never the current results.
+                items = (results[0].get("items") or [{}]) if results else [{}]
+                first = items[-1].get("run_id")
+                steps = [("list_project_runs", {"limit": 10, "status": "completed"}),
+                         ("discuss_project_run", {"run_id": first, "results_tab": "capex",
+                                                  "section": "results_capacity"}),
+                         ("get_results", {"result_kind": "economics_by_carrier", "run_id": first})]
+                if results and "items" not in results[0]:
+                    steps = steps[:1]  # the runs are refused (LC-T08): say why, read nothing else
+            elif "capacity results of the latest run" in said:
+                # LC-T10: a newer turn about the current results supersedes the past-run view.
+                steps = [("get_results", {"result_kind": "economics_by_carrier"}),
+                         ("ui_open_panel", {"panel_id": "results", "results_tab": "capex"})]
             elif "something else" in said:
                 listing = results[0] if results else {}
                 picked = next((v for v in listing.get("views", []) if v.get("data") == "available"), None)
@@ -172,6 +186,18 @@ def main():
                         f"{'read back' if receipt.get('outcome') == 'verified' else 'not confirmed'}; "
                         f"results stale: {receipt.get('results_stale')}; "
                         f"undo: {(receipt.get('undo') or {}).get('available')}.")
+            elif steps == [("list_project_runs", {"limit": 10, "status": "completed"})]:
+                raw = texts[0] if texts else ""
+                text = f"LC03H_REFUSED {raw.split('<untrusted_data>')[-1].split('</untrusted_data>')[0].strip()[:400]}"
+            elif steps[0][0] == "list_project_runs" and steps[-1][0] == "get_results":
+                read = results[2]
+                gas = ((read.get("data") or {}).get("by_carrier") or {}).get("gas") or {}
+                text = (f"LC03H_PAST Run {steps[1][1]['run_id']} ({read.get('scope')}): "
+                        f"gas LCOE {(gas.get('lcoe_eur_per_mwh') or {}).get('total')} EUR/MWh.")
+            elif steps[0] == ("get_results", {"result_kind": "economics_by_carrier"}):
+                gas = (results[0].get("by_carrier") or {}).get("gas") or {}
+                text = (f"LC03H_LATEST Current results: "
+                        f"gas LCOE {(gas.get('lcoe_eur_per_mwh') or {}).get('total')} EUR/MWh.")
             elif len(steps) == 1:
                 text = f"The solve was started (job {results[0].get('job_id')})."
             else:
@@ -187,6 +213,15 @@ def main():
             return True
 
         def do_POST(self):
+            if args.journey == "lc03h" and self.path in ("/fixture/revoke-access", "/fixture/restore-access"):
+                # LC-T08 in the browser: the signed-in user loses (then regains) their
+                # organisation membership, a real ACL change made in the database.
+                subprocess.run([sys.executable, "-c", MEMBERSHIP, self.path.rsplit("/", 1)[1],
+                                str(storage / "membership.json"), str(credentials)],
+                               cwd=backend_dir, env=env, check=True, capture_output=True)
+                self.send_response(204)
+                self.end_headers()
+                return
             if args.journey and self.path == "/v1/chat/completions":
                 if self._journey(json.loads(self.rfile.read(int(self.headers["Content-Length"])))):
                     return
@@ -286,6 +321,37 @@ user = bootstrap_super_admin(**json.loads(Path(sys.argv[1]).read_text()))
 with SessionLocal() as db:
     ensure_personal_org(db, db.get(User, user.id))
 """
+    MEMBERSHIP = """
+import json, sys, uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from sqlalchemy import select
+from db.session import SessionLocal
+from db.models import OrgMembership, Project, User
+action, kept, credentials = sys.argv[1], Path(sys.argv[2]), Path(sys.argv[3])
+with SessionLocal() as db:
+    user = db.scalar(select(User).where(User.email == json.loads(credentials.read_text())["email"]))
+    row = db.scalar(select(OrgMembership).where(OrgMembership.user_id == user.id))
+    if action == "revoke-access":
+        # oj-grid belongs to a colleague; the user is demoted from org admin to member,
+        # with no membership of that project: they can no longer open it.
+        owner = User(id=uuid.uuid4(), email="colleague@example.test", password_hash=None,
+                     status="active", is_super_admin=False, created_at=datetime.now(tz=timezone.utc))
+        db.add(owner)
+        db.flush()
+        db.add(OrgMembership(id=uuid.uuid4(), user_id=owner.id, org_id=row.org_id, role="admin"))
+        project = db.scalar(select(Project).where(Project.name == "oj-grid", Project.org_id == row.org_id))
+        kept.write_text(json.dumps({"role": row.role, "created_by": str(project.created_by)}))
+        project.created_by = owner.id
+        row.role = "member"
+    else:
+        # Restored as it was: their role, and oj-grid theirs again, so they can reopen it.
+        was = json.loads(kept.read_text())
+        row.role = was["role"]
+        project = db.scalar(select(Project).where(Project.name == "oj-grid", Project.org_id == row.org_id))
+        project.created_by = uuid.UUID(was["created_by"])
+    db.commit()
+"""
     backend = None
     def stop(*_):
         raise KeyboardInterrupt
@@ -315,7 +381,9 @@ with SessionLocal() as db:
             else:
                 raise RuntimeError("Backend readiness timeout")
             ready = {"base": f"http://127.0.0.1:{port}", "credentials_file": str(credentials)}
-            if args.journey in ("oj01", "oj05", "oj21", "oj22", "lc16c"):
+            if args.journey == "lc03h":
+                ready["control"] = f"http://127.0.0.1:{model.server_port}/fixture"
+            if args.journey in ("oj01", "oj05", "oj21", "oj22", "lc16c", "lc03h"):
                 # The same oj-grid the Tier A tests use (tests/oj_grid.py), as NetCDF.
                 network = storage / "oj-grid.nc"
                 # OJ-22 adds two more solar units, one inactive, so "all solar" is a set of three.

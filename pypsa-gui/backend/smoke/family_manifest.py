@@ -38,6 +38,8 @@ G = 'tests/gridspine/'
 D15_TOOLS = 'campus_set_island_config campus_island_config campus_run_island_study'
 #: E1-E6 read through GET .../island/report: the chat tool trims the events away (ticket 27).
 D16_TOOLS = 'campus_set_island_config campus_draft_campus campus_run_study'
+D17_TOOLS = (D16_TOOLS + ' campus_run_island_study campus_recommend_gfm_settings campus_island_gfm_settings '
+             'campus_gfm_settings_card campus_apply_gfm_settings')
 
 # The capability-matrix families, in `assistant_control_matrix.FAMILY_JOURNEYS`
 # order, keyed by their journey slug.
@@ -86,7 +88,7 @@ TOOLS_BY_FAMILY: dict[str, frozenset[str]] = {f: frozenset(names.split()) for f,
         get_project_sites set_project_sites get_project_layout update_project_layout get_project_flow
         get_project_flow_scope update_project_flow_scope get_project_network_meta get_meta update_meta
         project_readiness get_site_template_form fetch_site_context geocode_place get_osm_suggestions
-        list_project_network_component set_site_connection""",
+        list_project_network_component set_site_connection get_site_anchor set_site_anchor""",
     'network-topology': """
         batch_create_components batch_delete_components bulk_update_components cascade_delete_bus
         create_carrier create_component delete_component get_component get_component_schema list_carriers
@@ -118,7 +120,7 @@ TOOLS_BY_FAMILY: dict[str, frozenset[str]] = {f: frozenset(names.split()) for f,
         compare_project_runs discuss_project_run get_asset_results get_curtailment_by_cause get_energy_flows
         get_load_shape get_loadflow_summary get_project_results_bundle get_project_results_summary
         get_project_statistics get_project_compare_state get_results get_run_evidence get_vintage_results
-        list_project_runs list_result_assets list_result_views read_result""",
+        list_project_runs list_result_assets list_result_views read_result get_process_view""",
     'reliability-adequacy': """
         abort_adequacy_study get_adequacy_results get_asset_health record_asset_health get_fmea_worksheet
         save_fmea_worksheet run_fmea_sweep get_reliability_goal get_stress_scenarios put_stress_scenarios
@@ -189,8 +191,16 @@ def _unavailable(vid: str, reason: str, pointer: str) -> dict:
 # Rebaselined on master a6d73f57; see the slice log in
 # .scratch/live-copilot/issues/06-family-adapters.md.
 VARIANTS: list[dict] = [
-    _pending('LC-D01.projects', 'seam tests check identity/ACL; no independent file/ID oracle'),
-    _pending('LC-D02.topology', 'seam tests check shape; no reference-count/KCL oracle'),
+    _covered('LC-D01.projects', 'copy = new registry id + own network.nc (1 bus, 20 MW, 2 snapshots read with pypsa alone); rename keeps '
+             'the id and the file bytes; refused Save-As leaves the target file byte-identical; delete removes that directory only',
+             'list_projects save_project_a_copy rename_project save_project_as delete_project',
+             B + 'test_lc06_d01_projects.py::test_copy_rename_refused_overwrite_and_delete_keep_each_projects_id_and_files'),
+    _covered('LC-D02.topology', 'chain B1-B2-B3: G1 serves 10 MW, Ln1 5 MW and Ln2 2 MW by sign; bus B2 has 4 references (G2, L2, Ln1, Ln2): '
+             'a plain delete dangles exactly those 4 in validate_network, a cascade leaves B1 B3 G1 L1 L3 in memory and in the saved file',
+             'create_component delete_component cascade_delete_bus validate_network save_project',
+             B + 'test_lc06_d02_topology.py::test_the_built_topology_carries_the_hand_kirchhoff_flows',
+             B + 'test_lc06_d02_topology.py::test_a_plain_bus_delete_leaves_exactly_the_four_references_dangling',
+             B + 'test_lc06_d02_topology.py::test_a_cascade_delete_removes_the_bus_and_its_four_references_and_nothing_else'),
     _covered('LC-D03.dynamic_weights', 'objective = 10 EUR/MWh x (5 MW x 2 h + 7 MW x 3 h) = 310, after an import round trip',
              'import_uploaded_network save_project_as run_simulation save_project get_study_evidence',
              B + 'test_assistant_capabilities.py::test_native_dynamic_roundtrip_solves_and_persists_evidence'),
@@ -301,7 +311,13 @@ VARIANTS: list[dict] = [
              '',
              B + 'test_capacity_cycles_assurance.py::test_a_store_with_a_reversed_sign_is_refused',
              B + 'test_capacity_cycles_assurance.py::test_a_cyclic_store_is_checked_around_its_loop'),
-    _pending('LC-D09.inflow_spill', 'refusal only; no native inflow/spill oracle'),
+    _covered('LC-D09.spill', 'a held-full 20 MWh reservoir, 10 MW inflow, 4 MW load, 3 h weights: spill 6 MW each '
+             'snapshot, spilled_mwh 54; inflow 9 gives 5 and 45',
+             'run_simulation get_simulation_status get_asset_results',
+             B + 'test_lc06_d09_inflow_spill.py::test_a_full_reservoir_spills_its_inflow_less_its_dispatch[inflow10]',
+             B + 'test_lc06_d09_inflow_spill.py::test_a_full_reservoir_spills_its_inflow_less_its_dispatch[inflow9]'),
+    _unavailable('LC-D09.inflow', 'no tool reports a StorageUnit inflow; spill is its only native water output (ticket 31)',
+                 'pypsa-gui/backend/services/asset_results/registry.py spilled_mwh'),
     _covered('LC-D10.prices_emissions', 'time-weighted bus price, positive dual of a binding cap, emissions = dispatch / efficiency x factor',
              '',
              B + 'test_result_profiles_assurance.py::test_bus_price_is_time_weighted_and_observed',
@@ -310,8 +326,32 @@ VARIANTS: list[dict] = [
     _covered('LC-D11.copt', 'two-unit capacity distribution 0.72/0.18/0.08/0.02 (sums to 1), equal to GET /results/copt',
              '',
              B + 'test_copt_assurance.py::test_the_classical_fleet_by_hand_and_as_the_tab_has_it'),
-    _pending('LC-D11.fmea', 'seam checks shape only; engine seeds test_energy_hub_fmea_top.py'),
-    _pending('LC-D11.health', 'validation only'),
+    _covered('LC-D11.fmea', 'class A leave-one-out on the two-unit COPT fleet: dEUE 28.8 / 31.8 MWh, 17.52 / 43.8 per yr, '
+             'q 0.2 -> 0.1 gives 15.9; class B: a 10 MW tie out sheds 5 MW x 2 x 3 h = 30 MWh (4 MW: 24); '
+             'dEUE and occurrence only',
+             'update_solver_config get_adequacy_results run_fmea_sweep',
+             B + 'test_lc06_d11_fmea_health.py::test_class_a_prices_each_units_outages_by_hand[thermal1]',
+             B + 'test_lc06_d11_fmea_health.py::test_class_a_prices_each_units_outages_by_hand[thermal2]',
+             B + 'test_lc06_d11_fmea_health.py::test_class_a_moves_with_one_units_rate',
+             B + 'test_lc06_d11_fmea_health.py::test_class_b_one_link_outage_sheds_its_load',
+             B + 'test_lc06_d11_fmea_health.py::test_class_b_moves_with_the_load_behind_the_tie'),
+    _covered('LC-D11.fmea_criticality', 'criticality per year: dEUE x 8760/6 h x VoLL 1000 (thermal1 42,048,000 EUR/yr, '
+             'severity 2,400,000 EUR; thermal2 46,428,000); a year-long horizon is unscaled; class B tie 0.02 x 30 MWh '
+             'x 1460 x 1000 = 876,000 EUR/yr; on a year-long horizon both classes are unscaled',
+             'update_solver_config get_adequacy_results run_fmea_sweep',
+             B + 'test_lc06_d11_fmea_health.py::test_class_a_criticality_is_per_year[thermal1]',
+             B + 'test_lc06_d11_fmea_health.py::test_class_a_criticality_is_per_year[thermal2]',
+             B + 'test_lc06_d11_fmea_health.py::test_class_a_criticality_on_a_year_is_the_horizons',
+             B + 'test_lc06_d11_fmea_health.py::test_class_b_criticality_is_per_year',
+             B + 'test_lc06_d11_fmea_health.py::test_class_b_criticality_on_a_year_is_the_horizons'),
+    _covered('LC-D11.health', 'ledger read back from storage and the route; provenance 1 sourced, 1 drifted (0.25 vs 0.2), '
+             '1 orphaned; four invalid fields refused with the field named, the file byte-identical',
+             'record_asset_health get_asset_health',
+             B + 'test_lc06_d11_fmea_health.py::test_health_reads_back_from_storage_and_reconciles_with_the_network',
+             B + 'test_lc06_d11_fmea_health.py::test_an_invalid_record_names_its_field_and_stores_nothing[outage_rate_value-1.0]',
+             B + 'test_lc06_d11_fmea_health.py::test_an_invalid_record_names_its_field_and_stores_nothing[mttr_hours-0.0]',
+             B + 'test_lc06_d11_fmea_health.py::test_an_invalid_record_names_its_field_and_stores_nothing[measured_at-01/01/2026]',
+             B + 'test_lc06_d11_fmea_health.py::test_an_invalid_record_names_its_field_and_stores_nothing[confidence-certain]'),
     _covered('LC-D12.standard_mc', 'exact two-unit COPT LOLE 1927.2 h / EUE 54,312 MWh inside the seed-1 95 % CI; LOLE half-width <= 10 % of the oracle; stationary start',
              'run_mc_study get_adequacy_results',
              B + 'test_lc06_d12_standard_mc.py::test_the_oracle_is_the_hand_copt',
@@ -346,7 +386,13 @@ VARIANTS: list[dict] = [
              B + 'test_lc06_d13_energization_dtc.py::test_the_schedule_composes_as_min_with_each_capacity_edit',
              B + 'test_lc06_d13_energization_dtc.py::test_dropping_the_schedule_moves_ens_by_the_hand_delta'),
     _pending('LC-D13.multi_energy', 'no H2/heat attribution test found'),
-    _pending('LC-D14.static_campus', 'chat tests stub the service; seed tests/gridspine/test_campus_ranking.py'),
+    _covered('LC-D14.static_campus', 'six untied hours through the queued Run: k 1 picks import/trafo h0, consumption h2, '
+             'export/renewable h3; k 2 adds h5 import/trafo, h0 consumption, h2 renewable; k read back from the job; '
+             '50 MW in h5 moves the import pick',
+             'campus_draft_campus campus_run_study',
+             B + 'test_lc06_d14_static_campus.py::test_k1_picks_each_criterions_extreme_hour_and_unions_the_reasons',
+             B + 'test_lc06_d14_static_campus.py::test_k2_adds_each_criterions_runner_up',
+             B + 'test_lc06_d14_static_campus.py::test_more_load_in_the_last_hour_moves_the_import_pick'),
     *[_covered(f'LC-D15.{m}', 'exact {value, source} read-back; refusals name the field and the unit\'s control; '
                'a gfl BESS enters no GFM row: the genset carries 10 MW x 1000 x 4 h = 40,000 with only headroom binding',
                D15_TOOLS,
@@ -420,14 +466,35 @@ VARIANTS: list[dict] = [
              B + 'test_lc06_d16_frequency_events.py::test_e6_short_of_room_is_infeasible_with_the_shortfall'),
     _unavailable('LC-D16.emt_pll_voltage', 'single-bus aggregate frequency screening only; no EMT/RMS/PLL/voltage dynamics',
                  'gridspine/static/frequency.py LABEL'),
-    _pending('LC-D17.recommend_apply_restudy', 'apply digest checked by equality; no chain through the seam'),
+    _covered('LC-D17.recommend_apply_restudy', 'gfm_vsm BESS (H_v 1 s, 4 %) beside a 5 % droop genset, band 0.25 Hz: '
+             'the card sets droop and H_v within the search bounds; both files read back the card exactly, tagged '
+             'assumed; the re-study puts E2 RoCoF0 and df_qss on the applied values; without it the old figures stand; '
+             'a network edit after the card (saved, saved with the run manifest agreeing, or unsaved in the active '
+             'project) or a wrong digest is edit_preview_stale with nothing written, and an edit to another active '
+             'project refuses nothing (ticket 28); the HTTP apply needs the card\'s digest, a 422 without it, and '
+             'refuses a network edit after the card (ticket 29)',
+             D17_TOOLS,
+             B + 'test_lc06_d17_recommend_apply.py::test_the_applied_card_is_read_back_and_the_restudy_runs_on_it',
+             B + 'test_lc06_d17_recommend_apply.py::test_without_the_restudy_the_old_figures_stand_and_no_study_is_made',
+             B + 'test_lc06_d17_recommend_apply.py::test_a_network_edit_after_the_card_refuses_the_apply',
+             B + 'test_lc06_d17_recommend_apply.py::test_a_digest_that_is_not_the_cards_refuses_the_apply',
+             B + 'test_lc06_d17_recommend_apply.py::test_a_saved_network_edit_refuses_the_apply_by_the_cards_binding',
+             B + 'test_lc06_d17_recommend_apply.py::test_an_unsaved_network_edit_of_the_active_project_refuses_the_apply',
+             B + 'test_lc06_d17_recommend_apply.py::test_an_edit_to_another_active_project_does_not_refuse_the_apply',
+             B + 'test_lc06_d17_recommend_apply.py::test_the_http_apply_requires_the_cards_digest',
+             B + 'test_lc06_d17_recommend_apply.py::test_the_http_apply_refuses_a_network_edit_after_the_card'),
     _covered('LC-D18.investment', 'equity NPV 4.1322314 at cost of equity 10 %, WACC 7 %; financial close undiscounted',
              '',
              B + 'test_investment_assurance.py::test_hand_cash_with_a_nonzero_first_year'),
     _covered('LC-D19.single_case', 'objective 200 = 5 MW x 2 h x 20 EUR/MWh, same in the exported evidence',
              'prepare_experiment advance_experiment refresh_experiment wait_for_job export_run_evidence',
              B + 'test_experiment_case_advancement.py::test_real_case_finishes_only_with_terminal_and_intact_evidence'),
-    _pending('LC-D19.two_case_compare', 'two independently solved cases and signed deltas'),
+    _covered('LC-D19.two_case_compare', 'two solved cases at 3 h weighting: 20 and 30 EUR/MWh x 5 MW x 6 h = 600 and 900 EUR, '
+             'each its own run evidence; compare +300 EUR (+50 %), reversed -300 EUR; the export downloads the same report',
+             'start_experiment prepare_experiment advance_experiment refresh_experiment wait_for_job export_run_evidence '
+             'compare_experiments export_experiment_comparison',
+             B + 'test_lc06_d19_two_case_compare.py::test_two_weighted_cases_compare_their_own_solved_objectives',
+             B + 'test_lc06_d19_two_case_compare.py::test_the_signed_delta_flips_with_the_order'),
     _pending('LC-D20.delivery', 'seam only; delivered bytes not independently parsed'),
     _pending('LC-D21.reports', 'seam only; document facts not independently inspected'),
     _pending('LC-D22.undo_checkpoints', 'seam only; no before/after fingerprint oracle'),

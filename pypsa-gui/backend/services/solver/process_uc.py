@@ -15,6 +15,12 @@ A process unit is a Link with ``eh_process=True``. When one is committable:
   the shortfall. Per period it solves the first ``CHECK_WINDOW`` snapshots on a copy with every
   capacity fixed at the plan, once linearised and once binary, and flags the period above
   ``FLAG_PCT`` cost or any extra shortfall. It never fails the run or touches the plan.
+* **The chronological year** (``stage_network(time_base="year")``, grid-to-process 09/10): linearised
+  UC over 8,760 hours per period does not finish within the solve budget, so ``auto`` plans it as a
+  plain LP (``plain``): ``relax_for_plan`` takes the process units' commitment and minimum load off
+  for the plan solve and puts them back after it. The binary check then solves one week per
+  season of each period (``YEAR_WINDOW_DAYS``), each starting from the plan's store levels and
+  unit states at its first hour, so a week mid-year is not refilled from nothing.
 
 **Upstream PyPSA gap (for an upstream report).** PyPSA 1.1.2 enters ``start_up_cost`` and
 ``shut_down_cost`` in the objective as ``var × cost`` with no snapshot or investment-period
@@ -27,7 +33,11 @@ the cost on a weighted network and the solver warns on a user network (``weighte
 from __future__ import annotations
 
 import math
+import multiprocessing
+import os
+import tempfile
 import time
+from concurrent.futures import ProcessPoolExecutor, wait
 
 import numpy as np
 import pandas as pd
@@ -36,6 +46,12 @@ from models.process_unit import product_role_generators
 
 #: Snapshots per period the binary check solves: one representative week at 1 h.
 CHECK_WINDOW = 168
+#: On the chronological year: the day of the period each checked week starts (mid-January, -April, -July and
+#: -October, one week per season).
+YEAR_WINDOW_DAYS = (14, 105, 196, 287)
+#: What the phase line, the check's message and its ledger say on the year base.
+PLAIN_NOTE = f"plan solved as LP; unit commitment checked in {len(YEAR_WINDOW_DAYS)} sampled weeks per period"
+YEAR_HOURS = 8760
 #: Binary minus linearised operating cost, relative to linearised, above which a period is flagged.
 FLAG_PCT = 0.02
 #: Extra shortfall treated as "any": above numerical noise, relative to the product delivered in
@@ -82,13 +98,28 @@ def _setting(cfg) -> str:
     return getattr(cfg, "process_uc", "auto") or "auto"
 
 
+def is_year_base(n) -> bool:
+    """Every period is one chronological year of hours (8,760 snapshots, every objective weighting 1): the
+    ``year`` time base of ``eh_site.stage_network``."""
+    sns = n.snapshots
+    if not len(sns):
+        return False
+    periods = sns.get_level_values(0) if isinstance(sns, pd.MultiIndex) else np.zeros(len(sns))
+    counts = pd.Series(1, index=periods).groupby(level=0).size()
+    return bool((counts == YEAR_HOURS).all()
+                and np.isclose(n.snapshot_weightings["objective"].to_numpy(float), 1.0).all())
+
+
 def planning_uc_mode(n, cfg) -> str | None:
-    """How the plan commits the process units: "linearised", "binary", or None without any."""
+    """How the plan commits the process units: "linearised", "binary", "plain" (the year base under
+    ``auto``: no commitment in the plan, module docstring), or None without any."""
     if not len(process_committable(n)):
         return None
     mode = _setting(cfg)
     if mode == "auto":
-        return "binary" if sum(other_committable(n)) else "linearised"
+        if sum(other_committable(n)):
+            return "binary"
+        return "plain" if is_year_base(n) else "linearised"
     return mode
 
 
@@ -104,6 +135,9 @@ def planning_uc_note(n, cfg) -> str | None:
         return None
     k = len(process_committable(n))
     gens, links = other_committable(n)
+    if mode == "plain":
+        return (f"Process units: {PLAIN_NOTE} ({k} process link(s); minimum load and min up / down are "
+                "not in the plan)")
     if mode == "binary":
         why = (" (process_uc auto: other units are committable, so the plan stays binary)"
                if _setting(cfg) == "auto" else "")
@@ -113,6 +147,37 @@ def planning_uc_note(n, cfg) -> str | None:
         line += (f"; WARN: also relaxes {gens} committable generator(s) and {links} other "
                  "committable link(s) (process_uc: linearised is network-wide)")
     return line
+
+
+def relax_for_plan(n, cfg):
+    """Under ``plain``: the committable process units solve as plain Links (``committable`` False,
+    ``p_min_pu`` 0). Returns the undo, which puts them back (idempotent); a no-op otherwise."""
+    if planning_uc_mode(n, cfg) != "plain":
+        return lambda: None
+    return _relax(n, process_committable(n))
+
+
+def _relax(n, units):
+    """``units`` as plain Links (``committable`` False, ``p_min_pu`` 0); returns the idempotent undo."""
+    saved = n.links.loc[units, ["committable", "p_min_pu"]].copy()
+    series = n.links_t.p_min_pu[[u for u in units if u in n.links_t.p_min_pu.columns]].copy()
+    n.links.loc[units, "committable"] = False
+    n.links.loc[units, "p_min_pu"] = 0.0
+    if len(series.columns):
+        n.links_t.p_min_pu = n.links_t.p_min_pu.drop(columns=series.columns)
+    done = False
+
+    def undo() -> None:
+        nonlocal done
+        if done:
+            return
+        n.links.loc[saved.index, ["committable", "p_min_pu"]] = saved
+        n.links["committable"] = n.links["committable"].astype(bool)
+        for u in series.columns:
+            n.links_t.p_min_pu[u] = series[u]
+        done = True
+
+    return undo
 
 
 def merge_uc_kwargs(island_kw: dict, process_kw: dict) -> dict:
@@ -259,11 +324,69 @@ def _copy(n):
         n._model = model
 
 
-def _window(n, period) -> pd.Index:
+def _windows(n, period) -> list[tuple[int, pd.Index]]:
+    """(first hour in the period, snapshots) of each window the check solves in ``period``: the first
+    ``CHECK_WINDOW`` snapshots, or on the chronological year one week from each of ``YEAR_WINDOW_DAYS``."""
     sns = n.snapshots
     if period is not None:
         sns = sns[sns.get_level_values(0) == period]
-    return sns[:CHECK_WINDOW]
+    starts = [d * 24 for d in YEAR_WINDOW_DAYS] if is_year_base(n) else [0]
+    return [(h, sns[h:h + CHECK_WINDOW]) for h in starts]
+
+
+def _runs_before(on: np.ndarray) -> int:
+    """How many hours at the end of ``on`` hold its last value."""
+    if not len(on):
+        return 0
+    change = np.flatnonzero(on != on[-1])
+    return int(len(on) - (change[-1] + 1 if len(change) else 0))
+
+
+def _start_from_plan(m, n, period, first: int) -> None:
+    """A window starting ``first`` hours into ``period`` starts where the plan is then: each store and
+    storage unit at the plan's level after the hour before (no longer cyclic within the window), and each
+    committable process unit up or down for as long as the plan has had it so (a unit runs when its plan
+    dispatch reaches its minimum load, p_min_pu · p_nom: a fractional plan hour below it counts as off).
+    A window at the start of a period keeps the network's own start
+    (cyclic, as the representative week)."""
+    if first <= 0:
+        return
+    sns = n.snapshots
+    if period is not None:
+        sns = sns[sns.get_level_values(0) == period]
+    before = sns[:first]
+    last = before[-1]
+    if len(m.stores):
+        m.stores["e_initial"] = n.stores_t.e.loc[last].reindex(m.stores.index).fillna(0.0).to_numpy()
+        for c in ("e_cyclic", "e_cyclic_per_period", "e_initial_per_period"):
+            m.stores[c] = False
+    if len(m.storage_units):
+        soc = n.storage_units_t.state_of_charge.loc[last].reindex(m.storage_units.index).fillna(0.0)
+        m.storage_units["state_of_charge_initial"] = soc.to_numpy()
+        for c in ("cyclic_state_of_charge", "cyclic_state_of_charge_per_period",
+                  "state_of_charge_initial_per_period"):
+            m.storage_units[c] = False
+    # ... and ends no emptier than the plan: each store at least at the plan's level after the window's last
+    # hour, so the window cannot run its inventories down for free. A product short of it is lost
+    # production: the shortfall slack may cover it in any hour of the window, at its value.
+    after = sns[first:first + CHECK_WINDOW][-1]
+    if len(m.stores):
+        e_nom = pd.to_numeric(m.stores["e_nom"], errors="coerce").fillna(0.0)
+        end = n.stores_t.e.loc[after].reindex(m.stores.index).fillna(0.0)
+        for st in m.stores.index[e_nom > 0]:
+            col = m.stores_t.e_min_pu[st] if st in m.stores_t.e_min_pu.columns else \
+                pd.Series(float(m.stores.at[st, "e_min_pu"]), index=m.snapshots)
+            col.loc[after] = min(1.0, max(float(col.loc[after]), float(end[st]) / float(e_nom[st])))
+            m.stores_t.e_min_pu[st] = col
+    for g in product_role_generators(m, "shortfall"):
+        m.generators_t.p_max_pu.loc[sns[first:first + CHECK_WINDOW], g] = 1.0
+    for u in process_committable(m):
+        p_nom = float(m.links.at[u, "p_nom"]) or 1.0
+        p_min = n.get_switchable_as_dense("Link", "p_min_pu", before)[u].to_numpy() * p_nom
+        on = n.links_t.p0[u].loc[before].to_numpy() >= np.maximum(p_min * (1 - 1e-6), 1e-6 * p_nom)
+        hours = _runs_before(on)
+        m.links.at[u, "up_time_before"] = hours if on[-1] else 0
+        m.links.at[u, "down_time_before"] = 0 if on[-1] else hours
 
 
 def _empty_row(period, window=None, snapshots=0) -> dict:
@@ -274,18 +397,39 @@ def _empty_row(period, window=None, snapshots=0) -> dict:
             "flagged": False, "non_finite": []}
 
 
-def _period_row(n, period, cfg, solver_options, solve) -> dict:
-    sns = _window(n, period)
+def window_copy(n, period, first: int):
+    """The copy a window solves on: capacities fixed at the plan, started from the plan (``_start_from_plan``)."""
+    m = _copy(n)
+    if isinstance(n.snapshots, pd.MultiIndex):
+        m.snapshots.name = "snapshot"   # PyPSA's copy() drops the MultiIndex name
+    _fix_capacities(m)
+    _start_from_plan(m, n, period, first)
+    return m
+
+
+def _window_text(period, first: int, sns) -> str:
+    if first > 0:
+        start = sns[0][1] if isinstance(sns, pd.MultiIndex) else sns[0]
+        at = f"{len(sns)} snapshots from hour {first}"
+        at += f" ({pd.Timestamp(start):%d %b})" if isinstance(start, (pd.Timestamp, np.datetime64)) else ""
+        return at + (f" of period {period}" if period is not None else "")
+    return (f"first {len(sns)} snapshots of period {period}" if period is not None
+            else f"first {len(sns)} snapshots")
+
+
+def _period_row(n, period, cfg, solver_options, solve, first: int = 0, sns=None) -> dict:
+    if sns is None:
+        first, sns = _windows(n, period)[0]
     multi = isinstance(n.snapshots, pd.MultiIndex)
-    window = (f"first {len(sns)} snapshots of period {period}" if period is not None
-              else f"first {len(sns)} snapshots")
-    row = _empty_row(period, window, len(sns))
+    row = _empty_row(period, _window_text(period, first, sns), len(sns))
+    # The reference solves as the plan did: linearised UC, or on the year base the plain LP, so the gap
+    # is the plan's formulation against binary UC over the same window and start.
+    plain = planning_uc_mode(n, cfg) == "plain"
     results = {}
-    for label, kw in (("lin", _LIN), ("bin", {})):
-        m = _copy(n)
-        if multi:
-            m.snapshots.name = "snapshot"   # PyPSA's copy() drops the MultiIndex name
-        _fix_capacities(m)
+    for label, kw in (("lin", {} if plain else _LIN), ("bin", {})):
+        m = window_copy(n, period, first)
+        if plain and label == "lin":
+            _relax(m, process_committable(m))
         status, cond, cost = solve(m, sns, multi, cfg, solver_options, kw)
         if status != "ok":
             row.update(status="unverified", reason=f"{label} solve {status}/{cond}")
@@ -312,12 +456,18 @@ def _period_row(n, period, cfg, solver_options, solve) -> dict:
     return row
 
 
-def _ledger(rows, cfg) -> list[dict]:
+def _ledger(rows, cfg, plain: bool = False, worst: dict | None = None) -> list[dict]:
     gap = getattr(cfg, "mip_gap", 0.01)
     limit = getattr(cfg, "mip_time_limit_s", 0)
-    out = [{"item": "method", "value": "binary operational check: each period re-solved on its own with "
-            "every capacity fixed at the plan, once with linearised UC and once with binary UC; "
-            "the plan's linearised result is not re-used"},
+    method = ("binary operational check: each period re-solved on its own with every capacity fixed at the "
+              "plan, once with linearised UC and once with binary UC; the plan's linearised result is not "
+              "re-used")
+    if plain:
+        method = (f"{PLAIN_NOTE}: each sampled week re-solved with every capacity fixed at the plan and "
+                  "starting from the plan's store levels and unit states, once as the plan's plain LP and "
+                  "once with binary UC; each store ends no lower than the plan, any shortfall is lost "
+                  "production at its value")
+    out = [{"item": "method", "value": method},
            {"item": "cost basis", "value": "operating cost of the window (capacities fixed, so capex "
             "is excluded), objective-weighted; pct = (binary − linearised) / linearised"},
            {"item": "MIP settings", "value": f"gap {gap:.3g}" + (f", time limit {int(limit)} s"
@@ -329,8 +479,13 @@ def _ledger(rows, cfg) -> list[dict]:
             f"{SHORTFALL_TOL_REL:g} × the weighted delivery (floor {SHORTFALL_TOL_ABS:g})"},
            {"item": "caveat", "value": "extra_functionality not applied (island rows, commercial terms, "
             "reserve and adequacy rows); island gensets keep their own committable flag"}]
-    for r in rows:
+    if worst is not None and len(rows) > 1:
+        out.append({"item": "worst window", "value": f"{worst['window']}: {result_line(worst)}"})
+    per_period = pd.Series([r["period"] for r in rows], dtype=object).value_counts(dropna=False)
+    for i, r in enumerate(rows):
         label = f"period {r['period']}" if r["period"] is not None else "window"
+        if per_period.get(r["period"], 1) > 1:          # several weeks a period (the year base)
+            label += f", week {sum(1 for q in rows[:i + 1] if q['period'] == r['period'])}"
         out.append({"item": f"{label}: window", "value": r["window"]})
         out.append({"item": f"{label}: result", "value": result_line(r)})
     return out
@@ -355,30 +510,129 @@ def binary_check(n, cfg, *, solver_options: dict | None = None, solve=None) -> d
     t0 = time.monotonic()
     solve = solve or _solve_window
     periods = (list(n.investment_periods) if isinstance(n.snapshots, pd.MultiIndex) else [None])
-    rows = []
+    slots: list = []                     # one per window, in order: a row, or the window to solve
     for period in periods:
         try:
-            rows.append(_period_row(n, period, cfg, solver_options or {}, solve))
+            windows = _windows(n, period)
         except Exception as exc:                                 # noqa: BLE001
-            rows.append({**_empty_row(period), "status": "unverified",
-                         "reason": f"{type(exc).__name__}: {exc}"})
+            slots.append({**_empty_row(period), "status": "unverified",
+                          "reason": f"{type(exc).__name__}: {exc}"})
+            continue
+        slots += [(period, first, sns) for first, sns in windows]
+
+    def one(slot) -> dict:
+        if isinstance(slot, dict):
+            return slot
+        period, first, sns = slot
+        try:
+            return _period_row(n, period, cfg, solver_options or {}, solve, first, sns)
+        except Exception as exc:                                 # noqa: BLE001
+            return {**_empty_row(period, _window_text(period, first, sns), len(sns)),
+                    "status": "unverified", "reason": f"{type(exc).__name__}: {exc}"}
+
+    # The windows are independent solves on their own copies: on the year base they run side by side, in
+    # worker processes (HiGHS keeps one thread pool per process, so threads would queue on it). An injected
+    # ``solve`` (tests) stays in this process.
+    pending = [s for s in slots if not isinstance(s, dict)]
+    workers = min(check_workers(), len(pending)) if solve is _solve_window else 1
+    workers = max(workers, 1)
+    if workers > 1:
+        solved = _solve_in_workers(n, cfg, solver_options or {}, pending, workers)
+        rows = [s if isinstance(s, dict) else solved.pop(0) for s in slots]
+    else:
+        rows = [one(s) for s in slots]
     verified = [r for r in rows if r["status"] == "ok"]
     flagged = any(r["flagged"] for r in verified)
     status = "ok" if len(verified) == len(rows) else "unverified"
+    plain = planning_uc_mode(n, cfg) == "plain"
+    worst = _worst(verified)
     if flagged:
-        message = (f"{FLAG_MESSAGE}: binary UC costs more than {FLAG_PCT:.0%} more or sheds more in "
-                   + ", ".join(str(r["period"]) if r["period"] is not None else "the window"
-                               for r in verified if r["flagged"]))
+        message = (f"{_flag_message(plain)}: binary UC costs more than {FLAG_PCT:.0%} more or sheds more in "
+                   + ", ".join(dict.fromkeys(str(r["period"]) if r["period"] is not None else "the window"
+                                             for r in verified if r["flagged"])))
     elif status != "ok":
+        several = is_year_base(n)       # several weeks a period: name the week, not only the period
         message = "binary check unverified: " + "; ".join(
-            f"{r['period']}: {r.get('reason')}" for r in rows if r["status"] != "ok")
+            f"{r['window'] if several and r['window'] else r['period']}: {r.get('reason')}"
+            for r in rows if r["status"] != "ok")
     else:
-        message = "binary check: linearised UC within the flag threshold in every period"
-    return _payload(n, status, flagged, message, rows, _ledger(rows, cfg), t0)
+        message = (f"binary check: {'the LP plan' if plain else 'linearised UC'} within the flag threshold "
+                   "in every period")
+    if plain:
+        message = f"{PLAIN_NOTE}. {message}"
+    if worst is not None and len(verified) > 1:
+        message += f"; worst window: {worst['window']} ({result_line(worst)})"
+    out = _payload(n, status, flagged, message, rows, _ledger(rows, cfg, plain, worst), t0, worst)
+    out["workers"] = workers
+    return out
 
 
-def _payload(n, status, flagged, message, rows, ledger, t0) -> dict:
-    return {"status": status, "flagged": flagged, "message": message,
+_WORKER: dict = {}
+
+
+def _init_worker(path: str, cfg, opts: dict) -> None:
+    import pypsa
+
+    _WORKER.update(n=pypsa.Network(path), cfg=cfg, opts=opts)
+
+
+def _row_in_worker(slot) -> dict:
+    period, first, sns = slot
+    n, cfg, opts = _WORKER["n"], _WORKER["cfg"], _WORKER["opts"]
+    try:
+        return _period_row(n, period, cfg, opts, _solve_window, first, sns)
+    except Exception as exc:                                     # noqa: BLE001
+        return {**_empty_row(period, _window_text(period, first, sns), len(sns)),
+                "status": "unverified", "reason": f"{type(exc).__name__}: {exc}"}
+
+
+def _solve_in_workers(n, cfg, solver_options: dict, slots: list, workers: int) -> list[dict]:
+    """``_period_row`` of each window in ``slots``, in order, on ``workers`` fresh processes. Each worker reads the
+    solved network once from a temporary NetCDF export (a Network does not pickle); an abort's KeyboardInterrupt
+    stops them all."""
+    with tempfile.TemporaryDirectory(prefix="uc-check-") as tmp:
+        path = os.path.join(tmp, "plan.nc")
+        _copy(n).export_to_netcdf(path)
+        pool = ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("spawn"),
+                                   initializer=_init_worker, initargs=(path, cfg, solver_options))
+        try:
+            futures = [pool.submit(_row_in_worker, slot) for slot in slots]
+            pending = set(futures)
+            while pending:      # a timed wait, so an abort's KeyboardInterrupt lands within a second
+                _, pending = wait(pending, timeout=1.0)
+            rows = [f.result() for f in futures]
+        except BaseException:
+            for proc in list(getattr(pool, "_processes", {}).values()):
+                proc.terminate()
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
+        pool.shutdown()
+    return rows
+
+
+def check_workers() -> int:
+    """How many windows the check solves at once: the machine's cores less the one the plan's solver held, at
+    least 1 (a 2-core machine stays serial rather than oversubscribed)."""
+    return max(1, (os.cpu_count() or 1) - 1)
+
+
+def _flag_message(plain: bool) -> str:
+    return "the LP plan understates restarts" if plain else FLAG_MESSAGE
+
+
+def _worst(rows: list[dict]) -> dict | None:
+    """The verified window with the largest extra lost production above tolerance (noise ranks as none), then the
+    largest cost gap."""
+    def key(r):
+        lost = sum(float(e["value"]) for e in r["extra_shortfall"].values() if e["above_tolerance"])
+        return (lost, r["pct"] if r["pct"] is not None else math.inf)
+    return max(rows, key=key) if rows else None
+
+
+def _payload(n, status, flagged, message, rows, ledger, t0, worst=None) -> dict:
+    return {"status": status, "flagged": flagged, "message": message, "workers": None,
+            "worst": None if worst is None else {
+                k: worst[k] for k in ("period", "window", "delta", "pct", "extra_shortfall")},
             "process_units": [str(u) for u in process_committable(n)],
             "threshold": {"pct": FLAG_PCT, "extra_shortfall_rel": SHORTFALL_TOL_REL,
                           "extra_shortfall_abs": SHORTFALL_TOL_ABS},

@@ -329,6 +329,13 @@ def _failed(owner, project, failed):
         return key in _FAILURES
 
 
+def unavailable(owner, project):
+    """Whether this owner's attention records for the project could not be
+    written lately: the in-app notice may not reach them (study harness
+    issue 08 reads it before offering an unattended run)."""
+    return _failed(owner, str(project), False)
+
+
 def _update(owner, project, change=None):
     directory = owned_snapshots.directory('chat-attention', owner, project)
     if change is None and not directory.exists() and not directory.is_symlink():

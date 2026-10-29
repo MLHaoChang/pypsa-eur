@@ -170,6 +170,23 @@ def test_the_copt_mixes_the_event_and_ranks_it_as_its_own_mode():
     assert cm.scope["copt_common_mode"] == "event_mixture"
 
 
+def test_the_event_row_is_priced_per_year_on_a_two_year_horizon():
+    """LC-30: every hour weighted 2, so the horizon is two years and the
+    event's criticality is its ΔEUE × 8760/Σw × VoLL — half ΔEUE × VoLL."""
+    n = _weak(rate=0.05, mttr=24.0)
+    n.snapshot_weightings.loc[:, :] *= 2.0
+    hours = float(n.snapshot_weightings.generators.sum())
+    assert hours == pytest.approx(2 * 8760.0)
+    row = next(r for r in _freeze(n).copt_rows
+               if r["failure_mode"]["component_class"] == "CommonMode")
+    fm = row["failure_mode"]
+    assert row["delta_eue_mwh"] > 0.0
+    assert fm["criticality_eur_per_year"] == pytest.approx(
+        row["delta_eue_mwh"] * 8760.0 / hours * VOLL, rel=1e-9)
+    assert fm["horizon_years"] == pytest.approx(2.0)
+    assert fm["criticality_basis"] == "annualised"
+
+
 def test_a_firm_link_with_common_mode_is_mixed_not_converted():
     cm = _freeze(_weak(firm_link=True, rate=0.05, mttr=24.0))
     base = _freeze(_weak(firm_link=True))

@@ -469,7 +469,7 @@ GFM_APPLY_TOOL = "campus_apply_gfm_settings"
 
 
 class GfmApplyIn(BaseModel):
-    digest: str | None = None
+    digest: str  # the card the user approved; required (ticket 29)
 
 
 @router.get("/{name}/island/gfm-settings/card")
@@ -486,26 +486,23 @@ def gfm_settings_card(
 
 @router.post("/{name}/island/gfm-settings/apply")
 def apply_gfm_settings(
-    body: GfmApplyIn | None = None,
+    body: GfmApplyIn,
     proj: AuthorizedProject = ProjectAccessDep,
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
 ):
     """Write the recommended settings into the island sidecar and the campus
     file (tagged assumed); the island study goes, and the hub must be
-    re-solved: ``{changes, hub_resolve_needed}``. With the digest of the card the user
-    approved (``…/card``), the card must still be current, and the response carries
-    its ``receipt``: the values read back from both files."""
+    re-solved: ``{changes, hub_resolve_needed, receipt}``. The body carries the
+    digest of the card the user approved (``…/card``), which must still be current
+    (a 422 without it); the ``receipt`` holds the values read back from both files."""
     from harness import edit_card
     from services import campus_island_tuning as cit
     _check_lock(proj, db, user)
     project = _row(proj, db)
-    digest = body.digest if body else None
-    if digest is None:
-        return cit.apply_settings(project)
     with edit_card.for_project(project):
         card = edit_card.preview(GFM_APPLY_TOOL, {}, with_state=False)
-        edit_card.require_current(GFM_APPLY_TOOL, {}, {"digest": digest})
+        edit_card.require_current(GFM_APPLY_TOOL, {}, {"digest": body.digest})
         out = cit.apply_settings(project)
         return {**out, "receipt": edit_card.receipt(card, {})}
 

@@ -99,7 +99,7 @@ A long context is this session's largest cost. Rotate to a fresh coordinator whe
    The new coordinator runs `touch ~/.claude-coordinator` (see the top of this skill).
    The new coordinator also runs Artifact `open` on each dashboard in [Dashboard](#dashboard). The app lists only the artifacts a session has published or opened, so without it the owner's panel shows no dashboard after a rotation.
 3. **Hand over the routines.** `update_trigger` each routine (the sweep and the dashboard refresh) with `persistent_session_id` set to the new id. If `update_trigger` has no such field, `delete_trigger` and `create_trigger` again with the same cron and prompt.
-4. **Tell the sessions.** `send_message` each live session the new id. When any session rotates, reviewer or builder, tell every peer that works with it the new id at once.
+4. **Tell the sessions.** `send_message` the new id only to the sessions that send you work, folded into the next message you send them anyway when one is due soon. When any session rotates, reviewer or builder, send its new id the same way: only to the sessions that send it work.
 5. **Archive** this session once the new coordinator confirms the brief is saved. Relay anything that reaches this session before then.
 
 When this coordinator's children would hit the session-chain depth limit, the owner starts the successor at depth 0.
@@ -140,7 +140,7 @@ Leave `outcome_branch` unset, so the session can open each PR on its own `claude
 
 Always pass `source_url` `https://github.com/MLHaoChang/pypsa-eur`, `model`, `title` and `tags` (lowercase `team:<lead|review|build|assurance>`) on `create_session`. Before opening a package, check `git log origin/{{BASE_BRANCH}}` for it: it may have landed.
 
-Build the brief with `python3 scripts/coord/brief.py` (`--help`; template `docs/agents/session-brief.md`) and send the file it writes as the first message. From flags it takes the task (the owner's own words for the goal, and what "done" looks like), decisions, file pointers, the `{{BASE_BRANCH}}` SHA, the reviewer (the gatekeeper for {{GATED_AREAS}}) and the stream; it builds "Stay out of" from the open PRs' files and the live sessions (the inputs of Sweep's Capacity step); and it appends Context budget, Process and any stream paragraph the template defines. Paste a rotating session's hand-off note into the task verbatim. When the brief is long, write it to the scratchpad and have a cheap-model subagent call `create_session` with it verbatim.
+Build the brief with `python3 scripts/coord/brief.py` (`--help`; template `docs/agents/session-brief.md`) and send the file it writes as the first message. From flags it takes the task (the owner's own words for the goal, and what "done" looks like), decisions, file pointers, the `{{BASE_BRANCH}}` SHA, the reviewer (the gatekeeper for {{GATED_AREAS}}) and the stream; it builds "Stay out of" from the open PRs' files and the live sessions (the inputs of Sweep's Capacity step); and it appends Context budget, Process and any stream paragraph the template defines. Paste a rotating session's hand-off note into the task verbatim. Briefs keep "Hand off at 300k" (USE-2) for builders and reviewers alike; never lower it per brief. When the brief is long, write it to the scratchpad and have a cheap-model subagent call `create_session` with it verbatim.
 
 Never tell a session to disregard an auto-mode or classifier flag; it sends the coordinator a `PERMISSION` message. A builder with uncommitted helper scripts pushes them before you archive it.
 
