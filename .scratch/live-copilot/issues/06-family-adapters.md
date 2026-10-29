@@ -606,6 +606,14 @@ test_campus_ranking's spec (its tables are gridspine-level): a six-hour hub with
 metrics in the docstring, picks read through `GET /api/campus-electrical/{name}`
 `results.selection`. Mutation: 50 MW in hour 5 moves import, trafo and consumption there.
 
+### S13, LC-D09 spill; inflow unavailable (2026-10-29)
+
+Branch `claude/lc06-d09-inflow-spill`, stacked on S12. GK B (9) reviews. Session LC-06 (7).
+`tests/test_lc06_d09_inflow_spill.py`: run_simulation → get_asset_results. Hydro 10 MW / 20 MWh,
+held full by state_of_charge_set, the only source for a 4 MW load, inflow 10, weights 3 h × 3:
+spill 6 MW each snapshot, spilled_mwh 54; mutation inflow 9 → 5 and 45. The manifest splits
+`LC-D09.inflow_spill` into `LC-D09.spill` (covered) and `LC-D09.inflow` (unavailable, ticket 31).
+
 ## Hand-off 6 (2026-10-29, LC-06 (6), early)
 
 PR stack (each against master, stacked):
