@@ -6,8 +6,9 @@ GK B conditions (`.scratch/results-workbook/issues/02-result-view-sheets.md`):
 1 the lifted `/adequacy` body changes nothing; 2 keys equal the route and each
 scenario reads its own state and network; 3 a period-2 figure (Adequacy) or
 the no-period note (FMEA); 5 no results vs an error; 6 FMEA's criticality and
-severity are labelled by each row's own basis (per study horizon for class
-A/B until ticket 30 lands, per year for C), the horizon's length is given, and
+severity are labelled by each row's own basis (per year for class A/B since
+LC-30, per study horizon for a row saved before it, per year for C), the
+horizon's length is given, and
 no key compares two bases; 9 charts read number cells on their own sheet.
 """
 from __future__ import annotations
@@ -36,6 +37,9 @@ from services.results_workbook.views_adequacy import (
 )
 from services.results_workbook.views_grid import NO_PERIODS
 from services.solver_service import SolverConfig
+
+ANNUALISED = "per year (annualised)"
+LEGACY = f"{PER_HORIZON} (saved before annualising)"
 
 TITLES = {"adequacy": "Adequacy", "fmea": "FMEA"}
 P2 = "2040"
@@ -245,7 +249,7 @@ def test_fmea_keys_equal_the_route_and_each_scenario_reads_its_own_network(activ
                                     get_lock=PyPSAService.get_lock)
     top, top_mine = base["per_mode"][0], mine["per_mode"][0]
     label = "Highest criticality, classes A/B"
-    assert _key(ws, label, HORIZON, col=2) == f"EUR {PER_HORIZON}"
+    assert _key(ws, label, HORIZON, col=2) == f"EUR {ANNUALISED}"
     assert _key(ws, label, HORIZON) == pytest.approx(top["criticality_eur_per_year"]) and top[
         "criticality_eur_per_year"] > 0
     assert _key(ws, "Failure modes", HORIZON) == len(base["per_mode"])
@@ -258,26 +262,27 @@ def test_fmea_keys_equal_the_route_and_each_scenario_reads_its_own_network(activ
     assert sum(1 for r in rows if r[0] == "High load") == len(mine["per_mode"])
 
 
-def test_fmea_class_a_rows_without_a_basis_are_labelled_per_study_horizon(active):
+def test_fmea_class_a_rows_of_the_route_are_labelled_annualised_per_year(active):
     ws = _wb(_build(active, ["fmea"]))[TITLES["fmea"]]
     cells = [str(c) for row in ws.iter_rows(values_only=True) for c in row if isinstance(c, str)]
-    assert CRITICALITY in cells and SEVERITY in cells
-    assert PER_HORIZON == "per study horizon (ticket 30)"
-    # No route field name, which says "per year", reaches the sheet.
+    assert CRITICALITY_PER_YEAR in cells and SEVERITY_PER_EVENT in cells
+    assert PER_HORIZON == "per study horizon"
+    assert not any("ticket 30" in c for c in cells)
+    # No route field name reaches the sheet.
     assert not any("criticality_eur_per_year" in c or "severity_eur" in c for c in cells)
-    # Every row is class A without a basis: per horizon, and its per-year cells are empty.
+    # Every row is class A, annualised by LC-30: per year, and its per-horizon cells are empty.
     rows = _fmea_rows(ws)
-    assert rows and all(r["criticality basis"] == PER_HORIZON for r in rows)
-    assert all(_number(r[CRITICALITY]) and not _number(r[CRITICALITY_PER_YEAR]) for r in rows)
+    assert rows and all(r["criticality basis"] == ANNUALISED for r in rows)
+    assert all(_number(r[CRITICALITY_PER_YEAR]) and not _number(r[CRITICALITY]) for r in rows)
     assert "Study horizon: 2 h of modelled time" in _text(ws)
     titles = [_chart_title(ch) for ch in ws._charts]
     assert any("Criticality" in t for t in titles)
-    assert all(PER_HORIZON in t for t in titles if "riticality" in t)
+    assert all("per year" in t for t in titles if "riticality" in t)
     for ch in ws._charts:
         for s in ch.series:
             name = ws[s.tx.strRef.f.split("!")[1].replace("$", "")].value
             if "riticality" in str(name) or "everity" in str(name):
-                assert PER_HORIZON in str(name)
+                assert PER_HORIZON not in str(name)
 
 
 def _mode(mode_id: str, cls: str, crit: float, basis: str | None = None) -> dict:
@@ -306,7 +311,9 @@ def _fmea_rows(ws) -> list[dict]:
 
 
 @pytest.mark.parametrize("cls,basis,crit_col,sev_col,says", [
-    ("A", None, CRITICALITY, SEVERITY, PER_HORIZON),
+    ("A", None, CRITICALITY, SEVERITY, LEGACY),
+    ("B", "per_horizon_legacy", CRITICALITY, SEVERITY, LEGACY),
+    ("A", "per_horizon", CRITICALITY, SEVERITY, PER_HORIZON),
     ("A", "annualised", CRITICALITY_PER_YEAR, SEVERITY_PER_EVENT, "per year (annualised)"),
     ("C", None, CRITICALITY_PER_YEAR, SEVERITY_PER_EVENT, "per year (frequency × severity)"),
     ("C", "per_event", CRITICALITY_PER_YEAR, SEVERITY_PER_EVENT,

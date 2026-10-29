@@ -549,12 +549,13 @@ describe('P26: Guided card summary line, raw call under Details', () => {
     expect(summary()).toBe('Run the equipment-failure check (FMEA)')
   })
 
-  it('Expert is unchanged: tool name as the title, JSON shown, no summary, no Details', async () => {
+  it('Expert: plain words as the title, JSON shown, no summary, no Details', async () => {
     useUIStore.setState({ uiMode: 'expert' })
     const card = await show('run_eh_study', { budget_solves: 30 }, 'execution')
     expect(summary()).toBeNull()
     expect(card.querySelector('details')).toBeNull()
-    expect(document.getElementById('chat-confirmation-title')!.textContent).toBe('run_eh_study')
+    expect(document.getElementById('chat-confirmation-title')!.textContent)
+      .toBe('Run the reliability study for this site (about 30 calculation steps)')
     expect(card.querySelector('pre')!.textContent).toContain('"budget_solves": 30')
   })
 
