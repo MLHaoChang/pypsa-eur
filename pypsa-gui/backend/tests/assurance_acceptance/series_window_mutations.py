@@ -77,9 +77,13 @@ def main():
             ["-q", "-p", "no:cacheprovider", "-W", "ignore", "-x", "--no-header", SUITE],
             plugins=[Patch(old, new), first],
         )
-        status = f"killed by {first.name}" if rc not in (0, 5) else "SURVIVED"
+        # Only a test failure kills; a collection or usage error proves nothing.
+        if rc == 1:
+            status = f"killed by {first.name}"
+        else:
+            status = "SURVIVED" if rc in (0, 5) else f"ERROR rc={rc}"
         print(f"{name}: {status}", file=sys.stderr)
-        if rc in (0, 5):
+        if rc != 1:
             survivors.append(name)
     print(f"{len(survivors)} surviving mutants: {survivors}", file=sys.stderr)
     return 1 if survivors else 0
