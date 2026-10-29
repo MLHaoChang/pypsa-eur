@@ -1,0 +1,1 @@
+* Test(pypsa-gui): LC-33 pins the reserve-margin build, the margin loop's cheapest verified margin against a two-unit COPT, the frontier's point costs and knee under a campaign, and a perfect unit's ELCC through the chat tools.
