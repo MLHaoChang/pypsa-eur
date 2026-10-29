@@ -348,6 +348,8 @@ def _plan_apply(project) -> dict:
     from services.adequacy.island_config import validate
 
     state = get_settings(project)
+    if state["state"] == "stale":  # a recommendation exists; say why it no longer holds (ticket 28)
+        raise HTTPException(status_code=409, detail=state["reason"])
     if state["state"] != "ready":
         raise HTTPException(status_code=409, detail="no recommendation for the last campus run; "
                                                     "recommend GFM settings again")

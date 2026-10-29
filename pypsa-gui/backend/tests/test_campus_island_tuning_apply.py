@@ -355,19 +355,30 @@ _APPLY = "/api/campus-electrical/Router Hub/island/gfm-settings/apply"
 
 
 def test_the_apply_route_calls_the_service_with_the_row(client, router_hub, monkeypatch):  # noqa: F811
-    calls = []
+    from harness import edit_card
+    calls, checked = [], []
+    monkeypatch.setattr(edit_card, "preview", lambda *a, **kw: {"rows": []})
+    monkeypatch.setattr(edit_card, "require_current", lambda tool, args, card: checked.append(card["digest"]))
+    monkeypatch.setattr(edit_card, "receipt", lambda card, args: {"outcome": "verified"})
     monkeypatch.setattr(cit, "apply_settings", lambda *a, **kw: calls.append(a) or {"changes": []})
-    resp = client.post(_APPLY)
-    assert resp.status_code == 200 and resp.json() == {"changes": []}
+    resp = client.post(_APPLY, json={"digest": "d1"})
+    assert resp.status_code == 200 and resp.json() == {"changes": [], "receipt": {"outcome": "verified"}}
+    assert checked == ["d1"]                                    # the card is checked before the write
     ((row,),) = calls
     assert isinstance(row, Project) and row.name == "Router Hub"
+
+
+def test_the_apply_route_requires_the_cards_digest(client, router_hub, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(cit, "apply_settings", lambda *a, **kw: pytest.fail("not reached"))
+    for kwargs in ({}, {"json": {}}, {"json": {"digest": None}}):
+        assert client.post(_APPLY, **kwargs).status_code == 422
 
 
 def test_apply_is_refused_under_another_users_lock(client, router_hub, same_org_other_user,  # noqa: F811
                                                    monkeypatch):
     monkeypatch.setattr(cit, "apply_settings", lambda *a, **kw: pytest.fail("not reached"))
     assert client.post("/api/projects/Router Hub/lock").status_code == 200
-    assert _is_lock_refusal(same_org_other_user.post(_APPLY))
+    assert _is_lock_refusal(same_org_other_user.post(_APPLY, json={"digest": "d1"}))
 
 
 # ── end to end on the I7 hand hub (real gridspine) ──────────────────────────
