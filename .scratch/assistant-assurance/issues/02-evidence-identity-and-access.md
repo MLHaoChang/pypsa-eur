@@ -217,3 +217,31 @@ Smallest first; each goes to GK B as a plan before it is built.
 3. Mutation (`tests/assurance_acceptance/fact_builder_mutations.py`): breaking the builder at any one of the six sites fails a test. Met: 15 of 15 killed (entity/metric swap and dropped unit at all six sites; unescaped path at the page capture, page recheck and series sites). An unescaped path is an equivalent mutant at the static, aggregate and run sites, whose only token is a metric name.
 4. The pin test reads the live INPUT_METRICS. Met.
 5. The PR is opened from master after #895 and #898 merge, so its diff is S3 alone. The A1.x suites and `test_p1_replay` run unchanged at the PR head.
+
+### 2026-10-29 — S4 SERIES-WINDOW: a series record stores a certified-row mask
+
+- A series record no longer stores one fact per step. It stores `series: {rows, certified, index_sha256, values_sha256}`:
+  - `certified` is a base64 bitmask, one bit per row, least significant bit first;
+  - `index_sha256` is a digest of `[labels, periods]`;
+  - `values_sha256` is a digest of the per-row values, with null for a row that does not certify.
+  
+  Each digest is sha256 over a domain tag (`series-index/1`, `series-values/1`), a newline, and the canonical JSON save() seals (sorted keys, fixed separators, allow_nan=False). The same `_series_window` builds it at capture and at read.
+- `evidence()` rebuilds the steps from the live series and returns the record with `facts` in place of `series`, so every reader sees today's shape. It reads unavailable unless every one of these holds:
+  - the keys are exactly the four above;
+  - `rows` is an int equal to the live row count;
+  - the mask is valid base64 of exactly ceil(rows/8) bytes, with no bit past the last row and at least one bit set;
+  - both digests match.
+- `MAX_SERIES_POINTS` is 8784, an hourly leap year. The guard before the handler is unchanged in `harness/assurance.py`. `active_series_source` now measures the stored window, which for an hourly year of full-precision values with a 128-character name is about 1.5 KiB plus the digests.
+- The series adapter is `series-input/2`. A record in the old per-step form reads unavailable, with no migration; it expires within 24 h.
+- Change against the slice text above: a bitmask plus a values digest, not a values array. GK B (10) ruled this: 8784 full-precision float64 values take about 168 KB in JSON, over save()'s 128 KiB cap.
+- A draft cites a path of at most 128 characters (an existing limit of the draft contract), so a very long name can be captured but not cited. `test_p1_timeseries`'s long-name refusal test is replaced by `test_long_named_series_of_744_steps_is_now_captured`. `test_p1_integrity`'s series rewrites now edit the mask and the values digest.
+
+#### GK B (10) plan GO conditions (2026-10-29)
+
+1. The 8760 and 8784 step tests use seeded random full-precision float64 values and a 128-character name, and assert the sealed record's encoded size.
+2. Refusals for each of these: a relabelled or reordered index, an edited value, one step short or long, a mask bit flipped and resealed, `rows` ≠ the live count, a mask length ≠ ceil(rows/8), and stray bits past `rows`.
+3. The canonical digest input is pinned and the same at capture and read, with domain separation between the two digests.
+4. evidence()'s expanded facts are byte-equal to S3's for series of 744 steps or fewer.
+5. The old adapter_version reads unavailable, fail-closed, with no migration.
+6. Mutants that drop the index digest, the rows check, the values digest or the mask-length check each fail a named test (`series_window_mutations.py`).
+7. The guard still runs before the handler, and `harness/assurance.py` is unchanged. test_tool_error_kind_manifest and the A1.x suites run at the PR head.
