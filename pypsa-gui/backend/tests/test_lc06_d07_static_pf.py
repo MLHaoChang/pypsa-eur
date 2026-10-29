@@ -44,7 +44,7 @@ SLACK = 'A'
 LINES = {                           # name: (bus0, bus1, r ohm, x ohm, b siemens)
     'AB': ('A', 'B', 2.0, 10.0, 0.0),
     'BC': ('B', 'C', 3.0, 12.0, 0.0),
-    'AC': ('A', 'C', 4.0, 16.0, 1e-4),
+    'AC': ('C', 'A', 4.0, 16.0, 1e-4),   # from the load end: terminal 1 (at A) carries the peak
 }
 LOADS = {                           # bus: (p MW per snapshot, q Mvar per snapshot)
     'B': ([40.0, 20.0], [10.0, 5.0]),
@@ -155,13 +155,18 @@ def pf(seam):
             'summary': chat_tools.get_loadflow_summary(source='ac_pf', limit=25)}
 
 
+def _end_at(bus: str, name: str) -> int:
+    """0 or 1: the terminal of line ``name`` at ``bus``."""
+    return LINES[name].index(bus)
+
+
 def test_the_independent_solve_closes_kcl_and_meets_the_100_mva_load(oracle):
     """The oracle's own check: at the load bus C the lines deliver exactly the
     load, 60 MW + j80 Mvar = 100 MVA (snapshot 0) and 30 + j40 = 50 (snapshot 1)."""
     for t, sol in enumerate(oracle):
-        into_c = -(sol['flows']['BC'][1] + sol['flows']['AC'][1])
+        into_c = -sum(sol['flows'][name][_end_at('C', name)] for name in ('BC', 'AC'))
         assert (into_c.real, into_c.imag) == pytest.approx((LOADS['C'][0][t], LOADS['C'][1][t]), abs=FLOW_TOL)
-    assert abs(-(oracle[0]['flows']['BC'][1] + oracle[0]['flows']['AC'][1])) == pytest.approx(100.0, abs=FLOW_TOL)
+    assert abs(-sum(oracle[0]['flows'][name][_end_at('C', name)] for name in ('BC', 'AC'))) == pytest.approx(100.0, abs=FLOW_TOL)
 
 
 def test_bus_voltages_equal_the_independent_solve(pf, oracle):
@@ -180,15 +185,16 @@ def test_line_flows_at_bus0_equal_the_independent_solve(pf, oracle):
 
 def test_both_terminals_close_kcl_at_the_100_mva_load_bus(pf, oracle):
     """bus1 terminals are read from the solved network (no tool serves p1/q1):
-    they equal the oracle, and at C they sum to the 100 MVA load."""
+    they equal the oracle, and the terminals at C (bus1 of BC, bus0 of AC) sum
+    to the 100 MVA load."""
     from services.pypsa_service import PyPSAService
     n = PyPSAService.get_network()
     for t, sol in enumerate(oracle):
         for name, (_s0, s1) in sol['flows'].items():
             assert n.lines_t.p1[name].iloc[t] == pytest.approx(s1.real, abs=FLOW_TOL)
             assert n.lines_t.q1[name].iloc[t] == pytest.approx(s1.imag, abs=FLOW_TOL)
-    p_c = -(n.lines_t.p1['BC'].iloc[0] + n.lines_t.p1['AC'].iloc[0])
-    q_c = -(n.lines_t.q1['BC'].iloc[0] + n.lines_t.q1['AC'].iloc[0])
+    p_c = -sum(getattr(n.lines_t, f'p{_end_at("C", name)}')[name].iloc[0] for name in ('BC', 'AC'))
+    q_c = -sum(getattr(n.lines_t, f'q{_end_at("C", name)}')[name].iloc[0] for name in ('BC', 'AC'))
     assert (p_c, q_c) == pytest.approx((60.0, 80.0), abs=FLOW_TOL)
     assert math.hypot(p_c, q_c) == pytest.approx(100.0, abs=FLOW_TOL)
 
