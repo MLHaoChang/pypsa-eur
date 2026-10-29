@@ -314,13 +314,14 @@ VARIANTS: list[dict] = [
              B + 'test_copt_assurance.py::test_the_classical_fleet_by_hand_and_as_the_tab_has_it'),
     _covered('LC-D11.fmea', 'class A leave-one-out on the two-unit COPT fleet: dEUE 28.8 / 31.8 MWh, 17.52 / 43.8 per yr, '
              'q 0.2 -> 0.1 gives 15.9; class B: a 10 MW tie out sheds 5 MW x 2 x 3 h = 30 MWh (4 MW: 24); '
-             'criticality is the horizon dEUE x VoLL (ticket 30)',
+             'dEUE and occurrence only',
              'update_solver_config get_adequacy_results run_fmea_sweep',
              B + 'test_lc06_d11_fmea_health.py::test_class_a_prices_each_units_outages_by_hand[thermal1]',
              B + 'test_lc06_d11_fmea_health.py::test_class_a_prices_each_units_outages_by_hand[thermal2]',
              B + 'test_lc06_d11_fmea_health.py::test_class_a_moves_with_one_units_rate',
              B + 'test_lc06_d11_fmea_health.py::test_class_b_one_link_outage_sheds_its_load',
              B + 'test_lc06_d11_fmea_health.py::test_class_b_moves_with_the_load_behind_the_tie'),
+    _pending('LC-D11.fmea_criticality', 'criticality and severity are per horizon, labelled per year (ticket 30)'),
     _covered('LC-D11.health', 'ledger read back from storage and the route; provenance 1 sourced, 1 drifted (0.25 vs 0.2), '
              '1 orphaned; four invalid fields refused with the field named, the file byte-identical',
              'record_asset_health get_asset_health',

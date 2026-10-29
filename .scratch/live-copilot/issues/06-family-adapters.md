@@ -595,7 +595,9 @@ tie out sheds 30 MWh. Health: the ledger is read back from `asset_health.json` a
 provenance 1 sourced, 1 drifted, 1 orphaned; 4 invalid fields refused with the file
 byte-identical. Mutations as tests: thermal2 q 0.1 gives ΔEUE 15.9; 4 MW behind the tie gives
 24 MWh; the drift itself. Finding: criticality_eur_per_year is per horizon (ticket 30), sent to
-GK B with options; the tests pin today's ΔEUE·VoLL.
+GK B, which ruled (NOT OK @5847400b): criticality and severity are not asserted, only
+ΔEUE, occurrence and severity × occurrence = criticality; `LC-D11.fmea_criticality` pending
+on ticket 30, whose fix GK A reviews.
 
 ## Hand-off 6 (2026-10-29, LC-06 (6), early)
 
