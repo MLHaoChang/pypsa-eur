@@ -33,6 +33,11 @@ it('select_component selects that asset and opens the right panel', () => {
   expect(ui.rightPanelOpen).toBe(true)
 })
 
+it('a navigate frame for the properties panel opens the right panel', () => {
+  applyUiNavigate({ kind: 'navigate', panel_id: 'properties' })
+  expect(useUIStore.getState().rightPanelOpen).toBe(true)
+})
+
 it('open_asset_detail requests that asset with the metrics and mode asked', () => {
   applyUiNavigate({ kind: 'open_asset_detail', component_class: 'Generator', name: 'G1',
     metrics: ['p'], mode: 'duration' })
