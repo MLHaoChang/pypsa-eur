@@ -9,7 +9,7 @@ export const ACTIVITY_STATUS_WORDS: Record<string, string> = {
 export const ACTIVITY_FAMILY_WORDS: Record<string, string> = {
   run: 'Study run', foreground_simulation: 'Simulation', solve_queue: 'Queued solve', gridspine: 'Grid study',
   assistant_task: 'Assistant task', confirmation: 'Confirmation', source_gap: 'Source gap',
-  question: 'Question',
+  question: 'Question', adequacy_study: 'Adequacy study', report_job: 'Report',
 }
 
 const spaced = (v: string): string => v.replace(/_/g, ' ')

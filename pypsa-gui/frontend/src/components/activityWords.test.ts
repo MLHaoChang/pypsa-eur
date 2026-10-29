@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
-  ACTIVITY_STATUS_WORDS, NATIVE_OUTCOME_WORDS, activityFamilyWord, activityModeWord, activityStatusWord,
+  ACTIVITY_FAMILY_WORDS, ACTIVITY_STATUS_WORDS, NATIVE_OUTCOME_WORDS, activityFamilyWord, activityModeWord, activityStatusWord,
   nativeOutcomeWord,
 } from './activityWords'
 
@@ -40,5 +40,11 @@ describe('activityWords', () => {
     const selfSaid = new Set(['done', 'approved'])
     const missing = states.filter(v => !(v in NATIVE_OUTCOME_WORDS) && !(v in ACTIVITY_STATUS_WORDS) && !selfSaid.has(v))
     expect(missing).toEqual([])
+  })
+  it('has a word for every family the history keeps', () => {
+    const terminal = backend('harness/activity_history.py').match(/_TERMINAL = \{([\s\S]*?)\n\}/)![1]
+    const families = [...terminal.matchAll(/^\s+'([a-z_]+)': \{/gm)].map(m => m[1])
+    expect(families.length).toBe(3)
+    expect(families.filter(f => !(f in ACTIVITY_FAMILY_WORDS))).toEqual([])
   })
 })
