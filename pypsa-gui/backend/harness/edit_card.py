@@ -1422,10 +1422,7 @@ def _gfm_binding(args: dict) -> dict:
 
     def network(project) -> dict:
         nc = project_registry.project_dir(project) / ce.NETWORK_FILE
-        try:
-            active = PyPSAService.get_active_context().registry_key == project_registry.registry_key(project)
-        except Exception:  # noqa: BLE001 — no active context to compare binds no live network
-            active = False
+        active = PyPSAService.get_active_context().registry_key == project_registry.registry_key(project)
         return {"network_file": ce._file_digest(nc) if nc.is_file() else None,
                 "network_live": _fingerprint() if active else None}
 

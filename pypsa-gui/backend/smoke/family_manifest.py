@@ -441,15 +441,20 @@ VARIANTS: list[dict] = [
     _covered('LC-D17.recommend_apply_restudy', 'gfm_vsm BESS (H_v 1 s, 4 %) beside a 5 % droop genset, band 0.25 Hz: '
              'the card sets droop and H_v within the search bounds; both files read back the card exactly, tagged '
              'assumed; the re-study puts E2 RoCoF0 and df_qss on the applied values; without it the old figures stand; '
-             'a network edit (refused by the recommendation\'s own staleness, not the digest: ticket 28) or a wrong '
-             'digest after the card is edit_preview_stale with nothing written; the HTTP apply with no digest is '
-             'still 409 (ticket 29)',
+             'a network edit after the card (saved, saved with the run manifest agreeing, or unsaved in the active '
+             'project) or a wrong digest is edit_preview_stale with nothing written, and an edit to another active '
+             'project refuses nothing (ticket 28); the HTTP apply needs the card\'s digest, a 422 without it, and '
+             'refuses a network edit after the card (ticket 29)',
              D17_TOOLS,
              B + 'test_lc06_d17_recommend_apply.py::test_the_applied_card_is_read_back_and_the_restudy_runs_on_it',
              B + 'test_lc06_d17_recommend_apply.py::test_without_the_restudy_the_old_figures_stand_and_no_study_is_made',
              B + 'test_lc06_d17_recommend_apply.py::test_a_network_edit_after_the_card_refuses_the_apply',
              B + 'test_lc06_d17_recommend_apply.py::test_a_digest_that_is_not_the_cards_refuses_the_apply',
-             B + 'test_lc06_d17_recommend_apply.py::test_the_http_apply_without_a_digest_still_refuses_a_stale_network'),
+             B + 'test_lc06_d17_recommend_apply.py::test_a_saved_network_edit_refuses_the_apply_by_the_cards_binding',
+             B + 'test_lc06_d17_recommend_apply.py::test_an_unsaved_network_edit_of_the_active_project_refuses_the_apply',
+             B + 'test_lc06_d17_recommend_apply.py::test_an_edit_to_another_active_project_does_not_refuse_the_apply',
+             B + 'test_lc06_d17_recommend_apply.py::test_the_http_apply_requires_the_cards_digest',
+             B + 'test_lc06_d17_recommend_apply.py::test_the_http_apply_refuses_a_network_edit_after_the_card'),
     _covered('LC-D18.investment', 'equity NPV 4.1322314 at cost of equity 10 %, WACC 7 %; financial close undiscounted',
              '',
              B + 'test_investment_assurance.py::test_hand_cash_with_a_nonzero_first_year'),
