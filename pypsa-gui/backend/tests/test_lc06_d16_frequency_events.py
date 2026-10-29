@@ -275,8 +275,11 @@ def _site(pv_mw=0.0, gen_mw=0.0, gen_p=0.0, bess_mw=BESS_MW, ups_mwh=None):
     n.links_t.p0["grid_import"] = imp / 0.99
     n.links_t.p1["grid_import"] = -imp
     if ups_mwh is not None:
-        n.add("StorageUnit", "ups", bus="mv", carrier="battery", p_nom=UPS_MW, max_hours=ups_mwh / UPS_MW)
+        # full at hour 0: e(t−1) is the initial state of charge (non-cyclic)
+        n.add("StorageUnit", "ups", bus="mv", carrier="battery", p_nom=UPS_MW, max_hours=ups_mwh / UPS_MW,
+              state_of_charge_initial=ups_mwh)
         n.storage_units_t.p["ups"] = 0.0
+        n.storage_units_t.state_of_charge["ups"] = ups_mwh
     return n
 
 
