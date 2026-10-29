@@ -192,7 +192,7 @@ PR 2 (sections + compare):
 
 Met conditions: 1 (dump byte-equal; named suites green), 2 (pinned record MAC green on master and PR; cross-domain test), 3 (refusal and identical-republish tests), 4 (`run_manifest_mutations.py`: skip-verify, drop project_id, drop run_id each killed; dropping either from the binding alone is equivalent, since the body carries both), 5 (unsealed run reads unchecked, refused when checked).
 
-Consequences: runs recorded before this change, and every run after `SECRET_KEY` or the key file changes, stay readable history but are never checkable; there is no re-seal. A run whose key file cannot be read is published without a MAC (logged) rather than failing the run. With the dev default `SECRET_KEY` the MAC rests on the key file alone. A project copied to another install keeps its runs as unchecked history.
+Consequences: runs recorded before this change, and every run after `SECRET_KEY` or the key file changes, stay readable history but are never checkable; there is no re-seal. A run whose key file cannot be read is published without a MAC (logged) rather than failing the run; that run is then never checkable (open for GK B: the plan did not name this fallback). With the dev default `SECRET_KEY` the MAC rests on the key file alone. A project copied to another install keeps its runs as unchecked history.
 
 Not covered: a run id reused after retention deleted its directory would get a second manifest (ids come from job handles, uuids or nonces, so none is reused today). PR 2 (checked sections and compare) follows.
 

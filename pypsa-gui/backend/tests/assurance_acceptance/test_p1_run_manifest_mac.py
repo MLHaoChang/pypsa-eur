@@ -126,7 +126,7 @@ def test_a_manifest_moved_to_another_project_is_refused(run, harness, monkeypatc
 
 @pytest.mark.parametrize(
     "fault",
-    ["removed", "zeroed", "rewritten_metric"],
+    ["removed", "zeroed", "edited_warning"],
 )
 def test_a_checked_run_whose_mac_no_longer_verifies_is_unavailable(run, harness, fault):
     _, paths = checked_run(harness)
