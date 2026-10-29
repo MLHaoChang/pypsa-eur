@@ -2209,8 +2209,10 @@ def get_investment_case_export():
 
 
 def _workbook_scenarios(cfg, n, freshness: dict):
-    """The open project's sensitivity runs for the results workbook (RW-SCEN-1),
-    each read from its own saved context, or None without any."""
+    """The open project's sensitivity runs and the acting user's own experiment
+    cases for the results workbook (RW-SCEN-1), each read from its own saved
+    context, or None without any. Neither gather is entered holding
+    `experiments._LOCK`: the experiment one takes it only to read its store."""
     import contextlib
     import functools
 
@@ -2218,7 +2220,7 @@ def _workbook_scenarios(cfg, n, freshness: dict):
 
     from harness.experiment_comparison import basis_digests
     from services import workflow_tools as wt
-    from services.results_workbook.scenarios import gather_scenarios
+    from services.results_workbook.scenarios import gather_experiments, gather_scenarios
 
     ctx = PyPSAService.get_active_context()
     pid = getattr(ctx, "project_uuid", None)
@@ -2238,12 +2240,14 @@ def _workbook_scenarios(cfg, n, freshness: dict):
             logger.warning("results workbook: a scenario's case key not computable: %s", exc)
             return None, "current_assumptions_not_established"
 
+    readers = dict(ic_key=ic_key,
+                   result_df_for=lambda state: functools.partial(_result_df, state=state),
+                   solved_settings_for=lambda state, net: functools.partial(
+                       _solved_settings, state, net),
+                   dispatch_ready=_dispatch_ready)
     try:
-        return gather_scenarios(str(pid), base_basis, ic_key=ic_key,
-                                result_df_for=lambda state: functools.partial(_result_df, state=state),
-                                solved_settings_for=lambda state, net: functools.partial(
-                                    _solved_settings, state, net),
-                                dispatch_ready=_dispatch_ready)
+        return gather_experiments(str(pid), base_basis,
+                                  gather_scenarios(str(pid), base_basis, **readers), **readers)
     except HTTPException as exc:
         if exc.status_code == 404:  # no saved project row (a scratch network)
             return None
