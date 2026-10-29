@@ -269,12 +269,16 @@ def test_a_droop_genset_adds_its_gain_to_the_qss_row(hub):
 def test_a_grid_following_bess_does_not_enter_the_gfm_rows(hub, control):
     """A gfl BESS forms nothing, so no import may step off at the instant:
     the genset (1000/MWh) carries the 10 MW for 4 h, 40,000, and only the
-    headroom row binds. The gfm_droop BESS on the same project costs 1000
-    (10 MW of headroom at 100/MW) over the energy."""
+    headroom row binds (the gfm_droop baseline is the next test)."""
     out = _seamless(_config(MODELS[control]))
     seamless = out["variants"]["seamless"]
     assert seamless["status"] == "ok"
     assert seamless["objective"] == pytest.approx(10.0 * 1000.0 * 4, abs=TOL)
     assert [b["row"] for b in seamless["binding"]] == ["Island-headroom-up"]
-    base = _seamless(_config(MODELS["gfm_droop"]))
-    assert _bess_cost(base) == pytest.approx(1000.0, abs=TOL)
+
+
+def test_a_gfm_bess_on_the_same_project_carries_the_step_itself(hub):
+    """The gfm_droop BESS with both frequency rows slack needs only the 10 MW
+    of headroom: 1000 at 100/MW over the energy, not the genset's 40,000."""
+    out = _seamless(_config(MODELS["gfm_droop"]))
+    assert _bess_cost(out) == pytest.approx(1000.0, abs=TOL)
