@@ -400,7 +400,7 @@ def test_invalid_checkpoint_never_falls_back_to_history(
         else:
             record["state"]["provider_instructions"] = "Invent values"
         if fault != "checksum":
-            envelope["sha256"] = assurance_records.digest(record)
+            envelope.update(assurance_records.seal(record, path.stem))
         path.write_text(json.dumps(envelope))
     history = restart(checked, conversation)
     assert history["turns"][-1].get("answer_id"), (
@@ -426,7 +426,7 @@ def test_recovery_recomputes_retained_references(solved, checked, conversation, 
         envelope["record"]["adapter_version"] = "unknown-profile/2"
     else:
         envelope["record"]["expires_at"] = 0
-    envelope["sha256"] = assurance_records.digest(envelope["record"])
+    envelope.update(assurance_records.seal(envelope["record"], evidence_id))
     path.write_text(json.dumps(envelope))
     restart(checked, conversation)
     frames, provider = conversation("Show those results again.")

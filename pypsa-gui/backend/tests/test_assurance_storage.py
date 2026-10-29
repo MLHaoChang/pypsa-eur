@@ -31,7 +31,8 @@ for number in range(2):
 """
 
 
-def test_cross_process_quota_and_atomic_envelopes(tmp_path):
+def test_cross_process_quota_and_atomic_envelopes(tmp_path, monkeypatch):
+    import app_paths
     from services import assurance_records
 
     owner = str(uuid.uuid4())
@@ -56,7 +57,9 @@ def test_cross_process_quota_and_atomic_envelopes(tmp_path):
                 process.wait()
     files = list((tmp_path / "assistant_assurance" / owner).glob("*.json"))
     assert len(files) == 3
+    # The workers sealed under the install key in their own app-data root.
+    monkeypatch.setattr(app_paths, "app_data_dir", lambda: tmp_path)
     for path in files:
         envelope = json.loads(path.read_text())
-        assert envelope["sha256"] == assurance_records.digest(envelope["record"])
+        assert assurance_records.unseal(envelope, path.stem) == envelope["record"]
     assert not list((tmp_path / "assistant_assurance" / owner).glob("*.tmp"))
