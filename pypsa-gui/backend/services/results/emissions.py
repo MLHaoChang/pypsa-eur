@@ -315,7 +315,9 @@ def compute_emissions(n, source, *, result_df):
             for cap_name in gc.index[mask]:
                 cap_value = float(gc.at[cap_name, "constant"])
                 mu_raw = float(gc.at[cap_name, "mu"]) if "mu" in gc.columns else None
-                mu = mu_raw if mu_raw is not None else 0.0
+                # A missing or non-finite dual is unknown, not a 0 EUR/tCO2
+                # price (A1.6): null. A finite mu of 0 (a slack cap) stays 0.
+                mu = mu_raw if mu_raw is not None and _math.isfinite(mu_raw) else None
                 # Which period does this cap apply to (if any)?
                 ip_raw = gc.at[cap_name, "investment_period"] if "investment_period" in gc.columns else None
                 ip_norm: Any = None
@@ -344,7 +346,7 @@ def compute_emissions(n, source, *, result_df):
                     "scope": "period" if ip_norm is not None else "horizon",
                     "cap_tCO2": cap_value if _math.isfinite(cap_value) else None,
                     "used_tCO2": used,
-                    "shadow_price_eur_per_tCO2": mu if _math.isfinite(mu) else 0.0,
+                    "shadow_price_eur_per_tCO2": mu,
                     "slack_tCO2": slack,
                     "binding": _cap_binding(mu_raw, slack, cap_value),
                 }
@@ -356,7 +358,7 @@ def compute_emissions(n, source, *, result_df):
                         "active": True,
                         "name": str(cap_name),
                         "cap_tCO2": cap_value if _math.isfinite(cap_value) else None,
-                        "shadow_price_eur_per_tCO2": mu if _math.isfinite(mu) else 0.0,
+                        "shadow_price_eur_per_tCO2": mu,
                         "slack_tCO2": slack,
                         "binding": cap_entry["binding"],
                     }

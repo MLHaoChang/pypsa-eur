@@ -899,7 +899,7 @@ export function ChartActions({ chartRef, onExportCSV, filename, className }: Cha
 // strip's headline tile, and `hint` (often a full-sentence formula) stays a
 // hover title so the strip reads calmly.
 export function KPI({
-  label, value, unit, hint, delta, deltaState, sub, accent, state, reason, action,
+  label, value, unit, hint, delta, deltaState, sub, accent, state, reason, action, valueLabel,
 }: {
   label: string
   value: string
@@ -912,6 +912,7 @@ export function KPI({
   state?: ResultStateKind
   reason?: string
   action?: ResultAction
+  valueLabel?: string
 }) {
   return (
     <Kpi
@@ -926,6 +927,7 @@ export function KPI({
       state={state}
       reason={reason}
       action={action}
+      valueLabel={valueLabel}
     />
   )
 }

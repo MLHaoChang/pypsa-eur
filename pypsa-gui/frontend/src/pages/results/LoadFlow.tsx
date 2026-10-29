@@ -14,6 +14,7 @@ import { type TSPayload, fmtPower, shortStamp, downloadCSV, KPI, ChartActions, S
   CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
   useSeasonalViewMode, SeasonalLineCardGrid, WindowCapBanner,
   WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS } from './shared'
+import { NOT_RECORDED_KPI, NotRecordedNote } from './NotRecorded'
 import { useResultsFilter, resolveRange } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
 import { useUIStore } from '../../store/uiStore'
@@ -505,9 +506,9 @@ export default function LoadFlow() {
             {emissions.cap.active && (
               <>
                 <KPI label="Shadow price (marginal abatement)"
-                     value={emissions.cap.shadow_price_eur_per_tCO2 != null
-                       ? `${emissions.cap.shadow_price_eur_per_tCO2.toFixed(2)} €/tCO₂`
-                       : '—'} />
+                     {...(emissions.cap.shadow_price_eur_per_tCO2 != null
+                       ? { value: `${emissions.cap.shadow_price_eur_per_tCO2.toFixed(2)} €/tCO₂` }
+                       : NOT_RECORDED_KPI)} />
                 <KPI label="Cap slack"
                      value={emissions.cap.slack_tCO2 != null
                        ? `${emissions.cap.slack_tCO2.toLocaleString(undefined, { maximumFractionDigits: 1 })} tCO₂`
@@ -515,6 +516,7 @@ export default function LoadFlow() {
               </>
             )}
           </div>
+          <NotRecordedNote show={emissions.cap.active && emissions.cap.shadow_price_eur_per_tCO2 == null} />
           {emissions.total_tCO2 === 0 ? (
             <p className="text-[11px] text-muted mt-2">
               All dispatched carriers have <code>co2_emissions = 0</code>. Set per-carrier

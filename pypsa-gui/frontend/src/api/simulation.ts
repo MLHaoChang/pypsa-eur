@@ -1399,7 +1399,8 @@ export const resultsApi = {
         active: boolean
         name?: string
         cap_tCO2?: number | null
-        shadow_price_eur_per_tCO2?: number
+        // null when the cap's dual is missing or non-finite (unknown).
+        shadow_price_eur_per_tCO2?: number | null
         slack_tCO2?: number | null
       }
       // All active primary_energy + co2_emissions constraints. `scope` =
@@ -1412,7 +1413,8 @@ export const resultsApi = {
         scope: 'period' | 'horizon'
         cap_tCO2: number | null
         used_tCO2: number
-        shadow_price_eur_per_tCO2: number
+        // null when the cap's dual is missing or non-finite (unknown).
+        shadow_price_eur_per_tCO2: number | null
         slack_tCO2: number | null
         binding: boolean
       }>
@@ -1681,8 +1683,10 @@ export const resultsApi = {
   getProcessView: () => client.get<ProcessView>('/results/process_view').then(r => r.data),
   getLostLoad: (range?: TSRange) => client.get<{
     index: string[]; columns: string[]; data: number[][];
-    total_mwh: number; total_cost_eur: number;
-    voll_eur_per_mwh: number;
+    // null when the capture lacks them, or VoLL was not in the solve; a
+    // captured 0 is 0. VoLL is null when neither captured nor derivable.
+    total_mwh: number | null; total_cost_eur: number | null;
+    voll_eur_per_mwh: number | null;
     // UX overhaul S2b: whether VoLL was in the solve (solve-time settings,
     // not the draft). Absent on older backends.
     voll_applied?: boolean

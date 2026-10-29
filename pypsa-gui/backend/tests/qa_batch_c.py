@@ -73,8 +73,12 @@ def test_c1_lost_load_voll() -> None:
     _step("voll_eur_per_mwh in /results/lost_load payload", ok)
     ok2 = _has_in("frontend/src/api/simulation.ts", "voll_eur_per_mwh: number")
     _step("voll_eur_per_mwh in API client type", ok2)
-    ok3 = _has_in("frontend/src/pages/results/AggregatedOverview.tsx",
-                  "voll_eur_per_mwh")
+    # The Overview reads it through `vollOf` (results/summary.ts), which
+    # takes the payload's VOLL and never derives 0 from a null total.
+    ok3 = (_has_in("frontend/src/pages/results/summary.ts",
+                   "ll?.voll_eur_per_mwh")
+           and _has_in("frontend/src/pages/results/AggregatedOverview.tsx",
+                       "vollOf("))
     _step("Overview reads voll_eur_per_mwh", ok3)
 
 

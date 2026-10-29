@@ -2,7 +2,7 @@
 // tabs use, links each to its tab, and never shows an absent quantity as
 // zero (no VoLL: "not modelled"; no cap, margin or target: no "met").
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { ResultsFilterProvider } from './filterContext'
@@ -176,5 +176,32 @@ describe('the Summary card rows (W10 R1)', () => {
     expect(within(rows).getByTestId('summary-not-in-scope').textContent).toContain('AC power flow')
     fireEvent.click(within(rows).getByTestId('summary-row-open-capacity'))
     expect(onOpen).toHaveBeenCalledWith('capex')
+  })
+})
+
+// A1.6 / A1.7: an unknown total or shadow price is '—', never 0.
+describe('the Summary tab with unknown lost-load totals and shadow price', () => {
+  it('shows null lost-load totals as —, not 0 MWh or €0', async () => {
+    api.getLostLoad.mockResolvedValue({ total_mwh: null, total_cost_eur: null, voll_eur_per_mwh: null,
+      voll_applied: true, shed_hours: { total: 0, by_period: {} } })
+    renderTab()
+    const card = await screen.findByTestId('summary-adequacy')
+    await waitFor(() => expect(card.querySelector('[data-kpi-value="—"]')).not.toBeNull())
+    expect(within(card).queryByText(/0(\.0)? MWh/)).toBeNull()
+    expect(within(card).queryByText(/^€0/)).toBeNull()
+    expect(screen.queryByText(/unserved$/)).toBeNull()
+    expect(within(card).getAllByLabelText('Not recorded by this solve').length).toBe(2)
+    expect(screen.getAllByTestId('not-recorded-note').length).toBe(1)
+  })
+
+  it('a binding cap with an unknown shadow price shows —, not €0', async () => {
+    api.getEmissions.mockResolvedValue({ ...EMISSIONS, caps: [{ ...EMISSIONS.caps[0],
+      shadow_price_eur_per_tCO2: null }] })
+    renderTab()
+    const card = await screen.findByTestId('summary-emissions')
+    expect(await within(card).findByLabelText('Not recorded by this solve')).toBeTruthy()
+    expect(card.textContent).toMatch(/binding · —\/t/)
+    expect(within(card).queryByText(/€0/)).toBeNull()
+    expect(screen.getByTestId('not-recorded-note').textContent).toBe('—: not recorded by this solve')
   })
 })
