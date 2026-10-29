@@ -37,7 +37,7 @@ from fastapi import HTTPException
 from services.results_workbook.registry import register
 from services.results_workbook.views import HORIZON, Key, Table, ViewData, write_view
 from services.results_workbook.views_network import (
-    _by, _labels, _periods, _sum_or_none, _ts, _ts_frame, _view,
+    _by, _periods, _sum_or_none, _ts, _ts_table, _view,
 )
 
 __all__: list[str] = []
@@ -201,7 +201,7 @@ def _loadflow(run) -> ViewData | None:
                            ("transformers_t", "Transformer flow (bus0)")):
         ts = _ts(run, accessor, "p0")
         if ts is not None:
-            d.tables.append(Table(name, "MW", _ts_frame(ts), _labels(ts)))
+            d.tables.append(_ts_table(run, name, "MW", ts))
     return d
 
 

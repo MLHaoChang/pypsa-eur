@@ -25,7 +25,7 @@ from typing import Any, Literal
 import pandas as pd
 from openpyxl.utils import get_column_letter
 
-from services.results_workbook import charts
+from services.results_workbook import budget, charts
 from services.results_workbook.cells import BOLD, formula, heading, put, width
 
 __all__ = ["CHARTS", "HORIZON", "Chart", "Key", "Table", "ViewData", "write_view"]
@@ -51,6 +51,12 @@ class Table:
     unit: str
     frame: pd.DataFrame
     labels: int = 1
+    # A snapshot table (its last label column is the snapshot): how a coarser
+    # resolution aggregates it (`budget.KINDS`) and each row's hours.
+    time: str | None = None
+    weights: Any = None
+    # The coarser resolution it was written at, named (`budget.coarsen`).
+    resolution: str | None = None
 
 
 @dataclass
@@ -226,14 +232,15 @@ def _write_table(ws, row: int, name: str, names: list[str],
     base = next(t for t in tables if t is not None)
     label_cols = list(base.frame.columns[:base.labels])
     value_cols = _union([list(t.frame.columns[t.labels:]) for t in tables if t is not None])
-    put(ws, row, 1, f"{name} ({base.unit})" if base.unit else name)
+    unit = "; ".join(x for x in (base.unit, base.resolution) if x)
+    put(ws, row, 1, f"{name} ({unit})" if unit else name)
     ws.cell(row=row, column=1).font = BOLD
     row += 1
     header = row
     heading(ws, row, ["Scenario", *map(str, label_cols), *map(str, value_cols)])
     row += 1
     pos = {"header": header, "first": row, "last": row - 1, "labels": len(label_cols),
-           "values": {}}
+           "values": {}, "resolution": base.resolution}
     for i, (run_name, t) in enumerate(zip(names, tables)):
         if t is None:
             continue
@@ -267,13 +274,16 @@ def _charts(ws, view_id: str, positions: dict[str, dict], anchor_col: str) -> in
             continue
         cat_col = 2 + (spec.cats % pos["labels"])
         anchor = f"{anchor_col}{_KEY_ROW + 20 * drawn}"
+        title = spec.title
+        if pos["resolution"]:  # a coarsened table's chart names its resolution
+            title = title.replace("every snapshot", pos["resolution"])
         h, r0, r1 = pos["header"], pos["first"], pos["last"]
         cols = sorted(j for col, j in pos["values"].items()
                       if not spec.columns or col in spec.columns)
         if not cols:
             continue
         if spec.kind == "scatter":
-            charts.scatter(ws, title=spec.title, x=(cat_col, r0, cat_col, r1),
+            charts.scatter(ws, title=title, x=(cat_col, r0, cat_col, r1),
                            ys=[(c, h, c, r1) for c in cols[:_MAX_SERIES]],
                            anchor=anchor, y_title=spec.y_title)
         else:
@@ -284,10 +294,10 @@ def _charts(ws, view_id: str, positions: dict[str, dict], anchor_col: str) -> in
             box = (cols[0], h, last, r1)
             cats = (cat_col, r0, cat_col, r1)
             if spec.kind == "line":
-                charts.line(ws, title=spec.title, data=box, cats=cats, anchor=anchor,
+                charts.line(ws, title=title, data=box, cats=cats, anchor=anchor,
                             y_title=spec.y_title)
             else:
-                charts.bar(ws, title=spec.title, data=box, cats=cats, anchor=anchor,
+                charts.bar(ws, title=title, data=box, cats=cats, anchor=anchor,
                            stacked=spec.kind == "stacked", y_title=spec.y_title)
         drawn += 1
     return drawn
@@ -298,10 +308,32 @@ def write_view(wb, ctx, view_id: str, title: str, datas: list[ViewData | None]) 
     if not any(d and (d.keys or d.tables) for d in datas):
         return False
     names = [r.name for r in ctx.runs]
+    key_rows = _KEY_ROW + 2 + sum(len(k.by) for d in datas if d for k in d.keys)
+    datas, resolution, fallback = budget.fit(datas, key_rows, ctx.cells_left)
     ws = wb.create_sheet(title[:31])
     put(ws, 1, 1, title)
     ws.cell(row=1, column=1).font = BOLD
     notes = _union([d.notes for d in datas if d])
+    said = []
+    if resolution:
+        said.append(f"resolution {resolution}")
+        notes.append(f"The full data passes Excel's row limit or the workbook's cell budget, "
+                     f"so the snapshot tables are at {resolution} resolution (each "
+                     "table's title says how its cells aggregate; each bucket stays within "
+                     "one investment period). The key results use every snapshot.")
+    if fallback == "base" and len(datas) > 1:
+        said.append("other scenarios at key results only")
+        notes.append(("Even then the sheet does not fit, so" if resolution else
+                      "The full tables do not fit, so") +
+                     f" the tables hold {names[0]} only; "
+                     "the other scenarios are at key-results level.")
+    if fallback == "keys":
+        said.append("key results only")
+        notes.append("The tables pass Excel's row limit and cannot be made coarser, so "
+                     "the sheet holds the key results only.")
+    if said:
+        ctx.resolution[view_id] = "; ".join(said)
+    ctx.cells_left -= budget._cells(t for d in datas if d for t in d.tables)
     missing = [f"{name}: {why}" for name, why in zip(names, _why_missing(ctx, datas)) if why]
     put(ws, 2, 1, " ".join(notes + ([f"No figures for {'; '.join(missing)}."] if missing else [])))
     row = _write_keys(ws, _KEY_ROW, names, datas)
