@@ -102,6 +102,11 @@ content card, GRIDCODE-CHAT-1).
 - New error kinds only in `tool-error-kinds.d/`. R2 trial merge runs the listed route/ACL/lock,
   catalogue, prompt, selection and kind-manifest tests plus the inventory, route-parity, control-matrix
   and json_fragments checks; any exact-count pin changed is named in the PR body.
+- GK B NOT OK @e99f930b fixed: a family is `covered` only with at least one covered and no pending
+  variant (`_open` in `smoke/assistant_control_matrix.py`, used by `family_journeys`, `_full_coverage`
+  and `_full_coverage_problem`); a family with no covered variant is a `family-manifest:<slug>` blocker.
+  Test: `test_a_family_whose_manifest_rows_are_gone_is_open_not_covered` (LC-D20 rows removed); it fails
+  under both mutations (the old pending-only rule everywhere, and in the claim guard alone).
 
 2026-10-29: R2 built (session_01G7qCukn8KpPCqXtzidyFhy, stacked on R1 #906). `get_process_view` (read;
 the route's foreground project, a foreground project the caller may not read is 404 `not_authorized`),
