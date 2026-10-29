@@ -3,7 +3,7 @@
 
 # LC-34 — Exports write a formula-looking asset name unescaped
 
-Status: needs-triage
+Status: done (fixed by EXPORT-INJECT-1, PR #925; covered by LC-D20.injection)
 Type: bug
 
 Found by LC-32 (D20, `LC-D20.injection`). With a generator named `=HYPERLINK(1)` in the network:

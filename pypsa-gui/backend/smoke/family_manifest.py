@@ -502,7 +502,11 @@ VARIANTS: list[dict] = [
              B + 'test_lc06_d20_delivery.py::test_the_csv_bundle_and_the_workbook_carry_the_same_rows',
              B + 'test_lc06_d20_delivery.py::test_the_matpower_case_holds_the_hand_numbers',
              B + 'test_lc06_d20_delivery.py::test_a_bundle_of_two_deliveries_holds_each_file_byte_for_byte'),
-    _pending('LC-D20.injection', 'an asset named =HYPERLINK(1) is written unescaped into the CSV bundle and as a formula into the workbook (ticket 34); path injection untested'),
+    _covered('LC-D20.injection', 'a generator named =HYPERLINK(1) is delivered as the text \'=HYPERLINK(1) in the CSV bundle and the workbook, the workbook holds no formula cell, '
+             'and a negative number stays a number (EXPORT-INJECT-1, ticket 34)',
+             'export_csv_bundle export_excel',
+             B + 'test_lc06_d20_delivery.py::test_a_formula_looking_asset_name_is_delivered_as_text'),
+    _pending('LC-D20.path_injection', 'path or file-name injection in the delivered names untested'),
     _pending('LC-D20.delivery_gates', 'imports and their inspection/mapping, charts, export_run_evidence and the other exports, cross-tenant download, malformed or oversized data, expired delivery and interrupted work not tested'),
     _covered('LC-D21.reports', 'exported DOCX read with python-docx: headline table MC LOLE 3.21 h/yr, ENS cap 10.00, unrun sections say not established; scripted 3.2 h/yr audited verified; '
              'regenerated 9.9 h/yr is version 2, unverified and listed in Numbers to check, tables and other sections unchanged, version 1 intact (one stored study report, scripted model)',
