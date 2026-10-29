@@ -204,17 +204,15 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
     },
     {
         'id': 'site_scene',
-        'title': 'Site 3D scene: coordinates, buildings and proposals',
+        'title': 'Site 3D scene: buildings and proposals',
         'disposition': 'unbuilt',
-        'reason': 'The 3D site scene is not available from chat yet. Set the site coordinates in Project & site, then generate and correct buildings in Site 3D.',
+        'reason': 'The 3D site scene is not available from chat yet (SC-07). Chat can read and set the site coordinates (get_site_anchor, set_site_anchor); generate and correct buildings in Site 3D.',
         'page': 'Site 3D',
         'panel': 'map',
         'keywords': frozenset({
             'scene',
         }),
         'routes': frozenset({
-            ('GET', '/api/projects/{name}/site-anchor'),
-            ('PUT', '/api/projects/{name}/site-anchor'),
             ('GET', '/api/projects/{name}/sites/{site_id}/scene'),
             ('POST', '/api/projects/{name}/sites/{site_id}/scene/adopt'),
             ('POST', '/api/projects/{name}/sites/{site_id}/scene/proposals'),

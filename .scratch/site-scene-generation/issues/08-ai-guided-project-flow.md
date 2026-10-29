@@ -24,6 +24,24 @@ Show exact native receipts, distinguish partial model-create/scene-placement out
 
 Done for native release: V61–V72 pass at the integrated seams with real native data/services and scripted-provider control; other applicable domain/device/CI gates pass; a separate authorized real-provider evaluation supports conversational-quality claims. Report absent optional-engine adapters as unavailable, never implemented. Independent GK/UX review and all ordinary repository gates still apply.
 
+## Scene routes held for this issue (route parity)
+
+Live-voice issue 08 (R2, owner option 1) declares these GUI routes `held-by-spec` with this file as
+their `issue` (`pypsa-gui/backend/smoke/assistant_route_parity_declarations.d/`). They get their chat
+tools here, through the frozen SC-07 tool names in `../ai-guided-project-flow.md`; until then each
+is a limitation and this issue is one `route-parity:held:<this file>` full-coverage blocker.
+`assistant_route_parity.py --check` fails once this issue's Status is done or wontfix while a route
+is still held, or when a held route is no longer named below.
+
+- GET /api/projects/{name}/sites/{site_id}/scene
+- POST /api/projects/{name}/sites/{site_id}/scene/adopt
+- POST /api/projects/{name}/sites/{site_id}/scene/proposals
+- POST /api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/apply
+- POST /api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/cancel
+
+The site anchor (`GET/PUT /api/projects/{name}/site-anchor`) is not held: `get_site_anchor` and the
+carded `set_site_anchor` serve it.
+
 ## Likely touch points and verification
 
 Rebaseline before code: harness compose/workflows/catalogue/dispatch, typed chat handlers and owned scene/job services; server flow projection; frontend Site selection, existing companion/context and flow-navigation return anchors. This is a touch-point map, not authorization to overwrite other briefs. Keep proposals/applies in the common native scene path rather than implementing state changes inside prompt text.
