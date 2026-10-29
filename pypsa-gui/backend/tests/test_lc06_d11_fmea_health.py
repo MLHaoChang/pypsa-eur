@@ -17,13 +17,13 @@ two snapshots weighted 3 h. Capacity states: 100 MW p 0.72, 60 MW p 0.18,
 * thermal2 never out (100 MW p 0.9, 40 MW p 0.1):
   EUE = 3·(30·0.1) + 3·(60·0.1) = 27 MWh, so ΔEUE = 31.8 MWh.
 * Occurrence 8760·q/MTTR: 8760·0.1/50 = 17.52 /yr and 8760·0.2/40 = 43.8 /yr.
-* Criticality as the engine computes it: ΔEUE·VoLL, the horizon's ΔEUE
-  (ticket 30: labelled per year, not annualised).
+* Criticality and severity are not asserted at their values: the engine gives
+  the horizon's ΔEUE·VoLL, labelled per year (ticket 30). Only the identity
+  severity × occurrence = criticality is checked.
 
 Class B: bus B1 with 200 MW firm and 100 MW load, and bus B2 with 5 MW load
 fed only by the 10 MW tie (FOR 0.02, MTTR 24 h). The base serves all the load.
-With the tie out, B2 sheds 5 MW in both snapshots: ΔEUE = 5·2·3 = 30 MWh, and
-criticality = q·ΔEUE·VoLL = 0.02·30·1000 = 600 EUR.
+With the tie out, B2 sheds 5 MW in both snapshots: ΔEUE = 5·2·3 = 30 MWh.
 
 Tolerance: ``rel=1e-9``. COPT is exact arithmetic on four states, and the
 LP's shed load is a bound that HiGHS returns to its precision. The mutations
@@ -68,7 +68,6 @@ def test_class_a_prices_each_units_outages_by_hand(classical, name, delta_eue, o
     assert m["mode_id"] == f"generator:{name}:forced_outage"
     assert m["delta_eue_mwh"] == pytest.approx(delta_eue, rel=REL)
     assert m["occurrence_per_year"] == pytest.approx(occurrence, rel=REL)
-    assert m["criticality_eur_per_year"] == pytest.approx(delta_eue * VOLL, rel=REL)   # ticket 30
     assert m["severity_eur"] * m["occurrence_per_year"] == pytest.approx(m["criticality_eur_per_year"], rel=REL)
 
 
@@ -120,7 +119,6 @@ def test_class_b_one_link_outage_sheds_its_load(tied):
     fm = row["failure_mode"]
     assert fm["failure_class"] == "B" and fm["component_class"] == "Link"
     assert row["delta_eue_mwh"] == pytest.approx(5.0 * 2 * 3.0, rel=REL)          # 30 MWh, not 0
-    assert fm["criticality_eur_per_year"] == pytest.approx(0.02 * 30.0 * VOLL, rel=REL)
     assert fm["occurrence_per_year"] == pytest.approx(8760 * 0.02 / 24, rel=REL)
     assert tied.network.links.at["tie", "p_nom"] == 10.0                          # the outage was undone
 

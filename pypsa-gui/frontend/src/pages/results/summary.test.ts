@@ -3,7 +3,7 @@
 // selected period) and the unnamed PyPSA 1.1 statistics index columns.
 import { describe, expect, it } from 'vitest'
 import type { CostBreakdown } from '../../api/simulation'
-import { capacityRows, costView, emissionsView, reserveMarginVerdict, type EmissionsPayload } from './summary'
+import { capacityRows, costView, emissionsView, reserveMarginVerdict, vollOf, type EmissionsPayload } from './summary'
 
 const COST = {
   capex: 900, capex_expansion: 300, opex: 100, total: 1000,
@@ -87,5 +87,21 @@ describe('reserveMarginVerdict', () => {
   })
   it('no margin set, no verdict', () => {
     expect(reserveMarginVerdict(null)).toBeNull()
+  })
+})
+
+// A1.7: VOLL is the payload's own, else cost / MWh from two known totals with
+// MWh > 0 — never a division by zero, never 0 for an unknown.
+describe('vollOf', () => {
+  it('prefers the payload VOLL, a real 0 included', () => {
+    expect(vollOf({ voll_eur_per_mwh: 3000, total_mwh: 2, total_cost_eur: 10 })).toBe(3000)
+    expect(vollOf({ voll_eur_per_mwh: 0, total_mwh: 2, total_cost_eur: 10 })).toBe(0)
+  })
+  it('derives cost / MWh only from two known totals with MWh > 0', () => {
+    expect(vollOf({ voll_eur_per_mwh: null, total_mwh: 4, total_cost_eur: 6000 })).toBe(1500)
+    expect(vollOf({ voll_eur_per_mwh: null, total_mwh: 0, total_cost_eur: 50 })).toBeNull()
+    expect(vollOf({ voll_eur_per_mwh: null, total_mwh: null, total_cost_eur: 50 })).toBeNull()
+    expect(vollOf({ voll_eur_per_mwh: null, total_mwh: 4, total_cost_eur: null })).toBeNull()
+    expect(vollOf(null)).toBeNull()
   })
 })

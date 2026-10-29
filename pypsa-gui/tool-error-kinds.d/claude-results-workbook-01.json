@@ -1,0 +1,12 @@
+{
+  "kinds": {
+    "results_workbook_stale": {
+      "surface": "inline",
+      "why": "GET /api/results/workbook.xlsx (results-workbook issue 01) refuses with 409 while a solve runs, and when the results do not match the current inputs (workflow_tools.solve_freshness: inputs changed, or no fingerprint recorded), as create_chart refuses a stale run. The caller re-runs the model, or asks again with stored=true to export the stored run, which About then labels as such."
+    },
+    "unknown_result_view": {
+      "surface": "inline",
+      "why": "GET /api/results/workbook.xlsx refuses with 422 a views= id that is not a Results-panel view of a card (results_workbook.registry.workbook_views); the message lists the valid ids and the caller asks again with them."
+    }
+  }
+}

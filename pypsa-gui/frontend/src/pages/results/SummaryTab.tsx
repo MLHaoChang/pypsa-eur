@@ -22,6 +22,7 @@ import type { AdequacyReportPayload } from './adequacy'
 import { CARD_GROUPS, type CardGroupId } from './groups'
 import { freshnessOf } from './GroupHeader'
 import ProductionTiles from './ProductionTiles'
+import { NOT_RECORDED, NotRecordedDash, NotRecordedNote } from './NotRecorded'
 import { StatePill } from '../../components/ResultState'
 import { ScopeGate } from '../../components/flowScope/ScopeGate'
 import { useGridReadiness } from '../../components/gridReadiness/GridReadinessScorecard'
@@ -69,12 +70,13 @@ function Card({ title, testId, link, linkLabel, onOpen, hint, children }: {
 // components/Kpi.tsx): the figure rounded by kpiFigure (owner sign-off R1),
 // its unit smaller on the same unbreakable line. The detail lines below keep
 // full precision, as tables do.
-function Headline({ value, sub }: { value: string; sub?: ReactNode }) {
+function Headline({ value, sub, valueLabel }: { value: string; sub?: ReactNode; valueLabel?: string }) {
   const raw = splitValueUnit(value)
   const parts = kpiFigure(raw.value, raw.unit)
   return (
     <div>
       <div data-kpi-value={parts.unit ? `${parts.value} ${parts.unit}` : parts.value}
+        role={valueLabel ? 'img' : undefined} title={valueLabel} aria-label={valueLabel}
         className="flex items-baseline gap-1 whitespace-nowrap">
         <span className="text-[22px] font-semibold leading-none text-text tabular-nums">{parts.value}</span>
         {parts.unit && <span className="text-[13px] text-muted">{parts.unit}</span>}
@@ -138,6 +140,9 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
   }
 
   const scope = selectedPeriod != null ? `period ${selectedPeriod}` : 'horizon'
+  // Any "—" below for a value this solve did not record (A1.6 / A1.7).
+  const notRecorded = (ll != null && (ll.total_mwh == null || ll.total_cost_eur == null))
+    || (e != null && e.caps.some(cap => cap.binding == null || (cap.binding && cap.shadow_price_eur_per_tCO2 == null)))
   const shedHours = ll?.shed_hours == null ? null
     : selectedPeriod != null ? ll.shed_hours.by_period[String(selectedPeriod)] ?? null : ll.shed_hours.total
 
@@ -159,7 +164,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
         status={status} onOpenTab={onOpenTab} onOpenGroup={onOpenGroup}
         isIn={card => !scopeRead || inScope(flowScope, card)}
         headline={{
-          capacity: c ? `${fmtCurrency(c.total)} a year${ll && ll.total_mwh > 0 ? ` · ${fmtEnergy(ll.total_mwh)} unserved` : ''}` : null,
+          capacity: c ? `${fmtCurrency(c.total)} a year${ll?.total_mwh != null && ll.total_mwh > 0 ? ` · ${fmtEnergy(ll.total_mwh)} unserved` : ''}` : null,
           reliability: target
             ? `${fmtEnergy(target.target.system.achieved_ens_mwh)} unserved of ${fmtEnergy(target.target.system.cap_mwh)} allowed`
             : rm ? `Reserve margin ${rm.text}` : null,
@@ -196,8 +201,11 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
               <Headline value={`${e.total_tCO2} tCO₂`} />
               {e.caps.length ? e.caps.map(cap => (
                 <Line key={cap.name} label={`Cap ${cap.name}${cap.cap_tCO2 != null ? ` (${fmtTonnes(cap.cap_tCO2)})` : ''}`}
-                  tone={cap.binding ? 'warn' : 'ok'}
-                  value={cap.binding ? `binding · ${fmtCurrency(cap.shadow_price_eur_per_tCO2)}/t` : 'not binding'} />
+                  tone={cap.binding == null ? undefined : cap.binding ? 'warn' : 'ok'}
+                  value={cap.binding == null ? <NotRecordedDash />
+                    : !cap.binding ? 'not binding'
+                    : cap.shadow_price_eur_per_tCO2 != null ? `binding · ${fmtCurrency(cap.shadow_price_eur_per_tCO2)}/t`
+                    : <>binding · <NotRecordedDash />/t</>} />
               )) : <Absent>No CO₂ cap set.</Absent>}
             </>
           ) : <Absent>No emissions for this solve.</Absent>}
@@ -207,8 +215,10 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
           hint="Unserved energy is the VoLL slack dispatch the solve captured (/results/lost_load). LOLE and EUE come from an adequacy study: open the Adequacy tab.">
           {ll ? (
             <>
-              <Headline value={fmtEnergy(ll.total_mwh)} sub={`unserved energy${selectedPeriod != null ? ' (horizon)' : ''}`} />
-              <Line label="Cost at VoLL (not in the total)" value={fmtCurrency(ll.total_cost_eur)} />
+              <Headline value={fmtEnergy(ll.total_mwh)} sub={`unserved energy${selectedPeriod != null ? ' (horizon)' : ''}`}
+                valueLabel={ll.total_mwh == null ? NOT_RECORDED : undefined} />
+              <Line label="Cost at VoLL (not in the total)"
+                value={ll.total_cost_eur != null ? fmtCurrency(ll.total_cost_eur) : <NotRecordedDash />} />
               {shedHours != null && <Line label="Hours with shed load" value={shedHours.toFixed(1)} tone={shedHours > 0 ? 'warn' : 'ok'} />}
             </>
           ) : lostLoadRead ? (
@@ -251,6 +261,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
           )}
         </Card>
       </div>
+      <NotRecordedNote show={notRecorded} />
       <ProductionTiles view={processView} />
       {/* The visible next step (UX-flow rule 3): what follows the answer. */}
       <div data-testid="summary-handoff" className="flex flex-wrap items-center gap-3 text-[11px]">

@@ -1,6 +1,6 @@
 # Per-op undo of a refinement
 
-Status: ready-for-agent (triage 2026-10-28: no per-op undo on master; undo is the apply's whole snapshot)
+Status: done (#876, merged 2026-10-29)
 Type: task
 Blocked by: none (04 done, #576)
 Gated: yes (apply path), plus the UX reviewer for the UI

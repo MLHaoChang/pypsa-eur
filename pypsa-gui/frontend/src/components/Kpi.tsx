@@ -32,7 +32,7 @@ const TONE: Record<KpiTone, string> = {
 
 export default function Kpi({
   label, value, unit, basis, hint, delta, deltaTone, headline, testId,
-  state = 'ready', reason, action, fromStudy,
+  state = 'ready', reason, action, fromStudy, valueLabel,
 }: {
   label: string
   value: string
@@ -51,6 +51,8 @@ export default function Kpi({
   action?: ResultAction
   /** The figure is the study's; the project itself is not solved (G5). Keeps the figure, adds the pill. */
   fromStudy?: boolean
+  /** Hover text and accessible name for the figure itself, e.g. what a "—" means. */
+  valueLabel?: string
 }) {
   const raw = unit !== undefined ? { value, unit } : splitValueUnit(value)
   const parts = kpiFigure(raw.value, raw.unit)
@@ -68,6 +70,9 @@ export default function Kpi({
       {showsFigure ? (
         <div
           data-kpi-value={parts.unit ? `${parts.value} ${parts.unit}` : parts.value}
+          role={valueLabel ? 'img' : undefined}
+          title={valueLabel}
+          aria-label={valueLabel}
           className={`flex items-baseline gap-1 whitespace-nowrap ${state === 'stale' ? 'opacity-60' : ''}`}
         >
           <span
