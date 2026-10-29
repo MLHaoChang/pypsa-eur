@@ -25,7 +25,7 @@ from typing import Any, Literal
 import pandas as pd
 from openpyxl.utils import get_column_letter
 
-from services.results_workbook import charts
+from services.results_workbook import budget, charts
 from services.results_workbook.cells import BOLD, formula, heading, put, width
 
 __all__ = ["CHARTS", "HORIZON", "Chart", "Key", "Table", "ViewData", "write_view"]
@@ -307,10 +307,9 @@ def write_view(wb, ctx, view_id: str, title: str, datas: list[ViewData | None]) 
     """Writes the view's sheet; False (and no sheet) when no run has data."""
     if not any(d and (d.keys or d.tables) for d in datas):
         return False
-    from services.results_workbook import budget
     names = [r.name for r in ctx.runs]
     key_rows = _KEY_ROW + 2 + sum(len(k.by) for d in datas if d for k in d.keys)
-    datas, resolution, base_only = budget.fit(datas, key_rows, ctx.cells_left)
+    datas, resolution, fallback = budget.fit(datas, key_rows, ctx.cells_left)
     ws = wb.create_sheet(title[:31])
     put(ws, 1, 1, title)
     ws.cell(row=1, column=1).font = BOLD
@@ -319,16 +318,22 @@ def write_view(wb, ctx, view_id: str, title: str, datas: list[ViewData | None]) 
     if resolution:
         said.append(f"resolution {resolution}")
         notes.append(f"The full data passes Excel's row limit or the workbook's cell budget, "
-                     f"so every run's snapshot tables are at {resolution} resolution (each "
+                     f"so the snapshot tables are at {resolution} resolution (each "
                      "table's title says how its cells aggregate; each bucket stays within "
                      "one investment period). The key results use every snapshot.")
-    if base_only and len(datas) > 1:
+    if fallback == "base" and len(datas) > 1:
         said.append("other scenarios at key results only")
-        notes.append(f"Even then the sheet does not fit, so the tables hold {names[0]} only; "
+        notes.append(("Even then the sheet does not fit, so" if resolution else
+                      "The full tables do not fit, so") +
+                     f" the tables hold {names[0]} only; "
                      "the other scenarios are at key-results level.")
+    if fallback == "keys":
+        said.append("key results only")
+        notes.append("The tables pass Excel's row limit and cannot be made coarser, so "
+                     "the sheet holds the key results only.")
     if said:
         ctx.resolution[view_id] = "; ".join(said)
-    ctx.cells_left -= sum(t.frame.size for d in datas if d for t in d.tables)
+    ctx.cells_left -= budget._cells(t for d in datas if d for t in d.tables)
     missing = [f"{name}: {why}" for name, why in zip(names, _why_missing(ctx, datas)) if why]
     put(ws, 2, 1, " ".join(notes + ([f"No figures for {'; '.join(missing)}."] if missing else [])))
     row = _write_keys(ws, _KEY_ROW, names, datas)

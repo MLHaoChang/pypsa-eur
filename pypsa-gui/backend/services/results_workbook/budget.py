@@ -88,7 +88,7 @@ def coarsen(t, level: int):
     sums = by.sum()
     num, den, count = sums["vw"], sums["ww"], sums["n"]
     # A bucket with no value (or no hours) is blank, never 0.
-    out = num.where(count > 0) if t.time == "sum" else num / den.where(den > 0)
+    out = num.where((count > 0) & (den > 0)) if t.time == "sum" else num / den.where(den > 0)
     out = out.reset_index()
     out.columns = labels + list(values.columns)
     if pd.api.types.is_datetime64_any_dtype(out[snap]):
@@ -104,11 +104,12 @@ def _cells(tables) -> int:
     return sum(t.frame.size for t in tables if t is not None)
 
 
-def fit(datas: list, key_rows: int, cells_left: int) -> tuple[list, str | None, bool]:
+def fit(datas: list, key_rows: int, cells_left: int) -> tuple[list, str | None, str | None]:
     """The runs' `ViewData` with their snapshot tables at the finest resolution
     that keeps the sheet within Excel's rows and `cells_left` cells; returns
-    (datas, the resolution named or None at full resolution, whether fallback (b)
-    dropped the other scenarios' tables)."""
+    (datas, the resolution named or None at full resolution, the fallback taken:
+    None, "base" when (b) dropped the other scenarios' tables, or "keys" when even
+    the base's tables pass Excel's row limit and every run is at key results)."""
     def size(ds):
         tabs = [t for d in ds if d for t in d.tables]
         return key_rows + _rows(tabs), _cells(tabs)
@@ -118,7 +119,7 @@ def fit(datas: list, key_rows: int, cells_left: int) -> tuple[list, str | None, 
         return rows <= EXCEL_ROWS and cells <= cells_left
 
     if fits(datas):
-        return datas, None, False
+        return datas, None, None
     timed = any(t.time and t.weights is not None for d in datas if d for t in d.tables)
     candidates = []
     if timed:
@@ -139,9 +140,13 @@ def fit(datas: list, key_rows: int, cells_left: int) -> tuple[list, str | None, 
             label = "; ".join(sorted(named)) or None
             candidates.append((out, label))
             if fits(out):
-                return out, label, False
+                return out, label, None
     # Fallback (b): the base in full (at the coarsest resolution tried), the
     # other scenarios at key-results level.
     out, label = candidates[-1] if candidates else (datas, None)
     out = [out[0], *[replace(d, tables=[]) if d else None for d in out[1:]]]
-    return out, label, True
+    if size(out)[0] <= EXCEL_ROWS:
+        return out, label, "base"
+    # A table that cannot be coarsened still passes Excel's row limit: no run
+    # keeps its tables (a sheet is never truncated).
+    return [replace(d, tables=[]) if d else None for d in out], None, "keys"

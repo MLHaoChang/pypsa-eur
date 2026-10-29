@@ -225,9 +225,10 @@ def build_results_workbook(inp: WorkbookInputs) -> bytes:
             wb[t].max_row * wb[t].max_column for t in ctx.sheets[v]))
         for title in ctx.sheets.pop(view_id):
             del wb[title]
-        statuses = [(v, c, "error: over the 25 MB export limit even at the coarsest "
-                           "resolution; not written" if v == view_id else st)
-                    for v, c, st in statuses]
+        why = "error: over the 25 MB export limit" + (
+            f" at {ctx.resolution[view_id]}" if view_id in ctx.resolution else "") + (
+            "; not written")
+        statuses = [(v, c, why if v == view_id else st) for v, c, st in statuses]
         index, title = wb.index(about), about.title
         del wb[title]
         about = wb.create_sheet(title, index)

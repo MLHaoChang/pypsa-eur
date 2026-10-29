@@ -80,7 +80,7 @@ def test_a_missing_cell_drops_out_of_both_sums():
 def test_an_empty_or_zero_hour_bucket_is_blank_never_zero(time):
     t, _ = budget.coarsen(_table([math.nan] * 3, time=time), 0)
     assert math.isnan(_cell(t))
-    t, _ = budget.coarsen(_table([5.0, 6.0, 7.0], weights=[0.0, 0.0, 0.0]), 0)
+    t, _ = budget.coarsen(_table([5.0, 6.0, 7.0], weights=[0.0, 0.0, 0.0], time=time), 0)
     assert math.isnan(_cell(t))
 
 
@@ -164,6 +164,23 @@ def test_fallback_b_keeps_the_base_table_and_the_scenarios_keys():
     assert next(r for r in _rows(ws) if r[0] == "Generation")[3:5] == (120.0, 240.0)
 
 
+def test_a_table_past_the_row_limit_that_cannot_be_coarsened_leaves_key_results_only(
+        monkeypatch):
+    monkeypatch.setattr(budget, "EXCEL_ROWS", 12)
+    wb, ctx = Workbook(), _ctx(["Base", "High"], cells_left=budget.CELL_BUDGET)
+    datas = [_data(1.0), _data(2.0)]
+    for d in datas:
+        d.tables[0] = Table("Line loading", "%", d.tables[0].frame, 1)  # no time kind
+    write_view(wb, ctx, "dispatch", "Dispatch", datas)
+    ws = wb["Dispatch"]
+    text = " ".join(str(c) for r in _rows(ws) for c in r if c)
+    assert ws.max_row <= 12
+    assert "the sheet holds the key results only" in text and "Even then" not in text
+    assert ctx.resolution["dispatch"] == "key results only"
+    assert not any(r[1] == DAY[0] for r in _rows(ws))
+    assert next(r for r in _rows(ws) if r[0] == "Generation")[3:5] == (120.0, 240.0)
+
+
 def test_a_sheet_within_budget_is_untouched():
     wb, ctx = Workbook(), _ctx(["Base"], cells_left=budget.CELL_BUDGET)
     write_view(wb, ctx, "dispatch", "Dispatch", [_data(1.0)])
@@ -229,4 +246,8 @@ def test_over_max_bytes_drops_a_whole_sheet_and_says_so_in_about(solved, monkeyp
     wb = load_workbook(io.BytesIO(_build(solved, ["dispatch"])))
     from tests.test_results_workbook_views import TITLES
     assert TITLES["dispatch"] not in wb.sheetnames
-    assert str(_about(wb)["dispatch"]).startswith("error: over the 25 MB export limit")
+    status = str(_about(wb)["dispatch"])
+    assert status.startswith("error: over the 25 MB export limit")
+    # Dispatch fits the cell budget, so it was never coarsened: About must not
+    # claim a coarsest resolution was tried.
+    assert "resolution" not in status
