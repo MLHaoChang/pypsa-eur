@@ -44,29 +44,34 @@ def test_upgrade_creates_a_fresh_database(tmp_path):
     assert "organizations" in names
 
 
-
 def test_head_migration_downgrades_and_upgrades_again(tmp_path):
-    """The head migration's downgrade removes what it added, and the chain
-    upgrades back to head afterwards."""
+    """The head migration's downgrade undoes it, and the chain upgrades back
+    to the same schema afterwards."""
     import local_bootstrap
     from alembic import command
 
     url = f"sqlite+pysqlite:///{(tmp_path / 'roundtrip.db').as_posix()}"
     cfg = local_bootstrap._alembic_config(url)
 
-    def tables():
+    def schema():
         engine = create_engine(url)
         try:
-            return set(inspect(engine).get_table_names())
+            inspector = inspect(engine)
+            return {
+                table: sorted(c["name"] for c in inspector.get_columns(table))
+                for table in inspector.get_table_names()
+                if table != "alembic_version"
+            }
         finally:
             engine.dispose()
 
     command.upgrade(cfg, "head")
-    at_head = tables()
+    at_head = schema()
     command.downgrade(cfg, "-1")
-    assert "assurance_record_seq" in at_head - tables()
+    assert schema() != at_head
     command.upgrade(cfg, "head")
-    assert tables() == at_head
+    assert schema() == at_head
+
 
 def test_upgrade_or_stamp_handles_a_create_all_database(tmp_path):
     """Spec G4: a database built by create_all has no alembic_version row."""
