@@ -31,3 +31,7 @@ reads as if that were the connection.
 - The `run_eh_study` description says that weak_flexible sets the import Link
   rating from `import_p_nom_mw` (default 50 MW).
 - A test through the chat tools with a Link rated other than the cap shows the warning.
+
+## Comments
+
+GK A plan GO (conditions, all met): warning says lowered/raised; an extendable Link discloses p_nom_max old→new and a p_nom_min above the cap; the warning reaches the report's `notes` as well as the `apply_pack` note; the equal-rating case stays silent; with 2 Links each is named with its own rating and "over 2 Links"; the catalogue text is pinned against `default_weak_flexible_pack()`'s default; numbers unchanged.
