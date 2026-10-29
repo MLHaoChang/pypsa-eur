@@ -25,13 +25,18 @@ PINS = {
     "eh_site": 87313774.84,
 }
 
+#: Staged templates on the year time base: their week build is refused, so they have no week objective to pin
+#: (each one's own test file pins its year plan).
+YEAR_BASE = {"eh_concentrator_staged"}
+
 
 def _build(tid):
     return S.build_eh_site() if tid == "eh_site" else T.BUILDERS[tid]()
 
 
 def test_every_staged_template_is_pinned():
-    assert {t for t in T.BUILDERS if t.endswith("_staged")} | {"eh_site"} == set(PINS)
+    assert {t for t in T.BUILDERS if t.endswith("_staged")} | {"eh_site"} == set(PINS) | YEAR_BASE
+    assert not YEAR_BASE & set(PINS)
 
 
 @pytest.mark.live_solve
