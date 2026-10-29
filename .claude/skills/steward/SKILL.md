@@ -31,7 +31,7 @@ Many sessions work on this repo in parallel. One **coordinator** session relays 
 
 ## Messages to the coordinator
 
-Send the coordinator only: `premerge ok <full sha>`, questions (as options), PERMISSION requests and hand-off notes (`ci-only` included). No progress or status messages: no "ready", FYI, resend or "PR open, CI pending". A new session reports ready by doing its first piece of work. Reviewers' verdicts are PR comments, not messages; you see them through your PR subscription.
+Send the coordinator only: `premerge ok <full sha>`, review requests, questions (as options), PERMISSION requests and hand-off notes (`ci-only` included). No progress or status messages: no "ready", FYI, resend or "PR open, CI pending". A new session reports ready by doing its first piece of work. Reviewers' verdicts are PR comments, not messages; you see them through your PR subscription.
 
 ## Merge gate
 
