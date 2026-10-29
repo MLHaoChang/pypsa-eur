@@ -1,7 +1,12 @@
 # LC-03 — generic native evidence and navigation adapters
 
 Status: ready-for-agent
-Progress: Result-view registry #407, walk #410, retained load flow #416 merged; common retained adapter + Summary family (PR-D, below) open; LC-14 reach fixes outsourced.
+Progress: Result-view registry #407, walk #410, retained load flow #416, common adapter + Summary,
+capacity, dispatch, prices and emissions families (#848, #861 and earlier) merged; LC-T08 ACL
+recheck and LC-T09/T10 browser cases (PR-I, below) open. Remaining, after the results
+workbook's RW-03 (LC03-SCOPE-1): UI/export parity for past runs; queue/study/report sections;
+undigestable prices; sections over 16 KB; the remaining LC-T09/T10 browser cases (PR-I list). LC-14
+reach fixes outsourced.
 Type: task
 Baseline: master `c75ca5584b873418f10f1bca42f868255d445b7b`
 Dependencies: LC-01/02 and current native evidence stores
@@ -288,3 +293,79 @@ the Emissions view's `historical_section`, the catalogue's run_id list.
   (unavailable instead of ok).
 - Oversized emissions (thousands of generators) take the existing rule: the
   section is not stored and the run refuses.
+
+### PR-I, ACL recheck and historical browser cases (2026-10-28)
+
+Owner scope LC03-SCOPE-1. Branch `claude/lc03-acl-historical`, from master `fcf28e3e`.
+
+- Finding: every past-run path already resolves the project ACL per request:
+  `discuss_project_run` and `export_run_evidence` through `get_run_evidence`,
+  the Results run view (`GET /results/run-view`) through `_authority`, and the
+  exported file through the uploads route's `ProjectAccessDep`. The refusal was
+  a bare 404 "Project not found", and the run view showed only "evidence
+  unavailable".
+- `run_evidence._authority` now refuses typed `project_unavailable` (404) with
+  a plain reason, the same text for revoked and deleted (no new existence
+  leak); `RunBoundView` shows that message. The uploads route is unchanged.
+- LC-T08 (`tests/test_retained_acl.py`): a real ACL change, no monkeypatch. A
+  member of the same org reads every family's kept section of a past oj-grid run
+  (loadflow, results_summary, results_capacity, results_dispatch,
+  results_prices, results_emissions), then the membership row is deleted. Per
+  family: navigation (`discuss_project_run`, the run view) and download
+  (`export_run_evidence`, the file exported while they had access) refuse;
+  `get_results(run_id)` and `list_project_runs` refuse with the same reason.
+  RED before the change at the reason assert (detail was a bare string).
+- LC-T09/T10 browser (`frontend/scripts/smoke-copilot-lc03-historical.mjs`,
+  composer-fixture journey `lc03h`, in the owner-journeys CI step): oj-grid
+  solved through chat at Gas 50, re-priced to 60, solved again. The first run
+  opens from `results_capacity`: rendered binding historical, that run, gas
+  LCOE 50 (hand oracle; current 60), the answer says 50. Then the user's
+  Clear, a newer turn about the latest run, and a project switch each leave no
+  past-run view.
+- RED found (LC-T10): a newer turn's `ui_open_panel(results, …)` left the past
+  run's view on screen under an answer about the current results. Fix: a model
+  turn's Results navigation drops the discussed run (`applyUiNavigate(…, {fromModelTurn:
+  true})` from ChatPanel); a past run opens only by `open_run_result`, and the
+  live walk's own steps keep it (vitest for each).
+
+- GK B plan conditions (N5a): no existence oracle (`test_no_existence_oracle`:
+  a never-existed project's run id, a never-member, revoked and deleted refuse
+  byte-equal on `get_run_evidence` and the run view; `resolve_project` raises
+  only 404, so no 403 reaches these paths); nothing held outlives revocation
+  (`test_nothing_held_outlives_revocation`: discussed run and held evidence,
+  then `discuss_project_run`, `export_run_evidence()` of the discussed run, the
+  run view and the exported file refuse). Frontend precedence: one model turn
+  that opens a past run and then `ui_open_panel(results)` keeps that run, so
+  the view matches the answer's run; the next turn's Results navigation drops
+  it (vitest; RED before the per-turn check).
+
+Kept, with reasons:
+- Owner choice LC03-ACCESS-1 (option 1): in the real app access loss clears the
+  session's active-project pointer, so the browser's next read has no project
+  bound. Every run-evidence read with none bound (`run_evidence._authority`;
+  starting a run swallows that refusal) refuses `run_project_required` with
+  `NO_PROJECT_OPEN`: "No project is open for you now, so this run's kept
+  results are not shown. If the project was closed elsewhere or your access was
+  removed, open it again from Projects." The run view and the live walk show it
+  (vitests); the bound case keeps `project_unavailable`. The HTTP cases in
+  `test_retained_acl.py` now run on the browser session's own resolution (the
+  test's turn cell unset per request), and the smoke reopens the project from
+  Projects after access is restored (the fixture hands oj-grid back; the list
+  cached while access was gone, 10 s stale time, needs a reload; a turn sent
+  before the reopened project's activate returns still finds none open). No
+  shared auth code changed.
+- The past-run view's Results chrome still says "From the latest run" above the
+  retained section: UI parity for past runs is out of scope until RW-03.
+- Queue, study and report runs still refuse until each gets its own capture.
+- The exported file's own route (uploads `ProjectAccessDep`) refuses with its
+  shared bare 404; only the export tool and the run view carry the plain reason.
+- The plain reason is one `_refuse` for any 404 from `resolve_project`, so a
+  deleted project reads the same as revoked access; only revocation is tested.
+- A view already on screen when access is lost is rechecked on its next read
+  (`staleTime: 0`, remount), not pushed; not tested.
+
+Remaining LC-T09/T10 browser cases (this PR covers capacity only, and Clear,
+a newer turn and a project switch): the other five families' past-run views;
+filter, entity and time selection; an unrelated or legacy mount ACK; Guided vs
+Expert; run/generation change, pending ACK, highlight, speech and stale captions.
+
