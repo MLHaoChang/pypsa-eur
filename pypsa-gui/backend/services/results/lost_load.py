@@ -85,3 +85,33 @@ def compute_lost_load(n, capture, from_, to_):
             "by_period": {str(k): v for k, v in sh["by_period"].items()},
         },
     }, range_meta=range_meta)
+
+
+def lost_load_payload(n, capture, solved_settings, from_=None, to_=None):
+    """
+    The whole `/results/lost_load` answer, or `None` where the handler returns
+    204 (the results workbook reads the same function, package 02).
+
+    `solved_settings()` is the settings the last solve used, or None when
+    nothing is solved; it is only called when nothing was captured.
+    """
+    payload = compute_lost_load(n, capture, from_, to_)
+    if payload is not None:
+        return {**payload, "voll_applied": True}
+    # S2b: 204 only when nothing is solved. Otherwise say whether VoLL was in
+    # the solve: with it and nothing captured, the totals are a computed zero;
+    # without it, lost load was not modelled and the totals are null — never 0.
+    settings = solved_settings()
+    if settings is None:
+        return None
+    voll = float(settings.get("voll_eur_per_mwh") or 0.0)
+    applied = voll > 0
+    return {
+        "index": [], "columns": [], "data": [],
+        "voll_applied": applied,
+        "voll_eur_per_mwh": voll if applied else None,
+        "total_mwh": 0.0 if applied else None,
+        "total_cost_eur": 0.0 if applied else None,
+        "bus_carriers": {},
+        "shed_hours": {"total": 0.0, "by_period": {}} if applied else None,
+    }
