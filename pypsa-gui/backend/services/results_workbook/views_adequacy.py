@@ -63,7 +63,8 @@ def _adequacy(run) -> ViewData | None:
         return ViewData(
             tables=[Table("Report", "", pd.DataFrame([{k: _scalar(v) for k, v in p.items()}]),
                           labels=len(p))],
-            notes=["Solved without a reliability target: not modelled (the tab says so)."])
+            notes=[f"{run.name}: solved without a reliability target: not modelled "
+                   "(the tab says so)."])
     target = p.get("target") or {}
     system = target.get("system") or {}
     metrics = p.get("metrics") or {}
@@ -83,7 +84,12 @@ def _adequacy(run) -> ViewData | None:
             ("Shed hours", "h", metrics.get("shed_hours")),
             ("Involuntary lost load", "MWh", energy.get("involuntary_mwh")),
             ("Demand response", "MWh", energy.get("demand_response_mwh")),
-            ("System cost excluding shed", "EUR", cost.get("total_system_cost_eur")),
+            # The tab's own basis: a single period's yearly cost, or the
+            # discounted cost over the plan; never read as the other.
+            (("System cost excluding shed, discounted over the plan", "EUR")
+             if cost.get("period_basis") == "npv_multi_period"
+             else ("System cost excluding shed, per year", "EUR/a"))
+            + (cost.get("total_system_cost_eur"),),
             ("VoLL", "EUR/MWh", ((p.get("inputs") or {}).get("voll") or {}).get(
                 "default_eur_per_mwh"))):
         keys.append(Key(label, unit, {HORIZON: _num(v)}))

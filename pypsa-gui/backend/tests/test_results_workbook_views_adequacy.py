@@ -184,7 +184,7 @@ def test_adequacy_keys_equal_the_route_per_period_and_each_scenario_reads_its_ow
     assert _key(ws, "Achieved ENS against the target", HORIZON) == pytest.approx(
         base["target"]["system"]["achieved_ens_mwh"])
     assert _key(ws, "Energy not served", HORIZON) == base["metrics"]["ens_mwh"]
-    assert _key(ws, "System cost excluding shed", HORIZON) == base["cost"]["total_system_cost_eur"]
+    assert _key(ws, "System cost excluding shed, discounted over the plan", HORIZON) == base["cost"]["total_system_cost_eur"]
     assert _key(ws, "Firm capacity at peak", P2) == 118.0
     # MW is per period only: no horizon row.
     with pytest.raises(AssertionError):
@@ -206,6 +206,22 @@ def test_adequacy_solved_without_a_target_writes_not_modelled(active):
     wb = _wb(_build(active, ["adequacy"], solved_settings=lambda: {"voll_eur_per_mwh": 1.0}))
     assert "not modelled" in _text(wb[TITLES["adequacy"]])
 
+
+
+def test_a_single_period_system_cost_is_per_year(active):
+    report = PyPSAService.get_solver_state()["adequacy_report"]
+    report["cost"]["period_basis"] = "single_period"
+    ws = _wb(_build(active, ["adequacy"]))[TITLES["adequacy"]]
+    assert _key(ws, "System cost excluding shed, per year", HORIZON) == report["cost"][
+        "total_system_cost_eur"]
+    assert "discounted over the plan" not in _text(ws)
+
+
+def test_a_scenario_without_a_target_beside_a_base_with_one_says_not_modelled(active):
+    run = _scenario(report=False)
+    run.solved_settings = lambda: {"voll_eur_per_mwh": 1.0}
+    ws = _wb(_build(active, ["adequacy"], scenarios=S.Scenarios(runs=[run])))[TITLES["adequacy"]]
+    assert "High load: solved without a reliability target: not modelled" in _text(ws)
 
 # ── conditions 2, 3 and 6: FMEA ──────────────────────────────────────────
 
