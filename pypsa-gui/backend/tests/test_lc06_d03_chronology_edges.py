@@ -1,4 +1,4 @@
-"""LC-06 S11, LC-D03: leap day, DST dates, duplicate and out-of-order timestamps.
+"""LC-06 S11, LC-D03: leap day, a DST date and out-of-order timestamps.
 
 The seam is the copilot's ``set_snapshots`` and ``upload_timeseries`` tools. The
 oracles are counted by hand and read from the network the tools built, solved on a
@@ -12,8 +12,9 @@ Hand oracle, one bus, G1 20 MW at 10 EUR/MWh, L1 5 MW, unit weights:
   change falls on 29 March) has 72 hourly snapshots, no hour is dropped or doubled.
 - A CSV whose rows are out of order is aligned by its timestamps: 03:00 -> 4, 01:00 -> 2,
   00:00 -> 1, 02:00 -> 3 puts 1, 2, 3, 4 on 00:00 to 03:00, an objective of 10 · (1+2+3+4) = 100.
-- A CSV with a repeated timestamp is refused and the series it would have replaced is
-  unchanged.
+
+A repeated timestamp is not pinned here: today it fails with an untyped pandas error
+(ticket 33, ``LC-D03.upload_guards`` in the manifest).
 """
 # ruff: noqa: F811 -- shared public harness fixtures
 import pandas as pd
@@ -75,15 +76,3 @@ def test_an_out_of_order_csv_is_aligned_by_its_timestamps(alpha):
         "2026-01-01 00:00:00": 1.0, "2026-01-01 01:00:00": 2.0,
         "2026-01-01 02:00:00": 3.0, "2026-01-01 03:00:00": 4.0}
     assert _objective() == pytest.approx(100.0, rel=REL)
-
-
-def test_a_repeated_timestamp_is_refused_and_leaves_the_series_unchanged(alpha):
-    chat_tools.set_snapshots("2026-01-01 00:00", "2026-01-01 03:00", "h")
-    good = "snapshot,L1\n" + "".join(f"2026-01-01 0{h}:00,{h + 1}\n" for h in range(4))
-    chat_tools.upload_timeseries("loads", "L1", "p_set", good)
-    before = PyPSAService.get_network().loads_t.p_set["L1"].copy()
-    dup = "snapshot,L1\n2026-01-01 00:00,7\n2026-01-01 01:00,7\n2026-01-01 01:00,9\n2026-01-01 03:00,7\n"
-    with pytest.raises(Exception):
-        chat_tools.upload_timeseries("loads", "L1", "p_set", dup)
-    pd.testing.assert_series_equal(PyPSAService.get_network().loads_t.p_set["L1"], before)
-    assert list(before) == [1.0, 2.0, 3.0, 4.0]

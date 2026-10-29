@@ -204,12 +204,14 @@ VARIANTS: list[dict] = [
     _covered('LC-D03.dynamic_weights', 'objective = 10 EUR/MWh x (5 MW x 2 h + 7 MW x 3 h) = 310, after an import round trip',
              'import_uploaded_network save_project_as run_simulation save_project get_study_evidence',
              B + 'test_assistant_capabilities.py::test_native_dynamic_roundtrip_solves_and_persists_evidence'),
-    _covered('LC-D03.chronology_edges', 'hourly 2028-02-28..03-01 = 72 snapshots, 3600 EUR (10 x 5 MW x 72 h); 2027 = 48, 2400; 2026-03-28..30 over the DST date = 72, '
-             'no hour dropped; out-of-order CSV aligned by timestamp (1,2,3,4 at 00:00..03:00, objective 100); a repeated timestamp is refused, series unchanged',
+    _covered('LC-D03.chronology_edges', 'hourly 2028-02-28..03-01 = 72 snapshots, 3600 EUR (10 x 5 MW x 72 h); 2027 = 48, 2400; 2026-03-28..30 as zone-free wall clock = 72, '
+             'no hour dropped; out-of-order CSV aligned by timestamp (1,2,3,4 at 00:00..03:00, objective 100)',
              'set_snapshots upload_timeseries',
              B + 'test_lc06_d03_chronology_edges.py::test_the_horizon_has_the_hand_counted_hours_and_cost',
-             B + 'test_lc06_d03_chronology_edges.py::test_an_out_of_order_csv_is_aligned_by_its_timestamps',
-             B + 'test_lc06_d03_chronology_edges.py::test_a_repeated_timestamp_is_refused_and_leaves_the_series_unchanged'),
+             B + 'test_lc06_d03_chronology_edges.py::test_an_out_of_order_csv_is_aligned_by_its_timestamps'),
+    _pending('LC-D03.upload_guards', 'repeated timestamp fails with an untyped pandas InvalidIndexError, a missing snapshot is forward-filled silently, '
+             'an off-horizon CSV replaces the snapshots (ticket 33)'),
+    _pending('LC-D03.timezone_aware', 'timezone-aware or DST-offset inputs and MW-versus-pu mapping not tested; the DST case covers zone-free wall clock only'),
     _covered('LC-D04.bound_build', 'extendable G2 built to p_nom_max: optimal_capacity 3 = capacity_change 3; fixed G: 20 MW, change 0',
              '',
              B + 'test_capacity_cycles_assurance.py::test_an_extendable_generator_built_to_its_bound',
@@ -507,6 +509,7 @@ VARIANTS: list[dict] = [
              'update_component undo_last run_simulation create_project_snapshot restore_project_snapshot list_project_snapshots',
              B + 'test_lc06_d22_undo_checkpoints.py::test_undo_returns_the_exact_inputs_and_the_results_that_matched_them',
              B + 'test_lc06_d22_undo_checkpoints.py::test_a_checkpoint_restores_the_inputs_it_held_and_not_the_results'),
+    _pending('LC-D22.concurrency_gates', 'concurrent edit/rebind, stale preview, lock/ACL and missing-checkpoint-with-retained-evidence cases not tested'),
     _pending('LC-D23.provider_parity', 'dispatch parity only (test_assistant_provider_parity.py)'),
     _pending('LC-D24.ui', 'frontend e2e; not re-audited in LC-06'),
 ]
