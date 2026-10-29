@@ -70,6 +70,55 @@ seam that checks only shape or refusals, or that stubs the engine.
 | D01/02/20–23 | seam-only (no oracle) | independent oracles per the annex |
 | D24 | frontend e2e, not re-audited here | — |
 
+## Comments
+
+### GK A (3), GO conditions for S4–S9 (restated 2026-10-28, after rotation)
+
+GK A checks each condition at its slice's PR.
+
+All slices:
+- Show one mutation per slice (a perturbed fixture input, e.g. a doubled FOR,
+  halved H or link removed) under which the oracle assert fails.
+- State and justify each tolerance; no bare rel=0.1.
+- Take f0 from the network or profile (60 Hz on SAGC fixtures); test_sixty_hz stays green.
+- Use SAGC-1 generic demo figures in campus fixtures.
+- An engine bug found by a RED gets its own plan to GK A before any engine edit.
+
+S4, standard MC:
+- Oracle LOLE = Σ_h P(cap < L_h), EUE = Σ_h E[max(L_h − cap, 0)] from the two-unit COPT.
+- Fixed seed, with enough draws that the CI half-width is ≤ 10 % of the oracle LOLE.
+  Assert both the containment and the width.
+- If outages are chronological with MTTR and start all-available, make that
+  bias ≪ the CI or start stationary, and say which.
+
+S5:
+- Zonal: per hour, min(available Link capacity, max(surplus, 0) × delivery
+  ratio), on hours where each bound binds.
+- Common-mode: equal per-draw unit states across the two runs (no RNG shift),
+  then per draw EUE_cm ≥ EUE_base, and strictly greater in total where the Link
+  matters.
+
+S7:
+- Refusals name the field and the model.
+- One wrong-base case per class (H unit vs system base, droop % vs pu).
+- Exact read-back.
+
+S8:
+- RoCoF = −ΔP·f0/(2·H·S) at the first step, with D = 0.
+- Settled Δf = −ΔP/(ΣK + D), with no isochronous unit in that fixture; the
+  isochronous case asserts Δf → 0.
+- UPS L·T/2/3600 MWh.
+- dt-halving error ratio ≥ ~1.8 (first order).
+- The EMT/PLL/voltage unavailable row stays.
+
+S9:
+- Stale = a network edit between preview and apply, refused with the reason.
+- The re-study runs on the applied values.
+
+S6:
+- min(schedule, capacity) survives capacity edits up and down.
+- eh_dtc: bus VoLL and per-Load VoLL each change the result.
+
 ## Slice log
 
 ### S0, execution manifest (2026-10-28)
@@ -227,6 +276,36 @@ Branch `claude/lc06-d07-static-pf`, stacked on S2. GK B reviews. Session LC-06 (
   7. The oracle's KCL off by 1e-5: its self-check fails.
   8. x_tol 1e-3: the voltages and the bus0 flows fail.
 - No engine defect was found. `LC-D07.n1_voltage` stays unavailable (LIMITS_CLAIM).
+
+### S4, LC-D12 standard MC (2026-10-28)
+
+Branch `claude/lc06-d12-standard-mc`, stacked on S3. GK A reviews. Session LC-06 (3).
+
+- `tests/test_lc06_d12_standard_mc.py`: the study runs through `run_mc_study`
+  (seed 1, 500 draws, cov_target 0.04) and is read back through
+  `get_adequacy_results('mc')`.
+  - The fleet is G60 (q 0.1, MTTR 50 h) and G40 (q 0.2, MTTR 40 h); the load
+    cycles 50/70/90 MW for 8760 h.
+  - The oracle is computed from the network's inputs over the four COPT
+    states: LOLE = 2920 x 0.66 = 1927.2 h, EUE = 2920 x 18.6 = 54,312 MWh.
+  - Asserted: both oracles lie inside the reported 95 % CI; the LOLE half-width
+    is at most 10 % of the oracle (seed 1 gives 25 h, 1.3 %); the time basis is
+    per year with horizon_years 1.0; the run converged; the rates come from the
+    assets.
+- The start bias: the engine starts every chain from the stationary
+  distribution (`mc.sample_capacity`). Also, horizon ≫ MTTR: an all-available
+  start would miss about sum(q x MTTR) = 13 unit-down hours, under 1 %.
+- Calibration on 40 seeds: coverage 36/40 (LOLE) and 37/40 (EUE); mean 1928.1 h
+  against the oracle's 1927.2 h; the sd across seeds of 15.0 h matches the
+  reported SEM of 13.2 h.
+- Mutations, each red on its own test:
+  1. COPT state probabilities swapped: the LOLE test fails.
+  2. EUE shortfall less 1 MW: the EUE test fails.
+  3. 5 draws at cov_target 0.2: the half-width is 371 h, over the 193 h bound.
+  4. The hand total off by 0.01 per cycle: the hand-oracle test fails.
+  5. Fixture input (GK A's form): G60's FOR doubled in the network the app
+     runs, after the oracle is taken. LOLE 2702.8 h, CI (2673.9, 2731.7), excludes
+     1927.2; EUE 85,970 excludes 54,312. Both tests fail.
 
 ## Hand-off (2026-10-28, context near 300k)
 
