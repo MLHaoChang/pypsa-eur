@@ -93,3 +93,37 @@ R4 adds `Table.time` ("mean" | "sum") on the snapshot tables and a resolution la
 7. If MAX_BYTES is still hit after fallback (b), About reports an error and no truncated sheet is written. Test with a tiny monkeypatched MAX_BYTES.
 8. Mutations that must each fail a named test: an unweighted mean; the period key dropped from the bucket (the straddling day becomes one row); the NaN rule dropped.
 9. Stacked on #900: trial-merge with master, and run every test_results_workbook* file plus the route-policy tests (condition 10).
+
+### 2026-10-29 — GK B (11): R5 plan verdict GO, with conditions
+
+1. Scope: only this base's experiments. Include only records whose `project_id` equals the open base project's id and whose `owner_id` is the acting user. Test that an experiment of another project owned by the same user never appears, and neither does another user's experiment on the same shared project.
+2. Baseline check against the open base.
+   - When `base_basis["ok"]` is false, every experiment case gets `baseline_unavailable`.
+   - When the preflight's base `input_fingerprint` differs from `base_basis["fingerprint"]`, the case gets `baseline_changed`.
+   - When the record has a `baseline_run_id`, keep `_case`'s baseline evidence check in `_verify`.
+3. One reason vocabulary. The Scenarios sheet already uses `sc._reasons`' names: `case_inputs_changed`, `baseline_changed`, `mode_differs`, `horizon_differs`, `solver_settings_differ` and `case_unsolved`. Use those for experiment cases instead of a new `comparison_basis_differs`; one sheet should not have two spellings for the same refusal. Add new names only for what has no equivalent (`evidence_tampered`, failed or not-run cases), and give them the same note or About treatment.
+4. `compare_experiments` unchanged. `_case` must keep exactly today's exception set and its collapse to `experiment_source_unavailable`; an HTTPException from `resolve_project` inside `_load_case` is still caught. Prove it by copying master's `test_experiment_comparison.py` into the PR tree and running it there (review-gk byte-identity rule).
+5. The lock is really released. `ex._LOCK` is an RLock, so leaving an inner `with` does not release it if a caller further up already holds it. The `_load_context` spy asserts `not ex._LOCK._is_owned()`. Show that the workbook route enters `gather_experiments` without holding `ex._LOCK`. Keep the plan's case mutated between verify and load.
+6. Access before anything is read. For a case the user can't open, a spy shows that neither `_load_context` nor `run_evidence._load_run` is called and nothing in its directory is read. Asserting only that the name is absent is not enough.
+7. Same filling as sensitivity runs. `_fill` applies the same `dispatch_ready`, `result_df_for` and `solved_settings_for` reads. A case whose dispatch the routes would not serve gets `case_unsolved` and no figures. Test it.
+8. Cap. The cap is applied before any load. A case excluded after loading still holds its slot, so the cut is deterministic. Test that 6 sensitivity runs plus 4 experiment cases give 8 shown and "2 not shown", and that `_load_context` is never called for the 2 over-cap cases.
+9. Unique run names. "<title>: <case id>" can repeat (two experiments with the same title) or match a sensitivity project's name. Make the names unique, for example by suffixing a short experiment id on a clash, and test it. Check that no view keys a dict by run name.
+10. Mutation, one mutant per refusal, each killing a test:
+    - skip the post-load fingerprint check;
+    - skip the evidence digest check;
+    - resolve after loading;
+    - drop the `project_id` filter;
+    - drop the owner filter.
+
+At the trial merge, run `test_results_workbook*`, `test_experiment_comparison` and the routers/results tests. Keep the `routers/results.py` edit inside `_workbook_scenarios` because of #851. Send me the PR head when it's open.
+
+### 2026-10-29 — GK B (11): R5 ruling on condition 5 (`_observe` loads under the lock): Option A
+
+Option A, with three conditions. I read `_observe` (experiment_execution.py:155–200). It works on `copy.deepcopy(ledger)`, resolves access before it loads, and writes nothing, so running it outside the lock on the copy is sound. The post-load exact-fingerprint and evidence-digest checks still close the gap. Loading each case twice is accepted at a cap of 8.
+- (a) No writes in that window. A test runs the gather and shows that each case's ledger file and record file are byte-identical before and after.
+- (b) A concurrent change is caught. Change one case's ledger between the lock release and that case's load (for example, a cancel or refresh that rewrites it). That case must be excluded, or shown consistently with the ledger copy, never with figures from a network that differs from its receipt. Assert it.
+- (c) The spy is strict. Condition 5's spy covers every `_load_context` and `_load_run` call made during the gather, including the ones inside `_observe`.
+
+Condition 1, revised. `ex._read_record` already refuses a record whose owner or project differ (experiments.py:269), so don't add a redundant filter just to make a mutant killable. Keep the two exclusion tests: another project of the same user, and another user on a shared project. Replace the two filter mutants with one mutant that passes the wrong project or owner into `_read_record`, or skips it. It must fail one of those tests.
+
+Condition 9: your answer is noted. The unique-name test still stands.
