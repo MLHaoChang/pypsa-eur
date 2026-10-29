@@ -82,9 +82,15 @@ def family_journeys(variants: list[dict] | None = None) -> list[dict]:
             'source': MANIFEST_SOURCE,
             'suites': suites,
             'variants': by_status,
-            'status': 'pending' if by_status['pending'] else 'covered',
+            'status': 'pending' if _open(by_status) else 'covered',
         })
     return rows
+
+
+def _open(variants: dict) -> bool:
+    """A family is covered only with at least one covered variant and none pending: a family
+    whose manifest rows are gone (no variant at all) is open, never covered."""
+    return bool(variants['pending']) or not variants['covered']
 
 
 FAMILY_JOURNEYS: list[dict] = family_journeys()
@@ -124,14 +130,15 @@ def _full_coverage(journeys: list[dict], route_parity: dict | None = None,
     """The explicit limitation block: whole-application coverage is NOT claimed
     until every manifest variant of every family is covered and no blocker remains."""
     variants = family_manifest.VARIANTS if variants is None else variants
-    pending = [j for j in journeys if j['variants']['pending']]
+    pending = [j for j in journeys if _open(j['variants'])]
     blockers = []
     for j in pending:
         lc06 = [v for v in j['variants']['pending'] if v.split('.')[0] not in R3_SUITES]
-        if lc06:
+        if lc06 or not j['variants']['covered']:
+            summary = (f'{len(lc06)} LC-06 variants of this family are pending ({MANIFEST_SOURCE}).' if lc06 else
+                       f'No manifest variant of this family is covered ({MANIFEST_SOURCE}).')
             blockers.append({'id': f'family-manifest:{j["journey_id"].removeprefix("manifest:")}', 'issue': 'LC-06',
-                             'family': j['family'], 'pending_variants': lc06,
-                             'summary': f'{len(lc06)} LC-06 variants of this family are pending ({MANIFEST_SOURCE}).'})
+                             'family': j['family'], 'pending_variants': lc06, 'summary': summary})
     for suite in R3_SUITES:
         open_ = sorted({v for j in pending for v in j['variants']['pending'] if v.split('.')[0] == suite})
         if open_:
@@ -453,7 +460,7 @@ def _full_coverage_problem(matrix: dict) -> str | None:
     block = matrix.get('full_coverage')
     if not isinstance(block, dict):
         return 'full_coverage limitation block is missing'
-    pending = [j for j in family_journeys() if j['variants']['pending']]
+    pending = [j for j in family_journeys() if _open(j['variants'])]
     if block.get('claimed') is True and (pending or block.get('blockers')):
         return 'full_coverage.claimed is true while family journeys are pending or blockers remain'
     if pending and (block.get('claimed') is not False or block.get('status') != 'not_established'):

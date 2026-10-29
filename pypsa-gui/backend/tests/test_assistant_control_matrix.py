@@ -227,6 +227,23 @@ def test_matrix_guards_reject_each_broken_invariant(matrix, mutate, expected):
     assert expected in (_gen().matrix_problem(tampered) or '')
 
 
+def test_a_family_whose_manifest_rows_are_gone_is_open_not_covered(monkeypatch):
+    # GK B #906: deleting a family's rows from family_manifest must not read as covered.
+    gen, fm = _gen(), _manifest()
+    covered = [dict(v, status='covered') for v in fm.VARIANTS if v['suite'] != 'LC-D20']
+    journeys = {j['journey_id']: j for j in gen.family_journeys(covered)}
+    gone = journeys['manifest:import-export']
+    assert gone['variants'] == {'covered': [], 'pending': [], 'unavailable': []} and gone['status'] == 'pending'
+    block = gen._full_coverage(list(journeys.values()), variants=covered)
+    assert block['journeys_pending'] == 1 and block['claimed'] is False
+    (blocker,) = [b for b in block['blockers'] if b['id'].startswith('family-manifest:')]
+    assert blocker['id'] == 'family-manifest:import-export' and 'No manifest variant' in blocker['summary']
+    # The claim guard recomputes from the manifest: a forged claim with the rows gone is refused.
+    monkeypatch.setattr(gen.family_manifest, 'VARIANTS', covered)
+    forged = {'full_coverage': {'claimed': True, 'status': 'established', 'blockers': [], 'journeys_pending': 0}}
+    assert 'claimed is true' in gen._full_coverage_problem(forged)
+
+
 def test_claim_guard_rejects_claim_even_if_artifact_was_regenerated():
     gen = _gen()
     built = gen.build_matrix()
