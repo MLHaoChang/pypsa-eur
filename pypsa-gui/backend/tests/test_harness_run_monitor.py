@@ -5,6 +5,8 @@ Real project, real runner, the ordinary dispatch path; the routes are called
 as the companion calls them."""
 # ruff: noqa: F811 -- imported pytest fixtures
 import json
+import re
+from pathlib import Path
 
 from harness import confirm, runner as harness_runner
 from services import chat_tools
@@ -61,7 +63,7 @@ def edit_step(n, value):
 
 def test_the_view_carries_stages_envelope_and_the_monitor(client, session, site):
     task = start()
-    view = client.get(f"/api/chat/runs/{task['task_id']}")
+    view = client.get(f"/api/chat/runs/{task["task_id"]}/view")
     assert view.status_code == 200, view.text
     body = view.json()
     assert body["run"]["profile"] == "eh_site@1" and body["envelope"]["state"] == "proposed"
@@ -94,7 +96,7 @@ def test_a_granted_envelope_shows_solves_used_and_expiry(client, session, site):
     from services import run_envelope
     task = start()
     run_envelope.decide(session, task["task_id"], "unattended")
-    budgets = client.get(f"/api/chat/runs/{task['task_id']}").json()["monitor"]["budgets"]
+    budgets = client.get(f"/api/chat/runs/{task["task_id"]}/view").json()["monitor"]["budgets"]
     assert budgets["solves"] == {"used": 0, "of": 6} and budgets["expires_at"]
 
 
@@ -108,7 +110,7 @@ def test_an_unknown_foreign_or_unreachable_run_is_task_not_found_and_nothing_cha
     path.write_text(json.dumps(record))
     before = path.read_text()
     for target in (task["task_id"], "00000000-0000-4000-8000-000000000000", "not-a-task"):
-        assert client.get(f"/api/chat/runs/{target}").json()["detail"]["error_kind"] == "task_not_found"
+        assert client.get(f"/api/chat/runs/{target}/view").json()["detail"]["error_kind"] == "task_not_found"
         for action in ("present", "pause", "resume", "stop"):
             response = client.post(f"/api/chat/runs/{target}/{action}")
             assert response.status_code == 404 and response.json()["detail"]["error_kind"] == "task_not_found"
@@ -160,12 +162,12 @@ def test_a_card_the_run_waits_on_is_issued_when_the_user_opens_it(client, sessio
     monkeypatch.setattr(harness_runner, "_DEFAULT", runner)
     record = settle(runner, path, task["task_id"], lambda r: r["run"]["status"] == "needs_user", limit=12)
     assert record["run"]["waiting"]["ref"] == "inputs.2"
-    view = client.get(f"/api/chat/runs/{task['task_id']}").json()
+    view = client.get(f"/api/chat/runs/{task["task_id"]}/view").json()
     assert view["monitor"]["waiting"] == {"kind": "card", "ref": "inputs.2"} and "card" not in view["monitor"]
     assert client.post(f"/api/chat/runs/{task['task_id']}/present").json() == {"ok": True}
     runner.tick(path)
-    wait_until(lambda: "card" in client.get(f"/api/chat/runs/{task['task_id']}").json()["monitor"], 30)
-    card = client.get(f"/api/chat/runs/{task['task_id']}").json()["monitor"]["card"]
+    wait_until(lambda: "card" in client.get(f"/api/chat/runs/{task["task_id"]}/view").json()["monitor"], 30)
+    card = client.get(f"/api/chat/runs/{task["task_id"]}/view").json()["monitor"]["card"]
     assert card["tool_name"] == "update_component" and card["session_id"] == "run:" + task["task_id"]
     assert card["edit_card"] and card["expires_at_epoch_ms"] > 0
     answer = client.post(f"/api/chat/run:{task['task_id']}/confirm",
@@ -173,4 +175,42 @@ def test_a_card_the_run_waits_on_is_issued_when_the_user_opens_it(client, sessio
     assert answer.status_code == 200, answer.text
     runner._inflight[task["task_id"]][1].join(60)
     assert PyPSAService.get_active_context().network.generators.at["G1", "p_nom"] == 25.0
-    assert "card" not in client.get(f"/api/chat/runs/{task['task_id']}").json()["monitor"]
+    assert "card" not in client.get(f"/api/chat/runs/{task["task_id"]}/view").json()["monitor"]
+
+
+# ── Word-map parity (UX condition 2): every key the card shows has words ─────
+
+WORDS = Path(__file__).resolve().parents[2] / "frontend" / "src" / "components" / "runMonitor" / "runWords.ts"
+
+
+def words_keys(name):
+    text = WORDS.read_text()
+    start = text.index(f"export const {name}")
+    body = text[text.index("= {", start) + 3:text.index("\n}", start)]
+    body = re.sub(r"\{[^{}]*\}", "{}", body)
+    return {a or b for a, b in re.findall(r"(?:'([^']+)'|([A-Za-z_]\w*))\s*:\s*['{]", body)}
+
+
+def test_the_plan_card_names_every_stage_and_gate_fact_in_words():
+    from services import run_gates, run_profiles
+    assert words_keys("STAGE_WORDS") == set(run_profiles.STAGES)
+    assert set(run_gates.FACTS) <= words_keys("FACT_WORDS")
+
+
+def test_the_envelope_section_names_every_profile_edit_and_run_in_words():
+    from services import run_envelope, run_profiles
+    components, names, fields, runs = (words_keys(n) for n in ("COMPONENT_WORDS", "NAME_WORDS", "FIELD_WORDS", "RUN_WORDS"))
+    assert run_envelope.RUN_TOOLS <= runs
+    for ref in run_profiles.PROFILES:
+        envelope = run_profiles.resolve(ref).get("envelope")
+        for edit in (envelope or {}).get("edits", []):
+            target = edit["target"]
+            assert target["component"] in components and target["name"] in names and target["attr"] in fields, (ref, target)
+        for run in (envelope or {}).get("runs", []):
+            assert run["tool"] in runs, (ref, run)
+
+
+def test_every_reason_unattended_cannot_work_has_words():
+    from services import run_monitor
+    source = Path(run_monitor.__file__).read_text()
+    assert set(re.findall(r'return "([a-z_]+)"', source)) == words_keys("UNATTENDED_BLOCK_WORDS")

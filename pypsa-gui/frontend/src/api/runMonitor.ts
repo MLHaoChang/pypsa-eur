@@ -63,7 +63,7 @@ export interface RunMonitorView {
 const base = (taskId: string) => `/chat/runs/${encodeURIComponent(taskId)}`
 
 export async function getRun(taskId: string): Promise<RunMonitorView> {
-  return (await client.get<RunMonitorView>(base(taskId))).data
+  return (await client.get<RunMonitorView>(`${base(taskId)}/view`)).data
 }
 
 /** The user has the plan card open: a card the run waits on is issued now. */

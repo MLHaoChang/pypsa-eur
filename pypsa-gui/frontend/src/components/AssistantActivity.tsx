@@ -3,6 +3,8 @@ import { getAssistantActivity, getAssistantDecision, type ActivityFilter, type A
   type ActivityItem, type DecisionObservation } from '../api/assistantActivity'
 import { useUIStore } from '../store/uiStore'
 import { useChatStore } from '../store/chatStore'
+import { withReturnFrom } from '../layout/flowNavigation'
+import RunMonitor from './runMonitor/RunMonitor'
 
 const FILTERS: [ActivityFilter, string][] = [
   ['all', 'All'], ['running', 'Running'], ['needs_you', 'Needs you'],
@@ -13,6 +15,25 @@ function observationTime(value: number | null | undefined) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null
   const date = new Date(value * 1000)
   return Number.isFinite(date.getTime()) ? date : null
+}
+
+/** Study harness 08: a run's attention notice opens the companion on its
+ *  plan card (with "Back to …"); with no plan card in this conversation,
+ *  the plan card opens here. */
+function OpenRun({ taskId, title, onConversation }: { taskId: string; title: string; onConversation: () => void }) {
+  const [inline, setInline] = useState(false)
+  const open = () => {
+    const card = [...document.querySelectorAll('[data-run-task]')].find(e => e.getAttribute('data-run-task') === taskId)
+    if (!card) { setInline(true); return }
+    withReturnFrom(onConversation)
+    window.setTimeout(() => card.scrollIntoView({ block: 'nearest' }), 0)
+  }
+  return <>
+    {!inline && <button type="button" className="text-accent" data-testid="activity-open-run" onClick={open}>Open the run ›</button>}
+    {inline && <div className="rounded border border-border p-2 text-xs">
+      <RunMonitor task={{ task_id: taskId, title }} disabled={false} onRequest={() => onConversation()} />
+    </div>}
+  </>
 }
 
 function DecisionInspector({ item, close, onConversation, projectName }: {
@@ -207,6 +228,7 @@ export default function AssistantActivity({ onConversation }: { onConversation: 
         {item.decision_id && inspecting === item.id && <DecisionInspector
           key={JSON.stringify([key, item.decision_id, item.decision_revision, item.decision_digest])}
           item={item} close={() => setInspecting(null)} onConversation={onConversation} projectName={project} />}
+        {item.family === 'run' && item.tool_use_id && <OpenRun taskId={item.tool_use_id} title={item.title} onConversation={onConversation} />}
         {item.family === 'confirmation' && item.status === 'waiting_for_approval' && (item.session_id === session && item.live_approval_available !== false
           ? <button type="button" className="text-accent" onClick={onConversation}>Open originating chat</button>
           : <p className="text-xs">This decision belongs to another conversation. Return there to inspect it; no approval is granted here.</p>)}

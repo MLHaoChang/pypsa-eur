@@ -16,6 +16,7 @@
  *     `createChatStream` returns `() => void` so the caller can wire it
  *     into a React `useEffect` return.
  */
+import type { HarnessTurn } from '../store/chatStore'
 import { client } from './client'
 import { rawFetchHeaders } from './csrf'
 import type { UiContext } from '../utils/uiContext'
@@ -47,6 +48,10 @@ export interface ChatStreamRequest {
    * message and accepts each job once.
    */
   continuation_job_id?: string
+  /** LC-23 COP-1: the user's "Continue to <stage>" on a plan card. */
+  continue_task_id?: string
+  /** Study harness 08: the user's verdict on a run's plan-review card. */
+  envelope_decision?: HarnessTurn['envelope_decision']
   /**
    * Which configured profile to bind this session to. Preferred over
    * `model`; the server resolves it and refuses an unconfigured id — as a

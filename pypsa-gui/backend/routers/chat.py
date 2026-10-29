@@ -2157,7 +2157,7 @@ def _run_call(actor: User, call):
     return call()
 
 
-@router.get("/runs/{task_id}")
+@router.get("/runs/{task_id}/view")
 def run_view(task_id: str, actor: User = Depends(require_user)) -> dict[str, Any]:
     """The run's stages, gates, budgets, envelope and the card it waits on.
     Reading advances nothing."""

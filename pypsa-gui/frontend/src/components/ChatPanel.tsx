@@ -1,5 +1,7 @@
 import { navigationEpoch, manualNavigation } from '../utils/navigationEpoch'
 import AssistantResultCard from './AssistantResultCard'
+import EnvelopeSection, { type EnvelopeVerdict } from './runMonitor/EnvelopeSection'
+import { runUnderReview } from './runMonitor/planReview'
 import DictationControls from './DictationControls'
 import { createPortal } from 'react-dom'
 /**
@@ -34,7 +36,7 @@ import { CheckedChart } from './CheckedChart'
 import { CheckedAnswerControl } from './CheckedAnswerControl'
 import ChatAccess from './ChatAccess'
 import { SourceGapFollowupCard } from './SourceGapFollowupCard'
-import type { SourceGapDraft } from '../store/chatStore'
+import type { HarnessTurn, SourceGapDraft } from '../store/chatStore'
 import { shortMcpToolName } from '../api/mcpSettings'
 import { CHECKED_ANSWERS_QUERY_KEY, getCheckedAnswerCapabilities } from '../api/reliability'
 import toast from 'react-hot-toast'
@@ -496,9 +498,19 @@ export function ChoiceCard({ companion = false, target = null, inputOpen = false
   if (!choice) return null
   const multi = choice.multi_select === true
   const planReview = choice.intent === 'plan_review'
+  // Study harness 08: a run's plan review carries its envelope and three verdicts.
+  const run = planReview ? runUnderReview(useChatStore.getState().messages) : null
   const send = (answer: string) => {
     sendRequest(answer, { source: 'choice-card', label: `${choice.title}: ${answer}`,
       ...(choice.requiresChecked ? { requiresChecked: true } : {}) })
+    setChoice(null)
+  }
+  const decide = (v: EnvelopeVerdict) => {
+    if (!run) return
+    if (v.verdict === 'change') { send('Change'); return }
+    const label = v.verdict === 'unattended' ? 'Approve and run unattended' : 'Approve, step by step'
+    sendRequest(label, { source: 'choice-card', label: `${choice.title}: ${label}`,
+      harness: { envelope_decision: { task_id: run.taskId, ...v } } })
     setChoice(null)
   }
   const toggle = (label: string) =>
@@ -534,7 +546,8 @@ export function ChoiceCard({ companion = false, target = null, inputOpen = false
           <ChatMarkdown>{choice.detail}</ChatMarkdown>
         </div>
       )}
-      <div className="flex flex-col gap-1.5">
+      {run && <EnvelopeSection taskId={run.taskId} proposed={run.envelope} disabled={streaming} onVerdict={decide} />}
+      {!run && <div className="flex flex-col gap-1.5">
         {choice.options.map((o) => (
           <button
             key={o.label}
@@ -567,7 +580,7 @@ export function ChoiceCard({ companion = false, target = null, inputOpen = false
             )}
           </button>
         ))}
-      </div>
+      </div>}
       {multi && (
         <button
           type="button"
@@ -579,7 +592,7 @@ export function ChoiceCard({ companion = false, target = null, inputOpen = false
           {picked.length > 1 ? `Send ${picked.length} choices` : 'Send choice'}
         </button>
       )}
-      {choice.allow_free_text && (
+      {!run && choice.allow_free_text && (
         <div className="text-[11px] text-muted mt-2" data-testid="chat-choice-free-text">
           {onFreeText ? <button type="button" className="underline" onClick={onFreeText}>
             Type another answer
@@ -2601,13 +2614,15 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
       gapFollowup?: SourceGapDraft
       /** LC-12: the harness writes this turn's message; the transcript shows a marker. */
       continuation?: PlanContinuation
+      /** A plan card's verdict (COP-1 Continue, an envelope decision): the server writes the message. */
+      harness?: HarnessTurn
     }) => {
     if (opts?.gapFollowup && (useUIStore.getState().currentProject !== opts.gapFollowup.projectName
       || useChatStore.getState().newChatSeq !== opts.gapFollowup.chatSequence
       || useChatStore.getState().sourceGapDraft !== opts.gapFollowup
       || useChatStore.getState().streaming || useChatStore.getState().pending != null
       || useChatStore.getState().requestQueue.length > 0)) return
-    const requestedChecks = !opts?.continuation
+    const requestedChecks = !opts?.continuation && !opts?.harness
       && (opts?.requiresChecked === true || optedIntoChecks || requiredChecks)
     if (requestedChecks && !checksAvailable) {
       setError({ error_kind: 'assurance_unavailable',
@@ -2660,7 +2675,8 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
     const cleanup = createChatStream(
       {
         session_id: sessionId ?? undefined,
-        ...(opts?.continuation ? { continuation_job_id: opts.continuation.job_id } : { message: text }),
+        ...(opts?.continuation ? { continuation_job_id: opts.continuation.job_id }
+          : opts?.harness ? opts.harness : { message: text }),
         ...(requestedChecks ? { assurance: { version: 1, mode: 'strict' } as const } : {}),
         ...(opts?.gapFollowup ? { checked_scope: opts.gapFollowup.checked_scope,
           source_gap_ref: opts.gapFollowup.source_gap_ref } : {}),
@@ -2853,7 +2869,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
         }
       : {}
     dispatchSend(req.text, [], { fromCard: true, label: req.label, ...liveAdmission,
-      ...(req.requiresChecked ? { requiresChecked: true } : {}) })
+      ...(req.requiresChecked ? { requiresChecked: true } : {}), ...(req.harness ? { harness: req.harness } : {}) })
   }, [requestCount, streaming, pendingCard, pendingSendText, notReady, mismatchLine, dispatchSend])
 
   // Live companion turns use this same send. The dock only dispatches the
