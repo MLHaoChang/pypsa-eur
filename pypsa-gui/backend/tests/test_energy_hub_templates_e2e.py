@@ -15,6 +15,7 @@ import pytest
 BACKEND = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND / "project_templates"))
 import eh_templates as T  # noqa: E402
+from tests._year_base import build_for_solve  # noqa: E402
 
 ALL_STAGES = ["apply_pack", "ens_solve", "frontier", "mc_certify", "fmea_top",
               "redundancy", "levers", "dtc_stress", "dtc_planning", "assemble"]
@@ -39,7 +40,7 @@ def _project_from_template(client, tmp_path, monkeypatch, tid):
     from routers import projects as P
     src = tmp_path / tid
     src.mkdir()
-    T.BUILDERS[tid]().export_to_netcdf(str(src / "network.nc"))
+    build_for_solve(T, tid).export_to_netcdf(str(src / "network.nc"))
     T.write_sidecars(src, tid)
     monkeypatch.setattr(P, "_PROJECT_TEMPLATES_DIR", tmp_path)
     r = client.post(f"/api/projects/from_template/{tid}",
