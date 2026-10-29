@@ -47,6 +47,7 @@ import {
 // All three share the same status query (objective / solve_time / condition)
 // at the top so the user always sees solve metadata regardless of tab.
 
+import { sectionWords } from './results/sectionWords'
 import { CARD_GROUPS, cardPlaceOf, type CardGroupId, type ResultsTab } from './results/groups'
 import GroupHeader from './results/GroupHeader'
 import { ScopeGate } from '../components/flowScope/ScopeGate'
@@ -803,7 +804,7 @@ export default function Results() {
             {discussedRun.mode ? ` · ${discussedRun.mode}` : ''}
           </span>
           {discussedRun.section && (
-            <span className="text-muted">section {discussedRun.section}</span>
+            <span className="text-muted">Section: {sectionWords(discussedRun.section)}</span>
           )}
           {discussedRun.baselineRunId && (
             <span className="text-muted">baseline {discussedRun.baselineRunId}</span>
