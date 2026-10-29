@@ -218,7 +218,6 @@ from services.finance.case import (
     TemplateLine,
 )
 from services.finance.cashflow import esc_class_for
-from services.process_products import bus_unit, shortfalls
 
 ANNUAL_TOL = 0.005                      # plan C3: within 0.5 % of a year
 COMMODITY_TOL = 0.01                    # plan C13: the ledger cross-check, a cent …
@@ -1133,10 +1132,10 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
         fed = non_electric          # the owner's conversion feeds them indirectly (storage)
     if owner_conv and fed:
         missing = [ld for ld in fed if ld not in purchases]
-        # A product Load (its bus carries a shortfall slack) has nothing to buy
+        # A product Load (its bus carries a booked shortfall) has nothing to buy
         # in: its counterfactual is the site-today baseline re-solve, which
         # this analytic basis does not have (grid-to-process ticket 11).
-        product_buses = {sf.bus for sf in shortfalls(n, lost_load)}
+        product_buses = set(_lost_production_slacks(n, inputs, ledger_accs).values())
         products = [ld for ld in missing if str(n.loads.at[ld, "bus"]) in product_buses]
         missing = [ld for ld in missing if ld not in products]
         if products:
@@ -1402,25 +1401,51 @@ def _per_year(n, p_t, p) -> float | None:
     return float((x * w).sum()) / years_for_period(period_years_map(n), p)
 
 
-def _product_shortfall(n, lost_load, baseline) -> tuple[ProductShortfall, ...]:
-    """Each product shortfall's lost product per period (`process_products.
-    shortfalls`, the one accessor), on the project solve and on the
-    baseline (None: no site-today comparison, so nothing to report)."""
-    if baseline is None:
-        return ()
+def _lost_production_slacks(n, inputs, accs: dict[str, dict[str, _Acc]]) -> dict[str, str]:
+    """{slack: product bus} of every shortfall in the ledger (ticket 06): the
+    ledger's shortfall assets (`P.PRODUCT_SLACK_FLAGS`, booked or at no cost)
+    and the `lost_production` lines, never the network's roles (the case
+    reads the shortfall from the ledger alone). A captured slack (ticket 08)
+    is named after its bus."""
+    slack_bus = {lost_slack_name(b): str(b) for b in n.buses.index}
+    flag = P.PRODUCT_SLACK_FLAGS["shortfall"]
+    out: dict[str, str] = {}
+    for a in getattr(inputs, "assets", None) or ():
+        if a.component == "Generator" and flag in a.flags and a.name in n.generators.index:
+            out[a.name] = str(n.generators.at[a.name, "bus"])
+    for acc in accs.values():
+        for a in acc.values():
+            what = _asset_of(a) if a.source == "asset" and a.stream == "lost_production" else None
+            if what is None or what[0] != "Generator":
+                continue
+            g = what[1]
+            bus = str(n.generators.at[g, "bus"]) if g in n.generators.index else slack_bus.get(g)
+            if bus is not None:
+                out[g] = bus
+    return out
+
+
+def _product_shortfall(n, inputs, accs, baseline) -> tuple[ProductShortfall, ...]:
+    """Each booked shortfall's lost product per period, on the project solve
+    and on the baseline (None: no site-today comparison, so nothing to
+    report), from its Generator's dispatch; a captured slack (no Generator)
+    reads None, not read, never 0."""
     from services.period_utils import period_years_map, years_for_period
 
-    on_base = {sf.bus: sf for sf in shortfalls(baseline.network, baseline.lost_load)}
+    if baseline is None:
+        return ()
     years = period_years_map(n)
+    units = n.buses["unit"] if "unit" in n.buses.columns else None
+    gp, bp = n.generators_t.p, baseline.network.generators_t.p
     out = []
-    for sf in shortfalls(n, lost_load):
-        base_sf = on_base.get(sf.bus)
+    for g, bus in sorted(_lost_production_slacks(n, inputs, accs).items()):
+        u = units.get(bus) if units is not None else None
+        unit = "" if u is None or pd.isna(u) else str(u).strip()
         for p in _periods(n):
             out.append(ProductShortfall(
-                period=_key(p), generator=sf.name, bus=sf.bus, unit=bus_unit(n, sf.bus),
-                years=years_for_period(years, p), project_per_year=_per_year(n, sf.p, p),
-                counterfactual_per_year=None if base_sf is None
-                else _per_year(baseline.network, base_sf.p, p)))
+                period=_key(p), generator=g, bus=bus, unit=unit, years=years_for_period(years, p),
+                project_per_year=_per_year(n, gp[g] if g in gp.columns else None, p),
+                counterfactual_per_year=_per_year(baseline.network, bp[g] if g in bp.columns else None, p)))
     return tuple(out)
 
 
@@ -2435,7 +2460,7 @@ def _build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
 
     # Grid-to-process 11: the lost product behind the `lost_production` lines,
     # on both sides of a site-today comparison.
-    shortfall = _product_shortfall(n, lost_load, baseline if cf_lines else None)
+    shortfall = _product_shortfall(n, inputs, accs, baseline if cf_lines else None)
     flags += _envelope_flags(n, parsed)
 
     # The storage LCOS's throughput and charging cost (owner decision 6).
