@@ -250,3 +250,25 @@ def test_claim_guard_reads_pending_from_the_manifest_not_the_matrix_copy(matrix)
         row['status'] = 'covered'
     forged['full_coverage']['journeys_pending'] = 0
     assert 'journeys_pending disagrees with family_manifest' in (_gen().matrix_problem(forged) or '')
+
+
+def test_claim_guard_ignores_the_module_family_journeys(matrix, monkeypatch):
+    # Pending is recomputed from the manifest's variants, never from FAMILY_JOURNEYS.
+    gen = _gen()
+    cleared = [dict(r, variants=dict(r['variants'], pending=[]), status='covered') for r in gen.FAMILY_JOURNEYS]
+    monkeypatch.setattr(gen, 'FAMILY_JOURNEYS', cleared)
+    forged = json.loads(json.dumps(matrix))
+    forged['family_journeys'] = cleared
+    forged['full_coverage']['journeys_pending'] = 0
+    assert 'journeys_pending disagrees with family_manifest' in (gen.matrix_problem(forged) or '')
+
+
+def test_unavailable_variants_are_not_blockers_but_their_pointers_resolve(matrix):
+    fm = _manifest()
+    unavailable = {i for r in matrix['family_journeys'] for i in r['variants']['unavailable']}
+    assert unavailable, 'pick another unavailable variant once these are covered'
+    listed = {i for b in matrix['full_coverage']['blockers'] for i in b.get('pending_variants', [])}
+    assert not unavailable & listed
+    for v in fm.VARIANTS:
+        if v['id'] in unavailable:
+            assert fm._pointer_problem(v['pointer']) is None, v['id']

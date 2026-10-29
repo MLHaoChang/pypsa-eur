@@ -79,3 +79,26 @@ so a missing effect is `uncertain`; delete, publish, confirm and the MILP start 
 words; a file moved after the card is `edit_preview_stale` (also when a whole-file base check trips
 at confirm); both saves run the service's own YAML checks at preview (`check_campus_text`,
 `check_draft_text`); the extract card names the extraction provider call.
+
+2026-10-29: R1/R2 plan, GK B GO with conditions (session_01G7qCuie2cD7SpMavjY6YZ4). Two PRs, R1 first.
+Coordinator (owner option 1): the five Site 3D scene routes are held for SC-07 under a new closed
+reason `held-by-spec`; R2 builds `get_process_view` and the site-anchor GET/PUT tools (PUT behind a
+content card, GRIDCODE-CHAT-1).
+- R1: trial-merge with #891 and #892 heads and master; run `test_assistant_control_matrix` and
+  `assistant_control_matrix --check`. `_full_coverage_problem` never reads `FAMILY_JOURNEYS` (a
+  mutation reading it fails a test). An unavailable variant is not a blocker, but its pointer resolves.
+- `held-by-spec`: the `issue` pointer names an existing file containing the route's method and path;
+  the guard fails when that issue's `Status:` is done or wontfix; each held row adds
+  `route-parity:held:<issue>` to the full_coverage blockers and counts as a limitation, never a tool.
+- R2 removes only the needs_tool rows it closes (a fragment file only when left empty). #853's
+  `GET /api/profiles/schema` row: whichever lands second carries the fix; master never goes red.
+- `get_process_view`: the route's project/ACL resolution, read tier; hand oracle, available:false and
+  a not-the-caller's-project refusal.
+- `set_site_anchor`: carded, through `anchor.write_anchor` only; the digest binds project,
+  expected_revision and the new lat/lng/source/confirmed; `validate_anchor` at preview and inside the
+  confirmed write; `_check_project_lock` and `_may_write` at confirm; a moved anchor is
+  `edit_preview_stale` and writes nothing; the receipt reads back the stored row. Mutations: no
+  revision binding fails the stale test; no confirm-time validation fails a tampered-args test.
+- New error kinds only in `tool-error-kinds.d/`. R2 trial merge runs the listed route/ACL/lock,
+  catalogue, prompt, selection and kind-manifest tests plus the inventory, route-parity, control-matrix
+  and json_fragments checks; any exact-count pin changed is named in the PR body.
