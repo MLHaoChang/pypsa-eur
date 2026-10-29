@@ -327,6 +327,13 @@ def apply_archetype_pack_detailed(n, pack: ArchetypePack) -> ApplyResult:
                 "weak_flexible pack requires import_overlay.import_p_nom_mw")
         each = float(total) / float(len(selected))
         for name in selected:
+            rating = float(n.links.at[name, "p_nom"])
+            if abs(rating - each) > 1e-9:
+                warnings.append(
+                    f"weak_flexible set import Link {name!r} p_nom from "
+                    f"{rating:g} MW to {each:g} MW "
+                    f"(import_p_nom_mw {float(total):g} MW split over "
+                    f"{len(selected)} Link(s))")
             n.links.at[name, "p_nom"] = each
             if "p_nom_max" in n.links.columns:
                 try:

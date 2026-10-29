@@ -3,7 +3,7 @@
 
 # LC-26 — weak_flexible replaces the import Link's p_nom without saying so
 
-Status: needs-triage
+Status: done
 
 Found by GK A in the LC-06 S5 review (#881). The `weak_flexible` pack sets each
 selected import Link's `p_nom` (and a finite `p_nom_max`) to
