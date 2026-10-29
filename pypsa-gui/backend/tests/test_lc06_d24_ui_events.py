@@ -8,7 +8,7 @@ shapes from here and checks the store they drive.
 
 Hand oracle:
 - 01:00 is snapshot index 1 and 00:00 index 0, sent as ISO with the index beside it;
-- a timestamp off the axis, an unparsable one, an unknown asset opened for editing,
+- a timestamp off the axis, an unparsable one, an unknown component opened in the editor,
   an unknown panel and an unknown results tab are refused as ``invalid_navigation`` or
   ``component_not_found`` with NO ``ui_event`` frame, so the screen never moves to a
   wrong time or asset;

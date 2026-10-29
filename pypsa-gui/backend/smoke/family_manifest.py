@@ -503,12 +503,13 @@ VARIANTS: list[dict] = [
              'use_toolset update_component',
              B + 'test_lc06_d23_claude_wire_journey.py::test_the_claude_wire_journey_grants_only_what_was_offered'),
     _pending('LC-D23.wire_gates', 'injection in uploads or tool prose, truncation/spill, incompatible history, lost approval, timeout, unknown effect, workflow/goal/task and profile switch/recovery not tested; the OpenAI wire is out of scope (LC32-OPEN-1)'),
-    _covered('LC-D24.ui', 'the four ui_* tools only: ui_event frames carry the hand snapshot index (01:00 = 1), asset and panel as asked; an off-axis time, unknown asset or panel '
+    _covered('LC-D24.ui', 'the four ui_* tools only: ui_event frames carry the hand snapshot index (01:00 = 1), asset and panel as asked; an off-axis time, an unknown component opened in the editor, or an unknown panel '
              'moves nothing; frontend uiNavigate.lc06.test.ts drives the store from those frames and drops a frame older than a manual navigation',
              'ui_set_snapshot ui_select_component ui_open_asset_detail ui_open_panel',
              B + 'test_lc06_d24_ui_events.py::test_a_snapshot_is_addressed_by_its_hand_index',
              B + 'test_lc06_d24_ui_events.py::test_component_asset_and_panel_events_carry_exactly_what_was_asked',
              B + 'test_lc06_d24_ui_events.py::test_a_wrong_target_is_refused_without_moving_the_screen'),
+    _pending('LC-D24.unknown_asset_event', 'ui_open_asset_detail and ui_select_component without open_editor emit a ui_event for an unknown asset (not refused); untested, a possible defect'),
     _pending('LC-D24.panels_e2e', 'the Playwright e2e (6 pass / 2 fail baseline) is not re-run or re-audited; panel/subview/filter/editor coverage, wrong project/run/generation, disconnect and keyboard/touch/320px cases not tested'),
 ]
 
