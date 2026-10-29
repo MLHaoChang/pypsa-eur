@@ -489,7 +489,16 @@ def test_dropping_the_restart_time_never_raises_the_lost_tonnes(reset_backend):
 @pytest.mark.skipif(os.environ.get("PYPSA_GUI_YEAR_BUDGET_LIVE") != "1",
                     reason="Explicit year-budget live opt-in required (about 20 min)")
 def test_the_three_period_year_solves_within_the_budget(reset_backend):
+    import resource
+
     n, state, seconds = _plan("full")
+    # Peak memory with the check's workers in it: this process's peak, and the largest worker's (the pool's
+    # workers are reaped, so RUSAGE_CHILDREN holds them); the run's peak is at most this + workers × that.
+    own_gb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2**20
+    worker_gb = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / 2**20
+    workers = state["last_process_uc_check"]["workers"] or 0
+    print(f"year budget: {seconds:.0f} s; peak {own_gb:.2f} GB in the plan's process, {worker_gb:.2f} GB in the "
+          f"largest of {workers} check workers, at most {own_gb + workers * worker_gb:.2f} GB together")
     assert seconds <= BUDGET_S, f"{seconds:.0f} s"
     check = state["last_process_uc_check"]
     assert [r["period"] for r in check["periods"]] == [y for y in YEARS for _ in range(4)]

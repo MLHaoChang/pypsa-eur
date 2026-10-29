@@ -181,3 +181,42 @@ def test_the_worst_window_ignores_shortfall_noise():
     assert PU._worst(rows)["window"] == "jan"
     rows.append(row("jul", 0.001, 5.0, True))
     assert PU._worst(rows)["window"] == "jul"
+
+
+def test_the_undo_puts_back_a_minimum_load_series():
+    """A unit whose minimum load is a time series: the plan drops it, the undo restores it exactly."""
+    from services.solver_service import SolverConfig
+
+    n = _year_net()
+    series = pd.Series(np.where(np.arange(PU.YEAR_HOURS) % 24 < 12, 0.4, 0.6), index=n.snapshots)
+    n.links_t.p_min_pu["hb"] = series
+    before, before_t = _units(n), n.links_t.p_min_pu.copy()
+    undo = PU.relax_for_plan(n, SolverConfig())
+    assert "hb" not in n.links_t.p_min_pu.columns and n.links.at["hb", "p_min_pu"] == 0.0
+    undo()
+    pd.testing.assert_frame_equal(_units(n), before)
+    pd.testing.assert_frame_equal(n.links_t.p_min_pu, before_t)
+
+
+def test_an_abort_during_the_parallel_check_leaves_no_live_worker(monkeypatch):
+    import multiprocessing
+    import time
+
+    from services.solver_service import SolverConfig
+
+    n = _solved_plain()
+    monkeypatch.setattr(PU, "check_workers", lambda: 3)
+    real_wait = PU.wait
+
+    def abort(pending, timeout=None):
+        real_wait(pending, timeout=0.2)          # the workers are started, still loading the plan
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(PU, "wait", abort)
+    with pytest.raises(KeyboardInterrupt):
+        PU.binary_check(n, SolverConfig())
+    # Terminated, not left to finish their windows: gone within a second (a window takes longer).
+    deadline = time.monotonic() + 1.0
+    while multiprocessing.active_children() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert multiprocessing.active_children() == []

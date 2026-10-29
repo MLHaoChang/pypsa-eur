@@ -77,3 +77,10 @@ Design §3.B, "Acceptance checks (B)", except:
   - every candidate on at the pack's price: the plan builds PV to its 40 MW cap, no BESS and no pile extension, and loses about 0 t.
 
   At pack price, a 4-h BESS does not pay against 150-h events, and PV carries the curtailment. The tests pin all three. Prices were not tuned to force a BESS build.
+- 2026-10-29, the mine as a ceiling (GK A plan verdict). The mine is an ore Generator whose fixed schedule (800 / 1,000 / 1,200 t/h) is an upper bound, not a must-run feed. Ore the plant cannot take in an hour is not mined; the process view reports it per period as `unused_supply` on `ore_rom`, and the lost concentrate shows at the next vessel. `test_2027_with_every_candidate_off_loses_concentrate_and_a_bess_lowers_it` pins the unmined ore to the schedule less the mine's dispatch. The frontend does not show `unused_supply` yet.
+- 2026-10-29, the shed is fixed (GK A plan verdict). The concentrate shed is 40 kt and not extendable, although the design marks it "(extendable)". The largest vessel, in 2035, is about 11.7 kt (1,200 t/h × 0.0189 × 8,760 h / 17), so the shed holds more than three vessels and an extension would never be built. The ledger's "concentrate shed" row says so.
+- 2026-10-29, GK A (4) `GK NOT OK @4b2b7c16` (PR #869 comment 6485998916). Items 1, 2, 4 and 5 met, and the end-pin and load-out parts of 3. To land:
+  - (a) the undo's `links_t.p_min_pu` restore is tested: `test_the_undo_puts_back_a_minimum_load_series` (it fails when the undo drops the series);
+  - (b) the mine-as-ceiling and fixed-shed records above;
+  - (c) `test_an_abort_during_the_parallel_check_leaves_no_live_worker` (it fails without the terminate), and the budget run prints peak memory with the check's workers in it (`RUSAGE_SELF` and `RUSAGE_CHILDREN`);
+  - item 7, the year-base budget, waits on the owner (options A/B/C, through the coordinator).
