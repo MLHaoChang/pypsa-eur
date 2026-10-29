@@ -146,4 +146,5 @@ pypsa-gui/backend/test-results/
 .scratch/live-voice/capability-inventory.json
 .scratch/live-voice/capability-matrix.json
 .scratch/live-copilot/family-manifest.json
+.scratch/live-copilot/release-evidence.json
 .scratch/live-voice/route-parity.json
