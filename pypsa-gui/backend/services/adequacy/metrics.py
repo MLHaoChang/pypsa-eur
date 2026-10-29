@@ -203,7 +203,7 @@ def criticality_scale(nyears: float) -> tuple[float, str]:
     """
     The factor that turns a horizon's ΔEUE·VoLL into a per-YEAR criticality,
     and the basis to state beside it (ticket LC-30). Occurrence is annual
-    (8760·q/MTTR), so criticality must be too, or severity = criticality /
+    (events per year, ``occurrence.py``), so criticality must be too, or severity = criticality /
     occurrence mixes a per-horizon numerator with a per-year denominator.
 
     ``1/nyears`` when the horizon has length; an empty or unreadable horizon

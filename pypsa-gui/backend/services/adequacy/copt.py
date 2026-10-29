@@ -1062,7 +1062,7 @@ def attribute_criticality(units: list[CoptUnit], dist: CapacityDistribution,
         ΔEUE_i = EUE(fleet as-is) − EUE(fleet with unit i PERFECTLY available)
 
     ``criticality_eur_per_year`` is ΔEUE_i · VoLL scaled to a year by
-    8760 / ``horizon_hours`` (LC-30), matching the annual occurrence.
+    ``HOURS_PER_YEAR / horizon_hours`` (LC-30), matching the annual occurrence.
     ``horizon_hours`` defaults to Σ ``weights``; a per-block call passes the
     WHOLE horizon's, so the blocks' criticalities sum to the annual figure.
 
@@ -1270,7 +1270,7 @@ def screening_analysis(units, residual_load: pd.Series, *, weights: pd.Series,
     blocks = period_blocks(residual_load.index)
     w_full = weights.reindex(residual_load.index).fillna(0.0)
     # LC-30: every block annualises over the WHOLE horizon, so the by-name
-    # merge below sums to ΣΔEUE_b · VoLL · 8760/Σw, not one year per block.
+    # merge below sums to ΣΔEUE_b · VoLL / nyears, not one year per block.
     horizon_hours = float(w_full.sum())
     per: dict = {}
     for label, start, end in blocks:
