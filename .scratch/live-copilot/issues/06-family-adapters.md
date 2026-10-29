@@ -165,6 +165,21 @@ own plan (genset, PV and UPS figures; UPS L·T/2/3600 and E6 ramp oracles).
 8. The EMT/PLL/voltage unavailable row stays; E4–E6 stay pending naming S8b.
 9. Land these here under S8.
 
+### GK A (4), GO conditions for S8b (2026-10-29)
+
+GO on the S8b plan, with conditions:
+1. E4 has no grid-forming BESS, asserted from the read-back sidecar.
+2. E4 block 2: name where the engine resets between blocks; assert block 2's own
+   RoCoF, Δf_qss (reset −0.6667 or cumulative −1.3333, as the engine does) and t_block_s.
+3. E6: import_mw between the lossless hand value and it plus the stated loss bound.
+4. E6 infeasible: one change from the base; p0 explicit; every shortfall term named.
+5. UPS window mutant: drops ≥ 1, energy above L·T/2 by more than the tolerance, the drop's t reported.
+6. E4 at N+1: two gensets, the largest dropped and named, needed_s on the rest.
+7. The S8 conditions carry over: the oracle on the reported column (0⁺ or windowed,
+   stated), D = 0 from the read-back, the EMT row explicit.
+8. Mutations: PV, T halved, e 0.05 → ok false, droop 8 %, ramp halved; each turns red.
+9. Land these here under S8b.
+
 ## Slice log
 
 ### S0, execution manifest (2026-10-28)
@@ -486,6 +501,57 @@ Test only; no engine edit. The plan, and the A/B/C split question, went to GK A 
   (5) t_end 20 s ≥ 5·T_i, |Δf| < 1e-3, nadir < −0.1 (−0.345). (6) E3 names BESS and
   "no grid-forming headroom". (7) In-file tests, plus the default fixture mutated red.
   (8) The EMT row stays; E4–E6 pending, "S8b".
+
+### S8b, LC-D16 E4–E6 (2026-10-29)
+
+Branch `claude/lc06-d16b-frequency-events`, stacked on S8a. GK A reviews. Session LC-06 (6).
+Test only; no engine edit. Same file and seam as S8a; tables freq_events, freq_ups,
+freq_bridge, freq_planned.
+
+- E5 (seamless): PV 20 MW gfl_pq; ΔP = 20, −0.9500 Hz/s and −0.4000 Hz to 1e-6. The
+  mutation is PV 10 MW (halves both): PV 40 MW leaves no import, which the campus refuses.
+- UPS walk-in on E1: L 40 MW, T 10 s, 2 Hz window; energy L·T/2/3600 = 0.055556 MWh to
+  1e-9, drops 0, t_online = T. T 5 halves it; a 0.1 Hz window drops it (first_drop_s
+  reported, energy above the hand value). The UPS is full at hour 0: e(t−1) is its
+  `state_of_charge_initial` (`_solved_soc_before`, non-cyclic).
+- E4 (ups_bridged): a cold 60 MW droop genset alone (the BESS is gfl_pq, read back),
+  blocks 20 + 20. E4 rows carry only the 500 ms windowed RoCoF, so its oracle is
+  Δf(0.5)/0.5 on the two-state matrix exponential (Δf, P_m with T_g); Δf_qss −0.6667 per
+  block. `_e4_pickup` restores f0 at each block's settling instant (reset, not
+  cumulative); block 2's t_block_s = 15 + the settling instant on the closed form
+  (3.14 s), within one dt. Bridge: autonomy e·3600/L = 900 s; e 0.05 MWh → ok false.
+  N+1: an 80 MW genset (start 20 s) is dropped and named; ready stays 15 s.
+- E6 (planned): BESS 30 MW plus a spinning 60 MW genset at p_min 6 MW, ramp 6 MW/s;
+  34 < import < 34/0.99; ramp_s = (import − 30)/6. Ramp halved doubles it. Infeasible:
+  the genset alone changed to 5 MW (p0 0.5): I4 is not viable, so the import is the
+  lossless 39.5 (`dp_e1`); shortfall = import − (30 + 4.5).
+- Manifest: LC-D16.E4, E5 and E6 covered; the EMT/PLL/voltage unavailable row stays.
+
+## Hand-off 6 (2026-10-29, LC-06 (6), early)
+
+PR stack (each against master, stacked):
+- S2 #877 merged as 9b6770a4.
+- S3 #878 @dfcc445958102c3e725196737df8c104c29cc0a5 (master merged in at the coordinator's
+  request): GK B (9) OK @d4cc3f00 carries. CI restarted on it; premerge ok not yet sent.
+- S4 #880 @4356ec68603633441c9a79aa044511435272cd00: GK A OK @abd52b35 carries.
+- S5 #881 @76b46f4e3831f567fe2ca016023d8d57d3c274a7: GK A (4) OK @bdba756a carries.
+  "GUI backend shard 2/4" (run 40804860617) died to a runner shutdown; re-run the failed
+  job once that run completes (it was still in progress at hand-off).
+- S6 #884 @aa64ab5e2f51a58f78336e0cc8835880522a2cb4: GK A (4) OK.
+- S7 #885 @7b72e519c7b75c16e9274cfc5a0fa52ceabeb0cd: GK A (4) OK.
+- S8a #886 @45795d5173977cb493c14f7f3adde673a8e18e90: GK A (4) OK.
+- S8b #887: review requested from GK A (4); the GO conditions are above.
+The coordinator's order: after each merge, merge master into the next PR (a merge commit),
+then send premerge ok for it once green, in stack order.
+
+Next: S9 (D17 chain) and the GK B D-rows as in Hand-off 1, each with a plan to its GK first.
+
+Follow-ups: ticket 26 (with #881), ticket 27 (the chat island report trims the frequency tables).
+
+Env: as in Hand-off 2. The whole d16 file runs in about 5 min. premerge: `PREMERGE_PYTHON=/root/.venv-pypsa-gui/bin/python bash scripts/coord/premerge.sh <pr>`
+(about 3 min with its semantic tests). gh GraphQL is refused here; use `gh api` REST. `send_later` is
+refused (lineage depth 8), so there is no self check-in.
+Last merged SHA: 9b6770a4 (#877).
 
 ## Hand-off 5 (2026-10-29, LC-06 (5) at 300k)
 

@@ -34,7 +34,9 @@ import math
 import time
 import uuid
 
+import numpy as np
 import pytest
+from scipy.linalg import expm
 
 from gridspine.static import frequency as F
 from services import chat_tools, project_registry
@@ -239,3 +241,269 @@ def test_halving_dt_cuts_the_error_against_the_closed_form():
     coarse, fine = error(0.05), error(0.025)
     assert coarse > 1e-9
     assert coarse / fine >= 12.0
+
+
+# ── S8b: E4, E5, E6 and the UPS walk-in ─────────────────────────────────────
+#
+# Each oracle is on the row's own ΔP. A droop genset: K = P_n/(R·f0), its
+# inertia H·S with S = P_n/cos φ. Every ΔP here keeps Δf inside the 2 Hz
+# UPS window and the ±5 Hz limits, so nothing trips.
+
+PV = {"kind": "pv", "control": "gfl_pq", "pf_rated": t(0.95)}
+DROOP_GEN = {**GENSET, "governor": "droop", "droop_pct": t(4.0), "spinning": False}
+GEN_MW, GEN_H, GEN_COS = 60.0, 1.5, 0.8
+UPS_MW, UPS_H = 40.0, 0.25                     # 10 MWh, protecting the 40 MW dc_load
+WALK_IN = 10.0
+
+
+def ups_spec(walk_in_s=WALK_IN, window_hz=2.0):
+    return {"kind": "ups", "it_load": ["dc_load"], "walk_in_s": t(walk_in_s), "f_window_hz": t(window_hz),
+            "transfers_on_islanding": True}
+
+
+def _site(pv_mw=0.0, gen_mw=0.0, gen_p=0.0, bess_mw=BESS_MW, ups_mwh=None):
+    """The S8a hub with PV at ``pv_mw``, a genset dispatched at ``gen_p``,
+    the BESS at ``bess_mw`` and a UPS of ``ups_mwh``; the import is the rest."""
+    n = _network(genset_mw=gen_mw)
+    n.storage_units.loc["bess", "p_nom"] = bess_mw
+    n.generators.loc["pv", "p_nom"] = pv_mw
+    n.generators_t.p["pv"] = pv_mw
+    if gen_mw:
+        n.generators_t.p["gen"] = gen_p
+    imp = LOAD - pv_mw - gen_p
+    n.generators_t.p["grid_supply"] = imp
+    n.links_t.p0["grid_import"] = imp / 0.99
+    n.links_t.p1["grid_import"] = -imp
+    if ups_mwh is not None:
+        # full at hour 0: e(t−1) is the initial state of charge (non-cyclic)
+        n.add("StorageUnit", "ups", bus="mv", carrier="battery", p_nom=UPS_MW, max_hours=ups_mwh / UPS_MW,
+              state_of_charge_initial=ups_mwh)
+        n.storage_units_t.p["ups"] = 0.0
+        n.storage_units_t.state_of_charge["ups"] = ups_mwh
+    return n
+
+
+def _site_sidecar(scenarios=("seamless",), units=None, blocks=None, **kw):
+    s = _sidecar(**kw)
+    s["units"].update(units or {})
+    s["requirements"]["scenarios"] = list(scenarios)
+    if blocks is not None:
+        s["requirements"]["pickup_blocks"] = t(list(blocks))
+    return s
+
+
+def _table(report, key):
+    table = next(t for t in report["tables"] if t["id"] == f"freq_{key}")
+    cols = {"ups": F.UPS_COLUMNS, "bridge": F.BRIDGE_COLUMNS, "planned": F.PLANNED_COLUMNS,
+            "losses": F.LOSSES_COLUMNS}[key]
+    return [dict(zip(cols, row)) for row in table["rows"]]
+
+
+def _gen_rocof0(dp, f0=50.0):
+    return -dp * f0 / (2.0 * GEN_H * GEN_MW / GEN_COS)
+
+
+def _gen_settled(dp, droop=4.0, f0=50.0):
+    return -dp / (GEN_MW / (droop / 100.0 * f0))
+
+
+def _gen_state(dp, at_s, droop=4.0, t_g=0.5, f0=50.0):
+    """Δf(t) on the droop genset alone, by the matrix exponential: x = (Δf,
+    P_m), M dΔf/dt = −ΔP + P_m, T_g dP_m/dt = −K Δf − P_m, from x = 0; the
+    load-step room (100 % of P_n) never binds on a 20 MW block."""
+    m, k = 2.0 * GEN_H * GEN_MW / GEN_COS / f0, GEN_MW / (droop / 100.0 * f0)
+    a = np.array([[0.0, 1.0 / m], [-k / t_g, -1.0 / t_g]])
+    b = np.array([-dp / m, 0.0])
+    x = (expm(a * at_s) - np.eye(2)) @ np.linalg.solve(a, b)
+    return float(x[0]), float((-dp + x[1]) / m)                   # Δf, dΔf/dt
+
+
+def _gen_df(dp, at_s, droop=4.0):
+    return _gen_state(dp, at_s, droop)[0]
+
+
+def _gen_settling(dp, droop=4.0):
+    """The engine's settling instant (``_settle_time``) on the closed form:
+    the first t > 0 on the dt grid with Δf within 0.1 Hz of −ΔP/K and
+    |RoCoF| ≤ 0.05 Hz/s (3.14 s at droop 4 %)."""
+    k = 1
+    while True:
+        df, rocof = _gen_state(dp, k * DT_E4, droop)
+        if abs(df - _gen_settled(dp, droop)) <= BAND and abs(rocof) <= SETTLE:
+            return k * DT_E4
+        k += 1
+
+
+# ── E5: the PV lost in the island ───────────────────────────────────────────
+
+
+@pytest.mark.parametrize("pv_mw", [20.0, 10.0])
+def test_e5_losing_the_pv_is_a_step_of_its_output(make_hub, pv_mw):
+    """A gfl_pq PV (no frequency-watt) at ``pv_mw``: ΔP is its I4 output. At
+    20 MW: −20·50/(2·5·105.263) = −0.950 Hz/s and −20/50 = −0.400 Hz; at
+    10 MW (the mutation; 40 MW would leave no import, which the campus
+    refuses) both halve."""
+    e5 = _first(make_hub(_site(pv_mw=pv_mw), _site_sidecar(units={"pv": PV})), "E5")
+    assert "load damping D = 0" in json.dumps(make_hub.report)
+    assert {u["kind"] for u in make_hub.config["units"].values()} == {"bess", "load", "pv"}
+    assert e5["dp_mw"] == pytest.approx(pv_mw, abs=TOL)
+    assert e5["rocof0_hz_per_s"] == pytest.approx(rocof0(pv_mw), abs=TOL)
+    assert e5["df_qss_hz"] == pytest.approx(settled(pv_mw), abs=TOL)
+    assert rocof0(20.0) == pytest.approx(-0.95, abs=1e-12) and settled(20.0) == pytest.approx(-0.4, abs=1e-12)
+
+
+# ── the UPS walk-in on E1 ───────────────────────────────────────────────────
+
+
+def _ups_e1(make_hub, **spec):
+    make_hub(_site(ups_mwh=UPS_MW * UPS_H), _site_sidecar(units={"ups": ups_spec(**spec)}))
+    return next(r for r in _table(make_hub.report, "ups") if r["event"] == "E1" and r["hour"] == 0)
+
+
+@pytest.mark.parametrize("walk_in_s", [WALK_IN, WALK_IN / 2])
+def test_the_ups_walk_in_energy_is_half_load_times_walk_in(make_hub, walk_in_s):
+    """E1 opens the PCC with the UPS on its battery (it transfers); inside
+    its 2 Hz window it walks L = 40 MW back in linearly over T, so its battery
+    gives L·T/2: 40·10/2/3600 = 0.055556 MWh. The engine sums the walk-in by
+    trapezoids, exact on a line. T halved (the mutation) halves it."""
+    row = _ups_e1(make_hub, walk_in_s=walk_in_s)
+    assert row["energy_mwh"] == pytest.approx(LOAD * walk_in_s / 2.0 / 3600.0, abs=1e-9)
+    assert LOAD * WALK_IN / 2.0 / 3600.0 == pytest.approx(0.0555556, abs=1e-7)
+    assert int(row["drops"]) == 0
+    assert row["t_online_s"] == pytest.approx(walk_in_s, abs=2e-3)       # within dt
+    assert str(row["autonomy_ok"]).lower() == "true"
+
+
+def test_a_narrow_window_drops_the_ups_off_line(make_hub):
+    """The mutation: a 0.1 Hz window, which the walk-in's own Δf leaves, so
+    the UPS drops back to its battery and gives more than L·T/2."""
+    row = _ups_e1(make_hub, window_hz=0.1)
+    assert int(row["drops"]) >= 1
+    assert 0.0 < row["first_drop_s"] < WALK_IN          # the walk-in's own Δf crosses 0.1 Hz
+    assert row["energy_mwh"] > LOAD * WALK_IN / 2.0 / 3600.0 + 1e-6
+
+
+# ── E4: the ups_bridged start ────────────────────────────────────────────────
+
+
+# E4 runs the gensets alone, so the BESS here is gfl_pq: no grid former
+# whose inertia would join the block's RoCoF (asserted from the read-back).
+BESS_PQ = {"kind": "bess", "control": "gfl_pq", "pf_rated": t(PF)}
+DT_E4, BAND, SETTLE = 5e-3, 0.1, 0.05             # e4_ups_bridged's dt, band_hz and settle_hz_per_s
+
+
+def _e4(make_hub, ups_mwh=UPS_MW * UPS_H, droop=4.0, second=None):
+    """``second``: a second, larger genset (``(p_nom, start_s)``), which
+    N+1 drops as the largest."""
+    gen = {**DROOP_GEN, "droop_pct": t(droop)}
+    units = {"bess": BESS_PQ, "gen": gen, "ups": ups_spec()}
+    n = _site(gen_mw=GEN_MW, ups_mwh=ups_mwh)
+    sidecar = _site_sidecar(("ups_bridged",), units, blocks=(20.0, 20.0))
+    if second is not None:
+        n.add("Generator", "gen2", bus="mv", carrier="diesel", p_nom=second[0], marginal_cost=500.0)
+        n.generators_t.p["gen2"] = 0.0
+        sidecar["units"]["gen2"] = {**gen, "start_s": t(second[1])}
+        sidecar["requirements"]["genset_redundancy_n"] = t(1)
+    events = make_hub(n, sidecar)
+    controls = {u.get("control") for u in make_hub.config["units"].values()}
+    assert not controls & {"gfm_droop", "gfm_vsm"}
+    blocks = sorted((e for e in events if e["event"] == "E4" and e["hour"] == 0), key=lambda e: e["block"])
+    bridge = next(r for r in _table(make_hub.report, "bridge") if r["scenario"] == "ups_bridged" and r["hour"] == 0)
+    return blocks, bridge
+
+
+@pytest.mark.parametrize("droop", [4.0, 8.0])
+def test_e4_each_block_steps_the_genset_alone_from_nominal(make_hub, droop):
+    """The bus is dead; the cold 60 MW genset (H 1.5 s, cos φ 0.8, S 75 MVA)
+    is ready at start + sync = 15 s and picks up 20 + 20 MW, each block from
+    f0. E4's rows carry only the 500 ms windowed RoCoF (no 0⁺ column), so
+    the oracle is Δf(0.5)/0.5 on the two-state closed form (``_gen_df``; its
+    0⁺ value is −20·50/(2·1.5·75) = −4.444 Hz/s). Δf_qss = −20/K, K =
+    60/(0.04·50) = 30 MW/Hz: −0.6667 Hz; droop 8 % (the mutation) doubles it.
+
+    Block 2 starts from nominal, not from block 1's −0.6667 (``_e4_pickup``:
+    secondary control restores f0 at block 1's settling instant, and the
+    genset carries its share as P0), so its Δf_qss is −0.6667 again, not the
+    cumulative −1.3333. It starts at ready + block 1's settling instant on
+    the closed form, within one dt."""
+    blocks, _ = _e4(make_hub, droop=droop)
+    assert [int(b["block"]) for b in blocks] == [1, 2]
+    assert blocks[0]["t_block_s"] == pytest.approx(15.0, abs=TOL)
+    assert blocks[1]["t_block_s"] == pytest.approx(15.0 + _gen_settling(20.0, droop), abs=DT_E4 + 1e-9)
+    for b in blocks:
+        assert b["dp_mw"] == pytest.approx(20.0, abs=TOL)
+        assert b["rocof_window_hz_per_s"] == pytest.approx(_gen_df(20.0, 0.5, droop) / 0.5, abs=1e-6)
+        assert b["df_qss_hz"] == pytest.approx(_gen_settled(20.0, droop), abs=1e-4)
+    assert _gen_rocof0(20.0) == pytest.approx(-4.4444444, abs=1e-6)
+    assert (_gen_df(20.0, 1e-6) / 1e-6) == pytest.approx(_gen_rocof0(20.0), rel=1e-4)    # the form's own 0⁺
+
+
+def test_e4_at_n_plus_1_drops_the_largest_genset_and_waits_for_the_rest(make_hub):
+    """N+1 with a second, 80 MW genset starting at 20 s: it is the largest,
+    so it fails to start; the 60 MW genset alone picks up the blocks with
+    the same figures, ready at 15 s (not 25 s, the dropped unit's), and the
+    bridge's needed time is counted on that."""
+    blocks, bridge = _e4(make_hub, second=(80.0, 20.0))
+    assert "gen2" in bridge["dropped"].lower()
+    assert bridge["ready_s"] == pytest.approx(15.0, abs=TOL)
+    assert blocks[0]["t_block_s"] == pytest.approx(15.0, abs=TOL)
+    for b in blocks:
+        assert b["df_qss_hz"] == pytest.approx(_gen_settled(20.0), abs=1e-4)
+    assert bridge["needed_s"] == pytest.approx(max(1.0, blocks[-1]["t_block_s"]), abs=TOL)
+
+
+@pytest.mark.parametrize("ups_mwh,ok", [(UPS_MW * UPS_H, True), (0.05, False)])
+def test_e4_the_ups_bridges_the_start_only_with_the_energy(make_hub, ups_mwh, ok):
+    """Autonomy = e·3600/L: 10 MWh at 40 MW lasts 900 s; it must last the
+    ready time plus the last block's pickup. 0.05 MWh lasts 4.5 s < 15 s."""
+    blocks, bridge = _e4(make_hub, ups_mwh=ups_mwh)
+    assert bridge["it_mw"] == pytest.approx(LOAD, abs=TOL)
+    assert bridge["autonomy_s"] == pytest.approx(bridge["e_mwh"] * 3600.0 / LOAD, rel=1e-9)
+    assert bridge["e_mwh"] == pytest.approx(ups_mwh, rel=1e-6)
+    assert bridge["needed_s"] == pytest.approx(max(1.0, blocks[-1]["t_block_s"]), abs=TOL)
+    assert str(bridge["ok"]).lower() == str(ok).lower()
+
+
+# ── E6: planned islanding ────────────────────────────────────────────────────
+
+SPIN_GEN = {**DROOP_GEN, "spinning": True}
+
+
+def _e6(make_hub, gen_mw=GEN_MW, bess_mw=30.0, ramp_pu=0.1):
+    gen = {**SPIN_GEN, "ramp_pu_per_s": t(ramp_pu)}
+    events = make_hub(_site(gen_mw=gen_mw, gen_p=0.1 * gen_mw, bess_mw=bess_mw),
+                      _site_sidecar(("planned",), {"gen": gen}))
+    row = next(r for r in _table(make_hub.report, "planned") if r["hour"] == 0)
+    return row, [e for e in events if e["event"] == "E6" and e["hour"] == 0]
+
+
+@pytest.mark.parametrize("ramp_pu", [0.1, 0.05])
+def test_e6_the_ramp_time_is_the_genset_covering_what_the_bess_cannot(make_hub, ramp_pu):
+    """The 30 MW BESS takes over at once (a converter); the genset, at p_min
+    6 MW, ramps at ramp_pu·60 MW/s, so the import is covered at
+    (import − 30)/(ramp_pu·60): (34.x − 30)/6 ≈ 0.7 s. Halving the ramp
+    (the mutation) doubles it. The PCC then opens on ≈ 0 MW: no excursion."""
+    row, e6 = _e6(make_hub, ramp_pu=ramp_pu)
+    imp = row["import_mw"]
+    assert LOAD - 6.0 < imp < (LOAD - 6.0) / 0.99
+    assert str(row["feasible"]).lower() == "true" and row["shortfall_mw"] == pytest.approx(0.0, abs=TOL)
+    assert row["ramp_s"] == pytest.approx((imp - 30.0) / (ramp_pu * GEN_MW), abs=TOL)
+    assert len(e6) == 1 and abs(e6[0]["nadir_hz"]) < 1e-9
+
+
+def test_e6_short_of_room_is_infeasible_with_the_shortfall(make_hub):
+    """One change from the base: the genset is 5 MW, dispatched at its p_min
+    0.5 MW (P0, from the hub's dispatch). Room: the BESS from P0 0 to its
+    30 MW, plus the genset from 0.5 to 5 (4.5 MW, the ramp time is no limit
+    at full), 34.5 MW, short of the 39.5 MW import. This island cannot
+    carry the load, so I4 is not viable and the import is the lossless
+    one (``_study_hour``: ``dp_e1``), exactly 40 − 0.5."""
+    gen_mw, p0, bess_room = 5.0, 0.5, 30.0
+    row, e6 = _e6(make_hub, gen_mw=gen_mw)
+    losses = next(r for r in _table(make_hub.report, "losses") if r["hour"] == 0)
+    assert str(losses["i4_viable"]).lower() == "false"
+    imp = row["import_mw"]
+    assert imp == pytest.approx(LOAD - p0, abs=TOL)
+    assert str(row["feasible"]).lower() == "false"
+    assert row["shortfall_mw"] == pytest.approx(imp - (bess_room + (gen_mw - p0)), abs=TOL)
+    assert e6 == []

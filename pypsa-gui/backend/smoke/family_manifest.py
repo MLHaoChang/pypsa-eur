@@ -394,8 +394,30 @@ VARIANTS: list[dict] = [
     _covered('LC-D16.E3', 'tripping the only grid former collapses the island at t = 0, named "no grid-forming headroom"',
              D16_TOOLS,
              B + 'test_lc06_d16_frequency_events.py::test_e3_tripping_the_only_grid_former_collapses_the_island'),
-    *[_pending(f'LC-D16.{e}', 'engine seed only (test_frequency*.py); S8b')
-      for e in ('E4', 'E5', 'E6')],
+    _covered('LC-D16.E4', 'ups_bridged: a cold 60 MW droop genset alone picks up 20 + 20 MW, each block from f0: windowed '
+             'RoCoF on the two-state matrix exponential, df_qss -0.6667 Hz (droop 8 % doubles it), block 2 at ready + '
+             'the settling instant; UPS autonomy e 3600/L = 900 s, 0.05 MWh short; N+1 drops the largest, named',
+             D16_TOOLS,
+             B + 'test_lc06_d16_frequency_events.py::test_e4_each_block_steps_the_genset_alone_from_nominal[4.0]',
+             B + 'test_lc06_d16_frequency_events.py::test_e4_each_block_steps_the_genset_alone_from_nominal[8.0]',
+             B + 'test_lc06_d16_frequency_events.py::test_e4_at_n_plus_1_drops_the_largest_genset_and_waits_for_the_rest',
+             B + 'test_lc06_d16_frequency_events.py::test_e4_the_ups_bridges_the_start_only_with_the_energy[10.0-True]',
+             B + 'test_lc06_d16_frequency_events.py::test_e4_the_ups_bridges_the_start_only_with_the_energy[0.05-False]'),
+    _covered('LC-D16.E5', 'PV loss: a 20 MW gfl_pq PV lost on the gfm_vsm BESS, RoCoF0 -0.950 Hz/s and df_qss -0.400 Hz, D = 0; '
+             '10 MW halves both; UPS walk-in on E1: energy L T/2/3600 = 0.055556 MWh, T halved halves it, a 0.1 Hz '
+             'window drops the UPS',
+             D16_TOOLS,
+             B + 'test_lc06_d16_frequency_events.py::test_e5_losing_the_pv_is_a_step_of_its_output[20.0]',
+             B + 'test_lc06_d16_frequency_events.py::test_e5_losing_the_pv_is_a_step_of_its_output[10.0]',
+             B + 'test_lc06_d16_frequency_events.py::test_the_ups_walk_in_energy_is_half_load_times_walk_in[10.0]',
+             B + 'test_lc06_d16_frequency_events.py::test_the_ups_walk_in_energy_is_half_load_times_walk_in[5.0]',
+             B + 'test_lc06_d16_frequency_events.py::test_a_narrow_window_drops_the_ups_off_line'),
+    _covered('LC-D16.E6', 'planned: a 30 MW BESS at once plus a 60 MW genset ramping 6 MW/s from p_min cover the import at '
+             '(import - 30)/6 s, ramp halved doubles it; a 5 MW genset leaves shortfall import - (30 + 4.5)',
+             D16_TOOLS,
+             B + 'test_lc06_d16_frequency_events.py::test_e6_the_ramp_time_is_the_genset_covering_what_the_bess_cannot[0.1]',
+             B + 'test_lc06_d16_frequency_events.py::test_e6_the_ramp_time_is_the_genset_covering_what_the_bess_cannot[0.05]',
+             B + 'test_lc06_d16_frequency_events.py::test_e6_short_of_room_is_infeasible_with_the_shortfall'),
     _unavailable('LC-D16.emt_pll_voltage', 'single-bus aggregate frequency screening only; no EMT/RMS/PLL/voltage dynamics',
                  'gridspine/static/frequency.py LABEL'),
     _pending('LC-D17.recommend_apply_restudy', 'apply digest checked by equality; no chain through the seam'),
