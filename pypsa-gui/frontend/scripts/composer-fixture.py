@@ -341,11 +341,15 @@ with SessionLocal() as db:
         db.flush()
         db.add(OrgMembership(id=uuid.uuid4(), user_id=owner.id, org_id=row.org_id, role="admin"))
         project = db.scalar(select(Project).where(Project.name == "oj-grid", Project.org_id == row.org_id))
+        kept.write_text(json.dumps({"role": row.role, "created_by": str(project.created_by)}))
         project.created_by = owner.id
-        kept.write_text(json.dumps({"role": row.role}))
         row.role = "member"
     else:
-        row.role = json.loads(kept.read_text())["role"]
+        # Restored as it was: their role, and oj-grid theirs again, so they can reopen it.
+        was = json.loads(kept.read_text())
+        row.role = was["role"]
+        project = db.scalar(select(Project).where(Project.name == "oj-grid", Project.org_id == row.org_id))
+        project.created_by = uuid.UUID(was["created_by"])
     db.commit()
 """
     backend = None
