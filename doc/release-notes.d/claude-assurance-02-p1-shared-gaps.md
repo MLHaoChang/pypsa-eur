@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The aggregate load profile and the assistant's checked ``get_aggregate_load`` now name their gaps through one shared helper, so both report the same first gap in the same words. Members that cannot be aligned at all now report "the loads do not share the network's snapshots" instead of an incomplete sum with no gap.
