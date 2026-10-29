@@ -3,7 +3,9 @@
 // loop round, budgets used), what waits for the user, Pause and Stop. Guided
 // and Expert show the same card; Expert adds the ids in a closed Details.
 // The card never switches panels on its own: every jump is the user's "›"
-// click, through `withReturnFrom` so "Back to …" works (UX condition 6).
+// click, through the mode-aware openers (`openFlowTargetInPlace` in Guided,
+// `openFlowTarget` in Expert) so "Back to …" works (UX condition 6). Stop is
+// an inline second step (UX ruling B).
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { isAxiosError } from 'axios'
 import {
@@ -12,32 +14,41 @@ import {
 } from '../../api/runMonitor'
 import { useChatStore } from '../../store/chatStore'
 import { useUIStore, type SlidePanel } from '../../store/uiStore'
-import { withReturnFrom } from '../../layout/flowNavigation'
+import type { FlowTarget } from '../../api/flow'
+import { openFlowTarget, openFlowTargetInPlace } from '../../layout/flowNavigation'
+import { PANEL_SECTION } from '../../layout/flowSections'
 import { manualNavigation } from '../../utils/navigationEpoch'
 import {
-  FACT_WORDS, STAGE_STATUS_WORDS, euros, stageWords, stopWords, when, type RunFix,
+  FACT_UNITS, FACT_WORDS, STAGE_STATUS_WORDS, euros, stageWords, stopWords, when, type RunFix,
 } from './runWords'
 
 const POLL_MS = 4000
 const PRESENT_EVERY_MS = 60_000
 const OVER = new Set(['completed', 'cancelled'])
 
-/** Open a panel on the user's click, with "Back to <origin>". */
+/** Open a panel on the user's click, through the mode-aware opener (in place
+ *  over the cards in Guided, the panel in Expert), with "Back to <origin>". */
 export function openPanel(panel: SlidePanel): void {
   manualNavigation()
-  withReturnFrom(() => useUIStore.getState().setSlidePanel(panel))
+  const target: FlowTarget = {
+    section: PANEL_SECTION[panel] ?? 'results', panel, component: null, entity: null, field: null,
+  }
+  if (useUIStore.getState().uiMode === 'guided') openFlowTargetInPlace(target)
+  else openFlowTarget(target)
 }
 
 function ruleWords(r: GateRule): string {
+  const unit = r.unit ?? FACT_UNITS[r.fact]
   const value = typeof r.value === 'number' && Number.isFinite(r.value)
-    ? ` · ${r.value}${r.unit ? ` ${r.unit}` : ''}` : ''
+    ? ` · ${r.value}${unit ? ` ${unit}` : ''}` : ''
   return `${FACT_WORDS[r.fact] ?? 'A check'}${value}`
 }
 
 function Budgets({ view }: { view: RunMonitorView }) {
   const b = view.monitor.budgets
   const parts = [b.cost_eur.unmetered ? 'Cost could not be counted'
-    : `Cost ${euros(b.cost_eur.used)} of ${euros(b.cost_eur.limit)}`]
+    : b.cost_eur.limit > 0 ? `Cost ${euros(b.cost_eur.used)} of ${euros(b.cost_eur.limit)}`
+    : `Cost ${euros(b.cost_eur.used)} · no cost cap`]
   if (b.solves) parts.push(`Solves ${b.solves.used} of ${b.solves.of}`)
   if (b.expires_at) parts.push(`Expires ${when(b.expires_at)}`)
   return <div data-testid="run-budgets">{parts.join(' · ')}</div>
@@ -71,6 +82,7 @@ export default function RunMonitor({ task, disabled, onRequest }: {
   const [gone, setGone] = useState(false)
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState<string | null>(null)
+  const [stopping, setStopping] = useState(false)
   const presented = useRef<{ ref: string; at: number } | null>(null)
   const answered = useRef<Set<string>>(new Set())
 
@@ -133,9 +145,10 @@ export default function RunMonitor({ task, disabled, onRequest }: {
   const sessionId = useChatStore((s) => s.sessionId)
   const fix = (which: RunFix) => {
     if (which === 'resume') void act(() => resumeRun(taskId, sessionId))
-    else if (which === 'inputs') openPanel('hubDesign')
+    else if (which === 'issues') openPanel('issues')
     else if (which === 'results') openPanel('results')
     else if (which === 'solve_log') openPanel('solveQueue')
+    else if (which === 'budget') onRequest(`Use get_task with task_id ${taskId}. The run used up its budget: show me its envelope so I can change the budget.`)
     else if (which === 'new_brief') onRequest('The inputs changed outside the run. Draft a new brief for me to review.')
     else onRequest(`Use get_task with task_id ${taskId}. Inspect the uncertain step's effects and explain what needs verification before reconciliation.`)
   }
@@ -183,16 +196,17 @@ export default function RunMonitor({ task, disabled, onRequest }: {
 
     {gateFailed && <div data-testid="run-failure">
       {stoppedAt} failed: {failedRules} {failedRules === 1 ? 'rule' : 'rules'} did not pass ·{' '}
-      <Link onClick={() => fix(run.stage === 'result_gate' ? 'results' : 'inputs')}>
-        {run.stage === 'result_gate' ? 'Open results' : 'Fix in Inputs'}</Link>{' '}
+      <Link onClick={() => fix(run.stage === 'result_gate' ? 'results' : 'issues')}>
+        {run.stage === 'result_gate' ? 'Open results' : 'See the issues'}</Link>{' '}
       <span className="text-muted">then</span>{' '}
       <Link disabled={busy} onClick={() => fix('resume')}>Check again</Link>
     </div>}
     {stop && !cancelled && <div data-testid="run-failure">
       {stop.words}{stop.fix && <>: <Link disabled={busy} onClick={() => fix(stop.fix!)}>{stop.fixWords}</Link></>}
-      {run.reason === 'user' && <p className="text-muted">
-        {view.envelope?.state === 'granted' ? 'The unattended approval keeps running until it expires.' : 'Nothing runs until you resume.'}
-      </p>}
+      {run.status === 'paused' && <p className="text-muted" data-testid="run-resume-note">
+        Nothing runs until you resume: it picks up at {stoppedAt}.</p>}
+      {run.status === 'paused' && view.envelope?.state === 'granted' && <p className="text-muted" data-testid="run-paused-expiry">
+        Unattended approval expires {when(view.envelope.expires_at ?? view.monitor.budgets.expires_at)}</p>}
     </div>}
 
     {going && (pausedAt || run.status === 'needs_user') && <div data-testid="run-waiting">
@@ -225,14 +239,24 @@ export default function RunMonitor({ task, disabled, onRequest }: {
     {!cancelled && !finished && <div className="mt-1 flex flex-wrap items-baseline gap-2">
       {going && <button type="button" disabled={busy} className="text-accent disabled:opacity-40" data-testid="run-pause"
         onClick={() => void act(() => pauseRun(taskId))}>Pause</button>}
-      <button type="button" disabled={busy} className="text-muted hover:text-text disabled:opacity-40" data-testid="run-stop"
-        onClick={() => void act(() => stopRun(taskId))}>Stop</button>
-      <span className="text-muted" data-testid="run-stop-note">
-        Stop keeps the edits applied so far and the results so far; it cannot be undone.</span>
+      {!stopping && <button type="button" disabled={busy} className="text-muted hover:text-text disabled:opacity-40" data-testid="run-stop"
+        onClick={() => setStopping(true)}>Stop</button>}
+    </div>}
+    {stopping && !cancelled && !finished && <div role="group" aria-label="Stop the run?" data-testid="run-stop-confirm">
+      <div className="flex flex-wrap items-baseline gap-1">
+        <span className="font-medium">Stop the run?</span>
+        <button type="button" disabled={busy} className="text-amber-400 hover:underline disabled:opacity-40" data-testid="run-stop-yes"
+          onClick={() => { setStopping(false); void act(() => stopRun(taskId)) }}>Stop</button>
+        <span className="text-muted">·</span>
+        <button type="button" disabled={busy} className="text-accent hover:underline disabled:opacity-40" data-testid="run-stop-keep"
+          onClick={() => setStopping(false)}>Keep running</button>
+      </div>
+      <p className="text-muted" data-testid="run-stop-note">
+        The edits applied so far and the results so far are kept. A stopped run cannot be restarted.</p>
     </div>}
     {!guided && <details className="mt-1 text-muted"><summary>Details</summary>
       <div>Task {taskId}</div>
-      <div>Stage {run.stage} · {run.status}{run.reason ? ` · ${run.reason}` : ''}</div>
+      <div>Stage {run.stage}</div>
     </details>}
   </div>
 }

@@ -15,12 +15,13 @@ export type EnvelopeVerdict =
 
 const VERDICT = 'w-full text-left px-2.5 py-1.5 text-[12px] rounded border transition-colors disabled:opacity-50'
 
-function Stepper({ label, value, max, unit, onChange, testId }: {
-  label: string; value: number; max: number; unit?: string; onChange: (v: number) => void; testId: string
+function Stepper({ label, name, value, max, unit, onChange, testId }: {
+  /** `name` is the input's accessible name ("Solves, at most"). */
+  label: string; name: string; value: number; max: number; unit?: string; onChange: (v: number) => void; testId: string
 }) {
   return <label className="inline-flex items-center gap-1">
     {label}
-    <input type="number" min={1} max={max} step={1} value={value} data-testid={testId}
+    <input type="number" min={1} max={max} step={1} value={value} data-testid={testId} aria-label={name}
       onChange={(e) => {
         const v = Math.floor(Number(e.target.value))
         if (Number.isFinite(v)) onChange(Math.min(max, Math.max(1, v)))
@@ -72,25 +73,27 @@ export default function EnvelopeSection({ taskId, proposed, disabled, onVerdict 
         <label className="inline-flex items-start gap-1.5">
           <input type="checkbox" checked={edits[i] ?? false} disabled={disabled}
             onChange={() => setEdits(cur => cur.map((v, j) => (j === i ? !v : v)))} />
-          <span>{editSubject(e)}: {editLimits(e)}</span>
+          <span className={edits[i] ? undefined : 'text-muted line-through'}>{editSubject(e)}: {editLimits(e)}</span>
+          {!edits[i] && <span className="text-muted" data-testid="envelope-removed">· removed</span>}
         </label>
       </li>)}
       {envelope.runs.map((r, i) => <li key={`r${i}`} data-testid="envelope-run">
         <label className="inline-flex items-start gap-1.5">
           <input type="checkbox" checked={runs[i] ?? false} disabled={disabled}
             onChange={() => setRuns(cur => cur.map((v, j) => (j === i ? !v : v)))} />
-          <span>{runWords(r)}</span>
+          <span className={runs[i] ? undefined : 'text-muted line-through'}>{runWords(r)}</span>
+          {!runs[i] && <span className="text-muted" data-testid="envelope-removed">· removed</span>}
         </label>
       </li>)}
     </ul>
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1" data-testid="envelope-budgets">
-      <Stepper label="Solves up to" value={solves} max={proposed.budget.solves} onChange={setSolves} testId="envelope-solves" />
+      <Stepper label="Solves up to" name="Solves, at most" value={solves} max={proposed.budget.solves} onChange={setSolves} testId="envelope-solves" />
       <span>·</span>
       <span>Rounds up to {envelope.budget.rounds}</span>
       <span>·</span>
-      <Stepper label="Expires after" value={hours} max={proposed.budget.wall_time_h} unit="h" onChange={setHours} testId="envelope-hours" />
+      <Stepper label="Expires after" name="Hours until it expires, at most" value={hours} max={proposed.budget.wall_time_h} unit="h" onChange={setHours} testId="envelope-hours" />
       <span>·</span>
-      <span>{costCap !== undefined ? `Cost cap ${euros(costCap)}` : 'no cost cap'}</span>
+      <span>{costCap !== undefined && costCap > 0 ? `Cost cap ${euros(costCap)}` : 'no cost cap'}</span>
     </div>
     <div data-testid="envelope-research">
       {envelope.research.allowed ? `Research cost cap ${euros(envelope.research.cost_cap_eur)}` : 'No research'}
@@ -100,7 +103,7 @@ export default function EnvelopeSection({ taskId, proposed, disabled, onVerdict 
     <label className="inline-flex items-center gap-1.5" data-testid="envelope-email">
       <input type="checkbox" checked={emailOk && email} disabled={disabled || !emailOk} onChange={() => setEmail(v => !v)} />
       Email me when it needs me or ends
-      {view && !emailOk && <span className="text-muted">: email is not set up on this server</span>}
+      {view && !emailOk && <span className="text-muted" data-testid="envelope-email-reason">: email is not set up on this server</span>}
     </label>
     <div className="mt-2 flex flex-col gap-1.5" role="group" aria-label="Your verdict">
       <button type="button" data-testid="envelope-verdict" data-verdict="unattended"

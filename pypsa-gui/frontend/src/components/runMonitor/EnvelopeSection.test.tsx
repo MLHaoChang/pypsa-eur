@@ -35,10 +35,10 @@ describe('EnvelopeSection', () => {
     open()
     await waitFor(() => expect(screen.getByTestId('envelope-budgets').textContent).toContain('Cost cap €5.00'))
     expect(screen.getAllByTestId('envelope-edit').map(e => e.textContent)).toEqual([
-      "New gensets · maximum size: 0 MW or more, within ±50 % of today's value",
-      "New PV · maximum size: 0 MW or more, within ±50 % of today's value",
-      "New batteries · maximum size: 0 MW or more, within ±50 % of today's value",
-      'New batteries · storage hours: 1 h to 8 h',
+      "New gensets · Maximum capacity: 0 MW or more, within ±50 % of today's value",
+      "New PV · Maximum capacity: 0 MW or more, within ±50 % of today's value",
+      "New batteries · Maximum capacity: 0 MW or more, within ±50 % of today's value",
+      'New batteries · Storage hours: 1 h to 8 h',
     ])
     expect(screen.getByTestId('envelope-run').textContent).toBe('Queued solves')
     expect(screen.getByTestId('envelope-research').textContent).toBe('No research')
@@ -68,7 +68,8 @@ describe('EnvelopeSection', () => {
   it('grants the narrowed envelope as the harness turn, never wider', async () => {
     open({ email: { available: false } })
     await waitFor(() => expect((screen.getAllByTestId('envelope-verdict')[0] as HTMLButtonElement).disabled).toBe(false))
-    expect(screen.getByTestId('envelope-email').textContent).toContain('email is not set up on this server')
+    expect(screen.getByTestId('envelope-email-reason').textContent).toBe(': email is not set up on this server')
+    expect((screen.getByTestId('envelope-email').querySelector('input') as HTMLInputElement).disabled).toBe(true)
     fireEvent.click(screen.getAllByTestId('envelope-edit')[1].querySelector('input')!)
     fireEvent.change(screen.getByTestId('envelope-solves'), { target: { value: '4' } })
     fireEvent.change(screen.getByTestId('envelope-hours'), { target: { value: '99' } })  // never above the proposal
@@ -83,6 +84,25 @@ describe('EnvelopeSection', () => {
     expect(envelope.budget).toEqual({ solves: 4, rounds: 6, wall_time_h: 8 })
     expect(request.label).toBe('Own site study: Approve and run unattended')
     expect(useChatStore.getState().choice).toBeNull()
+  })
+
+  it('an unticked edit stays visible, marked removed; ticking it again restores it', async () => {
+    open()
+    await screen.findByTestId('envelope-section')
+    const box = screen.getAllByTestId('envelope-edit')[1].querySelector('input')!
+    fireEvent.click(box)
+    expect(screen.getAllByTestId('envelope-edit')).toHaveLength(4)
+    expect(screen.getAllByTestId('envelope-edit')[1].textContent).toMatch(/^New PV · Maximum capacity: .* · removed$/)
+    expect(screen.getAllByTestId('envelope-removed')).toHaveLength(1)
+    fireEvent.click(box)
+    expect(screen.queryByTestId('envelope-removed')).toBeNull()
+  })
+
+  it('the steppers have accessible names; an unset cost cap is said in words', async () => {
+    open({ budgets: { cost_eur: { used: 0, limit: 0, unmetered: false } } })
+    expect(await screen.findByRole('spinbutton', { name: 'Solves, at most' })).toBeTruthy()
+    expect(screen.getByRole('spinbutton', { name: 'Hours until it expires, at most' })).toBeTruthy()
+    await waitFor(() => expect(screen.getByTestId('envelope-budgets').textContent).toContain('no cost cap'))
   })
 
   it('step by step grants nothing; Change is an ordinary answer', async () => {

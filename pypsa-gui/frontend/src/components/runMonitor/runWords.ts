@@ -3,6 +3,9 @@
 // shows a raw key. `backend/tests/test_harness_run_monitor.py` checks that
 // every profile envelope's component, field and run tool has words here.
 import type { EnvelopeEdit, EnvelopeRun } from '../../api/runMonitor'
+import { COMPONENT_LABEL } from '../../utils/componentLabels'
+import { FIELD_LABELS } from '../../utils/fieldLabels'
+import { fmtCurrency } from '../../utils/format'
 
 /** The stage names (design §10), in run order. */
 export const STAGE_WORDS: Record<string, string> = {
@@ -33,9 +36,22 @@ export const FACT_WORDS: Record<string, string> = {
   'ic.baseline_keeps': 'The comparison keeps the baseline',
 }
 
-/** An envelope edit's component class, by its panel's word. */
-export const COMPONENT_WORDS: Record<string, string> = {
-  Generator: 'Generators', StorageUnit: 'Batteries', Store: 'Stores', Link: 'Process units', Load: 'Loads',
+/** The unit a counted gate fact is read in, when the rule sends none:
+ *  "The model has no errors · 0 errors". */
+export const FACT_UNITS: Record<string, string> = {
+  'validate.errors': 'errors',
+  'diagnose.unserved_islands': 'unconnected load groups',
+}
+
+/** An envelope edit's component class: the panels' own word (`COMPONENT_LABEL`).
+ *  Written as one entry per class so the backend's parity test
+ *  (`test_harness_run_monitor.py`) can read the keys from this file. */
+export const COMPONENT_WORDS: Record<string, { words: string }> = {
+  Generator: { words: COMPONENT_LABEL.Generator },
+  StorageUnit: { words: COMPONENT_LABEL.StorageUnit },
+  Store: { words: COMPONENT_LABEL.Store },
+  Link: { words: COMPONENT_LABEL.Link },
+  Load: { words: COMPONENT_LABEL.Load },
 }
 
 /** The names a profile's envelope globs over, in words. */
@@ -43,13 +59,13 @@ export const NAME_WORDS: Record<string, string> = {
   'genset_new_*': 'New gensets', 'pv_new_*': 'New PV', 'bess_new_*': 'New batteries',
 }
 
-/** An envelope edit's field: its word and unit. */
+/** An envelope edit's field: the panels' own word (`FIELD_LABELS`) and its unit. */
 export const FIELD_WORDS: Record<string, { words: string; unit: string }> = {
-  p_nom: { words: 'size', unit: 'MW' },
-  p_nom_max: { words: 'maximum size', unit: 'MW' },
-  p_nom_min: { words: 'minimum size', unit: 'MW' },
-  max_hours: { words: 'storage hours', unit: 'h' },
-  marginal_cost: { words: 'running cost', unit: '€/MWh' },
+  p_nom: { words: FIELD_LABELS.p_nom, unit: 'MW' },
+  p_nom_max: { words: FIELD_LABELS.p_nom_max, unit: 'MW' },
+  p_nom_min: { words: FIELD_LABELS.p_nom_min, unit: 'MW' },
+  max_hours: { words: FIELD_LABELS.max_hours, unit: 'h' },
+  marginal_cost: { words: FIELD_LABELS.marginal_cost, unit: '€/MWh' },
 }
 
 /** The runs an envelope can cover. */
@@ -60,11 +76,11 @@ export const RUN_WORDS: Record<string, string> = {
 
 const number = (x: number) => (Number.isInteger(x) ? String(x) : x.toFixed(2).replace(/\.?0+$/, ''))
 
-/** "New gensets · maximum size" */
+/** "New gensets · Maximum capacity" */
 export function editSubject(edit: EnvelopeEdit): string {
   const { component, name, attr } = edit.target
-  const who = NAME_WORDS[name] ?? `${COMPONENT_WORDS[component] ?? 'Assets'} named ${name}`
-  return `${who} · ${FIELD_WORDS[attr]?.words ?? 'a design value'}`
+  const who = NAME_WORDS[name] ?? `${COMPONENT_WORDS[component]?.words ?? 'Asset'} '${name}'`
+  return `${who} · ${FIELD_WORDS[attr]?.words ?? 'A design value'}`
 }
 
 /** "0 MW or more, within ±50 % of today's value" · "1 h to 8 h" · "one of: a, b" */
@@ -83,9 +99,8 @@ export function editLimits(edit: EnvelopeEdit): string {
 
 export const runWords = (run: EnvelopeRun): string => RUN_WORDS[run.tool] ?? 'Other runs'
 
-export function euros(x: number): string {
-  return `€${x.toFixed(2)}`
-}
+/** "€2.00", the KPI currency format. */
+export const euros = (x: number): string => fmtCurrency(x)
 
 /** "28 Oct 18:00", in the viewer's time zone. */
 export function when(iso: string | null | undefined): string {
@@ -104,8 +119,10 @@ export const UNATTENDED_BLOCK_WORDS: Record<string, string> = {
   locked: 'Another user is editing this project',
 }
 
-/** The fix a stopped run offers: a link in words (UX condition 8). */
-export type RunFix = 'resume' | 'inputs' | 'results' | 'solve_log' | 'new_brief' | 'review'
+/** The fix a stopped run offers: a link in words (UX condition 8).
+ *  `issues`, `results` and `solve_log` open a panel; `budget`, `new_brief`
+ *  and `review` ask the assistant on the user's click; `resume` resumes. */
+export type RunFix = 'resume' | 'issues' | 'results' | 'solve_log' | 'budget' | 'new_brief' | 'review'
 
 /** A run the runner stopped, in words, with its fix. `reason` is the
  *  backend's `run.reason`; an unknown one still reads in words. */
@@ -113,8 +130,8 @@ export function stopWords(reason: string | undefined, stage: string): { words: s
   const at = stageWords(stage)
   switch (reason) {
     case 'user': return { words: `Paused at ${at}`, fix: 'resume', fixWords: 'Resume' }
-    case 'budget': return { words: 'Cost budget used up: the run stopped', fix: 'results', fixWords: 'Review the results so far' }
-    case 'envelope_exhausted': return { words: 'Solve budget used up', fix: 'resume', fixWords: 'Continue step by step' }
+    case 'budget': return { words: 'Cost budget used up: the run stopped', fix: 'budget', fixWords: 'Change the budget' }
+    case 'envelope_exhausted': return { words: 'Solve budget used up: the run stopped', fix: 'budget', fixWords: 'Change the budget' }
     case 'envelope_expired': return { words: 'Unattended approval expired', fix: 'resume', fixWords: 'Continue step by step' }
     case 'envelope_revoked': return { words: 'Unattended approval withdrawn', fix: 'resume', fixWords: 'Continue step by step' }
     case 'envelope_drift':

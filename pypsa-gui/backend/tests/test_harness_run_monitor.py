@@ -6,7 +6,10 @@ as the companion calls them."""
 # ruff: noqa: F811 -- imported pytest fixtures
 import json
 import re
+import uuid
 from pathlib import Path
+
+import pytest
 
 from harness import confirm, runner as harness_runner
 from services import chat_tools
@@ -114,6 +117,100 @@ def test_an_unknown_foreign_or_unreachable_run_is_task_not_found_and_nothing_cha
         for action in ("present", "pause", "resume", "stop"):
             response = client.post(f"/api/chat/runs/{target}/{action}")
             assert response.status_code == 404 and response.json()["detail"]["error_kind"] == "task_not_found"
+    assert path.read_text() == before
+
+
+RUN_ACTIONS = ("present", "pause", "resume", "stop", "confirm")
+
+
+def run_call(client, task_id, action):
+    """One click on the plan card, as the companion sends it."""
+    if action == "view":
+        return client.get(f"/api/chat/runs/{task_id}/view")
+    if action == "confirm":
+        return client.post(f"/api/chat/run:{task_id}/confirm", json={"token": "t" * 16, "decision": "approve"})
+    return client.post(f"/api/chat/runs/{task_id}/{action}")
+
+
+def lose_owner(path):
+    record = json.loads(path.read_text())
+    record["owner_id"] = "00000000-0000-0000-0000-000000000001"
+    path.write_text(json.dumps(record))
+
+
+@pytest.fixture
+def member_only(seeded_identity, second_identity, _auth_db):
+    """The caller reaches the project only through a project membership row:
+    an org member (not admin) who did not create it. Yields (add, remove)."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy import delete, update
+
+    from db.models import OrgMembership, Project, ProjectMembership
+    _engine, session_local = _auth_db
+    me = seeded_identity["user_id"]
+
+    def add(project_id):
+        with session_local() as db:
+            db.execute(update(OrgMembership).where(OrgMembership.user_id == me).values(role="member"))
+            db.execute(update(Project).where(Project.id == uuid.UUID(project_id))
+                       .values(created_by=second_identity["user_id"]))
+            db.add(ProjectMembership(project_id=uuid.UUID(project_id), user_id=me, assigned_by=me,
+                                     assigned_at=datetime.now(tz=timezone.utc)))
+            db.commit()
+
+    def remove(project_id):
+        with session_local() as db:  # the real membership row, deleted
+            gone = db.execute(delete(ProjectMembership).where(ProjectMembership.user_id == me,
+                                                              ProjectMembership.project_id == uuid.UUID(project_id)))
+            assert gone.rowcount == 1
+            db.commit()
+    try:
+        yield add, remove
+    finally:
+        with session_local() as db:
+            db.execute(update(OrgMembership).where(OrgMembership.user_id == me).values(role="admin"))
+            db.commit()
+
+
+def delete_project(project_id):
+    from sqlalchemy import delete
+
+    from db.models import Project
+    from db.session import SessionLocal
+    with SessionLocal() as db:
+        assert db.execute(delete(Project).where(Project.id == uuid.UUID(project_id))).rowcount == 1
+        db.commit()
+
+
+@pytest.mark.parametrize("case", ["unknown", "foreign", "removed", "deleted"])
+def test_a_run_the_caller_cannot_reach_is_the_same_task_not_found_on_every_route(client, session, site,
+                                                                                 member_only, case):
+    """GK B (1), SC-16: an unknown run, another user's, one in a project the
+    caller was removed from (a real membership-row delete) and one in a
+    deleted project are told apart by nothing: the same 404 bytes on the view
+    and on every click, and nothing changes."""
+    project_id, root = site
+    task = start()
+    path = task_path(root, task)
+    unknown = "00000000-0000-4000-8000-000000000000"
+    expected = {a: run_call(client, unknown, a) for a in ("view", *RUN_ACTIONS)}
+    assert all(r.status_code == 404 and r.json()["detail"]["error_kind"] == "task_not_found"
+               for r in expected.values()), {a: r.text for a, r in expected.items()}
+    target = unknown if case == "unknown" else task["task_id"]
+    if case == "foreign":
+        lose_owner(path)
+    elif case == "removed":
+        add, remove = member_only
+        add(project_id)
+        assert run_call(client, target, "view").status_code == 200  # reached through the membership alone
+        remove(project_id)
+    elif case == "deleted":
+        delete_project(project_id)
+    before = path.read_text()
+    for action in ("view", *RUN_ACTIONS):
+        response = run_call(client, target, action)
+        assert (response.status_code, response.content) == (404, expected[action].content), (action, response.text)
     assert path.read_text() == before
 
 
