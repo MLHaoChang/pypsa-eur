@@ -527,6 +527,32 @@ freq_bridge, freq_planned.
   lossless 39.5 (`dp_e1`); shortfall = import − (30 + 4.5).
 - Manifest: LC-D16.E4, E5 and E6 covered; the EMT/PLL/voltage unavailable row stays.
 
+## Hand-off 6 (2026-10-29, LC-06 (6), early)
+
+PR stack (each against master, stacked):
+- S2 #877 merged as 9b6770a4.
+- S3 #878 @dfcc445958102c3e725196737df8c104c29cc0a5 (master merged in at the coordinator's
+  request): GK B (9) OK @d4cc3f00 carries. CI restarted on it; premerge ok not yet sent.
+- S4 #880 @4356ec68603633441c9a79aa044511435272cd00: GK A OK @abd52b35 carries.
+- S5 #881 @76b46f4e3831f567fe2ca016023d8d57d3c274a7: GK A (4) OK @bdba756a carries.
+  "GUI backend shard 2/4" (run 40804860617) died to a runner shutdown; re-run the failed
+  job once that run completes (it was still in progress at hand-off).
+- S6 #884 @aa64ab5e2f51a58f78336e0cc8835880522a2cb4: GK A (4) OK.
+- S7 #885 @7b72e519c7b75c16e9274cfc5a0fa52ceabeb0cd: GK A (4) OK.
+- S8a #886 @45795d5173977cb493c14f7f3adde673a8e18e90: GK A (4) OK.
+- S8b #887: review requested from GK A (4); the GO conditions are above.
+The coordinator's order: after each merge, merge master into the next PR (a merge commit),
+then send premerge ok for it once green, in stack order.
+
+Next: S9 (D17 chain) and the GK B D-rows as in Hand-off 1, each with a plan to its GK first.
+
+Follow-ups: ticket 26 (with #881), ticket 27 (the chat island report trims the frequency tables).
+
+Env: as in Hand-off 2. The whole d16 file runs in about 5 min. premerge: `PREMERGE_PYTHON=/root/.venv-pypsa-gui/bin/python bash scripts/coord/premerge.sh <pr>`
+(about 3 min with its semantic tests). gh GraphQL is refused here; use `gh api` REST. `send_later` is
+refused (lineage depth 8), so there is no self check-in.
+Last merged SHA: 9b6770a4 (#877).
+
 ## Hand-off 5 (2026-10-29, LC-06 (5) at 300k)
 
 PR stack (each against master, stacked; all merges clean):
