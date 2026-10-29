@@ -197,6 +197,37 @@ session session_01G7qCun3kha23YVZyoEFDuW.
 - Limit: a rolling window that stops on a limit without an incumbent is
   not caught, because PyPSA only logs it.
 
+### S3, LC-D07 independent static PF (2026-10-28)
+
+Branch `claude/lc06-d07-static-pf`, stacked on S2. GK B reviews. Session LC-06 (3).
+
+- `tests/test_lc06_d07_static_pf.py`: a meshed 3-bus 110 kV network (one line
+  with shunt susceptance) goes through `run_simulation`, then `run_ac_pf_stage`
+  with `ac_pf_x_tol = 1e-10` set by `update_solver_config`. The test builds the
+  Ybus from the line ohms and siemens and solves the power balance with
+  `scipy.optimize.root`, independently of PyPSA's NR. The residual must be
+  below 1e-9 MW/Mvar.
+  - Through `get_results(..., source='ac_pf')`: bus voltages (1e-9 p.u.), bus0 P/Q,
+    per-line losses (p0 + p1) and the total, and the slack = load + losses
+    (1e-6 MW).
+  - bus1 P/Q come from the solved network, since no tool serves them. At the load
+    bus C, the lines deliver 60 + j80 = 100 MVA (KCL).
+  - `get_loadflow_summary(source='ac_pf')`: peak apparent power and utilisation
+    equal the independent max-terminal |S| (rounded to 2 decimals).
+  - On the LC-T07 weighted fixture, P=60/Q=80 at both terminals gives exactly
+    100.0 MVA, util 100.0 %, peak_at snapshot 0, h_at_limit 1.0 and
+    h_over_limit 0.0.
+- Measured agreement: 2e-16 p.u. and 3e-13 MW. Mutations, each red on its own test:
+  1. r × 1.01 in the oracle's Ybus: the voltages fail.
+  2. Full shunt instead of b/2 at each end: the bus0 flows fail.
+  3. Load q × 0.999 in the app network: the bus1 terminals and KCL fail.
+  4. r × 1.01 in the app network: the losses and slack fail.
+  5. s_nom 201: the summary fails.
+  6. Q 79 on the fixture: the exact 100 MVA test fails.
+  7. The oracle's KCL off by 1e-5: its self-check fails.
+  8. x_tol 1e-3: the voltages and the bus0 flows fail.
+- No engine defect was found. `LC-D07.n1_voltage` stays unavailable (LIMITS_CLAIM).
+
 ## Hand-off (2026-10-28, context near 300k)
 
 State:
