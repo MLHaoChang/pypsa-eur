@@ -50,7 +50,7 @@ describe('RunMonitor', () => {
     show('gate_pass')
     await screen.findByTestId('run-current-stage')
     expect(screen.getAllByTestId('run-gate-rule').map(r => r.textContent)).toEqual(
-      ['The model has no errors · 0 errors · pass', 'The model is ready to solve · pass'])
+      ['The model has no errors · pass', 'The model is ready to solve · pass'])
     expect(screen.getByTestId('run-budgets').textContent).toMatch(/^Cost €0\.42 of €5\.00 · Solves 3 of 6 · Expires \d+ Oct \d\d:\d\d$/)
     cleanup()
     show('loop')
@@ -87,9 +87,9 @@ describe('RunMonitor', () => {
     })
 
   it.each([
-    ['gate_fail', /^Check inputs failed: 1 rule did not pass · See the issues › then Check again$/],
-    ['over_budget', /^Cost budget used up: the run stopped: Change the budget ›$/],
-    ['solves_used_up', /^Solve budget used up: the run stopped: Change the budget ›$/],
+    ['gate_fail', /^Check inputs failed: 1 rule did not pass\. See the issues ›, then Check again$/],
+    ['over_budget', /^Cost budget used up: the run waits for you: Change the budget ›$/],
+    ['solves_used_up', /^Solve budget used up: the run waits for you: Change the budget ›$/],
     ['expired', /^Unattended approval expired: Continue step by stepNothing runs until you resume: it picks up at Solve\.$/],
     ['solver_error', /^Solve did not finish: Open the solve log ›$/],
     ['out_of_date', /^Inputs out of date: Review a new brief ›$/],
@@ -123,6 +123,30 @@ describe('RunMonitor', () => {
     expect(useUIStore.getState().activeSlidePanel).toBe('issues')
   })
 
+  it('a failing counted rule says its count in singular or plural; a passing one only its name', async () => {
+    show('gate_fail')
+    await screen.findByTestId('run-current-stage')
+    expect(screen.getAllByTestId('run-gate-rule').map(r => r.textContent)).toEqual(
+      ['The model has no errors · pass', 'Every load is connected · 1 unconnected load group · fail'])
+  })
+
+  it.each([
+    ['over_budget', 'Solve · waits for you'], ['solves_used_up', 'Solve · waits for you'], ['waiting', 'Solve · waits for you'],
+    ['proposal', 'Inputs · waits for you'], ['paused', 'Solve · paused'], ['stopped', 'Solve · stopped'], ['loop', 'Solve · now'],
+  ] as const)('%s: the current stage row says %s', async (state, words) => {
+    show(state)
+    await screen.findByTestId('run-state')
+    const row = screen.getAllByTestId('run-stage').find(r => r.getAttribute('aria-current') === 'step')!
+    expect(row.querySelector('[data-testid="run-stage-words"]')?.textContent).toBe(words)
+  })
+
+  it.each(['over_budget', 'solves_used_up'] as const)('%s: a held run offers Stop but not Pause', async (state) => {
+    show(state)
+    await screen.findByTestId('run-failure')
+    expect(screen.queryByTestId('run-pause')).toBeNull()
+    expect(screen.getByTestId('run-stop')).toBeTruthy()
+  })
+
   it('solve budget used up: "Change the budget ›" reopens this run\u2019s Envelope section, not Resume', async () => {
     useChatStore.setState({ messages: [], choice: null })
     show('solves_used_up')
@@ -151,7 +175,8 @@ describe('RunMonitor', () => {
     expect(screen.queryByTestId('run-report-link')).toBeNull()
     cleanup()
     show('finished')
-    await screen.findByTestId('run-finished')
+    expect((await screen.findByTestId('run-state')).textContent).toBe('Finished')
+    expect(screen.queryByTestId('run-finished')).toBeNull()
     expect(screen.queryByTestId('run-report-link')).toBeNull()
     cleanup()
     show('finished_report')
@@ -179,6 +204,7 @@ describe('RunMonitor', () => {
     const failure = await screen.findByTestId('run-failure')
     expect(failure.textContent).toMatch(/^Paused at Solve: ResumeNothing runs until you resume: it picks up at Solve\.Unattended approval expires/)
     expect(screen.getByTestId('run-paused-expiry').textContent).toMatch(/^Unattended approval expires \d{1,2} Oct \d\d:\d\d$/)
+    expect(screen.getByTestId('run-budgets').textContent).not.toMatch(/Expires/)
     fireEvent.click(screen.getByRole('button', { name: 'Resume' }))
     await waitFor(() => expect(api.resumeRun).toHaveBeenCalledWith(TASK_ID, 's1'))
   })
@@ -189,6 +215,9 @@ describe('RunMonitor', () => {
     const step = screen.getByTestId('run-stop-confirm')
     expect(step.textContent).toBe('Stop the run?Stop·Keep runningThe edits applied so far and the results so far are kept. A stopped run cannot be restarted.')
     expect(screen.queryByTestId('run-stop')).toBeNull()
+    // The safe choice is plain; only the destructive Stop is marked.
+    expect(screen.getByTestId('run-stop-keep').className).toMatch(/\btext-muted\b/)
+    expect(screen.getByTestId('run-stop-keep').className).not.toMatch(/text-accent|text-amber/)
     fireEvent.click(screen.getByTestId('run-stop-keep'))
     expect(screen.queryByTestId('run-stop-confirm')).toBeNull()
     expect(api.stopRun).not.toHaveBeenCalled()
@@ -204,7 +233,8 @@ describe('RunMonitor', () => {
     fireEvent.click(screen.getByTestId('run-stop-yes'))
     await waitFor(() => expect(api.stopRun).toHaveBeenCalledWith(TASK_ID))
     const stopped = await screen.findByTestId('run-stopped')
-    expect(stopped.textContent).toMatch(/^Stopped at Solve: the edits applied so far and the results so far are kept\./)
+    expect(stopped.textContent).toBe('Stopped at Solve: the edits applied so far and the results so far are kept. '
+      + 'A stopped run cannot be restarted: start a new one from the composer.')
     expect(card()).not.toMatch(/cancelled/i)
     expect(screen.queryByTestId('run-pause')).toBeNull()
   })
@@ -252,6 +282,23 @@ describe('RunMonitor', () => {
     const [request] = useChatStore.getState().requestQueue
     expect(request.harness).toEqual({ continue_task_id: TASK_ID })
     expect(request.label).toBe('Continue to Inputs')
+  })
+
+  it('a Continue that cannot work says why, in visible words', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(api.getRun).mockResolvedValue(STATES.proposal)
+    render(<AssistantResultCard result={START} disabled disabledReason="Needs a model key: chat is off" onRequest={vi.fn()} />)
+    const button = await screen.findByTestId('run-continue') as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    const reason = screen.getByTestId('run-continue-reason')
+    expect(reason.textContent).toBe('Needs a model key: chat is off')
+    expect(button.getAttribute('aria-describedby')).toBe(reason.id)
+  })
+
+  it('the waiting fixture\u2019s card expires a TTL from now, so the evidence shows a real countdown', () => {
+    const issued = STATES.waiting.monitor.card!
+    expect(issued.expires_at_epoch_ms - Date.now()).toBeGreaterThan(0)
+    expect(issued.expires_at_epoch_ms - Date.now()).toBeLessThanOrEqual(issued.ttl_seconds * 1000)
   })
 
   it('a run the caller can no longer reach says so in words (SC-16)', async () => {

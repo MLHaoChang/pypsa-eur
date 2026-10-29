@@ -45,12 +45,14 @@ const MONITOR = {
 const GRANTED = { ...ENVELOPE, state: 'granted' as const, expires_at: '2026-10-28T17:00:00Z', used: 3 }
 const GRANTED_BUDGETS = { ...MONITOR.budgets, solves: { used: 3, of: 6 }, expires_at: '2026-10-28T17:00:00Z' }
 
-/** `run_monitor._actions`: the run buttons that can work now. */
+/** `run_monitor._actions`: the run buttons that can work now. A run held on
+ *  a stop reason or a failed stage already waits for the user: no Pause. */
 function actions(status: string, run: RunMonitorView['run']): RunAction[] {
   const over = status === 'cancelled' || status === 'completed'
-  const resumable = !over && ['paused', 'needs_user'].includes(run.status)
-    && (Boolean(run.reason) || run.stages.find(s => s.stage === run.stage)?.status === 'failed')
-  return ([['pause', !over && ['running', 'waiting_job', 'needs_user'].includes(run.status)],
+  const failed = run.stages.find(s => s.stage === run.stage)?.status === 'failed'
+  const resumable = !over && ['paused', 'needs_user'].includes(run.status) && (Boolean(run.reason) || failed)
+  const held = run.status === 'needs_user' && (failed || !(run.reason ?? 'waiting_').startsWith('waiting_'))
+  return ([['pause', !over && ['running', 'waiting_job', 'needs_user'].includes(run.status) && !held],
     ['resume', resumable], ['stop', !over]] as const).filter(([, ok]) => ok).map(([name]) => name)
 }
 
@@ -82,7 +84,7 @@ export const STATES: Record<string, RunMonitorView> = {
   waiting: view({ run: run('solve', { status: 'needs_user', reason: 'waiting_card', waiting: { kind: 'card', ref: 'solve.1' },
     stages: stages('solve') }), monitor: { ...MONITOR, waiting: { kind: 'card', ref: 'solve.1' }, card: {
     tool_use_id: 'run-solve.1-ab12', tool_name: 'solve_queue_enqueue', args: {}, safety_tier: 'execution',
-    confirmation_token: 'tok1', ttl_seconds: 300, session_id: `run:${TASK_ID}`, expires_at_epoch_ms: 4102444800000 } } }),
+    confirmation_token: 'tok1', ttl_seconds: 300, session_id: `run:${TASK_ID}`, expires_at_epoch_ms: Date.now() + 300_000 } } }),
   paused: view({ run: run('solve', { status: 'paused', reason: 'user', stages: stages('solve') }), envelope: GRANTED,
     monitor: { ...MONITOR, budgets: GRANTED_BUDGETS } }),
   stop_confirm: view({ run: run('solve', { stages: stages('solve') }), envelope: GRANTED,

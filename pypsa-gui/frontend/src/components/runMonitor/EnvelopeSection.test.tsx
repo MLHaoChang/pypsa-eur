@@ -69,6 +69,10 @@ describe('EnvelopeSection', () => {
     open({ email: { available: false } })
     await waitFor(() => expect((screen.getAllByTestId('envelope-verdict')[0] as HTMLButtonElement).disabled).toBe(false))
     expect(screen.getByTestId('envelope-email-reason').textContent).toBe(': email is not set up on this server')
+    // The reason runs on from the words in one inline run, so no flex gap opens before its colon.
+    expect(screen.getByTestId('envelope-email-reason').parentElement?.textContent)
+      .toBe('Email me when it needs me or ends: email is not set up on this server')
+    expect(screen.getByTestId('envelope-email-reason').parentElement).not.toBe(screen.getByTestId('envelope-email'))
     expect((screen.getByTestId('envelope-email').querySelector('input') as HTMLInputElement).disabled).toBe(true)
     fireEvent.click(screen.getAllByTestId('envelope-edit')[1].querySelector('input')!)
     fireEvent.change(screen.getByTestId('envelope-solves'), { target: { value: '4' } })
@@ -86,6 +90,14 @@ describe('EnvelopeSection', () => {
     expect(useChatStore.getState().choice).toBeNull()
   })
 
+  it('the budget controls join with · only between items: each row starts and ends with an item', async () => {
+    open()
+    await waitFor(() => expect(screen.getByTestId('envelope-budgets').textContent).toContain('Cost cap €5.00'))
+    const rows = screen.getAllByTestId('envelope-budget-row').map(r => r.textContent ?? '')
+    // (flex items: textContent has no spaces between them)
+    expect(rows).toEqual(['Solves up to·Rounds up to 6', 'Expires afterh·Cost cap €5.00'])
+  })
+
   it('an unticked edit stays visible, marked removed; ticking it again restores it', async () => {
     open()
     await screen.findByTestId('envelope-section')
@@ -94,6 +106,9 @@ describe('EnvelopeSection', () => {
     expect(screen.getAllByTestId('envelope-edit')).toHaveLength(4)
     expect(screen.getAllByTestId('envelope-edit')[1].textContent).toMatch(/^New PV · Maximum capacity: .* · removed$/)
     expect(screen.getAllByTestId('envelope-removed')).toHaveLength(1)
+    // The strikethrough stops at the edit: its "· removed" is a box of its own, never struck.
+    expect(screen.getByTestId('envelope-removed').closest('.line-through')).toBeNull()
+    expect(screen.getByTestId('envelope-removed').className).toMatch(/\binline-block\b/)
     fireEvent.click(box)
     expect(screen.queryByTestId('envelope-removed')).toBeNull()
   })

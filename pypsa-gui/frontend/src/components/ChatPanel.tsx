@@ -2,6 +2,7 @@ import { navigationEpoch, manualNavigation } from '../utils/navigationEpoch'
 import AssistantResultCard from './AssistantResultCard'
 import EnvelopeSection, { type EnvelopeVerdict } from './runMonitor/EnvelopeSection'
 import { runUnderReview } from './runMonitor/planReview'
+import { UNATTENDED_BLOCK_WORDS } from './runMonitor/runWords'
 import DictationControls from './DictationControls'
 import { createPortal } from 'react-dom'
 /**
@@ -3574,6 +3575,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
             {m.role === 'tool' && m.tool_use_id && (
               <>
                 <AssistantResultCard result={m.tool_result} disabled={streaming || notReady || Boolean(mismatchLine)}
+                  disabledReason={notReady ? UNATTENDED_BLOCK_WORDS.no_provider : mismatchLine ?? undefined}
                   continuation={continuationLine(m.tool_result, m.origin_project)}
                   toolWords={uiMode === 'guided' ? guidedToolPhrase : undefined}
                   onRequest={(text) => useChatStore.getState().sendRequest(text, { source: 'assistant-task' })} />

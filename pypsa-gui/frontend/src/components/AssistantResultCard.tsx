@@ -89,8 +89,10 @@ function WaitingLine({ line }: { line: ContinuationLine }) {
   </div>
 }
 
-export default function AssistantResultCard({ result, disabled, onRequest, continuation, toolWords }: {
+export default function AssistantResultCard({ result, disabled, disabledReason, onRequest, continuation, toolWords }: {
   result: unknown; disabled: boolean; onRequest: (text: string) => void
+  /** Why `disabled` holds, in words, when it is not passing (chat off, project mismatch). */
+  disabledReason?: string
   /** LC-02: names a plan step's tool in words (Guided); the tool name otherwise. */
   toolWords?: (tool: string) => string
   /** LC-12: set while this card's plan waits on its job. */
@@ -118,7 +120,7 @@ export default function AssistantResultCard({ result, disabled, onRequest, conti
     ? data.cases.map(object).map(c => c?.project_id).filter((id): id is string => typeof id === 'string').slice(0, 4) : []
   if (!taskId && !link && !preview && !sweepCases.length) return null
   return <div className="mt-1 rounded border border-border p-2 font-sans text-xs" data-testid="assistant-result-card">
-    {taskId && object(task?.run) && <RunMonitor task={task!} disabled={disabled} onRequest={onRequest} />}
+    {taskId && object(task?.run) && <RunMonitor task={task!} disabled={disabled} disabledReason={disabledReason} onRequest={onRequest} />}
     {taskId && !object(task?.run) && <div data-testid="assistant-task-card">
       <div className="font-medium">{String(task?.title ?? 'Task')}</div>
       <div>{(guided && TASK_WORDS[status]) || status} · {Number(task?.completed_steps ?? 0)} / {Number(task?.total_steps ?? 0)} steps</div>

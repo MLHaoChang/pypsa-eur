@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { COMPONENT_LABEL } from '../../utils/componentLabels'
 import { FIELD_LABELS } from '../../utils/fieldLabels'
 import { ENVELOPE } from './runFixtures'
-import { COMPONENT_WORDS, FACT_UNITS, FACT_WORDS, FIELD_WORDS, RUN_WORDS, STAGE_WORDS, UNATTENDED_BLOCK_WORDS, editSubject } from './runWords'
+import { COMPONENT_WORDS, FACT_UNITS, factUnit, FACT_WORDS, FIELD_WORDS, RUN_WORDS, STAGE_WORDS, UNATTENDED_BLOCK_WORDS, editSubject } from './runWords'
 
 describe('runWords', () => {
   it('names an envelope field by the panels’ FIELD_LABELS, with a unit', () => {
@@ -34,6 +34,9 @@ describe('runWords', () => {
 
   it('a counted gate fact has a plain name and a unit', () => {
     for (const fact of Object.keys(FACT_UNITS)) expect(FACT_WORDS[fact], fact).toBeTruthy()
+    expect([factUnit('validate.errors', 1), factUnit('validate.errors', 2), factUnit('validate.errors', 0)])
+      .toEqual(['error', 'errors', 'errors'])
+    expect(factUnit('diagnose.unserved_islands', 1)).toBe('unconnected load group')
   })
 
   it('stage names are exactly the nine of design §10', () => {

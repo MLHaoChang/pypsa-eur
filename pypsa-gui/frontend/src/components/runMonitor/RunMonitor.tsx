@@ -18,7 +18,7 @@ import { openPanel } from '../../pages/results/openPanel'
 import { PANEL_SECTION } from '../../layout/flowSections'
 import { manualNavigation } from '../../utils/navigationEpoch'
 import {
-  FACT_UNITS, FACT_WORDS, STAGE_STATUS_WORDS, stageWords, stopWords, when, type RunFix,
+  FACT_WORDS, STAGE_STATUS_WORDS, factUnit, stageWords, stopWords, when, type RunFix,
 } from './runWords'
 import { runUnderReview } from './planReview'
 import { fmtCurrency } from '../../utils/format'
@@ -39,20 +39,25 @@ function errorKind(err: unknown): string | null {
   return isAxiosError(err) ? (err.response?.data as { detail?: { error_kind?: string } })?.detail?.error_kind ?? null : null
 }
 
+/** A gate rule in words; a failing counted rule adds its count:
+ *  "Every load is connected · 1 unconnected load group". A passing rule's
+ *  name already says its count ("The model has no errors"). */
 function ruleWords(r: GateRule): string {
-  const unit = r.unit ?? FACT_UNITS[r.fact]
-  const value = typeof r.value === 'number' && Number.isFinite(r.value)
-    ? ` · ${r.value}${unit ? ` ${unit}` : ''}` : ''
+  const counted = r.verdict !== 'pass' && typeof r.value === 'number' && Number.isFinite(r.value)
+  const unit = counted ? r.unit ?? factUnit(r.fact, r.value as number) : undefined
+  const value = counted ? ` · ${r.value}${unit ? ` ${unit}` : ''}` : ''
   return `${FACT_WORDS[r.fact] ?? 'A check'}${value}`
 }
 
 function Budgets({ view }: { view: RunMonitorView }) {
+  // A paused run says its expiry once, as "Unattended approval expires …".
+  const paused = view.run?.status === 'paused' && view.envelope?.state === 'granted'
   const b = view.monitor.budgets
   const parts = [b.cost_eur.unmetered ? 'Cost could not be counted'
     : b.cost_eur.limit > 0 ? `Cost ${fmtCurrency(b.cost_eur.used)} of ${fmtCurrency(b.cost_eur.limit)}`
     : `Cost ${fmtCurrency(b.cost_eur.used)} · no cost cap`]
   if (b.solves) parts.push(`Solves ${b.solves.used} of ${b.solves.of}`)
-  if (b.expires_at) parts.push(`Expires ${when(b.expires_at)}`)
+  if (b.expires_at && !paused) parts.push(`Expires ${when(b.expires_at)}`)
   return <div data-testid="run-budgets">{parts.join(' · ')}</div>
 }
 
@@ -81,9 +86,11 @@ function Action({ children, onClick, disabled }: { children: string; onClick: ()
     className="text-accent hover:underline disabled:opacity-40">{children}</button>
 }
 
-export default function RunMonitor({ task, disabled, onRequest }: {
+export default function RunMonitor({ task, disabled, disabledReason, onRequest }: {
   /** The run's view as the tool result carried it; refreshed from the server. */
   task: Record<string, unknown>; disabled: boolean; onRequest: (text: string) => void
+  /** Why a chat-sent click (Continue) cannot work now, in words; shown beside it. */
+  disabledReason?: string
 }) {
   const guided = useUIStore((s) => s.uiMode) === 'guided'
   const taskId = String(task.task_id)
@@ -209,6 +216,10 @@ export default function RunMonitor({ task, disabled, onRequest }: {
     : gateFailed ? `${stoppedAt} failed` : stop ? stop.words
     : pausedAt ? 'Waiting for you' : run.status === 'needs_user' ? 'Waiting for you'
     : `Running · ${stoppedAt}`
+  // The current stage row once the run is held, paused or over: where it stands, not "now".
+  const currentWords = cancelled ? 'stopped' : run.status === 'paused' ? 'paused'
+    : pausedAt || run.status === 'needs_user' ? 'waits for you' : 'now'
+  const continueReason = disabled && disabledReason ? disabledReason : null
 
   return <div data-testid="run-monitor" data-run-task={taskId} data-run-status={run.status} data-task-status={view.status}>
     <div className="font-medium">{title}</div>
@@ -218,7 +229,8 @@ export default function RunMonitor({ task, disabled, onRequest }: {
         const now = s.stage === run.stage && !finished
         return <li key={s.stage} data-testid="run-stage" data-stage={s.stage} data-status={s.status}
           aria-current={now ? 'step' : undefined} className={now ? 'font-medium' : s.status === 'skipped' ? 'text-muted' : ''}>
-          {stageWords(s.stage)} · {now && s.status === 'pending' ? 'now' : STAGE_STATUS_WORDS[s.status] ?? 'to do'}
+          <span data-testid="run-stage-words">{stageWords(s.stage)} · {now && ['pending', 'active'].includes(s.status)
+            ? currentWords : STAGE_STATUS_WORDS[s.status] ?? 'to do'}</span>
           {now && !cancelled && <CurrentStage stage={s} view={view} />}
         </li>
       })}
@@ -228,10 +240,10 @@ export default function RunMonitor({ task, disabled, onRequest }: {
     </ol>
 
     {gateFailed && <div data-testid="run-failure">
-      {stoppedAt} failed: {failedRules} {failedRules === 1 ? 'rule' : 'rules'} did not pass ·{' '}
+      {stoppedAt} failed: {failedRules} {failedRules === 1 ? 'rule' : 'rules'} did not pass.{' '}
       <Link onClick={() => fix(run.stage === 'result_gate' ? 'results' : 'issues')}>
-        {run.stage === 'result_gate' ? 'Open results' : 'See the issues'}</Link>{' '}
-      {can.has('resume') && <><span className="text-muted">then</span>{' '}
+        {run.stage === 'result_gate' ? 'Open results' : 'See the issues'}</Link>
+      {can.has('resume') && <><span className="text-muted">, then</span>{' '}
         <Action disabled={busy} onClick={() => fix('resume')}>Check again</Action></>}
     </div>}
     {stop && !cancelled && <div data-testid="run-failure">
@@ -249,11 +261,14 @@ export default function RunMonitor({ task, disabled, onRequest }: {
       <ul className="list-disc pl-5">
         {pausedAt && <li>
           <button type="button" disabled={disabled} className="text-accent disabled:opacity-40" data-testid="run-continue"
+            aria-describedby={continueReason ? `run-continue-reason-${taskId}` : undefined}
             onClick={() => useChatStore.getState().sendRequest(`Continue to ${stageWords(pausedAt)}`, {
               source: 'run-monitor', label: `Continue to ${stageWords(pausedAt)}`,
               harness: { continue_task_id: taskId } })}>
             Continue to {stageWords(pausedAt)}
           </button>
+          {continueReason && <div id={`run-continue-reason-${taskId}`} className="text-muted" data-testid="run-continue-reason">
+            {continueReason}</div>}
         </li>}
         {card && <li data-testid="run-waiting-card">A step needs your approval: see the card below</li>}
         {!card && view.monitor.waiting && !pausedAt && <li data-testid="run-waiting-step">A step waits for your decision; its card opens here</li>}
@@ -266,9 +281,9 @@ export default function RunMonitor({ task, disabled, onRequest }: {
 
     {cancelled && <p data-testid="run-stopped">
       Stopped at {stoppedAt}: the edits applied so far and the results so far are kept.
-      A stopped run cannot be restarted; start a new one from the composer.
+      A stopped run cannot be restarted: start a new one from the composer.
     </p>}
-    {finished && <p data-testid="run-finished">{hasReport ? 'Finished: the report is in Reports.' : 'Finished.'}</p>}
+    {finished && hasReport && <p data-testid="run-finished">The report is in Reports.</p>}
 
     {failed && <p className="text-amber-400">{failed}</p>}
     {(can.has('pause') || can.has('stop')) && <div className="mt-1 flex flex-wrap items-baseline gap-2">
@@ -283,7 +298,7 @@ export default function RunMonitor({ task, disabled, onRequest }: {
         <button type="button" disabled={busy} className="text-amber-400 hover:underline disabled:opacity-40" data-testid="run-stop-yes"
           onClick={() => { setStopping(false); void act(() => stopRun(taskId)) }}>Stop</button>
         <span className="text-muted">·</span>
-        <button type="button" disabled={busy} className="text-accent hover:underline disabled:opacity-40" data-testid="run-stop-keep"
+        <button type="button" disabled={busy} className="text-muted hover:text-text disabled:opacity-40" data-testid="run-stop-keep"
           onClick={() => setStopping(false)}>Keep running</button>
       </div>
       <p className="text-muted" data-testid="run-stop-note">

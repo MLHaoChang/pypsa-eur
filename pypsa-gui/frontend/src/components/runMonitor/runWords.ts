@@ -36,11 +36,17 @@ export const FACT_WORDS: Record<string, string> = {
   'ic.baseline_keeps': 'The comparison keeps the baseline',
 }
 
-/** The unit a counted gate fact is read in, when the rule sends none:
- *  "The model has no errors · 0 errors". */
-export const FACT_UNITS: Record<string, string> = {
-  'validate.errors': 'errors',
-  'diagnose.unserved_islands': 'unconnected load groups',
+/** The unit a counted gate fact is read in, when the rule sends none,
+ *  singular and plural: "Every load is connected · 1 unconnected load group". */
+export const FACT_UNITS: Record<string, { one: string; other: string }> = {
+  'validate.errors': { one: 'error', other: 'errors' },
+  'diagnose.unserved_islands': { one: 'unconnected load group', other: 'unconnected load groups' },
+}
+
+/** A counted gate fact's unit for `n`: "1 error", "2 errors". */
+export function factUnit(fact: string, n: number): string | undefined {
+  const unit = FACT_UNITS[fact]
+  return unit && (n === 1 ? unit.one : unit.other)
 }
 
 /** An envelope edit's component class: the panels' own word (`COMPONENT_LABEL`).
@@ -127,8 +133,8 @@ export function stopWords(reason: string | undefined, stage: string): { words: s
   const at = stageWords(stage)
   switch (reason) {
     case 'user': return { words: `Paused at ${at}`, fix: 'resume', fixWords: 'Resume' }
-    case 'budget': return { words: 'Cost budget used up: the run stopped', fix: 'budget', fixWords: 'Change the budget' }
-    case 'envelope_exhausted': return { words: 'Solve budget used up: the run stopped', fix: 'budget', fixWords: 'Change the budget' }
+    case 'budget': return { words: 'Cost budget used up: the run waits for you', fix: 'budget', fixWords: 'Change the budget' }
+    case 'envelope_exhausted': return { words: 'Solve budget used up: the run waits for you', fix: 'budget', fixWords: 'Change the budget' }
     case 'envelope_expired': return { words: 'Unattended approval expired', fix: 'resume', fixWords: 'Continue step by step' }
     case 'envelope_revoked': return { words: 'Unattended approval withdrawn', fix: 'resume', fixWords: 'Continue step by step' }
     case 'envelope_drift':

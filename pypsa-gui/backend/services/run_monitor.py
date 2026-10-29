@@ -124,9 +124,15 @@ def _actions(task):
     """The plan card's run buttons that can work now, in this order."""
     run, status = task["run"], task["status"]
     over = status in ("cancelled", "completed")
+    failed = run["stages"][run["stage"]]["status"] == "failed"
     resumable = not over and status != "paused_at_card" and run["status"] in ("paused", "needs_user") and (
-        bool(run.get("reason")) or run["stages"][run["stage"]]["status"] == "failed")
-    return [name for name, ok in (("pause", not over and run["status"] in _PAUSABLE),
+        bool(run.get("reason")) or failed)
+    # A run held on a stop reason or a failed stage already waits for the user: Pause has nothing
+    # to do. A run waiting on a card (`waiting_*`) still goes on once answered, so it can pause.
+    held = run["status"] == "needs_user" and (
+        failed or not str(run.get("reason") or "waiting_").startswith("waiting_"))
+    pausable = not over and run["status"] in _PAUSABLE and not held
+    return [name for name, ok in (("pause", pausable),
                                   ("resume", resumable), ("stop", not over)) if ok]
 
 

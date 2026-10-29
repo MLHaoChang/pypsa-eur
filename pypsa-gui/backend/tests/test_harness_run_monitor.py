@@ -454,6 +454,21 @@ def test_resume_with_the_budget_spent_stops_the_run_instead(client, session, sit
     assert (resumed["run"]["status"], resumed["run"]["reason"]) == ("needs_user", "budget")
 
 
+def test_a_run_held_on_a_stop_reason_offers_resume_and_stop_but_not_pause(client, session, site):
+    """A budget stop already holds the run for the user, so Pause has nothing to do."""
+    project_id, root = site
+    task = start()
+    path = task_path(root, task)
+    record = json.loads(path.read_text())
+    record["run"]["status"], record["run"]["reason"] = "needs_user", "budget"
+    path.write_text(json.dumps(record))
+    view = client.get(f"/api/chat/runs/{task['task_id']}/view").json()
+    assert view["monitor"]["actions"] == ["resume", "stop"]
+    record["run"]["reason"] = "waiting_card"  # a card the run waits on is not a hold: it can pause
+    path.write_text(json.dumps(record))
+    assert "pause" in client.get(f"/api/chat/runs/{task['task_id']}/view").json()["monitor"]["actions"]
+
+
 # ── GK B (3), (4): the live card ─────────────────────────────────────────────
 
 

@@ -75,7 +75,7 @@ export default function EnvelopeSection({ taskId, proposed, disabled, onVerdict 
           <input type="checkbox" checked={edits[i] ?? false} disabled={disabled}
             onChange={() => setEdits(cur => cur.map((v, j) => (j === i ? !v : v)))} />
           <span><span className={edits[i] ? undefined : 'text-muted line-through'}>{editSubject(e)}: {editLimits(e)}</span>
-            {!edits[i] && <span className="text-muted" data-testid="envelope-removed">{' · removed'}</span>}</span>
+            {!edits[i] && <>{' '}<span className="inline-block text-muted" data-testid="envelope-removed">· removed</span></>}</span>
         </label>
       </li>)}
       {envelope.runs.map((r, i) => <li key={`r${i}`} data-testid="envelope-run">
@@ -83,18 +83,22 @@ export default function EnvelopeSection({ taskId, proposed, disabled, onVerdict 
           <input type="checkbox" checked={runs[i] ?? false} disabled={disabled}
             onChange={() => setRuns(cur => cur.map((v, j) => (j === i ? !v : v)))} />
           <span><span className={runs[i] ? undefined : 'text-muted line-through'}>{runWords(r)}</span>
-            {!runs[i] && <span className="text-muted" data-testid="envelope-removed">{' · removed'}</span>}</span>
+            {!runs[i] && <>{' '}<span className="inline-block text-muted" data-testid="envelope-removed">· removed</span></>}</span>
         </label>
       </li>)}
     </ul>
-    <div className="flex flex-wrap items-center gap-x-2 gap-y-1" data-testid="envelope-budgets">
-      <Stepper label="Solves up to" name="Solves, at most" value={solves} max={proposed.budget.solves} onChange={setSolves} testId="envelope-solves" />
-      <span>·</span>
-      <span>Rounds up to {envelope.budget.rounds}</span>
-      <span>·</span>
-      <Stepper label="Expires after" name="Hours until it expires, at most" value={hours} max={proposed.budget.wall_time_h} unit="h" onChange={setHours} testId="envelope-hours" />
-      <span>·</span>
-      <span>{costCap !== undefined && costCap > 0 ? `Cost cap ${fmtCurrency(costCap)}` : 'no cost cap'}</span>
+    {/* Two short rows, so a wrap never leaves a "·" at a line's end. */}
+    <div className="space-y-1" data-testid="envelope-budgets">
+      <div className="flex flex-wrap items-center gap-x-2" data-testid="envelope-budget-row">
+        <Stepper label="Solves up to" name="Solves, at most" value={solves} max={proposed.budget.solves} onChange={setSolves} testId="envelope-solves" />
+        <span>·</span>
+        <span>Rounds up to {envelope.budget.rounds}</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-2" data-testid="envelope-budget-row">
+        <Stepper label="Expires after" name="Hours until it expires, at most" value={hours} max={proposed.budget.wall_time_h} unit="h" onChange={setHours} testId="envelope-hours" />
+        <span>·</span>
+        <span>{costCap !== undefined && costCap > 0 ? `Cost cap ${fmtCurrency(costCap)}` : 'no cost cap'}</span>
+      </div>
     </div>
     <div data-testid="envelope-research">
       {envelope.research.allowed ? `Research cost cap ${fmtCurrency(envelope.research.cost_cap_eur)}` : 'No research'}
@@ -103,8 +107,8 @@ export default function EnvelopeSection({ taskId, proposed, disabled, onVerdict 
       and anything not listed here.</p>
     <label className="inline-flex items-center gap-1.5" data-testid="envelope-email">
       <input type="checkbox" checked={emailOk && email} disabled={disabled || !emailOk} onChange={() => setEmail(v => !v)} />
-      Email me when it needs me or ends
-      {view && !emailOk && <span className="text-muted" data-testid="envelope-email-reason">: email is not set up on this server</span>}
+      <span>Email me when it needs me or ends{view && !emailOk
+        && <span className="text-muted" data-testid="envelope-email-reason">: email is not set up on this server</span>}</span>
     </label>
     <div className="mt-2 flex flex-col gap-1.5" role="group" aria-label="Your verdict">
       <button type="button" data-testid="envelope-verdict" data-verdict="unattended"
