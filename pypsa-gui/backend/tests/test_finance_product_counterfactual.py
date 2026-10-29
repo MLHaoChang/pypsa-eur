@@ -154,6 +154,8 @@ def test_with_no_candidates_the_case_computes_at_npv_0_and_no_lost_tonne_delta(r
 @pytest.mark.live_solve
 def test_the_split_reconciles_to_the_incremental_cash_per_year(reset_backend):
     n, case, result = _case("all")
+    assert not [f for f in case.flags if f.startswith("counterfactual_not_established")]
+    assert result.metrics["project_pre_tax_npv"] is not None
     block = _block(case, result)
     sp = {k: np.asarray(v) for k, v in block["incremental_split"].items() if k != "energy_bill_streams"}
     np.testing.assert_allclose(sp["energy_bill"] + sp["lost_production"] + sp["other"],

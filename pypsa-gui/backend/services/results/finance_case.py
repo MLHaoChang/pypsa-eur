@@ -89,14 +89,15 @@ What it builds:
   flagged `counterfactual_keeps_contract:<id>`). Contracts on the owner's
   assets are absent. An owner conversion Link beside a non-electric site
   load (the owner's heat pump) → `counterfactual_not_established:
-  owner_conversion_load` — a product Load (its bus carries a shortfall
-  slack) with no purchase → `counterfactual_not_established:
-  product_load_needs_baseline` instead (its counterfactual is the site-today
-  re-solve, `counterfactual_product_loads:<loads>`; grid-to-process ticket
-  11) — unless every such load has a
+  owner_conversion_load` — unless every such load has a
   `CommercialConfig.reference_purchases` entry (H2e): the counterfactual then
   buys it, `counterfactual:purchase:<load>` = −Σ w·L/lhv × price per kg
   (base-year money, stream `fuel`), flagged `counterfactual_buys:<loads>`. A
+  product Load (its bus carries a shortfall slack) with no reference purchase
+  has nothing to buy in: its counterfactual is the site-today re-solve, so
+  here it blocks as `counterfactual_not_established:
+  product_load_needs_baseline` (`counterfactual_product_loads:<loads>`;
+  grid-to-process ticket 11), never `owner_conversion_load`. A
   `CommercialConfig.co2_price` (REAL prices by year) adds `co2:purchase:<load>`
   = −kg × co2_t_per_kg × price, and with a `grid_t_per_mwh` a
   `co2:grid_import` line on BOTH sides (the actual import and the served load
@@ -203,7 +204,6 @@ import pandas as pd
 
 from models.process_unit import product_roles
 from services.adequacy.slack import lost_slack_name
-from services.process_products import bus_unit, shortfalls
 from services.asset_schema import schema as _schema
 from services.asset_schema.access import upfront_parts
 from services.asset_schema.derive import has_parts, number
@@ -218,6 +218,7 @@ from services.finance.case import (
     TemplateLine,
 )
 from services.finance.cashflow import esc_class_for
+from services.process_products import bus_unit, shortfalls
 
 ANNUAL_TOL = 0.005                      # plan C3: within 0.5 % of a year
 COMMODITY_TOL = 0.01                    # plan C13: the ledger cross-check, a cent …
@@ -1391,20 +1392,14 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
 def _per_year(n, p_t, p) -> float | None:
     """Σ p · snapshot_weights("generators") of a dispatch series over period
     `p`, ÷ the period's years: its quantity per year (None when not read)."""
-    from services.period_utils import snapshot_weights
+    from services.period_utils import period_years_map, snapshot_weights, years_for_period
 
     if p_t is None:
         return None
     m = _mask(n, p)
     w = snapshot_weights(n, "generators").to_numpy(dtype=float)[m]
     x = p_t.reindex(n.snapshots).fillna(0.0).to_numpy(dtype=float)[m]
-    return float((x * w).sum()) / _years(n, p)
-
-
-def _years(n, p) -> float:
-    if p is None:
-        return 1.0
-    return float(n.investment_period_weightings.at[p, "years"])
+    return float((x * w).sum()) / years_for_period(period_years_map(n), p)
 
 
 def _product_shortfall(n, lost_load, baseline) -> tuple[ProductShortfall, ...]:
@@ -1413,15 +1408,19 @@ def _product_shortfall(n, lost_load, baseline) -> tuple[ProductShortfall, ...]:
     baseline (None: no site-today comparison, so nothing to report)."""
     if baseline is None:
         return ()
-    base = {sf.bus: sf for sf in shortfalls(baseline.network, baseline.lost_load)}
+    from services.period_utils import period_years_map, years_for_period
+
+    on_base = {sf.bus: sf for sf in shortfalls(baseline.network, baseline.lost_load)}
+    years = period_years_map(n)
     out = []
     for sf in shortfalls(n, lost_load):
-        b = base.get(sf.bus)
+        base_sf = on_base.get(sf.bus)
         for p in _periods(n):
             out.append(ProductShortfall(
-                period=_key(p), generator=sf.name, bus=sf.bus, unit=bus_unit(n, sf.bus), years=_years(n, p),
-                project_per_year=_per_year(n, sf.p, p),
-                counterfactual_per_year=None if b is None else _per_year(baseline.network, b.p, p)))
+                period=_key(p), generator=sf.name, bus=sf.bus, unit=bus_unit(n, sf.bus),
+                years=years_for_period(years, p), project_per_year=_per_year(n, sf.p, p),
+                counterfactual_per_year=None if base_sf is None
+                else _per_year(baseline.network, base_sf.p, p)))
     return tuple(out)
 
 

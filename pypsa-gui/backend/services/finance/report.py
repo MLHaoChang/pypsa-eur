@@ -598,6 +598,8 @@ def _counterfactual_block(result, case) -> dict[str, Any]:
 #: The streams the incremental split counts as the energy bill: the tariff
 #: class (`cashflow.STREAM_CLASS`), the commodity and the network charges.
 ENERGY_BILL_STREAMS = tuple(sorted(k for k, v in STREAM_CLASS.items() if v == "tariff"))
+#: Each split part's streams; any other stream is `other`.
+_SPLIT_PART = {**dict.fromkeys(ENERGY_BILL_STREAMS, "energy_bill"), "lost_production": "lost_production"}
 
 
 def _incremental_split(result) -> dict[str, list[float]] | None:
@@ -617,8 +619,7 @@ def _incremental_split(result) -> dict[str, list[float]] | None:
             meta = op.line_meta.get(key)
             if arr is None or meta is None:
                 continue
-            part = "energy_bill" if meta.stream in ENERGY_BILL_STREAMS else \
-                "lost_production" if meta.stream == "lost_production" else None
+            part = _SPLIT_PART.get(meta.stream)
             if part is not None:
                 parts[part] += sign * np.asarray(arr, dtype=float)
     net = np.asarray(net, dtype=float)
@@ -639,11 +640,11 @@ def _lost_product(case) -> list[dict[str, Any]] | None:
         return None
     out = []
     for r in rows:
-        a, c = r.project_per_year, r.counterfactual_per_year
+        project, base = r.project_per_year, r.counterfactual_per_year
         out.append({"period": r.period, "generator": r.generator, "bus": r.bus, "unit": r.unit,
                     "years": _num(r.years),
-                    "project_per_year": _num(a), "counterfactual_per_year": _num(c),
-                    "delta_per_year": None if a is None or c is None else _num(a - c)})
+                    "project_per_year": _num(project), "counterfactual_per_year": _num(base),
+                    "delta_per_year": None if project is None or base is None else _num(project - base)})
     return out
 
 
