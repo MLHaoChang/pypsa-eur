@@ -1526,13 +1526,10 @@ def get_adequacy():
     `{"configured": false}`; a report carries `configured: true` (UX overhaul
     S2b — the GUI shows "Not modelled", not a missing result).
     """
-    report = _state.get("adequacy_report")
-    if not report:
-        # S2b: solved without a target is not "not solved".
-        if _solved_settings() is None:
-            return Response(status_code=204)
-        return {"configured": False, "engine": "lp_proxy"}
-    return {**report, "configured": True}
+    from services.adequacy.report import adequacy_payload
+    # S2b: solved without a target is not "not solved" (`configured: false`).
+    out = adequacy_payload(_state, _solved_settings)
+    return Response(status_code=204) if out is None else out
 
 
 @results_router.get("/eh_study")

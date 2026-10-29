@@ -64,3 +64,32 @@ GK OK @14f6bee94c7d3a50352348b2c3575559a4933eac on R1 (#896). Condition 5, rulin
 10. `test_route_chat_disposition`, `test_project_route_acl_policy` green; no new third-party imports. Fragment `doc/release-notes.d/claude-results-workbook-02-loadflow.md`.
 
 Not in the sheets: the campus harmonic scan and voltage-stability blocks (nested; the sheet note points to the tab), and the hub cost comparison.
+
+### 2026-10-29 — R3 built (Adequacy, FMEA)
+
+`services/results_workbook/views_adequacy.py`; tests in `tests/test_results_workbook_views_adequacy.py`.
+
+1. The `/adequacy` body is now `adequacy.report.adequacy_payload(state, solved_settings)`; the route passes `_state` and `_solved_settings`, so its reads are the same. Departure: both are required arguments, not defaulted to the active ones, because `_solved_settings` lives in the router and services never import routers. Tests: `test_adequacy_route_json_equals_the_lifted_function_in_every_state` (204, `configured: false`, report); master's `test_adequacy_http`, `test_result_configured_fields`, `test_chat_adequacy_tools` unchanged and green; a one-off check against master's route body gave byte-equal rendered JSON in all four states (nothing solved, settings only, report, legacy stash). FMEA already read `copt_endpoint.build_fmea_modes_payload`, unchanged: `test_fmea_route_json_is_the_function_the_sheet_reads`.
+2. Each scenario column reads its own saved context's solver state (Adequacy) and its own network and config (FMEA); the base reads the active ones: `test_adequacy_keys_equal_the_route_per_period_and_each_scenario_reads_its_own_state`, `test_fmea_keys_equal_the_route_and_each_scenario_reads_its_own_network`.
+3. Adequacy: ENS cap and achieved ENS per period (`2040` asserted) and the horizon (their sum, as the report's system figure); MW and the margin per period only, never summed. FMEA has no period split: `NO_PERIODS` in the note, asserted, and every run's rows listed.
+5. False only on the route's 204 (nothing solved; no failure mode from any source); solved without a target writes a "not modelled" sheet, as the tab shows: `test_nothing_solved_and_no_failure_mode_are_no_results`, `test_adequacy_solved_without_a_target_writes_not_modelled`, `test_a_failing_read_is_an_error_in_about_not_no_results[adequacy|fmea]`.
+6. FMEA (after GK A's NOT OK @7040b6d1, fixed in 44951e0c): each row's criticality and severity sit in the columns of their own basis, with "criticality basis" and "severity basis" columns. The basis is the row's `criticality_basis` (ticket 30) when present, else by class: A/B "per study horizon (ticket 30)", C per year (frequency × per-event severity). "Highest criticality" is one key per family (A/B, C), None when a family mixes bases. There is one criticality chart per basis, and a mixed column is never charted. Both sheets note the horizon length. Tests: `test_each_fmea_row_is_labelled_by_its_own_basis[4]`, `test_mixed_bases_get_one_highest_key_each_and_no_chart_mixes_them`, `test_a_family_on_two_bases_has_no_highest`.
+8. Neither view reads a project's files; scenario runs come from `gather_scenarios`, which resolves each project first.
+9. `CHARTS` entries for both views; `test_every_chart_reads_number_cells_on_its_own_sheet[adequacy|fmea]`.
+10. `test_route_chat_disposition`, `test_project_route_acl_policy` green; `test_packaging_requirements` green but for the known defusedxml failure; no new third-party imports. Fragment `doc/release-notes.d/claude-results-workbook-02-adequacy.md`.
+
+Not in the sheets: the Adequacy tab's other study surfaces (COPT screening, frontier, Monte Carlo, planning loops) and the FMEA worksheet's expert class-D rows and overlays (per-project sidecar; the FMEA note points to the tab).
+
+### 2026-10-29 — GK B (10): R4 plan verdict GO, with conditions (GK A co-reviews the numbers)
+
+R4 adds `Table.time` ("mean" | "sum") on the snapshot tables and a resolution ladder: snapshot → day → week → month, bucketed per (period, bucket). The budget is estimated rows and cells, with MAX_BYTES as the backstop; when it is exceeded, fallback (b) applies. Prices are the time-weighted mean, not load-weighted, and the note says so.
+
+1. Means and sums weight by `snapshot_weights(n, "generators")` (hours), never `objective`. A hand test with objective = generators × 10 must fail a builder that uses objective.
+2. Gaps: a NaN cell drops out of both Σv·w and Σw for its column. An all-NaN or Σw = 0 bucket is written blank, never 0. Test both.
+3. Non-datetime snapshots: fixed-count blocks named as such ("blocks of 24 snapshots"), or fallback (b). Never a crash or a wrong bucket. Test one.
+4. One resolution per sheet for every scenario column, named once in the note; About lists each sheet's resolution.
+5. State of charge is labelled "weighted mean of the state", never energy.
+6. Keys always come from full-resolution data. Charts read only the coarsened number cells on their own sheet (condition 9, re-run on a coarsened workbook).
+7. If MAX_BYTES is still hit after fallback (b), About reports an error and no truncated sheet is written. Test with a tiny monkeypatched MAX_BYTES.
+8. Mutations that must each fail a named test: an unweighted mean; the period key dropped from the bucket (the straddling day becomes one row); the NaN rule dropped.
+9. Stacked on #900: trial-merge with master, and run every test_results_workbook* file plus the route-policy tests (condition 10).

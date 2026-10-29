@@ -159,8 +159,9 @@ def test_class_b_contingencies_select_occurrence_bearing_links_only():
 
 
 def test_class_b_rows_price_outages_first_order():
-    """criticality €/yr = q × ΔEUE_full × VoLL (the whole-horizon hold
-    integrates over event timing); occurrence = 8760·q/MTTR; severity =
+    """criticality €/yr = q × ΔEUE_full × VoLL / horizon_years (the whole-
+    horizon hold integrates over event timing; LC-30 scales the horizon to a
+    year, 8760/(N·WEIGHT)); occurrence = 8760·q/MTTR; severity =
     criticality / occurrence — the f×S identity by construction."""
     n = _network()
     PyPSAService.set_network(n)
@@ -174,7 +175,8 @@ def test_class_b_rows_price_outages_first_order():
     assert fm["engine"] == "lp_proxy"
     assert fm["fidelity"] == "deterministic_scenario"
     assert fm["criticality_eur_per_year"] == pytest.approx(
-        LINK_Q * STRANDED_MWH * VOLL, rel=1e-3)
+        LINK_Q * STRANDED_MWH * 8760.0 / (N_SNAPSHOTS * WEIGHT) * VOLL, rel=1e-3)
+    assert fm["horizon_years"] == pytest.approx(N_SNAPSHOTS * WEIGHT / 8760.0)
     assert fm["occurrence_per_year"] == pytest.approx(8760 * LINK_Q / LINK_MTTR)
     assert fm["severity_eur"] * fm["occurrence_per_year"] == pytest.approx(
         fm["criticality_eur_per_year"], rel=1e-9)

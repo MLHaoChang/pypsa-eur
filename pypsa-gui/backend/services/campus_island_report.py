@@ -59,6 +59,20 @@ _FREQ_TITLES = {
 }
 
 
+#: Every table id the report can hold, in report order; a hub shows the ones
+#: its run produced. A plain literal: the assistant inventory reads it without
+#: importing this module. The chat tool's `table` argument reads this list, and
+#: a test pins it to the builders' title maps.
+TABLE_IDS = (
+    "requirements", "units", "costs", "binding", "facts", "island_hours",
+    "static_summary", "static_flow", "static_flow_units", "static_flow_bus",
+    "static_flow_branch", "static_sc", "static_relays", "static_relays_imax",
+    "static_unbalanced", "static_earth", "static_earth_relays",
+    "freq_summary", "freq_e1_hourly", "freq_events", "freq_losses",
+    "freq_bridge", "freq_planned", "freq_ups",
+)
+
+
 def _table(tid, title, model, columns, rows, assumed_rows=(), group="inputs"):
     return {"id": tid, "group": group, "title": title, "model": model, "caveat": CAVEAT,
             "columns": list(columns), "rows": [list(r) for r in rows],

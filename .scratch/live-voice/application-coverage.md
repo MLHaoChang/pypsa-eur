@@ -176,8 +176,13 @@ not committed); CI
 (`assistant_control_matrix.py --check`, `tests/test_assistant_control_matrix.py`)
 fails if a claim appears while any of these hold:
 
-- Pending family journeys: 14 of 14 (every family is still `pending:issue-05-*`).
-- Behavioral fixtures: pending for every matrix row.
+- Family journeys with pending variants (LV 08 R1, one ledger): each family's journey is its
+  row in the LC-06 family manifest (`smoke/family_manifest.py`); a family is pending while any
+  variant of its suites is pending (one `family-manifest:<family>` blocker each). The suites LC-06
+  leaves out (D01, D02, D20–D24) keep one `r3-uncovered:<suite>` blocker each, owned by live-copilot
+  issue 32. Tools that no covered variant lists are one `manifest-tools-uncovered` blocker. Counts
+  change with every LC-06 slice, so they are not written here: run
+  `smoke/assistant_control_matrix.py --write` or `smoke/family_manifest.py --write`.
 - GUI-route to typed-tool parity: some GUI-reached routes still need a typed tool (one blocker
   per family). Counts change with every tool PR, so they are not written here: run
   `smoke/assistant_route_parity.py --write` (saves `route-parity.json`, not committed) or read

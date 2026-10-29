@@ -10,8 +10,10 @@ Every backend route the GUI reaches (axios ``client`` calls, ``fetch``,
 * ``tool``: an assistant tool covers it, through a declared ``TOOL_ROUTES``
   HTTP entry or through a service function the tool handler and the route
   handler both call (direct callees, same-module helpers followed);
-* ``needs-tool``: declared in the declarations file, a coverage gap;
-* ``limitation``: declared with a reason from ``LIMITATION_REASONS``.
+* ``needs-tool``: declared in the declarations file, a coverage gap that
+  ``--check`` fails on (LV08 R2: none is left);
+* ``limitation``: declared with a reason from ``LIMITATION_REASONS``; a
+  ``held-by-spec`` one names the open issue that holds it (``issue``).
 
 Declarations are ``assistant_route_parity_declarations.json`` plus the fragments in
 ``assistant_route_parity_declarations.d/`` (``smoke/json_fragments.py``).
@@ -63,7 +65,13 @@ LIMITATION_REASONS = (
     'live-stream',           # server-sent log streams; the assistant reads the same logs via snapshot tools
     'ui-local-state',        # layout/view persistence with no domain effect
     'binary-transfer',       # raw file bytes the assistant reaches via typed upload/export tools
+    'held-by-spec',          # a frozen spec owns this route's chat disposition; ``issue`` names it (HELD_ISSUE_RE)
 )
+# A ``held-by-spec`` limitation's ``issue``: a repo-relative issue file that names
+# the route as ``METHOD path`` and is not closed (its ``Status:`` is not done or
+# wontfix). Each held issue is one full_coverage blocker (assistant_control_matrix).
+HELD_ISSUE_RE = re.compile(r'\.scratch/(?:[\w-]+/)+issues/[\w-]+(?:\.[\w-]+)*\.md')  # no `..` segment
+CLOSED_STATUSES = ('done', 'wontfix')
 # The issue-05 coverage families (capability-matrix.json ``family_journeys``).
 FAMILIES = (
     'projects', 'network-topology', 'timeseries-horizon', 'solver-simulation', 'all-results',
@@ -297,6 +305,25 @@ def _resolve_callee(node, glb):
 # ─── matrix ─────────────────────────────────────────────────────────────────
 
 
+def _held_problems(key: tuple[str, str], issue) -> list[str]:
+    """Why a ``held-by-spec`` limitation's ``issue`` does not hold the route (empty when it does)."""
+    where = f'held-by-spec limitation {key}'
+    if not isinstance(issue, str) or not HELD_ISSUE_RE.fullmatch(issue):
+        return [f'{where}: issue {issue!r} is not a .scratch/<feature>/issues/<file>.md path']
+    path = ROOT / issue
+    if not path.is_file():
+        return [f'{where}: issue file {issue} does not exist']
+    text = path.read_text(encoding='utf-8')
+    problems = []
+    if f'{key[0]} {key[1]}' not in text:
+        problems.append(f'{where}: {issue} does not name the route as "{key[0]} {key[1]}"')
+    status = re.search(r'^Status:\s*([\w-]+)', text, re.M)
+    if status is None or status.group(1).lower() in CLOSED_STATUSES:
+        problems.append(f'{where}: {issue} is {status.group(1) if status else "without a Status: line"}; '
+                        'a closed issue holds nothing: build the tool or declare another reason')
+    return problems
+
+
 def load_declarations(path: Path = DECLARATIONS) -> dict:
     """The base declarations merged with ``assistant_route_parity_declarations.d/*.json``."""
     return load_merged(path)
@@ -362,6 +389,8 @@ def build(app=None, declarations: dict | None = None, frontend: tuple | None = N
     for key, d in limitations.items():
         if d.get('reason') not in LIMITATION_REASONS:
             problems.append(f'limitation {key}: reason {d.get("reason")!r} not in {LIMITATION_REASONS}')
+        elif d.get('reason') == 'held-by-spec':
+            problems += _held_problems(key, d.get('issue'))
     for key, d in needs.items():
         if d.get('family') not in FAMILIES:
             problems.append(f'needs-tool {key}: family {d.get("family")!r} not in {FAMILIES}')
@@ -396,6 +425,8 @@ def build(app=None, declarations: dict | None = None, frontend: tuple | None = N
                 row['note'] = needs[key]['note']
         elif key in limitations:
             row |= {'class': 'limitation', 'reason': limitations[key]['reason']}
+            if 'issue' in limitations[key]:
+                row['issue'] = limitations[key]['issue']
         else:
             row |= {'class': 'unclassified'}
             problems.append(f'unclassified GUI route {key[0]} {key[1]}: add a tool or declare it')
@@ -442,6 +473,10 @@ def main(argv=None) -> int:
         print(f'wrote {args.output}: {matrix["counts"]}')
     for s in matrix['stale_declarations']:
         print(f'stale (sweep prunes) {s["method"]} {s["path"]}: now served by {s["tools"]}')
+    # A needs-tool row is a coverage gap, and the gap is closed (LV08 R2): a new
+    # GUI route gets a tool or a limitation in the same PR.
+    problems += [f'needs-tool GUI route {r["method"]} {r["path"]} ({r["family"]}): add a typed tool '
+                 'or declare a limitation' for r in matrix['rows'] if r['class'] == 'needs-tool']
     for p in problems:
         print('FAIL', p)
     if not problems:

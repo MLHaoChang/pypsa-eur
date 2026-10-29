@@ -245,7 +245,7 @@ def test_declarations_merge_fragments_from_the_d_directory(tmp_path):
 
 
 def test_families_match_the_capability_matrix_journeys():
-    slugs = {j['journey_id'].removeprefix('pending:issue-05-') for j in control.FAMILY_JOURNEYS}
+    slugs = {j['journey_id'].removeprefix('manifest:') for j in control.FAMILY_JOURNEYS}
     assert set(parity.FAMILIES) == slugs
 
 
@@ -253,6 +253,66 @@ def test_committed_declarations_use_closed_reasons_and_families():
     decl = parity.load_declarations()
     assert {d['reason'] for d in decl['limitations']} <= set(parity.LIMITATION_REASONS)
     assert {d['family'] for d in decl['needs_tool']} <= set(parity.FAMILIES)
+
+
+# ─── LV08 R2: no needs-tool row; routes held by an open spec issue ──────────
+
+HELD = '.scratch/feat/issues/07-spec.md'
+
+
+def _held(tmp_path, monkeypatch, text: str | None, issue: str = HELD):
+    monkeypatch.setattr(parity, 'ROOT', tmp_path)
+    if text is not None:
+        (tmp_path / HELD).parent.mkdir(parents=True)
+        (tmp_path / HELD).write_text(text)
+    decl = _decl(limitations=[{'method': 'GET', 'path': '/api/things', 'reason': 'held-by-spec', 'issue': issue}])
+    return _build(_app(('GET', '/api/things')), decl, _scan(('GET', '/api/things')))
+
+
+def test_a_route_held_by_an_open_issue_naming_it_is_a_limitation(tmp_path, monkeypatch):
+    rows, problems = _held(tmp_path, monkeypatch, '# SC-07\n\nStatus: needs-triage\n\n- GET /api/things\n')
+    assert not problems
+    assert rows[('GET', '/api/things')] == {'method': 'GET', 'path': '/api/things', 'gui_files': ['api/x.ts'],
+                                                 'class': 'limitation', 'reason': 'held-by-spec', 'issue': HELD}
+
+
+@pytest.mark.parametrize('text, issue, expected', [
+    (None, HELD, 'does not exist'),
+    ('Status: needs-triage\n- POST /api/things\n', HELD, 'does not name the route as "GET /api/things"'),
+    ('Status: done\n- GET /api/things\n', HELD, 'is done'),
+    ('Status: wontfix — dropped\n- GET /api/things\n', HELD, 'is wontfix'),
+    ('- GET /api/things\n', HELD, 'without a Status: line'),
+    (None, 'docs/elsewhere.md', 'is not a .scratch/<feature>/issues/<file>.md path'),
+    (None, '.scratch/feat/../../etc/issues/x.md', 'is not a .scratch/<feature>/issues/<file>.md path'),
+    (None, '.scratch/feat/issues/../x.md', 'is not a .scratch/<feature>/issues/<file>.md path'),
+    (None, None, 'is not a .scratch/<feature>/issues/<file>.md path'),
+])
+def test_a_held_route_needs_an_open_issue_that_names_it(tmp_path, monkeypatch, text, issue, expected):
+    _, problems = _held(tmp_path, monkeypatch, text, issue)
+    assert any(expected in p for p in problems), problems
+
+
+def test_check_fails_on_any_needs_tool_row(monkeypatch, capsys):
+    app = _app(('GET', '/api/things'))
+    decl = _decl(needs_tool=[{'method': 'GET', 'path': '/api/things', 'family': 'projects'}])
+    matrix, problems = parity.build(app=app, declarations=decl, frontend=_scan(('GET', '/api/things')))
+    assert not problems and matrix['counts']['needs-tool'] == 1  # build reports it; --check refuses it
+    monkeypatch.setattr(parity, 'build', lambda: (matrix, []))
+    assert parity.main(['--check']) == 1
+    assert 'FAIL needs-tool GUI route GET /api/things (projects)' in capsys.readouterr().out
+
+
+def test_committed_declarations_have_no_needs_tool_row():
+    assert parity.load_declarations()['needs_tool'] == []
+
+
+def test_each_held_issue_is_one_full_coverage_blocker():
+    summary = {'counts': {}, 'needs_tool_by_family': {},
+               'held_by_issue': {HELD: ['GET /api/a', 'POST /api/b'], '.scratch/g/issues/01.md': ['GET /api/c']}}
+    blockers = control._full_coverage(control.FAMILY_JOURNEYS, summary)['blockers']
+    held = {b['id']: b for b in blockers if b['id'].startswith('route-parity:held:')}
+    assert set(held) == {f'route-parity:held:{HELD}', 'route-parity:held:.scratch/g/issues/01.md'}
+    assert held[f'route-parity:held:{HELD}']['pointer'] == HELD
 
 
 # ─── V6: deterministic output, side-effect-free import ──────────────────────

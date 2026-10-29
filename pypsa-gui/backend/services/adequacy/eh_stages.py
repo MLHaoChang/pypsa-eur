@@ -1022,13 +1022,17 @@ def _screen(inputs, zonal, scope: FleetScope, *, voll: float, index):
             m["delta_eue_mwh"] += p * float(r["delta_eue_mwh"])
             m["criticality_eur_per_year"] += p * float(
                 r["criticality_eur_per_year"])
+    # LC-30: per year, like the rows above (annualised in the COPT).
+    from services.adequacy.metrics import HOURS_PER_YEAR, criticality_scale
+    nyears = float(weights.sum()) / HOURS_PER_YEAR
+    scale, basis = criticality_scale(nyears)
     for k in cm_areas:
         area = zonal.areas[k]
         q = qs[k]
         e_up = sum(st[0] * e for st, e in zip(states, eues) if k not in st[1])
         e_up = e_up / (1.0 - q) if q < 1.0 else 0.0
         delta = max(eue_mix - e_up, 0.0)
-        crit = delta * max(float(voll), 0.0)
+        crit = delta * max(float(voll), 0.0) * scale
         occ = sum(8760.0 * float(c.q) / float(c.mttr_hours)
                   for c in area.common_mode if float(c.mttr_hours) > 0)
         name = "common_mode:" + ",".join(c.link for c in area.common_mode)
@@ -1041,6 +1045,7 @@ def _screen(inputs, zonal, scope: FleetScope, *, voll: float, index):
                 "failure_class": "A", "occurrence_per_year": occ,
                 "occurrence_basis": "FOR",
                 "severity_eur": 0.0, "criticality_eur_per_year": crit,
+                "criticality_basis": basis, "horizon_years": nyears,
                 "in_metric_scope": True, "engine": "copt",
                 "fidelity": "analytic_convolution",
                 "rate_source": "common_mode",

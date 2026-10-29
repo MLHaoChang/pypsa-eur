@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from services.results_workbook import registry, scenarios
+from services.results_workbook import budget, registry, scenarios
 from services.results_workbook.cells import NOT_ESTABLISHED, heading, put, width
 from services.results_workbook.overview import (
     RUN_THE_CASE, overview_figures, write_overview,
@@ -92,6 +92,10 @@ class WorkbookContext:
     sheets: dict[str, list[str]] = field(default_factory=dict)
     # Every run, the base first (`scenarios.Run`).
     runs: list[scenarios.Run] = field(default_factory=list)
+    # The cells the remaining sheets may still hold, and each coarsened
+    # sheet's resolution (`budget.fit`), said in About.
+    cells_left: int = field(default_factory=lambda: budget.CELL_BUDGET)
+    resolution: dict[str, str] = field(default_factory=dict)
 
     def __getattr__(self, name):
         return getattr(self.inputs, name)
@@ -209,11 +213,33 @@ def build_results_workbook(inp: WorkbookInputs) -> bytes:
             else:
                 status = ("sheets: " + ", ".join(ctx.sheets.get(view_id) or []) if wrote
                           else registry.NO_RESULTS.get(view_id, "no results for this run"))
+                if wrote and view_id in ctx.resolution:
+                    status += f" ({ctx.resolution[view_id]})"
         statuses.append((view_id, card_label.get(v.card, v.card or ""), status))
     _about(about, inp, statuses, figs)
-    buf = io.BytesIO()
-    wb.save(buf)
-    blob = buf.getvalue()
+    blob = _save(wb)
+    # The backstop over the cell budget: drop the largest view sheet whole
+    # (never a truncated sheet), say so in About, and try again.
+    while len(blob) > MAX_BYTES and ctx.sheets:
+        view_id = max(ctx.sheets, key=lambda v: sum(
+            wb[t].max_row * wb[t].max_column for t in ctx.sheets[v]))
+        for title in ctx.sheets.pop(view_id):
+            del wb[title]
+        why = "error: over the 25 MB export limit" + (
+            f" at {ctx.resolution[view_id]}" if view_id in ctx.resolution else "") + (
+            "; not written")
+        statuses = [(v, c, why if v == view_id else st) for v, c, st in statuses]
+        index, title = wb.index(about), about.title
+        del wb[title]
+        about = wb.create_sheet(title, index)
+        _about(about, inp, statuses, figs)
+        blob = _save(wb)
     if len(blob) > MAX_BYTES:
         raise WorkbookTooLarge(len(blob))
     return blob
+
+
+def _save(wb) -> bytes:
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
