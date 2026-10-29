@@ -3,7 +3,9 @@
 Reads CreationForm FIELD_MAP and attributeCatalog editability/closed sets without
 importing the React app. Maps each control to create_component / update_component
 or an explicit gap. Resolves the requested AR alias against real inventory IDs.
-Assigns one issue-05 journey id per coverage family (fixtures still pending).
+Each coverage family's journey is a reference to the LC-06 family manifest
+(``family_manifest.py``): its suites and their variants' status, read from the
+manifest itself, so coverage is counted in one ledger.
 
 ``--check`` builds the matrix in memory, with the inventory and route parity it
 summarises, and applies the CI guards; ``--write`` also saves it for reading. It
@@ -20,10 +22,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
-    from smoke import assistant_inventory, assistant_route_parity
+    from smoke import assistant_inventory, assistant_route_parity, family_manifest
 except ImportError:  # run as a script: smoke/ itself is on sys.path
     import assistant_inventory
     import assistant_route_parity
+    import family_manifest
 
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUTPUT = ROOT / '.scratch/live-voice/capability-matrix.json'
@@ -56,84 +59,44 @@ PALETTE_TO_CLASS: dict[str, str] = {
     'load_heat': 'Load',
 }
 
-# Application-coverage.md family table → issue-05 journey assignment ids.
-FAMILY_JOURNEYS: list[dict[str, str]] = [
-    {
-        'family': 'Projects/scenarios/templates',
-        'journey_id': 'pending:issue-05-projects',
-        'status': 'assigned',
-    },
-    {
-        'family': 'Network/topology/asset parameters',
-        'journey_id': 'pending:issue-05-network-topology',
-        'status': 'assigned',
-    },
-    {
-        'family': 'Time series/horizon/multi-period',
-        'journey_id': 'pending:issue-05-timeseries-horizon',
-        'status': 'assigned',
-    },
-    {
-        'family': 'Solver/simulation',
-        'journey_id': 'pending:issue-05-solver-simulation',
-        'status': 'assigned',
-    },
-    {
-        'family': 'All results',
-        'journey_id': 'pending:issue-05-all-results',
-        'status': 'assigned',
-    },
-    {
-        'family': 'Reliability/health/adequacy',
-        'journey_id': 'pending:issue-05-reliability-adequacy',
-        'status': 'assigned',
-    },
-    {
-        'family': 'GridSpine/campus electrical',
-        'journey_id': 'pending:issue-05-gridspine-campus',
-        'status': 'assigned',
-    },
-    {
-        'family': 'Economics/investment/Library',
-        'journey_id': 'pending:issue-05-economics-investment',
-        'status': 'assigned',
-    },
-    {
-        'family': 'Experiments/sensitivity',
-        'journey_id': 'pending:issue-05-experiments',
-        'status': 'assigned',
-    },
-    {
-        'family': 'Import/export/delivery',
-        'journey_id': 'pending:issue-05-import-export',
-        'status': 'assigned',
-    },
-    {
-        'family': 'Reports/templates/edit round trip',
-        'journey_id': 'pending:issue-05-reports',
-        'status': 'assigned',
-    },
-    {
-        'family': 'Audit/undo/checkpoints',
-        'journey_id': 'pending:issue-05-audit-undo',
-        'status': 'assigned',
-    },
-    {
-        'family': 'Harness/workflows/providers',
-        'journey_id': 'pending:issue-05-harness-workflows',
-        'status': 'assigned',
-    },
-    {
-        'family': 'UI/preferences/monitoring',
-        'journey_id': 'pending:issue-05-ui-monitoring',
-        'status': 'assigned',
-    },
-]
+# Each coverage family's journey is its row in the LC-06 family manifest
+# (`smoke/family_manifest.py`): the suites SUITES_BY_FAMILY assigns it and their
+# variants by status. A suite shared by two families counts in both.
+MANIFEST_SOURCE = 'pypsa-gui/backend/smoke/family_manifest.py'
+# The suites LC-06 leaves out (R3 of the LV 08 comparison); each keeps its own blocker.
+R3_SUITES = tuple(f'LC-D{i:02d}' for i in (1, 2, 20, 21, 22, 23, 24))
+R3_ISSUE = '.scratch/live-copilot/issues/32-uncovered-families-d01-d02-d20-d24.md'
+
+
+def family_journeys(variants: list[dict] | None = None) -> list[dict]:
+    """One journey row per family, read from the manifest's variants (or `variants`)."""
+    variants = family_manifest.VARIANTS if variants is None else variants
+    rows = []
+    for slug, family in family_manifest.FAMILIES.items():
+        suites = [f'LC-D{i:02d}' for i in family_manifest.SUITES_BY_FAMILY[slug]]
+        by_status = {s: [v['id'] for suite in suites for v in variants if v['suite'] == suite and v['status'] == s]
+                     for s in ('covered', 'pending', 'unavailable')}
+        rows.append({
+            'family': family,
+            'journey_id': f'manifest:{slug}',
+            'source': MANIFEST_SOURCE,
+            'suites': suites,
+            'variants': by_status,
+            'status': 'pending' if _open(by_status) else 'covered',
+        })
+    return rows
+
+
+def _open(variants: dict) -> bool:
+    """A family is covered only with at least one covered variant and none pending: a family
+    whose manifest rows are gone (no variant at all) is open, never covered."""
+    return bool(variants['pending']) or not variants['covered']
+
+
+FAMILY_JOURNEYS: list[dict] = family_journeys()
 
 # Blockers that stay until a human closes them with evidence; never derived away.
 STANDING_BLOCKERS: list[dict[str, str]] = [
-    {'id': 'behavioral-fixtures-pending', 'issue': '08',
-     'summary': 'Every matrix row still carries a pending:issue-05-* behavioral fixture; no per-family real journey has passed.'},
     {'id': 'ui-local-control-parity-unaudited', 'issue': '08',
      'summary': 'Client-only panel/subview/filter controls (no backend call) are not mapped to a navigation tool or a declared gap; controls that call the backend are audited in route_parity.'},
     {'id': 'hosted-gates-pending', 'issue': '05',
@@ -162,15 +125,32 @@ def _route_parity() -> dict:
     }
 
 
-def _full_coverage(journeys: list[dict[str, str]], route_parity: dict | None = None) -> dict:
+def _full_coverage(journeys: list[dict], route_parity: dict | None = None,
+                   variants: list[dict] | None = None) -> dict:
     """The explicit limitation block: whole-application coverage is NOT claimed
-    until every family journey is a real issue-05 journey and no blocker remains."""
-    pending = [j for j in journeys if str(j['journey_id']).startswith('pending:')]
-    blockers = [
-        {'id': f'family-journey:{j["journey_id"]}', 'issue': '05', 'family': j['family'],
-         'summary': 'Representative real journey not yet passing.'}
-        for j in pending
-    ] + STANDING_BLOCKERS
+    until every manifest variant of every family is covered and no blocker remains."""
+    variants = family_manifest.VARIANTS if variants is None else variants
+    pending = [j for j in journeys if _open(j['variants'])]
+    blockers = []
+    for j in pending:
+        lc06 = [v for v in j['variants']['pending'] if v.split('.')[0] not in R3_SUITES]
+        if lc06 or not j['variants']['covered']:
+            summary = (f'{len(lc06)} LC-06 variants of this family are pending ({MANIFEST_SOURCE}).' if lc06 else
+                       f'No manifest variant of this family is covered ({MANIFEST_SOURCE}).')
+            blockers.append({'id': f'family-manifest:{j["journey_id"].removeprefix("manifest:")}', 'issue': 'LC-06',
+                             'family': j['family'], 'pending_variants': lc06, 'summary': summary})
+    for suite in R3_SUITES:
+        open_ = sorted({v for j in pending for v in j['variants']['pending'] if v.split('.')[0] == suite})
+        if open_:
+            blockers.append({'id': f'r3-uncovered:{suite}', 'issue': 'LC-32', 'pointer': R3_ISSUE,
+                             'pending_variants': open_,
+                             'summary': f'LC-06 leaves {suite} out; no behavioral fixture covers it.'})
+    covered_tools = {t for v in variants if v['status'] == 'covered' for t in v.get('tools', [])}
+    uncovered = len(set(family_manifest.inventory_tools()) - covered_tools)
+    if uncovered:
+        blockers.append({'id': 'manifest-tools-uncovered', 'issue': 'LC-06',
+                         'summary': f'{uncovered} assistant tools are listed by no covered manifest variant.'})
+    blockers += STANDING_BLOCKERS
     if route_parity is not None:
         if route_parity['counts'].get('unclassified'):
             blockers.append({'id': 'route-parity:unclassified', 'issue': '08',
@@ -184,8 +164,8 @@ def _full_coverage(journeys: list[dict[str, str]], route_parity: dict | None = N
         'claimed': not blockers,
         'status': 'established' if not blockers else 'not_established',
         'rule': (
-            'Whole-application coverage may be claimed only when every family journey is a passing '
-            'issue-05 journey (journey_id not "pending:") and no blocker remains. Load flow, '
+            'Whole-application coverage may be claimed only when every variant of every family in '
+            'the LC-06 family manifest is covered and no blocker remains. Load flow, '
             'sensitivity and GridSpine fixtures are examples, not the scope.'
         ),
         'journeys_total': len(journeys),
@@ -402,7 +382,7 @@ def build_matrix() -> dict:
                     'requires_project': True,
                 },
                 'gap': gap,
-                'behavioral_fixture': 'pending:issue-05-network-topology',
+                'behavioral_fixture': 'manifest:network-topology',
             })
 
     edit_rows = []
@@ -424,7 +404,7 @@ def build_matrix() -> dict:
                 'ui_modes': ['expert'],
                 'requires_project': True,
             },
-            'behavioral_fixture': 'pending:issue-05-network-topology',
+            'behavioral_fixture': 'manifest:network-topology',
         })
 
     closed_rows = []
@@ -454,6 +434,7 @@ def build_matrix() -> dict:
             'pypsa-gui/backend/smoke/assistant_inventory.py (built in memory)',
             '.scratch/live-voice/application-coverage.md',
             'pypsa-gui/backend/smoke/assistant_route_parity.py (built in memory)',
+            MANIFEST_SOURCE,
         ],
         'controls': controls,
         'editability_overrides': edit_rows,
@@ -474,18 +455,18 @@ def build_matrix() -> dict:
 
 
 def _full_coverage_problem(matrix: dict) -> str | None:
-    """CI guard: a claim must be backed by passing journeys and zero blockers."""
+    """CI guard: a claim must be backed by covered manifest variants and zero blockers.
+    Pending is recomputed from the manifest, never read from the matrix's own copy."""
     block = matrix.get('full_coverage')
     if not isinstance(block, dict):
         return 'full_coverage limitation block is missing'
-    pending = [j for j in matrix.get('family_journeys', [])
-               if str(j.get('journey_id', '')).startswith('pending:')]
+    pending = [j for j in family_journeys() if _open(j['variants'])]
     if block.get('claimed') is True and (pending or block.get('blockers')):
         return 'full_coverage.claimed is true while family journeys are pending or blockers remain'
     if pending and (block.get('claimed') is not False or block.get('status') != 'not_established'):
-        return 'full_coverage must be claimed=false/not_established while issue-05 journeys are pending'
+        return 'full_coverage must be claimed=false/not_established while manifest variants are pending'
     if block.get('journeys_pending') != len(pending):
-        return 'full_coverage.journeys_pending disagrees with family_journeys'
+        return 'full_coverage.journeys_pending disagrees with family_manifest'
     return None
 
 
