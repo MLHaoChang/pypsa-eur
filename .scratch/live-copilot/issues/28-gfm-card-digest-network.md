@@ -18,7 +18,9 @@ reads the recommendation as `stale` (`campus_electrical_service._stale`
 compares the network's digest with the campus run's manifest), and
 `_plan_apply` refuses with 409, mapped to `edit_preview_stale` on the card
 path (`_card_refusal`). `tests/test_lc06_d17_recommend_apply.py`
-`test_a_network_edit_after_the_card_refuses_the_apply` pins that.
+`test_a_network_edit_after_the_card_refuses_the_apply` pins that. The reason the
+user then reads is "no recommendation for the last campus run; recommend GFM
+settings again", although a recommendation exists and only went stale.
 
 Options for whoever takes this:
 - Put the network fingerprint in the card's binding, so the digest moves with

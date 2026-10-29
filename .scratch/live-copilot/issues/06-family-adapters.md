@@ -544,6 +544,24 @@ freq_bridge, freq_planned.
   lossless 39.5 (`dp_e1`); shortfall = import − (30 + 4.5).
 - Manifest: LC-D16.E4, E5 and E6 covered; the EMT/PLL/voltage unavailable row stays.
 
+### S9, LC-D17 recommend → apply → re-study (2026-10-29)
+
+Branch `claude/lc06-d17-recommend-apply`, PR #888, stacked on #887. GK A (4) reviews; plan
+GO with conditions (above). Session LC-06 (7).
+
+- Fixture: the S8a hub with a 200 MW 5 % droop genset (H_s 1.5 s), BESS gfm_vsm H_v 1 s,
+  droop 4 %; band 0.25 Hz, RoCoF 4 Hz/s over 20 ms. With the BESS as the only grid
+  former, E3 collapses and the search returns `not_achievable`, so the genset is needed.
+- The card sets droop 4 → 1.8203125 % and H_v 1 → 1.3515625 s (no τ_f: a VSM has none).
+  Read-back exact in both files, tagged `assumed`. The re-study's E2 RoCoF0 and Δf_qss
+  equal the hand values on the applied settings (abs 1e-6). Without the re-study the old
+  figures stand (the mutation: they differ from the applied oracles by > 1e3 TOL).
+- Stale (network edit via `update_component` + `save_project`), wrong digest and HTTP apply
+  with no digest: 409, nothing written. Tickets 28 and 29 for the gaps.
+- Command: `pytest tests/test_lc06_d17_recommend_apply.py tests/test_family_manifest.py`,
+  212 s, all pass. `test_packaging_requirements.py` passes but for the openpyxl/defusedxml
+  case, which fails here only because this environment lacks defusedxml.
+
 ## Hand-off 6 (2026-10-29, LC-06 (6), early)
 
 PR stack (each against master, stacked):

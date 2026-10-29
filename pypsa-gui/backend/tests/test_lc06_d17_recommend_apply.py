@@ -160,7 +160,9 @@ def test_the_applied_card_is_read_back_and_the_restudy_runs_on_it(hub):
     for field, row in sets.items():
         lo, hi = BOUNDS[field]
         assert lo <= row["new"] <= hi
-        assert abs(row["new"] - row["old"]) > 0.1               # a real change, not rounding
+        # 0.1 (% or s): ten times the card's display rounding (0.01), and the
+        # oracles below then move by over 1e3 TOL.
+        assert abs(row["new"] - row["old"]) > 0.1
     assert sets["droop_pct"]["old"] == DROOP0 and sets["H_v_s"]["old"] == H0
 
     out = _apply(card["digest"])
@@ -207,10 +209,11 @@ def _edit_network():
     chat_tools.save_project(P, force=True)
 
 
-def _assert_stale(exc):
+def _assert_stale(exc, reason):
     detail = exc.value.detail
     assert exc.value.status_code == 409
     assert isinstance(detail, dict) and detail.get("error_kind") == "edit_preview_stale", detail
+    assert reason in detail["message"], detail                  # the reason the user sees
 
 
 def test_a_network_edit_after_the_card_refuses_the_apply(hub):
@@ -220,7 +223,7 @@ def test_a_network_edit_after_the_card_refuses_the_apply(hub):
     assert hub.files() == files                                 # the edit touches none of them
     with pytest.raises(Exception) as exc:
         _apply(card["digest"])
-    _assert_stale(exc)
+    _assert_stale(exc, "recommend GFM settings again")          # the recommendation is stale (ticket 28)
     assert hub.files() == files
 
 
@@ -230,7 +233,7 @@ def test_a_digest_that_is_not_the_cards_refuses_the_apply(hub):
     wrong = ("0" if card["digest"][0] != "0" else "1") + card["digest"][1:]
     with pytest.raises(Exception) as exc:
         _apply(wrong)
-    _assert_stale(exc)
+    _assert_stale(exc, "nothing was applied")
     assert hub.files() == files
     _apply(card["digest"])                                      # the card's own digest applies
     assert hub.files() != files

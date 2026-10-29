@@ -425,8 +425,9 @@ VARIANTS: list[dict] = [
     _covered('LC-D17.recommend_apply_restudy', 'gfm_vsm BESS (H_v 1 s, 4 %) beside a 5 % droop genset, band 0.25 Hz: '
              'the card sets droop and H_v within the search bounds; both files read back the card exactly, tagged '
              'assumed; the re-study puts E2 RoCoF0 and df_qss on the applied values; without it the old figures stand; '
-             'a network edit or a wrong digest after the card is edit_preview_stale with nothing written, also on the '
-             'HTTP apply with no digest (tickets 28, 29)',
+             'a network edit (refused by the recommendation\'s own staleness, not the digest: ticket 28) or a wrong '
+             'digest after the card is edit_preview_stale with nothing written; the HTTP apply with no digest is '
+             'still 409 (ticket 29)',
              D17_TOOLS,
              B + 'test_lc06_d17_recommend_apply.py::test_the_applied_card_is_read_back_and_the_restudy_runs_on_it',
              B + 'test_lc06_d17_recommend_apply.py::test_without_the_restudy_the_old_figures_stand_and_no_study_is_made',
