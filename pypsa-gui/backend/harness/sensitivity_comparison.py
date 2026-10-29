@@ -160,12 +160,15 @@ def _resolve(db, user, ref: str):
 
 def _projects(baseline_project_id, case_project_ids):
     """(base, [(case, spec)]): access first, then the child relation."""
+    from harness.experiment_execution import is_case_project_name
     from services import chat_tools, project_registry, workflow_tools as wt
     with chat_tools._acting() as (db, user):
         base = _resolve(db, user, baseline_project_id)
         if case_project_ids is None:
             children = []
             for child in project_registry.direct_children(db, base):
+                if is_case_project_name(child.name):
+                    continue            # an experiment case, not a sensitivity case
                 try:
                     child = project_registry.resolve_project(db, user, str(child.id))
                 except HTTPException:
