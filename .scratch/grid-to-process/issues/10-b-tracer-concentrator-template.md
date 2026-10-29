@@ -49,8 +49,8 @@ Design §3.B, "Acceptance checks (B)", except:
 - The assistant's `create_project_from_template` lists `eh_concentrator_staged`, and the assistant inventory is regenerated (owner G2P-14-NOW, 2026-10-28: moved here from issue 14).
 
 **Acceptance:**
-- [ ] `create_project_from_template` with `eh_concentrator_staged` creates the project, and the assistant inventory check passes.
-- [ ] Design §3.B "Acceptance checks (B)": the year solve within 09's budget, the mass balance, the shed carrying across shipments with the week build refused, non-firm curtailment, and restart. Two exceptions: the investment-case check (11) and the motor-start check (12).
+- [x] `create_project_from_template` with `eh_concentrator_staged` creates the project, and the assistant inventory check passes.
+- [x] Design §3.B "Acceptance checks (B)": the year solve within 09's budget, the mass balance, the shed carrying across shipments with the week build refused, non-firm curtailment, and restart. Two exceptions: the investment-case check (11) and the motor-start check (12). (Budget: 45 min, owner decision G2P-10-BUDGET-1.)
 
 **Out of scope:** the IC blocker (11); motor fields (12); any change to `stage_network` beyond calling it.
 
