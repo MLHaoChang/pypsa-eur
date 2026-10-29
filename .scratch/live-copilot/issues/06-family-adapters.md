@@ -586,6 +586,19 @@ each equal to its own exported run evidence (from the case project); compare +30
 reversed −300 (−33.3 %); the comparison export equals the report. Mutations run locally,
 each failed the test: unit weighting (Δ 100); compare reading the baseline for both (Δ 0).
 
+### S11, LC-D11 FMEA and health (2026-10-29)
+
+Branch `claude/lc06-d11-fmea-health`, stacked on S10. GK B (9) reviews. Session LC-06 (7).
+`tests/test_lc06_d11_fmea_health.py`. Class A on the test_copt_assurance fleet: ΔEUE 28.8
+and 31.8 MWh, occurrence 17.52 and 43.8 per yr, arithmetic in the docstring. Class B: a 10 MW
+tie out sheds 30 MWh. Health: the ledger is read back from `asset_health.json` and the route;
+provenance 1 sourced, 1 drifted, 1 orphaned; 4 invalid fields refused with the file
+byte-identical. Mutations as tests: thermal2 q 0.1 gives ΔEUE 15.9; 4 MW behind the tie gives
+24 MWh; the drift itself. Finding: criticality_eur_per_year is per horizon (ticket 30), sent to
+GK B, which ruled (NOT OK @5847400b): criticality and severity are not asserted, only
+ΔEUE, occurrence and severity × occurrence = criticality; `LC-D11.fmea_criticality` pending
+on ticket 30, whose fix GK A reviews.
+
 ## Hand-off 6 (2026-10-29, LC-06 (6), early)
 
 PR stack (each against master, stacked):
