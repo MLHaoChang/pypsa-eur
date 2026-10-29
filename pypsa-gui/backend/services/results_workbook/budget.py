@@ -14,12 +14,13 @@ tables are coarsened.
 A snapshot table (`Table.time`) carries its rows' durations in hours
 (`Table.weights`, `snapshot_weights(n, "generators")`, never the objective
 weighting). A bucket never crosses an investment period. Within a bucket and
-column a missing value drops out of both Σv·w and Σw; a bucket with no value
-or Σw = 0 is written blank, never 0:
+column a missing value drops out of both Σv·w and Σw of a mean; a bucket with
+no value or Σw = 0 is written blank, never 0:
 
 * "mean" (MW), "price" and "state" (the state of charge): Σv·w / Σw, a
   time-weighted mean; prices are not load-weighted, and a state stays a state;
-* "sum" (energy per snapshot): Σv·w.
+* "sum" (power per snapshot, written as energy): Σv·w, in the unit × hours
+  (MW → MWh). A bucket with any missing value is blank, never a partial total.
 
 Snapshots that are not datetimes (integer timesteps) are cut into fixed
 blocks of 24, 168 and 730 snapshots per period, named as such.
@@ -83,17 +84,25 @@ def coarsen(t, level: int):
     present = values.notna()
     vw = values.fillna(0.0).mul(w, axis=0)
     ww = present.mul(w, axis=0)
-    by = pd.concat({"vw": vw, "ww": ww, "n": present.astype(int)}, axis=1).groupby(
-        keys, sort=False)
+    by = pd.concat({"vw": vw, "ww": ww, "n": present.astype(int),
+                    "gap": (~present).astype(int)}, axis=1).groupby(keys, sort=False)
     sums = by.sum()
     num, den, count = sums["vw"], sums["ww"], sums["n"]
-    # A bucket with no value (or no hours) is blank, never 0.
-    out = num.where((count > 0) & (den > 0)) if t.time == "sum" else num / den.where(den > 0)
+    # A bucket with no value (or no hours) is blank, never 0; an energy bucket
+    # with any gap is blank, never a partial total.
+    if t.time == "sum":
+        out = num.where((count > 0) & (den > 0) & (sums["gap"] == 0))
+    else:
+        out = num / den.where(den > 0)
     out = out.reset_index()
     out.columns = labels + list(values.columns)
     if pd.api.types.is_datetime64_any_dtype(out[snap]):
         out[snap] = out[snap].dt.date.map(lambda d: d.isoformat())
-    return replace(t, frame=out, weights=None, resolution=f"{name}, {KINDS[t.time]}"), name
+    unit = t.unit
+    if t.time == "sum":
+        unit = "MWh" if unit == "MW" else f"{unit}·h"
+    return replace(t, unit=unit, frame=out, weights=None,
+                   resolution=f"{name}, {KINDS[t.time]}"), name
 
 
 def _rows(tables) -> int:

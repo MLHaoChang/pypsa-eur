@@ -61,6 +61,12 @@ def test_energy_is_the_sum_of_value_times_hours():
     t, _ = budget.coarsen(_table([10.0, 40.0, 20.0], time="sum"), 0)
     assert _cell(t) == pytest.approx(120.0)
     assert _cell(t) != pytest.approx(70.0)  # an unweighted sum fails
+    assert t.unit == "MWh"  # MW × hours is energy, never still MW
+
+
+def test_an_energy_bucket_with_any_missing_cell_is_blank_never_a_partial_total():
+    t, _ = budget.coarsen(_table([10.0, math.nan, 20.0], time="sum"), 0)
+    assert math.isnan(_cell(t))
 
 
 def test_prices_and_the_state_of_charge_say_how_they_are_averaged():
