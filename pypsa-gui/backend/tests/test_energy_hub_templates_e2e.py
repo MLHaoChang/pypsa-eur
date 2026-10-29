@@ -6,6 +6,7 @@ Class-C FMEA sweep with the template's stress registry.
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import sys
 import time
@@ -15,7 +16,7 @@ import pytest
 BACKEND = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND / "project_templates"))
 import eh_templates as T  # noqa: E402
-from tests._year_base import build_for_solve  # noqa: E402
+from tests._year_base import YEAR_BASE, build_for_solve  # noqa: E402
 
 ALL_STAGES = ["apply_pack", "ens_solve", "frontier", "mc_certify", "fmea_top",
               "redundancy", "levers", "dtc_stress", "dtc_planning", "assemble"]
@@ -24,6 +25,14 @@ BUDGET = 60
 # IPP plant) is covered by test_eh_ipp.py instead.
 STUDY_IDS = sorted(t for t in T.BUILDERS
                    if not T.TEMPLATE_META.get(t, {}).get("generation_only"))
+# A year-base template's full study is about 20 year solves, too long for CI,
+# so it runs only under the year-budget opt-in (owner decision G2P-10-E2E-1);
+# CI keeps its one-period readiness and feasibility checks.
+_YEAR_BASE_OPT_IN = [pytest.mark.slow, pytest.mark.skipif(
+    os.environ.get("PYPSA_GUI_YEAR_BUDGET_LIVE") != "1",
+    reason="Explicit year-budget live opt-in required (year-base full study)")]
+STUDY_PARAMS = [pytest.param(t, marks=_YEAR_BASE_OPT_IN) if t in YEAR_BASE else t
+                for t in STUDY_IDS]
 
 
 def _poll(client, url, timeout=900.0):
@@ -59,7 +68,7 @@ def _network_fingerprint():
 
 
 @pytest.mark.live_solve
-@pytest.mark.parametrize("tid", STUDY_IDS)
+@pytest.mark.parametrize("tid", STUDY_PARAMS)
 def test_every_feature_on_the_template(tid, client, tmp_path, monkeypatch,
                                        tmp_projects_dir):
     name = _project_from_template(client, tmp_path, monkeypatch, tid)
