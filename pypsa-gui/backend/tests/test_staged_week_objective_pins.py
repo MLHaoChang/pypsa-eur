@@ -16,6 +16,9 @@ sys.path.insert(0, str(TPL_DIR))
 import eh_site as S  # noqa: E402
 import eh_templates as T  # noqa: E402
 
+# A year-base template's week build is refused, so it has no week objective to pin (its own tests pin its plan).
+from tests._year_base import YEAR_BASE  # noqa: E402
+
 #: EUR, master 610f1c78; each a 3-period plan of one 168 h week per period.
 PINS = {
     "eh_datacenter_staged": 455703702.708,
@@ -24,10 +27,6 @@ PINS = {
     "eh_ammonia_staged": 171928188.451,
     "eh_site": 87313774.84,
 }
-
-#: Staged templates on the year time base: their week build is refused, so they have no week objective to pin
-#: (each one's own test file pins its year plan).
-YEAR_BASE = {"eh_concentrator_staged"}
 
 
 def _build(tid):
