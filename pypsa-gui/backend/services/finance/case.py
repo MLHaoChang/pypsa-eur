@@ -551,6 +551,25 @@ class CampusSummary:
 
 
 @dataclass(frozen=True)
+class ProductShortfall:
+    """One shortfall slack's lost product in one period, on the project solve
+    and on the site-today baseline (grid-to-process ticket 11). Per YEAR of
+    the period: Σ p · snapshot_weights("generators") over the period's
+    snapshots ÷ its `years` (the period total is that × `years`). The money
+    is the slack's `lost_production` line (the bus's ledgered value, never
+    VoLL); this is its quantity for the report, never a cash line. None =
+    not captured on that side."""
+
+    period: str                                 # the template's period key
+    generator: str
+    bus: str
+    unit: str                                   # the product bus's unit ("t")
+    years: float                                # the period's investment years
+    project_per_year: float | None
+    counterfactual_per_year: float | None
+
+
+@dataclass(frozen=True)
 class FinanceCase:
     inputs: FinanceInputs
     owner: str
@@ -588,6 +607,10 @@ class FinanceCase:
     # whose COD year is later is a STAGE: its capex is paid on its own
     # (`Operating.stage_capex`) and its clocks run from its COD.
     asset_cod: dict[str, date] = field(default_factory=dict)
+    # The lost product behind the `lost_production` lines, project and
+    # site-today baseline (grid-to-process ticket 11); empty without a
+    # baseline or a shortfall slack, and then left out of the case hash.
+    product_shortfall: tuple[ProductShortfall, ...] = ()
 
 
 def cod_year_of(case: FinanceCase, name: str, cod_year: int) -> int:
