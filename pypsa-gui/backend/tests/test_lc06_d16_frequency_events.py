@@ -294,7 +294,8 @@ def _site_sidecar(scenarios=("seamless",), units=None, blocks=None, **kw):
 
 def _table(report, key):
     table = next(t for t in report["tables"] if t["id"] == f"freq_{key}")
-    cols = {"ups": F.UPS_COLUMNS, "bridge": F.BRIDGE_COLUMNS, "planned": F.PLANNED_COLUMNS}[key]
+    cols = {"ups": F.UPS_COLUMNS, "bridge": F.BRIDGE_COLUMNS, "planned": F.PLANNED_COLUMNS,
+            "losses": F.LOSSES_COLUMNS}[key]
     return [dict(zip(cols, row)) for row in table["rows"]]
 
 
@@ -494,11 +495,15 @@ def test_e6_short_of_room_is_infeasible_with_the_shortfall(make_hub):
     """One change from the base: the genset is 5 MW, dispatched at its p_min
     0.5 MW (P0, from the hub's dispatch). Room: the BESS from P0 0 to its
     30 MW, plus the genset from 0.5 to 5 (4.5 MW, the ramp time is no limit
-    at full), 34.5 MW, short of the 39.5 MW import plus losses."""
+    at full), 34.5 MW, short of the 39.5 MW import. This island cannot
+    carry the load, so I4 is not viable and the import is the lossless
+    one (``_study_hour``: ``dp_e1``), exactly 40 − 0.5."""
     gen_mw, p0, bess_room = 5.0, 0.5, 30.0
     row, e6 = _e6(make_hub, gen_mw=gen_mw)
+    losses = next(r for r in _table(make_hub.report, "losses") if r["hour"] == 0)
+    assert str(losses["i4_viable"]).lower() == "false"
     imp = row["import_mw"]
-    assert LOAD - p0 < imp < (LOAD - p0) / 0.99
+    assert imp == pytest.approx(LOAD - p0, abs=TOL)
     assert str(row["feasible"]).lower() == "false"
     assert row["shortfall_mw"] == pytest.approx(imp - (bess_room + (gen_mw - p0)), abs=TOL)
     assert e6 == []

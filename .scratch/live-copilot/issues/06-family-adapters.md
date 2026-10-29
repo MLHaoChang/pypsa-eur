@@ -523,7 +523,8 @@ freq_bridge, freq_planned.
   N+1: an 80 MW genset (start 20 s) is dropped and named; ready stays 15 s.
 - E6 (planned): BESS 30 MW plus a spinning 60 MW genset at p_min 6 MW, ramp 6 MW/s;
   34 < import < 34/0.99; ramp_s = (import − 30)/6. Ramp halved doubles it. Infeasible:
-  the genset alone changed to 5 MW (p0 0.5): shortfall = import − (30 + 4.5).
+  the genset alone changed to 5 MW (p0 0.5): I4 is not viable, so the import is the
+  lossless 39.5 (`dp_e1`); shortfall = import − (30 + 4.5).
 - Manifest: LC-D16.E4, E5 and E6 covered; the EMT/PLL/voltage unavailable row stays.
 
 ## Hand-off 5 (2026-10-29, LC-06 (5) at 300k)
