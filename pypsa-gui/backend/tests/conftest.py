@@ -458,8 +458,10 @@ def _reset_tenant_tables(_auth_db):
     with engine.begin() as conn:
         # `library_items` (Edge Investment Case WP1.1a): per-org Library rows
         # must not leak a version number from one test into the next.
+        # `assurance_record_seq`: a record's replay mark must not outlive the
+        # test whose record store it belongs to.
         for table in ("project_locks", "project_memberships", "projects", "solve_jobs",
-                      "library_items"):
+                      "library_items", "assurance_record_seq"):
             conn.execute(text(f"DELETE FROM {table}"))
 
 @pytest.fixture(autouse=True)
