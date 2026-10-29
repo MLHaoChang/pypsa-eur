@@ -56,6 +56,8 @@ INPUT_ADAPTERS = {
     "static_page": "static-input-page/1",
     "series": "series-input/1",
     "run": "run-metrics/1",
+    "run_section": "run-section/1",
+    "run_comparison": "run-compare/1",
     "aggregate_load": "aggregate-load/1",
 }
 
@@ -1164,6 +1166,48 @@ def evidence(owner, evidence_id):
         except (HTTPException, KeyError, ValueError, TypeError, AttributeError):
             unavailable("evidence_unavailable")
         return record
+    if record["scope"].get("kind") == "run_section":
+        from services import run_evidence
+
+        try:
+            scope = record["scope"]
+            project_id, manifest, data, _status = run_evidence.checked_run_section(
+                scope["entity_id"], scope["section"]
+            )
+            if (
+                project_id != record["project_id"]
+                or manifest is None
+                or digest({"manifest": manifest, "section": scope["section"]})
+                != record["source_sha256"]
+                or _run_section_scope(manifest, scope["section"]) != scope
+            ):
+                unavailable("evidence_unavailable")
+            facts, gap = run_section_facts(manifest, scope["section"], data)
+            if gap is not None:
+                unavailable("evidence_unavailable")
+            _require_current_facts(record["facts"], facts)
+        except (HTTPException, KeyError, ValueError, TypeError, AttributeError):
+            unavailable("evidence_unavailable")
+        return record
+    if record["scope"].get("kind") == "run_comparison":
+        from services import run_evidence
+
+        try:
+            scope = record["scope"]
+            project_id, sources, _status = run_evidence.checked_run_comparison(
+                scope["entity_id"], scope["baseline_run_id"], scope["metrics"]
+            )
+            if (
+                project_id != record["project_id"]
+                or sources is None
+                or _comparison_digest(sources, scope["metrics"]) != record["source_sha256"]
+                or _run_comparison_scope(sources, scope["metrics"]) != scope
+            ):
+                unavailable("evidence_unavailable")
+            _require_current_facts(record["facts"], run_comparison_facts(sources))
+        except (HTTPException, KeyError, ValueError, TypeError, AttributeError):
+            unavailable("evidence_unavailable")
+        return record
     # Otherwise current inputs only. This does not substitute a cold, saved
     # network for changed foreground inputs.
     ctx = PyPSAService.get_active_context()
@@ -1312,6 +1356,266 @@ def capture_run(owner, args, result, digest_before):
     }
     save(record, record["evidence_id"])
     return record
+
+
+# A checked section answer certifies at most this many numbers, so its record
+# stays well under save()'s 128 KiB.
+MAX_SECTION_FACTS = 200
+
+
+def _number(value):
+    """A finite JSON number as recorded (int or float), never a bool."""
+    return type(value) in (int, float) and math.isfinite(value)
+
+
+def _unit(unit):
+    return isinstance(unit, str) and 1 <= len(unit) <= 16
+
+
+def _section_pairs(data):
+    """(tokens, value, unit) of every {"value", "unit"} object in a section, in
+    document order. Iterative, so a deeply nested section cannot recurse."""
+    stack = [((), data)]
+    while stack:
+        tokens, item = stack.pop()
+        if isinstance(item, dict):
+            if _number(item.get("value")) and _unit(item.get("unit")):
+                yield tokens, item["value"], item["unit"]
+            children = list(item.items())
+        elif isinstance(item, list):
+            children = list(enumerate(item))
+        else:
+            continue
+        stack.extend(((*tokens, key), child) for key, child in reversed(children))
+
+
+def run_section_facts(manifest, section, data):
+    """(facts, gap): one fact per {value, unit} pair of a recorded section, at
+    its pointer under /data. The metric is the pair's own key (the section's
+    name at its root, the nearest named key inside a list). Claims match a
+    fact by path, so a key repeated at two pointers stays two facts."""
+    facts = []
+    for tokens, value, unit in _section_pairs(data):
+        names = [t for t in tokens if isinstance(t, str)]
+        metric = names[-1] if names else section
+        if not 1 <= len(metric) <= 64:
+            continue
+        facts.append(_fact(manifest["run_id"], metric, value, unit, "data", *tokens, "value"))
+    if not facts:
+        return [], "this section records no number with a unit"
+    if len(facts) > MAX_SECTION_FACTS:
+        return [], f"this section records more than {MAX_SECTION_FACTS} numbers with units"
+    return facts, None
+
+
+def _run_section_scope(manifest, section):
+    return {
+        **_run_scope(manifest),
+        "kind": "run_section",
+        "section": section,
+        "section_sha256": manifest["sections"][section]["sha256"],
+    }
+
+
+def run_section_source(run_id, section):
+    """(project id, source digest, facts, gap) of one recorded section; the
+    digest and facts only when the run checks and the section has facts."""
+    from services import run_evidence
+
+    project_id, manifest, data, status = run_evidence.checked_run_section(run_id, section)
+    if manifest is None:
+        gap = (
+            "the run does not record this section"
+            if status == "not_recorded"
+            else f"this run is {status.replace('_', ' ')}"
+        )
+        return project_id, None, [], gap
+    facts, gap = run_section_facts(manifest, section, data)
+    return project_id, digest({"manifest": manifest, "section": section}), facts, gap
+
+
+def _shown_at(shown, tokens):
+    """The value a result shows at a pointer's tokens, else None."""
+    for token in tokens:
+        if isinstance(shown, dict) and isinstance(token, str) and token in shown:
+            shown = shown[token]
+        elif isinstance(shown, list) and isinstance(token, int) and 0 <= token < len(shown):
+            shown = shown[token]
+        else:
+            return None
+    return shown
+
+
+def _shown_facts(result, facts):
+    """The facts a result shows exactly (value and unit at the fact's path)."""
+    kept = []
+    for fact in facts:
+        tokens = unpointer(fact["path"])
+        unit_tokens = [*tokens[:-1], "unit"] if tokens[-1] == "value" else None
+        value = _shown_at(result, _typed(result, tokens))
+        if unit_tokens is not None and _shown_at(result, _typed(result, unit_tokens)) != fact["unit"]:
+            continue
+        if _certified(value, fact["value"]):
+            kept.append(fact)
+    return kept
+
+
+def _typed(result, tokens):
+    """Pointer tokens with list indices as ints, following the result."""
+    typed, node = [], result
+    for token in tokens:
+        if isinstance(node, list) and token.isdigit():
+            token = int(token)
+        typed.append(token)
+        node = _shown_at(node, [token])
+    return typed
+
+
+def _record(owner, project_id, source_kind, kind, scope, facts, source_sha256, coverage, warning):
+    ctx = PyPSAService.get_active_context()
+    record = {
+        "version": 1,
+        "record_kind": "evidence",
+        "evidence_id": str(uuid.uuid4()),
+        "owner_id": owner,
+        "project_id": project_id,
+        "org_id": ctx.org_id,
+        "source_kind": source_kind,
+        "adapter_version": INPUT_ADAPTERS[kind],
+        "scope": scope,
+        "facts": facts,
+        "source_sha256": source_sha256,
+        "validity": {
+            "outcome": "completed",
+            "as_of": time.time(),
+            "coverage": coverage,
+            "warnings": [warning],
+        },
+        "expires_at": time.time() + RETENTION_SECONDS,
+    }
+    save(record, record["evidence_id"])
+    return record
+
+
+def capture_run_section(owner, args, result, digest_before):
+    """Evidence for the {value, unit} pairs one get_run_evidence section result
+    showed exactly, as of the run's finish; the run and section must be the
+    ones digested before the handler."""
+    from services import run_evidence
+
+    ctx = PyPSAService.get_active_context()
+    if digest_before is None or not isinstance(result, dict) or not ctx.project_uuid:
+        return None
+    authorize(owner, ctx.project_uuid)
+    section = args.get("section")
+    project_id, manifest, data, _status = run_evidence.checked_run_section(
+        args.get("run_id"), section
+    )
+    if (
+        manifest is None
+        or project_id != ctx.project_uuid
+        or digest({"manifest": manifest, "section": section}) != digest_before
+        or result.get("run_id") != manifest["run_id"]
+        or result.get("status") != "completed"
+        or result.get("section") != section
+    ):
+        return None
+    facts, gap = run_section_facts(manifest, section, data)
+    facts = _shown_facts(result, facts) if gap is None else []
+    if not facts:
+        return None
+    return _record(
+        owner, project_id, "run_section", "run_section",
+        _run_section_scope(manifest, section), facts, digest_before, "run_section_values",
+        "Section values as recorded when the run finished; current inputs may differ.",
+    )
+
+
+def run_comparison_facts(sources):
+    """One fact per computed delta (its metric's unit) and per percentage
+    (unit "%", only where the baseline is not zero), bound to the run."""
+    run_id = sources["run"]["run_id"]
+    facts = []
+    for metric, entry in sources["comparison"]["deltas"].items():
+        delta = entry["delta"]
+        if _number(delta["value"]) and _unit(delta["unit"]):
+            facts.append(_fact(run_id, metric, delta["value"], delta["unit"],
+                               "deltas", metric, "delta", "value"))
+        if _number(entry["delta_pct"]):
+            facts.append(_fact(run_id, metric, entry["delta_pct"], "%",
+                               "deltas", metric, "delta_pct"))
+    return facts
+
+
+def _run_comparison_scope(sources, metrics):
+    run, base = sources["run"], sources["baseline"]
+    return {
+        "kind": "run_comparison",
+        "entity_id": run["run_id"],
+        "baseline_run_id": base["run_id"],
+        "mode": run.get("mode"),
+        "finished_at": run["finished_at"],
+        "baseline_finished_at": base["finished_at"],
+        "metrics": list(metrics) if metrics is not None else None,
+        "unsaved_inputs": bool(run.get("unsaved_inputs") or base.get("unsaved_inputs")),
+    }
+
+
+def _comparison_digest(sources, metrics):
+    return digest({"run": sources["run"], "baseline": sources["baseline"], "metrics": metrics})
+
+
+def run_comparison_source(args):
+    """(project id, source digest, gap) of a comparison; the digest only when
+    both runs check, they are comparable and some delta is certifiable."""
+    from services import run_evidence
+
+    metrics = args.get("metrics")
+    project_id, sources, status = run_evidence.checked_run_comparison(
+        args.get("run_id"), args.get("baseline_run_id"), metrics
+    )
+    if sources is None:
+        role, _, rest = status.partition(" ")
+        if role == "run":
+            return project_id, None, f"the run is {rest.replace('_', ' ')}"
+        if role == "baseline":
+            return project_id, None, f"the baseline run is {rest.replace('_', ' ')}"
+        return project_id, None, f"the runs are {status.replace('_', ' ')}"
+    if not run_comparison_facts(sources):
+        return project_id, None, "no recorded metric has a delta in the same unit"
+    return project_id, _comparison_digest(sources, metrics), None
+
+
+def capture_run_comparison(owner, args, result, digest_before):
+    """Evidence for the deltas one compare_project_runs result showed exactly;
+    both runs must be the ones digested before the handler."""
+    from services import run_evidence
+
+    ctx = PyPSAService.get_active_context()
+    if digest_before is None or not isinstance(result, dict) or not ctx.project_uuid:
+        return None
+    authorize(owner, ctx.project_uuid)
+    metrics = args.get("metrics")
+    project_id, sources, _status = run_evidence.checked_run_comparison(
+        args.get("run_id"), args.get("baseline_run_id"), metrics
+    )
+    if (
+        sources is None
+        or project_id != ctx.project_uuid
+        or _comparison_digest(sources, metrics) != digest_before
+        or result.get("comparable") is not True
+        or (result.get("run") or {}).get("run_id") != sources["run"]["run_id"]
+        or (result.get("baseline") or {}).get("run_id") != sources["baseline"]["run_id"]
+    ):
+        return None
+    facts = _shown_facts(result, run_comparison_facts(sources))
+    if not facts:
+        return None
+    return _record(
+        owner, project_id, "run_comparison", "run_comparison",
+        _run_comparison_scope(sources, metrics), facts, digest_before, "run_deltas",
+        "Deltas of metrics as recorded when both runs finished; current inputs may differ.",
+    )
 
 
 def capture_dispatch(owner, entity):
