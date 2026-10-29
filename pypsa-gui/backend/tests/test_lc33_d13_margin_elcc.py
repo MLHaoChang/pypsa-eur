@@ -71,12 +71,12 @@ def call(name: str, **args) -> None:
     assert not [d for e, d in frames if e == 'tool_error'], frames
 
 
-def wait_for(kind: str, timeout: float = 300.0) -> dict:
+def wait_for(kind: str, timeout: float = 300.0, ends=('done', 'met')) -> dict:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         out = chat_tools.get_adequacy_results(kind)
         if out.get('status') != 'running':
-            assert out.get('status') in ('done', 'met') and not out.get('error'), out
+            assert out.get('status') in ends and not out.get('error'), out
             return out.get('result') or out
         time.sleep(0.2)
     raise AssertionError(f'{kind} did not finish')
@@ -211,6 +211,8 @@ def test_the_margin_loop_steps_to_the_cheapest_verified_margin(seam, load):
     assert out['margin_tight'] == pytest.approx(oracle['m_tight'], abs=MW_TOL / load)
     assert oracle['m_start'] > PROBE_MARGIN
     assert out['margin0'] == pytest.approx(oracle['m_start'], abs=MW_TOL / load)
+    # Ceiling: F and the 150 MW cap of X, both derated, over the peak.
+    assert out['margin_ceiling'] == pytest.approx((1 - ML_Q) * (ML_F_MW + 150.0) / load - 1, abs=1e-9)
     its = [it for it in out['iterations'] if it['solve_status'] == 'ok']
     assert its[0]['lever_value'] == pytest.approx(oracle['m_start'], abs=MW_TOL / load)
     capex = capex_per_mw(ML_CAPEX, loop_network(load))
@@ -234,7 +236,41 @@ def test_the_margin_loop_steps_to_the_cheapest_verified_margin(seam, load):
     met_rows = [(cost, m) for m, met, cost in verdicts if met]
     assert met_rows and any(not met for _m, met, _c in verdicts)
     assert out['lever_star'] == pytest.approx(min(met_rows)[1], abs=1e-12)
+    # m* = 1.07 at load 100: X(m) reaches the load, (1 + m) x 100 - 117 = 0.9 x 100,
+    # the first X at which losing F still leaves X >= load (LOLE 4.8 -> 0.48 h).
+    # The verified margin is at or above it, not equal: the cheapest VERIFIED
+    # margin, not the global minimum.
     assert out['lever_star'] >= oracle['m_step'] - 1e-9
+
+
+@pytest.mark.parametrize('firm_share', [1.0, 0.9], ids=['m_tight_0', 'm_tight_negative'])
+def test_a_probe_tight_at_or_below_zero_margin_starts_at_the_overshoot(seam, monkeypatch, firm_share):
+    """Runner layer, stubbed probe report (branch unreachable from the seam: the
+    probe's own reserve constraint keeps firm >= (1 + probe) x peak).
+
+    The real solve runs; only the adequacy report it hands back is edited to
+    firm = firm_share x peak, and the real x0 positioning reads it. With
+    base = max(m_tight, 0) = 0 a multiplicative overshoot is still 0, so the
+    start is STEP_OVERSHOOT itself; without that guard it would clamp to
+    PROBE_MARGIN.
+    """
+    from services.adequacy import sweep
+
+    real = sweep._solve_once
+
+    def solve_then_edit_report(cfg, n, lock, log_queue, sink):
+        real(cfg, n, lock, log_queue, sink)
+        for row in ((sink.get('adequacy_report') or {}).get('reserve_margin') or {}).get('by_period') or []:
+            row['firm_mw'] = firm_share * row['peak_mw']
+
+    monkeypatch.setattr(sweep, '_solve_once', solve_then_edit_report)
+    seam(loop_network(100.0))()
+    call('run_margin_loop', target_lole_h=ML_TARGET_H, draws=ML_DRAWS, seed=ML_SEED, max_solves=1)
+    out = wait_for('margin_loop', ends=('budget_exhausted',))   # one solve, by design
+    assert out['margin_tight'] == pytest.approx(firm_share - 1, abs=1e-12)
+    assert out['margin0'] == pytest.approx(STEP_OVERSHOOT, abs=1e-12)
+    assert STEP_OVERSHOOT != PROBE_MARGIN
+    assert out['iterations'][0]['lever_value'] == pytest.approx(STEP_OVERSHOOT, abs=1e-12)
 
 
 def test_the_hand_step_moves_with_the_load():
@@ -249,21 +285,24 @@ def test_the_hand_step_moves_with_the_load():
 FR_TARGETS = [5000, 2500, 1000]
 
 
-def frontier_network() -> pypsa.Network:
+DEAR_PER_MWH = 200.0                         # capex per MWh of the 4 h horizon
+
+
+def frontier_network(dear_per_mwh: float = DEAR_PER_MWH) -> pypsa.Network:
     n = one_bus(4, 100.0)
     n.add('Generator', 'base', bus='b', carrier='gas', p_nom=60.0, marginal_cost=10.0)
     # 8760 x 30: 30 EUR per MWh of a 4 h horizon on top of 20 EUR/MWh dispatch.
     n.add('Generator', 'cheap', bus='b', carrier='gas', p_nom_extendable=True, p_nom_max=20.0,
           capital_cost=8760.0 * 30, marginal_cost=20.0)
     n.add('Generator', 'dear', bus='b', carrier='gas', p_nom_extendable=True, p_nom_max=500.0,
-          capital_cost=8760.0 * 200, marginal_cost=20.0)
+          capital_cost=8760.0 * dear_per_mwh, marginal_cost=20.0)
     return n
 
 
-def frontier_oracle(voll: float) -> tuple[list[tuple[float, float]], int]:
+def frontier_oracle(voll: float, dear_per_mwh: float = DEAR_PER_MWH) -> tuple[list[tuple[float, float]], int]:
     """[(ENS MWh, total system cost EUR)] per target, and the knee index."""
     hours, short = 4, 40.0
-    per_mwh = {'cheap': 30.0 + 20.0, 'dear': 200.0 + 20.0}
+    per_mwh = {'cheap': 30.0 + 20.0, 'dear': dear_per_mwh + 20.0}
     caps = {'cheap': 20.0, 'dear': float('inf')}
     points = []
     for target in FR_TARGETS:
@@ -285,12 +324,16 @@ def frontier_oracle(voll: float) -> tuple[list[tuple[float, float]], int]:
 def test_the_frontier_oracle_by_hand():
     assert frontier_oracle(100.0) == ([(80.0, 6400.0), (80.0, 6400.0), (40.0, 15200.0)], 1)
     assert frontier_oracle(40.0) == ([(160.0, 2400.0), (100.0, 5400.0), (40.0, 15200.0)], 0)
+    # capex mutation: +10 EUR/MWh on the dear plant moves only the point that builds it, by 10 x 10 MW x 4 h
+    assert frontier_oracle(100.0, DEAR_PER_MWH + 10) == ([(80.0, 6400.0), (80.0, 6400.0), (40.0, 15600.0)], 1)
 
 
-@pytest.mark.parametrize('voll', [100.0, 40.0], ids=['voll_100', 'voll_40'])
-def test_the_frontier_prices_each_target_and_the_campaign_charges_it(seam, voll):
-    points, knee = frontier_oracle(voll)
-    seam(frontier_network(), voll=voll)
+@pytest.mark.parametrize('voll, dear_per_mwh', [(100.0, DEAR_PER_MWH), (40.0, DEAR_PER_MWH),
+                                                (100.0, DEAR_PER_MWH + 10)],
+                         ids=['voll_100', 'voll_40', 'dear_capex_up'])
+def test_the_frontier_prices_each_target_and_the_campaign_charges_it(seam, voll, dear_per_mwh):
+    points, knee = frontier_oracle(voll, dear_per_mwh)
+    seam(frontier_network(dear_per_mwh), voll=voll)
     started = chat_tools.start_campaign('LC-33 frontier', 10)
     assert started['spent_solves'] == 0
     call('run_frontier_study', targets_permyriad=FR_TARGETS)
@@ -321,6 +364,9 @@ def test_total_system_cost_is_the_objective_less_the_shed_at_voll(seam):
     total = report['cost']['total_system_cost_eur']
     assert total == pytest.approx(state['objective'] - voll * lost['total_mwh'], abs=EUR_TOL)
     assert report['metrics']['ens_mwh'] == pytest.approx(lost['total_mwh'], abs=MW_TOL)
+    # ... and it is the frontier's hand point at the same cap.
+    ens, cost = frontier_oracle(voll)[0][FR_TARGETS.index(1000)]
+    assert (lost['total_mwh'], total) == pytest.approx((ens, cost), abs=EUR_TOL)
 
 
 # ── ELCC ─────────────────────────────────────────────────────────────────
