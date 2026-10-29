@@ -1,0 +1,1 @@
+* Test(pypsa-gui): Assistant behaviour coverage for chronology edge cases (LC-D03: leap day, DST dates, out-of-order and repeated timestamps) and undo/checkpoints (LC-D22: input fingerprints before and after, results not resurrected); both capability-matrix rows move from pending to covered.
