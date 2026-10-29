@@ -35,3 +35,15 @@ it('leaves a built-in tool unlabelled', () => {
   render(<ConfirmationCard />)
   expect(screen.queryByTestId('chat-confirmation-external')).toBeNull()
 })
+
+it('titles an Expert built-in card in plain words and hides an empty payload', () => {
+  useChatStore.setState({ sessionId: 'session-1', pending: {
+    tool_use_id: 'call-2', tool_name: 'run_simulation', args: {},
+    safety_tier: 'write', confirmation_token: 'token-2', ttl_seconds: 300,
+    expires_at_epoch_ms: Date.now() + 300_000,
+  } })
+  const { container } = render(<ConfirmationCard />)
+  const title = document.getElementById('chat-confirmation-title')!.textContent!
+  expect(title).not.toContain('run_simulation')
+  expect(container.querySelector('pre')).toBeNull()
+})
