@@ -180,6 +180,23 @@ GO on the S8b plan, with conditions:
 8. Mutations: PV, T halved, e 0.05 → ok false, droop 8 %, ramp halved; each turns red.
 9. Land these here under S8b.
 
+### GK A (4), GO conditions for S9 (2026-10-29)
+
+- The card is non-trivial: each "sets" value is inside gfm_tuning's bounds and
+  moves from the current value by more than the tolerance.
+- RoCoF at 0+ holds with the applied tau_f, or tau_f is pinned. The fixture is
+  gfm_vsm, whose M = 2 H_v S_n / f0 has no tau_f (`frequency._gfm_m`); the card
+  sets none, asserted. Settled from the applied droop, D = 0.
+- Read-back: exact equality of the sidecar and the campus file with the card,
+  source tag included.
+- Stale: network edit, then apply: edit_preview_stale (409), sidecar, campus
+  file and APPLIED_FILE byte-identical; the same for a wrong digest.
+- Known gaps filed as tickets 28 (digest without the network) and 29 (HTTP apply
+  with no digest); one HTTP test pins today's guard (no digest, network edited:
+  still 409).
+- Mutations, one per oracle; skipping the re-study keeps the pre-apply figures
+  and makes no new island study.
+
 ## Slice log
 
 ### S0, execution manifest (2026-10-28)
