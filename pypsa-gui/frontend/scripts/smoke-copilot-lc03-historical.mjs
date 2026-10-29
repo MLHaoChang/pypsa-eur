@@ -170,26 +170,37 @@ try {
     await page.waitForURL(/\/projects/)
     // The list may still be the one cached while access was gone (10 s stale time).
     if (reload) await page.reload()
-    // The whole card is its link: a pointer click on the card's name opens it
-    // (the visible one: the tab strip may still carry the name off-screen).
-    await page.getByText(name, { exact: true }).locator('visible=true').first().click({ timeout: 30000 })
+    // The whole card is its link, named "Open <project>" for assistive tech.
+    // The server binds the session to it on activate; a turn sent before that
+    // would still find no project open.
+    const activated = page.waitForResponse(r => r.url().endsWith('/activate') && r.ok(), { timeout: 60000 })
+    await page.getByRole('link', { name: `Open ${name}`, exact: true }).click({ timeout: 30000 })
       .catch(async error => {
         await page.screenshot({ path: path.join(artifacts, `lc03h-failed-card-${name}.png`) })
         throw error
       })
-    await page.waitForURL(/\/app/)
+    await page.waitForURL(/\/app/).catch(async error => {
+      await page.screenshot({ path: path.join(artifacts, `lc03h-failed-open-${name}.png`) })
+      throw error
+    })
     await page.getByTestId('chat-input').waitFor({ state: 'attached' }).catch(async error => {
       await page.screenshot({ path: path.join(artifacts, `lc03h-failed-open-${name}.png`) })
       throw error
     })
+    await activated
   }
 
   const openPast = async nth => {
+    // Counted before sending: reopening a project starts its transcript afresh.
+    const answered = await page.getByTestId('chat-messages').getByText(/LC03H_PAST/).count()
     await send(page, PAST)
     // Binding the conversation to a run is a write: the user approves its card.
     const approvals = await page.getByTestId('chat-confirm-approve').count()
-    await page.getByTestId('chat-confirm-approve').nth(approvals).click({ timeout: 60000 })
-    const words = await answer(page, 'LC03H_PAST', nth)
+    await page.getByTestId('chat-confirm-approve').nth(approvals).click({ timeout: 60000 }).catch(async error => {
+      await page.screenshot({ path: path.join(artifacts, `lc03h-failed-approve-${nth}.png`) })
+      throw error
+    })
+    const words = await answer(page, 'LC03H_PAST', answered)
     const view = await pastView(page, runs[0])
     return { words, ...view }
   }
