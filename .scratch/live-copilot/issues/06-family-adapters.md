@@ -150,6 +150,21 @@ means oracle discrimination; no new refusal or warning.
    wrong-base case asserts |correct − wrong| ≫ tol.
 7. Land these here under S7.
 
+### GK A (4), GO conditions for S8 (2026-10-29)
+
+Split A: S8a now (E1, E2, E3, isochronous, dt halving, 60 Hz); S8b (E4–E6) with its
+own plan (genset, PV and UPS figures; UPS L·T/2/3600 and E6 ramp oracles).
+1. dt halving: assert the order, ratio ≥ 0.75·2⁴ = 12 for RK4, error = max over time
+   points spanning several M/K, coarse error > 1e-9; report the measured ratio.
+2. Assert the oracle against the reported metric: 0⁺ RoCoF, or the windowed closed form.
+3. D = 0 and no isochronous unit in the Δf_qss case, asserted from the read-back.
+4. E1: ΔP between 40 MW and 40 MW plus a stated loss bound.
+5. Isochronous: |Δf(t_end)| below the band with t_end ≥ 5·T_i; the nadir nonzero.
+6. E3: the collapse row names the tripped unit and the reason.
+7. Mutations: H_v halved → twice the RoCoF; droop 8 % → twice Δf_qss; each fails its assert.
+8. The EMT/PLL/voltage unavailable row stays; E4–E6 stay pending naming S8b.
+9. Land these here under S8.
+
 ## Slice log
 
 ### S0, execution manifest (2026-10-28)
@@ -463,6 +478,14 @@ Test only; no engine edit. The plan, and the A/B/C split question, went to GK A 
 - Found: the chat tool `campus_island_report` trims the 21 tables to the first 2 under
   the result cap, so the events never reach the copilot. Ticket 27. S8a reads the route.
 - Manifest: LC-D16.E1, E2 and E3 covered; E4–E6 pending (S8b).
+- GK A (4)'s S8 conditions: (1) dt halving takes the max error over the trace to 2 s
+  (4.75 τ), dt 0.05 → 0.025: ratio 16.8, coarse 5.4e-7 Hz, asserted ≥ 12 and > 1e-9.
+  (2) `rocof0_hz_per_s` is dΔf/dt at 0⁺ (`Trace.rocof0`); the 500 ms windowed column is
+  also asserted on the closed form (−1.11200). (3) The ledger's "load damping D = 0" and
+  the read-back sidecar's kinds {bess, load}. (4) 40 < ΔP < 40/0.99 (the Link's 1 %).
+  (5) t_end 20 s ≥ 5·T_i, |Δf| < 1e-3, nadir < −0.1 (−0.345). (6) E3 names BESS and
+  "no grid-forming headroom". (7) In-file tests, plus the default fixture mutated red.
+  (8) The EMT row stays; E4–E6 pending, "S8b".
 
 ## Hand-off 4 (2026-10-29, LC-06 (4) at 300k)
 

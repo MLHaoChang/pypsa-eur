@@ -29,6 +29,7 @@ both carry ``abs=1e-6``. The mutations move them by 1.9 Hz/s and 0.8 Hz.
 """
 from __future__ import annotations
 
+import json
 import math
 import time
 import uuid
@@ -57,6 +58,12 @@ def rocof0(dp, h=H_V, f0=50.0):
 
 def settled(dp, droop=DROOP, f0=50.0):
     return -dp / (BESS_MW / (droop / 100.0 * f0))
+
+
+def closed_form(dp, at_s, f0=50.0):
+    """Δf(t) on the BESS alone: M dΔf/dt = −ΔP − K Δf, D = 0."""
+    k, m = BESS_MW / (DROOP / 100.0 * f0), 2.0 * H_V * BESS_MW / PF / f0
+    return -dp / k * (1.0 - math.exp(-k * at_s / m))
 
 
 def _network(genset_mw=0.0):
@@ -111,7 +118,9 @@ def make_hub(user_and_db, client):
         assert state["status"] == "completed", state
         resp = client.get(f"/api/campus-electrical/{P}/island/report")
         assert resp.status_code == 200, resp.text
-        return _events(resp.json())
+        make.report = resp.json()
+        make.config = chat_tools.campus_island_config(P)["config"]
+        return _events(make.report)
     return make
 
 
@@ -129,8 +138,17 @@ def _first(events, event):
 
 
 def test_e2_rocof_and_settled_frequency_are_the_hand_values(make_hub):
+    """``rocof0_hz_per_s`` is dΔf/dt at 0⁺ (``frequency.Trace.rocof0``, the
+    balance at the step), so its oracle is −ΔP·f0/(2·H·S_n); the 500 ms
+    windowed RoCoF is (Δf(0.5) − 0)/0.5 on the closed form."""
     e2 = _first(make_hub(_network(), _sidecar()), "E2")
+    # D = 0 and no isochronous unit, from the run, not assumed: the ledger
+    # states the damping, and the read-back sidecar holds no genset.
+    ledger = json.dumps(make_hub.report)
+    assert "load damping D = 0" in ledger
+    assert {u["kind"] for u in make_hub.config["units"].values()} == {"bess", "load"}
     assert e2["dp_mw"] == pytest.approx(LOAD, abs=TOL)
+    assert e2["rocof_window_hz_per_s"] == pytest.approx(closed_form(LOAD, 0.5) / 0.5, abs=1e-5)
     assert e2["rocof0_hz_per_s"] == pytest.approx(rocof0(LOAD), abs=TOL)       # −1.900
     assert e2["df_qss_hz"] == pytest.approx(settled(LOAD), abs=TOL)            # −0.800
     assert rocof0(LOAD) == pytest.approx(-1.9, abs=1e-12) and settled(LOAD) == pytest.approx(-0.8, abs=1e-12)
@@ -138,7 +156,9 @@ def test_e2_rocof_and_settled_frequency_are_the_hand_values(make_hub):
 
 def test_e1_islanding_rocof_holds_on_the_rows_own_import(make_hub):
     e1 = _first(make_hub(_network(), _sidecar()), "E1")
-    assert LOAD < e1["dp_mw"] < LOAD / 0.99                    # the import plus the line losses
+    # ΔP is the import plus the losses, bounded by the Link's 1 % (efficiency
+    # 0.99): a ΔP drifting from the I4 flow fails here.
+    assert LOAD < e1["dp_mw"] < LOAD / 0.99
     assert e1["rocof0_hz_per_s"] == pytest.approx(rocof0(e1["dp_mw"]), abs=TOL)
     assert e1["df_qss_hz"] == pytest.approx(settled(e1["dp_mw"]), abs=TOL)
 
@@ -193,7 +213,8 @@ def test_an_isochronous_genset_returns_the_frequency_to_nominal(make_hub):
     e2 = _first(make_hub(_network(genset_mw=200.0), _sidecar(genset=GENSET)), "E2")
     two_m = 2.0 * (H_V * BESS_MW / PF + 1.5 * 200.0 / 0.8)
     assert e2["rocof0_hz_per_s"] == pytest.approx(-LOAD * 50.0 / two_m, abs=TOL)
-    assert e2["df_qss_hz"] == pytest.approx(0.0, abs=1e-3)
+    assert e2["df_qss_hz"] == pytest.approx(0.0, abs=1e-3)     # t_end 20 s ≥ 5 T_i; band 0.1 Hz
+    assert e2["nadir_hz"] < -0.1                               # not trivially flat (−0.345)
     assert abs(settled(LOAD)) > 100 * 1e-3                       # the droop-only answer, −0.8, is far off
 
 
@@ -201,21 +222,20 @@ def test_an_isochronous_genset_returns_the_frequency_to_nominal(make_hub):
 
 
 def test_halving_dt_cuts_the_error_against_the_closed_form():
-    """E2 on the BESS alone: M dΔf/dt = −ΔP − K Δf, so
-    Δf(t) = −ΔP/K · (1 − e^(−K t / M)), M = 2 H_v S_n / f0. The engine is
-    fixed-step RK4, so the error falls ~16× per halving; the condition
-    asks at least ~1.8 (first order)."""
-    f0, s_n = 50.0, BESS_MW / PF
+    """E2 on the BESS alone against Δf(t) = −ΔP/K · (1 − e^(−K t / M)),
+    M = 2 H_v S_n / f0, τ = M/K = 0.42 s. The error is the max over the
+    trace up to 2 s (4.75 τ). The engine is fixed-step RK4, so halving dt
+    cuts it ~2⁴; GK A (4) asks ≥ 0.75·2⁴ = 12, with the coarse error well
+    above roundoff. Measured: ratio 16.8, coarse error 5.4e-7 Hz
+    (dt 0.05 → 0.025)."""
+    s_n = BESS_MW / PF
     unit = F.Unit(name="bess", model="gfm_vsm", p0=0.0, p_n=BESS_MW, s_n=s_n, r=DROOP / 100.0, h=H_V,
                   i_max_mw=1.2 * s_n)
-    k, m = BESS_MW / (DROOP / 100.0 * f0), 2.0 * H_V * s_n / f0
-    t_at = 1.0
 
     def error(dt):
-        tr = F.simulate([unit], F.step(LOAD), t_end=t_at, dt=dt, f0=f0)
-        exact = -LOAD / k * (1.0 - math.exp(-k * t_at / m))
-        return abs(tr.df[-1] - exact)
+        tr = F.simulate([unit], F.step(LOAD), t_end=2.0, dt=dt, f0=50.0)
+        return max(abs(df - closed_form(LOAD, float(at))) for at, df in zip(tr.t, tr.df))
 
-    coarse, fine = error(0.1), error(0.05)
-    assert fine < coarse
-    assert coarse / fine >= 1.8
+    coarse, fine = error(0.05), error(0.025)
+    assert coarse > 1e-9
+    assert coarse / fine >= 12.0
