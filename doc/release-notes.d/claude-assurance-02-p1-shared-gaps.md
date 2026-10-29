@@ -1,0 +1,1 @@
+* Refactor(pypsa-gui): The aggregate load profile (``/network/loads/aggregate`` and ``get_aggregate_load``) and the assistant's checked aggregate now find their gaps with one shared helper, so both report the same first gap in the same words; the response itself is unchanged.

@@ -49,8 +49,8 @@ Design §3.B, "Acceptance checks (B)", except:
 - The assistant's `create_project_from_template` lists `eh_concentrator_staged`, and the assistant inventory is regenerated (owner G2P-14-NOW, 2026-10-28: moved here from issue 14).
 
 **Acceptance:**
-- [ ] `create_project_from_template` with `eh_concentrator_staged` creates the project, and the assistant inventory check passes.
-- [ ] Design §3.B "Acceptance checks (B)": the year solve within 09's budget, the mass balance, the shed carrying across shipments with the week build refused, non-firm curtailment, and restart. Two exceptions: the investment-case check (11) and the motor-start check (12).
+- [x] `create_project_from_template` with `eh_concentrator_staged` creates the project, and the assistant inventory check passes.
+- [x] Design §3.B "Acceptance checks (B)": the year solve within 09's budget, the mass balance, the shed carrying across shipments with the week build refused, non-firm curtailment, and restart. Two exceptions: the investment-case check (11) and the motor-start check (12). (Budget: 45 min, owner decision G2P-10-BUDGET-1.)
 
 **Out of scope:** the IC blocker (11); motor fields (12); any change to `stage_network` beyond calling it.
 
@@ -67,3 +67,22 @@ Design §3.B, "Acceptance checks (B)", except:
   cycle loaded out at hours 480–503; say so in the template's ledger, or choose the year's start.
 - The campus island report (`services/campus_electrical_service`, `campus_island_report.py:259-264`) lists every
   failing hourly E1 row uncapped; on 26,280 hours that table can run to thousands of rows.
+
+## Comments
+
+- 2026-10-28, vessel size (GK A plan verdict, condition 1). The design's 25 kt per vessel does not close the mass balance: at 1,000 t/h of ore and a mass pull of 0.0189, the plant makes 18.9 t/h of concentrate, or 9.5 kt in a 21-day cycle, so 25 kt is about 2.6 times one cycle's production. The template makes each vessel the year's nameplate concentrate over its vessels: 8,760 h // 504 h = 17 vessels a year, so 7.8 / 9.7 / 11.7 kt in 2027 / 2030 / 2035 (15.1 / 18.9 / 22.6 t/h × 8,760 h ÷ 17). Ledgered as `demo`, with the arithmetic.
+- 2026-10-28, finding (GK A plan verdict, condition 5). Lost concentrate in 2027, the year whose connection is non-firm (two 150-h winter events at 15 MW of 25 MW):
+  - every 2027 candidate off (PV, BESS, the pile extension): 221 t lost;
+  - the same with a 20 MW × 4 h BESS installed: 69 t lost, so a BESS lowers it;
+  - every candidate on at the pack's price: the plan builds PV to its 40 MW cap, no BESS and no pile extension, and loses about 0 t.
+
+  At pack price, a 4-h BESS does not pay against 150-h events, and PV carries the curtailment. The tests pin all three. Prices were not tuned to force a BESS build.
+- 2026-10-29, the mine as a ceiling (GK A plan verdict). The mine is an ore Generator whose fixed schedule (800 / 1,000 / 1,200 t/h) is an upper bound, not a must-run feed. Ore the plant cannot take in an hour is not mined; the process view reports it per period as `unused_supply` on `ore_rom`, and the lost concentrate shows at the next vessel. `test_2027_with_every_candidate_off_loses_concentrate_and_a_bess_lowers_it` pins the unmined ore to the schedule less the mine's dispatch. The frontend does not show `unused_supply` yet.
+- 2026-10-29, the shed is fixed (GK A plan verdict). The concentrate shed is 40 kt and not extendable, although the design marks it "(extendable)". The largest vessel, in 2035, is about 11.7 kt (1,200 t/h × 0.0189 × 8,760 h / 17), so the shed holds more than three vessels and an extension would never be built. The ledger's "concentrate shed" row says so.
+- 2026-10-29, GK A (4) `GK NOT OK @4b2b7c16` (PR #869 comment 6485998916). Items 1, 2, 4 and 5 met, and the end-pin and load-out parts of 3. To land:
+  - (a) the undo's `links_t.p_min_pu` restore is tested: `test_the_undo_puts_back_a_minimum_load_series` (it fails when the undo drops the series);
+  - (b) the mine-as-ceiling and fixed-shed records above;
+  - (c) `test_an_abort_during_the_parallel_check_leaves_no_live_worker` (it fails without the terminate), and the budget run prints peak memory with the check's workers in it (`RUSAGE_SELF` and `RUSAGE_CHILDREN`);
+  - item 7, the year-base budget, waits on the owner (options A/B/C, through the coordinator).
+- 2026-10-29, owner decisions (rows in PR #893). G2P-10-BUDGET-1 = A: the year-base budget is 45 min (`BUDGET_S = 45 * 60`); the ledger's solver row records 2,346 s in all, the check 54 s on 3 workers, peak 4.62 GB on 4 cores. G2P-10-SUGGEST-1 = D: `eh_critical` on the `site` bus, `process_load: true` in the metadata, and the suggester tests skip flagged templates; the suggester gap is issue 19.
+- 2026-10-29, follow-up (plan speed, owner decision G2P-10-BUDGET-1). The year-base plan took 2,346 s (about 39 min) of its 45 on HiGHS IPM. To bring it back under 30: try a HiPO build of HiGHS, or a commercial solver where the user has one, and re-measure with `PYPSA_GUI_YEAR_BUDGET_LIVE=1`. Not built here.

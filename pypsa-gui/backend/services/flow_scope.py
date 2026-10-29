@@ -206,6 +206,8 @@ TEMPLATE_PRESETS: Final[dict[str, Preset]] = {
     "eh_microgrid": _MICROGRID, "eh_microgrid_staged": _MICROGRID,
     "eh_h2_hub": _H2_HUB, "eh_h2_hub_staged": _H2_HUB,
     "eh_ammonia_staged": _AMMONIA,
+    # The concentrator (grid-to-process ticket 10): a process plant as the ammonia hub.
+    "eh_concentrator_staged": _AMMONIA,
     "eh_ipp_hybrid": _IPP,
 }
 # `eh_site` by its `site_type` (`project_templates/eh_site.SITE_TYPES`).

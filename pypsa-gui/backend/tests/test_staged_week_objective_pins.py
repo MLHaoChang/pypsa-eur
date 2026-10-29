@@ -16,6 +16,9 @@ sys.path.insert(0, str(TPL_DIR))
 import eh_site as S  # noqa: E402
 import eh_templates as T  # noqa: E402
 
+# A year-base template's week build is refused, so it has no week objective to pin (its own tests pin its plan).
+from tests._year_base import YEAR_BASE  # noqa: E402
+
 #: EUR, master 610f1c78; each a 3-period plan of one 168 h week per period.
 PINS = {
     "eh_datacenter_staged": 455703702.708,
@@ -31,7 +34,8 @@ def _build(tid):
 
 
 def test_every_staged_template_is_pinned():
-    assert {t for t in T.BUILDERS if t.endswith("_staged")} | {"eh_site"} == set(PINS)
+    assert {t for t in T.BUILDERS if t.endswith("_staged")} | {"eh_site"} == set(PINS) | YEAR_BASE
+    assert not YEAR_BASE & set(PINS)
 
 
 @pytest.mark.live_solve

@@ -58,3 +58,7 @@ Read [the design](../design.md) §3.B (the IC paragraph) first.
 **Likely files:** `pypsa-gui/backend/services/results/finance_case.py`, `pypsa-gui/backend/services/results/baseline.py`, tests under `pypsa-gui/backend/tests/`.
 **Blocked by:** 10.
 **Model:** Opus (IC engine, gated).
+
+## Comments
+
+- 2026-10-28, from 10 (GK A, plan condition): `eh_concentrator_staged` carries 2027's non-firm connection (`non_firm_dynamic`: two 150-h winter events, as `grid_import` p_max_pu) in the network only. Its commercial block keeps the preset's firm ConnectionAgreement (one per project), so the per-period connection kind is not in the commercial block. 11 must not value 2027 as firm without saying so.

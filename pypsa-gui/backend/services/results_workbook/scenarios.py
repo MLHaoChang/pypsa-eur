@@ -51,6 +51,18 @@ class Run:
     case_state: dict | None = None
     # `sensitivity_comparison` reason codes; empty when comparable with the base.
     reasons: list[str] = field(default_factory=list)
+    # The run's own results, which the result-view sheets read (package 02):
+    # its network, solver config, lost-load capture, result lookup over its own
+    # solver state, and the settings its solve used. None when not comparable.
+    network: Any = None
+    cfg: Any = None
+    lost_load: dict | None = None
+    result_df: Callable | None = None
+    solved_settings: Callable[[], dict | None] | None = None
+    # The run's own saved context (`workflow_tools._load_context`), for the
+    # views whose route reads a whole context (Load flow). None for the base,
+    # whose context is the active one.
+    context: Any = None
 
 
 @dataclass
@@ -89,10 +101,15 @@ def _cases(base_project_id: str) -> tuple[Any, list[tuple[Any, dict]], int]:
 def gather_scenarios(base_project_id: str, base_basis: dict, *,
                      result_df_for: Callable[[dict], Callable],
                      ic_key: Callable[[Any, Callable], tuple[tuple[str, dict] | None, str | None]],
+                     solved_settings_for: Callable[[dict, Any], Callable[[], dict | None]] | None = None,
+                     dispatch_ready: Callable[[Any], bool] | None = None,
                      ) -> Scenarios | None:
     """The base's sensitivity runs, or None when it has none the user can see
     or hide. `base_basis` is the open base's `fingerprint`, `mode`, `basis`
-    (`experiment_comparison.basis_digests`) and `ok` (its results are current)."""
+    (`experiment_comparison.basis_digests`) and `ok` (its results are current).
+    `solved_settings_for(state, network)` and `dispatch_ready(network)` are the
+    routes' own reads (`_solved_settings`, `_dispatch_ready`) over a run's
+    context: a run whose dispatch the routes would not serve shows no figures."""
     from harness import sensitivity_comparison as sc
     from services.finance.investment_case_runner import staleness
     from services.finance.report import load_ic_report
@@ -106,12 +123,19 @@ def gather_scenarios(base_project_id: str, base_basis: dict, *,
         reasons = ([] if base_basis["ok"] else ["baseline_unavailable"]) + sc._reasons(
             base_basis, read, spec, base_basis["fingerprint"])
         run = Run(name=project.name, project_id=str(project.id), reasons=reasons)
+        if not reasons and dispatch_ready is not None and not dispatch_ready(read["ctx"].network):
+            run.reasons = reasons = ["case_unsolved"]
         if not reasons:
             ctx = read["ctx"]
             state = ctx.solver_state
             result_df = result_df_for(state)
             run.figs = overview_figures(ctx.network, state.get("solver_config"),
                                         state.get("last_lost_load"), result_df)
+            run.network, run.cfg, run.result_df = ctx.network, state.get("solver_config"), result_df
+            run.context = ctx
+            run.lost_load = state.get("last_lost_load")
+            run.solved_settings = (solved_settings_for(state, ctx.network) if solved_settings_for
+                                   else lambda state=state: state.get("last_solve_settings"))
             run.headline = sc._values(read)
             run.ic_report = load_ic_report(state)
             if run.ic_report is not None:

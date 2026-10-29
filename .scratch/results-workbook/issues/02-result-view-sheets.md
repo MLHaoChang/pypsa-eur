@@ -27,3 +27,40 @@ Fill 01's sheet-builder registry for every result view the app's result tabs sho
 ## Out of scope
 
 The UI and chat tool (03).
+
+## Comments
+
+### 2026-10-29 — GK B plan verdict: GO, as separate PRs, with conditions
+
+Slices, each its own PR with its own tests: **R1** network views (capex, dispatch, flows, loadshape, storage, curtailment, lostload, prices, economics, emissions) + scenario columns; **R2** loadflow + campus/gridspine views (grid_code, electrical_design, island, grid_forming), GK A co-reviews the numbers; **R3** adequacy + fmea, GK A co-reviews; **R4** the cell budget and coarsening; **R5** RW-SCEN-2 experiment runs.
+
+1. Every lifted route body (dispatch/storage `_ts_payload`, `/adequacy`, the lost-load empty branch, loadflow's optional n/state) changes nothing: master's route tests run green unchanged, and the JSON is byte-equal to master's on the existing fixtures.
+2. Each key figure equals the route payload; each scenario column comes from that run's own network/cfg/result_df (a builder fed the base's network for every run must fail a test).
+3. A period-2 figure is asserted on every view; no long table is first-period-only.
+4. (R4) Coarsening with hand values and a non-unit weighting: MW = weighted mean; energy = Σ p·w (an unweighted sum must fail); no bucket crosses a period (a day straddling the boundary); the sheet names the resolution; fallback (b) tested.
+5. A builder returns False only when the route would be empty or not-run; an exception is a reported error in About, never a silent "no results". One test of each.
+6. (R3) Until ticket 30 lands, fmea's `criticality_eur_per_year` and `severity_eur` are not presented as per year: omitted, or labelled "per study horizon (ticket 30)", in any chart or ranking too. Test the label.
+7. (R5) Reuse `experiment_comparison._case`. Tests: tampered evidence digest excluded with its reason; different basis gives `comparison_basis_differs`; a case project the user can't open is counted, not named; a failed or not-yet-completed case is excluded; a case whose network or context changed after the receipt is excluded. Don't hold `experiments._LOCK` while loading case networks: verify under the lock, release, load, then check the loaded network's input fingerprint equals the verified one. MAX_CASES is shared; the excess is counted.
+8. Access first: the campus/gridspine views and every scenario/case run call `resolve_project` before reading any file of that project.
+9. Charts read only number cells (or formulas over them) on their own sheet; every view covered.
+10. Per PR: `test_route_chat_disposition`, `test_project_route_acl_policy`, `test_packaging_requirements` when imports change; a release fragment; these conditions recorded here.
+
+Accepted not-done: overnight capex by period and fuel stay `not_established`; a campus-study scenario's IC key leaves out the extra_assets digest; the cell budget is a heuristic with `MAX_BYTES` as the backstop.
+
+### 2026-10-29 — GK B: condition 5 ruling, and GK OK on R1
+
+GK OK @14f6bee94c7d3a50352348b2c3575559a4933eac on R1 (#896). Condition 5, ruling A: R1 leaves `compute_prices`, `compute_curtailment` and `compute_cost_breakdown` swallowing exceptions as master does. Follow-up: [04](04-result-services-raise.md).
+
+### 2026-10-29 — R2 built (Load Flow, Grid code & connection, Electrical design, Island, Grid-forming)
+
+`services/results_workbook/views_grid.py`; tests in `tests/test_results_workbook_views_grid.py`.
+
+1. `loadflow_summary.get_loadflow_view` / `_loadflow` take an optional `context` (a run's saved context: its network, solver state, user series and project id), threaded to the helpers as `state`; omitted, every read is the active one as before. Tests: `test_loadflow_route_json_is_unchanged_and_a_context_read_of_the_active_run_equals_it`; master's `test_loadflow_summary`, `test_loadflow_navigation`, `test_results_source_navigation` unchanged and green; a one-off check against master's module gave byte-equal JSON on the `test_loadflow_summary` fixture (lopf, windows, ac_pf). Departure: `context` instead of separate `n`/`state`, because the exact-input fingerprint the route checks needs the run's user series too.
+2. Keys equal the route's function (`get_loadflow_view`, `ce.get_state`, `gs.get_capacity`/`get_connection`, `ce.get_island` + `island_report`, `cit.get_settings`); scenario columns differ from the base and match their own run: `test_loadflow_keys_equal_the_route_and_each_scenario_reads_its_own_context`, `test_project_views_read_each_runs_own_project_after_resolving_it`, `test_grid_code_keys_equal_the_campus_payload`.
+3. Load Flow: every period is the tab's window over that period (`2040` asserted); Electrical design: cost per period (`2040` asserted, `test_electrical_design_costs_per_period_with_the_second_period`). Grid code, island and grid-forming have no period split and say so in the sheet note (`NO_PERIODS`).
+5. False only when the tab would be empty: load flow `not_solved`/`no_ac_branches`, no campus results, a study project for Electrical design/island/grid-forming, island report with no table beyond its inputs, GFM `not_run`, gridspine 404 before a screened run. Tests: `test_a_loadflow_the_tab_cannot_show_is_no_results`, `test_grid_forming_not_run_is_no_results`, `test_a_campus_study_not_run_is_no_results`, `test_a_failing_project_view_is_an_error_in_about_not_no_results`, `test_a_planning_study_before_its_screen_is_no_results_but_other_errors_raise`.
+8. `WorkbookInputs.project_for(run)` (the route's `_workbook_project`: `resolve_project` for the acting user, None when refused) is called per run before any project file is read; the route now keeps the acting user through the build. Scenario runs keep their saved context (`Run.context`), loaded by `gather_scenarios` after its `resolve_project`. Tests: `test_a_run_the_user_cannot_open_reads_nothing_of_its_project`, `test_the_routes_project_reader_resolves_access_first`, `test_without_project_access_the_project_views_have_no_data`.
+9. `CHARTS` entries for the five views; `test_every_chart_reads_number_cells_on_its_own_sheet` covers each (grid code both hub and study).
+10. `test_route_chat_disposition`, `test_project_route_acl_policy` green; no new third-party imports. Fragment `doc/release-notes.d/claude-results-workbook-02-loadflow.md`.
+
+Not in the sheets: the campus harmonic scan and voltage-stability blocks (nested; the sheet note points to the tab), and the hub cost comparison.

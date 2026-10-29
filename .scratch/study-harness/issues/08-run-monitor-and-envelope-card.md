@@ -45,3 +45,39 @@ UX placement: GO, 28 Oct, with the conditions under "UX conditions" below
 `pypsa-gui/frontend/src/components/AssistantResultCard.tsx`, `pypsa-gui/frontend/src/components/ChatPanel.tsx` (plan-review card), `pypsa-gui/backend/services/assistant_tasks.py` (view payload), frontend tests
 
 ## Comments
+
+### GK B (9) plan verdict, 29 Oct: GO with conditions
+
+1. No oracle: unknown, foreign owner, owner removed from the project (a real membership-row delete) and deleted project each give a byte-identical 404 `task_not_found` on GET and on every POST (present, pause, resume, stop, confirm).
+2. Every action rechecks at call time, with nothing cached from view: resume, present and confirm re-run owner, `resolve_project`, `_may_write`, envelope expiry and budget. Tests:
+   - revoke after pause, then resume → 404, and nothing dispatches;
+   - pause past `expires_at`, then resume → no unattended step. The PR says whether the run falls back to step by step or to needs_user, and tests it.
+3. Stop and pause kill the live card. After stop, a confirm with the old token is refused and nothing runs. After pause, the PR says and tests the same or "stays answerable". The captured card is dropped on resolve, stop, pause and expiry. Mutation: not clearing it on stop must fail a test.
+4. present refuses a paused or stopped run, and issues at most one live card per run: a second present re-issues and invalidates the first token. Test both.
+5. `solves.used` counts only this run's own audit rows: test with a second run in the same project.
+6. brief_stale: the red test asserts the dispatch count over N ticks, then the needs_user stop. Mutation: removing the stop must fail.
+7. At the trial merge: test_route_chat_disposition, test_project_route_acl_policy, test_write_surface_lock_policy, and assistant_inventory, route_parity and control_matrix `--check`. New error kinds go in this branch's tool-error-kinds.d fragment. Keep the word-map parity test.
+8. No envelope lists run_sensitivity_sweep or run_eh_study. The #875 ruling holds: refuse any project argument that is not the run's own.
+9. Ruling (A): pause keeps the envelope granted. Resume re-checks item 2, and the monitor shows the expiry still running while paused.
+
+### UX (4) plan verdict, 29 Oct: GO with conditions
+
+- **Stop is (B):** an inline second step, "Stop the run? Stop · Keep running", with "The edits applied so far and the results so far are kept. A stopped run cannot be restarted."
+
+1. Links use "›" (U+203A).
+2. Every "›" that opens a panel goes through the mode-aware opener (openFlowTargetInPlace in Guided, openFlowTarget in Expert) with withReturnFrom. A block deep in a panel is reached by request-then-scroll. One screenshot shows a Guided link landing in its Guided home.
+3. Reuse the panels' own FIELD_WORDS and component word maps rather than a separate envelope map, and parity-test against them and the backend profiles. Gate facts get plain names with units.
+4. Budget used up: the fix is "Change the budget ›" (the Envelope or Change path), not Resume. The PR says what each failure fix does.
+5. Paused: also "Unattended approval expires <date time>".
+6. Status in words, never by colour alone. No internal status anywhere, Expert Details included. Expert Details may show the task and stage ids; Guided shows neither.
+7. Envelope section:
+   - the disabled email and unattended choices give their reason as visible text;
+   - the steppers have accessible names ("Solves, at most");
+   - an unticked edit stays visible as "removed".
+8. Screenshots, in Guided and Expert, of every issue state, plus:
+   - a disabled unattended reason;
+   - the email-disabled reason;
+   - a narrowed envelope;
+   - the Stop second step;
+   - the Activity row and where "Open the run ›" lands.
+9. "Open the run ›" is the only run link in Activity.

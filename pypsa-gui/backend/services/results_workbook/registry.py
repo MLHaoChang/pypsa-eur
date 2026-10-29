@@ -32,7 +32,9 @@ SHEET_BUILDERS: dict[str, SheetBuilder] = {}
 NO_RESULTS: dict[str, str] = {}
 
 #: Modules whose import registers builders (`load_builders`); 02 appends its own.
-BUILDER_MODULES: tuple[str, ...] = ("services.results_workbook.finance",)
+BUILDER_MODULES: tuple[str, ...] = ("services.results_workbook.finance",
+                                    "services.results_workbook.views_network",
+                                    "services.results_workbook.views_grid")
 
 
 class UnknownView(ValueError):

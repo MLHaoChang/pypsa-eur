@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { resultsEvidenceApi } from '../../api/resultsEvidence'
+import { projectUnavailableReason, resultsEvidenceApi } from '../../api/resultsEvidence'
 import { useUIStore, type RunResultRequest } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 
@@ -14,6 +14,9 @@ export default function RunBoundView({ run, tab }: { run: RunResultRequest; tab:
     enabled: !!project, staleTime: 0, refetchOnMount: 'always',
   })
   if (query.isFetching || query.isPending) return <p className="p-4" role="status">Loading retained run {run.runId}…</p>
+  // LC-T08: access lost since the run is refused on read; say so plainly.
+  const lost = query.isError ? projectUnavailableReason(query.error) : null
+  if (lost) return <p className="p-4" role="status">{lost}</p>
   if (query.isError || !query.data) return <p className="p-4" role="status">Retained {section ?? 'summary'} evidence unavailable for run {run.runId}. Current results have not been substituted.</p>
   const { data, binding } = query.data
   if (binding.project_name !== project || binding.run_id !== run.runId

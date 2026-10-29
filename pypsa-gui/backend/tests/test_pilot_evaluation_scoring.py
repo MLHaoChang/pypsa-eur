@@ -63,6 +63,23 @@ def test_corrupt_passed_receipt_cannot_satisfy_gate(corrupt):
     assert score(case, frames, answer)["failures"]
 
 
+
+@pytest.mark.parametrize("version", ["2", 1, None])
+def test_receipt_under_another_policy_version_is_unsupported(version):
+    case = GOLDEN_CASES[0]
+    frames, answer = observation(case)
+    answer["receipt"]["policy_version"] = version
+    assert "unsupported_policy" in score(case, frames, answer)["failures"]
+
+
+def test_receipt_under_the_current_policy_version_is_supported():
+    from services import assurance_records as records
+
+    case = GOLDEN_CASES[0]
+    frames, answer = observation(case)
+    assert answer["receipt"]["policy_version"] == records.POLICY_VERSION == "1"
+    assert "unsupported_policy" not in score(case, frames, answer)["failures"]
+
 def passing_results():
     results = []
     for case in CASES:
