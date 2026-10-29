@@ -135,6 +135,8 @@ PROFILE_USED_FILE = "campus_profile_used.json"
 #: or, when the scan could not run, why.
 HARMONIC_SCAN_META = "campus_harmonic_scan.json"
 HARMONIC_SCAN_ERROR = "harmonic_scan_error.json"
+VOLTAGE_STABILITY_META = "campus_voltage_stability.json"
+VOLTAGE_STABILITY_ERROR = "voltage_stability_error.json"
 SOLVER_CONFIG_FILE = "solver_config.json"
 MAX_CAMPUS_BYTES = 1_000_000
 MAX_LIBRARY_BYTES = 1_000_000
@@ -284,6 +286,43 @@ def _harmonic_scan(run: Path, profile: str, profile_dirs) -> None:
     (run / HARMONIC_SCAN_META).write_text(json.dumps(meta))
 
 
+def _voltage_stability(run: Path, profile: str, profile_dirs) -> None:
+    """The P–V/Q–V margin at the PCC of the sized run in ``run`` (study harness
+    18, ``campus_study.voltage_stability_campus``), its meta in
+    ``VOLTAGE_STABILITY_META``. A screen beside the sizing, as the harmonic
+    scan: its failure (no S_k''min entered among them) never fails the run,
+    the reason goes to ``VOLTAGE_STABILITY_ERROR`` and no margin file stays.
+    The limits are the grid-readiness rows' (``grid_readiness``), not the run's."""
+    files = (cs.VOLTAGE_STABILITY_CSV, VOLTAGE_STABILITY_META, VOLTAGE_STABILITY_ERROR)
+
+    def clear():
+        for name in files:
+            (run / name).unlink(missing_ok=True)
+
+    clear()
+    try:
+        summary = cs.voltage_stability_campus(run, profile, profile_dirs)
+    except Exception as exc:  # noqa: BLE001 - a screen failure is shown with the results, never a failed run
+        if not isinstance(exc, ContractError):
+            logger.exception("campus run: the P–V/Q–V screen failed in %s", run)
+        clear()
+        (run / VOLTAGE_STABILITY_ERROR).write_text(json.dumps({"error": str(exc) or type(exc).__name__}))
+        return
+    (run / VOLTAGE_STABILITY_META).write_text(json.dumps(summary))
+
+
+def _voltage_stability_results(run: Path) -> dict | None:
+    """The screen for ``get_state``: ``{error}`` when it could not run, else its
+    meta with one row per period; None for a run from before it was a stage."""
+    error = run / VOLTAGE_STABILITY_ERROR
+    if error.is_file():
+        return json.loads(error.read_text())
+    meta = run / VOLTAGE_STABILITY_META
+    if not meta.is_file():
+        return None
+    return {**json.loads(meta.read_text()), "rows": _read_csv(run / cs.VOLTAGE_STABILITY_CSV) or []}
+
+
 def _scan_note(note: str) -> str:
     """A scan note as the panel shows it: in words, from a capital. gridspine's
     notes name their input fields (``pcc.sk_normal_mva``); the app names none."""
@@ -412,6 +451,8 @@ def _results(run: Path):
                        if investment is not None and (run / COST_BASIS_FILE).is_file() else None),
         # DC-SURFACE-1: the harmonic impedance scan from the PCC (``_harmonic_scan_results``).
         "harmonic_scan": _harmonic_scan_results(run),
+        # Study harness 18: the P–V/Q–V margin at the PCC (``_voltage_stability_results``).
+        "voltage_stability": _voltage_stability_results(run),
     }
 
 
@@ -1476,7 +1517,7 @@ def _aborted_on_stop(stage):
 
 #: The run's stages, in order, as its progress names them (the queue log's
 #: ``campus <stage> <done>/<total>`` lines and ``get_state``'s ``run_job``).
-RUN_STAGES = ("prepare", "rank", "island_checks", "cuts", "size", "harmonic_scan", "invest")
+RUN_STAGES = ("prepare", "rank", "island_checks", "cuts", "size", "harmonic_scan", "voltage_stability", "invest")
 
 
 class CampusRunAborted(Exception):
@@ -1585,6 +1626,8 @@ def run(project, settings: dict, *, progress=None, should_stop=None) -> dict:
                     {"profile": s["profile"], "sha256": profile_fingerprint(project, s["profile"])}))
                 stage("harmonic_scan")
                 _harmonic_scan(work, s["profile"], profile_dirs)
+                stage("voltage_stability")
+                _voltage_stability(work, s["profile"], profile_dirs)
             except ContractError as exc:
                 raise _unprocessable(exc)
             _publish_run(work, published)

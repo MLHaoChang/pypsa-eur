@@ -101,6 +101,15 @@ A profile may carry these optional keys:
     readiness issue 18), a positive number below 90. The planning-criteria screen
     judges its angle check on it when no ``AngleLimit`` is passed; without
     either, the angle verdict reads unknown.
+``pv_margin_min_pct``
+    The least P–V real-power margin at the connection point, % of the planned
+    import (study harness issue 18), a positive number. The grid-readiness
+    P–V row judges the screened margin on it; without it the row shows a
+    planning-practice placeholder.
+``qv_margin_min_mvar``
+    The least Q–V reactive margin at the connection point, Mvar (study harness
+    issue 18), a number >= 0. The grid-readiness Q–V row judges on it as the
+    P–V row does.
 ``dynamic_requirements``
     What a steady-state study cannot show (ride-through, RoCoF, frequency
     response, pending rules): ``{id, requirement, value, clause, source,
@@ -154,7 +163,8 @@ _SINGLE_LIMITS = ("q_range_demand", "rvc_limit_pct", "campus_voltage", "q_range_
                   "current_tdd_standard",
                   "q_capability_unit",
                   "voltage_deadband_pct",
-                  "angle_limit_deg")
+                  "angle_limit_deg",
+                  "pv_margin_min_pct", "qv_margin_min_mvar")
 #: Every key a profile may carry; any other is loaded with a warning.
 PROFILE_KEYS = frozenset({"title", "voltage_bands", "q_range_demand", "rvc_limit_pct", "campus_voltage",
                           "q_range_ibr", "rvc_limit_infrequent_pct", "q_capability_pq", "pf_min_lagging",
@@ -165,7 +175,8 @@ PROFILE_KEYS = frozenset({"title", "voltage_bands", "q_range_demand", "rvc_limit
                           "current_tdd_standard",
                           "q_capability_unit",
                           "voltage_deadband_pct",
-                          "angle_limit_deg"})
+                          "angle_limit_deg",
+                          "pv_margin_min_pct", "qv_margin_min_mvar"})
 #: ``angle_limit_deg`` stays below this: past 90 degrees a branch is beyond its steady-state transfer limit
 #: (P = V1 V2 / X sin delta peaks at 90).
 ANGLE_LIMIT_MAX_DEG = 90.0
@@ -271,12 +282,18 @@ def _check_profile(name, p):
                 "harmonic_resonance_clearance_h", "pst_limit", "plt_limit",
                 "unbalance_limit_pct",
                 "voltage_deadband_pct",
-                "angle_limit_deg"):
+                "angle_limit_deg",
+                "pv_margin_min_pct"):
         if key not in p:
             continue                                   # q_range_demand and rvc_limit_pct are required
         _check_limit(key, p[key], where)
         if not _is_number(p[key].get("value")) or p[key]["value"] <= 0:
             raise ContractError(f"{where}: {key} value must be a positive number, got {p[key].get('value')!r}")
+    if "qv_margin_min_mvar" in p:
+        _check_limit("qv_margin_min_mvar", p["qv_margin_min_mvar"], where)
+        if not _is_number(p["qv_margin_min_mvar"].get("value")) or p["qv_margin_min_mvar"]["value"] < 0:
+            raise ContractError(f"{where}: qv_margin_min_mvar value must be a number >= 0, "
+                                f"got {p['qv_margin_min_mvar'].get('value')!r}")
     if "angle_limit_deg" in p and p["angle_limit_deg"]["value"] >= ANGLE_LIMIT_MAX_DEG:
         raise ContractError(f"{where}: angle_limit_deg value must be an angle below {ANGLE_LIMIT_MAX_DEG:g} degrees, "
                             f"got {p['angle_limit_deg']['value']!r}")

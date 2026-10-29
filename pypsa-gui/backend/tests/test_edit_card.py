@@ -41,16 +41,18 @@ def test_carded_actions_are_confirmed_tiers_with_their_own_card():
 
 
 # Q3-CARDS-1: every settings edit has its own old → new adapter; a new edit tool without one is listed here.
-# LV08 B-campus: the readiness limits and the external dispatch upload have no card yet
-# (follow-up .scratch/live-voice/issues/13-lv08-bcampus-limit-dispatch-cards.md).
-_NO_ADAPTER_YET = frozenset({
-    "campus_set_grid_limit", "campus_reset_grid_limit", "gridspine_upload_external_dispatch",
-})
+_NO_ADAPTER_YET = frozenset()
 
 
 def test_every_settings_edit_has_an_adapter():
     missing = set(edit_card.SETTINGS_EDITS) - set(edit_card.ADAPTERS)
     assert missing == _NO_ADAPTER_YET, missing ^ _NO_ADAPTER_YET
+
+
+def test_no_settings_edit_is_waiting_for_an_adapter():
+    assert _NO_ADAPTER_YET == frozenset()
+    writes = {t["name"] for t in chat_tools_schema.TOOLS if _safety_tier_for(t["name"]) == "write"}
+    assert {name for name in edit_card.SETTINGS_EDITS if name in writes} <= set(edit_card.ADAPTERS)
 
 
 @pytest.fixture

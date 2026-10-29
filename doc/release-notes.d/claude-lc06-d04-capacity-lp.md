@@ -1,0 +1,1 @@
+* Test(pypsa-gui): LC-06 LC-D04 capacity expansion is checked end to end against a hand-solved unique LP (objective, per-carrier capex/opex/energy, built capacities and binding bound, and a cap perturbation), through the ordinary chat tools and the authenticated generator route.

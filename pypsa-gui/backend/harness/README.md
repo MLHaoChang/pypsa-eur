@@ -1175,6 +1175,141 @@ only: no runner, no envelope, no loops.
   the scope preset, and per stage its status and each rule's verdict, fact and
   value.
 
+### The harness runner (study harness issue 02)
+
+`harness/runner.py` advances harness runs with no chat panel open
+(`.scratch/study-harness/design.md` §6.6). It starts from the `main.py`
+lifespan after the solve queue and is off under pytest (tests build their own
+`Runner`).
+
+- **Ticks.** One worker thread; at most one action per run per tick. It wakes
+  on a job settling, `start_task`, the user's resume or Continue, a cancel,
+  or the 60 s scan (task files only, ≤ 200 per scan, never a network). The
+  wake hook is `assistant_tasks._WAKE_LISTENERS`, because services never
+  import the harness.
+- **Lease.** `run.runner.lease_until`, which is wall time in the file and is
+  renewed every 30 s. It is taken under the task lock and a sidecar file lock
+  (`<task>.json.lease`). Another instance acts only after the lease has
+  lapsed. A takeover counts as a restart; 3 restarts in an hour pause the run
+  (`reason: restarts`), and 2 runner errors in a row pause it too.
+- **Explicit context (B1).** Each tick resolves the project as the run's owner,
+  so the ACL is checked again (a lost owner or ACL gives `reason: access`).
+  It takes the project's context through `services.study.runner.base_context`
+  and binds, in a copied context, the four request bindings
+  (`PyPSAService.bind_request_scope`, shared with the middleware), the owner
+  as acting user, the session `run:<task_id>` (rebuilt from its event log),
+  `assistant_tasks.RUN_CONTEXT` and `harness_locks.enter_run`. The foreground
+  context is never read or moved.
+- **Dispatch.** Each step goes through `loop.dispatch_tool_call` (Guided) on a
+  per-run helper thread, and every call and frame is in the run session's
+  event log.
+  - The helper takes `mutation_lock` then `solver_state_lock` after the
+    decision, re-checks under them (the context's uuid is the run's project,
+    the owner still resolves it, no foreign edit lock, no other run's hold),
+    and releases them on `tool_running`.
+  - The handler runs on the tool executor with its own locks; no lock is held
+    across a card wait or a job.
+  - A failed re-check ends the step with no effect (`reason: recheck`).
+- **Cards.** A carded step nobody has decided is not issued. The run records
+  `waiting = {kind: card, ref}` and goes `needs_user`; `task.status` is left
+  alone, so the chat's stepwise path goes on, and the chat's `begin_step` or
+  `continue_at_card` clears `waiting`.
+  - `present(task_id)` (the companion, issue 08) issues the card with its TTL
+    starting then.
+  - `Runner(decisions=...)` is a test-only seam; the app's runner has none.
+- **One holder per step.** A run step's `claim` is set by compare-and-set
+  under the task lock: the chat's `admit` takes it before its card, the
+  runner's `claim_step` before its own. Another holder's live claim refuses
+  `task_step_claimed`. A claim lasts the card TTL plus 60 s. It guards only
+  pending → running: once a step runs, its `running` status is the authority,
+  so `admit` refuses another session `task_step_claimed` before any card
+  even after the claim lapses. Plans of file version 1 (no `run` block) keep
+  the chat's old path: no claim, and a repeat is refused at `begin_step`
+  (`task_step_uncertain`; pinned by
+  `test_oj07_edit_relaunch_walk_journey.py::test_a_process_restart_loses_the_job_and_continues_once_uncertain`
+  and `test_assistant_capabilities.py::test_interrupted_write_requires_confirmed_reconciliation`).
+- **The hold.** While an effectful step is decided, running or waiting on its
+  job, `services/harness_locks.py` holds the project. The write middleware and
+  `chat_tools._check_foreign_lock` refuse 409 `project_locked` ("a harness run
+  is editing this project"), in local mode too, unless the caller is the
+  runner itself. Reads and the chat routes stay open. `_enforce_project_lock`
+  (the `/api/projects/...` writes: save, snapshots, studies) checks the hold by
+  the path's project. `cancel_task`, `resume_task` and `resolve_task_step`
+  naming a task the caller owns pass the hold, so the user can always stop
+  the run; the runner's next tick lets the project go.
+- **The lease file lock** is `harness/durable.file_lock` (msvcrt on Windows,
+  flock elsewhere); `runner.py` imports no `fcntl`.
+- **Restart.** On a takeover:
+  - a waiting queue step whose rows are terminal settles from them;
+  - a live one is followed again;
+  - a lost one is `uncertain` (`_reconcile_lost`; nothing is requeued);
+  - any uncertain step makes the run `needs_user` (`reason: uncertain`).
+- **Stops.** `run.reason` names why the runner stopped the run:
+  `waiting_card`, `budget`, `uncertain`, `locked`, `access`, `recheck`,
+  `restarts` or `runner_errors`. `resume_task` clears a runner stop, and the
+  runner's checks decide again.
+- **Model cost.** `runner.charge(path, usage, model)` meters provider usage
+  (input, cache read, cache write, output) in EUR on `run.budget`. The limit
+  comes from the profile's `budget.cost_eur`, €5 by default. Rates are
+  `DEFAULT_RATES_EUR`, or `PYPSA_GUI_MODEL_RATES_EUR`, which is validated.
+  An unknown model, a missing count or an invalid table fails closed, and a
+  spent budget is `needs_user`. Agent turns (issue 04) feed it.
+- **Notices.**
+  - One `attention` record (family `run`) per state change into `needs_user`,
+    `completed`, `failed` or `paused`.
+  - An email through `email_service` only when the deployment is configured
+    and the envelope's `notify.email` is true (issue 03's file). At most one
+    per change and 10 per run, with a server-built plain text: project,
+    state and the app link. It leaves out the run title, which the model
+    wrote, and never carries values.
+  - `run.notices` keeps the log.
+
+### The approval envelope (study harness issue 03)
+
+`services/run_envelope.py` (design §7; SH-ENVELOPE-1). "Approve once, run
+unattended inside it" for a harness run only; COP-1 is unchanged everywhere
+else.
+
+- **File.** `<task_id>.envelope.json` beside the task: owner, project, task,
+  `edits` (tool, `{component, name glob, attr}`, numeric `bounds` or an
+  `enum`, `at_grant` per matched instance), `runs`, `budget`, `research`,
+  `notify`, `state` and its own `audit` (`granted|used|refused|expired|revoked`).
+- **Proposal.** `_start_run` writes the profile's `envelope` block
+  (`run_profiles.load` validates it: §6.0 attrs, write-tier edit tools only,
+  no grid-code publish, one component class per glob) as `proposed`;
+  `start_task` and `get_task` return it under `envelope`, `detail` being the
+  plan-review card's text.
+- **Grant.** Only the `/stream` request's `envelope_decision` (verdict
+  `unattended`, `stepwise` or `revoke`, the user's narrowing) reaches
+  `run_envelope.decide`; no tool can. A grant is `approvals.decided(by="user")`
+  with `envelope_id`, fails closed, and is never wider than the profile
+  (`invalid_envelope`). `stepwise` grants nothing.
+- **Admission.** `confirm._confirm_destructive_tool` asks `run_envelope.admit`
+  before issuing a card. Only the runner's own session `run:<task_id>` is
+  asked. Every dispatch re-checks, in order: native (not external, known),
+  not grid-code publish, not a delete, not `destructive`, no researched value,
+  `granted`, owner/project/task, `expires_at`, budget, the freshness chain,
+  `brief_stale`, any `project*` argument naming a project but the run's
+  (`wrong_project`: its uuid, or its name where that is not a uuid), then the tool and the edit card's typed rows (listed instance
+  at grant, within bounds relative to `at_grant`). The runner's
+  `decision_guard` then takes the locks and re-checks ACL and holds. A match
+  is `approvals.decided(by="envelope:<id>")` plus `used`; a refusal is
+  `refused` with its reason and the card path.
+- **Runner.** A step the envelope lists dispatches without waiting
+  (`decision="envelope"`); a refusal waits for the user's card on that step
+  (`waiting.envelope_refused`). COP-1 card boundaries are crossed inside a
+  live envelope (`continue_at_card`, on record). Expiry, an exhausted budget,
+  a revoke, drift, an unreadable fingerprint or a stale brief pause the run
+  (`reason: envelope_<why>`) and notify; nothing re-grants itself. Under an
+  effectful step's locks the runner reads `chain_head`: an uncarded step
+  (one the envelope never admits) that starts off the chain's last link
+  pauses the run with `envelope_drift`. After the step, `settle` appends the
+  chain's next fingerprint only when the step started on the last link.
+  Known limit: a user edit that lands *during* a step (its handler takes its
+  own locks after the runner's are released) is taken into the chain.
+- **End.** `cancel_task` revokes; the plan card's revoke pauses the run.
+
+
 ## Recorded runs, load flow, and experiment plans
 
 These tools live in `services/run_evidence.py`, `services/loadflow_summary.py`,

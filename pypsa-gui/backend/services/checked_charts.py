@@ -273,9 +273,13 @@ def verify(manifest):
     path = assurance_records._path(manifest["owner_id"], manifest["evidence_id"])
     if not path.exists():
         return "missing"
-    envelope = json.loads(path.read_text(encoding="utf-8"))
-    record = envelope["record"]
-    if (assurance_records.digest(record) != envelope["sha256"] or record["record_kind"] != "evidence"
+    try:
+        record = assurance_records.unseal(
+            json.loads(path.read_text(encoding="utf-8")), manifest["evidence_id"]
+        )
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    if (record["record_kind"] != "evidence"
             or record["project_id"] != manifest["project_id"] or record["owner_id"] != manifest["owner_id"]
             or record["source_sha256"] != manifest["source_sha256"]):
         return False

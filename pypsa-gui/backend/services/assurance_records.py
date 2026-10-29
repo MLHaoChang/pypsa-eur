@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import logging
 import math
 from numbers import Real
 import os
+import secrets
 import time
 import uuid
 
@@ -17,6 +19,7 @@ import app_paths
 from harness.durable import network_guard, transaction
 from services import project_registry
 from services.pypsa_service import PyPSAService
+from settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -57,15 +60,93 @@ INPUT_ADAPTERS = {
 }
 
 
-def digest(value):
-    encoded = json.dumps(
+def _canonical(value):
+    return json.dumps(
         value,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
         allow_nan=False,
     ).encode()
-    return hashlib.sha256(encoded).hexdigest()
+
+
+def digest(value):
+    return hashlib.sha256(_canonical(value)).hexdigest()
+
+
+def key_path():
+    """The record MAC's per-install key: beside the record store, never in it."""
+    return app_paths.app_data_dir() / "assistant_assurance.key"
+
+
+def _install_key():
+    path = key_path()
+    if not path.exists():
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        temp = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
+        try:
+            with temp.open("xb") as stream:
+                os.chmod(temp, 0o600)
+                stream.write(secrets.token_bytes(32))
+                stream.flush()
+                os.fsync(stream.fileno())
+            try:
+                # A link never replaces a key another process created first.
+                os.link(temp, path)
+            except FileExistsError:
+                pass
+            except OSError:
+                # No hard links here (FAT, some network shares): create exclusively.
+                try:
+                    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                except FileExistsError:
+                    pass
+                else:
+                    with os.fdopen(fd, "wb") as stream:
+                        stream.write(temp.read_bytes())
+                        stream.flush()
+                        os.fsync(stream.fileno())
+        finally:
+            temp.unlink(missing_ok=True)
+    key = path.read_bytes()
+    if len(key) != 32:
+        raise ValueError("assurance_key_invalid")
+    return key
+
+
+def _mac(record, record_id):
+    """Keyed by SECRET_KEY and the install key, so rewriting a record together
+    with every hash it carries still cannot make it read as checked. The id is
+    bound too, so a sealed record copied over another id is refused."""
+    key = hmac.new(
+        get_settings().secret_key.encode(),
+        b"pypsa-gui assistant-assurance record/1" + _install_key(),
+        hashlib.sha256,
+    ).digest()
+    return hmac.new(
+        key, _canonical({"id": record_id, "record": record}), hashlib.sha256
+    ).hexdigest()
+
+
+def seal(record, record_id):
+    return {
+        "record": record,
+        "sha256": digest(record),
+        "mac": _mac(record, record_id),
+    }
+
+
+def unseal(envelope, record_id):
+    """The envelope's record, or ValueError unless this server sealed it."""
+    record = envelope["record"]
+    mac = envelope["mac"]
+    if (
+        not isinstance(mac, str)
+        or digest(record) != envelope["sha256"]
+        or not hmac.compare_digest(_mac(record, record_id), mac)
+    ):
+        raise ValueError("assurance_record_unsealed")
+    return record
 
 
 def unavailable(kind):
@@ -107,15 +188,24 @@ def _path(owner, record_id):
             raise ValueError()
     except (ValueError, TypeError, AttributeError):
         raise HTTPException(404, "Record not found") from None
-    return (
-        app_paths.app_data_dir() / "assistant_assurance" / owner / (record_id + ".json")
-    )
+    from pathlib import Path
+
+    # The containment is the barrier CodeQL reads (py/path-injection), spelled
+    # as in site_service: realpath, then a prefix check against the root.
+    root = os.path.realpath(app_paths.app_data_dir() / "assistant_assurance")
+    full = os.path.realpath(os.path.join(root, owner, record_id + ".json"))
+    if not full.startswith(root + os.sep):
+        raise HTTPException(404, "Record not found")
+    return Path(full)
 
 
 def save(record, record_id):
-    """Commit record and checksum together before anything public is emitted."""
+    """Commit record, checksum and MAC together before anything public is emitted."""
     path = _path(record["owner_id"], record_id)
-    envelope = {"record": record, "sha256": digest(record)}
+    try:
+        envelope = seal(record, record_id)
+    except (OSError, ValueError):
+        unavailable("evidence_unavailable")
     encoded = json.dumps(envelope, ensure_ascii=False, allow_nan=False).encode()
     if len(encoded) > 128 * 1024:
         unavailable("assurance_record_too_large")
@@ -187,10 +277,7 @@ def load(owner, record_id, kind):
     try:
         if path.stat().st_size > 128 * 1024:
             raise ValueError()
-        envelope = json.loads(path.read_text(encoding="utf-8"))
-        record = envelope["record"]
-        if digest(record) != envelope["sha256"]:
-            raise ValueError()
+        record = unseal(json.loads(path.read_text(encoding="utf-8")), record_id)
         if record["owner_id"] != owner or record["record_kind"] != kind:
             raise HTTPException(404, "Record not found")
         if record["expires_at"] <= time.time():

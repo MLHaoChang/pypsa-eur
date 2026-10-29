@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session as DBSession
 from models.schemas import (
     BUS_LAZY_COLUMNS,
+    GENERATOR_LAZY_COLUMNS,
     LINK_LAZY_COLUMNS,
     BusCreate,
     CarrierCreate,
@@ -410,7 +411,8 @@ def get_generators():
 
 @router.post("/generators", status_code=201)
 def create_generator(gen: GeneratorCreate):
-    return _create_component("Generator", "generators", gen.name, gen.model_dump(exclude={"name"}))
+    unset_lazy = GENERATOR_LAZY_COLUMNS - gen.model_fields_set
+    return _create_component("Generator", "generators", gen.name, gen.model_dump(exclude={"name"} | unset_lazy))
 
 
 @router.put("/generators/{name}")

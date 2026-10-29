@@ -41,6 +41,7 @@ from services.solver.myopic import (  # noqa: F401
 )
 from services.solver.objective import (  # noqa: F401
     _log_objective_conditioning,
+    _no_solution_is_a_failure,
     _objective_conditioning,
     _rescale_results_for_objective,
     _wrap_with_capex_budget,
@@ -1150,6 +1151,7 @@ def run_simulation(
                             **_process_uc.sclopf_model_kwargs(network, proc_uc_kwargs),
                             **merged_solver_options,
                         )
+                        status, condition = _no_solution_is_a_failure(network, status, condition, phase)
                         _capture_extendable_p_nom_opt_to_frozen_store(network, phase)
                         _rescale_results_for_objective(network, log_queue=log_queue)
                         # PyPSA's SCLOPF leaves NaN in passive-branch _t
@@ -1233,6 +1235,7 @@ def run_simulation(
                                 assign_all_duals=True,
                                 **uc_kwargs,
                             )
+                        status, condition = _no_solution_is_a_failure(network, status, condition, phase)
                         _capture_extendable_p_nom_opt_to_frozen_store(network, phase)
                         # Reverse user_objective_scale on n.objective + LP duals
                         # so the post-solve diagnostics below (and every
