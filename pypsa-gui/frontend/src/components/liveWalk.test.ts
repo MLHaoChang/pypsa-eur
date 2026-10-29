@@ -91,11 +91,14 @@ describe('source-bound results walk', () => {
     expect(useUIStore.getState().discussedRun).toEqual({ runId: 'run-old', baselineRunId: 'baseline-old' })
     expect(resultsEvidenceApi.run).toHaveBeenLastCalledWith('run-old', 'loadflow', 'baseline-old')
   })
-  it("a past run's walk says plainly when access to the project was lost (LC-T08)", async () => {
+  it.each([
+    ['project_unavailable', 'This project is not available to you: your access was removed or the project was deleted.'],
+    ['run_project_required', "No project is open for you now, so this run's kept results are not shown. "
+      + 'If the project was closed elsewhere or your access was removed, open it again from Projects.'],
+  ])("a past run's walk says plainly when access to the project was lost (LC-T08, %s)", async (kind, message) => {
     useUIStore.setState({ discussedRun: { runId: 'run-old' } })
-    const message = 'This project is not available to you: your access was removed or the project was deleted.'
-    vi.mocked(resultsEvidenceApi.run).mockRejectedValue(Object.assign(new Error('404'),
-      { response: { status: 404, data: { detail: { error_kind: 'project_unavailable', message } } } }))
+    vi.mocked(resultsEvidenceApi.run).mockRejectedValue(Object.assign(new Error('refused'),
+      { response: { status: 404, data: { detail: { error_kind: kind, message } } } }))
     const onStop = vi.fn()
     startKeyResultsWalk({ onStop })
     await vi.waitFor(() => expect(onStop).toHaveBeenCalledWith(message))

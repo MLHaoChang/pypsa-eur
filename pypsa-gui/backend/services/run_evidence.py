@@ -81,13 +81,22 @@ def _refuse(kind: str, message: str, status: int = 409, **extra: Any) -> None:
     raise HTTPException(status, detail)
 
 
-def _authority() -> tuple[Path, str, str]:
+# LC03-ACCESS-1: a run-evidence read with no project bound. Access loss clears
+# the session's project pointer, so the server cannot tell lost access from a
+# project never opened; the words cover both without claiming either.
+NO_PROJECT_OPEN = ("No project is open for you now, so this run's kept results are not shown. "
+                   "If the project was closed elsewhere or your access was removed, open it "
+                   "again from Projects.")
+# Starting a run keeps its own words.
+_NO_PROJECT_TO_RECORD = 'Create, save and activate a project before reading run evidence.'
+
+
+def _authority(unbound: str = NO_PROJECT_OPEN) -> tuple[Path, str, str]:
     from services import chat_tools, project_registry
 
     ctx = PyPSAService.get_active_context()
     if not ctx.loaded_project or not ctx.project_uuid:
-        _refuse('run_project_required',
-                'Create, save and activate a project before reading run evidence.')
+        _refuse('run_project_required', unbound)
     with chat_tools._acting() as (db, user):
         try:
             project = project_registry.resolve_project(db, user, ctx.project_uuid)
@@ -641,7 +650,7 @@ def start_foreground_run(ctx: Any, *, job_id: str, tool_name: str,
     from services import chat_tools, dirty_state
 
     try:
-        root, project_id, owner = _authority()
+        root, project_id, owner = _authority(_NO_PROJECT_TO_RECORD)
         token = {
             'root': root, 'project_id': project_id, 'actor_id': owner,
             'run_id': foreground_run_id(job_id), 'job_id': job_id,
@@ -934,7 +943,7 @@ def publish_queue_run(job: Any, status: str | None = None) -> dict | None:
 def start_study_run(study_key: str, record: dict) -> dict | None:
     """Mark an adequacy/study mesh worker as a running evidence run."""
     try:
-        root, project_id, owner = _authority()
+        root, project_id, owner = _authority(_NO_PROJECT_TO_RECORD)
         run_id = study_run_id(study_key)
         kind = _STUDY_KIND.get(study_key, study_key)
         started = _now()
@@ -1034,7 +1043,7 @@ def watch_study_run(study_key: str, record: dict) -> None:
 
 def start_report_run(record: dict) -> dict | None:
     try:
-        root, project_id, owner = _authority()
+        root, project_id, owner = _authority(_NO_PROJECT_TO_RECORD)
         report_id = record.get('report_id')
         run_id = report_run_id(report_id if isinstance(report_id, str) else None)
         started = _now()

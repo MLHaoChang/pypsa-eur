@@ -9,9 +9,11 @@
  * project switch each drop the past-run view; nothing of it is left showing.
  * LC-T08: while the past run is on screen the user loses access to the
  * project (the fixture makes it a colleague's and demotes the user from org
- * admin to member: a real database ACL change); its next read, in
- * Guided and Expert, and the assistant's own run tools give the server's plain
- * reason, and the way out (Clear) stays. The user's role is then restored.
+ * admin to member: a real database ACL change). Access loss clears the
+ * session's open project, so its next read, in Guided and Expert, and the
+ * assistant's own run tools say in plain words that no project is open for the
+ * user now (LC03-ACCESS-1), and the way out (Clear) stays. The user's role is
+ * then restored and they open the project again from Projects.
  * npm run build
  * PYPSA_COMPOSER_PYTHON=<test-env-python> CHROMIUM_BIN=<chromium> node scripts/smoke-copilot-lc03-historical.mjs
  * No paid inference. Artifacts omit credentials/cookies.
@@ -31,7 +33,7 @@ const python = process.env.PYPSA_COMPOSER_PYTHON || path.join(repository, '.pixi
 const artifacts = process.env.LC03H_ARTIFACTS || await fs.mkdtemp(path.join(os.tmpdir(), 'copilot-lc03h-'))
 const PAST = 'Show me the capacity results of the first run.'
 const LATEST = 'Show me the capacity results of the latest run.'
-const REASON = 'This project is not available to you: your access was removed or the project was deleted.'
+const REASON = "No project is open for you now, so this run's kept results are not shown."
 
 function fixture(storage) {
   const child = spawn(python, [path.join(frontend, 'scripts/composer-fixture.py'), '--storage', storage, '--journey', 'lc03h'],
@@ -163,6 +165,19 @@ try {
   }
   assert.notEqual(runs[0], runs[1])
 
+  const openProject = async name => {
+    await page.getByRole('button', { name: /^Projects$/ }).first().click()
+    await page.waitForURL(/\/projects/)
+    // The whole card is its link: a pointer click on the card's name opens it.
+    const card = await page.getByText(name, { exact: true }).first().boundingBox()
+    await page.mouse.click(card.x + card.width / 2, card.y + card.height / 2)
+    await page.waitForURL(/\/app/)
+    await page.getByTestId('chat-input').waitFor({ state: 'attached' }).catch(async error => {
+      await page.screenshot({ path: path.join(artifacts, `lc03h-failed-open-${name}.png`) })
+      throw error
+    })
+  }
+
   const openPast = async nth => {
     await send(page, PAST)
     // Binding the conversation to a run is a write: the user approves its card.
@@ -224,20 +239,13 @@ try {
   await page.screenshot({ path: path.join(artifacts, 'lc03h-refused-chat.png') })
   await control('restore-access')
   await page.getByRole('button', { name: 'Guided', exact: true }).click()
+  // Access back, the project is opened again from Projects, as the words say.
+  await openProject('oj-grid')
 
   // LC-T10 (3): a project switch leaves nothing of the past run behind.
   await openPast(3)
   // The user's own switch: the Projects page, then the other project.
-  await page.getByRole('button', { name: /^Projects$/ }).first().click()
-  await page.waitForURL(/\/projects/)
-  // The whole card is its link: a pointer click on the card's name opens it.
-  const card = await page.getByText('oj-grid-other', { exact: true }).first().boundingBox()
-  await page.mouse.click(card.x + card.width / 2, card.y + card.height / 2)
-  await page.waitForURL(/\/app/)
-  await page.getByTestId('chat-input').waitFor({ state: 'attached' }).catch(async error => {
-    await page.screenshot({ path: path.join(artifacts, 'lc03h-failed-switch.png') })
-    throw error
-  })
+  await openProject('oj-grid-other')
   await page.waitForFunction(() => localStorage.getItem('network-diagram:current-project') === 'oj-grid-other',
     null, { timeout: 30000 })
   await page.getByTestId('chat-input').waitFor({ state: 'attached' })

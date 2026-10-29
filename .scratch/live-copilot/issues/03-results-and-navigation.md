@@ -340,10 +340,17 @@ Owner scope LC03-SCOPE-1. Branch `claude/lc03-acl-historical`, from master `fcf2
   it (vitest; RED before the per-turn check).
 
 Kept, with reasons:
-- Open, pending the owner's choice on past-run reads after access loss: in the
-  real app access loss clears the session's active-project pointer, so reads
-  refuse `run_project_required`; the browser smoke's LC-T08 phase fails on that.
-  The backend HTTP run-view cases run on the test harness's bound context.
+- Owner choice LC03-ACCESS-1 (option 1): in the real app access loss clears the
+  session's active-project pointer, so the browser's next read has no project
+  bound. Every run-evidence read with none bound (`run_evidence._authority`'s
+  default; starting a run keeps its words) refuses `run_project_required` with
+  `NO_PROJECT_OPEN`: "No project is open for you now, so this run's kept
+  results are not shown. If the project was closed elsewhere or your access was
+  removed, open it again from Projects." The run view and the live walk show it
+  (vitests); the bound case keeps `project_unavailable`. The HTTP cases in
+  `test_retained_acl.py` now run on the browser session's own resolution (the
+  test's turn cell unset per request), and the smoke reopens the project from
+  Projects after access is restored. No shared auth code changed.
 - The past-run view's Results chrome still says "From the latest run" above the
   retained section: UI parity for past runs is out of scope until RW-03.
 - Queue, study and report runs still refuse until each gets its own capture.

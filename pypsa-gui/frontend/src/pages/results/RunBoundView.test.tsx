@@ -39,6 +39,17 @@ describe('RunBoundView refusals (LC-T08)', () => {
     expect(screen.queryByText(/native retained evidence/)).toBeNull()
   })
 
+  it('says plainly when no project is open for the user now, as after access loss', async () => {
+    const open = "No project is open for you now, so this run's kept results are not shown. "
+      + 'If the project was closed elsewhere or your access was removed, open it again from Projects.'
+    vi.mocked(resultsEvidenceApi.run).mockRejectedValue(refused({ error_kind: 'run_project_required', message: open }))
+    show()
+    expect(await screen.findByText(open)).toBeTruthy()
+    expect(screen.getByRole('status').textContent).toBe(open)
+    expect(screen.queryByText(/run_project_required/)).toBeNull()
+    expect(screen.queryByText(/not been substituted/)).toBeNull()
+  })
+
   it('keeps the unavailable line for any other refusal', async () => {
     vi.mocked(resultsEvidenceApi.run).mockRejectedValue(refused({ error_kind: 'evidence_unavailable', message: 'x' }))
     show()

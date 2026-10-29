@@ -103,6 +103,24 @@ def _plain_refusal(exc: HTTPException) -> None:
     assert exc.detail['message'].startswith(REASON)
 
 
+def _browser_get(browser, url, **kwargs):
+    """A browser request on its own session's resolution, not the test's turn cell."""
+    token = PyPSAService._turn_cell.set(None)
+    try:
+        return browser.get(url, **kwargs)
+    finally:
+        PyPSAService._turn_cell.reset(token)
+
+
+def _no_project_open(view) -> None:
+    # LC03-ACCESS-1: access loss clears the session's project pointer, so the
+    # browser's next read has no project bound and says so in plain words.
+    assert view.status_code == 409, view.text
+    assert view.json()['detail'] == {'error_kind': 'run_project_required',
+                                     'message': run_evidence.NO_PROJECT_OPEN}
+    assert 'data' not in view.json()
+
+
 def test_navigation_is_refused_once_access_is_lost(past_run):
     run_id, browser = past_run['run_id'], past_run['browser']
     record = run_evidence.get_run_evidence(run_id)
@@ -112,7 +130,7 @@ def test_navigation_is_refused_once_access_is_lost(past_run):
     for section in FAMILIES:
         opened = chat_tools.DISPATCHERS['discuss_project_run'](run_id=run_id, section=section)
         assert opened['kind'] == 'open_run_result' and opened['run_id'] == run_id
-        view = browser.get('/api/results/run-view', params={'run_id': run_id, 'section': section})
+        view = _browser_get(browser, '/api/results/run-view', params={'run_id': run_id, 'section': section})
         assert view.status_code == 200, (section, view.text)
         assert view.json()['binding']['scope'] == 'historical'
         assert view.json()['data']['section'] == section
@@ -123,11 +141,8 @@ def test_navigation_is_refused_once_access_is_lost(past_run):
         with pytest.raises(HTTPException) as refused:
             chat_tools.DISPATCHERS['discuss_project_run'](run_id=run_id, section=section)
         _plain_refusal(refused.value)
-        view = browser.get('/api/results/run-view', params={'run_id': run_id, 'section': section})
-        assert view.status_code == 404, (section, view.text)
-        assert view.json()['detail']['error_kind'] == 'project_unavailable'
-        assert view.json()['detail']['message'].startswith(REASON)
-        assert 'data' not in view.json()
+        _no_project_open(_browser_get(browser, '/api/results/run-view',
+                                      params={'run_id': run_id, 'section': section}))
 
 
 def test_download_is_refused_once_access_is_lost(past_run):
@@ -136,7 +151,7 @@ def test_download_is_refused_once_access_is_lost(past_run):
     for section in FAMILIES:
         exported = chat_tools.DISPATCHERS['export_run_evidence'](run_id=run_id, section=section)
         blobs[section] = f"/api/projects/{NAME}/uploads/{exported['file_id']}/blob"
-        got = browser.get(blobs[section])
+        got = _browser_get(browser, blobs[section])
         assert got.status_code == 200, (section, got.text)
         assert got.json()['section'] == section and got.json()['run_id'] == run_id
 
@@ -147,7 +162,7 @@ def test_download_is_refused_once_access_is_lost(past_run):
             chat_tools.DISPATCHERS['export_run_evidence'](run_id=run_id, section=section)
         _plain_refusal(refused.value)
         # The file exported while they had access is not served either.
-        assert browser.get(blobs[section]).status_code == 404, section
+        assert _browser_get(browser, blobs[section]).status_code == 404, section
 
 
 def test_the_answer_path_gives_the_same_plain_reason(past_run):
@@ -172,12 +187,18 @@ def _refusal(call) -> tuple:
 
 
 def _view(browser, run_id) -> tuple:
-    view = browser.get('/api/results/run-view', params={'run_id': run_id, 'section': 'results_capacity'})
+    view = _browser_get(browser, '/api/results/run-view',
+                        params={'run_id': run_id, 'section': 'results_capacity'})
     return view.status_code, view.json()['detail']
 
 
 def test_no_existence_oracle(past_run, client, session_ctx, _auth_db, seeded_identity, monkeypatch):
-    """Never existed, never a member, revoked and deleted refuse byte-equal."""
+    """Never existed, never a member, revoked and deleted refuse byte-equal.
+
+    The assistant's read (context bound for the turn) refuses `project_unavailable`;
+    the browser's run view, on its own session, has no project bound once access
+    is gone (LC03-ACCESS-1) and refuses `run_project_required` in plain words.
+    """
     run_id, browser = past_run['run_id'], past_run['browser']
     ctx = session_ctx(client)
     read = lambda: run_evidence.get_run_evidence(run_id)  # noqa: E731
@@ -192,19 +213,27 @@ def test_no_existence_oracle(past_run, client, session_ctx, _auth_db, seeded_ide
                              org_id=seeded_identity['org_id'], role='member'))
         db.commit()
     outsider = attach_session(TestClient(main.app), session_local, outsider_id)
+    # A never-member cannot open the project, so its session has none bound.
+    assert outsider.post(f'/api/projects/{ctx.project_uuid}/activate').status_code == 404
     member = chat_tools.acting_user_id()
-    seen = {}
+    engine, browser_seen = {}, {}
     try:
         with monkeypatch.context() as m:
             m.setattr(ctx, 'project_uuid', str(uuid.uuid4()))
-            seen['never existed'] = (_refusal(read), _view(browser, run_id))
+            engine['never existed'] = _refusal(read)
+        # A session pointer can never name a project that does not exist: the
+        # browser's form is a run id that was never recorded, from a session.
+        browser_seen['never existed'] = _view(outsider, 'never-recorded-run')
         chat_tools.set_acting_user(str(outsider_id))
-        seen['never a member'] = (_refusal(read), _view(outsider, run_id))
+        engine['never a member'] = _refusal(read)
+        browser_seen['never a member'] = _view(outsider, run_id)
         chat_tools.set_acting_user(member)
         past_run['revoke']()
-        seen['revoked'] = (_refusal(read), _view(browser, run_id))
+        engine['revoked'] = _refusal(read)
+        browser_seen['revoked'] = _view(browser, run_id)
         assert client.delete(f'/api/projects/{NAME}').status_code in (200, 204)
-        seen['deleted'] = (_refusal(read), _view(browser, run_id))
+        engine['deleted'] = _refusal(read)
+        browser_seen['deleted'] = _view(browser, run_id)
     finally:
         chat_tools.set_acting_user(member)
         with session_local() as db:
@@ -213,11 +242,14 @@ def test_no_existence_oracle(past_run, client, session_ctx, _auth_db, seeded_ide
             if row is not None:
                 db.delete(row)
             db.commit()
-    first = seen['revoked']
-    assert first[0][0] == 404 and first[0][1]['error_kind'] == 'project_unavailable'
-    assert first[0][1]['message'].startswith(REASON)
-    for case, got in seen.items():
-        assert got == (first[0], first[0]), case
+    status, detail = engine['revoked']
+    assert status == 404 and detail['error_kind'] == 'project_unavailable'
+    assert detail['message'].startswith(REASON)
+    assert browser_seen['revoked'] == (409, {'error_kind': 'run_project_required',
+                                             'message': run_evidence.NO_PROJECT_OPEN})
+    for case in engine:
+        assert engine[case] == engine['revoked'], case
+        assert browser_seen[case] == browser_seen['revoked'], case
 
 
 def test_nothing_held_outlives_revocation(past_run):
@@ -229,9 +261,9 @@ def test_nothing_held_outlives_revocation(past_run):
     assert held['run_id'] == run_id
     exported = chat_tools.DISPATCHERS['export_run_evidence']()  # the discussed run
     blob = f"/api/projects/{NAME}/uploads/{exported['file_id']}/blob"
-    assert browser.get(blob).status_code == 200
-    assert browser.get('/api/results/run-view',
-                       params={'run_id': run_id, 'section': 'results_capacity'}).status_code == 200
+    assert _browser_get(browser, blob).status_code == 200
+    assert _browser_get(browser, '/api/results/run-view',
+                        params={'run_id': run_id, 'section': 'results_capacity'}).status_code == 200
 
     past_run['revoke']()
 
@@ -239,6 +271,6 @@ def test_nothing_held_outlives_revocation(past_run):
                  lambda: chat_tools.DISPATCHERS['export_run_evidence'](),
                  lambda: run_evidence.get_run_evidence(run_id, section='results_capacity')):
         _plain_refusal(pytest.raises(HTTPException, call).value)
-    view = browser.get('/api/results/run-view', params={'run_id': run_id, 'section': 'results_capacity'})
-    assert view.status_code == 404 and view.json()['detail']['error_kind'] == 'project_unavailable'
-    assert browser.get(blob).status_code == 404
+    _no_project_open(_browser_get(browser, '/api/results/run-view',
+                                  params={'run_id': run_id, 'section': 'results_capacity'}))
+    assert _browser_get(browser, blob).status_code == 404

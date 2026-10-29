@@ -61,9 +61,12 @@ export const resultsEvidenceApi = {
 }
 
 /** The server's own words when a run read refuses because the project is no
- * longer available to this user (LC-T08); null for any other failure. */
+ * longer available to this user (LC-T08), or none is open for them now, as after
+ * access loss (LC03-ACCESS-1); null for any other failure. */
 export function projectUnavailableReason(error: unknown): string | null {
   const detail = (error as { response?: { data?: { detail?: { error_kind?: string; message?: string } } } } | null)
     ?.response?.data?.detail
-  return detail?.error_kind === 'project_unavailable' && detail.message ? detail.message : null
+  const kind = detail?.error_kind
+  return (kind === 'project_unavailable' || kind === 'run_project_required') && detail?.message
+    ? detail.message : null
 }
