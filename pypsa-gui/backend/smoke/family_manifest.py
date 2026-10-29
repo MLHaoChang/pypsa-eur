@@ -38,6 +38,8 @@ G = 'tests/gridspine/'
 D15_TOOLS = 'campus_set_island_config campus_island_config campus_run_island_study'
 #: E1-E6 read through GET .../island/report: the chat tool trims the events away (ticket 27).
 D16_TOOLS = 'campus_set_island_config campus_draft_campus campus_run_study'
+D17_TOOLS = (D16_TOOLS + ' campus_run_island_study campus_recommend_gfm_settings campus_island_gfm_settings '
+             'campus_gfm_settings_card campus_apply_gfm_settings')
 
 # The capability-matrix families, in `assistant_control_matrix.FAMILY_JOURNEYS`
 # order, keyed by their journey slug.
@@ -420,7 +422,18 @@ VARIANTS: list[dict] = [
              B + 'test_lc06_d16_frequency_events.py::test_e6_short_of_room_is_infeasible_with_the_shortfall'),
     _unavailable('LC-D16.emt_pll_voltage', 'single-bus aggregate frequency screening only; no EMT/RMS/PLL/voltage dynamics',
                  'gridspine/static/frequency.py LABEL'),
-    _pending('LC-D17.recommend_apply_restudy', 'apply digest checked by equality; no chain through the seam'),
+    _covered('LC-D17.recommend_apply_restudy', 'gfm_vsm BESS (H_v 1 s, 4 %) beside a 5 % droop genset, band 0.25 Hz: '
+             'the card sets droop and H_v within the search bounds; both files read back the card exactly, tagged '
+             'assumed; the re-study puts E2 RoCoF0 and df_qss on the applied values; without it the old figures stand; '
+             'a network edit (refused by the recommendation\'s own staleness, not the digest: ticket 28) or a wrong '
+             'digest after the card is edit_preview_stale with nothing written; the HTTP apply with no digest is '
+             'still 409 (ticket 29)',
+             D17_TOOLS,
+             B + 'test_lc06_d17_recommend_apply.py::test_the_applied_card_is_read_back_and_the_restudy_runs_on_it',
+             B + 'test_lc06_d17_recommend_apply.py::test_without_the_restudy_the_old_figures_stand_and_no_study_is_made',
+             B + 'test_lc06_d17_recommend_apply.py::test_a_network_edit_after_the_card_refuses_the_apply',
+             B + 'test_lc06_d17_recommend_apply.py::test_a_digest_that_is_not_the_cards_refuses_the_apply',
+             B + 'test_lc06_d17_recommend_apply.py::test_the_http_apply_without_a_digest_still_refuses_a_stale_network'),
     _covered('LC-D18.investment', 'equity NPV 4.1322314 at cost of equity 10 %, WACC 7 %; financial close undiscounted',
              '',
              B + 'test_investment_assurance.py::test_hand_cash_with_a_nonzero_first_year'),
