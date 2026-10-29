@@ -1,0 +1,1 @@
+* Test(pypsa-gui): LC-33 pins the N-1 secure solve (2600 against 1000 and 1800 EUR, base flows 30/30) and the chained AC power-flow stage (slack = LP dispatch + independently solved losses) through the chat tools.

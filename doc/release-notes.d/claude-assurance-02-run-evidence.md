@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A checked assistant answer about a run now needs the run's manifest to carry a server-keyed MAC (SECRET_KEY and the install key), bound to its project and run id, so a run forged or copied in the project directory is refused as "unverified". Ordinary run reads are unchanged; runs recorded before this change stay readable but can no longer be checked.

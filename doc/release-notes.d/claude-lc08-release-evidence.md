@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): `smoke/release_evidence.py` reports source-pinned release evidence for each of the 14 assistant capability families from the LC-06 family manifest: variant and tool denominators, oracles and test nodes, pending owners, mapped owner journeys and recorded limitations. It enables no capability and keeps `full_coverage=not_established`.

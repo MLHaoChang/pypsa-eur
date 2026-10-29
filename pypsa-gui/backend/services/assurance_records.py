@@ -114,15 +114,24 @@ def _install_key():
     return key
 
 
+RECORD_MAC_DOMAIN = b"pypsa-gui assistant-assurance record/1"
+
+
+def server_key(domain):
+    """A MAC key from SECRET_KEY and the install key, one per domain label, so
+    a MAC made for one kind of object never verifies as another's."""
+    return hmac.new(
+        get_settings().secret_key.encode(),
+        domain + _install_key(),
+        hashlib.sha256,
+    ).digest()
+
+
 def _mac(record, record_id):
     """Keyed by SECRET_KEY and the install key, so rewriting a record together
     with every hash it carries still cannot make it read as checked. The id is
     bound too, so a sealed record copied over another id is refused."""
-    key = hmac.new(
-        get_settings().secret_key.encode(),
-        b"pypsa-gui assistant-assurance record/1" + _install_key(),
-        hashlib.sha256,
-    ).digest()
+    key = server_key(RECORD_MAC_DOMAIN)
     return hmac.new(
         key, _canonical({"id": record_id, "record": record}), hashlib.sha256
     ).hexdigest()
@@ -464,15 +473,7 @@ def _raw_facts(ctx, component_class, name):
         # Missing data does not become zero or a fact.
         value = _finite(component.static.at[name, metric])
         if value is not None:
-            facts.append(
-                {
-                    "path": "/" + metric,
-                    "entity_id": name,
-                    "metric": metric,
-                    "value": value,
-                    "unit": unit,
-                }
-            )
+            facts.append(_fact(name, metric, value, unit, metric))
     return facts
 
 
@@ -536,6 +537,17 @@ def pointer(*tokens):
     return "".join(
         "/" + str(t).replace("~", "~0").replace("/", "~1") for t in tokens
     )
+
+
+def _fact(entity_id, metric, value, unit, *tokens):
+    """One certified fact, at the JSON pointer `tokens` name in the result."""
+    return {
+        "path": pointer(*tokens),
+        "entity_id": entity_id,
+        "metric": metric,
+        "value": value,
+        "unit": unit,
+    }
 
 
 def page_source_digest(ctx, component_class):
@@ -620,15 +632,7 @@ def capture_input_page(owner, args, result, digest_before):
                     continue
                 raw = static.at[name, metric]
                 if _certified(row.get(metric), raw):
-                    facts.append(
-                        {
-                            "path": pointer(name, metric),
-                            "entity_id": name,
-                            "metric": metric,
-                            "value": float(raw),
-                            "unit": unit,
-                        }
-                    )
+                    facts.append(_fact(name, metric, float(raw), unit, name, metric))
         if not facts:
             return None
         offset = args.get("offset", 0)
@@ -716,13 +720,14 @@ def _series_steps(args, series):
     for i, raw in enumerate(series.to_numpy(dtype="float64")):
         tokens = (labels[i],) if periods is None else (periods[i], labels[i])
         steps.append(
-            {
-                "path": pointer(args["name"], *tokens),
-                "entity_id": args["name"],
-                "metric": args["attribute"],
-                "value": json.loads(json.dumps(float(raw))),
-                "unit": unit,
-            }
+            _fact(
+                args["name"],
+                args["attribute"],
+                json.loads(json.dumps(float(raw))),
+                unit,
+                args["name"],
+                *tokens,
+            )
         )
     return labels, periods, steps
 
@@ -879,13 +884,7 @@ def _aggregate_facts(entity, totals):
     totals = [float(v) for v in totals]
     values = {"peak": max(totals), "mean": sum(totals) / len(totals)}
     return [
-        {
-            "path": pointer(metric),
-            "entity_id": entity,
-            "metric": metric,
-            "value": json.loads(json.dumps(value)),
-            "unit": "MW",
-        }
+        _fact(entity, metric, json.loads(json.dumps(value)), "MW", metric)
         for metric, value in values.items()
     ]
 
@@ -1113,15 +1112,7 @@ def _page_facts(ctx, component_class, facts):
             continue
         value = _finite(static.at[name, metric])
         if value is not None:
-            expected.append(
-                {
-                    "path": pointer(name, metric),
-                    "entity_id": name,
-                    "metric": metric,
-                    "value": value,
-                    "unit": unit,
-                }
-            )
+            expected.append(_fact(name, metric, value, unit, name, metric))
     return expected
 
 
@@ -1249,13 +1240,7 @@ def _run_facts(manifest):
     from services import run_evidence
 
     return [
-        {
-            "path": pointer(metric),
-            "entity_id": manifest["run_id"],
-            "metric": metric,
-            "value": entry["value"],
-            "unit": entry["unit"],
-        }
+        _fact(manifest["run_id"], metric, entry["value"], entry["unit"], metric)
         for metric, entry in sorted((manifest.get("metrics") or {}).items())
         if run_evidence._METRIC.fullmatch(metric)
         and isinstance(entry, dict)

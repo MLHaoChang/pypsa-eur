@@ -425,3 +425,16 @@ def test_multi_period_total_cost_is_unavailable_never_mixed(monkeypatch):
     values = sc._values({"summary": {"has_solve": True}, "hours": sc.HOURS_PER_YEAR})
     assert values["total_cost_meur"] == (None, "multi-period: annuitised CAPEX and undiscounted OPEX do not add", None)
     assert values["opex_meur"][0] == 2.0 and values["capex_meur_total"][0] == 3.0
+
+
+def test_an_experiment_case_project_is_no_sensitivity_case_and_not_counted(swept, monkeypatch):
+    from services import project_registry
+    base_id, ids = swept
+    experiment_name = "exp-" + "0" * 32 + "-Gas"
+    with chat_tools._acting() as (db, user):
+        child = project_registry.resolve_project(db, user, ids["Gas 30"])
+        child.name = experiment_name
+        db.commit()
+    monkeypatch.setattr(sc, "MAX_CASES", 2)  # two real cases fit; a counted third would be refused
+    report = tool("compare_sensitivities", baseline_project_id=base_id)
+    assert sorted(by_name(report)) == ["Gas 20", "Gas 5"]
