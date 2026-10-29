@@ -1910,12 +1910,17 @@ TOOLS: list[dict[str, Any]] = [
         "that moves it is warned earlier_target_broken; relay warnings and "
         "offer to reorder. The answer gives per-op stats (peak, energy, load "
         "factor, hours touched and clipped) and the new job_id. "
+        "To undo one recorded op instead, send undo_index (its position in "
+        "the profile's refinements, from 0) and no ops: the later ops replay "
+        "without it into a new pending profile behind the same card; a later "
+        "op that no longer fits is refused naming its op and index. "
         "`project_id` is the project NAME and must be the open project. "
         "Safety: execution.",
         {"project_id": {"type": "string"},
          "job_id": {"type": "string"},
-         "ops": {"type": "array", "items": {"type": "object"}}},
-        ["project_id", "job_id", "ops"],
+         "ops": {"type": "array", "items": {"type": "object"}},
+         "undo_index": {"type": "integer", "minimum": 0}},
+        ["project_id", "job_id"],
     ),
     _t(
         "generate_series_profile",
