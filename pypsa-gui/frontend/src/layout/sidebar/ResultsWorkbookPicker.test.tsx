@@ -39,7 +39,7 @@ function setup() {
 describe('ResultsWorkbookPicker', () => {
   it('pre-ticks the cards\' tabs and locks them', async () => {
     setup()
-    const capex = await screen.findByLabelText('Capacity Expansion') as HTMLInputElement
+    const capex = await screen.findByLabelText('Capacity expansion') as HTMLInputElement
     expect(capex.checked).toBe(true)
     expect(capex.disabled).toBe(true)
     const lf = screen.getByLabelText('Load Flow') as HTMLInputElement
