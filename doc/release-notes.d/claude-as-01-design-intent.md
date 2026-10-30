@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Asset sizing design-intent presets A-E as scenario metadata (`DesignIntentSpec`): technology bounds, intent A backup energy (critical load x 4 h, editable), intent B/C genset floor and run-hour cap, intent D bridge reserve and a non-blocking ride-through warning. Data model only.
