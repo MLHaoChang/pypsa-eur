@@ -1,0 +1,1 @@
+* Feat(gridspine): Grid-code profiles take load-variation keys (ramp MW/min, MW per window, LCL ride-through band, Stage 1 d_lim, and whether transfer to BESS counts as ride-through); a missing key falls back to a marked assumed default.
