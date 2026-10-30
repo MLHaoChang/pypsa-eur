@@ -499,7 +499,7 @@ VARIANTS: list[dict] = [
              'and campaign_status carry edited_since_study (study_state.edited_since against the revision captured at the study\'s '
              'start). False after the run, True after update_component with the stored numbers unchanged, cleared by a re-run moving '
              'margin_tight 0.17 -> 117/110 - 1, the 1000-permyriad frontier point +400 EUR and the ELCC 20 -> 15 MW; the campaign flags '
-             'each entry and follows the latest per study. A record or entry with no captured revision reads None',
+             'each entry and follows the latest per study (None while that study runs). A record or entry with no captured revision reads None',
              'run_margin_loop run_frontier_study run_mc_study update_component get_adequacy_results start_campaign campaign_status',
              B + 'test_lc37_d13_stale_readers.py::test_an_edit_flags_the_margin_loop_and_a_rerun_clears_it_with_the_hand_delta',
              B + 'test_lc37_d13_stale_readers.py::test_an_edit_flags_the_frontier_and_the_campaign_and_a_rerun_clears_both',
@@ -507,7 +507,8 @@ VARIANTS: list[dict] = [
              B + 'test_lc37_d13_stale_readers.py::test_a_record_without_a_captured_revision_reads_unknown[frontier]',
              B + 'test_lc37_d13_stale_readers.py::test_a_record_without_a_captured_revision_reads_unknown[mc]',
              B + 'test_lc37_d13_stale_readers.py::test_a_record_without_a_captured_revision_reads_unknown[margin_loop]',
-             B + 'test_lc37_d13_stale_readers.py::test_a_campaign_entry_without_a_captured_revision_reads_unknown'),
+             B + 'test_lc37_d13_stale_readers.py::test_a_campaign_entry_without_a_captured_revision_reads_unknown',
+             B + 'test_lc37_d13_stale_readers.py::test_the_campaign_flag_follows_the_latest_entry_of_each_study'),
     _pending('LC-D13.stale_source_http_readers', 'GET /api/results/frontier, /mc and /margin_loop (the panels) serve the record without '
              'edited_since_study, so a panel shows pre-edit numbers unflagged; the chat readers carry it (LC-37); '
              'ticket .scratch/live-copilot/issues/39-adequacy-http-readers-stale-source.md'),

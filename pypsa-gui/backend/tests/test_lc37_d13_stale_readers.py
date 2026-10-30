@@ -164,3 +164,37 @@ def test_a_campaign_entry_without_a_captured_revision_reads_unknown(seam):
     status = chat_tools.campaign_status()
     assert [e['edited_since_study'] for e in status['entries']] == [None]
     assert status['edited_since_study'] is None
+
+
+def test_the_campaign_flag_follows_the_latest_entry_of_each_study(seam):
+    """Two studies, one stale: the campaign is stale until that study is re-run.
+    A study still running reads None, as its own reader does."""
+    import threading
+
+    from services import dirty_state
+    seam(elcc_network(100.0))
+    chat_tools.start_campaign('LC-37 two studies', 10)
+    campaign.record('frontier', 4, network_revision=dirty_state.revision())
+    dirty_state.bump_revision()
+    campaign.record('mc', 0, network_revision=dirty_state.revision())
+    status = chat_tools.campaign_status()
+    assert [(e['study'], e['edited_since_study']) for e in status['entries']] == [('frontier', True), ('mc', False)]
+    assert status['edited_since_study'] is True
+
+    campaign.record('frontier', 4, network_revision=dirty_state.revision())
+    status = chat_tools.campaign_status()
+    assert [e['edited_since_study'] for e in status['entries']] == [True, False, False]
+    assert status['edited_since_study'] is False
+
+    release = threading.Event()
+    worker = threading.Thread(target=release.wait, daemon=True)
+    worker.start()
+    try:
+        results_router._state['mc'] = {'status': 'running', 'thread': worker}
+        status = chat_tools.campaign_status()
+        assert [e['edited_since_study'] for e in status['entries']] == [True, None, False]
+        assert status['edited_since_study'] is None
+    finally:
+        release.set()
+        worker.join()
+        results_router._state.pop('mc', None)
