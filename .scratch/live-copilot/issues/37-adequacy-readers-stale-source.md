@@ -3,7 +3,7 @@
 
 # LC-37 — Adequacy readers serve pre-edit numbers with no freshness marker
 
-Status: needs-triage
+Status: done
 Type: bug
 
 Found by LC-36 (#954). The manifest row is `LC-D13.stale_source_unflagged_readers` (`_pending`).
@@ -21,10 +21,24 @@ numbers. Example: the ELCC of LC-33's `elcc_network` is 20 MW at load 100. It is
 
 ## Acceptance
 
-- [ ] Each of the four readers says whether the network changed since the study ran, on the
+- [x] Each of the four readers says whether the network changed since the study ran, on the
       same basis as `edited_since_study` (the revision captured on the record).
-- [ ] A test through the chat tools per reader: False after the run, True after
+- [x] A test through the chat tools per reader: False after the run, True after
       `update_component`, cleared by a re-run whose number moves by the hand delta.
-- [ ] `LC-D13.stale_source_unflagged_readers` becomes `_covered`.
+- [x] `LC-D13.stale_source_unflagged_readers` becomes `_covered`.
 
 ## Comments
+
+- GK A (plan, 6): GO with conditions, all met in the PR. (1) The flags are asserted with `is
+  False` / `is True`; dropping the capture in each runner, and in `_campaign_gated`, fails its
+  test with `None is False`. (2) A record or campaign entry without `network_revision` reads
+  `None`, one test per reader. (3) A study's own solves and restore never bump the revision: the
+  flag `is False` after each run, read after `base_restored is True` for the margin loop and
+  the frontier. (4) The campaign flags each entry, its top-level flag follows the latest entry
+  per study, no entries read `None`, and the revision is read before `start()` so it can only
+  over-report. (5) Gaps have `_pending` rows with tickets: the HTTP readers
+  (`LC-D13.stale_source_http_readers`, LC-39; `routers/results.py` was RW-04's) and
+  solver-config changes (`LC-D13.stale_source_solver_config`, LC-40; EH has the same limit).
+  The frontier's edit raises the dear plant's `marginal_cost` by 10 EUR/MWh, because
+  `capital_cost` is a derived field `update_component` refuses; the hand delta is the same
+  +400 EUR.

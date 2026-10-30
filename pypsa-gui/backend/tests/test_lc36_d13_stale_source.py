@@ -14,8 +14,8 @@ reads 10 MWh (it is the study that ran, flagged, not recomputed). Re-running
 clears the flag and moves electrical unmet by the hand delta: the heat pump
 still takes 10 MW, the AC Load gets 45 of its 55 MW, 2 x 10 = 20 MWh (+10).
 
-The margin-loop, frontier, MC/ELCC and campaign readers carry no such
-marker; that gap is `LC-D13.stale_source_unflagged_readers`, not pinned here.
+The margin-loop, frontier, MC/ELCC and campaign readers carry the same
+marker since LC-37 (`test_lc37_d13_stale_readers`).
 """
 import time
 

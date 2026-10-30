@@ -121,6 +121,16 @@ def _iso(ts: float) -> str:
 
 
 def _snapshot(campaign: _Campaign, *, active: bool = True) -> dict:
+    # LC-37: each entry says whether the network was edited since its study
+    # started (`study_state.edited_since` against the revision the entry
+    # captured; None for an entry without one). The campaign's own flag reads
+    # the LATEST entry of each study, so a re-run supersedes a stale one;
+    # None with no entries.
+    from services.study_state import edited_since
+    entries = [{**e, "edited_since_study": edited_since(e)}
+               for e in campaign.entries]
+    latest = {e["study"]: e["edited_since_study"] for e in entries}
+    flags = list(latest.values())
     return {
         "active": active,
         "objective": campaign.objective,
@@ -128,7 +138,10 @@ def _snapshot(campaign: _Campaign, *, active: bool = True) -> dict:
         "spent_solves": campaign.spent_solves,
         "remaining_solves": campaign.budget_solves - campaign.spent_solves,
         "started_at": _iso(campaign.started_at),
-        "entries": list(campaign.entries),
+        "entries": entries,
+        "edited_since_study": (None if not flags
+                               else True if True in flags
+                               else None if None in flags else False),
     }
 
 
@@ -227,8 +240,12 @@ def check(study: str, solves: int) -> None:
                 f"smaller max_solves) to fit")
 
 
-def record(study: str, solves: int) -> dict | None:
-    """Charge a STARTED study. Returns the new status, or None if idle."""
+def record(study: str, solves: int, *,
+           network_revision: int | None = None) -> dict | None:
+    """Charge a STARTED study. Returns the new status, or None if idle.
+
+    ``network_revision`` is the edit counter read before the study started
+    (LC-37); the snapshot compares it with the current one."""
     ctx = _context()
     with ctx.solver_state_lock:
         active = _get(ctx)
@@ -242,6 +259,7 @@ def record(study: str, solves: int) -> dict | None:
             "study": study,
             "solves_charged": int(solves),
             "at": _iso(time.time()),
+            "network_revision": network_revision,
         })
         return _snapshot(active)
 

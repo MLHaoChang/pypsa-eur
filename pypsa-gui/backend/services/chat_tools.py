@@ -3872,7 +3872,20 @@ def get_adequacy_results(kind: str) -> Any:
     a lookup dict, a 400 on an unknown kind, and one path outlier.
     """
     handler = _resolve_adequacy_handler(kind)
-    return _adequacy_payload(kind, handler())
+    result = handler()
+    if kind in _ADEQUACY_EDITED_SINCE_KINDS and isinstance(result, dict):
+        # LC-37: has the network been edited since this study started? On the
+        # EH reader's basis (`study_state.edited_since`); null (Unavailable)
+        # while running or for a record without a captured revision.
+        from services.study_state import edited_since
+        result = {**result, "edited_since_study": edited_since(result)}
+    return _adequacy_payload(kind, result)
+
+
+# The study readers whose route does not carry `edited_since_study` itself
+# (the EH reader's does). Their GET serves the record, `network_revision`
+# included, so the flag is computed from that copy.
+_ADEQUACY_EDITED_SINCE_KINDS = frozenset({"frontier", "mc", "margin_loop"})
 
 
 def adequacy_path_for(kind: str) -> str:
@@ -4016,11 +4029,17 @@ def _campaign_gated(study: str, start, **estimate_kwargs):
     """
     from services.adequacy import campaign
 
+    from services import dirty_state
+
     solves = campaign.estimate_solves(PyPSAService.get_network(), study,
                                       **estimate_kwargs)
     campaign.check(study, solves)
+    # LC-37: the entry's edit counter, read BEFORE the study starts. An edit
+    # landing between this read and the study's own capture is then counted
+    # as "edited since", so the entry can only over-report, never miss one.
+    revision = dirty_state.revision()
     result = start()
-    charged = campaign.record(study, solves)
+    charged = campaign.record(study, solves, network_revision=revision)
     if charged is None:
         return result
     return {**result, "campaign": {

@@ -495,9 +495,25 @@ VARIANTS: list[dict] = [
              '50 -> 55 MW (the stored study still reads 10 MWh), cleared by a re-run with electrical unmet 20 MWh (+10 by hand)',
              'run_eh_study update_component get_adequacy_results',
              B + 'test_lc36_d13_stale_source.py::test_an_edit_flags_the_eh_study_and_a_rerun_clears_it_with_the_hand_delta'),
-    _pending('LC-D13.stale_source_unflagged_readers', 'the margin_loop, frontier and mc/ELCC readers and campaign_status carry no freshness '
-             'marker: after update_component they serve pre-edit numbers unflagged (checked by LC-36); a defect, so not pinned; '
-             'ticket .scratch/live-copilot/issues/37-adequacy-readers-stale-source.md'),
+    _covered('LC-D13.stale_source_unflagged_readers', 'chat readers, network edits: get_adequacy_results margin_loop / frontier / mc '
+             'and campaign_status carry edited_since_study (study_state.edited_since against the revision captured at the study\'s '
+             'start). False after the run, True after update_component with the stored numbers unchanged, cleared by a re-run moving '
+             'margin_tight 0.17 -> 117/110 - 1, the 1000-permyriad frontier point +400 EUR and the ELCC 20 -> 15 MW; the campaign flags '
+             'each entry and follows the latest per study. A record or entry with no captured revision reads None',
+             'run_margin_loop run_frontier_study run_mc_study update_component get_adequacy_results start_campaign campaign_status',
+             B + 'test_lc37_d13_stale_readers.py::test_an_edit_flags_the_margin_loop_and_a_rerun_clears_it_with_the_hand_delta',
+             B + 'test_lc37_d13_stale_readers.py::test_an_edit_flags_the_frontier_and_the_campaign_and_a_rerun_clears_both',
+             B + 'test_lc37_d13_stale_readers.py::test_an_edit_flags_the_elcc_and_a_rerun_clears_it_with_the_hand_delta',
+             B + 'test_lc37_d13_stale_readers.py::test_a_record_without_a_captured_revision_reads_unknown[frontier]',
+             B + 'test_lc37_d13_stale_readers.py::test_a_record_without_a_captured_revision_reads_unknown[mc]',
+             B + 'test_lc37_d13_stale_readers.py::test_a_record_without_a_captured_revision_reads_unknown[margin_loop]',
+             B + 'test_lc37_d13_stale_readers.py::test_a_campaign_entry_without_a_captured_revision_reads_unknown'),
+    _pending('LC-D13.stale_source_http_readers', 'GET /api/results/frontier, /mc and /margin_loop (the panels) serve the record without '
+             'edited_since_study, so a panel shows pre-edit numbers unflagged; the chat readers carry it (LC-37); '
+             'ticket .scratch/live-copilot/issues/39-adequacy-http-readers-stale-source.md'),
+    _pending('LC-D13.stale_source_solver_config', 'edited_since_study (EH, margin loop, frontier, mc, campaign) counts network edits only: '
+             'update_solver_config (VoLL, reserve_margin, ...) does not move the revision, so a study read after a config change reads '
+             'False; ticket .scratch/live-copilot/issues/40-stale-source-solver-config.md'),
     _covered('LC-D13.incomplete_campaign', 'a campaign of budget 3 refuses a 3-target frontier (4 solves) as campaign_budget_exhausted with '
              'spent 0 and no entry, runs 2 targets to their hand points (spent 3) and closes with end_campaign; budget 4 runs all three. '
              'An EH redundancy compare at budget_solves 2 (ens_solve takes 1) solves base alone, budget_exhausted, no selection; at 10 it '

@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The assistant's margin-loop, frontier and Monte-Carlo/ELCC readers (`get_adequacy_results`) and `campaign_status` now say whether the network was edited since the study ran (`edited_since_study`), as the Energy Hub study reader does.
