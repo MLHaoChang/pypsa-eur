@@ -1,0 +1,1 @@
+* Doc(pypsa-gui): Throwaway numerical prototype of the AI-load sizing loop (intents A, B and D on a small PyPSA campus with transformer, reactive, ESCR, ramp and flicker checks fed back as cuts). The loop converges with four changes to the cuts, which are recorded in the research note.

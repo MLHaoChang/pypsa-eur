@@ -9,7 +9,9 @@ both trees, then `cmp` the two files:
         -p tests.assurance_acceptance.fact_record_dump \
         tests/assurance_acceptance/test_p1_evidence.py ...
 
-Each line is keyed by test id and site. The static_page capture site builds
+Each line is keyed by test id and site. S4 adds the facts evidence() and
+capture_series return, so a series record that stores only a row mask can be
+compared with S3's, which stored its facts. The static_page capture site builds
 its facts inside capture_input_page, so its facts are the saved record's
 (site "save", kind "static_page"). Without FACT_DUMP it does nothing.
 """
@@ -40,6 +42,19 @@ def _dumping(out, test, site, real):
     return wrapped
 
 
+def _record_facts(out, test, site, real):
+    """S4: the facts a record is read or captured with, whatever it stores."""
+
+    def wrapped(*args, **kwargs):
+        record = real(*args, **kwargs)
+        if isinstance(record, dict):
+            kind = (record.get("scope") or {}).get("kind")
+            _write(out, test=test, site=site, kind=kind, facts=record.get("facts"))
+        return record
+
+    return wrapped
+
+
 @pytest.fixture(autouse=True)
 def _dump_facts(monkeypatch, request):
     out = os.environ.get("FACT_DUMP")
@@ -50,6 +65,9 @@ def _dump_facts(monkeypatch, request):
     for site in SITES:
         real = getattr(assurance_records, site)
         monkeypatch.setattr(assurance_records, site, _dumping(out, test, site, real))
+    for site in ("evidence", "capture_series"):
+        real = getattr(assurance_records, site)
+        monkeypatch.setattr(assurance_records, site, _record_facts(out, test, site, real))
     save = assurance_records.save
 
     def dumping_save(record, record_id):

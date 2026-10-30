@@ -3,7 +3,7 @@
 
 # LC-33 — Time-series upload: untyped duplicate refusal, silent fill, off-horizon horizon replacement
 
-Status: needs-triage
+Status: ready-for-agent
 Type: bug
 
 Found by LC-32 (D03, `LC-D03.upload_guards`) driving `upload_timeseries` on a four-snapshot

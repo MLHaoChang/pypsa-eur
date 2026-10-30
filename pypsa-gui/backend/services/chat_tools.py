@@ -7581,6 +7581,7 @@ def export_to_excel(sheets: dict, filename: str) -> dict:
     """
     import io as _io
     from openpyxl import Workbook
+    from routers.io import _escape_formula
     wb = Workbook()
     # Remove the default sheet so we don't ship an empty "Sheet" leaf.
     default = wb.active
@@ -7589,14 +7590,10 @@ def export_to_excel(sheets: dict, filename: str) -> dict:
     for sheet_name, rows in (sheets or {}).items():
         ws = wb.create_sheet(title=str(sheet_name)[:31] or "Sheet")
         for row in (rows or []):
-            ws.append(list(row))
-            # openpyxl stores ANY string starting with "=" as a formula
-            # (`data_type == "f"`), which Excel evaluates on open. A string
-            # cell is shown as written, so force the type rather than edit
-            # the text: in xlsx the cell type decides, not the characters.
-            for cell in ws[ws.max_row]:
-                if cell.data_type == "f":
-                    cell.data_type = "s"
+            # EXPORT-INJECT-1, the same rule as the app's Excel export: a text
+            # cell starting = + - @ tab or CR gets a leading quote, so openpyxl
+            # stores it as text, never a formula; a number stays a number.
+            ws.append([_escape_formula(v) for v in row])
     buf = _io.BytesIO()
     wb.save(buf)
     payload = buf.getvalue()
