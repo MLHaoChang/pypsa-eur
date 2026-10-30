@@ -70,3 +70,30 @@ def test_a_larger_reactive_swing_raises_the_envelope_pst(tmp_path):
         return _rows(G.grid_readiness(d, n, PROFILE))["flicker"]["flicker"]["pst"]
 
     assert pst(0.3) > pst(0.0)
+
+
+def test_the_envelope_row_pins_step_rate_and_pst_by_hand(tmp_path):
+    from gridspine.static import flicker as fl
+
+    d, n = _project(tmp_path, "eh_datacenter", dc_load={})
+    mx = json.loads((d / "eh_template.json").read_text())["dc_load"]["envelope"]["max"]
+    row = _rows(G.grid_readiness(d, n, PROFILE))["flicker"]["flicker"]
+    env = row["envelope"]
+    swing = mx["swing_mw"] + mx["oscillation_amplitude_mw"]
+    p_res = max(0.0, swing - env["p_sm_mw"])
+    q_res = mx["tan_phi_swing"] * swing
+    psi = math.atan(F.DEFAULT_XR)
+    assert env["step_mva"] == pytest.approx(math.cos(psi) * p_res + math.sin(psi) * q_res)
+    # r counts voltage changes: two per cycle, 120 / T, not 60 / T.
+    assert env["changes_per_min"] == pytest.approx(120.0 / mx["oscillation_period_s"])
+    d_pct = env["step_mva"] / row["sk_mva"] * 100.0
+    # Pst of the lumped envelope alone, then the whole row (other units may add).
+    assert fl.pst(d_pct, env["changes_per_min"]) > fl.pst(d_pct, 60.0 / mx["oscillation_period_s"])
+    assert row["pst"] >= fl.pst(d_pct, env["changes_per_min"]) - 1e-9
+
+
+def test_a_process_unit_only_row_has_no_envelope_part(tmp_path):
+    from tests.test_grid_readiness import _flicker_row_of, _flicker_site
+
+    row = _flicker_row_of(tmp_path, _flicker_site())
+    assert "envelope" not in row["flicker"] and row["project_value"] == pytest.approx(0.8963, abs=1e-4)

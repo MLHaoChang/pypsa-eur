@@ -7,11 +7,14 @@ The residual real swing is ``P_res = max(0, S + A - P_sm)`` and the residual rea
 ``Q_res = max(0, tan φ_swing · (S + A) - Q_dyn)``. The step the grid sees as a voltage change is
 ``cos ψ · P_res + sin ψ · Q_res`` (ΔU ≈ R·ΔP + X·ΔQ over the PoC impedance, ψ = atan(X/R)),
 in MVA to divide by S_sc. IEC TR 61000-3-7 gives the ΔU/U ≈ ΔS/S_sc approximation and the
-changes-per-minute classes; the oscillation repeats at 60/T changes a minute.
+changes-per-minute classes; the oscillation cycles 60/T times a minute and each cycle is two voltage changes, so r = 120/T
+(``gridspine.static.flicker.changes_per_min``).
 """
 from __future__ import annotations
 
 import math
+
+from gridspine.static.flicker import changes_per_min
 
 #: Name of the lumped envelope row in the flicker screen's unit table.
 ENVELOPE_UNIT = "gpu_envelope"
@@ -35,11 +38,11 @@ def voltage_form_mva(p_res: float, q_res: float, xr: float = DEFAULT_XR) -> floa
 
 
 def envelope_unit(envelope: dict, p_sm_mw: float, xr: float = DEFAULT_XR) -> dict:
-    """The flicker-unit record of the envelope's worst phase: its voltage-form step and its 60/T rate."""
+    """The flicker-unit record of the envelope's worst phase: its voltage-form step and its voltage changes per minute (120/T)."""
     mx = envelope["max"]
     period = float(mx["oscillation_period_s"])
     p_res, q_res = residual_swing(mx["swing_mw"], mx["oscillation_amplitude_mw"], p_sm_mw,
                                   float(mx.get("tan_phi_swing") or 0.0))
     return {"unit": ENVELOPE_UNIT, "step_mva": voltage_form_mva(p_res, q_res, xr),
-            "changes_per_min": 60.0 / period if period > 0 else None,
+            "changes_per_min": changes_per_min(60.0 / period) if period > 0 else None,
             "p_res_mw": p_res, "q_res_mvar": q_res, "p_sm_mw": float(p_sm_mw), "xr": float(xr)}

@@ -521,7 +521,7 @@ def _rvc_row(inp: _Inputs) -> dict:
                 project_value=round(d, 4), verdict=_judge(d, limit, RULE_RVC),
                 assumed=lim_assumed or fault_assumed or _envelope_assumed(inp),
                 note=(f"Voltage change ≈ load step / fault level × 100 = {swing:.4g} MW / {sk:g} MVA: a screening upper bound "
-                      "(IEC 61000-3-7 style) that ignores the grid X/R; above the limit a power-flow "
+                      "(IEC 61000-3-7 style) that is P-only: it ignores the grid X/R and the load's reactive swing (AS-11); above the limit a power-flow "
                       f"or EMT study is needed; {_BEFORE_MITIGATION}"),
                 section="connection", target=target)
 
@@ -955,10 +955,10 @@ def _flicker_row(inp: _Inputs) -> dict:
     if env_unit is not None:
         row["flicker"]["envelope"] = env_unit
         row["assumed"] = True
-        row["note"] += (f"; GPU envelope after smoothing: {env_unit['p_res_mw']:.3g} MW and "
+        row["note"] += (f"; GPU envelope (the one row that applies the grid X/R, through the voltage form) after smoothing: {env_unit['p_res_mw']:.3g} MW and "
                         f"{env_unit['q_res_mvar']:.3g} Mvar residual ({env_unit['p_sm_mw']:.3g} MW smoothed), "
                         f"step cos ψ·ΔP + sin ψ·ΔQ = {env_unit['step_mva']:.3g} MVA at {env_unit['changes_per_min']:g} "
-                        f"changes/min, X/R {env_unit['xr']:g} ({fi.XR_ASSUMED}); tan φ_swing is assumed")
+                        f"voltage changes/min (two per cycle), X/R {env_unit['xr']:g} ({fi.XR_ASSUMED}); tan φ_swing is assumed")
     return row
 
 
