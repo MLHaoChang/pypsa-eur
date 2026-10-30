@@ -876,6 +876,20 @@ def _flicker_row(inp: _Inputs) -> dict:
     part = {"pst_limit": "Pst", "plt_limit": "Plt"}
     source = f"{_profile_title(inp)}: " + "; ".join(f"{part[c['key']]}: {c['clause']}" for c in cited)
     units = flicker_units(inp.n, "PoC") if inp.n is not None else None
+    env_unit = None
+    if units is not None and inp.envelope is not None:
+        import pandas as pd
+        from services.adequacy import flicker_inputs as fi
+        from services.adequacy.smoothing import _reserve, _year
+
+        p_sm = 0.0
+        if inp.island_raw is not None:
+            p_sm = float(_reserve(inp.n, inp.island_raw, _year((inp.envelope["phases"][-1] or {}).get("cod")))["mw"])
+        env_unit = fi.envelope_unit(inp.envelope, p_sm)
+        units = pd.concat([units, pd.DataFrame([{"unit": env_unit["unit"], "poc": "PoC",
+                                                 "step_mva": env_unit["step_mva"],
+                                                 "changes_per_min": env_unit["changes_per_min"]}])],
+                          ignore_index=True)
     if units is None or units.empty:
         return _row(rid, req, rule=RULE_FLICKER, limit=limit, unit=unit, source=source, project_value=None,
                     verdict="unknown", assumed=True,
@@ -938,6 +952,13 @@ def _flicker_row(inp: _Inputs) -> dict:
                note="; ".join(notes), section="assets", target=target)
     row["flicker"] = {"sk_mva": sk, "pst": p, "plt": plt, "pst_limit": limits.pst, "plt_limit": limits.plt,
                       "no_input_units": missing, "outside_range_units": outside}
+    if env_unit is not None:
+        row["flicker"]["envelope"] = env_unit
+        row["assumed"] = True
+        row["note"] += (f"; GPU envelope after smoothing: {env_unit['p_res_mw']:.3g} MW and "
+                        f"{env_unit['q_res_mvar']:.3g} Mvar residual ({env_unit['p_sm_mw']:.3g} MW smoothed), "
+                        f"step cos ψ·ΔP + sin ψ·ΔQ = {env_unit['step_mva']:.3g} MVA at {env_unit['changes_per_min']:g} "
+                        f"changes/min, X/R {env_unit['xr']:g} ({fi.XR_ASSUMED}); tan φ_swing is assumed")
     return row
 
 

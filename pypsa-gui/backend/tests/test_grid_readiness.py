@@ -770,7 +770,7 @@ def test_the_campus_ups_walks_the_step_in_too_fast_for_the_ramp_limit(tmp_path):
     assert rows["ramp_rate"]["after_battery"]["units"] == ["ups_battery"]
     assert "before mitigation" in rows["ramp_rate"]["note"]
     assert out["summary"]["pass_after_mitigation"] == 2
-    assert out["summary"]["red_flags"] == 3                         # the summary stays before mitigation
+    assert out["summary"]["red_flags"] == 4                         # before mitigation; the envelope flicker is the fourth
 
 
 def test_a_small_ups_covers_part_of_the_step(tmp_path):
