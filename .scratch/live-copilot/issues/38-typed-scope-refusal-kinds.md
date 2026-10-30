@@ -3,7 +3,7 @@
 
 # LC-38 — Adequacy scope refusals reach the chat with only the generic error kind
 
-Status: needs-triage
+Status: done
 Type: enhancement
 
 Found by LC-36 (#954), recorded in the `LC-D13.unsupported_scope` manifest row.
@@ -21,9 +21,9 @@ LC-36's tests therefore pin the guard's own text. The campaign budget refusal is
 
 ## Acceptance
 
-- [ ] Scope refusals of the adequacy planning tools carry a typed kind (for example
+- [x] Scope refusals of the adequacy planning tools carry a typed kind (for example
       `unsupported_scope`, or one per class). The kind is declared in
       `pypsa-gui/tool-error-kinds.d/`.
-- [ ] LC-36's `test_lc36_d13_scope_campaign.py` pins the typed kind in place of the guard text.
+- [x] LC-36's `test_lc36_d13_scope_campaign.py` pins the typed kind in place of the guard text.
 
 ## Comments
