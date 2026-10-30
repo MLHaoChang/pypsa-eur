@@ -1,0 +1,1 @@
+* Test(pypsa-gui): LC-36 pins the remaining LC-D13 adequacy variants through the chat tools: heat unmet by carrier and by Load, MC certification of the ENS plan (with the selected redundancy finalist disclosed as uncertified), unsupported-scope refusals, the study-swap guard, the EH study's edited-since flag, and campaigns and EH studies cut short by their budget.
