@@ -1347,7 +1347,7 @@ async def upload_timeseries(
         dup = [str(t) for t in df.index[df.index.duplicated()].unique()[:5]]
         raise HTTPException(422, {
             "error_kind": "timeseries_duplicate_timestamp",
-            "message": f"The CSV repeats timestamp(s) {', '.join(dup)}; each "
+            "message": f"The CSV repeats timestamp(s) {', '.join(dup)}: each "
                        "timestamp may appear once. Nothing was stored.",
         })
     filled: list[str] = []
@@ -1359,10 +1359,9 @@ async def upload_timeseries(
                     "error_kind": "timeseries_outside_horizon",
                     "message": f"The CSV runs {df.index.min()} to {df.index.max()}, "
                                "outside the network's snapshots "
-                               f"({n.snapshots[0]} to {n.snapshots[-1]}); storing it "
-                               "would replace the snapshots. Nothing was stored. Set the "
-                               "horizon first (set_snapshots), or confirm the replacement "
-                               "with replace_horizon=true.",
+                               f"({n.snapshots[0]} to {n.snapshots[-1]}): storing it "
+                               "would replace the snapshots. Nothing was stored. Set "
+                               "the horizon first with set_snapshots, then upload again.",
                 })
         else:
             lo, hi = df.index.min(), df.index.max()
