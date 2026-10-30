@@ -157,6 +157,24 @@ def _circle_q(s: float, p: float) -> float:
     return math.sqrt(max(s ** 2 - p ** 2, 0.0))
 
 
+def pcs_s_mva(p_mw: float, s_x_mva: float | None) -> float:
+    """A battery PCS's apparent power: rated ``p_mw`` plus the oversize ``s_x_mva`` the sizing LP chose (AS-05;
+    None or NaN is none). Set it as the unit's ``s_mva`` so the exact circle ``_circle_q`` checks what the LP's
+    inner bound credited."""
+    if s_x_mva is None or s_x_mva != s_x_mva:
+        return float(p_mw)
+    if s_x_mva < 0:
+        raise ValueError(f"PCS oversize {s_x_mva!r} MVA must be >= 0")
+    return float(p_mw) + float(s_x_mva)
+
+
+def statcom_split(q_statcom_mvar: float, q_steady_need_mvar: float) -> tuple[float, float]:
+    """``(steady, dynamic)``: a STATCOM of ``q_statcom_mvar`` serves the steady need first, and only what is left
+    is free for flicker (AS-05). The two slices sum to the rating, so one Mvar is never counted twice."""
+    steady = min(max(q_steady_need_mvar, 0.0), max(q_statcom_mvar, 0.0))
+    return steady, max(q_statcom_mvar, 0.0) - steady
+
+
 def _ibr_ratings(campus):
     """``(uid, kind, P_n, S)`` of every IBR unit, S by ``_s_mva``."""
     for uid, u in campus.units.iterrows():
@@ -453,10 +471,15 @@ def reactive_need(campus, rows: pd.DataFrame, req: ReactiveRequirement, tol: flo
                           sum(d["q_mvar"] for d in dispatch.values()))
 
 
-def size_compensation(results: dict, criteria: SizingCriteria = SizingCriteria()) -> pd.DataFrame:
+def size_compensation(results: dict, criteria: SizingCriteria = SizingCriteria(),
+                      q_dyn_mvar: float = 0.0) -> pd.DataFrame:
     """One row per direction (``capacitive``, ``inductive``). ``required_mvar``
     is the worst selected hour. ``recommended_mvar`` adds the sizing margin
-    and rounds up to whole Mvar. A direction never needed is 0."""
+    and rounds up to whole Mvar. A direction never needed is 0. A
+    ``q_dyn_mvar`` > 0 (the STATCOM's dynamic slice for flicker, AS-05) adds a
+    ``dynamic`` row of its own, so it is never summed into the steady rows."""
+    if not q_dyn_mvar >= 0:
+        raise ValueError(f"q_dyn_mvar {q_dyn_mvar!r} must be >= 0")
     rows = []
     for direction, sign in (("capacitive", 1.0), ("inductive", -1.0)):
         worst, where = 0.0, (None, None)
@@ -468,4 +491,8 @@ def size_compensation(results: dict, criteria: SizingCriteria = SizingCriteria()
             "recommended_mvar": float(math.ceil(worst * (1 + criteria.margin) - 1e-9)) if worst > 0 else 0.0,
             "worst_period": where[0], "worst_hour": where[1], "margin": criteria.margin,
         })
+    if q_dyn_mvar > 0:
+        rows.append({"direction": "dynamic", "required_mvar": float(q_dyn_mvar),
+                     "recommended_mvar": float(math.ceil(q_dyn_mvar * (1 + criteria.margin) - 1e-9)),
+                     "worst_period": None, "worst_hour": None, "margin": criteria.margin})
     return pd.DataFrame(rows)
