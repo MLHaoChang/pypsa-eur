@@ -27,3 +27,4 @@ Raised by GK A in the AS-05 review (#974).
 ## Comments
 
 - A network that saved unused extra-port columns (all at their defaults) gets a new fingerprint once, so its existing studies show out of date once.
+- GK A plan conditions (GO): (1) the unused port attributes leave `columns` before both uses (the static frame and, in exact mode, the defaults rows), and the empty dynamic `efficiency{k}` frame is skipped too. (2) Decided per port k: bus{k} and efficiency{k} are skipped together, only when every bus{k} is "", every static efficiency{k} is its default and efficiency{k} has no series. (3) Tests: process order, populated bus2, time-varying efficiency2 with bus2 set, and master pins in a fresh process for a network with a Generator, Store and Link and for one with no Link. (4) Normal and exact bytes are both pinned. (5) The PR body lists the consumers. (6) Only workflow_tools.py changes, and the AS-05 tag append is untouched.
