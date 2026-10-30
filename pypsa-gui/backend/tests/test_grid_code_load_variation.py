@@ -6,7 +6,7 @@ import pytest
 from gridspine.schema.contracts import ContractError
 from gridspine.templates import grid_codes as G
 
-NEW_KEYS = ("load_ramp_mw_per_min", "load_variation_limit", "lcl_ride_through_band", "stage1_d_lim_pct",
+NEW_KEYS = ("load_ramp_mw_per_min", "load_variation_limit", "lcl_ride_through_band", "stage1_ds_over_ssc_pct",
             "ride_through_transfer_counts")
 SHIPPED = ("eu_rfg_dcc_ce", "generic_assumed", "us_ieee2800_nerc")
 
@@ -32,7 +32,7 @@ def test_shipped_profiles_load(name):
     ("load_ramp_mw_per_min", _lim(value=30)),
     ("load_variation_limit", _lim(value=10, window_s=5)),
     ("lcl_ride_through_band", _lim(v_min=0.8, v_max=1.1, duration_s=1)),
-    ("stage1_d_lim_pct", _lim(value=0.4)),
+    ("stage1_ds_over_ssc_pct", _lim(value=0.4, r_max_per_min=10)),
     ("ride_through_transfer_counts", _lim(value=False)),
 ])
 def test_schema_accepts(key, lim):
@@ -46,7 +46,8 @@ def test_schema_accepts(key, lim):
     ("load_variation_limit", _lim(value=10, window_s=0)),
     ("lcl_ride_through_band", _lim(v_min=1.2, v_max=1.1, duration_s=1)),
     ("lcl_ride_through_band", _lim(v_min=0.8, v_max=1.1)),          # no duration
-    ("stage1_d_lim_pct", _lim(value=-1)),
+    ("stage1_ds_over_ssc_pct", _lim(value=-1, r_max_per_min=10)),
+    ("stage1_ds_over_ssc_pct", _lim(value=0.4)),                    # no rate band
     ("ride_through_transfer_counts", _lim(value="yes")),
     ("load_ramp_mw_per_min", {"value": 30}),                        # no clause or tag
 ])
@@ -83,3 +84,13 @@ def test_transfer_warning_follows_key():
     for p in (_profile(ride_through_transfer_counts=_lim(value=False)), _profile()):
         w = G.ride_through_transfer_warning(p)
         assert w and "ride-through" in w
+
+
+def test_pre_existing_keys_are_unchanged():
+    import yaml
+    from pathlib import Path
+
+    frozen = yaml.safe_load((Path(__file__).parent / "data" / "grid_codes_before_as08.yaml").read_text())["profiles"]
+    for name, before in frozen.items():
+        after = {k: v for k, v in G.load_grid_code(name, raw=True).items() if k not in NEW_KEYS}
+        assert after == {k: v for k, v in before.items()}, name

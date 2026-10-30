@@ -117,7 +117,7 @@ profiles:
     # One band for every nominal voltage. kv_max is a large finite number, since
     # the loader takes finite bounds only; no real system is above it.
     # Load variation (asset-sizing loop AS-08). All assumed: generic engineering placeholders, no sourced
-    # figure. d_lim is the relative voltage change of IEC TR 61000-3-7 Stage 1, not verified against that text here.
+    # figure. Stage 1 is a limit on dS/S_sc (IEC TR 61000-3-7), not a voltage change.
     load_ramp_mw_per_min:
       value: 30
       clause: "generic engineering placeholder; no public code sets a MW/min ramp for this profile"
@@ -133,9 +133,10 @@ profiles:
       duration_s: 1
       clause: "generic engineering placeholder for a large-load ride-through band; PJM LCL ride-through work (Oct 2026) is a proposal, not adopted"
       source: assumed
-    stage1_d_lim_pct:
+    stage1_ds_over_ssc_pct:
       value: 0.4
-      clause: "generic engineering placeholder for the IEC TR 61000-3-7 Stage 1 relative voltage change limit; not verified against the text here"
+      r_max_per_min: 10
+      clause: "IEC TR 61000-3-7 Stage 1 (dS/S_sc)max, 0.4 % for r < 10 changes per minute, as read by GK A; this session could not read the paywalled text, so not verified"
       source: assumed
     ride_through_transfer_counts:
       value: false
@@ -212,7 +213,7 @@ profiles:
       Sources gathered 14 October 2026: NERC PRC-029-1 and PRC-024-3 texts; the
       IEEE SA 2800 webinar slides; MISO's PAC-2024-2 summary of IEEE 2800.
     # Load variation (asset-sizing loop AS-08). All assumed: generic engineering placeholders, no sourced
-    # figure. d_lim is the relative voltage change of IEC TR 61000-3-7 Stage 1, not verified against that text here.
+    # figure. Stage 1 is a limit on dS/S_sc (IEC TR 61000-3-7), not a voltage change.
     load_ramp_mw_per_min:
       value: 30
       clause: "generic engineering placeholder; no public code sets a MW/min ramp for this profile"
@@ -228,9 +229,10 @@ profiles:
       duration_s: 1
       clause: "generic engineering placeholder for a large-load ride-through band; PJM LCL ride-through work (Oct 2026) is a proposal, not adopted"
       source: assumed
-    stage1_d_lim_pct:
+    stage1_ds_over_ssc_pct:
       value: 0.4
-      clause: "generic engineering placeholder for the IEC TR 61000-3-7 Stage 1 relative voltage change limit; not verified against the text here"
+      r_max_per_min: 10
+      clause: "IEC TR 61000-3-7 Stage 1 (dS/S_sc)max, 0.4 % for r < 10 changes per minute, as read by GK A; this session could not read the paywalled text, so not verified"
       source: assumed
     ride_through_transfer_counts:
       value: false
