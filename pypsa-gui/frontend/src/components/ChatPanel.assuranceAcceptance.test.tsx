@@ -1,7 +1,7 @@
 /** Implemented public UI/voice publication boundary, always run in CI. */
 import { createHash, webcrypto } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { useChatStore } from '../store/chatStore'
@@ -112,6 +112,21 @@ describe('implemented assurance publication boundary', () => {
     emit(event, { delta: unsafe })
     expect(screen.queryByText(unsafe)).toBeNull()
     expect(useChatStore.getState().messages.some(m => m.content.includes(unsafe) || m.thinking?.includes(unsafe))).toBe(false)
+  })
+
+  it.each([
+    ['assurance_publication_failed', 'The checked answer could not be published'],
+    ['assurance_access_revoked', 'You no longer have access to this project'],
+  ])('a commit refusal %s ends the turn with its banner and no retry', async (kind, title) => {
+    await start()
+    emit('token', { delta: unsafe })
+    emit('error', { error_kind: kind, message: 'No answer was published.' })
+    emit('session_done', { reason: kind })
+    expect(useChatStore.getState().error?.error_kind).toBe(kind)
+    expect(useChatStore.getState().streaming).toBe(false)
+    expect(within(screen.getByTestId('chat-error-banner')).getByText(title)).toBeTruthy()
+    expect(screen.queryByTestId('chat-error-retry')).toBeNull()
+    expect(screen.queryByText(unsafe)).toBeNull()
   })
 
   it('P2/P6: turn_done cannot speak text without an approval receipt', async () => {

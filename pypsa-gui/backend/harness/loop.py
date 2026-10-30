@@ -2057,9 +2057,17 @@ def _run_turn_body(
             else:
                 yield "answer_progress", {"version": 1, "turn_id": session.assurance_turn.turn_id,
                                           "stage": "checking_claims", "status": "running"}
+                from services.assurance_records import AccessRevoked
                 try:
                     session.assurance_turn.review_interpretations(assistant_blocks, provider, session.model, turn_ctx)
                     assistant_blocks = session.assurance_turn.commit(assistant_blocks, turn_ctx)
+                except AccessRevoked:
+                    # REVOKE-KIND: the account or project access ended; expected, not a fault.
+                    logger.warning("checked answer withdrawn: project access was revoked")
+                    yield "error", {"error_kind": "assurance_access_revoked",
+                                    "message": "No answer was published. If your access comes back, open the project again from Projects."}
+                    yield "session_done", {"reason": "assurance_access_revoked"}
+                    return
                 except Exception:  # noqa: BLE001 — fail closed, including uncertain storage
                     logger.exception("checked answer could not be committed")
                     yield "error", {"error_kind": "assurance_publication_failed",

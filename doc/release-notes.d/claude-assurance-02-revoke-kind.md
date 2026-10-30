@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): When project access is revoked while a checked answer is being saved, the assistant now says "You no longer have access to this project" instead of the generic "could not be published", and the server logs it as a warning rather than an error.

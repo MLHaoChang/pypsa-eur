@@ -262,8 +262,15 @@ def _user(db, owner):
 
     user = db.get(User, uuid.UUID(owner))
     if user is None or user.status != "active":
-        raise HTTPException(401, "Authentication required")
+        raise AccessRevoked(401, "Authentication required")
     return user
+
+
+class AccessRevoked(HTTPException):
+    """The owner's account or project access is gone (REVOKE-KIND).
+
+    Keeps the refusal's status and detail, so a route answers exactly as it
+    did; a checked commit reports it as `assurance_access_revoked`."""
 
 
 def authorize(owner, project_id=None):
@@ -271,8 +278,17 @@ def authorize(owner, project_id=None):
 
     with SessionLocal() as db:
         user = _user(db, owner)
-        if project_id is not None:
+        if project_id is None:
+            return
+        try:
             project_registry.resolve_project(db, user, project_id)
+        except HTTPException as refused:
+            # Only the access refusals; any other status keeps its own path.
+            if refused.status_code in (403, 404):
+                raise AccessRevoked(
+                    refused.status_code, refused.detail, refused.headers
+                ) from refused
+            raise
 
 
 def _path(owner, record_id):
@@ -450,7 +466,7 @@ def load(owner, record_id, kind):
     except HTTPException as refused:
         # Revoked project access reads exactly like a record that never existed.
         if refused.status_code == 404:
-            raise HTTPException(404, "Record not found") from None
+            raise AccessRevoked(404, "Record not found") from None
         raise
     return record
 
