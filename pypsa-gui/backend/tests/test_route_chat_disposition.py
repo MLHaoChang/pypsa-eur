@@ -200,12 +200,11 @@ KNOWN_GAPS: dict[tuple[str, str], str] = {
     ('GET', '/api/results/energy_flows.csv'): 'Results panel',
     ('GET', '/api/results/investment_case/export.xlsx'): 'Results panel',
     ('GET', '/api/results/process_uc_check'): 'Results panel',
-    ('GET', '/api/results/process_view'): 'Results panel',
     ('POST', '/api/campus-electrical/{name}/island/preset'): 'Campus electrical panel',
     ('POST', '/api/projects/{name}/flow/ack'): 'Projects page / Workspace panel',
     ('POST', '/api/projects/{name}/profiles/shape'): 'Time series panel',
 }
-_KNOWN_GAPS_CEILING = 70
+_KNOWN_GAPS_CEILING = 12
 
 
 def _routes():
