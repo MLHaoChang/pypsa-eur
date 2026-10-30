@@ -21,4 +21,6 @@ AS-05 adds the LP variables `PCS-s_x`, `Statcom-q_ss` and `Statcom-q_dyn`, read 
 
 ## PRs
 
+- #985
+
 ## Comments
