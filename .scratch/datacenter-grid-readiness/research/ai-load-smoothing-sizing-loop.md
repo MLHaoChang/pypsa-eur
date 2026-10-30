@@ -442,6 +442,25 @@ discrete assets frozen and finitely many cuts, the loop ends. Each iteration cos
 campus study. On a full 8760 h network that is the dominant cost, so a tsam-reduced year for iterations 1 to
 n-1 and a full-year final solve is a sensible default. This is an assumption to check against run times.
 
+**Prototype result (AS-PROTO-1, [`prototype-as-loop/RESULTS.md`](prototype-as-loop/RESULTS.md)): converges
+with changes.** A one-week campus was run for intents A, B and D on five grid cases.
+
+- With the cuts as written above, 14 of 15 runs pass every check in 2 or 3 rounds. One run (weak grid,
+  flat tariff, intent D) creeps for 9 rounds, because the PQ cut and the Pst cut both count the same
+  STATCOM Mvar.
+- The cuts as written also buy 2 to 9 times more reactive capacity than needed.
+- With four changes, all 15 runs pass in 2 or 3 rounds and no run oscillates:
+  1. split the STATCOM into Q_ss (PQ cut) and Q_dyn (Pst cut);
+  2. write the PQ cut per hour and linear in the transformer flow, not as a constant Q_need from the
+     failing iterate, which goes stale. In the same cut, cap S_x ≤ r·P and credit √(1+2/r) Mvar per MVA,
+     a tighter inner bound on the PQ circle than (S − P);
+  3. write the Pst cut on the voltage as cos ψ·ΔP_res + sin ψ·ΔQ_res ≤ d_lim·S_sc. Both residuals are
+     floored at zero, and the cut includes the load's own reactive swing;
+  4. set the power floor to S + A, and make the energy floor the sum of the event energies, not their max.
+- The ESCR cut, the transformer import cap and the monotone-cost argument hold as written.
+- Keep the capacity-move condition in rule 6: in the creeping run the cost moved under 0.02 % per round
+  while Pst was six times over the limit. A tolerance stop with a check still failing is "not converged".
+
 ### 4.5 What stays outside
 
 - **Sub-cycle and control interaction:**
@@ -487,7 +506,11 @@ gridspine, DC and adequacy; GK B for investment and finance. The suggested model
 - **Not verified:** the Marcos closed-form energy equation (OCR), the IEEE 519 Isc/IL table wording, NFPA 110
   and Uptime exact wording, ERCOT's lower ride-through bands, and the vendor deck's PPC timing and EtherCAT
   claim.
-- **No numerical prototype was run.** The cut forms in 4.4 are linearisations (an inner bound on the PQ
-  circle, and κ for Pst) that a test case must confirm. Convergence in practice (5 iterations, 0.5 %) is an
-  assumption.
+- **A one-week numerical prototype was run (AS-PROTO-1, `prototype-as-loop/`); a full-year run was
+  not.** It found four changes to the cuts (see the end of 4.4).
+  - Remaining risks: the prototype uses illustrative costs and grids, a single envelope, and one fast
+    storage tier.
+  - The transformer freeze rule was never exercised.
+  - The load's reactive swing (tan φ_swing) decides whether a weak grid needs a STATCOM for flicker, and
+    it needs vendor data.
 - **No client document was used** (SAGC-1). All limits cited are public.
