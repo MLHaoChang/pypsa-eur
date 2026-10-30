@@ -6,8 +6,8 @@ the frontier with VoLL 0 ('requires a VOLL > 0') and the margin loop under the
 'rolling' solve strategy (the reserve margin would bind per window, not per
 period). Each refusal reaches the chat seam as a `tool_error` frame with the
 generic kind 'tool_error' (no typed kind exists for scope refusals; a follow-up
-names that gap), so each test pins the kind exactly, a short stable fragment
-of the message, no solve charged to the campaign, and the reader's prior
+ticket names that gap), so each test pins the kind exactly, the guard's own
+text (it occurs only at the runner's raise site), no solve charged to the campaign, and the reader's prior
 output byte-identical. The mutation is the in-scope run: LC-33's frontier
 fixture at VoLL 100 gives its hand points (`frontier_oracle`) and costs
 targets + 1 = 4 solves; the margin loop under 'full' (the default) is met from LC-33's hand
@@ -79,7 +79,8 @@ def test_a_frontier_at_voll_zero_is_refused_without_a_solve_and_keeps_the_prior_
     chat_tools.update_solver_config({'voll': 0.0})
     [err] = tool_errors('run_frontier_study', targets_permyriad=FR_TARGETS)
     assert err['error_kind'] == 'tool_error'
-    assert 'VOLL > 0' in err['message']
+    # The runner guard's own text (frontier_loop_runner.py), not the engine's later check.
+    assert err['message'] == 'the frontier requires a VOLL > 0 in solver settings'
     status = chat_tools.campaign_status()
     assert status['spent_solves'] == spent
     assert [(e['study'], e['solves_charged']) for e in status['entries']] == [('frontier', spent)]
@@ -98,7 +99,8 @@ def test_the_margin_loop_refuses_the_rolling_strategy_before_any_solve(seam, str
     assert json.loads(before)['status'] == 'no_data'
     [err] = tool_errors('run_margin_loop', target_lole_h=1.92, draws=200, seed=1, max_solves=8)
     assert err['error_kind'] == 'tool_error'
-    assert "'rolling' solve strategy" in err['message']
+    # The runner guard's own text (margin_loop_runner.py); validation_service's capitalised twin differs.
+    assert err['message'].startswith("the reserve margin is not supported with the 'rolling' solve strategy")
     assert snapshot('margin_loop') == before
 
 
