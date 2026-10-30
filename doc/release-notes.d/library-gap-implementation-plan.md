@@ -1,0 +1,1 @@
+* Docs(GridSpine): Add a source-to-consumer library assessment and staged research/implementation briefs for equipment, lifecycle costs, regional data, tariffs, market references, reliability, demand, process data and safe copilot use, with dependencies and planned validation cases.

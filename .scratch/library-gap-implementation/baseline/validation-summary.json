@@ -1,0 +1,22 @@
+{
+  "master_sha": "aba252d2384f55116bbd15516a5b025951ba265e",
+  "scope": "Existing library contracts on fetched master; no ingestion or new importer validation",
+  "counts": {
+    "tests": 379,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "report": "assessment-2026-10-25.md",
+  "inventory": "native-inventory.json",
+  "research_pr_heads": {
+    "491": "c35bfd0b7a218a343c9b5febc8f1b69aa26f0836",
+    "524": "3a99ed44f6867a48d7f6a0251a7ffacd37a4885f",
+    "711": "bd26ea2cb8bfe06b9b302d4bf9853756a50432a9",
+    "712": "c117493f494a74d7d19d9a053286cb7f347730e9"
+  },
+  "new_source_data_ingested": false,
+  "paid_calls": false,
+  "junit": "library-tests.xml",
+  "log": "library-tests.log"
+}

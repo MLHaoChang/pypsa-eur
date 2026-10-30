@@ -1,0 +1,971 @@
+{
+  "schema_version": 1,
+  "kind": "planned_research_and_implementation_tasks",
+  "baseline_master": "aba252d2384f55116bbd15516a5b025951ba265e",
+  "created": "2026-10-25",
+  "runtime_implemented": false,
+  "new_datasets_admitted": false,
+  "tasks": [
+    {
+      "id": "LG-01",
+      "title": "Reconcile the source-to-consumer register and shipped state",
+      "group": "R0",
+      "priority": 0,
+      "depends_on": [],
+      "status": "ready-for-agent",
+      "anchors": [
+        ".scratch/gridspine-library-eu/IMPLEMENTATION.md",
+        ".scratch/gridspine-library-research/terms/clearances.json",
+        "pypsa-gui/backend/services/library/reference_catalogue.py",
+        "pypsa-gui/backend/services/library/defaults_pack",
+        "pypsa-gui/backend/services/library/common_items"
+      ],
+      "file": "issues/01-source-consumer-register.md",
+      "cases": [
+        {
+          "id": "LG-01-01",
+          "trigger": "Inventory deduplicates aliases without summing #491/#524 entries.",
+          "expected": "Counts reconcile to their own source/variant/row units and duplicate IDs are rejected.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-01-02",
+          "trigger": "Current reference apply and both partial TenneT records are mapped to code.",
+          "expected": "Register reports shipped apply and partial tariffs, not future-only or complete billing.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-01-03",
+          "trigger": "A source version has no native consumer or no rights record.",
+          "expected": "It is research/unavailable for apply, never admitted from its URL alone.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-01-04",
+          "trigger": "A new edition is detected.",
+          "expected": "An update candidate is recorded; existing project hashes/pins and values remain unchanged.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-01-05",
+          "trigger": "Re-run the extractor on identical native files.",
+          "expected": "Stable sorted output and hashes; changed source edition is a visible diff.",
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "LG-02",
+      "title": "Complete the coordinated money-year and template/study/regional repin",
+      "group": "R0",
+      "priority": 0,
+      "depends_on": [
+        "LG-01"
+      ],
+      "status": "needs-info",
+      "anchors": [
+        ".scratch/money-year/issues/01-templates-case-year-and-repin.md",
+        "pypsa-gui/backend/project_templates/eh_templates.py",
+        "pypsa-gui/backend/project_templates/eh_ammonia.py",
+        "pypsa-gui/backend/project_templates/eh_site.py",
+        "pypsa-gui/backend/project_templates/eh_staged_hubs.py",
+        "pypsa-gui/backend/services/study/library.py",
+        "pypsa-gui/backend/services/study/compile.py",
+        "pypsa-gui/backend/services/adequacy/redundancy.py",
+        "pypsa-gui/backend/tests/test_study_ledger_from_pack.py"
+      ],
+      "file": "issues/02-money-year-and-pins.md",
+      "cases": [
+        {
+          "id": "LG-02-01",
+          "trigger": "Load a saved project pinned to 2026-10-22.",
+          "expected": "Its values, hash and case basis remain identical.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-02-02",
+          "trigger": "Create each affected single/staged/ammonia template and guided study.",
+          "expected": "Asset, tariff, CO2 and case bases are consistent or a precise unresolved field blocks monetary use.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-02-03",
+          "trigger": "Only the study pack pin changes while tariff year is old.",
+          "expected": "Existing mixed-year refusal remains effective; no gate is disabled.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-02-04",
+          "trigger": "Compare relabel-only rows before and after migration.",
+          "expected": "Numbers remain identical; any converted row has a separate independent conversion oracle.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-02-05",
+          "trigger": "Construct a new regional example.",
+          "expected": "Correct EU base/provenance is selected; absent local monetary data never falls back to EUR.",
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "LG-03",
+      "title": "Bind interpretation-critical source semantics without rewriting numerical pins",
+      "group": "R0",
+      "priority": 1,
+      "depends_on": [
+        "LG-01"
+      ],
+      "status": "needs-info",
+      "anchors": [
+        "pypsa-gui/backend/services/library/series_store.py",
+        "pypsa-gui/backend/services/library/items.py",
+        "pypsa-gui/backend/services/library/bundle_pins.py",
+        "pypsa-gui/backend/models/commercial.py",
+        "pypsa-gui/backend/routers/library.py"
+      ],
+      "file": "issues/03-semantic-source-manifest.md",
+      "cases": [
+        {
+          "id": "LG-03-01",
+          "trigger": "An old numeric ref is loaded/exported/reloaded.",
+          "expected": "Original numeric bytes/hash and behavior are unchanged; unknown semantics remain visible.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-03-02",
+          "trigger": "Same timestamps/values, different EUR/USD or DA/RT product.",
+          "expected": "Numeric pin may match; semantic identity/binding differs and incompatible monetary use is refused.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-03-03",
+          "trigger": "Verification or promotion metadata changes.",
+          "expected": "No value hash rewrite; descriptive state cannot alter the bound financial interpretation.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-03-04",
+          "trigger": "Manifest is tampered with, missing or belongs to another org.",
+          "expected": "Resolve/apply fails safely; no numeric-only claim of verified currency.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-03-05",
+          "trigger": "A complete series and manifest are bundled twice.",
+          "expected": "Roundtrip preserves both identities and stable canonical semantics without importing restricted bytes.",
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "LG-04",
+      "title": "Add a small model-identified equipment and footprint reference subset",
+      "group": "R1",
+      "priority": 1,
+      "depends_on": [
+        "LG-01"
+      ],
+      "status": "needs-info",
+      "anchors": [
+        "gridspine/templates/data/campus_assets.yaml",
+        "gridspine/templates/campus_assets.py",
+        "pypsa-gui/frontend/src/site3d/assetLibrary.ts",
+        "pypsa-gui/frontend/src/site3d/library/README.md",
+        "pypsa-gui/frontend/src/site3d/assetLibrary.test.ts"
+      ],
+      "file": "issues/04-oem-equipment-and-footprints.md",
+      "cases": [
+        {
+          "id": "LG-04-01",
+          "trigger": "Convert a stated mm envelope and an independently specified unit count.",
+          "expected": "Expected metre dimensions/total area follow hand arithmetic; no inferred service clearance.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-04-02",
+          "trigger": "Scale 10 MW to 50 MW for an OEM unit.",
+          "expected": "Use documented count/configuration or refuse; never stretch all dimensions by five.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-04-03",
+          "trigger": "User has explicit dimensions and library edition changes.",
+          "expected": "Existing project dimensions stay unchanged until selected in an approved diff.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-04-04",
+          "trigger": "Dataset identifies an ESS model but has no dimensions or invalid ratings.",
+          "expected": "No fabricated footprint; missing or incompatible fields stay unavailable.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-04-05",
+          "trigger": "Preview/apply/reload a compatible record in Guided and Expert.",
+          "expected": "Shared native identity and source persist; preview leaves solve intact; denial changes nothing.",
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "LG-05",
+      "title": "Replace supported grid-equipment assumptions and resolve the H2 voltage-pair gap",
+      "group": "R1",
+      "priority": 1,
+      "depends_on": [
+        "LG-01"
+      ],
+      "status": "needs-info",
+      "anchors": [
+        ".scratch/campus-library-gaps/issues/01-h2-hub-220-110kv-transformer.md",
+        "gridspine/templates/data/campus_assets.yaml",
+        "gridspine/templates/campus_assets.py",
+        "gridspine/static/campus_invest.py",
+        "gridspine/static/campus_milp.py",
+        "tests/gridspine/test_campus_assets_reference.py",
+        "tests/gridspine/test_campus_milp.py"
+      ],
+      "file": "issues/05-grid-technical-reference-gaps.md",
+      "cases": [
+        {
+          "id": "LG-05-01",
+          "trigger": "Convert an impedance from a stated rated MVA/kV base.",
+          "expected": "Independent base-conversion oracle matches; an unknown base is refused.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-05-02",
+          "trigger": "Use 50 Hz versus 60 Hz or a cable at an incompatible installation temperature.",
+          "expected": "No silent reuse of incompatible technical ratings.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-05-03",
+          "trigger": "Run the H2 example investment selection with no compatible voltage pair.",
+          "expected": "A reviewed explicit unresolved outcome, never a substituted voltage or fabricated transformer.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-05-04",
+          "trigger": "A cited cost has no test evidence for losses/impedance.",
+          "expected": "Only cost provenance improves; technical assumptions stay flagged.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-05-05",
+          "trigger": "A compatible subset is applied and a small campus case is evaluated.",
+          "expected": "Native loading/loss behavior agrees with an independent small electrical calculation; no grid-code certification claim.",
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "LG-06",
+      "title": "Admit bounded storage cost and lifecycle references",
+      "group": "R2",
+      "priority": 1,
+      "depends_on": [
+        "LG-01",
+        "LG-02"
+      ],
+      "status": "needs-info",
+      "anchors": [
+        "pypsa-gui/backend/services/library/europe_reference.py",
+        "pypsa-gui/backend/services/library/reference_data",
+        "pypsa-gui/backend/services/library/defaults_pack",
+        "pypsa-gui/backend/services/finance/replacements.py",
+        "pypsa-gui/backend/services/finance/lcos.py"
+      ],
+      "file": "issues/06-storage-lifecycle-costs.md",
+      "cases": [
+        {
+          "id": "LG-06-01",
+          "trigger": "A 2 MW/8 MWh reference gives distinct power/energy costs.",
+          "expected": "Independent MW/kW and MWh/kWh calculation matches and EPC is counted once.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-06-02",
+          "trigger": "Only an aggregate installed cost is published.",
+          "expected": "No invented power/energy split or unjustified duration extrapolation.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-06-03",
+          "trigger": "A replacement occurs within a known planning horizon.",
+          "expected": "Hand-discounted replacement/salvage oracle agrees and avoids duplicate augmentation.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-06-04",
+          "trigger": "A cycle-life value has stated DoD/temperature/C-rate conditions.",
+          "expected": "Incompatible site use is flagged/reference-only, not a universal failure or degradation default.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-06-05",
+          "trigger": "Preview and explicit use under the admitted scope.",
+          "expected": "Original edition/pins and year persist; no old-project reprice or common promotion of user-scoped data.",
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "LG-07",
+      "title": "Expand hydrogen technical, O&M and replacement references",
+      "group": "R2",
+      "priority": 1,
+      "depends_on": [
+        "LG-01",
+        "LG-02"
+      ],
+      "status": "needs-info",
+      "anchors": [
+        "pypsa-gui/backend/services/library/europe_reference.py",
+        "pypsa-gui/backend/services/library/reference_catalogue.py",
+        "pypsa-gui/backend/project_templates/eh_templates.py",
+        "pypsa-gui/backend/project_templates/eh_staged_hubs.py",
+        "pypsa-gui/backend/services/finance/replacements.py"
+      ],
+      "file": "issues/07-hydrogen-lifecycle-boundaries.md",
+      "cases": [
+        {
+          "id": "LG-07-01",
+          "trigger": "Convert stated electrolyser electricity input and H2 output.",
+          "expected": "Hand efficiency/production calculation matches on the declared LHV/HHV basis.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-07-02",
+          "trigger": "A source quotes output kW but target expects input kW.",
+          "expected": "Explicit documented conversion or refusal; no same-number copy.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-07-03",
+          "trigger": "Stack life differs from plant life and replacement cost excludes BOP.",
+          "expected": "Replacement schedule/cashflow resets only the supported component, without a second full-plant cost.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-07-04",
+          "trigger": "Compression or cooling is outside the source boundary.",
+          "expected": "Exclusion is visible; no fabricated parasitic demand.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-07-05",
+          "trigger": "A projected cost and a current measured value are compared.",
+          "expected": "Distinct scenario/edition labels and currency-year basis; no automatic template reprice.",
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "LG-08",
+      "title": "Add one complete representable European tariff pilot",
+      "group": "R3",
+      "priority": 1,
+      "depends_on": [
+        "LG-01",
+        "LG-03"
+      ],
+      "status": "needs-info",
+      "anchors": [
+        "pypsa-gui/backend/services/library/common_items/tariff",
+        "pypsa-gui/backend/services/library/common.py",
+        "pypsa-gui/backend/services/commercial/tariff_engine.py",
+        "pypsa-gui/backend/models/commercial.py",
+        "pypsa-gui/backend/tests/test_library_common_tariff.py"
+      ],
+      "file": "issues/08-eu-complete-tariff-pilot.md",
+      "cases": [
+        {
+          "id": "LG-08-01",
+          "trigger": "Bill a fixed trace under the selected complete schedule.",
+          "expected": "Independent line-item and monthly/annual arithmetic match including eligible taxes.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-08-02",
+          "trigger": "A DSO price includes a TSO component already.",
+          "expected": "It is counted once; no duplicate upstream network fee.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-08-03",
+          "trigger": "Use an ineligible voltage class or expired schedule.",
+          "expected": "Selection/use refuses or requires an explicit eligible choice.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-08-04",
+          "trigger": "Inspect an existing TenneT partial item.",
+          "expected": "Its unsupported weighted-peak flags remain and total stays None.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-08-05",
+          "trigger": "A selected schedule has unsupported holidays/00:30 band/ratchet.",
+          "expected": "It cannot be labelled a complete bill; reason and excluded components persist in export.",
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "LG-09",
+      "title": "Add one complete US C&I tariff and stage Canadian/Mexican coverage",
+      "group": "R3",
+      "priority": 1,
+      "depends_on": [
+        "LG-01",
+        "LG-03"
+      ],
+      "status": "needs-info",
+      "anchors": [
+        "pypsa-gui/backend/services/library/urdb.py",
+        "pypsa-gui/backend/services/library/items.py",
+        "pypsa-gui/backend/services/commercial/tariff_engine.py",
+        "pypsa-gui/backend/tests/test_tariff_engine_urdb.py",
+        "pypsa-gui/backend/tests/fixtures/investment_case/us_tariff_demand_charge.json"
+      ],
+      "file": "issues/09-nam-complete-tariff-pilot.md",
+      "cases": [
+        {
+          "id": "LG-09-01",
+          "trigger": "An official schedule and URDB record disagree.",
+          "expected": "Exact revision discrepancy blocks admission until reconciled; no preferred-number guess.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-09-02",
+          "trigger": "A short spike has different hourly and 15-minute billing peaks.",
+          "expected": "Independent demand-interval oracle matches the chosen tariff semantics.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-09-03",
+          "trigger": "Ratchet/minimum-bill/rider is required but unsupported.",
+          "expected": "Partial/refusal is explicit; total is not sold as complete.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-09-04",
+          "trigger": "Compare an eligible USD tariff and a CAD/EUR reference.",
+          "expected": "No silent currency fallback or unchecked conversion.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-09-05",
+          "trigger": "Save/reload/export the admitted tariff in its permitted org.",
+          "expected": "Identity, source edition, eligibility and all native billing terms persist; other org access is refused.",
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "LG-10",
+      "title": "Conditionally support minute-aligned tariff bands",
+      "group": "R3",
+      "priority": 2,
+      "depends_on": [
+        "LG-01",
+        "LG-03"
+      ],
+      "status": "needs-triage",
+      "anchors": [
+        "pypsa-gui/backend/models/commercial.py",
+        "pypsa-gui/backend/services/commercial/tariff_engine.py",
+        "pypsa-gui/backend/services/library/items.py",
+        "pypsa-gui/frontend/src/pages/results/investment/TariffBuilder.tsx",
+        "pypsa-gui/frontend/src/pages/results/investment/tariffModel.ts"
+      ],
+      "file": "issues/10-minute-boundary-tariff-extension.md",
+      "cases": [
+        {
+          "id": "LG-10-01",
+          "trigger": "Evaluate a band boundary at 00:29, 00:30 and 00:31.",
+          "expected": "Only the approved half-open minute band matches; no integer truncation.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-10-02",
+          "trigger": "Load/export an old integer-hour tariff.",
+          "expected": "Its values, old content identity and previous bills remain unchanged.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-10-03",
+          "trigger": "Use 30-minute settlement with hourly TOU and vice versa.",
+          "expected": "Each independent time concept is respected; none supplies the missing one.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-10-04",
+          "trigger": "Cross midnight and both DST transitions in local time.",
+          "expected": "No gaps/double matching outside the reviewed policy; expected UTC interval table matches.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-10-05",
+          "trigger": "Compare bill evaluation and LP-selected energy under the same tariff.",
+          "expected": "They use identical minute-band semantics and independent expected costs.",
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "LG-11",
+      "title": "Admit exact EU and US historical wholesale-price products",
+      "group": "R3",
+      "priority": 1,
+      "depends_on": [
+        "LG-01",
+        "LG-03"
+      ],
+      "status": "needs-info",
+      "anchors": [
+        "pypsa-gui/backend/services/library/series_store.py",
+        "pypsa-gui/backend/services/library/series_io.py",
+        "pypsa-gui/backend/services/library/export_series.py",
+        "pypsa-gui/backend/services/library/template_series.py",
+        "pypsa-gui/backend/models/commercial.py"
+      ],
+      "file": "issues/11-historical-market-price-pilots.md",
+      "cases": [
+        {
+          "id": "LG-11-01",
+          "trigger": "Parse interval-ending versus interval-start data.",
+          "expected": "Expected UTC timestamps and durations match an explicit independent table.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-11-02",
+          "trigger": "Parse spring/autumn DST and negative values.",
+          "expected": "No lost/duplicate physical intervals; negative prices persist.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-11-03",
+          "trigger": "Mix CAISO nodes or DAM and RT components.",
+          "expected": "Product mismatch refuses; total is not accidentally summed with components.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-11-04",
+          "trigger": "Price a fixed 15-minute MWh trace.",
+          "expected": "Independent price-times-energy cost matches units and declared currency.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-11-05",
+          "trigger": "A final/revised edition changes semantics or values.",
+          "expected": "A new candidate/version is created; pinned project data remains unchanged.",
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "LG-12",
+      "title": "Refresh renewable-cost/PPA benchmark editions and comparability",
+      "group": "R4",
+      "priority": 2,
+      "depends_on": [
+        "LG-01",
+        "LG-03"
+      ],
+      "status": "needs-info",
+      "anchors": [
+        "pypsa-gui/backend/services/library/reference_catalogue.py",
+        "pypsa-gui/backend/services/library/europe_reference.py",
+        "pypsa-gui/backend/services/library/reference_data/README.md",
+        "pypsa-gui/frontend/src/pages/results/investment/LibraryReferences.tsx"
+      ],
+      "file": "issues/12-ppa-and-renewable-benchmarks.md",
+      "cases": [
+        {
+          "id": "LG-12-01",
+          "trigger": "Compare identical numbers labelled first-year versus levelized.",
+          "expected": "They are not treated as interchangeable contract strikes.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-12-02",
+          "trigger": "An AC plant cost is mapped to DC capacity.",
+          "expected": "A sourced ratio/explicit conversion is required; otherwise comparison refuses.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-12-03",
+          "trigger": "A workbook sheet embeds third-party price-index data.",
+          "expected": "Uncleared cells are excluded even if other sheets are reusable.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-12-04",
+          "trigger": "A 2026 release is admitted while a project pins the older reference.",
+          "expected": "Old reference bytes/basis remain available and unchanged.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-12-05",
+          "trigger": "A chatbot is asked for a current executable PPA quote from historical data.",
+          "expected": "It labels the benchmark and states the missing offer, without manufacturing a price.",
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "LG-13",
+      "title": "Separate supply-quality references from component outage/maintenance data",
+      "group": "R5",
+      "priority": 2,
+      "depends_on": [
+        "LG-01"
+      ],
+      "status": "needs-info",
+      "anchors": [
+        "pypsa-gui/backend/services/adequacy/occurrence.py",
+        "pypsa-gui/backend/services/adequacy",
+        "pypsa-gui/backend/tests/test_adequacy_occurrence.py",
+        "pypsa-gui/backend/tests/test_adequacy_profiled_units.py"
+      ],
+      "file": "issues/13-reliability-and-maintenance-evidence.md",
+      "cases": [
+        {
+          "id": "LG-13-01",
+          "trigger": "Supply data contains SAIDI/SAIFI only.",
+          "expected": "It is display/screening reference, not silently converted into UPS/genset FOR/MTTR.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-13-02",
+          "trigger": "An outage source includes planned downtime or censored events.",
+          "expected": "Exposure and event definition are retained; incompatible target parameter use refuses.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-13-03",
+          "trigger": "A two-unit system has explicit independent failure probabilities.",
+          "expected": "Exhaustive small-state probability oracle matches native availability output.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-13-04",
+          "trigger": "A VRE trace already includes outages.",
+          "expected": "Native no-double-count guard remains effective.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-13-05",
+          "trigger": "A maintenance record is org-private or lacks cohort evidence.",
+          "expected": "It stays private/reference-only and is not promoted into a universal common failure law.",
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "LG-14",
+      "title": "Add one bounded calibrated-model C&I demand profile set",
+      "group": "R5",
+      "priority": 2,
+      "depends_on": [
+        "LG-01"
+      ],
+      "status": "needs-info",
+      "anchors": [
+        "pypsa-gui/backend/services/profile_gen/load_archetypes.py",
+        "pypsa-gui/backend/services/profile_gen/load_upload.py",
+        "pypsa-gui/backend/study_library/load_profiles",
+        "pypsa-gui/backend/routers/profiles.py"
+      ],
+      "file": "issues/14-representative-demand-profiles.md",
+      "cases": [
+        {
+          "id": "LG-14-01",
+          "trigger": "Scale a 15-minute kW profile to a stated annual MWh.",
+          "expected": "Independent duration-weighted integral matches target without treating sum(kW) as kWh.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-14-02",
+          "trigger": "Use a mismatched weather/calendar/leap-year profile.",
+          "expected": "Explicit mapping decision or refusal; no silent dropped February/day/DST interval.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-14-03",
+          "trigger": "Select end uses in electricity and heat.",
+          "expected": "Each native carrier keeps the correct units and no aggregate double count.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-14-04",
+          "trigger": "Source includes modelled rather than measured values.",
+          "expected": "UI/export/chat retain the modelled label and cohort limits.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-14-05",
+          "trigger": "Load another climate or zero/invalid annual demand.",
+          "expected": "Compatibility and finite/nonnegative scaling checks hold; old synthetic seeds are unchanged.",
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "LG-15",
+      "title": "Map mining, ammonia, hydrogen and DC process data to existing example consumers",
+      "group": "R5",
+      "priority": 2,
+      "depends_on": [
+        "LG-01",
+        "LG-07"
+      ],
+      "status": "needs-info",
+      "anchors": [
+        "pypsa-gui/backend/project_templates/eh_ammonia.py",
+        "pypsa-gui/backend/project_templates/eh_templates.py",
+        "pypsa-gui/backend/project_templates/eh_staged_hubs.py",
+        "pypsa-gui/backend/services/library/reference_catalogue.py"
+      ],
+      "file": "issues/15-sector-process-reference-pilots.md",
+      "cases": [
+        {
+          "id": "LG-15-01",
+          "trigger": "One process makes a stated tonnes/day output from multiple carriers.",
+          "expected": "Independent unit and mass/energy balance is explicit and agrees within justified tolerances.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-15-02",
+          "trigger": "A source provides specific energy but not minimum-load or restart constraints.",
+          "expected": "Only supported energy fields are available; control limits remain unknown.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-15-03",
+          "trigger": "A staged template changes production between periods.",
+          "expected": "Period duration and capacity-year/product units remain consistent; no duplicated total.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-15-04",
+          "trigger": "Mining commodity/ore grade differs from a published case.",
+          "expected": "No automatic generic recipe or transferable performance claim.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-15-05",
+          "trigger": "Request process-to-building linkage before #711 runtime exists.",
+          "expected": "Unavailable capability is explained; no fabricated scene or physical/electrical link.",
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "LG-16",
+      "title": "Define the event/control evidence admission and adapter gate",
+      "group": "R5",
+      "priority": 2,
+      "depends_on": [
+        "LG-01"
+      ],
+      "status": "needs-info",
+      "anchors": [
+        "docs/agents/owner-decisions.md",
+        "pypsa-gui/backend/services/library/series_store.py",
+        "pypsa-gui/backend/harness/README.md",
+        ".scratch/project-workflow/modular-cards.md"
+      ],
+      "file": "issues/16-rapid-load-control-evidence.md",
+      "cases": [
+        {
+          "id": "LG-16-01",
+          "trigger": "A trace has 1 ms samples.",
+          "expected": "Generic series still rejects it; no rounding/aliasing into whole seconds.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-16-02",
+          "trigger": "A bounded rectangular load step needs smoothing energy.",
+          "expected": "Independent power-times-duration/reserve oracle matches the screen with unit/efficiency limits.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-16-03",
+          "trigger": "Backup and smoothing request the same battery reserve.",
+          "expected": "Combined allocation cannot exceed the one declared reserve; no double count.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-16-04",
+          "trigger": "Operating point/controller or sample rate is missing.",
+          "expected": "No dynamic performance/certification claim or automatic operational setting.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-16-05",
+          "trigger": "User deselects the optional screen.",
+          "expected": "No new job, required field, background simulation or changed base result.",
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "LG-17",
+      "title": "Prove bounded manual and AI library use across the existing workflow",
+      "group": "Shared",
+      "priority": 1,
+      "depends_on": [
+        "LG-01",
+        "LG-03"
+      ],
+      "status": "needs-info",
+      "anchors": [
+        "pypsa-gui/frontend/src/pages/results/investment/ReferenceApplyDrawer.tsx",
+        "pypsa-gui/frontend/src/pages/economics/CommercialLibraryPage.tsx",
+        "pypsa-gui/frontend/src/layout/properties/AssetFields.tsx",
+        "pypsa-gui/backend/harness/README.md",
+        "pypsa-gui/backend/services/library/reference_apply.py",
+        "pypsa-gui/backend/tests/test_chat_tools_library.py"
+      ],
+      "file": "issues/17-guided-expert-copilot-journeys.md",
+      "cases": [
+        {
+          "id": "LG-17-01",
+          "trigger": "Preview a reference while a solve is retained.",
+          "expected": "No input mutation or solve invalidation; source/applicability labels are visible.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-17-02",
+          "trigger": "Approve/deny/cancel a compatible edit in Guided, Expert and scripted chat.",
+          "expected": "Only approval mutates once; native read-back, receipt and version pin agree across modes.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-17-03",
+          "trigger": "Switch owner/project/component or edit locally after preview.",
+          "expected": "Stale/cross-scope apply refuses; no local edit is silently overwritten.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-17-04",
+          "trigger": "Ask for a numeric conclusion with partial tariff/unknown cost/no compatible source.",
+          "expected": "Assistant states exact missing evidence and does not invent a value or full total.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-17-05",
+          "trigger": "A new library tool description changes provider tool selection.",
+          "expected": "Discovery and results-walk regressions stay green; inventory is generated, never hand-edited.",
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "LG-18",
+      "title": "Expand local-currency cost/O&M coverage without EUR substitution",
+      "group": "R0/R2",
+      "priority": 1,
+      "depends_on": [
+        "LG-01",
+        "LG-02"
+      ],
+      "status": "needs-info",
+      "anchors": [
+        "pypsa-gui/backend/services/library/defaults_pack",
+        "pypsa-gui/backend/services/library/defaults_pack/pricing.py",
+        "pypsa-gui/backend/services/finance/packs/us_federal.py",
+        "pypsa-gui/backend/services/finance/packs/ca_federal.py",
+        "pypsa-gui/backend/tests/test_library_defaults_pack_regional.py"
+      ],
+      "file": "issues/18-regional-monetary-coverage.md",
+      "cases": [
+        {
+          "id": "LG-18-01",
+          "trigger": "A high-use local monetary row has an admitted source.",
+          "expected": "Exact source value/unit/conversion appears in a new regional version only.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-18-02",
+          "trigger": "A monetary key is still missing locally.",
+          "expected": "Existing explicit refusal stays effective; no EUR row or zero is substituted.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-18-03",
+          "trigger": "A technical row is reusable across regions.",
+          "expected": "It retains technical applicability and does not acquire a fabricated local price.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-18-04",
+          "trigger": "New overlay is rebuilt on the corrected EU base.",
+          "expected": "Its inherited source/year labels and manifest are consistent without rewriting old overlays.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-18-05",
+          "trigger": "Compare a future-year scenario and a base-year cost.",
+          "expected": "Projection year is distinct from money year and any conversion has an independent oracle.",
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "LG-19",
+      "title": "Audit and close only missing official-source lookup controls",
+      "group": "Shared",
+      "priority": 2,
+      "depends_on": [
+        "LG-01",
+        "LG-03"
+      ],
+      "status": "needs-triage",
+      "anchors": [
+        ".scratch/project-workflow/library-and-live-lookup.md",
+        "pypsa-gui/backend/harness/README.md",
+        "pypsa-gui/backend/services/library",
+        "pypsa-gui/backend/routers/library.py",
+        "pypsa-gui/backend/harness/catalogue.py"
+      ],
+      "file": "issues/19-confined-official-source-lookup.md",
+      "cases": [
+        {
+          "id": "LG-19-01",
+          "trigger": "Off-list host, lookalike IDN, redirect escape, private/metadata IP or DNS rebinding.",
+          "expected": "Connection/redirect is refused at the enforced boundary and audited.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-19-02",
+          "trigger": "Oversize/unsupported content, timeout, exhausted budget or too many attachments.",
+          "expected": "Bounded failure; no uncontrolled retry, credentials or external request chain.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-19-03",
+          "trigger": "Page says to change costs, fetch another host or call a write tool.",
+          "expected": "It remains data; no extra authority, write or unapproved fetch.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-19-04",
+          "trigger": "Admin has not enabled lookup or kill switch is active.",
+          "expected": "No network call and existing offline/library path remains usable.",
+          "status": "planned"
+        },
+        {
+          "id": "LG-19-05",
+          "trigger": "A permitted document parses to a valid proposal but source rights are user-scoped.",
+          "expected": "Only reviewed org/local use; no common promotion, silent apply or evidence inflation.",
+          "status": "planned"
+        }
+      ]
+    }
+  ]
+}
