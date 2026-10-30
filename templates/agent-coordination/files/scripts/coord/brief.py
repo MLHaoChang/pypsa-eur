@@ -16,8 +16,11 @@ paragraphs (Context budget, Process) are kept as they are. ``--stream NAME`` app
 template's ``## Stream NAME`` heading. "Stay out of" is built from the open PRs'
 changed files (``--open-prs``, the file ``frontier.py`` takes) and the live
 sessions (``--sessions``, ``sessions.py`` output or issue paths), plus
-``--stay-out`` text. ``--model``, ``--title`` and ``--team`` are only echoed back
-as the ``create_session`` arguments to pass.
+``--stay-out`` text. ``--files`` names the package's likely files (paths or
+directory prefixes); each one an open PR also changes prints an ``OVERLAP`` line
+and the script exits 3, because the package is not ready until that PR merges.
+``--model``, ``--title`` and ``--team`` are only echoed back as the
+``create_session`` arguments to pass.
 """
 
 import argparse
@@ -65,6 +68,18 @@ def stay_out(prs, session_lines, extra):
     return "\n".join(out) if out else "none"
 
 
+def overlaps(prs, likely):
+    """(likely path, PR, changed file) for each changed file under a likely path."""
+    hits = []
+    for path in likely:
+        prefix = path.rstrip("/")
+        for pr in sorted(prs, key=int):
+            for f in sorted(prs[pr]):
+                if f == prefix or f.startswith(prefix + "/"):
+                    hits.append((path, pr, f))
+    return hits
+
+
 def fill(block, values):
     """Replace the body of each field paragraph (its label is a key of ``values``)."""
     paragraphs = []
@@ -92,6 +107,9 @@ def main(argv=None):
     ap.add_argument("--exclude-pr", action="append", default=[], help="PR number to leave out")
     ap.add_argument("--sessions", help="file: live sessions, one per line")
     ap.add_argument("--stay-out", default="", help="extra text for Stay out of")
+    ap.add_argument(
+        "--files", default="", help="comma-separated likely files or directories"
+    )
     ap.add_argument("--sha", default="", help="master SHA the session starts from")
     ap.add_argument("--model", default="")
     ap.add_argument("--title", default="")
@@ -133,7 +151,11 @@ def main(argv=None):
     tags = f"team:{args.team}"
     print(f"wrote {args.out} ({len(text.split())} words)")
     print(f"create_session: model={args.model or '?'} title={args.title or '?'} tags=[{tags}]")
-    return 0
+    likely = [f.strip() for f in args.files.split(",") if f.strip()]
+    hits = overlaps(prs, likely)
+    for path, pr, f in hits:
+        print(f"OVERLAP: {path} is changed by open PR #{pr} ({f}); open after it merges")
+    return 3 if hits else 0
 
 
 if __name__ == "__main__":
