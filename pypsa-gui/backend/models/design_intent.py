@@ -50,11 +50,13 @@ class DesignIntentSpec(BaseModel):
     #: Intent A backup energy = critical load x this many hours (AS-AUTONOMY-1).
     backup_autonomy_h: float = Field(default=4.0, gt=0)
     #: Intents B/C: annual run-hour cap on the genset; None = uncapped.
-    genset_run_hours_cap: float | None = Field(default=None, ge=0)
+    genset_run_hours_cap: float | None = Field(default=None, ge=0, le=8760)
     #: Intent D: bridge reserve energy = critical load x this many hours.
     bridge_reserve_h: float = Field(default=0.25, gt=0)
 
     @model_validator(mode="after")
     def _known(self):
         preset(self.intent)
+        if self.genset_run_hours_cap is not None and self.intent not in ("B", "C"):
+            raise ValueError("genset_run_hours_cap applies to intents B and C only")
         return self

@@ -62,11 +62,30 @@ def test_genset_floor_and_run_hour_cap(intent):
         DesignIntentSpec(intent=intent, genset_run_hours_cap=-1)
 
 
-def test_no_genset_in_intent_a_bound_to_zero():
-    b = D.technology_bounds(DesignIntentSpec(intent="A"), 80.0)
-    assert b["genset"] == {"p_nom_max": 0.0}
-    assert "genset" not in D.technology_bounds(DesignIntentSpec(intent="B"), 80.0) or \
-        D.technology_bounds(DesignIntentSpec(intent="B"), 80.0)["genset"]["p_nom_min"] == 80.0
+def test_technology_bounds_pinned_per_intent():
+    tb = lambda i, **kw: D.technology_bounds(DesignIntentSpec(intent=i, **kw), 80.0)
+    assert tb("A") == {"genset": {"p_nom_max": 0.0}, "energy_bess_gfm": {"e_nom_min": 320.0}}
+    assert tb("B") == {"genset": {"p_nom_min": 80.0}}
+    assert tb("C", genset_run_hours_cap=500) == {"genset": {"p_nom_min": 80.0, "run_hours_cap": 500}}
+    assert tb("D") == {"bess_gfm": {"e_nom_min": 20.0}}
+    assert tb("E") == {}
+
+
+@pytest.mark.parametrize("bad", [0, -80.0, float("nan")])
+def test_critical_load_must_be_positive(bad):
+    spec = DesignIntentSpec(intent="A")
+    for fn in (D.backup_energy_mwh, D.bridge_reserve_mwh, D.genset_p_nom_min_mw, D.technology_bounds):
+        with pytest.raises(ValueError):
+            fn(spec, bad)
+
+
+def test_run_hours_cap_only_for_b_c_and_at_most_a_year():
+    for i in "ADE":
+        with pytest.raises(ValidationError):
+            DesignIntentSpec(intent=i, genset_run_hours_cap=100)
+    with pytest.raises(ValidationError):
+        DesignIntentSpec(intent="B", genset_run_hours_cap=8761)
+    assert DesignIntentSpec(intent="B", genset_run_hours_cap=8760).genset_run_hours_cap == 8760
 
 
 def test_intent_d_warns_without_transfer_ride_through_but_does_not_block():
@@ -78,6 +97,15 @@ def test_intent_d_warns_without_transfer_ride_through_but_does_not_block():
     assert D.grid_code_warnings(DesignIntentSpec(intent="A"), {}) == []
 
 
-def test_existing_specs_load_unchanged_without_design_intent():
-    assert "design_intent" in DataCentreLoadSpec.model_fields
-    assert DataCentreLoadSpec.model_fields["design_intent"].default is None
+@pytest.mark.parametrize("tid", ["eh_datacenter", "eh_datacenter_staged"])
+def test_existing_stored_spec_loads_unchanged(tid):
+    import pathlib, sys
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "project_templates"))
+    import eh_templates as T
+    stored = T.dc_load_preset(tid)  # a spec as persisted today, no design_intent key
+    assert "design_intent" not in stored
+    spec = DataCentreLoadSpec.model_validate(stored)
+    assert spec.design_intent is None
+    assert spec.phases[0].it_mw == stored["phases"][0]["it_mw"]
+    assert spec.pue_at_design == stored["pue_at_design"] and spec.critical_share == stored["critical_share"]
+    assert T.dc_load_spec(tid, {}).design_intent is None
