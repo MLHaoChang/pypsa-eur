@@ -53,6 +53,7 @@ OWNERS: dict[str, str] = {
     'LC-D11.fmea_criticality': 'LC-30 (.scratch/live-copilot/issues/30-fmea-criticality-per-horizon.md)',
     **{f'LC-D13.{v}': LC33 for v in ('margin_loop', 'reserve_margin_coupling', 'elcc_frontier_campaign',
                                      'eh_redundancy', 'eh_levers', 'eh_dtc_planning', 'multi_energy')},
+    'LC-D13.multi_energy_heat': UNASSIGNED,
 }
 
 

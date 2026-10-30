@@ -453,6 +453,7 @@ VARIANTS: list[dict] = [
              B + 'test_lc33_d13_multi_energy.py::test_h2_unmet_on_its_own_bus_is_attributed_to_hydrogen_alone[h2_40]',
              B + 'test_lc33_d13_multi_energy.py::test_h2_unmet_on_its_own_bus_is_attributed_to_hydrogen_alone[h2_45]',
              B + 'test_lc33_d13_multi_energy.py::test_a_shared_bus_reports_the_forced_h2_shed_and_its_readers_agree'),
+    _pending('LC-D13.multi_energy_heat', 'heat unmet attribution (dedicated heat bus and per-Load) has no hand-number test; LC-33 pinned H2 only'),
     _covered('LC-D14.static_campus', 'six untied hours through the queued Run: k 1 picks import/trafo h0, consumption h2, '
              'export/renewable h3; k 2 adds h5 import/trafo, h0 consumption, h2 renewable; k read back from the job; '
              '50 MW in h5 moves the import pick',
