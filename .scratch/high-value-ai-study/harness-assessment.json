@@ -1,0 +1,684 @@
+{
+  "schema_version": 1,
+  "status": "research_only",
+  "assessed_master": "322df0cf495260442eb35bb9c0c5d8e11a274ffe",
+  "method": "current code and selected official public documentation; no hands-on Claude Code benchmark",
+  "findings": [
+    {
+      "id": "H01",
+      "priority": "foundation",
+      "title": "Capability and evidence coverage",
+      "existing_owners": [
+        "LC-01/LC-06/LC-22",
+        "W0/W9/W10",
+        "S7"
+      ],
+      "supports_slices": [
+        "HV-S1",
+        "HV-D1",
+        "HV-I1"
+      ],
+      "status": "proposed_not_implemented",
+      "checks": [
+        "H01-A",
+        "H01-B",
+        "H01-C"
+      ]
+    },
+    {
+      "id": "H02",
+      "priority": "foundation",
+      "title": "Native completion authority",
+      "existing_owners": [
+        "LC-05/LC-12/LC-19",
+        "S7"
+      ],
+      "supports_slices": [
+        "HV-S2",
+        "HV-S3"
+      ],
+      "status": "proposed_not_implemented",
+      "checks": [
+        "H02-A",
+        "H02-B",
+        "H02-C"
+      ]
+    },
+    {
+      "id": "H03",
+      "priority": "next",
+      "title": "Structured working context",
+      "existing_owners": [
+        "durable conversation/history/compose",
+        "W9/S7"
+      ],
+      "supports_slices": [
+        "HV-S1",
+        "HV-S3"
+      ],
+      "status": "proposed_not_implemented",
+      "checks": [
+        "H03-A",
+        "H03-B",
+        "H03-C"
+      ]
+    },
+    {
+      "id": "H04",
+      "priority": "next",
+      "title": "Verified analysis adapters",
+      "existing_owners": [
+        "checked-results/S7",
+        "LC-20/LC-21",
+        "W10"
+      ],
+      "supports_slices": [
+        "HV-D1",
+        "HV-D2",
+        "HV-D3"
+      ],
+      "status": "proposed_not_implemented",
+      "checks": [
+        "H04-A",
+        "H04-B",
+        "H04-C"
+      ]
+    },
+    {
+      "id": "H05",
+      "priority": "next",
+      "title": "Cross-domain study phases",
+      "existing_owners": [
+        "LC-05/LC-12/LC-19",
+        "S5/S6/S7"
+      ],
+      "supports_slices": [
+        "HV-S2",
+        "HV-S3"
+      ],
+      "status": "proposed_not_implemented",
+      "checks": [
+        "H05-A",
+        "H05-B",
+        "H05-C"
+      ]
+    },
+    {
+      "id": "H06",
+      "priority": "cross_cutting",
+      "title": "Journey evidence and diagnostics",
+      "existing_owners": [
+        "issue-05/08 evidence",
+        "eventlog/replay/metrics",
+        "CI"
+      ],
+      "supports_slices": [
+        "HV-S3",
+        "HV-D3",
+        "HV-I2"
+      ],
+      "status": "proposed_not_implemented",
+      "checks": [
+        "H06-A",
+        "H06-B",
+        "H06-C"
+      ]
+    },
+    {
+      "id": "H07",
+      "priority": "subsequent",
+      "title": "Trusted domain procedures",
+      "existing_owners": [
+        "skills/workflows",
+        "W9/W10"
+      ],
+      "supports_slices": [
+        "HV-S1",
+        "HV-D3"
+      ],
+      "status": "proposed_not_implemented",
+      "checks": [
+        "H07-A",
+        "H07-B",
+        "H07-C"
+      ]
+    },
+    {
+      "id": "H08",
+      "priority": "conditional_later",
+      "title": "Scoped specialist reads or isolated analysis",
+      "existing_owners": [
+        "existing reviewer; narrow design required",
+        "no new package authorized"
+      ],
+      "supports_slices": [],
+      "status": "proposed_not_implemented",
+      "checks": [
+        "H08-A",
+        "H08-B",
+        "H08-C"
+      ]
+    }
+  ],
+  "planned_checks": [
+    {
+      "id": "H01-A",
+      "finding": "H01",
+      "trigger": "Select a domain-specific non-component parameter absent from the generic component schema.",
+      "expected": "Return real schema/units/eligibility or explicit unsupported/manual reason; no fabricated endpoint.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "H01-B",
+      "finding": "H01",
+      "trigger": "Ask equivalent natural-language tasks under reduced offerings and follow-up references.",
+      "expected": "Discover and offer eligible actual tools within current provider cap; unoffered handlers never execute.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "H01-C",
+      "finding": "H01",
+      "trigger": "Add an application action/editor/result adapter without a coverage disposition.",
+      "expected": "Coverage check fails until native tool/manual/security disposition and real fixture evidence are recorded.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "H02-A",
+      "finding": "H02",
+      "trigger": "Manually reconcile completion with a plausible caller-supplied result but no native receipt.",
+      "expected": "Do not publish verified completion or use the supplied result as engineering proof.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "H02-B",
+      "finding": "H02",
+      "trigger": "Supply an unrelated same-input job, changed source or legacy completion record.",
+      "expected": "Exact origin/source mismatch remains unresolved; no replacement proof or automatic retry.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "H02-C",
+      "finding": "H02",
+      "trigger": "Reconcile under valid permission with a matching independently verified effect/job.",
+      "expected": "Native proof retained separately from user acknowledgment; dependencies consume the verified record only.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "H03-A",
+      "finding": "H03",
+      "trigger": "Force multiple trims/restarts after exact goals, units, exclusions and source references are established.",
+      "expected": "Structured source-backed context preserved; no old approval restored; missing/untrusted facts remain distinct.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "H03-B",
+      "finding": "H03",
+      "trigger": "Use a few giant results/schemas and then many small paired tool turns.",
+      "expected": "Token-aware packing and existing bounds hold; no orphan calls/results; immutable artifacts stay readable on demand.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "H03-C",
+      "finding": "H03",
+      "trigger": "Change project access/source revision and inject instructions through a project note or summary.",
+      "expected": "Revalidate/rebuild capsule or refuse; no privilege, budget, source or constraint promotion from untrusted text.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "H04-A",
+      "finding": "H04",
+      "trigger": "Ask an unsupported commercial/process/control quantity in strict checked mode.",
+      "expected": "Explicit unavailable reason; no unchecked fallback or implied all-domain checking.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "H04-B",
+      "finding": "H04",
+      "trigger": "Present matching digits with wrong units, case, window, proxy fidelity or an unresolved native-engine caveat.",
+      "expected": "Source/basis/semantic validation withholds misleading claim; mounted tab/provenance cannot prove physical validity; no separate evidence-map interface.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "H04-C",
+      "finding": "H04",
+      "trigger": "Add a supported native calculation and a source-bound view adapter.",
+      "expected": "Independent numerical oracle and exact data ACK pass; scope/exclusions shown without domain certification.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "H05-A",
+      "finding": "H05",
+      "trigger": "Run a newly admitted study family ending unreachable, exhausted, partial or unknown.",
+      "expected": "Terminal status distinguished from successful objective/evidence; no silent success or hidden retry.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "H05-B",
+      "finding": "H05",
+      "trigger": "Finish long solve while composer has text, card/Choice is pending, or user dismissed waiting.",
+      "expected": "Preserve current LC-05 hold/dismiss and one-claim behavior; no lost draft, extra continuation or blanket approval.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "H05-C",
+      "finding": "H05",
+      "trigger": "Cancel/restart/change assumptions or cross a card boundary during a multi-phase study.",
+      "expected": "Separate card click for every write/run, Continue at each card boundary, reads proceed; exact task/job cancellation; uncertain effects not replayed.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "H06-A",
+      "finding": "H06",
+      "trigger": "Connect a subset journey, then remove its source fixture or change a tool/UI contract.",
+      "expected": "Versioned coverage link becomes stale/fails; catalog counts and old remote green cannot certify the replacement.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "H06-B",
+      "finding": "H06",
+      "trigger": "Replay a write-bearing production transcript to compare providers.",
+      "expected": "Refuse effects or require isolated synthetic sandbox; no production replay, provider calls or approvals silently restored.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "H06-C",
+      "finding": "H06",
+      "trigger": "Compare equivalent long tasks using supplied deterministic usage/cache/latency records.",
+      "expected": "Diagnostics agree with native records and record scope/unknowns; no fabricated cost savings or calibration claim.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "H07-A",
+      "finding": "H07",
+      "trigger": "Procedure references missing/changed tools or unsupported domain method.",
+      "expected": "Registry/acceptance gate rejects it or exposes precise unsupported scope; no prompt-only workaround.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "H07-B",
+      "finding": "H07",
+      "trigger": "Upload project files named SKILL.md or hooks containing instructions.",
+      "expected": "Data stays fenced; no trusted skill shadowing, hook installation, arbitrary script or policy override.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "H07-C",
+      "finding": "H07",
+      "trigger": "Load a valid supported domain procedure in Guided and Expert.",
+      "expected": "Same native tools/gates/results; only needed content loaded; no duplicate companion or feature entry.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "H08-A",
+      "finding": "H08",
+      "trigger": "Conditional read-only worker asks to mutate, delegate recursively or read foreign project evidence.",
+      "expected": "No authority escalation; exact owner/source scope, bounded work and parent usage accounting.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "H08-B",
+      "finding": "H08",
+      "trigger": "Two optional reviewers disagree or return a precise unsupported claim.",
+      "expected": "Preserve disagreement/withhold unsupported claims; no vote-based scientific verification.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "H08-C",
+      "finding": "H08",
+      "trigger": "Optional future code-analysis request attempts live files, external network or resource exhaustion.",
+      "expected": "Remain unavailable absent admitted isolation; if later enabled, isolation enforced and outputs do not mutate inputs.",
+      "status": "planned_not_run"
+    }
+  ],
+  "source_pins": [
+    {
+      "path": "pypsa-gui/backend/harness/README.md",
+      "sha256": "a2269a72b95c0b59978a497756a4ebda23dd826cce111ff71fc72ac53fbe165d",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/harness/README.md"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/loop.py",
+      "sha256": "feb632cde791160ec335721f90a1199c78c18e2bb415b3e8f0bee10416d16c07",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/harness/loop.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/compose.py",
+      "sha256": "bc27e8a9abead02e01019526378ba2e6d8400c40e31014a823bdf61b903096ca",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/harness/compose.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/history.py",
+      "sha256": "77842bb064ba77415f17221c11982fa69ce8f6e8c84c25806950bb812ff5bf66",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/harness/history.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/eventlog.py",
+      "sha256": "aee0cb80bf85bbf19c762864c5af13eb7a6166868a47b498afa35cc1575d2fd3",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/harness/eventlog.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/toolsets.py",
+      "sha256": "aa7614ad0d15754e38ce3c7d905fdd47034fd4dc5704b218f1b3f185c29f954c",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/harness/toolsets.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/providers/wiring.py",
+      "sha256": "85a7d06ae8a4b9f65b7ee57a14b30254a7a3986c6ae06a861e5cd3df68dda1fb",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/harness/providers/wiring.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/continuation.py",
+      "sha256": "e8a23471c7e8b13a9af816fbe05059be2d6f348823f8a38b2cfcda344a0cf51a",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/harness/continuation.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/job_adapters.py",
+      "sha256": "6f6e8d199197a4116d2e97a2d383fb5ea11b1978e06a9a486930c14e701ad9ba",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/harness/job_adapters.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/budget.py",
+      "sha256": "d4d9da12f0d6668187211b82a4694b2770d4261e5984c25482a982b087585c31",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/harness/budget.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/reviewer.py",
+      "sha256": "6cd8cfd77a0b7ac360d373caf515750f8a1ed148e1c9e2e94df9c7c017215663",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/harness/reviewer.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/metrics.py",
+      "sha256": "2d1c99c835923ebfce42e38fe55506c2b854da0fd4c2258ec4e62e96ed9c20f5",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/harness/metrics.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/replay.py",
+      "sha256": "e72ad6d24c281c062569cfafccf4e0da6e1ba8376c7de87c8bdcd47ffd3a3126",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/harness/replay.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/skills/registry.py",
+      "sha256": "68d2a447693d49fb2f0a03933b9a137c056aa4b8ee58b81bf6bc8153ed3d5afb",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/harness/skills/registry.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/mcp_client.py",
+      "sha256": "48e94de701d9b97dccdbb3114f039fd7c90586f0cec0d39e573e5e3a7ba4d1a1",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/harness/mcp_client.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/assistant_tasks.py",
+      "sha256": "19a438c005b54a235f2317bad736bed6a2e233f5c54bd15a0a0d962c051b01b4",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/services/assistant_tasks.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/durable_conversation.py",
+      "sha256": "afb7f4abed6b4e984e38dd57bdf9d33db87fefe0571867b7db63b33ac0fc2846",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/services/durable_conversation.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/result_views.py",
+      "sha256": "d334d2a0ff7f77bc43bccc789eb98be000cb5397ce94ef17ff99660a984917a5",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/services/result_views.py"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/hooks/usePlanContinuation.ts",
+      "sha256": "6ef44811cdef65e82374e44bc509c1016acbf3e59e6633c5b6a083fc151b0c17",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/frontend/src/hooks/usePlanContinuation.ts"
+    },
+    {
+      "path": ".scratch/live-voice/capability-inventory.json",
+      "sha256": "e4cb5736e94bb49df65f9b84d075d2bf3d8f935d2b81aab201e4064a1402fdb8",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/.scratch/live-voice/capability-inventory.json"
+    },
+    {
+      "path": ".scratch/live-voice/capability-matrix.json",
+      "sha256": "d87cf959bba9a2aa349b57373126b751ee621e212d2688655394e4f2f6831ae5",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/.scratch/live-voice/capability-matrix.json"
+    },
+    {
+      "path": "pypsa-gui/backend/smoke/assistant_inventory.py",
+      "sha256": "3231cf40a6db7b0a102cb6783166499a8d547470c4024e641eb3df8c4ca8e60d",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/smoke/assistant_inventory.py"
+    },
+    {
+      "path": "pypsa-gui/backend/smoke/assistant_control_matrix.py",
+      "sha256": "3ac086953db90b4398d3a4eaffba6012712a47d4765ec9e0bec35aac8d15e6ff",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/smoke/assistant_control_matrix.py"
+    },
+    {
+      "path": ".scratch/live-copilot/issues/01-discovery-and-scope.md",
+      "sha256": "e6f656a5662d2d75b1989730a57ebb78d780323e6efae47bfb9c6b828acb9e78",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/.scratch/live-copilot/issues/01-discovery-and-scope.md"
+    },
+    {
+      "path": ".scratch/live-copilot/issues/06-family-adapters.md",
+      "sha256": "501b36f78d7ba0dc5a8c1bbb0bcbc5a06c40dd3074088969d6146a9e70501ec9",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/.scratch/live-copilot/issues/06-family-adapters.md"
+    },
+    {
+      "path": ".scratch/live-copilot/issues/20-results-plausibility-check.md",
+      "sha256": "40e28e870c31368bdc58a89bf4d11c9ef74aeec7c5e6d1d415106a813a502225",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/.scratch/live-copilot/issues/20-results-plausibility-check.md"
+    },
+    {
+      "path": ".scratch/live-copilot/issues/21-network-study-report.md",
+      "sha256": "d3931ad57139f3eeb5c44b4ffb61f936f35ebf5c50f34731370d85dd56deafa2",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/.scratch/live-copilot/issues/21-network-study-report.md"
+    },
+    {
+      "path": ".scratch/live-copilot/issues/22-unsupported-by-chat.md",
+      "sha256": "58f84713d1d0f9a9c83a5bb8d3101749b7656bb15ce96c7c8df4e93246f7b544",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/.scratch/live-copilot/issues/22-unsupported-by-chat.md"
+    },
+    {
+      "path": "pypsa-gui/backend/tests/test_chat_turn_summary.py",
+      "sha256": "2ca08998a5e761fb681c614d73e8037d7f2e63fd178e1a5cf333f96ad43474a1",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/tests/test_chat_turn_summary.py"
+    },
+    {
+      "path": "pypsa-gui/backend/tests/test_openai_tool_selection.py",
+      "sha256": "08f785e018954bdbad0c19329dc76428786f9a1b2616b9e59c3eb86d9d508938",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/tests/test_openai_tool_selection.py"
+    },
+    {
+      "path": "pypsa-gui/backend/tests/test_durable_conversation_parent_thread.py",
+      "sha256": "7cc252077f6d3e9e66b360beb64ab2a43c22ed7c797d011bd3a06d3b1bd6bad7",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/tests/test_durable_conversation_parent_thread.py"
+    },
+    {
+      "path": "pypsa-gui/backend/tests/test_assistant_task_outcomes.py",
+      "sha256": "162a38d1785de69d512e97cf3943fb86165bf8eb44a3bb4877f4b37ceec17db5",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/tests/test_assistant_task_outcomes.py"
+    },
+    {
+      "path": "pypsa-gui/backend/tests/test_task_solver_outcome.py",
+      "sha256": "d11367892696df7e3dee1a03ac991b8f5272e12b3708d339d515115930ea4ccb",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/tests/test_task_solver_outcome.py"
+    },
+    {
+      "path": "pypsa-gui/backend/tests/test_harness_eventlog_truth.py",
+      "sha256": "2bfe210c3ed1491f47670b869d609f0f9ff0d6adaee89464f336c77191d7c37e",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/tests/test_harness_eventlog_truth.py"
+    },
+    {
+      "path": "pypsa-gui/backend/tests/test_oj07_edit_relaunch_walk_journey.py",
+      "sha256": "2575e5277befaec3c37670c7d539d75d3532ebaa2715d7825f590d7c8a1c5b87",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/tests/test_oj07_edit_relaunch_walk_journey.py"
+    },
+    {
+      "path": "pypsa-gui/backend/tests/test_result_views.py",
+      "sha256": "3aabdf3266d60c8c892413c522ca19799105e93dbf22468ceb7bea80f52eb80c",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/tests/test_result_views.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/ac_pf_service.py",
+      "sha256": "b6d607462dc6cb1301c02f7ccec629156d1cc405c53972fb07a5c77f44f4d31f",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/322df0cf495260442eb35bb9c0c5d8e11a274ffe/pypsa-gui/backend/services/ac_pf_service.py"
+    }
+  ],
+  "public_references": [
+    {
+      "name": "how-claude-code-works",
+      "url": "https://code.claude.com/docs/en/how-claude-code-works.md",
+      "final_url": "https://code.claude.com/docs/en/how-claude-code-works.md",
+      "http_status": 200,
+      "bytes": 18484,
+      "sha256": "c3cfd24cbd4f08f42bb1c38207a64b6db1b0ffb9e277062c87da9e2c00770388",
+      "retrieved_utc": "2026-10-21T22:16:40.798477+00:00",
+      "review_scope": "selected relevant sections; no execution of documentation commands",
+      "supports": "Published agent loop, tools, context and checkpoint limitations"
+    },
+    {
+      "name": "memory",
+      "url": "https://code.claude.com/docs/en/memory.md",
+      "final_url": "https://code.claude.com/docs/en/memory.md",
+      "http_status": 200,
+      "bytes": 51857,
+      "sha256": "d951a26e6662ef73a97566b7e9bac1d84d477d1a15e0b193148340d05081a88c",
+      "retrieved_utc": "2026-10-21T22:16:40.912749+00:00",
+      "review_scope": "selected relevant sections; no execution of documentation commands",
+      "supports": "Persistent instructions/auto-memory are context, not enforced configuration"
+    },
+    {
+      "name": "sub-agents",
+      "url": "https://code.claude.com/docs/en/sub-agents.md",
+      "final_url": "https://code.claude.com/docs/en/sub-agents.md",
+      "http_status": 200,
+      "bytes": 110784,
+      "sha256": "89aa73eb3f28e274650634620113a19585dd09b7f40be3dd16d584800cb60aed",
+      "retrieved_utc": "2026-10-21T22:16:40.854329+00:00",
+      "review_scope": "selected relevant sections; no execution of documentation commands",
+      "supports": "Scoped separate contexts, tool access and usage; not a correctness oracle"
+    },
+    {
+      "name": "hooks",
+      "url": "https://code.claude.com/docs/en/hooks.md",
+      "final_url": "https://code.claude.com/docs/en/hooks.md",
+      "http_status": 200,
+      "bytes": 269876,
+      "sha256": "5a5cc139bc639ced7c328a509c3962da375dfba672dc54713356940a354bd79f",
+      "retrieved_utc": "2026-10-21T22:16:40.851835+00:00",
+      "review_scope": "selected relevant sections; no execution of documentation commands",
+      "supports": "Configured lifecycle extension; not all hooks are deterministic or necessary for GridSpine"
+    },
+    {
+      "name": "sandboxing",
+      "url": "https://code.claude.com/docs/en/sandboxing.md",
+      "final_url": "https://code.claude.com/docs/en/sandboxing.md",
+      "http_status": 200,
+      "bytes": 95397,
+      "sha256": "b77ce86ffbdb116b82c2a289d6edf1d5e2eb09953cb0f5e6eee1aaca0b1970ea",
+      "retrieved_utc": "2026-10-21T22:16:40.845474+00:00",
+      "review_scope": "selected relevant sections; no execution of documentation commands",
+      "supports": "Execution isolation is a separate configured OS boundary"
+    },
+    {
+      "name": "skills",
+      "url": "https://code.claude.com/docs/en/skills.md",
+      "final_url": "https://code.claude.com/docs/en/skills.md",
+      "http_status": 200,
+      "bytes": 111106,
+      "sha256": "8f70b9f034eaba99f49608220efd5ccea4f3cf27b6da98531074c93552a0c80a",
+      "retrieved_utc": "2026-10-21T22:16:40.813955+00:00",
+      "review_scope": "selected relevant sections; no execution of documentation commands",
+      "supports": "On-demand reusable procedures"
+    },
+    {
+      "name": "costs",
+      "url": "https://code.claude.com/docs/en/costs.md",
+      "final_url": "https://code.claude.com/docs/en/costs.md",
+      "http_status": 200,
+      "bytes": 44374,
+      "sha256": "9daf33a0e41a0af2a0a5ec91c0c2017b3cec87e836496dd00d3c53576b31ad54",
+      "retrieved_utc": "2026-10-21T22:16:40.872745+00:00",
+      "review_scope": "selected relevant sections; no execution of documentation commands",
+      "supports": "Reported usage/cache diagnostics versus authoritative billing"
+    }
+  ],
+  "observed_coverage": {
+    "catalogue_tools": 275,
+    "result_tabs": 17,
+    "panels": 20,
+    "creation_controls": 170,
+    "families": 14,
+    "family_links_pending": 14,
+    "whole_application": "not_established",
+    "interpretation": "pending registry links are not proof that no subset journeys exist"
+  },
+  "validation": {
+    "inventory": "passed",
+    "control_matrix": "passed",
+    "focused_baseline_tests": {
+      "result": "passed",
+      "tests": 370,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_seconds": 329.977,
+      "timestamp_utc": "2026-10-21T22:18:37.529248+00:00",
+      "scope": "existing baseline subsets; not new requirements or live model behavior",
+      "files": [
+        "pypsa-gui/backend/tests/test_chat_turn_summary.py",
+        "pypsa-gui/backend/tests/test_openai_tool_selection.py",
+        "pypsa-gui/backend/tests/test_durable_conversation_parent_thread.py",
+        "pypsa-gui/backend/tests/test_assistant_task_outcomes.py",
+        "pypsa-gui/backend/tests/test_task_solver_outcome.py",
+        "pypsa-gui/backend/tests/test_harness_eventlog_truth.py",
+        "pypsa-gui/backend/tests/test_oj07_edit_relaunch_walk_journey.py",
+        "pypsa-gui/backend/tests/test_result_views.py"
+      ],
+      "cwd": "pypsa-gui/backend",
+      "command": "PYTHONPATH=<assessed-worktree> NUMBA_CACHE_DIR=<isolated-cache> MPLCONFIGDIR=<isolated-cache> OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 <test-env-python> -m pytest tests/test_chat_turn_summary.py tests/test_openai_tool_selection.py tests/test_durable_conversation_parent_thread.py tests/test_assistant_task_outcomes.py tests/test_task_solver_outcome.py tests/test_harness_eventlog_truth.py tests/test_oj07_edit_relaunch_walk_journey.py tests/test_result_views.py -q -p no:warnings -o faulthandler_timeout=45 --junitxml=<isolated-output>/baseline-tests.xml",
+      "report": "evidence/harness-baseline-322df0c.xml",
+      "sha256": "8e3328202cf39cc5a877921587ff4c6e5d1ea675b6cd6d0be9632e2d9de483fb"
+    },
+    "offline_pilot": {
+      "result": "passed",
+      "scored_cases": 244,
+      "required_cases": 244,
+      "scope": "finite_suite_only",
+      "live_requested": false,
+      "live_status": "pending_opt_in",
+      "process_exit_code": 0,
+      "source": {
+        "commit": "322df0cf495260442eb35bb9c0c5d8e11a274ffe",
+        "dirty": false,
+        "backend_python_sha256": "e59078899f28c6afd23836a12660e4e4fe04cde9dea7a66a408c7b44574b87aa"
+      },
+      "report": "evidence/harness-pilot-322df0c.json",
+      "sha256": "64d54ad0eae75057159e559d88f1e16fd4e0f129bc624d6bb3efff530432e508",
+      "command": "PYTHONPATH=<assessed-worktree> NUMBA_CACHE_DIR=<isolated-cache> MPLCONFIGDIR=<isolated-cache> OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 <test-env-python> tools/run_pilot_evaluation.py --expanded --report <isolated-output>/pilot-evaluation.json",
+      "cwd": "pypsa-gui/backend"
+    },
+    "new_acceptance_checks": "planned_not_run",
+    "paid_model_calls": 0,
+    "reviewers_contacted": false,
+    "runtime_changed": false,
+    "full_regression": false,
+    "premerge_certified": false
+  },
+  "later_master_review": {
+    "sha": "fdcd35c1bd11eb8b10a19db82fa499e6794480b3",
+    "changes": [
+      ".scratch/project-workflow/card-workspaces.md",
+      "doc/release-notes.d/claude-results-by-card-design.md"
+    ],
+    "assessment": "Merged reviewed/owner-approved card-workspace design only; no backend/frontend changes. Source tests remain attributed to runtime master322. Includes reported Link-connected AC-PF caveat; source inspection confirms omitted Link p_set copy, numerical reproduction not run here.",
+    "design_url": "https://github.com/MLHaoChang/pypsa-eur/blob/fdcd35c1bd11eb8b10a19db82fa499e6794480b3/.scratch/project-workflow/card-workspaces.md",
+    "design_sha256": "15dab0fb37140d41f796d71a2ffab09ac8fba4042f14052a765361b9c346c977"
+  },
+  "owner_relay": {
+    "pr": 559,
+    "state_at_inspection": "OPEN",
+    "head": "e36d1e714382aa00086c08b80ef97ad4e8dbf657",
+    "decisions": [
+      "AI-567",
+      "AI-567b",
+      "COP-1",
+      "RC1-RC4",
+      "USE-1"
+    ],
+    "local_disposition": "OWNER-DISPOSITION.md"
+  }
+}

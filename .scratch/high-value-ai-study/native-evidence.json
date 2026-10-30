@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "assessed_master": "87546ef5d184a9b20c80a65e2164f7fac0930f15",
+  "files": [
+    {
+      "path": "pypsa-gui/backend/harness/README.md",
+      "sha256": "5d77d313ddcf167e07fdd1953c86b85014f7502917c6a6660c3426a73d57482c",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/pypsa-gui/backend/harness/README.md"
+    },
+    {
+      "path": "docs/agents/owner-decisions.md",
+      "sha256": "14996ab2d3d66422921dca4fdfddd52a95fc99036b43bf5ce45b95b321f18756",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/docs/agents/owner-decisions.md"
+    },
+    {
+      "path": ".scratch/project-workflow/modular-cards.md",
+      "sha256": "5a80c3a797d9b46787a7b3e1ab8e52e75d7877c6e6b8066a9a537b9b2e7b5312",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/.scratch/project-workflow/modular-cards.md"
+    },
+    {
+      "path": ".scratch/live-copilot/issues/05-ordered-workflows.md",
+      "sha256": "fbdaf2627feb6b80197b52972958fa6bd240e63bf3ff770c54867bee09470cc1",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/.scratch/live-copilot/issues/05-ordered-workflows.md"
+    },
+    {
+      "path": ".scratch/live-copilot/issues/19-run-lifecycle-and-failure.md",
+      "sha256": "17376a8cbfdd82a3c3df3d4e375bd1f54348349d73cebf44b4bc33358defad59",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/.scratch/live-copilot/issues/19-run-lifecycle-and-failure.md"
+    },
+    {
+      "path": ".scratch/live-copilot/issues/20-results-plausibility-check.md",
+      "sha256": "40e28e870c31368bdc58a89bf4d11c9ef74aeec7c5e6d1d415106a813a502225",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/.scratch/live-copilot/issues/20-results-plausibility-check.md"
+    },
+    {
+      "path": ".scratch/live-copilot/issues/21-network-study-report.md",
+      "sha256": "d3931ad57139f3eeb5c44b4ffb61f936f35ebf5c50f34731370d85dd56deafa2",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/.scratch/live-copilot/issues/21-network-study-report.md"
+    },
+    {
+      "path": "pypsa-gui/backend/services/assistant_tasks.py",
+      "sha256": "078aa989ddd52ef80da326afb74ecb6c5aee0d5644f1dadf401095878559eeb5",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/pypsa-gui/backend/services/assistant_tasks.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/continuation.py",
+      "sha256": "d48470d6a21d219fff7c4c89b41410035df599bbbcbec922666b356880ccd99c",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/pypsa-gui/backend/harness/continuation.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/experiment_contract.py",
+      "sha256": "352510b5e76e69958c0a7af6d076c271b6457317eb39d6c5158e9228f1df8cdd",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/pypsa-gui/backend/harness/experiment_contract.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/adequacy/campaign.py",
+      "sha256": "7798ed72b0c56d2b257fedcb259bf71a19f1732404b2763b31cf0f67d59f4699",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/pypsa-gui/backend/services/adequacy/campaign.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/study/findings.py",
+      "sha256": "3376133c39638cbfedf5649ce6ccfe75f8de161edd4cbec7e242cde22278e20d",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/pypsa-gui/backend/services/study/findings.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/study/ledger.py",
+      "sha256": "16dfb723f5ee27b57b54392b24838eaef3abc15d4719b1a86af0e5b422f54751",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/pypsa-gui/backend/services/study/ledger.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/study/tornado_runner.py",
+      "sha256": "7d76ec368614daec8386c1f61e6308fcdf40ccee2fa07fb521eaef4574cdd5cc",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/pypsa-gui/backend/services/study/tornado_runner.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/reports/evidence.py",
+      "sha256": "bf1b7c9c133c30fcc2cb2aebc400439cba7fe4cd63562069d4afe08305916053",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/pypsa-gui/backend/services/reports/evidence.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/reports/number_audit.py",
+      "sha256": "12901fef78978e4d7a3e3768bba5726566ac4790a22a3f7caf89fbad75728367",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/pypsa-gui/backend/services/reports/number_audit.py"
+    },
+    {
+      "path": "pypsa-gui/backend/routers/uploads.py",
+      "sha256": "a96f5b1d26e771901300a7266fc45e3c8a44402814a071ea8540d6ba7067d6db",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/pypsa-gui/backend/routers/uploads.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/upload_service.py",
+      "sha256": "9d03b1c2ced037af0f9939c1c9d941d8594965e71cbd8c0c8c713d7bf8553990",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/pypsa-gui/backend/services/upload_service.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/library/series_io.py",
+      "sha256": "0ef37b1d68000db80d80c25f8680d55d5ceaefc8f40e1de07cc9da5c2cb91f3d",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/pypsa-gui/backend/services/library/series_io.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/profile_gen/load_upload.py",
+      "sha256": "e4cda8a4de5f8595944f4af62c8e285a074a8890e58a45a1c86f94824dff95a6",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/pypsa-gui/backend/services/profile_gen/load_upload.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/timeseries_qa.py",
+      "sha256": "d86976e1306a635556eacac3531efaef28b1c711ee47d89b821720b47e2b74b9",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/pypsa-gui/backend/services/timeseries_qa.py"
+    },
+    {
+      "path": "pypsa-gui/backend/tests/test_assistant_task_outcomes.py",
+      "sha256": "162a38d1785de69d512e97cf3943fb86165bf8eb44a3bb4877f4b37ceec17db5",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/pypsa-gui/backend/tests/test_assistant_task_outcomes.py"
+    },
+    {
+      "path": "pypsa-gui/backend/tests/test_study_findings.py",
+      "sha256": "7d5481bddd610c3d6cf48574546c77fd0d31d21b47b632da1ca665610c18b930",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/pypsa-gui/backend/tests/test_study_findings.py"
+    },
+    {
+      "path": "pypsa-gui/backend/tests/test_adequacy_campaign.py",
+      "sha256": "52a7090b446253d419d0e5b23706c50570b2f1f07af09e8ff4fefa8d59eb6611",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/pypsa-gui/backend/tests/test_adequacy_campaign.py"
+    },
+    {
+      "path": "pypsa-gui/backend/tests/test_series_io.py",
+      "sha256": "9e73d969a89629183215c250706c9ea621f864dc1418317770236959fc7e77e3",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/pypsa-gui/backend/tests/test_series_io.py"
+    },
+    {
+      "path": "pypsa-gui/backend/tests/test_chat_uploads.py",
+      "sha256": "951adb9468bf7edf04e016c8a828dec8f27d786521dc9491ce54f3c8ba238044",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/pypsa-gui/backend/tests/test_chat_uploads.py"
+    },
+    {
+      "path": "pypsa-gui/backend/tests/test_number_audit.py",
+      "sha256": "4cb7bf15d315a2adc865a0e4a6765cb36fc8b13b08df3d53ccda512ed8c81403",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/87546ef5d184a9b20c80a65e2164f7fac0930f15/pypsa-gui/backend/tests/test_number_audit.py"
+    }
+  ],
+  "external_context": [
+    {
+      "pr": 558,
+      "state_at_inspection": "OPEN_DRAFT",
+      "head": "a08317290edf7746c2928f4650a467bb881403ae",
+      "role": "prior research; later relayed owner disposition applies"
+    },
+    {
+      "pr": 559,
+      "state_at_inspection": "OPEN",
+      "head": "3d457a58a3971f58d3c67e252fb128f60af8d037",
+      "role": "relayed PM-558, RES-CARDS, CARD-WS, AI-558; not present in assessed master"
+    }
+  ],
+  "incoming_master_review": {
+    "reviewed_master": "49791da3e1197f3872b9273d37ca97c47c57b13d",
+    "changes_since_tested_baseline": [
+      "doc/release-notes.d/claude-w3a-titles-followup.md",
+      "pypsa-gui/backend/harness/catalogue.py",
+      "pypsa-gui/backend/services/issue_titles.py"
+    ],
+    "assessment": "Reviewed all incoming diff: get_project_flow description adds native item title and blocker detail; nameplate title clarified. No tool schema, action or execution changes; no overlap with this spec PR. Use native flow title/detail in help. Existing 161-test evidence remains for the assessed baseline, not a newly tested combined source.",
+    "compare_url": "https://github.com/MLHaoChang/pypsa-eur/compare/87546ef5d184a9b20c80a65e2164f7fac0930f15...49791da3e1197f3872b9273d37ca97c47c57b13d"
+  }
+}
