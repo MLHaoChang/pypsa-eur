@@ -361,6 +361,8 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         # Results workbook (RW-01): the whole horizon by design; a snapshot range
         # would cut the Overview's per-period KPIs.
         "/workbook.xlsx",
+        # The picker's view list: ids and labels, no series.
+        "/workbook/views",
         # The ELCC candidate list for the panel's asset picker (Phase 6) — one
         # row per eligible asset with its nameplate, no snapshot axis at all.
         "/mc/elcc_candidates",

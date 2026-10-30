@@ -1,0 +1,9 @@
+{
+ "limitations": [
+  {
+   "method": "GET",
+   "path": "/api/results/workbook/views",
+   "reason": "ui-local-state"
+  }
+ ]
+}

@@ -95,7 +95,7 @@ NOT_EDITS = {
     "preview_project_changes": "a preview record; apply_project_changes is the edit",
     "create_chart": "a chart file", "build_delivery": "a delivery file",
     "create_project_snapshot": "a backup of the current inputs",
-    "export_asset_results": "an export", "export_chat_summary": "an export",
+    "export_asset_results": "an export", "export_results_workbook": "an export", "export_chat_summary": "an export",
     "export_eh_report_docx": "an export", "export_experiment_comparison": "an export",
     "export_sensitivity_comparison": "an export",
     "export_preview_png": "an export", "export_report_docx": "an export", "export_report_pdf": "an export",

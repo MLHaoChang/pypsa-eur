@@ -85,6 +85,13 @@ UI_INTERNAL: dict[str, dict] = {
             ('GET', '/api/health'),
         }),
     },
+    'results_workbook_picker': {
+        "reason": ("The Export chooser's view ticks for the results workbook; chat names views through "
+                   'list_result_views and export_results_workbook(views, all).'),
+        "routes": frozenset({
+            ('GET', '/api/results/workbook/views'),
+        }),
+    },
     'chat_panel': {
         "reason": ('The chat panel itself: stream, cards, history, checked-answer records, Activity and the '
                    "plan card's run monitor."),

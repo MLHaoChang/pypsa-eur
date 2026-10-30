@@ -143,8 +143,8 @@ TOOLS_BY_FAMILY: dict[str, frozenset[str]] = {f: frozenset(names.split()) for f,
         start_experiment""",
     'import-export': """
         build_delivery download_project_bundle export_asset_results export_csv_bundle export_excel
-        export_experiment_comparison export_matpower export_network_nc export_preview_png export_run_evidence
-        export_sensitivity_comparison export_to_csv export_to_excel get_file_delivery import_csv_bundle
+        export_experiment_comparison export_matpower export_network_nc export_preview_png export_results_workbook
+        export_run_evidence export_sensitivity_comparison export_to_csv export_to_excel get_file_delivery import_csv_bundle
         import_excel import_map_geometry import_matpower import_meter_data import_network_nc
         import_project_bundle import_uploaded_network inspect_import read_excel_sheet read_upload_meta
         list_uploads delete_upload clear_uploads download_snapshot_weightings_csv
@@ -523,8 +523,19 @@ VARIANTS: list[dict] = [
              B + 'test_lc06_d22_undo_checkpoints.py::test_undo_returns_the_exact_inputs_and_the_results_that_matched_them',
              B + 'test_lc06_d22_undo_checkpoints.py::test_a_checkpoint_restores_the_inputs_it_held_and_not_the_results'),
     _pending('LC-D22.concurrency_gates', 'concurrent edit/rebind, stale preview, lock/ACL and missing-checkpoint-with-retained-evidence cases not tested'),
-    _pending('LC-D23.provider_parity', 'dispatch parity only (test_assistant_provider_parity.py)'),
-    _pending('LC-D24.ui', 'frontend e2e; not re-audited in LC-06'),
+    _covered('LC-D23.provider_parity', 'one journey on the Claude wire only (LC32-OPEN-1), read from the request bodies: toolset results offers a strict subset without update_component; '
+             'the unoffered call is refused tool_not_offered with G1 still 20 MW; toolset all restores the first offer; approved write gives G1 35 MW and a 20 -> 35 receipt, denied leaves 20 MW',
+             'use_toolset update_component',
+             B + 'test_lc06_d23_claude_wire_journey.py::test_the_claude_wire_journey_grants_only_what_was_offered'),
+    _pending('LC-D23.wire_gates', 'injection in uploads or tool prose, truncation/spill, incompatible history, lost approval, timeout, unknown effect, workflow/goal/task and profile switch/recovery not tested; the OpenAI wire is out of scope (LC32-OPEN-1)'),
+    _covered('LC-D24.ui', 'the four ui_* tools only: ui_event frames carry the hand snapshot index (01:00 = 1), asset and panel as asked; an off-axis time, an unknown component opened in the editor, or an unknown panel '
+             'moves nothing; frontend uiNavigate.lc06.test.ts drives the store from those frames and drops a frame older than a manual navigation',
+             'ui_set_snapshot ui_select_component ui_open_asset_detail ui_open_panel',
+             B + 'test_lc06_d24_ui_events.py::test_a_snapshot_is_addressed_by_its_hand_index',
+             B + 'test_lc06_d24_ui_events.py::test_component_asset_and_panel_events_carry_exactly_what_was_asked',
+             B + 'test_lc06_d24_ui_events.py::test_a_wrong_target_is_refused_without_moving_the_screen'),
+    _pending('LC-D24.unknown_asset_event', 'ticket 35: ui_open_asset_detail and ui_select_component without open_editor emit a ui_event for an unknown asset or unknown metric (not refused); untested, a possible defect if the frontend lands on a non-existent asset'),
+    _pending('LC-D24.panels_e2e', 'the Playwright e2e (6 pass / 2 fail baseline) is not re-run or re-audited; panel/subview/filter/editor coverage, wrong project/run/generation, disconnect and keyboard/touch/320px cases not tested'),
 ]
 
 

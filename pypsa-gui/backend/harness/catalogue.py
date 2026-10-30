@@ -4971,6 +4971,20 @@ TOOLS.extend([
     _t("campus_get_published_grid_code", "Read one PUBLISHED grid-code profile of a hub project: {id, sha256, yaml, profile, unconfirmed, document}. unconfirmed limits were published still extracted: say so before relying on them. 404 for an unknown profile. Safety: read.", {"project_id": {"type": "string"}, "profile_id": {"type": "string", "minLength": 1, "maxLength": 64}}, ["project_id", "profile_id"]),
     _t("campus_delete_published_grid_code", "Delete a published grid-code profile: studies can no longer use it (the draft, if any, stays). The user confirms a card naming it first. 404 for an unknown profile. Safety: destructive.", {"project_id": {"type": "string"}, "profile_id": {"type": "string", "minLength": 1, "maxLength": 64}}, ["project_id", "profile_id"]),
 ])
+TOOLS.extend([
+    _t("export_results_workbook",
+       "Write the run's results as ONE Excel workbook to the project's uploads/ (kind='agent_export'), so the chat panel shows a download chip. "
+       "Sheets: About, Overview (capex, opex, LCOE per period, investment-case KPIs or not_established) with native charts, Scenarios when sensitivities exist, "
+       "and one sheet with charts per result view. By default it holds the views of the cards switched on for the project; views=[view ids] adds more, "
+       "all=true holds every result view. The ids are the Results tabs' (list_result_views). Same file the Export chooser's 'Results workbook (Excel)' downloads. "
+       "Refuses while a solve runs or when the inputs changed since the solve (stored=true exports the stored run, which About labels), "
+       "and never solves or runs the investment case. Returns {filename, bytes, kind}. Safety: write.",
+       {"views": {"type": "array", "items": {"type": "string", "maxLength": 64}, "maxItems": 40},
+        "all": {"type": "boolean"},
+        "stored": {"type": "boolean"},
+        "filename": {"type": "string", "maxLength": 120}},
+       []),
+])
 
 TOOL_COUNT: int = len(TOOLS)
 
@@ -5384,6 +5398,7 @@ TOOL_ROUTES: dict[str, list] = {
     "get_asset_results": _SERVICE_CALL,
     "ui_open_asset_detail": _UI_EVENT,
     "export_asset_results": _SERVICE_CALL,
+    "export_results_workbook": [("GET", "/api/results/workbook.xlsx")],
     # Task 10 — writes <app-data>/llm-profiles.json via services.llm_config,
     # not an HTTP route. The settings pane's own PUT /chat/settings/llm/active
     # is a DIFFERENT surface with a super-admin gate; this tool reaches the
