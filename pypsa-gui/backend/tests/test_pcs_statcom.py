@@ -548,3 +548,138 @@ def test_annual_costs_are_charged_per_modelled_horizon_on_a_168_h_week():
     assert sol["q_ss"] > 1.0
     extra = 168 / 8760 * (C_PCS * sol["s_x"]["small"] + C_STATCOM * (sol["q_ss"] + sol["q_dyn"]))
     assert float(n.objective) - float(base.objective) == pytest.approx(extra, rel=1e-6)
+
+
+# ── AS-12: the solved sizes outlive the model, and cost_breakdown carries their cost ──
+
+
+def _run(n):
+    """The app's solve path, which persists the sizes once the solve succeeds."""
+    import queue
+    import threading
+
+    from services import solver_service
+    from services.pypsa_service import PyPSAService
+
+    PyPSAService.set_network(n)
+    status, condition = solver_service.run_simulation(
+        solver_service.SolverConfig(), n, PyPSAService.get_lock(), threading.Event(), queue.SimpleQueue(),
+        state_update=lambda **kw: None)
+    assert status == "ok", condition
+    return solver_service.SolverConfig()
+
+
+def _round_trip(n, tmp_path):
+    from services.pypsa_service import PyPSAService
+
+    path = tmp_path / "solved.nc"
+    PyPSAService.export_network_to_netcdf(n, path)
+    back = pypsa.Network()
+    PyPSAService.import_network_from_netcdf(back, path)
+    return back
+
+
+def _persisted(n):
+    return (n.stores["pcs_s_x_opt"].dropna().to_dict(), float(n.links.at["trafo", "statcom_q_ss_opt"]),
+            float(n.links.at["trafo", "statcom_q_dyn_opt"]))
+
+
+def test_result_columns_are_not_tags():
+    assert not set(ps.RESULT_STORE_COLUMNS) & set(STORE_COLUMNS)
+    assert not set(ps.RESULT_LINK_COLUMNS) & set(LINK_COLUMNS)
+
+
+def test_run_simulation_persists_s_x_q_ss_and_q_dyn():
+    n = _campus([105.0], [105.0 * TAN_LOAD])
+    _bess(n, "small", 10.0)
+    _run(n)
+    s_x, q_ss, q_dyn = _persisted(n)
+    assert s_x == {"small": pytest.approx(2.0, rel=1e-6)}
+    assert q_ss == pytest.approx(HAND_Q_NEED - 2.0 * math.sqrt(11.0), rel=1e-6)
+    assert q_dyn == pytest.approx(0.0, abs=1e-6)
+
+
+def test_persist_solution_keeps_q_dyn_and_survives_a_netcdf_round_trip(tmp_path):
+    n = _hand_case()
+
+    def dyn(n, sns):
+        n.model.add_constraints(n.model["Statcom-q_dyn"] >= 3.0, name="Test-q_dyn_floor")
+
+    sol = _solve(n, dyn)
+    ps.persist_solution(n)
+    del n.model                                             # what the forward check and AS-06 see later
+    assert _persisted(n) == (sol["s_x"].to_dict(), sol["q_ss"], sol["q_dyn"])
+    assert _persisted(n)[2] == pytest.approx(3.0, abs=1e-6)
+    back = _round_trip(n, tmp_path)
+    assert _persisted(back) == _persisted(n)
+    assert back.stores.loc["highC", list(STORE_COLUMNS)].tolist() == n.stores.loc["highC", list(STORE_COLUMNS)].tolist()
+
+
+def test_persisted_results_leave_both_fingerprints_unchanged():
+    n = _hand_case()
+    _solve(n)
+    before = _fingerprints(n)
+    ps.persist_solution(n)
+    assert n.stores.at["highC", "pcs_s_x_opt"] > 0
+    assert _fingerprints(n) == before
+
+
+def test_an_untagged_solve_clears_stale_results():
+    n = _hand_case()
+    _solve(n)
+    ps.persist_solution(n)
+    n.links.loc["trafo", list(LINK_COLUMNS)] = np.nan
+    n.stores.loc["highC", list(STORE_COLUMNS)] = np.nan
+    assert n.optimize(solver_name="highs", extra_functionality=_wrap_with_split_storage(n, None))[0] == "ok"
+    ps.persist_solution(n)
+    assert n.stores["pcs_s_x_opt"].isna().all()
+    assert n.links[list(ps.RESULT_LINK_COLUMNS)].isna().all().all()
+    assert ps.cost_terms(n) == {}
+
+
+def test_an_untagged_network_gains_no_result_columns():
+    n = _campus([105.0], [105.0 * TAN_LOAD])
+    n.links.loc["trafo", list(LINK_COLUMNS)] = np.nan
+    assert n.optimize(solver_name="highs")[0] == "ok"
+    ps.persist_solution(n)
+    assert not set(ps.RESULT_LINK_COLUMNS) & set(n.links.columns)
+    assert not set(ps.RESULT_STORE_COLUMNS) & set(n.stores.columns)
+
+
+@pytest.mark.parametrize("weight, years", [(8760.0, 1.0), (1.0, 1 / 8760)])
+def test_cost_breakdown_carries_pcs_and_statcom_cost_and_the_objective_reconciles(tmp_path, weight, years):
+    """One snapshot weighted as a year, and the same snapshot unweighted (one hour: the typed annual costs
+    are charged x 1/8760, as the LP charged them)."""
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.results.objective_decomposition import compute_objective_decomposition
+
+    n = _campus([105.0], [105.0 * TAN_LOAD])
+    n.snapshot_weightings.loc[:, "objective"] = weight
+    _bess(n, "small", 10.0)
+    cfg = _run(n)
+    s_x, q_ss, _ = _persisted(n)
+    assert q_ss > 1.0
+    pcs = years * C_PCS * s_x["small"]
+    statcom = years * C_STATCOM * q_ss
+    for net in (n, _round_trip(n, tmp_path)):
+        cb = compute_cost_breakdown(net, cfg)
+        rows = {(r["component"], r["carrier"]): r for r in cb["by_carrier"]}
+        assert rows[("PCS/STATCOM", "PCS oversize")]["capex"] == pytest.approx(pcs, rel=1e-6)
+        assert rows[("PCS/STATCOM", "STATCOM")]["capex"] == pytest.approx(statcom, rel=1e-6)
+        comp = {r["component"]: r for r in cb["by_component"]}
+        assert comp["PCS/STATCOM"]["total"] == pytest.approx(pcs + statcom, rel=1e-6)
+        dec = compute_objective_decomposition(net, cb, cfg)
+        assert abs(dec["gap_eur"]) <= 1e-6 * abs(dec["lp_total"]), dec
+        assert abs(dec["residual_gap_eur"]) <= 1e-6 * abs(dec["lp_total"]), dec
+
+
+def test_cost_terms_include_q_dyn():
+    n = _hand_case()
+
+    def dyn(n, sns):
+        n.model.add_constraints(n.model["Statcom-q_dyn"] >= 3.0, name="Test-q_dyn_floor")
+
+    sol = _solve(n, dyn)
+    ps.persist_solution(n)
+    assert ps.cost_terms(n) == {"PCS oversize": pytest.approx(C_PCS * sol["s_x"]["highC"], rel=1e-9),
+                                "STATCOM": pytest.approx(C_STATCOM * (sol["q_ss"] + sol["q_dyn"]), rel=1e-9)}

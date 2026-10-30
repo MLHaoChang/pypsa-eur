@@ -3,7 +3,7 @@
 
 # AS-12 — Persist PCS oversize and STATCOM results
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Blocked by: 05
 Reviewer: GK A
@@ -16,8 +16,8 @@ AS-05 adds the LP variables `PCS-s_x`, `Statcom-q_ss` and `Statcom-q_dyn`, read 
 
 ## Acceptance
 
-- [ ] S_x per store, Q_ss and Q_dyn survive the solve and a save/load round-trip.
-- [ ] `cost_breakdown` carries the PCS and STATCOM cost; the objective reconciles on a tagged network.
+- [x] S_x per store, Q_ss and Q_dyn survive the solve and a save/load round-trip.
+- [x] `cost_breakdown` carries the PCS and STATCOM cost; the objective reconciles on a tagged network.
 
 ## PRs
 

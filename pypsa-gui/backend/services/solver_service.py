@@ -105,6 +105,7 @@ from services.solver.island import solve_uc as _island_solve_uc
 from services.solver.split_storage import _wrap_with_split_storage
 from services.solver.envelope_floors import _wrap_with_envelope_floors
 from services.solver.pcs_statcom import _wrap_with_pcs_statcom
+from services.solver.pcs_statcom import persist_solution as _persist_pcs_statcom
 from services.solver import lost_production as _lost_production
 from services.solver import process_uc as _process_uc
 # Edge Investment Case commercial layer (spec §5.1): the PoC price writer and
@@ -1317,6 +1318,8 @@ def run_simulation(
                 # produced a dispatch (re-review #5: no rows mixing one run's
                 # prices with another run's dispatch).
                 if status in ("ok", "optimal"):
+                    # AS-12: the PCS/STATCOM sizes live only in n.model; keep them on the network.
+                    _persist_pcs_statcom(network)
                     # A sizing solve records its sizes: the fixed-size run's
                     # "capacity_run" source (F1). Never an operational one.
                     if (getattr(config, "fixed_sizes", "off") == "off"

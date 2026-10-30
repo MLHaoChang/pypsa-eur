@@ -458,6 +458,13 @@ def compute_cost_breakdown(n, cfg):
         _yrs = _years_for_period(_period) if _period is not None else 1.0
         _accumulate("Commercial", _label, _period, _cx * _yrs, _ox * _yrs)
 
+    # AS-12: the PCS oversize and STATCOM capital costs are LP-only terms (the sizes are not components), so
+    # `n.statistics()` misses them. `cost_terms` reads the persisted sizes, already x `fom_horizon_factor(n)` as
+    # the objective charged them, so no years weighting here.
+    from services.solver.pcs_statcom import cost_terms as _pcs_statcom_cost_terms
+    for _label, _cx in _pcs_statcom_cost_terms(n).items():
+        _accumulate("PCS/STATCOM", _label, None, _cx, 0.0)
+
     # Materialise by_carrier as a flat list now that all rows have been folded.
     for (comp, carrier), v in by_carrier_dict.items():
         by_carrier.append({
