@@ -199,7 +199,8 @@ def test_bundle_check_requires_the_pack_at_the_frozen_root(tmp_path):
                     "2026-10-24",                                            # refinery gap 2
                     "2026-10-25",                                            # MONEY-YEAR-1 relabel
                     "2026-10-26", "2026-10-26+ca_federal", "2026-10-26+uk",   # money-year 01
-                    "2026-10-26+us_federal"):
+                    "2026-10-26+us_federal",
+                    "2026-10-30"):                                           # AS-02 split storage
         pack = root / "services" / "library" / "defaults_pack" / "versions" / version
         pack.mkdir(parents=True)
         (pack / "manifest.json").write_text("{}")
