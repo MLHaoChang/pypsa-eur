@@ -467,7 +467,8 @@ VARIANTS: list[dict] = [
                  'pypsa-gui/backend/services/adequacy/multi_energy.py ATTRIBUTION_DEDICATED'),
     _covered('LC-D13.unsupported_scope', 'refused before any solve with no campaign charge and the reader byte-identical: the frontier at '
              'VoLL 0 and the margin loop under the rolling strategy, each by its guard\'s own text; the refusals are untyped (kind '
-             'tool_error), and typed scope kinds are a follow-up ticket LC-36 files; in scope, the '
+             'tool_error), and typed scope kinds are '
+             '.scratch/live-copilot/issues/38-typed-scope-refusal-kinds.md; in scope, the '
              'frontier gives LC-33\'s hand points at 4 solves and the loop is met from the hand starting margin',
              'run_frontier_study run_margin_loop start_campaign campaign_status update_solver_config get_adequacy_results',
              B + 'test_lc36_d13_scope_campaign.py::test_a_frontier_at_voll_zero_is_refused_without_a_solve_and_keeps_the_prior_result',
@@ -495,7 +496,8 @@ VARIANTS: list[dict] = [
              'run_eh_study update_component get_adequacy_results',
              B + 'test_lc36_d13_stale_source.py::test_an_edit_flags_the_eh_study_and_a_rerun_clears_it_with_the_hand_delta'),
     _pending('LC-D13.stale_source_unflagged_readers', 'the margin_loop, frontier and mc/ELCC readers and campaign_status carry no freshness '
-             'marker: after update_component they serve pre-edit numbers unflagged (checked by LC-36); a defect, so not pinned'),
+             'marker: after update_component they serve pre-edit numbers unflagged (checked by LC-36); a defect, so not pinned; '
+             'ticket .scratch/live-copilot/issues/37-adequacy-readers-stale-source.md'),
     _covered('LC-D13.incomplete_campaign', 'a campaign of budget 3 refuses a 3-target frontier (4 solves) as campaign_budget_exhausted with '
              'spent 0 and no entry, runs 2 targets to their hand points (spent 3) and closes with end_campaign; budget 4 runs all three. '
              'An EH redundancy compare at budget_solves 2 (ens_solve takes 1) solves base alone, budget_exhausted, no selection; at 10 it '
