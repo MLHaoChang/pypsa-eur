@@ -11,6 +11,11 @@ SPDX-License-Identifier: CC-BY-4.0
 > The original PyPSA-Eur model and documentation are preserved in full
 > [below](#pypsa-eur-a-sector-coupled-open-optimisation-model-of-the-european-energy-system).
 
+🧭 **Finding your way around this repo:** see
+[**`docs/REPO-GUIDE.md`**](docs/REPO-GUIDE.md) — what each section is, where
+to find what, and when it last changed. Architecture deep-dive:
+[`docs/superpowers/handoffs/2026-10-17-architecture-current-state.md`](docs/superpowers/handoffs/2026-10-17-architecture-current-state.md).
+
 **What it is.** A complete graphical front end on top of the PyPSA optimisation
 stack. Draw a grid on a schematic canvas or a geographic map, attach
 generators / storage / sector-coupling links, set up a multi-year investment
@@ -61,7 +66,7 @@ open model that PyPSA GUI sits on top of.*
 
 [![GitHub release (latest by date including pre-releases)](https://img.shields.io/github/v/release/pypsa/pypsa-eur?include_prereleases)](https://github.com/PyPSA/pypsa-eur/releases)
 [![Documentation](https://readthedocs.org/projects/pypsa-eur/badge/?version=latest)](https://pypsa-eur.readthedocs.io/en/latest/?badge=latest)
-[![Test workflows](https://github.com/pypsa/pypsa-eur/actions/workflows/test.yaml/badge.svg)](https://github.com/pypsa/pypsa-eur/actions/workflows/test.yaml)
+[![Test workflows](https://github.com/pypsa/pypsa-eur/actions/workflows/test.yaml/badge.svg)](https://github.com/PyPSA/pypsa-eur/actions/workflows/test.yaml)
 ![Size](https://img.shields.io/github/repo-size/pypsa/pypsa-eur)
 [![Zenodo PyPSA-Eur](https://zenodo.org/badge/DOI/10.5281/zenodo.3520874.svg)](https://doi.org/10.5281/zenodo.3520874)
 [![Zenodo PyPSA-Eur-Sec](https://zenodo.org/badge/DOI/10.5281/zenodo.3938042.svg)](https://doi.org/10.5281/zenodo.3938042)
