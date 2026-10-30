@@ -5,6 +5,17 @@ Start with [spec.md](spec.md) for ownership/shared contracts and [workflow-strat
 
 Planning base:60d8332d64b2edef1b204fb5980311e6102229a8. The [research package](../harness-research-2026/assessment.md) retains its own earlier source dates/SHAs and does not substitute for these implementation contracts.
 
+## What improves for users
+
+- Safer model actions: stale approvals cannot authorize a changed native input.
+- Continuity: confirmed requirements, exact results and unfinished work survive long chats and restarts.
+- Bounded background studies: native checks drive justified new candidates, with visible history and honest stop reasons.
+- Sourced setup: research proposes parameters with units, sources and conflicts; applying a researched value still needs confirmation.
+- Iterative deliverables: every report or Excel feedback item stays tracked until its checks and required decisions are satisfied.
+- Parallel help: one coordinator can use two read-only workers while native software retains action, evidence and budget authority.
+
+These are proposed capabilities. The first unattended numerical adapter is intentionally small; unsupported domain/template steps remain visible. The detailed contract distinguishes that initial release from later expansion.
+
 ## Features
 
 | ID | Detailed specification |

@@ -57,7 +57,9 @@ The server owns task leases, counters, checkpoints and exact native receipts. Ac
 
 The coordinator can concurrently delegate two bounded read-only packet tasks initially. A third worker is a separately tested/configured extension within the same parent quota, not recursive uncontrolled spawning. Research/synthesis proposals can be joined, but the coordinator remains the sole native patch-commit authority. Conflicting or stale suggestions are retained and resolved through evidence/user review, not majority voting. Concurrent candidate branches need their own explicit native admission; workers do not mutate the shared live model.
 
-## Concrete acceptance journey
+## Product-target acceptance journey (capability-gated)
+
+This target journey is not the initial unattended qualification: its template/reliability/report adapters must each be present and checked. Missing adapters produce explicit proposal/manual/needs-user paths without pretending completion. The initial real two-solve journey is the narrower HH-06/10 generic fixed-generator fixture.
 
 A user selects the data-center template, Energy and Reliability, requests a fixed scenario comparison and a report/workbook. The plan lists native prerequisites, tunable design fields and immutable demand/connection/goals, then records every requested output. Read-only workers can research documented component ranges and summarize existing evidence in parallel. The user approves any proposed researched values. The coordinator submits an immutable candidate, evaluates native checks and frozen design goals, applies only permitted changes to new candidates and records before/after results/reasons. An unchanged failure signature stops rather than generating identical solves.
 

@@ -5,7 +5,7 @@ Status: needs-triage
 Type: implementation specification; documentation only in this commissioning task
 Priority: high
 Baseline: `60d8332d64b2edef1b204fb5980311e6102229a8` (30 October 2026)
-Dependencies: HH-05 characterization; HH-03 for physical inference sends; HH-09 owns the shared IntentContract/DecisionPacket and acceptance IDs. HH-10 owns deferred asynchronous input snapshot coverage. HH-01 owns input admission, HH-02 engineering requirements, HH-04 reference pilot, HH-06 study and HH-07 research. These dependencies grant no artifact effects.
+Dependencies: HH-05 characterization; HH-03 for physical inference sends; HH-09A owns the shared authoritative IntentContract/DecisionPacket store, CAS/checker/decision APIs and acceptance IDs, independently of HH-09B delegation. HH-10 owns deferred asynchronous input snapshot coverage. HH-01 owns input admission, HH-02 engineering requirements, HH-04 reference pilot, HH-06 study and HH-07 research. These dependencies grant no artifact effects.
 
 ## 1. Outcome and first delivery
 

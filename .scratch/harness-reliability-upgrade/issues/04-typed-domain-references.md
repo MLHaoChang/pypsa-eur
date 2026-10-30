@@ -61,7 +61,7 @@ Factories return an explicit `not_eligible` result for the characterized legacy 
 2. Resolve the native target using the current ladder. Ambiguity produces the existing Choice and no reference.
 3. Capture refs under the same bounded lock as the native observation. Use explicit bound context; do not switch the active project to read another reference.
 4. A component preview stores the reference privately beside the exact approved args/digest. No later model field can replace it.
-5. HH-01 rechecks and consumes the private preview/ref at the native mutation boundary; require `requirements_revision/requirements_digest` if HH-02 is active. A successful facade precheck outside that lock is not atomic authority.
+5. HH-01 rechecks and consumes the private preview/ref at the native mutation boundary; require `requirements_revision/records_digest` if HH-02 is active. A successful facade precheck outside that lock is not atomic authority.
 6. No reference lock is held while waiting for a user, model, SDK stream, filesystem remote fetch or queued job. Native run-evidence store reads retain their own established transaction order.
 
 On restart/reload/eviction: old live ComponentRef/ProjectRef observations expire due to the HH-01 residency identity; re-resolve and re-preview. Historical RunRef can be rebuilt after fresh ACL/integrity checks. A serialized ref never auto-restores a card or native job authorization. Parent requirements persist separately from the short-lived observation.

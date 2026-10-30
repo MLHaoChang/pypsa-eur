@@ -31,3 +31,16 @@ G-b#853and outsourced register entries have their existing reviewed scopes. This
 No generic runtime worker factory was found in the current harness; current reviewer is a bounded no-tool call, and the server runner is a native task/stage controller. No existing report/Excel export implies numerical auditing of arbitrary user prose, cell formulas, external links or macros. No current profile can claim every template/module runs unattended. Named first-slice adapters and unsupported prerequisites are required in the detailed tickets.
 
 This is a source/spec audit. Application tests, live model calls and domain reviews were not executed by the plan-writing task.
+
+## Additional source delta: 30 October 2026
+
+Fresh fetched master: `30c79cf750c42314eedd0597d06b1780b92a81fe` (after pinned planning base). Source diff inspected, no merge/rewrite of this specification branch’s native application tree:
+
+- `models/design_intent.py` and `services/design_intent.py` implement asset-sizing intents/presets (AS-01). They represent physical sizing preferences, not user-request/deliverable acceptance. HH-09 references their exact values/version when selected rather than copying their semantics into another sizing model. Future AS-02..10 engine loops retain their native ownership; no generic outer correction loop may silently wrap them.
+- `harness/loop.py` and its README now keep `_assurance` first in checked model projections, then `_edit_receipt`. HH-01/05 must preserve both; no receipt-first refactor may displace that checked guard.
+- `services/assurance_records.py` now admits bounded hourly-year input series with row masks/index/value digests (`series-input/2`). Existing native readers reconstruct/revalidate facts. HH-04 references those native evidence APIs and cannot assume raw inline stored series facts or use stale `/1` shape.
+- `services/chat_tools.py:export_to_excel` now uses the same `_escape_formula` as native I/O exports. HH-08 reuses that hardening; it must not restore earlier unsafe text/formula behavior.
+- Adequacy campaign/margin/frontier paths and LC journey coverage now explicitly reject stale/incomplete/swap scope. HH-06 future reliability adapters consume these guards rather than bypassing them; the initial release tests their unsupported unattended routing, not positive new reliability loops.
+- Owner decisions AS-BUILD-1/AS-AUTONOMY-1/AS-NOUPS-1 specify native asset-sizing work and defaults. These specs add no alternative autonomy default or sizing loop.
+
+Reassessment outcome: these changes do not remove the ten proposed harness deltas, but narrow their integration contracts as listed. No application tests on the combined tree were run or claimed. Each implementation rechecks actual then-current master and current official PRs; a source-delta assessment is not runtime compatibility evidence.

@@ -9,11 +9,11 @@ Every slice has an exact baseline, allowlist, schema/state contract, red/green a
 |---|---|---|
 | A | HH-05A baseline characterization and negative-control infrastructure | Offline only; no runtime capability claim. |
 | B | HH-01A exact guarded Generator scalar updates + shared InputVersion | Native/barrier/undo/receipt tests; unsupported/legacy unattended paths pause and require re-review. |
-| C | HH-03A protected accounting +HH-03B new stage/report/worker sends; HH-09shared contract types | Every physical send in enabled tasks has explicit supported bounds and durable accounting; unknown price/bounds prevent strict monetary activation. No children/runtime authority merely from type definitions. |
+| C | HH-03A protected accounting +HH-03B new stage/report/worker sends; HH-09A protected intent/acceptance store and CAS APIs | Every physical send in enabled tasks has explicit supported bounds and durable accounting; unknown price/bounds prevent strict monetary activation. HH-09A lands types, persistence, receipts and reduction APIs together, with no worker dependency; types alone do not qualify the store. No child authority follows from it. |
 | D | HH-02confirmed typed requirements and HH-04references | Explicit parent/intent binding; native effect guard; active data survives flags/restart without silent ignoring. |
 | E | HH-10immutable candidate queue/snapshot pipeline | Real native isolated solve, strict durable fence, exact artifact/job/result provenance; no best-effort or resident-live fallback. |
-| F | HH-06study cycle and HH-07research; HH-08artifact revisions; HH-09two-worker coordinator | Exact registered profile/adapter/IntentContract, scope/resource/review grant and native receipts. All prerequisites physically implemented, not only declared in JSON. |
-| G | HH-05Bcomplete workflow qualification | All fixed positive/adversarial/integration cases execute with manifest/source identity, no missing required measurement or feature stand-in. |
+| F | HH-06study cycle and HH-07research; HH-08artifact revisions; HH-09B two-worker coordinator | Exact registered profile/adapter/IntentContract, scope/resource/review grant and native receipts. All prerequisites physically implemented, not only declared in JSON. |
+| G | HH-05Bcomplete workflow qualification | All fixed initial-scope positive/adversarial/integration cases execute; roadmap positives are listed as excluded, with mandatory unsupported-route controls with manifest/source identity, no missing required measurement or feature stand-in. |
 
 HH-01PhaseB is HH-10's concrete queue task. A foundation-only release may be useful but must not be described as the completed hours-long autonomous product. Copy-only artifact formatting can ship before advanced factual/formula revision adapters, but the coverage packet must list those unsupported parts and preserve their open acceptance items.
 

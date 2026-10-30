@@ -6,7 +6,7 @@ Type: task
 Baseline: `60d8332d64b2edef1b204fb5980311e6102229a8`
 Baseline provenance: first drafted at `002a3fe212b0f11e07a726c72a44177ff919130f`; current plan rebased by source-delta inspection to `60d8332d64b2edef1b204fb5980311e6102229a8`. Native evidence/workbook/turn-check changes are recorded in baseline.md; implementation must recheck fresh source.
 Owner: Harness evaluation; domain owners supply independent fixture oracles.
-Depends on: none for characterization; HH-01/02/03/04 add their feature cases incrementally.
+Depends on: none for characterization; foundation and workflow profiles have the explicit dependency sets below. HH-09A supplies acceptance authority before any controller qualification; HH-09B workers are not required by that store.
 
 ## Outcome and scope
 
@@ -27,13 +27,13 @@ No second approval/certification system, no general LLM judge, no benchmark-driv
 
 New `harness/trajectory_evaluation.py` holds immutable case/outcome/report types and pure scoring. New `tools/run_trajectory_evaluation.py` is the opt-in/offline CLI; import has no execution or configuration side effects. Test fixtures/replay sandbox logic lives under `tests/trajectory_fixtures.py` and a versioned `tests/fixtures/harness_trajectory/` manifest. No ordinary product route/tool calls this evaluator.
 
-`CaseSpec` v1 fields: unique `case_id`, `feature` HH-01..05, `domain` one of energy/grid/reliability/commercial/control/cross-cutting, `purpose` positive/refusal/unsupported/fault-injection, `fixture_version`, `fixture_digest`, `initial_state_digest`, `actor_scope`, `mode`, `provider_wire`, `checked_policy`, `candidate_variant`, `required_tool_names`, expected semantic steps/final predicates, `oracle_version` and declared resource limits. Sensitive actor/auth values are synthetic IDs, never credentials. User-facing text is not the oracle.
+`CaseSpec` v1 fields: unique `case_id`, `feature` one of the ten closed values HH-01 through HH-10, `subphase` from that feature’s declared phase set, `domain` one of energy/grid/reliability/commercial/control/cross-cutting, `purpose` positive/refusal/unsupported/fault-injection, `fixture_version`, `fixture_digest`, `initial_state_digest`, `actor_scope`, `mode`, `provider_wire`, `checked_policy`, `candidate_variant`, `required_tool_names`, expected semantic steps/final predicates, `oracle_version` and declared resource limits. Sensitive actor/auth values are synthetic IDs, never credentials. User-facing text is not the oracle.
 
 `CaseOutcome` v1: exact case/config identity, `execution=passed|failed|error|incomplete|unsupported`, observed ordered native actions and scoped source IDs, guard/card/refusal decisions, terminal job/effect/evidence states, native state diff, `oracle_checks`, attributed failure stage, measurements, sanitized artifact locators. Keep `policy_refused` separate from effect status; a test expecting refusal can pass only if it prevented the effect and published no forbidden claims. Unexpected refusal of a valid task fails.
 
 Measurements: input/output/cache-read/cache-write tokens by main/reviewer/compressor role; reservations/settlements/unknown usage; native solves started/finished; recovery tool calls; repeated unchanged failing actions; total wall time and per-stage latency. Missing usage is `null`/unknown, not 0. Offline scripted usage is labelled synthetic and cannot be published as observed provider spend. Currencies/bases remain explicit. No storage of private model reasoning or secret HTTP headers.
 
-`Report` v1: suite/version/manifest digest, source commit, clean/dirty status, Python/dependency lock digest, case outcomes, required/missing/duplicate/unexpected IDs, fixture/oracle versions, observed coverage, verdict, claim scope finite_suite_only, independent_domain_approval=false. A git SHA alone does not identify uncommitted code; record tree/patch digest or refuse qualification on a dirty tree.
+`Report` v1: qualification profile/version and capability-set digest, suite/version/manifest digest, source commit, clean/dirty status, Python/dependency lock digest, case outcomes, required/missing/duplicate/unexpected IDs, fixture/oracle versions, observed coverage, verdict, claim scope finite_suite_only, independent_domain_approval=false. A git SHA alone does not identify uncommitted code; record tree/patch digest or refuse qualification on a dirty tree.
 
 ## Sandbox and counterfactual protocol
 
@@ -77,11 +77,25 @@ Each is independently named and paired with its positive control; parameter expa
 | E23 | Huge single tool result and paired calls under trim | Pairing preserved, bounded projection/locator, no context overflow claim from message count alone. |
 | E24 | Missing/duplicate result, altered fixture/oracle/report manifest | Qualification fails; no denominator shrink, fabricated zero error or stale verdict reuse. |
 
-Fixture dimensions: IDs E01–E24 map to one primary case each; wire/mode/trim variants are declared in a checked-in manifest. Phase HH-05A runs existing-behavior characterization and negative controls (E07/E08/E15–E24) with supported current primitives; HH-05B adds all feature-dependent E01–E14 after their slices. A profile names its fixed required IDs and variants; users cannot set arbitrary `--omit`/filter options to produce a qualified pass. Diagnostic filtered runs are explicitly non-qualifying.
+## Fixed qualification profiles and roadmap boundaries
+
+These are three different finite qualification scopes, not flags that omit failing cases:
+
+| Profile | Fixed required scope | Permitted conclusion |
+|---|---|---|
+| `foundation-characterization/1` | E07/E08/E15–E24 on existing primitives; E07 specifically tests existing untrusted-source restrictions rather than an absent HH-02 store. Baseline characterization records known limitations as observations, never new-feature passes. | Current behavior characterized; no new enforcement or workflow activation. |
+| `foundation-implementation/1` | All E01–E24 and D01–D10, HH-01A, HH-02, HH-03A/B broker/ledger tests, HH-04, and HH-09A store tests. Controller-specific send cases exercise the broker contract with scripted clients here; they do not certify those clients’ production wiring. | Only the named foundation capabilities qualified, including their explicit unsupported boundaries. |
+| `workflow-qualification/1` | The foundation profile plus every initial-release case in HH-06/07/08/09B/10, every HH-03B production-call wiring case, and X01–X18 in test-matrix.md. Native reliability/control/process/finance-loop extensions are not enabled. Their currently unsupported requests still have mandatory prevention/routing cases. | Bounded initial workflow qualified on exactly its registered adapters. No universal template/domain or future native-loop qualification. |
+
+For every case, the checked-in manifest gives a globally unique ID `HH-xx:local-id:variant`, source ticket/section, `release_scope=initial|roadmap`, positive/refusal purpose, and exact immutable fixture/checker/capability IDs. Implementation converts every normative initial acceptance group and each named variation into explicit rows; a group is not one case if it contains multiple required behaviors. The manifest is reviewed before evaluator code and its exact digest is the qualification constant. No runtime auto-discovery of installed features may construct or shrink the denominator. A future adapter requires a new reviewed profile version; it cannot rewrite `/1` or relabel an unimplemented positive as a refusal. Missing an **initial required capability** is incomplete, not a skip or automatic downgrade.
+
+HH-06:C12’s initial case explicitly asserts rejection of unattended native margin/coupling-loop dispatch and absence of nested/inner solves. A future positive native-loop case is `release_scope=roadmap` and is not counted as executed or qualified by `/1`. Other roadmap rows retain the same distinction. The matrix must list those exclusions and unsupported dispositions publicly. This resolves the contradiction of requiring an unsupported future positive while declaring that adapter disabled; it does not waive the negative safety case. All other HH-06 initial cases, including C25–C30, remain required on their declared initial semantics.
+
+Fixture dimensions: IDs E01–E24 map to one primary case each; wire/mode/trim variants are declared in a checked-in manifest. Phase HH-05A runs the characterization profile above; HH-05B runs the exact foundation or workflow qualification profile after its declared dependencies land. A profile names its fixed required IDs and variants; users cannot set arbitrary `--omit`/filter options to produce a qualified pass. Diagnostic filtered runs are explicitly non-qualifying.
 
 ## Five-section domain fixtures
 
-Reuse native, small existing regression fixtures and independently documented arithmetic. At least one valid and one unsupported/adversarial journey per section in the complete HH-05B manifest; each section needs its own named cases D01–D10 in addition to cross-cutting E cases.
+Reuse native, small existing regression fixtures and independently documented arithmetic. At least one valid and one unsupported/adversarial journey per section in each foundation/workflow qualification manifest; each section needs its own named cases D01–D10 in addition to cross-cutting E cases.
 
 - **D01/D02 Energy/capacity:** reuse the hand-worked two-snapshot weighted dispatch oracle (5 and7MW, weights2 and1h →17MWh, marginal10EUR/MWh →170EUR) on the declared model basis, then change the selected period/source or money-year qualification. A valid profile must succeed; wrong-basis extra claim must be withheld. Existing profile arithmetic is reused, not counted as a novel algorithm.
 - **D03/D04 Grid:** use the existing small loadflow/branch profile fixture and native dynamic `s_max_pu` rating. Pair valid LOPF source with AC-present/unsupported or wrong-rating fixture. P-only LOPF screening cannot certify AC/PQ/grid-code compliance.
@@ -97,7 +111,7 @@ For native capabilities not configured in the test environment, the required cas
 - Utility: every declared deterministic positive case must meet its expected native outcome; refusing everything fails. Expected unsupported/refusal cases pass only their specified prevention/communication oracle and are not successful engineering calculations.
 - Completeness: missing/duplicate/unexpected IDs, source/config mismatch, execution errors, absent fixture truth or unknown required measurements make report non-qualifying. Unknown usage is allowed only in cases specifically asserting its conservative handling, never as zero cost.
 - Performance: record deterministic operation counts and bounded pack size; timing is diagnostic with no flaky wall-clock CI threshold. Later authorized real-model A/B runs hold model/tool/task/budget fixed, use a separate holdout and report mean plus all-repeat success, uncertainty and p50/p95 time/cost. No fixed uplift is promised by the research papers.
-- CI: offline bounded subset in routine backend CI; complete HH-05B profile must run as an actual release/qualification step before enabling all slices. Add/change workflow only through its own allowed-file review; green path filters cannot substitute for execution.
+- CI: offline bounded subset in routine backend CI; exact `workflow-qualification/1` profile must run as an actual release/qualification step before enabling its initial workflow slices. Add/change workflow only through its own allowed-file review; green path filters cannot substitute for execution.
 
 ## Allowed files / validation
 
@@ -105,4 +119,8 @@ New `harness/trajectory_evaluation.py`, `tools/run_trajectory_evaluation.py`, `t
 
 Write tests red for manifest/authority/fixture isolation and scoring before production evaluator code. Plant a wrong oracle, omitted case, duplicate, disabled guard and fake completion to show the evaluator rejects each. Then run complete relevant tests plus old pilot/replay/provider suites and repo-required semantic checks on exact head. Record commands, case expansions, denominator, skips, fixture/oracle/source digests and artifacts. No paid/model/weather download calls.
 
-Done means HH-05A characterization is reproducible and remains available, HH-05B has the full fixed case/domain manifest when its dependencies land, all mandatory cases execute, independently computed outcomes and hard safety/positive-utility gates pass, and normal review accepts the report/schema. It is not population calibration, expert approval or proof of no hallucination.
+Done means HH-05A characterization is reproducible and remains available, HH-05B has the full fixed case/domain manifest for its named qualification profile when its dependencies land, all mandatory cases execute, independently computed outcomes and hard safety/positive-utility gates pass, and normal review accepts the report/schema. It is not population calibration, expert approval or proof of no hallucination.
+
+## Evaluator schema and scope negative controls
+
+Add HH05-Q01–Q06 to the evaluator’s own fixed tests: Q01 validates all ten feature enums and rejects HH-11/unknown subphase; Q02 rejects a workflow manifest lacking HH-10 or HH-09A even if every supplied outcome passed; Q03 rejects changing an initial positive to unsupported after an unavailable capability; Q04 requires the initial C12 negative case while excluding and explicitly reporting its unimplemented roadmap positive; Q05 verifies profile/version/capability/fixture digests prevent reuse of a foundation report as workflow activation; Q06 makes a diagnostic filtered run permanently non-qualifying and preserves the checked-pilot denominator. These tests are mandatory in all three evaluator profiles; they are meta-tests, not six independent engineering tasks.

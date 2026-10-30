@@ -13,7 +13,7 @@
 
 ## Dependency and shared-file order
 
-HH-05Afirst. HH-01Aowns InputVersion/native mutation; HH-03A/Bowns provider lifecycle/strict spend; HH-09shared intent types may land before runtime with zero new authority. HH-02requirements and HH-04refs integrate those types. HH-10strict native candidate solve is required before HH-06autonomous solve/rerun. HH-07research, HH-08artifact revisions and HH-09coordinator runtime require their exact HH-03Bresource coverage and source/acceptance contracts. HH-05Bexpanded qualification is required for the whole product claim. Avoid simultaneous implementation PRs hand-merging shared loop, parent, card and native queue files.
+HH-05Afirst. HH-01Aowns InputVersion/native mutation; HH-03A/Bowns provider lifecycle/strict spend; HH-09A authoritative intent/acceptance store, CAS/checker/user-decision APIs and project-lifecycle fencing land before consumers, independently of HH-09B workers; types alone are incomplete. Existing writer entry points must participate in its common transaction/outer lifecycle guard before the feature activates. HH-02requirements and HH-04refs integrate those types. HH-10strict native candidate solve is required before HH-06autonomous solve/rerun. HH-07research, HH-08artifact revisions and HH-09B coordinator runtime require their exact HH-03Bresource coverage and source/acceptance contracts. HH-05Bexpanded qualification is required for the whole product claim. Avoid simultaneous implementation PRs hand-merging shared loop, parent, card and native queue files.
 
 ## First bounded scopes
 
