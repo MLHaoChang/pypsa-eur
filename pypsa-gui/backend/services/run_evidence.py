@@ -537,25 +537,70 @@ def checked_run_manifest(run_id: Any) -> tuple[str, dict | None, str]:
     """
     root, project_id, _owner = _authority()
     with _LOCK:
-        record = _load_run(root, project_id, run_id, sealed=True)
-        if record is None:
-            return project_id, None, 'not_found'
-        mac = record.pop('mac', None)
-        status = record.get('status')
-        if status != 'completed':
-            known = isinstance(status, str) and status in STATUSES
-            return project_id, None, status if known else 'corrupt'
-        if (not isinstance(record.get('metrics'), dict)
-                or not isinstance(record.get('sections') or {}, dict)
-                or not isinstance(record.get('finished_at'), str)):
-            return project_id, None, 'corrupt'
-        if any(_section_state(root, record, name)[1] is not None
-               for name in list(record.get('sections') or {})):
-            return project_id, None, 'unverified'
-        # Last, so a malformed or unfinished run keeps naming its status.
-        if not _seal_verifies(record, mac):
-            return project_id, None, 'unverified'
-        return project_id, copy.deepcopy(record), 'completed'
+        return (project_id, *_checked_manifest(root, project_id, run_id))
+
+
+def _checked_manifest(root: Path, project_id: str, run_id: Any) -> tuple[dict | None, str]:
+    """(manifest, status) as checked_run_manifest gives them; call under _LOCK."""
+    record = _load_run(root, project_id, run_id, sealed=True)
+    if record is None:
+        return None, 'not_found'
+    mac = record.pop('mac', None)
+    status = record.get('status')
+    if status != 'completed':
+        known = isinstance(status, str) and status in STATUSES
+        return None, status if known else 'corrupt'
+    if (not isinstance(record.get('metrics'), dict)
+            or not isinstance(record.get('sections') or {}, dict)
+            or not isinstance(record.get('finished_at'), str)):
+        return None, 'corrupt'
+    if any(_section_state(root, record, name)[1] is not None
+           for name in list(record.get('sections') or {})):
+        return None, 'unverified'
+    # Last, so a malformed or unfinished run keeps naming its status.
+    if not _seal_verifies(record, mac):
+        return None, 'unverified'
+    return copy.deepcopy(record), 'completed'
+
+
+def checked_run_section(run_id: Any, section: Any) -> tuple[str, dict | None, Any, str]:
+    """(project id, manifest, section data, status) for a checked answer about
+    one recorded section of one run: the manifest and data only when the run
+    checks as in checked_run_manifest and records that section ('not_recorded'
+    when it does not)."""
+    root, project_id, _owner = _authority()
+    with _LOCK:
+        manifest, status = _checked_manifest(root, project_id, run_id)
+        if manifest is None:
+            return project_id, None, None, status
+        if not isinstance(section, str) or section not in manifest['sections']:
+            return project_id, None, None, 'not_recorded'
+        blob, reason = _section_state(root, manifest, section)
+        if reason is not None:
+            return project_id, None, None, 'unverified'
+        return project_id, manifest, json.loads(blob), 'completed'
+
+
+def checked_run_comparison(run_id: Any, baseline_run_id: Any,
+                           metrics: list[str] | None = None) -> tuple[str, dict | None, str]:
+    """(project id, sources, status) for a checked answer about the deltas
+    compare_project_runs gives without allow_input_changes. ``sources`` holds
+    both checked manifests and the comparison computed from them, only when
+    both runs check and are comparable; otherwise the status names the run
+    that does not check ('run <status>' or 'baseline <status>') or the
+    reasons the two are not comparable."""
+    root, project_id, _owner = _authority()
+    with _LOCK:
+        run, run_status = _checked_manifest(root, project_id, run_id)
+        base, base_status = _checked_manifest(root, project_id, baseline_run_id)
+        if run is None or base is None:
+            role, status = ('run', run_status) if run is None else ('baseline', base_status)
+            return project_id, None, f'{role} {status}'
+        out = _comparison(root, run, base, metrics, False)
+        if not out['comparable']:
+            reasons = ', '.join(r['reason'] for r in out['incomparable_reasons'])
+            return project_id, None, f'not comparable ({reasons})'
+        return project_id, {'run': run, 'baseline': base, 'comparison': out}, 'completed'
 
 
 MAX_COMPARE_METRICS = 20
@@ -603,68 +648,74 @@ def compare_project_runs(run_id: str, baseline_run_id: str, metrics: list[str] |
     with _LOCK:
         run = _require_run(root, project_id, run_id, 'run_id')
         base = _require_run(root, project_id, baseline_run_id, 'baseline_run_id')
-        reasons: list[dict] = []
-        for role, record in (('run', run), ('baseline', base)):
-            if record['status'] != 'completed':
-                reasons.append({'reason': 'run_not_completed', 'role': role,
-                                'run_id': record['run_id'], 'status': record['status']})
-        if not reasons:
-            _require_verified_evidence(root, run)
-            _require_verified_evidence(root, base)
-        mode_run, mode_base = run.get('mode'), base.get('mode')
-        if not mode_run or not mode_base:
-            reasons.append({'reason': 'mode_unknown', 'run': mode_run, 'baseline': mode_base})
-        elif mode_run != mode_base:
-            reasons.append({'reason': 'mode_mismatch', 'run': mode_run, 'baseline': mode_base})
-        fp_run, fp_base = run.get('fingerprint'), base.get('fingerprint')
-        fingerprints_match = fp_run is not None and fp_run == fp_base
-        if not fingerprints_match and not allow_input_changes:
-            reasons.append({'reason': 'fingerprint_mismatch' if fp_run and fp_base
-                            else 'fingerprint_unknown',
-                            'run': fp_run, 'baseline': fp_base})
-        out: dict[str, Any] = {
-            'run': _summary(root, run),
-            'baseline': _summary(root, base),
-            'comparable': not reasons,
-            'incomparable_reasons': reasons,
-            'mode': mode_run if mode_run == mode_base else None,
-            'fingerprints_match': fingerprints_match,
-            'inputs_differ': bool(fp_run and fp_base and fp_run != fp_base),
-            'warnings': {'run': list(run.get('warnings') or []),
-                         'baseline': list(base.get('warnings') or [])},
-            'deltas': {},
-            'unmatched_metrics': [],
-        }
-        if reasons:
-            out['note'] = ('No deltas are computed for incomparable runs. Inspect each run with '
-                           'get_run_evidence instead.')
-            return out
-        run_metrics = run.get('metrics') or {}
-        base_metrics = base.get('metrics') or {}
-        names = list(metrics) if metrics is not None else sorted(set(run_metrics) | set(base_metrics))
-        for name in names:
-            a, b = run_metrics.get(name), base_metrics.get(name)
-            if a is None or b is None:
-                out['unmatched_metrics'].append({
-                    'metric': name,
-                    'reason': 'not_recorded_in_both',
-                    'recorded_in': [r for r, m in (('run', a), ('baseline', b)) if m is not None]})
-                continue
-            if a['unit'] != b['unit']:
-                out['unmatched_metrics'].append({
-                    'metric': name, 'reason': 'units_differ',
-                    'run_unit': a['unit'], 'baseline_unit': b['unit']})
-                continue
-            delta = a['value'] - b['value']
-            out['deltas'][name] = {
-                'run': {'value': a['value'], 'unit': a['unit']},
-                'baseline': {'value': b['value'], 'unit': b['unit']},
-                'delta': {'value': delta, 'unit': a['unit']},
-                'delta_pct': (delta / b['value'] * 100.0) if b['value'] else None,
-            }
-        out['note'] = ('delta = run - baseline, computed from recorded metrics only; '
-                       'delta_pct is null when the baseline value is zero.')
+        return _comparison(root, run, base, metrics, allow_input_changes)
+
+
+def _comparison(root: Path, run: dict, base: dict, metrics: list[str] | None,
+                allow_input_changes: bool) -> dict:
+    """compare_project_runs' result for two loaded runs; call under _LOCK."""
+    reasons: list[dict] = []
+    for role, record in (('run', run), ('baseline', base)):
+        if record['status'] != 'completed':
+            reasons.append({'reason': 'run_not_completed', 'role': role,
+                            'run_id': record['run_id'], 'status': record['status']})
+    if not reasons:
+        _require_verified_evidence(root, run)
+        _require_verified_evidence(root, base)
+    mode_run, mode_base = run.get('mode'), base.get('mode')
+    if not mode_run or not mode_base:
+        reasons.append({'reason': 'mode_unknown', 'run': mode_run, 'baseline': mode_base})
+    elif mode_run != mode_base:
+        reasons.append({'reason': 'mode_mismatch', 'run': mode_run, 'baseline': mode_base})
+    fp_run, fp_base = run.get('fingerprint'), base.get('fingerprint')
+    fingerprints_match = fp_run is not None and fp_run == fp_base
+    if not fingerprints_match and not allow_input_changes:
+        reasons.append({'reason': 'fingerprint_mismatch' if fp_run and fp_base
+                        else 'fingerprint_unknown',
+                        'run': fp_run, 'baseline': fp_base})
+    out: dict[str, Any] = {
+        'run': _summary(root, run),
+        'baseline': _summary(root, base),
+        'comparable': not reasons,
+        'incomparable_reasons': reasons,
+        'mode': mode_run if mode_run == mode_base else None,
+        'fingerprints_match': fingerprints_match,
+        'inputs_differ': bool(fp_run and fp_base and fp_run != fp_base),
+        'warnings': {'run': list(run.get('warnings') or []),
+                     'baseline': list(base.get('warnings') or [])},
+        'deltas': {},
+        'unmatched_metrics': [],
+    }
+    if reasons:
+        out['note'] = ('No deltas are computed for incomparable runs. Inspect each run with '
+                       'get_run_evidence instead.')
         return out
+    run_metrics = run.get('metrics') or {}
+    base_metrics = base.get('metrics') or {}
+    names = list(metrics) if metrics is not None else sorted(set(run_metrics) | set(base_metrics))
+    for name in names:
+        a, b = run_metrics.get(name), base_metrics.get(name)
+        if a is None or b is None:
+            out['unmatched_metrics'].append({
+                'metric': name,
+                'reason': 'not_recorded_in_both',
+                'recorded_in': [r for r, m in (('run', a), ('baseline', b)) if m is not None]})
+            continue
+        if a['unit'] != b['unit']:
+            out['unmatched_metrics'].append({
+                'metric': name, 'reason': 'units_differ',
+                'run_unit': a['unit'], 'baseline_unit': b['unit']})
+            continue
+        delta = a['value'] - b['value']
+        out['deltas'][name] = {
+            'run': {'value': a['value'], 'unit': a['unit']},
+            'baseline': {'value': b['value'], 'unit': b['unit']},
+            'delta': {'value': delta, 'unit': a['unit']},
+            'delta_pct': (delta / b['value'] * 100.0) if b['value'] else None,
+        }
+    out['note'] = ('delta = run - baseline, computed from recorded metrics only; '
+                   'delta_pct is null when the baseline value is zero.')
+    return out
 
 
 _FOREGROUND_KINDS = {'lopf': 'simulation', 'ac_pf': 'ac_pf'}

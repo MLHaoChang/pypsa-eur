@@ -178,7 +178,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
         openReports={() => setSlidePanel('reports')}
       />
       <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(240px,1fr))]">
-        <Card title="Cost" testId="summary-cost" link="capex" linkLabel="Capacity Expansion" onOpen={onOpenTab}
+        <Card title="Cost" testId="summary-cost" link="capex" linkLabel="Capacity expansion" onOpen={onOpenTab}
           hint="From /results/cost_breakdown (n.statistics(): annualised capital cost with fixed O&M, plus operating cost). Shed load is not included; see Adequacy.">
           {c ? (
             <>
@@ -186,7 +186,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
               <Line label="Capital cost (annualised)" value={fmtCurrency(c.capital)} />
               <Line label="Operating cost" value={fmtCurrency(c.operating)} />
               {c.newBuild != null && (
-                <span title="Annualised capital of capacity this solve built: max(0, optimal − installed) × capital cost, as on the Capacity Expansion tab.">
+                <span title="Annualised capital of capacity this solve built: max(0, optimal − installed) × capital cost, as on the Capacity expansion tab.">
                   <Line label="of which new build" value={fmtCurrency(c.newBuild)} />
                 </span>
               )}
@@ -234,7 +234,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
             className="self-start text-[10.5px] text-accent hover:underline">LOLE and EUE: Adequacy</button>
         </Card>
 
-        <Card title="Key capacities" testId="summary-capacity" link="capex" linkLabel="Capacity Expansion" onOpen={onOpenTab}
+        <Card title="Key capacities" testId="summary-capacity" link="capex" linkLabel="Capacity expansion" onOpen={onOpenTab}
           hint="From /results/statistics (PyPSA n.statistics()): optimal capacity, and new build as max(0, optimal − installed). A multi-period horizon shows the last period's fleet unless a period is selected.">
           {caps.length ? (
             <table className="w-full text-[11px]">

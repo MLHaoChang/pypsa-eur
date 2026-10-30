@@ -184,3 +184,6 @@ export function buildManualRow(input: {
     fidelity: 'expert_judgement',
   }
 }
+
+/** The one label for the annualised criticality column, in the FMEA tab and the EH panel. */
+export const CRITICALITY_PER_YEAR_LABEL = 'Criticality (€ per year)'
