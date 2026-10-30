@@ -13,8 +13,13 @@ Hand oracle, one bus, G1 20 MW at 10 EUR/MWh, L1 5 MW, unit weights:
 - A CSV whose rows are out of order is aligned by its timestamps: 03:00 -> 4, 01:00 -> 2,
   00:00 -> 1, 02:00 -> 3 puts 1, 2, 3, 4 on 00:00 to 03:00, an objective of 10 · (1+2+3+4) = 100.
 
-A repeated timestamp is not pinned here: today it fails with an untyped pandas error
-(ticket 33, ``LC-D03.upload_guards`` in the manifest).
+Upload guards (ticket 33, ``LC-D03.upload_guards``), on a four-snapshot network:
+- a repeated timestamp is refused as ``timeseries_duplicate_timestamp`` and the stored
+  series is unchanged;
+- a CSV missing 02:00 is stored and the gap is forward-filled (1, 2, 2, 4), named in
+  ``filled_snapshots``;
+- a CSV wholly outside the horizon is refused as ``timeseries_outside_horizon`` and the
+  snapshots are unchanged, unless ``replace_horizon=True`` confirms the replacement.
 """
 # ruff: noqa: F811 -- shared public harness fixtures
 import pandas as pd
@@ -76,3 +81,67 @@ def test_an_out_of_order_csv_is_aligned_by_its_timestamps(alpha):
         "2026-01-01 00:00:00": 1.0, "2026-01-01 01:00:00": 2.0,
         "2026-01-01 02:00:00": 3.0, "2026-01-01 03:00:00": 4.0}
     assert _objective() == pytest.approx(100.0, rel=REL)
+
+
+def _four(alpha):
+    chat_tools.set_snapshots("2026-01-01 00:00", "2026-01-01 03:00", "h")
+    ok = "snapshot,L1\n" + "".join(f"2026-01-01 0{h}:00,{h + 1}\n" for h in range(4))
+    chat_tools.upload_timeseries("loads", "L1", "p_set", ok)
+    return list(PyPSAService.get_network().loads_t.p_set["L1"])
+
+
+def _kind(result):
+    detail = result.get("detail", result) if isinstance(result, dict) else result
+    return detail.get("error_kind") if isinstance(detail, dict) else None
+
+
+def _refused(csv):
+    from fastapi import HTTPException
+    try:
+        chat_tools.upload_timeseries("loads", "L1", "p_set", csv)
+    except HTTPException as exc:
+        return exc.detail
+    pytest.fail("the upload was accepted")
+
+
+def test_a_repeated_timestamp_is_refused_and_stores_nothing(alpha):
+    before = _four(alpha)
+    csv = "snapshot,L1\n2026-01-01 00:00,9\n2026-01-01 01:00,2\n2026-01-01 01:00,7\n2026-01-01 03:00,4\n"
+    detail = _refused(csv)
+    assert detail["error_kind"] == "timeseries_duplicate_timestamp"
+    assert "2026-01-01 01:00" in detail["message"]
+    assert list(PyPSAService.get_network().loads_t.p_set["L1"]) == before == [1.0, 2.0, 3.0, 4.0]
+
+
+def test_a_missing_snapshot_is_forward_filled_and_named(alpha):
+    _four(alpha)
+    csv = "snapshot,L1\n2026-01-01 00:00,1\n2026-01-01 01:00,2\n2026-01-01 03:00,4\n"
+    result = chat_tools.upload_timeseries("loads", "L1", "p_set", csv)
+    assert result["rows"] == 3
+    assert result["filled_snapshots"] == ["2026-01-01 02:00:00"]
+    assert list(PyPSAService.get_network().loads_t.p_set["L1"]) == [1.0, 2.0, 2.0, 4.0]
+    assert _objective() == pytest.approx(10 * (1 + 2 + 2 + 4), rel=REL)
+
+
+def test_an_off_horizon_csv_is_refused_and_keeps_the_snapshots(alpha):
+    before = _four(alpha)
+    snaps = list(PyPSAService.get_network().snapshots)
+    csv = "snapshot,L1\n2026-06-01 00:00,8\n2026-06-01 01:00,9\n"
+    assert _refused(csv)["error_kind"] == "timeseries_outside_horizon"
+    n = PyPSAService.get_network()
+    assert list(n.snapshots) == snaps and list(n.loads_t.p_set["L1"]) == before
+
+
+def test_an_off_horizon_csv_replaces_the_snapshots_once_confirmed(alpha):
+    import io
+
+    from fastapi import UploadFile
+
+    from routers.network import upload_timeseries as route
+    _four(alpha)
+    csv = "snapshot,L1\n2026-06-01 00:00,8\n2026-06-01 01:00,9\n"
+    upload = UploadFile(filename="L1.csv", file=io.BytesIO(csv.encode()))
+    result = chat_tools._sync(route(component="loads", attribute="p_set", file=upload,
+                                    replace_horizon=True))
+    assert result["rows"] == 2
+    assert len(PyPSAService.get_network().snapshots) == 2

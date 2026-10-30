@@ -1267,9 +1267,16 @@ async def upload_timeseries(
     attribute: str,
     file: UploadFile = File(...),
     period: int | None = None,
+    replace_horizon: bool = False,
 ):
     """
     Upload a CSV of time-series data for one (component, attribute) pair.
+
+    Guards on a flat-snapshot network (no ``period``): a repeated timestamp is
+    refused (``timeseries_duplicate_timestamp``); a CSV sharing no timestamp
+    with the current snapshots is refused (``timeseries_outside_horizon``)
+    unless ``replace_horizon=true`` confirms the snapshots are to be replaced;
+    snapshots the CSV skips are forward-filled and named in ``filled_snapshots``.
 
     Behaviour by network snapshot type:
 
@@ -1332,6 +1339,35 @@ async def upload_timeseries(
             names=["period", "timestep"],
         )
         df.index = new_mi
+
+    # A repeated timestamp has no single value to align on (pandas fails deep
+    # inside the reindex with an untyped InvalidIndexError), so it is refused
+    # here, typed, before anything is stored.
+    if not df.index.is_unique:
+        dup = [str(t) for t in df.index[df.index.duplicated()].unique()[:5]]
+        raise HTTPException(422, {
+            "error_kind": "timeseries_duplicate_timestamp",
+            "message": f"The CSV repeats timestamp(s) {', '.join(dup)}; each "
+                       "timestamp may appear once. Nothing was stored.",
+        })
+    filled: list[str] = []
+    if period is None and not is_multi and len(n.snapshots) and len(df.index):
+        overlap = df.index.intersection(n.snapshots)
+        if not len(overlap):
+            if not replace_horizon:
+                raise HTTPException(422, {
+                    "error_kind": "timeseries_outside_horizon",
+                    "message": f"The CSV runs {df.index.min()} to {df.index.max()}, "
+                               "outside the network's snapshots "
+                               f"({n.snapshots[0]} to {n.snapshots[-1]}); storing it "
+                               "would replace the snapshots. Nothing was stored. Set the "
+                               "horizon first (set_snapshots), or confirm the replacement "
+                               "with replace_horizon=true.",
+                })
+        else:
+            lo, hi = df.index.min(), df.index.max()
+            filled = [str(t) for t in n.snapshots
+                      if lo <= t <= hi and t not in df.index]
 
     # Phase 12f: refuse before the lock is taken and before `_user_ts` is
     # written. A CSV's blank cell is a NaN by the time `read_csv` is done, and
@@ -1413,6 +1449,9 @@ async def upload_timeseries(
         "unmatched_columns": unmatched,
         "period": period,
         "mode": "per_period" if period is not None else ("broadcast" if is_multi else "flat"),
+        # Snapshots inside the CSV's range that it has no row for; the
+        # series holds the previous value there (forward fill).
+        "filled_snapshots": filled,
     }
 # ── User-uploaded time-series delete ─────────────────────────────────────────
 # Single endpoint that drops `(component, attribute, name)` entries from
