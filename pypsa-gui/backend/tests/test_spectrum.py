@@ -13,6 +13,7 @@ import pypsa
 import pytest
 
 from services.adequacy import spectrum as S
+from services.adequacy.smoothing import LATENCY_S
 from services.solver import envelope_floors as EF
 from services.solver.split_storage import add_split_storage
 
@@ -173,19 +174,45 @@ def test_a_two_hertz_f_c_puts_the_fast_store_in_the_tier_and_the_slow_one_out():
     n = _site()
     split = S.apply_tier_split(n, 2.0)  # reach 0.08 s: the GFM supercap, not the GFL energy BESS
     assert split["cap"]["eligible"] and not split["bess"]["eligible"]
-    assert split["cap"]["latency_s"] == S.TECHNOLOGY_LATENCY_S["supercap"]
+    assert split["cap"]["latency_s"] == LATENCY_S["gfm_droop"] and split["bess"]["latency_s"] == LATENCY_S["gfl_pq"]
+    assert "grid forming" in split["cap"]["latency_basis"] and "assumed" in split["cap"]["latency_basis"]
+    assert split["bess"]["before"] is None and split["bess"]["after"] is False
+    assert "slower than" in split["bess"]["reason"]
     assert n.stores.at["cap", "smoothing_tier"] == 1.0 and n.stores.at["bess", "smoothing_tier"] == 0.0
     assert "plain" not in split and math.isnan(n.stores.at["plain", "smoothing_tier"])
     assert EF.refusals(n, {"power_floor_mw": 1.0}) == []
 
 
-def test_the_route_says_when_no_store_reaches_f_c(client, install_network):
-    n = install_network(_site())
-    n.remove("Store", "cap")
-    t, p = _sine(freq=2.0)
-    body = client.post(URL, files={"file": ("trace.csv", _csv(t, p), "text/csv")}).json()
-    assert not body["tier_split"]["bess"]["eligible"]
-    assert any("no split storage responds" in note for note in body["notes"])
+def test_a_user_set_flag_that_turns_off_is_reported_and_other_stores_are_untouched():
+    n = _site()
+    EF.tag_store(n, "bess", smoothing_tier=True)
+    EF.tag_store(n, "plain", smoothing_tier=True)
+    dry = S.tier_split(n, 2.0)
+    assert dry["bess"]["before"] is True and dry["bess"]["after"] is False
+    assert n.stores.at["bess", "smoothing_tier"] == 1.0  # the dry run changes nothing
+    split = S.apply_tier_split(n, 2.0)
+    assert split == dry
+    assert n.stores.at["bess", "smoothing_tier"] == 0.0
+    assert n.stores.at["plain", "smoothing_tier"] == 1.0  # not a split storage: left as the user set it
+
+
+def test_an_unknown_technology_is_taken_as_grid_following_and_says_so():
+    n = _site()
+    n.stores.loc["cap", "storage_technology"] = "flywheel"
+    row = S.tier_split(n, 0.5)["cap"]
+    assert row["latency_s"] == max(LATENCY_S.values()) and "taken as grid following" in row["latency_basis"]
+
+
+@pytest.mark.parametrize("override, match", [
+    ({"nope": 0.02}, "not a split storage"),
+    ({"plain": 0.02}, "not a split storage"),
+    ({"bess": 0.0}, "> 0"),
+    ({"bess": float("nan")}, "> 0"),
+    ({"bess": float("inf")}, "> 0"),
+])
+def test_a_bad_latency_override_is_refused(override, match):
+    with pytest.raises(S.TraceError, match=match):
+        S.tier_split(_site(), 2.0, latency=override)
 
 
 def test_a_slow_band_lets_any_bess_in_the_tier():
@@ -199,6 +226,7 @@ def test_a_latency_override_moves_a_store_across_the_split():
     n = _site()
     split = S.apply_tier_split(n, 2.0, latency={"bess": 0.02})
     assert split["bess"]["eligible"] and split["bess"]["latency_s"] == 0.02
+    assert split["bess"]["latency_basis"] == "given"
 
 
 def test_a_network_without_split_storage_has_nothing_to_split():
@@ -218,17 +246,37 @@ def test_a_clean_csv_reads_and_converts_kw_to_mw():
     assert np.allclose(tr.p_mw, p)
 
 
-def test_a_time_column_in_milliseconds_reads_as_seconds():
+@pytest.mark.parametrize("header", ["time_ms,power_mw", "time_min,power_mw", "time_h,power_mw"])
+def test_time_in_another_unit_than_seconds_is_refused(header):
     t, p = _sine(duration=60.0)
-    tr = S.read_trace(_csv(t * 1000.0, p, header="time_ms,power_mw"))
-    assert np.allclose(tr.t_s, t)
+    with pytest.raises(S.TraceError, match="time must be numeric seconds"):
+        S.read_trace(_csv(t, p, header=header))
 
 
-def test_iso_timestamps_read_as_seconds():
+def test_iso_timestamps_are_refused_with_a_message_that_says_so():
     body = "time,power_mw\n" + "\n".join(
         f"2026-01-01T00:{i // 600:02d}:{i // 10 % 60:02d}.{i % 10}00,{100 + math.sin(i):.6f}" for i in range(400))
-    tr = S.read_trace(body.encode())
-    assert tr.t_s[0] == 0.0 and tr.t_s[1] == pytest.approx(0.1)
+    with pytest.raises(S.TraceError, match="timestamps are not read"):
+        S.read_trace(body.encode())
+
+
+@pytest.mark.parametrize("blob, match", [
+    (bytes(range(256)) * 4, "binary"),
+    ("time_s,power_mw\n0,1\n".encode("utf-16"), "binary"),
+    ("time_s,power_mw\n".encode() + "\n".join(f"{i / 10},{100 + i % 3}" for i in range(20)).encode()
+     + b"\n2.1,\xe9t\xe9", "UTF-8"),
+    (b"time_s,power_mw\n0,1\n0.1,2,3,4\n0.2,3\n0.3,4\n0.4,5\n0.5,6\n0.6,7\n0.7,8\n0.8,9\n", "readable CSV"),
+])
+def test_unparseable_uploads_are_refused(blob, match):
+    with pytest.raises(S.TraceError, match=match):
+        S.read_trace(blob)
+
+
+def test_a_trace_over_the_sample_cap_is_refused(monkeypatch):
+    monkeypatch.setattr(S, "MAX_SAMPLES", 100)
+    t, p = _sine(duration=60.0)
+    with pytest.raises(S.TraceError, match="at most 100"):
+        S.read_trace(_csv(t, p))
 
 
 @pytest.mark.parametrize("blob, match", [
@@ -256,7 +304,7 @@ def test_a_repeated_timestamp_is_refused():
 
 
 @pytest.mark.parametrize("header, unit, match", [
-    ("time_mw,power_mw", None, "not a time unit"),
+    ("time_mw,power_mw", None, "time must be numeric seconds"),
     ("time_s,power_mwh", None, "unit"),        # energy, not power
     ("time_s,power_hz", None, "unit"),
     ("time_s,power", None, "unit"),            # no unit anywhere
@@ -304,6 +352,21 @@ def test_a_flat_trace_has_no_spectrum_to_read():
         _analyse(t, np.full_like(t, 100.0))
 
 
+def test_a_band_with_too_few_bins_is_refused():
+    t, p = _sine(duration=60.0)  # 1/60 Hz bins
+    with pytest.raises(S.TraceError, match="PSD bin"):
+        _analyse(t, p, band=(0.5, 0.52))
+
+
+def test_f_c_is_not_the_peak_when_a_faster_tone_holds_more_than_the_limit():
+    t, p = _sine(freq=0.5, amp=10.0)
+    p = p + 6.0 * np.sin(2 * math.pi * 5.0 * t)  # 50 + 18 MW^2: 26 % above 0.5 Hz, over the 20 % limit
+    out = _analyse(t, p)
+    assert out["f_peak_hz"] == pytest.approx(0.5)
+    assert out["f_c_hz"] == pytest.approx(5.0, abs=2 / DURATION)
+    assert out["equivalent_oscillation"]["source"].startswith("assumed: single-sine equivalent")
+
+
 def test_a_trace_too_coarse_for_the_band_is_refused():
     t, p = _sine(freq=0.01, fs=0.1, duration=3000.0)  # Nyquist 0.05 Hz < 0.1 Hz
     with pytest.raises(S.TraceError, match="Nyquist"):
@@ -312,42 +375,86 @@ def test_a_trace_too_coarse_for_the_band_is_refused():
 
 # --- the route ------------------------------------------------------------------------------------------------------
 
-URL = "/api/network/spectrum/trace"
+URL = "/api/spectrum/trace"
+APPLY = "/api/network/spectrum/tier_split"
 
 
-def test_the_route_analyses_an_upload_without_touching_the_network(client, install_network):
+def _post(client, blob, data=None):
+    return client.post(URL, files={"file": ("trace.csv", blob, "text/csv")}, data=data or {})
+
+
+def test_the_route_analyses_an_upload_and_dry_runs_the_split_without_touching_the_network(client, install_network):
     n = install_network(_site())
-    t, p = _sine(freq=2.0)
-    r = client.post(URL, files={"file": ("trace.csv", _csv(t, p), "text/csv")})
+    undo_before = client.get("/api/network/undo/info").json()
+    r = _post(client, _csv(*_sine(freq=2.0)))
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["f_peak_hz"] == pytest.approx(2.0)
-    assert body["tier_split"]["cap"]["eligible"] and not body["tier_split"]["bess"]["eligible"]
-    assert body["applied"] is False and "smoothing_tier" not in n.stores.columns
+    assert body["tier_split"]["cap"]["after"] is True and body["tier_split"]["bess"]["after"] is False
+    assert "smoothing_tier" not in n.stores.columns
+    assert client.get("/api/network/undo/info").json() == undo_before
     assert "psd" in body and len(body["psd"]["f_hz"]) == len(body["psd"]["mw2_per_hz"]) <= S.PSD_POINTS
 
 
-def test_the_route_applies_the_tier_split_when_asked(client, install_network):
+def test_the_route_says_when_no_store_reaches_f_c(client, install_network):
     n = install_network(_site())
-    t, p = _sine(freq=2.0)
-    r = client.post(URL, files={"file": ("trace.csv", _csv(t, p), "text/csv")}, data={"apply": "true"})
+    n.remove("Store", "cap")
+    body = _post(client, _csv(*_sine(freq=2.0))).json()
+    assert not body["tier_split"]["bess"]["eligible"]
+    assert any("no split storage responds" in note for note in body["notes"])
+
+
+def test_the_tier_split_route_writes_the_flags_and_reports_before_and_after(client, install_network):
+    n = install_network(_site())
+    EF.tag_store(n, "bess", smoothing_tier=True)
+    r = client.post(APPLY, json={"f_c_hz": 2.0})
     assert r.status_code == 200, r.text
-    assert r.json()["applied"] is True
+    split = r.json()["tier_split"]
+    assert split["bess"]["before"] is True and split["bess"]["after"] is False
     assert n.stores.at["cap", "smoothing_tier"] == 1.0 and n.stores.at["bess", "smoothing_tier"] == 0.0
+    log = client.get("/api/changelog/").json()
+    assert any("Smoothing tier from f_c" in e["description"] and "changed bess" in e["description"] for e in log)
+
+
+@pytest.mark.parametrize("payload, match", [
+    ({"f_c_hz": 2.0, "latency_s": {"nope": 0.1}}, "not a split storage"),
+    ({"f_c_hz": 2.0, "latency_s": {"bess": -1}}, "> 0"),
+])
+def test_the_tier_split_route_refuses_a_bad_override(client, install_network, payload, match):
+    install_network(_site())
+    r = client.post(APPLY, json=payload)
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "bad_trace" and match in r.json()["detail"]["message"]
+
+
+def test_the_tier_split_route_refuses_a_network_without_split_storage(client, install_network):
+    n = pypsa.Network()
+    n.add("Bus", "ac")
+    install_network(n)
+    r = client.post(APPLY, json={"f_c_hz": 2.0})
+    assert r.status_code == 422 and "no split storage" in r.json()["detail"]["message"]
+
+
+def test_an_oversize_upload_is_refused(client, install_network, monkeypatch):
+    install_network(_site())
+    monkeypatch.setattr(S, "MAX_TRACE_BYTES", 1000)
+    r = _post(client, _csv(*_sine(freq=2.0)))
+    assert r.status_code == 413, r.text
 
 
 @pytest.mark.parametrize("blob, data, match", [
     (b"", {}, "empty"),
-    (b"time_s,power_mwh\n" + b"\n".join(f"{i / 10},{i}".encode() for i in range(200)), {}, "unit"),
-    (b"time_s,power_mw\n" + b"\n".join(f"{(i % 50) / 10},{i}".encode() for i in range(200)), {}, "increasing"),
+    (bytes(range(256)) * 4, {}, "binary"),
+    (b"time_s,power_mwh\n" + b"\n".join(f"{i / 10},{i}".encode() for i in range(400)), {}, "unit"),
+    (b"time_s,power_mw\n" + b"\n".join(f"{(i % 50) / 10},{i}".encode() for i in range(400)), {}, "increasing"),
     (None, {"limit": "1.5"}, "limit"),
+    (None, {"limit": "0"}, "limit"),
     (None, {"band_lo_hz": "5", "band_hi_hz": "1"}, "band"),
+    (None, {"unit": "kW"}, "disagree"),
 ])
 def test_the_route_refuses_bad_uploads_with_a_clear_error(client, install_network, blob, data, match):
     install_network(_site())
-    if blob is None:
-        blob = _csv(*_sine())
-    r = client.post(URL, files={"file": ("trace.csv", blob, "text/csv")}, data=data)
+    r = _post(client, _csv(*_sine()) if blob is None else blob, data)
     assert r.status_code == 422, r.text
     detail = r.json()["detail"]
     assert detail["error_kind"] == "bad_trace"

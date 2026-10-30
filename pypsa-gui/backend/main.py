@@ -1314,8 +1314,10 @@ app.include_router(clustering.router, prefix="/api/network", tags=["clustering"]
 # Per-period capacity bounds (vintage expansion). Sits under /api/network so
 # its mutations pick up the auto-undo + dispatch-invalidation middleware.
 app.include_router(vintage.router, prefix="/api/network", tags=["vintage"])
-# AS-09 spectrum input; under /api/network so applying the tier split gets the auto-undo middleware.
+# AS-09 spectrum input: the tier-split write sits under /api/network (lock gate, auto-undo); the trace
+# analysis changes nothing and sits outside it.
 app.include_router(spectrum.router, prefix="/api/network", tags=["spectrum"])
+app.include_router(spectrum.analysis_router, prefix="/api/spectrum", tags=["spectrum"])
 app.include_router(changelog.router, prefix="/api/changelog", tags=["changelog"])
 app.include_router(simulation.router, prefix="/api/simulation", tags=["simulation"])
 app.include_router(results.results_router, prefix="/api/results", tags=["results"])

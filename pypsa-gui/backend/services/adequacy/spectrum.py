@@ -12,18 +12,20 @@ amplitude A at a period T. A trace (time in s, active power in W, kW, MW or GW) 
 * **Band energy.** The PSD integrated over the band of concern, MW². A utility example limits content in a
   critical band of ~0.1-20 Hz to 20 % of in-band energy (Choukse et al., arXiv 2508.14318, 2025); both the
   band and the limit are "assumed" defaults the caller can change.
-* **f_c.** The lowest frequency above which at most the limit's share of the in-band energy lies. A
-  smoothing tier that cancels everything below f_c leaves the grid within the limit.
+* **f_c.** The lowest PSD bin at which the cumulative in-band share reaches 1 − limit: at most the limit's
+  share of in-band energy lies above it. A smoothing tier that cancels everything up to f_c leaves the grid
+  within the limit.
 * **Tier split.** A technology is fast enough for the band when its response latency is below about
   1/(2π f) of the band it must cancel (research note section 4; 0.32 s at T = 2 s). A split storage (AS-02)
   joins the AS-03 smoothing tier when its latency is at most 1/(2π f_c); `apply_tier_split` sets the
-  `smoothing_tier` flag that AS-03's floors read.
-* **Equivalent oscillation.** A = √(2 E_band) at T = the band's energy-weighted mean period ∑E_i/f_i / ∑E_i:
-  one sine with the trace's band energy replaces a phase's (A, T) for `floors_from_envelope`. Weighting the
-  period by energy, not taking 1/f_peak, keeps a broadband trace's slow content in the energy floor (the
-  swing A·T/π grows with T); it is still a one-sine summary of the spectrum.
+  `smoothing_tier` flag that AS-03's floors read. A store's latency comes from its converter control through
+  `smoothing.response_latency`, the control from its technology (`TECHNOLOGY_CONTROL`, assumed).
+* **Equivalent oscillation** (assumed: single-sine equivalent of a multi-tone band). A = √(2 E_band) at
+  T = the band's energy-weighted mean period ∑E_i/f_i / ∑E_i replaces a phase's (A, T) for
+  `floors_from_envelope`. Weighting the period by energy, not taking 1/f_peak, keeps a broadband trace's slow
+  content in the energy floor (the swing A·T/π grows with T); for one tone both are 1/f.
 
-The trace is read in memory and never stored (SAGC-1). Every limit is generic engineering, "assumed".
+Time is numeric seconds. The trace is read in memory and never stored (SAGC-1). Every limit is generic engineering, "assumed".
 """
 from __future__ import annotations
 
@@ -37,7 +39,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
-from services.adequacy.smoothing import LATENCY_S
+from services.adequacy.smoothing import response_latency
 
 if TYPE_CHECKING:
     import pypsa
@@ -52,26 +54,26 @@ UNITS = {"w": 1e-6, "kw": 1e-3, "mw": 1.0, "gw": 1e3}
 #: Header suffixes that name a unit, but not one of active power.
 NOT_POWER = {"wh", "kwh", "mwh", "gwh", "hz", "a", "ka", "v", "kv", "var", "kvar", "mvar", "va", "kva", "mva",
              "pu", "%", "s", "ms"}
-#: Time units the time column's header may name, in s; seconds when it names none.
-TIME_UNITS = {"s": 1.0, "ms": 1e-3, "us": 1e-6, "min": 60.0, "h": 3600.0}
-#: Header suffixes that name a unit, but not one of time.
-NOT_TIME = set(UNITS) | NOT_POWER - set(TIME_UNITS)
 #: The trace must hold this many periods of the band's low edge, so that edge is resolved past the window.
 MIN_PERIODS = 3
+#: The clipped band must hold this many PSD bins.
+MIN_BAND_BINS = 3
 MIN_SAMPLES = 8
+#: The PSD takes the whole trace as one segment, so its length is capped: 2^21 samples, about 11.6 h at 50 Hz.
+MAX_SAMPLES = 2 ** 21
+#: Upload cap for a trace, bytes: 2^21 rows of about 30 characters.
+MAX_TRACE_BYTES = 64 * 1024 * 1024
 #: Largest |P| read as plausible for one site, MW; above it the unit is likely wrong (W labelled MW).
 MAX_ABS_MW = 1e5
 #: Sampling may jitter by this share of the median interval; beyond it the PSD would need resampling.
 JITTER = 0.01
+EQUIVALENT = "assumed: single-sine equivalent of a multi-tone band (A = √(2·E_band), T energy-weighted)"
 #: Points of the PSD the route returns for a chart.
 PSD_POINTS = 512
-#: Response latency of each AS-02 storage technology, s; assumed, from the control presets'
-#: `smoothing.LATENCY_S`: a supercap and a high-C BESS behind a grid-forming converter, an energy BESS
-#: behind a grid-following one. A technology not listed is taken as grid following, as
-#: `smoothing.response_latency` does.
-TECHNOLOGY_LATENCY_S = {"supercap": LATENCY_S["gfm_droop"], "high_c_bess": LATENCY_S["gfm_droop"],
-                        "energy_bess": LATENCY_S["gfl_pq"]}
-DEFAULT_LATENCY_S = max(LATENCY_S.values())
+#: The converter control each AS-02 storage technology is taken to run, a `smoothing.LATENCY_S` key; assumed:
+#: a supercap and a high-C BESS behind a grid-forming converter, an energy BESS behind a grid-following one.
+#: A technology not listed has no known control and `smoothing.response_latency` takes it as grid following.
+TECHNOLOGY_CONTROL = {"supercap": "gfm_droop", "high_c_bess": "gfm_droop", "energy_bess": "gfl_pq"}
 
 
 class TraceError(ValueError):
@@ -107,28 +109,27 @@ def _power_scale(column: str, unit: str | None) -> float:
 
 
 def _seconds(raw: pd.Series, column: str) -> np.ndarray:
+    token = _unit_token(column)
+    if token not in ("", "s"):
+        raise TraceError(f"time column '{column}' names unit '{token}'; time must be numeric seconds "
+                         "(header 'time_s')")
     num = pd.to_numeric(raw, errors="coerce")
-    if num.notna().any():
-        token = _unit_token(column)
-        if token in NOT_TIME:
-            raise TraceError(f"time column '{column}' names unit '{token}', not a time unit "
-                             f"({', '.join(TIME_UNITS)})")
-        return num.to_numpy(float) * TIME_UNITS.get(token, 1.0)
-    stamps = pd.to_datetime(raw, errors="coerce", utc=True, format="ISO8601")
-    if stamps.isna().all():
-        raise TraceError(f"time column '{column}' holds neither seconds nor ISO timestamps")
-    secs = (stamps - stamps.dropna().iloc[0]).dt.total_seconds()
-    return secs.to_numpy(float)
+    if num.isna().all():
+        raise TraceError(f"time column '{column}' is not numeric seconds; timestamps are not read, convert "
+                         "them to seconds from the start")
+    return num.to_numpy(float)
 
 
 def read_trace(blob: bytes, unit: str | None = None) -> Trace:
-    """A trace from a CSV or TSV export: the first column is time (seconds, `_ms`, or ISO timestamps), the
-    second active power with its unit in the header suffix (`power_mw`) or `unit`. Refused, with the reason,
-    when empty, too short, not numeric, not strictly increasing, unevenly sampled, or in a wrong unit."""
+    """A trace from a UTF-8 CSV or TSV export: the first column is time in numeric seconds, the second active
+    power with its unit in the header suffix (`power_mw`) or `unit`. Refused, with the reason, when empty,
+    binary, too short or long, not numeric, not strictly increasing, unevenly sampled, or in a wrong unit."""
+    if b"\x00" in blob:
+        raise TraceError("the upload is binary, not a CSV text file")
     try:
         text = blob.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        text = blob.decode("latin-1")
+    except UnicodeDecodeError as exc:
+        raise TraceError(f"the upload is not UTF-8 text (byte {exc.start}); save it as a UTF-8 CSV") from exc
     if not text.strip():
         raise TraceError("the upload is empty")
     first = text.lstrip().splitlines()[0]
@@ -141,6 +142,9 @@ def read_trace(blob: bytes, unit: str | None = None) -> Trace:
         raise TraceError("the trace needs two columns: time, then active power")
     if frame.empty:
         raise TraceError("the trace is empty: a header but no rows")
+    if len(frame) > MAX_SAMPLES:
+        raise TraceError(f"the trace has {len(frame)} rows; at most {MAX_SAMPLES} are read, shorten or "
+                         "downsample it")
     if len(frame) < MIN_SAMPLES:
         raise TraceError(f"the trace has {len(frame)} rows; it needs at least {MIN_SAMPLES}")
     t_col, p_col = str(frame.columns[0]), str(frame.columns[1])
@@ -253,13 +257,16 @@ def analyse(trace: Trace, band=BAND_HZ, limit: float = IN_BAND_LIMIT) -> dict:
     total = float(psd.sum() * _df(f))
     if total <= 1e-12 * max(1.0, float(np.mean(p)) ** 2):
         raise TraceError("the trace is flat: no fluctuation to analyse")
-    e_band = band_energy(f, psd, lo, hi)
     m = (f >= lo) & (f <= hi)
+    e_band = band_energy(f, psd, lo, hi)
     f_peak = float(f[m][np.argmax(psd[m])])
     period = float((psd[m] / f[m]).sum() / psd[m].sum()) if psd[m].sum() > 0 else 1.0 / f_peak
     f_c = corner_frequency(f, psd, lo, hi, limit)
-    tests = [{"technology": tech, **in_band_test(f, psd, lat, (lo, hi), limit)}
-             for tech, lat in TECHNOLOGY_LATENCY_S.items()]
+    if m.sum() < MIN_BAND_BINS:
+        raise TraceError(f"the band {lo:g}-{hi:g} Hz holds {int(m.sum())} PSD bin(s) of {_df(f):g} Hz; it needs "
+                         f"{MIN_BAND_BINS}: use a longer trace or a wider band")
+    tests = [{"technology": tech, **in_band_test(f, psd, _latency(tech)["latency_s"], (lo, hi), limit)}
+             for tech in TECHNOLOGY_CONTROL]
     f_out, psd_out = _decimate(f, psd)
     return {
         "samples": int(p.size), "sample_hz": fs, "duration_s": duration, "band_hz": [lo, hi],
@@ -267,7 +274,7 @@ def analyse(trace: Trace, band=BAND_HZ, limit: float = IN_BAND_LIMIT) -> dict:
         "in_band_share": e_band / total, "limit": limit, "f_c_hz": f_c,
         "fast_latency_s": None if not f_c else latency_bound_s(f_c),
         "equivalent_oscillation": {"amplitude_mw": math.sqrt(2.0 * e_band), "period_s": period,
-                                   "frequency_hz": 1.0 / period},
+                                   "frequency_hz": 1.0 / period, "source": EQUIVALENT},
         "tests": tests, "notes": notes, "source": SOURCE,
         "psd": {"f_hz": f_out, "mw2_per_hz": psd_out},
     }
@@ -282,31 +289,64 @@ def replace_oscillation(envelope: dict, analysis: dict, cod: str | None = None) 
     eq = analysis["equivalent_oscillation"]
     for ph in phases:
         ph["oscillation"] = {**(ph.get("oscillation") or {}), "amplitude_mw": eq["amplitude_mw"],
-                             "period_s": eq["period_s"], "frequency_hz": eq["frequency_hz"], "source": "trace"}
+                             "period_s": eq["period_s"], "frequency_hz": eq["frequency_hz"], "source": "trace",
+                             "basis": EQUIVALENT}
+    return out
+
+
+def _latency(technology: str) -> dict:
+    """`smoothing.response_latency` of a converter running the technology's assumed control."""
+    return response_latency(technology, {"control": TECHNOLOGY_CONTROL.get(technology)})
+
+
+def _overrides(latency: dict[str, float] | None, stores) -> dict[str, float]:
+    out = {}
+    for name, value in (latency or {}).items():
+        if name not in stores:
+            raise TraceError(f"latency override names '{name}', which is not a split storage on the network")
+        v = float(value)
+        if not (math.isfinite(v) and v > 0):
+            raise TraceError(f"latency override for '{name}' must be a finite number > 0 s, got {value}")
+        out[name] = v
     return out
 
 
 def tier_split(n: pypsa.Network, f_c_hz: float, latency: dict[str, float] | None = None) -> dict:
-    """Per AS-02 split storage: its technology, latency and whether it reaches f_c (latency <= 1/(2π f_c))."""
+    """Per AS-02 split storage: technology, latency and its basis, the bound 1/(2π f_c), whether it reaches f_c,
+    and its `smoothing_tier` flag before and after the split (`before` None when never set). Changes nothing."""
+    from services.solver.envelope_floors import STORE_COLUMNS
     from services.solver.split_storage import split_storage_tags
 
     if not (math.isfinite(f_c_hz) and f_c_hz > 0):
         raise TraceError(f"f_c must be > 0 Hz, got {f_c_hz}")
     tags = split_storage_tags(n)
     if tags is None:
+        if latency:
+            _overrides(latency, ())
         return {}
+    override = _overrides(latency, tags.index)
     bound = latency_bound_s(f_c_hz)
-    latency = latency or {}
+    flag = STORE_COLUMNS[0]
     out = {}
     for name, tech in tags["storage_technology"].items():
-        lat = float(latency.get(name, TECHNOLOGY_LATENCY_S.get(tech, DEFAULT_LATENCY_S)))
-        out[name] = {"technology": tech, "latency_s": lat, "latency_bound_s": bound, "eligible": lat <= bound}
+        if name in override:
+            lat, basis = override[name], "given"
+        else:
+            r = _latency(tech)
+            lat, basis = r["latency_s"], f"{r['basis']}, assumed for {tech}"
+        old = n.stores.at[name, flag] if flag in n.stores.columns else math.nan
+        eligible = lat <= bound
+        reason = (f"responds in {lat:g} s, within 1/(2π f_c) = {bound:.3g} s" if eligible else
+                  f"responds in {lat:g} s, slower than 1/(2π f_c) = {bound:.3g} s")
+        out[name] = {"technology": tech, "latency_s": lat, "latency_basis": basis, "latency_bound_s": bound,
+                     "eligible": eligible, "before": None if pd.isna(old) else bool(old), "after": eligible,
+                     "reason": reason}
     return out
 
 
 def apply_tier_split(n: pypsa.Network, f_c_hz: float, latency: dict[str, float] | None = None) -> dict:
     """Set AS-03's `smoothing_tier` flag on each split storage from `tier_split`: on when it reaches f_c, off
-    when it does not. Other Stores are left alone."""
+    when it does not, overwriting a flag set earlier (the table reports `before`). Other Stores are left alone."""
     from services.solver.envelope_floors import tag_store
 
     split = tier_split(n, f_c_hz, latency)
