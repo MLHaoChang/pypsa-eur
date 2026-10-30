@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-# AS-13 — PCS/STATCOM sizes over every rolling window or myopic period
+# AS-14 — PCS/STATCOM sizes over every rolling window or myopic period
 
 Status: needs-triage
 Type: task
