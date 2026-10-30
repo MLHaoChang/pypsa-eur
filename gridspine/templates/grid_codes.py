@@ -119,7 +119,7 @@ A profile may carry these optional keys:
     must ride through: ``v_min`` < 1 < ``v_max`` (per unit) for ``duration_s``
     seconds. ``stage1_ds_over_ssc_pct`` is the IEC TR 61000-3-7 Stage 1 limit on
     the load step over the short-circuit power, (dS/S_sc)max in %, for
-    ``r_max_per_min`` changes per minute or fewer (both positive). ``ride_through_transfer_counts``
+    fewer than ``r_max_per_min`` changes per minute (both positive). ``ride_through_transfer_counts``
     is true when the profile accepts transfer to BESS or a genset as
     ride-through; false or absent, intent D (no UPS) is warned
     (``ride_through_transfer_warning``). ``load_variation_limits`` returns all

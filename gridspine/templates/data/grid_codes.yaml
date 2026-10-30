@@ -136,7 +136,7 @@ profiles:
     stage1_ds_over_ssc_pct:
       value: 0.4
       r_max_per_min: 10
-      clause: "IEC TR 61000-3-7 Stage 1 (dS/S_sc)max, 0.4 % for r < 10 changes per minute, as read by GK A; this session could not read the paywalled text, so not verified"
+      clause: "IEC TR 61000-3-7 Stage 1: (dS/S_sc)max by rate band, 0.4 % for r < 10 changes per minute (0.2 % for 10 to 200, 0.1 % above 200); not checked against the text here, so assumed"
       source: assumed
     ride_through_transfer_counts:
       value: false
@@ -232,7 +232,7 @@ profiles:
     stage1_ds_over_ssc_pct:
       value: 0.4
       r_max_per_min: 10
-      clause: "IEC TR 61000-3-7 Stage 1 (dS/S_sc)max, 0.4 % for r < 10 changes per minute, as read by GK A; this session could not read the paywalled text, so not verified"
+      clause: "IEC TR 61000-3-7 Stage 1: (dS/S_sc)max by rate band, 0.4 % for r < 10 changes per minute (0.2 % for 10 to 200, 0.1 % above 200); not checked against the text here, so assumed"
       source: assumed
     ride_through_transfer_counts:
       value: false
