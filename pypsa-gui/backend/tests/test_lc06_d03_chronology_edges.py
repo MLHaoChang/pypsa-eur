@@ -19,7 +19,9 @@ Upload guards (ticket 33, ``LC-D03.upload_guards``), on a four-snapshot network:
 - a CSV missing 02:00 is stored and the gap is forward-filled (1, 2, 2, 4), named in
   ``filled_snapshots``;
 - a CSV wholly outside the horizon is refused as ``timeseries_outside_horizon`` and the
-  snapshots are unchanged, unless ``replace_horizon=True`` confirms the replacement.
+  snapshots are unchanged, unless ``replace_horizon=True`` confirms the replacement;
+- the first upload to a blank network (PyPSA's placeholder ``now`` snapshot) is accepted
+  and the snapshots become the CSV's.
 """
 # ruff: noqa: F811 -- shared public harness fixtures
 import pandas as pd
@@ -145,3 +147,15 @@ def test_an_off_horizon_csv_replaces_the_snapshots_once_confirmed(alpha):
                                     replace_horizon=True))
     assert result["rows"] == 2
     assert len(PyPSAService.get_network().snapshots) == 2
+
+
+def test_the_first_upload_to_a_blank_network_adopts_the_csv_range(alpha, install_network):
+    n = pypsa.Network()
+    n.add("Bus", "B1", v_nom=110)
+    n.add("Load", "L1", bus="B1", p_set=5)
+    assert not isinstance(n.snapshots, pd.DatetimeIndex)
+    install_network(n)
+    csv = "snapshot,L1\n2026-06-01 00:00,8\n2026-06-01 01:00,9\n"
+    assert chat_tools.upload_timeseries("loads", "L1", "p_set", csv)["rows"] == 2
+    assert [str(t) for t in PyPSAService.get_network().snapshots] == [
+        "2026-06-01 00:00:00", "2026-06-01 01:00:00"]

@@ -1351,7 +1351,11 @@ async def upload_timeseries(
                        "timestamp may appear once. Nothing was stored.",
         })
     filled: list[str] = []
-    if period is None and not is_multi and len(n.snapshots) and len(df.index):
+    # Only a real horizon is guarded: a blank or reset network still holds
+    # PyPSA's placeholder 'now' snapshot (not a DatetimeIndex), and its first
+    # upload legitimately adopts the CSV's range.
+    if (period is None and not is_multi and isinstance(n.snapshots, pd.DatetimeIndex)
+            and len(n.snapshots) and len(df.index)):
         overlap = df.index.intersection(n.snapshots)
         if not len(overlap):
             if not replace_horizon:
