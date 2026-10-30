@@ -711,6 +711,7 @@ export const KIND_COPY: Record<
   wrong_replica: { title: 'This chat belongs to another application worker' },
   assurance_publication_failed: { title: 'The checked answer could not be published' },
   assurance_access_revoked: { title: 'You no longer have access to this project' },
+  assurance_project_deleted: { title: 'This project was deleted' },
   source_gap_followup_unavailable: { title: 'Prepare this follow-up again',
     body: 'Refresh Activity and inspect the source gap before preparing a new checked request.' },
   invalid_source_gap_followup: { title: 'This follow-up requires the exact checked request' },
@@ -808,7 +809,7 @@ export const TOOL_ERROR_BANNER_KINDS = new Set([
   'solver_in_flight', 'parallel_destructive_not_allowed',
   'tool_call_cap_exceeded',
   'assurance_unavailable', 'assurance_context_changed', 'assurance_context_persistence_failed', 'assurance_publication_failed',
-  'assurance_access_revoked',
+  'assurance_access_revoked', 'assurance_project_deleted',
   'wrong_replica',
   'task_checkpoint_failed',
   // `set_active_profile` raises these as HTTPExceptions, which the dispatcher

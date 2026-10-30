@@ -21,12 +21,18 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - Separators: "›" (U+203A) only for links that go somewhere; "·" separates data; a colon in sentences. Disabled reasons are visible text.
 - One entry point per feature, one bulk action, no duplicate buttons (owner decision UX-flow).
 - A UI PR needs screenshots of each state, in Guided and Expert.
+  - Waived for a text-only change inside an existing banner or layout that already has shots in both modes (#894, #929, #971).
+  - For text swaps, a shot harness that mocks the component is acceptable (#917, #928).
 - No Python-repr quotes (`{x!r}`, `Line 'L1'`) in user-visible text, refusals and chat tool results included: plain words, or curly quotes “…”.
 - A colon, not an em dash, joins clauses in a sentence, refusals included.
 - Freshness wording is "out of date" (as `ResultState` says), never "stale".
 - Card labels reuse the owning panel's own word map (for example `FIELD_WORDS`, `CARD_GROUPS`), with a parity test that fails when the two drift.
 - Guided edit cards cap the headline at 4 lines (`HEADLINE_CAP`, #784), and show all lines when the cap would hide only one.
 - A background run never jumps to another panel on its own when it finishes; offer a "›" link through `withReturnFrom` instead.
+- A refusal message names only actions its real caller can take. When the GUI never shows it, the chat tool's own arguments decide what it may name (#951).
+- Activity (POLISH-PW-2): show the "Outcome: <word>" line only when the native state adds something to the plain status.
+- The FMEA criticality label is "Criticality (€ per year)" (POLISH-PW-2).
+- The turn check mark is muted, is cleared when the turn ends, and shares `ANSWER_NOT_CHECKED` (#946).
 
 ## Master merges
 

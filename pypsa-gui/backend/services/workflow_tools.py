@@ -511,6 +511,13 @@ def _network_input_fingerprint(ctx, *, exact=False):
     if tags is not None:
         parts.append("split-storage/1")
         parts.append(_exact_frame_json(tags) if exact else tags.to_json())
+    # AS-03: the envelope-floor flags and run-hour caps, likewise only when present.
+    from services.solver.envelope_floors import GENERATOR_COLUMNS, STORE_COLUMNS
+    for frame, cols in ((n.stores, STORE_COLUMNS), (n.generators, GENERATOR_COLUMNS)):
+        present = [c for c in cols if c in frame.columns]
+        if present:
+            parts.append("envelope-floors/1")
+            parts.append(_exact_frame_json(frame[present]) if exact else frame[present].to_json())
     # AS-05: the PCS/STATCOM tags and their costs change the LP rows and the
     # objective. Appended only when a Store or Link carries one.
     from services.solver.pcs_statcom import pcs_statcom_tags

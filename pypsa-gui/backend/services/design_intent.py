@@ -10,6 +10,16 @@ import math
 
 from models.design_intent import DesignIntentSpec
 
+try:
+    from gridspine.templates.grid_codes import ride_through_transfer_warning
+except ImportError:                             # pragma: no cover - build-shape branch
+    # The frozen app may ship without gridspine (see gridspine_service); the same rule, minus the clause.
+    def ride_through_transfer_warning(profile: dict):
+        if (profile.get("ride_through_transfer_counts") or {}).get("value") is True:
+            return None
+        return ("This grid code may not count transfer to BESS or a genset as ride-through, so a design "
+                "without a UPS may not comply.")
+
 
 def _check_critical(critical_mw: float) -> float:
     if not (math.isfinite(critical_mw) and critical_mw > 0):
@@ -53,8 +63,9 @@ def technology_bounds(spec: DesignIntentSpec, critical_mw: float) -> dict[str, d
 
 def grid_code_warnings(spec: DesignIntentSpec, profile: dict) -> list[str]:
     """Intent D: warn unless the profile accepts transfer to BESS as ride-through
-    (AS-NOUPS-1). A missing key counts as not accepted. Never blocks."""
-    if spec.intent != "D" or profile.get("bess_transfer_ride_through") is True:
+    (AS-NOUPS-1), by its ``ride_through_transfer_counts`` key. A missing key
+    counts as not accepted. Never blocks."""
+    if spec.intent != "D":
         return []
-    return ["Intent D (no UPS): the grid-code profile does not accept transfer to "
-            "BESS as ride-through; the BESS must bridge in parallel without transfer."]
+    warning = ride_through_transfer_warning(profile)
+    return [warning] if warning else []

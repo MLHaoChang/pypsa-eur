@@ -27,7 +27,7 @@ from services.solver_service import SolverConfig
 URL = "/api/results/workbook.xlsx"
 NETWORK_VIEWS = ["capex", "dispatch", "flows", "loadshape", "storage", "curtailment",
                  "lostload", "prices", "economics", "emissions"]
-TITLES = {"capex": "Capacity Expansion", "dispatch": "Dispatch", "flows": "Energy flow",
+TITLES = {"capex": "Capacity expansion", "dispatch": "Dispatch", "flows": "Energy flow",
           "loadshape": "Load shape", "storage": "Storage cycling", "curtailment": "Curtailment",
           "lostload": "Lost load", "prices": "Prices", "economics": "Economics",
           "emissions": "Emissions"}
@@ -129,7 +129,7 @@ def test_each_views_key_figures_equal_its_routes_payload(client, install_network
         w2 = [float(w.iloc[i]) for i in range(len(w)) if n.snapshots[i][0] == 2040]
 
         cb, ebc = get("cost_breakdown"), get("economics_by_carrier")
-        ws = wb["Capacity Expansion"]
+        ws = wb["Capacity expansion"]
         assert _approx(_key(ws, "Capex (annualised)", HORIZON), cb["capex"])
         assert _approx(_key(ws, "Total system cost", HORIZON), cb["total"])
         cb2 = next(b for b in cb["by_period"] if b["period"] == 2040)
