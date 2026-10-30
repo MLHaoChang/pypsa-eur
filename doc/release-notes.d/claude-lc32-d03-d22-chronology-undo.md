@@ -1,0 +1,1 @@
+* Test(pypsa-gui): Assistant behaviour coverage for chronology edge cases (LC-D03: leap day, a DST date and out-of-order timestamps) and undo/checkpoints (LC-D22: input fingerprints before and after, results not resurrected). The untested annex items stay as pending rows (upload guards with LC-33, time zones, undo concurrency gates).

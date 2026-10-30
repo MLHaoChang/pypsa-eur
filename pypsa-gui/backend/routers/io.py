@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import io
 import pathlib
 import tempfile
@@ -65,11 +66,65 @@ def export_netcdf():
     )
 
 
+# EXPORT-INJECT-1: a spreadsheet runs a cell starting with one of these as a
+# formula (OWASP CSV injection). A string cell gets a leading single quote; a
+# number, negative ones included, stays a number.
+_FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _is_number(text: str) -> bool:
+    try:
+        float(text)
+    except ValueError:
+        return False
+    return True
+
+
+def _escape_formula(value):
+    if isinstance(value, str) and value.startswith(_FORMULA_TRIGGERS) and not _is_number(value):
+        return "'" + value
+    return value
+
+
+def _unescape_formula(value):
+    """The GUI's own imports undo `_escape_formula`, so an export round-trips."""
+    if isinstance(value, str) and value.startswith("'") and _escape_formula(value[1:]) != value[1:]:
+        return value[1:]
+    return value
+
+
+def _map_csv_folder(folder, fn) -> None:
+    for f in pathlib.Path(folder).rglob("*.csv"):
+        with f.open(newline="", encoding="utf-8") as fh:
+            rows = [[fn(cell) for cell in row] for row in csv.reader(fh)]
+        with f.open("w", newline="", encoding="utf-8") as fh:
+            csv.writer(fh, lineterminator="\n").writerows(rows)
+
+
+def _map_xlsx_strings(path, fn, data_only: bool = False) -> None:
+    """Apply `fn` to every text cell; a formula cell counts as text, so a
+    formula the export would have written becomes an escaped string. An
+    import passes `data_only`: a workbook saved by Excel keeps each formula's
+    cached value, as PyPSA's own reader would see it."""
+    import openpyxl
+    wb = openpyxl.load_workbook(str(path), data_only=data_only)
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                if cell.data_type in ("s", "f") and isinstance(cell.value, str):
+                    new = fn(cell.value)
+                    if new != cell.value or cell.data_type == "f":
+                        cell.value = new
+                        cell.data_type = "s"
+    wb.save(str(path))
+
+
 def _export_csv_zip_bytes() -> bytes:
     n = PyPSAService.get_network()
     buf = io.BytesIO()
     with tempfile.TemporaryDirectory() as tmpdir:
         n.export_to_csv_folder(tmpdir)
+        _map_csv_folder(tmpdir, _escape_formula)
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
             for f in pathlib.Path(tmpdir).rglob("*"):
                 if f.is_file():
@@ -96,6 +151,7 @@ def _export_excel_bytes() -> bytes:
         # is not a workbook; let its writer create the file instead.
         tmp.unlink()
         n.export_to_excel(str(tmp))
+        _map_xlsx_strings(tmp, _escape_formula)
         data = tmp.read_bytes()
     except AttributeError:
         # Fallback: write each component DataFrame as a sheet
@@ -112,6 +168,7 @@ def _export_excel_bytes() -> bytes:
                 for row in rows:
                     ws.append(row)
         wb.save(str(tmp))
+        _map_xlsx_strings(tmp, _escape_formula)
         data = tmp.read_bytes()
     finally:
         tmp.unlink(missing_ok=True)
@@ -292,6 +349,7 @@ async def import_csv(
     with tempfile.TemporaryDirectory() as tmpdir:
         with _zip.ZipFile(io.BytesIO(data)) as zf:
             safe_extract(zf, tmpdir)
+        _map_csv_folder(tmpdir, _unescape_formula)
         with PyPSAService.get_lock():
             _reset_with_ts_clear()
             n = PyPSAService.get_network()
@@ -333,6 +391,7 @@ async def import_excel(
             with tempfile.TemporaryDirectory() as directory:
                 native_file = pathlib.Path(directory) / "network.xlsx"
                 native_file.write_bytes(data)
+                _map_xlsx_strings(native_file, _unescape_formula, data_only=True)
                 n.import_from_excel(str(native_file), engine="openpyxl")
         else:
             for sheet_name in wb.sheetnames:
@@ -342,7 +401,7 @@ async def import_excel(
                 ws = wb[sheet_name]
                 headers = [cell.value for cell in next(ws.iter_rows(min_row=1, max_row=1))]
                 for row in ws.iter_rows(min_row=2, values_only=True):
-                    row_dict = dict(zip(headers, row))
+                    row_dict = dict(zip(headers, map(_unescape_formula, row)))
                     name = row_dict.pop("name", row_dict.pop(headers[0], None))
                     if name:
                         try:

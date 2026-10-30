@@ -38,6 +38,7 @@ import { GuideButton, useGuide } from '../../components/GuidedTour'
 import { prepareTaggingTour } from './prepareTaggingTour'
 import { InfoTip } from '../../layout/properties/cardKit'
 import type { ZeroReason } from './fmea'
+import { CRITICALITY_PER_YEAR_LABEL } from './fmea'
 
 const ARCHETYPES: { id: EhArchetype; label: string; blurb: string }[] = [
   {
@@ -1888,7 +1889,7 @@ export function EhReferenceDesignPanel() {
                           <th className="text-right font-medium py-1 pr-3">#</th>
                           <th className="text-left font-medium py-1 pr-3">Class</th>
                           <th className="text-left font-medium py-1 pr-3">Component</th>
-                          <th className="text-right font-medium py-1 pr-3">Criticality €/yr</th>
+                          <th className="text-right font-medium py-1 pr-3">{CRITICALITY_PER_YEAR_LABEL}</th>
                           <th className="text-right font-medium py-1 pr-3">Occ./yr</th>
                           <th className="text-right font-medium py-1">ΔEUE (MWh)</th>
                         </tr>
