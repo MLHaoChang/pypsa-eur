@@ -35,6 +35,8 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "solver/adequacy.py": (3, "EH import-energy cap: E MWh/yr × Σ w / 8760 per period "
                               "(formula, code, message) — a unit"),
     "solver_service.py": (1, "comment restating the solver/adequacy.py cap formula"),
+    "solver/envelope_floors.py": (4, "AS-03 genset run-hour cap: H h/yr × Σ w / 8760 per period "
+                                     "(docstring, code) and the cap's [0, 8760] h/yr range — a unit"),
     "asset_results/compute.py": (2, "prose explaining why Σweights/8760 is avoided"),
     "asset_schema/fields.py": (1, "MTTR help text restating the occurrence.py formula "
                                   "(8760 × rate / MTTR events/yr) — prose, a unit (S1a)"),
@@ -162,6 +164,7 @@ def test_the_inventory_is_pinned():
     # G-a: profile_gen/compare.py (1) annualises weighted CF in calendar-year hours.
     # LC-18: harness/sensitivity_comparison.py (1) annualises in h/yr.
     # G2P-10: solver/process_uc.py (1) recognises the hourly year time base.
-    assert sum(c for c, _ in ALLOWED.values()) == 88
-    assert len(ALLOWED) == 47
+    # AS-03: solver/envelope_floors.py (4) prorates the annual run-hour cap.
+    assert sum(c for c, _ in ALLOWED.values()) == 92
+    assert len(ALLOWED) == 48
     assert all(reason for _, reason in ALLOWED.values())
