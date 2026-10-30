@@ -239,7 +239,7 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         'id': 'power_trace_spectrum',
         'title': 'Power-trace spectrum and smoothing-tier split',
         'disposition': 'unbuilt',
-        'reason': 'Reading a power trace into a PSD, f_c and the smoothing-tier split is not available from chat or a screen yet (AS-09); it is an API route for now.',
+        'reason': 'Reading a power trace into a PSD, f_c and the smoothing-tier split is not available from chat or a screen yet; it is an API route for now.',
         'page': 'API: POST /api/network/spectrum/trace',
         'panel': None,
         'keywords': frozenset({

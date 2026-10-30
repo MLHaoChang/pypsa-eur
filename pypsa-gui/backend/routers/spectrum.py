@@ -55,4 +55,7 @@ async def upload_trace(
                 f"Spectrum f_c {f_c:.3g} Hz (latency bound {out['fast_latency_s']:.3g} s): "
                 f"smoothing tier {', '.join(fast) or 'none'}; trace not stored.")
         out["tier_split"], out["applied"] = split, True
+    if out["tier_split"] and not any(v["eligible"] for v in out["tier_split"].values()):
+        out["notes"].append(f"no split storage responds within {out['fast_latency_s']:.3g} s, so none can sit in "
+                            "the smoothing tier; a power or energy floor is refused until one can")
     return out

@@ -18,8 +18,10 @@ amplitude A at a period T. A trace (time in s, active power in W, kW, MW or GW) 
   1/(2π f) of the band it must cancel (research note section 4; 0.32 s at T = 2 s). A split storage (AS-02)
   joins the AS-03 smoothing tier when its latency is at most 1/(2π f_c); `apply_tier_split` sets the
   `smoothing_tier` flag that AS-03's floors read.
-* **Equivalent oscillation.** A = √(2 E_band), T = 1/f_peak, the sine with the trace's band energy at its
-  peak frequency, replaces a phase's (A, T) for `floors_from_envelope`.
+* **Equivalent oscillation.** A = √(2 E_band) at T = the band's energy-weighted mean period ∑E_i/f_i / ∑E_i:
+  one sine with the trace's band energy replaces a phase's (A, T) for `floors_from_envelope`. Weighting the
+  period by energy, not taking 1/f_peak, keeps a broadband trace's slow content in the energy floor (the
+  swing A·T/π grows with T); it is still a one-sine summary of the spectrum.
 
 The trace is read in memory and never stored (SAGC-1). Every limit is generic engineering, "assumed".
 """
@@ -51,7 +53,11 @@ UNITS = {"w": 1e-6, "kw": 1e-3, "mw": 1.0, "gw": 1e3}
 NOT_POWER = {"wh", "kwh", "mwh", "gwh", "hz", "a", "ka", "v", "kv", "var", "kvar", "mvar", "va", "kva", "mva",
              "pu", "%", "s", "ms"}
 #: Time units the time column's header may name, in s; seconds when it names none.
-TIME_UNITS = {"s": 1.0, "ms": 1e-3}
+TIME_UNITS = {"s": 1.0, "ms": 1e-3, "us": 1e-6, "min": 60.0, "h": 3600.0}
+#: Header suffixes that name a unit, but not one of time.
+NOT_TIME = set(UNITS) | NOT_POWER - set(TIME_UNITS)
+#: The trace must hold this many periods of the band's low edge, so that edge is resolved past the window.
+MIN_PERIODS = 3
 MIN_SAMPLES = 8
 #: Largest |P| read as plausible for one site, MW; above it the unit is likely wrong (W labelled MW).
 MAX_ABS_MW = 1e5
@@ -103,7 +109,11 @@ def _power_scale(column: str, unit: str | None) -> float:
 def _seconds(raw: pd.Series, column: str) -> np.ndarray:
     num = pd.to_numeric(raw, errors="coerce")
     if num.notna().any():
-        return num.to_numpy(float) * TIME_UNITS.get(_unit_token(column), 1.0)
+        token = _unit_token(column)
+        if token in NOT_TIME:
+            raise TraceError(f"time column '{column}' names unit '{token}', not a time unit "
+                             f"({', '.join(TIME_UNITS)})")
+        return num.to_numpy(float) * TIME_UNITS.get(token, 1.0)
     stamps = pd.to_datetime(raw, errors="coerce", utc=True, format="ISO8601")
     if stamps.isna().all():
         raise TraceError(f"time column '{column}' holds neither seconds nor ISO timestamps")
@@ -158,6 +168,11 @@ def read_trace(blob: bytes, unit: str | None = None) -> Trace:
     return Trace(t, p)
 
 
+def latency_bound_s(f_hz: float) -> float:
+    """The slowest response that still cancels content at f: 1/(2π f), s. Also the reach of a latency, Hz."""
+    return 1.0 / (2.0 * math.pi * f_hz)
+
+
 def spectrum(t_s, p_mw) -> tuple[np.ndarray, np.ndarray]:
     """(f in Hz, one-sided PSD in MW²/Hz) of the mean-removed trace: one Hann-windowed segment."""
     from scipy.signal import welch
@@ -193,7 +208,7 @@ def corner_frequency(f, psd, lo: float, hi: float, limit: float) -> float | None
 def in_band_test(f, psd, latency_s: float, band=BAND_HZ, limit: float = IN_BAND_LIMIT) -> dict:
     """What a tier of latency τ leaves: the band energy above its reach 1/(2πτ), as a share of the band."""
     lo, hi = band
-    reach = 1.0 / (2.0 * math.pi * latency_s)
+    reach = latency_bound_s(latency_s)
     total = band_energy(f, psd, lo, hi)
     left = band_energy(f, psd, max(lo, np.nextafter(reach, math.inf)), hi) if reach < hi else 0.0
     share = left / total if total > 0 else 0.0
@@ -228,9 +243,9 @@ def analyse(trace: Trace, band=BAND_HZ, limit: float = IN_BAND_LIMIT) -> dict:
     if nyquist <= lo:
         raise TraceError(f"sampled at {fs:g} Hz, its Nyquist frequency {nyquist:g} Hz is at or below the "
                          f"band's {lo:g} Hz; sample faster")
-    if duration < 1.0 / lo:
+    if duration < MIN_PERIODS / lo:
         raise TraceError(f"the trace lasts {duration:g} s, too short to resolve {lo:g} Hz (needs "
-                         f"{1.0 / lo:g} s)")
+                         f"{MIN_PERIODS / lo:g} s, {MIN_PERIODS} periods)")
     if nyquist < hi:
         notes.append(f"band clipped at the Nyquist frequency {nyquist:g} Hz (sampled at {fs:g} Hz)")
         hi = nyquist
@@ -241,6 +256,7 @@ def analyse(trace: Trace, band=BAND_HZ, limit: float = IN_BAND_LIMIT) -> dict:
     e_band = band_energy(f, psd, lo, hi)
     m = (f >= lo) & (f <= hi)
     f_peak = float(f[m][np.argmax(psd[m])])
+    period = float((psd[m] / f[m]).sum() / psd[m].sum()) if psd[m].sum() > 0 else 1.0 / f_peak
     f_c = corner_frequency(f, psd, lo, hi, limit)
     tests = [{"technology": tech, **in_band_test(f, psd, lat, (lo, hi), limit)}
              for tech, lat in TECHNOLOGY_LATENCY_S.items()]
@@ -249,9 +265,9 @@ def analyse(trace: Trace, band=BAND_HZ, limit: float = IN_BAND_LIMIT) -> dict:
         "samples": int(p.size), "sample_hz": fs, "duration_s": duration, "band_hz": [lo, hi],
         "f_peak_hz": f_peak, "band_energy_mw2": e_band, "total_energy_mw2": total,
         "in_band_share": e_band / total, "limit": limit, "f_c_hz": f_c,
-        "fast_latency_s": None if not f_c else 1.0 / (2.0 * math.pi * f_c),
-        "equivalent_oscillation": {"amplitude_mw": math.sqrt(2.0 * e_band), "period_s": 1.0 / f_peak,
-                                   "frequency_hz": f_peak},
+        "fast_latency_s": None if not f_c else latency_bound_s(f_c),
+        "equivalent_oscillation": {"amplitude_mw": math.sqrt(2.0 * e_band), "period_s": period,
+                                   "frequency_hz": 1.0 / period},
         "tests": tests, "notes": notes, "source": SOURCE,
         "psd": {"f_hz": f_out, "mw2_per_hz": psd_out},
     }
@@ -279,7 +295,7 @@ def tier_split(n: pypsa.Network, f_c_hz: float, latency: dict[str, float] | None
     tags = split_storage_tags(n)
     if tags is None:
         return {}
-    bound = 1.0 / (2.0 * math.pi * f_c_hz)
+    bound = latency_bound_s(f_c_hz)
     latency = latency or {}
     out = {}
     for name, tech in tags["storage_technology"].items():
@@ -295,7 +311,8 @@ def apply_tier_split(n: pypsa.Network, f_c_hz: float, latency: dict[str, float] 
 
     split = tier_split(n, f_c_hz, latency)
     if not split:
-        raise TraceError("the network has no AS-02 split storage to put in the smoothing tier")
+        raise TraceError("the network has no split storage (a Store with charger and discharger links) to put "
+                         "in the smoothing tier")
     for name, row in split.items():
         tag_store(n, name, smoothing_tier=row["eligible"])
     return split

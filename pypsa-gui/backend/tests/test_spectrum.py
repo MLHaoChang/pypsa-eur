@@ -83,7 +83,9 @@ def test_f_c_leaves_at_most_the_limit_of_in_band_energy_above_it():
     t, p = _sine(freq=0.5, amp=10.0)
     p = p + 5.0 * np.sin(2 * math.pi * 4.0 * t)  # 50 + 12.5 MW^2: the 4 Hz tone is 20 % of the band
     out = _analyse(t, p, limit=0.25)
-    assert out["f_c_hz"] == pytest.approx(0.5, abs=0.01)    # cancelling up to 0.5 Hz leaves 20 % <= 25 %
+    # Above the 0.5 Hz tone: the 4 Hz tone (20 %) plus the Hann window's upper side bin of 0.5 Hz, over 25 %;
+    # one bin up only the 4 Hz tone is left, so f_c sits within a bin of 0.5 Hz.
+    assert out["f_c_hz"] == pytest.approx(0.5, abs=0.01)
     out = _analyse(t, p, limit=0.10)
     assert out["f_c_hz"] == pytest.approx(4.0, abs=0.01)    # 20 % > 10 %: the tier must reach 4 Hz
 
@@ -125,11 +127,23 @@ def test_the_trace_replaces_a_phase_oscillation_and_the_floors_read_it():
     new = S.replace_oscillation(env, out, cod="2030-01-01")
     osc = new["phases"][1]["oscillation"]
     assert osc["amplitude_mw"] == pytest.approx(10.0, rel=1e-3)   # sqrt(2 x 50 MW^2)
-    assert osc["period_s"] == pytest.approx(4.0, rel=1e-6)
+    assert osc["period_s"] == pytest.approx(4.0, rel=1e-4)  # the window's side bins move it by ~1e-5
     assert osc["source"] == "trace"
     assert new["phases"][0]["oscillation"]["amplitude_mw"] == 3.0  # the other phase keeps its (A, T)
     assert env["phases"][1]["oscillation"]["amplitude_mw"] == 4.0  # the input is not changed
     assert EF.floors_from_envelope(new, 10.0)["power_floor_mw"] == pytest.approx(40.0, rel=1e-3)
+
+
+def test_a_broadband_trace_takes_the_energy_weighted_period_not_the_peak():
+    t, p = _sine(freq=0.5, amp=10.0)
+    p = p + 5.0 * np.sin(2 * math.pi * 4.0 * t)  # 50 MW^2 at 2 s, 12.5 MW^2 at 0.25 s
+    eq = _analyse(t, p)["equivalent_oscillation"]
+    assert eq["amplitude_mw"] == pytest.approx(math.sqrt(2 * 62.5), rel=1e-3)
+    assert eq["period_s"] == pytest.approx((50.0 * 2.0 + 12.5 * 0.25) / 62.5, rel=2e-3)
+    t, p = _sine(freq=4.0, amp=10.0)
+    p = p + 5.0 * np.sin(2 * math.pi * 0.25 * t)  # the peak is at 4 Hz; the slow tone still lengthens T
+    eq = _analyse(t, p)["equivalent_oscillation"]
+    assert eq["period_s"] > 1.0 / 4.0 * 3
 
 
 def test_without_a_cod_every_phase_takes_the_trace():
@@ -165,6 +179,15 @@ def test_a_two_hertz_f_c_puts_the_fast_store_in_the_tier_and_the_slow_one_out():
     assert EF.refusals(n, {"power_floor_mw": 1.0}) == []
 
 
+def test_the_route_says_when_no_store_reaches_f_c(client, install_network):
+    n = install_network(_site())
+    n.remove("Store", "cap")
+    t, p = _sine(freq=2.0)
+    body = client.post(URL, files={"file": ("trace.csv", _csv(t, p), "text/csv")}).json()
+    assert not body["tier_split"]["bess"]["eligible"]
+    assert any("no split storage responds" in note for note in body["notes"])
+
+
 def test_a_slow_band_lets_any_bess_in_the_tier():
     n = _site()
     split = S.apply_tier_split(n, 0.5)  # reach 0.32 s, as in the prototype at T = 2 s
@@ -181,7 +204,7 @@ def test_a_latency_override_moves_a_store_across_the_split():
 def test_a_network_without_split_storage_has_nothing_to_split():
     n = pypsa.Network()
     n.add("Bus", "ac")
-    with pytest.raises(S.TraceError, match="no AS-02 split storage"):
+    with pytest.raises(S.TraceError, match="no split storage"):
         S.apply_tier_split(n, 0.5)
 
 
@@ -193,6 +216,12 @@ def test_a_clean_csv_reads_and_converts_kw_to_mw():
     assert np.allclose(tr.p_mw, p) and np.allclose(tr.t_s, t)
     tr = S.read_trace(_csv(t, p * 1e6, header="t,p"), unit="W")
     assert np.allclose(tr.p_mw, p)
+
+
+def test_a_time_column_in_milliseconds_reads_as_seconds():
+    t, p = _sine(duration=60.0)
+    tr = S.read_trace(_csv(t * 1000.0, p, header="time_ms,power_mw"))
+    assert np.allclose(tr.t_s, t)
 
 
 def test_iso_timestamps_read_as_seconds():
@@ -227,6 +256,7 @@ def test_a_repeated_timestamp_is_refused():
 
 
 @pytest.mark.parametrize("header, unit, match", [
+    ("time_mw,power_mw", None, "not a time unit"),
     ("time_s,power_mwh", None, "unit"),        # energy, not power
     ("time_s,power_hz", None, "unit"),
     ("time_s,power", None, "unit"),            # no unit anywhere
@@ -263,13 +293,13 @@ def test_uneven_sampling_is_refused():
 
 
 def test_a_trace_too_short_for_the_band_is_refused():
-    t, p = _sine(duration=5.0)  # < 1 / 0.1 Hz
+    t, p = _sine(duration=25.0)  # < 3 periods of 0.1 Hz
     with pytest.raises(S.TraceError, match="too short"):
         _analyse(t, p)
 
 
 def test_a_flat_trace_has_no_spectrum_to_read():
-    t = np.arange(1000) / FS
+    t = np.arange(3000) / FS
     with pytest.raises(S.TraceError, match="flat"):
         _analyse(t, np.full_like(t, 100.0))
 
