@@ -1,0 +1,36 @@
+# Research synthesis review
+
+Verdict: **GO for research recommendations only**. The root applied both conformance corrections and I re-read assessment rows 109 and 153: provider tool sets may differ under caps; each request enforces its sent-offer set; Guided/Expert retain their intentional card-policy differences. No remaining implementation-fact blocker was found. This is an implementation-fact review against pinned master `06df80d420677f06f63b9a71b13d028227bc03bd`, not an official gatekeeper verdict, literature verification, implementation authorization or production validation. Read `/workspace/harness-research-2026/.scratch/harness-research-2026/assessment.md`; source catalogue remains a known placeholder outside this review.
+
+## Resolved factual correction: conformance preserves intentional policy differences
+
+The earlier draft's line 153 required the same card/guard decisions across both UI modes. This is corrected in the current draft. Native write tier is intentionally carded in Guided and usually uncarded in Expert; external non-read tools have a separate floor, and saved personal restrictions can add cards/blocks. Source: `pypsa-gui/backend/harness/confirm.py:31` Guided policy explanation, `:47` tier selection, `:52` `confirmation_policy`; tests `test_harness_dispatch_entry.py:167` Expert write, `:174` Guided write, `:187` external write. Current row 153 explicitly preserves different card policies.
+
+The earlier draft's line 109 could imply identical offered lists across providers. This is also corrected in the current draft. Official OpenAI requests have a 128-tool selection cap (`providers/wiring.py:300,326–364`), while other adapters can receive the full eligible view. Current row 109 explicitly preserves each request's exact sent-offer allowlist and required eligible tools within that provider's declared limit.
+
+Suggested replacement for matrix line 153:
+
+> Same source, scope, ownership, units, stop state and verified native effects across provider wires; each mode/restriction follows its declared confirmation policy. Required eligible tools remain offered within the provider's supported limit, and dispatch accepts only that request's actual offer. Prose and complete offered lists need not match.
+
+Suggested roadmap line 109 acceptance:
+
+> Preserve source/scope/ownership/units and verified outcomes across providers; preserve mode-specific card policy and each request's actual offered-tool allowlist; no false completion on stale or uncertain workers.
+
+## Checks specifically requested
+
+- **ProjectRef is scoped appropriately.** Lines 122–126 explicitly reuse registry/reference/evidence resolvers, existing frozen selectors, ordinary dispatcher/ACL/revision/assurance paths and native source of truth. Serialization grants no authority. Read+preview pilot and measurable simplification test make this a contract consolidation experiment, not a second registry. Existing foundations are `services/project_registry.py:100,134,160`, `services/reference_resolution.py:128,190,264`, `harness/assurance_scope.py:18`, `harness/job_adapters.py:62,75,88`, `services/run_evidence.py:486`, `services/result_views.py:43,83`. Optional refinement: include an internal owner/scope binding in the reference factory; model-visible UUIDs remain data and every action reauthorizes. Do not require a full object framework.
+- **Mutation race is qualified honestly.** Line 108 explicitly says documented limit, not reproduced exploit; README `:1317–1318` states that a user edit landing during the step can be taken into the chain after runner locks are released. P0 deterministic barrier test before expanding unattended authority is reasonable. Retain “test then select the narrow fix”; do not promise a specific lock design or infer all approvals are broken. No race reproducer ran in this research.
+- **Budget-helper caller claim is properly limited.** Line 110 says no *general production send-path callers found*, not that budgets are absent or that an unlimited-spend exploit was proven. Recheck search across `pypsa-gui` for `reserve_budget`, `settle_budget`, `compact_model_context` returned service definitions and tests only for these exact helper names. Existing session/daily/tool limits, runner EUR charging, experiment caps and reviewer usage accounting remain real. This search is not proof no alternative reservation mechanism exists anywhere; phrase it as the observed call-site audit and require send-boundary tracing before implementation. Current draft already does that adequately.
+- **K strict boundary is correct.** Lines 98/114 preserve general strict `get_results` refusal, count K #851 as open native read-only work, put checked findings in Assurance issue 10, and require exact kind-specific admission/MAC/rederive/extra-claim tests. `docs/agents/owner-decisions.md:127–128`, `.scratch/assistant-assurance/issues/10-metric-calculation-and-validity.md:38`, study-harness 05 `:37` anchor this. Do not change “domain service owns five rules” into assurance ownership of native rules; current wording keeps this clear. G-b #853 is also properly distinguished from merged G-a backend work.
+
+## Does it re-propose shipped work?
+
+No material duplication after those conformance edits. The existing-capability table and roadmap consistently identify new contracts/integration/evaluation over existing primitives. The assessment correctly credits native tool schemas, cards and restrictions, finite retries, replay/failure taxonomy, parent persistence, event-log truth, spill, independently read-back durable effects, checked profiles/MAC/rederivation, runner/envelopes/monitoring, discovery/MCP and the 292-case finite suite. It avoids stale “three checked tools,” “no NPV,” “no runner” and “no memory” claims.
+
+Already planned work is visibly labelled existing: Assurance checked plausibility, study-harness L1/L2 and research. Cross-domain adapters and displayed-data ACKs retain existing contracts. Lower P2 priority for those two is a defensible research sequencing choice, not evidence their UX value is low; each has separate owner/domain dependencies and should be split into separate implementation slices.
+
+The context-counterfactual recommendation builds on actual `harness/replay.py:26,46` and `tests/test_harness_replay.py:42,58,87`; provider-offer tests already exist in `tests/test_workflow_provider_parity.py:138–145`. New test families assess semantic preservation/state loss, rather than pretending replay/parity is new. Failure taxonomy likewise exists in `protocol.py:23`, `services/failure_taxonomy.py:121`, `run_lifecycle.py:138` and the error-kind manifest; the proposal is richer evaluation attribution.
+
+## Handoff qualifications
+
+The main source-code architecture/priorities/ownership claims are sound at the pin. Before building, re-read current master and owner amendments; outsourced Q/S/R and K/G-b own overlapping selection/scoring/catalogue/route surfaces. Initial evaluation and race-barrier work can remain offline. No runtime tests, paid calls, code changes, PR contact or independent engineering review were performed for this review. Literature numbering/results and final source catalogue remain for the literature tracks/root to verify.

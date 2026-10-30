@@ -1,0 +1,106 @@
+{
+  "cutoff": "2026-10-29",
+  "master": "06df80d420677f06f63b9a71b13d028227bc03bd",
+  "records": [
+    {
+      "url": "https://arxiv.org/abs/2607.20709v1",
+      "http_status": 200,
+      "title": "NVIDIA-labs OO Agents: Native Python Object-Oriented Agents"
+    },
+    {
+      "url": "https://arxiv.org/abs/2606.15874v2",
+      "http_status": 200,
+      "title": "LLM-as-Code: Agentic Programming for Agent Harness"
+    },
+    {
+      "url": "https://arxiv.org/abs/2604.13346v1",
+      "http_status": 200,
+      "title": "AgentSPEX: An Agent SPecification and EXecution Language"
+    },
+    {
+      "url": "https://arxiv.org/abs/2607.08028v1",
+      "http_status": 200,
+      "title": "From Prompts to Contracts: Harness Engineering for Auditable Enterprise LLM Agents"
+    },
+    {
+      "url": "https://arxiv.org/abs/2606.09498v3",
+      "http_status": 200,
+      "title": "Self-Harness: Harnesses That Improve Themselves"
+    },
+    {
+      "url": "https://arxiv.org/abs/2609.00006v1",
+      "http_status": 200,
+      "title": "Harness Engineering: Anatomy, Architecture, and Evolution of Coding Agents -- A Source-Code Study of Eleven Systems"
+    },
+    {
+      "url": "https://arxiv.org/abs/2602.12670v4",
+      "http_status": 200,
+      "title": "SkillsBench: Benchmarking How Well Agent Skills Work Across Diverse Tasks"
+    },
+    {
+      "url": "https://arxiv.org/abs/2602.11988v3",
+      "http_status": 200,
+      "title": "Evaluating AGENTS.md: Are Repository-Level Context Files Helpful for Coding Agents?"
+    },
+    {
+      "url": "https://arxiv.org/abs/2606.28434v1",
+      "http_status": 200,
+      "title": "SWE-MeM: Learning Adaptive Memory Management for Long-Horizon Coding Agents"
+    },
+    {
+      "url": "https://arxiv.org/abs/2608.14036v1",
+      "http_status": 200,
+      "title": "Demystifying Agent Skills: Why They Work-Until They Don't"
+    },
+    {
+      "url": "https://arxiv.org/abs/2609.34422v2",
+      "http_status": 200,
+      "title": "Coding Agent Memory Post-training: Unlocking the Memory Potential of Pre-trained File Operations for Long-Horizon Tasks via Reinforcement Learning"
+    },
+    {
+      "url": "https://arxiv.org/abs/2609.36526v1",
+      "http_status": 200,
+      "title": "Adapting Context Compression for Long-Horizon Agents with Counterfactual Continuations"
+    },
+    {
+      "url": "https://arxiv.org/abs/2604.11790v2",
+      "http_status": 200,
+      "title": "ClawGuard: A Runtime Security Framework for Tool-Augmented LLM Agents Against Indirect Prompt Injection"
+    },
+    {
+      "url": "https://arxiv.org/abs/2601.05755v2",
+      "http_status": 200,
+      "title": "VIGIL: Defending LLM Agents Against Tool Stream Injection via Verify-Before-Commit"
+    },
+    {
+      "url": "https://arxiv.org/abs/2606.09500v4",
+      "http_status": 200,
+      "title": "Deterministic Integrity Gates for LLM-Assisted Clinical Manuscript Preparation: An Auditable Biomedical Informatics Architecture"
+    },
+    {
+      "url": "https://arxiv.org/abs/2604.08224v1",
+      "http_status": 200,
+      "title": "Externalization in LLM Agents: A Unified Review of Memory, Skills, Protocols and Harness Engineering"
+    },
+    {
+      "url": "https://arxiv.org/abs/2605.18747v1",
+      "http_status": 200,
+      "title": "Code as Agent Harness"
+    },
+    {
+      "url": "https://arxiv.org/abs/2606.20683v1",
+      "http_status": 200,
+      "title": "From Question Answering to Task Completion: A Survey on Agent System and Harness Design"
+    },
+    {
+      "url": "https://arxiv.org/abs/2605.12239v1",
+      "http_status": 200,
+      "title": "Harness Engineering as Categorical Architecture"
+    },
+    {
+      "url": "https://arxiv.org/abs/2512.24601v3",
+      "http_status": 200,
+      "title": "Recursive Language Models"
+    }
+  ]
+}

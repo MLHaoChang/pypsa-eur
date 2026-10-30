@@ -1,0 +1,1 @@
+* Docs(pypsa-gui): Specify the model-neutral workflow harness, bounded study/research and report/workbook revision cycles, delegated work, native admission and validation; application behavior is unchanged.
