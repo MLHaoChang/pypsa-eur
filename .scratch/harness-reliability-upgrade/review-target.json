@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "base_commit": "60d8332d64b2edef1b204fb5980311e6102229a8",
+  "payload_sha256": "ea149605a451df8fc702c48ddc5a8d7fc2823525f1b3e38973ccf0f253595825",
+  "files": [
+    {
+      "path": ".scratch/harness-reliability-upgrade/README.md",
+      "sha256": "28389d564243a50d93aae905572527adbdc81859f0bf434b905bdc414a0f9bf4"
+    },
+    {
+      "path": ".scratch/harness-reliability-upgrade/baseline.md",
+      "sha256": "052dbb6caf74658c9ef4a515c1ff5c78d656a8a3c80c6fc78f47cc3da03571de"
+    },
+    {
+      "path": ".scratch/harness-reliability-upgrade/handoff.md",
+      "sha256": "de98fa877cb4fae087cdc85e51393d1011574d976c4ef05fe21677ca70c39985"
+    },
+    {
+      "path": ".scratch/harness-reliability-upgrade/issues/01-atomic-mutation-admission.md",
+      "sha256": "024bc1ec9b63b8ebb068cfe37dd7236e250c3cb34f4d4846b9c44f3b05bea434"
+    },
+    {
+      "path": ".scratch/harness-reliability-upgrade/issues/02-persistent-requirements.md",
+      "sha256": "69edbe8b6b2f5692d950c9097eeb825621a46c422d1ffff65e9aa9c25b85064f"
+    },
+    {
+      "path": ".scratch/harness-reliability-upgrade/issues/03-durable-call-budgets.md",
+      "sha256": "3b36f9d9a2f815755294d84181355d79e369f77bb115771632ce131117b944d5"
+    },
+    {
+      "path": ".scratch/harness-reliability-upgrade/issues/04-typed-domain-references.md",
+      "sha256": "3198824635470bec5f5e9d6a27c7bbcb1d9b3a3987a413677a741d272cded6f7"
+    },
+    {
+      "path": ".scratch/harness-reliability-upgrade/issues/05-trajectory-evaluation.md",
+      "sha256": "21f770bd235be859a12b0f6406b12828b7b63615dad78dc6600ca87127c4f549"
+    },
+    {
+      "path": ".scratch/harness-reliability-upgrade/issues/06-study-correction-cycles.md",
+      "sha256": "d7b3eb930d9bdcef6c649e18697fc3b6bdb29f300e8992fec2c2ffafeb683332"
+    },
+    {
+      "path": ".scratch/harness-reliability-upgrade/issues/07-research-parameter-proposals.md",
+      "sha256": "cd38b6c405b49c65af260fa4f191b1bacce59f3f3dedd44f2c0afdc2adb74984"
+    },
+    {
+      "path": ".scratch/harness-reliability-upgrade/issues/08-report-workbook-revisions.md",
+      "sha256": "66ebddc142f0e7f5d114be6e19d069ec453af83fe5bbe110fff626a8ef57f161"
+    },
+    {
+      "path": ".scratch/harness-reliability-upgrade/issues/09-coordinator-delegation.md",
+      "sha256": "40c7838eb04564adc58d2ff7d4a95c4efff5947aff4f3cfa210a3ae101387ccd"
+    },
+    {
+      "path": ".scratch/harness-reliability-upgrade/issues/10-immutable-solve-admission.md",
+      "sha256": "3a71a703c32ab065556c229b9fe890d5a749611f1376c083701b46c0c0aa2282"
+    },
+    {
+      "path": ".scratch/harness-reliability-upgrade/rollout.md",
+      "sha256": "062a66f8f608a96e4fa59a3206a2d157ae723c408391eb9e51a8fbc40cd3a4cb"
+    },
+    {
+      "path": ".scratch/harness-reliability-upgrade/spec.md",
+      "sha256": "b914c447d81c7dfd69fb0ac718ac8ef8ee34528747c8ff175e1155f5ad1553be"
+    },
+    {
+      "path": ".scratch/harness-reliability-upgrade/test-matrix.md",
+      "sha256": "befba3587c8fc5bb7a1ecdaacac382be958e5ea7ca5ad7c95afab0c85b9d1328"
+    },
+    {
+      "path": ".scratch/harness-reliability-upgrade/user-requirements.md",
+      "sha256": "d706bd4468c54ba1f760dcff28185157678445ee7a57d63bb88895a348139318"
+    },
+    {
+      "path": ".scratch/harness-reliability-upgrade/workflow-strategy.md",
+      "sha256": "40114217d8ecfcb28780926277b1c3ebb0d908f08dff79a1c6b7e93827df467d"
+    },
+    {
+      "path": ".scratch/harness-research-2026/README.md",
+      "sha256": "395729ae5379766da6a5aa959a92d3b0fa8d8564ca98b4bfc165bd340144bdc7"
+    },
+    {
+      "path": ".scratch/harness-research-2026/assessment.md",
+      "sha256": "a44d98a76034455347c1941a2c6f24b300daca02998d8a12dbd95690c1f225e3"
+    },
+    {
+      "path": ".scratch/harness-research-2026/source-notes/context-memory.md",
+      "sha256": "0ade855ea4451af31013220e3413cc7cb5d7a36091d26f6881995ad51a43e87c"
+    },
+    {
+      "path": ".scratch/harness-research-2026/source-notes/current-harness-audit.md",
+      "sha256": "b17d8f41e158248aa16148fe83c1da52c31b737006af87e366d4e8d3bd6c9363"
+    },
+    {
+      "path": ".scratch/harness-research-2026/source-notes/object-architecture.md",
+      "sha256": "0fb3549f14a8c18eaf110bdb1693a0a12682bcbf670a3cd52f387b14c85782a9"
+    },
+    {
+      "path": ".scratch/harness-research-2026/source-notes/reliability-evaluation.md",
+      "sha256": "34a91ecf2e7d71f7d4c418d676b7a8f2d05cfc82f1423ef8a25156a17423e254"
+    },
+    {
+      "path": ".scratch/harness-research-2026/source-notes/root-source-notes.md",
+      "sha256": "5efd3fcae5df3f2c70520e7a54e79720f55f43a1a246da9ee12e260d13440502"
+    },
+    {
+      "path": ".scratch/harness-research-2026/source-notes/synthesis-review.md",
+      "sha256": "0b1d71e1ff3653c02dd9a5b5f44f40a0e5723d57e89d708a2f95466d87b4f135"
+    },
+    {
+      "path": ".scratch/harness-research-2026/source-record-checks.json",
+      "sha256": "a7a74a5b3d8c40fe14c1f239f842e208e6d3381d4e6662d073fec6fa4a12a99f"
+    },
+    {
+      "path": "doc/release-notes.d/claude-harness-workflow-implementation-specs.md",
+      "sha256": "d5c443b828d29ce2043ae1b9b0bd79be3cdad24a5ae7f92b456e4865c715c293"
+    }
+  ],
+  "excluded": "review-target.json and reviews/ (review records only; no normative rules)"
+}
