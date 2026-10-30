@@ -129,7 +129,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                units="MW, MWh, EUR per period",
                checked_gap="unsupported_snapshot_scope",
                card="capacity", sub_option="sizing", card_tab="build"),
-    ResultView("capex", _RESULTS, "capex", "Capacity Expansion",
+    ResultView("capex", _RESULTS, "capex", "Capacity expansion",
                "sized assets and their capital cost", "results",
                (_r("get_results", result_kind="cost_breakdown"),
                 _r("get_results", result_kind="economics_by_carrier")),

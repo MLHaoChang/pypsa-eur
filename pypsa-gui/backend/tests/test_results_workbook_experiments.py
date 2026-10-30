@@ -206,7 +206,7 @@ def test_failed_and_not_completed_cases_say_so_on_the_sheet_and_the_view_sheets(
     runs = _runs(ws)
     assert runs["Infeasible: case"] == EXPERIMENT_REASONS["case_failed"]
     assert runs["One checked case: cost"] == EXPERIMENT_REASONS["case_not_completed"]
-    note = _wb["Capacity Expansion"]["A2"].value
+    note = _wb["Capacity expansion"]["A2"].value
     assert f"Infeasible: case: not comparable with the base ({EXPERIMENT_REASONS['case_failed']})" in note
 
 

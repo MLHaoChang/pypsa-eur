@@ -175,7 +175,7 @@ def _capex(run) -> ViewData | None:
     ebc = compute_economics_by_carrier(n, run.cfg, run.lost_load, result_df=run.result_df)
     if cb is None and not ebc.get("available"):
         return None
-    d = ViewData(notes=["Costs as the Capacity Expansion tab reads them (cost breakdown and "
+    d = ViewData(notes=["Costs as the Capacity expansion tab reads them (cost breakdown and "
                         "economics by carrier); capacity is each asset's optimal size, counted in "
                         "the periods it is active."])
     if cb is not None:
@@ -514,7 +514,7 @@ def _emissions(run) -> ViewData | None:
     return d
 
 
-_view("capex", "Capacity Expansion", _capex)
+_view("capex", "Capacity expansion", _capex)
 _view("dispatch", "Dispatch", _dispatch)
 _view("flows", "Energy flow", _flows)
 _view("loadshape", "Load shape", _loadshape)

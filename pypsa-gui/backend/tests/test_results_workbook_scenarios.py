@@ -368,7 +368,7 @@ def test_each_view_column_reads_that_cases_own_saved_run(client, swept):
     _base_id, ids = swept
     r = client.get(URL, params={"views": "capex"})
     assert r.status_code == 200, r.text
-    values = _view_keys(load_workbook(io.BytesIO(r.content))["Capacity Expansion"], "Opex")
+    values = _view_keys(load_workbook(io.BytesIO(r.content))["Capacity expansion"], "Opex")
     assert set(ids) <= set(values)
     with chat_tools._acting() as (db, user):
         for name, pid in ids.items():
