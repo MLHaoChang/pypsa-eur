@@ -10,6 +10,7 @@ import copy
 import hashlib
 import json
 import math
+import re
 import threading
 import time
 from collections import Counter, OrderedDict
@@ -470,6 +471,23 @@ def solve_freshness(ctx=None):
     return {"inputs_changed_since_solve": changed, "results_current": solve_matches_inputs(ctx)}
 
 
+_EXTRA_PORT = re.compile(r"(bus|efficiency)([2-9]|[1-9]\d+)")
+
+
+def _unpopulated_extra_port(component, name, *, static):
+    """An extra Link port attribute (bus2, efficiency2, ...) no row of this network sets.
+
+    PyPSA registers extra ports on process-wide defaults once any network uses them, so every
+    network built later carries them at their defaults. Skipping them keeps a network's
+    fingerprint independent of what else the process loaded.
+    """
+    if not _EXTRA_PORT.fullmatch(name):
+        return False
+    if not static:
+        return component.dynamic[name].empty
+    return bool(component.static[name].eq(component.defaults.at[name, "default"]).all())
+
+
 def _network_input_fingerprint(ctx, *, exact=False):
     """Hash model inputs, excluding solver outputs so a solve can be reused."""
     # PyPSA assigns a slack control while solving. Canonicalise controls on a
@@ -495,13 +513,15 @@ def _network_input_fingerprint(ctx, *, exact=False):
                             sort_keys=True, default=str))
     for component in n.components:
         defaults = component.defaults
-        columns = [name for name in defaults.index if "Input" in str(defaults.at[name, "status"]) and name in component.static.columns]
+        columns = [name for name in defaults.index if "Input" in str(defaults.at[name, "status"]) and name in component.static.columns
+                   and not _unpopulated_extra_port(component, name, static=True)]
         if exact:
             parts.append(str(component.name))
             parts.append(_exact_frame_json(defaults.loc[columns, ['type', 'unit', 'status']]))
         parts.append(_exact_frame_json(component.static[columns]) if exact else component.static[columns].to_json())
         for name in sorted(component.dynamic):
-            if name in defaults.index and "Input" in str(defaults.at[name, "status"]):
+            if (name in defaults.index and "Input" in str(defaults.at[name, "status"])
+                    and not _unpopulated_extra_port(component, name, static=False)):
                 parts.append(encode(component.dynamic[name]))
     # AS-02: a split storage's custom Store columns (hours, C-rate) change the
     # LP. Appended only when a Store carries them, so the fingerprint of a

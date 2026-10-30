@@ -460,6 +460,55 @@ def test_an_untagged_network_keeps_masters_fingerprint():
                                 "a5561ccbaa135de5db22096dd74899f7a92be69b854b85cdf2c71176ce0196ed")
 
 
+def _link_network():
+    n = pypsa.Network()
+    n.set_snapshots(pd.RangeIndex(2))
+    n.add("Bus", "grid")
+    n.add("Bus", "campus")
+    n.add("Generator", "import", bus="grid", p_nom=200, marginal_cost=10.0)
+    n.add("Link", "trafo", bus0="grid", bus1="campus", p_nom=150, efficiency=0.99)
+    n.add("Load", "dc", bus="campus", p_set=[100.0, 105.0], q_set=[30.0, 34.5])
+    return n
+
+
+def _load_a_three_port_link():
+    # Registers bus2 / efficiency2 on PyPSA's process-wide Link defaults, as a CHP project does in the API.
+    m = pypsa.Network()
+    m.add("Bus", ["x", "y", "z"])
+    m.add("Link", "chp", bus0="x", bus1="y", bus2="z", efficiency2=0.5)
+
+
+def test_an_untagged_link_network_keeps_masters_fingerprint():
+    # Computed with master's `_network_input_fingerprint` (b421ad19) in a fresh process, before any network
+    # registered extra Link ports. It must hold whatever ran before it in this process.
+    _load_a_three_port_link()
+    assert _fingerprints(_link_network()) == ("2e5174230c47db442708bd8bdd09c4535fbe737ed85a9b2cfbff67e0ab8eb090",
+                                              "c6f3feb6a69782b4747c573278da75f93784787be0181dbf8c4d8fca28b05b0e")
+
+
+def test_a_link_networks_fingerprint_ignores_ports_another_network_registered():
+    before = _fingerprints(_link_network())
+    _load_a_three_port_link()
+    after = _link_network()
+    assert {"bus2", "efficiency2"} <= set(after.links.columns)
+    assert _fingerprints(after) == before
+    # As built before any registration, whatever this process loaded earlier.
+    after.links.drop(columns=[c for c in after.links.columns if c in ("bus2", "efficiency2")], inplace=True)
+    after.links_t.pop("efficiency2", None)
+    assert _fingerprints(after) == before
+
+
+def test_a_populated_extra_port_still_changes_the_fingerprint():
+    n = _link_network()
+    n.add("Bus", "heat")
+    before = _fingerprints(n)
+    n.links.loc["trafo", "bus2"] = "heat"
+    with_port = _fingerprints(n)
+    assert with_port[0] != before[0] and with_port[1] != before[1]
+    n.links.loc["trafo", "efficiency2"] = 0.4
+    assert _fingerprints(n)[0] != with_port[0]
+
+
 def test_an_untagged_link_network_appends_nothing(monkeypatch):
     # The same network with the AS-05 append switched off gives the same bytes in this process.
     n = _campus([100.0, 105.0], [30.0, 34.5])
