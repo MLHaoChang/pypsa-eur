@@ -410,3 +410,69 @@ def test_a_two_period_myopic_run_applies_the_rows_in_every_period():
     assert sum("[STORAGE]" in ln and "split-storage rows" in ln for ln in lines) == len(periods)
     p, e = _p_e(n, "bess")
     assert p > 1.0 and p == pytest.approx(0.25 * e, rel=1e-6)
+
+
+# ── review fixes ─────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("su, why", [(dict(p_min_pu=0.2), "forces dispatch"), (dict(p_max_pu=-0.2), "forces charging")])
+def test_migration_refuses_forced_dispatch_or_charging(su, why):
+    n = _with_storage_unit(_peaks(on=5, off=7), p_nom=10.0, max_hours=2.0, **su)
+    with pytest.raises(SplitStorageError, match=why):
+        migrate_storage_unit(n, "bess")
+
+
+def test_migration_keeps_a_duration_no_range_holds_and_refuses_a_wrong_technology():
+    from services.solver.split_storage import MIGRATED
+
+    n = _with_storage_unit(_peaks(on=5, off=7), p_nom=10.0, max_hours=24.0)
+    with pytest.raises(SplitStorageError, match="outside the Energy BESS range"):
+        migrate_storage_unit(n, "bess", technology="energy_bess")
+    migrate_storage_unit(n, "bess")
+    assert n.stores.at["bess", "storage_technology"] == MIGRATED
+    assert n.stores.at["bess", "min_hours"] == n.stores.at["bess", "max_hours"] == 24.0
+
+
+def test_a_c_rate_beyond_the_maximum_duration_is_refused():
+    from services.solver.split_storage import size_conflicts
+
+    n = _site(_peaks(on=4, off=8))
+    with pytest.raises(SplitStorageError, match="beyond the 8 h maximum"):
+        add_split_storage(n, "bess", "ac", "energy_bess", c_rate_max=0.1)
+    add_split_storage(n, "bess", "ac", "energy_bess", power_capital_cost=1.0, p_nom_max=100.0, e_nom_max=800.0)
+    n.stores.at["bess", "c_rate_max"] = 0.1                         # edited afterwards: validation catches it
+    assert "beyond its 8 h maximum" in size_conflicts(n)[0][1]
+
+
+def test_discharger_bounds_that_clash_with_the_tie_are_refused():
+    from services.solver.split_storage import size_conflicts
+
+    n = _site(_peaks(on=4, off=8))
+    add_split_storage(n, "bess", "ac", "energy_bess", power_capital_cost=1.0, p_nom_max=100.0, e_nom_max=800.0)
+    n.links.at["bess charger", "p_nom_min"] = 50.0
+    n.links.at["bess discharger", "p_nom_max"] = 40.0                # delivers at most 38.4 MW
+    assert "no common power" in size_conflicts(n)[0][1]
+
+
+def test_the_pack_prices_the_technologies_and_they_compete_on_those_costs():
+    from services.solver.split_storage import pack_capital_costs
+
+    costs = {k: pack_capital_costs(k, "2026-10-30") for k in ("high_c_bess", "energy_bess", "supercap")}
+    for power, energy in costs.values():
+        assert power > 0 and energy > 0
+    assert costs["high_c_bess"][0] == pytest.approx(costs["energy_bess"][0])     # the same inverter
+    assert costs["high_c_bess"][1] > costs["energy_bess"][1]                     # the LTO premium
+    assert costs["supercap"][1] > 50 * costs["energy_bess"][1]                   # a power product
+
+    def run(price):
+        n = _site(price)
+        for name, tech in (("fast", "high_c_bess"), ("slow", "energy_bess")):
+            power, energy = costs[tech]
+            add_split_storage(n, name, "ac", tech, power_capital_cost=power, energy_capital_cost=energy)
+        _solve(n)
+        return {k: _p_e(n, k)[0] for k in ("fast", "slow")}
+
+    short = run(_peaks(on=1, off=11, high=400.0))
+    assert short["fast"] > 1.0 and short["slow"] < 1e-3
+    long = run(_peaks(on=6, off=18))
+    assert long["slow"] > 1.0 and long["fast"] < 1e-3

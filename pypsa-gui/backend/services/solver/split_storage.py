@@ -27,6 +27,9 @@ from services.solver.runtime import _safe_log
 if TYPE_CHECKING:
     import pypsa
 
+#: The `storage_technology` of a migrated StorageUnit whose `max_hours` no shipped range holds.
+MIGRATED = "migrated_storage_unit"
+
 #: Custom `Store` columns that mark a split storage and hold its limits.
 STORE_COLUMNS = ("storage_technology", "min_hours", "max_hours", "c_rate_max", "charger", "discharger")
 
@@ -54,6 +57,36 @@ STORAGE_TECHNOLOGIES: dict[str, StorageTech] = {
     "high_c_bess": StorageTech("High-C-rate BESS", 0.25, 1.0, 4.0, "high-c-battery"),
     "energy_bess": StorageTech("Energy BESS", 2.0, 8.0, 0.5, "battery"),
 }
+
+
+def _tagged(n: "pypsa.Network") -> pd.DataFrame | None:
+    """The Stores a split storage tags (a `min_hours` value), or None when there are none."""
+    stores = getattr(n, "stores", None)
+    if stores is None or "min_hours" not in stores.columns or not stores["min_hours"].notna().any():
+        return None
+    return stores[stores["min_hours"].notna()]
+
+
+def pack_capital_costs(technology: str, version: str) -> tuple[float, float]:
+    """(power EUR/MW/yr, energy EUR/MWh/yr) for `technology` from defaults-pack `version`: each part's
+    overnight cost x the annuity at the pack's discount rate and the part's lifetime, plus its fixed O&M share
+    (a part without one carries none). The money year is each row's own."""
+    from services.finance.replacements import annuity
+    from services.library.defaults_pack.loader import load_defaults_pack
+
+    pack = load_defaults_pack(version)
+    rate = float(pack.finance.discount_rate.value)
+    keys = {v.key: v for v in pack.cost_values}
+    tech = _technology(technology).pack_technology
+
+    def part(name: str) -> float:
+        overnight = float(keys[f"{tech}.{name}.overnight"].value)
+        life = float(keys[f"{tech}.{name}.lifetime"].value)
+        fom = keys.get(f"{tech}.{name}.fom_share")
+        share = float(fom.value) if fom is not None and fom.value is not None else 0.0
+        return overnight * (annuity(rate, life) + share)
+
+    return part("power"), part("energy")
 
 
 def _technology(key: str) -> StorageTech:
@@ -97,8 +130,9 @@ def add_split_storage(
             f"{name}: hours {lo:g}–{hi:g} h are outside the {tech.label} range "
             f"{tech.min_hours:g}–{tech.max_hours:g} h")
     c_rate = tech.c_rate_max if c_rate_max is None else float(c_rate_max)
-    if not c_rate > 0:
-        raise SplitStorageError(f"{name}: c_rate_max must be positive, got {c_rate!r}")
+    if not c_rate >= 1.0 / hi:
+        raise SplitStorageError(f"{name}: c_rate_max {c_rate!r}/h needs E/P >= {1 / c_rate if c_rate > 0 else math.inf:g} h,"
+                                f" beyond the {hi:g} h maximum")
     if not (0 < efficiency_charge <= 1 and 0 < efficiency_discharge <= 1):
         raise SplitStorageError(f"{name}: efficiencies must be in (0, 1]")
     carrier = carrier or technology
@@ -111,7 +145,7 @@ def add_split_storage(
                efficiency_charge=efficiency_charge, efficiency_discharge=efficiency_discharge,
                power_capital_cost=power_capital_cost, marginal_cost=marginal_cost,
                charger={"p_nom_max": p_nom_max}, discharger={"p_nom_max": p_nom_max / efficiency_discharge})
-    _tag(n, name, technology, lo, hi, c_rate)
+    _tag_store(n, name, technology, lo, hi, c_rate)
 
 
 def _add_links(n, name, bus, store_bus, carrier, *, p_nom, extendable, efficiency_charge,
@@ -126,7 +160,7 @@ def _add_links(n, name, bus, store_bus, carrier, *, p_nom, extendable, efficienc
           **common.get("discharger", {}), **common.get("both", {}))
 
 
-def _tag(n, name, technology, lo, hi, c_rate) -> None:
+def _tag_store(n, name, technology, lo, hi, c_rate) -> None:
     for col, value in zip(STORE_COLUMNS, (technology, lo, hi, c_rate, f"{name} charger", f"{name} discharger")):
         if col not in n.stores.columns:
             n.stores[col] = pd.Series(dtype=object if isinstance(value, str) else float)
@@ -162,10 +196,15 @@ def migrate_storage_unit(n: "pypsa.Network", name: str, technology: str | None =
 
     hours = float(su["max_hours"])
     if technology is None:
+        # A duration no shipped range holds keeps its own hours, labelled as a migrated unit.
         technology = next((k for k, t in STORAGE_TECHNOLOGIES.items()
-                           if t.min_hours <= hours <= t.max_hours), "energy_bess")
-    tech = _technology(technology)
-    c_rate = max(tech.c_rate_max, 1.0 / hours)       # never tighter than the unit's own duration
+                           if t.min_hours <= hours <= t.max_hours), MIGRATED)
+    else:
+        tech = _technology(technology)
+        if not tech.min_hours <= hours <= tech.max_hours:
+            raise SplitStorageError(f"{name}: max_hours {hours:g} h is outside the {tech.label} range "
+                                    f"{tech.min_hours:g}–{tech.max_hours:g} h")
+    c_rate = 1.0 / hours       # E = max_hours x P exactly: the C-rate row adds nothing to the unit's LP
     eff_d = float(su["efficiency_dispatch"])
     extendable = bool(su["p_nom_extendable"])
     carrier = su["carrier"] or "storage"
@@ -185,7 +224,7 @@ def migrate_storage_unit(n: "pypsa.Network", name: str, technology: str | None =
                         "p_nom_max": su["p_nom_max"]},
                discharger={"p_max_pu": float(su["p_max_pu"]), "p_nom_min": su["p_nom_min"] / eff_d,
                            "p_nom_max": su["p_nom_max"] / eff_d}, both=both)
-    _tag(n, name, technology, hours, hours, c_rate)
+    _tag_store(n, name, technology, hours, hours, c_rate)
 
 
 def _migration_blockers(n, name, su) -> list[str]:
@@ -203,6 +242,10 @@ def _migration_blockers(n, name, su) -> list[str]:
             out.append(f"{attr} varies in time")
     if not float(su["efficiency_dispatch"]) > 0:
         out.append("efficiency_dispatch is 0")
+    if float(su["p_min_pu"]) > 0:
+        out.append(f"p_min_pu = {su['p_min_pu']!r} forces dispatch")
+    if float(su["p_max_pu"]) < 0:
+        out.append(f"p_max_pu = {su['p_max_pu']!r} forces charging")
     if not float(su["max_hours"]) > 0:
         out.append("max_hours is 0")
     if not bool(su.get("active", True)):
@@ -232,11 +275,12 @@ def tied_unpriced_members(n: "pypsa.Network") -> set[tuple[str, str]]:
     """(component, name) of each unpriced Store or Link of a split storage whose size another, priced member
     of the same storage fixes through the power tie and the E/P-hour rows. Validation does not report those
     as "built free"; a storage with no priced member at all is still reported."""
-    stores = getattr(n, "stores", None)
-    if stores is None or "min_hours" not in stores.columns:
+    tagged = _tagged(n)
+    if tagged is None:
         return set()
+    stores = n.stores
     out: set[tuple[str, str]] = set()
-    for name, s in stores[stores["min_hours"].notna()].iterrows():
+    for name, s in tagged.iterrows():
         members = [("Store", name, stores)] + [("Link", s[k], n.links) for k in ("charger", "discharger")
                                                 if s[k] in n.links.index]
         if any(_priced(frame, m) for _, m, frame in members):
@@ -246,34 +290,42 @@ def tied_unpriced_members(n: "pypsa.Network") -> set[tuple[str, str]]:
 
 def split_storage_tags(n: "pypsa.Network") -> pd.DataFrame | None:
     """The tagged Stores' `STORE_COLUMNS`, sorted by name, or None when no Store is tagged."""
-    stores = getattr(n, "stores", None)
-    if stores is None or "min_hours" not in stores.columns or not stores["min_hours"].notna().any():
-        return None
-    return stores.loc[stores["min_hours"].notna(), list(STORE_COLUMNS)].sort_index()
+    tagged = _tagged(n)
+    return None if tagged is None else tagged[list(STORE_COLUMNS)].sort_index()
 
 
 def size_conflicts(n: "pypsa.Network") -> list[tuple[str, str]]:
     """(store, reason) for each split storage whose fixed sizes or bounds leave no P and E that meet its
     power tie, hours and C-rate. Validation refuses these before the solve, so the LP is never infeasible
     for this reason."""
-    stores = getattr(n, "stores", None)
-    if stores is None or "min_hours" not in stores.columns:
+    tagged = _tagged(n)
+    if tagged is None:
         return []
+    stores = n.stores
     out: list[tuple[str, str]] = []
-    for name, s in stores[stores["min_hours"].notna()].iterrows():
+    for name, s in tagged.iterrows():
         ch, dis = s["charger"], s["discharger"]
         if ch not in n.links.index or dis not in n.links.index:
             out.append((name, "its charger or discharger link is missing"))
             continue
         lo, hi, c = float(s["min_hours"]), float(s["max_hours"]), float(s["c_rate_max"])
-        lo_eff = max(lo, 1.0 / c) if math.isfinite(c) and c > 0 else lo   # E >= P / c_rate_max
+        min_duration = max(lo, 1.0 / c) if math.isfinite(c) and c > 0 else lo   # E >= P / c_rate_max
         link_ext = (bool(n.links.at[ch, "p_nom_extendable"]), bool(n.links.at[dis, "p_nom_extendable"]))
         if link_ext[0] != link_ext[1]:
             out.append((name, "the charger and discharger must both be extendable or both fixed"))
             continue
         eff = float(n.links.at[dis, "efficiency"])
+        if min_duration > hi * (1 + 1e-9):
+            out.append((name, f"its C-rate needs at least {min_duration:g} h, beyond its {hi:g} h maximum"))
+            continue
         if link_ext[0]:
-            p_lo, p_hi = float(n.links.at[ch, "p_nom_min"]), float(n.links.at[ch, "p_nom_max"])
+            # P must fit the charger's bounds and, through the tie, the discharger's.
+            p_lo = max(float(n.links.at[ch, "p_nom_min"]), eff * float(n.links.at[dis, "p_nom_min"]))
+            p_hi = min(float(n.links.at[ch, "p_nom_max"]), eff * float(n.links.at[dis, "p_nom_max"]))
+            if p_lo > p_hi * (1 + 1e-9):
+                out.append((name, f"the charger and discharger bounds leave no common power (tie at "
+                                  f"efficiency {eff:g})"))
+                continue
         else:
             p_lo = p_hi = float(n.links.at[ch, "p_nom"])
             p_dis = eff * float(n.links.at[dis, "p_nom"])
@@ -284,17 +336,16 @@ def size_conflicts(n: "pypsa.Network") -> list[tuple[str, str]]:
             e_lo, e_hi = float(stores.at[name, "e_nom_min"]), float(stores.at[name, "e_nom_max"])
         else:
             e_lo = e_hi = float(stores.at[name, "e_nom"])
-        # Some P in [p_lo, p_hi] and E in [e_lo, e_hi] with lo_eff x P <= E <= hi x P.
-        if lo_eff * p_lo > e_hi * (1 + 1e-9) or hi * p_hi < e_lo * (1 - 1e-9):
+        # Some P in [p_lo, p_hi] and E in [e_lo, e_hi] with min_duration x P <= E <= hi x P.
+        if min_duration * p_lo > e_hi * (1 + 1e-9) or hi * p_hi < e_lo * (1 - 1e-9):
             out.append((name, f"power {p_lo:g}–{p_hi:g} MW and energy {e_lo:g}–{e_hi:g} MWh cannot meet "
-                              f"{lo_eff:g}–{hi:g} h"))
+                              f"{min_duration:g}–{hi:g} h"))
     return out
 
 
 def _wrap_with_split_storage(network: "pypsa.Network", user_fn, log_queue=None):
     """Chain the split-storage rows after `user_fn`. Returns `user_fn` unchanged when no Store is tagged."""
-    stores = getattr(network, "stores", None)
-    if stores is None or "min_hours" not in stores.columns or not stores["min_hours"].notna().any():
+    if _tagged(network) is None:
         return user_fn
 
     def emit(msg: str) -> None:
@@ -322,7 +373,7 @@ def _nominal(n, component: str, attr: str, name: str):
 def _add_rows(n, emit) -> None:
     m = n.model
     rows: dict[str, list] = {"tie": [], "min_hours": [], "max_hours": [], "c_rate": []}
-    tagged = n.stores[n.stores["min_hours"].notna()]
+    tagged = _tagged(n)
     for name, s in tagged.iterrows():
         ch, dis = s["charger"], s["discharger"]
         if ch not in n.links.index or dis not in n.links.index:
