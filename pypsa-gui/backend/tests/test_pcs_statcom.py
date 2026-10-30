@@ -697,3 +697,53 @@ def test_cost_terms_include_q_dyn():
     ps.persist_solution(n)
     assert ps.cost_terms(n) == {"PCS oversize": pytest.approx(C_PCS * sol["s_x"]["highC"], rel=1e-9),
                                 "STATCOM": pytest.approx(C_STATCOM * (sol["q_ss"] + sol["q_dyn"]), rel=1e-9)}
+
+
+# ── GK A conditions on AS-12: no silent zero, and the basis of a rolling solve ──
+
+
+def test_a_tagged_network_solved_without_the_rows_stays_blank_and_says_so():
+    n = _hand_case()
+    assert n.optimize(solver_name="highs", extra_functionality=_wrap_with_split_storage(n, None))[0] == "ok"
+    warnings = ps.persist_solution(n)
+    assert any("highC" in w for w in warnings) and any("trafo" in w for w in warnings)
+    assert n.stores.reindex(columns=["pcs_s_x_opt"]).isna().all().all()          # blank, never 0
+    assert n.links.reindex(columns=list(ps.RESULT_LINK_COLUMNS)).isna().all().all()
+    assert ps.cost_terms(n) == {}
+    notes = ps.cost_notes(n)
+    assert any("highC" in s for s in notes) and any("trafo" in s for s in notes)
+
+
+def test_a_store_tagged_after_the_solve_is_left_blank_and_not_counted():
+    n = _hand_case()
+    sol = _solve(n)
+    _bess(n, "late", 5.0)
+    warnings = ps.persist_solution(n)
+    assert warnings == [w for w in warnings if "late" in w] and warnings
+    assert np.isnan(n.stores.at["late", "pcs_s_x_opt"])
+    assert ps.cost_terms(n)["PCS oversize"] == pytest.approx(C_PCS * sol["s_x"]["highC"], rel=1e-9)
+    assert [s for s in ps.cost_notes(n) if "late" in s]
+
+
+def test_a_rolling_solve_marks_its_sizes_as_the_last_window_only(tmp_path):
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.solver_service import SolverConfig
+
+    n = _campus([100.0, 105.0], [100.0 * TAN_LOAD, 105.0 * TAN_LOAD])
+    _bess(n, "small", 10.0)
+    cfg = _run(n, SolverConfig(solve_strategy="rolling", rolling_horizon=1, rolling_overlap=0))
+    assert n.stores.at["small", "pcs_s_x_opt"] > 0
+    for net in (n, _round_trip(n, tmp_path)):
+        assert net.meta.get("pcs_statcom_basis") == "last_solve"
+        notes = compute_cost_breakdown(net, cfg)["pcs_statcom_notes"]
+        assert any("last solve only (rolling/myopic)" in s for s in notes)
+
+
+def test_a_full_horizon_solve_carries_no_basis_note():
+    from services.results.cost_breakdown import compute_cost_breakdown
+
+    n = _campus([105.0], [105.0 * TAN_LOAD])
+    _bess(n, "small", 10.0)
+    cfg = _run(n)
+    assert n.meta.get("pcs_statcom_basis") == "horizon"
+    assert compute_cost_breakdown(n, cfg)["pcs_statcom_notes"] == []

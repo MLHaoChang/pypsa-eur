@@ -464,6 +464,9 @@ def compute_cost_breakdown(n, cfg):
     from services.solver.pcs_statcom import cost_terms as _pcs_statcom_cost_terms
     for _label, _cx in _pcs_statcom_cost_terms(n).items():
         _accumulate("PCS/STATCOM", _label, None, _cx, 0.0)
+    # What those rows leave out (a tagged row with no solved size) or cover in part (rolling/myopic).
+    from services.solver.pcs_statcom import cost_notes as _pcs_statcom_cost_notes
+    _pcs_statcom_notes = _pcs_statcom_cost_notes(n)
 
     # Materialise by_carrier as a flat list now that all rows have been folded.
     for (comp, carrier), v in by_carrier_dict.items():
@@ -701,6 +704,7 @@ def compute_cost_breakdown(n, cfg):
         })
     return {
         "commercial": _commercial["block"],
+        "pcs_statcom_notes": _pcs_statcom_notes,
         "capex": capex_total,
         "capex_lifetime": capex_lifetime_total,
         "capex_expansion": capex_expansion_total,
