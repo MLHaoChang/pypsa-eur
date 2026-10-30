@@ -5783,6 +5783,16 @@ def ui_select_component(component_class: str, name: str, open_editor: bool | Non
             })
         return {"_ui_event": True, "kind": "open_properties",
                 "component_class": component_class, "name": name}
+    from services.asset_results import compute as asset_compute
+    try:
+        df = getattr(PyPSAService.get_network(), asset_compute.attr_for(component_class))
+    except KeyError:
+        df = None
+    if df is None or name not in df.index:
+        raise HTTPException(404, detail={
+            "error_kind": "component_not_found", "component_class": component_class, "name": name,
+            "message": f"{component_class} '{name}' is not in the network.",
+        })
     return {"_ui_event": True, "kind": "select_component",
             "component_class": component_class, "name": name}
 
@@ -7352,6 +7362,23 @@ def ui_open_asset_detail(
     chart: bool | None = None,
 ) -> dict:
     """Open the Asset Detail tab pre-configured. No backend mutation."""
+    from services.asset_results import compute as asset_compute
+    from services.asset_results.registry import metric_for
+    try:
+        df = getattr(PyPSAService.get_network(), asset_compute.attr_for(component_class))
+    except KeyError:
+        df = None
+    if df is None or name not in df.index:
+        raise HTTPException(404, detail={
+            "error_kind": "component_not_found", "component_class": component_class, "name": name,
+            "message": f"{component_class} '{name}' is not in the network.",
+        })
+    for m in metrics or []:
+        if metric_for(component_class, str(m)) is None:
+            raise HTTPException(400, detail={
+                "error_kind": "invalid_navigation", "field": "metrics",
+                "message": f"{component_class} has no metric '{m}'.",
+            })
     event: dict[str, Any] = {
         "_ui_event": True, "kind": "open_asset_detail",
         "component_class": component_class, "name": name,
@@ -7581,6 +7608,7 @@ def export_to_excel(sheets: dict, filename: str) -> dict:
     """
     import io as _io
     from openpyxl import Workbook
+    from routers.io import _escape_formula
     wb = Workbook()
     # Remove the default sheet so we don't ship an empty "Sheet" leaf.
     default = wb.active
@@ -7589,14 +7617,10 @@ def export_to_excel(sheets: dict, filename: str) -> dict:
     for sheet_name, rows in (sheets or {}).items():
         ws = wb.create_sheet(title=str(sheet_name)[:31] or "Sheet")
         for row in (rows or []):
-            ws.append(list(row))
-            # openpyxl stores ANY string starting with "=" as a formula
-            # (`data_type == "f"`), which Excel evaluates on open. A string
-            # cell is shown as written, so force the type rather than edit
-            # the text: in xlsx the cell type decides, not the characters.
-            for cell in ws[ws.max_row]:
-                if cell.data_type == "f":
-                    cell.data_type = "s"
+            # EXPORT-INJECT-1, the same rule as the app's Excel export: a text
+            # cell starting = + - @ tab or CR gets a leading quote, so openpyxl
+            # stores it as text, never a formula; a number stays a number.
+            ws.append([_escape_formula(v) for v in row])
     buf = _io.BytesIO()
     wb.save(buf)
     payload = buf.getvalue()

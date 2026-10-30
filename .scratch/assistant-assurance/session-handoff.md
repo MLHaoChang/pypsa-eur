@@ -942,3 +942,42 @@ Tests that rewrite a record to reach the deeper checks re-seal it with `records.
 Not covered: replay of an older sealed version of a mutable record within 24 hours; pre-change unresolved operation reservations keep a quota slot. Records saved before this change, or after `SECRET_KEY` or the key file changes, read as unavailable.
 
 Remaining for P1: A1.6/A1.7 validity and masks, the other `read_unvalidated` families (run sections, `compare_project_runs`), frontend `assurance_state`, SERIES-WINDOW, REVOKE-KIND.
+
+### 2026-10-30 — P1 slices S1–S4 merged (issue 02)
+
+Each slice's details, GK B conditions, test counts and mutants are in the
+[issue](issues/02-evidence-identity-and-access.md) under its own heading; this
+entry records only where each landed.
+
+- **S1, one aggregate gap helper; pilot POLICY_VERSION** (#895, 497c3f17).
+  `assurance_records.aggregate_gaps` names the gaps for both aggregate paths;
+  handler JSON byte-equal to master's on 19 scenarios; 14 of 14 gap-swap mutants
+  killed (`aggregate_gap_mutations.py`).
+- **S2, REPLAY** (#898, 904fc506). A DB high-water mark (`assurance_record_seq`,
+  migration 0010) sealed into every mutable record; `load()` accepts only an exact
+  match. `test_p1_replay.py` 32 cases; `replay_mutation.py` reds all 21 red-first
+  cases. Upgrade effect: pre-migration mutable records read unavailable for up to
+  24 h (no backfill).
+- **S3, shared fact builder** (#916, 561c5a6b). `assurance_records._fact` at all
+  six sites; `fact_record_dump.py` byte-equal on both trees (sha256 `45313c17…`);
+  15 of 15 mutants killed (`fact_builder_mutations.py`).
+- **S4, SERIES-WINDOW** (#927, cab2e5aa). A series record stores
+  `{rows, certified, index_sha256, values_sha256}` (adapter `series-input/2`);
+  `MAX_SERIES_POINTS` 8784; old per-step records read unavailable. 5 of 5 mutants
+  killed (`series_window_mutations.py`). `harness/loop.py` now puts `_assurance`
+  first in a checked dict result so the 4000-character cut keeps it.
+
+Also merged since the last entry: run manifest MAC (#930), checked run sections
+and compare deltas (#941), REVOKE-KIND (#929), frontend `assurance_state` (#946).
+
+Last merged SHA: cab2e5aa (S4). Every listed P1 slice is merged.
+
+Open, not started:
+- Windowed `get_timeseries` args need `harness/catalogue.py` (held by #851).
+- Per-family unit maps for retained results sections; runs outside `run_evidence`.
+- Follow-ups from S4/REVOKE-KIND, none blocking: `records.discard` after
+  REVOKE-TOCTOU reads `assurance_publication_failed` (fails closed, GK B agreed);
+  the error/`session_done` triple in `harness/loop.py`; helper duplication in
+  `test_p1_revocation.py`; a deleted project's 404 reads "You no longer have access
+  to this project" in commit; `services/assurance_records.py` is not
+  ruff-formatted (131 changed lines, layout only).

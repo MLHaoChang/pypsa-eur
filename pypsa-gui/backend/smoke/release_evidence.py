@@ -45,6 +45,7 @@ BACKEND_COMMAND = 'cd pypsa-gui/backend && python -m pytest {nodes}'
 LC32 = 'LC-32 (owner decision LC32-OPEN-1)'
 UNASSIGNED = 'unassigned: no open issue builds it; the coordinator ranks it'
 LC33 = 'LC-33 (.scratch/live-copilot/issues/33-unassigned-variants-d06-d13.md)'
+LC36 = 'LC-36 (.scratch/live-copilot/issues/36-lc-d13-remaining-variants.md)'
 # Owner of each pending variant, by variant id or, failing that, by suite.
 OWNERS: dict[str, str] = {
     **{f'LC-D{i:02d}': LC32 for i in (1, 2, 3, 20, 21, 22, 23, 24)},
@@ -53,8 +54,9 @@ OWNERS: dict[str, str] = {
     'LC-D11.fmea_criticality': 'LC-30 (.scratch/live-copilot/issues/30-fmea-criticality-per-horizon.md)',
     **{f'LC-D13.{v}': LC33 for v in ('margin_loop', 'reserve_margin_coupling', 'elcc_frontier_campaign',
                                      'eh_redundancy', 'eh_levers', 'eh_dtc_planning', 'multi_energy')},
-    **{f'LC-D13.{v}': UNASSIGNED for v in ('multi_energy_heat', 'finalist_certification', 'unsupported_scope',
-                                           'study_swap', 'stale_source', 'incomplete_campaign')},
+    **{f'LC-D13.{v}': LC36 for v in ('multi_energy_heat', 'mc_certify_ens_plan', 'unsupported_scope',
+                                     'study_swap', 'stale_source', 'incomplete_campaign')},
+    'LC-D13.stale_source_unflagged_readers': 'LC-37 (.scratch/live-copilot/issues/37-adequacy-readers-stale-source.md, needs-triage)',
 }
 
 

@@ -3,7 +3,7 @@
 
 # 04 — Prices, curtailment and cost-breakdown services raise instead of returning None
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Blocked by: 02 (R1, PR #896)
 Gated: yes (results data; GK B)

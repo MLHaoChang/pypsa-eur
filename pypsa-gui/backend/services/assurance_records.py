@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -40,10 +41,10 @@ SERIES_METRICS = {
     ("loads", "p_set"): ("Load", "MW"),
     ("generators", "p_max_pu"): ("Generator", "p.u."),
 }
-# Larger series are refused before the handler. A step's fact carries the
-# name twice, so the facts' encoded size is bounded too, under save()'s
-# 128 KiB record cap with room for the rest of the record.
-MAX_SERIES_POINTS = 744
+# Larger series are refused before the handler. The stored window (row mask
+# and digests) and the name are bounded too, under save()'s 128 KiB record
+# cap with room for the rest of the record.
+MAX_SERIES_POINTS = 8784  # an hourly leap year
 MAX_SERIES_FACT_BYTES = 120 * 1024
 # get_aggregate_load's `section` or `names` argument, at most.
 MAX_AGGREGATE_ARG_CHARS = 1024
@@ -54,7 +55,7 @@ POLICY_VERSION = "1"
 INPUT_ADAPTERS = {
     "static": "static-input/1",
     "static_page": "static-input-page/1",
-    "series": "series-input/1",
+    "series": "series-input/2",
     "run": "run-metrics/1",
     "run_section": "run-section/1",
     "run_comparison": "run-compare/1",
@@ -750,9 +751,58 @@ def _series_steps(args, series):
     return labels, periods, steps
 
 
+def _series_digest(domain, value):
+    """sha256 of a domain tag and the canonical JSON save() seals."""
+    return hashlib.sha256(domain.encode() + b"\n" + _canonical(value)).hexdigest()
+
+
+def _series_window(labels, periods, steps, certified):
+    """The stored form of a series record's facts: one bit per row (least
+    significant first), bound to the index and to the certified values."""
+    mask = bytearray((len(steps) + 7) // 8)
+    for row, ok in enumerate(certified):
+        if ok:
+            mask[row // 8] |= 1 << (row % 8)
+    return {
+        "rows": len(steps),
+        "certified": base64.b64encode(bytes(mask)).decode("ascii"),
+        "index_sha256": _series_digest("series-index/1", [labels, periods]),
+        "values_sha256": _series_digest(
+            "series-values/1",
+            [step["value"] if ok else None for step, ok in zip(steps, certified)],
+        ),
+    }
+
+
+def _series_facts(window, labels, periods, steps):
+    """The facts a stored series window certifies against the live steps."""
+    rows = window["rows"]
+    if (
+        set(window) != {"rows", "certified", "index_sha256", "values_sha256"}
+        or type(rows) is not int
+        or rows != len(steps)
+    ):
+        unavailable("evidence_unavailable")
+    mask = base64.b64decode(window["certified"], validate=True)
+    if len(mask) != (rows + 7) // 8:
+        unavailable("evidence_unavailable")
+    certified = [bool(mask[row // 8] >> (row % 8) & 1) for row in range(rows)]
+    # No bit past the last row, and at least one certified row.
+    if sum(certified) != sum(bin(octet).count("1") for octet in mask) or not any(
+        certified
+    ):
+        unavailable("evidence_unavailable")
+    expected = _series_window(labels, periods, steps, certified)
+    if window["index_sha256"] != expected["index_sha256"]:
+        unavailable("evidence_unavailable")
+    if window["values_sha256"] != expected["values_sha256"]:
+        unavailable("evidence_unavailable")
+    return [step for step, ok in zip(steps, certified) if ok]
+
+
 def active_series_source(args):
     """Taken before get_timeseries runs: the source digest, step count and the
-    encoded size of the facts if every step certified."""
+    encoded size of the stored series window."""
     ctx = PyPSAService.get_active_context()
     with network_guard():
         source_digest, series = _series_source(ctx, args)
@@ -760,7 +810,10 @@ def active_series_source(args):
             return source_digest, 0, 0
         if len(series) > MAX_SERIES_POINTS:
             return source_digest, len(series), None
-        size = len(json.dumps(_series_steps(args, series)[2], ensure_ascii=False).encode())
+        labels, periods, steps = _series_steps(args, series)
+        # Its size does not depend on which rows certify.
+        window = _series_window(labels, periods, steps, [False] * len(steps))
+        size = len(_canonical({"entity_id": args["name"], "series": window}))
     return source_digest, len(series), size
 
 
@@ -1042,9 +1095,8 @@ def capture_series(owner, args, result, digest_before):
             not isinstance(row, list) or len(row) != 1 for row in data
         ):
             return None
-        facts = [
-            step for step, row in zip(steps, data) if _certified(row[0], step["value"])
-        ]
+        certified = [_certified(row[0], step["value"]) for step, row in zip(steps, data)]
+        facts = [step for step, ok in zip(steps, certified) if ok]
         if not facts:
             return None
         record = {
@@ -1065,7 +1117,7 @@ def capture_series(owner, args, result, digest_before):
                 "points": len(index),
                 "certified": len(facts),
             },
-            "facts": facts,
+            "series": _series_window(labels, periods, steps, certified),
             "source_sha256": digest_before,
             "validity": {
                 "outcome": "completed",
@@ -1079,7 +1131,15 @@ def capture_series(owner, args, result, digest_before):
             "expires_at": time.time() + RETENTION_SECONDS,
         }
         save(record, record["evidence_id"])
-    return record
+    return _with_series_facts(record, facts)
+
+
+def _with_series_facts(record, facts):
+    """The record as every reader sees it: its facts where the window was."""
+    return {
+        ("facts" if key == "series" else key): (facts if key == "series" else value)
+        for key, value in record.items()
+    }
 
 
 def series_args(scope):
@@ -1250,8 +1310,8 @@ def evidence(owner, evidence_id):
                 source_digest, series = _series_source(ctx, args)
                 if source_digest != record["source_sha256"] or series is None:
                     unavailable("evidence_unavailable")
-                _require_current_facts(record["facts"], _series_steps(args, series)[2])
-                return record
+                facts = _series_facts(record["series"], *_series_steps(args, series))
+                return _with_series_facts(record, facts)
             if scope.get("kind") == "aggregate_load":
                 # Any edit to a member, or a load joining or leaving the
                 # target set, invalidates it.
