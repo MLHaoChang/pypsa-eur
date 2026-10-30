@@ -1,0 +1,1 @@
+* Doc(pypsa-gui): Research note on sizing assets for AI-load power fluctuations (BESS, supercapacitor, STATCOM, UPS, diesel) and a loop that turns customer design preferences into capacity-expansion constraints and feeds electrical and grid-code checks back as cuts.
