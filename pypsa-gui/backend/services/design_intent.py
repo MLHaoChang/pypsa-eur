@@ -8,8 +8,17 @@ from __future__ import annotations
 
 import math
 
-from gridspine.templates.grid_codes import ride_through_transfer_warning
 from models.design_intent import DesignIntentSpec
+
+try:
+    from gridspine.templates.grid_codes import ride_through_transfer_warning
+except ImportError:                             # pragma: no cover - build-shape branch
+    # The frozen app may ship without gridspine (see gridspine_service); the same rule, minus the clause.
+    def ride_through_transfer_warning(profile: dict):
+        if (profile.get("ride_through_transfer_counts") or {}).get("value") is True:
+            return None
+        return ("This grid code may not count transfer to BESS or a genset as ride-through, so a design "
+                "without a UPS may not comply.")
 
 
 def _check_critical(critical_mw: float) -> float:
