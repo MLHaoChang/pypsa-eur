@@ -265,3 +265,32 @@ def test_the_sheet_from_a_solved_network_has_a_band_that_fits():
     assert soc["fits"] is True
     assert soc["smoothing_upper_mwh"] - soc["smoothing_lower_mwh"] == pytest.approx(
         float(n.stores.at["fast", "e_nom_opt"]) - E_SM, rel=1e-6)
+
+
+def test_a_solved_network_without_its_lp_solution_is_refused_not_read_as_zero_slices():
+    n = _solved()
+    n._model = None
+    with pytest.raises(CS.ControlSettingsError, match="fast"):
+        CS.tiers_from_solved(n)
+
+
+def test_a_model_without_the_envelope_variables_is_refused():
+    n = _solved()
+    n.model.variables.remove("EnvelopeFloor-p_smooth")
+    with pytest.raises(CS.ControlSettingsError, match="EnvelopeFloor-p_smooth"):
+        CS.tiers_from_solved(n)
+
+
+def test_an_envelope_without_oscillation_gets_a_not_checked_latency_row():
+    env = {"phases": [{"swing_mw": 30.0}]}
+    sheet = CS.build_sheet(envelope=env, ramp_mw_per_min=RAMP, tiers=[_tier()], gfm=_recommendation())
+    r = _row(sheet, "latency")
+    assert r["status"] == "not checked" and "oscillation" in r["note"]
+    assert sheet["latency_limit_s"] is None and sheet["ok"] is True
+    assert not [x for x in sheet["rows"] if x["id"].startswith("latency.")]
+
+
+def test_the_latency_note_carries_the_basis_of_the_assumed_latency():
+    assert "grid forming" in _row(_sheet(), "latency.fast")["note"]
+    assert "grid following" in _row(_sheet([_tier(control="gfl_pq")]), "latency.fast")["note"]
+    assert "given" in _row(_sheet([_tier(latency_s=0.1)]), "latency.fast")["note"]

@@ -28,10 +28,12 @@ Settings (`rows`, one per setting and unit):
   ups_transfer.<u>            the f window and whether it transfers on islanding.
   ups_disturbance_counting.<u>  "none": a UPS walk-in or transfer is not counted as a disturbance (ERCOT NOGRR 282).
   preset                      the project preset `select_preset` selected (None: none).
+  latency (not checked)       the single row that stands in for the latency rows when the envelope has no
+                              oscillation, so no band exists; status "not checked", not a failure.
   emt.*                       sub-cycle items no steady-state or RMS check can settle, status "needs EMT".
 
 Row columns: id, group, setting, value, unit, source ("sized" from a capacity, "assumed"), status ("set", "ok",
-"flagged", "needs EMT"), traces_to (the asset or function the value comes from), note. A "needs EMT" row never
+"flagged", "not checked", "needs EMT"), traces_to (the asset or function the value comes from), note. A "needs EMT" row never
 counts as a failure; a "flagged" row does, and `sheet["ok"]` is False with `sheet["flags"]` naming it.
 """
 from __future__ import annotations
@@ -50,7 +52,8 @@ FORMAT = (
     "holds the rows with columns id, group, setting, value, unit, source, status, traces_to, note (a structured "
     "value is JSON text). source is 'sized' (from a sized capacity) or 'assumed' (generic engineering, SAGC-1). "
     "status is 'set' (a setting to apply), 'ok' (a check passed), 'flagged' (a check failed or could not run: "
-    "ok is then false) or 'needs EMT' (sub-cycle, outside a steady-state or RMS check; never a failure). "
+    "ok is then false), 'not checked' (no input to check against, e.g. no oscillation for the latency band; "
+    "not a failure) or 'needs EMT' (sub-cycle, outside a steady-state or RMS check; never a failure). "
     "traces_to names the asset or function behind the value."
 )
 CSV_COLUMNS = ("id", "group", "setting", "value", "unit", "source", "status", "traces_to", "note")
@@ -66,6 +69,10 @@ _EMT = (
     ("emt.ups_transfer_switching", "UPS transfer and static-switch transient",
      "the switching transient lasts under a cycle"),
 )
+
+
+class ControlSettingsError(ValueError):
+    """The solved network cannot give the sheet its sized slices; raised instead of reading them as zero."""
 
 
 def band_limit_s(f_hz: float) -> float:
@@ -185,17 +192,23 @@ def build_sheet(*, envelope: dict, ramp_mw_per_min: float, tiers: list[dict], ba
                          "set" if band["fits"] else "flagged",
                          f"Store {t['name']}: e_nom_opt {t['e_mwh']:.4g} MWh, e_smooth {t['e_sm_mwh']:.4g} MWh",
                          "" if band["fits"] else "the backup slice and the smoothing band do not fit the store"))
+    if limit is None and smoothing:
+        rows.append(_row("latency", "latency", "response latency of the smoothing tiers", None, "s", "assumed",
+                         "not checked", "envelope",
+                         "the envelope has no oscillation, so there is no band to check a latency against"))
     for t in smoothing:
         if limit is None:
             break
-        latency = t.get("latency_s")
+        latency, basis = t.get("latency_s"), "latency given for the tier"
         if latency is None:
-            latency = response_latency(t["name"], {"kind": "bess", "control": t.get("control")})["latency_s"]
+            r = response_latency(t["name"], {"kind": "bess", "control": t.get("control")})
+            latency, basis = r["latency_s"], r["basis"] + ", assumed"
         ok = latency < limit
         rows.append(_row(f"latency.{t['name']}", "latency", f"response latency of {t['name']}", latency, "s",
                          "assumed", "ok" if ok else "flagged", f"Store {t['name']}: control {t.get('control')}",
-                         f"limit {limit:.3g} s = 1/(2π f) at {f_osc:g} Hz" if ok else
-                         f"latency {latency:g} s is not below {limit:.3g} s = 1/(2π f) at {f_osc:g} Hz"))
+                         (f"limit {limit:.3g} s = 1/(2π f) at {f_osc:g} Hz" if ok else
+                          f"latency {latency:g} s is not below {limit:.3g} s = 1/(2π f) at {f_osc:g} Hz")
+                         + f"; {basis}"))
     rows += _gfm_rows(gfm, [t["name"] for t in tiers])
     rows += _ups_rows(ups or {}, ramp_mw_per_min)
     rows.append(_row("preset", "preset", "island preset (select_preset)", preset, "", "assumed", "set",
@@ -216,8 +229,12 @@ def tiers_from_solved(n) -> list[dict]:
     model = getattr(n, "model", None)
 
     def slice_of(var: str, name: str) -> float:
-        if model is None or var not in model.variables or name not in model.variables[var].indexes["name"]:
-            return 0.0
+        if name not in tier:
+            return 0.0                       # a backup-only store has no smoothing slice
+        if model is None:
+            raise ControlSettingsError(f"Store '{name}' is a smoothing tier but the network has no solved model")
+        if var not in model.variables or name not in model.variables[var].indexes["name"]:
+            raise ControlSettingsError(f"Store '{name}' is a smoothing tier but the model has no {var} for it")
         return float(model.variables[var].solution.sel(name=name).sum())
 
     def nominal(frame, attr, name):
