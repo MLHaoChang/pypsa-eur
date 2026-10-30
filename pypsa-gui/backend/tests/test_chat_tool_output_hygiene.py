@@ -76,8 +76,32 @@ def test_an_xlsx_cell_that_reads_as_a_formula_is_stored_as_a_string(captured_exp
         "openpyxl stored the string as a FORMULA (data_type 'f'); Excel would "
         "evaluate it on open"
     )
-    assert cell.value == HYPERLINK, "the text itself must survive unchanged"
+    # EXPORT-INJECT-1: escaped as the app's own Excel export escapes it.
+    assert cell.value == "'" + HYPERLINK
     assert ws["B2"].value == 3
+
+
+@pytest.mark.parametrize("text", [
+    "=HYPERLINK(1)", "+HYPERLINK(1)", "-HYPERLINK(1)", "@HYPERLINK(1)",
+    "\tHYPERLINK(1)", "\rHYPERLINK(1)",
+])
+def test_each_formula_lead_in_an_xlsx_cell_reads_back_as_text(captured_export, text):
+    chat_tools.export_to_excel({"S": [["name"], [text]]}, "out.xlsx")
+
+    cell = load_workbook(io.BytesIO(captured_export["payload"]))["S"]["A2"]
+    assert cell.data_type == "s"
+    assert cell.value == "'" + text
+
+
+def test_an_xlsx_number_stays_a_number(captured_export):
+    chat_tools.export_to_excel(
+        {"S": [["a", "b", "c"], [-5, -2.5, "-5"]]}, "out.xlsx")
+
+    ws = load_workbook(io.BytesIO(captured_export["payload"]))["S"]
+    assert (ws["A2"].value, ws["A2"].data_type) == (-5, "n")
+    assert (ws["B2"].value, ws["B2"].data_type) == (-2.5, "n")
+    # A string that IS a number is data, not a formula: no quote added.
+    assert ws["C2"].value == "-5"
 
 
 # ── What the model is told ───────────────────────────────────────────────────
