@@ -45,6 +45,7 @@ def _campus(load_p, load_q, *, link_p_nom=S_N, link_p_max_pu=PF_TR, link_p_min_p
     """grid -> trafo Link -> campus. The load's Q is the native `q_set`; the Link carries the PQ tags."""
     n = pypsa.Network()
     n.set_snapshots(pd.RangeIndex(len(load_p)))
+    n.snapshot_weightings.loc[:, "objective"] = 8760 / len(load_p)      # one modelled year: annual costs as typed
     n.add("Bus", "grid", carrier="AC")
     n.add("Bus", "campus", carrier="AC")
     n.add("Generator", "import", bus="grid", p_nom=1e3, p_min_pu=-1.0, marginal_cost=10.0)
@@ -510,3 +511,31 @@ def test_prototype_week_regression():
     sol = _solve(n, time_limit=120.0)                       # HiGHS stops the run after 120 s
     assert sol["s_x"]["highC"] == pytest.approx(7.854, abs=0.05)
     assert sol["q_ss"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_annual_costs_are_charged_per_modelled_horizon_on_a_168_h_week():
+    """GK A: the typed annual costs scale by `fom_horizon_factor(n)` = 168 / 8760 on an unweighted week, as the
+    app scales every typed annual capital_cost; the sizes do not move, since both costs scale alike."""
+    from services.solver.periodized_costs import fom_horizon_factor
+
+    rng = np.random.default_rng(7)
+    hours = np.arange(168)
+    load = 70 + 30.0 * (rng.random(168) > 0.2) + 5 * np.sin(2 * np.pi * (hours - 14) / 24)
+
+    def week(tagged):
+        n = _campus(load, load * TAN_LOAD)
+        n.snapshot_weightings.loc[:, "objective"] = 1.0
+        _bess(n, "small", 10.0)
+        if not tagged:
+            n.links.loc["trafo", list(LINK_COLUMNS)] = np.nan
+            n.stores.loc["small", list(STORE_COLUMNS)] = np.nan
+        return n
+
+    n, base = week(True), week(False)
+    assert fom_horizon_factor(n) == pytest.approx(168 / 8760)
+    sol = _solve(n, time_limit=120.0)
+    assert base.optimize(solver_name="highs", extra_functionality=_wrap_with_split_storage(base, None))[0] == "ok"
+    assert sol["s_x"]["small"] == pytest.approx(2.0, rel=1e-6)
+    assert sol["q_ss"] > 1.0
+    extra = 168 / 8760 * (C_PCS * sol["s_x"]["small"] + C_STATCOM * (sol["q_ss"] + sol["q_dyn"]))
+    assert float(n.objective) - float(base.objective) == pytest.approx(extra, rel=1e-6)

@@ -21,7 +21,8 @@ Tags (custom columns, so the rows survive the project's .nc round-trip and enter
   * abs_pos, abs_neg, per hour: a(t) >= p_tr(t) and a(t) >= -p_tr(t), with p_tr the Link's flow;
   * pq, per hour: Q_ss + sum_i c_i S_x,i - k_loss a(t) + tan(acos pf_req) p_tr(t) >= Q_load(t), with
     k_loss = x p_cap / (pf^2 S_n), the chord of the transformer's x (p / pf)^2 / S_n on |p| <= p_cap;
-  * pcs_cost and statcom_cost: the capital costs of S_x and of Q_ss + Q_dyn in the objective.
+  * pcs_cost and statcom_cost: the capital costs of S_x and of Q_ss + Q_dyn in the objective, typed per year
+    and charged x `fom_horizon_factor(n)` (years per modelled horizon), as the app charges typed annual costs.
 
 c_i = sqrt(1 + 2 / r_i) is the chord of the PQ circle sqrt((P + S_x)^2 - P^2) on [0, r P]. The circle is
 concave in S_x, so the chord is an inner bound: the LP credits PCS Q at rated P, the worst case, and never more
@@ -39,6 +40,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
+from services.solver.periodized_costs import fom_horizon_factor
 from services.solver.runtime import _safe_log
 
 if TYPE_CHECKING:
@@ -182,6 +184,9 @@ def _add_rows(n, snapshots, stores: pd.DataFrame, link: str, emit) -> None:
                                 "myopically")
     m = n.model
     t = n.links.loc[link]
+    # Both costs are typed per year, like every annual capital_cost the GUI asks for; the LP charges them per
+    # modelled horizon, as the periodized-cost fill does for the typed component columns.
+    years = fom_horizon_factor(n)
     k_loss = t["pq_x_pu"] * t["pq_p_cap_mw"] / (t["pq_pf"] ** 2 * t["pq_s_n_mva"])
     tan_req = math.tan(math.acos(t["pq_pf_req"]))
     p_tr = m.variables["Link-p"].sel(name=link)
@@ -201,7 +206,7 @@ def _add_rows(n, snapshots, stores: pd.DataFrame, link: str, emit) -> None:
     lhs = q_ss - k_loss * abs_p + tan_req * p_tr
     cost = 0
     if "statcom_cost" in ROWS:
-        cost = float(t["statcom_capital_cost"]) * (q_ss + q_dyn)
+        cost = years * float(t["statcom_capital_cost"]) * (q_ss + q_dyn)
     if len(stores):
         idx = pd.Index(stores.index, name="Store")
         s_x = m.add_variables(lower=0, coords=[idx], name="PCS-s_x")
@@ -209,7 +214,7 @@ def _add_rows(n, snapshots, stores: pd.DataFrame, link: str, emit) -> None:
         c = _as_array(r.map(credit), idx)
         lhs = lhs + (c * s_x).sum()
         if "pcs_cost" in ROWS:
-            cost = cost + (_as_array(stores["pcs_capital_cost"].astype(float), idx) * s_x).sum()
+            cost = cost + (_as_array(years * stores["pcs_capital_cost"].astype(float), idx) * s_x).sum()
         if "sx_cap" in ROWS:
             for name in stores.index:
                 p = _p_nom(n, n.stores.at[name, "charger"])
