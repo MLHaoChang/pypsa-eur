@@ -45,7 +45,8 @@ root=$(git rev-parse --show-toplevel)
 cd "$root"
 # Run from a worktree (e.g. wt-pm), $root has no node_modules; the main
 # checkout, which owns the shared .git, does.
-main_root=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+common_dir=$(git rev-parse --path-format=absolute --git-common-dir)
+main_root=${common_dir%/*}
 
 # Link the main checkout's frontend node_modules into the trial merge.
 link_node_modules() {
