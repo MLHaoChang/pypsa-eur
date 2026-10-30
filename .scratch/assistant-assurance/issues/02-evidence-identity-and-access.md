@@ -3,7 +3,7 @@
 
 # P1: authorized evidence identity and validity
 
-Status: in progress — list_components page evidence (A1.1, current-input part of A1.3, A1.5 page capture) in #806; A1.2 revocation cases executable (#813), REVOKE-TOCTOU closed (#818); get_timeseries steps (#826); A1.4 integrity cases executable (#840); A1.4-RETAINED closed by a record MAC (#850); A1.3 run as-of cases executable (#856); A1.5 complete-source load aggregate (#864); A1.6/A1.7 aggregate handler validity (#868) and emissions/lost-load null-not-zero (#879); one aggregate gap helper and pilot POLICY_VERSION (2026-10-29 slice); run manifest MAC (run-evidence PR 1, #930); checked run sections and compare deltas (run-evidence PR 2); rest of P1 open (see "Remaining P1 slices")
+Status: in progress — list_components page evidence (A1.1, current-input part of A1.3, A1.5 page capture) in #806; A1.2 revocation cases executable (#813), REVOKE-TOCTOU closed (#818); get_timeseries steps (#826); A1.4 integrity cases executable (#840); A1.4-RETAINED closed by a record MAC (#850); A1.3 run as-of cases executable (#856); A1.5 complete-source load aggregate (#864); A1.6/A1.7 aggregate handler validity (#868) and emissions/lost-load null-not-zero (#879); one aggregate gap helper and pilot POLICY_VERSION (2026-10-29 slice); run manifest MAC (run-evidence PR 1, #930); checked run sections and compare deltas (run-evidence PR 2, #941); REPLAY (#898), shared fact builder (#916), SERIES-WINDOW (#927), REVOKE-KIND (#929) and frontend assurance_state (#946) merged; every listed P1 slice is merged (see "Remaining P1 slices")
 Progress: Authorized retained evidence, ACL rechecks shipped; status says whole phase open, displayed-data revision proof pending
 Type: task
 Blocked by: 01; live-voice issue 06 for retained-run guarantees
@@ -158,12 +158,13 @@ Not covered: replay of an older, validly sealed version of a mutable record (`op
 
 Smallest first; each goes to GK B as a plan before it is built.
 
-- **REPLAY.** A monotonic per-record sequence for mutable records (`operation`, `ui_action`, `conversation_context`), so an older, validly sealed copy reads unavailable. Only `assurance_records` changes.
-- **Shared fact builder.** One builder for the fact dicts of the static, static_page, series, run and aggregate kinds. Refactor only, behind the A1.x suites.
-- **SERIES-WINDOW.** A compact series record: a values array plus an index digest, with facts resolved on lookup. It lifts the 744-step cap without new args. Windowed args would need `harness/catalogue.py`; blocked while #851/#869 hold it.
+- **REPLAY.** Merged (#898, 904fc506): a DB high-water mark sealed into every mutable record (`operation`, `ui_action`, `conversation_context`); see "REPLAY closed" below.
+- **Shared fact builder.** Merged (#916, 561c5a6b): `assurance_records._fact` at all six sites; see "S3" below.
+- **SERIES-WINDOW.** Merged (#927, cab2e5aa): a certified-row mask plus index and values digests, cap 8784 steps; see "S4" below. Windowed args still need `harness/catalogue.py` and stay out while #851 holds it.
 - **REVOKE-KIND.** Merged (#929, 147326c2).
-- **Frontend assurance_state.** Done: `ChatPanel.tsx` reads `session_init.assurance` and marks each turn "Answer not checked" (legacy/unvalidated, muted) or "Answer will be checked" (strict or pilot, muted, only while the turn runs); a missing or malformed field renders nothing. Tests: `ChatPanel.turnCheckMark.test.tsx`; screenshots in `.scratch/assistant-assurance/screens/`.
-- **Run sections, compare_project_runs, run manifest MAC.** In progress (Assurance 02 run-evidence session): PR 1 the manifest MAC, PR 2 the checked section and compare reads; see below.
+- **Frontend assurance_state.** Merged (#946, 958c6b65): `ChatPanel.tsx` reads `session_init.assurance` and marks each turn "Answer not checked" (legacy/unvalidated, muted) or "Answer will be checked" (strict or pilot, muted, only while the turn runs); a missing or malformed field renders nothing. Tests: `ChatPanel.turnCheckMark.test.tsx`; screenshots in `.scratch/assistant-assurance/screens/`.
+- **Run sections, compare_project_runs, run manifest MAC.** Merged: PR 1 the manifest MAC (#930, f0815515), PR 2 the checked section and compare reads (#941, 507aa942); see below.
+- **Still open after the slices** (2026-10-30): windowed `get_timeseries` args (need `harness/catalogue.py`); the non-blocking follow-ups listed in the [handoff](../session-handoff.md) "P1 slices S1–S4 merged".
 
 ### 2026-10-29 — Run evidence: manifest MAC, checked sections and compare (plan)
 
