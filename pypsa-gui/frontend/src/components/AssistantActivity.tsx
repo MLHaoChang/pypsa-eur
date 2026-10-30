@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { activityFamilyWord, activityStatusWord } from './activityWords'
+import { activityFamilyWord, activityStatusWord, nativeOutcomeWord } from './activityWords'
 import { getAssistantActivity, getAssistantDecision, type ActivityFilter, type ActivitySnapshot,
   type ActivityItem, type DecisionObservation } from '../api/assistantActivity'
 import { useUIStore } from '../store/uiStore'
@@ -219,9 +219,11 @@ export default function AssistantActivity({ onConversation }: { onConversation: 
         return <article key={item.id} className="border border-border rounded p-3 space-y-1">
         <p className="font-medium break-words">{item.title}</p>
         <p>{activityStatusWord(item.status)} <span className="text-muted">· {activityFamilyWord(item.family)}</span></p>
-        {item.family !== 'run' && <p className="text-xs text-muted">Native status: {item.native_status}{item.stage ? ` · ${item.stage}` : ''}</p>}
+        {item.family !== 'run' && nativeOutcomeWord(item.native_status, item.status) &&
+          <p className="text-xs text-muted">Outcome: {nativeOutcomeWord(item.native_status, item.status)}</p>}
         {item.family !== 'run' && item.observation === 'retained' && item.last_observed_status &&
-          <p className="text-xs text-muted">Last recorded native status: {item.last_observed_status}</p>}
+          nativeOutcomeWord(item.last_observed_status, item.status) &&
+          <p className="text-xs text-muted">Last recorded: {nativeOutcomeWord(item.last_observed_status, item.status)}</p>}
         {item.observation && <p className="text-xs text-muted">
           {item.observation === 'retained' ? 'Retained observation' : 'Current native observation'}
           {recorded && <> · Last recorded <time dateTime={recorded.toISOString()}>
