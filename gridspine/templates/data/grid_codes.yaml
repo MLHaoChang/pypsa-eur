@@ -116,6 +116,32 @@ profiles:
     title: "Generic assumed limits (placeholder until a real grid code is supplied)"
     # One band for every nominal voltage. kv_max is a large finite number, since
     # the loader takes finite bounds only; no real system is above it.
+    # Load variation (asset-sizing loop AS-08). All assumed: generic engineering placeholders, no sourced
+    # figure. Stage 1 is a limit on dS/S_sc (IEC TR 61000-3-7), not a voltage change.
+    load_ramp_mw_per_min:
+      value: 30
+      clause: "generic engineering placeholder; no public code sets a MW/min ramp for this profile"
+      source: assumed
+    load_variation_limit:
+      value: 10
+      window_s: 5
+      clause: "generic engineering placeholder: MW of active-power change per window; no public code sets it for this profile"
+      source: assumed
+    lcl_ride_through_band:
+      v_min: 0.8
+      v_max: 1.1
+      duration_s: 1
+      clause: "generic engineering placeholder for a large-load ride-through band; PJM LCL ride-through work (Oct 2026) is a proposal, not adopted"
+      source: assumed
+    stage1_ds_over_ssc_pct:
+      value: 0.4
+      r_max_per_min: 10
+      clause: "IEC TR 61000-3-7 Stage 1: (dS/S_sc)max by rate band, 0.4 % for r < 10 changes per minute (0.2 % for 10 to 200, 0.1 % above 200); not checked against the text here, so assumed"
+      source: assumed
+    ride_through_transfer_counts:
+      value: false
+      clause: "generic engineering: conservative, transfer to BESS or a genset is not counted as ride-through until a code says so"
+      source: assumed
     voltage_bands:
       - kv_min: 0.0
         kv_max: 10000.0
@@ -186,6 +212,32 @@ profiles:
       and every dynamic requirement is reported as needing a dynamic study.
       Sources gathered 14 October 2026: NERC PRC-029-1 and PRC-024-3 texts; the
       IEEE SA 2800 webinar slides; MISO's PAC-2024-2 summary of IEEE 2800.
+    # Load variation (asset-sizing loop AS-08). All assumed: generic engineering placeholders, no sourced
+    # figure. Stage 1 is a limit on dS/S_sc (IEC TR 61000-3-7), not a voltage change.
+    load_ramp_mw_per_min:
+      value: 30
+      clause: "generic engineering placeholder; no public code sets a MW/min ramp for this profile"
+      source: assumed
+    load_variation_limit:
+      value: 10
+      window_s: 5
+      clause: "generic engineering placeholder: MW of active-power change per window; no public code sets it for this profile"
+      source: assumed
+    lcl_ride_through_band:
+      v_min: 0.8
+      v_max: 1.1
+      duration_s: 1
+      clause: "generic engineering placeholder for a large-load ride-through band; PJM LCL ride-through work (Oct 2026) is a proposal, not adopted"
+      source: assumed
+    stage1_ds_over_ssc_pct:
+      value: 0.4
+      r_max_per_min: 10
+      clause: "IEC TR 61000-3-7 Stage 1: (dS/S_sc)max by rate band, 0.4 % for r < 10 changes per minute (0.2 % for 10 to 200, 0.1 % above 200); not checked against the text here, so assumed"
+      source: assumed
+    ride_through_transfer_counts:
+      value: false
+      clause: "generic engineering: conservative, transfer to BESS or a genset is not counted as ride-through until a code says so"
+      source: assumed
     voltage_bands:
       - kv_min: 0.0
         kv_max: 69.0
