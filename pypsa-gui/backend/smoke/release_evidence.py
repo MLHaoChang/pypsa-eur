@@ -56,7 +56,7 @@ OWNERS: dict[str, str] = {
                                      'eh_redundancy', 'eh_levers', 'eh_dtc_planning', 'multi_energy')},
     **{f'LC-D13.{v}': LC36 for v in ('multi_energy_heat', 'mc_certify_ens_plan', 'unsupported_scope',
                                      'study_swap', 'stale_source', 'incomplete_campaign')},
-    'LC-D13.stale_source_unflagged_readers': UNASSIGNED,
+    'LC-D13.stale_source_unflagged_readers': 'LC-37 (.scratch/live-copilot/issues/37-adequacy-readers-stale-source.md, needs-triage)',
 }
 
 
