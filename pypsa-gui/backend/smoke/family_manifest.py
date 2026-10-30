@@ -260,8 +260,18 @@ VARIANTS: list[dict] = [
              'update_solver_config run_simulation get_simulation_status',
              B + 'test_lc06_d05_foresight.py::test_every_foresight_reports_the_hand_horizon_cost[myopic]',
              B + 'test_lc06_d05_foresight.py::test_every_foresight_reports_the_hand_horizon_cost[limited]'),
-    _pending('LC-D06.sclopf', 'engine seed only: test_fixed_sizes.py'),
-    _pending('LC-D06.ac_stage', 'lifecycle/refusal only, no numbers'),
+    _covered('LC-D06.sclopf', 'two identical parallel lines A-B (s_nom 60), 10 EUR/MWh at A, 50 at B, 100 MW load at B, 1 h: N-1 (BODF 1) caps '
+             'f1 + f2 at 60, base flows 30/30, objective 60 x 10 + 40 x 50 = 2600; N-1 off 50/50 and 1000; s_nom 80 gives 40/40 and 1800',
+             'update_solver_config run_simulation get_simulation_status get_results',
+             B + 'test_lc33_d06_sclopf_ac.py::test_n1_limits_the_corridor_to_one_lines_rating[n1]',
+             B + 'test_lc33_d06_sclopf_ac.py::test_n1_limits_the_corridor_to_one_lines_rating[n1_off]',
+             B + 'test_lc33_d06_sclopf_ac.py::test_n1_limits_the_corridor_to_one_lines_rating[n1_s_nom_80]'),
+    _covered('LC-D06.ac_stage', 'run_ac_pf_after_lopf chained onto run_simulation on the LC-D07 3-bus network: the PQ unit keeps its LP setpoint '
+             '(30 MW), the slack carries its LP dispatch plus the losses, losses and voltages from the independent Ybus/Newton solve of '
+             'LC-D07; doubling every r keeps the LP objective (1e-9 relative) and moves the losses to the oracle value',
+             'update_solver_config run_simulation get_simulation_status get_results',
+             B + 'test_lc33_d06_sclopf_ac.py::test_the_chained_ac_stage_keeps_the_lp_setpoints_and_the_slack_takes_the_losses',
+             B + 'test_lc33_d06_sclopf_ac.py::test_doubling_the_resistance_moves_only_the_losses'),
     _covered('LC-D06.solver_outcomes', 'unbounded and unavailable solver refused by the real validator before the solver; '
              'a limit stop with no incumbent (real HiGHS; stubbed return at the full, SCLOPF and myopic call sites) = failed, '
              'no objective; with an incumbent = completed, record condition time_limit; MIP gap 0.25 bounds the UC objective (hand 640)',
@@ -378,21 +388,85 @@ VARIANTS: list[dict] = [
     _covered('LC-D13.copt_screening', 'EUE/LOLE from the hand two-unit COPT distribution',
              '',
              B + 'test_copt_assurance.py::test_the_classical_fleet_by_hand_and_as_the_tab_has_it'),
-    _pending('LC-D13.margin_loop', 'HTTP test stubs the engine'),
-    _pending('LC-D13.reserve_margin_coupling', 'seam checks shape only'),
-    _pending('LC-D13.elcc_frontier_campaign', 'seam checks contract keys only'),
-    _pending('LC-D13.eh_redundancy', 'engine seed only'),
-    _pending('LC-D13.eh_levers', 'engine seed only'),
+    _covered('LC-D13.margin_loop', 'flat 100 MW over 48 h, firm F 130 MW and extendable X (both EFORd 0.1): m_tight 0.17, start m_tight x '
+             '(1 + STEP_OVERSHOOT), X(m) = max(0, ((1 + m) x 100 - 117) / 0.9), cost 480 x X + 48,000; two-unit COPT LOLE 4.8 h below '
+             'X = 100 (m* 1.07) and 0.48 h from it; the loop verifies the cheapest met margin, at or above m*; load 110 moves m_tight and m*. '
+             'm_tight <= 0: runner layer, stubbed probe report (branch unreachable from the seam: the probe\'s own reserve constraint)',
+             'run_margin_loop get_adequacy_results',
+             B + 'test_lc33_d13_margin_elcc.py::test_the_margin_loop_steps_to_the_cheapest_verified_margin[load_100]',
+             B + 'test_lc33_d13_margin_elcc.py::test_the_margin_loop_steps_to_the_cheapest_verified_margin[load_110]',
+             B + 'test_lc33_d13_margin_elcc.py::test_a_probe_tight_at_or_below_zero_margin_starts_at_the_overshoot[m_tight_0]',
+             B + 'test_lc33_d13_margin_elcc.py::test_a_probe_tight_at_or_below_zero_margin_starts_at_the_overshoot[m_tight_negative]',
+             B + 'test_lc33_d13_margin_elcc.py::test_the_hand_step_moves_with_the_load'),
+    _covered('LC-D13.reserve_margin_coupling', 'loads 100/150 MW at weights 3/1 (unweighted peak 150, weighted 300): firm base 96 MW, '
+             'the peaker (EFORd 0.1) builds ((1 + m) x 150 - 96) / 0.9 = 93.33 MW at m 0.2 and 110 at m 0.3 (+15 / 0.9), objective by '
+             'the hand delta; get_adequacy_results(reserve_margin) required/achieved/binding',
+             'update_solver_config run_simulation get_results get_adequacy_results',
+             B + 'test_lc33_d13_margin_elcc.py::test_the_fixture_peaks_differ_by_weighting',
+             B + 'test_lc33_d13_margin_elcc.py::test_the_margin_builds_the_derated_shortfall_through_the_lp[m_0.2]',
+             B + 'test_lc33_d13_margin_elcc.py::test_the_margin_builds_the_derated_shortfall_through_the_lp[m_0.3]',
+             B + 'test_lc33_d13_margin_elcc.py::test_raising_the_margin_moves_the_build_and_the_objective_by_the_hand_delta'),
+    _covered('LC-D13.elcc_frontier_campaign', 'frontier under start_campaign, flat 100 MW over 4 h: caps 200/100/40 MWh cost 6400/6400/15,200, '
+             'knee point 1; VoLL 40 gives 2400/5400/15,200 and knee 0; dear capex up moves each point by its built MW; campaign_status '
+             'charges targets + 1 solves; total_system_cost = objective - VoLL x ENS. ELCC of a perfect 30 MW unit beside 80 MW at q 0.1 = '
+             'load - 80 (20 MW; 15 at 95 MW of load), not nameplate, within the engine bisection tolerance',
+             'start_campaign campaign_status run_frontier_study run_simulation run_mc_study get_adequacy_results',
+             B + 'test_lc33_d13_margin_elcc.py::test_the_frontier_oracle_by_hand',
+             B + 'test_lc33_d13_margin_elcc.py::test_the_frontier_prices_each_target_and_the_campaign_charges_it[voll_100]',
+             B + 'test_lc33_d13_margin_elcc.py::test_the_frontier_prices_each_target_and_the_campaign_charges_it[voll_40]',
+             B + 'test_lc33_d13_margin_elcc.py::test_the_frontier_prices_each_target_and_the_campaign_charges_it[dear_capex_up]',
+             B + 'test_lc33_d13_margin_elcc.py::test_total_system_cost_is_the_objective_less_the_shed_at_voll',
+             B + 'test_lc33_d13_margin_elcc.py::test_a_perfect_units_elcc_is_the_capacity_that_restores_the_lole[load_100]',
+             B + 'test_lc33_d13_margin_elcc.py::test_a_perfect_units_elcc_is_the_capacity_that_restores_the_lole[load_95]'),
+    _covered('LC-D13.eh_redundancy', 'certifiable weak hub, 8 h at weight 1095: base option 9,745,500 EUR; n1_generation option: spare built '
+             'where it beats the peaker (10 MW at 180 EUR/MWh, priced from the defaults pack), cost base - 120 x 10 x 1095 + 10 x annualised, '
+             'selected; peak hour trimmed to 115 MW: base -300 x 5 x 1095, spare 5 MW',
+             'run_eh_study get_adequacy_results',
+             B + 'test_lc33_d13_eh_planning.py::test_the_hub_oracle_by_hand',
+             B + 'test_lc33_d13_eh_planning.py::test_the_n1_spare_is_priced_built_and_selected_by_hand[peak_120]',
+             B + 'test_lc33_d13_eh_planning.py::test_the_n1_spare_is_priced_built_and_selected_by_hand[peak_115]'),
+    _covered('LC-D13.eh_levers', 'import cap 0 / 25 / 50 MW: 0 infeasible at the ENS cap, 25 MW 47,358,750 EUR, 50 MW 9,745,500; import '
+             'price 5 -> 8 EUR/MWh moves each option by 3 x cap x 8 x 1095',
+             'run_eh_study get_adequacy_results',
+             B + 'test_lc33_d13_eh_planning.py::test_each_import_cap_costs_the_hand_merit_order[price_5]',
+             B + 'test_lc33_d13_eh_planning.py::test_each_import_cap_costs_the_hand_merit_order[price_8]'),
     _covered('LC-D13.eh_dtc', 'P16 shared bus, 2 h at weight 1: critical unserved 140 MWh under the bus aggregate (bus VoLL) and 40 MWh under per_load (per-Load VoLL priority, priority_exact); local 40 MW gives 80 against 0',
              'run_eh_study get_adequacy_results',
              B + 'test_lc06_d13_energization_dtc.py::test_bus_and_per_load_voll_each_set_the_critical_unserved'),
-    _pending('LC-D13.eh_dtc_planning', 'engine seed only'),
+    _covered('LC-D13.eh_dtc_planning', 'P16 shared bus islanded, extendable local unit: per_load keeps the 30 MW hospital, builds 20 MW, '
+             'ENS 0, cost 5240; bus aggregate retains 80 MW, builds 70, 14,340; hospital 40 MW builds 30, 7060',
+             'run_eh_study get_adequacy_results',
+             B + 'test_lc33_d13_eh_planning.py::test_the_islanded_plan_builds_the_retained_critical_shortfall[per_load]',
+             B + 'test_lc33_d13_eh_planning.py::test_the_islanded_plan_builds_the_retained_critical_shortfall[bus_aggregate]',
+             B + 'test_lc33_d13_eh_planning.py::test_the_islanded_plan_builds_the_retained_critical_shortfall[hospital_40]'),
     _covered('LC-D13.energization', 'ENS = sum_h w_h max(L - G - min(E_h, cap), 0) at each cap step 80 -> 30 -> 80 MW (97,000 / 158,000 / 97,000 MWh, non-uniform weights); the solve sees the edited p_nom; dropping the schedule moves ENS by -82,000 MWh',
              'run_eh_study get_adequacy_results',
              B + 'test_lc06_d13_energization_dtc.py::test_the_fixture_binds_each_way_at_the_low_cap',
              B + 'test_lc06_d13_energization_dtc.py::test_the_schedule_composes_as_min_with_each_capacity_edit',
              B + 'test_lc06_d13_energization_dtc.py::test_dropping_the_schedule_moves_ens_by_the_hand_delta'),
-    _pending('LC-D13.multi_energy', 'no H2/heat attribution test found'),
+    _covered('LC-D13.multi_energy', 'H2 only (heat not covered). Dedicated H2 bus: 80 MW gas serves the 50 MW AC Load, the electrolyser '
+             '(eta 0.6) delivers 18 MW of a 40 MW H2 Load: H2 unmet 44 MWh by carrier and by Load, electrical 0; H2 +5 MW gives +10 MWh. '
+             'Shared bus: 30 MWh short, at least 20 MWh H2, by-carrier and by-Load readers agree. Live solves capture per-Load slacks, so '
+             'the dedicated-bus roll-up path is unreachable from the seam (LC-D13.multi_energy_dedicated_rollup); heat is LC-D13.multi_energy_heat',
+             'run_eh_study get_adequacy_results',
+             B + 'test_lc33_d13_multi_energy.py::test_the_dedicated_oracle_by_hand',
+             B + 'test_lc33_d13_multi_energy.py::test_h2_unmet_on_its_own_bus_is_attributed_to_hydrogen_alone[h2_40]',
+             B + 'test_lc33_d13_multi_energy.py::test_h2_unmet_on_its_own_bus_is_attributed_to_hydrogen_alone[h2_45]',
+             B + 'test_lc33_d13_multi_energy.py::test_a_shared_bus_reports_the_forced_h2_shed_and_its_readers_agree'),
+    _pending('LC-D13.multi_energy_heat', 'heat unmet attribution (dedicated heat bus and per-Load) has no hand-number test; LC-33 pinned H2 only'),
+    _unavailable('LC-D13.multi_energy_dedicated_rollup', 'dedicated-bus roll-up attribution (ENS by carrier from bus ENS) is not reachable '
+                 'from the chat tools: live solves always capture per-Load slacks, so the section reports per_load_slack',
+                 'pypsa-gui/backend/services/adequacy/multi_energy.py ATTRIBUTION_DEDICATED'),
+    _pending('LC-D13.unsupported_scope', 'no hand-number test through the chat tools; refusals exist below the seam or without an oracle '
+             '(test_adequacy_margin_loop.py rolling/unpriceable/ceiling, test_adequacy_campaign.py budget and second campaign, '
+             'test_copt_assurance.py COPT inputs), not re-audited'),
+    _pending('LC-D13.finalist_certification', 'MC certification of the selected EH option is not pinned by hand; LC-33 pins the LP cost and '
+             'selection only (test_energy_hub_mc_certify.py, test_energy_hub_redundancy_select.py exist, not re-audited)'),
+    _pending('LC-D13.study_swap', 'swapping the study or project while a loop, frontier, campaign or EH study runs is not tested'),
+    _pending('LC-D13.stale_source', 'edited/stale flags exist for EH studies (test_eh_study_edited_since.py, test_eh_review_route.py), not '
+             're-audited; margin loop, frontier, ELCC and campaign results after a source edit are not tested'),
+    _pending('LC-D13.incomplete_campaign', 'aborted or incomplete campaigns and studies: EH aborted-study tests exist (test_eh_review_route.py, '
+             'test_eh_study_record_survives_reactivation.py), not re-audited; a campaign closed with targets unsolved is not tested'),
     _covered('LC-D14.static_campus', 'six untied hours through the queued Run: k 1 picks import/trafo h0, consumption h2, '
              'export/renewable h3; k 2 adds h5 import/trafo, h0 consumption, h2 renewable; k read back from the job; '
              '50 MW in h5 moves the import pick',
