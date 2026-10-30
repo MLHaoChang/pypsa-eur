@@ -1,0 +1,8 @@
+{
+  "kinds": {
+    "results_workbook_no_results": {
+      "surface": "inline",
+      "why": "export_results_workbook refuses with 409 when the network has no solved results yet (the route answers 204); the assistant tells the user to run the model first and offers to start the solve."
+    }
+  }
+}

@@ -143,8 +143,8 @@ TOOLS_BY_FAMILY: dict[str, frozenset[str]] = {f: frozenset(names.split()) for f,
         start_experiment""",
     'import-export': """
         build_delivery download_project_bundle export_asset_results export_csv_bundle export_excel
-        export_experiment_comparison export_matpower export_network_nc export_preview_png export_run_evidence
-        export_sensitivity_comparison export_to_csv export_to_excel get_file_delivery import_csv_bundle
+        export_experiment_comparison export_matpower export_network_nc export_preview_png export_results_workbook
+        export_run_evidence export_sensitivity_comparison export_to_csv export_to_excel get_file_delivery import_csv_bundle
         import_excel import_map_geometry import_matpower import_meter_data import_network_nc
         import_project_bundle import_uploaded_network inspect_import read_excel_sheet read_upload_meta
         list_uploads delete_upload clear_uploads download_snapshot_weightings_csv

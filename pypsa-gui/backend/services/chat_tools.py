@@ -7424,6 +7424,30 @@ def export_asset_results(
     return meta
 
 
+def export_results_workbook(views: list | None = None, all: bool = False,  # noqa: A002 — the route's own name
+                            stored: bool = False, filename: str | None = None) -> dict:
+    """Write the run's results workbook (RW-TABS-1) to the project's uploads/.
+
+    The route's own handler builds it, so the file is the one the Export
+    chooser downloads for the same views (`GET /api/results/workbook.xlsx`)."""
+    from routers import results as R
+
+    resp = _route(R.get_results_workbook, views=",".join(str(v) for v in (views or [])),
+                  all_views=bool(all), stored=bool(stored))
+    if resp.status_code == 204:
+        raise HTTPException(
+            status_code=409,
+            detail={"error_kind": "results_workbook_no_results",
+                    "message": "There are no solved results to export. Run the model first."})
+    fname = filename or f"results_{PyPSAService.get_loaded_project() or 'network'}.xlsx"
+    if not fname.lower().endswith(".xlsx"):
+        fname += ".xlsx"
+    meta = _save_agent_export(
+        resp.body, fname, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    meta["bytes"] = meta["size"]
+    return meta
+
+
 # ── LLM provider switching (1) — Task 10 ────────────────────────────────────
 
 
@@ -9564,6 +9588,7 @@ DISPATCHERS: dict[str, Any] = {
     "get_asset_results": get_asset_results,
     "ui_open_asset_detail": ui_open_asset_detail,
     "export_asset_results": export_asset_results,
+    "export_results_workbook": export_results_workbook,
     # llm provider switching (1) — Task 10
     "set_active_profile": set_active_profile,
 }
