@@ -29,11 +29,13 @@ import { fieldLabel, fmt, sentence } from '../components/series/SeriesKit'
 import { errorText } from '../api/profiles'
 import DefaultsReview from '../components/series/DefaultsReview'
 import { WeatherBar } from '../components/series/WeatherBar'
+import RenewableTuner from '../components/series/RenewableTuner'
+import { profileText } from '../components/series/ProfileCompare'
 import { generateAndApply, readyRows } from '../components/series/renewableGeneration'
 import { MissingCoordinatesBanner, ReadinessBadge } from '../components/series/RenewableReadiness'
 import { profilesApi, type ReadinessRow } from '../api/profiles'
 
-const EDITOR_TITLE = { load: 'Profile', availability: 'Availability', price: 'Price' } as const
+const EDITOR_TITLE = { load: 'Profile', availability: 'Availability', price: 'Price', tune: 'Tune the profile' } as const
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 
@@ -796,7 +798,7 @@ function LoadItem({
   )
 }
 
-function GenItem({ gen, meta, readiness, onGenerate, generating, hasActive, activeRows, selected, checked, onClick, onCheck, onDownload, onUpload, onDelete, onEdit, attrLabel, uploadError }: {
+function GenItem({ gen, meta, readiness, onGenerate, onTune, generating, hasActive, activeRows, selected, checked, onClick, onCheck, onDownload, onUpload, onDelete, onEdit, attrLabel, uploadError }: {
   gen: Generator
   meta: GeneratorProfileMeta | undefined
   // The readiness row (RP-02) for a wind/solar generator on the Renewables tab.
@@ -804,6 +806,7 @@ function GenItem({ gen, meta, readiness, onGenerate, generating, hasActive, acti
   // One-click generate from the weather bar's year and source (RP-04b); set
   // only on a Renewables row that may be written.
   onGenerate?: () => void
+  onTune?: () => void
   generating?: boolean
   // Whether the generator has a profile for the CURRENTLY-ACTIVE sub-attribute
   // (p_max_pu / p_min_pu / marginal_cost). Drives the row's check icon, the
@@ -911,14 +914,16 @@ function GenItem({ gen, meta, readiness, onGenerate, generating, hasActive, acti
           }}
         />
       </div>
-      {onGenerate && (
+      {(onGenerate || onTune) && (
         <div className="px-3 pl-[34px] pb-1.5 -mt-0.5 border-b border-border/40">
-          <button type="button" data-testid={`generate-${gen.name}`} disabled={generating}
+          {onGenerate && <button type="button" data-testid={`generate-${gen.name}`} disabled={generating}
             onClick={e => { e.stopPropagation(); onGenerate() }}
             className="text-[10px] text-accent hover:underline disabled:opacity-50"
             title="Generate this generator's profile from the weather bar's source and year">
             {generating ? 'Generating…' : readiness?.profile === 'generated' ? 'Regenerate' : 'Generate'}
-          </button>
+          </button>}
+          {onTune && <button type="button" data-testid={`tune-${gen.name}`} className="ml-3 text-[10px] text-accent hover:underline"
+            onClick={e => { e.stopPropagation(); onTune() }}>Tune…</button>}
         </div>
       )}
       {uploadError && (
@@ -1056,6 +1061,7 @@ export default function TimeSeriesManager() {
     | { family: 'load'; component: string; tab: 'archetype' | 'upload' }
     | { family: 'availability'; component: string; componentType: 'generators' | 'links' }
     | { family: 'price'; component: string; componentType: 'generators' | 'links' }
+    | { family: 'tune'; component: string }
     | null
   >(null)
 
@@ -1959,6 +1965,7 @@ export default function TimeSeriesManager() {
                   <GenItem key={g.name} gen={g} meta={gProfiles[g.name]}
                     readiness={activeTab === 'renewable' ? readinessOf(g.name) : undefined}
                     onGenerate={activeTab === 'renewable' && canGenerateRow(g.name) ? () => { void generateRow(g.name) } : undefined}
+                    onTune={activeTab === 'renewable' && uiMode === 'expert' && readinessOf(g.name)?.coord_source === 'bus' ? () => setSeriesEditor({ family: 'tune', component: g.name }) : undefined}
                     generating={generating.has(g.name)}
                     hasActive={genHasProfileForActive(g.name)}
                     activeRows={genActiveRows(g.name)}
@@ -1983,6 +1990,7 @@ export default function TimeSeriesManager() {
                   <GenItem key={g.name} gen={g} meta={gProfiles[g.name]}
                     readiness={activeTab === 'renewable' ? readinessOf(g.name) : undefined}
                     onGenerate={activeTab === 'renewable' && canGenerateRow(g.name) ? () => { void generateRow(g.name) } : undefined}
+                    onTune={activeTab === 'renewable' && uiMode === 'expert' && readinessOf(g.name)?.coord_source === 'bus' ? () => setSeriesEditor({ family: 'tune', component: g.name }) : undefined}
                     generating={generating.has(g.name)}
                     hasActive={genHasProfileForActive(g.name)}
                     activeRows={genActiveRows(g.name)}
@@ -2351,7 +2359,7 @@ export default function TimeSeriesManager() {
           }} />
         </Dialog>
       )}
-      {seriesEditor && currentProject && (
+      {seriesEditor && currentProject && (seriesEditor.family !== 'tune' || uiMode === 'expert') && (
         <Dialog
           open
           onClose={() => setSeriesEditor(null)}
@@ -2365,7 +2373,14 @@ export default function TimeSeriesManager() {
             <button type="button" aria-label="Close" className="text-muted hover:text-text"
               onClick={() => setSeriesEditor(null)}><X size={14} /></button>
           </div>
-          {seriesEditor.family === 'load' ? (
+          {seriesEditor.family === 'tune' ? (
+            readinessOf(seriesEditor.component) ? <RenewableTuner key={`${currentProject}:${seriesEditor.component}`} project={currentProject}
+              row={readinessOf(seriesEditor.component)!} onApplied={result => {
+                setSeriesEditor(null)
+                setGenNotice({ tone: 'ok', text: profileText(`${result.component}: profile applied. Undo (Ctrl+Z) reverts it.${result.warning ? ` ${result.warning}` : ''}${result.warnings?.length ? ` ${result.warnings.join(' ')}` : ''}`) })
+                void qc.invalidateQueries()
+              }} /> : <p>This generator is no longer available.</p>
+          ) : seriesEditor.family === 'load' ? (
             <LoadSeriesEditor
               key={`${seriesEditor.component}:${seriesEditor.tab}`}
               project={currentProject}

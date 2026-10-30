@@ -522,6 +522,7 @@ def list_profile_presets(technology: str | None = None):
             {
                 "name": p.name,
                 "technology": p.technology,
+                "source_type": p.source_type,
                 "description": getattr(p, "description", ""),
                 "params": dict(p.params),
             }
@@ -1670,7 +1671,7 @@ def clear_weather_choice(
 
 
 @project_router.get("/{name}/profiles/compare")
-def compare_profiles(a: str, b: str, component: str | None = None,
+def compare_profiles(b: str, a: str | None = None, component: str | None = None,
                      proj: AuthorizedProject = ProjectAccessDep):
     """Read before/after statistics on the model clock without changing it."""
     from services.profile_gen import compare

@@ -57,6 +57,34 @@ def _compare(client, project, a, b, **extra):
     return res.json()
 
 
+def test_new_only_preview_has_no_baseline_or_deltas(client, project, session_ctx):
+    jid = _pending(session_ctx(client))
+    paired = _compare(client, project, "current:g_a", f"pending:{jid}:g_a")
+    res = client.get(f"/api/projects/{project}/profiles/compare",
+                     params={"b": f"pending:{jid}:g_a"})
+    assert res.status_code == 200, res.text
+    got = res.json()
+    assert json.dumps(got["b"], sort_keys=True) == json.dumps(paired["b"], sort_keys=True)
+    assert got["a"] is None and got["delta"] is None and got["week"]["a"] is None
+    assert got["week"]["b"] == paired["week"]["b"]
+
+
+def test_new_only_preview_requires_a_target_for_multiple_points(client, project, session_ctx):
+    jid = _pending(session_ctx(client), points=["g_a", "g_c"])
+    res = client.get(f"/api/projects/{project}/profiles/compare", params={"b": f"pending:{jid}"})
+    assert res.status_code == 422
+    assert res.json()["detail"]["error_kind"] == "invalid_compare_side"
+
+
+def test_new_only_preview_refuses_nonfinite_values(client, project, session_ctx):
+    series = pd.Series(0.4, index=SNAPS)
+    series.iloc[0] = float("nan")
+    jid = _pending(session_ctx(client), series)
+    res = client.get(f"/api/projects/{project}/profiles/compare", params={"b": f"pending:{jid}:g_a"})
+    assert res.status_code == 422
+    assert "finite" in res.json()["detail"]["message"].lower()
+
+
 def test_the_flh_delta_matches_a_hand_calculation(
     client, project, session_ctx, record_property
 ):

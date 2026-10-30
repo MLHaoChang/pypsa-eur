@@ -299,3 +299,13 @@ def test_tuning_receipts_come_from_flat_settings_not_caller_metadata():
     )
     assert got.meta["tuning"] == {"losses": 0.1}
     assert "tuning_not_applied" not in got.meta
+
+
+def test_preset_route_preserves_native_source_type_and_technology_filter(client):
+    from services.profile_gen import presets
+
+    for technology in (None, "wind", "solar"):
+        res = client.get("/api/profiles/presets", params={"technology": technology} if technology else {})
+        assert res.status_code == 200
+        expected = {(p.name, p.technology): p.source_type for p in presets.list_presets(technology)}
+        assert {(p["name"], p["technology"]): p["source_type"] for p in res.json()["presets"]} == expected

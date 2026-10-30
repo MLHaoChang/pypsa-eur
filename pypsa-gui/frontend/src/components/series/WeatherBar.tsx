@@ -58,6 +58,17 @@ export function WeatherBar({ project }: { project: string }) {
           Edit in Connection &amp; grid ›
         </button>
       </p>
+      {w.window && <p className="text-muted" data-testid="weather-window">
+        {'unsupported' in w.window ? `Profile window unavailable: ${w.window.unsupported}` : (() => {
+          const window = w.window
+          const a = new Date(window.first.endsWith('Z') ? window.first : `${window.first}Z`)
+          const b = new Date(window.last.endsWith('Z') ? window.last : `${window.last}Z`)
+          const day = new Intl.DateTimeFormat('en-GB', { day: 'numeric', timeZone: 'UTC' })
+          const full = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+          const dates = a.getUTCMonth() === b.getUTCMonth() ? `${day.format(a)}–${full.format(b)}` : `${full.format(a)}–${full.format(b)}`
+          return `${window.runs === 1 ? dates : `${window.runs} sampled periods`} · ${window.hours} h (UTC): a generated profile takes these dates from ${w.year}.`
+        })()}
+      </p>}
       {save.isError && <p className="text-warn" data-testid="weather-error">{errorText(save.error)}</p>}
     </div>
   )
