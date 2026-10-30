@@ -3,7 +3,7 @@
 
 # AS-01 — Design-intent presets A–E
 
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: none
 Model: Sonnet
@@ -17,12 +17,14 @@ Add one design intent per scenario as scenario metadata, extending DC 03 `backup
 
 ## Acceptance
 
-- [ ] Tests first: each intent A–E loads, round-trips and rejects an unknown intent.
-- [ ] Intent A default backup energy = critical load x 4 h (AS-AUTONOMY-1): 80 MW critical load gives 320 MWh. The hours value is editable per project and validated > 0.
-- [ ] Intent D is offered. Its grid-code check warns when the profile does not accept transfer to BESS as ride-through (AS-NOUPS-1); the warning does not block the scenario.
-- [ ] Intent B/C genset p_nom >= P_crit and run-hour cap fields exist; intent D bridge reserve default 0.25 h (80 MW gives 20 MWh).
-- [ ] Existing `backup_mode` projects load unchanged.
+- [x] Tests first: each intent A–E loads, round-trips and rejects an unknown intent.
+- [x] Intent A default backup energy = critical load x 4 h (AS-AUTONOMY-1): 80 MW critical load gives 320 MWh. The hours value is editable per project and validated > 0.
+- [x] Intent D is offered. Its grid-code check warns when the profile does not accept transfer to BESS as ride-through (AS-NOUPS-1); the warning does not block the scenario.
+- [x] Intent B/C genset p_nom >= P_crit and run-hour cap fields exist; intent D bridge reserve default 0.25 h (80 MW gives 20 MWh).
+- [x] Existing `backup_mode` projects load unchanged.
 
 ## PRs
+
+- #962
 
 ## Comments
