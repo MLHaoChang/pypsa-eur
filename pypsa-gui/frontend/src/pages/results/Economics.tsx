@@ -731,7 +731,7 @@ export default function Economics() {
                sub={kpis.fixed != null
                  ? 'annualised CAPEX + fixed O&M (gens + storage)'
                  : 'capital-cost resolver failed — see the note above'}
-               hint="Σ ((overnight × annuity, or capital_cost) + fom_cost) × p_nom_opt over generators, storage units, stores and converters (electrolysers / heat pumps / P2X) — the fixed cost the LP objective actually paid (PyPSA's periodized_cost). FOM is shown separately in the table but is already part of this figure. Reconciles EXACTLY with the Dispatch tab's CAPEX (annuitised) KPI — measured Δ 0.00. It does NOT match Capacity Expansion's cost_breakdown.capex, which also includes line and transformer CAPEX and is several times larger. Shown as 'unavailable' rather than 0 when the capital-cost resolver fails." />
+               hint="Σ ((overnight × annuity, or capital_cost) + fom_cost) × p_nom_opt over generators, storage units, stores and converters (electrolysers / heat pumps / P2X) — the fixed cost the LP objective actually paid (PyPSA's periodized_cost). FOM is shown separately in the table but is already part of this figure. Reconciles EXACTLY with the Dispatch tab's CAPEX (annuitised) KPI — measured Δ 0.00. It does NOT match Capacity expansion's cost_breakdown.capex, which also includes line and transformer CAPEX and is several times larger. Shown as 'unavailable' rather than 0 when the capital-cost resolver fails." />
           <KPI label="Variable cost"
                value={fmtCurrency(kpis.vom + kpis.charge_cost)}
                sub={kpis.charge_cost > 0
@@ -988,7 +988,7 @@ export default function Economics() {
             (overnight × annuity if you typed overnight_cost) and the LP objective adds fixed O&M on top of it, so this equals the
             LP-objective contribution; <span className="font-mono">fom_cost</span> is the O&M share of it, shown separately, not an extra.
             Σ fixed_cost across this table reconciles exactly with the Dispatch tab's <span className="font-mono">CAPEX (annuitised)</span> KPI.
-            It is deliberately smaller than Capacity Expansion's <span className="font-mono">cost_breakdown.capex</span>, which also
+            It is deliberately smaller than Capacity expansion's <span className="font-mono">cost_breakdown.capex</span>, which also
             counts line and transformer CAPEX — this tab covers only generators, storage units, stores and converters.
           </p>
           <p>
