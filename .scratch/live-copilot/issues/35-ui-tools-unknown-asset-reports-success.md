@@ -3,7 +3,7 @@
 
 # LC-35 — UI tools report success for an unknown asset or metric
 
-Status: needs-triage
+Status: ready-for-agent
 Type: bug
 
 Found by LC-32 (D24, `LC-D24.unknown_asset_event`); reviewed by GK B (12).

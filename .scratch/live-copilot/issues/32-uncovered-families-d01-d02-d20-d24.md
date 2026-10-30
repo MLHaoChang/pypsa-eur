@@ -3,7 +3,11 @@
 
 # LC-32 — Behaviour coverage for the families LC-06 leaves out
 
-Status: needs-triage
+Status: done
+
+Closed under owner decision LC32-CLOSE-1: the remaining `_pending` rows stay as the
+follow-up list; tickets 33 (`33-timeseries-upload-guards.md`) and 35
+(`35-ui-tools-unknown-asset-reports-success.md`) are their own fix packages.
 Type: task
 
 Split from live-voice issue 08 (owner decision LV08-SHRINK-1; see
