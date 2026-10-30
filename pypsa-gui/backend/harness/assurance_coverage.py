@@ -31,7 +31,15 @@ ADAPTERS: dict[str, dict[str, str]] = {
     },
     "run_metric_evidence": {
         "effects": "none",
-        "validity": "recorded metrics of one completed run, manifest and sections rechecked, as of its finish",
+        "validity": (
+            "recorded metrics, or one recorded section's numbers with units, of one completed "
+            "run; sealed manifest and sections rechecked, as of its finish"
+        ),
+        "progress": "tool_result", "artifact": "none", "status": "checked",
+    },
+    "run_comparison_evidence": {
+        "effects": "none",
+        "validity": "metric deltas between two comparable completed runs, both sealed manifests rechecked",
         "progress": "tool_result", "artifact": "none", "status": "checked",
     },
     "aggregate_load_evidence": {
@@ -100,6 +108,7 @@ CHECKED_TOOL_ADAPTERS = {
     "list_components": "static_input_page_evidence",
     "get_timeseries": "series_input_evidence",
     "get_run_evidence": "run_metric_evidence",
+    "compare_project_runs": "run_comparison_evidence",
     "get_aggregate_load": "aggregate_load_evidence",
     "update_component": "checked_input_effect",
     "ui_open_panel": "navigation_ack",

@@ -256,12 +256,13 @@ def test_a_run_that_did_not_complete_is_refused_before_the_handler(
 @pytest.mark.parametrize(
     "args",
     [
-        {"run_id": "run-old", "section": "summary"},
+        {"run_id": "run-old", "section": "summary", "metrics": ["objective"]},
         {"run_id": "run-old", "metrics": ["objective"]},
         {"run_id": 7},
         {},
     ],
-    ids=["section", "extra", "number", "missing"],
+    # A section alone is its own checked read (test_p1_run_sections).
+    ids=["section_and_extra", "extra", "number", "missing"],
 )
 def test_inexact_args_are_refused_before_the_handler(run, harness, monkeypatch, args):
     calls = wrap_handler(monkeypatch)

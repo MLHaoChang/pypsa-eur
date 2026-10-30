@@ -3,7 +3,7 @@
 
 # P1: authorized evidence identity and validity
 
-Status: in progress — list_components page evidence (A1.1, current-input part of A1.3, A1.5 page capture) in #806; A1.2 revocation cases executable (#813), REVOKE-TOCTOU closed (#818); get_timeseries steps (#826); A1.4 integrity cases executable (#840); A1.4-RETAINED closed by a record MAC (#850); A1.3 run as-of cases executable (#856); A1.5 complete-source load aggregate (#864); A1.6/A1.7 aggregate handler validity (#868) and emissions/lost-load null-not-zero (#879); one aggregate gap helper and pilot POLICY_VERSION (2026-10-29 slice); rest of P1 open (see "Remaining P1 slices")
+Status: in progress — list_components page evidence (A1.1, current-input part of A1.3, A1.5 page capture) in #806; A1.2 revocation cases executable (#813), REVOKE-TOCTOU closed (#818); get_timeseries steps (#826); A1.4 integrity cases executable (#840); A1.4-RETAINED closed by a record MAC (#850); A1.3 run as-of cases executable (#856); A1.5 complete-source load aggregate (#864); A1.6/A1.7 aggregate handler validity (#868) and emissions/lost-load null-not-zero (#879); one aggregate gap helper and pilot POLICY_VERSION (2026-10-29 slice); run manifest MAC (run-evidence PR 1, #930); checked run sections and compare deltas (run-evidence PR 2); rest of P1 open (see "Remaining P1 slices")
 Progress: Authorized retained evidence, ACL rechecks shipped; status says whole phase open, displayed-data revision proof pending
 Type: task
 Blocked by: 01; live-voice issue 06 for retained-run guarantees
@@ -162,7 +162,50 @@ Smallest first; each goes to GK B as a plan before it is built.
 - **Shared fact builder.** One builder for the fact dicts of the static, static_page, series, run and aggregate kinds. Refactor only, behind the A1.x suites.
 - **SERIES-WINDOW.** A compact series record: a values array plus an index digest, with facts resolved on lookup. It lifts the 744-step cap without new args. Windowed args would need `harness/catalogue.py`; blocked while #851/#869 hold it.
 - **REVOKE-KIND** and **frontend assurance_state.** Blocked: both need `ChatPanel.tsx` (held by #883) and UX review.
-- **Run sections, compare_project_runs, run manifest MAC.** Blocked: all go through `services/run_evidence.py` (LC-03 (6), #883).
+- **Run sections, compare_project_runs, run manifest MAC.** In progress (Assurance 02 run-evidence session): PR 1 the manifest MAC, PR 2 the checked section and compare reads; see below.
+
+### 2026-10-29 — Run evidence: manifest MAC, checked sections and compare (plan)
+
+Seam: `run_evidence.checked_run_manifest` stays the one guard every checked run read goes through. PR 1 seals every terminal manifest with a server-keyed MAC; PR 2 adds checked `get_run_evidence(run_id, section)` (only `{value, unit}` pairs inside the section are facts) and checked `compare_project_runs` (deltas recomputed from both checked manifests; `allow_input_changes: true` stays unchecked).
+
+#### GK B (12) plan GO conditions (2026-10-29)
+
+Split: PR 1 is the MAC alone; PR 2 opens after PR 1 merges.
+
+PR 1 (MAC):
+1. Existing readers see no change: `mac` is stripped in `_load_run` and `get_run_evidence`; only `checked_run_manifest` reads it raw. `_load_run` and `get_run_evidence` output for a run published under the PR is byte-equal to master's. Run at the trial merge: `test_experiment_comparison`, `test_results_workbook_experiments`, the experiment execution and reconciliation suites, `test_p1_run_as_of`, `test_retained_results*`.
+2. Record MACs are unchanged by extracting `server_key(domain)`: a fixed record sealed on master and on the PR tree gives the same MAC. Separate domain labels; a record MAC never verifies as a run MAC and the reverse.
+3. One MAC per run id, ever: a republish with different content is refused, an identical one returns what is stored. (Already so on master: `publish_run` and `start_run` refuse a second manifest with `run_already_finalized`; run ids come from job handles, uuids or nonces.)
+4. MAC input: canonical {domain, project_id, run_id, manifest-without-mac}. Mutants (drop project_id, drop run_id, skip the verify) each fail a named test.
+5. Old manifests read as unchecked data and are refused when checked (`run_not_checkable`, "unverified"); no re-seal, no migration. Both tested.
+
+PR 2 (sections + compare):
+6. A section fact's `value` is a finite int or float, never a bool; `unit` a str of 1..16 characters. Paths use the existing pointer escape (a key holding '~' and '/' tested). A metric key at two pointers in one section is certified at neither, or claims match by path; never first-match-by-metric. Tested.
+7. A section's facts are capped so the record stays under save()'s 128 KiB; beyond the cap, `run_not_checkable` with a reason (tested with a small monkeypatched cap).
+8. `delta_pct`'s unit matches what `_comparison` computes, asserted by hand (100 -> 110); a baseline of 0 gives no pct fact. The `_comparison` extraction is byte-identical: master's compare tests run in the PR tree.
+9. Mutants: the plan's list, plus accept a bool value and certify a duplicated metric key.
+10. `harness/catalogue.py` untouched (#851). Trial-merge with #927 and REVOKE-KIND if open; files both change listed in the PR body.
+
+### 2026-10-29 — Run evidence PR 1: a server-keyed MAC on every run manifest
+
+`tests/assurance_acceptance/test_p1_run_manifest_mac.py` (13 cases, 8 red on master). `publish_run` writes `mac`, an HMAC-SHA256 of canonical {domain, project_id, run_id, manifest-without-mac} under `assurance_records.server_key(b"pypsa-gui run-manifest/1")`; record MACs use the same helper under their own label, byte-for-byte as before (a record sealed on master pins it). `checked_run_manifest` verifies it last, so a malformed or unfinished run still names its status; a missing or wrong MAC reads `unverified`, refused as `run_not_checkable` before the handler and 409 on lookup. Every other reader (`_load_run`, `get_run_evidence`, `list_project_runs`, `compare_project_runs`, retained results, experiments) gets the manifest without `mac`: `run_manifest_dump.py` prints the same bytes on master and on the PR tree.
+
+Met conditions: 1 (dump byte-equal; named suites green), 2 (pinned record MAC green on master and PR; cross-domain test), 3 (refusal and identical-republish tests), 4 (`run_manifest_mutations.py`: skip-verify, drop project_id, drop run_id each killed; dropping either from the binding alone is equivalent, since the body carries both), 5 (unsealed run reads unchecked, refused when checked).
+
+Consequences: runs recorded before this change, and every run after `SECRET_KEY` or the key file changes, stay readable history but are never checkable; there is no re-seal. A run whose key file cannot be read is published without a MAC (logged) rather than failing the run; that run is then never checkable (GK B (12) kept this fallback at review: it fails closed for checking and keeps history). With the dev default `SECRET_KEY` the MAC rests on the key file alone. A project copied to another install keeps its runs as unchecked history.
+
+Not covered: a run id reused after retention deleted its directory would get a second manifest (ids come from job handles, uuids or nonces, so none is reused today). PR 2 (checked sections and compare) follows.
+
+### 2026-10-29 — Run evidence PR 2: checked run sections and compare deltas
+
+`tests/assurance_acceptance/test_p1_run_sections.py` (35 cases) and `test_p1_run_compare.py` (39 cases); 43 of the first 69 red on master, the 26 green there being refusals that must stay refusals (inexact args, claims off a recorded value).
+
+- **Sections.** `get_run_evidence` with exactly `run_id` and a `section` is checked through `run_evidence.checked_run_section` (the sealed-manifest guard, then the section's own hash). Facts are the section's `{"value", "unit"}` objects: a finite int or float (never a bool) and a unit of 1..16 characters, at `/data/<pointer>/value`, metric = the pair's own key. Claims match facts by path, so a key repeated at two pointers is two facts and a value never certifies at the other's path. Over `MAX_SECTION_FACTS` (200), facts encoding over `MAX_SECTION_FACT_BYTES` (120 KiB, since a long key repeats in every path under it), or no such pair: `run_not_checkable` before the handler. Scope `run_section` (adapter `run-section/1`) carries the section's sha256; lookup re-reads both and re-derives the facts. The rest of the section stays unchecked; today that means the retained results tables, whose units sit outside the data.
+- **Compare.** `compare_project_runs` with two different run ids, optional `metrics`, and `allow_input_changes` absent or false is checked through `run_evidence.checked_run_comparison`: both runs through the sealed-manifest guard, then `_comparison` (extracted from `compare_project_runs`; `run_manifest_dump.py` still byte-equal to master's, `test_run_evidence_compare` unchanged and green). Facts: each delta in its metric's unit at `/deltas/<m>/delta/value`, and `delta_pct` with unit `%` at `/deltas/<m>/delta_pct` when the baseline is not zero (100 -> 110 gives 10 EUR and 10.0 %, asserted by hand). Incomparable runs (mode or fingerprint), a failed or unverified side (named by role) or no delta in a shared unit: `run_not_checkable`. Scope `run_comparison` (adapter `run-compare/1`); lookup recomputes from both manifests.
+- **Harness.** `compare_project_runs` joins `CHECKED_TOOLS` (`run_comparison_evidence` in `assurance_coverage`); `harness/catalogue.py` untouched. A source digest of the manifests binds each record, so another validly sealed manifest under the same run id (the run-id-reuse gap of PR 1) is refused too.
+- **Mutants** (`tests/assurance_acceptance/run_read_mutations.py`): 9 of 9 killed: section facts without the byte cap, section lookup without the fact re-derive or the source digest, section guard taking extra args, a bool value as a fact, a claim matched by metric instead of path, compare guard taking `allow_input_changes: true`, compare lookup without the recompute or the source digest.
+
+Not covered: per-family unit maps for the retained results sections; runs from `retained_results`/scenario stores outside `run_evidence`.
 
 ### 2026-10-29 — REPLAY closed: a DB high-water mark on every mutable record
 

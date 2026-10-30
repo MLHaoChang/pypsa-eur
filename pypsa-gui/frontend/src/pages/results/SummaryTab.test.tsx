@@ -124,7 +124,7 @@ describe('the Summary tab (M3)', () => {
     const onOpen = renderTab()
     fireEvent.click(within(await screen.findByTestId('summary-emissions')).getByRole('button', { name: /Emissions/ }))
     fireEvent.click(within(screen.getByTestId('summary-adequacy')).getByRole('button', { name: /Adequacy/ }))
-    fireEvent.click(within(screen.getByTestId('summary-cost')).getByRole('button', { name: /Capacity Expansion/ }))
+    fireEvent.click(within(screen.getByTestId('summary-cost')).getByRole('button', { name: /Capacity expansion/ }))
     expect(onOpen.mock.calls.map(c => c[0])).toEqual(['emissions', 'adequacy', 'capex'])
   })
 

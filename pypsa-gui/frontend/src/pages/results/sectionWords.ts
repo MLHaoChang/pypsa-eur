@@ -4,7 +4,7 @@ export const SECTION_TAB: Record<string, string> = {
   results_dispatch: 'dispatch', results_prices: 'prices', results_emissions: 'emissions',
 }
 
-/** A retained section by its Results tab's own label: "results_capacity" → "Capacity Expansion". */
+/** A retained section by its Results tab's own label: "results_capacity" → "Capacity expansion". */
 export function sectionWords(section: string, tabLabel: (id: string) => string | undefined): string {
   const id = SECTION_TAB[section]
   const label = id ? tabLabel(id) : undefined
