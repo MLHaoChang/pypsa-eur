@@ -511,6 +511,13 @@ def _network_input_fingerprint(ctx, *, exact=False):
     if tags is not None:
         parts.append("split-storage/1")
         parts.append(_exact_frame_json(tags) if exact else tags.to_json())
+    # AS-05: the PCS/STATCOM tags and their costs change the LP rows and the
+    # objective. Appended only when a Store or Link carries one.
+    from services.solver.pcs_statcom import pcs_statcom_tags
+    for label, tags in zip(("pcs-statcom-stores/1", "pcs-statcom-links/1"), pcs_statcom_tags(n)):
+        if tags is not None:
+            parts.append(label)
+            parts.append(_exact_frame_json(tags) if exact else tags.to_json())
     parts.extend(str(key) + (encode(series.to_frame()) if exact else series.to_json(date_format="iso"))
                  for key, series in sorted(ctx.user_ts.items()))
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()
