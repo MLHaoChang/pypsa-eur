@@ -1,5 +1,6 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { buildManualRow, mergeWorksheet, unpricedRankingWarning, WORKSHEET_CSV_HEADER, worksheetCsvRows, ZERO_REASON_TEXT } from './fmea'
+import { buildManualRow, mergeWorksheet, unpricedRankingWarning, WORKSHEET_CSV_HEADER, worksheetCsvRows, ZERO_REASON_TEXT, CRITICALITY_PER_YEAR_LABEL } from './fmea'
 import type { CoptPayload } from './adequacy'
 
 const copt: CoptPayload = {
@@ -166,5 +167,16 @@ describe('zero_reason', () => {
     }) })
     expect(worksheetCsvRows(mergeWorksheet(withReasons, sidecar)))
       .toEqual(worksheetCsvRows(mergeWorksheet(strip(withReasons), sidecar)))
+  })
+})
+
+describe('criticality column label', () => {
+  it('is one shared string in the FMEA tab and the EH panel', () => {
+    expect(CRITICALITY_PER_YEAR_LABEL).toBe('Criticality (€ per year)')
+    for (const file of ['FmeaTab.tsx', 'EhReferenceDesignPanel.tsx']) {
+      const src = readFileSync(`${__dirname}/${file}`, 'utf8')
+      expect(src).toContain('CRITICALITY_PER_YEAR_LABEL')
+      expect(src).not.toMatch(/Criticality[ (]*€\/yr/)
+    }
   })
 })

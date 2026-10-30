@@ -114,15 +114,24 @@ def _install_key():
     return key
 
 
+RECORD_MAC_DOMAIN = b"pypsa-gui assistant-assurance record/1"
+
+
+def server_key(domain):
+    """A MAC key from SECRET_KEY and the install key, one per domain label, so
+    a MAC made for one kind of object never verifies as another's."""
+    return hmac.new(
+        get_settings().secret_key.encode(),
+        domain + _install_key(),
+        hashlib.sha256,
+    ).digest()
+
+
 def _mac(record, record_id):
     """Keyed by SECRET_KEY and the install key, so rewriting a record together
     with every hash it carries still cannot make it read as checked. The id is
     bound too, so a sealed record copied over another id is refused."""
-    key = hmac.new(
-        get_settings().secret_key.encode(),
-        b"pypsa-gui assistant-assurance record/1" + _install_key(),
-        hashlib.sha256,
-    ).digest()
+    key = server_key(RECORD_MAC_DOMAIN)
     return hmac.new(
         key, _canonical({"id": record_id, "record": record}), hashlib.sha256
     ).hexdigest()

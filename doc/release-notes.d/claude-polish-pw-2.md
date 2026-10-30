@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): UI wording in plain words: the Results run band names the run's status and mode, "Capacity expansion" is sentence case everywhere, Activity rows say "Outcome: …" only when the source's end state adds to the status, and the FMEA and electrical-design criticality column reads "Criticality (€ per year)".

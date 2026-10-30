@@ -29,6 +29,7 @@ import {
   unpricedRankingWarning,
   type WorksheetRow,
   type WorksheetSidecar,
+  CRITICALITY_PER_YEAR_LABEL,
 } from './fmea'
 
 const FIDELITY_TIP: Record<string, string> = {
@@ -347,7 +348,7 @@ export default function FmeaTab() {
                 <th className="py-1 pr-2">Class</th>
                 <SortHeader label="Occurrence (/yr)" columnKey="occurrence_per_year" sortKey={sortKey} sortDir={sortDir} onClick={onSortClick("occurrence_per_year")} />
                 <SortHeader label="Severity (€)" columnKey="severity_eur" sortKey={sortKey} sortDir={sortDir} onClick={onSortClick("severity_eur")} />
-                <SortHeader label="Criticality (€/yr)" columnKey="criticality_eur_per_year" sortKey={sortKey} sortDir={sortDir} onClick={onSortClick("criticality_eur_per_year")} />
+                <SortHeader label={CRITICALITY_PER_YEAR_LABEL} columnKey="criticality_eur_per_year" sortKey={sortKey} sortDir={sortDir} onClick={onSortClick("criticality_eur_per_year")} />
                 <th className="py-1 pr-2">Mitigability</th>
                 <th className="py-1 pr-2">Provenance</th>
                 <th className="py-1" />
