@@ -1,0 +1,13 @@
+# Round 3 independent Spec review
+
+**Verdict: GO for the bounded implementation plan. No material Spec blocker remains.**
+
+Reviewed HEAD `af968acf3c0281a3d4e9dda0bc23be55d736e700`, amendment diff from `8c9bcc986f8b09f374565f65a0df6cb50dfec2dd`, and retained round-2 review context against planning base `60d8332d64b2edef1b204fb5980311e6102229a8`. Independently verified all 28 listed file SHA-256 values, sorted manifest entries and canonical JSON aggregate: `b217a515c8043f51f3b1d5722d5ec8d4adb081b0ee558d8b8987993c5440b15c`.
+
+Resolved **SP-R2-1 / FA1**: `spec.md:67`, HH-02:145, HH-03:67 and HH-09:78–80 now explicitly place bounded `durable_conversation._LOCK` before the directory transaction, outside the later leaf category. The common helper forbids fresh reverse acquisition; native/session callbacks must move before parent entry and CAS-revalidate. HH-09:A14 and HH-03:test24 require deterministic integration checks.
+
+Resolved **FA2**: HH-03:71–73 owns complete-parent encoded-byte validation and protected maximum terminal-growth reserves; HH-09:72 intersects its 256 KiB aggregate with the 1 MiB parent. Every parent writer preserves settlement headroom. Exact native settlement cannot bundle unrelated acceptance growth. HH-03:test24, HH-09:A19 and X19 exercise saturation, racing writers, restart and late exactly-once settlement; HH-05 makes X19 mandatory. Earlier SP1–SP4/AD1–AD3/ST1–ST2 resolutions remain intact.
+
+Rechecked U01–U06: native reuse, admission, durable requirements/accounting, exact references and trajectory qualification remain coherent. U07–U08: immutable candidate solves, fixed numerical checks, bounded corrections and server recovery preserve original criteria and honest stops. U09: proposal-only research is useful independently; researched application retains explicit native confirmation. U10: model-neutral template/module routing exposes missing adapters. U11–U12: all artifact comments, factual checks and required judgments survive partial revisions. U13: two read-only workers initially; third-worker expansion is explicit. U14: native and Assurance owners retain authority. U15: this is the Spec-axis GO; final independent adjudication remains separate. U16: entry recipe, shared contracts, dependencies and handoff are concrete; the root sequence already requires HH-03 before HH-09A.
+
+Skipped: implementation, runtime tests/solves, network/paid calls, commits and reviewer contact. This GO proves no runtime reliability, scientific correctness, full-template automation or official merge approval. Native prerequisites, certified provider bounds, broader adapters and real-use/domain calibration remain qualification gates.
