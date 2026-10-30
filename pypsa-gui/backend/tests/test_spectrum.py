@@ -263,7 +263,7 @@ def test_iso_timestamps_are_refused_with_a_message_that_says_so():
 @pytest.mark.parametrize("blob, match", [
     (bytes(range(256)) * 4, "binary"),
     ("time_s,power_mw\n0,1\n".encode("utf-16"), "binary"),
-    ("time_s,power_mw\n".encode() + "\n".join(f"{i / 10},{100 + i % 3}" for i in range(20)).encode()
+    (b"time_s,power_mw\n" + "\n".join(f"{i / 10},{100 + i % 3}" for i in range(20)).encode()
      + b"\n2.1,\xe9t\xe9", "UTF-8"),
     (b"time_s,power_mw\n0,1\n0.1,2,3,4\n0.2,3\n0.3,4\n0.4,5\n0.5,6\n0.6,7\n0.7,8\n0.8,9\n", "readable CSV"),
 ])
