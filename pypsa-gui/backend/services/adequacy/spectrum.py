@@ -299,6 +299,22 @@ def _latency(technology: str) -> dict:
     return response_latency(technology, {"control": TECHNOLOGY_CONTROL.get(technology)})
 
 
+def store_latency(n: pypsa.Network, name: str, override: float | None = None) -> tuple[float, str]:
+    """(latency s, basis) of Store `name`: a given `override`, else its own `control` column when set, else
+    its `storage_technology`'s assumed control (`TECHNOLOGY_CONTROL`); every control reads
+    `smoothing.response_latency`, an unknown one as grid following. One source for every reader of a
+    smoothing store's latency, so the tier split and the control-settings sheet cannot disagree."""
+    if override is not None:
+        return float(override), "given"
+    control = n.stores.at[name, "control"] if "control" in n.stores.columns else None
+    if isinstance(control, str) and control.strip():
+        r = response_latency(name, {"control": control.strip()})
+        return r["latency_s"], f"{r['basis']}, from the store's control {control.strip()}"
+    tech = n.stores.at[name, "storage_technology"] if "storage_technology" in n.stores.columns else None
+    r = _latency(tech)
+    return r["latency_s"], f"{r['basis']}, assumed for {tech}"
+
+
 def _overrides(latency: dict[str, float] | None, stores) -> dict[str, float]:
     out = {}
     for name, value in (latency or {}).items():
@@ -329,11 +345,7 @@ def tier_split(n: pypsa.Network, f_c_hz: float, latency: dict[str, float] | None
     flag = STORE_COLUMNS[0]
     out = {}
     for name, tech in tags["storage_technology"].items():
-        if name in override:
-            lat, basis = override[name], "given"
-        else:
-            r = _latency(tech)
-            lat, basis = r["latency_s"], f"{r['basis']}, assumed for {tech}"
+        lat, basis = store_latency(n, name, override.get(name))
         old = n.stores.at[name, flag] if flag in n.stores.columns else math.nan
         eligible = lat <= bound
         reason = (f"responds in {lat:g} s, within 1/(2π f_c) = {bound:.3g} s" if eligible else

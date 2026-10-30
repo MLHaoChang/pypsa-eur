@@ -196,6 +196,26 @@ def test_a_user_set_flag_that_turns_off_is_reported_and_other_stores_are_untouch
     assert n.stores.at["plain", "smoothing_tier"] == 1.0  # not a split storage: left as the user set it
 
 
+def test_a_store_control_column_wins_over_the_technology_default():
+    n = _site()
+    n.stores["control"] = None
+    n.stores.loc["cap", "control"] = "gfl_pq"     # a supercap behind a grid-following converter
+    n.stores.loc["bess", "control"] = "gfm_vsm"   # an energy BESS behind a grid-forming one
+    split = S.tier_split(n, 2.0)
+    assert not split["cap"]["eligible"] and split["bess"]["eligible"]
+    assert split["cap"]["latency_s"] == LATENCY_S["gfl_pq"] and "control gfl_pq" in split["cap"]["latency_basis"]
+    assert S.store_latency(n, "bess") == (LATENCY_S["gfm_vsm"], split["bess"]["latency_basis"])
+    assert S.store_latency(n, "bess", 0.5) == (0.5, "given")  # an override wins over the control
+
+
+def test_an_unknown_store_control_is_taken_as_grid_following():
+    n = _site()
+    n.stores["control"] = None
+    n.stores.loc["cap", "control"] = "mystery"
+    lat, basis = S.store_latency(n, "cap")
+    assert lat == max(LATENCY_S.values()) and "taken as grid following" in basis
+
+
 def test_an_unknown_technology_is_taken_as_grid_following_and_says_so():
     n = _site()
     n.stores.loc["cap", "storage_technology"] = "flywheel"

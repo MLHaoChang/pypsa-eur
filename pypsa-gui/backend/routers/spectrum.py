@@ -51,8 +51,9 @@ async def analyse_trace(
     f_c, the equivalent (A, T) and the dry-run tier split of the open network. Changes nothing."""
     blob = await read_capped(file, max_bytes=S.MAX_TRACE_BYTES)
     try:
-        trace = S.read_trace(blob, unit)
-        out = await run_in_threadpool(S.analyse, trace, (band_lo_hz, band_hi_hz), limit)
+        # Parsing a capped upload is up to seconds of pandas: off the event loop, with the analysis.
+        out = await run_in_threadpool(
+            lambda: S.analyse(S.read_trace(blob, unit), (band_lo_hz, band_hi_hz), limit))
     except S.TraceError as exc:
         raise _refuse(exc) from exc
     f_c = out["f_c_hz"]
