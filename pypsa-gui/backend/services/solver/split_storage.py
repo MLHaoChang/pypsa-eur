@@ -5,7 +5,8 @@ storage is a `Store` (energy E) with a charger and a discharger `Link` (power P)
 "battery charger" and "battery discharger". The `Store` carries the technology's duration range and C-rate in
 custom columns, and `_wrap_with_split_storage` adds, per store:
 
-  * the power tie: charger p_nom == discharger efficiency x discharger p_nom, so P is the AC-side MW both ways;
+  * the power tie (PyPSA-Eur's): charger p_nom == discharger efficiency x discharger p_nom. P is the AC-side MW,
+    the charger's p_nom: it draws P from the bus charging and delivers P to it discharging. E is store-side MWh;
   * min_hours x P <= E <= max_hours x P;
   * P <= c_rate_max x E.
 
@@ -39,7 +40,8 @@ class StorageTech:
     label: str
     min_hours: float
     max_hours: float
-    #: P <= c_rate_max x E, per hour. The default equals 1 / min_hours; a chemistry limit can only tighten it.
+    #: P <= c_rate_max x E, per hour, i.e. E/P >= 1 / c_rate_max. Every shipped default equals 1 / min_hours, so
+    #: the row is implied by min_hours until a project sets a tighter chemistry limit (tested with one).
     c_rate_max: float
     #: The defaults-pack technology that prices its power and energy parts.
     pack_technology: str
@@ -131,17 +133,25 @@ def _tag(n, name, technology, lo, hi, c_rate) -> None:
         n.stores.loc[name, col] = value
 
 
-#: StorageUnit attributes the migration carries, and the defaults the rest must still have.
+#: StorageUnit attributes the migration maps exactly; any other attribute must keep its default.
 _CARRIED = {"bus", "carrier", "p_nom", "p_nom_extendable", "p_nom_min", "p_nom_max", "p_min_pu", "p_max_pu",
-            "capital_cost", "marginal_cost", "marginal_cost_storage", "efficiency_store", "efficiency_dispatch",
-            "standing_loss", "max_hours", "cyclic_state_of_charge", "cyclic_state_of_charge_per_period",
-            "state_of_charge_initial", "state_of_charge_initial_per_period", "build_year", "lifetime"}
+            "capital_cost", "marginal_cost", "efficiency_store", "efficiency_dispatch", "standing_loss",
+            "max_hours", "cyclic_state_of_charge", "state_of_charge_initial", "build_year", "lifetime"}
+#: Attributes that do not change the LP, or that `_migration_blockers` checks by name.
+_IGNORED = {"active", "sign", "type", "control", "q_set"}
 
 
 def migrate_storage_unit(n: "pypsa.Network", name: str, technology: str | None = None) -> None:
     """Replace StorageUnit `name` by a Store `name` with charger and discharger Links, E/P fixed at its
-    `max_hours`. Refuses, changing nothing, when the unit uses something the layout cannot carry (inflow,
-    spill, a set SOC or dispatch, a time-varying charge limit, non-default attributes outside `_CARRIED`).
+    `max_hours`, so the LP and its objective are unchanged. Exact or refused: anything the layout does not map
+    exactly (inflow, spill cost, marginal_cost_storage, a set SOC or dispatch, any time-varying input, the
+    per-period SOC options, build_year or lifetime in a multi-period network, any other non-default attribute)
+    raises `SplitStorageError` naming it, and the network is left unchanged.
+
+    The mapping: P is the AC-side MW, so charger p_nom = P and discharger p_nom = P / efficiency_dispatch
+    (the PyPSA-Eur tie); E = max_hours x P; the unit's capital_cost goes on the charger; its marginal_cost,
+    per MWh dispatched, becomes the discharger's per MWh drawn (x efficiency_dispatch). No route or chat tool
+    calls this yet; a caller that offers it to users needs its own review.
     """
     if name not in n.storage_units.index:
         raise SplitStorageError(f"no StorageUnit {name!r}")
@@ -159,8 +169,6 @@ def migrate_storage_unit(n: "pypsa.Network", name: str, technology: str | None =
     eff_d = float(su["efficiency_dispatch"])
     extendable = bool(su["p_nom_extendable"])
     carrier = su["carrier"] or "storage"
-    p_max_pu = n.get_switchable_as_dense("StorageUnit", "p_max_pu")[name]
-    p_min_pu = float(su["p_min_pu"])
     both = {"build_year": su["build_year"], "lifetime": su["lifetime"]}
 
     n.remove("StorageUnit", name)
@@ -169,35 +177,30 @@ def migrate_storage_unit(n: "pypsa.Network", name: str, technology: str | None =
     n.add("Store", name, bus=store_bus, carrier=carrier, e_nom=hours * float(su["p_nom"]),
           e_nom_extendable=extendable, e_nom_min=hours * float(su["p_nom_min"]),
           e_nom_max=hours * float(su["p_nom_max"]), standing_loss=su["standing_loss"],
-          marginal_cost_storage=su["marginal_cost_storage"], e_cyclic=bool(su["cyclic_state_of_charge"]),
-          e_cyclic_per_period=bool(su["cyclic_state_of_charge_per_period"]),
-          e_initial=su["state_of_charge_initial"],
-          e_initial_per_period=bool(su["state_of_charge_initial_per_period"]), **both)
+          e_cyclic=bool(su["cyclic_state_of_charge"]), e_initial=su["state_of_charge_initial"], **both)
     _add_links(n, name, su["bus"], store_bus, carrier, p_nom=float(su["p_nom"]), extendable=extendable,
                efficiency_charge=float(su["efficiency_store"]), efficiency_discharge=eff_d,
                power_capital_cost=float(su["capital_cost"]), marginal_cost=float(su["marginal_cost"]),
-               charger={"p_max_pu": -p_min_pu, "p_nom_min": su["p_nom_min"], "p_nom_max": su["p_nom_max"]},
-               discharger={"p_max_pu": p_max_pu, "p_nom_min": su["p_nom_min"] / eff_d,
+               charger={"p_max_pu": -float(su["p_min_pu"]), "p_nom_min": su["p_nom_min"],
+                        "p_nom_max": su["p_nom_max"]},
+               discharger={"p_max_pu": float(su["p_max_pu"]), "p_nom_min": su["p_nom_min"] / eff_d,
                            "p_nom_max": su["p_nom_max"] / eff_d}, both=both)
     _tag(n, name, technology, hours, hours, c_rate)
 
 
-#: Attributes `_migration_blockers` checks by name, or that do not change the LP.
-_CHECKED = {"inflow", "spill_cost", "p_set", "q_set", "state_of_charge_set", "active", "sign", "type", "control"}
-
-
 def _migration_blockers(n, name, su) -> list[str]:
     out: list[str] = []
-    for attr, why in (("inflow", "inflow"), ("spill_cost", "spill cost")):
-        series = n.get_switchable_as_dense("StorageUnit", attr)[name]
-        if (series != 0).any():
-            out.append(f"{why} is set")
-    for attr in ("state_of_charge_set", "p_set", "q_set"):
-        if attr in n.storage_units_t and name in n.storage_units_t[attr].columns \
-                and n.storage_units_t[attr][name].notna().any():
+    for attr, frame in n.components["StorageUnit"].dynamic.items():
+        if name not in frame.columns:
+            continue
+        col = frame[name]
+        if attr in ("inflow", "spill_cost"):
+            if (col.fillna(0) != 0).any():
+                out.append(f"{attr} is set")
+        elif attr in ("state_of_charge_set", "p_set") and col.notna().any():
             out.append(f"{attr} is set")
-    if name in n.storage_units_t["p_min_pu"].columns:
-        out.append("p_min_pu varies in time")
+        elif attr in _CARRIED:
+            out.append(f"{attr} varies in time")
     if not float(su["efficiency_dispatch"]) > 0:
         out.append("efficiency_dispatch is 0")
     if not float(su["max_hours"]) > 0:
@@ -205,12 +208,16 @@ def _migration_blockers(n, name, su) -> list[str]:
     if not bool(su.get("active", True)):
         out.append("the unit is inactive")
     defaults = n.components["StorageUnit"].defaults["default"]
+    multi_period = bool(getattr(n, "has_investment_periods", False))
     for attr, value in su.items():
-        if attr in _CARRIED or attr in _CHECKED or attr not in defaults.index or attr.endswith("_opt"):
+        if attr in _IGNORED or attr not in defaults.index or attr.endswith("_opt"):
+            continue
+        if attr in _CARRIED and not (multi_period and attr in ("build_year", "lifetime")):
             continue
         default = defaults[attr]
         if not (value == default or (pd.isna(value) and pd.isna(default))):
-            out.append(f"{attr} = {value!r} is not carried")
+            why = " in a multi-period network" if attr in ("build_year", "lifetime") else ""
+            out.append(f"{attr} = {value!r} is not carried{why}")
     return out
 
 
@@ -234,6 +241,53 @@ def tied_unpriced_members(n: "pypsa.Network") -> set[tuple[str, str]]:
                                                 if s[k] in n.links.index]
         if any(_priced(frame, m) for _, m, frame in members):
             out |= {(c, m) for c, m, frame in members if not _priced(frame, m)}
+    return out
+
+
+def split_storage_tags(n: "pypsa.Network") -> pd.DataFrame | None:
+    """The tagged Stores' `STORE_COLUMNS`, sorted by name, or None when no Store is tagged."""
+    stores = getattr(n, "stores", None)
+    if stores is None or "min_hours" not in stores.columns or not stores["min_hours"].notna().any():
+        return None
+    return stores.loc[stores["min_hours"].notna(), list(STORE_COLUMNS)].sort_index()
+
+
+def size_conflicts(n: "pypsa.Network") -> list[tuple[str, str]]:
+    """(store, reason) for each split storage whose fixed sizes or bounds leave no P and E that meet its
+    power tie, hours and C-rate. Validation refuses these before the solve, so the LP is never infeasible
+    for this reason."""
+    stores = getattr(n, "stores", None)
+    if stores is None or "min_hours" not in stores.columns:
+        return []
+    out: list[tuple[str, str]] = []
+    for name, s in stores[stores["min_hours"].notna()].iterrows():
+        ch, dis = s["charger"], s["discharger"]
+        if ch not in n.links.index or dis not in n.links.index:
+            out.append((name, "its charger or discharger link is missing"))
+            continue
+        lo, hi, c = float(s["min_hours"]), float(s["max_hours"]), float(s["c_rate_max"])
+        lo_eff = max(lo, 1.0 / c) if math.isfinite(c) and c > 0 else lo   # E >= P / c_rate_max
+        link_ext = (bool(n.links.at[ch, "p_nom_extendable"]), bool(n.links.at[dis, "p_nom_extendable"]))
+        if link_ext[0] != link_ext[1]:
+            out.append((name, "the charger and discharger must both be extendable or both fixed"))
+            continue
+        eff = float(n.links.at[dis, "efficiency"])
+        if link_ext[0]:
+            p_lo, p_hi = float(n.links.at[ch, "p_nom_min"]), float(n.links.at[ch, "p_nom_max"])
+        else:
+            p_lo = p_hi = float(n.links.at[ch, "p_nom"])
+            p_dis = eff * float(n.links.at[dis, "p_nom"])
+            if abs(p_lo - p_dis) > 1e-6 * max(1.0, p_lo):
+                out.append((name, f"the charger is {p_lo:g} MW but the discharger delivers {p_dis:g} MW"))
+                continue
+        if bool(stores.at[name, "e_nom_extendable"]):
+            e_lo, e_hi = float(stores.at[name, "e_nom_min"]), float(stores.at[name, "e_nom_max"])
+        else:
+            e_lo = e_hi = float(stores.at[name, "e_nom"])
+        # Some P in [p_lo, p_hi] and E in [e_lo, e_hi] with lo_eff x P <= E <= hi x P.
+        if lo_eff * p_lo > e_hi * (1 + 1e-9) or hi * p_hi < e_lo * (1 - 1e-9):
+            out.append((name, f"power {p_lo:g}–{p_hi:g} MW and energy {e_lo:g}–{e_hi:g} MWh cannot meet "
+                              f"{lo_eff:g}–{hi:g} h"))
     return out
 
 

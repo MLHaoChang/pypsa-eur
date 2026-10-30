@@ -28,7 +28,7 @@ import pandas as pd
 
 from services.carrier_catalog import CARRIER_CATALOG
 from services.issue_titles import issue_title
-from services.solver.split_storage import tied_unpriced_members
+from services.solver.split_storage import size_conflicts, tied_unpriced_members
 
 # Severity literal kept narrow on purpose — anything beyond error/warning
 # pushes UX complexity onto every callsite for marginal value.
@@ -1926,6 +1926,9 @@ def _check_lopf(n, solver_config) -> list[Issue]:
     tied = tied_unpriced_members(n)
     out += [i for i in _check_extendable_bounds(n.stores, "Store", "e_nom", True)
             if not (i.code == "store_no_capital_cost" and ("Store", i.name) in tied)]
+    out += [_err("split_storage_sizes", "Store", name,
+                 f"Split storage {name}: {why}; change its sizes, bounds or hours.")
+            for name, why in size_conflicts(n)]
 
     # Links — Link.efficiency is a generic conversion coefficient (not
     # bounded by thermodynamics like Generator.efficiency). Heat pumps

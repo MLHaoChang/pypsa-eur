@@ -503,6 +503,14 @@ def _network_input_fingerprint(ctx, *, exact=False):
         for name in sorted(component.dynamic):
             if name in defaults.index and "Input" in str(defaults.at[name, "status"]):
                 parts.append(encode(component.dynamic[name]))
+    # AS-02: a split storage's custom Store columns (hours, C-rate) change the
+    # LP. Appended only when a Store carries them, so the fingerprint of a
+    # network without one stays byte-identical.
+    from services.solver.split_storage import split_storage_tags
+    tags = split_storage_tags(n)
+    if tags is not None:
+        parts.append("split-storage/1")
+        parts.append(_exact_frame_json(tags) if exact else tags.to_json())
     parts.extend(str(key) + (encode(series.to_frame()) if exact else series.to_json(date_format="iso"))
                  for key, series in sorted(ctx.user_ts.items()))
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()

@@ -73,7 +73,7 @@ new_rows = [
        round(32365 / USD_PER_EUR_2018, 4), "EUR/kWh", "EUR/MWh", "[0, inf)",
        "section 4.3.11.1: $32,365/kWh at E/P 0.0124 h", money=True, note=fx),
     sc(POWER, "fom_share", "Supercapacitor fixed O&M (share of overnight cost per year)",
-       round(100 * 1 / 930, 4), "%/year", "share/year", "[0, 1]",
+       round(100 * 1 / 930, 6), "%/year", "share/year", "[0, 1]",
        "section 4.3.11.2: $1/kW-yr over the Table ES-1 total project cost $930/kW",
        note="booked on the power part; the energy part carries none"),
     sc(POWER, "lifetime", "Supercapacitor power part lifetime", 16.0, "years", "years", "[1, inf)",
