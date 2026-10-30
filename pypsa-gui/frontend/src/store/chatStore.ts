@@ -51,6 +51,8 @@ export interface ChatMessage {
   receipt?: AnswerReceipt
   /** Retrying a checked question must not silently become ordinary chat. */
   requiresChecked?: boolean
+  /** What `session_init.assurance` said about this turn's checking: shown as a small mark. */
+  turnCheck?: 'checking' | 'unchecked'
   // Replayed from an interrupted turn record: why it ended. Shown under the
   // bubble; the assistant does not see this turn on later ones.
   interrupted?: string

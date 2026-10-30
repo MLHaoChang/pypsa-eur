@@ -2142,6 +2142,18 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
           rows.forEach((m, i) => { if (m.role === 'user') lastUser = i })
           useChatStore.setState({ messages: rows.map((m, i) => i === lastUser ? { ...m, requiresChecked: true } : m) })
         }
+        {
+          const a = d.assurance
+          const turnCheck = a?.version === 1 && a.mode === 'legacy' && a.state === 'unvalidated' ? 'unchecked'
+            : a?.version === 1 && (a.mode === 'strict' || a.mode === 'pilot') && a.state === 'checking' ? 'checking'
+            : undefined
+          if (turnCheck) {
+            const rows = useChatStore.getState().messages
+            let lastUser = -1
+            rows.forEach((m, i) => { if (m.role === 'user') lastUser = i })
+            if (lastUser >= 0) useChatStore.setState({ messages: rows.map((m, i) => i === lastUser ? { ...m, turnCheck } : m) })
+          }
+        }
         // A new turn answers (or moves past) any Choice card still showing.
         setChoice(null)
         // P28 A3 — the frame names the profile the session is bound to. Kept
@@ -3589,6 +3601,14 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
                 This turn did not finish ({m.interrupted.replace(/_/g, ' ')}). It is
                 shown for reference; the assistant does not see it on later turns.
               </div>
+            )}
+            {m.role === 'user' && m.turnCheck === 'unchecked' && (
+              <div className="mt-1 text-[10px] text-muted" data-testid="chat-turn-check-unchecked"
+                title="The answer to this message is not checked against the project's results.">Not checked</div>
+            )}
+            {m.role === 'user' && m.turnCheck === 'checking' && (
+              <div className="mt-1 text-[10px] text-accent" data-testid="chat-turn-check-checking"
+                title="The answer to this message is checked against the project's results before it is shown.">Answer will be checked</div>
             )}
             {m.role === 'user' && m.attachment_file_ids && m.attachment_file_ids.length > 0 && (
               <ReplayAttachmentChips fileIds={m.attachment_file_ids} />
