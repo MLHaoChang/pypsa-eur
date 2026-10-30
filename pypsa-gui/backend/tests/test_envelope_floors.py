@@ -127,19 +127,22 @@ def _backup_min_soc_mwh() -> float:
     return float(_solve(n, backup_mwh=320.0).stores_t.e["bess"].min())
 
 
-def _spiked() -> pypsa.Network:
-    """200 h, a 10 MW load, an import outage price spike for 150 h, a 10 MW genset at 300 EUR/MWh."""
+def _spiked(year: bool = True) -> pypsa.Network:
+    """200 snapshots, a 10 MW load, an import outage price spike in the first 150, a 10 MW genset at
+    300 EUR/MWh. `year` weights the snapshots up to 8760 h (43.8 each), else 1 h each (a 200 h horizon)."""
     n = _site([1000.0 if t < 150 else 20.0 for t in range(200)])
+    n.snapshot_weightings.loc[:, "generators"] = 8760 / 200 if year else 1.0
     n.loads.loc["load", "p_set"] = 10.0
     n.add("Generator", "genset", bus="ac", p_nom=10.0, marginal_cost=300.0)
     return n
 
 
-def _genset_hours(cap: float | None = 100.0) -> float:
-    n = _spiked()
+def _genset_hours(cap: float | None = 100.0, year: bool = True) -> float:
+    """The genset's weighted run hours, sum_t w_t p(t) / p_nom."""
+    n = _spiked(year)
     EF.set_run_hours_cap(n, "genset", cap)
     _solve(n)
-    return float(n.generators_t.p["genset"].sum()) / 10.0
+    return float((n.generators_t.p["genset"] * n.snapshot_weightings.generators).sum()) / 10.0
 
 
 # ── each row, by hand ────────────────────────────────────────────────────────
@@ -166,8 +169,14 @@ def test_the_backup_reserve_applies_outside_island_mode_through_the_discharger()
 
 
 def test_a_100_h_run_hour_cap_binds_through_a_150_h_price_spike():
-    assert _genset_hours(100.0) == pytest.approx(100.0, rel=1e-6)
-    assert _genset_hours(None) == pytest.approx(150.0, rel=1e-6)
+    assert _genset_hours(100.0) == pytest.approx(100.0, rel=1e-6)          # a full year: 100 h
+    assert _genset_hours(None) == pytest.approx(150.0 * 8760 / 200, rel=1e-6)   # uncapped: the whole spike
+
+
+def test_the_run_hour_cap_is_prorated_on_a_short_horizon():
+    # 200 h of a year: 100 h/yr x 200 / 8760 = 2.2831 h of the 150 h spike.
+    assert _genset_hours(100.0, year=False) == pytest.approx(100.0 * 200 / 8760, rel=1e-6)
+    assert _genset_hours(None, year=False) == pytest.approx(150.0, rel=1e-6)
 
 
 #: Each row family's own measurement and its pinned value.
@@ -196,10 +205,10 @@ def test_the_run_hour_cap_holds_per_investment_period_with_generator_weightings(
     n = pypsa.Network()
     n.set_snapshots(pd.RangeIndex(20))
     n.set_investment_periods([2030, 2040])
-    n.snapshot_weightings.loc[:, "generators"] = 10.0                # 20 snapshots x 10 = 200 h per period
+    n.snapshot_weightings.loc[:, "generators"] = 438.0               # 20 snapshots x 438 = 8760 h per period
     n.add("Bus", "ac", carrier="AC")
     n.add("Load", "load", bus="ac", p_set=20.0)                    # both gensets' caps bind in 2040
-    price = pd.Series([1000.0 if t < 15 else 20.0 for t in range(20)] * 2, n.snapshots)  # 150 h of spike
+    price = pd.Series([1000.0 if t < 15 else 20.0 for t in range(20)] * 2, n.snapshots)  # 6570 h of spike
     n.add("Generator", "import", bus="ac", p_nom=1e4, marginal_cost=price)
     n.add("Generator", "genset", bus="ac", p_nom=10.0, marginal_cost=300.0, build_year=2030, lifetime=50)
     n.add("Generator", "late", bus="ac", p_nom=10.0, marginal_cost=300.0, build_year=2040, lifetime=50)

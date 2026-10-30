@@ -18,8 +18,9 @@ slice P_k^sm (MW) and E_k^sm (MWh, usable), new LP variables, and:
                    flagged `backup_reserve`, in island mode or not: the critical load's AC energy (intent A:
                    P_crit x autonomy hours, AS-AUTONOMY-1; intent D: the bridge reserve) delivered through the
                    discharger, above the smoothing band;
-  6. run hours     sum_t w_t p_g(t) <= H_g x p_nom_g per investment period, w = snapshot_weightings.generators,
-                   for each Generator with a `run_hours_cap` active in that period.
+  6. run hours     sum_t w_t p_g(t) <= H_g x (sum_t w_t / 8760) x p_nom_g per investment period, w =
+                   snapshot_weightings.generators: the annual cap prorated to the period's weighted hours, for
+                   each Generator with a `run_hours_cap` active in that period.
 
 The floors are the max over the envelope's phases: P^sm and E^sm are single size variables per store, so the
 largest phase governs every period. The site-wide values (`power_floor_mw`, `energy_floor_mwh`, `backup_mwh`)
@@ -261,9 +262,12 @@ def _run_hours(m, ctx) -> int:
                 if not bool(n.components["Generator"].get_active_assets(per).get(g, False)):
                     continue
                 mask = sns.get_level_values(0) == per
-            lhs = (p.sel(name=g) * _per_t(p, np.where(mask, w, 0.0))).sum()
+            w_p = np.where(mask, w, 0.0)
+            lhs = (p.sel(name=g) * _per_t(p, w_p)).sum()
             tag = g if per is None else f"{g}-{per}"
-            m.add_constraints(lhs - h * p_nom <= 0, name=f"envelope_floors_run_hours-{tag}")
+            # An annual cap, prorated to the period's weighted hours (as adequacy's import energy cap).
+            m.add_constraints(lhs - h * float(w_p.sum()) / 8760.0 * p_nom <= 0,
+                              name=f"envelope_floors_run_hours-{tag}")
             added += 1
     return added
 
