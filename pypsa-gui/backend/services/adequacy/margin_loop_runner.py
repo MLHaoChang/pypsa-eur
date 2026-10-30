@@ -17,6 +17,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel as _BaseModel
 
 from models.schemas import Finite as _Finite
+from services.adequacy.campaign import unsupported_scope as _unsupported_scope
 from services.adequacy.coupling import snapshot_hash as _snapshot_hash
 from services.pypsa_service import PyPSAService
 
@@ -187,8 +188,7 @@ def start_margin_loop(
 
     strategy = str(getattr(cfg, "solve_strategy", "full") or "full")
     if strategy == "rolling":
-        raise HTTPException(
-            422,
+        raise _unsupported_scope(
             "the reserve margin is not supported with the 'rolling' solve "
             "strategy: PyPSA solves each window independently, so the "
             "constraint would be built against that WINDOW's peak demand "
@@ -286,7 +286,7 @@ def start_margin_loop(
         # budget refusing — the K6 outcome this guard exists to prevent.
         if iss.code == "reserve_margin_unpriceable_assets" \
                 or iss.code.startswith("nonfinite_"):
-            raise HTTPException(422, iss.message)
+            raise _unsupported_scope(iss.message)
 
     # The ceiling: a margin is achievable iff EVERY period can reach it, so
     # the binding period is the one that fails first and the aggregate is

@@ -466,9 +466,7 @@ VARIANTS: list[dict] = [
                  'from the chat tools: live solves always capture per-Load slacks, so the section reports per_load_slack',
                  'pypsa-gui/backend/services/adequacy/multi_energy.py ATTRIBUTION_DEDICATED'),
     _covered('LC-D13.unsupported_scope', 'refused before any solve with no campaign charge and the reader byte-identical: the frontier at '
-             'VoLL 0 and the margin loop under the rolling strategy, each by its guard\'s own text; the refusals are untyped (kind '
-             'tool_error), and typed scope kinds are '
-             '.scratch/live-copilot/issues/38-typed-scope-refusal-kinds.md; in scope, the '
+             'VoLL 0 and the margin loop under the rolling strategy, each typed unsupported_scope; in scope, the '
              'frontier gives LC-33\'s hand points at 4 solves and the loop is met from the hand starting margin',
              'run_frontier_study run_margin_loop start_campaign campaign_status update_solver_config get_adequacy_results',
              B + 'test_lc36_d13_scope_campaign.py::test_a_frontier_at_voll_zero_is_refused_without_a_solve_and_keeps_the_prior_result',

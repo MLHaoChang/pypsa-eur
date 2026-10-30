@@ -485,6 +485,9 @@ def test_the_synchronous_refusal_set_is_complete(
     r = client.post(LOOP_URL, json=body)
     assert r.status_code == 422, r.text
     detail = r.json()["detail"]
+    if isinstance(detail, dict):  # a typed scope refusal (LC-38)
+        assert detail["error_kind"] == "unsupported_scope", detail
+        detail = detail["message"]
     for frag in fragments:
         assert frag in detail, f"{case_id}: {frag!r} missing from {detail!r}"
     assert client.get(LOOP_URL).status_code == 204
@@ -559,7 +562,8 @@ def test_the_unpriceable_refusal_reuses_the_validators_sentence_verbatim(
                                reserve_margin=0.15))
               if i.code == "reserve_margin_unpriceable_assets"]
     assert issues, "the fixture no longer trips the validator's own check"
-    assert r.json()["detail"] == issues[0].message
+    assert r.json()["detail"] == {
+        "error_kind": "unsupported_scope", "message": issues[0].message}
 
 
 def test_the_ceiling_refusal_names_the_ceiling_and_spends_no_solves(

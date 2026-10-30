@@ -1,0 +1,1 @@
+{"kinds": {"unsupported_scope": {"surface": "inline", "why": "run_frontier_study (VoLL 0) and run_margin_loop (the 'rolling' solve strategy, or an unpriceable/non-finite reserve-margin fleet) refuse the project's settings before any solve and charge nothing; the assistant reports the limit and which setting to change, and does not retry."}}}

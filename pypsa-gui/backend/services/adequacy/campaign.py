@@ -38,6 +38,8 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
+from fastapi import HTTPException
+
 # The user-facing default, and the ceiling on an explicit override. 30 solves
 # is a frontier plus a reliability loop, or a full class-B sweep — a real
 # campaign in one sitting. Past ~4x that it is not a campaign but an overnight
@@ -60,6 +62,16 @@ CHARGEABLE = (
 
 class CampaignError(RuntimeError):
     """A campaign-lifecycle refusal (already running, none running)."""
+
+
+def unsupported_scope(message: str) -> HTTPException:
+    """
+    A 422 the chat dispatcher reads as `error_kind: 'unsupported_scope'` (it
+    takes `detail["error_kind"]`, as for `CampaignBudgetError`): the study
+    refuses the project's settings or inputs before any solve, so the agent
+    reports the limit instead of retrying or parsing the message.
+    """
+    return HTTPException(422, {"error_kind": "unsupported_scope", "message": message})
 
 
 class CampaignBudgetError(RuntimeError):

@@ -17,6 +17,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel as _BaseModel
 
 from models.schemas import Finite as _Finite
+from services.adequacy.campaign import unsupported_scope as _unsupported_scope
 from services.pypsa_service import PyPSAService
 
 logger = logging.getLogger("pypsa_gui.results")
@@ -54,7 +55,7 @@ def start_frontier(
 
     cfg = solver_state.get("solver_config")
     if cfg is None or float(getattr(cfg, "voll", 0.0) or 0.0) <= 0:
-        raise HTTPException(422, "the frontier requires a VOLL > 0 in solver settings")
+        raise _unsupported_scope("the frontier requires a VOLL > 0 in solver settings")
 
     targets = list(getattr(body, "targets_permyriad", None)
                    or DEFAULT_TARGETS_PERMYRIAD)

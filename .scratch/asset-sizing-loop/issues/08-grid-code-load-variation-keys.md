@@ -1,0 +1,27 @@
+<!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+
+# AS-08 — Grid-code keys for load variation
+
+Status: ready-for-agent
+Type: task
+Blocked by: none
+Model: Sonnet
+Reviewer: GK A
+
+Spec: [spec.md](../spec.md). Source: research note section 5, [RESULTS.md](../../datacenter-grid-readiness/research/prototype-as-loop/RESULTS.md).
+
+## Scope
+
+Add keys to `grid_codes.yaml` for load variation: ramp MW/min, ΔP per window (for example 10 MW per 5 s), and an LCL ride-through band, plus Stage 1 d_lim. All marked "assumed" with public sources only (SAGC-1). Read the IEC TR 61000-3-7 text (not the EPRI reproduction) before setting defaults. Intent D grid-code check: a profile key says whether transfer to BESS counts as ride-through (AS-NOUPS-1).
+
+## Acceptance
+
+- [ ] Tests first: schema accepts and rejects the new keys; a profile missing them falls back to a marked default.
+- [ ] Every new value carries "assumed" and a public source or "generic engineering".
+- [ ] The ride-through-transfer key drives the AS-01 warning for intent D.
+- [ ] Existing profiles load unchanged.
+
+## PRs
+
+## Comments
