@@ -28,6 +28,7 @@ import pandas as pd
 
 from services.carrier_catalog import CARRIER_CATALOG
 from services.issue_titles import issue_title
+from services.solver.split_storage import size_conflicts, tied_unpriced_members
 
 # Severity literal kept narrow on purpose — anything beyond error/warning
 # pushes UX complexity onto every callsite for marginal value.
@@ -1919,8 +1920,15 @@ def _check_lopf(n, solver_config) -> list[Issue]:
                     out.append(_err("storage_soc_oob", "StorageUnit", str(name),
                         f"state_of_charge_initial={soc} outside [0, {cap}] (=p_nom·max_hours)."))
 
-    # Stores
-    out += _check_extendable_bounds(n.stores, "Store", "e_nom", True)
+    # Stores. A split storage's Store and Links are sized together (AS-02:
+    # the power tie and the E/P-hour rows), so one priced member prices all
+    # three: an unpriced one is not "built free up to the max".
+    tied = tied_unpriced_members(n)
+    out += [i for i in _check_extendable_bounds(n.stores, "Store", "e_nom", True)
+            if not (i.code == "store_no_capital_cost" and ("Store", i.name) in tied)]
+    out += [_err("split_storage_sizes", "Store", name,
+                 f"Split storage {name}: {why}; change its sizes, bounds or hours.")
+            for name, why in size_conflicts(n)]
 
     # Links — Link.efficiency is a generic conversion coefficient (not
     # bounded by thermodynamics like Generator.efficiency). Heat pumps
@@ -1934,6 +1942,8 @@ def _check_lopf(n, solver_config) -> list[Issue]:
         # WP2.1c-iii): it is not "built free up to the max".
         link_issues = [i for i in link_issues
                        if not (i.code == "link_no_capital_cost" and i.name == priced_poc)]
+    link_issues = [i for i in link_issues
+                   if not (i.code == "link_no_capital_cost" and ("Link", i.name) in tied)]
     out += link_issues
     out += _check_efficiency(n.links, "Link", "efficiency", upper=None)
     # Multi-link efficiency2 / efficiency3 / efficiency4 are validated only
