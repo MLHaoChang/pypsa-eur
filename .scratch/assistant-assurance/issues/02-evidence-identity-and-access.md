@@ -162,7 +162,7 @@ Smallest first; each goes to GK B as a plan before it is built.
 - **Shared fact builder.** One builder for the fact dicts of the static, static_page, series, run and aggregate kinds. Refactor only, behind the A1.x suites.
 - **SERIES-WINDOW.** A compact series record: a values array plus an index digest, with facts resolved on lookup. It lifts the 744-step cap without new args. Windowed args would need `harness/catalogue.py`; blocked while #851/#869 hold it.
 - **REVOKE-KIND.** Merged (#929, 147326c2).
-- **Frontend assurance_state.** Queued until REVOKE-KIND merges; needs `ChatPanel.tsx` and UX review.
+- **Frontend assurance_state.** Done: `ChatPanel.tsx` reads `session_init.assurance` and marks each turn "Answer not checked" (legacy/unvalidated, muted) or "Answer will be checked" (strict or pilot, muted, only while the turn runs); a missing or malformed field renders nothing. Tests: `ChatPanel.turnCheckMark.test.tsx`; screenshots in `.scratch/assistant-assurance/screens/`.
 - **Run sections, compare_project_runs, run manifest MAC.** In progress (Assurance 02 run-evidence session): PR 1 the manifest MAC, PR 2 the checked section and compare reads; see below.
 
 ### 2026-10-29 — Run evidence: manifest MAC, checked sections and compare (plan)

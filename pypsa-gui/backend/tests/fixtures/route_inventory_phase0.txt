@@ -460,6 +460,8 @@ GET     /api/results/store_energy                                               
 GET     /api/results/transformer_reactive                                          -> get_transformer_reactive_api_results_transformer_reactive_get
 GET     /api/results/transformers                                                  -> get_transformer_results_api_results_transformers_get
 GET     /api/results/unit_commitment                                               -> get_unit_commitment_api_results_unit_commitment_get
+GET     /api/results/workbook.xlsx                                                 -> get_results_workbook
+GET     /api/results/workbook/views                                                -> get_results_workbook_views
 GET     /api/results/value_flows                                                   -> get_value_flows_api_results_value_flows_get
 GET     /api/results/voltages                                                      -> get_voltages_api_results_voltages_get
 POST    /api/simulation/abort                                                      -> abort_api_simulation_abort_post

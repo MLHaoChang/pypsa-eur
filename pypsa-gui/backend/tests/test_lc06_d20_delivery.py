@@ -16,7 +16,10 @@ L1 5 MW, two hourly snapshots.
 - MATPOWER: bus 1 has Pd 5 and baseKV 110, the generator row has Pmax 20, its
   cost row has c1 10;
 - a bundle of two deliveries is a zip of ``<file_id>_<name>`` members and a manifest,
-  each member byte for byte the delivery it names.
+  each member byte for byte the delivery it names;
+- injection (EXPORT-INJECT-1): a generator named ``=HYPERLINK(1)`` is delivered as the
+  text ``'=HYPERLINK(1)`` in the CSV bundle and the workbook, and the workbook holds no
+  formula cell; a number stays a number.
 """
 # ruff: noqa: F811 -- shared public harness fixtures
 import hashlib
@@ -24,6 +27,7 @@ import io
 import re
 import zipfile
 
+import openpyxl
 import pandas as pd
 import pypsa
 import pytest
@@ -94,3 +98,16 @@ def test_a_bundle_of_two_deliveries_holds_each_file_byte_for_byte(baseline, clie
     assert set(archive.namelist()) == names | {"manifest.json"}
     assert archive.read(first["file_id"] + "_network.nc") == delivered(client, first)
     assert archive.read(second["file_id"] + "_network.m") == delivered(client, second)
+
+
+def test_a_formula_looking_asset_name_is_delivered_as_text(baseline, client):
+    chat_tools.create_component("Generator", "=HYPERLINK(1)", {"bus": "B1", "p_nom": 7.0, "marginal_cost": -3.0})
+    bundle = zipfile.ZipFile(io.BytesIO(delivered(client, chat_tools.export_csv_bundle())))
+    generators = pd.read_csv(io.BytesIO(bundle.read("generators.csv")), dtype=str).set_index("name")
+    assert "'=HYPERLINK(1)" in generators.index and "=HYPERLINK(1)" not in generators.index
+    assert generators.at["'=HYPERLINK(1)", "marginal_cost"] == "-3.0"   # a negative number stays a number
+
+    book = openpyxl.load_workbook(io.BytesIO(delivered(client, chat_tools.export_excel())))
+    cells = [c for sheet in book for row in sheet.iter_rows() for c in row if c.value is not None]
+    assert [c.value for c in cells if c.data_type == "f"] == []
+    assert "'=HYPERLINK(1)" in [c.value for c in book["generators"]["A"]]

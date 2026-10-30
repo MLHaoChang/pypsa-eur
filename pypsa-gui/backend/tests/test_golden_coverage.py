@@ -206,6 +206,8 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     # Results workbook (RW-01): re-reports cost_breakdown / economics_by_carrier
     # and the stored case report in Excel; it computes no figure of its own.
     ("routers/results.py", "get_results_workbook"):            frozenset(),
+    # RW-03: lists the views a workbook can hold, with availability; no figures.
+    ("routers/results.py", "get_results_workbook_views"):      frozenset(),
     # ── routers/simulation.py ───────────────────────────────────────────
     ("routers/simulation.py", "get_solver_config"):    frozenset(),
     ("routers/simulation.py", "update_solver_config"):  frozenset(),

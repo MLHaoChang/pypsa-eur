@@ -6,6 +6,9 @@ import { CheckedEvidenceCard } from './CheckedEvidenceCard'
 import { CheckedChart } from './CheckedChart'
 import ChatMarkdown from './ChatMarkdown'
 
+/** The one word for an answer the gate did not check; the chat panel's turn mark uses it too. */
+export const ANSWER_NOT_CHECKED = 'Answer not checked'
+
 const UPLOAD_BLOB = /^\/api\/projects\/[^/?#]+\/uploads\/[0-9a-f]{16}\/blob$/
 
 export function downloadHref(result: unknown): { href: string; filename: string | null } | null {
@@ -67,7 +70,7 @@ function OutcomeCard({ message, checked, failed, download, docked }: {
   const tooLarge = new TextEncoder().encode(ordinaryText).byteLength > 64 * 1024
   const body = checked ? answer?.text : tooLarge ? null : ordinaryText
   const label = checked ? answer ? checkedLabel(answer) : missing ? 'Checked answer unavailable' : 'Checking saved answer'
-    : failed || message?.interrupted ? 'Response incomplete — not checked' : 'Answer not checked'
+    : failed || message?.interrupted ? 'Response incomplete — not checked' : ANSWER_NOT_CHECKED
   const openTranscript = () => useUIStore.getState().setAssistantDockOpen(true)
   if (!open) {
     return <section data-testid="companion-outcome" data-docked="true" data-no-panel-close aria-label="Assistant answer"
