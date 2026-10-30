@@ -3,7 +3,7 @@
 
 # AS-08 — Grid-code keys for load variation
 
-Status: ready-for-agent
+Status: in-progress
 Type: task
 Blocked by: none
 Model: Sonnet
@@ -17,11 +17,13 @@ Add keys to `grid_codes.yaml` for load variation: ramp MW/min, ΔP per window (f
 
 ## Acceptance
 
-- [ ] Tests first: schema accepts and rejects the new keys; a profile missing them falls back to a marked default.
-- [ ] Every new value carries "assumed" and a public source or "generic engineering".
+- [x] Tests first: schema accepts and rejects the new keys; a profile missing them falls back to a marked default.
+- [x] Every new value carries "assumed" and a public source or "generic engineering".
 - [ ] The ride-through-transfer key drives the AS-01 warning for intent D.
-- [ ] Existing profiles load unchanged.
+- [x] Existing profiles load unchanged.
 
 ## PRs
+
+#963. The ride-through-transfer box stays open until #962 (AS-01) merges and `grid_code_warnings` delegates to `ride_through_transfer_warning`. IEC TR 61000-3-7 text was paywalled: the Stage 1 value is as read by GK A, not verified by the author.
 
 ## Comments
