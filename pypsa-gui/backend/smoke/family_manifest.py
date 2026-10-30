@@ -447,13 +447,26 @@ VARIANTS: list[dict] = [
     _covered('LC-D13.multi_energy', 'H2 only (heat not covered). Dedicated H2 bus: 80 MW gas serves the 50 MW AC Load, the electrolyser '
              '(eta 0.6) delivers 18 MW of a 40 MW H2 Load: H2 unmet 44 MWh by carrier and by Load, electrical 0; H2 +5 MW gives +10 MWh. '
              'Shared bus: 30 MWh short, at least 20 MWh H2, by-carrier and by-Load readers agree. Live solves capture per-Load slacks, so '
-             'the dedicated-bus roll-up path is unreachable from the seam (GK A: recorded here, no pending row)',
+             'the dedicated-bus roll-up path is unreachable from the seam (LC-D13.multi_energy_dedicated_rollup); heat is LC-D13.multi_energy_heat',
              'run_eh_study get_adequacy_results',
              B + 'test_lc33_d13_multi_energy.py::test_the_dedicated_oracle_by_hand',
              B + 'test_lc33_d13_multi_energy.py::test_h2_unmet_on_its_own_bus_is_attributed_to_hydrogen_alone[h2_40]',
              B + 'test_lc33_d13_multi_energy.py::test_h2_unmet_on_its_own_bus_is_attributed_to_hydrogen_alone[h2_45]',
              B + 'test_lc33_d13_multi_energy.py::test_a_shared_bus_reports_the_forced_h2_shed_and_its_readers_agree'),
     _pending('LC-D13.multi_energy_heat', 'heat unmet attribution (dedicated heat bus and per-Load) has no hand-number test; LC-33 pinned H2 only'),
+    _unavailable('LC-D13.multi_energy_dedicated_rollup', 'dedicated-bus roll-up attribution (ENS by carrier from bus ENS) is not reachable '
+                 'from the chat tools: live solves always capture per-Load slacks, so the section reports per_load_slack',
+                 'pypsa-gui/backend/services/adequacy/multi_energy.py ATTRIBUTION_DEDICATED'),
+    _pending('LC-D13.unsupported_scope', 'no hand-number test through the chat tools; refusals exist below the seam or without an oracle '
+             '(test_adequacy_margin_loop.py rolling/unpriceable/ceiling, test_adequacy_campaign.py budget and second campaign, '
+             'test_copt_assurance.py COPT inputs), not re-audited'),
+    _pending('LC-D13.finalist_certification', 'MC certification of the selected EH option is not pinned by hand; LC-33 pins the LP cost and '
+             'selection only (test_energy_hub_mc_certify.py, test_energy_hub_redundancy_select.py exist, not re-audited)'),
+    _pending('LC-D13.study_swap', 'swapping the study or project while a loop, frontier, campaign or EH study runs is not tested'),
+    _pending('LC-D13.stale_source', 'edited/stale flags exist for EH studies (test_eh_study_edited_since.py, test_eh_review_route.py), not '
+             're-audited; margin loop, frontier, ELCC and campaign results after a source edit are not tested'),
+    _pending('LC-D13.incomplete_campaign', 'aborted or incomplete campaigns and studies: EH aborted-study tests exist (test_eh_review_route.py, '
+             'test_eh_study_record_survives_reactivation.py), not re-audited; a campaign closed with targets unsolved is not tested'),
     _covered('LC-D14.static_campus', 'six untied hours through the queued Run: k 1 picks import/trafo h0, consumption h2, '
              'export/renewable h3; k 2 adds h5 import/trafo, h0 consumption, h2 renewable; k read back from the job; '
              '50 MW in h5 moves the import pick',
