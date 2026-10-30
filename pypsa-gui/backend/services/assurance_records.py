@@ -273,6 +273,23 @@ class AccessRevoked(HTTPException):
     did; a checked commit reports it as `assurance_access_revoked`."""
 
 
+class ProjectDeleted(AccessRevoked):
+    """The project row is gone. Still a 404 to a route; a checked commit reports
+    it as `assurance_project_deleted`, since no grant was withdrawn."""
+
+
+def _project_deleted(db, project_id):
+    from db.models import Project
+
+    # Only the owner's own session reaches this with a project it once held, so
+    # saying "deleted" leaks nothing that session did not already know.
+    try:
+        row_id = uuid.UUID(str(project_id))
+    except ValueError:
+        return False
+    return db.get(Project, row_id) is None
+
+
 def authorize(owner, project_id=None):
     from db.session import SessionLocal
 
@@ -284,6 +301,10 @@ def authorize(owner, project_id=None):
             project_registry.resolve_project(db, user, project_id)
         except HTTPException as refused:
             # Only the access refusals; any other status keeps its own path.
+            if refused.status_code == 404 and _project_deleted(db, project_id):
+                raise ProjectDeleted(
+                    refused.status_code, refused.detail, refused.headers
+                ) from refused
             if refused.status_code in (403, 404):
                 raise AccessRevoked(
                     refused.status_code, refused.detail, refused.headers
@@ -466,7 +487,8 @@ def load(owner, record_id, kind):
     except HTTPException as refused:
         # Revoked project access reads exactly like a record that never existed.
         if refused.status_code == 404:
-            raise AccessRevoked(404, "Record not found") from None
+            kind = ProjectDeleted if isinstance(refused, ProjectDeleted) else AccessRevoked
+            raise kind(404, "Record not found") from None
         raise
     return record
 
