@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Control-settings sheet for a sized plant (AS-07): ramp limiter, smoothing filter cut-off and tier split, SOC bands, GFM droop and H, UPS walk-in and transfer, preset and a latency check, exported as JSON and CSV next to the PSS/E dyr; sub-cycle items are listed as needing EMT.
