@@ -74,14 +74,18 @@ describe('per-turn checking mark', () => {
   it('marks an unchecked turn quietly', async () => {
     await turn({ version: 1, mode: 'legacy', state: 'unvalidated' })
     const mark = await screen.findByTestId('chat-turn-check-unchecked')
-    expect(mark.textContent).toBe('Not checked')
+    expect(mark.textContent).toBe('Answer not checked')
     expect(mark.className).not.toMatch(/amber|red|accent/)
     expect(screen.queryByTestId('chat-turn-check-checking')).toBeNull()
   })
 
   it.each(['strict', 'pilot'])('marks a %s turn as being checked', async mode => {
     await turn({ version: 1, mode, state: 'checking' })
-    expect((await screen.findByTestId('chat-turn-check-checking')).textContent).toBe('Answer will be checked')
+    const mark = await screen.findByTestId('chat-turn-check-checking')
+    expect(mark.textContent).toBe('Answer will be checked')
+    expect(mark.className).not.toMatch(/accent/)
+    emit('turn_done', {})
+    await waitFor(() => expect(screen.queryByTestId('chat-turn-check-checking')).toBeNull())
     expect(screen.queryByTestId('chat-turn-check-unchecked')).toBeNull()
   })
 

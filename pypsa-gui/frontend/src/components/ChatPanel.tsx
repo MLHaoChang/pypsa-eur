@@ -82,6 +82,7 @@ import { useSpeechToText } from '../hooks/useSpeechToText'
 import { isNearBottom } from '../utils/chatUi'
 import { insertAtCursor } from '../utils/speechToText'
 import ChatMarkdown from './ChatMarkdown'
+import { ANSWER_NOT_CHECKED } from './CompanionOutcome'
 import { UploadProgressToast } from './UploadProgressToast'
 import { ConfirmationCard } from './ConfirmationCard'
 import ExternalAgentStrip from './ExternalAgentStrip'
@@ -3604,10 +3605,10 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
             )}
             {m.role === 'user' && m.turnCheck === 'unchecked' && (
               <div className="mt-1 text-[10px] text-muted" data-testid="chat-turn-check-unchecked"
-                title="The answer to this message is not checked against the project's results.">Not checked</div>
+                title="The answer to this message is not checked against the project's results.">{ANSWER_NOT_CHECKED}</div>
             )}
-            {m.role === 'user' && m.turnCheck === 'checking' && (
-              <div className="mt-1 text-[10px] text-accent" data-testid="chat-turn-check-checking"
+            {m.role === 'user' && m.turnCheck === 'checking' && streaming && m.id === [...messages].reverse().find(x => x.role === 'user')?.id && (
+              <div className="mt-1 text-[10px] text-muted" data-testid="chat-turn-check-checking"
                 title="The answer to this message is checked against the project's results before it is shown.">Answer will be checked</div>
             )}
             {m.role === 'user' && m.attachment_file_ids && m.attachment_file_ids.length > 0 && (
