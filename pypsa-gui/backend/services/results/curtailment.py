@@ -152,7 +152,8 @@ def compute_curtailment(n, from_, to_):
 
     Lifted from `routers.results.get_curtailment`, which keeps the network
     lookup, the `_dispatch_ready` gate and the `_state` reads. Returns the
-    payload dict, or `None` where the handler returns 204.
+    payload dict, or `None` where there is nothing to show; an internal
+    exception is logged and raised (the route answers 204).
     """
     try:
         curtailment = curtailment_frame(n)
@@ -163,8 +164,8 @@ def compute_curtailment(n, from_, to_):
             curtailment, range_meta = _slice_ts(curtailment, from_, to_)
         return _ts_payload(curtailment, range_meta=range_meta)
     except Exception:
-        logger.exception("results endpoint failed; returning 204 (see traceback)")
-        return None
+        logger.exception("results endpoint failed (see traceback)")
+        raise
 
 
 #: The causes, in display order. `other` is curtailment at neither cause (a full

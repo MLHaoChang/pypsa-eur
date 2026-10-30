@@ -47,7 +47,8 @@ def compute_prices(n, source, from_, to_, *, result_df):
 
     Lifted from `routers.results.get_prices`, which keeps the network
     lookup, the `_dispatch_ready` gate and the `_state` reads. Returns the
-    payload dict, or `None` where the handler returns 204.
+    payload dict, or `None` where there is nothing to show; an internal
+    exception is logged and raised (the route answers 204).
     """
     import numpy as np
     try:
@@ -160,8 +161,8 @@ def compute_prices(n, source, from_, to_, *, result_df):
             ),
         }, range_meta=range_meta)
     except Exception:
-        logger.exception("results endpoint failed; returning 204 (see traceback)")
-        return None
+        logger.exception("results endpoint failed (see traceback)")
+        raise
 
 
 
