@@ -16,8 +16,17 @@ logger = logging.getLogger(__name__)
 
 def load_sheet(xlsx: pd.ExcelFile, sheet_name: str, index_col: str) -> pd.DataFrame:
     df = xlsx.parse(sheet_name, skiprows=5, index_col=index_col)
-    year_columns = [col for col in df.columns if isinstance(col, int)]
+    # year headers may be read as int or as float (e.g. 2000.0), depending on
+    # the edition and the Excel reader
+    year_columns = [
+        col
+        for col in df.columns
+        if isinstance(col, (int, float))
+        and not isinstance(col, bool)
+        and float(col).is_integer()
+    ]
     df = df[year_columns].dropna(how="all", axis=0)
+    df.columns = df.columns.astype(int)
     return df
 
 
@@ -47,26 +56,27 @@ if __name__ == "__main__":
     tab38 = load_sheet(xlsx, "Tabelle38", index_col="Verkehrsträger")
 
     data = {
-        "total residential": tab17.loc["Total Endenergieverbrauch"],
+        "total residential": tab17.loc["Total"],
         "total residential space": tab17.loc["Raumwärme"],
         "total residential water": tab17.loc["Warmwasser"],
-        "total residential cooking": tab17.loc["Kochen / Geschirrspüler"],
+        "total residential cooking": tab17.loc["Kochen"] + tab17.loc["Geschirrspüler"],
         "electricity residential": tab18.loc["Total"],
         "electricity residential space": tab18.loc["Raumwärme"],
         "electricity residential water": tab18.loc["Warmwasser"],
         "electricity residential cooking": tab18.loc["Kochherde"],
-        "total services": tab26.loc["Total Endenergie"],
+        "total services": tab26.loc["Total"],
         "total services space": tab26.loc["Raumwärme"],
         "total services water": tab26.loc["Warmwasser"],
         "total services cooking": tab26.loc["Prozesswärme"],
-        "electricity services": tab28.loc["Total Elektrizität"],
+        "electricity services": tab28.loc["Total"],
         "electricity services space": tab28.loc["Raumwärme"],
         "electricity services water": tab28.loc["Warmwasser"],
         "electricity services cooking": tab28.loc["Prozesswärme"],
         "total rail": tab35.loc["Schiene"],
         "total road": tab35.loc["Strasse"],
         "electricity road": tab38.loc["Strasse"],
-        "electricity rail": tab38.loc["Schiene"],
+        # "Schiene*": rail including trolleybuses
+        "electricity rail": tab38.loc["Schiene*"],
         "total domestic aviation": tab35.loc["Luft (Inland)"],
         "total international aviation": tab1.loc["int. Flugverkehr"],
         "total domestic navigation": tab35.loc["Wasser"],
