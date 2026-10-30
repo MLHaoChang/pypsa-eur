@@ -6,11 +6,13 @@ network. Hard constraints return as technology bounds the sizing step reads.
 """
 from __future__ import annotations
 
+import math
+
 from models.design_intent import DesignIntentSpec
 
 
 def _check_critical(critical_mw: float) -> float:
-    if not critical_mw > 0:
+    if not (math.isfinite(critical_mw) and critical_mw > 0):
         raise ValueError(f"critical_mw must be > 0, got {critical_mw}")
     return critical_mw
 

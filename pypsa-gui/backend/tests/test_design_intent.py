@@ -5,6 +5,8 @@ Data model and validation only; no LP changes.
 """
 from __future__ import annotations
 
+import pathlib
+
 import pytest
 from pydantic import ValidationError
 
@@ -71,7 +73,7 @@ def test_technology_bounds_pinned_per_intent():
     assert tb("E") == {}
 
 
-@pytest.mark.parametrize("bad", [0, -80.0, float("nan")])
+@pytest.mark.parametrize("bad", [0, -80.0, float("nan"), float("inf")])
 def test_critical_load_must_be_positive(bad):
     spec = DesignIntentSpec(intent="A")
     for fn in (D.backup_energy_mwh, D.bridge_reserve_mwh, D.genset_p_nom_min_mw, D.technology_bounds):
@@ -98,14 +100,26 @@ def test_intent_d_warns_without_transfer_ride_through_but_does_not_block():
 
 
 @pytest.mark.parametrize("tid", ["eh_datacenter", "eh_datacenter_staged"])
-def test_existing_stored_spec_loads_unchanged(tid):
-    import pathlib, sys
-    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "project_templates"))
+def test_existing_stored_spec_loads_unchanged(tid, monkeypatch):
+    monkeypatch.syspath_prepend(str(pathlib.Path(__file__).resolve().parents[1] / "project_templates"))
     import eh_templates as T
     stored = T.dc_load_preset(tid)  # a spec as persisted today, no design_intent key
     assert "design_intent" not in stored
     spec = DataCentreLoadSpec.model_validate(stored)
     assert spec.design_intent is None
-    assert spec.phases[0].it_mw == stored["phases"][0]["it_mw"]
-    assert spec.pue_at_design == stored["pue_at_design"] and spec.critical_share == stored["critical_share"]
-    assert T.dc_load_spec(tid, {}).design_intent is None
+    # the full dump equals the one from the same spec built without the field
+    plain = DataCentreLoadSpec.model_validate({**stored, "design_intent": None})
+    assert spec.model_dump(mode="json", exclude={"design_intent"}) == \
+        plain.model_dump(mode="json", exclude={"design_intent"})
+    assert T.dc_load_spec(tid, {}).model_dump(mode="json")["design_intent"] is None
+
+
+def test_spec_carrying_a_design_intent_round_trips(monkeypatch):
+    monkeypatch.syspath_prepend(str(pathlib.Path(__file__).resolve().parents[1] / "project_templates"))
+    import eh_templates as T
+    stored = {**T.dc_load_preset("eh_datacenter"),
+              "design_intent": {"intent": "B", "genset_run_hours_cap": 500}}
+    spec = DataCentreLoadSpec.model_validate(stored)
+    assert spec.design_intent == DesignIntentSpec(intent="B", genset_run_hours_cap=500)
+    again = DataCentreLoadSpec.model_validate_json(spec.model_dump_json())
+    assert again == spec and again.model_dump() == spec.model_dump()
