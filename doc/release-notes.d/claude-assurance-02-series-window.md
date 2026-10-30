@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The in-app assistant can now give a checked answer on a time series of up to 8784 steps (an hourly leap year), up from 744. A series's evidence record now stores which steps it certifies, bound to the series' index and values, instead of one fact per step. Series evidence saved before the upgrade reads as unavailable; it expires within 24 hours.

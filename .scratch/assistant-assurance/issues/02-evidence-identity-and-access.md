@@ -161,7 +161,7 @@ Smallest first; each goes to GK B as a plan before it is built.
 - **REPLAY.** A monotonic per-record sequence for mutable records (`operation`, `ui_action`, `conversation_context`), so an older, validly sealed copy reads unavailable. Only `assurance_records` changes.
 - **Shared fact builder.** One builder for the fact dicts of the static, static_page, series, run and aggregate kinds. Refactor only, behind the A1.x suites.
 - **SERIES-WINDOW.** A compact series record: a values array plus an index digest, with facts resolved on lookup. It lifts the 744-step cap without new args. Windowed args would need `harness/catalogue.py`; blocked while #851/#869 hold it.
-- **REVOKE-KIND.** In review as #929.
+- **REVOKE-KIND.** Merged (#929, 147326c2).
 - **Frontend assurance_state.** Done: `ChatPanel.tsx` reads `session_init.assurance` and marks each turn "Answer not checked" (legacy/unvalidated, muted) or "Answer will be checked" (strict or pilot, muted, only while the turn runs); a missing or malformed field renders nothing. Tests: `ChatPanel.turnCheckMark.test.tsx`; screenshots in `.scratch/assistant-assurance/screens/`.
 - **Run sections, compare_project_runs, run manifest MAC.** In progress (Assurance 02 run-evidence session): PR 1 the manifest MAC, PR 2 the checked section and compare reads; see below.
 
@@ -257,10 +257,44 @@ Not covered: per-family unit maps for the retained results sections; runs from `
 #### GK B (10) plan GO conditions (2026-10-29)
 
 1. `_fact` builds the dict in today's key order: path, entity_id, metric, value, unit. Normalisation stays at each call site. Met: `test_p1_fact_builder` pins the key order.
-2. A dump (`tests/assurance_acceptance/fact_record_dump.py`) covers all six sites, with the static_page capture and recheck dumped separately. It includes a static record for every INPUT_METRICS class, and a name holding both '~' and '/' for the page and series kinds. It is byte-equal between master and the PR tree, and the PR body gives both outputs' sha256. Met: 1534 lines on each tree, the same sha256 (`7e0a8f7f…df32`), `cmp` equal. Escaped names reach the static_page capture and recheck and the series site.
+2. A dump (`tests/assurance_acceptance/fact_record_dump.py`) covers all six sites, with the static_page capture and recheck dumped separately. It includes a static record for every INPUT_METRICS class, and a name holding both '~' and '/' for the page and series kinds. It is byte-equal between master and the PR tree, and the PR body gives both outputs' sha256. Met: over the evidence, timeseries, aggregate, run_as_of and fact_builder suites, on the PR head 3fc01699 and on master 904fc506 (the plugin and the builder test copied in, the two `_fact` unit tests deselected on both), 781 lines on each tree, `cmp` equal, sha256 `45313c1776ad5e90a95429afc6e2ca5136584e9d7324052a006e1654790088ce`; GK B (11) reproduced it. An earlier run before #898 merged, over a wider file set, gave 1534 lines, sha256 `7e0a8f7f…df32`, also equal. Escaped names reach the static_page capture and recheck and the series site.
 3. Mutation (`tests/assurance_acceptance/fact_builder_mutations.py`): breaking the builder at any one of the six sites fails a test. Met: 15 of 15 killed (entity/metric swap and dropped unit at all six sites; unescaped path at the page capture, page recheck and series sites). An unescaped path is an equivalent mutant at the static, aggregate and run sites, whose only token is a metric name.
 4. The pin test reads the live INPUT_METRICS. Met.
 5. The PR is opened from master after #895 and #898 merge, so its diff is S3 alone. The A1.x suites and `test_p1_replay` run unchanged at the PR head.
+
+### 2026-10-29 — S4 SERIES-WINDOW: a series record stores a certified-row mask
+
+- A series record no longer stores one fact per step. It stores `series: {rows, certified, index_sha256, values_sha256}`:
+  - `certified` is a base64 bitmask, one bit per row, least significant bit first;
+  - `index_sha256` is a digest of `[labels, periods]`;
+  - `values_sha256` is a digest of the per-row values, with null for a row that does not certify.
+  
+  Each digest is sha256 over a domain tag (`series-index/1`, `series-values/1`), a newline, and the canonical JSON save() seals (sorted keys, fixed separators, allow_nan=False). The same `_series_window` builds it at capture and at read.
+- `evidence()` rebuilds the steps from the live series and returns the record with `facts` in place of `series`, so every reader sees today's shape. It reads unavailable unless every one of these holds:
+  - the keys are exactly the four above;
+  - `rows` is an int equal to the live row count;
+  - the mask is valid base64 of exactly ceil(rows/8) bytes, with no bit past the last row and at least one bit set;
+  - both digests match.
+- `MAX_SERIES_POINTS` is 8784, an hourly leap year. The guard before the handler is unchanged in `harness/assurance.py`. `active_series_source` now measures the stored window, which for an hourly year of full-precision values with a 128-character name is about 1.5 KiB plus the digests.
+- The series adapter is `series-input/2`. A record in the old per-step form reads unavailable, with no migration; it expires within 24 h.
+- Change against the slice text above: a bitmask plus a values digest, not a values array. GK B (10) ruled this: 8784 full-precision float64 values take about 168 KB in JSON, over save()'s 128 KiB cap.
+- A draft cites a path of at most 128 characters (an existing limit of the draft contract), so a very long name can be captured but not cited. `test_p1_timeseries`'s long-name refusal test is replaced by `test_long_named_series_of_744_steps_is_now_captured`. `test_p1_integrity`'s series rewrites now edit the mask and the values digest.
+
+#### GK B (10) plan GO conditions (2026-10-29)
+
+1. The 8760 and 8784 step tests use seeded random full-precision float64 values and a 128-character name, and assert the sealed record's encoded size. Met: under 16 KiB for 8760 and 8784 steps.
+2. Refusals for each of these: a relabelled or reordered index, an edited value, one step short or long, a mask bit flipped and resealed, `rows` ≠ the live count, a mask length ≠ ceil(rows/8), and stray bits past `rows`. Met, plus a missing or extra key, a non-int `rows`, a mask that is not base64, a cleared or empty mask, and a digest rewritten in a resealed record.
+3. The canonical digest input is pinned and the same at capture and read, with domain separation between the two digests. Met: `test_the_digest_input_is_pinned_and_domain_separated`, `test_the_mask_is_one_bit_per_row_least_significant_first`.
+4. evidence()'s expanded facts are byte-equal to S3's for series of 744 steps or fewer. Met: the `fact_record_dump` plugin now also records what evidence() and capture_series return. Over timeseries, revocation, integrity, fact_builder and replay, the 258 series lines are equal on both trees (sha256 `1d80c11a…f478`).
+5. The old adapter_version reads unavailable, fail-closed, with no migration. Met: `test_the_old_per_step_record_is_unavailable`.
+6. Mutants that drop the index digest, the rows check, the values digest or the mask-length check each fail a named test (`series_window_mutations.py`). Met, 5 of 5: index digest by `test_a_rewritten_digest_is_unavailable[index_sha256]`, values digest by `test_a_cleared_mask_bit_is_unavailable`, rows by `test_a_row_count_other_than_the_live_one_is_unavailable[5]`, mask length by `test_a_mask_of_the_wrong_length_is_unavailable[octets0]`, stray bits by `test_stray_bits_past_the_last_row_are_unavailable`.
+7. The guard still runs before the handler, and `harness/assurance.py` is unchanged. test_tool_error_kind_manifest and the A1.x suites run at the PR head. Met: all green on the branch.
+
+#### GK B (12) review condition (2026-10-29): the model-visible size
+
+- Measured with `test_a_full_year_reaches_the_model_bounded_with_its_assurance` (744 and 8784 steps, through the real stream). The model never receives every point: a checked result is never spilled, and `_result_to_anthropic_content` cuts every body to 4000 characters. That holds at 744 (a 33.7 KB result) and at 8784 (394 KB), so the cap does not change what the model sees, only how much is cut.
+- Found: the model-visible dict is the handler's raw result with `_assurance` merged last, so the cut dropped the outcome and evidence ids. That already happened at 744 steps on master. `result_projection` is not on this path for a dict result.
+- Fixed the shaping here rather than keeping 744, which would not help: `harness/loop.py` now puts `_assurance` first in a checked dict result, as `_edit_receipt` is for edit cards. The test asserts the body stays under 8 KiB, keeps `_assurance` and the evidence id, and that the evidence read returns every fact (744 or 8784).
 
 ### 2026-10-29 — REVOKE-KIND: a typed kind for revoked access during commit
 

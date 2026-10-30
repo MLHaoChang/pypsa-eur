@@ -307,7 +307,8 @@ component (`frontend/src/components/EditCard.tsx`).
   `edit_card_records` (stress scenarios, asset health, study ledger, layout). Where a handler had
   no pure validator the card needs, the handler's check was extracted (`_patched_study`,
   `planned_config_update`, `prepare_item`, …) so the write and the card call one function.
-  `_edit_receipt` is the first key of the result, so a spilled or truncated result keeps it.
+  `_edit_receipt` is the first key of the result (the second, after `_assurance`, when the result
+  is checked), so a spilled or truncated result keeps it.
 - **Settings cards (LC-16 slice C, OJ-44).** `update_solver_config`,
   `update_meta` and `set_investment_period_weightings` run their own handler on
   an isolated copy (`edit_card._sandbox`), so the card refuses what the route
@@ -473,7 +474,9 @@ publication through `assurance.py`; the default remains `disabled`. `pilot`
 admits an explicit version-1 strict request. The chat's **Check answers** option
 uses the shared harness when the server enables pilot
 mode. Checking defaults off for new pilot chats and project bindings; strict
-server mode requires it. Browser publication is armed before dispatch and refuses
+server mode requires it. A checked result is never spilled, so a long one is cut
+for the model; `_assurance` is its first key, so the cut keeps the outcome and
+evidence ids. Browser publication is armed before dispatch and refuses
 an omitted/downgraded acknowledgement. Retries, edits and clarification choices
 preserve checked policy, including a conservative history hint when an earlier
 answer is unavailable. That hint is never approval. Read the
