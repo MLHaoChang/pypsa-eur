@@ -553,20 +553,20 @@ def test_annual_costs_are_charged_per_modelled_horizon_on_a_168_h_week():
 # ── AS-12: the solved sizes outlive the model, and cost_breakdown carries their cost ──
 
 
-def _run(n):
-    """The app's solve path, which persists the sizes once the solve succeeds."""
+def _run(n, cfg=None, expect="ok"):
+    """The app's solve path, which persists the sizes once the solve succeeds. Returns the config it ran."""
     import queue
     import threading
 
     from services import solver_service
     from services.pypsa_service import PyPSAService
 
+    cfg = cfg if cfg is not None else solver_service.SolverConfig()
     PyPSAService.set_network(n)
     status, condition = solver_service.run_simulation(
-        solver_service.SolverConfig(), n, PyPSAService.get_lock(), threading.Event(), queue.SimpleQueue(),
-        state_update=lambda **kw: None)
-    assert status == "ok", condition
-    return solver_service.SolverConfig()
+        cfg, n, PyPSAService.get_lock(), threading.Event(), queue.SimpleQueue(), state_update=lambda **kw: None)
+    assert (status == "ok") == (expect == "ok"), condition
+    return cfg
 
 
 def _round_trip(n, tmp_path):
@@ -646,17 +646,31 @@ def test_an_untagged_network_gains_no_result_columns():
     assert not set(ps.RESULT_STORE_COLUMNS) & set(n.stores.columns)
 
 
-@pytest.mark.parametrize("weight, years", [(8760.0, 1.0), (1.0, 1 / 8760)])
-def test_cost_breakdown_carries_pcs_and_statcom_cost_and_the_objective_reconciles(tmp_path, weight, years):
-    """One snapshot weighted as a year, and the same snapshot unweighted (one hour: the typed annual costs
-    are charged x 1/8760, as the LP charged them)."""
+def test_a_failed_re_solve_leaves_no_stale_sizes():
+    n = _campus([105.0], [105.0 * TAN_LOAD])
+    _bess(n, "small", 10.0)
+    _run(n)
+    assert ps.cost_terms(n)
+    n.loads_t.p_set.loc[:, "dc"] = 1_000.0                 # beyond the transformer: infeasible
+    _run(n, expect="fail")
+    assert n.stores["pcs_s_x_opt"].isna().all()
+    assert n.links[list(ps.RESULT_LINK_COLUMNS)].isna().all().all()
+    assert ps.cost_terms(n) == {}
+
+
+@pytest.mark.parametrize("weight, years, scale", [(8760.0, 1.0, 1.0), (1.0, 1 / 8760, 1.0), (8760.0, 1.0, 1e-3)])
+def test_cost_breakdown_carries_pcs_and_statcom_cost_and_the_objective_reconciles(tmp_path, weight, years, scale):
+    """One snapshot weighted as a year, the same snapshot unweighted (one hour: the typed annual costs are
+    charged x 1/8760, as the LP charged them), and a user objective scale, which the solve reverts."""
+    from services.solver_service import SolverConfig
+
     from services.results.cost_breakdown import compute_cost_breakdown
     from services.results.objective_decomposition import compute_objective_decomposition
 
     n = _campus([105.0], [105.0 * TAN_LOAD])
     n.snapshot_weightings.loc[:, "objective"] = weight
     _bess(n, "small", 10.0)
-    cfg = _run(n)
+    cfg = _run(n, SolverConfig(user_objective_scale=scale))
     s_x, q_ss, _ = _persisted(n)
     assert q_ss > 1.0
     pcs = years * C_PCS * s_x["small"]

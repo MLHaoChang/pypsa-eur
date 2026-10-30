@@ -106,6 +106,7 @@ from services.solver.split_storage import _wrap_with_split_storage
 from services.solver.envelope_floors import _wrap_with_envelope_floors
 from services.solver.pcs_statcom import _wrap_with_pcs_statcom
 from services.solver.pcs_statcom import persist_solution as _persist_pcs_statcom
+from services.solver.pcs_statcom import clear_solution as _clear_pcs_statcom
 from services.solver import lost_production as _lost_production
 from services.solver import process_uc as _process_uc
 # Edge Investment Case commercial layer (spec §5.1): the PoC price writer and
@@ -674,6 +675,8 @@ def run_simulation(
                     delattr(network, _stale)
                 except AttributeError:
                     pass
+            # AS-12: likewise the PCS/STATCOM sizes; a success persists this run's after the solve.
+            _clear_pcs_statcom(network)
             t_solve = time.time()
             # Clean up stale `transformer.type` strings that don't match any
             # row in n.transformer_types. The GUI's presets are display

@@ -251,15 +251,20 @@ def solution(n: "pypsa.Network") -> dict:
     return out
 
 
+def clear_solution(n: "pypsa.Network") -> None:
+    """Blank the persisted sizes, so a solve that fails leaves none of the previous run's behind."""
+    for frame, columns in ((n.stores, RESULT_STORE_COLUMNS), (n.links, RESULT_LINK_COLUMNS)):
+        for col in columns:
+            if col in frame.columns:
+                frame[col] = np.nan
+
+
 def persist_solution(n: "pypsa.Network") -> None:
     """Write the solved S_x (MVA, per tagged store) and Q_ss, Q_dyn (Mvar, on the PQ Link) to the result columns,
     so they outlive `n.model` and survive the project's .nc round-trip (AS-12). Called after a successful solve;
     clears the columns first, so a solve without the rows leaves no stale sizes. A network that never had the
     columns gains none unless the rows were built."""
-    for frame, columns in ((n.stores, RESULT_STORE_COLUMNS), (n.links, RESULT_LINK_COLUMNS)):
-        for col in columns:
-            if col in frame.columns:
-                frame[col] = np.nan
+    clear_solution(n)
     m = getattr(n, "model", None)
     if m is None or "Statcom-q_ss" not in m.variables:
         return
