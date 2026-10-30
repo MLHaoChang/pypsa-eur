@@ -1,0 +1,75 @@
+{
+  "baseline": "a68db6cfcf254df17a5b0d96da7a4c995f26423f",
+  "findings": [
+    {
+      "id": "F01",
+      "priority": "high",
+      "verification": "reproduced_authenticated_http",
+      "finding": "Automatic before-restore checkpoint omits unsaved model edit",
+      "probe": "test_restore_safety_checkpoint_preserves_unsaved_network_edit",
+      "expected": "Capture changed x=25 before replacing live model, or refuse/explicitly resolve dirty work",
+      "actual": "Restore 200; safety checkpoint x=0"
+    },
+    {
+      "id": "F02",
+      "priority": "high",
+      "verification": "reproduced_authenticated_http",
+      "finding": "Stress settings added after checkpoint survive restore",
+      "probe": "test_restore_removes_stress_settings_absent_at_checkpoint",
+      "expected": "Restore declared original empty stress registry",
+      "actual": "Restore 200; later valid audit-new scenario remains"
+    },
+    {
+      "id": "F03",
+      "priority": "medium",
+      "verification": "reproduced_authenticated_http",
+      "finding": "Upload directory absent in checkpoint survives restore",
+      "probe": "test_restore_removes_upload_directory_absent_at_checkpoint",
+      "expected": "Remove later directory in declared restore scope",
+      "actual": "Restore 200; later audit-only.txt remains"
+    },
+    {
+      "id": "F04",
+      "priority": "medium",
+      "verification": "source_inspected",
+      "finding": "Snapshot Compare opens project rail without selected snapshot identity"
+    },
+    {
+      "id": "F05",
+      "priority": "medium",
+      "verification": "source_inspected",
+      "finding": "Newest saved snapshot labelled current without working-copy equality"
+    },
+    {
+      "id": "F06",
+      "priority": "medium",
+      "verification": "source_inspected_and_existing_helper_tests",
+      "finding": "Home Updated and recency use creation timestamp"
+    },
+    {
+      "id": "F07",
+      "priority": "medium",
+      "verification": "source_inspected",
+      "finding": "Best objective across project list lacks validated common comparison basis; row guard only counts snapshots"
+    },
+    {
+      "id": "F08",
+      "priority": "medium",
+      "verification": "source_inspected",
+      "finding": "Workspace text contradicts session-bound context and project-node lock implementation"
+    },
+    {
+      "id": "F09",
+      "priority": "low",
+      "verification": "source_inspected_and_existing_helper_tests",
+      "finding": "Home scenario count is direct-child count, not whole descendant family"
+    },
+    {
+      "id": "F10",
+      "priority": "medium",
+      "verification": "source_inspected_not_portability_e2e",
+      "finding": "Generic bundle allowlist does not universally carry sensitivity receipt, experiments or retained run evidence"
+    }
+  ],
+  "fixes_implemented": false
+}
