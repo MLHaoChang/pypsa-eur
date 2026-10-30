@@ -250,7 +250,12 @@ class DataConfig(BaseModel):
         description="Seawater temperature data source configuration.",
     )
     swiss_energy_balances: _DataSourceConfig = Field(
-        default_factory=lambda: _DataSourceConfig(source="primary"),
+        # `archive` rather than `primary`: the primary URL is unversioned and
+        # on 2026-10-30 BFE replaced the 2024 tables with the 2025 edition,
+        # whose sheet layout `build_swiss_energy_balances` cannot read
+        # (KeyError 'Total Endenergieverbrauch' in every Integration job).
+        # The archive row in `data/versions.csv` is the supported 2024 file.
+        default_factory=lambda: _DataSourceConfig(source="archive"),
         description="Swiss energy balances data source configuration.",
     )
     synthetic_electricity_demand: _DataSourceConfig = Field(

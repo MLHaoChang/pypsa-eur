@@ -1356,7 +1356,7 @@ data:
     source: archive
     version: latest
   swiss_energy_balances:
-    source: primary
+    source: archive
     version: latest
   synthetic_electricity_demand:
     source: archive
