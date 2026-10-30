@@ -25,6 +25,8 @@ In `extra_functionality`, written like `_reserve_row`, add from each `DcPhase` e
 
 ## PRs
 
+- #975
+
 ## Comments
 
 **2026-10-30, GK A plan GO (conditions).** Rows only in `services/solver/envelope_floors.py`; shared files get one wrap line + import in `solver_service.py`, one `SolverConfig.envelope_floors` field (end of class; floats finite and >= 0, None a no-op) and the fingerprint append. Changing the field changes both `_network_input_fingerprint` and the investment-case digest (test); it does not mark readers stale (LC-40). Energy floor pinned at 1.835 MWh = 2·(0.75 + 0.16667) + 0.00177, hand-computed as literals; RESULTS.md's "1.82" does not reproduce from the smoothing formulas (discrepancy noted). Backup row is sum η_dis·(e − E_sm/2·[tier]) >= backup MWh (AC critical energy). SOC window from the Store's `e_min_pu`/`e_max_pu` in the band row, no new column; energy floor sums E_sm unweighted. A flagged Store without the AS-02 charger/discharger (or a backup Store without a discharger) is refused before the solve, naming it. One mutation test per row; custom columns survive the `.nc` round-trip; genset cap weighted by `snapshot_weightings.generators` per investment period, active generators only, pinned at 100 h (uncapped 150 h). Floors are the max over phases because P_sm and E_sm are single size variables per store.
