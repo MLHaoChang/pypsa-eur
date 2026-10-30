@@ -236,3 +236,9 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **Reviewers read code inline.** Two reviewers pulled 112k and 142k chars of `git show`/`git diff` (single outputs to 24k) with no subagent calls; builders that delegated reads stayed small. 13 full-size screenshots cost ~15k tokens.
   - Fix: read `git diff --stat` first, then one hunk or file at a time capped with `| head -c 6000`; whole-file or cross-file reads go to an Explore subagent that returns file:line findings; open screenshots downscaled to at most 1000 px wide.
   - Lives in: review-gk (Review setup), review-ux (Review setup), live and template copies.
+
+## 30 Oct 2026: rotate past 300k only when real work remains (owner decision ROTATE-TAIL-1)
+
+- **A near-done session rotated.** AS-02 hit 301k with one failing CI shard left; the fresh session re-read the issue, code and CI log, which can cost more than finishing (rotation breaks even after ~10–15 turns at the smaller context).
+  - Fix: past 300k, finish a short active tail (a master merge, or an already-diagnosed small fix) first; a CI-only tail still goes `ci-only` to the coordinator, because a CI wait outlives the 1 h cache and each wake re-writes the whole context.
+  - Lives in: steward (Rotation), live and template copies.

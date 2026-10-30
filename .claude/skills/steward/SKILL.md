@@ -93,6 +93,8 @@ A long context is a session's largest cost: every tool call re-reads it. Rotate 
 - the context-guard hook says "Context at <N>k (limit 300k)" (owner decisions USE-1, USE-2; it repeats every +20k, so don't poll `get_session`);
 - a package's PR has merged and more slices remain.
 
+Past 300k, first finish a tail you can do in a few turns within the hour (a master merge, or a small fix you have already diagnosed); if only CI is left, send `ci-only` (step 6). Anything bigger rotates now (owner decision ROTATE-TAIL-1).
+
 Write the hand-off note as under [Finishing a package](#finishing-a-package), `send_message` it to the coordinator, ask for a fresh session for the rest, then stop.
 Done when the coordinator has the note and the request.
 
