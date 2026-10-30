@@ -131,6 +131,7 @@ CHECKED_TOOLS = frozenset(
         "get_aggregate_load",
         "get_component",
         "get_run_evidence",
+        "compare_project_runs",
         "get_timeseries",
         "list_components",
         "ui_open_panel",
@@ -166,8 +167,11 @@ class Turn:
         self.page_digests = {}
         # get_timeseries: series source digests, kept the same way.
         self.series_digests = {}
-        # get_run_evidence: run manifest digests, kept the same way.
+        # get_run_evidence: run manifest digests (with the section, for a
+        # section read), kept the same way.
         self.run_digests = {}
+        # compare_project_runs: digests of both run manifests, kept the same way.
+        self.compare_digests = {}
         # get_aggregate_load: aggregate source digests, kept the same way.
         self.aggregate_digests = {}
 
@@ -686,9 +690,40 @@ class Turn:
         if tool_name == "get_run_evidence":
             if self.request_scope is not None or not isinstance(args, dict):
                 return False
-            # Exact args only: a section is unchecked data, not a recorded metric.
+            # Exact args only: a run's metrics, or one recorded section's
+            # numbers with units.
             run_id = args.get("run_id")
-            if set(args) != {"run_id"} or not isinstance(run_id, str):
+            if not isinstance(run_id, str):
+                return False
+            if set(args) == {"run_id", "section"}:
+                from services import run_evidence
+
+                section = args["section"]
+                if not isinstance(section, str) or not run_evidence._SECTION.fullmatch(
+                    section
+                ):
+                    return False
+                _project, source_digest, _facts, gap = records.run_section_source(
+                    run_id, section
+                )
+                if gap is not None:
+                    raise HTTPException(
+                        409,
+                        {
+                            "error_kind": "run_not_checkable",
+                            "message": (
+                                "Only a recorded section of a completed run whose "
+                                "evidence verifies, with numbers recorded with "
+                                f"units, can be checked; here {gap}. Ask without "
+                                "checking to see it as unchecked data."
+                            ),
+                        },
+                    )
+                self.run_digests.setdefault(records.digest(args), []).append(
+                    source_digest
+                )
+                return True
+            if set(args) != {"run_id"}:
                 return False
             _project, manifest, status = records.run_source(run_id)
             if manifest is None:
@@ -705,6 +740,48 @@ class Turn:
                 )
             self.run_digests.setdefault(records.digest(args), []).append(
                 records.digest(manifest)
+            )
+            return True
+        if tool_name == "compare_project_runs":
+            if self.request_scope is not None or not isinstance(args, dict):
+                return False
+            # Exact args only: two different runs, optional recorded metric
+            # names; deltas across changed inputs stay unchecked.
+            run_id, baseline = args.get("run_id"), args.get("baseline_run_id")
+            metrics = args.get("metrics")
+            if (
+                not {"run_id", "baseline_run_id"} <= set(args)
+                or not set(args)
+                <= {"run_id", "baseline_run_id", "metrics", "allow_input_changes"}
+                or args.get("allow_input_changes", False) is not False
+                or not isinstance(run_id, str)
+                or not isinstance(baseline, str)
+                or run_id == baseline
+                or (
+                    metrics is not None
+                    and (
+                        not isinstance(metrics, list)
+                        or not metrics
+                        or any(not isinstance(m, str) for m in metrics)
+                    )
+                )
+            ):
+                return False
+            _project, source_digest, gap = records.run_comparison_source(args)
+            if gap is not None:
+                raise HTTPException(
+                    409,
+                    {
+                        "error_kind": "run_not_checkable",
+                        "message": (
+                            "Only deltas between two comparable completed runs whose "
+                            f"evidence verifies can be checked; here {gap}. Ask "
+                            "without checking to see it as unchecked data."
+                        ),
+                    },
+                )
+            self.compare_digests.setdefault(records.digest(args), []).append(
+                source_digest
             )
             return True
         if tool_name == "get_aggregate_load":
@@ -748,7 +825,17 @@ class Turn:
             record = records.capture_series(self.owner, args, result, pending.pop(0))
         elif tool_name == "get_run_evidence":
             pending = self.run_digests.get(records.digest(args)) or [None]
-            record = records.capture_run(self.owner, args, result, pending.pop(0))
+            capture = (
+                records.capture_run_section
+                if isinstance(args, dict) and "section" in args
+                else records.capture_run
+            )
+            record = capture(self.owner, args, result, pending.pop(0))
+        elif tool_name == "compare_project_runs":
+            pending = self.compare_digests.get(records.digest(args)) or [None]
+            record = records.capture_run_comparison(
+                self.owner, args, result, pending.pop(0)
+            )
         elif tool_name == "get_aggregate_load":
             pending = self.aggregate_digests.get(records.digest(args)) or [None]
             record = records.capture_aggregate(self.owner, args, result, pending.pop(0))
@@ -840,6 +927,42 @@ class Turn:
                     fact["metric"]: {"value": fact["value"], "unit": fact["unit"]}
                     for fact in record["facts"]
                 },
+                "_assurance": metadata,
+            }
+        if scope.get("kind") == "run_section":
+            # The certified numbers only, each at its path; the rest of the
+            # section stays unchecked.
+            return {
+                "run_id": scope["entity_id"],
+                "status": "completed",
+                "finished_at": scope["finished_at"],
+                "mode": scope["mode"],
+                "unsaved_inputs": scope["unsaved_inputs"],
+                "section": scope["section"],
+                "values": [
+                    {k: fact[k] for k in ("path", "metric", "value", "unit")}
+                    for fact in record["facts"]
+                ],
+                "_assurance": metadata,
+            }
+        if scope.get("kind") == "run_comparison":
+            deltas = {}
+            for fact in record["facts"]:
+                entry = deltas.setdefault(fact["metric"], {})
+                if fact["path"].endswith("/delta_pct"):
+                    entry["delta_pct"] = fact["value"]
+                else:
+                    entry["delta"] = {"value": fact["value"], "unit": fact["unit"]}
+            return {
+                "run": {"run_id": scope["entity_id"], "finished_at": scope["finished_at"]},
+                "baseline": {
+                    "run_id": scope["baseline_run_id"],
+                    "finished_at": scope["baseline_finished_at"],
+                },
+                "comparable": True,
+                "mode": scope["mode"],
+                "unsaved_inputs": scope["unsaved_inputs"],
+                "deltas": deltas,
                 "_assurance": metadata,
             }
         return {
@@ -986,6 +1109,32 @@ class Turn:
                 )
                 notes.add("run")
                 continue
+            if scope.get("kind") == "run_section":
+                unsaved = "; solved with unsaved inputs" if scope["unsaved_inputs"] else ""
+                lines.append(
+                    f"Run {_label(fact['entity_id'])} (completed "
+                    f"{_label(scope['finished_at'])}), section "
+                    f"{_label(scope['section'])}: {_label(fact['metric'])} = "
+                    f"{value_text} {_label(fact['unit'])} (as of that run, not the "
+                    f"current inputs{unsaved})."
+                )
+                notes.add("run_section")
+                continue
+            if scope.get("kind") == "run_comparison":
+                unsaved = "; solved with unsaved inputs" if scope["unsaved_inputs"] else ""
+                change = (
+                    f"changed by {value_text} % of the baseline"
+                    if fact["path"].endswith("/delta_pct")
+                    else f"changed by {value_text} {_label(fact['unit'])}"
+                )
+                lines.append(
+                    f"Run {_label(fact['entity_id'])} against baseline "
+                    f"{_label(scope['baseline_run_id'])} (both completed, same inputs): "
+                    f"{_label(fact['metric'])} {change} (run minus baseline, as "
+                    f"recorded{unsaved})."
+                )
+                notes.add("run_comparison")
+                continue
             lines.append(
                 f"Configured {scope['component_class']} input {_label(fact['entity_id'])}: "
                 f"{fact['metric']} = {value_text} {fact['unit']}{page}."
@@ -997,10 +1146,21 @@ class Turn:
                 {
                     "static": "\nStatic inputs; time-series overrides are not checked.",
                     "series": "\nTime-series steps; other steps are not checked.",
-                    "run": "\nRecorded run metrics; run sections are not checked.",
+                    "run": "\nRecorded run metrics; a run section is checked only when read by name.",
+                    "run_section": "\nRecorded section numbers with units; the rest "
+                    "of the section is not checked.",
+                    "run_comparison": "\nRecorded metric deltas; metrics in other "
+                    "units or not in both runs are not checked.",
                     "aggregate": "\nConfigured load aggregate; per-step sums are not checked.",
                 }[note]
-                for note in ("static", "series", "run", "aggregate")
+                for note in (
+                    "static",
+                    "series",
+                    "run",
+                    "run_section",
+                    "run_comparison",
+                    "aggregate",
+                )
                 if note in (notes or {"static"})
             ),
             public_blocks,
@@ -1281,7 +1441,10 @@ only JSON {"schema_version":1,"blocks":[{"id":"fact-1","kind":"observed",
 "entity_id":"the-actual-entity","metric":"p_set","value":5,"unit":"MW"}]}.
 For a list_components row the path is "/<name>/<metric>", a JSON pointer
 (write "~" in a name as "~0" and "/" as "~1"); a page is never the whole class.
-For get_run_evidence the entity_id is the run_id and the path is "/<metric>".
+For get_run_evidence the entity_id is the run_id and the path is "/<metric>";
+with a section, use a value's own path and metric from the result's values.
+For compare_project_runs the entity_id is the run_id and the path is
+"/deltas/<metric>/delta/value" (its unit) or "/deltas/<metric>/delta_pct" ("%").
 Use only exact captured static input facts and their units. Do not add narrative,
 claims of completed effects or unsupported calculations. When this turn supplies
 a generator-dispatch computed ledger, return exactly its computed blocks instead
