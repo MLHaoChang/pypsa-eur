@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A workbook the in-app assistant writes (`export_to_excel`) now escapes text cells starting with `=`, `+`, `-`, `@`, tab or carriage return with a leading single quote, the same rule as the app's own Excel export, so a cell that looks like a formula opens as text; numbers stay numbers.

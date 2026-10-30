@@ -444,7 +444,7 @@ VARIANTS: list[dict] = [
              B + 'test_lc06_d13_energization_dtc.py::test_the_fixture_binds_each_way_at_the_low_cap',
              B + 'test_lc06_d13_energization_dtc.py::test_the_schedule_composes_as_min_with_each_capacity_edit',
              B + 'test_lc06_d13_energization_dtc.py::test_dropping_the_schedule_moves_ens_by_the_hand_delta'),
-    _covered('LC-D13.multi_energy', 'H2 only (heat not covered). Dedicated H2 bus: 80 MW gas serves the 50 MW AC Load, the electrolyser '
+    _covered('LC-D13.multi_energy', 'H2 only. Dedicated H2 bus: 80 MW gas serves the 50 MW AC Load, the electrolyser '
              '(eta 0.6) delivers 18 MW of a 40 MW H2 Load: H2 unmet 44 MWh by carrier and by Load, electrical 0; H2 +5 MW gives +10 MWh. '
              'Shared bus: 30 MWh short, at least 20 MWh H2, by-carrier and by-Load readers agree. Live solves capture per-Load slacks, so '
              'the dedicated-bus roll-up path is unreachable from the seam (LC-D13.multi_energy_dedicated_rollup); heat is LC-D13.multi_energy_heat',
@@ -453,20 +453,60 @@ VARIANTS: list[dict] = [
              B + 'test_lc33_d13_multi_energy.py::test_h2_unmet_on_its_own_bus_is_attributed_to_hydrogen_alone[h2_40]',
              B + 'test_lc33_d13_multi_energy.py::test_h2_unmet_on_its_own_bus_is_attributed_to_hydrogen_alone[h2_45]',
              B + 'test_lc33_d13_multi_energy.py::test_a_shared_bus_reports_the_forced_h2_shed_and_its_readers_agree'),
-    _pending('LC-D13.multi_energy_heat', 'heat unmet attribution (dedicated heat bus and per-Load) has no hand-number test; LC-33 pinned H2 only'),
+    _covered('LC-D13.multi_energy_heat', 'heat beside electrical. Dedicated heat bus: 55 MW gas, 50 MW AC Load, a 10 MW heat pump (efficiency 3) '
+             'to a 40 MW heat Load; the LP runs the heat pump first (3 MWh of shed avoided per MWh): heat unmet 20 MWh, electrical 10 MWh, '
+             'by carrier and by Load, ENS target 10 MWh; heat +5 MW gives +10 MWh heat, electrical exactly 10. Shared bus: 30 MWh short, '
+             'at least 20 MWh heat, readers agree Load by Load (a bus-carrier roll-up fails it)',
+             'run_eh_study get_adequacy_results',
+             B + 'test_lc36_d13_multi_energy_heat.py::test_the_dedicated_oracle_by_hand',
+             B + 'test_lc36_d13_multi_energy_heat.py::test_heat_unmet_on_its_own_bus_is_attributed_to_heat_alone[heat_40]',
+             B + 'test_lc36_d13_multi_energy_heat.py::test_heat_unmet_on_its_own_bus_is_attributed_to_heat_alone[heat_45]',
+             B + 'test_lc36_d13_multi_energy_heat.py::test_a_shared_bus_reports_the_forced_heat_shed_and_its_readers_agree'),
     _unavailable('LC-D13.multi_energy_dedicated_rollup', 'dedicated-bus roll-up attribution (ENS by carrier from bus ENS) is not reachable '
                  'from the chat tools: live solves always capture per-Load slacks, so the section reports per_load_slack',
                  'pypsa-gui/backend/services/adequacy/multi_energy.py ATTRIBUTION_DEDICATED'),
-    _pending('LC-D13.unsupported_scope', 'no hand-number test through the chat tools; refusals exist below the seam or without an oracle '
-             '(test_adequacy_margin_loop.py rolling/unpriceable/ceiling, test_adequacy_campaign.py budget and second campaign, '
-             'test_copt_assurance.py COPT inputs), not re-audited'),
-    _pending('LC-D13.finalist_certification', 'MC certification of the selected EH option is not pinned by hand; LC-33 pins the LP cost and '
-             'selection only (test_energy_hub_mc_certify.py, test_energy_hub_redundancy_select.py exist, not re-audited)'),
-    _pending('LC-D13.study_swap', 'swapping the study or project while a loop, frontier, campaign or EH study runs is not tested'),
-    _pending('LC-D13.stale_source', 'edited/stale flags exist for EH studies (test_eh_study_edited_since.py, test_eh_review_route.py), not '
-             're-audited; margin loop, frontier, ELCC and campaign results after a source edit are not tested'),
-    _pending('LC-D13.incomplete_campaign', 'aborted or incomplete campaigns and studies: EH aborted-study tests exist (test_eh_review_route.py, '
-             'test_eh_study_record_survives_reactivation.py), not re-audited; a campaign closed with targets unsolved is not tested'),
+    _covered('LC-D13.unsupported_scope', 'refused before any solve with no campaign charge and the reader byte-identical: the frontier at '
+             'VoLL 0 and the margin loop under the rolling strategy, each by its guard\'s own text; the refusals are untyped (kind '
+             'tool_error), and typed scope kinds are '
+             '.scratch/live-copilot/issues/38-typed-scope-refusal-kinds.md; in scope, the '
+             'frontier gives LC-33\'s hand points at 4 solves and the loop is met from the hand starting margin',
+             'run_frontier_study run_margin_loop start_campaign campaign_status update_solver_config get_adequacy_results',
+             B + 'test_lc36_d13_scope_campaign.py::test_a_frontier_at_voll_zero_is_refused_without_a_solve_and_keeps_the_prior_result',
+             B + 'test_lc36_d13_scope_campaign.py::test_the_margin_loop_refuses_the_rolling_strategy_before_any_solve[rolling]',
+             B + 'test_lc36_d13_scope_campaign.py::test_the_margin_loop_refuses_the_rolling_strategy_before_any_solve[full]'),
+    _unavailable('LC-D13.finalist_certification', 'finalist MC certification is not built: the EH study certifies the ENS plan, and the '
+                 'redundancy table discloses finalists_mc_certified False (pinned under LC-D13.mc_certify_ens_plan)',
+                 'pypsa-gui/backend/services/adequacy/redundancy.py finalists_mc_certified'),
+    _covered('LC-D13.mc_certify_ens_plan', 'islanded 60 + 45 MW units, 100 MW Load, one year: the certification CI holds the ENS plan\'s '
+             'two-unit COPT LOLE 8760 x (1 - 0.95 x 0.9) = 1270.2 h and excludes the selected n1_generation finalist\'s 479.6 h (its 40 MW '
+             'spare sized by hand from the option cost); verdict by hand (pass iff hi <= target x horizon_years, fail iff lo > target): '
+             '3 h fails, 1270.2 h is inconclusive, 8760 h passes; finalists_mc_certified False',
+             'run_eh_study get_adequacy_results',
+             B + 'test_lc36_d13_eh_certify_incomplete.py::test_the_certification_oracle_by_hand',
+             B + 'test_lc36_d13_eh_certify_incomplete.py::test_certification_covers_the_ens_plan_and_the_finalist_is_disclosed_uncertified[fail_3h]',
+             B + 'test_lc36_d13_eh_certify_incomplete.py::test_certification_covers_the_ens_plan_and_the_finalist_is_disclosed_uncertified[inconclusive_copt]',
+             B + 'test_lc36_d13_eh_certify_incomplete.py::test_certification_covers_the_ens_plan_and_the_finalist_is_disclosed_uncertified[pass_8760h]'),
+    _covered('LC-D13.study_swap', 'a live frontier (held at a gate before the real sweep) blocks activate_project (study_in_flight) and '
+             'load_project; after it finishes to LC-33\'s hand points, or is aborted, the switch goes through and B reads no frontier',
+             'run_frontier_study activate_project load_project abort_adequacy_study get_adequacy_results',
+             B + 'test_lc36_d13_study_swap.py::test_a_live_frontier_blocks_the_switch_until_it_ends[finish]',
+             B + 'test_lc36_d13_study_swap.py::test_a_live_frontier_blocks_the_switch_until_it_ends[abort]'),
+    _covered('LC-D13.stale_source', 'EH study: edited_since_study False after the run, True after update_component raises the AC Load '
+             '50 -> 55 MW (the stored study still reads 10 MWh), cleared by a re-run with electrical unmet 20 MWh (+10 by hand)',
+             'run_eh_study update_component get_adequacy_results',
+             B + 'test_lc36_d13_stale_source.py::test_an_edit_flags_the_eh_study_and_a_rerun_clears_it_with_the_hand_delta'),
+    _pending('LC-D13.stale_source_unflagged_readers', 'the margin_loop, frontier and mc/ELCC readers and campaign_status carry no freshness '
+             'marker: after update_component they serve pre-edit numbers unflagged (checked by LC-36); a defect, so not pinned; '
+             'ticket .scratch/live-copilot/issues/37-adequacy-readers-stale-source.md'),
+    _covered('LC-D13.incomplete_campaign', 'a campaign of budget 3 refuses a 3-target frontier (4 solves) as campaign_budget_exhausted with '
+             'spent 0 and no entry, runs 2 targets to their hand points (spent 3) and closes with end_campaign; budget 4 runs all three. '
+             'An EH redundancy compare at budget_solves 2 (ens_solve takes 1) solves base alone, budget_exhausted, no selection; at 10 it '
+             'selects n1_generation',
+             'start_campaign run_frontier_study campaign_status end_campaign run_eh_study get_adequacy_results',
+             B + 'test_lc36_d13_scope_campaign.py::test_a_study_that_would_overrun_the_campaign_is_refused_and_charges_nothing[budget_3]',
+             B + 'test_lc36_d13_scope_campaign.py::test_a_study_that_would_overrun_the_campaign_is_refused_and_charges_nothing[budget_4]',
+             B + 'test_lc36_d13_eh_certify_incomplete.py::test_a_redundancy_compare_cut_by_the_budget_selects_nothing[budget_2]',
+             B + 'test_lc36_d13_eh_certify_incomplete.py::test_a_redundancy_compare_cut_by_the_budget_selects_nothing[budget_10]'),
     _covered('LC-D14.static_campus', 'six untied hours through the queued Run: k 1 picks import/trafo h0, consumption h2, '
              'export/renewable h3; k 2 adds h5 import/trafo, h0 consumption, h2 renewable; k read back from the job; '
              '50 MW in h5 moves the import pick',

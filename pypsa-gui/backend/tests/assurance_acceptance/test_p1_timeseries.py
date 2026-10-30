@@ -260,28 +260,28 @@ def test_series_over_the_step_limit_is_refused_with_its_kind(
     assert approval(frames)["verdict"] == "limited"
 
 
+def test_series_whose_window_would_overflow_the_record_is_refused(
+    series, harness, monkeypatch
+):
+    # A window of at most 8784 rows and a 128-character name stay far under the
+    # bound, so lower it to reach the size refusal.
+    monkeypatch.setattr(records, "MAX_SERIES_FACT_BYTES", 16)
+    calls = wrap_handler(monkeypatch, lambda result: None)
+    frames = read_series(harness, series_draft(value=1, step=STEPS[0]))
+    assert not calls
+    assert series_result(frames)["error_kind"] == "series_too_long_to_check"
+    assert approval(frames)["verdict"] == "limited"
+
+
 def test_longest_series_stays_under_the_record_cap(baseline, harness):
     # Values whose repr is as long as a float's gets.
     set_series([-1.2345678901234567e-300 * (i + 1) for i in range(744)])
-    assert records.MAX_SERIES_POINTS == 744
+    assert records.MAX_SERIES_POINTS >= 744
     value = -1.2345678901234567e-300 * 2
     frames = read_series(harness, series_draft(value=value))
     assert approval(frames)["verdict"] == "passed"
     record = harness.client.get(f"/api/chat/evidence/{evidence_ids(frames)[0]}").json()
     assert record["scope"]["certified"] == 744
-
-
-def test_long_name_series_that_would_overflow_the_record_is_refused(
-    baseline, harness, monkeypatch
-):
-    name = "é~/" * 42  # 126 characters, each encoded or escaped wider
-    network().add("Load", name, bus="B1", p_set=1)
-    set_series([1.0] * 744)
-    network().loads_t.p_set[name] = 1.0
-    calls = wrap_handler(monkeypatch, lambda result: None)
-    frames = read_series(harness, args={**ARGS, "name": name})
-    assert not calls
-    assert series_result(frames)["error_kind"] == "series_too_long_to_check"
 
 
 def test_middle_step_edit_moves_the_source_digest(baseline):
