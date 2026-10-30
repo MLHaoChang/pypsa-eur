@@ -447,17 +447,26 @@ def _fingerprints(n):
     return wt._network_input_fingerprint(ctx), wt._network_input_fingerprint(ctx, exact=True)
 
 
-def test_an_untagged_link_network_keeps_masters_fingerprint():
-    # Computed with master's `_network_input_fingerprint` (f91d43c47, before AS-05) on this network.
+def test_an_untagged_network_keeps_masters_fingerprint():
+    # Computed with master's `_network_input_fingerprint` (f91d43c47, before AS-05) on this network. No Link:
+    # PyPSA registers extra Link ports (bus2...) on the process-wide defaults once any network uses them, so a
+    # hash of a Link network depends on which tests ran before it (see test_extras_passthrough).
     n = pypsa.Network()
     n.set_snapshots(pd.RangeIndex(2))
-    n.add("Bus", "grid")
     n.add("Bus", "campus")
-    n.add("Generator", "import", bus="grid", p_nom=200, marginal_cost=10.0)
-    n.add("Link", "trafo", bus0="grid", bus1="campus", p_nom=125.0, p_max_pu=0.98)
+    n.add("Generator", "import", bus="campus", p_nom=200, marginal_cost=10.0)
     n.add("Load", "dc", bus="campus", p_set=[100.0, 105.0], q_set=[30.0, 34.5])
-    assert _fingerprints(n) == ("8067b34466139bc7b0998c8160fd47c8b7f07a13a221dbff9771070b48a03801",
-                                "a447304ae648155a8961e4cc595839e533e731663583280f16f4d41af194b450")
+    assert _fingerprints(n) == ("ae6082a31962e2c70073341e1662b3259204edc0a0c09052bf2a5298d44fa922",
+                                "a5561ccbaa135de5db22096dd74899f7a92be69b854b85cdf2c71176ce0196ed")
+
+
+def test_an_untagged_link_network_appends_nothing(monkeypatch):
+    # The same network with the AS-05 append switched off gives the same bytes in this process.
+    n = _campus([100.0, 105.0], [30.0, 34.5])
+    n.links.loc["trafo", list(LINK_COLUMNS)] = np.nan
+    with_append = _fingerprints(n)
+    monkeypatch.setattr(ps, "pcs_statcom_tags", lambda n: (None, None))
+    assert _fingerprints(n) == with_append
 
 
 @pytest.mark.parametrize("frame, name, col, value", [
