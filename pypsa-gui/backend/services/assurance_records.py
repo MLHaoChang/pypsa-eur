@@ -273,6 +273,23 @@ class AccessRevoked(HTTPException):
     did; a checked commit reports it as `assurance_access_revoked`."""
 
 
+class ProjectDeleted(AccessRevoked):
+    """The project row is gone. Still a 404 to a route; a checked commit reports
+    it as `assurance_project_deleted`, since no grant was withdrawn."""
+
+
+def _project_deleted(db, project_id):
+    from db.models import Project
+
+    # Only the owner's own session reaches this with a project it once held, so
+    # saying "deleted" leaks nothing that session did not already know.
+    try:
+        row_id = uuid.UUID(str(project_id))
+    except ValueError:
+        return False
+    return db.get(Project, row_id) is None
+
+
 def authorize(owner, project_id=None):
     from db.session import SessionLocal
 
@@ -284,6 +301,10 @@ def authorize(owner, project_id=None):
             project_registry.resolve_project(db, user, project_id)
         except HTTPException as refused:
             # Only the access refusals; any other status keeps its own path.
+            if refused.status_code == 404 and _project_deleted(db, project_id):
+                raise ProjectDeleted(
+                    refused.status_code, refused.detail, refused.headers
+                ) from refused
             if refused.status_code in (403, 404):
                 raise AccessRevoked(
                     refused.status_code, refused.detail, refused.headers
@@ -466,7 +487,8 @@ def load(owner, record_id, kind):
     except HTTPException as refused:
         # Revoked project access reads exactly like a record that never existed.
         if refused.status_code == 404:
-            raise AccessRevoked(404, "Record not found") from None
+            kind = ProjectDeleted if isinstance(refused, ProjectDeleted) else AccessRevoked
+            raise kind(404, "Record not found") from None
         raise
     return record
 
@@ -553,9 +575,7 @@ def capture_input(owner, args, result):
 # dozen rows; save() caps every record at 128 KiB and refuses a larger one.
 def pointer(*tokens):
     """RFC 6901 JSON pointer; '~' and '/' in names cannot alias another path."""
-    return "".join(
-        "/" + str(t).replace("~", "~0").replace("/", "~1") for t in tokens
-    )
+    return "".join("/" + str(t).replace("~", "~0").replace("/", "~1") for t in tokens)
 
 
 def _fact(entity_id, metric, value, unit, *tokens):
@@ -875,9 +895,7 @@ def aggregate_gaps(snapshots, unknown, members):
         gaps.append("the loads do not share the network's snapshots")
     # A bool or numeric-string member would convert below but join, not add,
     # in sum(): every step of it counts as missing.
-    numbers = [
-        pd.api.types.is_numeric_dtype(s) and s.dtype != bool for s in present
-    ]
+    numbers = [pd.api.types.is_numeric_dtype(s) and s.dtype != bool for s in present]
     if not all(numbers):
         gaps.append("a step that is not a number")
     try:
@@ -1095,7 +1113,9 @@ def capture_series(owner, args, result, digest_before):
             not isinstance(row, list) or len(row) != 1 for row in data
         ):
             return None
-        certified = [_certified(row[0], step["value"]) for step, row in zip(steps, data)]
+        certified = [
+            _certified(row[0], step["value"]) for step, row in zip(steps, data)
+        ]
         facts = [step for step, ok in zip(steps, certified) if ok]
         if not facts:
             return None
@@ -1276,7 +1296,8 @@ def evidence(owner, evidence_id):
             if (
                 project_id != record["project_id"]
                 or sources is None
-                or _comparison_digest(sources, scope["metrics"]) != record["source_sha256"]
+                or _comparison_digest(sources, scope["metrics"])
+                != record["source_sha256"]
                 or _run_comparison_scope(sources, scope["metrics"]) != scope
             ):
                 unavailable("evidence_unavailable")
@@ -1478,11 +1499,16 @@ def run_section_facts(manifest, section, data):
         metric = names[-1] if names else section
         if not 1 <= len(metric) <= 64:
             continue
-        facts.append(_fact(manifest["run_id"], metric, value, unit, "data", *tokens, "value"))
+        facts.append(
+            _fact(manifest["run_id"], metric, value, unit, "data", *tokens, "value")
+        )
     if not facts:
         return [], "this section records no number with a unit"
     if len(facts) > MAX_SECTION_FACTS:
-        return [], f"this section records more than {MAX_SECTION_FACTS} numbers with units"
+        return (
+            [],
+            f"this section records more than {MAX_SECTION_FACTS} numbers with units",
+        )
     if len(json.dumps(facts, ensure_ascii=False).encode()) > MAX_SECTION_FACT_BYTES:
         return [], "this section's numbers are too large to check"
     return facts, None
@@ -1502,7 +1528,9 @@ def run_section_source(run_id, section):
     digest and facts only when the run checks and the section has facts."""
     from services import run_evidence
 
-    project_id, manifest, data, status = run_evidence.checked_run_section(run_id, section)
+    project_id, manifest, data, status = run_evidence.checked_run_section(
+        run_id, section
+    )
     if manifest is None:
         gap = (
             "the run does not record this section"
@@ -1519,7 +1547,11 @@ def _shown_at(shown, tokens):
     for token in tokens:
         if isinstance(shown, dict) and isinstance(token, str) and token in shown:
             shown = shown[token]
-        elif isinstance(shown, list) and isinstance(token, int) and 0 <= token < len(shown):
+        elif (
+            isinstance(shown, list)
+            and isinstance(token, int)
+            and 0 <= token < len(shown)
+        ):
             shown = shown[token]
         else:
             return None
@@ -1533,7 +1565,10 @@ def _shown_facts(result, facts):
         tokens = unpointer(fact["path"])
         unit_tokens = [*tokens[:-1], "unit"] if tokens[-1] == "value" else None
         value = _shown_at(result, _typed(result, tokens))
-        if unit_tokens is not None and _shown_at(result, _typed(result, unit_tokens)) != fact["unit"]:
+        if (
+            unit_tokens is not None
+            and _shown_at(result, _typed(result, unit_tokens)) != fact["unit"]
+        ):
             continue
         if _certified(value, fact["value"]):
             kept.append(fact)
@@ -1551,7 +1586,9 @@ def _typed(result, tokens):
     return typed
 
 
-def _record(owner, project_id, source_kind, kind, scope, facts, source_sha256, coverage, warning):
+def _record(
+    owner, project_id, source_kind, kind, scope, facts, source_sha256, coverage, warning
+):
     ctx = PyPSAService.get_active_context()
     record = {
         "version": 1,
@@ -1605,8 +1642,14 @@ def capture_run_section(owner, args, result, digest_before):
     if not facts:
         return None
     return _record(
-        owner, project_id, "run_section", "run_section",
-        _run_section_scope(manifest, section), facts, digest_before, "run_section_values",
+        owner,
+        project_id,
+        "run_section",
+        "run_section",
+        _run_section_scope(manifest, section),
+        facts,
+        digest_before,
+        "run_section_values",
         "Section values as recorded when the run finished; current inputs may differ.",
     )
 
@@ -1619,11 +1662,30 @@ def run_comparison_facts(sources):
     for metric, entry in sources["comparison"]["deltas"].items():
         delta = entry["delta"]
         if _number(delta["value"]) and _unit(delta["unit"]):
-            facts.append(_fact(run_id, metric, delta["value"], delta["unit"],
-                               "deltas", metric, "delta", "value"))
+            facts.append(
+                _fact(
+                    run_id,
+                    metric,
+                    delta["value"],
+                    delta["unit"],
+                    "deltas",
+                    metric,
+                    "delta",
+                    "value",
+                )
+            )
         if _number(entry["delta_pct"]):
-            facts.append(_fact(run_id, metric, entry["delta_pct"], "%",
-                               "deltas", metric, "delta_pct"))
+            facts.append(
+                _fact(
+                    run_id,
+                    metric,
+                    entry["delta_pct"],
+                    "%",
+                    "deltas",
+                    metric,
+                    "delta_pct",
+                )
+            )
     return facts
 
 
@@ -1642,7 +1704,9 @@ def _run_comparison_scope(sources, metrics):
 
 
 def _comparison_digest(sources, metrics):
-    return digest({"run": sources["run"], "baseline": sources["baseline"], "metrics": metrics})
+    return digest(
+        {"run": sources["run"], "baseline": sources["baseline"], "metrics": metrics}
+    )
 
 
 def run_comparison_source(args):
@@ -1692,8 +1756,14 @@ def capture_run_comparison(owner, args, result, digest_before):
     if not facts:
         return None
     return _record(
-        owner, project_id, "run_comparison", "run_comparison",
-        _run_comparison_scope(sources, metrics), facts, digest_before, "run_deltas",
+        owner,
+        project_id,
+        "run_comparison",
+        "run_comparison",
+        _run_comparison_scope(sources, metrics),
+        facts,
+        digest_before,
+        "run_deltas",
         "Deltas of metrics as recorded when both runs finished; current inputs may differ.",
     )
 
@@ -1760,16 +1830,28 @@ def capture_scoped(owner, scope):
     raw = _scoped_read(ctx, scope, owner)
     with network_guard():
         facts, slots = calculations.scoped_calculate(raw, scope)
-        first = (raw["storage_unit"] if scope["profile"] in calculations.STORAGE_PROFILES
-                 else raw if scope["profile"] in (calculations.carrier.PROFILE, *calculations.branch.PROFILES,
-                                                  calculations.lost_load.PROFILE, calculations.price.PROFILE,
-                                                  *calculations.emissions.PROFILES,
-                                                  calculations.curtailment.PROFILE,
-                                                  calculations.capacity.PROFILE, calculations.cycles.PROFILE,
-                                                  calculations.balance.PROFILE, calculations.site_import.PROFILE,
-                                                  *calculations.investment.PROFILES, calculations.copt_screen.PROFILE,
-                                                  calculations.readiness.PROFILE)
-                 else next(iter(raw["generators"].values())))
+        first = (
+            raw["storage_unit"]
+            if scope["profile"] in calculations.STORAGE_PROFILES
+            else raw
+            if scope["profile"]
+            in (
+                calculations.carrier.PROFILE,
+                *calculations.branch.PROFILES,
+                calculations.lost_load.PROFILE,
+                calculations.price.PROFILE,
+                *calculations.emissions.PROFILES,
+                calculations.curtailment.PROFILE,
+                calculations.capacity.PROFILE,
+                calculations.cycles.PROFILE,
+                calculations.balance.PROFILE,
+                calculations.site_import.PROFILE,
+                *calculations.investment.PROFILES,
+                calculations.copt_screen.PROFILE,
+                calculations.readiness.PROFILE,
+            )
+            else next(iter(raw["generators"].values()))
+        )
         record = {
             "version": 1,
             "record_kind": "evidence",
@@ -1813,7 +1895,10 @@ def _scoped_read(ctx, scope, owner):
         raw = calculations.scoped_source(ctx, scope, owner, investment_state=before)
     if invested:
         after = calculations.investment.current(ctx)
-        if not calculations.investment.is_current(after) or after["assumptions_hash"] != raw["assumptions_hash"]:
+        if (
+            not calculations.investment.is_current(after)
+            or after["assumptions_hash"] != raw["assumptions_hash"]
+        ):
             raise ValueError("investment_case_not_current")
     return raw
 

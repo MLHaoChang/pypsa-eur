@@ -140,6 +140,7 @@ MESSAGES = {
     # The banner title already says access is gone (UX (5)), so the message doesn't repeat it.
     "assurance_access_revoked":
         "No answer was published. If your access comes back, open the project again from Projects.",
+    "assurance_project_deleted": "No answer was published. Open another project from Projects.",
     "assurance_publication_failed": "The checked answer could not be saved. No answer was published.",
 }
 
@@ -458,3 +459,35 @@ def test_authorize_marks_an_inactive_account():
     with pytest.raises(records.AccessRevoked) as refused:
         records.authorize(str(uuid.uuid4()))
     assert (refused.value.status_code, refused.value.detail) == (401, "Authentication required")
+
+
+def test_deleted_project_in_commit_is_typed_as_deleted(
+    baseline, harness, seeded_identity, monkeypatch
+):
+    owner = str(seeded_identity["user_id"])
+    before = answer_records(owner)
+
+    def deleted():
+        monkeypatch.setattr(records.project_registry, "resolve_project", resolve_refusing(404))
+        monkeypatch.setattr(records, "_project_deleted", lambda db, project_id: True)
+
+    response = harness.request(in_commit_guard(monkeypatch, deleted))
+    assert_nothing_published(
+        parse_sse(response.text), owner, before, "assurance_project_deleted")
+
+
+def test_authorize_reports_a_missing_project_row_as_deleted(seeded_identity):
+    with pytest.raises(records.ProjectDeleted) as refused:
+        records.authorize(str(seeded_identity["user_id"]), str(uuid.uuid4()))
+    assert (refused.value.status_code, refused.value.detail) == (404, "Project not found")
+
+
+def test_authorize_keeps_a_refused_existing_project_as_revoked(seeded_identity, monkeypatch):
+    def resolve(db, user, project_id):
+        raise HTTPException(404, "Project not found")
+
+    monkeypatch.setattr(records.project_registry, "resolve_project", resolve)
+    monkeypatch.setattr(records, "_project_deleted", lambda db, project_id: False)
+    with pytest.raises(records.AccessRevoked) as refused:
+        records.authorize(str(seeded_identity["user_id"]), str(uuid.uuid4()))
+    assert not isinstance(refused.value, records.ProjectDeleted)
