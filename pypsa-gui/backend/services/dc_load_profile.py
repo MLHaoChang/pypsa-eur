@@ -55,6 +55,8 @@ SOURCES: dict[str, str] = {
     "checkpoint_duration_s": f"assumed; {_LLAMA3}",
     "oscillation_amplitude_share": f"assumed; {_STABILISATION}",
     "oscillation_period_s": f"assumed; {_STABILISATION}; {_NERC}",
+    "tan_phi_swing": ("assumed; reactive swing of the load as tan φ of its real swing, to be replaced "
+                      "by vendor data (IEC TR 61000-3-7 treats flicker through ΔP and ΔQ)"),
     "idle_hours_per_day": "assumed; illustrative daily restart/maintenance window",
     "pue": "assumed; PUE at or below the design temperature, slope above it",
     "ambient": "assumed; temperate (Central European) site, no weather data",
@@ -138,6 +140,7 @@ def _phase_envelope(w: AiWorkloadSpec, phase: DcPhase) -> dict:
         "rack_count": (None if phase.rack_kw is None
                        else int(np.ceil(it * 1000.0 / phase.rack_kw))),
         "swing_mw": swing,
+        "tan_phi_swing": w.tan_phi_swing,
         "max_dp_dt_mw_per_s": max_dp_dt,
         "max_dp_dt_mw_per_min": max_dp_dt * 60.0,
         "checkpoint": {
@@ -178,6 +181,7 @@ def dynamic_envelope(spec: DataCentreLoadSpec) -> dict:
             "max_dp_dt_mw_per_s": max(p["max_dp_dt_mw_per_s"] for p in phases),
             "oscillation_amplitude_mw": max(p["oscillation"]["amplitude_mw"] for p in phases),
             "oscillation_period_s": w.oscillation_period_s,
+            "tan_phi_swing": w.tan_phi_swing,
         },
         "sources": SOURCES,
     }
