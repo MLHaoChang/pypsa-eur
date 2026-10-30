@@ -50,6 +50,7 @@ Ticket-local prefixes are interpreted with the ticket ID (e.g. HH-04:R01 differs
 | X16 | Same goal across provider transports and Guided/Expert | Same authority/source/outcome invariants; each actual offer set and each intended mode-specific confirmation policy honored. |
 | X17 | Policy preauthorizes deterministic artifact formatting only | Allowed copy fixes need no repeated decision; factual/parameter/formula/publication changes require their separate policy/card; no general authorization bypass. |
 | X18 | Rollback/flag disable with enforced requirements, unknown spend and partial native effects | Records retained; protected work stops rather than falls back; no replay/free cap or newly created final artifact. |
+| X19 | Parent near total byte cap while acceptance/outbox/requirements grow and a stopped worker’s receipt arrives late | All writers preserve HH-03 terminal-growth reserve and exact `_LOCK`→directory order; growth refuses before replace and exact late settlement remains possible once without unrelated acceptance growth or a new send. |
 
 These assertions may be implemented by linking/parameterizing existing detailed cases; the evaluator records their mapping, not an invented additional independent-user denominator.
 

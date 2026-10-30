@@ -2,7 +2,7 @@
   "schema_version": 1,
   "base_commit": "60d8332d64b2edef1b204fb5980311e6102229a8",
   "additional_source_inspected": "30c79cf750c42314eedd0597d06b1780b92a81fe",
-  "payload_sha256": "9f584bd85e65b9db0c1a7a25b936dc498c556b8713a47a9f797994376ce2ade4",
+  "payload_sha256": "b217a515c8043f51f3b1d5722d5ec8d4adb081b0ee558d8b8987993c5440b15c",
   "files": [
     {
       "path": ".scratch/harness-reliability-upgrade/README.md",
@@ -22,11 +22,11 @@
     },
     {
       "path": ".scratch/harness-reliability-upgrade/issues/02-persistent-requirements.md",
-      "sha256": "69edbe8b6b2f5692d950c9097eeb825621a46c422d1ffff65e9aa9c25b85064f"
+      "sha256": "4ca183bc5ba52fdfaf1b6018f4a8bf8dd19971785ec8ec7bac884b722488deaf"
     },
     {
       "path": ".scratch/harness-reliability-upgrade/issues/03-durable-call-budgets.md",
-      "sha256": "3b36f9d9a2f815755294d84181355d79e369f77bb115771632ce131117b944d5"
+      "sha256": "eb33bc07d4f5d48e96d9b1b9432b6d0ec244e005ac2f675285de6d3be32935ae"
     },
     {
       "path": ".scratch/harness-reliability-upgrade/issues/04-typed-domain-references.md",
@@ -34,7 +34,7 @@
     },
     {
       "path": ".scratch/harness-reliability-upgrade/issues/05-trajectory-evaluation.md",
-      "sha256": "c9d5561c814abc5b82036f39cdb2322693fc276f3cf313876304fc0825afd345"
+      "sha256": "ce6cacc30cff85b6b54e091778b0f50fbeb82be0391e3d515bd00816bf47e539"
     },
     {
       "path": ".scratch/harness-reliability-upgrade/issues/06-study-correction-cycles.md",
@@ -50,7 +50,7 @@
     },
     {
       "path": ".scratch/harness-reliability-upgrade/issues/09-coordinator-delegation.md",
-      "sha256": "3ffc2d5780c16252fa4f26bda7be37ef786ce63747868445c9efc63b7eda3886"
+      "sha256": "38461536f12d62f65f511c427753be930e67f510239df1ee3f1c454e7a60e76e"
     },
     {
       "path": ".scratch/harness-reliability-upgrade/issues/10-immutable-solve-admission.md",
@@ -62,11 +62,11 @@
     },
     {
       "path": ".scratch/harness-reliability-upgrade/spec.md",
-      "sha256": "16810a23bd00445e1f44b3f85e8597093f9701720c419c68c0accf11ebaaf69e"
+      "sha256": "2a375e6c3188d6dd96f79ae30acc14ab2236f9276f4b58293bb690bbcdd23fdb"
     },
     {
       "path": ".scratch/harness-reliability-upgrade/test-matrix.md",
-      "sha256": "09dbe320d1f7b303ee5c410c99a6badf9ee0cfd7b5010772031c565c10273bf8"
+      "sha256": "085c44389189967fefca02a03a590093bf7c5e47a4c66ca7008b9946545d8dbb"
     },
     {
       "path": ".scratch/harness-reliability-upgrade/user-requirements.md",
@@ -117,5 +117,6 @@
       "sha256": "d5c443b828d29ce2043ae1b9b0bd79be3cdad24a5ae7f92b456e4865c715c293"
     }
   ],
-  "excluded": "review-target.json and reviews/ (review records only; no normative rules)"
+  "excluded": "review-target.json and reviews/ (review records only; no normative rules)",
+  "payload_digest_algorithm": "sha256(UTF-8 json.dumps(files, sort_keys=True, separators=(comma, colon), ensure_ascii=True)); files sorted by path; exact path/sha256 pairs; no trailing newline"
 }
