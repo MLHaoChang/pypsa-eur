@@ -3,7 +3,7 @@
 
 # 03 — Export picker in Hand-off › Exports, and a chat tool
 
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: 02
 Gated: yes (UI; UX review with screenshots)
@@ -19,6 +19,6 @@ Read [the spec](../spec.md) first, owner decision RW-TABS-1.
 
 ## Acceptance
 
-- [ ] UX OK on Guided and Expert screenshots of the picker.
-- [ ] The chat tool and the UI produce byte-identical sheet contents for the same view list.
-- [ ] test_loadflow_navigation.py and test_openai_tool_selection.py pass after the catalogue change.
+- [x] UX OK on Guided and Expert screenshots of the picker.
+- [x] The chat tool and the UI produce byte-identical sheet contents for the same view list.
+- [x] test_loadflow_navigation.py and test_openai_tool_selection.py pass after the catalogue change.
