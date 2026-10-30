@@ -506,7 +506,8 @@ def test_a_populated_extra_port_still_changes_the_fingerprint():
     with_port = _fingerprints(n)
     assert with_port[0] != before[0] and with_port[1] != before[1]
     n.links.loc["trafo", "efficiency2"] = 0.4
-    assert _fingerprints(n)[0] != with_port[0]
+    with_efficiency = _fingerprints(n)
+    assert with_efficiency[0] != with_port[0] and with_efficiency[1] != with_port[1]
 
 
 def test_a_time_varying_extra_port_efficiency_changes_the_fingerprint():
