@@ -15,6 +15,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 from models.commercial import TimeSeriesRef
+from models.design_intent import DesignIntentSpec
 
 RedundancyTier = Literal["N", "N+1", "2N"]
 UtilisationKind = Literal["ai_training", "inference", "mixed", "flat"]
@@ -96,6 +97,8 @@ class DataCentreLoadSpec(BaseModel):
     workload_shift_window_h: float | None = Field(default=None, gt=0)
     gensets: list[GensetSpec] = Field(default_factory=list)
     waste_heat_export: bool = False
+    #: Asset-sizing design intent A-E (AS-01); None = a backup_mode-only project.
+    design_intent: DesignIntentSpec | None = None
 
     @model_validator(mode="after")
     def _shares(self) -> "DataCentreLoadSpec":

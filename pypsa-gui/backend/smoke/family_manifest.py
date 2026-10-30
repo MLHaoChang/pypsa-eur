@@ -466,9 +466,7 @@ VARIANTS: list[dict] = [
                  'from the chat tools: live solves always capture per-Load slacks, so the section reports per_load_slack',
                  'pypsa-gui/backend/services/adequacy/multi_energy.py ATTRIBUTION_DEDICATED'),
     _covered('LC-D13.unsupported_scope', 'refused before any solve with no campaign charge and the reader byte-identical: the frontier at '
-             'VoLL 0 and the margin loop under the rolling strategy, each by its guard\'s own text; the refusals are untyped (kind '
-             'tool_error), and typed scope kinds are '
-             '.scratch/live-copilot/issues/38-typed-scope-refusal-kinds.md; in scope, the '
+             'VoLL 0 and the margin loop under the rolling strategy, each typed unsupported_scope; in scope, the '
              'frontier gives LC-33\'s hand points at 4 solves and the loop is met from the hand starting margin',
              'run_frontier_study run_margin_loop start_campaign campaign_status update_solver_config get_adequacy_results',
              B + 'test_lc36_d13_scope_campaign.py::test_a_frontier_at_voll_zero_is_refused_without_a_solve_and_keeps_the_prior_result',
@@ -652,7 +650,10 @@ VARIANTS: list[dict] = [
              B + 'test_lc06_d24_ui_events.py::test_a_snapshot_is_addressed_by_its_hand_index',
              B + 'test_lc06_d24_ui_events.py::test_component_asset_and_panel_events_carry_exactly_what_was_asked',
              B + 'test_lc06_d24_ui_events.py::test_a_wrong_target_is_refused_without_moving_the_screen'),
-    _pending('LC-D24.unknown_asset_event', 'ticket 35: ui_open_asset_detail and ui_select_component without open_editor emit a ui_event for an unknown asset or unknown metric (not refused); untested, a possible defect if the frontend lands on a non-existent asset'),
+    _covered('LC-D24.unknown_asset_event', 'ui_select_component (without open_editor) and ui_open_asset_detail refuse an unknown asset as component_not_found and an unknown metric as invalid_navigation, with no ui_event frame; a known asset is unchanged',
+             'ui_select_component ui_open_asset_detail',
+             B + 'test_lc06_d24_ui_events.py::test_a_wrong_target_is_refused_without_moving_the_screen',
+             B + 'test_lc06_d24_ui_events.py::test_component_asset_and_panel_events_carry_exactly_what_was_asked'),
     _pending('LC-D24.panels_e2e', 'the Playwright e2e (6 pass / 2 fail baseline) is not re-run or re-audited; panel/subview/filter/editor coverage, wrong project/run/generation, disconnect and keyboard/touch/320px cases not tested'),
 ]
 

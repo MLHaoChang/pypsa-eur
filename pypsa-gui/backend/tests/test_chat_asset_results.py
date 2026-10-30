@@ -131,19 +131,21 @@ def test_scalars_are_always_returned_for_the_category(install_network):
     assert out["scalars"]["energy_mwh"] is not None
 
 
-def test_ui_tool_emits_a_typed_ui_event_and_never_mutates():
-    ev = T.ui_open_asset_detail("Generator", "Gas 1", category="dispatch",
+def test_ui_tool_emits_a_typed_ui_event_and_never_mutates(install_network):
+    install_network(build_network(solve=True), name=None)
+    ev = T.ui_open_asset_detail("Generator", "gas", category="dispatch",
                                 metrics=["p"], mode="duration", chart=True)
     assert ev["_ui_event"] is True
     assert ev["kind"] == "open_asset_detail"
     assert ev["component_class"] == "Generator"
-    assert ev["name"] == "Gas 1"
+    assert ev["name"] == "gas"
     assert ev["metrics"] == ["p"]
     assert ev["chart"] is True
 
 
-def test_ui_tool_omits_unset_optionals_so_the_panel_keeps_its_state():
-    ev = T.ui_open_asset_detail("Generator", "Gas 1")
+def test_ui_tool_omits_unset_optionals_so_the_panel_keeps_its_state(install_network):
+    install_network(build_network(solve=True), name=None)
+    ev = T.ui_open_asset_detail("Generator", "gas")
     assert "category" not in ev and "metrics" not in ev and "mode" not in ev
 
 

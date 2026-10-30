@@ -682,7 +682,8 @@ def test_get_results_rejects_unknown_kind():
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_ui_select_component_returns_event_marker():
+def test_ui_select_component_returns_event_marker(install_network):
+    _install_minimal_network(install_network)
     event = chat_tools.ui_select_component(component_class="Bus", name="B1")
     assert event["_ui_event"] is True
     assert event["kind"] == "select_component"
