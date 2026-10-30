@@ -886,6 +886,8 @@ def _flicker_row(inp: _Inputs) -> dict:
         if inp.island_raw is not None:
             p_sm = float(_reserve(inp.n, inp.island_raw, _year((inp.envelope["phases"][-1] or {}).get("cod")))["mw"])
         env_unit = fi.envelope_unit(inp.envelope, p_sm)
+        cycles = env_unit.pop("cycles_per_min")
+        env_unit["changes_per_min"] = fl.changes_per_min(cycles) if cycles is not None else None
         units = pd.concat([units, pd.DataFrame([{"unit": env_unit["unit"], "poc": "PoC",
                                                  "step_mva": env_unit["step_mva"],
                                                  "changes_per_min": env_unit["changes_per_min"]}])],

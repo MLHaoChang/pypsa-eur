@@ -14,8 +14,6 @@ from __future__ import annotations
 
 import math
 
-from gridspine.static.flicker import changes_per_min
-
 #: Name of the lumped envelope row in the flicker screen's unit table.
 ENVELOPE_UNIT = "gpu_envelope"
 #: PoC X/R when the project enters none. Assumed: a typical MV/HV transmission-level figure.
@@ -38,11 +36,11 @@ def voltage_form_mva(p_res: float, q_res: float, xr: float = DEFAULT_XR) -> floa
 
 
 def envelope_unit(envelope: dict, p_sm_mw: float, xr: float = DEFAULT_XR) -> dict:
-    """The flicker-unit record of the envelope's worst phase: its voltage-form step and its voltage changes per minute (120/T)."""
+    """The flicker-unit record of the envelope's worst phase: its voltage-form step and its cycles per minute (60/T); the caller turns them into voltage changes (two each) with gridspine's changes_per_min."""
     mx = envelope["max"]
     period = float(mx["oscillation_period_s"])
     p_res, q_res = residual_swing(mx["swing_mw"], mx["oscillation_amplitude_mw"], p_sm_mw,
                                   float(mx.get("tan_phi_swing") or 0.0))
     return {"unit": ENVELOPE_UNIT, "step_mva": voltage_form_mva(p_res, q_res, xr),
-            "changes_per_min": changes_per_min(60.0 / period) if period > 0 else None,
+            "cycles_per_min": 60.0 / period if period > 0 else None,
             "p_res_mw": p_res, "q_res_mvar": q_res, "p_sm_mw": float(p_sm_mw), "xr": float(xr)}
