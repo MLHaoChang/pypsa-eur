@@ -129,6 +129,10 @@ def _bridge(n, cost_breakdown, cfg) -> dict:
             opex_raw = (float(entry["opex"]) / years) if entry and years else 0.0
         lp_basis += weight * (opex_raw + f["extendable"])
         nonext_reported += years * f["nonextendable"]
+    # AS-12: the PCS/STATCOM capital cost is in the objective and in `cost_breakdown`, but in no component.
+    from services.solver.pcs_statcom import cost_terms
+
+    lp_basis += sum(cost_terms(n).values())
     cb_total = float(cost_breakdown["total"])
     # U2 WP10 removed the decision study's `demand_charge_eur` term (F1-B4):
     # a site demand charge is an Investment Case commercial term, which

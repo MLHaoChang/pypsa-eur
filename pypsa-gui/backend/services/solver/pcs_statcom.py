@@ -29,6 +29,9 @@ concave in S_x, so the chord is an inner bound: the LP credits PCS Q at rated P,
 than the exact circle the forward check (`gridspine.static.campus_reactive`) uses. The PF allowance stays signed
 on p_tr, so an export hour needs the loss and gets no allowance.
 
+After a successful solve `persist_solution` copies S_x, Q_ss and Q_dyn to the result columns (`pcs_s_x_opt` on the
+Store, `statcom_q_ss_opt` and `statcom_q_dyn_opt` on the Link), which `cost_terms` reads for `cost_breakdown`.
+
 What the rows cannot hold is refused before the solve (`PcsStatcomRefusal`), never skipped: a skipped tag would
 give a wrong size, not a no-op. Every limit is a generic engineering value marked "assumed" (SAGC-1).
 """
@@ -50,6 +53,10 @@ if TYPE_CHECKING:
 STORE_COLUMNS = ("pcs_r_max", "pcs_capital_cost")
 #: Custom `Link` columns of the PQ cut and the STATCOM.
 LINK_COLUMNS = ("pq_x_pu", "pq_pf", "pq_s_n_mva", "pq_p_cap_mw", "pq_pf_req", "statcom_capital_cost")
+#: The solved sizes, persisted by `persist_solution`. Never tags: they must stay out of `pcs_statcom_tags` and so
+#: out of the input fingerprint.
+RESULT_STORE_COLUMNS = ("pcs_s_x_opt",)
+RESULT_LINK_COLUMNS = ("statcom_q_ss_opt", "statcom_q_dyn_opt")
 #: The rows `_add_rows` builds (tests drop one at a time to show each is needed).
 ROWS = ("sx_cap", "abs_pos", "abs_neg", "pq", "pcs_cost", "statcom_cost")
 
@@ -241,4 +248,83 @@ def solution(n: "pypsa.Network") -> dict:
            "s_x": pd.Series(dtype=float)}
     if "PCS-s_x" in m.variables:
         out["s_x"] = m.variables["PCS-s_x"].solution.to_pandas()
+    return out
+
+
+#: `n.meta` key naming what the persisted sizes cover: "horizon" (one LP sized the whole run) or "last_solve"
+#: (rolling horizon or myopic: the last window's or period's LP; the rows are rebuilt per LP).
+BASIS_KEY = "pcs_statcom_basis"
+LAST_SOLVE_NOTE = "PCS/STATCOM sizes and cost are from the last solve only (rolling/myopic)"
+
+
+def clear_solution(n: "pypsa.Network") -> None:
+    """Blank the persisted sizes, so a solve that fails leaves none of the previous run's behind."""
+    for frame, columns in ((n.stores, RESULT_STORE_COLUMNS), (n.links, RESULT_LINK_COLUMNS)):
+        for col in columns:
+            if col in frame.columns:
+                frame[col] = np.nan
+    n.meta.pop(BASIS_KEY, None)
+
+
+def persist_solution(n: "pypsa.Network", basis: str = "horizon") -> list[str]:
+    """Write the solved S_x (MVA, per tagged store) and Q_ss, Q_dyn (Mvar, on the PQ Link) to the result columns,
+    so they outlive `n.model` and survive the project's .nc round-trip (AS-12). Called after a successful solve,
+    with `basis` "last_solve" for a rolling or myopic one; clears the columns first, so a solve without the rows
+    leaves no stale sizes. A network that never had the columns gains none unless the rows were built.
+
+    A tagged store or Link whose variable is not in the model stays NaN, never 0; the returned warnings name it."""
+    clear_solution(n)
+    stores, links = pcs_statcom_tags(n)
+    m = getattr(n, "model", None)
+    if m is None or "Statcom-q_ss" not in m.variables:
+        tagged = [*([] if stores is None else [f"store {s}" for s in stores.index]),
+                  *([] if links is None else [f"link {k}" for k in links.index])]
+        return [f"{t}: tagged for PCS/STATCOM but the solve built no rows for it; its size is left blank"
+                for t in tagged]
+    sol = solution(n)
+    link = links.index[0]
+    _set(n.links, link, {"statcom_q_ss_opt": sol["q_ss"], "statcom_q_dyn_opt": sol["q_dyn"]}, RESULT_LINK_COLUMNS)
+    for store, s_x in sol["s_x"].items():
+        _set(n.stores, store, {"pcs_s_x_opt": s_x}, RESULT_STORE_COLUMNS)
+    n.meta[BASIS_KEY] = basis
+    missing = [] if stores is None else [s for s in stores.index if s not in sol["s_x"].index]
+    return [f"store {s}: tagged for a PCS oversize but the solve built no S_x for it; its size is left blank"
+            for s in missing]
+
+
+def cost_notes(n: "pypsa.Network") -> list[str]:
+    """What `cost_terms` leaves out or covers only in part: tagged rows with no persisted size, and the
+    last-solve basis of a rolling or myopic run."""
+    stores, links = pcs_statcom_tags(n)
+    notes = []
+    for frame, tagged, cols, what in ((n.stores, stores, RESULT_STORE_COLUMNS, "store"),
+                                      (n.links, links, RESULT_LINK_COLUMNS, "link")):
+        if tagged is None:
+            continue
+        sized = frame.reindex(columns=list(cols)).loc[tagged.index].notna().all(axis=1)
+        notes += [f"{what} {name}: tagged for PCS/STATCOM but no solved size; its cost is not counted"
+                  for name in sized.index[~sized]]
+    if n.meta.get(BASIS_KEY) == "last_solve":
+        notes.append(LAST_SOLVE_NOTE)
+    return notes
+
+
+def cost_terms(n: "pypsa.Network") -> dict:
+    """The PCS and STATCOM cost the last solve charged, from the persisted sizes and the typed annual costs x
+    `fom_horizon_factor(n)`, as `_add_rows` put them in the objective: {"PCS oversize": EUR, "STATCOM": EUR},
+    each only when its size is persisted."""
+    out = {}
+    stores = n.stores
+    if all(c in stores.columns for c in ("pcs_s_x_opt", "pcs_capital_cost")):
+        s_x = stores["pcs_s_x_opt"].dropna()
+        if len(s_x):
+            out["PCS oversize"] = float((stores.loc[s_x.index, "pcs_capital_cost"] * s_x).sum())
+    links = n.links
+    if all(c in links.columns for c in (*RESULT_LINK_COLUMNS, "statcom_capital_cost")):
+        q = links[list(RESULT_LINK_COLUMNS)].dropna()
+        if len(q):
+            out["STATCOM"] = float((links.loc[q.index, "statcom_capital_cost"] * q.sum(axis=1)).sum())
+    if out:
+        years = fom_horizon_factor(n)
+        out = {k: years * v for k, v in out.items()}
     return out
