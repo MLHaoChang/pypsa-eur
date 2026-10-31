@@ -172,7 +172,8 @@ def run_sizing_loop(solve, forward, *, max_rounds: int = MAX_ROUNDS, freeze_afte
     "not_run",
     "warnings", "seconds"}``. ``status`` is ``converged`` / ``not_converged`` / ``unresolved`` / ``failed`` /
     ``aborted``; ``verdict`` is the sentence for the user. ``final`` is the row the verdict reads (the full-year
-    row when ``final_solve`` ran). ``stop_event`` is checked before every solve; ``on_iteration`` sees each row.
+    row when ``final_solve`` ran). ``stop_event`` is checked before every solve, and a solve that ends unsolved
+    after a stop request is an abort; ``on_iteration`` sees each row.
     """
     budget = _budget(max_rounds)
     freeze_after = max(1, int(freeze_after))
@@ -207,6 +208,8 @@ def run_sizing_loop(solve, forward, *, max_rounds: int = MAX_ROUNDS, freeze_afte
             rounds.append(row)
             if on_iteration is not None:
                 on_iteration(row)
+            if stopped():
+                return done("aborted", f"aborted during round {k}", row)
             return done("failed", f"failed: round {k} solve did not reach an optimum ({cond})", row)
         t = time.perf_counter()
         checks = forward(result, state)
@@ -279,6 +282,8 @@ def run_sizing_loop(solve, forward, *, max_rounds: int = MAX_ROUNDS, freeze_afte
     if not _solved(result):
         cond = _why(result)
         row.update(status=(result or {}).get("status"), condition=cond, forward_s=0.0)
+        if stopped():
+            return done("aborted", "aborted during the full-year solve", row)
         return done("failed", f"failed: the full-year solve did not reach an optimum ({cond})", row)
     t = time.perf_counter()
     checks = forward(result, state)

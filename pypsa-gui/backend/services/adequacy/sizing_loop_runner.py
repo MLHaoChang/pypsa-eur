@@ -10,8 +10,8 @@ Wires `services.adequacy.sizing_loop.run_sizing_loop` to real solves and the for
   project as it found it. The runner writes nothing of the caller's network or config; applying a result is
   AS-10's job. Settings whose pre-solve step the copy does not reproduce are refused by name (`refusals`): island
   ride-through, commercial terms, Capacity > sizing off. A solve mode the loop does not follow (rolling, myopic,
-  SCLOPF) is named in `basis_note`: the loop sizes one full-horizon LP. A stop request lands between rounds: one
-  LP is not interrupted. Inner rounds solve a tsam-reduced year (`services.time_aggregation_service`, the limited-foresight
+  SCLOPF) is named in `basis_note`: the loop sizes one full-horizon LP. A stop request lands between rounds and
+  inside a solve: `runtime._AbortWatcher` interrupts a running LP, and the loop ends `aborted`. Inner rounds solve a tsam-reduced year (`services.time_aggregation_service`, the limited-foresight
   clustering, with `SolverConfig.lf_*`); the final solve is the full year, and its forward pass gives the verdict.
 * **forward**: the checks on the solved, fixed capacities. Each is a scalar check with gridspine or the AS
   helpers:
@@ -41,6 +41,7 @@ import copy
 import dataclasses
 import logging
 import math
+import threading
 from typing import Callable
 
 import numpy as np
@@ -51,6 +52,7 @@ from services.adequacy.flicker_inputs import DEFAULT_XR
 from services.solver import sizing_cuts as sc
 from services.solver.envelope_floors import _flagged, floors_from_envelope
 from services.solver.pcs_statcom import pcs_statcom_tags, solution
+from services.solver.runtime import _AbortWatcher
 
 logger = logging.getLogger(__name__)
 
@@ -269,9 +271,9 @@ def _sizes(n, link: str) -> dict:
 
 
 def solve_once(base, config, inp: SizingInputs, state: dict, *, reduce: bool, solver_name: str = "highs",
-               solver_options: dict | None = None) -> dict:
+               solver_options: dict | None = None, stop_event=None) -> dict:
     """One LP under `state` (cuts, frozen) on a copy of `base`; the result `run_sizing_loop` reads, plus the
-    solved `network` for the forward pass."""
+    solved `network` for the forward pass. A stop request during the solve interrupts it (status "aborted")."""
     n, info = reduce_year(base, config) if reduce else (base.copy(), {"snapshots": len(base.snapshots),
                                                                       "of": len(base.snapshots)})
     info["basis"] = "reduced_year" if reduce else "full_year"
@@ -283,11 +285,19 @@ def solve_once(base, config, inp: SizingInputs, state: dict, *, reduce: bool, so
     if inp.link in frozen:
         _freeze(n, inp.link, frozen[inp.link])
     cfg = _config_with_floors(config, cuts)
+    watcher = _AbortWatcher(stop_event, threading.get_ident())
+    watcher.start()
     try:
+        watcher.arm()
         status, condition = n.optimize(solver_name=solver_name, **_prepare(n, cfg), **(solver_options or {}))
+    except KeyboardInterrupt:                                 # the watcher's interrupt: a stop request
+        return {"status": "aborted", "condition": "stopped during the solve", "info": info}
     except Exception as exc:                                  # noqa: BLE001 - the controller reads a status
         logger.exception("sizing loop: the solve raised")
         return {"status": "error", "condition": f"{type(exc).__name__}: {exc}", "info": info}
+    finally:
+        watcher.disarm()
+        watcher.shutdown()
     if status != "ok":
         return {"status": status, "condition": condition, "info": info}
     return {"status": status, "condition": condition, "cost_eur": float(n.objective), "sizes": _sizes(n, inp.link),
@@ -447,7 +457,14 @@ def run_sizing(network, config, inp: SizingInputs, *, max_rounds: int = sl.MAX_R
     last: dict = {}
 
     def run(state, reduce):
-        res = solve(base, config, inp, state, reduce=reduce, solver_name=solver_name, solver_options=solver_options)
+        try:
+            res = solve(base, config, inp, state, reduce=reduce, solver_name=solver_name,
+                        solver_options=solver_options, stop_event=stop_event)
+        except KeyboardInterrupt:
+            if stop_event is None or not stop_event.is_set():
+                raise
+            # The watcher's interrupt landed just outside solve_once's handler.
+            return {"status": "aborted", "condition": "stopped during the solve"}
         if res.get("network") is not None:
             last["network"] = res["network"]
         return res

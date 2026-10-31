@@ -10,6 +10,7 @@ from __future__ import annotations
 import dataclasses
 import math
 import threading
+import time
 
 import numpy as np
 import pandas as pd
@@ -194,6 +195,29 @@ def test_abort_after_round_one(monkeypatch):
     assert out["status"] == "aborted" and len(out["rounds"]) == 1 and len(solves) == 1
 
 
+def test_a_stop_during_a_solve_interrupts_it_and_ends_aborted(monkeypatch):
+    stop, entered = threading.Event(), threading.Event()
+
+    def blocking_prepare(n, cfg):
+        entered.set()
+        while True:                    # a long LP: only the abort watcher's interrupt ends it
+            time.sleep(0.05)
+
+    monkeypatch.setattr(slr, "_prepare", blocking_prepare)
+    box = {}
+    worker = threading.Thread(target=lambda: box.update(out=run_sizing(_tiny(), _config(), _inputs(),
+                                                                        stop_event=stop)), daemon=True)
+    worker.start()
+    assert entered.wait(10)
+    t0 = time.perf_counter()
+    stop.set()
+    worker.join(10)
+    assert not worker.is_alive() and time.perf_counter() - t0 < 5
+    out = box["out"]
+    assert out["status"] == "aborted" and out["verdict"] == "aborted during round 1"
+    assert out["rounds"][0]["condition"] == "stopped during the solve"
+
+
 def test_a_raising_solve_is_a_failed_status_not_an_exception(monkeypatch):
     def boom(*a, **kw):
         raise RuntimeError("solver crashed")
@@ -260,6 +284,7 @@ def test_a_network_without_pq_tags_is_refused():
 
 
 def test_inner_rounds_solve_a_reduced_year_and_the_final_solve_the_full_year():
+    pytest.importorskip("tsam")
     seen = []
 
     def solve(base, config, inp, state, *, reduce, **kw):
@@ -277,6 +302,7 @@ def test_inner_rounds_solve_a_reduced_year_and_the_final_solve_the_full_year():
 
 
 def test_the_reduced_year_keeps_the_full_years_weight():
+    pytest.importorskip("tsam")
     n = _weak_flat_d(weeks=4)
     red, info = slr.reduce_year(n, _config(lf_k_periods=1, lf_period_length_h=168))
     assert info["snapshots"] == 168
