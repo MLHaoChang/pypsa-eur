@@ -1149,7 +1149,11 @@ def get_frontier():
     st = _state.get("frontier")
     if not st:
         return Response(status_code=204)
-    return {k: v for k, v in st.items() if k not in ("thread", "stop_event")}
+    out = {k: v for k, v in st.items() if k not in ("thread", "stop_event")}
+    # LC-39: has the network been edited since this study started? Same basis
+    # as the EH route and the chat readers (null: running / no captured revision).
+    out["edited_since_study"] = _study_state.edited_since(st)
+    return out
 
 
 @results_router.post("/frontier/abort")
@@ -1211,7 +1215,9 @@ def get_mc():
         return Response(status_code=204)
     # `stop_event` is a threading.Event: unserialisable, and the abort route's
     # only handle on a live run. Same filter the loops' GETs use.
-    return {k: v for k, v in st.items() if k not in ("thread", "stop_event")}
+    out = {k: v for k, v in st.items() if k not in ("thread", "stop_event")}
+    out["edited_since_study"] = _study_state.edited_since(st)  # LC-39, as /frontier
+    return out
 
 
 @results_router.post("/mc/abort")
@@ -1435,8 +1441,10 @@ def get_margin_loop():
             return Response(status_code=204)
         # Shallow copy under the lock; `iterations` is REBOUND by the worker,
         # never mutated, so the list this copy captures is frozen for ever.
-        return {k: v for k, v in st.items()
-                if k not in ("thread", "stop_event")}
+        out = {k: v for k, v in st.items()
+               if k not in ("thread", "stop_event")}
+        out["edited_since_study"] = _study_state.edited_since(st)  # LC-39, as /frontier
+        return out
 
 
 @results_router.post("/margin_loop/abort")

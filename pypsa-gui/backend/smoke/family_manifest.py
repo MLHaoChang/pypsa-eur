@@ -511,9 +511,14 @@ VARIANTS: list[dict] = [
              B + 'test_lc37_d13_stale_readers.py::test_a_record_without_a_captured_revision_reads_unknown[margin_loop]',
              B + 'test_lc37_d13_stale_readers.py::test_a_campaign_entry_without_a_captured_revision_reads_unknown',
              B + 'test_lc37_d13_stale_readers.py::test_the_campaign_flag_follows_the_latest_entry_of_each_study'),
-    _pending('LC-D13.stale_source_http_readers', 'GET /api/results/frontier, /mc and /margin_loop (the panels) serve the record without '
-             'edited_since_study, so a panel shows pre-edit numbers unflagged; the chat readers carry it (LC-37); '
-             'ticket .scratch/live-copilot/issues/39-adequacy-http-readers-stale-source.md'),
+    _covered('LC-D13.stale_source_http_readers', 'GET /api/results/frontier, /mc and /margin_loop (the panels) carry edited_since_study like '
+             'the chat readers: False after the run, True after update_component with the stored record unchanged, cleared by a re-run',
+             'run_margin_loop run_frontier_study run_mc_study update_component',
+             B + 'test_lc39_d13_http_stale_readers.py::test_the_margin_loop_route_flags_an_edit_and_a_rerun_clears_it',
+             B + 'test_lc39_d13_http_stale_readers.py::test_the_frontier_route_flags_an_edit_and_a_rerun_clears_it',
+             B + 'test_lc39_d13_http_stale_readers.py::test_the_mc_route_flags_an_edit_and_a_rerun_clears_it'),
+    _pending('LC-D13.stale_source_panels', 'the frontier, MC and margin-loop panels do not read edited_since_study from their routes, so '
+             'they show pre-edit numbers unflagged; ticket .scratch/live-copilot/issues/41-adequacy-panels-stale-banner.md'),
     _pending('LC-D13.stale_source_solver_config', 'edited_since_study (EH, margin loop, frontier, mc, campaign) counts network edits only: '
              'update_solver_config (VoLL, reserve_margin, ...) does not move the revision, so a study read after a config change reads '
              'False; ticket .scratch/live-copilot/issues/40-stale-source-solver-config.md'),
