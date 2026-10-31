@@ -201,3 +201,14 @@ def test_a_legacy_sheet_workbook_strips_only_the_escape_quote(client, session_ct
     n = session_ctx(client).network
     assert sorted(n.generators.index) == sorted([BAD, "'-5"])
     assert n.generators.at[BAD, "p_nom"] == 5.0
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["=1+1", "+1+cmd", "-2+3+cmd", "@SUM(A1)", "\t=1", "\r=1", "=", "-",
+     "-5", "+3.2", "plain", "", 7, -3.5, None],
+)
+def test_chat_csv_cell_escapes_like_the_io_export(raw):
+    from services.chat_tools import _inert_csv_cell
+
+    assert _inert_csv_cell(raw) == _escape_formula(raw)

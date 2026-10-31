@@ -7594,23 +7594,14 @@ def set_active_profile(profile_id: str) -> dict:
 # names, uploaded files and imported networks into them. So a bus named
 # `=HYPERLINK("https://…","open")` became a live link in a file the user was
 # invited to download and open. (Register: lower-confidence notes, 2026-09-28.)
-_FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r")
-
-
 def _inert_csv_cell(value):
     """A CSV cell a spreadsheet will show as text, never evaluate.
 
-    OWASP's mitigation: prefix a leading apostrophe. Applied to strings only,
-    and not to a string that IS a number (`"-5"`, `"+3.2"`): that is data a
-    spreadsheet reads as the number it is, and an apostrophe would turn it
-    into text.
+    Same rule as the io export (`routers.io._escape_formula`): one definition,
+    so the chat CSV and the downloaded project export cannot drift apart.
     """
-    if isinstance(value, str) and value.startswith(_FORMULA_TRIGGERS):
-        try:
-            float(value)
-        except ValueError:
-            return "'" + value
-    return value
+    from routers.io import _escape_formula
+    return _escape_formula(value)
 
 
 def export_to_excel(sheets: dict, filename: str) -> dict:
