@@ -22,7 +22,8 @@ in each panel.
 
 - [x] `GET /api/results/{frontier,mc,margin_loop}` carry `edited_since_study`, False after a
       run, True after an edit, cleared by a re-run (one HTTP test per route).
-- [ ] Each panel shows the stale state.
+- [ ] Each panel shows the stale state. Moved to LC-41
+      (`41-adequacy-panels-stale-banner.md`).
 - [x] `LC-D13.stale_source_http_readers` becomes `_covered`.
 
 ## Comments

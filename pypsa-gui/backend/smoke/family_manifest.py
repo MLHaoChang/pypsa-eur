@@ -517,6 +517,8 @@ VARIANTS: list[dict] = [
              B + 'test_lc39_d13_http_stale_readers.py::test_the_margin_loop_route_flags_an_edit_and_a_rerun_clears_it',
              B + 'test_lc39_d13_http_stale_readers.py::test_the_frontier_route_flags_an_edit_and_a_rerun_clears_it',
              B + 'test_lc39_d13_http_stale_readers.py::test_the_mc_route_flags_an_edit_and_a_rerun_clears_it'),
+    _pending('LC-D13.stale_source_panels', 'the frontier, MC and margin-loop panels do not read edited_since_study from their routes, so '
+             'they show pre-edit numbers unflagged; ticket .scratch/live-copilot/issues/41-adequacy-panels-stale-banner.md'),
     _pending('LC-D13.stale_source_solver_config', 'edited_since_study (EH, margin loop, frontier, mc, campaign) counts network edits only: '
              'update_solver_config (VoLL, reserve_margin, ...) does not move the revision, so a study read after a config change reads '
              'False; ticket .scratch/live-copilot/issues/40-stale-source-solver-config.md'),
