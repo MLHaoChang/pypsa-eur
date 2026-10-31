@@ -48,7 +48,7 @@ LC33 = 'LC-33 (.scratch/live-copilot/issues/33-unassigned-variants-d06-d13.md)'
 LC36 = 'LC-36 (.scratch/live-copilot/issues/36-lc-d13-remaining-variants.md)'
 # Owner of each pending variant, by variant id or, failing that, by suite.
 OWNERS: dict[str, str] = {
-    **{f'LC-D{i:02d}': LC32 for i in (1, 2, 3, 20, 21, 22, 23, 24)},
+    **{f'LC-D{i:02d}': LC32 for i in (1, 2, 3, 20, 21, 22, 23)},
     'LC-D06.sclopf': LC33,
     'LC-D06.ac_stage': LC33,
     'LC-D11.fmea_criticality': 'LC-30 (.scratch/live-copilot/issues/30-fmea-criticality-per-horizon.md)',
@@ -96,6 +96,8 @@ JOURNEYS: dict[str, list[dict]] = {
         _browser('OJ-01', 'smoke-copilot-oj01.mjs', 'two chat solves, the latest load flow shown'),
         _browser('LC-03', 'smoke-copilot-lc03-historical.mjs', 'past runs re-priced and compared'),
     ],
+    'ui-monitoring': [_browser('LC-D24', 'smoke-copilot-lc06-d24.mjs',
+                               'ui_select_component, ui_open_asset_detail, ui_open_panel on screen; an unknown asset refused')],
     'harness-workflows': [_backend('OJ-46', 'a feature chat must refuse names the reason and the page',
                                    'test_oj46_feature_chat_must_refuse_journey.py::'
                                    'test_a_feature_chat_must_refuse_names_the_reason_and_the_page')],

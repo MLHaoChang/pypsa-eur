@@ -382,6 +382,7 @@ jobs:
         node scripts/smoke-copilot-oj05.mjs || status=1
         node scripts/smoke-copilot-oj21.mjs || status=1
         node scripts/smoke-copilot-lc03-historical.mjs || status=1
+        node scripts/smoke-copilot-lc06-d24.mjs || status=1
         exit $status
 
     - name: Upload journey screenshots

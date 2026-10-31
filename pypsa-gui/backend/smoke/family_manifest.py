@@ -680,7 +680,9 @@ VARIANTS: list[dict] = [
              'ui_select_component ui_open_asset_detail',
              B + 'test_lc06_d24_ui_events.py::test_a_wrong_target_is_refused_without_moving_the_screen',
              B + 'test_lc06_d24_ui_events.py::test_component_asset_and_panel_events_carry_exactly_what_was_asked'),
-    _pending('LC-D24.panels_e2e', 'the Playwright e2e (6 pass / 2 fail baseline) is not re-run or re-audited; panel/subview/filter/editor coverage, wrong project/run/generation, disconnect and keyboard/touch/320px cases not tested'),
+    _covered('LC-D24.panels_e2e', 'the built app, loopback wire, real native backend and Chromium: ui_select_component on L2 moves the screen to L2, the unknown asset Nope is refused component_not_found and never appears, ui_open_asset_detail opens L2, ui_open_panel opens the Capacity results tab; scripts/smoke-copilot-lc06-d24.mjs runs in the browser job and the backend test pins that wiring. Not covered: wrong project/run/generation, disconnect, keyboard/touch/320px',
+             'ui_select_component ui_open_asset_detail ui_open_panel',
+             B + 'test_lc06_d24_ui_events.py::test_the_panels_e2e_journey_is_wired_into_the_browser_job'),
 ]
 
 
