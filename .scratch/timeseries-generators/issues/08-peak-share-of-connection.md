@@ -1,6 +1,7 @@
 # Peak as a share of the connection
 
-Status: ready-for-agent (triage 2026-10-28: refine can scale to the connection but neither stats nor preview report the share)
+Status: done
+<!-- 2026-10-31: done, refine.py peak_share_of_connection and SeriesKit.tsx show the share. -->
 Type: task
 Blocked by: none (04 done, #576)
 Gated: no

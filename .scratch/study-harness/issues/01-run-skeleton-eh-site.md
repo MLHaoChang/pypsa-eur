@@ -3,7 +3,8 @@
 
 # 01 — Harness run skeleton on eh_site: task v3, profile schema, typed gates
 
-Status: ready-for-agent
+Status: done
+<!-- 2026-10-31: done, commit 9ddbef87d. -->
 Type: task
 Blocked by: none
 Gated: yes (GK B reviews the plan and the PR)
