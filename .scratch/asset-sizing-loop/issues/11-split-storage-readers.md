@@ -47,6 +47,10 @@ table) and `compare/capacity.py` already read Stores.
   skips: a split missing a Link and an untagged Store + Links are named in `MCInputs.storage_notes` and the MC
   result's `storage_notes`; (6) cycles = throughput / (2 x E), throughput = charger p0 + |discharger p1|;
   (7) the StorageUnit path is unchanged.
+- GK A ruling on PR #1004 (option a): the split reading applies both Links' `p_max_pu`; a split storage that a
+  Link's `p_max_pu` of 0 blocks throughout (a migrated discharge-only unit) is named in `storage_notes`, not
+  counted. Follow-up: the StorageUnit reader ignores `p_max_pu`/`p_min_pu` (SU availability), so the two layouts
+  differ on non-default limits until it reads them.
 - Out of slice 1: counting an untagged Store with charging/discharging Links (an imported PyPSA-Eur battery);
   it is only named today. Slice 2 or later.
 - Slice 2 (open): `services/adequacy/portfolio.py`, `site_peak.py`, `smoothing.py`, `redundancy.py`, `levers.py`

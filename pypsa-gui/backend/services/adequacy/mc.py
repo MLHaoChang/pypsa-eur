@@ -271,9 +271,7 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
     storage: list[StorageSpec] = []
     from services.solver.storage_inventory import SPLIT, list_storages, storage_notes
     entries = list_storages(n)
-    notes = tuple(storage_notes(n, entries))
-    for note in notes:
-        logger.warning("adequacy storage: %s", note)
+    notes = list(storage_notes(n, entries))
     blocks = _period_blocks(snapshots)
     if entries:
         from services.adequacy.activity import ActivityContext
@@ -305,6 +303,13 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
             if e.layout == SPLIT:
                 p_nom, su_series, p_act = _split_capacity(
                     n, ctxs[e.power_component], e)
+                if p_nom <= 0 and p_act > 0:
+                    # GK A (AS-11a): built, but a Link's availability is 0
+                    # throughout (e.g. a migrated discharge-only unit).
+                    blocked = [lk for lk in (e.charger, e.discharger)
+                               if all(_block_pu(n, lk, a, b) <= 0.0 for _l, a, b in blocks)]
+                    notes.append(f"{e.name}: p_max_pu of {' and '.join(blocked)} is 0 in "
+                                 "every block; not counted")
             else:
                 p_nom, su_series = ctxs[e.power_component].capacity_series(e.power_row, row)
             if p_nom <= 0 and not keep_zero_capacity:
@@ -357,6 +362,9 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
                 "probability-like unavailability; fix the value (or clear it "
                 "so the per-carrier default applies).")
 
+    for note in notes:
+        logger.warning("adequacy storage: %s", note)
+
     profiles: dict[str, np.ndarray] = {}
     gens = getattr(n, "generators", None)
     p_max_pu_t = getattr(getattr(n, "generators_t", None), "p_max_pu", None)
@@ -408,7 +416,7 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
         storage=tuple(storage),
         nyears=float(horizon_years(n)),
         vre_profiles=profiles,
-        storage_notes=notes,
+        storage_notes=tuple(notes),
     )
 
 

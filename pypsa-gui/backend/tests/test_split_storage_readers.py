@@ -210,3 +210,13 @@ def test_storage_cycling_is_available_on_a_network_with_only_split_storage():
     _, split = _solved_pair()
     out = _compute_storage_cycling_summary(split, [], False, True)
     assert out.available and [u.name for u in out.by_unit] == ["bess"]
+
+
+def test_a_migrated_discharge_only_unit_is_named_when_its_charger_is_blocked():
+    """GK A ruling (a): the split reading applies the charger's p_max_pu (= -p_min_pu = 0), so the storage is not
+    counted; it is named, not dropped silently. The StorageUnit reader ignores p_min_pu (issue follow-up)."""
+    _, split = _pair(**{**SU, "p_min_pu": 0.0})
+    inp = M.snapshot_inputs(split)
+    assert inp.storage == ()
+    assert inp.storage_notes == ("bess: p_max_pu of bess charger is 0 in every block; not counted",)
+    assert M.mc_adequacy(inp, draws=50, seed=1, max_draws=50)["storage_notes"] == list(inp.storage_notes)
