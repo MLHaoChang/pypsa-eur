@@ -102,6 +102,9 @@ from services.solver.island import (  # noqa: F401  (re-exported)
     _wrap_with_island,
 )
 from services.solver.island import solve_uc as _island_solve_uc
+from services.solver.split_storage import _wrap_with_split_storage
+from services.solver.envelope_floors import _wrap_with_envelope_floors
+from services.solver.pcs_statcom import _wrap_with_pcs_statcom
 from services.solver import lost_production as _lost_production
 from services.solver import process_uc as _process_uc
 # Edge Investment Case commercial layer (spec §5.1): the PoC price writer and
@@ -438,6 +441,8 @@ class SolverConfig:
     # the solver-config PUT keeps it. Nothing at solve time reads it, and it is
     # in no solve fingerprint (a finance edit never makes a dispatch stale).
     finance: dict | None = None
+    # AS-03 envelope floors (`EnvelopeFloors` on the API schema). None = no rows.
+    envelope_floors: dict | None = None
 
     def __post_init__(self):
         # ── Sanitize solver_options ───────────────────────────────────────
@@ -601,6 +606,12 @@ def run_simulation(
         # Opt-in; refused, with the reason, on a path that is not the plain
         # LOPF as it will actually run (see `_wrap_with_island`).
         extra_fn = _wrap_with_island(network, extra_fn, config, log_queue=log_queue)
+        # Split power/energy storage (AS-02): the E/P-hour range, C-rate cap and
+        # power tie of each Store tagged by `split_storage`. No-op when none is.
+        extra_fn = _wrap_with_split_storage(network, extra_fn, log_queue=log_queue)
+        # Envelope floors, headroom, backup reserve and run-hour caps (AS-03). No-op when unset.
+        extra_fn = _wrap_with_envelope_floors(network, extra_fn, config, log_queue=log_queue)
+        extra_fn = _wrap_with_pcs_statcom(network, extra_fn, log_queue=log_queue)  # AS-05 PCS/STATCOM rows
         # Edge Investment Case LP-level commercial terms (peaks, ratchets,
         # tiers, group caps; spec §5.1). After the reserve margin, before the
         # objective scale, which must stay last.

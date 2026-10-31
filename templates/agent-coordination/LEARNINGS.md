@@ -242,3 +242,15 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **A near-done session rotated.** AS-02 hit 301k with one failing CI shard left; the fresh session re-read the issue, code and CI log, which can cost more than finishing (rotation breaks even after ~10–15 turns at the smaller context).
   - Fix: past 300k, finish a short active tail (a master merge, or an already-diagnosed small fix) first; a CI-only tail still goes `ci-only` to the coordinator, because a CI wait outlives the 1 h cache and each wake re-writes the whole context.
   - Lives in: steward (Rotation), live and template copies.
+
+## 30 Oct 2026: retro "coordinator speed" (owner picked 1–3)
+
+- **premerge linked `node_modules` to itself in a worktree.** Run from the coordinator's wt-pm worktree, `$root` is that worktree, so the frontend tests failed with "Cannot find package 'vitest'" and a green PR (#957) showed `blocked`.
+  - Fix: link from the main checkout (`--git-common-dir`), and say so when it has no `node_modules`.
+  - Lives in: `scripts/coord/premerge.sh` (this project's copy only; the template's premerge has no frontend step).
+- **Reviewers couldn't reach builders.** A gatekeeper with a NOT OK had no builder id and relayed every ask through the coordinator, costing a coordinator wake per relay.
+  - Fix: steward ends each PR body with `Session: <id>`; review-gk and review-ux send a NOT OK's asks to that id; premerge prints the line under "builder session" and flags a missing one.
+  - Lives in: steward (Driving a PR, step 1), review-gk, review-ux, premerge.sh (live and template copies).
+- **Two packages ran on the same files.** LC-37 and LC-38 both changed the adequacy campaign and loop runners; the second needed a hand master merge and a delta re-review (one 60–80 min CI cycle).
+  - Fix: `brief.py --files <likely files>` prints `OVERLAP` and exits 3 when an open PR changes one of them.
+  - Lives in: `scripts/coord/brief.py`, coordinator (Taking on tasks, Open), live and template copies; test `tests/test_coord_brief.py`.

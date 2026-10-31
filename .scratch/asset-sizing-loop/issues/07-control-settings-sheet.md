@@ -17,11 +17,18 @@ After the forward pass, write a control-settings sheet: ramp limiter (MW/min at 
 
 ## Acceptance
 
-- [ ] Tests first: each setting in the sheet traces to a sized capacity; a SOC band from E^smooth = 1.82 MWh in a 10 MWh unit gives 0.91 / 9.09 MWh bounds.
-- [ ] A tier whose latency exceeds the band limit fails the latency check and is flagged.
-- [ ] Export lands next to the dyr file; format documented.
-- [ ] Sub-cycle items are listed "needs EMT".
+- [x] Tests first: each setting in the sheet traces to a sized capacity; a SOC band from E^smooth = 1.82 MWh in a 10 MWh unit gives 0.91 / 9.09 MWh bounds.
+- [x] A tier whose latency exceeds the band limit fails the latency check and is flagged.
+- [x] Export lands next to the dyr file; format documented.
+- [x] Sub-cycle items are listed "needs EMT".
 
 ## PRs
 
+- AS-07 `services/control_settings.py`, tests `tests/test_control_settings.py` (branch `claude/as-07-control-settings-sheet`).
+
 ## Comments
+
+- Figures: the formula (2 x (step + checkpoint) + oscillation, as AS-03 pins) gives E^smooth = 1.835 MWh, not RESULTS.md's rounded 1.82. In a 10 MWh unit that is bounds 0.9175 / 9.0825 MWh, not 0.91 / 9.09. The test pins both: `soc_band(10, 1.82)` gives 0.91 / 9.09 (the half-in rule), the formula energy gives 0.9175 / 9.0825.
+- Backup MWh is shared over the backup stores by energy rating (the LP only constrains their sum).
+- Filter cut-off f_c = min(f_ramp, f_osc) with f_ramp = R/60 / (2 pi S), first order, assumed; the tier crossover between several tiers is not split by frequency, only by power and energy share.
+- Format: `services/control_settings.py` docstring and the `format` key of the exported JSON. Not wired into `campus_bundle` (a gridspine file); `write_sheet(sheet, dyr_path)` is the call a runner (AS-06) makes after the bundle.

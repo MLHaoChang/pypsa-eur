@@ -55,6 +55,8 @@ class AiWorkloadSpec(BaseModel):
     #: Peak (not peak-to-peak) amplitude of the training-step oscillation.
     oscillation_amplitude_share: float = Field(default=0.10, ge=0, le=1)
     oscillation_period_s: float = Field(default=2.0, gt=0)
+    #: Reactive swing of the load as tan φ of its real swing (S + A); assumed until vendor data.
+    tan_phi_swing: float = Field(default=0.1, ge=0)
     #: Whole hours per day at ``idle_share`` (job restarts, maintenance),
     #: from ``idle_start_hour`` on the site clock.
     idle_hours_per_day: int = Field(default=1, ge=0, le=24)

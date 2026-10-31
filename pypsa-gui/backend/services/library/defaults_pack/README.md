@@ -32,6 +32,11 @@ two faces" §3 rule 4). The pack holds:
   the heat pump's `max_sink_temperature`, the store's `steam_temperature`); a range the sheet states
   for 2030 is `source`, any other the assumed ±30 %. The build script is
   `.scratch/grid-to-process/refinery-heat/make_pack_2026-10-24.py`;
+- from version 2026-10-30, the split-storage technologies (AS-02), each with a `power` part per MW
+  and an `energy` part per MWh: the supercapacitor (`supercapacitor`, PNNL-28866, 2018 USD at the
+  ECB 2018 average rate, so 2018 EUR) and the high-C-rate battery (`high-c-battery`: the `battery`
+  rows, with energy at 1.75 x for the LTO premium PNNL-28866 states). Every range is assumed. The
+  build script is `.scratch/asset-sizing-loop/make_pack_2026-10-30.py`;
 - finance defaults;
 - regional cost overlays (see [Regional versions](#regional-versions));
 - two illustrative tariffs;

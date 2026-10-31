@@ -2632,12 +2632,12 @@ export function CarrierKpiPanel({
             return (
               <>
                 <KPI accent label="OPEX (total)" value={fmtCurrency(opexEur)}
-                     hint="Broader than Capacity Expansion's OPEX (horizon): Σ gen/link marginal cost + storage charge at bus price + curtailment + lost-load (economics_by_carrier). For this run, gen cost alone matches Capacity Expansion; the extra is mainly Storage charge cost." />
+                     hint="Broader than Capacity expansion's OPEX (horizon): Σ gen/link marginal cost + storage charge at bus price + curtailment + lost-load (economics_by_carrier). For this run, gen cost alone matches Capacity expansion; the extra is mainly Storage charge cost." />
                 <KPI label="Gen cost" value={fmtCurrency(genCostEur)}
-                     hint={`Σ marginal_cost × |dispatch| × weights over gens / links producing on this carrier — this is what Capacity Expansion labels OPEX (horizon). Link costs (e.g. electrolyzer / P2H marginal_cost × |p0|) are already included by the backend.${scaleHint}`} />
+                     hint={`Σ marginal_cost × |dispatch| × weights over gens / links producing on this carrier. This is what Capacity expansion labels OPEX (horizon). Link costs (e.g. electrolyzer / P2H marginal_cost × |p0|) are already included by the backend.${scaleHint}`} />
                 <KPI label="Storage charge cost" value={fmtCurrency(econ.charge * 1e6)}
                      {...(hasStorage ? zeroOr(econ.charge) : noStorage)}
-                     hint="What storage paid (or earned, if negative) to charge — bus_price × |charge| × weights. Included in OPEX (total) here, but NOT in Capacity Expansion OPEX (horizon)." />
+                     hint="What storage paid (or earned, if negative) to charge: bus_price × |charge| × weights. Included in OPEX (total) here, but NOT in Capacity expansion OPEX (horizon)." />
                 <KPI label="Curtailment cost" value={fmtCurrency(econ.curt * 1e6)}
                      {...(!dispatch.hasRenewables ? noRenewables
                        : !dispatch.hasCurtailmentCost

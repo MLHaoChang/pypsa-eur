@@ -51,6 +51,7 @@ ISSUE_TITLES: dict[str, str] = {
     # Storage
     "storage_max_hours_invalid": "Storage duration must be positive",
     "storage_soc_oob": "Initial state of charge outside the storage range",
+    "split_storage_sizes": "Storage power and energy sizes cannot meet its hours",
     "storage_initial_ignored": "Initial state of charge is ignored (cyclic storage)",
 
     # Links, lines and transformers

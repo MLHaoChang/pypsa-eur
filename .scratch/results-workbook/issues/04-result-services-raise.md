@@ -3,7 +3,7 @@
 
 # 04 — Prices, curtailment and cost-breakdown services raise instead of returning None
 
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: 02 (R1, PR #896)
 Gated: yes (results data; GK B)
@@ -18,9 +18,9 @@ Make each service raise on an unexpected exception and return None only when the
 
 ## Acceptance
 
-- [ ] Each service raises on an internal exception; a test forces one and sees it raised.
-- [ ] Each route still answers 204 on that exception, and master's route tests pass unchanged.
-- [ ] The workbook lists a crashing prices, curtailment or economics view in About as an error, not "no results"; one test.
+- [x] Each service raises on an internal exception; a test forces one and sees it raised.
+- [x] Each route still answers 204 on that exception, and master's route tests pass unchanged.
+- [x] The workbook lists a crashing prices, curtailment or economics view in About as an error, not "no results"; one test.
 
 ## Comments
 

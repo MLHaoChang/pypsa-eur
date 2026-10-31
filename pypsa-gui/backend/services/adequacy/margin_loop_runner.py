@@ -715,9 +715,14 @@ def start_margin_loop(
         "error": None,
         "started_at": time.time(),
         "finished_at": None,
+        # LC-37: the edit counter when the loop STARTED, as the EH study
+        # keeps it; `edited_since_study` compares it.
+        "network_revision": None,
         "thread": None,
         "stop_event": stop_event,
     }
+    from services import dirty_state
+    study_ctx = PyPSAService.get_active_context()
 
     def on_iteration(row: dict) -> None:
         """Grow the record by REBINDING, never by appending in place.
@@ -959,6 +964,11 @@ def start_margin_loop(
     # the `restore="final"` config write would land in the PROCESS foreground
     # — a different project's state from the one the caller is polling.
     def worker():
+        # Captured in the worker under the mutation lock, before the loop
+        # first reads the network (eh_study_runner's rule): a race can only
+        # over-report an edit.
+        with lock:
+            record["network_revision"] = dirty_state.revision(study_ctx)
         # The outer stack is the every-path guarantee (a raise before the
         # explicit close in `_worker`); closing it twice is a no-op.
         with contextlib.ExitStack() as topology:

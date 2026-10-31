@@ -132,8 +132,11 @@ def test_five_options_five_forks_five_solves_charged_on_the_base_context(
         assert not (project_storage_dir(row.name) / "studies").exists()
 
     # The campaign: charged on the BASE context, five solves, then closed.
+    # The decision study captures no network revision (LC-37 captures one only
+    # for the chat-gated studies), so its freshness is unknown, never False.
     assert rec["campaign"]["entries"] == [
-        {"study": "decision_study", "solves_charged": 5, "at": rec["campaign"]["entries"][0]["at"]}]
+        {"study": "decision_study", "solves_charged": 5, "at": rec["campaign"]["entries"][0]["at"],
+         "network_revision": None, "edited_since_study": None}]
     assert rec["campaign"]["active"] is False
     fg = session_ctx(client)
     assert fg is not _base_ctx(registry_key_for, "run-five")

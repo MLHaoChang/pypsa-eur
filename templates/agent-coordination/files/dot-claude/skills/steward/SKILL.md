@@ -9,7 +9,7 @@ Many sessions work on this repo in parallel. One **coordinator** session relays 
 
 ## Driving a PR
 
-1. **Branch.** Open each PR on its own `claude/*` branch, against `{{BASE_BRANCH}}`, with a body that follows `.github/pull_request_template.md`.
+1. **Branch.** Open each PR on its own `claude/*` branch, against `{{BASE_BRANCH}}`, with a body that follows `.github/pull_request_template.md` and ends with `Session: <your session id>` above the attribution lines, so reviewers send their asks straight to you.
    Done when the PR exists and its head is pushed.
 2. **Release note.** Add a fragment file under `{{RELEASE_NOTES_DIR}}/` as its `README.md` describes.
    Done when the PR diff contains one new fragment.

@@ -110,6 +110,20 @@ A profile may carry these optional keys:
     The least Q–V reactive margin at the connection point, Mvar (study harness
     issue 18), a number >= 0. The grid-readiness Q–V row judges on it as the
     P–V row does.
+``load_ramp_mw_per_min``, ``load_variation_limit``, ``lcl_ride_through_band``, ``stage1_ds_over_ssc_pct``, ``ride_through_transfer_counts``
+    The limits on a large load's variation (asset-sizing loop AS-08).
+    ``load_ramp_mw_per_min`` is the ramp limit, a positive number.
+    ``load_variation_limit`` is the change in active power allowed within a
+    window: ``value`` MW per ``window_s`` seconds, both positive.
+    ``lcl_ride_through_band`` is the voltage band a large controllable load
+    must ride through: ``v_min`` < 1 < ``v_max`` (per unit) for ``duration_s``
+    seconds. ``stage1_ds_over_ssc_pct`` is the IEC TR 61000-3-7 Stage 1 limit on
+    the load step over the short-circuit power, (dS/S_sc)max in %, for
+    fewer than ``r_max_per_min`` changes per minute (both positive). ``ride_through_transfer_counts``
+    is true when the profile accepts transfer to BESS or a genset as
+    ride-through; false or absent, intent D (no UPS) is warned
+    (``ride_through_transfer_warning``). ``load_variation_limits`` returns all
+    five, a missing one as a marked ``assumed`` default (``LOAD_VARIATION_DEFAULTS``).
 ``dynamic_requirements``
     What a steady-state study cannot show (ride-through, RoCoF, frequency
     response, pending rules): ``{id, requirement, value, clause, source,
@@ -164,7 +178,9 @@ _SINGLE_LIMITS = ("q_range_demand", "rvc_limit_pct", "campus_voltage", "q_range_
                   "q_capability_unit",
                   "voltage_deadband_pct",
                   "angle_limit_deg",
-                  "pv_margin_min_pct", "qv_margin_min_mvar")
+                  "pv_margin_min_pct", "qv_margin_min_mvar",
+                  "load_ramp_mw_per_min", "load_variation_limit", "lcl_ride_through_band", "stage1_ds_over_ssc_pct",
+                  "ride_through_transfer_counts",)
 #: Every key a profile may carry; any other is loaded with a warning.
 PROFILE_KEYS = frozenset({"title", "voltage_bands", "q_range_demand", "rvc_limit_pct", "campus_voltage",
                           "q_range_ibr", "rvc_limit_infrequent_pct", "q_capability_pq", "pf_min_lagging",
@@ -176,7 +192,9 @@ PROFILE_KEYS = frozenset({"title", "voltage_bands", "q_range_demand", "rvc_limit
                           "q_capability_unit",
                           "voltage_deadband_pct",
                           "angle_limit_deg",
-                          "pv_margin_min_pct", "qv_margin_min_mvar"})
+                          "pv_margin_min_pct", "qv_margin_min_mvar",
+                          "load_ramp_mw_per_min", "load_variation_limit", "lcl_ride_through_band", "stage1_ds_over_ssc_pct",
+                  "ride_through_transfer_counts",})
 #: ``angle_limit_deg`` stays below this: past 90 degrees a branch is beyond its steady-state transfer limit
 #: (P = V1 V2 / X sin delta peaks at 90).
 ANGLE_LIMIT_MAX_DEG = 90.0
@@ -338,6 +356,7 @@ def _check_profile(name, p):
             )
     if "campus_voltage" in p:
         _check_campus_voltage(p["campus_voltage"], where)
+    _check_load_variation(p, where)
     if "dynamic_requirements" in p:
         _check_dynamic(p["dynamic_requirements"], where)
     if "notes" in p and not isinstance(p["notes"], str):
@@ -463,6 +482,76 @@ def reported_requirements(profile: dict) -> list:
                     "detail": f"voltage-control deadband {value}: reported, not enforced "
                               "(the static study has no voltage-control loop)"})
     return out
+
+
+#: What a profile without a load-variation key gets: generic engineering, tagged ``assumed``, so a report can
+#: say the number is a placeholder (SAGC-1: no sourced client or network figure).
+LOAD_VARIATION_DEFAULTS = {
+    "load_ramp_mw_per_min": {"value": 30.0},
+    "load_variation_limit": {"value": 10.0, "window_s": 5.0},
+    "lcl_ride_through_band": {"v_min": 0.8, "v_max": 1.1, "duration_s": 1.0},
+    "stage1_ds_over_ssc_pct": {"value": 0.4, "r_max_per_min": 10.0},
+    "ride_through_transfer_counts": {"value": False},
+}
+_DEFAULT_CLAUSE = "default: generic engineering placeholder, no grid code supplied"
+
+
+def _positive(lim, field, name, where):
+    v = lim.get(field)
+    if not _is_number(v) or v <= 0:
+        raise ContractError(f"{where}: {name}.{field} must be a positive number, got {v!r}")
+
+
+def _check_load_variation(p, where):
+    for key in ("load_ramp_mw_per_min", "stage1_ds_over_ssc_pct"):
+        if key in p:
+            _check_limit(key, p[key], where)
+            _positive(p[key], "value", key, where)
+    if "stage1_ds_over_ssc_pct" in p:
+        _positive(p["stage1_ds_over_ssc_pct"], "r_max_per_min", "stage1_ds_over_ssc_pct", where)
+    if "load_variation_limit" in p:
+        lim = p["load_variation_limit"]
+        _check_limit("load_variation_limit", lim, where)
+        _positive(lim, "value", "load_variation_limit", where)
+        _positive(lim, "window_s", "load_variation_limit", where)
+    if "lcl_ride_through_band" in p:
+        lim = p["lcl_ride_through_band"]
+        _check_limit("lcl_ride_through_band", lim, where)
+        for f in ("v_min", "v_max"):
+            _positive(lim, f, "lcl_ride_through_band", where)
+        if not lim["v_min"] < 1 < lim["v_max"]:
+            raise ContractError(f"{where}: lcl_ride_through_band needs v_min < 1 < v_max, "
+                                f"got v_min={lim['v_min']} v_max={lim['v_max']}")
+        _positive(lim, "duration_s", "lcl_ride_through_band", where)
+    if "ride_through_transfer_counts" in p:
+        lim = p["ride_through_transfer_counts"]
+        _check_limit("ride_through_transfer_counts", lim, where)
+        if not isinstance(lim.get("value"), bool):
+            raise ContractError(f"{where}: ride_through_transfer_counts value must be true or false, "
+                                f"got {lim.get('value')!r}")
+
+
+def load_variation_limits(profile: dict) -> dict:
+    """The five load-variation limits of a profile; a missing one is the
+    ``LOAD_VARIATION_DEFAULTS`` entry, tagged ``assumed`` and ``defaulted``."""
+    out = {}
+    for key, default in LOAD_VARIATION_DEFAULTS.items():
+        if key in profile:
+            out[key] = {**profile[key], "defaulted": False}
+        else:
+            out[key] = {**default, "clause": _DEFAULT_CLAUSE, "source": "assumed", "defaulted": True}
+    return out
+
+
+def ride_through_transfer_warning(profile: dict):
+    """The intent D (no UPS) warning, or ``None`` when the profile accepts
+    transfer to BESS as ride-through (owner decision AS-NOUPS-1)."""
+    lim = load_variation_limits(profile)["ride_through_transfer_counts"]
+    if lim["value"]:
+        return None
+    basis = "the profile does not set it (default: no)" if lim["defaulted"] else lim["clause"]
+    return ("This grid code may not count transfer to BESS or a genset as ride-through, so a design without a "
+            f"UPS may not comply: {basis}.")
 
 
 def validate_profile(name: str, profile: dict) -> dict:

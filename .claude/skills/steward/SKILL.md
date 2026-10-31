@@ -9,7 +9,7 @@ Many sessions work on this repo in parallel. One **coordinator** session relays 
 
 ## Driving a PR
 
-1. **Branch.** Open each PR on its own `claude/*` branch, against `master`, with a body that follows `.github/pull_request_template.md`. A PR whose plan went to review (see [Gatekeeper checkpoints](#gatekeeper-checkpoints)) opens after the plan verdicts arrive.
+1. **Branch.** Open each PR on its own `claude/*` branch, against `master`, with a body that follows `.github/pull_request_template.md` and ends with `Session: <your session id>` above the attribution lines, so reviewers send their asks straight to you. A PR whose plan went to review (see [Gatekeeper checkpoints](#gatekeeper-checkpoints)) opens after the plan verdicts arrive.
    Done when the PR exists and its head is pushed.
 2. **Release note.** Add a fragment file under `doc/release-notes.d/` as `doc/release-notes.d/README.md` describes; `doc/release_notes.md` stays untouched.
    Done when the PR diff contains one new fragment and no change to `doc/release_notes.md`.

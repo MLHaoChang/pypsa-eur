@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The prices, curtailment and cost-breakdown services raise on an internal error instead of returning the "no results" value; their routes still answer 204, and the results workbook lists a crashing view in About as an error.

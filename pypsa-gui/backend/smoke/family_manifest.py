@@ -209,8 +209,12 @@ VARIANTS: list[dict] = [
              'set_snapshots upload_timeseries',
              B + 'test_lc06_d03_chronology_edges.py::test_the_horizon_has_the_hand_counted_hours_and_cost',
              B + 'test_lc06_d03_chronology_edges.py::test_an_out_of_order_csv_is_aligned_by_its_timestamps'),
-    _pending('LC-D03.upload_guards', 'repeated timestamp fails with an untyped pandas InvalidIndexError, a missing snapshot is forward-filled silently, '
-             'an off-horizon CSV replaces the snapshots (ticket 33)'),
+    _covered('LC-D03.upload_guards', 'repeated timestamp refused as timeseries_duplicate_timestamp, series unchanged; a missing snapshot forward-filled (1,2,2,4) and named in filled_snapshots; '
+             'an off-horizon CSV refused as timeseries_outside_horizon, snapshots unchanged, replaced only with replace_horizon',
+             'upload_timeseries',
+             B + 'test_lc06_d03_chronology_edges.py::test_a_repeated_timestamp_is_refused_and_stores_nothing',
+             B + 'test_lc06_d03_chronology_edges.py::test_a_missing_snapshot_is_forward_filled_and_named',
+             B + 'test_lc06_d03_chronology_edges.py::test_an_off_horizon_csv_is_refused_and_keeps_the_snapshots'),
     _pending('LC-D03.timezone_aware', 'timezone-aware or DST-offset inputs and MW-versus-pu mapping not tested; the DST case covers zone-free wall clock only'),
     _covered('LC-D04.bound_build', 'extendable G2 built to p_nom_max: optimal_capacity 3 = capacity_change 3; fixed G: 20 MW, change 0',
              '',
@@ -493,9 +497,26 @@ VARIANTS: list[dict] = [
              '50 -> 55 MW (the stored study still reads 10 MWh), cleared by a re-run with electrical unmet 20 MWh (+10 by hand)',
              'run_eh_study update_component get_adequacy_results',
              B + 'test_lc36_d13_stale_source.py::test_an_edit_flags_the_eh_study_and_a_rerun_clears_it_with_the_hand_delta'),
-    _pending('LC-D13.stale_source_unflagged_readers', 'the margin_loop, frontier and mc/ELCC readers and campaign_status carry no freshness '
-             'marker: after update_component they serve pre-edit numbers unflagged (checked by LC-36); a defect, so not pinned; '
-             'ticket .scratch/live-copilot/issues/37-adequacy-readers-stale-source.md'),
+    _covered('LC-D13.stale_source_unflagged_readers', 'chat readers, network edits: get_adequacy_results margin_loop / frontier / mc '
+             'and campaign_status carry edited_since_study (study_state.edited_since against the revision captured at the study\'s '
+             'start). False after the run, True after update_component with the stored numbers unchanged, cleared by a re-run moving '
+             'margin_tight 0.17 -> 117/110 - 1, the 1000-permyriad frontier point +400 EUR and the ELCC 20 -> 15 MW; the campaign flags '
+             'each entry and follows the latest per study (None while that study runs). A record or entry with no captured revision reads None',
+             'run_margin_loop run_frontier_study run_mc_study update_component get_adequacy_results start_campaign campaign_status',
+             B + 'test_lc37_d13_stale_readers.py::test_an_edit_flags_the_margin_loop_and_a_rerun_clears_it_with_the_hand_delta',
+             B + 'test_lc37_d13_stale_readers.py::test_an_edit_flags_the_frontier_and_the_campaign_and_a_rerun_clears_both',
+             B + 'test_lc37_d13_stale_readers.py::test_an_edit_flags_the_elcc_and_a_rerun_clears_it_with_the_hand_delta',
+             B + 'test_lc37_d13_stale_readers.py::test_a_record_without_a_captured_revision_reads_unknown[frontier]',
+             B + 'test_lc37_d13_stale_readers.py::test_a_record_without_a_captured_revision_reads_unknown[mc]',
+             B + 'test_lc37_d13_stale_readers.py::test_a_record_without_a_captured_revision_reads_unknown[margin_loop]',
+             B + 'test_lc37_d13_stale_readers.py::test_a_campaign_entry_without_a_captured_revision_reads_unknown',
+             B + 'test_lc37_d13_stale_readers.py::test_the_campaign_flag_follows_the_latest_entry_of_each_study'),
+    _pending('LC-D13.stale_source_http_readers', 'GET /api/results/frontier, /mc and /margin_loop (the panels) serve the record without '
+             'edited_since_study, so a panel shows pre-edit numbers unflagged; the chat readers carry it (LC-37); '
+             'ticket .scratch/live-copilot/issues/39-adequacy-http-readers-stale-source.md'),
+    _pending('LC-D13.stale_source_solver_config', 'edited_since_study (EH, margin loop, frontier, mc, campaign) counts network edits only: '
+             'update_solver_config (VoLL, reserve_margin, ...) does not move the revision, so a study read after a config change reads '
+             'False; ticket .scratch/live-copilot/issues/40-stale-source-solver-config.md'),
     _covered('LC-D13.incomplete_campaign', 'a campaign of budget 3 refuses a 3-target frontier (4 solves) as campaign_budget_exhausted with '
              'spent 0 and no entry, runs 2 targets to their hand points (spent 3) and closes with end_campaign; budget 4 runs all three. '
              'An EH redundancy compare at budget_solves 2 (ens_solve takes 1) solves base alone, budget_exhausted, no selection; at 10 it '
@@ -650,7 +671,10 @@ VARIANTS: list[dict] = [
              B + 'test_lc06_d24_ui_events.py::test_a_snapshot_is_addressed_by_its_hand_index',
              B + 'test_lc06_d24_ui_events.py::test_component_asset_and_panel_events_carry_exactly_what_was_asked',
              B + 'test_lc06_d24_ui_events.py::test_a_wrong_target_is_refused_without_moving_the_screen'),
-    _pending('LC-D24.unknown_asset_event', 'ticket 35: ui_open_asset_detail and ui_select_component without open_editor emit a ui_event for an unknown asset or unknown metric (not refused); untested, a possible defect if the frontend lands on a non-existent asset'),
+    _covered('LC-D24.unknown_asset_event', 'ui_select_component (without open_editor) and ui_open_asset_detail refuse an unknown asset as component_not_found and an unknown metric as invalid_navigation, with no ui_event frame; a known asset is unchanged',
+             'ui_select_component ui_open_asset_detail',
+             B + 'test_lc06_d24_ui_events.py::test_a_wrong_target_is_refused_without_moving_the_screen',
+             B + 'test_lc06_d24_ui_events.py::test_component_asset_and_panel_events_carry_exactly_what_was_asked'),
     _pending('LC-D24.panels_e2e', 'the Playwright e2e (6 pass / 2 fail baseline) is not re-run or re-audited; panel/subview/filter/editor coverage, wrong project/run/generation, disconnect and keyboard/touch/320px cases not tested'),
 ]
 

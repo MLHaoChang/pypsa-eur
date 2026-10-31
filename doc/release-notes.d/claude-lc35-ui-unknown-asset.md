@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The assistant's `ui_select_component` and `ui_open_asset_detail` now refuse an unknown asset (`component_not_found`) or metric (`invalid_navigation`) instead of reporting success and moving the screen to nothing.

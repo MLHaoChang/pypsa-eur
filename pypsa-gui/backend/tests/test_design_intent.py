@@ -90,13 +90,27 @@ def test_run_hours_cap_only_for_b_c_and_at_most_a_year():
     assert DesignIntentSpec(intent="B", genset_run_hours_cap=8760).genset_run_hours_cap == 8760
 
 
+def _transfer(value):
+    return {"ride_through_transfer_counts": {"value": value, "clause": "generic engineering", "source": "assumed"}}
+
+
 def test_intent_d_warns_without_transfer_ride_through_but_does_not_block():
     spec = DesignIntentSpec(intent="D")
-    w = D.grid_code_warnings(spec, {"bess_transfer_ride_through": False})
-    assert len(w) == 1 and "ride-through" in w[0]
-    assert D.grid_code_warnings(spec, {}) == w
-    assert D.grid_code_warnings(spec, {"bess_transfer_ride_through": True}) == []
+    for profile in (_transfer(False), {}):
+        w = D.grid_code_warnings(spec, profile)
+        assert len(w) == 1 and "ride-through" in w[0]
+    assert D.grid_code_warnings(spec, _transfer(True)) == []
     assert D.grid_code_warnings(DesignIntentSpec(intent="A"), {}) == []
+
+
+def test_intent_d_warning_reads_a_loaded_profile():
+    from gridspine.templates.grid_codes import load_grid_code
+
+    spec = DesignIntentSpec(intent="D")
+    base = load_grid_code("generic_assumed")
+    assert len(D.grid_code_warnings(spec, base)) == 1
+    assert D.grid_code_warnings(spec, {**base, **_transfer(True)}) == []
+    assert len(D.grid_code_warnings(spec, {**base, **_transfer(False)})) == 1
 
 
 @pytest.mark.parametrize("tid", ["eh_datacenter", "eh_datacenter_staged"])

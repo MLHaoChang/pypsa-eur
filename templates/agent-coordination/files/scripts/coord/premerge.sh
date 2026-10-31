@@ -239,6 +239,17 @@ if ((${#append_overlap[@]})); then
 fi
 
 echo
+echo "== builder session"
+# Reviewers send NOT OK details straight to the builder named on the PR body's
+# "Session: <id>" line. Missing it is reported, not blocking.
+if sid=$(command -v gh >/dev/null && gh api "repos/$gh_repo/pulls/$pr" --jq .body \
+  | grep -oE 'Session: session_[A-Za-z0-9]+' | tail -1) && [[ -n $sid ]]; then
+  echo "$sid"
+else
+  echo "no 'Session: <id>' line in the PR body: ask the PR's session to add it"
+fi
+
+echo
 echo "== reviewer verdicts"
 # The gatekeeper (GK) and UX reviewer post "GK OK @<sha>: ..." / "GK NOT OK @<sha>: ..."
 # (and UX) as PR comments. A missing or stale OK is reported, not blocking:

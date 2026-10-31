@@ -85,7 +85,7 @@ The owner hands over tasks: in a message, or as specs under `.scratch/`.
    - the files it will likely touch;
    - the packages it depends on.
 2. **Confirm.** Where a split changes scope or order, ask the owner as one `AskUserQuestion` with the recommended plan first. Otherwise go ahead and tell the owner the plan.
-3. **Open.** Open a session for each package that is ready. A package is ready when no dependency is unmerged and it shares no likely files with a running package. Queue the rest in the state file. See [Opening a session](#opening-a-session).
+3. **Open.** Open a session for each package that is ready. A package is ready when no dependency is unmerged and it shares no likely files with a running package. Pass those files to `brief.py --files`: it prints `OVERLAP` and exits 3 when an open PR changes one of them. Queue the rest in the state file. See [Opening a session](#opening-a-session).
 4. **Track.** Add each session to the dashboard's sessions board and to the log.
 5. **Refill.** When a package hands off, archive its session. Then open every queued package that is now ready.
 

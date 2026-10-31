@@ -1,0 +1,255 @@
+# Connection-point limits, one profile per grid-code family (increment 10).
+#
+# EVERY limit carries its clause and a provenance tag:
+#   code     -- a number the regulation itself states (quoted from the
+#               as-adopted EU text: DCC = Regulation (EU) 2016/1388,
+#               RfG = Regulation (EU) 2016/631);
+#   assumed  -- not set by the code; a stated engineering choice to revisit.
+#   extracted -- read from an uploaded grid-code document by the copilot and
+#               not yet confirmed by a person; carries page and quote. Only
+#               a project's own profiles carry it, never this file.
+# The code values below were read from legislation.gov.uk's "adopted" text
+# (the retained UK version has deleted the Continental Europe rows).
+#
+# A profile may also carry ``campus_voltage``, an optional design band for the
+# buses inside the campus ({v_min, v_max, clause, source}). Without it the
+# study holds those buses to the voltage_bands, as an assumed design limit.
+profiles:
+  eu_rfg_dcc_ce:
+    title: "EU RfG (2016/631) and DCC (2016/1388), Continental Europe"
+    # Steady-state ("unlimited time") voltage bands at the connection point,
+    # by nominal voltage. kv_min inclusive, kv_max exclusive, except where
+    # kv_max_inclusive says otherwise (DCC: "from 300 kV to 400 kV (including)").
+    voltage_bands:
+      - kv_min: 0.0
+        kv_max: 110.0
+        v_min: 0.90
+        v_max: 1.10
+        clause: "not set by RfG/DCC below 110 kV; +/-10 % used"
+        source: assumed
+      - kv_min: 110.0
+        kv_max: 300.0
+        v_min: 0.90
+        v_max: 1.118
+        clause: "DCC Annex II (first table) and RfG Art. 16(2)(a) Table 6.1, Continental Europe: 0,90-1,118 pu unlimited"
+        source: code
+      - kv_min: 300.0
+        kv_max: 400.0
+        kv_max_inclusive: true
+        v_min: 0.90
+        v_max: 1.05
+        clause: "DCC Annex II (second table) and RfG Art. 16(2)(a) Table 6.2, Continental Europe: 0,90-1,05 pu unlimited"
+        source: code
+    # The widest reactive range a TSO may require of a transmission-connected
+    # demand facility, as a fraction of the larger of max import / export.
+    q_range_demand:
+      value: 0.48
+      clause: "DCC Art. 15(1)(a): not wider than 48 percent of the larger of the maximum import or export capacity (0,9 power factor); the relevant TSO specifies the actual range"
+      source: code
+    # Rapid voltage change at the connection point on connection or trip.
+    rvc_limit_pct:
+      value: 3.0
+      clause: "not set by RfG/DCC; IEC TR 61000-3-7 indicative planning levels for infrequent rapid voltage changes at HV/EHV are about 3-5 % (not verified against the text here); 3 % used"
+      source: assumed
+    # Harmonic voltage at the connection point (grid-to-process issue 17). Demo values: IEC TR 61000-3-6
+    # indicative planning levels for HV-EHV, used whole as the limit on this site's contribution. The operator
+    # allocates an installation only a share of them, so a pass here is a screening result, not a connection
+    # approval.
+    thd_limit_pct:
+      value: 3.0
+      clause: "not set by RfG/DCC; IEC TR 61000-3-6 Table 2 indicative planning level for total harmonic distortion at HV-EHV (not verified against the text here); 3 % used"
+      source: assumed
+    harmonic_limits_pct:
+      orders: {2: 1.4, 3: 2, 4: 0.8, 5: 2, 6: 0.4, 7: 2, 8: 0.4, 9: 1, 10: 0.35, 11: 1.5, 12: 0.32, 13: 1.5, 14:
+        0.3, 15: 0.3, 16: 0.28, 17: 1.2, 18: 0.27, 19: 1.07, 20: 0.26, 21: 0.2, 22: 0.25, 23: 0.89, 24:
+        0.24, 25: 0.82, 26: 0.23, 27: 0.2, 28: 0.23, 29: 0.7, 30: 0.22, 31: 0.66, 32: 0.22, 33: 0.2, 34:
+        0.22, 35: 0.58, 36: 0.21, 37: 0.55, 38: 0.21, 39: 0.2, 40: 0.21, 41: 0.5, 42: 0.21, 43: 0.47, 44:
+        0.2, 45: 0.2, 46: 0.2, 47: 0.43, 48: 0.2, 49: 0.42, 50: 0.2}
+      clause: "not set by RfG/DCC; IEC TR 61000-3-6 Table 2 indicative planning levels for individual harmonic voltages at HV-EHV, % of the fundamental (not verified against the text here)"
+      source: assumed
+    # Flicker severity at the connection point (grid-to-process issue 17). Demo values: IEC TR 61000-3-7
+    # indicative planning levels for HV-EHV (MV is 0.9 / 0.7), used whole as the limit on this site's contribution.
+    pst_limit:
+      value: 0.8
+      clause: "not set by RfG/DCC; IEC TR 61000-3-7 indicative planning level for short-term flicker severity Pst at HV-EHV; a planning level, not an emission limit allocated to this installation (margin overstated); not verified against the text here"
+      source: assumed
+    plt_limit:
+      value: 0.6
+      clause: "not set by RfG/DCC; IEC TR 61000-3-7 indicative planning level for long-term flicker severity Plt at HV-EHV; a planning level, not an emission limit allocated to this installation (margin overstated); not verified against the text here"
+      source: assumed
+    # The current-distortion standard of the TDD screen (datacenter readiness 12). Demo: a placeholder.
+    current_tdd_standard:
+      value: ieee519-2014
+      clause: "not set by RfG/DCC; placeholder; IEEE 519-2014 Tables 2-4 current distortion limits by PCC voltage and Isc/IL (not verified against the text here)"
+      source: assumed
+    # What a steady-state study cannot show, reported as "dynamic study needed"
+    # and never counted as passed (plan 2026-10-14 e2e demo, section 7.3). The
+    # clauses and ranges below were not re-read against the adopted text when
+    # they were added; check them before a decision rests on them.
+    dynamic_requirements:
+      - id: frequency_ranges
+        requirement: "Stay connected over the frequency ranges and times"
+        value: "49.0-51.0 Hz unlimited; 47.5-48.5 Hz and 48.5-49.0 Hz for TSO-specified times (at least 30 min at 47.5-48.5 Hz); 51.0-51.5 Hz 30 min (Continental Europe)"
+        clause: "DCC Art. 12(1) and Annex I, Table 1 (demand facilities); RfG Art. 13(1)(a) Table 2 (generating modules)"
+        source: code
+        applies_to: facility
+      - id: rocof
+        requirement: "Withstand a rate of change of frequency"
+        value: "TSO-specified"
+        clause: "RfG Art. 13(1)(b): the rate of change of frequency withstand capability is specified by the TSO"
+        source: code
+        applies_to: ibr
+      - id: frt
+        requirement: "Fault ride-through of the on-site power park modules (BESS, PV)"
+        value: "the TSO's voltage-against-time profile, within the RfG's ranges by module type"
+        clause: "RfG Art. 14(3)(a) (type B) and Art. 16(3)(a) (type D): the TSO specifies the voltage-against-time profile within the RfG's bounds"
+        source: code
+        applies_to: ibr
+      - id: lfsm_o
+        requirement: "Limited frequency sensitive mode, over-frequency"
+        value: "droop 2-12 %, threshold 50.2-50.5 Hz (TSO-specified within these)"
+        clause: "RfG Art. 13(2)"
+        source: code
+        applies_to: ibr
+
+  generic_assumed:
+    title: "Generic assumed limits (placeholder until a real grid code is supplied)"
+    # One band for every nominal voltage. kv_max is a large finite number, since
+    # the loader takes finite bounds only; no real system is above it.
+    voltage_bands:
+      - kv_min: 0.0
+        kv_max: 10000.0
+        v_min: 0.90
+        v_max: 1.10
+        clause: "generic placeholder until a real code is supplied: +/-10 % at every voltage"
+        source: assumed
+    # tan(acos 0.95) = 0.3287, to three decimals.
+    q_range_demand:
+      value: 0.329
+      clause: "generic placeholder until a real code is supplied: power factor 0.95 at the connection point, +/-tan(acos 0.95) of P_ref"
+      source: assumed
+    rvc_limit_pct:
+      value: 3.0
+      clause: "generic placeholder until a real code is supplied: 3 % rapid voltage change"
+      source: assumed
+    campus_voltage:
+      v_min: 0.95
+      v_max: 1.05
+      clause: "generic placeholder until a real code is supplied: 0.95-1.05 pu design band for buses inside the campus"
+      source: assumed
+    # Harmonic voltage at the connection point (grid-to-process issue 17). Demo values: IEC TR 61000-3-6
+    # indicative planning levels for HV-EHV, used whole as the limit on this site's contribution. The operator
+    # allocates an installation only a share of them, so a pass here is a screening result, not a connection
+    # approval.
+    thd_limit_pct:
+      value: 3.0
+      clause: "generic placeholder until a real code is supplied: IEC TR 61000-3-6 Table 2 indicative planning level for total harmonic distortion at HV-EHV (not verified against the text here); 3 % used"
+      source: assumed
+    harmonic_limits_pct:
+      orders: {2: 1.4, 3: 2, 4: 0.8, 5: 2, 6: 0.4, 7: 2, 8: 0.4, 9: 1, 10: 0.35, 11: 1.5, 12: 0.32, 13: 1.5, 14:
+        0.3, 15: 0.3, 16: 0.28, 17: 1.2, 18: 0.27, 19: 1.07, 20: 0.26, 21: 0.2, 22: 0.25, 23: 0.89, 24:
+        0.24, 25: 0.82, 26: 0.23, 27: 0.2, 28: 0.23, 29: 0.7, 30: 0.22, 31: 0.66, 32: 0.22, 33: 0.2, 34:
+        0.22, 35: 0.58, 36: 0.21, 37: 0.55, 38: 0.21, 39: 0.2, 40: 0.21, 41: 0.5, 42: 0.21, 43: 0.47, 44:
+        0.2, 45: 0.2, 46: 0.2, 47: 0.43, 48: 0.2, 49: 0.42, 50: 0.2}
+      clause: "generic placeholder until a real code is supplied: IEC TR 61000-3-6 Table 2 indicative planning levels for individual harmonic voltages at HV-EHV, % of the fundamental (not verified against the text here)"
+      source: assumed
+    # Flicker severity at the connection point (grid-to-process issue 17). Demo values: IEC TR 61000-3-7
+    # indicative planning levels for HV-EHV (MV is 0.9 / 0.7), used whole as the limit on this site's contribution.
+    pst_limit:
+      value: 0.8
+      clause: "generic placeholder until a real code is supplied: IEC TR 61000-3-7 indicative planning level for short-term flicker severity Pst at HV-EHV; a planning level, not an emission limit allocated to this installation (margin overstated); not verified against the text here"
+      source: assumed
+    plt_limit:
+      value: 0.6
+      clause: "generic placeholder until a real code is supplied: IEC TR 61000-3-7 indicative planning level for long-term flicker severity Plt at HV-EHV; a planning level, not an emission limit allocated to this installation (margin overstated); not verified against the text here"
+      source: assumed
+    # The current-distortion standard of the TDD screen (datacenter readiness 12). Demo: a placeholder.
+    current_tdd_standard:
+      value: ieee519-2014
+      clause: "generic placeholder until a real code is supplied: placeholder; IEEE 519-2014 Tables 2-4 current distortion limits by PCC voltage and Isc/IL (not verified against the text here)"
+      source: assumed
+
+  us_ieee2800_nerc:
+    title: "US: IEEE 2800-2022 (on-site IBR) and NERC PRC-029-1 / PRC-024-3, with the site's own range assumed"
+    notes: >-
+      What binds a data centre is narrower than the codes' titles suggest.
+      IEEE 2800-2022 and NERC PRC-029-1 are written for inverter-based
+      generating resources; whether a behind-the-meter BESS or PV at a load
+      site falls in PRC-029-1's scope (BES IBR, or non-BES IBR of 20 MVA or
+      more on a delivery system of 60 kV or above) is unverified, and IEEE 2800
+      applies where a transmission provider adopts it. No NERC standard yet sets
+      ride-through for large or computational loads (a Level 3 alert of May
+      2026; Project 2026-02 drafts CLO-001/002/003; FERC set a filing deadline
+      of 31 December 2026); binding load ride-through is regional (ERCOT
+      NOGRR282 / NPRR1308 from 1 August 2026). The site's reactive range below
+      is therefore assumed, IEEE 2800's capability is held to the on-site IBR,
+      and every dynamic requirement is reported as needing a dynamic study.
+      Sources gathered 14 October 2026: NERC PRC-029-1 and PRC-024-3 texts; the
+      IEEE SA 2800 webinar slides; MISO's PAC-2024-2 summary of IEEE 2800.
+    voltage_bands:
+      - kv_min: 0.0
+        kv_max: 69.0
+        v_min: 0.90
+        v_max: 1.10
+        clause: "not set by NERC or IEEE 2800 below transmission level; the transmission owner's FAC-001 criteria apply; +/-10 % used"
+        source: assumed
+      - kv_min: 69.0
+        kv_max: 1000.0
+        kv_max_inclusive: true
+        v_min: 0.90
+        v_max: 1.05
+        # The 30-minute tier is reported with the dynamic requirements, never
+        # enforced by the steady-state checks.
+        v_max_30min: 1.10
+        clause: "NERC PRC-029-1 Table 2 (FERC Order 909): continuous operation 0.90-1.05 pu at the high side of the main power transformer, above 1.05 pu for 1,800 s; aligned with IEEE 2800-2022"
+        source: code
+    q_range_demand:
+      value: 0.329
+      clause: "not set by any US code for a load: power factor 0.95 at the connection capacity used as a placeholder (FERC Order 827 and IEEE 2800 state +/-0.95 pf for generating resources, not for the load)"
+      source: assumed
+    q_range_ibr:
+      value: 0.3287
+      reference: "ICR at rated active power, at the reference point of applicability (default the point of measurement)"
+      clause: "IEEE 2800-2022 reactive power capability: inject or absorb at least 32.87 % of ICR (about +/-0.95 pf) at every active-power level; value as summarised by MISO PAC-2024-2, not read from the standard's own text"
+      source: code
+    rvc_limit_pct:
+      value: 3.0
+      clause: "no US code value found for rapid voltage change at the connection point; 3 % used"
+      source: assumed
+    dynamic_requirements:
+      - id: frt
+        requirement: "Frequency ride-through of the on-site IBR"
+        value: "58.8-61.2 Hz continuous; outside it for 299 s; may trip above 61.8 Hz or below 57.0 Hz"
+        clause: "NERC PRC-029-1 (aligned with IEEE 2800-2022 frequency ride-through)"
+        source: code
+        applies_to: ibr
+      - id: vrt
+        requirement: "Voltage ride-through of the on-site IBR (PV, BESS)"
+        value: "0.90-1.05 pu continuous; above 1.05 pu 1,800 s; above 1.10 pu 1.0 s; below 0.90 pu 6 s; below 0.70 pu 3 s; below 0.50 pu 1.2 s; below 0.25 pu 0.32 s"
+        clause: "NERC PRC-029-1 Table 2, at the high side of the main power transformer"
+        source: code
+        applies_to: ibr
+      - id: rocof
+        requirement: "Ride through a rate of change of frequency"
+        value: "5 Hz/s"
+        clause: "NERC PRC-029-1 R3; IEEE 2800-2022 RoCoF ride-through (absolute RoCoF up to 5.0 Hz/s)"
+        source: code
+        applies_to: ibr
+      - id: pfr
+        requirement: "Primary frequency response of the on-site IBR"
+        value: "droop 5 % (range 2-5 %), deadband 0.036 Hz (0.06 % of nominal)"
+        clause: "IEEE 2800-2022 primary frequency response defaults, as summarised by MISO PAC-2024-2"
+        source: code
+        applies_to: ibr
+      - id: prc024_no_trip
+        requirement: "Protection settings outside the no-trip zone (Eastern Interconnection)"
+        value: "59.5-60.5 Hz continuous; instantaneous trip only at or beyond 61.8 / 57.8 Hz; voltage no-trip curve per PRC-024-3 Attachment 2"
+        clause: "NERC PRC-024-3 (a settings audit, not a load-flow check)"
+        source: code
+        applies_to: ibr
+      - id: large_load_ride_through
+        requirement: "Ride-through of the data centre load itself"
+        value: "no binding NERC standard yet; regional rules (ERCOT NOGRR282 / NPRR1308) and pending NERC standards"
+        clause: "NERC Level 3 alert (May 2026); Project 2026-02; FERC order of 16 July 2026 (filing by 31 December 2026)"
+        source: assumed
+        applies_to: load

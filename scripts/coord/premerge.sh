@@ -43,6 +43,22 @@ gh_repo=${PREMERGE_REPO:-MLHaoChang/pypsa-eur}
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 root=$(git rev-parse --show-toplevel)
 cd "$root"
+# Run from a worktree (e.g. wt-pm), $root has no node_modules; the main
+# checkout, which owns the shared .git, does.
+common_dir=$(git rev-parse --path-format=absolute --git-common-dir)
+main_root=${common_dir%/*}
+
+# Link the main checkout's frontend node_modules into the trial merge.
+link_node_modules() {
+  local dst=$wt/pypsa-gui/frontend/node_modules
+  local src=$main_root/pypsa-gui/frontend/node_modules
+  [[ -e $dst ]] && return 0
+  if [[ ! -d $src ]]; then
+    echo "  no $src: install the frontend dependencies in the main checkout first"
+    return 1
+  fi
+  ln -s "$src" "$dst"
+}
 
 # Overlap in these paths is harmless when the merge itself is clean.
 docs_only_re='^(docs/superpowers/OPEN-ITEMS\.md|docs/superpowers/plans/.*|doc/release-notes\.d/.*|doc/release_notes\.md|(.*/)?(CONTEXT|GLOSSARY)\.md|GLOSSARY-MAP\.md|pypsa-gui/backend/harness/README\.md)$'
@@ -211,8 +227,7 @@ else
   if ((need_vt)); then
     echo
     echo "== frontend tool-list tests"
-    [[ -e $wt/pypsa-gui/frontend/node_modules ]] \
-      || ln -s "$root/pypsa-gui/frontend/node_modules" "$wt/pypsa-gui/frontend/node_modules" 2>/dev/null || true
+    link_node_modules || true
     read -r -a vt_cmd <<<"${PREMERGE_VITEST:-npx vitest run}"
     if (cd "$wt/pypsa-gui/frontend" && "${vt_cmd[@]}" "${tool_list_vitests[@]}"); then
       echo "frontend tool-list tests: pass"
@@ -259,8 +274,7 @@ if ((${#code_files[@]})); then
     fi
     if [[ -n $unique_vt ]]; then
       mapfile -t vtfiles <<<"$unique_vt"
-      [[ -e $wt/pypsa-gui/frontend/node_modules ]] \
-        || ln -s "$root/pypsa-gui/frontend/node_modules" "$wt/pypsa-gui/frontend/node_modules" 2>/dev/null || true
+      link_node_modules || true
       read -r -a vt_cmd <<<"${PREMERGE_VITEST:-npx vitest run}"
       (cd "$wt/pypsa-gui/frontend" && "${vt_cmd[@]}" "${vtfiles[@]}") || ok=0
     fi
@@ -306,6 +320,17 @@ else
   sed 's/^/  /' <<<"$live"
   fail=1
   reasons+=("template not updated")
+fi
+
+echo
+echo "== builder session"
+# Reviewers send NOT OK details straight to the builder named on the PR body's
+# "Session: <id>" line. Missing it is reported, not blocking.
+if sid=$(command -v gh >/dev/null && gh api "repos/$gh_repo/pulls/$pr" --jq .body \
+  | grep -oE 'Session: session_[A-Za-z0-9]+' | tail -1) && [[ -n $sid ]]; then
+  echo "$sid"
+else
+  echo "no 'Session: <id>' line in the PR body: ask the PR's session to add it"
 fi
 
 echo

@@ -1,0 +1,1 @@
+{"kinds": {"assurance_project_deleted": {"surface": "banner", "why": "The project was deleted while a checked answer was being committed. Nothing was published, any saved answer was withdrawn, and the turn ends; there is no retry, since the project is gone. Kept apart from assurance_access_revoked, where a grant ended."}}}
