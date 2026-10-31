@@ -9,7 +9,7 @@ export function EditedSinceStudyBanner({ edited, testId }: {
 }) {
   if (edited !== true) return null
   return (
-    <div className="mx-3 mt-1">
+    <div className="mx-3 my-1">
       <p data-testid={testId}
         className="rounded border border-warn/50 bg-warn/10 px-3 py-2 text-[12px] text-warn">
         {EDITED_TEXT}
