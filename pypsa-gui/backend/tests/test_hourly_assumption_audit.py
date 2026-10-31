@@ -30,6 +30,8 @@ ALLOWED: dict[str, tuple[int, str]] = {
                                  "occurrence.py formula, a unit"),
     "adequacy/eh_study.py": (1, "modelled hours = nyears × 8760 (nyears is Σ weights / 8760, "
                                 "weights in hours) — a unit"),
+    "adequacy/sizing_loop_runner.py": (1, "AS-06: a RangeIndex has no step, so the tsam view reads it as hourly "
+                                          "(documented in _PeriodView); a timestamped index keeps its own step"),
     "adequacy/levers.py": (2, "annualise to MWh/yr: Σ w·p × 8760 / Σ w and p_nom × 8760 — "
                               "8760 h/yr, weights in hours; a unit"),
     "solver/adequacy.py": (3, "EH import-energy cap: E MWh/yr × Σ w / 8760 per period "
@@ -165,6 +167,7 @@ def test_the_inventory_is_pinned():
     # LC-18: harness/sensitivity_comparison.py (1) annualises in h/yr.
     # G2P-10: solver/process_uc.py (1) recognises the hourly year time base.
     # AS-03: solver/envelope_floors.py (4) prorates the annual run-hour cap.
-    assert sum(c for c, _ in ALLOWED.values()) == 92
-    assert len(ALLOWED) == 48
+    # AS-06: adequacy/sizing_loop_runner.py (1) reads a RangeIndex as hourly for tsam.
+    assert sum(c for c, _ in ALLOWED.values()) == 93
+    assert len(ALLOWED) == 49
     assert all(reason for _, reason in ALLOWED.values())
