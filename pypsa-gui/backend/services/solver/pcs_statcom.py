@@ -13,6 +13,7 @@ Tags (custom columns, so the rows survive the project's .nc round-trip and enter
   * one grid-connection `Link` (bus0 grid, bus1 campus): `pq_x_pu`, `pq_pf`, `pq_s_n_mva`, `pq_p_cap_mw`,
     `pq_pf_req` and `statcom_capital_cost` (per Mvar per year). Q_load(t) is the native `q_set` of the Loads on
     bus1.
+  * optional on that Link: `pq_q_margin_mvar`, the sizing loop's PQ cut (AS-06), added to Q_load(t).
 
 `_wrap_with_pcs_statcom` adds:
 
@@ -53,6 +54,9 @@ if TYPE_CHECKING:
 STORE_COLUMNS = ("pcs_r_max", "pcs_capital_cost")
 #: Custom `Link` columns of the PQ cut and the STATCOM.
 LINK_COLUMNS = ("pq_x_pu", "pq_pf", "pq_s_n_mva", "pq_p_cap_mw", "pq_pf_req", "statcom_capital_cost")
+#: Optional `Link` columns, part of the tags only where set, so a network without them keeps its fingerprint:
+#: `pq_q_margin_mvar`, the sizing loop's PQ cut (AS-06), Mvar added to Q_load(t) in the pq row.
+OPTIONAL_LINK_COLUMNS = ("pq_q_margin_mvar",)
 #: The solved sizes, persisted by `persist_solution`. Never tags: they must stay out of `pcs_statcom_tags` and so
 #: out of the input fingerprint.
 RESULT_STORE_COLUMNS = ("pcs_s_x_opt",)
@@ -105,8 +109,10 @@ def pcs_statcom_tags(n: "pypsa.Network") -> tuple[pd.DataFrame | None, pd.DataFr
     """(tagged stores, tagged links), each with only the tag columns, or None where nothing is tagged."""
     stores = _tagged(getattr(n, "stores", None), STORE_COLUMNS)
     links = _tagged(getattr(n, "links", None), LINK_COLUMNS)
-    return (None if stores is None else stores.reindex(columns=list(STORE_COLUMNS)),
-            None if links is None else links.reindex(columns=list(LINK_COLUMNS)))
+    if links is not None:
+        links = links.reindex(columns=list(LINK_COLUMNS) + [c for c in OPTIONAL_LINK_COLUMNS
+                                                             if c in links.columns and links[c].notna().any()])
+    return (None if stores is None else stores.reindex(columns=list(STORE_COLUMNS)), links)
 
 
 def _check(n: "pypsa.Network") -> tuple[pd.DataFrame, str] | None:
@@ -129,6 +135,9 @@ def _check(n: "pypsa.Network") -> tuple[pd.DataFrame, str] | None:
                            ("pq_s_n_mva", tags["pq_s_n_mva"] > 0), ("pq_p_cap_mw", tags["pq_p_cap_mw"] > 0),
                            ("pq_pf_req", 0 < tags["pq_pf_req"] <= 1),
                            ("statcom_capital_cost", tags["statcom_capital_cost"] >= 0)) if not ok]
+    margin = tags.get("pq_q_margin_mvar", np.nan)
+    if not (np.isnan(margin) or (np.isfinite(margin) and margin >= 0)):
+        bad.append("pq_q_margin_mvar")
     if bad:
         raise PcsStatcomRefusal(f"link {link}: {', '.join(f'{c} = {tags[c]:g}' for c in bad)} out of range")
     s = n.links.loc[link]
@@ -199,6 +208,9 @@ def _add_rows(n, snapshots, stores: pd.DataFrame, link: str, emit) -> None:
     p_tr = m.variables["Link-p"].sel(name=link)
     q_set = n.get_switchable_as_dense("Load", "q_set").loc[snapshots]
     q_load = q_set[n.loads.index[n.loads["bus"] == t["bus1"]]].sum(axis=1)
+    margin = float(t.get("pq_q_margin_mvar", np.nan))
+    if np.isfinite(margin) and margin > 0:
+        q_load = q_load + margin
 
     q_ss = m.add_variables(lower=0, name="Statcom-q_ss")
     q_dyn = m.add_variables(lower=0, name="Statcom-q_dyn")

@@ -27,3 +27,23 @@ Add a `*_loop_runner` in the `ADQ/coupling.py` pattern: solve, forward pass on f
 ## PRs
 
 ## Comments
+
+### GK A plan verdict (2026-10-31): GO for both PRs, with conditions
+
+Answers: (a) the PQ margin is an optional `pq_q_margin_mvar` Link column read by pcs_statcom's pq row, fingerprinted only when present, with a pin test that existing fingerprints stay byte-identical; (b) scalar forward checks with optional campus adapters; a skipped adapter is named, and the verdict is then "converged (campus checks not run: …)", never a plain converged.
+
+PR 1 (engine):
+1. Converged needs every check passing (a harmonics filter cost excepted). A failing check that yields no new or tighter cut while its lever is not "none" is not_converged and names the check.
+2. Monotone cuts, a direction per key: import_cap_mw and pst_rhs_mva only fall; the floors, gfm_mva_min and pq_margin_mvar only rise. A looser proposal is ignored (tested).
+3. The import cap bounds the import flow p(t) at the PoC, not the transformer p_nom, so it cannot contradict a frozen transformer.
+4. Pst rhs = d_lim · S_sc,min, S_sc,min = S_k''/c (IEC 60909 c factor), reusing flicker_inputs/gridspine; the shortfall tightening is a docstring formula with a row test.
+5. Every sizing_cuts LP input enters `_network_input_fingerprint` when present and leaves it byte-identical when absent (normal and exact mode); inert controller settings never enter it.
+6. The tolerance stop compares cost including the filter cost, consistently with the reported cost.
+
+PR 2 (runner):
+7. A run on a copy writes nothing of the open project's state (capacity_run record, caches, stashes, solve status, manifests, hourly audit); the active network and its results are byte-equal after a loop. AS-10 applies the result.
+8. The forward pass runs again on the full-year final solve; the verdict is the full-year one ("reduced-year rounds passed, full year failed" is not_converged).
+9. AS-07's sheet is built before n.model is dropped; spectrum and control_settings are called only through their public functions.
+10. gridspine imports stay inside functions or behind the import guard; tests/test_packaging_requirements.py passes at the trial merge.
+11. stop_event aborts between rounds and inside long solves; abort after round 1 is tested.
+12. The slow acceptance case is marked slow; a fast fake-solve test covers the runner wiring.
