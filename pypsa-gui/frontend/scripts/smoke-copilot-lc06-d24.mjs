@@ -93,18 +93,27 @@ try {
     return said.at(-1)
   }
 
+  // The right panel's Properties for L2 (header, then the bus it starts from); empty before any selection.
+  const properties = async () => /LINE\s+L2[\s\S]*From bus\s+B2/i.test(await page.evaluate(() => document.body.innerText))
+  assert.equal(await properties(), false, 'nothing is selected at the start')
+
   // A real asset: the tool reports it and the screen moves to it.
   assert.match(await turn('LC06D24 select L2'), /select_component/)
-  await page.getByText('L2', { exact: true }).first().waitFor({ timeout: 15000 })
+  await page.getByText('From bus').first().waitFor({ timeout: 15000 })
+  assert.equal(await properties(), true, 'L2 is selected and its properties are open')
   await page.screenshot({ path: path.join(artifacts, 'lc06d24-select.png') })
 
   // An unknown asset: refused in the tool result; no ui_event, so the selection stays L2.
   const refused = await turn('LC06D24 unknown asset')
   assert.match(refused, /component_not_found/)
   assert.doesNotMatch(refused, /select_component/)
+  assert.equal(await properties(), true, 'the selection is still L2')
   assert.equal(await page.getByText('Nope', { exact: true }).count(), 0, 'the screen never lands on the unknown asset')
 
+  // Asset detail: the Asset Detail drawer shows L2.
   assert.match(await turn('LC06D24 detail of L2'), /open_asset_detail/)
+  await page.getByTestId('asset-drawer').waitFor({ timeout: 15000 })
+  await page.waitForFunction(() => /L2\s+Line · bus B2/.test(document.querySelector('[data-testid="asset-drawer"]')?.innerText ?? ''), null, { timeout: 15000 })
   await page.screenshot({ path: path.join(artifacts, 'lc06d24-detail.png') })
 
   assert.match(await turn('LC06D24 panel'), /navigate/)
