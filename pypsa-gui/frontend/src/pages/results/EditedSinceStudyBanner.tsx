@@ -9,9 +9,11 @@ export function EditedSinceStudyBanner({ edited, testId }: {
 }) {
   if (edited !== true) return null
   return (
-    <p data-testid={testId}
-      className="rounded border border-warn/50 bg-warn/10 px-3 py-2 text-[12px] text-warn">
-      {EDITED_TEXT}
-    </p>
+    <div className="mx-3 mt-1">
+      <p data-testid={testId}
+        className="rounded border border-warn/50 bg-warn/10 px-3 py-2 text-[12px] text-warn">
+        {EDITED_TEXT}
+      </p>
+    </div>
   )
 }
