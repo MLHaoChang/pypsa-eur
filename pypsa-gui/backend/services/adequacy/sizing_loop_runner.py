@@ -12,8 +12,8 @@ Wires `services.adequacy.sizing_loop.run_sizing_loop` to real solves and the for
   ride-through, commercial terms, Capacity > sizing off. What the loop does not follow is named in `basis_note`:
   a rolling, myopic or SCLOPF solve (the loop sizes one full-horizon LP), unit commitment and the project's
   solver options, and a missing tsam (the inner rounds then solve, and are labelled, full year). The transforms'
-  restores run when the loop ends, after the forward checks and the sheet, so the open project's transient rows
-  are left as found; the loop marks and clears them on a private `solving_context`, never the project's. A stop request lands between rounds and
+  restores run once that round's forward checks are done (the last round's after the sheet), so one solved copy is
+  alive at a time and the open project's transient rows are left as found; the loop marks and clears them on a private `solving_context`, never the project's. A stop request lands between rounds and
   inside a solve: `runtime._AbortWatcher` interrupts a running LP, and the loop ends `aborted`. Inner rounds solve a tsam-reduced year (`services.time_aggregation_service`, the limited-foresight
   clustering, with `SolverConfig.lf_*`); the final solve is the full year, and its forward pass gives the verdict.
 * **forward**: the checks on the solved, fixed capacities. Each is a scalar check with gridspine or the AS
@@ -338,15 +338,17 @@ def solve_once(base, config, inp: SizingInputs, state: dict, *, reduce: bool, so
             _restore(undo, vintages)
 
 
-def _restore(undo: list, vintages: dict) -> None:
-    """Run the copies' transform restores, last first, as run_simulation does, and put the thread's frozen-vintage
-    store back: the modelling assumptions mark VOLL and DSR slacks in the open project's transient rows, and only
-    their restore clears them."""
-    for fn in reversed(undo):
+def _restore(undo: list, vintages: dict | None = None) -> None:
+    """Run a copy's transform restores, last first, as run_simulation does, and empty `undo`; with `vintages`, put
+    the thread's frozen-vintage store back. The modelling assumptions mark VOLL and DSR slacks as transient rows,
+    and only their restore clears them."""
+    while undo:
         try:
-            fn()
+            undo.pop()()
         except Exception:                                     # noqa: BLE001 - one failed restore must not skip the rest
             logger.exception("sizing loop: a restore raised")
+    if vintages is None:
+        return
     store = _frozen_vintage_store()
     store.clear()
     store.update(vintages)
@@ -516,12 +518,15 @@ def run_sizing(network, config, inp: SizingInputs, *, max_rounds: int = sl.MAX_R
                         stop_event=stop_event, on_iteration=on_iteration, solver_name=solver_name,
                         solver_options=solver_options)
         finally:
-            _restore(undo, vintages)                          # after the forward checks and the sheet
+            _restore(undo, vintages)                          # the last round's, after its checks and the sheet
 
 
 def _run(base, config, inp, solve, last, undo, *, max_rounds, freeze_after, stop_event, on_iteration, solver_name,
          solver_options) -> dict:
     def run(state, reduce):
+        # The previous round's forward checks are done: restore its copy now, so one solved copy is alive at a time.
+        _restore(undo)
+        last.pop("network", None)
         try:
             res = solve(base, config, inp, state, reduce=reduce, solver_name=solver_name,
                         solver_options=solver_options, stop_event=stop_event, undo=undo)

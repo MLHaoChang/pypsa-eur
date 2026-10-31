@@ -195,6 +195,20 @@ def test_abort_after_round_one(monkeypatch):
     assert out["status"] == "aborted" and len(out["rounds"]) == 1 and len(solves) == 1
 
 
+def test_each_rounds_restores_run_before_the_next_round_solves(monkeypatch):
+    monkeypatch.setattr(slr, "forward_checks", _always_failing_pst)
+    pending = []
+
+    def solve(*a, undo, **kw):
+        pending.append(len(undo))                             # round k's restores, still queued when k+1 starts
+        res = slr.solve_once(*a, undo=undo, **kw)
+        assert undo                                           # this round queued its own restores
+        return res
+
+    out = run_sizing(_tiny(), _config(voll=10_000.0), _inputs(), max_rounds=3, solve=solve)
+    assert len(out["rounds"]) == 3 and pending == [0, 0, 0]
+
+
 def test_a_stop_during_a_solve_interrupts_it_and_ends_aborted(monkeypatch):
     stop, entered = threading.Event(), threading.Event()
 
