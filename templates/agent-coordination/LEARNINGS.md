@@ -236,3 +236,15 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **Reviewers read code inline.** Two reviewers pulled 112k and 142k chars of `git show`/`git diff` (single outputs to 24k) with no subagent calls; builders that delegated reads stayed small. 13 full-size screenshots cost ~15k tokens.
   - Fix: read `git diff --stat` first, then one hunk or file at a time capped with `| head -c 6000`; whole-file or cross-file reads go to an Explore subagent that returns file:line findings; open screenshots downscaled to at most 1000 px wide.
   - Lives in: review-gk (Review setup), review-ux (Review setup), live and template copies.
+
+## 30 Oct 2026: retro "coordinator speed" (owner picked 1–3)
+
+- **premerge linked `node_modules` to itself in a worktree.** Run from the coordinator's wt-pm worktree, `$root` is that worktree, so the frontend tests failed with "Cannot find package 'vitest'" and a green PR (#957) showed `blocked`.
+  - Fix: link from the main checkout (`--git-common-dir`), and say so when it has no `node_modules`.
+  - Lives in: `scripts/coord/premerge.sh` (this project's copy only; the template's premerge has no frontend step).
+- **Reviewers couldn't reach builders.** A gatekeeper with a NOT OK had no builder id and relayed every ask through the coordinator, costing a coordinator wake per relay.
+  - Fix: steward ends each PR body with `Session: <id>`; review-gk and review-ux send a NOT OK's asks to that id; premerge prints the line under "builder session" and flags a missing one.
+  - Lives in: steward (Driving a PR, step 1), review-gk, review-ux, premerge.sh (live and template copies).
+- **Two packages ran on the same files.** LC-37 and LC-38 both changed the adequacy campaign and loop runners; the second needed a hand master merge and a delta re-review (one 60–80 min CI cycle).
+  - Fix: `brief.py --files <likely files>` prints `OVERLAP` and exits 3 when an open PR changes one of them.
+  - Lives in: `scripts/coord/brief.py`, coordinator (Taking on tasks, Open), live and template copies; test `tests/test_coord_brief.py`.
