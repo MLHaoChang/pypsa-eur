@@ -89,11 +89,22 @@ def start_frontier(
                         else None),
                     "targets_permyriad": targets, "base_restored": None,
                     "base_restore_status": None,
-                    "started_at": time.time(), "thread": None,
+                    "started_at": time.time(),
+                    # LC-37: the edit counter when the study STARTED, as the
+                    # EH study keeps it; `edited_since_study` compares it.
+                    "network_revision": None,
+                    "thread": None,
                     "stop_event": stop_event}
+    from services import dirty_state
+    study_ctx = PyPSAService.get_active_context()
 
     def worker():
         try:
+            # Captured in the worker under the mutation lock, right before the
+            # sweep first takes it (eh_study_runner's rule): a race can only
+            # over-report an edit.
+            with lock:
+                record["network_revision"] = dirty_state.revision(study_ctx)
             res = run_frontier_sweep(n, lock, cfg, targets, stop_event=stop_event,
                                      final_state_update=state_update)
             voll = float(getattr(cfg, "voll", 0.0) or 0.0)

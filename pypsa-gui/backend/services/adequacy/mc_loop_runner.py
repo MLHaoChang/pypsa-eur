@@ -131,7 +131,11 @@ def start_mc(
     population = None
     snapshot_fp = None
     margin_payload = None
+    from services import dirty_state
     with PyPSAService.get_lock():
+        # LC-37: the edit counter of the network this snapshot reads, as the
+        # EH study keeps it; `edited_since_study` compares it.
+        network_revision = dirty_state.revision()
         vre_names = [nm for kind, nm in assets if kind == "vre"]
         if want_portfolio:
             # The portfolio's must-take half needs its profiles PRESERVED in
@@ -212,6 +216,7 @@ def start_mc(
     stop_event = _threading.Event()
     record: dict = {"status": "running", "result": None, "error": None,
                     "goal_sources": goal_sources,
+                    "network_revision": network_revision,
                     "started_at": time.time(), "thread": None,
                     "stop_event": stop_event}
 

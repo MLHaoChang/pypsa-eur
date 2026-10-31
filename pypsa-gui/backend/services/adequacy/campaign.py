@@ -132,7 +132,32 @@ def _iso(ts: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
 
 
-def _snapshot(campaign: _Campaign, *, active: bool = True) -> dict:
+def _any_edited(flags: list) -> bool | None:
+    """Three-valued "any": True when one study is stale, None when none is
+    but one is unknown (or there are none), else False."""
+    if True in flags:
+        return True
+    return None if not flags or None in flags else False
+
+
+def _snapshot(campaign: _Campaign, ctx, *, active: bool = True) -> dict:
+    # LC-37: each entry says whether the network was edited since its study
+    # started (`study_state.edited_since` against the revision the entry
+    # captured, read on the campaign's own context; None for an entry without
+    # one, and for the latest entry of a study whose record is still running,
+    # as the study readers say). The campaign's own flag reads the LATEST
+    # entry of each study, so a re-run supersedes a stale one; None with no
+    # entries.
+    from services import dirty_state
+    from services.project_context import record_is_running
+    from services.study_state import edited_since
+    revision = dirty_state.revision(ctx)
+    entries = [{**e, "edited_since_study": edited_since(e, revision=revision)}
+               for e in campaign.entries]
+    latest = {e["study"]: e for e in entries}
+    for study, e in latest.items():
+        if record_is_running(ctx.solver_state.get(study)):
+            e["edited_since_study"] = None
     return {
         "active": active,
         "objective": campaign.objective,
@@ -140,7 +165,9 @@ def _snapshot(campaign: _Campaign, *, active: bool = True) -> dict:
         "spent_solves": campaign.spent_solves,
         "remaining_solves": campaign.budget_solves - campaign.spent_solves,
         "started_at": _iso(campaign.started_at),
-        "entries": list(campaign.entries),
+        "entries": entries,
+        "edited_since_study": _any_edited(
+            [e["edited_since_study"] for e in latest.values()]),
     }
 
 
@@ -185,7 +212,7 @@ def start(objective: str, budget_solves: int | None = None) -> dict:
         campaign = _Campaign(objective=objective, budget_solves=budget,
                              started_at=time.time())
         _put(ctx, campaign)
-        return _snapshot(campaign)
+        return _snapshot(campaign, ctx)
 
 
 def status() -> dict:
@@ -195,7 +222,7 @@ def status() -> dict:
         active = _get(ctx)
         if active is None:
             return {"active": False, "entries": []}
-        return _snapshot(active)
+        return _snapshot(active, ctx)
 
 
 def end(note: str | None = None) -> dict:
@@ -205,7 +232,7 @@ def end(note: str | None = None) -> dict:
         active = _get(ctx)
         if active is None:
             raise CampaignError("no campaign is running")
-        final = _snapshot(active, active=False)
+        final = _snapshot(active, ctx, active=False)
         _put(ctx, None)
     if note:
         final["note"] = str(note)[:MAX_OBJECTIVE_LEN]
@@ -239,8 +266,12 @@ def check(study: str, solves: int) -> None:
                 f"smaller max_solves) to fit")
 
 
-def record(study: str, solves: int) -> dict | None:
-    """Charge a STARTED study. Returns the new status, or None if idle."""
+def record(study: str, solves: int, *,
+           network_revision: int | None = None) -> dict | None:
+    """Charge a STARTED study. Returns the new status, or None if idle.
+
+    ``network_revision`` is the edit counter read before the study started
+    (LC-37); the snapshot compares it with the current one."""
     ctx = _context()
     with ctx.solver_state_lock:
         active = _get(ctx)
@@ -254,8 +285,9 @@ def record(study: str, solves: int) -> dict | None:
             "study": study,
             "solves_charged": int(solves),
             "at": _iso(time.time()),
+            "network_revision": network_revision,
         })
-        return _snapshot(active)
+        return _snapshot(active, ctx)
 
 
 def estimate_solves(n, study: str, **kwargs) -> int:
