@@ -87,6 +87,13 @@ class StorageSpec:
     split storages (AS-11: a ``Store`` with charger and discharger ``Link``s,
     read through ``services.solver.storage_inventory.list_storages``).
 
+    A split storage's P is AC-side: its charger's size and its discharger's
+    size × efficiency, the smaller when they differ (named in
+    ``MCInputs.storage_notes``), each derated by its Link's ``p_max_pu``
+    (``_split_capacity``). Its E is the Store's size, scaled by the same
+    max-over-blocks P ratio as a StorageUnit's ``max_hours × p_nom``.
+    Standing losses are not modelled for either layout.
+
     A plain ``Store`` is deliberately absent: it carries no power rating, so
     there is nothing to bound the hourly discharge with and a greedy dispatch
     would let it behave as unlimited-power energy. Revisit with H2.
@@ -133,6 +140,10 @@ class MCInputs:
     # must-take contribution (profile × capacity) that was netted OUT of the
     # residual, so ELCC can un-net it. Empty by default.
     vre_profiles: dict = field(default_factory=dict)
+    # AS-11: storages the walk could not count as built (a split storage
+    # missing a Link, unequal charge and dispatch power, an untagged
+    # Store + Links), one sentence each; `mc_adequacy` reports them.
+    storage_notes: tuple = ()
 
 
 def _storage_capacity(row) -> float:
@@ -162,6 +173,55 @@ def _efficiency(row, col: str) -> float:
 # Phase 12d: the block construction lives beside the activity rule; the
 # name is kept here for its callers and tests.
 from services.adequacy.activity import period_blocks as _period_blocks  # noqa: E402
+
+
+def _block_pu(n, link: str, start: int, end: int) -> float:
+    """The lowest ``p_max_pu`` of Link ``link`` over hours ``[start, end)``,
+    clipped to [0, 1]: one availability per block, since a store's power is
+    block-constant in the dispatch (``block_capacity``)."""
+    pmp = getattr(getattr(n, "links_t", None), "p_max_pu", None)
+    if pmp is not None and link in getattr(pmp, "columns", ()):
+        seg = np.asarray(pmp[link].reindex(n.snapshots).to_numpy(), dtype=np.float64)[start:end]
+        v = float(np.nanmin(seg)) if seg.size and not np.isnan(seg).all() else 1.0
+    else:
+        try:
+            v = float(n.links.at[link, "p_max_pu"])
+        except (KeyError, TypeError, ValueError):
+            v = 1.0
+    return min(max(v, 0.0), 1.0) if math.isfinite(v) else 1.0
+
+
+def _split_capacity(n, ctx, e):
+    """``(p_nom_mw, capacity_series, p_activity_max)`` of a split storage.
+    Per block, P is the charger's size and the discharger's size × its
+    efficiency, each × its Link's lowest ``p_max_pu`` in the block (GK A,
+    AS-11a), combined by ``ac_power`` (the smaller, unless they agree).
+    ``p_activity_max`` is the same without ``p_max_pu``: the E scale. A
+    block where availability is below the maximum carries proportionally
+    less energy (``block_store_arrays``' rule)."""
+    from services.adequacy.activity import _CONST_TOL
+    from services.solver.storage_inventory import ac_power
+
+    crow, drow = n.links.loc[e.charger], n.links.loc[e.discharger]
+    ch = ctx.capacity_by_period(e.charger, crow)
+    dis = ctx.capacity_by_period(e.discharger, drow)
+    act: list[float] = []
+    caps: list[float] = []
+    for (_label, start, end), c, d in zip(ctx.blocks, ch, dis):
+        d_ac = d * e.eff_dispatch
+        act.append(ac_power(c, d_ac))
+        caps.append(ac_power(c * _block_pu(n, e.charger, start, end),
+                             d_ac * _block_pu(n, e.discharger, start, end)))
+    p_act = max(act) if act else 0.0
+    cap_max = max(caps) if caps else 0.0
+    if cap_max <= 0.0:
+        return 0.0, None, p_act
+    if all(abs(c - cap_max) <= _CONST_TOL * cap_max for c in caps):
+        return cap_max, None, p_act
+    series = np.empty(ctx.H, dtype=np.float64)
+    for (_label, start, end), c in zip(ctx.blocks, caps):
+        series[start:end] = c
+    return cap_max, series, p_act
 
 
 def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
@@ -209,8 +269,11 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
         np.asarray(weights.reindex(snapshots).to_numpy(), dtype=np.float64))
 
     storage: list[StorageSpec] = []
-    from services.solver.storage_inventory import SPLIT, list_storages
+    from services.solver.storage_inventory import SPLIT, list_storages, storage_notes
     entries = list_storages(n)
+    notes = tuple(storage_notes(n, entries))
+    for note in notes:
+        logger.warning("adequacy storage: %s", note)
     blocks = _period_blocks(snapshots)
     if entries:
         from services.adequacy.activity import ActivityContext
@@ -239,13 +302,17 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
             # Phase 12d: `solved_capacity`'s rule per period, through the
             # same activity context the generator walk uses; `p_nom_mw` is
             # the maximum over the blocks and the series carries the rest.
-            p_nom, su_series = ctxs[e.power_component].capacity_series(e.power_row, row)
+            if e.layout == SPLIT:
+                p_nom, su_series, p_act = _split_capacity(
+                    n, ctxs[e.power_component], e)
+            else:
+                p_nom, su_series = ctxs[e.power_component].capacity_series(e.power_row, row)
             if p_nom <= 0 and not keep_zero_capacity:
                 continue
             if e.layout == SPLIT:
-                # E is the Store's own size; scaled with P only if the
-                # block maximum differs from the solved P (vintages).
-                e_nom = (e.e_nom_mwh * p_nom / e.p_nom_mw) if e.p_nom_mw > 0 else 0.0
+                # The SU rule: E follows P's max-over-blocks ratio (activity
+                # and vintages; E/P is the Store's solved ratio).
+                e_nom = (e.e_nom_mwh * p_act / e.p_nom_mw) if e.p_nom_mw > 0 else 0.0
                 occ_comp = "stores"
             else:
                 try:
@@ -341,6 +408,7 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
         storage=tuple(storage),
         nyears=float(horizon_years(n)),
         vre_profiles=profiles,
+        storage_notes=notes,
     )
 
 
@@ -869,4 +937,5 @@ def mc_adequacy(inputs: MCInputs, *, draws: int = 500, seed=0,
         "horizon_years": nyears,
         "resolution_floor_h": floor,
         "warning": MC_WARNING_V1,
+        **({"storage_notes": list(inputs.storage_notes)} if inputs.storage_notes else {}),
     }

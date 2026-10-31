@@ -15,7 +15,7 @@ from services.adequacy import mc as M
 from services.compare.dispatch import _compute_dispatch_summary
 from services.compare.storage_cycling import _compute_storage_cycling_summary
 from services.solver.split_storage import _wrap_with_split_storage, add_split_storage, migrate_storage_unit
-from services.solver.storage_inventory import SPLIT, STORAGE_UNIT, list_storages
+from services.solver.storage_inventory import SPLIT, STORAGE_UNIT, list_storages, storage_notes
 
 HOURS = 48
 
@@ -43,7 +43,7 @@ def _pair(**su) -> tuple[pypsa.Network, pypsa.Network]:
     return legacy, split
 
 
-SU = dict(p_nom=20.0, max_hours=2.0, efficiency_store=0.95, efficiency_dispatch=0.9)
+SU = dict(p_nom=20.0, max_hours=2.0, efficiency_store=0.95, efficiency_dispatch=0.9, standing_loss=0.001)
 
 
 def _spec(s: M.StorageSpec) -> tuple:
@@ -59,6 +59,8 @@ def test_the_inventory_lists_both_layouts_with_power_energy_and_efficiencies():
         assert e.p_nom_mw == pytest.approx(20.0)
         assert e.e_nom_mwh == pytest.approx(40.0)
         assert (e.eff_store, e.eff_dispatch) == pytest.approx((0.95, 0.9))
+        assert e.standing_loss == pytest.approx(0.001)
+        assert (e.p_charge_mw, e.p_dispatch_mw) == pytest.approx((20.0, 20.0))
     assert (b.power_component, b.power_row, b.discharger) == ("links", "bess charger", "bess discharger")
 
 
@@ -76,10 +78,50 @@ def test_the_inventory_reads_solved_sizes_of_an_extendable_split_storage():
     assert {e.name: e.p_nom_mw for e in list_storages(n)}["new"] == 0.0
 
 
-def test_a_split_storage_whose_link_is_gone_is_not_listed():
+def test_a_split_storage_whose_link_is_gone_is_not_listed_but_named():
     _, split = _pair(**SU)
     split.remove("Link", "bess discharger")
     assert list_storages(split) == []
+    inp = M.snapshot_inputs(split)
+    assert inp.storage == ()
+    assert inp.storage_notes == ("bess: split storage without its charger or discharger link; not counted",)
+    assert M.mc_adequacy(inp, draws=50, seed=1, max_draws=50)["storage_notes"] == list(inp.storage_notes)
+
+
+def test_an_untagged_store_with_links_is_named_not_counted():
+    n = _adequacy_site(**SU)
+    n.add("Bus", "pe store", carrier="battery")
+    n.add("Store", "pe", bus="pe store", carrier="battery", e_nom=40.0)
+    n.add("Link", "pe charger", bus0="ac", bus1="pe store", p_nom=20.0)
+    n.add("Link", "pe discharger", bus0="pe store", bus1="ac", p_nom=20.0)
+    assert [e.name for e in list_storages(n)] == ["bess"]
+    assert storage_notes(n) == ["pe: Store with charging and discharging links but no split-storage tag; not counted"]
+
+
+def test_an_undersized_discharger_caps_the_power_and_is_named():
+    """A fixed split storage whose discharger delivers 12 MW to the bus but whose charger draws 20 MW counts as
+    12 MW, the AC-side power it can give back."""
+    _, split = _pair(**SU)
+    split.links.loc["bess discharger", "p_nom"] = 12.0 / 0.9
+    (e,) = list_storages(split)
+    assert (e.p_charge_mw, e.p_dispatch_mw, e.p_nom_mw) == pytest.approx((20.0, 12.0, 12.0))
+    inp = M.snapshot_inputs(split)
+    assert inp.storage[0].p_nom_mw == pytest.approx(12.0)
+    assert inp.storage[0].e_nom_mwh == pytest.approx(40.0 * 12.0 / 12.0)
+    assert len(inp.storage_notes) == 1 and inp.storage_notes[0].startswith("bess: charger 20 MW")
+
+
+def test_a_discharger_availability_below_one_derates_the_power():
+    legacy, split = _pair(**SU)
+    split.links.loc["bess discharger", "p_max_pu"] = 0.5
+    (s,) = M.snapshot_inputs(split).storage
+    assert s.p_nom_mw == pytest.approx(10.0)
+    assert s.e_nom_mwh == pytest.approx(40.0)          # energy is not an availability
+    # Time-varying: the lowest value in the block counts (one block here).
+    split.links.loc["bess discharger", "p_max_pu"] = 1.0
+    split.links_t.p_max_pu = pd.DataFrame({"bess discharger": np.linspace(1.0, 0.25, HOURS)}, index=split.snapshots)
+    assert M.snapshot_inputs(split).storage[0].p_nom_mw == pytest.approx(5.0)
+    assert M.snapshot_inputs(legacy).storage_notes == ()
 
 
 def test_the_monte_carlo_gives_a_split_storage_the_same_ens_as_the_equal_storage_unit():

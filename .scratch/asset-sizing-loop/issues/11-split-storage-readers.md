@@ -40,6 +40,15 @@ table) and `compare/capacity.py` already read Stores.
   (`list_storages`, `split_ac_flows`) lists both layouts; the adequacy Monte Carlo (`mc.snapshot_inputs`, which
   `mc_zonal.py` via `eh_stages` and `elcc.py` reuse), `compare/storage_cycling.py` and `compare/dispatch.py` read it.
   Tests: `pypsa-gui/backend/tests/test_split_storage_readers.py`. Acceptance boxes 1–3 are met by slice 1.
+- GK A plan GO for slice 1 (2026-10-31), conditions: (1) split P = min(charger size, discharger size x
+  efficiency), named in a note when they differ by > 1e-6 relative; (2) Link `p_max_pu` of both Links derates P
+  (lowest value per block); (3) E follows the StorageUnit's max-over-blocks P ratio, migrated-equivalence ENS/LOLE
+  bit-identical; (4) `StorageEntry` carries `standing_loss` (the MC ignores it in both layouts); (5) no silent
+  skips: a split missing a Link and an untagged Store + Links are named in `MCInputs.storage_notes` and the MC
+  result's `storage_notes`; (6) cycles = throughput / (2 x E), throughput = charger p0 + |discharger p1|;
+  (7) the StorageUnit path is unchanged.
+- Out of slice 1: counting an untagged Store with charging/discharging Links (an imported PyPSA-Eur battery);
+  it is only named today. Slice 2 or later.
 - Slice 2 (open): `services/adequacy/portfolio.py`, `site_peak.py`, `smoothing.py`, `redundancy.py`, `levers.py`
   (`storage_duration`), `eh_readiness.py`, `activity.py`; the dispatch walk of `compare/economics.py`;
   `services/results/dispatch_digest.py`, `results/billing.py`, `results/load_shape.py`;
