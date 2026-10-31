@@ -3,7 +3,8 @@
 
 # LC-33 — Behaviour coverage for the nine unassigned LC-D06/LC-D13 variants
 
-Status: ready-for-agent
+Status: done
+<!-- 2026-10-31: done, commit 08c6e8c80; LC-D13.multi_energy_heat and finalist_certification stay pending outside its nine. -->
 Type: task
 
 Owner decision LC-VARIANTS-1: one package covers the nine variants LC-08's hand-off left

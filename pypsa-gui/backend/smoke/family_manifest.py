@@ -215,7 +215,12 @@ VARIANTS: list[dict] = [
              B + 'test_lc06_d03_chronology_edges.py::test_a_repeated_timestamp_is_refused_and_stores_nothing',
              B + 'test_lc06_d03_chronology_edges.py::test_a_missing_snapshot_is_forward_filled_and_named',
              B + 'test_lc06_d03_chronology_edges.py::test_an_off_horizon_csv_is_refused_and_keeps_the_snapshots'),
-    _pending('LC-D03.timezone_aware', 'timezone-aware or DST-offset inputs and MW-versus-pu mapping not tested; the DST case covers zone-free wall clock only'),
+    _covered('LC-D03.timezone_aware', 'CSV timestamps with a UTC offset (+01:00, +00:00 or mixed offsets) refused as timeseries_timezone_aware, snapshots and series unchanged; '
+             'an off-horizon CSV on a two-period network refused as timeseries_outside_horizon (broadcast and per-period), nothing stored; '
+             'MW-versus-pu mapping not covered',
+             'upload_timeseries',
+             B + 'test_lc06_d03_chronology_edges.py::test_a_timezone_aware_csv_is_refused_typed_and_stores_nothing',
+             B + 'test_lc06_d03_chronology_edges.py::test_an_off_horizon_csv_on_a_period_network_is_refused_and_stores_nothing'),
     _covered('LC-D04.bound_build', 'extendable G2 built to p_nom_max: optimal_capacity 3 = capacity_change 3; fixed G: 20 MW, change 0',
              '',
              B + 'test_capacity_cycles_assurance.py::test_an_extendable_generator_built_to_its_bound',
@@ -685,7 +690,9 @@ VARIANTS: list[dict] = [
              'ui_select_component ui_open_asset_detail',
              B + 'test_lc06_d24_ui_events.py::test_a_wrong_target_is_refused_without_moving_the_screen',
              B + 'test_lc06_d24_ui_events.py::test_component_asset_and_panel_events_carry_exactly_what_was_asked'),
-    _pending('LC-D24.panels_e2e', 'the Playwright e2e (6 pass / 2 fail baseline) is not re-run or re-audited; panel/subview/filter/editor coverage, wrong project/run/generation, disconnect and keyboard/touch/320px cases not tested'),
+    _covered('LC-D24.panels_e2e', 'the built app, loopback wire, real native backend and Chromium: ui_select_component on L2 moves the screen to L2, the unknown asset Nope is refused component_not_found and never appears, ui_open_asset_detail opens L2, ui_open_panel opens the Capacity results tab; scripts/smoke-copilot-lc06-d24.mjs runs in the browser job and the backend test pins that wiring. Not covered: wrong project/run/generation, disconnect, keyboard/touch/320px',
+             'ui_select_component ui_open_asset_detail ui_open_panel',
+             B + 'test_lc06_d24_ui_events.py::test_the_panels_e2e_journey_is_wired_into_the_browser_job'),
 ]
 
 

@@ -1340,6 +1340,20 @@ async def upload_timeseries(
         )
         df.index = new_mi
 
+    # Snapshots are zone-free wall clock. A CSV carrying UTC offsets (or mixed
+    # offsets, which pandas leaves as strings) cannot be aligned to them
+    # without guessing the zone, so it is refused typed rather than surfacing
+    # as a misleading off-horizon error.
+    csv_ts = df.index.get_level_values(-1)
+    offset_strings = csv_ts.dtype == object and csv_ts.astype(str).str.contains(
+        r"(?:[+-]\d{2}:?\d{2}|Z)$", regex=True).any()
+    if getattr(csv_ts, "tz", None) is not None or offset_strings:
+        raise HTTPException(422, {
+            "error_kind": "timeseries_timezone_aware",
+            "message": "The CSV's timestamps carry a UTC offset. Snapshots are zone-free wall clock: convert "
+                       "the timestamps to local wall time without an offset and "
+                       "upload again. Nothing was stored.",
+        })
     # A repeated timestamp has no single value to align on (pandas fails deep
     # inside the reindex with an untyped InvalidIndexError), so it is refused
     # here, typed, before anything is stored.
@@ -1371,6 +1385,20 @@ async def upload_timeseries(
             lo, hi = df.index.min(), df.index.max()
             filled = [str(t) for t in n.snapshots
                       if lo <= t <= hi and t not in df.index]
+
+    # MultiIndex (period) networks: the stored series is aligned on the
+    # timestep level, so a CSV sharing no timestep with it would be stored
+    # but never applied. Replacing a period horizon is not offered here.
+    if is_multi and len(n.snapshots) and len(df.index):
+        steps = n.snapshots.get_level_values(-1)
+        if not len(df.index.get_level_values(-1).intersection(steps)):
+            raise HTTPException(422, {
+                "error_kind": "timeseries_outside_horizon",
+                "message": f"The CSV runs {csv_ts.min()} to {csv_ts.max()}, outside "
+                           f"the network's snapshots ({steps.min()} to {steps.max()}). "
+                           "Nothing was stored. Rebuild the periods with "
+                           "/snapshots/multi_period, then upload again.",
+            })
 
     # Phase 12f: refuse before the lock is taken and before `_user_ts` is
     # written. A CSV's blank cell is a NaN by the time `read_csv` is done, and

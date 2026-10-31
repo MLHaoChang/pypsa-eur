@@ -65,6 +65,8 @@ def test_component_asset_and_panel_events_carry_exactly_what_was_asked(baseline,
     ("ui_select_component", {"component_class": "Generator", "name": "Nope"}, "component_not_found"),
     ("ui_open_asset_detail", {"component_class": "Generator", "name": "Nope"}, "component_not_found"),
     ("ui_open_asset_detail", {"component_class": "Generator", "name": "G1", "metrics": ["no_such_metric"]}, "invalid_navigation"),
+    ("ui_open_asset_detail", {"component_class": "Generator", "name": "G1", "category": "no_such_category"}, "invalid_navigation"),
+    ("ui_open_asset_detail", {"component_class": "Generator", "name": "G1", "mode": "no_such_mode"}, "invalid_navigation"),
     ("ui_open_panel", {"panel_id": "nowhere"}, "invalid_navigation"),
     ("ui_open_panel", {"panel_id": "results", "results_tab": "loading"}, "invalid_navigation"),
 ])
@@ -74,3 +76,11 @@ def test_a_wrong_target_is_refused_without_moving_the_screen(baseline, session, 
     assert [e for e, _ in out if e == "ui_event"] == []
     assert [d["error_kind"] for e, d in out if e == "tool_error"] == [kind]
     assert fingerprint() == before
+
+
+def test_the_panels_e2e_journey_is_wired_into_the_browser_job():
+    """LC-D24.panels_e2e: the browser journey exists and the CI browser job runs it."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[3]
+    assert (root / "pypsa-gui/frontend/scripts/smoke-copilot-lc06-d24.mjs").is_file()
+    assert "node scripts/smoke-copilot-lc06-d24.mjs" in (root / ".github/workflows/test.yaml").read_text()

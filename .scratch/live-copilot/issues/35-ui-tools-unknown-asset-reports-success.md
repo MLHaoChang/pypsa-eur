@@ -23,3 +23,9 @@ Expected: both tools refuse an unknown asset as `component_not_found`, and an un
 metric as `invalid_navigation`, with no `ui_event` frame, as the editor path already does.
 Then extend `test_lc06_d24_ui_events.py::test_a_wrong_target_is_refused_without_moving_the_screen`
 and move `LC-D24.unknown_asset_event` to covered.
+
+## Follow-ups (CAPACITY-FILL-1, option c)
+
+- Unknown asset (both tools) and unknown metric were already refused on master; the unknown
+  `category` and `mode` of `ui_open_asset_detail` now are too (`invalid_navigation`, no `ui_event`).
+- `LC-D24.panels_e2e` is covered by `frontend/scripts/smoke-copilot-lc06-d24.mjs`, run in the CI browser job.

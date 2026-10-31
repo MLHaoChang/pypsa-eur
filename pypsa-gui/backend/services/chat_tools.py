@@ -7386,6 +7386,18 @@ def ui_open_asset_detail(
                 "error_kind": "invalid_navigation", "field": "metrics",
                 "message": f"{component_class} has no metric '{m}'.",
             })
+    from services.asset_results.registry import CATEGORY_IDS
+    from services.asset_results.service import VIEW_MODES
+    if category and category not in CATEGORY_IDS:
+        raise HTTPException(400, detail={
+            "error_kind": "invalid_navigation", "field": "category",
+            "message": f"Unknown category '{category}'; use one of {', '.join(CATEGORY_IDS)}.",
+        })
+    if mode and mode not in VIEW_MODES:
+        raise HTTPException(400, detail={
+            "error_kind": "invalid_navigation", "field": "mode",
+            "message": f"Unknown mode '{mode}'; use one of {', '.join(VIEW_MODES)}.",
+        })
     event: dict[str, Any] = {
         "_ui_event": True, "kind": "open_asset_detail",
         "component_class": component_class, "name": name,
