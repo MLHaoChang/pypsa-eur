@@ -643,6 +643,11 @@ def update_solver_config(
                 kind, message = problems[0]
                 raise HTTPException(422, {**_ROLLING_REFUSALS[kind], "message": message})
         _state["solver_config"] = SolverConfig(**merged)
+        # LC-40 (LC40-COUNTER-1): a solver-config change moves the same edit
+        # counter as a network edit, so every stale reader sees it. At the
+        # sink, so the HTTP route and the chat tool both cross it.
+        from services import dirty_state
+        dirty_state.bump_revision()
         return asdict(_state["solver_config"])
 
 

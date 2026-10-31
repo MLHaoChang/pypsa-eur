@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): a solver-config change (`PUT /api/simulation/solver_config`) now marks finished adequacy and decision studies as edited since; decision and tornado studies record the edit counter on their campaign entry.

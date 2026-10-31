@@ -152,7 +152,8 @@ class ForkSolver:
         try:
             with self.ctx.solver_state_lock:
                 self.record["variants"].append({"variant": variant_id, "fork": row.name})
-            campaign.record(R.STUDY_KEY, 1)
+            campaign.record(R.STUDY_KEY, 1,
+                            network_revision=self.record.get("network_revision"))
             with self.ctx.solver_state_lock:
                 self.record["solves_charged"] += 1
             job, _new = solve_queue.enqueue_unique(

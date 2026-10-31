@@ -171,7 +171,11 @@ def edited_since(record, *, revision: int | None = None) -> bool | None:
 
     ``None`` — Unavailable, never ``False`` — when the record is not a dict,
     is running, or has no captured revision (a record from before this phase,
-    or restored from an older ``results_state.pkl``). The claim is "edited
+    or restored from an older ``results_state.pkl``).
+
+    A solver-config change counts as an edit (owner decision LC40-COUNTER-1,
+    "same counter"): ``update_solver_config`` bumps the same revision, so a
+    study read after a VoLL or ``reserve_margin`` change reads True. The claim is "edited
     since", never "changed" or "differs": an edit then its undo reads True.
     """
     if not isinstance(record, dict):

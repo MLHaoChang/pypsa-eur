@@ -3,7 +3,7 @@
 
 # LC-40 — A solver-config change does not mark an adequacy study stale
 
-Status: needs-triage
+Status: done
 Type: bug
 
 Found by LC-37 (GK A review). The manifest row is `LC-D13.stale_source_solver_config`
@@ -18,10 +18,10 @@ False` while its numbers came from the old config. The EH study has the same lim
 
 ## Acceptance
 
-- [ ] Decide whether a solver-config change counts as an edit for the study readers (a
+- [x] Decide whether a solver-config change counts as an edit for the study readers (a
       separate config revision, or the same counter), and say so in `edited_since`'s docstring.
-- [ ] A chat-tool test: a frontier, then `update_solver_config(voll=...)`; the reader says the
+- [x] A chat-tool test: a frontier, then `update_solver_config(voll=...)`; the reader says the
       study is stale, and a re-run clears it with the hand-moved knee.
-- [ ] `LC-D13.stale_source_solver_config` becomes `_covered`.
+- [x] `LC-D13.stale_source_solver_config` becomes `_covered`.
 
 ## Comments

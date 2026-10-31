@@ -519,9 +519,11 @@ VARIANTS: list[dict] = [
              B + 'test_lc39_d13_http_stale_readers.py::test_the_mc_route_flags_an_edit_and_a_rerun_clears_it'),
     _pending('LC-D13.stale_source_panels', 'the frontier, MC and margin-loop panels do not read edited_since_study from their routes, so '
              'they show pre-edit numbers unflagged; ticket .scratch/live-copilot/issues/41-adequacy-panels-stale-banner.md'),
-    _pending('LC-D13.stale_source_solver_config', 'edited_since_study (EH, margin loop, frontier, mc, campaign) counts network edits only: '
-             'update_solver_config (VoLL, reserve_margin, ...) does not move the revision, so a study read after a config change reads '
-             'False; ticket .scratch/live-copilot/issues/40-stale-source-solver-config.md'),
+    _covered('LC-D13.stale_source_solver_config', 'a frontier at VoLL 100, then update_solver_config(voll=200): the reader and the campaign say '
+             'edited_since_study True with the stored knee unchanged (hand oracle at 100); a re-run clears it and moves the knee to the '
+             'hand oracle at 200. Same edit counter as a network edit (LC40-COUNTER-1)',
+             'run_frontier_study update_solver_config get_adequacy_results campaign_status',
+             B + 'test_lc40_d13_solver_config_stale.py::test_a_voll_change_flags_the_frontier_and_a_rerun_clears_it'),
     _covered('LC-D13.incomplete_campaign', 'a campaign of budget 3 refuses a 3-target frontier (4 solves) as campaign_budget_exhausted with '
              'spent 0 and no entry, runs 2 targets to their hand points (spent 3) and closes with end_campaign; budget 4 runs all three. '
              'An EH redundancy compare at budget_solves 2 (ens_solve takes 1) solves base alone, budget_exhausted, no selection; at 10 it '
