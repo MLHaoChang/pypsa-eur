@@ -3873,19 +3873,7 @@ def get_adequacy_results(kind: str) -> Any:
     """
     handler = _resolve_adequacy_handler(kind)
     result = handler()
-    if kind in _ADEQUACY_EDITED_SINCE_KINDS and isinstance(result, dict):
-        # LC-37: has the network been edited since this study started? On the
-        # EH reader's basis (`study_state.edited_since`); null (Unavailable)
-        # while running or for a record without a captured revision.
-        from services.study_state import edited_since
-        result = {**result, "edited_since_study": edited_since(result)}
     return _adequacy_payload(kind, result)
-
-
-# The study readers whose route does not carry `edited_since_study` itself
-# (the EH reader's does). Their GET serves the record, `network_revision`
-# included, so the flag is computed from that copy.
-_ADEQUACY_EDITED_SINCE_KINDS = frozenset({"frontier", "mc", "margin_loop"})
 
 
 def adequacy_path_for(kind: str) -> str:
