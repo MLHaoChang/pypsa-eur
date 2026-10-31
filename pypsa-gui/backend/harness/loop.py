@@ -2057,10 +2057,16 @@ def _run_turn_body(
             else:
                 yield "answer_progress", {"version": 1, "turn_id": session.assurance_turn.turn_id,
                                           "stage": "checking_claims", "status": "running"}
-                from services.assurance_records import AccessRevoked
+                from services.assurance_records import AccessRevoked, ProjectDeleted
                 try:
                     session.assurance_turn.review_interpretations(assistant_blocks, provider, session.model, turn_ctx)
                     assistant_blocks = session.assurance_turn.commit(assistant_blocks, turn_ctx)
+                except ProjectDeleted:
+                    logger.warning("checked answer withdrawn: the project was deleted")
+                    yield "error", {"error_kind": "assurance_project_deleted",
+                                    "message": "No answer was published. Open another project from Projects."}
+                    yield "session_done", {"reason": "assurance_project_deleted"}
+                    return
                 except AccessRevoked:
                     # REVOKE-KIND: the account or project access ended; expected, not a fault.
                     logger.warning("checked answer withdrawn: project access was revoked")

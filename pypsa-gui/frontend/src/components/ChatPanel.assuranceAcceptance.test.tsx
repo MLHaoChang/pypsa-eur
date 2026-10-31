@@ -117,6 +117,7 @@ describe('implemented assurance publication boundary', () => {
   it.each([
     ['assurance_publication_failed', 'The checked answer could not be published'],
     ['assurance_access_revoked', 'You no longer have access to this project'],
+    ['assurance_project_deleted', 'This project was deleted'],
   ])('a commit refusal %s ends the turn with its banner and no retry', async (kind, title) => {
     await start()
     emit('token', { delta: unsafe })

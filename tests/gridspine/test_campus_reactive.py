@@ -341,3 +341,47 @@ def test_a_statcom_too_small_runs_at_its_rating_and_the_rest_stays_a_gap():
     need = reactive_need(camp, hour, req)
     assert need.dispatch["ST1"]["q_mvar"] == pytest.approx(5.0) and need.q_comp_mvar > 0.0
     assert need.q_final_mvar == pytest.approx(lim, abs=0.01)
+
+
+# ── AS-05: PCS oversize and the STATCOM's steady / dynamic slices ───────────
+
+
+def test_the_pcs_s_is_rated_p_plus_the_oversize_and_the_exact_circle_reads_it():
+    from gridspine.static.campus_reactive import _circle_q, pcs_s_mva
+    s = pcs_s_mva(119.9, 7.8535)
+    assert s == pytest.approx(127.7535)
+    assert _circle_q(s, 119.9) == pytest.approx(44.1, abs=0.05)     # exact circle >= the LP's 26.05 Mvar
+    assert pcs_s_mva(50.0, None) == pytest.approx(50.0)
+    assert pcs_s_mva(50.0, float("nan")) == pytest.approx(50.0)
+    with pytest.raises(ValueError):
+        pcs_s_mva(50.0, -1.0)
+
+
+@pytest.mark.parametrize("total, steady, split", [(10.0, 6.0, (6.0, 4.0)), (10.0, 12.0, (10.0, 0.0)),
+                                                   (3.4, 0.0, (0.0, 3.4)), (0.0, 5.0, (0.0, 0.0))])
+def test_the_statcom_serves_steady_q_first_and_leaves_the_rest_dynamic(total, steady, split):
+    from gridspine.static.campus_reactive import statcom_split
+    q_ss, q_dyn = statcom_split(total, steady)
+    assert (q_ss, q_dyn) == pytest.approx(split)
+    assert q_ss + q_dyn == pytest.approx(total)                     # one Mvar is never counted twice
+
+
+def test_size_compensation_default_output_is_unchanged():
+    from gridspine.static.campus_reactive import ReactiveResult
+    r = ReactiveResult(True, 0.0, 0.0, 0.0, 4.0, {}, False)
+    s = size_compensation({(2030, 1): r}, SizingCriteria(margin=0.2))
+    assert list(s["direction"]) == ["capacitive", "inductive"]
+    assert list(s.columns) == ["direction", "required_mvar", "recommended_mvar", "worst_period", "worst_hour",
+                               "margin"]
+
+
+def test_size_compensation_reports_the_dynamic_slice_as_its_own_row():
+    from gridspine.static.campus_reactive import ReactiveResult
+    r = ReactiveResult(True, 0.0, 0.0, 0.0, 4.0, {}, False)
+    s = size_compensation({(2030, 1): r}, SizingCriteria(margin=0.2), q_dyn_mvar=3.355).set_index("direction")
+    assert list(s.index) == ["capacitive", "inductive", "dynamic"]
+    assert s.at["capacitive", "required_mvar"] == pytest.approx(4.0)  # steady, not 4.0 + 3.355
+    assert s.at["dynamic", "required_mvar"] == pytest.approx(3.355)
+    assert s.at["dynamic", "recommended_mvar"] == pytest.approx(math.ceil(3.355 * 1.2))
+    with pytest.raises(ValueError):
+        size_compensation({}, q_dyn_mvar=-1.0)

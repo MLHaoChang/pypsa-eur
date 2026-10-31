@@ -70,7 +70,7 @@ function OutcomeCard({ message, checked, failed, download, docked }: {
   const tooLarge = new TextEncoder().encode(ordinaryText).byteLength > 64 * 1024
   const body = checked ? answer?.text : tooLarge ? null : ordinaryText
   const label = checked ? answer ? checkedLabel(answer) : missing ? 'Checked answer unavailable' : 'Checking saved answer'
-    : failed || message?.interrupted ? 'Response incomplete — not checked' : ANSWER_NOT_CHECKED
+    : failed || message?.interrupted ? 'Response incomplete: not checked' : ANSWER_NOT_CHECKED
   const openTranscript = () => useUIStore.getState().setAssistantDockOpen(true)
   if (!open) {
     return <section data-testid="companion-outcome" data-docked="true" data-no-panel-close aria-label="Assistant answer"

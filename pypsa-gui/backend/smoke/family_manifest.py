@@ -209,8 +209,12 @@ VARIANTS: list[dict] = [
              'set_snapshots upload_timeseries',
              B + 'test_lc06_d03_chronology_edges.py::test_the_horizon_has_the_hand_counted_hours_and_cost',
              B + 'test_lc06_d03_chronology_edges.py::test_an_out_of_order_csv_is_aligned_by_its_timestamps'),
-    _pending('LC-D03.upload_guards', 'repeated timestamp fails with an untyped pandas InvalidIndexError, a missing snapshot is forward-filled silently, '
-             'an off-horizon CSV replaces the snapshots (ticket 33)'),
+    _covered('LC-D03.upload_guards', 'repeated timestamp refused as timeseries_duplicate_timestamp, series unchanged; a missing snapshot forward-filled (1,2,2,4) and named in filled_snapshots; '
+             'an off-horizon CSV refused as timeseries_outside_horizon, snapshots unchanged, replaced only with replace_horizon',
+             'upload_timeseries',
+             B + 'test_lc06_d03_chronology_edges.py::test_a_repeated_timestamp_is_refused_and_stores_nothing',
+             B + 'test_lc06_d03_chronology_edges.py::test_a_missing_snapshot_is_forward_filled_and_named',
+             B + 'test_lc06_d03_chronology_edges.py::test_an_off_horizon_csv_is_refused_and_keeps_the_snapshots'),
     _pending('LC-D03.timezone_aware', 'timezone-aware or DST-offset inputs and MW-versus-pu mapping not tested; the DST case covers zone-free wall clock only'),
     _covered('LC-D04.bound_build', 'extendable G2 built to p_nom_max: optimal_capacity 3 = capacity_change 3; fixed G: 20 MW, change 0',
              '',
@@ -650,7 +654,10 @@ VARIANTS: list[dict] = [
              B + 'test_lc06_d24_ui_events.py::test_a_snapshot_is_addressed_by_its_hand_index',
              B + 'test_lc06_d24_ui_events.py::test_component_asset_and_panel_events_carry_exactly_what_was_asked',
              B + 'test_lc06_d24_ui_events.py::test_a_wrong_target_is_refused_without_moving_the_screen'),
-    _pending('LC-D24.unknown_asset_event', 'ticket 35: ui_open_asset_detail and ui_select_component without open_editor emit a ui_event for an unknown asset or unknown metric (not refused); untested, a possible defect if the frontend lands on a non-existent asset'),
+    _covered('LC-D24.unknown_asset_event', 'ui_select_component (without open_editor) and ui_open_asset_detail refuse an unknown asset as component_not_found and an unknown metric as invalid_navigation, with no ui_event frame; a known asset is unchanged',
+             'ui_select_component ui_open_asset_detail',
+             B + 'test_lc06_d24_ui_events.py::test_a_wrong_target_is_refused_without_moving_the_screen',
+             B + 'test_lc06_d24_ui_events.py::test_component_asset_and_panel_events_carry_exactly_what_was_asked'),
     _pending('LC-D24.panels_e2e', 'the Playwright e2e (6 pass / 2 fail baseline) is not re-run or re-audited; panel/subview/filter/editor coverage, wrong project/run/generation, disconnect and keyboard/touch/320px cases not tested'),
 ]
 
