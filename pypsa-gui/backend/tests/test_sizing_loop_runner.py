@@ -198,7 +198,7 @@ def test_abort_after_round_one(monkeypatch):
 def test_a_stop_during_a_solve_interrupts_it_and_ends_aborted(monkeypatch):
     stop, entered = threading.Event(), threading.Event()
 
-    def blocking_prepare(n, cfg):
+    def blocking_prepare(n, cfg, undo):
         entered.set()
         while True:                    # a long LP: only the abort watcher's interrupt ends it
             time.sleep(0.05)
@@ -264,6 +264,50 @@ def test_the_project_capex_budget_binds_inside_the_loop():
 def test_a_pre_solve_setting_the_loop_cannot_reproduce_is_refused_by_name(setting, value, named):
     with pytest.raises(SizingLoopRefusal, match=named):
         run_sizing(_tiny(), _config(**{setting: value}), _inputs())
+
+
+def test_without_tsam_the_inner_rounds_say_full_year(monkeypatch):
+    import sys
+
+    monkeypatch.setitem(sys.modules, "tsam", None)
+    monkeypatch.setitem(sys.modules, "tsam.timeseriesaggregation", None)
+    out = run_sizing(_tiny(), _config(), _inputs(reduce=True))
+    inner = [r for r in out["rounds"] if r["basis"] == "rounds"]
+    assert inner and all(r["info"]["basis"] == "full_year" for r in inner)
+    assert "tsam not available: the inner rounds solved the full year" in out["basis_note"]
+
+
+def test_committable_units_and_project_solver_options_are_named():
+    n = _tiny()
+    n.generators.loc["import", "committable"] = True
+    lines = slr.basis_lines(_config(), n)
+    assert any(line.startswith("1 committable unit(s)") for line in lines)
+    assert not any("committable" in line for line in slr.basis_lines(_config(), _tiny()))
+    out = run_sizing(_tiny(), _config(presolve_enabled=False), _inputs())
+    assert "the project's solver and presolve options are not merged" in out["basis_note"]
+
+
+def test_voll_and_dsr_slacks_leave_the_project_registry_as_found(monkeypatch):
+    from services.pypsa_service import PyPSAService
+    from services.solver.vintage_store import _frozen_vintage_store
+
+    marked = []
+    real_mark = PyPSAService.mark_transient.__func__
+    monkeypatch.setattr(PyPSAService, "mark_transient",
+                        classmethod(lambda cls, c, name: (marked.append(name), real_mark(cls, c, name))))
+    ctx = PyPSAService._transient_target(ensure=True)
+    _frozen_vintage_store()["sentinel"] = 1.0
+
+    def registry():
+        with ctx.transient_lock:
+            return {k: set(v) for k, v in ctx.transient_rows.items()}, dict(_frozen_vintage_store())
+
+    before = registry()
+    cfg = _config(voll=10_000.0, dsr_price_eur_per_mwh=500.0, dsr_share_of_load=0.1, dsr_buses=["mv"])
+    out = run_sizing(_tiny(), cfg, _inputs())
+    assert out["status"] in ("converged", "not_converged"), out["verdict"]
+    assert marked                                            # the slacks were registered during the loop
+    assert registry() == before
 
 
 @pytest.mark.parametrize("mode", ["rolling", "myopic"])

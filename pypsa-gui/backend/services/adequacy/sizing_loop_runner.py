@@ -9,8 +9,10 @@ Wires `services.adequacy.sizing_loop.run_sizing_loop` to real solves and the for
   record, a DSR commit, commercial terms and solve state for the open project, and the loop must leave the
   project as it found it. The runner writes nothing of the caller's network or config; applying a result is
   AS-10's job. Settings whose pre-solve step the copy does not reproduce are refused by name (`refusals`): island
-  ride-through, commercial terms, Capacity > sizing off. A solve mode the loop does not follow (rolling, myopic,
-  SCLOPF) is named in `basis_note`: the loop sizes one full-horizon LP. A stop request lands between rounds and
+  ride-through, commercial terms, Capacity > sizing off. What the loop does not follow is named in `basis_note`:
+  a rolling, myopic or SCLOPF solve (the loop sizes one full-horizon LP), unit commitment and the project's
+  solver options, and a missing tsam (the inner rounds then solve, and are labelled, full year). The transforms'
+  restores run once each solve's results are read, so the open project's transient rows are left as found. A stop request lands between rounds and
   inside a solve: `runtime._AbortWatcher` interrupts a running LP, and the loop ends `aborted`. Inner rounds solve a tsam-reduced year (`services.time_aggregation_service`, the limited-foresight
   clustering, with `SolverConfig.lf_*`); the final solve is the full year, and its forward pass gives the verdict.
 * **forward**: the checks on the solved, fixed capacities. Each is a scalar check with gridspine or the AS
@@ -53,6 +55,7 @@ from services.solver import sizing_cuts as sc
 from services.solver.envelope_floors import _flagged, floors_from_envelope
 from services.solver.pcs_statcom import pcs_statcom_tags, solution
 from services.solver.runtime import _AbortWatcher
+from services.solver.vintage_store import _frozen_vintage_store
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +85,7 @@ def refusals(config) -> list[str]:
     return out
 
 
-def basis_lines(config) -> list[str]:
+def basis_lines(config, network=None) -> list[str]:
     """One line per project solve option the loop's single full-horizon LP does not follow."""
     out = []
     mode = getattr(config, "solve_strategy", "full")
@@ -92,7 +95,25 @@ def basis_lines(config) -> list[str]:
         out.append("the project solves security-constrained (SCLOPF); the loop sizes the plain LOPF")
     if (getattr(config, "extra_functionality_code", "") or "").strip():
         out.append("the project's extra_functionality code is applied in the loop")
+    if network is not None:
+        from services.solver import process_uc
+
+        gens, links = process_uc.committable_counts(network)
+        if gens or links:
+            out.append(f"{gens + links} committable unit(s): the project solve's unit-commitment keywords (process "
+                       "and island UC) and its MIP gap and time limit are not followed; the loop solves them with "
+                       "n.optimize's defaults")
+    if getattr(config, "solver_options", None) or not getattr(config, "presolve_enabled", True):
+        out.append("the project's solver and presolve options are not merged; the loop uses its own solver_options")
     return out
+
+
+def _tsam_available() -> bool:
+    try:
+        import tsam  # noqa: F401
+    except ImportError:
+        return False
+    return True
 
 
 class SizingLoopRefusal(ValueError):
@@ -201,14 +222,16 @@ def reduce_year(n, config) -> tuple[object, dict]:
         _forget(view)
     keep = n.snapshots[view.timesteps.get_indexer(agg.snapshots.get_level_values(1))]
     out = n.copy()
-    if len(keep) < len(n.snapshots):
+    reduced = len(keep) < len(n.snapshots)
+    if reduced:
         # tsam's weight is cluster size x the objective weight; each column takes the cluster size x its own.
         orig = n.snapshot_weightings.loc[keep]
         count = pd.Series(agg.weights.to_numpy(), index=keep) / orig["objective"]
         out.set_snapshots(keep)
         for col in out.snapshot_weightings.columns:
             out.snapshot_weightings[col] = orig[col] * count
-    return out, {"snapshots": len(out.snapshots), "of": len(n.snapshots), "typical_periods": agg.typical_periods}
+    return out, {"snapshots": len(out.snapshots), "of": len(n.snapshots), "typical_periods": agg.typical_periods,
+                 "reduced": reduced}
 
 
 # ── one solve ───────────────────────────────────────────────────────────────
@@ -233,14 +256,15 @@ def _freeze(n, link: str, size_mva: float) -> None:
     n.links.at[link, "pq_p_cap_mw"] = size_mva * pu
 
 
-def _prepare(n, cfg) -> dict:
-    """The project solve's pre-LP transforms on the private copy `n` (no restore: the copy is dropped), and the
-    `n.optimize` keywords it would pass."""
+def _prepare(n, cfg, undo: list) -> dict:
+    """The project solve's pre-LP transforms on the private copy `n`, and the `n.optimize` keywords it would pass.
+    Each transform's restore goes on `undo`: the modelling assumptions register their VOLL and DSR slacks in the
+    open project's transient rows, and only their restore clears them."""
     from services import solver_service as ss
     from services.adequacy.energization import apply_energization
 
-    apply_energization(n)
-    ss._apply_modelling_assumptions(n, cfg, lambda _msg: None)
+    undo.append(apply_energization(n))
+    undo.append(ss._apply_modelling_assumptions(n, cfg, lambda _msg: None)[0])
     kw = {"extra_functionality": ss.build_lp_chain(n, cfg, None)}
     if getattr(cfg, "transmission_losses", False):
         kw["transmission_losses"] = ss._compute_loss_atol(n)
@@ -276,7 +300,7 @@ def solve_once(base, config, inp: SizingInputs, state: dict, *, reduce: bool, so
     solved `network` for the forward pass. A stop request during the solve interrupts it (status "aborted")."""
     n, info = reduce_year(base, config) if reduce else (base.copy(), {"snapshots": len(base.snapshots),
                                                                       "of": len(base.snapshots)})
-    info["basis"] = "reduced_year" if reduce else "full_year"
+    info["basis"] = "reduced_year" if reduce and info.get("reduced") else "full_year"
     cuts, frozen = state["cuts"], state["frozen"]
     mx = _envelope_max(inp.envelope)
     lp = {k: v for k, v in cuts.items() if k in sc.CUT_COLUMNS}
@@ -287,9 +311,15 @@ def solve_once(base, config, inp: SizingInputs, state: dict, *, reduce: bool, so
     cfg = _config_with_floors(config, cuts)
     watcher = _AbortWatcher(stop_event, threading.get_ident())
     watcher.start()
+    vintages, undo = dict(_frozen_vintage_store()), []
     try:
         watcher.arm()
-        status, condition = n.optimize(solver_name=solver_name, **_prepare(n, cfg), **(solver_options or {}))
+        status, condition = n.optimize(solver_name=solver_name, **_prepare(n, cfg, undo), **(solver_options or {}))
+        watcher.disarm()
+        if status != "ok":
+            return {"status": status, "condition": condition, "info": info}
+        return {"status": status, "condition": condition, "cost_eur": float(n.objective),
+                "sizes": _sizes(n, inp.link), "info": info, "network": n}
     except KeyboardInterrupt:                                 # the watcher's interrupt: a stop request
         return {"status": "aborted", "condition": "stopped during the solve", "info": info}
     except Exception as exc:                                  # noqa: BLE001 - the controller reads a status
@@ -298,10 +328,14 @@ def solve_once(base, config, inp: SizingInputs, state: dict, *, reduce: bool, so
     finally:
         watcher.disarm()
         watcher.shutdown()
-    if status != "ok":
-        return {"status": status, "condition": condition, "info": info}
-    return {"status": status, "condition": condition, "cost_eur": float(n.objective), "sizes": _sizes(n, inp.link),
-            "info": info, "network": n}
+        for fn in reversed(undo):                             # results are read: restore, as run_simulation does
+            try:
+                fn()
+            except Exception:                                 # noqa: BLE001 - one failed restore must not skip the rest
+                logger.exception("sizing loop: a restore raised")
+        store = _frozen_vintage_store()
+        store.clear()
+        store.update(vintages)
 
 
 # ── the forward pass ────────────────────────────────────────────────────────
@@ -473,7 +507,12 @@ def run_sizing(network, config, inp: SizingInputs, *, max_rounds: int = sl.MAX_R
                              max_rounds=max_rounds, freeze_after=freeze_after,
                              final_solve=(lambda s: run(s, False)) if inp.reduce else None,
                              stop_event=stop_event, on_iteration=on_iteration)
-    out["basis_note"] = "; ".join([BASIS_NOTE, *basis_lines(config)])
+    lines = basis_lines(config, base)
+    if inp.reduce and any(r.get("info", {}).get("basis") == "full_year" for r in out["rounds"]
+                          if r.get("basis") == "rounds"):
+        lines.append("tsam not available: the inner rounds solved the full year" if not _tsam_available()
+                     else "the year reduction fell back to the full year for some inner rounds")
+    out["basis_note"] = "; ".join([BASIS_NOTE, *lines])
     out["sheet"], out["sheet_paths"] = None, []
     if out["status"] == "converged" and last.get("network") is not None:
         from services import control_settings
