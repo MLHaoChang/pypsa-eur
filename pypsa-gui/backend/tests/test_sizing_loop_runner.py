@@ -198,14 +198,54 @@ def test_a_raising_solve_is_a_failed_status_not_an_exception(monkeypatch):
     def boom(*a, **kw):
         raise RuntimeError("solver crashed")
 
-    monkeypatch.setattr(slr, "_chain", boom)
+    monkeypatch.setattr(slr, "_prepare", boom)
     out = run_sizing(_tiny(), _config(), _inputs())
     assert out["status"] == "failed" and "RuntimeError: solver crashed" in out["verdict"]
 
 
 def test_every_result_names_its_basis():
     out = run_sizing(_tiny(), _config(), _inputs())
-    assert "not applied" in out["basis_note"]
+    assert out["basis_note"] == slr.BASIS_NOTE
+
+
+def _budget_activity(budget):
+    """The loop's result and the capex-budget row's activity in each solved round."""
+    seen = []
+
+    def spy(*a, **kw):
+        res = slr.solve_once(*a, **kw)
+        if res.get("network") is not None:
+            seen.append(float(res["network"].model.constraints["capex_budget_0"].lhs.solution.sum()))
+        return res
+
+    return run_sizing(_tiny(), _config(capex_budget_per_period={"0": budget}), _inputs(), solve=spy), seen
+
+
+def test_the_project_capex_budget_binds_inside_the_loop():
+    # A slack budget: the row is in every round's LP and the loop converges.
+    out, slack = _budget_activity(1e12)
+    assert out["status"] == "converged" and slack
+    # Below what the converged sizes cost: the first round fits, a later one cannot, so the loop fails rather
+    # than reporting sizes that break the project's budget.
+    out, tight = _budget_activity(0.9 * slack[-1])
+    assert tight and tight[0] <= 0.9 * slack[-1] + 1e-3
+    assert out["status"] == "failed", out["verdict"]
+
+
+@pytest.mark.parametrize("setting, value, named", [
+    ("island_constraints", True, "island constraints are on"),
+    ("commercial", {"tariff": {}}, "commercial bindings are set on this project and are not applied to the loop"),
+    ("fixed_sizes", "nameplate", "Capacity > sizing is off"),
+])
+def test_a_pre_solve_setting_the_loop_cannot_reproduce_is_refused_by_name(setting, value, named):
+    with pytest.raises(SizingLoopRefusal, match=named):
+        run_sizing(_tiny(), _config(**{setting: value}), _inputs())
+
+
+@pytest.mark.parametrize("mode", ["rolling", "myopic"])
+def test_a_rolling_or_myopic_project_is_named_in_the_basis(mode):
+    out = run_sizing(_tiny(), _config(solve_strategy=mode), _inputs())
+    assert f"the project solves {mode}; the loop sizes one full-horizon LP" in out["basis_note"]
 
 
 def test_a_network_without_pq_tags_is_refused():

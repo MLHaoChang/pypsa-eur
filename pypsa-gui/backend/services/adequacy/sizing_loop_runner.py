@@ -2,13 +2,15 @@
 
 Wires `services.adequacy.sizing_loop.run_sizing_loop` to real solves and the forward checks:
 
-* **solve**: one LP on a private copy of the network, through the AS LP chain (split storage AS-02, envelope floors
-  AS-03, PCS/STATCOM AS-05, sizing cuts AS-06) and `n.optimize`. Not `run_simulation`: that publishes a sizing
+* **solve**: one LP on a private copy of the network, through the project solve's own extra_functionality chain
+  (`solver_service.build_lp_chain`: user code, curtailment cost, capex budget, ENS cap, import-energy cap, reserve
+  margin, island, the AS rows, commercial bindings, objective scale), after the energization schedule and the
+  modelling assumptions are applied to the copy, and `n.optimize`. Not `run_simulation`: that publishes a sizing
   record, a DSR commit, commercial terms and solve state for the open project, and the loop must leave the
   project as it found it. The runner writes nothing of the caller's network or config; applying a result is
-  AS-10's job. The price: only the AS rows are applied. The project's other solve options (island ride-through,
-  commercial terms, reserve margin, capex budget, caps, rolling or myopic runs) are not, so the sizes can
-  differ from a project solve; every result says so in `basis_note`. A stop request lands between rounds: one
+  AS-10's job. Settings whose pre-solve step the copy does not reproduce are refused by name (`refusals`): island
+  ride-through, commercial terms, Capacity > sizing off. A solve mode the loop does not follow (rolling, myopic,
+  SCLOPF) is named in `basis_note`: the loop sizes one full-horizon LP. A stop request lands between rounds: one
   LP is not interrupted. Inner rounds solve a tsam-reduced year (`services.time_aggregation_service`, the limited-foresight
   clustering, with `SolverConfig.lf_*`); the final solve is the full year, and its forward pass gives the verdict.
 * **forward**: the checks on the solved, fixed capacities. Each is a scalar check with gridspine or the AS
@@ -47,9 +49,8 @@ import pandas as pd
 from services.adequacy import sizing_loop as sl
 from services.adequacy.flicker_inputs import DEFAULT_XR
 from services.solver import sizing_cuts as sc
-from services.solver.envelope_floors import _flagged, _wrap_with_envelope_floors, floors_from_envelope
-from services.solver.pcs_statcom import _wrap_with_pcs_statcom, pcs_statcom_tags, solution
-from services.solver.split_storage import _wrap_with_split_storage
+from services.solver.envelope_floors import _flagged, floors_from_envelope
+from services.solver.pcs_statcom import pcs_statcom_tags, solution
 
 logger = logging.getLogger(__name__)
 
@@ -60,10 +61,36 @@ TAN_PHI_SWING_ASSUMED = 0.1
 #: Fault-current credit per MVA of grid-forming converter, pu (assumed).
 GFM_CREDIT = 1.2
 ESCR_MIN = 3.0
-#: What every result's sizes rest on.
-BASIS_NOTE = ("sized through the AS LP rows only (split storage, envelope floors, PCS/STATCOM, sizing cuts); the "
-              "project's other solve options (island, commercial terms, reserve margin, budgets, caps, rolling or "
-              "myopic runs) are not applied")
+#: What every result's sizes rest on, before the per-setting lines of `basis_lines`.
+BASIS_NOTE = ("the loop's LP matches the project solve's: the same extra_functionality chain "
+              "(solver_service.build_lp_chain), energization and modelling assumptions, on a private copy")
+
+
+def refusals(config) -> list[str]:
+    """One line per project setting whose pre-solve step the loop does not reproduce on its copy."""
+    out = []
+    if getattr(config, "island_constraints", False):
+        out.append("sizing loop: island constraints are on for this project; their island_config.json apply is "
+                   "not reproduced in the loop")
+    if getattr(config, "commercial", None):
+        out.append("sizing loop: commercial bindings are set on this project and are not applied to the loop "
+                   "(the PoC price writer and connection agreement run only in a project solve)")
+    if getattr(config, "fixed_sizes", "off") != "off":
+        out.append("sizing loop: Capacity > sizing is off for this project; the loop sizes, so turn sizing on")
+    return out
+
+
+def basis_lines(config) -> list[str]:
+    """One line per project solve option the loop's single full-horizon LP does not follow."""
+    out = []
+    mode = getattr(config, "solve_strategy", "full")
+    if mode in ("rolling", "myopic"):
+        out.append(f"the project solves {mode}; the loop sizes one full-horizon LP")
+    if getattr(config, "sclopf", False):
+        out.append("the project solves security-constrained (SCLOPF); the loop sizes the plain LOPF")
+    if (getattr(config, "extra_functionality_code", "") or "").strip():
+        out.append("the project's extra_functionality code is applied in the loop")
+    return out
 
 
 class SizingLoopRefusal(ValueError):
@@ -204,11 +231,18 @@ def _freeze(n, link: str, size_mva: float) -> None:
     n.links.at[link, "pq_p_cap_mw"] = size_mva * pu
 
 
-def _chain(n, cfg):
-    fn = _wrap_with_split_storage(n, None)
-    fn = _wrap_with_envelope_floors(n, fn, cfg)
-    fn = _wrap_with_pcs_statcom(n, fn)
-    return sc._wrap_with_sizing_cuts(n, fn)
+def _prepare(n, cfg) -> dict:
+    """The project solve's pre-LP transforms on the private copy `n` (no restore: the copy is dropped), and the
+    `n.optimize` keywords it would pass."""
+    from services import solver_service as ss
+    from services.adequacy.energization import apply_energization
+
+    apply_energization(n)
+    ss._apply_modelling_assumptions(n, cfg, lambda _msg: None)
+    kw = {"extra_functionality": ss.build_lp_chain(n, cfg, None)}
+    if getattr(cfg, "transmission_losses", False):
+        kw["transmission_losses"] = ss._compute_loss_atol(n)
+    return kw
 
 
 def _nominal(frame, attr, name) -> float:
@@ -250,8 +284,7 @@ def solve_once(base, config, inp: SizingInputs, state: dict, *, reduce: bool, so
         _freeze(n, inp.link, frozen[inp.link])
     cfg = _config_with_floors(config, cuts)
     try:
-        status, condition = n.optimize(solver_name=solver_name, extra_functionality=_chain(n, cfg),
-                                       **(solver_options or {}))
+        status, condition = n.optimize(solver_name=solver_name, **_prepare(n, cfg), **(solver_options or {}))
     except Exception as exc:                                  # noqa: BLE001 - the controller reads a status
         logger.exception("sizing loop: the solve raised")
         return {"status": "error", "condition": f"{type(exc).__name__}: {exc}", "info": info}
@@ -405,6 +438,9 @@ def run_sizing(network, config, inp: SizingInputs, *, max_rounds: int = sl.MAX_R
     """Run the sizing loop on a copy of `network`; `network` and `config` are left untouched. `solve` (tests)
     replaces `solve_once` with the same signature. The result is `run_sizing_loop`'s, plus `sheet` (the AS-07
     control-settings sheet of a converged run, or None) and `sheet_paths`."""
+    refused = refusals(config)
+    if refused:
+        raise SizingLoopRefusal("; ".join(refused))
     base = network.copy()
     _check_inputs(base, inp)
     solve = solve or solve_once
@@ -420,7 +456,7 @@ def run_sizing(network, config, inp: SizingInputs, *, max_rounds: int = sl.MAX_R
                              max_rounds=max_rounds, freeze_after=freeze_after,
                              final_solve=(lambda s: run(s, False)) if inp.reduce else None,
                              stop_event=stop_event, on_iteration=on_iteration)
-    out["basis_note"] = BASIS_NOTE
+    out["basis_note"] = "; ".join([BASIS_NOTE, *basis_lines(config)])
     out["sheet"], out["sheet_paths"] = None, []
     if out["status"] == "converged" and last.get("network") is not None:
         from services import control_settings
