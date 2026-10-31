@@ -3,6 +3,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { resultsApi } from '../../api/simulation'
+import { EDITED_TEXT } from '../hubDesign/cards/ResultsCard'
 import {
   FrontierPanel, curveIsFlat, kneeMessage,
   type FrontierPayload, type FrontierRow,
@@ -216,5 +217,26 @@ describe('FrontierPanel — the applied goal (UX S4b)', () => {
     await userEvent.setup().click(screen.getByRole('button', { name: /cost vs availability/i }))
     await waitFor(() => expect(container.querySelector('.recharts-line')).not.toBeNull())
     expect(container.querySelector('.recharts-reference-line')).toBeNull()
+  })
+})
+
+describe('FrontierPanel — edited since the study (LC-41)', () => {
+  afterEach(() => { cleanup() })
+
+  it.each([
+    [true, true],
+    [false, false],
+    [null, false],
+    [undefined, false],
+  ])('edited_since_study %s -> banner shown: %s', async (flag, shown) => {
+    vi.mocked(resultsApi.getFrontier).mockResolvedValue({ ...DONE, edited_since_study: flag } as never)
+    renderPanel()
+    await screen.findByTestId('frontier-panel')
+    await waitFor(() => expect(vi.mocked(resultsApi.getFrontier)).toHaveBeenCalled())
+    if (shown) {
+      expect((await screen.findByTestId('frontier-edited')).textContent).toBe(EDITED_TEXT)
+    } else {
+      expect(screen.queryByTestId('frontier-edited')).toBeNull()
+    }
   })
 })

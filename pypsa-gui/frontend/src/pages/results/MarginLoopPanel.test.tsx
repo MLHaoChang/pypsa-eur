@@ -16,6 +16,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { goal } from '../../test/fixtures/reliabilityGoal'
 import { resultsApi } from '../../api/simulation'
+import { EDITED_TEXT } from '../hubDesign/cards/ResultsCard'
 import { compact, restoreSentence, CAP_LEVER } from './LoopPanel'
 import { MarginLoopPanel, MARGIN_LEVER, bindingLabel, leverPct } from './MarginLoopPanel'
 import type {
@@ -787,5 +788,26 @@ describe('MarginLoopPanel not-run copy', () => {
     const copy = (await screen.findByTestId('margin-loop-not-run')).textContent ?? ''
     expect(copy).not.toContain('max_solves')
     expect(copy).toMatch(/up to 8 full capacity expansions/)
+  })
+})
+
+describe('MarginLoopPanel — edited since the study (LC-41)', () => {
+  afterEach(() => { cleanup() })
+
+  it.each([
+    [true, true],
+    [false, false],
+    [null, false],
+    [undefined, false],
+  ])('edited_since_study %s -> banner shown: %s', async (flag, shown) => {
+    vi.mocked(resultsApi.getMarginLoop).mockResolvedValue({ ...MET, edited_since_study: flag } as never)
+    renderPanel()
+    await screen.findByTestId('margin-loop-panel')
+    await waitFor(() => expect(vi.mocked(resultsApi.getMarginLoop)).toHaveBeenCalled())
+    if (shown) {
+      expect((await screen.findByTestId('margin-loop-edited')).textContent).toBe(EDITED_TEXT)
+    } else {
+      expect(screen.queryByTestId('margin-loop-edited')).toBeNull()
+    }
   })
 })

@@ -10,6 +10,7 @@ import { useUIStore } from '../../store/uiStore'
 import { ReliabilityGoalSummary } from '../../components/reliabilityGoal/ReliabilityGoalSummary'
 import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
 import { nk } from '../../utils/queryKeys'
+import { EditedSinceStudyBanner } from './EditedSinceStudyBanner'
 import {
   activityChipText, basisSuffix, foldChipText, foldChipTitle,
   ramChipText, ramChipTitle,
@@ -443,6 +444,7 @@ export function McPanel() {
       >
         <Dices size={11} /> Sequential Monte Carlo {open ? '▾' : '▸'}
       </button>
+      <EditedSinceStudyBanner edited={payload?.edited_since_study} testId="mc-edited" />
       {open && (
         <div className="p-3 flex flex-col gap-3">
           <p className="text-[11px] text-muted">
