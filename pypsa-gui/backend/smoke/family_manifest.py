@@ -517,8 +517,13 @@ VARIANTS: list[dict] = [
              B + 'test_lc39_d13_http_stale_readers.py::test_the_margin_loop_route_flags_an_edit_and_a_rerun_clears_it',
              B + 'test_lc39_d13_http_stale_readers.py::test_the_frontier_route_flags_an_edit_and_a_rerun_clears_it',
              B + 'test_lc39_d13_http_stale_readers.py::test_the_mc_route_flags_an_edit_and_a_rerun_clears_it'),
-    _pending('LC-D13.stale_source_panels', 'the frontier, MC and margin-loop panels do not read edited_since_study from their routes, so '
-             'they show pre-edit numbers unflagged; ticket .scratch/live-copilot/issues/41-adequacy-panels-stale-banner.md'),
+    _covered('LC-D13.stale_source_panels', 'the frontier, MC and margin-loop panels show the Energy Hub "edited since this study" banner '
+             'when their route carries edited_since_study true, and none for false or null',
+             'run_margin_loop run_frontier_study run_mc_study update_component',
+             B + 'test_lc41_d13_panel_stale_banner.py::test_the_panel_renders_the_shared_banner_from_its_route_flag[FrontierPanel]',
+             B + 'test_lc41_d13_panel_stale_banner.py::test_the_panel_renders_the_shared_banner_from_its_route_flag[McPanel]',
+             B + 'test_lc41_d13_panel_stale_banner.py::test_the_panel_renders_the_shared_banner_from_its_route_flag[MarginLoopPanel]',
+             B + 'test_lc41_d13_panel_stale_banner.py::test_the_panel_has_a_component_test_for_each_flag_value'),
     _pending('LC-D13.stale_source_solver_config', 'edited_since_study (EH, margin loop, frontier, mc, campaign) counts network edits only: '
              'update_solver_config (VoLL, reserve_margin, ...) does not move the revision, so a study read after a config change reads '
              'False; ticket .scratch/live-copilot/issues/40-stale-source-solver-config.md'),

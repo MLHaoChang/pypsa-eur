@@ -22,7 +22,8 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - One entry point per feature, one bulk action, no duplicate buttons (owner decision UX-flow).
 - A UI PR needs screenshots of each state, in Guided and Expert.
   - Waived for a text-only change inside an existing banner or layout that already has shots in both modes (#894, #929, #971).
-  - For text swaps, a shot harness that mocks the component is acceptable (#917, #928).
+  - A new placement of an existing component is not text-only and needs shots (#990).
+  - For a text swap or a placement check, a shot harness that mocks the component or its routes is acceptable (#917, #928, #990).
 - No Python-repr quotes (`{x!r}`, `Line 'L1'`) in user-visible text, refusals and chat tool results included: plain words, or curly quotes “…”.
 - A colon, not an em dash, joins clauses in a sentence, refusals included.
 - Freshness wording is "out of date" (as `ResultState` says), never "stale".

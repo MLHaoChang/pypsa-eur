@@ -3,7 +3,7 @@
 
 # LC-41 — The frontier, MC and margin-loop panels do not show the stale state
 
-Status: needs-triage
+Status: done
 Type: bug
 
 Split from LC-39. `GET /api/results/{frontier,mc,margin_loop}` now carry `edited_since_study`
@@ -15,7 +15,7 @@ UI work: it needs the UX reviewer. Follow how the EH panel shows the same flag.
 
 ## Acceptance
 
-- [ ] Each of the three panels shows a stale banner when `edited_since_study` is true.
-- [ ] `LC-D13.stale_source_panels` becomes `_covered`.
+- [x] Each of the three panels shows a stale banner when `edited_since_study` is true.
+- [x] `LC-D13.stale_source_panels` becomes `_covered`.
 
 ## Comments
