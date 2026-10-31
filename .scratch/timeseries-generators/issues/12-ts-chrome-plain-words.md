@@ -1,6 +1,7 @@
 # Time Series chrome: plain words
 
-Status: ready-for-agent (triage 2026-10-28: Loads/Renewables subtitles and every attribute sub-tab still show raw names)
+Status: done
+<!-- 2026-10-31: done, plain words in 9cf85d027 and 8dd421d51; the Guided zero-cost warning now names its generator (validation_service.py), so the drawer no longer gets '1 item(s)'. -->
 Type: task
 Blocked by: none (ts-05 done, #586); after 10 if both run (shared file)
 Gated: no; UX reviewer for the UI

@@ -1,6 +1,7 @@
 # Assistant: process-unit fields and the template parameters
 
-Status: ready-for-agent (owner G2P-14-NOW, 2026-10-28: run now; the concentrator listing moved to issue 10)
+Status: done
+<!-- 2026-10-31: done, commit 189b0bba9. -->
 Type: task
 Blocked by: none (was 07; the template listing moved to issue 10 by owner G2P-14-NOW)
 Gated: no (harness)

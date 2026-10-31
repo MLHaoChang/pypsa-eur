@@ -159,3 +159,51 @@ def test_the_first_upload_to_a_blank_network_adopts_the_csv_range(alpha, install
     assert chat_tools.upload_timeseries("loads", "L1", "p_set", csv)["rows"] == 2
     assert [str(t) for t in PyPSAService.get_network().snapshots] == [
         "2026-06-01 00:00:00", "2026-06-01 01:00:00"]
+
+
+@pytest.mark.parametrize("csv", [
+    "snapshot,L1\n2026-01-01 00:00+01:00,9\n2026-01-01 01:00+01:00,9\n",
+    "snapshot,L1\n2026-01-01T00:00:00+00:00,9\n2026-01-01T01:00:00+00:00,9\n"
+    "2026-01-01T02:00:00+00:00,9\n2026-01-01T03:00:00+00:00,9\n",
+    "snapshot,L1\n2026-01-01 00:00+01:00,9\n2026-01-01 01:00+02:00,9\n",
+], ids=["offset", "utc", "mixed_offsets"])
+def test_a_timezone_aware_csv_is_refused_typed_and_stores_nothing(alpha, csv):
+    before = _four(alpha)
+    snaps = list(PyPSAService.get_network().snapshots)
+    assert _refused(csv)["error_kind"] == "timeseries_timezone_aware"
+    n = PyPSAService.get_network()
+    assert list(n.snapshots) == snaps and list(n.loads_t.p_set["L1"]) == before
+
+
+@pytest.fixture
+def two_periods(alpha):
+    n = PyPSAService.get_network()
+    n.set_snapshots(pd.date_range("2026-01-01", periods=2, freq="h"))
+    n.set_investment_periods([2030, 2040])
+    assert isinstance(n.snapshots, pd.MultiIndex)
+    return n
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"period": 2030}], ids=["broadcast", "per_period"])
+def test_an_off_horizon_csv_on_a_period_network_is_refused_and_stores_nothing(two_periods, kwargs):
+    import io
+
+    from fastapi import HTTPException, UploadFile
+
+    from routers.network import upload_timeseries as route
+    from services.user_timeseries import _user_ts
+    snaps = list(two_periods.snapshots)
+    csv = "snapshot,L1\n2026-06-01 00:00,8\n2026-06-01 01:00,9\n"
+    upload = UploadFile(filename="L1.csv", file=io.BytesIO(csv.encode()))
+    with pytest.raises(HTTPException) as exc:
+        chat_tools._sync(route(component="loads", attribute="p_set", file=upload, **kwargs))
+    assert exc.value.detail["error_kind"] == "timeseries_outside_horizon"
+    assert list(PyPSAService.get_network().snapshots) == snaps
+    assert ("loads", "p_set", "L1") not in _user_ts
+
+
+def test_an_integer_indexed_csv_on_a_range_snapshot_network_is_not_called_timezone_aware(alpha):
+    n = PyPSAService.get_network()
+    n.set_snapshots(pd.RangeIndex(4))
+    result = chat_tools.upload_timeseries("loads", "L1", "p_set", "snapshot,L1\n0,1\n1,2\n2,3\n3,4\n")
+    assert result["rows"] == 4

@@ -3,7 +3,8 @@
 
 # 18 — P–V/Q–V margin as a grid-readiness row and gate fact (G7a wiring)
 
-Status: ready-for-agent
+Status: done
+<!-- 2026-10-31: done, merged as #860. -->
 Type: task
 Blocked by: none (10 lists the gate as deferred until this lands; 10 is not blocked by it)
 Gated: yes (GK A reviews the plan and the PR)
