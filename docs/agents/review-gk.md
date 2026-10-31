@@ -66,6 +66,9 @@ A `pytest.raises(Exception)` on a refusal is checked for what actually raises. A
 - A PR that adds custom (non-PyPSA) component columns the LP reads adds them to `_network_input_fingerprint`, appended only when present so existing fingerprints stay byte-identical, with a pin test (AS-02).
 - A new defaults-pack version becomes `load_defaults_pack()`'s default for every unpinned caller: the PR lists those callers and tests that the previous version's rows are byte-equal (AS-02).
 - An exception subclass that narrows a refusal kind (#971's ProjectDeleted under AccessRevoked) is checked against every caller of the raising function: only the intended handler tells the two apart, so no existence oracle opens.
+- A runner that solves a private network copy binds `PyPSAService.solving_context(<private ProjectContext>)` around the transforms, the solve and the restore; otherwise `mark_transient` and `clear_transient` hit the project ctx (#992).
+- A test that skips without tsam uses `pytest.importorskip("tsam")`; cloud containers have no tsam.
+- A browser journey that flips a manifest row to covered waits on a locator specific to each screen effect it claims, not on text that may already be visible (#998).
 
 ## Engineering rules
 
