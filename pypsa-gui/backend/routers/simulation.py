@@ -783,8 +783,10 @@ def put_value_flows(body: ValueFlowsIn, if_match: str | None = Header(default=No
         merged = asdict(_state["solver_config"])
         merged["commercial"] = {**commercial, "value_flows": new}
         _state["solver_config"] = SolverConfig(**merged)
-        # LC-40: the value flows change the LP (the commercial layer), so a
-        # study read after this is stale, as after PUT /solver_config.
+        # LC-40: the value flows sit in `commercial`, part of the solve-input
+        # fingerprint, so a study read after this counts as edited, as after
+        # PUT /solver_config. Nothing at solve time reads them, so this may
+        # over-report, which "edited since" allows.
         from services import dirty_state
         dirty_state.bump_revision()
         return _value_flows_state(merged["commercial"])

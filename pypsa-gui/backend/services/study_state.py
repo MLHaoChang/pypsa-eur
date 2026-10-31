@@ -178,9 +178,8 @@ def edited_since(record, *, revision: int | None = None) -> bool | None:
     margin and coupling loops' ``restore="final"`` holds bump the same
     revision, so a study read after a VoLL, ``reserve_margin`` or value-flow
     change reads True. A loop's own hold re-captures its record's revision
-    (its verdict describes the held setting). ``PUT /finance`` is exempt: the
-    finance inputs are in no solve fingerprint and no adequacy study reads
-    them. The claim is "edited
+    (its verdict describes the held setting). ``PUT /finance`` is exempt: no adequacy
+    or study reader reads the finance inputs. The claim is "edited
     since", never "changed" or "differs": an edit then its undo reads True.
     """
     if not isinstance(record, dict):
