@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The control-settings sheet reads a smoothing store's latency from the same function as the tier split, and checks a trace-sourced oscillation against the higher of 1/T and the trace's f_c.

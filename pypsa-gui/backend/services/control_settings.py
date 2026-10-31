@@ -45,6 +45,7 @@ from pathlib import Path
 
 from services.adequacy.site_peak import _value
 from services.adequacy.smoothing import response_latency
+from services.adequacy.spectrum import store_latency
 from services.solver import envelope_floors as EF
 
 FORMAT = (
@@ -104,6 +105,23 @@ def _envelope_terms(envelope: dict) -> tuple[float, float | None]:
         if period > 0 and float((ph.get("oscillation") or {}).get("amplitude_mw", 0.0)) > 0:
             f_osc = max(f_osc or 0.0, 1.0 / period)
     return swing, f_osc
+
+
+def _latency_frequency(envelope: dict) -> float | None:
+    """The frequency the latency band is set at: the highest oscillation frequency, except that a trace-sourced
+    oscillation (`spectrum.replace_oscillation`) contributes the higher of 1/T and the trace's f_c: f_c sits
+    above 1/T on a broadband trace, but can fall below it (a dominant low tone), and the band must not loosen."""
+    best = None
+    for ph in envelope["phases"]:
+        osc = ph.get("oscillation") or {}
+        period = float(osc.get("period_s", 0.0))
+        if not (period > 0 and float(osc.get("amplitude_mw", 0.0)) > 0):
+            continue
+        f = 1.0 / period
+        if osc.get("source") == "trace" and float(osc.get("f_c_hz") or 0.0) > 0:
+            f = max(f, float(osc["f_c_hz"]))
+        best = max(best or 0.0, f)
+    return best
 
 
 def _filter_row(swing: float, f_osc: float | None, ramp: float) -> dict | None:
@@ -168,7 +186,8 @@ def build_sheet(*, envelope: dict, ramp_mw_per_min: float, tiers: list[dict], ba
     if not (math.isfinite(ramp_mw_per_min) and ramp_mw_per_min > 0):
         raise ValueError(f"ramp_mw_per_min must be > 0, got {ramp_mw_per_min}")
     swing, f_osc = _envelope_terms(envelope)
-    limit = band_limit_s(f_osc) if f_osc else None
+    f_lat = _latency_frequency(envelope)
+    limit = band_limit_s(f_lat) if f_lat else None
     smoothing = [t for t in tiers if t.get("tier", True)]
     backups = [t for t in tiers if t.get("backup")]
     rows = [_row("ramp_limiter", "ramp", "ramp limiter at the PoC", ramp_mw_per_min, "MW/min", "assumed", "set",
@@ -199,15 +218,15 @@ def build_sheet(*, envelope: dict, ramp_mw_per_min: float, tiers: list[dict], ba
     for t in smoothing:
         if limit is None:
             break
-        latency, basis = t.get("latency_s"), "latency given for the tier"
-        if latency is None:
+        latency, basis = t.get("latency_s"), t.get("latency_basis") or "latency given for the tier"
+        if latency is None:              # a hand-built tier; `tiers_from_solved` fills both from `store_latency`
             r = response_latency(t["name"], {"kind": "bess", "control": t.get("control")})
             latency, basis = r["latency_s"], r["basis"] + ", assumed"
         ok = latency < limit
         rows.append(_row(f"latency.{t['name']}", "latency", f"response latency of {t['name']}", latency, "s",
                          "assumed", "ok" if ok else "flagged", f"Store {t['name']}: control {t.get('control')}",
-                         (f"limit {limit:.3g} s = 1/(2π f) at {f_osc:g} Hz" if ok else
-                          f"latency {latency:g} s is not below {limit:.3g} s = 1/(2π f) at {f_osc:g} Hz")
+                         (f"limit {limit:.3g} s = 1/(2π f) at {f_lat:g} Hz" if ok else
+                          f"latency {latency:g} s is not below {limit:.3g} s = 1/(2π f) at {f_lat:g} Hz")
                          + f"; {basis}"))
     rows += _gfm_rows(gfm, [t["name"] for t in tiers])
     rows += _ups_rows(ups or {}, ramp_mw_per_min)
@@ -222,8 +241,8 @@ def build_sheet(*, envelope: dict, ramp_mw_per_min: float, tiers: list[dict], ba
 def tiers_from_solved(n) -> list[dict]:
     """The flagged smoothing_tier and backup_reserve stores of a solved network as `build_sheet` tiers:
     name, p_mw (charger p_nom), e_mwh, p_sm_mw, e_sm_mwh (the LP's smoothing slice), e_min_pu, e_max_pu (the
-    store's tightest window), eta_dis, backup, tier. The control is read from the store's `control` column
-    when it has one."""
+    store's tightest window), eta_dis, backup, tier, control (the `control` column or None), latency_s and
+    latency_basis (`spectrum.store_latency`, the one reading AS-09's tier split uses)."""
     names = dict.fromkeys(EF._flagged(n.stores, "smoothing_tier") + EF._flagged(n.stores, "backup_reserve"))
     tier, backup = set(EF._flagged(n.stores, "smoothing_tier")), set(EF._flagged(n.stores, "backup_reserve"))
     model = getattr(n, "model", None)
@@ -255,6 +274,7 @@ def tiers_from_solved(n) -> list[dict]:
             "e_min_pu": float(e_min[name].max()), "e_max_pu": float(e_max[name].min()),
             "eta_dis": float(n.links.at[dis, "efficiency"]) if dis else 1.0,
             "control": n.stores.at[name, "control"] if "control" in n.stores.columns else None})
+        out[-1]["latency_s"], out[-1]["latency_basis"] = store_latency(n, name)
     return out
 
 

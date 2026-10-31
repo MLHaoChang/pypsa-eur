@@ -290,7 +290,7 @@ def replace_oscillation(envelope: dict, analysis: dict, cod: str | None = None) 
     for ph in phases:
         ph["oscillation"] = {**(ph.get("oscillation") or {}), "amplitude_mw": eq["amplitude_mw"],
                              "period_s": eq["period_s"], "frequency_hz": eq["frequency_hz"], "source": "trace",
-                             "basis": EQUIVALENT}
+                             "basis": EQUIVALENT, "f_c_hz": analysis.get("f_c_hz")}
     return out
 
 
