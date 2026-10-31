@@ -3,7 +3,7 @@
 
 # AS-06 — Sizing loop runner
 
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: 03, 04, 05
 Model: Opus
@@ -17,12 +17,12 @@ Add a `*_loop_runner` in the `ADQ/coupling.py` pattern: solve, forward pass on f
 
 ## Acceptance
 
-- [ ] Tests first: cost is non-decreasing across rounds; cuts accumulate.
-- [ ] The weak-flat intent D prototype case passes in 2 rounds (note cuts needed 9).
-- [ ] A synthetic run with cost moving < 0.02 % per round while Pst is 6x over returns "not converged".
-- [ ] A check with no lever (SCR set by grid alone) stops with "unresolved, needs grid reinforcement or EMT study".
-- [ ] Transformer rounds up and is frozen after round 2; it cannot flip sizes.
-- [ ] Full-year uses a tsam-reduced year for inner rounds and a full-year final solve; run time recorded.
+- [x] Tests first: cost is non-decreasing across rounds; cuts accumulate.
+- [x] The weak-flat intent D prototype case passes in 2 rounds (note cuts needed 9).
+- [x] A synthetic run with cost moving < 0.02 % per round while Pst is 6x over returns "not converged".
+- [x] A check with no lever (SCR set by grid alone) stops with "unresolved, needs grid reinforcement or EMT study".
+- [x] Transformer rounds up and is frozen after round 2; it cannot flip sizes.
+- [x] Full-year uses a tsam-reduced year for inner rounds and a full-year final solve; run time recorded.
 
 ## PRs
 
@@ -47,3 +47,7 @@ PR 2 (runner):
 10. gridspine imports stay inside functions or behind the import guard; tests/test_packaging_requirements.py passes at the trial merge.
 11. stop_event aborts between rounds and inside long solves; abort after round 1 is tested.
 12. The slow acceptance case is marked slow; a fast fake-solve test covers the runner wiring.
+
+### Builder note (PR 2): the runner's solve path
+
+The runner solves each round with `n.optimize` on a private copy, not through `run_simulation`. `run_simulation` publishes a sizing record, a DSR commit, commercial terms and solve state for the open project (condition 7). The LP is still the project's: `solver_service.build_lp_chain` is the one extra_functionality chain both use (user code, curtailment cost, capex budget, ENS cap, import-energy cap, reserve margin, island, the AS rows, commercial bindings, objective scale), and the copy gets the energization schedule and the modelling assumptions first. Settings whose pre-solve step the copy does not reproduce are refused by name: island constraints, commercial bindings, Capacity > sizing off. `basis_note` names what the loop does not follow: a rolling, myopic or SCLOPF solve (the loop sizes one full-horizon LP), committable units (the project's UC keywords and MIP options), the project's solver and presolve options, and a missing tsam ("tsam not available: inner rounds solve the full year"; such rounds are labelled full year). Each round's transform restores run once its forward checks are done (the last round's after the sheet), inside a private `solving_context`, so one solved copy is alive at a time, so the open project's transient rows and the frozen-vintage store are left as found. A stop request lands between rounds and inside a solve: `runtime._AbortWatcher` interrupts a running LP and the loop ends `aborted`.

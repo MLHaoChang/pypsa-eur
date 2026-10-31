@@ -524,6 +524,55 @@ def _revision_or_none() -> int | None:
         return None
 
 
+def build_lp_chain(network, config, log_queue):
+    """The extra_functionality chain of a project solve: user code, then every LP wrap in order (objective
+    scale last). `run_simulation` and the AS-06 sizing loop both build their LP from it, so the two cannot
+    drift. Raises what `_compile_extra_functionality` raises."""
+    extra_fn = _compile_extra_functionality(config.extra_functionality_code)
+    # Wrap whatever the user wrote (or nothing) with our auto-curtailment-cost
+    # callback if any generator carries a non-zero `curtailment_cost`. This
+    # mirrors the user's expectation that "set curtailment_cost on a renewable
+    # → the optimiser pays for curtailing it" without forcing them to write
+    # any extra_functionality code themselves. The wrapper chains both
+    # callbacks so user-provided code still runs.
+    extra_fn = _wrap_with_curtailment_cost(network, extra_fn, log_queue=log_queue)
+    # Per-period CAPEX budget constraint — applied via extra_functionality
+    # so PyPSA's LP picks up the linopy constraint. Only adds work when
+    # the config dict is non-empty.
+    extra_fn = _wrap_with_capex_budget(network, extra_fn, config, log_queue=log_queue)
+    # Reliability target: per-period ENS cap (+ per-zone ceilings) on the
+    # involuntary slack dispatch. Adds work only when a target is set.
+    extra_fn = _wrap_with_ens_cap(network, extra_fn, config, log_queue=log_queue)
+    # Energy import cap (EH pack only). Adds work only when set.
+    extra_fn = _wrap_with_import_energy_cap(
+        network, extra_fn, config, log_queue=log_queue)
+    # Firm-capacity standard: a per-period planning reserve margin on
+    # derated installed capacity. Adds work only when a margin is set.
+    extra_fn = _wrap_with_reserve_margin(
+        network, extra_fn, config, log_queue=log_queue)
+    # Island ride-through, bridge and fuel rows (campus island I2a).
+    # Opt-in; refused, with the reason, on a path that is not the plain
+    # LOPF as it will actually run (see `_wrap_with_island`).
+    extra_fn = _wrap_with_island(network, extra_fn, config, log_queue=log_queue)
+    # Split power/energy storage (AS-02): the E/P-hour range, C-rate cap and
+    # power tie of each Store tagged by `split_storage`. No-op when none is.
+    extra_fn = _wrap_with_split_storage(network, extra_fn, log_queue=log_queue)
+    # Envelope floors, headroom, backup reserve and run-hour caps (AS-03). No-op when unset.
+    extra_fn = _wrap_with_envelope_floors(network, extra_fn, config, log_queue=log_queue)
+    extra_fn = _wrap_with_pcs_statcom(network, extra_fn, log_queue=log_queue)  # AS-05 PCS/STATCOM rows
+    extra_fn = _wrap_with_sizing_cuts(network, extra_fn, log_queue=log_queue)  # AS-06 sizing-loop cuts
+    # Edge Investment Case LP-level commercial terms (peaks, ratchets,
+    # tiers, group caps; spec §5.1). After the reserve margin, before the
+    # objective scale, which must stay last.
+    extra_fn = _wrap_with_commercial_bindings(
+        network, extra_fn, config, log_queue=log_queue)
+    # User-supplied numerical-conditioning scale on the LP objective.
+    # Multiplies model.objective by a positive constant right before
+    # solve. Adds work only when scale ≠ 1.0.
+    extra_fn = _wrap_with_objective_scale(network, extra_fn, config, log_queue=log_queue)
+    return extra_fn
+
+
 def run_simulation(
     config: SolverConfig,
     network: pypsa.Network,
@@ -583,48 +632,7 @@ def run_simulation(
         # surfaced as a graceful `[PHASE] Failed` instead of crashing the
         # worker before any sentinel is emitted on log_queue (which would
         # hang the SSE consumer waiting for `None`).
-        extra_fn = _compile_extra_functionality(config.extra_functionality_code)
-        # Wrap whatever the user wrote (or nothing) with our auto-curtailment-cost
-        # callback if any generator carries a non-zero `curtailment_cost`. This
-        # mirrors the user's expectation that "set curtailment_cost on a renewable
-        # → the optimiser pays for curtailing it" without forcing them to write
-        # any extra_functionality code themselves. The wrapper chains both
-        # callbacks so user-provided code still runs.
-        extra_fn = _wrap_with_curtailment_cost(network, extra_fn, log_queue=log_queue)
-        # Per-period CAPEX budget constraint — applied via extra_functionality
-        # so PyPSA's LP picks up the linopy constraint. Only adds work when
-        # the config dict is non-empty.
-        extra_fn = _wrap_with_capex_budget(network, extra_fn, config, log_queue=log_queue)
-        # Reliability target: per-period ENS cap (+ per-zone ceilings) on the
-        # involuntary slack dispatch. Adds work only when a target is set.
-        extra_fn = _wrap_with_ens_cap(network, extra_fn, config, log_queue=log_queue)
-        # Energy import cap (EH pack only). Adds work only when set.
-        extra_fn = _wrap_with_import_energy_cap(
-            network, extra_fn, config, log_queue=log_queue)
-        # Firm-capacity standard: a per-period planning reserve margin on
-        # derated installed capacity. Adds work only when a margin is set.
-        extra_fn = _wrap_with_reserve_margin(
-            network, extra_fn, config, log_queue=log_queue)
-        # Island ride-through, bridge and fuel rows (campus island I2a).
-        # Opt-in; refused, with the reason, on a path that is not the plain
-        # LOPF as it will actually run (see `_wrap_with_island`).
-        extra_fn = _wrap_with_island(network, extra_fn, config, log_queue=log_queue)
-        # Split power/energy storage (AS-02): the E/P-hour range, C-rate cap and
-        # power tie of each Store tagged by `split_storage`. No-op when none is.
-        extra_fn = _wrap_with_split_storage(network, extra_fn, log_queue=log_queue)
-        # Envelope floors, headroom, backup reserve and run-hour caps (AS-03). No-op when unset.
-        extra_fn = _wrap_with_envelope_floors(network, extra_fn, config, log_queue=log_queue)
-        extra_fn = _wrap_with_pcs_statcom(network, extra_fn, log_queue=log_queue)  # AS-05 PCS/STATCOM rows
-        extra_fn = _wrap_with_sizing_cuts(network, extra_fn, log_queue=log_queue)  # AS-06 sizing-loop cuts
-        # Edge Investment Case LP-level commercial terms (peaks, ratchets,
-        # tiers, group caps; spec §5.1). After the reserve margin, before the
-        # objective scale, which must stay last.
-        extra_fn = _wrap_with_commercial_bindings(
-            network, extra_fn, config, log_queue=log_queue)
-        # User-supplied numerical-conditioning scale on the LP objective.
-        # Multiplies model.objective by a positive constant right before
-        # solve. Adds work only when scale ≠ 1.0.
-        extra_fn = _wrap_with_objective_scale(network, extra_fn, config, log_queue=log_queue)
+        extra_fn = build_lp_chain(network, config, log_queue)
 
         tmp_log.touch()
         tail_thread = threading.Thread(

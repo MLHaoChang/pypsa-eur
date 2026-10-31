@@ -9,7 +9,7 @@ never sleeps. Everything expensive is behind the callables it is handed:
 
 * ``solve(state) -> result``: one capacity-expansion solve under ``state["cuts"]`` with the library assets in
   ``state["frozen"]`` fixed. ``result`` is ``{"status", "condition", "cost_eur", "sizes"}``; ``sizes`` maps an
-  asset to its solved capacity. A solve failure arrives as a status, never as an exception.
+  asset to its solved capacity; an optional ``info`` dict (snapshots solved, …) is copied onto the row. A solve failure arrives as a status, never as an exception.
 * ``forward(result, state) -> checks``: the forward pass on the fixed capacities. Each check is
   ``{"name", "ok", "lever", "cut", ...}``:
 
@@ -172,7 +172,8 @@ def run_sizing_loop(solve, forward, *, max_rounds: int = MAX_ROUNDS, freeze_afte
     "not_run",
     "warnings", "seconds"}``. ``status`` is ``converged`` / ``not_converged`` / ``unresolved`` / ``failed`` /
     ``aborted``; ``verdict`` is the sentence for the user. ``final`` is the row the verdict reads (the full-year
-    row when ``final_solve`` ran). ``stop_event`` is checked before every solve; ``on_iteration`` sees each row.
+    row when ``final_solve`` ran). ``stop_event`` is checked before every solve, and a solve that ends unsolved
+    after a stop request is an abort; ``on_iteration`` sees each row.
     """
     budget = _budget(max_rounds)
     freeze_after = max(1, int(freeze_after))
@@ -207,12 +208,15 @@ def run_sizing_loop(solve, forward, *, max_rounds: int = MAX_ROUNDS, freeze_afte
             rounds.append(row)
             if on_iteration is not None:
                 on_iteration(row)
+            if stopped():
+                return done("aborted", f"aborted during round {k}", row)
             return done("failed", f"failed: round {k} solve did not reach an optimum ({cond})", row)
         t = time.perf_counter()
         checks = forward(result, state)
         row.update(status=result["status"], condition=result.get("condition", "optimal"),
                    cost_eur=float(result["cost_eur"]), sizes=dict(result.get("sizes") or {}),
-                   forward_s=time.perf_counter() - t, **_evaluate(result, checks))
+                   forward_s=time.perf_counter() - t, info=dict(result.get("info") or {}),
+                   **_evaluate(result, checks))
         prev = rounds[-1] if rounds else None
         rounds.append(row)
         # The LP cost alone: a filter cost may fall for its own reasons.
@@ -278,12 +282,15 @@ def run_sizing_loop(solve, forward, *, max_rounds: int = MAX_ROUNDS, freeze_afte
     if not _solved(result):
         cond = _why(result)
         row.update(status=(result or {}).get("status"), condition=cond, forward_s=0.0)
+        if stopped():
+            return done("aborted", "aborted during the full-year solve", row)
         return done("failed", f"failed: the full-year solve did not reach an optimum ({cond})", row)
     t = time.perf_counter()
     checks = forward(result, state)
     row.update(status=result["status"], condition=result.get("condition", "optimal"),
                cost_eur=float(result["cost_eur"]), sizes=dict(result.get("sizes") or {}),
-               forward_s=time.perf_counter() - t, **_evaluate(result, checks))
+               forward_s=time.perf_counter() - t, info=dict(result.get("info") or {}),
+               **_evaluate(result, checks))
     if on_iteration is not None:
         on_iteration(row)
     if row["unresolved"]:
