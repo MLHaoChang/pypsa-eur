@@ -775,6 +775,11 @@ def start_margin_loop(
             with PyPSAService.get_solver_state_lock():
                 solver_state["solver_config"] = dataclasses.replace(
                     solver_state["solver_config"], reserve_margin=float(m_star))
+                # LC-40: the hold is a solver-config write, so it moves the
+                # shared counter (other studies go stale); this loop's own
+                # record re-captures it, as the held margin is what its
+                # verdict describes.
+                record["network_revision"] = dirty_state.bump_revision(study_ctx)
         else:
             final_cfg = base_cfg
         try:

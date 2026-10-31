@@ -174,8 +174,13 @@ def edited_since(record, *, revision: int | None = None) -> bool | None:
     or restored from an older ``results_state.pkl``).
 
     A solver-config change counts as an edit (owner decision LC40-COUNTER-1,
-    "same counter"): ``update_solver_config`` bumps the same revision, so a
-    study read after a VoLL or ``reserve_margin`` change reads True. The claim is "edited
+    "same counter"): ``update_solver_config``, ``PUT /value_flows`` and the
+    margin and coupling loops' ``restore="final"`` holds bump the same
+    revision, so a study read after a VoLL, ``reserve_margin`` or value-flow
+    change reads True. A loop's own hold re-captures its record's revision
+    (its verdict describes the held setting). ``PUT /finance`` is exempt: the
+    finance inputs are in no solve fingerprint and no adequacy study reads
+    them. The claim is "edited
     since", never "changed" or "differs": an edit then its undo reads True.
     """
     if not isinstance(record, dict):

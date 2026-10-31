@@ -524,11 +524,13 @@ VARIANTS: list[dict] = [
              B + 'test_lc41_d13_panel_stale_banner.py::test_the_panel_renders_the_shared_banner_from_its_route_flag[McPanel]',
              B + 'test_lc41_d13_panel_stale_banner.py::test_the_panel_renders_the_shared_banner_from_its_route_flag[MarginLoopPanel]',
              B + 'test_lc41_d13_panel_stale_banner.py::test_the_panel_has_a_component_test_for_each_flag_value'),
-    _covered('LC-D13.stale_source_solver_config', 'a frontier at VoLL 100, then update_solver_config(voll=200): the reader and the campaign say '
+    _covered('LC-D13.stale_source_solver_config', 'a frontier at VoLL 100, then update_solver_config(voll=40): the reader and the campaign say '
              'edited_since_study True with the stored knee unchanged (hand oracle at 100); a re-run clears it and moves the knee to the '
-             'hand oracle at 200. Same edit counter as a network edit (LC40-COUNTER-1)',
+             'hand oracle at 40; value flows and the margin hold move it too, finance does not. Same edit counter as a network edit (LC40-COUNTER-1)',
              'run_frontier_study update_solver_config get_adequacy_results campaign_status',
-             B + 'test_lc40_d13_solver_config_stale.py::test_a_voll_change_flags_the_frontier_and_a_rerun_clears_it'),
+             B + 'test_lc40_d13_solver_config_stale.py::test_a_voll_change_flags_the_frontier_and_a_rerun_clears_it',
+             B + 'test_lc40_d13_solver_config_stale.py::test_a_value_flows_change_flags_the_frontier',
+             B + 'test_lc40_d13_solver_config_stale.py::test_a_margin_hold_moves_the_counter_but_not_its_own_loop_stale'),
     _covered('LC-D13.incomplete_campaign', 'a campaign of budget 3 refuses a 3-target frontier (4 solves) as campaign_budget_exhausted with '
              'spent 0 and no entry, runs 2 targets to their hand points (spent 3) and closes with end_campaign; budget 4 runs all three. '
              'An EH redundancy compare at budget_solves 2 (ens_solve takes 1) solves base alone, budget_exhausted, no selection; at 10 it '

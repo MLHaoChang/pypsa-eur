@@ -463,6 +463,10 @@ def start_coupling_loop(
                 solver_state["solver_config"] = dataclasses.replace(
                     solver_state["solver_config"],
                     ens_cap_permyriad=float(eps_star))
+                # LC-40: the hold is a solver-config write; it moves the shared
+                # counter so other studies read stale.
+                from services import dirty_state
+                dirty_state.bump_revision()
         else:
             final_cfg = base_cfg
         try:
