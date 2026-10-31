@@ -235,6 +235,22 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
             ('POST', '/api/library/series'),
         }),
     },
+    {
+        'id': 'power_trace_spectrum',
+        'title': 'Power-trace spectrum and smoothing-tier split',
+        'disposition': 'unbuilt',
+        'reason': 'Reading a power trace into a PSD, f_c and the smoothing-tier split is not available from chat or a screen yet; it is an API route for now.',
+        'page': 'API: POST /api/spectrum/trace',
+        'panel': None,
+        'keywords': frozenset({
+            'psd',
+            'spectrum',
+        }),
+        'routes': frozenset({
+            ('POST', '/api/network/spectrum/tier_split'),
+            ('POST', '/api/spectrum/trace'),
+        }),
+    },
 )
 
 NOTE = ("not_via_chat lists features you cannot do from chat. Tell the user the reason and the page; "

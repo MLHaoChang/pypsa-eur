@@ -448,9 +448,8 @@ def _fingerprints(n):
 
 
 def test_an_untagged_network_keeps_masters_fingerprint():
-    # Computed with master's `_network_input_fingerprint` (f91d43c47, before AS-05) on this network. No Link:
-    # PyPSA registers extra Link ports (bus2...) on the process-wide defaults once any network uses them, so a
-    # hash of a Link network depends on which tests ran before it (see test_extras_passthrough).
+    # Computed with master's `_network_input_fingerprint` (f91d43c47, before AS-05) on this network. No Link,
+    # so the extra-port filter leaves it untouched; the Link pin is below.
     n = pypsa.Network()
     n.set_snapshots(pd.RangeIndex(2))
     n.add("Bus", "campus")
@@ -458,6 +457,67 @@ def test_an_untagged_network_keeps_masters_fingerprint():
     n.add("Load", "dc", bus="campus", p_set=[100.0, 105.0], q_set=[30.0, 34.5])
     assert _fingerprints(n) == ("ae6082a31962e2c70073341e1662b3259204edc0a0c09052bf2a5298d44fa922",
                                 "a5561ccbaa135de5db22096dd74899f7a92be69b854b85cdf2c71176ce0196ed")
+
+
+def _link_network():
+    n = pypsa.Network()
+    n.set_snapshots(pd.RangeIndex(2))
+    n.add("Bus", "grid")
+    n.add("Bus", "campus")
+    n.add("Generator", "import", bus="grid", p_nom=200, marginal_cost=10.0)
+    n.add("Link", "trafo", bus0="grid", bus1="campus", p_nom=150, efficiency=0.99)
+    n.add("Store", "bess", bus="campus", e_nom=40.0, e_cyclic=True, marginal_cost=0.5)
+    n.add("Load", "dc", bus="campus", p_set=[100.0, 105.0], q_set=[30.0, 34.5])
+    return n
+
+
+def _load_a_three_port_link():
+    # Registers bus2 / efficiency2 on PyPSA's process-wide Link defaults, as a CHP project does in the API.
+    m = pypsa.Network()
+    m.add("Bus", ["x", "y", "z"])
+    m.add("Link", "chp", bus0="x", bus1="y", bus2="z", efficiency2=0.5)
+
+
+def test_an_untagged_link_network_keeps_masters_fingerprint():
+    # Computed with master's `_network_input_fingerprint` (b421ad19) in a fresh process, before any network
+    # registered extra Link ports. It must hold whatever ran before it in this process.
+    _load_a_three_port_link()
+    assert _fingerprints(_link_network()) == ("b610fc3f01d827edf11e351450d8c9f48cc40feb0753b875ded5d27404866fa6",
+                                              "a9ab52d602e68025d493832ed1838e56d04a0d0e4876cbe062b741d1d0945dc0")
+
+
+def test_a_link_networks_fingerprint_ignores_ports_another_network_registered():
+    before = _fingerprints(_link_network())
+    _load_a_three_port_link()
+    after = _link_network()
+    assert {"bus2", "efficiency2"} <= set(after.links.columns)
+    assert _fingerprints(after) == before
+    # As built before any registration, whatever this process loaded earlier.
+    after.links.drop(columns=[c for c in after.links.columns if c in ("bus2", "efficiency2")], inplace=True)
+    after.links_t.pop("efficiency2", None)
+    assert _fingerprints(after) == before
+
+
+def test_a_populated_extra_port_still_changes_the_fingerprint():
+    n = _link_network()
+    n.add("Bus", "heat")
+    before = _fingerprints(n)
+    n.links.loc["trafo", "bus2"] = "heat"
+    with_port = _fingerprints(n)
+    assert with_port[0] != before[0] and with_port[1] != before[1]
+    n.links.loc["trafo", "efficiency2"] = 0.4
+    with_efficiency = _fingerprints(n)
+    assert with_efficiency[0] != with_port[0] and with_efficiency[1] != with_port[1]
+
+
+def test_a_time_varying_extra_port_efficiency_changes_the_fingerprint():
+    n = _link_network()
+    n.add("Bus", "heat")
+    n.links.loc["trafo", "bus2"] = "heat"
+    before = _fingerprints(n)
+    n.links_t["efficiency2"] = pd.DataFrame({"trafo": [0.4, 0.5]}, index=n.snapshots)
+    after = _fingerprints(n)
+    assert after[0] != before[0] and after[1] != before[1]
 
 
 def test_an_untagged_link_network_appends_nothing(monkeypatch):

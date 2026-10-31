@@ -62,6 +62,7 @@ def test_the_issue_rows_are_declared():
         'solve_queue_instance_controls': ('out of chat', 'solveQueue'), 'map_layout_and_sites': ('manual', 'map'),
         'site_scene': ('unbuilt', 'map'),
         'library_uploads_and_tariff_edit': ('manual', 'library'),
+        'power_trace_spectrum': ('unbuilt', None),
     }
     assert 'grid_code_publish' not in entries  # GRIDCODE-CHAT-1: chat tools behind a card
     assert {k: (e['disposition'], e['panel']) for k, e in entries.items()} == expected
