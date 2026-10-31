@@ -38,10 +38,13 @@ THE STOPPING RULE (revised, issue 06).
 
 CUTS ARE NEVER REMOVED, and each key moves only in its own direction (``CUT_DIRECTIONS``): an upper bound
 only falls, a floor only rises. A looser proposal is ignored. So the feasible set only shrinks and the cost is
-non-decreasing; a cost that falls means a cut was lost, and is flagged in ``warnings``.
+non-decreasing; a cost that falls means a cut was lost, and is flagged in ``warnings`` (on
+the LP cost: a filter cost may fall for its own reasons).
 
-LIBRARY ASSETS (the transformer) round up to the library size the forward pass names, and freeze at the end of
-round ``freeze_after`` (2). A frozen size is never changed again, so it cannot flip between library sizes.
+LIBRARY ASSETS (the transformer) round up to the library size the forward pass names (the largest, when two
+checks name one asset; the last named, in a round that names none), and freeze at that size at the end of round
+``freeze_after`` (2). A frozen size is never changed again, so it cannot flip between library sizes. ``library``
+in the result holds the latest rounded-up sizes, also for a run that converged before the freeze.
 
 TERMINATION IS TOTAL: each round makes exactly one ``solve`` call, the loop runs at most ``MAX_ROUNDS`` rounds,
 and ``final_solve`` runs at most once, after a converged verdict.
@@ -62,14 +65,14 @@ FREEZE_AFTER = 2
 COST_TOL = 0.005
 CAPACITY_TOL = 0.02
 
-#: Each cut and its direction: "max" keys are floors (only rise), "min" keys are upper bounds (only fall).
+#: Each cut and its direction: an "upper" bound only falls, a "floor" only rises.
 CUT_DIRECTIONS = {
-    "import_cap_mw": "min",    # import flow at the PoC, p(t) <= cap (not the transformer's p_nom)
-    "pst_rhs_mva": "min",      # cos psi P_res + sin psi Q_res <= rhs
-    "p_floor_mw": "max",       # smoothing power floor, sum P_sm >= floor
-    "e_floor_mwh": "max",      # smoothing energy floor, sum E_sm >= floor
-    "gfm_mva_min": "max",      # sum over GFM stores of P + S_x >= min
-    "pq_margin_mvar": "max",   # added to Q_load in the per-hour PQ row
+    "import_cap_mw": "upper",    # import flow at the PoC, p(t) <= cap (not the transformer's p_nom)
+    "pst_rhs_mva": "upper",      # cos psi P_res + sin psi Q_res <= rhs
+    "p_floor_mw": "floor",       # smoothing power floor, sum P_sm >= floor
+    "e_floor_mwh": "floor",      # smoothing energy floor, sum E_sm >= floor
+    "gfm_mva_min": "floor",      # sum over GFM stores of P + S_x >= min
+    "pq_margin_mvar": "floor",   # added to Q_load in the per-hour PQ row
 }
 
 UNRESOLVED_COPY = "unresolved, needs grid reinforcement or EMT study"
@@ -93,7 +96,7 @@ def merge_cuts(cuts: dict, proposed: dict) -> tuple[dict, set]:
         if not math.isfinite(v):
             raise ValueError(f"sizing cut {key} must be finite, got {value!r}")
         old = merged.get(key)
-        tighter = old is None or (v < old if CUT_DIRECTIONS[key] == "min" else v > old)
+        tighter = old is None or (v < old if CUT_DIRECTIONS[key] == "upper" else v > old)
         if tighter and (old is None or abs(v - old) > 1e-9 * max(1.0, abs(old))):
             merged[key] = v
             changed.add(key)
@@ -116,29 +119,45 @@ def _capacity_move(a: dict, b: dict, frozen: dict) -> float:
     return worst
 
 
-def _verdict_list(names) -> str:
-    return ", ".join(names)
+def _lever(check: dict) -> str:
+    return check.get("lever", "cut")
+
+
+def _why(result) -> str:
+    """The failed solve's condition, for the verdict."""
+    result = result or {}
+    return result.get("condition") or result.get("status") or "unknown"
 
 
 def _evaluate(result: dict, checks: list[dict]) -> dict:
     """The row fields a forward pass gives: what fails, what has no lever, the filter cost, the total."""
     for c in checks:
-        if c.get("lever", "cut") not in LEVERS:
+        if _lever(c) not in LEVERS:
             raise ValueError(f"check {c.get('name')}: lever {c.get('lever')!r} is not one of {LEVERS}")
-    filter_cost = sum(float(c.get("filter_cost_eur") or 0.0) for c in checks if c.get("lever") == "filter_cost")
-    failing = [c for c in checks if not c.get("ok") and c.get("lever", "cut") != "filter_cost"]
+    filter_cost = sum(float(c.get("filter_cost_eur") or 0.0) for c in checks if _lever(c) == "filter_cost")
+    failing = [c for c in checks if not c.get("ok") and _lever(c) != "filter_cost"]
     return {
         "checks": checks,
         "failing": [c["name"] for c in failing],
-        "unresolved": [c["name"] for c in failing if c.get("lever") == "none"],
+        "unresolved": [c["name"] for c in failing if _lever(c) == "none"],
         "not_run": [c["name"] for c in checks if c.get("skipped")],
         "filter_cost_eur": filter_cost,
         "total_cost_eur": float(result["cost_eur"]) + filter_cost,
     }
 
 
+def _round_up(library: dict, checks: list[dict]) -> None:
+    """Record this round's rounded-up library sizes: the largest any check names for an asset. An asset no
+    check names this round keeps its last size."""
+    sizes: dict = {}
+    for c in checks:
+        for asset, size in (c.get("library") or {}).items():
+            sizes[asset] = max(sizes.get(asset, -math.inf), float(size))
+    library.update(sizes)
+
+
 def _converged_text(not_run) -> str:
-    return f"converged (campus checks not run: {_verdict_list(not_run)})" if not_run else "converged"
+    return f"converged (campus checks not run: {", ".join(not_run)})" if not_run else "converged"
 
 
 def run_sizing_loop(solve, forward, *, max_rounds: int = MAX_ROUNDS, freeze_after: int = FREEZE_AFTER,
@@ -147,7 +166,8 @@ def run_sizing_loop(solve, forward, *, max_rounds: int = MAX_ROUNDS, freeze_afte
     """
     Run the loop until the revised rule stops it.
 
-    Returns ``{"status", "verdict", "rounds", "final", "cuts", "frozen", "failing", "unresolved", "not_run",
+    Returns ``{"status", "verdict", "rounds", "final", "cuts", "frozen", "library", "failing", "unresolved",
+    "not_run",
     "warnings", "seconds"}``. ``status`` is ``converged`` / ``not_converged`` / ``unresolved`` / ``failed`` /
     ``aborted``; ``verdict`` is the sentence for the user. ``final`` is the row the verdict reads (the full-year
     row when ``final_solve`` ran). ``stop_event`` is checked before every solve; ``on_iteration`` sees each row.
@@ -156,6 +176,7 @@ def run_sizing_loop(solve, forward, *, max_rounds: int = MAX_ROUNDS, freeze_afte
     freeze_after = max(1, int(freeze_after))
     cuts: dict = {}
     frozen: dict = {}
+    library: dict = {}       # each library asset's latest rounded-up size
     rounds: list[dict] = []
     warnings: list[str] = []
     t0 = time.perf_counter()
@@ -163,7 +184,7 @@ def run_sizing_loop(solve, forward, *, max_rounds: int = MAX_ROUNDS, freeze_afte
     def done(status, verdict, row=None, **extra):
         last = row or (rounds[-1] if rounds else None)
         return {"status": status, "verdict": verdict, "rounds": rounds, "final": last, "cuts": dict(cuts),
-                "frozen": dict(frozen), "failing": (last or {}).get("failing", []),
+                "frozen": dict(frozen), "library": dict(library), "failing": (last or {}).get("failing", []),
                 "unresolved": (last or {}).get("unresolved", []), "not_run": (last or {}).get("not_run", []),
                 "warnings": warnings, "seconds": time.perf_counter() - t0, **extra}
 
@@ -179,7 +200,7 @@ def run_sizing_loop(solve, forward, *, max_rounds: int = MAX_ROUNDS, freeze_afte
         solve_s = time.perf_counter() - t
         row = {"round": k, "basis": "rounds", "cuts": dict(cuts), "frozen": dict(frozen), "solve_s": solve_s}
         if not _solved(result):
-            cond = (result or {}).get("condition") or (result or {}).get("status") or "unknown"
+            cond = _why(result)
             row.update(status=(result or {}).get("status"), condition=cond, forward_s=0.0)
             rounds.append(row)
             if on_iteration is not None:
@@ -192,21 +213,22 @@ def run_sizing_loop(solve, forward, *, max_rounds: int = MAX_ROUNDS, freeze_afte
                    forward_s=time.perf_counter() - t, **_evaluate(result, checks))
         prev = rounds[-1] if rounds else None
         rounds.append(row)
-        if prev is not None and row["total_cost_eur"] < prev["total_cost_eur"] * (1 - 1e-9) - 1e-9:
-            warnings.append(f"round {k}: total cost fell from {prev['total_cost_eur']:.6g} to "
-                            f"{row['total_cost_eur']:.6g}; cuts only shrink the feasible set, so a cut was lost")
-        # Freeze the library assets the forward pass rounded up, once, at the end of round `freeze_after`.
+        # The LP cost alone: a filter cost may fall for its own reasons.
+        if prev is not None and row["cost_eur"] < prev["cost_eur"] * (1 - 1e-9) - 1e-9:
+            warnings.append(f"round {k}: LP cost fell from {prev['cost_eur']:.6g} to {row['cost_eur']:.6g}; "
+                            "cuts only shrink the feasible set, so a cut was lost")
+        _round_up(library, checks)
+        # Freeze the library assets, once, at the end of round `freeze_after`, at their latest rounded-up size.
         if k == freeze_after:
-            for c in checks:
-                for asset, size in (c.get("library") or {}).items():
-                    frozen.setdefault(asset, float(size))
+            for asset, size in library.items():
+                frozen.setdefault(asset, size)
         if on_iteration is not None:
             on_iteration(row)
 
         if not row["failing"]:
             break
         if row["unresolved"]:
-            return done("unresolved", f"{UNRESOLVED_COPY}: {_verdict_list(row['unresolved'])}", row)
+            return done("unresolved", f"{UNRESOLVED_COPY}: {", ".join(row['unresolved'])}", row)
         if prev is not None:
             dc = abs(row["total_cost_eur"] - prev["total_cost_eur"]) / max(abs(prev["total_cost_eur"]), 1e-9)
             move = _capacity_move(prev["sizes"], row["sizes"], frozen)
@@ -214,23 +236,24 @@ def run_sizing_loop(solve, forward, *, max_rounds: int = MAX_ROUNDS, freeze_afte
             if dc < cost_tol and move < capacity_tol:
                 return done("not_converged",
                             f"not converged: tolerance stop (cost moved {dc:.3%}, capacities {move:.2%}) with "
-                            f"checks still failing: {_verdict_list(row['failing'])}", row)
-        stale = []
-        for c in checks:
-            if c["name"] not in row["failing"]:
-                continue
-            cuts, changed = merge_cuts(cuts, c.get("cut") or {})
-            if not changed:
-                stale.append(c["name"])
+                            f"checks still failing: {", ".join(row['failing'])}", row)
+        # Merge every failing check's cut first: a check whose key another check tightened further is not stale,
+        # since the next LP still differs on that key.
+        proposed = [c for c in checks if c["name"] in row["failing"]]
+        changed: set = set()
+        for c in proposed:
+            cuts, more = merge_cuts(cuts, c.get("cut") or {})
+            changed |= more
+        stale = [c["name"] for c in proposed if not set(c.get("cut") or {}) & changed]
         row["cuts_after"] = dict(cuts)
         if stale:
             return done("not_converged",
-                        f"not converged: no tighter cut for {_verdict_list(stale)}; checks still failing: "
-                        f"{_verdict_list(row['failing'])}", row)
+                        f"not converged: no tighter cut for {", ".join(stale)}; checks still failing: "
+                        f"{", ".join(row['failing'])}", row)
         if k == budget:
             return done("not_converged",
                         f"not converged in {budget} rounds; checks still failing: "
-                        f"{_verdict_list(row['failing'])}", row)
+                        f"{", ".join(row['failing'])}", row)
 
     last = rounds[-1]
     if final_solve is None:
@@ -243,7 +266,7 @@ def run_sizing_loop(solve, forward, *, max_rounds: int = MAX_ROUNDS, freeze_afte
     row = {"round": state["round"], "basis": "full_year", "cuts": dict(cuts), "frozen": dict(frozen),
            "solve_s": time.perf_counter() - t}
     if not _solved(result):
-        cond = (result or {}).get("condition") or (result or {}).get("status") or "unknown"
+        cond = _why(result)
         row.update(status=(result or {}).get("status"), condition=cond, forward_s=0.0)
         return done("failed", f"failed: the full-year solve did not reach an optimum ({cond})", row)
     t = time.perf_counter()
@@ -254,8 +277,8 @@ def run_sizing_loop(solve, forward, *, max_rounds: int = MAX_ROUNDS, freeze_afte
     if on_iteration is not None:
         on_iteration(row)
     if row["unresolved"]:
-        return done("unresolved", f"{UNRESOLVED_COPY}: {_verdict_list(row['unresolved'])}", row)
+        return done("unresolved", f"{UNRESOLVED_COPY}: {", ".join(row['unresolved'])}", row)
     if row["failing"]:
         return done("not_converged", "not converged: reduced-year rounds passed, full year failed: "
-                    f"{_verdict_list(row['failing'])}", row)
+                    f"{", ".join(row['failing'])}", row)
     return done("converged", _converged_text(row["not_run"]), row)

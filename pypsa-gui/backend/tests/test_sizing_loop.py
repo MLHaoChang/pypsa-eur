@@ -276,3 +276,46 @@ def test_on_iteration_sees_every_row():
                                               [_check("pst", True)]])
     run_sizing_loop(script.solve, script.forward, on_iteration=seen.append)
     assert [r["round"] for r in seen] == [1, 2]
+
+
+# ── review fixes ────────────────────────────────────────────────────────────
+
+
+def test_a_check_whose_key_another_check_tightened_further_is_not_stale():
+    script = Script([_ok(100.0), _ok(102.0)],
+                    [[_check("transformer", False, cut={"import_cap_mw": 50.0}),
+                      _check("site_peak", False, cut={"import_cap_mw": 60.0})],
+                     [_check("transformer", True), _check("site_peak", True)]])
+    out = run_sizing_loop(script.solve, script.forward)
+    assert out["status"] == "converged" and script.states[1]["cuts"] == {"import_cap_mw": 50.0}
+
+
+def test_two_checks_naming_one_asset_round_up_to_the_larger():
+    checks = [[_check("transformer", True, library={"trafo": 80.0}), _check("site_peak", True, library={"trafo": 100.0}),
+               _check("pst", False, cut={"pst_rhs_mva": 5.0 - k})] for k in range(3)]
+    script = Script([_ok(100.0 + k, s=10.0 * k) for k in range(3)], checks)
+    out = run_sizing_loop(script.solve, script.forward, max_rounds=3)
+    assert out["frozen"] == {"trafo": 100.0}
+
+
+def test_a_freeze_round_naming_no_library_size_freezes_the_last_named():
+    checks = [[_check("transformer", True, library={"trafo": 80.0}), _check("pst", False, cut={"pst_rhs_mva": 5.0})],
+              [_check("pst", False, cut={"pst_rhs_mva": 4.0})],
+              [_check("pst", True)]]
+    script = Script([_ok(100.0, s=1.0), _ok(102.0, s=2.0), _ok(104.0, s=3.0)], checks)
+    out = run_sizing_loop(script.solve, script.forward)
+    assert script.states[2]["frozen"] == {"trafo": 80.0} and out["frozen"] == {"trafo": 80.0}
+
+
+def test_a_run_converged_before_the_freeze_still_reports_the_library_size():
+    script = Script([_ok(100.0)], [[_check("transformer", True, library={"trafo": 80.0}), _check("pst", True)]])
+    out = run_sizing_loop(script.solve, script.forward)
+    assert out["frozen"] == {} and out["library"] == {"trafo": 80.0}
+
+
+def test_a_falling_filter_cost_is_not_flagged():
+    script = Script([_ok(100.0), _ok(100.0)],
+                    [[_check("harmonics", False, lever="filter_cost", filter_cost_eur=20.0),
+                      _check("pst", False, cut={"pst_rhs_mva": 5.0})],
+                     [_check("harmonics", False, lever="filter_cost", filter_cost_eur=10.0), _check("pst", True)]])
+    assert run_sizing_loop(script.solve, script.forward)["warnings"] == []

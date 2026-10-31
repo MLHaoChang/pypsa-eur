@@ -44,8 +44,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
+from services.adequacy.flicker_inputs import residual_swing, voltage_form_mva
 from services.solver.pcs_statcom import LINK_COLUMNS as PQ_LINK_COLUMNS
 from services.solver.pcs_statcom import _p_nom
+from services.solver.pcs_statcom import _tagged as _pq_tagged
 from services.solver.runtime import _safe_log
 
 if TYPE_CHECKING:
@@ -79,6 +81,19 @@ def pst_rhs_mva(pst_limit: float, changes_per_min: float, sk_mva: float, c_max: 
     c = c_factor(None, "max") if c_max is None else float(c_max)
     d_lim_pct = float(pst_limit) / fl.pst(1.0, float(changes_per_min))     # Pst is linear in d
     return d_lim_pct / 100.0 * float(sk_mva) / c
+
+
+def pst_step_mva(swing_mw: float, p_sm_mw: float, q_dyn_mvar: float, tan_phi_swing: float, xr: float) -> float:
+    """The Pst row's left side, cos psi P_res + sin psi Q_res, at solved P_sm and Q_dyn: AS-04's
+    `residual_swing` and `voltage_form_mva` with S + A = `swing_mw`."""
+    p_res, q_res = residual_swing(swing_mw, 0.0, p_sm_mw, tan_phi_swing, q_dyn_mvar)
+    return voltage_form_mva(p_res, q_res, xr)
+
+
+def gfm_mva_min(escr_min: float, p_n_mw: float, sk_mva: float, gfm_credit: float = 1.2) -> float:
+    """The GFM MVA the ESCR cut asks for: (S_sc + credit x GFM MVA) / P_n >= escr_min solved for the GFM MVA,
+    floored at 0. `gfm_credit` is the fault-current credit per MVA of grid-forming converter (assumed 1.2 pu)."""
+    return max(0.0, (float(escr_min) * float(p_n_mw) - float(sk_mva)) / float(gfm_credit))
 
 
 def tightened_pst_rhs(rhs: float | None, *, step_lp_mva: float, d_pct: float, d_lim_pct: float,
@@ -115,13 +130,8 @@ def tag_gfm(n: "pypsa.Network", store: str, on: bool = True) -> None:
 
 
 def _tagged(frame: pd.DataFrame | None, columns: tuple) -> pd.DataFrame | None:
-    if frame is None:
-        return None
-    present = [c for c in columns if c in frame.columns]
-    if not present:
-        return None
-    mask = frame[present].notna().any(axis=1)
-    return frame.loc[mask].reindex(columns=list(columns)) if mask.any() else None
+    rows = _pq_tagged(frame, columns)
+    return None if rows is None else rows.reindex(columns=list(columns))
 
 
 def sizing_cuts_tags(n: "pypsa.Network") -> tuple[pd.DataFrame | None, pd.DataFrame | None]:

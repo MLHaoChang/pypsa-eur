@@ -344,3 +344,21 @@ def test_each_row_is_needed(monkeypatch, row, holds):
     assert holds(_each_cut_measures(_solve(_each_cut_case()))[row])
     monkeypatch.setattr(sc, "ROWS", tuple(r for r in sc.ROWS if r != row))
     assert not holds(_each_cut_measures(_solve(_each_cut_case()))[row])
+
+
+# ── helpers the runner uses ─────────────────────────────────────────────────
+
+
+def test_the_lp_step_matches_the_pst_row_at_the_solved_sizes():
+    n = _campus([100.0])
+    _bess(n, "highC", 119.9)
+    tag_cuts(n, "trafo", {"pst_rhs_mva": 10.0}, swing_mw=40.0, tan_phi_swing=0.1, xr=XR)
+    _solve(n)
+    step = sc.pst_step_mva(40.0, 0.0, solution(n)["q_dyn"], 0.1, XR)
+    assert step == pytest.approx(10.0, abs=1e-6)                 # the row binds at its rhs
+
+
+def test_the_gfm_floor_solves_the_escr_rule():
+    # (S_sc + 1.2 GFM) / P_n >= 3: S_sc = 250 MVA, P_n = 105 MW asks for (315 - 250) / 1.2 = 54.17 MVA.
+    assert sc.gfm_mva_min(3.0, 105.0, 250.0) == pytest.approx(65.0 / 1.2)
+    assert sc.gfm_mva_min(3.0, 105.0, 2000.0) == 0.0
