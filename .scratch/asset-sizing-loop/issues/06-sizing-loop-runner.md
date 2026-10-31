@@ -47,3 +47,7 @@ PR 2 (runner):
 10. gridspine imports stay inside functions or behind the import guard; tests/test_packaging_requirements.py passes at the trial merge.
 11. stop_event aborts between rounds and inside long solves; abort after round 1 is tested.
 12. The slow acceptance case is marked slow; a fast fake-solve test covers the runner wiring.
+
+### Builder note (PR 2): the runner's solve path
+
+The runner solves each round with `n.optimize` through the AS LP chain (split storage, envelope floors, PCS/STATCOM, sizing cuts) on a private copy, not through `run_simulation`. `run_simulation` publishes a sizing record, a DSR commit, commercial terms and solve state for the open project (condition 7). As a result, the project's other solve options (island, commercial terms, reserve margin, budgets, caps, rolling/myopic) are not applied. Every result says so in `basis_note`. A stop request lands between rounds; one LP is not interrupted.

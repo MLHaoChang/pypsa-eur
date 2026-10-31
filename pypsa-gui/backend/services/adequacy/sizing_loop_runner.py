@@ -6,7 +6,10 @@ Wires `services.adequacy.sizing_loop.run_sizing_loop` to real solves and the for
   AS-03, PCS/STATCOM AS-05, sizing cuts AS-06) and `n.optimize`. Not `run_simulation`: that publishes a sizing
   record, a DSR commit, commercial terms and solve state for the open project, and the loop must leave the
   project as it found it. The runner writes nothing of the caller's network or config; applying a result is
-  AS-10's job. Inner rounds solve a tsam-reduced year (`services.time_aggregation_service`, the limited-foresight
+  AS-10's job. The price: only the AS rows are applied. The project's other solve options (island ride-through,
+  commercial terms, reserve margin, capex budget, caps, rolling or myopic runs) are not, so the sizes can
+  differ from a project solve; every result says so in `basis_note`. A stop request lands between rounds: one
+  LP is not interrupted. Inner rounds solve a tsam-reduced year (`services.time_aggregation_service`, the limited-foresight
   clustering, with `SolverConfig.lf_*`); the final solve is the full year, and its forward pass gives the verdict.
 * **forward**: the checks on the solved, fixed capacities. Each is a scalar check with gridspine or the AS
   helpers:
@@ -57,6 +60,10 @@ TAN_PHI_SWING_ASSUMED = 0.1
 #: Fault-current credit per MVA of grid-forming converter, pu (assumed).
 GFM_CREDIT = 1.2
 ESCR_MIN = 3.0
+#: What every result's sizes rest on.
+BASIS_NOTE = ("sized through the AS LP rows only (split storage, envelope floors, PCS/STATCOM, sizing cuts); the "
+              "project's other solve options (island, commercial terms, reserve margin, budgets, caps, rolling or "
+              "myopic runs) are not applied")
 
 
 class SizingLoopRefusal(ValueError):
@@ -141,6 +148,16 @@ def _reindex(frame: pd.DataFrame, idx: pd.MultiIndex) -> pd.DataFrame:
     return out
 
 
+def _forget(view) -> None:
+    """Drop the clustering cache's entries for `view`: they are keyed by id(view), which a later object may reuse
+    once this one is freed."""
+    from services import time_aggregation_service as tas
+
+    with tas._cache_lock:
+        for key in [k for k in tas._cache if k[0] == id(view)]:
+            del tas._cache[key]
+
+
 def reduce_year(n, config) -> tuple[object, dict]:
     """A copy of `n` on tsam's representative snapshots, weighted to the full year, and `{"snapshots",
     "of", "typical_periods"}`. Falls back to the full year where the limited-foresight clustering does."""
@@ -149,14 +166,19 @@ def reduce_year(n, config) -> tuple[object, dict]:
     if isinstance(n.snapshots, pd.MultiIndex):
         raise SizingLoopRefusal("the sizing loop solves one investment period; run the periods myopically")
     view = _PeriodView(n)
-    agg = aggregate_period_snapshots(view, 0, config)
+    try:
+        agg = aggregate_period_snapshots(view, 0, config)
+    finally:
+        _forget(view)
     keep = n.snapshots[view.timesteps.get_indexer(agg.snapshots.get_level_values(1))]
     out = n.copy()
     if len(keep) < len(n.snapshots):
+        # tsam's weight is cluster size x the objective weight; each column takes the cluster size x its own.
+        orig = n.snapshot_weightings.loc[keep]
+        count = pd.Series(agg.weights.to_numpy(), index=keep) / orig["objective"]
         out.set_snapshots(keep)
-        w = pd.Series(agg.weights.to_numpy(), index=keep)
         for col in out.snapshot_weightings.columns:
-            out.snapshot_weightings[col] = w
+            out.snapshot_weightings[col] = orig[col] * count
     return out, {"snapshots": len(out.snapshots), "of": len(n.snapshots), "typical_periods": agg.typical_periods}
 
 
@@ -200,7 +222,7 @@ def _sum_var(m, var) -> float:
 def _sizes(n, link: str) -> dict:
     m = n.model
     pq = solution(n)
-    sizes = {f"link:{link}": _nominal(n.links, "p_nom", link), "q_ss": pq["q_ss"], "q_dyn": pq["q_dyn"],
+    sizes = {link: _nominal(n.links, "p_nom", link), "q_ss": pq["q_ss"], "q_dyn": pq["q_dyn"],
              "p_sm": _sum_var(m, "EnvelopeFloor-p_smooth"), "e_sm": _sum_var(m, "EnvelopeFloor-e_smooth")}
     for s in n.stores.index:
         sizes[f"store:{s}"] = _nominal(n.stores, "e_nom", s)
@@ -227,8 +249,12 @@ def solve_once(base, config, inp: SizingInputs, state: dict, *, reduce: bool, so
     if inp.link in frozen:
         _freeze(n, inp.link, frozen[inp.link])
     cfg = _config_with_floors(config, cuts)
-    status, condition = n.optimize(solver_name=solver_name, extra_functionality=_chain(n, cfg),
-                                   **(solver_options or {}))
+    try:
+        status, condition = n.optimize(solver_name=solver_name, extra_functionality=_chain(n, cfg),
+                                       **(solver_options or {}))
+    except Exception as exc:                                  # noqa: BLE001 - the controller reads a status
+        logger.exception("sizing loop: the solve raised")
+        return {"status": "error", "condition": f"{type(exc).__name__}: {exc}", "info": info}
     if status != "ok":
         return {"status": status, "condition": condition, "info": info}
     return {"status": status, "condition": condition, "cost_eur": float(n.objective), "sizes": _sizes(n, inp.link),
@@ -261,7 +287,7 @@ def _transformer(n, inp, state, flow) -> tuple[dict, float]:
     lib = sorted(float(s) for s in inp.transformer_library_mva)
     up = next((s for s in lib if s >= s_need - 1e-6), None)
     frozen = state["frozen"].get(inp.link)
-    s_n = frozen or up or lib[-1]
+    s_n = frozen if frozen is not None else (up or lib[-1])
     if frozen is not None and s_need > frozen + 1e-6:
         return _check("transformer", False, cut={"import_cap_mw": frozen * pf}, value=s_need, limit=frozen,
                       note="the flow outgrows the frozen transformer"), s_n
@@ -272,12 +298,12 @@ def _transformer(n, inp, state, flow) -> tuple[dict, float]:
 
 
 def _gridspine():
-    """(campus_reactive, flicker, island_sc_seq), or a refusal naming what the build lacks."""
+    """(campus_reactive, flicker, island_sc_seq, strength), or a refusal naming what the build lacks."""
     try:
-        from gridspine.static import campus_reactive, flicker, island_sc_seq
+        from gridspine.static import campus_reactive, flicker, island_sc_seq, strength
     except ImportError as exc:  # pragma: no cover - build-shape branch
         raise SizingLoopRefusal(f"the sizing loop's forward checks need gridspine ({exc})") from exc
-    return campus_reactive, flicker, island_sc_seq
+    return campus_reactive, flicker, island_sc_seq, strength
 
 
 def _pq(n, inp, state, flow, s_n) -> tuple[dict, float]:
@@ -287,7 +313,7 @@ def _pq(n, inp, state, flow, s_n) -> tuple[dict, float]:
     q_load = _bus1_load(n, inp.link, "q_set").reindex(flow.index).to_numpy()
     p = flow.to_numpy()
     q_need = float((q_load + float(t["pq_x_pu"]) * (p / float(t["pq_pf"])) ** 2 / s_n
-                    - math.tan(math.acos(float(t["pq_pf_req"]))) * np.maximum(p, 0.0)).max())
+                    - math.tan(math.acos(float(t["pq_pf_req"]))) * p).max())   # signed, as AS-05's pq row
     pq = solution(n)
     q_pcs = 0.0
     for s, s_x in pq["s_x"].items():
@@ -307,7 +333,9 @@ def _escr(n, inp, sizes) -> dict:
     gfm = sc._gfm_stores(n)
     gfm_mva = sum(sizes.get(f"charger:{s}", 0.0) + sizes.get(f"s_x:{s}", 0.0) for s in gfm)
     p_n = inp.p_n_mw if inp.p_n_mw is not None else float(_bus1_load(n, inp.link, "p_set").max())
-    escr = (inp.sk_mva + inp.gfm_credit * gfm_mva) / p_n
+    if not p_n > 0:
+        raise SizingLoopRefusal(f"P_n must be > 0 for the ESCR check, got {p_n}")
+    escr = _gridspine()[3].escr(inp.sk_mva + inp.gfm_credit * gfm_mva, 0.0, p_n)   # no shunt Mvar here
     if escr >= inp.escr_min - 1e-9:
         return _check("escr", True, value=escr, limit=inp.escr_min)
     if not gfm:
@@ -331,7 +359,7 @@ def _smoothing(n, inp, sizes) -> dict:
 
 
 def _pst(n, inp, state, sizes, q_dyn_free) -> dict:
-    _, fl, sc_seq = _gridspine()
+    _, fl, sc_seq, _ = _gridspine()
     c_factor = sc_seq.c_factor
     mx = _envelope_max(inp.envelope)
     swing = float(mx["swing_mw"]) + float(mx["oscillation_amplitude_mw"])
@@ -392,6 +420,7 @@ def run_sizing(network, config, inp: SizingInputs, *, max_rounds: int = sl.MAX_R
                              max_rounds=max_rounds, freeze_after=freeze_after,
                              final_solve=(lambda s: run(s, False)) if inp.reduce else None,
                              stop_event=stop_event, on_iteration=on_iteration)
+    out["basis_note"] = BASIS_NOTE
     out["sheet"], out["sheet_paths"] = None, []
     if out["status"] == "converged" and last.get("network") is not None:
         from services import control_settings

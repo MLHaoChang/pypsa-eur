@@ -172,13 +172,40 @@ def test_a_campus_adapter_runs_and_drops_from_the_not_run_list():
     assert "campus_flow" in out["rounds"][0]["not_run"]
 
 
-def test_abort_after_round_one():
-    stop = threading.Event()
-    out = run_sizing(_tiny(), _config(), _inputs(), stop_event=stop, on_iteration=lambda row: stop.set())
-    assert len(out["rounds"]) == 1
-    assert out["status"] in ("aborted", "converged")      # converged when round 1 already passed every check
-    if out["rounds"][0]["failing"]:
-        assert out["status"] == "aborted"
+def _always_failing_pst(result, state, inp):
+    """The real forward pass with a Pst check that fails every round and tightens its cut."""
+    checks = [c for c in _real_forward(result, state, inp) if c["name"] != "pst"]
+    return checks + [slr._check("pst", False, cut={"pst_rhs_mva": 10.0 - state["round"]})]
+
+
+_real_forward = slr.forward_checks
+
+
+def test_abort_after_round_one(monkeypatch):
+    monkeypatch.setattr(slr, "forward_checks", _always_failing_pst)
+    stop, solves = threading.Event(), []
+
+    def solve(*a, **kw):
+        solves.append(1)
+        return slr.solve_once(*a, **kw)
+
+    out = run_sizing(_tiny(), _config(), _inputs(), stop_event=stop, on_iteration=lambda row: stop.set(),
+                     solve=solve)
+    assert out["status"] == "aborted" and len(out["rounds"]) == 1 and len(solves) == 1
+
+
+def test_a_raising_solve_is_a_failed_status_not_an_exception(monkeypatch):
+    def boom(*a, **kw):
+        raise RuntimeError("solver crashed")
+
+    monkeypatch.setattr(slr, "_chain", boom)
+    out = run_sizing(_tiny(), _config(), _inputs())
+    assert out["status"] == "failed" and "RuntimeError: solver crashed" in out["verdict"]
+
+
+def test_every_result_names_its_basis():
+    out = run_sizing(_tiny(), _config(), _inputs())
+    assert "not applied" in out["basis_note"]
 
 
 def test_a_network_without_pq_tags_is_refused():
@@ -205,8 +232,7 @@ def test_inner_rounds_solve_a_reduced_year_and_the_final_solve_the_full_year():
     assert seen[-1] is False and all(seen[:-1])
     inner = out["rounds"][0]["info"]
     assert inner["basis"] == "reduced_year" and inner["snapshots"] == 168 and inner["of"] == 4 * 168
-    assert out["final"]["info"] == {"basis": "full_year", "snapshots": 4 * 168, "of": 4 * 168} \
-        or out["status"] != "converged"
+    assert out["final"]["info"] == {"basis": "full_year", "snapshots": 4 * 168, "of": 4 * 168}
     assert all(r["solve_s"] >= 0 for r in out["rounds"])
 
 
@@ -214,8 +240,19 @@ def test_the_reduced_year_keeps_the_full_years_weight():
     n = _weak_flat_d(weeks=4)
     red, info = slr.reduce_year(n, _config(lf_k_periods=1, lf_period_length_h=168))
     assert info["snapshots"] == 168
-    assert red.snapshot_weightings["objective"].sum() == pytest.approx(n.snapshot_weightings["objective"].sum())
+    # Each column keeps its own year: objective 8760 h, stores and generators 4 x 168 h of 1 h steps.
+    for col in n.snapshot_weightings.columns:
+        assert red.snapshot_weightings[col].sum() == pytest.approx(n.snapshot_weightings[col].sum()), col
+    assert red.snapshot_weightings["stores"].max() == pytest.approx(4.0)
     assert len(n.snapshots) == 4 * 168                     # the caller's network is not reduced
+
+
+def test_the_clustering_cache_keeps_no_entry_for_the_runner():
+    from services import time_aggregation_service as tas
+
+    before = set(tas._cache)
+    slr.reduce_year(_weak_flat_d(weeks=4), _config(lf_k_periods=1, lf_period_length_h=168))
+    assert set(tas._cache) == before
 
 
 def test_reduced_rounds_passing_and_a_failing_full_year_is_not_converged():
@@ -247,8 +284,7 @@ def test_reduced_rounds_passing_and_a_failing_full_year_is_not_converged():
 def test_a_converged_run_writes_the_control_settings_sheet(tmp_path):
     dyr = tmp_path / "campus.dyr"
     out = run_sizing(_tiny(), _config(), _inputs(dyr_path=str(dyr)))
-    if out["status"] != "converged":
-        pytest.skip(f"the two-hour case did not converge: {out['verdict']}")
+    assert out["status"] == "converged", out["verdict"]
     assert out["sheet"] is not None
     assert sorted(p.split("/")[-1] for p in out["sheet_paths"]) == ["campus.control_settings.csv",
                                                                    "campus.control_settings.json"]
