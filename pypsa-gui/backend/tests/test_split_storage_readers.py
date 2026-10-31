@@ -96,6 +96,18 @@ def test_an_untagged_store_with_links_is_named_not_counted():
     n.add("Link", "pe discharger", bus0="pe store", bus1="ac", p_nom=20.0)
     assert [e.name for e in list_storages(n)] == ["bess"]
     assert storage_notes(n) == ["pe: Store with charging and discharging links but no split-storage tag; not counted"]
+    # A hydrogen store with an electrolyser and a fuel cell is not a battery: no note.
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Store", "h2 tank", bus="h2", carrier="H2", e_nom=100.0)
+    n.add("Link", "electrolysis", bus0="ac", bus1="h2", p_nom=5.0)
+    n.add("Link", "fuel cell", bus0="h2", bus1="ac", p_nom=5.0)
+    assert len(storage_notes(n)) == 1
+
+
+@pytest.mark.parametrize("p_nom", [17.3, 0.1 + 0.2, 123.456789, 1e-3 * 7])
+def test_a_migrated_storage_unit_reads_bit_identical_at_any_size(p_nom):
+    legacy, split = _pair(**{**SU, "p_nom": p_nom, "max_hours": 2.7})
+    assert [_spec(s) for s in M.snapshot_inputs(split).storage] == [_spec(s) for s in M.snapshot_inputs(legacy).storage]
 
 
 def test_an_undersized_discharger_caps_the_power_and_is_named():

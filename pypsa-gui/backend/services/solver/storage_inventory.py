@@ -131,7 +131,8 @@ def list_storages(n: pypsa.Network) -> list[StorageEntry]:
 def storage_notes(n: pypsa.Network, entries: list[StorageEntry] | None = None) -> list[str]:
     """One sentence per storage the readers do not count as built, or count at less than one of its sizes:
     a split storage missing a Link, a split storage whose charge and dispatch power differ, and a `Store` with
-    charging and discharging Links but no split-storage tag (an imported PyPSA-Eur battery; not read yet)."""
+    charging and discharging Links but no split-storage tag and a battery carrier (an imported PyPSA-Eur battery; not
+    read yet)."""
     entries = list_storages(n) if entries is None else entries
     notes: list[str] = []
     for e in entries:
@@ -148,6 +149,8 @@ def storage_notes(n: pypsa.Network, entries: list[StorageEntry] | None = None) -
     for name in sorted(tagged_names - listed):
         notes.append(f"{name}: split storage without its charger or discharger link; not counted")
     for name in sorted(set(stores.index) - tagged_names):
+        if "batter" not in str(stores.at[name, "carrier"]).lower():
+            continue            # H2, heat and other stores are not electricity storage readers count
         bus = stores.at[name, "bus"]
         if (links["bus1"] == bus).any() and (links["bus0"] == bus).any():
             notes.append(f"{name}: Store with charging and discharging links but no split-storage tag; not counted")

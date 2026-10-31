@@ -312,7 +312,7 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
             if e.layout == SPLIT:
                 # The SU rule: E follows P's max-over-blocks ratio (activity
                 # and vintages; E/P is the Store's solved ratio).
-                e_nom = (e.e_nom_mwh * p_act / e.p_nom_mw) if e.p_nom_mw > 0 else 0.0
+                e_nom = (e.e_nom_mwh * (p_act / e.p_nom_mw)) if e.p_nom_mw > 0 else 0.0
                 occ_comp = "stores"
             else:
                 try:
