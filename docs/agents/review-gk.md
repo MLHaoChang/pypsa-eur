@@ -35,7 +35,7 @@ Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sh
 
 ## Known container-only failures
 
-`test_harness_provider_parity`, `test_workflow_provider_parity[*-anthropic]`, `test_profile_gen_atlite_source` (atlite is not installed) and `test_openpyxl_parses_uploads_with_defusedxml_in_this_environment`.
+`test_harness_provider_parity`, `test_workflow_provider_parity[*-anthropic]`, `test_profile_gen_atlite_source` (atlite is not installed), tests that need `tsam` (not installed) and `test_openpyxl_parses_uploads_with_defusedxml_in_this_environment`.
 
 ## Test quality
 
@@ -75,3 +75,6 @@ A `pytest.raises(Exception)` on a refusal is checked for what actually raises. A
 - A new scorecard input read from a component is registered as an editable field end to end (FieldSpec, model, schemas, attrs_doc, fieldLabels, fixture) in the same PR.
 - E1 growth placeholders: setting `nh3_delivery_tpd` converts t/d to MWh_NH3/h (× 5.166/24), with a test.
 - A handler that `pd.concat()`s user-uploaded series survives members that cannot be aligned (a tz-aware index next to a naive one, a repeated timestamp) and reports a gap, never a 500 (#868). Test both.
+- A smoothing tier's latency has one source, `spectrum.store_latency`: a given override, then the store's `control` column, then the technology default. AS-07's sheet and AS-09's tier split both read it (AS-13).
+- A trace-sourced latency band uses max(1/T, f_c), never f_c alone: a trace's f_c can fall below 1/T and loosen the check (#988).
+- A solve-like runner that bypasses `run_simulation` solves the project's own LP through the shared wrap-chain helper (`solver_service.build_lp_chain`, from AS-06 #992), and names per setting any pre-solve step it does not reproduce (island apply, commercial PoC writer, user code); a blanket note is not enough.
