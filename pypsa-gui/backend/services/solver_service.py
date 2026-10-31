@@ -1332,9 +1332,9 @@ def run_simulation(
                 # prices with another run's dispatch).
                 if status in ("ok", "optimal"):
                     # AS-12: the PCS/STATCOM sizes live only in n.model; keep them on the network.
-                    # Rolling and myopic rebuild the rows per LP, so only the last one's sizes remain.
+                    # Rolling and myopic rebuild the rows per LP; keep the largest size over them (AS-14).
                     for _warning in _persist_pcs_statcom(
-                            network, basis="last_solve" if (use_rolling or use_myopic) else "horizon"):
+                            network, basis="max_over_solves" if (use_rolling or use_myopic) else "horizon"):
                         phase(f"[PQ] WARN: {_warning}")
                     # A sizing solve records its sizes: the fixed-size run's
                     # "capacity_run" source (F1). Never an operational one.

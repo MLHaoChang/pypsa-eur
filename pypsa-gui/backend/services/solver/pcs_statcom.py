@@ -32,6 +32,8 @@ on p_tr, so an export hour needs the loss and gets no allowance.
 
 After a successful solve `persist_solution` copies S_x, Q_ss and Q_dyn to the result columns (`pcs_s_x_opt` on the
 Store, `statcom_q_ss_opt` and `statcom_q_dyn_opt` on the Link), which `cost_terms` reads for `cost_breakdown`.
+A rolling or myopic run rebuilds the rows per LP, so the wrap reads each LP's sizes and the persisted size is the
+largest over the LPs, its cost counted once (AS-14, owner decision AS14-MAX-1).
 
 What the rows cannot hold is refused before the solve (`PcsStatcomRefusal`), never skipped: a skipped tag would
 give a wrong size, not a no-op. Every limit is a generic engineering value marked "assumed" (SAGC-1).
@@ -39,6 +41,7 @@ give a wrong size, not a no-op. Every limit is a generic engineering value marke
 from __future__ import annotations
 
 import math
+import weakref
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -178,13 +181,74 @@ def _wrap_with_pcs_statcom(network: "pypsa.Network", user_fn, log_queue=None):
     def emit(msg: str) -> None:
         _safe_log(log_queue, f"[PQ] {msg}")
 
+    lps = _SolvedLps()
+    network._pcs_statcom_lps = lps
+
     def pcs_statcom_fn(n, snapshots):
+        lps.read_previous(n.model)
         if user_fn is not None:
             user_fn(n, snapshots)
         stores, link = _check(n)
         _add_rows(n, snapshots, stores, link, emit)
+        lps.built(n.model, _period_of(snapshots))
 
     return pcs_statcom_fn
+
+
+def _period_of(snapshots):
+    """The investment period an LP's snapshots belong to (`_add_rows` holds one), or None on flat snapshots."""
+    if not isinstance(snapshots, pd.MultiIndex):
+        return None
+    period = snapshots.get_level_values(0)[0]
+    return period.item() if hasattr(period, "item") else period
+
+
+class _SolvedLps:
+    """The sizes each LP of one run solved, as plain numbers, in order, with its period (AS-14). A rolling or
+    myopic run builds a new model per window or period and keeps only the last, so the LP built last is read at
+    the first line of the next call, before anything is built (and the final one by `persist_solution`). The
+    model is dropped as soon as it is read, so at most the solved model and the one being built are alive.
+
+    `skipped` lists, 1-based, the LPs built but with no solution (a build PyPSA abandoned and retried); they are
+    left out of the max and named in the cost note. A failed window or period fails the whole solve before
+    anything is persisted (`_RollingWindowFailureCatcher`, the myopic status check)."""
+
+    def __init__(self):
+        self.solved: list[tuple[object, dict]] = []
+        self.skipped: list[int] = []
+        self.built_count = 0
+        self._pending = None            # (model, period) of the LP built last, not yet read
+        self._last = None               # weakref to the model built last, to match it in `persist_solution`
+
+    def built(self, model, period) -> None:
+        self.built_count += 1
+        self._pending = (model, period)     # held until read: PyPSA drops its own reference at the next build
+        self._last = weakref.ref(model)
+
+    def is_last(self, model) -> bool:
+        return self._last is not None and self._last() is model
+
+    def read_previous(self, current) -> None:
+        """Fold the LP built last into the record. `current` is the model now being built (or the solved one at
+        persist time); a pending model that is `current` itself is read only at persist time (`final=True`)."""
+        self._read(current, final=False)
+
+    def read_final(self, current) -> None:
+        self._read(current, final=True)
+
+    def _read(self, current, *, final: bool) -> None:
+        if self._pending is None:
+            return
+        model, period = self._pending
+        if model is current and not final:
+            return                      # this call's own model: it has no solution yet
+        self._pending = None
+        sol = _model_solution(model)
+        del model
+        if sol is None:
+            self.skipped.append(self.built_count)
+        else:
+            self.solved.append((period, sol))
 
 
 def _p_nom(n, link: str):
@@ -240,7 +304,10 @@ def _add_rows(n, snapshots, stores: pd.DataFrame, link: str, emit) -> None:
                 m.add_constraints(s_x.sel(Store=name) - float(r[name]) * p <= 0, name=f"PCS-sx_cap-{name}")
                 rows += 1
     if "pq" in ROWS:
-        m.add_constraints(lhs >= q_load.rename_axis("snapshot"), name="PQ-pq")
+        # On the LP's own snapshot coordinate: a period-level (MultiIndex) snapshot index cannot be renamed
+        # to the single name "snapshot" (myopic solves one period on such an index).
+        rhs = abs_p.lower.copy(data=q_load.reindex(snapshots).to_numpy(dtype=float))
+        m.add_constraints(lhs >= rhs, name="PQ-pq")
         rows += 1
     if not isinstance(cost, int):
         m.add_objective(m.objective.expression + cost, overwrite=True)
@@ -255,7 +322,20 @@ def _as_array(series: pd.Series, idx: pd.Index):
 
 def solution(n: "pypsa.Network") -> dict:
     """The solved S_x per store (MVA), Q_ss and Q_dyn (Mvar), read from the model after the solve."""
-    m = n.model
+    return _read_solution(n.model)
+
+
+def _model_solution(m) -> dict | None:
+    """`_read_solution(m)`, or None when `m` holds no finite solution (not solved, or the solve failed)."""
+    try:
+        sol = _read_solution(m)
+    except Exception:  # noqa: BLE001 — linopy raises when the model was never optimized
+        return None
+    values = [sol["q_ss"], sol["q_dyn"], *sol["s_x"].tolist()]
+    return sol if all(np.isfinite(v) for v in values) else None
+
+
+def _read_solution(m) -> dict:
     out = {"q_ss": float(m.variables["Statcom-q_ss"].solution), "q_dyn": float(m.variables["Statcom-q_dyn"].solution),
            "s_x": pd.Series(dtype=float)}
     if "PCS-s_x" in m.variables:
@@ -263,10 +343,20 @@ def solution(n: "pypsa.Network") -> dict:
     return out
 
 
-#: `n.meta` key naming what the persisted sizes cover: "horizon" (one LP sized the whole run) or "last_solve"
-#: (rolling horizon or myopic: the last window's or period's LP; the rows are rebuilt per LP).
+#: `n.meta` key naming what the persisted sizes cover: "horizon" (one LP sized the whole run) or
+#: "max_over_solves" (rolling horizon or myopic: the largest size over the window or period LPs, AS-14).
+#: "last_solve" is what a network persisted before AS-14 carries: the last LP's sizes only.
 BASIS_KEY = "pcs_statcom_basis"
+MAX_BASIS = "max_over_solves"
+#: `n.meta` keys: how many LPs the sizes are the max over; the LPs (1-based) built with no solution and left
+#: out; and, on a network with investment periods, each cost's split {"statcom": [[period, share], ...],
+#: "stores": {name: [[period, share], ...]}} (`_max_over`).
+LPS_KEY = "pcs_statcom_lps"
+SKIPPED_KEY = "pcs_statcom_skipped_lps"
+PERIODS_KEY = "pcs_statcom_periods"
 LAST_SOLVE_NOTE = "PCS/STATCOM sizes and cost are from the last solve only (rolling/myopic)"
+#: A largest size at or below this (MVA or Mvar) is not split over periods.
+_BUILT_TOL = 1e-6
 
 
 def clear_solution(n: "pypsa.Network") -> None:
@@ -275,13 +365,53 @@ def clear_solution(n: "pypsa.Network") -> None:
         for col in columns:
             if col in frame.columns:
                 frame[col] = np.nan
-    n.meta.pop(BASIS_KEY, None)
+    for key in (BASIS_KEY, LPS_KEY, SKIPPED_KEY, PERIODS_KEY):
+        n.meta.pop(key, None)
+
+
+def _increments(values: list[tuple[object, float]]) -> list[list]:
+    """[[period, share], ...]: the share of the largest value each period adds over the running max before it,
+    Δ_k = max(0, v_k - max_{j<k} v_j), so the shares sum to 1 and the size is still costed once (GK A condition 3).
+    Periods in LP order, repeated ones merged; a largest value of 0 books its (zero) cost in the first period."""
+    top = max(v for _, v in values)
+    if top <= _BUILT_TOL:
+        return [[values[0][0], 1.0]]
+    out: dict = {}
+    running = 0.0
+    for period, v in values:
+        delta = max(0.0, v - running)
+        running = max(running, v)
+        if delta > 0:
+            out[period] = out.get(period, 0.0) + delta / top
+    return [[p, share] for p, share in out.items()]
+
+
+def _max_over(readings: list[tuple[object, dict]]) -> tuple[dict, dict]:
+    """The largest S_x per store, Q_ss and Q_dyn over `readings` (period, solution), in LP order, and how each
+    cost splits over the periods: one build at the largest size, each period paying what it adds over the
+    running max before it (`_increments`). Q_ss and Q_dyn are maxed apart, so the pair can come from two LPs."""
+    stores = pd.Index([]).append([sol["s_x"].index for _, sol in readings]).unique()
+    s_x = pd.Series({s: max(float(sol["s_x"].get(s, 0.0)) for _, sol in readings) for s in stores}, dtype=float)
+    out = {"q_ss": max(sol["q_ss"] for _, sol in readings), "q_dyn": max(sol["q_dyn"] for _, sol in readings),
+           "s_x": s_x}
+    # The STATCOM cost is on Q_ss + Q_dyn, each maxed apart: its increment in a period is the sum of theirs.
+    statcom = {}
+    for key in ("q_ss", "q_dyn"):
+        for period, share in _increments([(p, sol[key]) for p, sol in readings]):
+            statcom[period] = statcom.get(period, 0.0) + share * out[key]
+    total = out["q_ss"] + out["q_dyn"]
+    split = {"statcom": ([[p, v / total] for p, v in statcom.items() if v > 0] if total > _BUILT_TOL
+                         else [[readings[0][0], 1.0]]),
+             "stores": {str(s): _increments([(p, float(sol["s_x"].get(s, 0.0))) for p, sol in readings])
+                        for s in stores}}
+    return out, split
 
 
 def persist_solution(n: "pypsa.Network", basis: str = "horizon") -> list[str]:
     """Write the solved S_x (MVA, per tagged store) and Q_ss, Q_dyn (Mvar, on the PQ Link) to the result columns,
     so they outlive `n.model` and survive the project's .nc round-trip (AS-12). Called after a successful solve,
-    with `basis` "last_solve" for a rolling or myopic one; clears the columns first, so a solve without the rows
+    with `basis` "max_over_solves" for a rolling or myopic one, which persists the largest size over its LPs
+    (AS-14); clears the columns first, so a solve without the rows
     leaves no stale sizes. A network that never had the columns gains none unless the rows were built.
 
     A tagged store or Link whose variable is not in the model stays NaN, never 0; the returned warnings name it."""
@@ -293,20 +423,36 @@ def persist_solution(n: "pypsa.Network", basis: str = "horizon") -> list[str]:
                   *([] if links is None else [f"link {k}" for k in links.index])]
         return [f"{t}: tagged for PCS/STATCOM but the solve built no rows for it; its size is left blank"
                 for t in tagged]
-    sol = solution(n)
+    lps = getattr(n, "_pcs_statcom_lps", None)
+    skipped: list[int] = []
+    if lps is not None and lps.is_last(m):
+        lps.read_final(m)
+        readings, skipped = list(lps.solved), list(lps.skipped)
+    else:  # rows built outside this wrap's record (by hand, or by an earlier wrap): this model alone
+        readings = [(None, solution(n))]
+    if not readings:
+        readings = [(None, solution(n))]
+    if basis != MAX_BASIS:
+        readings, skipped = readings[-1:], []
+    sol, split = _max_over(readings)
     link = links.index[0]
     _set(n.links, link, {"statcom_q_ss_opt": sol["q_ss"], "statcom_q_dyn_opt": sol["q_dyn"]}, RESULT_LINK_COLUMNS)
     for store, s_x in sol["s_x"].items():
         _set(n.stores, store, {"pcs_s_x_opt": s_x}, RESULT_STORE_COLUMNS)
     n.meta[BASIS_KEY] = basis
+    n.meta[LPS_KEY] = len(readings)
+    if skipped:
+        n.meta[SKIPPED_KEY] = skipped
+    if any(p is not None for p, _ in [*split["statcom"], *(x for v in split["stores"].values() for x in v)]):
+        n.meta[PERIODS_KEY] = split
     missing = [] if stores is None else [s for s in stores.index if s not in sol["s_x"].index]
     return [f"store {s}: tagged for a PCS oversize but the solve built no S_x for it; its size is left blank"
             for s in missing]
 
 
 def cost_notes(n: "pypsa.Network") -> list[str]:
-    """What `cost_terms` leaves out or covers only in part: tagged rows with no persisted size, and the
-    last-solve basis of a rolling or myopic run."""
+    """What `cost_terms` leaves out or how it is based: tagged rows with no persisted size, and the max-over-LPs
+    basis of a rolling or myopic run (the last-solve basis of a network persisted before AS-14)."""
     stores, links = pcs_statcom_tags(n)
     notes = []
     for frame, tagged, cols, what in ((n.stores, stores, RESULT_STORE_COLUMNS, "store"),
@@ -318,25 +464,47 @@ def cost_notes(n: "pypsa.Network") -> list[str]:
                   for name in sized.index[~sized]]
     if n.meta.get(BASIS_KEY) == "last_solve":
         notes.append(LAST_SOLVE_NOTE)
+    if n.meta.get(BASIS_KEY) == MAX_BASIS:
+        notes.append(f"PCS/STATCOM sizes are the largest over {n.meta.get(LPS_KEY, '?')} LPs (rolling windows or "
+                     "myopic periods), Q_ss and Q_dyn each on its own, so the pair can come from two LPs; the "
+                     "investment is counted once, at that size, each period paying what it adds over the periods "
+                     "before it. Each LP charged the size it chose for its own window or period, so this total "
+                     "differs from the sum of the window objectives")
+        skipped = n.meta.get(SKIPPED_KEY) or []
+        if len(skipped):
+            notes.append(f"PCS/STATCOM: {len(skipped)} LP(s) built with no solution (LP "
+                         f"{', '.join(str(int(i)) for i in skipped)}, a build the solver retried) are not in the max")
     return notes
 
 
-def cost_terms(n: "pypsa.Network") -> dict:
-    """The PCS and STATCOM cost the last solve charged, from the persisted sizes and the typed annual costs x
-    `fom_horizon_factor(n)`, as `_add_rows` put them in the objective: {"PCS oversize": EUR, "STATCOM": EUR},
-    each only when its size is persisted."""
-    out = {}
+def cost_items(n: "pypsa.Network") -> list[tuple[str, object, float]]:
+    """The PCS and STATCOM cost of the persisted sizes, from the typed annual costs x `fom_horizon_factor(n)`, as
+    `_add_rows` put them in the objective: (label, period, EUR) with label "PCS oversize" (per store) or
+    "STATCOM", each only when its size is persisted. The period is the investment period the cost is booked in
+    (None on flat snapshots); on a max-over-LPs basis a size that grew is split over the periods it grew in, and
+    the parts sum to the largest size's cost, counted once (AS14-MAX-1)."""
+    split = n.meta.get(PERIODS_KEY) or {}
+    store_split = split.get("stores") or {}
+    whole = [[None, 1.0]]
+    items = []
+    years = fom_horizon_factor(n)
     stores = n.stores
     if all(c in stores.columns for c in ("pcs_s_x_opt", "pcs_capital_cost")):
-        s_x = stores["pcs_s_x_opt"].dropna()
-        if len(s_x):
-            out["PCS oversize"] = float((stores.loc[s_x.index, "pcs_capital_cost"] * s_x).sum())
+        for name, s_x in stores["pcs_s_x_opt"].dropna().items():
+            eur = years * float(stores.at[name, "pcs_capital_cost"]) * float(s_x)
+            items += [("PCS oversize", p, eur * float(share)) for p, share in store_split.get(str(name), whole)]
     links = n.links
     if all(c in links.columns for c in (*RESULT_LINK_COLUMNS, "statcom_capital_cost")):
-        q = links[list(RESULT_LINK_COLUMNS)].dropna()
-        if len(q):
-            out["STATCOM"] = float((links.loc[q.index, "statcom_capital_cost"] * q.sum(axis=1)).sum())
-    if out:
-        years = fom_horizon_factor(n)
-        out = {k: years * v for k, v in out.items()}
+        for name, q in links[list(RESULT_LINK_COLUMNS)].dropna().iterrows():
+            eur = years * float(links.at[name, "statcom_capital_cost"]) * float(q.sum())
+            items += [("STATCOM", p, eur * float(share)) for p, share in split.get("statcom") or whole]
+    return items
+
+
+def cost_terms(n: "pypsa.Network") -> dict:
+    """The PCS and STATCOM cost of the persisted sizes (`cost_items` summed per label): {"PCS oversize": EUR,
+    "STATCOM": EUR}, each only when its size is persisted."""
+    out: dict[str, float] = {}
+    for label, _period, eur in cost_items(n):
+        out[label] = out.get(label, 0.0) + eur
     return out
