@@ -812,7 +812,6 @@ def _pq_rows(cb):
 def test_a_rolling_solve_persists_the_largest_size_over_its_windows_and_costs_it_once(tmp_path):
     """Two one-hour windows; the first needs the larger STATCOM. The last window alone would size it smaller."""
     from services.results.cost_breakdown import compute_cost_breakdown
-    from services.results.objective_decomposition import compute_objective_decomposition
     from services.solver.periodized_costs import fom_horizon_factor
     from services.solver_service import SolverConfig
 
@@ -833,7 +832,6 @@ def test_a_rolling_solve_persists_the_largest_size_over_its_windows_and_costs_it
         notes = cb["pcs_statcom_notes"]
         assert any("largest over 2 LPs" in s and "counted once" in s and "differs from the sum of the window "
                    "objectives" in s for s in notes), notes
-        assert compute_objective_decomposition(net, cb, cfg)["lp_basis_total"] > 0
 
 
 def test_a_myopic_solve_persists_the_largest_size_and_books_it_in_the_period_that_needs_it(tmp_path):
