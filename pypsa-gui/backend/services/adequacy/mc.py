@@ -83,15 +83,24 @@ MC_WARNING_V1 = (
 
 @dataclass(frozen=True)
 class StorageSpec:
-    """One dispatchable store, flattened out of ``n.storage_units``.
+    """One dispatchable store, flattened out of ``n.storage_units`` and the
+    split storages (AS-11: a ``Store`` with charger and discharger ``Link``s,
+    read through ``services.solver.storage_inventory.list_storages``).
 
-    ``Store``s are deliberately absent in v1: they carry no power rating, so
+    A split storage's P is AC-side: its charger's size and its discharger's
+    size × efficiency, the smaller when they differ (named in
+    ``MCInputs.storage_notes``), each derated by its Link's ``p_max_pu``
+    (``_split_capacity``). Its E is the Store's size, scaled by the same
+    max-over-blocks P ratio as a StorageUnit's ``max_hours × p_nom``.
+    Standing losses are not modelled for either layout.
+
+    A plain ``Store`` is deliberately absent: it carries no power rating, so
     there is nothing to bound the hourly discharge with and a greedy dispatch
-    would let them behave as unlimited-power energy. Revisit with H2.
+    would let it behave as unlimited-power energy. Revisit with H2.
     """
     name: str
     p_nom_mw: float          # copt.solved_capacity's rule (spec §1.1)
-    e_nom_mwh: float         # max_hours × p_nom_mw
+    e_nom_mwh: float         # max_hours × p_nom_mw (a split storage: its Store's size)
     eff_store: float         # efficiency_store, default 1.0
     eff_dispatch: float      # efficiency_dispatch, default 1.0
     # Phase 12d: power rating in MW per modelled hour, ``(H,)``, when it is
@@ -131,6 +140,10 @@ class MCInputs:
     # must-take contribution (profile × capacity) that was netted OUT of the
     # residual, so ELCC can un-net it. Empty by default.
     vre_profiles: dict = field(default_factory=dict)
+    # AS-11: storages the walk could not count as built (a split storage
+    # missing a Link, unequal charge and dispatch power, an untagged
+    # Store + Links), one sentence each; `mc_adequacy` reports them.
+    storage_notes: tuple = ()
 
 
 def _storage_capacity(row) -> float:
@@ -152,19 +165,63 @@ def _storage_capacity(row) -> float:
 def _efficiency(row, col: str) -> float:
     """PyPSA's default is 1.0; a missing/NaN/non-positive value is data noise,
     not a physical claim, so it degrades to lossless rather than silently
-    zeroing a store's output."""
-    try:
-        v = float(row[col])
-    except (KeyError, TypeError, ValueError):
-        return 1.0
-    if not math.isfinite(v) or v <= 0.0:
-        return 1.0
-    return v
+    zeroing a store's output. One rule with the storage list (AS-11)."""
+    from services.solver.storage_inventory import efficiency
+    return efficiency(row, col)
 
 
 # Phase 12d: the block construction lives beside the activity rule; the
 # name is kept here for its callers and tests.
 from services.adequacy.activity import period_blocks as _period_blocks  # noqa: E402
+
+
+def _block_pu(n, link: str, start: int, end: int) -> float:
+    """The lowest ``p_max_pu`` of Link ``link`` over hours ``[start, end)``,
+    clipped to [0, 1]: one availability per block, since a store's power is
+    block-constant in the dispatch (``block_capacity``)."""
+    pmp = getattr(getattr(n, "links_t", None), "p_max_pu", None)
+    if pmp is not None and link in getattr(pmp, "columns", ()):
+        seg = np.asarray(pmp[link].reindex(n.snapshots).to_numpy(), dtype=np.float64)[start:end]
+        v = float(np.nanmin(seg)) if seg.size and not np.isnan(seg).all() else 1.0
+    else:
+        try:
+            v = float(n.links.at[link, "p_max_pu"])
+        except (KeyError, TypeError, ValueError):
+            v = 1.0
+    return min(max(v, 0.0), 1.0) if math.isfinite(v) else 1.0
+
+
+def _split_capacity(n, ctx, e):
+    """``(p_nom_mw, capacity_series, p_activity_max)`` of a split storage.
+    Per block, P is the charger's size and the discharger's size × its
+    efficiency, each × its Link's lowest ``p_max_pu`` in the block (GK A,
+    AS-11a), combined by ``ac_power`` (the smaller, unless they agree).
+    ``p_activity_max`` is the same without ``p_max_pu``: the E scale. A
+    block where availability is below the maximum carries proportionally
+    less energy (``block_store_arrays``' rule)."""
+    from services.adequacy.activity import _CONST_TOL
+    from services.solver.storage_inventory import ac_power
+
+    crow, drow = n.links.loc[e.charger], n.links.loc[e.discharger]
+    ch = ctx.capacity_by_period(e.charger, crow)
+    dis = ctx.capacity_by_period(e.discharger, drow)
+    act: list[float] = []
+    caps: list[float] = []
+    for (_label, start, end), c, d in zip(ctx.blocks, ch, dis):
+        d_ac = d * e.eff_dispatch
+        act.append(ac_power(c, d_ac))
+        caps.append(ac_power(c * _block_pu(n, e.charger, start, end),
+                             d_ac * _block_pu(n, e.discharger, start, end)))
+    p_act = max(act) if act else 0.0
+    cap_max = max(caps) if caps else 0.0
+    if cap_max <= 0.0:
+        return 0.0, None, p_act
+    if all(abs(c - cap_max) <= _CONST_TOL * cap_max for c in caps):
+        return cap_max, None, p_act
+    series = np.empty(ctx.H, dtype=np.float64)
+    for (_label, start, end), c in zip(ctx.blocks, caps):
+        series[start:end] = c
+    return cap_max, series, p_act
 
 
 def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
@@ -212,9 +269,11 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
         np.asarray(weights.reindex(snapshots).to_numpy(), dtype=np.float64))
 
     storage: list[StorageSpec] = []
-    su = getattr(n, "storage_units", None)
+    from services.solver.storage_inventory import SPLIT, list_storages, storage_notes
+    entries = list_storages(n)
+    notes = list(storage_notes(n, entries))
     blocks = _period_blocks(snapshots)
-    if su is not None and not su.empty:
+    if entries:
         from services.adequacy.activity import ActivityContext
         from services.adequacy.occurrence import (
             OutageRateError,
@@ -222,45 +281,73 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
             resolve_outage_params,
         )
         elec_buses = set(electrical_columns(n, list(n.buses.index)))
-        su_ctx = ActivityContext(n, "storage_units", blocks)
-        sparams = resolve_outage_params(n, "storage_units")
+        # AS-11: a split storage (Store + charger/discharger Links) is read
+        # like the equal StorageUnit: power is the charger's row, so its
+        # activity and vintages come from the links frame; its outage rate
+        # from the Store, which carries the storage's carrier.
+        ctxs: dict[str, ActivityContext] = {}
+        params: dict[str, object] = {}
         bad_rates: list[str] = []
-        for s in su.index:
-            row = su.loc[s]
-            if is_slack_name(str(s)) or is_slack_carrier(row.get("carrier")):
+        for e in entries:
+            frame = getattr(n, e.power_component)
+            row = frame.loc[e.power_row]
+            if is_slack_name(e.name) or is_slack_carrier(e.carrier):
                 continue
-            if str(row.get("bus")) not in elec_buses:
+            if e.bus not in elec_buses:
                 continue
+            if e.power_component not in ctxs:
+                ctxs[e.power_component] = ActivityContext(n, e.power_component, blocks)
             # Phase 12d: `solved_capacity`'s rule per period, through the
             # same activity context the generator walk uses; `p_nom_mw` is
             # the maximum over the blocks and the series carries the rest.
-            p_nom, su_series = su_ctx.capacity_series(s, row)
+            if e.layout == SPLIT:
+                p_nom, su_series, p_act = _split_capacity(
+                    n, ctxs[e.power_component], e)
+                if p_nom <= 0 and p_act > 0:
+                    # GK A (AS-11a): built, but a Link's availability is 0
+                    # throughout (e.g. a migrated discharge-only unit).
+                    blocked = [lk for lk in (e.charger, e.discharger)
+                               if all(_block_pu(n, lk, a, b) <= 0.0 for _l, a, b in blocks)]
+                    notes.append(f"{e.name}: p_max_pu of {' and '.join(blocked)} is 0 in "
+                                 "every block; not counted")
+            else:
+                p_nom, su_series = ctxs[e.power_component].capacity_series(e.power_row, row)
             if p_nom <= 0 and not keep_zero_capacity:
                 continue
-            try:
-                max_hours = float(row["max_hours"])
-            except (KeyError, TypeError, ValueError):
-                max_hours = 0.0
-            if not math.isfinite(max_hours) or max_hours < 0:
-                max_hours = 0.0
-            occ = sparams.loc[s]
+            if e.layout == SPLIT:
+                # The SU rule: E follows P's max-over-blocks ratio (activity
+                # and vintages; E/P is the Store's solved ratio).
+                e_nom = (e.e_nom_mwh * (p_act / e.p_nom_mw)) if e.p_nom_mw > 0 else 0.0
+                occ_comp = "stores"
+            else:
+                try:
+                    max_hours = float(row["max_hours"])
+                except (KeyError, TypeError, ValueError):
+                    max_hours = 0.0
+                if not math.isfinite(max_hours) or max_hours < 0:
+                    max_hours = 0.0
+                e_nom = max_hours * p_nom
+                occ_comp = "storage_units"
+            if occ_comp not in params:
+                params[occ_comp] = resolve_outage_params(n, occ_comp)
+            occ = params[occ_comp].loc[e.name]
             q_s = 0.0
             cite = ""
             if str(occ["source"]) != "missing":
                 if not rate_is_usable(occ["rate"]):
-                    bad_rates.append(f"{s} (rate {float(occ['rate']):g})")
+                    bad_rates.append(f"{e.name} (rate {float(occ['rate']):g})")
                     continue
                 q_s = float(occ["rate"])
             if str(occ["source"]) == "carrier_default":
                 from services.adequacy.occurrence import library_citation as _lib_cite
-                carrier = str(row.get("carrier") or "").strip().lower()
+                carrier = e.carrier.strip().lower()
                 cite = _lib_cite(carrier) or ""
             storage.append(StorageSpec(
-                name=str(s),
+                name=e.name,
                 p_nom_mw=p_nom,
-                e_nom_mwh=max_hours * p_nom,
-                eff_store=_efficiency(row, "efficiency_store"),
-                eff_dispatch=_efficiency(row, "efficiency_dispatch"),
+                e_nom_mwh=e_nom,
+                eff_store=e.eff_store,
+                eff_dispatch=e.eff_dispatch,
                 capacity_series=su_series,
                 q=q_s,
                 basis=str(occ["basis"] or ""),
@@ -274,6 +361,9 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
                 f"{' …' if len(bad_rates) > 10 else ''}. An outage rate is a "
                 "probability-like unavailability; fix the value (or clear it "
                 "so the per-carrier default applies).")
+
+    for note in notes:
+        logger.warning("adequacy storage: %s", note)
 
     profiles: dict[str, np.ndarray] = {}
     gens = getattr(n, "generators", None)
@@ -326,6 +416,7 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
         storage=tuple(storage),
         nyears=float(horizon_years(n)),
         vre_profiles=profiles,
+        storage_notes=tuple(notes),
     )
 
 
@@ -854,4 +945,5 @@ def mc_adequacy(inputs: MCInputs, *, draws: int = 500, seed=0,
         "horizon_years": nyears,
         "resolution_floor_h": floor,
         "warning": MC_WARNING_V1,
+        **({"storage_notes": list(inputs.storage_notes)} if inputs.storage_notes else {}),
     }
