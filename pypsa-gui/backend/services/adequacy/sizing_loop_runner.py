@@ -12,7 +12,8 @@ Wires `services.adequacy.sizing_loop.run_sizing_loop` to real solves and the for
   ride-through, commercial terms, Capacity > sizing off. What the loop does not follow is named in `basis_note`:
   a rolling, myopic or SCLOPF solve (the loop sizes one full-horizon LP), unit commitment and the project's
   solver options, and a missing tsam (the inner rounds then solve, and are labelled, full year). The transforms'
-  restores run once each solve's results are read, so the open project's transient rows are left as found. A stop request lands between rounds and
+  restores run when the loop ends, after the forward checks and the sheet, so the open project's transient rows
+  are left as found. A stop request lands between rounds and
   inside a solve: `runtime._AbortWatcher` interrupts a running LP, and the loop ends `aborted`. Inner rounds solve a tsam-reduced year (`services.time_aggregation_service`, the limited-foresight
   clustering, with `SolverConfig.lf_*`); the final solve is the full year, and its forward pass gives the verdict.
 * **forward**: the checks on the solved, fixed capacities. Each is a scalar check with gridspine or the AS
@@ -100,9 +101,10 @@ def basis_lines(config, network=None) -> list[str]:
 
         gens, links = process_uc.committable_counts(network)
         if gens or links:
-            out.append(f"{gens + links} committable unit(s): the project solve's unit-commitment keywords (process "
-                       "and island UC) and its MIP gap and time limit are not followed; the loop solves them with "
-                       "n.optimize's defaults")
+            out.append(f"{gens + links} committable unit(s): solved as a MIP with n.optimize's defaults, not the "
+                       "project's unit-commitment keywords (process and island UC), MIP gap or time limit; on the "
+                       "reduced year, start-ups and min up/down times across representative-period joins are "
+                       "approximate")
     if getattr(config, "solver_options", None) or not getattr(config, "presolve_enabled", True):
         out.append("the project's solver and presolve options are not merged; the loop uses its own solver_options")
     return out
@@ -295,9 +297,11 @@ def _sizes(n, link: str) -> dict:
 
 
 def solve_once(base, config, inp: SizingInputs, state: dict, *, reduce: bool, solver_name: str = "highs",
-               solver_options: dict | None = None, stop_event=None) -> dict:
+               solver_options: dict | None = None, stop_event=None, undo: list | None = None) -> dict:
     """One LP under `state` (cuts, frozen) on a copy of `base`; the result `run_sizing_loop` reads, plus the
-    solved `network` for the forward pass. A stop request during the solve interrupts it (status "aborted")."""
+    solved `network` for the forward pass. A stop request during the solve interrupts it (status "aborted").
+    The copy's transform restores go on `undo` for the caller to run once it has read the network; without
+    `undo` they run before returning."""
     n, info = reduce_year(base, config) if reduce else (base.copy(), {"snapshots": len(base.snapshots),
                                                                       "of": len(base.snapshots)})
     info["basis"] = "reduced_year" if reduce and info.get("reduced") else "full_year"
@@ -311,7 +315,9 @@ def solve_once(base, config, inp: SizingInputs, state: dict, *, reduce: bool, so
     cfg = _config_with_floors(config, cuts)
     watcher = _AbortWatcher(stop_event, threading.get_ident())
     watcher.start()
-    vintages, undo = dict(_frozen_vintage_store()), []
+    own = undo is None
+    undo = [] if own else undo
+    vintages = dict(_frozen_vintage_store())
     try:
         watcher.arm()
         status, condition = n.optimize(solver_name=solver_name, **_prepare(n, cfg, undo), **(solver_options or {}))
@@ -328,14 +334,22 @@ def solve_once(base, config, inp: SizingInputs, state: dict, *, reduce: bool, so
     finally:
         watcher.disarm()
         watcher.shutdown()
-        for fn in reversed(undo):                             # results are read: restore, as run_simulation does
-            try:
-                fn()
-            except Exception:                                 # noqa: BLE001 - one failed restore must not skip the rest
-                logger.exception("sizing loop: a restore raised")
-        store = _frozen_vintage_store()
-        store.clear()
-        store.update(vintages)
+        if own:
+            _restore(undo, vintages)
+
+
+def _restore(undo: list, vintages: dict) -> None:
+    """Run the copies' transform restores, last first, as run_simulation does, and put the thread's frozen-vintage
+    store back: the modelling assumptions mark VOLL and DSR slacks in the open project's transient rows, and only
+    their restore clears them."""
+    for fn in reversed(undo):
+        try:
+            fn()
+        except Exception:                                     # noqa: BLE001 - one failed restore must not skip the rest
+            logger.exception("sizing loop: a restore raised")
+    store = _frozen_vintage_store()
+    store.clear()
+    store.update(vintages)
 
 
 # ── the forward pass ────────────────────────────────────────────────────────
@@ -489,11 +503,22 @@ def run_sizing(network, config, inp: SizingInputs, *, max_rounds: int = sl.MAX_R
     _check_inputs(base, inp)
     solve = solve or solve_once
     last: dict = {}
+    undo: list = []
+    vintages = dict(_frozen_vintage_store())
+    try:
+        return _run(base, config, inp, solve, last, undo, max_rounds=max_rounds, freeze_after=freeze_after,
+                    stop_event=stop_event, on_iteration=on_iteration, solver_name=solver_name,
+                    solver_options=solver_options)
+    finally:
+        _restore(undo, vintages)                              # after the forward checks and the sheet
 
+
+def _run(base, config, inp, solve, last, undo, *, max_rounds, freeze_after, stop_event, on_iteration, solver_name,
+         solver_options) -> dict:
     def run(state, reduce):
         try:
             res = solve(base, config, inp, state, reduce=reduce, solver_name=solver_name,
-                        solver_options=solver_options, stop_event=stop_event)
+                        solver_options=solver_options, stop_event=stop_event, undo=undo)
         except KeyboardInterrupt:
             if stop_event is None or not stop_event.is_set():
                 raise
@@ -510,7 +535,7 @@ def run_sizing(network, config, inp: SizingInputs, *, max_rounds: int = sl.MAX_R
     lines = basis_lines(config, base)
     if inp.reduce and any(r.get("info", {}).get("basis") == "full_year" for r in out["rounds"]
                           if r.get("basis") == "rounds"):
-        lines.append("tsam not available: the inner rounds solved the full year" if not _tsam_available()
+        lines.append("tsam not available: inner rounds solve the full year" if not _tsam_available()
                      else "the year reduction fell back to the full year for some inner rounds")
     out["basis_note"] = "; ".join([BASIS_NOTE, *lines])
     out["sheet"], out["sheet_paths"] = None, []

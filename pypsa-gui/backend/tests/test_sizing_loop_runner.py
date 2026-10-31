@@ -274,14 +274,15 @@ def test_without_tsam_the_inner_rounds_say_full_year(monkeypatch):
     out = run_sizing(_tiny(), _config(), _inputs(reduce=True))
     inner = [r for r in out["rounds"] if r["basis"] == "rounds"]
     assert inner and all(r["info"]["basis"] == "full_year" for r in inner)
-    assert "tsam not available: the inner rounds solved the full year" in out["basis_note"]
+    assert "tsam not available: inner rounds solve the full year" in out["basis_note"]
 
 
 def test_committable_units_and_project_solver_options_are_named():
     n = _tiny()
     n.generators.loc["import", "committable"] = True
     lines = slr.basis_lines(_config(), n)
-    assert any(line.startswith("1 committable unit(s)") for line in lines)
+    assert any(line.startswith("1 committable unit(s): solved as a MIP") and "representative-period joins" in line
+               for line in lines)
     assert not any("committable" in line for line in slr.basis_lines(_config(), _tiny()))
     out = run_sizing(_tiny(), _config(presolve_enabled=False), _inputs())
     assert "the project's solver and presolve options are not merged" in out["basis_note"]
@@ -303,10 +304,18 @@ def test_voll_and_dsr_slacks_leave_the_project_registry_as_found(monkeypatch):
             return {k: set(v) for k, v in ctx.transient_rows.items()}, dict(_frozen_vintage_store())
 
     before = registry()
+    during = []
+    real_forward = slr.forward_checks
+
+    def forward(result, state, inp):                         # the restores wait until the forward checks are done
+        during.append(registry()[0] != before[0])
+        return real_forward(result, state, inp)
+
+    monkeypatch.setattr(slr, "forward_checks", forward)
     cfg = _config(voll=10_000.0, dsr_price_eur_per_mwh=500.0, dsr_share_of_load=0.1, dsr_buses=["mv"])
     out = run_sizing(_tiny(), cfg, _inputs())
     assert out["status"] in ("converged", "not_converged"), out["verdict"]
-    assert marked                                            # the slacks were registered during the loop
+    assert marked and during and all(during)                 # the slacks were registered during the loop
     assert registry() == before
 
 
