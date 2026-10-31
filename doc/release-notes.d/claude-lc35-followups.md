@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): the assistant's `ui_open_asset_detail` now refuses an unknown results category or view mode as `invalid_navigation` instead of reporting success; a browser journey covers the assistant's select, detail and panel navigation.

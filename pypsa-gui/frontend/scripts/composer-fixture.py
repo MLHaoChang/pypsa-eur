@@ -21,7 +21,7 @@ def main():
     parser.add_argument("--storage", type=Path, required=True)
     parser.add_argument("--decisions", action="store_true")
     parser.add_argument("--no-model", action="store_true", help="configure no model profile (the no-key path)")
-    parser.add_argument("--journey", choices=["oj01", "oj05", "oj21", "oj22", "lc16c", "lc03h"],
+    parser.add_argument("--journey", choices=["oj01", "oj05", "oj21", "oj22", "lc16c", "lc03h", "lc06d24"],
                         help="script a finite owner journey on the loopback wire (LC-03 OJ-01)")
     args = parser.parse_args()
     storage = args.storage.resolve()
@@ -126,6 +126,14 @@ def main():
                                                     if len(results) > 1 else None})]
                 if len(results) > 1 and not results[1].get("preview_id"):
                     steps = steps[:2]  # a refused preview ends the turn; nothing to apply
+            elif "LC06D24 select" in said:
+                steps = [("ui_select_component", {"component_class": "Line", "name": "L2"})]
+            elif "LC06D24 unknown" in said:
+                steps = [("ui_select_component", {"component_class": "Line", "name": "Nope"})]
+            elif "LC06D24 detail" in said:
+                steps = [("ui_open_asset_detail", {"component_class": "Line", "name": "L2"})]
+            elif "LC06D24 panel" in said:
+                steps = [("ui_open_panel", {"panel_id": "results", "results_tab": "capex"})]
             elif "Undo that change" in said:
                 steps = [("undo_last", {})]
             elif "NH3 tank" in said:
@@ -177,6 +185,8 @@ def main():
                 # A refusal comes back as "kind\n<untrusted_data>\nmessage\n</untrusted_data>": say the message.
                 raw = results[0].get("message") or results[0].get("unparsed") or json.dumps(results[0])
                 text = f"OJ22_EMPTY {raw.split('<untrusted_data>')[-1].split('</untrusted_data>')[0].strip()[:600]}"
+            elif "LC06D24" in said:
+                text = f"LC06D24_ANSWER {json.dumps(results[-1])[:300]}"
             elif steps[-1][0] == "preview_project_changes":
                 text = f"OJ23_ANSWER {json.dumps(results[0])[:600]}"
             elif steps[-1][0] in ("update_component", "undo_last", "apply_project_changes", "update_solver_config",
@@ -383,7 +393,7 @@ with SessionLocal() as db:
             ready = {"base": f"http://127.0.0.1:{port}", "credentials_file": str(credentials)}
             if args.journey == "lc03h":
                 ready["control"] = f"http://127.0.0.1:{model.server_port}/fixture"
-            if args.journey in ("oj01", "oj05", "oj21", "oj22", "lc16c", "lc03h"):
+            if args.journey in ("oj01", "oj05", "oj21", "oj22", "lc16c", "lc03h", "lc06d24"):
                 # The same oj-grid the Tier A tests use (tests/oj_grid.py), as NetCDF.
                 network = storage / "oj-grid.nc"
                 # OJ-22 adds two more solar units, one inactive, so "all solar" is a set of three.
