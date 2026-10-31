@@ -109,8 +109,8 @@ def _envelope_terms(envelope: dict) -> tuple[float, float | None]:
 
 def _latency_frequency(envelope: dict) -> float | None:
     """The frequency the latency band is set at: the highest oscillation frequency, except that a trace-sourced
-    oscillation (`spectrum.replace_oscillation`) contributes the trace's f_c, which sits above 1/T on a
-    broadband trace."""
+    oscillation (`spectrum.replace_oscillation`) contributes the higher of 1/T and the trace's f_c: f_c sits
+    above 1/T on a broadband trace, but can fall below it (a dominant low tone), and the band must not loosen."""
     best = None
     for ph in envelope["phases"]:
         osc = ph.get("oscillation") or {}
@@ -119,7 +119,7 @@ def _latency_frequency(envelope: dict) -> float | None:
             continue
         f = 1.0 / period
         if osc.get("source") == "trace" and float(osc.get("f_c_hz") or 0.0) > 0:
-            f = float(osc["f_c_hz"])
+            f = max(f, float(osc["f_c_hz"]))
         best = max(best or 0.0, f)
     return best
 

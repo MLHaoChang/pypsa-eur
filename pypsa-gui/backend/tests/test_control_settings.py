@@ -319,3 +319,10 @@ def test_a_trace_sourced_oscillation_sets_the_latency_band_at_the_traces_f_c():
     env = {"phases": [{**PROTOTYPE["phases"][0], "oscillation": osc}]}
     sheet = CS.build_sheet(envelope=env, ramp_mw_per_min=RAMP, tiers=[_tier()], gfm=_recommendation())
     assert sheet["latency_limit_s"] == pytest.approx(CS.band_limit_s(5.0))
+
+
+def test_a_trace_f_c_below_one_over_t_does_not_loosen_the_latency_band():
+    osc = {"amplitude_mw": 10.0, "period_s": 6.6, "source": "trace", "f_c_hz": 0.150}     # 1/T = 0.1515 Hz
+    env = {"phases": [{**PROTOTYPE["phases"][0], "oscillation": osc}]}
+    sheet = CS.build_sheet(envelope=env, ramp_mw_per_min=RAMP, tiers=[_tier()], gfm=_recommendation())
+    assert sheet["latency_limit_s"] == pytest.approx(CS.band_limit_s(1 / 6.6))
