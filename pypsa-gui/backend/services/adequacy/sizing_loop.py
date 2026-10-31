@@ -44,7 +44,9 @@ the LP cost: a filter cost may fall for its own reasons).
 LIBRARY ASSETS (the transformer) round up to the library size the forward pass names (the largest, when two
 checks name one asset; the last named, in a round that names none), and freeze at that size at the end of round
 ``freeze_after`` (2). A frozen size is never changed again, so it cannot flip between library sizes. ``library``
-in the result holds the latest rounded-up sizes, also for a run that converged before the freeze.
+in the result holds the latest rounded-up sizes, also for a run that converged before the freeze. The full-year
+solve fixes every library asset at that size; without one, a run that converged before the freeze says in
+``warnings`` (and ``library_in_cost`` False on the row) that the round-up is not yet in the cost.
 
 TERMINATION IS TOTAL: each round makes exactly one ``solve`` call, the loop runs at most ``MAX_ROUNDS`` rounds,
 and ``final_solve`` runs at most once, after a converged verdict.
@@ -256,10 +258,18 @@ def run_sizing_loop(solve, forward, *, max_rounds: int = MAX_ROUNDS, freeze_afte
                         f"{", ".join(row['failing'])}", row)
 
     last = rounds[-1]
+    unfrozen = {a: v for a, v in library.items() if a not in frozen}
     if final_solve is None:
+        if unfrozen:
+            # Converged before the freeze: the LP sized these continuously, so its cost lacks the round-up.
+            last["library_in_cost"] = False
+            warnings.append("library sizes not yet in the cost (converged before the freeze): " + ", ".join(
+                f"{a} {v:g}" for a, v in unfrozen.items()))
         return done("converged", _converged_text(last["not_run"]), last)
     if stopped():
         return done("aborted", "aborted before the full-year solve", last)
+    # The full-year solve fixes every library asset at its rounded-up size, frozen or not yet.
+    frozen.update(unfrozen)
     state = {"round": len(rounds) + 1, "cuts": dict(cuts), "frozen": dict(frozen), "final": True}
     t = time.perf_counter()
     result = final_solve(state)
