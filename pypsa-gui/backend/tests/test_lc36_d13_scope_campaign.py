@@ -72,9 +72,11 @@ def test_a_frontier_at_voll_zero_is_refused_without_a_solve_and_keeps_the_prior_
     assert_frontier_points(wait_for('frontier'), FR_TARGETS)
     spent = len(FR_TARGETS) + 1
     assert chat_tools.campaign_status()['spent_solves'] == spent
-    before = snapshot('frontier')
 
     chat_tools.update_solver_config({'voll': 0.0})
+    # LC-40: the config change makes the kept result stale; the refused run must not touch it.
+    assert chat_tools.get_adequacy_results('frontier')['edited_since_study'] is True
+    before = snapshot('frontier')
     [err] = tool_errors('run_frontier_study', targets_permyriad=FR_TARGETS)
     assert err['error_kind'] == 'unsupported_scope'
     status = chat_tools.campaign_status()
