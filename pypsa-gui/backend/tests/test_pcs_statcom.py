@@ -785,18 +785,168 @@ def test_a_store_tagged_after_the_solve_is_left_blank_and_not_counted():
     assert [s for s in ps.cost_notes(n) if "late" in s]
 
 
-def test_a_rolling_solve_marks_its_sizes_as_the_last_window_only(tmp_path):
+# ── AS-14 (owner decision AS14-MAX-1): keep the max over the LPs, cost it once ──
+
+Q_SS_105 = HAND_Q_NEED - 2.0 * math.sqrt(11.0)     # the hand case: 105 MW, S_x capped at r x P = 2 MVA
+Q_SS_100 = 100.0 * (TAN_LOAD + K_LOSS - TAN_REQ) - 2.0 * math.sqrt(11.0)
+
+
+def _periodic(loads, periods):
+    """The campus with one snapshot per investment period, each weighted as a year."""
+    n = _campus(loads, [p * TAN_LOAD for p in loads])
+    n.set_snapshots(pd.MultiIndex.from_arrays([periods, [0] * len(periods)], names=["period", "timestep"]))
+    n.investment_periods = periods
+    n.snapshot_weightings.loc[:, "objective"] = 8760.0
+    n.loads_t.p_set.loc[:, "dc"] = loads
+    n.loads_t.q_set.loc[:, "dc"] = [p * TAN_LOAD for p in loads]
+    _bess(n, "small", 10.0)
+    return n
+
+
+def _pq_rows(cb):
+    rows = {(r["component"], r["carrier"]): r["capex"] for r in cb["by_carrier"] if r["component"] == "PCS/STATCOM"}
+    by_period = {p["period"]: {c["component"]: c["capex"] for c in p["by_component"]} for p in cb["by_period"]}
+    return rows, by_period
+
+
+def test_a_rolling_solve_persists_the_largest_size_over_its_windows_and_costs_it_once(tmp_path):
+    """Two one-hour windows; the first needs the larger STATCOM. The last window alone would size it smaller."""
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.results.objective_decomposition import compute_objective_decomposition
+    from services.solver.periodized_costs import fom_horizon_factor
+    from services.solver_service import SolverConfig
+
+    n = _campus([105.0, 100.0], [105.0 * TAN_LOAD, 100.0 * TAN_LOAD])
+    _bess(n, "small", 10.0)
+    cfg = _run(n, SolverConfig(solve_strategy="rolling", rolling_horizon=1, rolling_overlap=0))
+    s_x, q_ss, q_dyn = _persisted(n)
+    assert q_ss == pytest.approx(Q_SS_105, rel=1e-6)
+    assert s_x == {"small": pytest.approx(2.0, rel=1e-6)} and q_dyn == pytest.approx(0.0, abs=1e-6)
+    years = fom_horizon_factor(n)
+    for net in (n, _round_trip(n, tmp_path)):
+        assert net.meta.get("pcs_statcom_basis") == "max_over_solves"
+        assert _persisted(net)[1] == pytest.approx(Q_SS_105, rel=1e-6)
+        cb = compute_cost_breakdown(net, cfg)
+        rows, _ = _pq_rows(cb)
+        assert rows[("PCS/STATCOM", "STATCOM")] == pytest.approx(years * C_STATCOM * Q_SS_105, rel=1e-6)
+        assert rows[("PCS/STATCOM", "PCS oversize")] == pytest.approx(years * C_PCS * 2.0, rel=1e-6)
+        notes = cb["pcs_statcom_notes"]
+        assert any("largest over 2 LPs" in s and "counted once" in s and "differs from the sum of the window "
+                   "objectives" in s for s in notes), notes
+        # The decomposition skips its LP bridge on a rolling run, so the once-counted cost is never reconciled
+        # against the summed window objectives.
+        assert compute_objective_decomposition(net, cb, cfg)["lp_basis_total"] is None
+
+
+def test_a_myopic_solve_persists_the_largest_size_and_books_it_in_the_period_that_needs_it(tmp_path):
     from services.results.cost_breakdown import compute_cost_breakdown
     from services.solver_service import SolverConfig
 
-    n = _campus([100.0, 105.0], [100.0 * TAN_LOAD, 105.0 * TAN_LOAD])
-    _bess(n, "small", 10.0)
-    cfg = _run(n, SolverConfig(solve_strategy="rolling", rolling_horizon=1, rolling_overlap=0))
-    assert n.stores.at["small", "pcs_s_x_opt"] > 0
+    n = _periodic([105.0, 100.0], [2030, 2035])
+    cfg = _run(n, SolverConfig(solve_strategy="myopic", multi_investment_periods=True))
+    assert _persisted(n)[1] == pytest.approx(Q_SS_105, rel=1e-6)
     for net in (n, _round_trip(n, tmp_path)):
-        assert net.meta.get("pcs_statcom_basis") == "last_solve"
-        notes = compute_cost_breakdown(net, cfg)["pcs_statcom_notes"]
-        assert any("last solve only (rolling/myopic)" in s for s in notes)
+        assert net.meta.get("pcs_statcom_basis") == "max_over_solves"
+        cb = compute_cost_breakdown(net, cfg)
+        rows, by_period = _pq_rows(cb)
+        pq = rows[("PCS/STATCOM", "STATCOM")] + rows[("PCS/STATCOM", "PCS oversize")]
+        assert rows[("PCS/STATCOM", "STATCOM")] == pytest.approx(C_STATCOM * Q_SS_105, rel=1e-6)
+        assert by_period[2030]["PCS/STATCOM"] == pytest.approx(pq, rel=1e-9)
+        assert "PCS/STATCOM" not in by_period[2035]          # the smaller later period adds nothing
+
+
+def test_a_size_that_grows_in_a_later_period_books_only_the_growth_there():
+    """GK A condition 3: period k pays max(0, size_k - running max before k); the parts sum to the max's cost."""
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.solver_service import SolverConfig
+
+    n = _periodic([100.0, 105.0], [2030, 2035])
+    cfg = _run(n, SolverConfig(solve_strategy="myopic", multi_investment_periods=True))
+    assert _persisted(n)[1] == pytest.approx(Q_SS_105, rel=1e-6)
+    cb = compute_cost_breakdown(n, cfg)
+    _, by_period = _pq_rows(cb)
+    assert by_period[2030]["PCS/STATCOM"] == pytest.approx(C_STATCOM * Q_SS_100 + C_PCS * 2.0, rel=1e-6)
+    assert by_period[2035]["PCS/STATCOM"] == pytest.approx(C_STATCOM * (Q_SS_105 - Q_SS_100), rel=1e-6)
+    assert by_period[2030]["PCS/STATCOM"] + by_period[2035]["PCS/STATCOM"] == pytest.approx(
+        sum(ps.cost_terms(n).values()), rel=1e-12)
+
+
+def test_q_ss_and_q_dyn_are_maxed_apart_and_split_by_period():
+    """Q_dyn peaks in the period Q_ss does not: the persisted pair is the larger of each (GK A condition 5)."""
+    readings = [(2030, {"q_ss": 5.0, "q_dyn": 0.0, "s_x": pd.Series({"a": 1.0})}),
+                (2035, {"q_ss": 3.0, "q_dyn": 4.0, "s_x": pd.Series({"a": 2.0})})]
+    sol, split = ps._max_over(readings)
+    assert (sol["q_ss"], sol["q_dyn"], sol["s_x"]["a"]) == (5.0, 4.0, 2.0)
+    assert split["statcom"] == [[2030, pytest.approx(5 / 9)], [2035, pytest.approx(4 / 9)]]
+    assert split["stores"]["a"] == [[2030, 0.5], [2035, 0.5]]
+    assert ps._increments([(None, 2.0), (None, 3.0)]) == [[None, 1.0]]
+
+
+def test_each_lp_is_read_once_and_a_build_with_no_solution_is_named(tmp_path):
+    """GK A conditions 1 and 4: a model built and never solved is skipped, by number, never folded in as 0, and
+    a call never reads its own model."""
+    n = _hand_case()
+    fn = _then(n, None)
+    n.optimize.create_model()
+    fn(n, n.snapshots)                                          # LP 1: built, never solved
+    lps = n._pcs_statcom_lps
+    lps.read(n.model)                                           # its own model: not read
+    assert lps.solved == [] and lps.skipped == []
+    assert n.optimize(solver_name="highs", extra_functionality=fn)[0] == "ok"     # LP 2 reads LP 1 first
+    assert lps.skipped == [1] and lps.solved == []
+    ps.persist_solution(n, basis=ps.MAX_BASIS)
+    assert lps.solved and n.meta[ps.LPS_KEY] == 1 and n.meta[ps.SKIPPED_KEY] == [1]
+    assert any("LP 1" in s and "not in the max" in s for s in ps.cost_notes(n))
+    assert any("LP 1" in s for s in ps.cost_notes(_round_trip(n, tmp_path)))
+    assert _persisted(n)[1] == pytest.approx(solution(n)["q_ss"], rel=1e-12)
+
+
+def test_a_max_basis_with_no_record_of_the_earlier_lps_says_so():
+    """A model the wrap's record does not hold (an earlier wrap, rebuilt since) is persisted alone, with a warning."""
+    n = _hand_case()
+    _solve(n)
+    _wrap_with_pcs_statcom(n, None)                            # a new record, which never saw the solved model
+    warnings = ps.persist_solution(n, basis=ps.MAX_BASIS)
+    assert any("last LP's only" in w for w in warnings), warnings
+    assert n.meta[ps.LPS_KEY] == 1
+
+
+def test_a_rolling_solve_with_an_infeasible_window_fails_and_persists_nothing():
+    """A failed window fails the whole solve, so no max is taken over a partial run (GK A condition 4)."""
+    from services.solver_service import SolverConfig
+
+    n = _campus([105.0, 400.0], [105.0 * TAN_LOAD, 400.0 * TAN_LOAD])
+    _bess(n, "small", 10.0)
+    _run(n, SolverConfig(solve_strategy="rolling", rolling_horizon=1, rolling_overlap=0), expect="fail")
+    assert n.stores.reindex(columns=["pcs_s_x_opt"]).isna().all().all()
+    assert "pcs_statcom_basis" not in n.meta
+
+
+def test_a_network_persisted_before_as_14_still_reads_as_last_solve(tmp_path):
+    """GK A condition 6: an old .nc carries basis "last_solve" and no period split."""
+    n = _campus([105.0], [105.0 * TAN_LOAD])
+    _bess(n, "small", 10.0)
+    _run(n)
+    n.meta["pcs_statcom_basis"] = "last_solve"
+    for key in (ps.LPS_KEY, ps.SKIPPED_KEY, ps.PERIODS_KEY):
+        n.meta.pop(key, None)
+    back = _round_trip(n, tmp_path)
+    assert ps.LAST_SOLVE_NOTE in ps.cost_notes(back)
+    assert {(label, period) for label, period, _ in ps.cost_items(back)} == {("PCS oversize", None), ("STATCOM", None)}
+    assert ps.cost_terms(back) == pytest.approx(ps.cost_terms(n), rel=1e-12)
+
+
+def test_a_one_period_multi_index_solve_puts_the_cost_in_its_period():
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.solver_service import SolverConfig
+
+    n = _periodic([105.0], [2030])
+    cfg = _run(n, SolverConfig(multi_investment_periods=True))
+    assert n.meta.get("pcs_statcom_basis") == "horizon"
+    cb = compute_cost_breakdown(n, cfg)
+    rows, by_period = _pq_rows(cb)
+    assert by_period[2030]["PCS/STATCOM"] == pytest.approx(sum(rows.values()), rel=1e-9)
+    assert sum(p["capex"] for p in cb["by_period"]) == pytest.approx(cb["capex"], rel=1e-9)
 
 
 def test_a_full_horizon_solve_carries_no_basis_note():
