@@ -55,6 +55,7 @@ Key Phase 2 invariants enforced here:
 NO ANTHROPIC SDK IMPORT. `run_turn` drives an `LLMProvider` (the seam in
 `services/llm_provider.py`); the provider — not this module — drives the SDK.
 """
+
 from __future__ import annotations
 
 import concurrent.futures
@@ -75,25 +76,72 @@ from services.project_context import ProjectContext
 logger = logging.getLogger("pypsa_gui.chat")
 
 from harness.history import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    _message_is_tool_results, _is_turn_start, rewind_session, _drop_oldest_turn_group, TURN_SUMMARY_PREFIX, TURN_SUMMARY_MAX_CHARS, _SUMMARY_LINE_CHARS, _SUMMARY_MAX_LINES, is_turn_summary, _describe_dropped, _render_summary, _parse_summary, trim_session_messages, CHAT_FILENAME, _redact_for_persist, get_persist_path, read_all_turns, read_all_turns_with_gap, append_turn, flush_to_disk, _rotate_chat_jsonl_unlocked, SAVE_LINEAGE_REBIND_MOVE, SAVE_LINEAGE_COPY, SAVE_LINEAGE_SCENARIO_COPY, _project_chat_paths, handle_save_lineage, handle_rename_lineage, handle_snapshot_lineage, _chat_paths_in,
-    TURN_USAGE_KEY, INTERRUPTED_KEY, INTERRUPTED_REASON_KEY, usage_since, is_interrupted_turn, TurnTrace,
+    _message_is_tool_results,
+    _is_turn_start,
+    rewind_session,
+    _drop_oldest_turn_group,
+    TURN_SUMMARY_PREFIX,
+    TURN_SUMMARY_MAX_CHARS,
+    _SUMMARY_LINE_CHARS,
+    _SUMMARY_MAX_LINES,
+    is_turn_summary,
+    _describe_dropped,
+    _render_summary,
+    _parse_summary,
+    trim_session_messages,
+    CHAT_FILENAME,
+    _redact_for_persist,
+    get_persist_path,
+    read_all_turns,
+    read_all_turns_with_gap,
+    append_turn,
+    flush_to_disk,
+    _rotate_chat_jsonl_unlocked,
+    SAVE_LINEAGE_REBIND_MOVE,
+    SAVE_LINEAGE_COPY,
+    SAVE_LINEAGE_SCENARIO_COPY,
+    _project_chat_paths,
+    handle_save_lineage,
+    handle_rename_lineage,
+    handle_snapshot_lineage,
+    _chat_paths_in,
+    TURN_USAGE_KEY,
+    INTERRUPTED_KEY,
+    INTERRUPTED_REASON_KEY,
+    usage_since,
+    is_interrupted_turn,
+    TurnTrace,
 )
-
 
 
 from harness.session import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    RESULT_REFS_MAXLEN, PendingConfirmation, ChatSession, _SESSIONS, _SESSIONS_LOCK, get_session, session_owner_allows, session_replica_allows, _evict_idle_sessions_locked, get_or_create_session_reporting, get_or_create_session, drop_session, _reset_sessions_for_tests, TURN_AUTHOR_KEY, turn_is_callers,
+    RESULT_REFS_MAXLEN,
+    PendingConfirmation,
+    ChatSession,
+    _SESSIONS,
+    _SESSIONS_LOCK,
+    get_session,
+    session_owner_allows,
+    session_replica_allows,
+    _evict_idle_sessions_locked,
+    get_or_create_session_reporting,
+    get_or_create_session,
+    drop_session,
+    _reset_sessions_for_tests,
+    TURN_AUTHOR_KEY,
+    turn_is_callers,
 )
-
 
 
 from harness.confirm import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    DESTRUCTIVE_TIERS, GUIDED_CONFIRM_TIERS, _confirm_tiers, _is_guided, find_parallel_destructive, _safety_tier_for, _confirm_destructive_tool,
+    DESTRUCTIVE_TIERS,
+    GUIDED_CONFIRM_TIERS,
+    _confirm_tiers,
+    _is_guided,
+    find_parallel_destructive,
+    _safety_tier_for,
+    _confirm_destructive_tool,
 )
-
-
-
-
 
 
 # Tools that the agent itself uses to legitimately CHANGE the active
@@ -116,24 +164,26 @@ from harness.confirm import (  # noqa: E402, F401 — moved (issue 08); re-expor
 # save guard lets through, and wrote the imported network over the old
 # project. The panel now clears its project on `to: null` (CH-2 in the
 # 2026-09-28 solver-and-chat register).
-PROJECT_REBINDING_TOOLS = frozenset([
-    "activate_project",
-    "load_project",
-    "save_project_as",
-    "rename_project",
-    "restore_project_snapshot",
-    "create_project_from_template",
-    "import_project_bundle",
-    "save_project",
-    # P27a gate finding 3: the network imports replace the network through
-    # `reset_network`, which UNBINDS it (`loaded_project` X → None). The frame
-    # then carries `to: null`; a later same-turn tool is not a foreign switch.
-    "import_network_nc",
-    "import_csv_bundle",
-    "import_excel",
-    "import_matpower",
-    "import_uploaded_network",
-])
+PROJECT_REBINDING_TOOLS = frozenset(
+    [
+        "activate_project",
+        "load_project",
+        "save_project_as",
+        "rename_project",
+        "restore_project_snapshot",
+        "create_project_from_template",
+        "import_project_bundle",
+        "save_project",
+        # P27a gate finding 3: the network imports replace the network through
+        # `reset_network`, which UNBINDS it (`loaded_project` X → None). The frame
+        # then carries `to: null`; a later same-turn tool is not a foreign switch.
+        "import_network_nc",
+        "import_csv_bundle",
+        "import_excel",
+        "import_matpower",
+        "import_uploaded_network",
+    ]
+)
 
 # Default + selectable models: `DEFAULT_MODEL` / `OPUS_MODEL` are imported
 # above from `services.llm_config` (Task 5 moved the constants there — the
@@ -152,20 +202,24 @@ from harness import fence as harness_fence  # noqa: E402 — a patched function 
 from harness import spill as harness_spill  # noqa: E402 — issue 16
 
 
-
-
-
-
-
 from harness.ratelimit import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    _RATE_BUCKETS, _RATE_LOCK, check_rate_limit,
+    _RATE_BUCKETS,
+    _RATE_LOCK,
+    check_rate_limit,
 )
 
 
 from harness.metrics import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    _METRICS, _METRICS_LOCK, _metric_incr, _metric_error, _metric_record_duration, _metric_add_tokens, _percentile, _metrics_snapshot, _reset_metrics_for_tests,
+    _METRICS,
+    _METRICS_LOCK,
+    _metric_incr,
+    _metric_error,
+    _metric_record_duration,
+    _metric_add_tokens,
+    _percentile,
+    _metrics_snapshot,
+    _reset_metrics_for_tests,
 )
-
 
 
 # Per-tool-timeout worker pool (#16). A SINGLE module-level executor reused
@@ -180,21 +234,30 @@ from harness.metrics import (  # noqa: E402, F401 — moved (issue 08); re-expor
 # Named so the saturation message quotes the real ceiling.
 TOOL_EXECUTOR_MAX_WORKERS: int = 8
 _TOOL_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
-    max_workers=TOOL_EXECUTOR_MAX_WORKERS, thread_name_prefix="chat-tool",
+    max_workers=TOOL_EXECUTOR_MAX_WORKERS,
+    thread_name_prefix="chat-tool",
 )
 
 from harness.results import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    _RESULT_CONTENT_CAP, _ERROR_DETAIL_CAP, _coerce_jsonable, _truncate_result, _truncation_marker, _apply_turn_tool_result_budget, _error_result_content, _result_to_anthropic_content, _STORAGE_PLACEHOLDER, _redact_storage_roots, _IDENTIFYING_RESULT_KEYS, _scrub_identities,
+    _RESULT_CONTENT_CAP,
+    _ERROR_DETAIL_CAP,
+    _coerce_jsonable,
+    _truncate_result,
+    _truncation_marker,
+    _apply_turn_tool_result_budget,
+    _error_result_content,
+    _result_to_anthropic_content,
+    _STORAGE_PLACEHOLDER,
+    _redact_storage_roots,
+    _IDENTIFYING_RESULT_KEYS,
+    _scrub_identities,
 )
-
 
 
 from harness.fence import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    _UNTRUSTED_OPEN, _UNTRUSTED_CLOSE,
+    _UNTRUSTED_OPEN,
+    _UNTRUSTED_CLOSE,
 )
-
-
-
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -204,20 +267,6 @@ from harness.fence import (  # noqa: E402, F401 — moved (issue 08); re-exporte
 # SSE frame ORDER must never depend on a metric call (must-fix: no metric
 # helper emits a frame).
 # ─────────────────────────────────────────────────────────────────────────
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -235,12 +284,6 @@ from services.redaction import (  # moved 2026-08-13 (provider seam, Task 1)
 )
 
 
-
-
-
-
-
-
 # ─────────────────────────────────────────────────────────────────────────
 # Session registry (in-memory, process-lifetime). Phase 4 may persist a
 # rolling pointer alongside chat.jsonl; Phase 2 keeps it RAM-only because the
@@ -248,45 +291,8 @@ from services.redaction import (  # moved 2026-08-13 (provider seam, Task 1)
 # ─────────────────────────────────────────────────────────────────────────
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    # NB: do not raise — eviction wraps this call in try/except, but a
-    # frequent quiet exit is preferable to noisy logs in the common case.
-
-
+# NB: do not raise — eviction wraps this call in try/except, but a
+# frequent quiet exit is preferable to noisy logs in the common case.
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -302,19 +308,15 @@ from harness.sse import sse_frame  # noqa: E402, F401 — moved (issue 08); re-e
 # ─────────────────────────────────────────────────────────────────────────
 
 
-
-
 # ─────────────────────────────────────────────────────────────────────────
 # F10 + F9 — solver-log bridge
 # ─────────────────────────────────────────────────────────────────────────
 
 
 from harness.solver_bridge import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    _classify_solver_line, solver_log_bridge,
+    _classify_solver_line,
+    solver_log_bridge,
 )
-
-
-
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -324,19 +326,15 @@ from harness.solver_bridge import (  # noqa: E402, F401 — moved (issue 08); re
 
 
 from harness.stub import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    agent_loop_stub, _dispatch_stub_call,
+    agent_loop_stub,
+    _dispatch_stub_call,
 )
-
-
-
 
 
 # ─────────────────────────────────────────────────────────────────────────
 # Phase 3 — provider-driven agent loop (run_turn drives an LLMProvider; the
 # provider drives its SDK — see services/llm_provider.py)
 # ─────────────────────────────────────────────────────────────────────────
-
-
 
 
 _redact_for_log = redact_for_log  # moved 2026-08-13 (provider seam, Task 1)
@@ -356,6 +354,7 @@ from harness.providers.anthropic import (  # moved 2026-08-13 (provider seam)
     serialise_block as _serialise_for_anthropic,  # noqa: F401
     with_history_cache_breakpoint as _with_history_cache_breakpoint,  # noqa: F401
 )
+
 # `llm_anthropic` imported as a module (not just names) so
 # `llm_anthropic.AnthropicProvider` is reached as a module attribute and
 # tests can monkeypatch it there and have the seam pick up the patched
@@ -369,41 +368,70 @@ from harness.providers import openai_compat as llm_openai_compat  # noqa: F401 �
 
 
 from harness.providers.wiring import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    llm_config_module, _resolve_turn_profile, _NON_PORTABLE_BLOCK_TYPES, _filter_non_portable_blocks, _anthropic_client_for_profile, _provider_for_profile, _GRIDSPINE_ALWAYS, _bound_project_kind, _tools_payload, _tools_payload_for_profile,
+    llm_config_module,
+    _resolve_turn_profile,
+    _NON_PORTABLE_BLOCK_TYPES,
+    _filter_non_portable_blocks,
+    _anthropic_client_for_profile,
+    _provider_for_profile,
+    _GRIDSPINE_ALWAYS,
+    _bound_project_kind,
+    _tools_payload,
+    _tools_payload_for_profile,
 )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 from harness.compose import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    _ADEQUACY_GUIDE, _ADEQUACY_GUIDE_CHAINING, _ADEQUACY_GUIDE_FACTS, _ASSISTANT_STANCE, _ASSISTANT_STANCE_CHAINING, _ASSISTANT_STANCE_FACTS, _BASE_IDENTITY, _BASE_IDENTITY_CHAINING, _BASE_IDENTITY_FACTS, _CONFIRMATION_CARD_CONTRACT_TEMPLATE, _DOMAIN_GUIDE, _DOMAIN_GUIDE_CHAINING, _DOMAIN_GUIDE_FACTS, _EDIT_CARD, _EH_GUIDE, _EH_GUIDE_CHAINING, _EH_GUIDE_FACTS, _GUIDED_STEPS, _NEXT_STEP_RUBRIC, _NEXT_STEP_RUBRIC_CHAINING, _NEXT_STEP_RUBRIC_FACTS, _PRICE_CONGESTION_GUIDE, _PRICE_CONGESTION_GUIDE_CHAINING, _PRICE_CONGESTION_GUIDE_FACTS, _PROJECT_OVERVIEW, _REFERENCE_LADDER, _RESULTS_WALK, _SOLVER_ERROR_DECODER, _SOLVER_ERROR_DECODER_CHAINING, _SOLVER_ERROR_DECODER_FACTS, _STYLE_GUIDANCE, _UI_CONTEXT_MAX_VALUE_CHARS, _UNTRUSTED_DATA_CLAUSE, _WORKFLOW_STATE_TOOLS, _build_system_prompt, _format_live_network_meta, _format_ui_context, _guided_mode_addendum, _hub_design_workflow, _prompts, _sanitise_ui_value, _workflow_addendum, _workflow_state_payload,
+    _ADEQUACY_GUIDE,
+    _ADEQUACY_GUIDE_CHAINING,
+    _ADEQUACY_GUIDE_FACTS,
+    _ASSISTANT_STANCE,
+    _ASSISTANT_STANCE_CHAINING,
+    _ASSISTANT_STANCE_FACTS,
+    _BASE_IDENTITY,
+    _BASE_IDENTITY_CHAINING,
+    _BASE_IDENTITY_FACTS,
+    _CONFIRMATION_CARD_CONTRACT_TEMPLATE,
+    _DOMAIN_GUIDE,
+    _DOMAIN_GUIDE_CHAINING,
+    _DOMAIN_GUIDE_FACTS,
+    _EDIT_CARD,
+    _EH_GUIDE,
+    _EH_GUIDE_CHAINING,
+    _EH_GUIDE_FACTS,
+    _GUIDED_STEPS,
+    _NEXT_STEP_RUBRIC,
+    _NEXT_STEP_RUBRIC_CHAINING,
+    _NEXT_STEP_RUBRIC_FACTS,
+    _PRICE_CONGESTION_GUIDE,
+    _PRICE_CONGESTION_GUIDE_CHAINING,
+    _PRICE_CONGESTION_GUIDE_FACTS,
+    _PROJECT_OVERVIEW,
+    _REFERENCE_LADDER,
+    _RESULTS_WALK,
+    _SOLVER_ERROR_DECODER,
+    _SOLVER_ERROR_DECODER_CHAINING,
+    _SOLVER_ERROR_DECODER_FACTS,
+    _STYLE_GUIDANCE,
+    _UI_CONTEXT_MAX_VALUE_CHARS,
+    _UNTRUSTED_DATA_CLAUSE,
+    _WORKFLOW_STATE_TOOLS,
+    _build_system_prompt,
+    _format_live_network_meta,
+    _format_ui_context,
+    _guided_mode_addendum,
+    _hub_design_workflow,
+    _prompts,
+    _sanitise_ui_value,
+    _workflow_addendum,
+    _workflow_state_payload,
 )
 
 from harness.history import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    _THINKING_REQUIRED_FIELDS, _thinking_block_is_wellformed, _sanitise_history_message,
+    _THINKING_REQUIRED_FIELDS,
+    _thinking_block_is_wellformed,
+    _sanitise_history_message,
 )
-
-
-
-
-
 
 
 @dataclass
@@ -503,7 +531,8 @@ def _stream_assistant_message(
                 if session.abort_event.is_set():
                     yield "session_done", {"reason": "aborted"}
                     return _StreamOutcome(
-                        stop_turn=True, model_fallback_used=model_fallback_used,
+                        stop_turn=True,
+                        model_fallback_used=model_fallback_used,
                     )
                 if ev.type == "text_delta":
                     emitted_this_attempt = True
@@ -518,10 +547,13 @@ def _stream_assistant_message(
                 # as the model opens a tool_use block.
                 elif ev.type == "tool_use_start":
                     emitted_this_attempt = True
-                    yield "tool_preparing", {
-                        "tool_use_id": ev.tool_use_id,
-                        "tool_name": ev.tool_name,
-                    }
+                    yield (
+                        "tool_preparing",
+                        {
+                            "tool_use_id": ev.tool_use_id,
+                            "tool_name": ev.tool_name,
+                        },
+                    )
                 elif ev.type == "message_done":
                     final_blocks = ev.blocks
                     final_usage = ev.usage
@@ -556,7 +588,7 @@ def _stream_assistant_message(
                 _metric_incr("retries")
                 delay = min(
                     harness_budget.MAX_STREAM_RETRY_DELAY,
-                    harness_budget.BASE_STREAM_RETRY_DELAY * (2 ** attempt),
+                    harness_budget.BASE_STREAM_RETRY_DELAY * (2**attempt),
                 )
                 # `msg` used to be computed and thrown away, which is why the
                 # thinking-block 400 could not be diagnosed from the log file
@@ -567,7 +599,10 @@ def _stream_assistant_message(
                 # upstream exception text to disk.
                 logger.warning(
                     "chat: transient SDK error %r — retry %d/%d in %.1fs: %s",
-                    error_kind, attempt + 1, harness_budget.MAX_STREAM_RETRIES, delay,
+                    error_kind,
+                    attempt + 1,
+                    harness_budget.MAX_STREAM_RETRIES,
+                    delay,
                     _redact_secrets_in_str(msg),
                 )
                 time.sleep(delay)
@@ -592,14 +627,18 @@ def _stream_assistant_message(
                 session.model = fallback_model
                 logger.warning(
                     "chat: rate_limited on %s after retries — falling back to %s",
-                    from_model, fallback_model,
+                    from_model,
+                    fallback_model,
                 )
-                yield "model_fallback", {
-                    "from_model": from_model,
-                    "to_model": fallback_model,
-                    "reason": "rate_limited",
-                    "profile_id": profile.id,
-                }
+                yield (
+                    "model_fallback",
+                    {
+                        "from_model": from_model,
+                        "to_model": fallback_model,
+                        "reason": "rate_limited",
+                        "profile_id": profile.id,
+                    },
+                )
                 # Grant exactly one extra attempt on the fallback model.
                 max_attempts = attempt + 2
                 attempt += 1
@@ -610,15 +649,19 @@ def _stream_assistant_message(
             # the retry warning above.
             logger.error(
                 "chat: turn failed (terminal) %r after %d attempt(s): %s",
-                error_kind, attempt + 1, _redact_secrets_in_str(msg),
+                error_kind,
+                attempt + 1,
+                _redact_secrets_in_str(msg),
             )
             yield "error", {"error_kind": error_kind, "message": msg}
             yield "session_done", {"reason": error_kind}
             return _StreamOutcome(
-                stop_turn=True, model_fallback_used=model_fallback_used,
+                stop_turn=True,
+                model_fallback_used=model_fallback_used,
             )
     return _StreamOutcome(
-        final_blocks=final_blocks, final_usage=final_usage,
+        final_blocks=final_blocks,
+        final_usage=final_usage,
         model_fallback_used=model_fallback_used,
     )
 
@@ -707,22 +750,27 @@ def _dispatch_tool_uses(
             switched = True
             for rem in tool_uses[idx:]:
                 rem_id = rem.get("id")
-                yield "tool_error", {
-                    "tool_use_id": rem_id,
-                    "tool_name": rem.get("name"),
-                    "error_kind": "project_switched_mid_turn",
-                    "message": (
-                        f"active project changed from {turn_project_holder[0]!r} "
-                        "during this turn; refusing to run tools against a "
-                        "different network."
-                    ),
-                }
-                tool_results_for_next_turn.append({
-                    "type": "tool_result",
-                    "tool_use_id": rem_id,
-                    "is_error": True,
-                    "content": "project_switched_mid_turn",
-                })
+                yield (
+                    "tool_error",
+                    {
+                        "tool_use_id": rem_id,
+                        "tool_name": rem.get("name"),
+                        "error_kind": "project_switched_mid_turn",
+                        "message": (
+                            f"active project changed from {turn_project_holder[0]!r} "
+                            "during this turn; refusing to run tools against a "
+                            "different network."
+                        ),
+                    },
+                )
+                tool_results_for_next_turn.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": rem_id,
+                        "is_error": True,
+                        "content": "project_switched_mid_turn",
+                    }
+                )
             break
         # C-1 — CAPABILITY ENFORCEMENT AT THE DISPATCH SEAM.
         #
@@ -750,15 +798,18 @@ def _dispatch_tool_uses(
         # has (a task cap only lowers it); nothing may skip it.
         tool_call_count += 1
         if tool_call_count > harness_budget.MAX_TOOL_CALLS_PER_TURN:
-            yield "tool_error", {
-                "tool_use_id": tu.get("id"),
-                "tool_name": tu.get("name"),
-                "error_kind": "tool_call_cap_exceeded",
-                "message": (
-                    f"more than {harness_budget.MAX_TOOL_CALLS_PER_TURN} tool calls in "
-                    "one turn; refusing further dispatch this turn."
-                ),
-            }
+            yield (
+                "tool_error",
+                {
+                    "tool_use_id": tu.get("id"),
+                    "tool_name": tu.get("name"),
+                    "error_kind": "tool_call_cap_exceeded",
+                    "message": (
+                        f"more than {harness_budget.MAX_TOOL_CALLS_PER_TURN} tool calls in "
+                        "one turn; refusing further dispatch this turn."
+                    ),
+                },
+            )
             yield "session_done", {"reason": "tool_call_cap_exceeded"}
             # PAIRING. Anthropic requires one `tool_result` per `tool_use` id in
             # the next user message, and the assistant message carrying these
@@ -769,25 +820,32 @@ def _dispatch_tool_uses(
             # promised "one tool_result per tool_use_id WITHOUT exception", and
             # this was the exception.
             for pending in tool_uses[idx:]:
-                tool_results_for_next_turn.append({
-                    "type": "tool_result",
-                    "tool_use_id": pending.get("id"),
-                    "is_error": True,
-                    "content": "tool_call_cap_exceeded",
-                })
+                tool_results_for_next_turn.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": pending.get("id"),
+                        "is_error": True,
+                        "content": "tool_call_cap_exceeded",
+                    }
+                )
             # Ends the whole turn, not just this loop — reported to the
             # caller rather than returned from it, because a generator's
             # `return` cannot end its caller's.
             return _ToolDispatchOutcome(
-                tool_call_count=tool_call_count, stop_turn=True,
+                tool_call_count=tool_call_count,
+                stop_turn=True,
             )
         # The one per-call path (MCP build step 3): the allowlist refuses a
         # tool never on offer before the card and the dispatcher lookup, then
         # the guard, validators, card and handler run in order.
         dispatched = yield from dispatch_tool_call(
-            session, tu, tool_results_for_next_turn,
-            offered_tool_names=offered_tool_names, turn_ctx=turn_ctx,
-            result_char_budget=char_budget, guided=guided,
+            session,
+            tu,
+            tool_results_for_next_turn,
+            offered_tool_names=offered_tool_names,
+            turn_ctx=turn_ctx,
+            result_char_budget=char_budget,
+            guided=guided,
         )
         if not dispatched:
             continue
@@ -809,20 +867,23 @@ def _dispatch_tool_uses(
                 # then sends `expect=<old>` and the backend's identity
                 # guard 409s with "Backend network is bound to project
                 # 'X', not 'Y'" — incident 2026-06-08.
-                yield "project_rebound", {
-                    "from": turn_project_holder[0],
-                    "to": new_bound,
-                    "via_tool": tu_name,
-                }
+                yield (
+                    "project_rebound",
+                    {
+                        "from": turn_project_holder[0],
+                        "to": new_bound,
+                        "via_tool": tu_name,
+                    },
+                )
                 turn_project_holder[0] = new_bound
                 if session.navigation_turn is not None:
                     from harness.navigation import rebind
+
                     rebind(session.navigation_turn)
     return _ToolDispatchOutcome(
-        tool_call_count=tool_call_count, switched_mid_turn=switched,
+        tool_call_count=tool_call_count,
+        switched_mid_turn=switched,
     )
-
-
 
 
 def _build_user_content(
@@ -868,28 +929,40 @@ def _build_user_content(
     if attachment_file_ids:
         try:
             from services import upload_service
+
             multimodal_mimes = {
-                "image/png", "image/jpeg", "image/webp", "image/gif",
+                "image/png",
+                "image/jpeg",
+                "image/webp",
+                "image/gif",
                 "application/pdf",
             }
             multimodal_ids: list[str] = []
             tool_meta: list[dict[str, Any]] = []
             for fid in attachment_file_ids:
                 meta = upload_service.get_upload_meta(
-                    project, fid,
+                    project,
+                    fid,
                 )
                 if meta.mime in multimodal_mimes:
                     multimodal_ids.append(fid)
                 else:
-                    tool_meta.append({
-                        "file_id": meta.file_id,
-                        "filename": meta.filename,
-                        "mime": meta.mime,
-                        "size": meta.size,
-                    })
-            multimodal_blocks = upload_service.build_multimodal_content_blocks(
-                project, multimodal_ids,
-            ) if multimodal_ids else []
+                    tool_meta.append(
+                        {
+                            "file_id": meta.file_id,
+                            "filename": meta.filename,
+                            "mime": meta.mime,
+                            "size": meta.size,
+                        }
+                    )
+            multimodal_blocks = (
+                upload_service.build_multimodal_content_blocks(
+                    project,
+                    multimodal_ids,
+                )
+                if multimodal_ids
+                else []
+            )
         except HTTPException as exc:
             # The one path that ends the turn. An extracted plain function
             # cannot yield, so the frames come back in the return value and the
@@ -898,10 +971,13 @@ def _build_user_content(
             detail = exc.detail if isinstance(exc.detail, dict) else {}
             _metric_error(detail.get("error_kind", "invalid_attachment"))
             return message, [
-                ("error", {
-                    "error_kind": detail.get("error_kind", "invalid_attachment"),
-                    "message": detail.get("message", str(exc.detail)),
-                }),
+                (
+                    "error",
+                    {
+                        "error_kind": detail.get("error_kind", "invalid_attachment"),
+                        "message": detail.get("message", str(exc.detail)),
+                    },
+                ),
                 ("session_done", {"reason": "invalid_attachment"}),
             ]
 
@@ -936,7 +1012,12 @@ def _build_user_content(
                     "wordprocessingml.document"
                 ):
                     hint = "read_upload_meta (then use the file_id with future tools)"
-                elif m["mime"] in ("application/x-netcdf", "application/x-hdf", "application/x-hdf5", "application/zip"):
+                elif m["mime"] in (
+                    "application/x-netcdf",
+                    "application/x-hdf",
+                    "application/x-hdf5",
+                    "application/zip",
+                ):
                     hint = "inspect_import / import_uploaded_network"
                 else:
                     hint = "read_upload_meta"
@@ -965,38 +1046,42 @@ def _build_user_content(
     return user_content, None
 
 
-
-
 # Literal error_kind values so tool-error-kinds.json's AST scan sees them.
 _ADMISSION_ERRORS: dict[str, dict[str, str]] = {
-    'duplicate': {
-        'error_kind': 'duplicate',
-        'message': (
-            'this utterance was already admitted; the duplicate was ignored so '
-            'effects are not repeated.'
+    "duplicate": {
+        "error_kind": "duplicate",
+        "message": (
+            "this utterance was already admitted; the duplicate was ignored so "
+            "effects are not repeated."
         ),
     },
-    'queued': {
-        'error_kind': 'queued',
-        'message': (
-            'a turn is already running on this chat session; this message was kept '
-            'as the single pending correction (latest wins).'
+    "queued": {
+        "error_kind": "queued",
+        "message": (
+            "a turn is already running on this chat session; this message was kept "
+            "as the single pending correction (latest wins)."
         ),
     },
-    'stale_generation': {
-        'error_kind': 'stale_generation',
-        'message': (
-            'this utterance belongs to an older conversation generation and was '
-            'not admitted.'
+    "stale_generation": {
+        "error_kind": "stale_generation",
+        "message": (
+            "this utterance belongs to an older conversation generation and was "
+            "not admitted."
         ),
     },
-    'rejected_empty': {
-        'error_kind': 'rejected_empty',
-        'message': (
-            'the utterance text is empty, so nothing was sent.'
-        ),
+    "rejected_empty": {
+        "error_kind": "rejected_empty",
+        "message": ("the utterance text is empty, so nothing was sent."),
     },
 }
+
+
+def _refuse_user_input(
+    message, attachment_file_ids, strict_assurance, source_gap_ref, reason
+):
+    """A harness-written turn (continuation, plan continue, envelope decision) carries no user input."""
+    if message or attachment_file_ids or strict_assurance or source_gap_ref is not None:
+        raise ValueError(reason)
 
 
 def run_turn(
@@ -1090,28 +1175,34 @@ def run_turn(
     # wire and model while every frame reports success — the exact
     # "unresolvable renders as success" shape ADR-0001 exists to forbid.
     if unknown_profile_id is not None:
-        yield "error", {
-            "error_kind": "unknown_profile_id",
-            "message": (
-                "the model profile this chat asked for is no longer "
-                "configured, so the message was not sent — it would "
-                "otherwise have gone to a different provider. Pick a "
-                "profile from the model menu and try again."
-            ),
-        }
+        yield (
+            "error",
+            {
+                "error_kind": "unknown_profile_id",
+                "message": (
+                    "the model profile this chat asked for is no longer "
+                    "configured, so the message was not sent — it would "
+                    "otherwise have gone to a different provider. Pick a "
+                    "profile from the model menu and try again."
+                ),
+            },
+        )
         yield "session_done", {"reason": "unknown_profile_id"}
         return
 
     if wire_conflict:
-        yield "error", {
-            "error_kind": "profile_switch_requires_new_chat",
-            "message": (
-                "this chat session is already bound to a different LLM "
-                "provider wire; switching providers mid-conversation isn't "
-                "supported because prior turns may not replay on the new "
-                "wire. Start a new chat to use a different provider."
-            ),
-        }
+        yield (
+            "error",
+            {
+                "error_kind": "profile_switch_requires_new_chat",
+                "message": (
+                    "this chat session is already bound to a different LLM "
+                    "provider wire; switching providers mid-conversation isn't "
+                    "supported because prior turns may not replay on the new "
+                    "wire. Start a new chat to use a different provider."
+                ),
+            },
+        )
         yield "session_done", {"reason": "profile_switch_requires_new_chat"}
         return
 
@@ -1132,19 +1223,22 @@ def run_turn(
         _admission_generation = _held_generation
     elif utterance_id is not None and generation is not None:
         from services.utterance_admission import StableUtterance, admit_utterance
-        decision = admit_utterance(StableUtterance(
-            utterance_id=utterance_id,
-            text=message,
-            generation=generation,
-            session_id=session.session_id,
-        ))
-        if decision.status != 'admitted':
+
+        decision = admit_utterance(
+            StableUtterance(
+                utterance_id=utterance_id,
+                text=message,
+                generation=generation,
+                session_id=session.session_id,
+            )
+        )
+        if decision.status != "admitted":
             detail = _ADMISSION_ERRORS.get(decision.status) or {
-                'error_kind': 'internal_error',
-                'message': 'this utterance was not admitted.',
+                "error_kind": "internal_error",
+                "message": "this utterance was not admitted.",
             }
             yield "error", detail
-            yield "session_done", {"reason": detail['error_kind']}
+            yield "session_done", {"reason": detail["error_kind"]}
             return
         _admission_lease = decision.lease_id
         _admission_generation = decision.generation
@@ -1157,19 +1251,23 @@ def run_turn(
             # leave the coordinator holding a lease with no turn body.
             if _admission_lease is not None and _admission_generation is not None:
                 from services import utterance_admission as _ua
+
                 _ua._DEFAULT.release_lease(
                     session_id=session.session_id,
                     lease_id=_admission_lease,
                     generation=_admission_generation,
                     promote=False,
                 )
-            yield "error", {
-                "error_kind": "turn_already_in_flight",
-                "message": (
-                    "another turn is already running on this chat session; "
-                    "wait for it to finish before sending the next message."
-                ),
-            }
+            yield (
+                "error",
+                {
+                    "error_kind": "turn_already_in_flight",
+                    "message": (
+                        "another turn is already running on this chat session; "
+                        "wait for it to finish before sending the next message."
+                    ),
+                },
+            )
             yield "session_done", {"reason": "turn_already_in_flight"}
             return
         session._turn_in_flight = True
@@ -1179,6 +1277,7 @@ def run_turn(
     _t_start = time.monotonic()
 
     from services.pypsa_service import PyPSAService
+
     _wal_ctx: ProjectContext | None = None
 
     _drain_utt = None
@@ -1193,6 +1292,7 @@ def run_turn(
     # active: the panel closes the stream on it, so the goal's new state is
     # sent first.
     from harness import goals as _goals
+
     goal_watch = _goals.Watch()
     _held_done: dict[str, Any] | None = None
     _checked = False
@@ -1204,30 +1304,53 @@ def run_turn(
         # return, error return, GeneratorExit on client disconnect) without
         # re-indenting the 480-line body. #19 + #20 share this single finally.
         from harness import assurance
+
         if continuation_job_id is not None:
             # LC-12: the harness writes this turn's message; claiming it is
             # once per job. It approves nothing.
             from harness import continuation
+
             try:
-                if message or attachment_file_ids or strict_assurance or source_gap_ref is not None:
-                    raise ValueError("a continuation is not a user message")
+                _refuse_user_input(
+                    message,
+                    attachment_file_ids,
+                    strict_assurance,
+                    source_gap_ref,
+                    "a continuation is not a user message",
+                )
                 message = continuation.claim(session, continuation_job_id)
             except (HTTPException, ValueError, OSError):
-                yield "error", {"error_kind": "continuation_unavailable",
-                                "message": "No finished job of this conversation is waiting to continue."}
+                yield (
+                    "error",
+                    {
+                        "error_kind": "continuation_unavailable",
+                        "message": "No finished job of this conversation is waiting to continue.",
+                    },
+                )
                 yield "session_done", {"reason": "continuation_unavailable"}
                 return
         if continue_task_id is not None:
             # LC-23 COP-1: the user's Continue clears the plan's card pause.
             # The harness writes the message; it approves nothing.
             from services import assistant_tasks as _plans
+
             try:
-                if message or attachment_file_ids or strict_assurance or source_gap_ref is not None:
-                    raise ValueError("a plan continue is not a user message")
+                _refuse_user_input(
+                    message,
+                    attachment_file_ids,
+                    strict_assurance,
+                    source_gap_ref,
+                    "a plan continue is not a user message",
+                )
                 message = _plans.continue_at_card(session, continue_task_id)
             except (HTTPException, ValueError, OSError):
-                yield "error", {"error_kind": "plan_continue_unavailable",
-                                "message": "This plan is not paused at a card."}
+                yield (
+                    "error",
+                    {
+                        "error_kind": "plan_continue_unavailable",
+                        "message": "This plan is not paused at a card.",
+                    },
+                )
                 yield "session_done", {"reason": "plan_continue_unavailable"}
                 return
         if envelope_decision is not None:
@@ -1235,62 +1358,122 @@ def run_turn(
             # card grants, narrows or revokes its approval envelope. The
             # harness writes the message; no tool call reaches this.
             from services import run_envelope
+
             try:
-                if message or attachment_file_ids or strict_assurance or source_gap_ref is not None:
-                    raise ValueError("an envelope decision is not a user message")
+                _refuse_user_input(
+                    message,
+                    attachment_file_ids,
+                    strict_assurance,
+                    source_gap_ref,
+                    "an envelope decision is not a user message",
+                )
                 message = run_envelope.decide(session, **envelope_decision)
             except HTTPException as exc:
                 detail = exc.detail if isinstance(exc.detail, dict) else {}
                 kind = detail.get("error_kind", "envelope_decision_unavailable")
-                yield "error", {"error_kind": kind, "message": str(detail.get("message", ""))[:300]}
+                yield (
+                    "error",
+                    {
+                        "error_kind": kind,
+                        "message": str(detail.get("message", ""))[:300],
+                    },
+                )
                 yield "session_done", {"reason": kind}
                 return
             except (ValueError, TypeError, OSError):
-                yield "error", {"error_kind": "envelope_decision_unavailable",
-                                "message": "This plan's envelope cannot be decided now."}
+                yield (
+                    "error",
+                    {
+                        "error_kind": "envelope_decision_unavailable",
+                        "message": "This plan's envelope cannot be decided now.",
+                    },
+                )
                 yield "session_done", {"reason": "envelope_decision_unavailable"}
                 return
         if strict_assurance or assurance.strict_configured():
-            session.assurance_turn = assurance.Turn(session, PyPSAService.get_active_context())
+            session.assurance_turn = assurance.Turn(
+                session, PyPSAService.get_active_context()
+            )
             from harness.navigation import begin_turn
+
             begin_turn(session.assurance_turn, binding_generation)
             if source_gap_ref is not None:
                 from harness import attention
+
                 try:
-                    if checked_operation is not None or attachment_file_ids or utterance_id is not None or generation is not None:
-                        raise ValueError('follow-up must be an explicit scoped text request')
-                    session.assurance_turn.source_gap_binding = attention.admit_followup(
-                        session, PyPSAService.get_active_context().project_uuid,
-                        source_gap_ref, message, checked_scope)
+                    if (
+                        checked_operation is not None
+                        or attachment_file_ids
+                        or utterance_id is not None
+                        or generation is not None
+                    ):
+                        raise ValueError(
+                            "follow-up must be an explicit scoped text request"
+                        )
+                    session.assurance_turn.source_gap_binding = (
+                        attention.admit_followup(
+                            session,
+                            PyPSAService.get_active_context().project_uuid,
+                            source_gap_ref,
+                            message,
+                            checked_scope,
+                        )
+                    )
                 except (HTTPException, ValueError, TypeError, KeyError, OSError):
-                    yield 'error', {'error_kind': 'source_gap_followup_unavailable',
-                                    'message': 'The source gap changed, is unavailable, or the request no longer matches. Refresh Activity and prepare it again.'}
-                    yield 'session_done', {'reason': 'source_gap_followup_unavailable'}
+                    yield (
+                        "error",
+                        {
+                            "error_kind": "source_gap_followup_unavailable",
+                            "message": "The source gap changed, is unavailable, or the request no longer matches. Refresh Activity and prepare it again.",
+                        },
+                    )
+                    yield "session_done", {"reason": "source_gap_followup_unavailable"}
                     return
             try:
                 session.assurance_turn.suspend_scope()
             except (HTTPException, OSError, ValueError):
-                yield "error", {"error_kind": "assurance_context_persistence_failed",
-                                "message": "Checked conversation state could not be saved. Try again when storage is available."}
+                yield (
+                    "error",
+                    {
+                        "error_kind": "assurance_context_persistence_failed",
+                        "message": "Checked conversation state could not be saved. Try again when storage is available.",
+                    },
+                )
                 yield "session_done", {"reason": "assurance_context_persistence_failed"}
                 return
             session.assurance_turn.prepare_operation(checked_operation)
             if not attachment_file_ids and checked_operation is None:
-                session.assurance_turn.prepare_request(message, ui_context, PyPSAService.get_active_context(), checked_scope)
+                session.assurance_turn.prepare_request(
+                    message,
+                    ui_context,
+                    PyPSAService.get_active_context(),
+                    checked_scope,
+                )
         elif source_gap_ref is not None:
-            yield 'error', {'error_kind': 'invalid_source_gap_followup', 'message': 'This follow-up requires a checked request.'}
-            yield 'session_done', {'reason': 'invalid_source_gap_followup'}
+            yield (
+                "error",
+                {
+                    "error_kind": "invalid_source_gap_followup",
+                    "message": "This follow-up requires a checked request.",
+                },
+            )
+            yield "session_done", {"reason": "invalid_source_gap_followup"}
             return
         elif assurance.shadow_configured():
             try:
-                session.shadow_turn = assurance.Turn(session, PyPSAService.get_active_context())
+                session.shadow_turn = assurance.Turn(
+                    session, PyPSAService.get_active_context()
+                )
                 if not attachment_file_ids:
-                    session.shadow_turn.prepare_request(message, ui_context, PyPSAService.get_active_context())
+                    session.shadow_turn.prepare_request(
+                        message, ui_context, PyPSAService.get_active_context()
+                    )
             except Exception:
                 logger.exception("Shadow scope could not be prepared")
                 session.shadow_turn = None
         if session.assurance_turn is None and ui_ack:
             from harness.navigation import open_ordinary
+
             try:
                 session.navigation_turn = open_ordinary(session, binding_generation)
             except Exception:  # noqa: BLE001 — without a binding, navigation stays "opened"
@@ -1307,9 +1490,11 @@ def run_turn(
         except Exception:  # noqa: BLE001 — never blocks the turn
             logger.exception("chat: could not resolve the turn's project")
         from harness import eventlog as _eventlog
+
         _eventlog.turn_start(session, message, _wal_ctx)
         from harness import attention as _attention
-        _attention.followed_up(session, getattr(_wal_ctx, 'project_uuid', None))
+
+        _attention.followed_up(session, getattr(_wal_ctx, "project_uuid", None))
         _checked = session.assurance_turn is not None
         body = _run_turn_body(
             session,
@@ -1327,10 +1512,16 @@ def run_turn(
                     if payload is None:
                         continue
                 if event == "choice_request":
-                    _attention.question_presented(session, getattr(_wal_ctx, 'project_uuid', None),
-                                                  payload, checked=session.assurance_turn is not None)
+                    _attention.question_presented(
+                        session,
+                        getattr(_wal_ctx, "project_uuid", None),
+                        payload,
+                        checked=session.assurance_turn is not None,
+                    )
                 if event == "answer_approved" and session.assurance_turn is not None:
-                    _attention.checked_answer(session, getattr(_wal_ctx, 'project_uuid', None))
+                    _attention.checked_answer(
+                        session, getattr(_wal_ctx, "project_uuid", None)
+                    )
                 trace.note(event, payload)
                 goal_watch.note(event, payload)
                 if event == "error" and _goals.on_error(session):
@@ -1352,14 +1543,22 @@ def run_turn(
         if body is not None:
             body.close()
         _persist_interrupted_turn(
-            _wal_ctx, session, message, trace, ended_by=_ended_by,
+            _wal_ctx,
+            session,
+            message,
+            trace,
+            ended_by=_ended_by,
             usage_at_start=_usage_at_start,
             attachment_file_ids=attachment_file_ids,
         )
         # Issue 13 (shadow): close the turn on the event log, one fsync.
         from harness import eventlog as _eventlog
-        _eventlog.turn_end(session, _turn_end_reason(trace, _ended_by),
-                           usage_since(dict(session.usage_acc), _usage_at_start))
+
+        _eventlog.turn_end(
+            session,
+            _turn_end_reason(trace, _ended_by),
+            usage_since(dict(session.usage_acc), _usage_at_start),
+        )
         if _ended_by == "disconnected":
             # Nobody is watching: no round may start on a stream that is gone.
             _goals.pause(session, "disconnected", by="harness")
@@ -1369,13 +1568,17 @@ def run_turn(
             session._undo_snapshotted = []
             if session.assurance_turn is not None and session.assurance_context:
                 approved = session.assurance_turn.approved
-                if not approved or session.assurance_context["anchor"] != approved["answer_id"]:
+                if (
+                    not approved
+                    or session.assurance_context["anchor"] != approved["answer_id"]
+                ):
                     session.assurance_context = None
             session.assurance_turn = None
             session.shadow_turn = None
             session.navigation_turn = None
         if _admission_lease is not None and _admission_generation is not None:
             from services import utterance_admission as _ua
+
             # Promote pending into a new lease, then start that follow-up turn
             # on this same stream (auto-drain). Leaving a promoted lease
             # without a turn would hang admission.
@@ -1387,7 +1590,7 @@ def run_turn(
             )
             if (
                 promoted is not None
-                and promoted.status == 'admitted'
+                and promoted.status == "admitted"
                 and promoted.lease_id is not None
             ):
                 active = _ua._DEFAULT.active_utterance(session.session_id)
@@ -1408,6 +1611,7 @@ def run_turn(
         # side-effect, so the yielded frame ORDER several tests pin
         # byte-exactly is unchanged on every exit.
         from services import chat_tools as _chat_tools  # noqa: PLC0415
+
         _chat_tools.set_turn_profile(None)
         _chat_tools.set_chat_session(None)
 
@@ -1510,6 +1714,7 @@ def _persist_interrupted_turn(
             record["attachment_file_ids"] = list(attachment_file_ids)
         # Issue 13: logged first, then projected to chat.jsonl.
         from harness import eventlog
+
         eventlog.turn_record(session, record)
         append_turn(ctx, record)
     except Exception:  # noqa: BLE001 — persistence is best-effort
@@ -1569,8 +1774,7 @@ def _outbound_vision_block_kinds(
             if block_type == "image":
                 has_image = True
                 source = block.get("source")
-                if not (isinstance(source, dict)
-                        and source.get("type") == "base64"):
+                if not (isinstance(source, dict) and source.get("type") == "base64"):
                     has_unsupported_image_source = True
             elif block_type == "document":
                 has_document = True
@@ -1609,6 +1813,7 @@ def _run_turn_body(
     # whatever is active at persistence time). The solver-log bridge already
     # snapshots its ctx (F10); the turn loop did not until now.
     from services.pypsa_service import PyPSAService
+
     turn_ctx = PyPSAService.get_active_context()
     # The record's `turn_usage` is measured from here (TURN_USAGE_KEY).
     with session._lock:
@@ -1622,7 +1827,9 @@ def _run_turn_body(
     turn_project_holder = [turn_ctx.loaded_project]
 
     def _project_switched() -> bool:
-        return PyPSAService.get_active_context().loaded_project != turn_project_holder[0]
+        return (
+            PyPSAService.get_active_context().loaded_project != turn_project_holder[0]
+        )
 
     # W-3 — the fallback ceiling, for an endpoint that never reports usage.
     #
@@ -1646,12 +1853,18 @@ def _run_turn_body(
     # daily cap refuses — a silent behaviour change, and a merge is the
     # worst place to make one. The helper stays the pure predicate its
     # own seam test exercises.
-    if not session.usage_reported and session.turns_started >= harness_budget.MAX_TURNS_PER_SESSION:
-        yield "session_done", {
-            "reason": "budget_exhausted",
-            "kind": "turns",
-            "limit": harness_budget.MAX_TURNS_PER_SESSION,
-        }
+    if (
+        not session.usage_reported
+        and session.turns_started >= harness_budget.MAX_TURNS_PER_SESSION
+    ):
+        yield (
+            "session_done",
+            {
+                "reason": "budget_exhausted",
+                "kind": "turns",
+                "limit": harness_budget.MAX_TURNS_PER_SESSION,
+            },
+        )
         return
     with session._lock:
         session.turns_started += 1
@@ -1675,14 +1888,17 @@ def _run_turn_body(
     try:
         profile = _resolve_turn_profile(session)
     except llm_config_module().ProfileNotConfiguredError:
-        yield "error", {
-            "error_kind": "unknown_profile_id",
-            "message": (
-                "the model profile this chat was using is no longer "
-                "configured, so the message was not sent. Pick a profile "
-                "from the model menu and try again."
-            ),
-        }
+        yield (
+            "error",
+            {
+                "error_kind": "unknown_profile_id",
+                "message": (
+                    "the model profile this chat was using is no longer "
+                    "configured, so the message was not sent. Pick a profile "
+                    "from the model menu and try again."
+                ),
+            },
+        )
         yield "session_done", {"reason": "unknown_profile_id"}
         return
     # C-3 — publish the turn's profile to the tool layer. A tool that makes
@@ -1691,10 +1907,14 @@ def _run_turn_body(
     # not choose. Set here, once the profile is resolved and before any tool
     # can be dispatched; the executor submit site already copies the context.
     from services import chat_tools as _chat_tools  # noqa: PLC0415
+
     _chat_tools.set_turn_profile(profile)
     _chat_tools.set_chat_session(session)
 
-    clarifying_scope = session.assurance_turn is not None and session.assurance_turn.clarification is not None
+    clarifying_scope = (
+        session.assurance_turn is not None
+        and session.assurance_turn.clarification is not None
+    )
     if provider is None and not clarifying_scope:
         # `_provider_for_profile` reproduces the exact priority this branch
         # always had: an injected `client` wins (wrapped, anthropic wire
@@ -1729,20 +1949,28 @@ def _run_turn_body(
 
     with session._lock:
         selection_history = list(session.messages)
-    selected_tools = [] if clarifying_scope else _tools_payload_for_profile(profile, message, history=selection_history)
+    selected_tools = (
+        []
+        if clarifying_scope
+        else _tools_payload_for_profile(profile, message, history=selection_history)
+    )
     from harness import assurance
-    yield "session_init", {
-        "session_id": session.session_id,
-        "session6": session.session6(),
-        "model": session.model,
-        # Task 8 — the count actually sent this turn (0 for a `tools: false`
-        # profile), not the catalogue size. See _tools_payload_for_profile.
-        "tool_count": len(selected_tools),
-        "profile_id": profile.id,
-        "profile_label": profile.label,
-        # A checked turn's projection replaces this with its "checking" state.
-        "assurance": assurance.legacy_state(),
-    }
+
+    yield (
+        "session_init",
+        {
+            "session_id": session.session_id,
+            "session6": session.session6(),
+            "model": session.model,
+            # Task 8 — the count actually sent this turn (0 for a `tools: false`
+            # profile), not the catalogue size. See _tools_payload_for_profile.
+            "tool_count": len(selected_tools),
+            "profile_id": profile.id,
+            "profile_label": profile.label,
+            # A checked turn's projection replaces this with its "checking" state.
+            "assurance": assurance.legacy_state(),
+        },
+    )
 
     # Seed conversation history. Caller-supplied message_history wins for
     # tests / callers that want explicit control; otherwise we rebuild from
@@ -1767,7 +1995,9 @@ def _run_turn_body(
     ]
 
     user_content, attachment_abort = _build_user_content(
-        turn_project_holder[0] or "", attachment_file_ids, message,
+        turn_project_holder[0] or "",
+        attachment_file_ids,
+        message,
     )
     if attachment_abort is not None:
         for _frame in attachment_abort:
@@ -1787,6 +2017,7 @@ def _run_turn_body(
     # Issue 13 (shadow): each addendum is its own event as well as part of
     # the user message.
     from harness import eventlog as _eventlog
+
     _eventlog.context(session, "ui_context", ui_block)
     # The active workflow's step rides the same per-turn slot (issue 06):
     # after the context block (outside the untrusted fence), before the
@@ -1801,12 +2032,14 @@ def _run_turn_body(
     session.turn_single_edit_applied = False
     session.turn_redirects = {}
     from harness.compose import _results_card_addendum
+
     card_block = _results_card_addendum(session)
     _eventlog.context(session, "results_card", card_block)
     if card_block:
         ui_block = f"{ui_block}\n\n{card_block}" if ui_block else card_block
     # The session's goal (issue 17) rides the same slot, after the step.
     from harness import goals as _goals
+
     goal_block = _goals.addendum(session)
     _eventlog.context(session, "goal", goal_block)
     if goal_block:
@@ -1815,13 +2048,16 @@ def _run_turn_body(
         assurance_block = session.assurance_turn.request_content()
         _eventlog.context(session, "checked_request", assurance_block)
         if assurance_block:
-            ui_block = f"{ui_block}\n\n{assurance_block}" if ui_block else assurance_block
+            ui_block = (
+                f"{ui_block}\n\n{assurance_block}" if ui_block else assurance_block
+            )
     if ui_block:
         if isinstance(user_content, str):
             user_content = f"{ui_block}\n\n{user_content}"
         else:
             user_content.insert(
-                len(user_content) - 1, {"type": "text", "text": ui_block},
+                len(user_content) - 1,
+                {"type": "text", "text": ui_block},
             )
 
     # Improvement #18 — anchor the history cache breakpoint at the last
@@ -1849,40 +2085,50 @@ def _run_turn_body(
     #     the user drops the attachment or switches to a vision-capable
     #     profile — there is no way to "fix" already-persisted history from
     #     here.
-    (has_vision_image, has_vision_document,
-     has_unsupported_image_source) = _outbound_vision_block_kinds(messages)
+    (has_vision_image, has_vision_document, has_unsupported_image_source) = (
+        _outbound_vision_block_kinds(messages)
+    )
     if (has_vision_image or has_vision_document) and not profile.vision:
         # Fixed message: capability name + profile LABEL only — never an
         # id/base_url (SECURITY, b94eb245 on master: redaction is
         # secrets-only and deliberately passes bare emails/ids through, so
         # this frame must not carry one to begin with).
-        yield "error", {
-            "error_kind": "capability_unsupported",
-            "message": (
-                f"the {profile.label!r} profile does not support image or "
-                "document attachments (vision is disabled for this "
-                "profile) — remove the attachment or switch to a "
-                "vision-capable profile."
-            ),
-        }
+        yield (
+            "error",
+            {
+                "error_kind": "capability_unsupported",
+                "message": (
+                    f"the {profile.label!r} profile does not support image or "
+                    "document attachments (vision is disabled for this "
+                    "profile) — remove the attachment or switch to a "
+                    "vision-capable profile."
+                ),
+            },
+        )
         yield "session_done", {"reason": "capability_unsupported"}
         return
     if has_vision_document and profile.wire != "anthropic":
         # PDF (`document`) blocks are Anthropic-native: even with
         # `vision: true`, a non-anthropic wire can't process them.
-        yield "error", {
-            "error_kind": "capability_unsupported",
-            "message": (
-                f"the {profile.label!r} profile cannot process PDF "
-                "attachments — PDF document support requires an "
-                "Anthropic-wire profile. Remove the attachment or switch "
-                "to an Anthropic profile."
-            ),
-        }
+        yield (
+            "error",
+            {
+                "error_kind": "capability_unsupported",
+                "message": (
+                    f"the {profile.label!r} profile cannot process PDF "
+                    "attachments — PDF document support requires an "
+                    "Anthropic-wire profile. Remove the attachment or switch "
+                    "to an Anthropic profile."
+                ),
+            },
+        )
         yield "session_done", {"reason": "capability_unsupported"}
         return
-    if (has_vision_image and has_unsupported_image_source
-            and profile.wire != "anthropic"):
+    if (
+        has_vision_image
+        and has_unsupported_image_source
+        and profile.wire != "anthropic"
+    ):
         # Fix round 1 (Task 8 review, finding 1) — an image whose `source`
         # isn't `{"type": "base64", ...}` is not something
         # llm_openai_compat._to_openai_messages can translate into an
@@ -1900,15 +2146,18 @@ def _run_turn_body(
         # inherit this check by default: confirm whether its adapter can
         # also carry a non-base64 image source before assuming this
         # `!= "anthropic"` condition still means "needs refusing".
-        yield "error", {
-            "error_kind": "capability_unsupported",
-            "message": (
-                f"the {profile.label!r} profile cannot process this image "
-                "attachment — its source format is not supported for this "
-                "provider; remove the attachment or switch to a profile "
-                "that supports it."
-            ),
-        }
+        yield (
+            "error",
+            {
+                "error_kind": "capability_unsupported",
+                "message": (
+                    f"the {profile.label!r} profile cannot process this image "
+                    "attachment — its source format is not supported for this "
+                    "provider; remove the attachment or switch to a profile "
+                    "that supports it."
+                ),
+            },
+        )
         yield "session_done", {"reason": "capability_unsupported"}
         return
 
@@ -1926,9 +2175,7 @@ def _run_turn_body(
     # "was this tool offered", and only the sent payload knows that. A
     # `tools: false` profile sends `[]`, so the set is empty and every
     # `tool_use` coming back is refused.
-    offered_tool_names = {
-        t.get("name") for t in tools if isinstance(t, dict)
-    }
+    offered_tool_names = {t.get("name") for t in tools if isinstance(t, dict)}
     # A4 — orient the model on the P0-pinned turn context (not a later
     # active switch). Failure → omit; never abort the turn for meta.
     # Task 8 — `include_tools=profile.tools` trims the tool-chaining half of
@@ -1960,7 +2207,8 @@ def _run_turn_body(
     # meaning `llm_config` documents for that field.
     max_output_tokens = harness_budget.output_limit(
         session.turn_task_cap,
-        profile.max_output_tokens or harness_budget.MAX_OUTPUT_TOKENS_PER_TURN)
+        profile.max_output_tokens or harness_budget.MAX_OUTPUT_TOKENS_PER_TURN,
+    )
     # W10 H2a — provider calls this turn, against the task cap's rounds.
     task_rounds = 0
 
@@ -1982,11 +2230,13 @@ def _run_turn_body(
         # neutral seam vocabulary for this; the translation to `cache_control`
         # happens in llm_anthropic, not here. Built once — identical across
         # retries.
-        system_blocks = [{
-            "type": "text",
-            "text": system_prompt,
-            "stable": True,
-        }]
+        system_blocks = [
+            {
+                "type": "text",
+                "text": system_prompt,
+                "stable": True,
+            }
+        ]
         # `request.messages` is the SAME `messages` list object this loop
         # appends to below (tool_result / assistant replays) — appends are
         # visible to the next provider call because the list is shared by
@@ -2016,7 +2266,8 @@ def _run_turn_body(
             final_blocks, final_usage = [], {}
         else:
             stream_outcome = yield from _stream_assistant_message(
-                session, provider,
+                session,
+                provider,
                 request=request,
                 profile=profile,
                 model_fallback_used=model_fallback_used,
@@ -2036,48 +2287,83 @@ def _run_turn_body(
                 cache_create_tokens=final_usage.get("cache_create_tokens", 0),
             )
             # #20 — process-lifetime cumulative tokens for GET /metrics.
-            _metric_add_tokens(final_usage.get("input_tokens", 0),
-                               final_usage.get("output_tokens", 0))
+            _metric_add_tokens(
+                final_usage.get("input_tokens", 0), final_usage.get("output_tokens", 0)
+            )
 
         # The provider's `message_done` event is the ONLY source of the
         # blocks we replay — already serialised by the provider. Add the
         # assistant turn to both the outbound array and the session history
         # for the next iteration.
         assistant_blocks = final_blocks
-        if session.shadow_turn is not None and not any(b.get("type") == "tool_use" for b in assistant_blocks):
+        if session.shadow_turn is not None and not any(
+            b.get("type") == "tool_use" for b in assistant_blocks
+        ):
             try:
                 from harness.rollout import observe
+
                 observe(session.shadow_turn, assistant_blocks)
             except Exception:
                 logger.exception("Shadow observation could not be saved")
         if session.assurance_turn is not None:
             if any(b.get("type") == "tool_use" for b in assistant_blocks):
                 # Retain tool protocol pairing, never private preamble/thinking.
-                assistant_blocks = [b for b in assistant_blocks if b.get("type") == "tool_use"]
+                assistant_blocks = [
+                    b for b in assistant_blocks if b.get("type") == "tool_use"
+                ]
             else:
-                yield "answer_progress", {"version": 1, "turn_id": session.assurance_turn.turn_id,
-                                          "stage": "checking_claims", "status": "running"}
+                yield (
+                    "answer_progress",
+                    {
+                        "version": 1,
+                        "turn_id": session.assurance_turn.turn_id,
+                        "stage": "checking_claims",
+                        "status": "running",
+                    },
+                )
                 from services.assurance_records import AccessRevoked, ProjectDeleted
+
                 try:
-                    session.assurance_turn.review_interpretations(assistant_blocks, provider, session.model, turn_ctx)
-                    assistant_blocks = session.assurance_turn.commit(assistant_blocks, turn_ctx)
+                    session.assurance_turn.review_interpretations(
+                        assistant_blocks, provider, session.model, turn_ctx
+                    )
+                    assistant_blocks = session.assurance_turn.commit(
+                        assistant_blocks, turn_ctx
+                    )
                 except ProjectDeleted:
                     logger.warning("checked answer withdrawn: the project was deleted")
-                    yield "error", {"error_kind": "assurance_project_deleted",
-                                    "message": "No answer was published. Open another project from Projects."}
+                    yield (
+                        "error",
+                        {
+                            "error_kind": "assurance_project_deleted",
+                            "message": "No answer was published. Open another project from Projects.",
+                        },
+                    )
                     yield "session_done", {"reason": "assurance_project_deleted"}
                     return
                 except AccessRevoked:
                     # REVOKE-KIND: the account or project access ended; expected, not a fault.
-                    logger.warning("checked answer withdrawn: project access was revoked")
-                    yield "error", {"error_kind": "assurance_access_revoked",
-                                    "message": "No answer was published. If your access comes back, open the project again from Projects."}
+                    logger.warning(
+                        "checked answer withdrawn: project access was revoked"
+                    )
+                    yield (
+                        "error",
+                        {
+                            "error_kind": "assurance_access_revoked",
+                            "message": "No answer was published. If your access comes back, open the project again from Projects.",
+                        },
+                    )
                     yield "session_done", {"reason": "assurance_access_revoked"}
                     return
                 except Exception:  # noqa: BLE001 — fail closed, including uncertain storage
                     logger.exception("checked answer could not be committed")
-                    yield "error", {"error_kind": "assurance_publication_failed",
-                                    "message": "The checked answer could not be saved. No answer was published."}
+                    yield (
+                        "error",
+                        {
+                            "error_kind": "assurance_publication_failed",
+                            "message": "The checked answer could not be saved. No answer was published.",
+                        },
+                    )
                     yield "session_done", {"reason": "assurance_publication_failed"}
                     return
         # One rule for both arrays: a turn with no blocks the API accepts is
@@ -2095,8 +2381,16 @@ def _run_turn_body(
             # Persist to session for next-turn rehydration (E2E QA: INT-001).
             with session._lock:
                 history_msg = assistant_msg
-                if session.assurance_turn is not None and session.assurance_turn.approved:
-                    history_msg = {**assistant_msg, "_approved_answer_id": session.assurance_turn.approved["answer_id"]}
+                if (
+                    session.assurance_turn is not None
+                    and session.assurance_turn.approved
+                ):
+                    history_msg = {
+                        **assistant_msg,
+                        "_approved_answer_id": session.assurance_turn.approved[
+                            "answer_id"
+                        ],
+                    }
                 session.append_history_message(history_msg)
 
         tool_uses = [b for b in assistant_blocks if b.get("type") == "tool_use"]
@@ -2156,19 +2450,25 @@ def _run_turn_body(
                 if attachment_file_ids:
                     turn_record["attachment_file_ids"] = list(attachment_file_ids)
                 if session.assurance_turn is not None:
-                    turn_record.update(answer_id=session.assurance_turn.approved["answer_id"],
-                                       receipt=session.assurance_turn.approved["receipt"])
+                    turn_record.update(
+                        answer_id=session.assurance_turn.approved["answer_id"],
+                        receipt=session.assurance_turn.approved["receipt"],
+                    )
                 # Issue 13: logged first, then projected to chat.jsonl.
                 from harness import eventlog as _eventlog
+
                 _eventlog.turn_record(session, turn_record)
                 append_turn(ctx, turn_record)
             except Exception:  # noqa: BLE001 — persistence is best-effort
-                logger.exception(
-                    "chat: failed to persist turn to chat.jsonl"
-                )
+                logger.exception("chat: failed to persist turn to chat.jsonl")
                 if session.assurance_turn is not None:
-                    yield "error", {"error_kind": "assurance_publication_failed",
-                                    "message": "The checked answer could not be saved to history."}
+                    yield (
+                        "error",
+                        {
+                            "error_kind": "assurance_publication_failed",
+                            "message": "The checked answer could not be saved to history.",
+                        },
+                    )
                     yield "session_done", {"reason": "assurance_publication_failed"}
                     return
             if session.assurance_turn is not None:
@@ -2176,10 +2476,17 @@ def _run_turn_body(
                     yield "session_done", {"reason": "aborted"}
                     return
                 from services import assurance_records
-                assurance_records.answer(session.assurance_turn.owner, session.assurance_turn.approved["answer_id"])
+
+                assurance_records.answer(
+                    session.assurance_turn.owner,
+                    session.assurance_turn.approved["answer_id"],
+                )
                 session.assurance_turn.remember_scope()
                 yield "answer_approved", session.assurance_turn.approval()
-                assurance_records.answer(session.assurance_turn.owner, session.assurance_turn.approved["answer_id"])
+                assurance_records.answer(
+                    session.assurance_turn.owner,
+                    session.assurance_turn.approved["answer_id"],
+                )
                 if session.abort_event.is_set() or _project_switched():
                     yield "session_done", {"reason": "aborted"}
                     return
@@ -2191,8 +2498,13 @@ def _run_turn_body(
             # any other: the panel publishes a checked answer only on the
             # turn_done naming its answer_id, so an error here would drop it.
             if session.assurance_turn is not None:
-                yield "turn_done", {"usage": usage_snapshot,
-                                    "answer_id": session.assurance_turn.approved["answer_id"]}
+                yield (
+                    "turn_done",
+                    {
+                        "usage": usage_snapshot,
+                        "answer_id": session.assurance_turn.approved["answer_id"],
+                    },
+                )
             else:
                 yield "turn_done", {"usage": usage_snapshot}
             return
@@ -2203,15 +2515,28 @@ def _run_turn_body(
         task_cap = session.turn_task_cap
         if task_cap is not None and (
             task_rounds >= task_cap.rounds
-            or tool_call_count + len(tool_uses) > harness_budget.tool_call_limit(task_cap)
+            or tool_call_count + len(tool_uses)
+            > harness_budget.tool_call_limit(task_cap)
         ):
-            refused = [{"type": "tool_result", "tool_use_id": b.get("id"), "is_error": True,
-                        "content": "task_step_limit"} for b in tool_uses]
+            refused = [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": b.get("id"),
+                    "is_error": True,
+                    "content": "task_step_limit",
+                }
+                for b in tool_uses
+            ]
             messages.append({"role": "user", "content": refused})
             with session._lock:
                 session.append_history_message({"role": "user", "content": refused})
-            yield "error", {"error_kind": "task_step_limit",
-                            "message": harness_budget.TASK_STEP_LIMIT}
+            yield (
+                "error",
+                {
+                    "error_kind": "task_step_limit",
+                    "message": harness_budget.TASK_STEP_LIMIT,
+                },
+            )
             yield "session_done", {"reason": "task_step_limit"}
             return
 
@@ -2242,50 +2567,71 @@ def _run_turn_body(
             tool_call_count += len(all_tool_uses)
             tool_results = []
             for call in all_tool_uses:
-                yield "tool_error", {
-                    "tool_use_id": call["tool_use_id"],
-                    "tool_name": call["name"],
-                    "error_kind": "parallel_destructive_not_allowed",
-                    "message": (
-                        "two or more destructive / execution tool calls were "
-                        "issued in a single turn. Re-issue each in its own "
-                        "turn."
-                    ),
-                }
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": call["tool_use_id"],
-                    "is_error": True,
-                    "content": "parallel_destructive_not_allowed",
-                })
+                yield (
+                    "tool_error",
+                    {
+                        "tool_use_id": call["tool_use_id"],
+                        "tool_name": call["name"],
+                        "error_kind": "parallel_destructive_not_allowed",
+                        "message": (
+                            "two or more destructive / execution tool calls were "
+                            "issued in a single turn. Re-issue each in its own "
+                            "turn."
+                        ),
+                    },
+                )
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": call["tool_use_id"],
+                        "is_error": True,
+                        "content": "parallel_destructive_not_allowed",
+                    }
+                )
             messages.append({"role": "user", "content": tool_results})
             with session._lock:
-                session.append_history_message({"role": "user", "content": tool_results})
+                session.append_history_message(
+                    {"role": "user", "content": tool_results}
+                )
             if tool_call_count > harness_budget.MAX_TOOL_CALLS_PER_TURN:
-                yield "error", {
-                    "error_kind": "tool_call_cap_exceeded",
-                    "message": (
-                        f"more than {harness_budget.MAX_TOOL_CALLS_PER_TURN} tool calls in "
-                        "one turn; refusing further dispatch this turn."
-                    ),
-                }
+                yield (
+                    "error",
+                    {
+                        "error_kind": "tool_call_cap_exceeded",
+                        "message": (
+                            f"more than {harness_budget.MAX_TOOL_CALLS_PER_TURN} tool calls in "
+                            "one turn; refusing further dispatch this turn."
+                        ),
+                    },
+                )
                 yield "session_done", {"reason": "tool_call_cap_exceeded"}
                 return
             continue
 
         from harness import edit_routing
         from services import assistant_tasks
+
         # A bound plan's next step runs as that step, with its own card; routing it
         # to the preview would leave the plan unable to complete.
-        routable = [tu for tu in tool_uses
-                    if not assistant_tasks.is_next_step(session, tu.get("name"), tu.get("input") or {})]
-        session.turn_redirects = ({} if session.assurance_turn is not None or not edit_routing.preview_available() else
-                                  edit_routing.redirects(routable, session.turn_single_edit_applied))
+        routable = [
+            tu
+            for tu in tool_uses
+            if not assistant_tasks.is_next_step(
+                session, tu.get("name"), tu.get("input") or {}
+            )
+        ]
+        session.turn_redirects = (
+            {}
+            if session.assurance_turn is not None
+            or not edit_routing.preview_available()
+            else edit_routing.redirects(routable, session.turn_single_edit_applied)
+        )
         tool_results_for_next_turn: list[dict[str, Any]] = []
         # A7 — one budget shared across every tool in this assistant step.
         tool_result_char_budget = {"used": 0}
         dispatch = yield from _dispatch_tool_uses(
-            session, tool_uses,
+            session,
+            tool_uses,
             tool_call_count=tool_call_count,
             turn_ctx=turn_ctx,
             turn_project_holder=turn_project_holder,
@@ -2304,9 +2650,7 @@ def _run_turn_body(
             # non-empty so a stop with nothing dispatched does not append an
             # empty user message, which is itself invalid.
             if tool_results_for_next_turn:
-                messages.append(
-                    {"role": "user", "content": tool_results_for_next_turn}
-                )
+                messages.append({"role": "user", "content": tool_results_for_next_turn})
                 with session._lock:
                     session.append_history_message(
                         {"role": "user", "content": tool_results_for_next_turn}
@@ -2320,28 +2664,39 @@ def _run_turn_body(
             )
         if switched_mid_turn:
             _metric_error("project_switched_mid_turn")
-            yield "error", {
-                "error_kind": "project_switched_mid_turn",
-                "message": (
-                    f"The active project changed from {turn_project_holder[0]!r} "
-                    "mid-turn. This turn was stopped before running tools "
-                    "against the wrong network — re-send your message."
-                ),
-            }
+            yield (
+                "error",
+                {
+                    "error_kind": "project_switched_mid_turn",
+                    "message": (
+                        f"The active project changed from {turn_project_holder[0]!r} "
+                        "mid-turn. This turn was stopped before running tools "
+                        "against the wrong network — re-send your message."
+                    ),
+                },
+            )
             yield "session_done", {"reason": "project_switched_mid_turn"}
             return
 
         # A tool may change the catalogue view or bind a newly created study.
         # Refresh only AFTER this batch has been checked against the catalogue
         # it actually received. New tools are eligible on the next request.
-        if any(t.get("name") in PROJECT_REBINDING_TOOLS or t.get("name") in {"use_toolset", "start_task", "resume_task", "resolve_task_step", "find_capabilities"} or getattr(session, "task_id", None) for t in tool_uses):
+        if any(
+            t.get("name") in PROJECT_REBINDING_TOOLS
+            or t.get("name")
+            in {
+                "use_toolset",
+                "start_task",
+                "resume_task",
+                "resolve_task_step",
+                "find_capabilities",
+            }
+            or getattr(session, "task_id", None)
+            for t in tool_uses
+        ):
             _chat_tools.set_chat_session(session)
             tools = _tools_payload_for_profile(profile, message, history=messages)
             offered_tool_names = {t["name"] for t in tools}
-
-
-
-
 
 
 def _snapshot_for_turn_undo(session: ChatSession, tool_name: str) -> None:
@@ -2390,8 +2745,11 @@ def _snapshot_for_turn_undo(session: ChatSession, tool_name: str) -> None:
         from services.project_context import LIVE_NETWORK_STUDIES
         from services.study_state import study_in_flight_detail
 
-        if study_in_flight_detail(PyPSAService.get_solver_state(),
-                                  "edit the network", keys=LIVE_NETWORK_STUDIES):
+        if study_in_flight_detail(
+            PyPSAService.get_solver_state(),
+            "edit the network",
+            keys=LIVE_NETWORK_STUDIES,
+        ):
             return
     except Exception:  # noqa: BLE001 — the gate itself will still refuse
         pass
@@ -2445,25 +2803,34 @@ def dispatch_tool_call(
     tests/test_harness_dispatch_entry.py.
     """
     if offered_tool_names is not None and tu.get("name") not in offered_tool_names:
-        yield "tool_error", {
-            "tool_use_id": tu.get("id"),
-            "tool_name": tu.get("name"),
-            "error_kind": "tool_not_offered",
-            "message": (
-                "the endpoint requested a tool that was not offered "
-                "for this turn; refusing to run it."
-            ),
-        }
-        tool_results_collector.append({
-            "type": "tool_result",
-            "tool_use_id": tu.get("id"),
-            "is_error": True,
-            "content": "tool_not_offered",
-        })
+        yield (
+            "tool_error",
+            {
+                "tool_use_id": tu.get("id"),
+                "tool_name": tu.get("name"),
+                "error_kind": "tool_not_offered",
+                "message": (
+                    "the endpoint requested a tool that was not offered "
+                    "for this turn; refusing to run it."
+                ),
+            },
+        )
+        tool_results_collector.append(
+            {
+                "type": "tool_result",
+                "tool_use_id": tu.get("id"),
+                "is_error": True,
+                "content": "tool_not_offered",
+            }
+        )
         return False
     yield from _dispatch_real_tool_call(
-        session, tu, tool_results_collector, turn_ctx=turn_ctx,
-        result_char_budget=result_char_budget, guided=guided,
+        session,
+        tu,
+        tool_results_collector,
+        turn_ctx=turn_ctx,
+        result_char_budget=result_char_budget,
+        guided=guided,
     )
     return True
 
@@ -2472,6 +2839,7 @@ def _tool_tier(session: ChatSession, tool_name: str) -> str:
     """An external MCP tool's tier from the session's list (issue 19), else
     the catalogue's (`destructive` for a name it does not know)."""
     from harness import mcp_client
+
     return mcp_client.tier_for(session, tool_name) or _safety_tier_for(tool_name)
 
 
@@ -2480,6 +2848,7 @@ def _publish_hooks(ctx, run_token) -> dict:
     if run_token is None:
         return {}
     from services import run_evidence
+
     return {
         "on_terminal": lambda: run_evidence.publish_foreground_run(run_token, ctx),
         "on_superseded": lambda: run_evidence.publish_foreground_superseded(run_token),
@@ -2511,23 +2880,40 @@ def _dispatch_real_tool_call(
     payloads are replaced with an omitted stub.
     """
     from services import chat_tools as _chat_tools  # noqa: PLC0415
+
     tool_use_id = tu.get("id") or uuid.uuid4().hex
     tool_name = tu.get("name") or "<missing-name>"
     args = tu.get("input") or {}
     # Ordinary and checked calls execute the same finite JSON snapshot. Never
     # give caller-owned inputs or emitted frames a reference to that snapshot.
     import json
+
     try:
         args = json.loads(json.dumps(args, allow_nan=False))
     except (ValueError, TypeError, OverflowError):
-        yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
-                             "error_kind": "validation_error",
-                             "message": "Tool arguments must be finite JSON values."}
-        tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
-                                       "is_error": True, "content": "validation_error"})
+        yield (
+            "tool_error",
+            {
+                "tool_use_id": tool_use_id,
+                "tool_name": tool_name,
+                "error_kind": "validation_error",
+                "message": "Tool arguments must be finite JSON values.",
+            },
+        )
+        tool_results_collector.append(
+            {
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "is_error": True,
+                "content": "validation_error",
+            }
+        )
         return
     from harness import mcp_client
-    external = mcp_client.server_for(session, tool_name)   # an MCP tool's server (issue 19)
+
+    external = mcp_client.server_for(
+        session, tool_name
+    )  # an MCP tool's server (issue 19)
     tier = _tool_tier(session, tool_name)
 
     # LC-16 slice C: a multi-asset edit goes through the one preview card. The
@@ -2536,31 +2922,49 @@ def _dispatch_real_tool_call(
     redirect = None if external else (session.turn_redirects or {}).get(tool_use_id)
     if redirect:
         detail = {"error_kind": "use_project_preview", "message": redirect}
-        tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id, "is_error": True,
-                                       "content": _error_result_content(detail, None, detail["error_kind"])})
+        tool_results_collector.append(
+            {
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "is_error": True,
+                "content": _error_result_content(detail, None, detail["error_kind"]),
+            }
+        )
         return
     # LC-19: a re-solve of current results is asked about first, also for the
     # model only (harness/run_lifecycle.py); the user's yes comes back with the flag,
     # which the card keeps only while the results really are current.
     from harness import run_lifecycle
+
     try:
         current = None
         if not external:
             current, args = run_lifecycle.gate(tool_name, args)
     except Exception:  # noqa: BLE001 — the run card still asks; never make a tool uncallable
-        logger.exception("chat: re-run check for %r failed; the card decides", tool_name)
+        logger.exception(
+            "chat: re-run check for %r failed; the card decides", tool_name
+        )
         current = None
     if current:
-        tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id, "is_error": True,
-                                       "content": _error_result_content(current, None, current["error_kind"])})
+        tool_results_collector.append(
+            {
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "is_error": True,
+                "content": _error_result_content(current, None, current["error_kind"]),
+            }
+        )
         return
 
-    yield "tool_request", {
-        "tool_use_id": tool_use_id,
-        "tool_name": tool_name,
-        "args": json.loads(json.dumps(args)),
-        "safety_tier": tier,
-    }
+    yield (
+        "tool_request",
+        {
+            "tool_use_id": tool_use_id,
+            "tool_name": tool_name,
+            "args": json.loads(json.dumps(args)),
+            "safety_tier": tier,
+        },
+    )
 
     # Resolve the handler BEFORE the confirmation gate.
     #
@@ -2584,42 +2988,66 @@ def _dispatch_real_tool_call(
     # `tool_request` has already fired above, so the audit trail is intact, and
     # the confirmation gate below is unchanged for every tool that exists.
     from services.chat_tools import DISPATCHERS
-    handler = DISPATCHERS.get(tool_name) or mcp_client.dispatcher_for(session, tool_name)
+
+    handler = DISPATCHERS.get(tool_name) or mcp_client.dispatcher_for(
+        session, tool_name
+    )
     if handler is None:
-        yield "tool_error", {
-            "tool_use_id": tool_use_id,
-            "tool_name": tool_name,
-            "error_kind": "unknown_tool",
-            "message": f"no dispatcher for tool {tool_name!r}",
-        }
-        tool_results_collector.append({
-            "type": "tool_result",
-            "tool_use_id": tool_use_id,
-            "is_error": True,
-            "content": "unknown_tool",
-        })
+        yield (
+            "tool_error",
+            {
+                "tool_use_id": tool_use_id,
+                "tool_name": tool_name,
+                "error_kind": "unknown_tool",
+                "message": f"no dispatcher for tool {tool_name!r}",
+            },
+        )
+        tool_results_collector.append(
+            {
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "is_error": True,
+                "content": "unknown_tool",
+            }
+        )
         return
 
     if session.assurance_turn is not None:
-        refusal = {"error_kind": "capability_unsupported",
-                   "message": "This operation is outside the checked-input pilot."}
+        refusal = {
+            "error_kind": "capability_unsupported",
+            "message": "This operation is outside the checked-input pilot.",
+        }
         content = "Unsupported in strict checked-input mode; no effect executed."
         try:
             admitted = session.assurance_turn.tool_guard(tool_name, args)
         except HTTPException as refused:  # a typed refusal names its own kind
             admitted = False
             from harness.assurance import GUARD_REFUSAL_KINDS
-            if (isinstance(refused.detail, dict)
-                    and refused.detail.get("error_kind") in GUARD_REFUSAL_KINDS):
-                refusal = {"error_kind": refused.detail["error_kind"],
-                           "message": str(refused.detail.get("message", ""))}
+
+            if (
+                isinstance(refused.detail, dict)
+                and refused.detail.get("error_kind") in GUARD_REFUSAL_KINDS
+            ):
+                refusal = {
+                    "error_kind": refused.detail["error_kind"],
+                    "message": str(refused.detail.get("message", "")),
+                }
                 content = refusal["message"]
         except Exception:  # noqa: BLE001 — required guard failures never abstain
             admitted = False
         if not admitted:
-            yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name, **refusal}
-            tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
-                                           "is_error": True, "content": content})
+            yield (
+                "tool_error",
+                {"tool_use_id": tool_use_id, "tool_name": tool_name, **refusal},
+            )
+            tool_results_collector.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "is_error": True,
+                    "content": content,
+                }
+            )
             return
 
     # #19 — argument validation BEFORE the confirmation gate. The gate below
@@ -2634,11 +3062,14 @@ def _dispatch_real_tool_call(
     # LC-04 (owner Q3): every chat edit shows its old→new card, in Expert as
     # in Guided, so an edit is gated as Guided gates a write.
     from harness import edit_card as edit_cards
+
     is_edit = tier != "read" and not external and edit_cards.is_edit(tool_name)
     from harness.confirm import GUIDED_UNCARDED
+
     guided = (guided and tool_name not in GUIDED_UNCARDED) or is_edit
     if tier in _confirm_tiers(guided):
         from services.chat_tools import PRE_DISPATCH_VALIDATORS
+
         validator = PRE_DISPATCH_VALIDATORS.get(tool_name)
         problem: str | None = None
         if validator is not None:
@@ -2647,29 +3078,37 @@ def _dispatch_real_tool_call(
             except Exception:  # noqa: BLE001 — never make a tool uncallable
                 logger.exception(
                     "chat: pre-dispatch validator for %r failed; falling back "
-                    "to the unvalidated path", tool_name,
+                    "to the unvalidated path",
+                    tool_name,
                 )
                 problem = None
         if problem:
-            yield "tool_error", {
-                "tool_use_id": tool_use_id,
-                "tool_name": tool_name,
-                "error_kind": "invalid_tool_args",
-                "message": problem,
-            }
+            yield (
+                "tool_error",
+                {
+                    "tool_use_id": tool_use_id,
+                    "tool_name": tool_name,
+                    "error_kind": "invalid_tool_args",
+                    "message": problem,
+                },
+            )
             # Anthropic requires a tool_result for every tool_use; omitting it
             # breaks the NEXT request of the turn, far from this cause.
-            tool_results_collector.append({
-                "type": "tool_result",
-                "tool_use_id": tool_use_id,
-                "is_error": True,
-                # The fifth is_error site. Validators interpolate the
-                # caller-supplied name with `!r`, which does not escape the
-                # fence delimiter, so a hostile name the model read from an
-                # earlier result came back here unfenced. Same builder as the
-                # other four sites.
-                "content": _error_result_content(problem, None, "invalid_tool_args"),
-            })
+            tool_results_collector.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "is_error": True,
+                    # The fifth is_error site. Validators interpolate the
+                    # caller-supplied name with `!r`, which does not escape the
+                    # fence delimiter, so a hostile name the model read from an
+                    # earlier result came back here unfenced. Same builder as the
+                    # other four sites.
+                    "content": _error_result_content(
+                        problem, None, "invalid_tool_args"
+                    ),
+                }
+            )
             return
 
     # #18 — per-tier auto-approve policy. The tool_request frame already fired
@@ -2682,39 +3121,93 @@ def _dispatch_real_tool_call(
     # relaxed — auto-approve drops the human round-trip, not the serialisation.
     confirmation_args = args
     from harness import restrictions
+
     try:
         restriction = restrictions.capture(session)
         restrictions.require_allowed(restriction, tier)
     except Exception as exc:
-        detail = getattr(exc, 'detail', None)
-        kind = detail.get('error_kind', 'restriction_unavailable') if isinstance(detail, dict) else 'restriction_unavailable'
-        yield 'tool_error', {'tool_use_id': tool_use_id, 'tool_name': tool_name,
-                             'error_kind': kind, 'message': _redact_for_log(detail or exc)}
-        tool_results_collector.append({'type': 'tool_result', 'tool_use_id': tool_use_id,
-                                       'is_error': True, 'content': _error_result_content(detail, exc, kind)})
+        detail = getattr(exc, "detail", None)
+        kind = (
+            detail.get("error_kind", "restriction_unavailable")
+            if isinstance(detail, dict)
+            else "restriction_unavailable"
+        )
+        yield (
+            "tool_error",
+            {
+                "tool_use_id": tool_use_id,
+                "tool_name": tool_name,
+                "error_kind": kind,
+                "message": _redact_for_log(detail or exc),
+            },
+        )
+        tool_results_collector.append(
+            {
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "is_error": True,
+                "content": _error_result_content(detail, exc, kind),
+            }
+        )
         return
     try:
         from services import assistant_tasks
+
         assistant_tasks.admit(session, tool_name, args or {})
     except Exception as exc:
         detail = getattr(exc, "detail", None)
-        kind = detail.get("error_kind", "task_admission_failed") if isinstance(detail, dict) else "task_admission_failed"
-        yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
-                             "error_kind": kind, "message": _redact_for_log(detail or exc)}
-        tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
-                                       "is_error": True, "content": _error_result_content(detail, exc, kind)})
+        kind = (
+            detail.get("error_kind", "task_admission_failed")
+            if isinstance(detail, dict)
+            else "task_admission_failed"
+        )
+        yield (
+            "tool_error",
+            {
+                "tool_use_id": tool_use_id,
+                "tool_name": tool_name,
+                "error_kind": kind,
+                "message": _redact_for_log(detail or exc),
+            },
+        )
+        tool_results_collector.append(
+            {
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "is_error": True,
+                "content": _error_result_content(detail, exc, kind),
+            }
+        )
         return
     if tool_name == "apply_project_changes":
         try:
             from services.assistant_tools import preview_confirmation
+
             confirmation_args = preview_confirmation(args.get("preview_id"))
         except Exception as exc:
             detail = getattr(exc, "detail", None)
-            kind = detail.get("error_kind", "invalid_preview") if isinstance(detail, dict) else "invalid_preview"
-            yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
-                                 "error_kind": kind, "message": _redact_for_log(detail or exc)}
-            tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
-                                           "is_error": True, "content": _error_result_content(detail, exc, kind)})
+            kind = (
+                detail.get("error_kind", "invalid_preview")
+                if isinstance(detail, dict)
+                else "invalid_preview"
+            )
+            yield (
+                "tool_error",
+                {
+                    "tool_use_id": tool_use_id,
+                    "tool_name": tool_name,
+                    "error_kind": kind,
+                    "message": _redact_for_log(detail or exc),
+                },
+            )
+            tool_results_collector.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "is_error": True,
+                    "content": _error_result_content(detail, exc, kind),
+                }
+            )
             return
     edit_card = None
     if is_edit and session.assurance_turn is None:
@@ -2724,28 +3217,64 @@ def _dispatch_real_tool_call(
             edit_card = edit_cards.preview(tool_name, args or {})
         except Exception as exc:
             detail = getattr(exc, "detail", None)
-            kind = detail.get("error_kind", "edit_preview_unavailable") if isinstance(detail, dict) else "edit_preview_unavailable"
-            yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
-                                 "error_kind": kind, "message": _redact_for_log(detail or exc)}
-            tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
-                                           "is_error": True, "content": _error_result_content(detail, exc, kind)})
+            kind = (
+                detail.get("error_kind", "edit_preview_unavailable")
+                if isinstance(detail, dict)
+                else "edit_preview_unavailable"
+            )
+            yield (
+                "tool_error",
+                {
+                    "tool_use_id": tool_use_id,
+                    "tool_name": tool_name,
+                    "error_kind": kind,
+                    "message": _redact_for_log(detail or exc),
+                },
+            )
+            tool_results_collector.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "is_error": True,
+                    "content": _error_result_content(detail, exc, kind),
+                }
+            )
             return
     sweep_card = None
     if tool_name == "run_sensitivity_sweep" and session.assurance_turn is None:
         # LC-17: every case's base → case rows from the saved baseline; a
         # refusal here (unsaved baseline, name conflict) means no card.
         from harness import sweep_card as sweep_cards
+
         try:
             sweep_card = sweep_cards.preview(args or {})
         except Exception as exc:
             detail = getattr(exc, "detail", None)
-            kind = detail.get("error_kind", "sweep_preview_unavailable") if isinstance(detail, dict) else "sweep_preview_unavailable"
-            yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
-                                 "error_kind": kind, "message": _redact_for_log(detail or exc)}
-            tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
-                                           "is_error": True, "content": _error_result_content(detail, exc, kind)})
+            kind = (
+                detail.get("error_kind", "sweep_preview_unavailable")
+                if isinstance(detail, dict)
+                else "sweep_preview_unavailable"
+            )
+            yield (
+                "tool_error",
+                {
+                    "tool_use_id": tool_use_id,
+                    "tool_name": tool_name,
+                    "error_kind": kind,
+                    "message": _redact_for_log(detail or exc),
+                },
+            )
+            tool_results_collector.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "is_error": True,
+                    "content": _error_result_content(detail, exc, kind),
+                }
+            )
             return
     from harness import confirm as confirmation_gate
+
     policy_revision = confirmation_gate.confirmation_revision()
     approved = yield from _confirm_destructive_tool(
         session,
@@ -2754,9 +3283,10 @@ def _dispatch_real_tool_call(
         args=confirmation_args,
         tier=tier,
         tool_results_collector=tool_results_collector,
-        guided=guided or (session.assurance_turn is not None and tool_name == "update_component"),
+        guided=guided
+        or (session.assurance_turn is not None and tool_name == "update_component"),
         external=external,
-        restriction_mode=restriction['mode'] if restriction else 'standard',
+        restriction_mode=restriction["mode"] if restriction else "standard",
         restriction_snapshot=restriction,
         edit_card=edit_card,
         sweep_card=sweep_card,
@@ -2766,28 +3296,41 @@ def _dispatch_real_tool_call(
 
     task_ticket = None
     try:
+
         def require_current_confirmation():
             restrictions.require_current(restriction, session)
-            if (confirmation_gate.confirmation_revision() != policy_revision
-                    or _tool_tier(session, tool_name) != tier
-                    or mcp_client.server_for(session, tool_name) != external):
+            if (
+                confirmation_gate.confirmation_revision() != policy_revision
+                or _tool_tier(session, tool_name) != tier
+                or mcp_client.server_for(session, tool_name) != external
+            ):
                 from fastapi import HTTPException
-                raise HTTPException(409, detail={
-                    "error_kind": "confirmation_revoked",
-                    "message": "The action's confirmation rules changed; request and review it again.",
-                })
+
+                raise HTTPException(
+                    409,
+                    detail={
+                        "error_kind": "confirmation_revoked",
+                        "message": "The action's confirmation rules changed; request and review it again.",
+                    },
+                )
 
         require_current_confirmation()
         effect_fresh = True
         if session.assurance_turn is not None and tool_name == "update_component":
             from harness.effects import reserve
+
             effect_fresh = reserve(session.assurance_turn, args)
         from services import assistant_tasks
+
         task_ticket = assistant_tasks.begin_step(session, tool_name, args or {})
         prior_worker = None
-        if task_ticket is not None and tool_name in ("run_simulation", "run_ac_pf_stage"):
+        if task_ticket is not None and tool_name in (
+            "run_simulation",
+            "run_ac_pf_stage",
+        ):
             # The worker before this call: a job bound to it is no new solve.
             from services.pypsa_service import PyPSAService
+
             solver_ctx = turn_ctx or PyPSAService.get_active_context()
             with solver_ctx.solver_state_lock:
                 prior_worker = solver_ctx.solver_state.get("thread")
@@ -2812,8 +3355,32 @@ def _dispatch_real_tool_call(
         # fails partway can still have mutated the network, so marking on success
         # only would under-report. Over-marking costs a prompt about already-clean
         # work; under-marking costs the work itself.
-        if effect_fresh and tier != "read" and not external and tool_name not in {"run_sensitivity_sweep", "start_experiment", "prepare_experiment", "advance_experiment", "refresh_experiment", "cancel_experiment", "reconcile_experiment", "export_experiment_comparison", "export_sensitivity_comparison", "start_task", "resume_task", "cancel_task", "resolve_task_step", "preview_project_changes", "create_chart", "build_delivery"}:
+        if (
+            effect_fresh
+            and tier != "read"
+            and not external
+            and tool_name
+            not in {
+                "run_sensitivity_sweep",
+                "start_experiment",
+                "prepare_experiment",
+                "advance_experiment",
+                "refresh_experiment",
+                "cancel_experiment",
+                "reconcile_experiment",
+                "export_experiment_comparison",
+                "export_sensitivity_comparison",
+                "start_task",
+                "resume_task",
+                "cancel_task",
+                "resolve_task_step",
+                "preview_project_changes",
+                "create_chart",
+                "build_delivery",
+            }
+        ):
             from services import dirty_state
+
             dirty_state.mark_dirty()
             # ★ P33b B2: the chat seam of the edit counter. Same placement and
             # same rationale as the mark above — before the handler, so a
@@ -2823,12 +3390,13 @@ def _dispatch_real_tool_call(
             # for tools that write the live network: a study, a Solve, a read
             # or an export is not an edit.
             from services.chat_tools_schema import tool_edits_network
+
             if tool_edits_network(tool_name):
                 dirty_state.bump_revision()
         # Same seam, same reason: the HTTP middleware's undo snapshot never runs
         # for an in-process call either. After the confirmation gate, so a refused
         # tool costs no snapshot. See `_snapshot_for_turn_undo`.
-        if effect_fresh and not external:     # an MCP tool edits no project
+        if effect_fresh and not external:  # an MCP tool edits no project
             _snapshot_for_turn_undo(session, tool_name)
 
         # Execute via the chat_tools dispatcher. `handler` was resolved above the
@@ -2868,24 +3436,37 @@ def _dispatch_real_tool_call(
             _chat_tools.set_chat_session(session)
             _ctx_snapshot = contextvars.copy_context()
             checked_turn = session.assurance_turn
+
             def invoke_handler():
                 require_current_confirmation()
                 if checked_turn is not None and tool_name == "update_component":
                     from harness.effects import execute
+
                     return execute(checked_turn, tool_name, args, handler)
                 from harness.experiment_execution import invoke
+
                 reviewed = contextlib.nullcontext()
-                if tool_name == 'apply_project_changes':
-                    from services.assistant_tools import confirmed_preview, preview_confirmation
-                    reviewed = confirmed_preview(confirmation_args['review_sha256'])
+                if tool_name == "apply_project_changes":
+                    from services.assistant_tools import (
+                        confirmed_preview,
+                        preview_confirmation,
+                    )
+
+                    reviewed = confirmed_preview(confirmation_args["review_sha256"])
                     # LC-16: the card the user approved, the review shown and
                     # the stored preview the handler applies are one record.
                     if edit_card is not None and (
-                            (edit_card.get("binding") or {}).get("review_sha256") != confirmation_args['review_sha256']
-                            or preview_confirmation(args.get("preview_id"))['review_sha256']
-                            != confirmation_args['review_sha256']):
-                        edit_cards._refuse("invalid_preview", "The reviewed preview changed; create and review a "
-                                           "new preview.", 409)
+                        (edit_card.get("binding") or {}).get("review_sha256")
+                        != confirmation_args["review_sha256"]
+                        or preview_confirmation(args.get("preview_id"))["review_sha256"]
+                        != confirmation_args["review_sha256"]
+                    ):
+                        edit_cards._refuse(
+                            "invalid_preview",
+                            "The reviewed preview changed; create and review a "
+                            "new preview.",
+                            409,
+                        )
                 with reviewed:
                     if edit_card is not None:
                         edit_cards.require_current(tool_name, args or {}, edit_card)
@@ -2893,11 +3474,17 @@ def _dispatch_real_tool_call(
                             out = invoke(session, tool_name, args or {}, handler)
                         if isinstance(out, dict):
                             # First, so a result the chat spills or truncates keeps its receipt.
-                            out = {"_edit_receipt": edit_cards.receipt(edit_card, args or {}), **out}
+                            out = {
+                                "_edit_receipt": edit_cards.receipt(
+                                    edit_card, args or {}
+                                ),
+                                **out,
+                            }
                         return out
                     if sweep_card is not None:
                         sweep_cards.require_current(args or {}, sweep_card)
                     return invoke(session, tool_name, args or {}, handler)
+
             # PER_TOOL_TIMEOUT_SECONDS is a budget for RUNNING the handler.
             # `future.result(timeout=...)` alone measured queue + run on a pool
             # every session shares, so a call that never got a worker was
@@ -2917,6 +3504,7 @@ def _dispatch_real_tool_call(
             future = _TOOL_EXECUTOR.submit(run_in_worker)
             if checked_turn is not None and tool_name == "update_component":
                 from harness.effects import register_worker
+
                 register_worker(checked_turn, future)
             assistant_tasks.register_worker(task_ticket, future)
             try:
@@ -2925,31 +3513,42 @@ def _dispatch_real_tool_call(
                 # longer run behind the user's back. If cancel() loses the race
                 # the worker has just started, so it gets the full execution
                 # budget from here.
-                if (not started.wait(timeout=harness_budget.PER_TOOL_TIMEOUT_SECONDS)
-                        and future.cancel()):
+                if (
+                    not started.wait(timeout=harness_budget.PER_TOOL_TIMEOUT_SECONDS)
+                    and future.cancel()
+                ):
                     try:
-                        assistant_tasks.finish_step(task_ticket, error="tool_not_started")
+                        assistant_tasks.finish_step(
+                            task_ticket, error="tool_not_started"
+                        )
                     except Exception:
                         logger.exception("Task not-started checkpoint unavailable")
-                    yield "tool_error", {
-                        "tool_use_id": tool_use_id,
-                        "tool_name": tool_name,
-                        "error_kind": "tool_not_started",
-                        "message": (
-                            f"tool {tool_name!r} never started: all "
-                            f"{TOOL_EXECUTOR_MAX_WORKERS} chat-tool workers were "
-                            f"busy for {harness_budget.PER_TOOL_TIMEOUT_SECONDS:g}s. "
-                            f"It was cancelled rather than left queued to run later."
-                        ),
-                    }
-                    tool_results_collector.append({
-                        "type": "tool_result",
-                        "tool_use_id": tool_use_id,
-                        "is_error": True,
-                        "content": "tool_not_started",
-                    })
+                    yield (
+                        "tool_error",
+                        {
+                            "tool_use_id": tool_use_id,
+                            "tool_name": tool_name,
+                            "error_kind": "tool_not_started",
+                            "message": (
+                                f"tool {tool_name!r} never started: all "
+                                f"{TOOL_EXECUTOR_MAX_WORKERS} chat-tool workers were "
+                                f"busy for {harness_budget.PER_TOOL_TIMEOUT_SECONDS:g}s. "
+                                f"It was cancelled rather than left queued to run later."
+                            ),
+                        },
+                    )
+                    tool_results_collector.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tool_use_id,
+                            "is_error": True,
+                            "content": "tool_not_started",
+                        }
+                    )
                     return
-                tool_deadline = time.monotonic() + harness_budget.PER_TOOL_TIMEOUT_SECONDS
+                tool_deadline = (
+                    time.monotonic() + harness_budget.PER_TOOL_TIMEOUT_SECONDS
+                )
                 if tool_name == "wait_for_job":
                     # A bounded local wait can publish progress without any
                     # additional model request. Reuse the existing frame shape.
@@ -2958,12 +3557,25 @@ def _dispatch_real_tool_call(
                     while not future.done() and time.monotonic() < deadline:
                         with session._lock:
                             progress = session.job_wait_progress
-                        if progress and progress.get("job_id") == args.get("job_id") and progress != previous_progress:
-                            yield "tool_progress", {"tool_use_id": tool_use_id, "tool_name": tool_name,
-                                                    "line": f"Job {progress['job_id']}: {progress['status']}", "kind": "INFO"}
+                        if (
+                            progress
+                            and progress.get("job_id") == args.get("job_id")
+                            and progress != previous_progress
+                        ):
+                            yield (
+                                "tool_progress",
+                                {
+                                    "tool_use_id": tool_use_id,
+                                    "tool_name": tool_name,
+                                    "line": f"Job {progress['job_id']}: {progress['status']}",
+                                    "kind": "INFO",
+                                },
+                            )
                             previous_progress = dict(progress)
                         try:
-                            future.result(timeout=min(0.25, max(0, deadline - time.monotonic())))
+                            future.result(
+                                timeout=min(0.25, max(0, deadline - time.monotonic()))
+                            )
                         except concurrent.futures.TimeoutError:
                             continue
                 result = future.result(timeout=max(0, tool_deadline - time.monotonic()))
@@ -3009,21 +3621,26 @@ def _dispatch_real_tool_call(
                 # next user message (same invariant the project_switched and
                 # handler-exception paths honour) — emit the is_error result so
                 # a resumed turn doesn't 400.
-                yield "tool_error", {
-                    "tool_use_id": tool_use_id,
-                    "tool_name": tool_name,
-                    "error_kind": "tool_timeout",
-                    "message": (
-                        f"tool {tool_name!r} exceeded the "
-                        f"{harness_budget.PER_TOOL_TIMEOUT_SECONDS:g}s execution deadline"
-                    ),
-                }
-                tool_results_collector.append({
-                    "type": "tool_result",
-                    "tool_use_id": tool_use_id,
-                    "is_error": True,
-                    "content": "tool_timeout",
-                })
+                yield (
+                    "tool_error",
+                    {
+                        "tool_use_id": tool_use_id,
+                        "tool_name": tool_name,
+                        "error_kind": "tool_timeout",
+                        "message": (
+                            f"tool {tool_name!r} exceeded the "
+                            f"{harness_budget.PER_TOOL_TIMEOUT_SECONDS:g}s execution deadline"
+                        ),
+                    },
+                )
+                tool_results_collector.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "is_error": True,
+                        "content": "tool_timeout",
+                    }
+                )
                 return
     except Exception as exc:  # noqa: BLE001 — surface as tool_error
         # v4-MAJOR-1 / v6-F1 + v4-MINOR-1: structured error_kind propagates
@@ -3049,21 +3666,31 @@ def _dispatch_real_tool_call(
         # message, not the dict repr. A lock refusal keeps its whole detail
         # (the banner reads the holder from it).
         shown = detail
-        if isinstance(detail, dict) and "lock" not in detail and isinstance(detail.get("message"), str) and detail["message"].strip():
+        if (
+            isinstance(detail, dict)
+            and "lock" not in detail
+            and isinstance(detail.get("message"), str)
+            and detail["message"].strip()
+        ):
             shown = detail["message"]
         msg = _redact_for_log(shown or exc)
-        yield "tool_error", {
-            "tool_use_id": tool_use_id,
-            "tool_name": tool_name,
-            "error_kind": error_kind,
-            "message": msg,
-        }
-        tool_results_collector.append({
-            "type": "tool_result",
-            "tool_use_id": tool_use_id,
-            "is_error": True,
-            "content": _error_result_content(detail, exc, error_kind),
-        })
+        yield (
+            "tool_error",
+            {
+                "tool_use_id": tool_use_id,
+                "tool_name": tool_name,
+                "error_kind": error_kind,
+                "message": msg,
+            },
+        )
+        tool_results_collector.append(
+            {
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "is_error": True,
+                "content": _error_result_content(detail, exc, error_kind),
+            }
+        )
         return
 
     # Only a SUCCESSFUL undo reaches this line (a refused one raised above and
@@ -3081,6 +3708,7 @@ def _dispatch_real_tool_call(
             from services.pypsa_service import PyPSAService
             from harness.solver_bridge import start_detached_solver_monitor
             from harness import job_adapters as ja
+
             active_ctx = turn_ctx or PyPSAService.get_active_context()
             with active_ctx.solver_state_lock:
                 kind = active_ctx.solver_state.get("kind")
@@ -3090,6 +3718,7 @@ def _dispatch_real_tool_call(
             plan_settled = False
             if status == "running":
                 from services import chat_tools as _ct
+
                 owner = getattr(session, "owner_user_id", None) or _ct.acting_user_id()
                 job_id = ja.register_foreground_solve(
                     tool_name=tool_name,
@@ -3100,43 +3729,71 @@ def _dispatch_real_tool_call(
                     kind=kind,
                 )
                 from services import run_evidence as _run_evidence
+
                 run_token = _run_evidence.start_foreground_run(
-                    active_ctx, job_id=job_id, tool_name=tool_name, kind=kind,
+                    active_ctx,
+                    job_id=job_id,
+                    tool_name=tool_name,
+                    kind=kind,
                 )
                 # LC-12: a plan's run step waits on its job durably and the
                 # turn is released; the job's end settles the step and arms
                 # one continuation of this conversation.
                 try:
-                    task_path = assistant_tasks.await_job(task_ticket, job_id, session.session_id)
+                    task_path = assistant_tasks.await_job(
+                        task_ticket, job_id, session.session_id
+                    )
                 except Exception:  # noqa: BLE001 — the step then stays a start receipt: uncertain
                     logger.exception("chat: plan step could not wait on job %s", job_id)
                     task_path = None
                 start_detached_solver_monitor(
-                    session, active_ctx,
+                    session,
+                    active_ctx,
                     tool_use_id=tool_use_id,
                     tool_name=tool_name,
                     **({} if task_path else _publish_hooks(active_ctx, run_token)),
                 )
                 if task_path:
                     from harness import continuation
+
                     # The turn's pinned context can be an older copy of the live
                     # one (same solver state, but a network an earlier step
                     # replaced); the solve ran on the live network, so its
                     # record is read there.
                     live_ctx = PyPSAService.get_active_context()
-                    solve_ctx = live_ctx if live_ctx.solver_state is active_ctx.solver_state else active_ctx
-                    settled = continuation.follow_job(active_ctx, run_token, task_path, task_ticket, job_id,
-                                                      prior_worker=prior_worker, solve_ctx=solve_ctx)
+                    solve_ctx = (
+                        live_ctx
+                        if live_ctx.solver_state is active_ctx.solver_state
+                        else active_ctx
+                    )
+                    settled = continuation.follow_job(
+                        active_ctx,
+                        run_token,
+                        task_path,
+                        task_ticket,
+                        job_id,
+                        prior_worker=prior_worker,
+                        solve_ctx=solve_ctx,
+                    )
                     # A quick solve settles within the grace and the plan goes
                     # on in this turn; a long one releases the turn.
                     deadline = time.monotonic() + continuation.GRACE_SECONDS
                     for progress in solver_log_bridge(
-                        session, active_ctx, poll_interval=0.1,
-                        is_solver_done=lambda: settled.is_set() or time.monotonic() >= deadline,
+                        session,
+                        active_ctx,
+                        poll_interval=0.1,
+                        is_solver_done=lambda: (
+                            settled.is_set() or time.monotonic() >= deadline
+                        ),
                     ):
-                        yield "tool_progress", {
-                            "tool_use_id": tool_use_id, "tool_name": tool_name, **progress,
-                        }
+                        yield (
+                            "tool_progress",
+                            {
+                                "tool_use_id": tool_use_id,
+                                "tool_name": tool_name,
+                                **progress,
+                            },
+                        )
                     if settled.is_set():
                         # This turn goes on with the plan: the step carries the
                         # job's outcome and no separate continuation follows.
@@ -3148,13 +3805,15 @@ def _dispatch_real_tool_call(
                 "running": status == "running" and not plan_settled,
                 "kind": kind,
                 "monitor": "get_simulation_status",
-                "detached_progress": task_ticket is None or (status == "running" and not plan_settled),
+                "detached_progress": task_ticket is None
+                or (status == "running" and not plan_settled),
                 **({"job_id": job_id} if job_id else {}),
             }
         except Exception as exc:  # noqa: BLE001 — enrich is best-effort
             logger.exception(
                 "chat: foreground solve handoff enrich for %s failed: %s",
-                tool_name, _redact_for_log(exc),
+                tool_name,
+                _redact_for_log(exc),
             )
 
     # Study copilot slice 2: a plan's queued run step (sweep, enqueue) waits on
@@ -3162,23 +3821,39 @@ def _dispatch_real_tool_call(
     # a same-turn result); one follower settles the step from native records
     # and arms one continuation. A partial or cancelled sweep does not wait:
     # its receipt settles uncertain in finish_step.
-    if (task_ticket is not None and tool_name in assistant_tasks.QUEUE_WAIT_TOOLS
-            and isinstance(result, dict) and result.get("status") not in ("partial", "cancelled")):
+    if (
+        task_ticket is not None
+        and tool_name in assistant_tasks.QUEUE_WAIT_TOOLS
+        and isinstance(result, dict)
+        and result.get("status") not in ("partial", "cancelled")
+    ):
         try:
             from harness import continuation
+
             jobs = continuation.queue_jobs(result)
             if jobs:  # an all-reused sweep has no job: its receipt settles the step
-                assistant_tasks.track_queue_follower(task_ticket)  # before the step reads waiting
-                task_path = assistant_tasks.await_job(task_ticket, None, session.session_id, jobs=jobs)
+                assistant_tasks.track_queue_follower(
+                    task_ticket
+                )  # before the step reads waiting
+                task_path = assistant_tasks.await_job(
+                    task_ticket, None, session.session_id, jobs=jobs
+                )
                 if task_path:
                     continuation.follow_queue_job(task_path, task_ticket)
-                    result = {**result, "waiting": True, "job_id": jobs[0]["job_id"],
-                              "note": "The plan waits on these queued jobs; the conversation continues when they end."}
+                    result = {
+                        **result,
+                        "waiting": True,
+                        "job_id": jobs[0]["job_id"],
+                        "note": "The plan waits on these queued jobs; the conversation continues when they end.",
+                    }
                 else:  # the step stopped running during the call: nothing follows, nothing is promised
                     assistant_tasks.forget_queue_follower(task_ticket)
         except Exception as exc:  # noqa: BLE001 — the step then stays a start receipt: uncertain
             assistant_tasks.forget_queue_follower(task_ticket)
-            logger.exception("chat: plan step could not wait on queued jobs: %s", _redact_for_log(exc))
+            logger.exception(
+                "chat: plan step could not wait on queued jobs: %s",
+                _redact_for_log(exc),
+            )
 
     # Issue 11 — adequacy/study mesh handoff. Starters already return
     # {"status": "running"} after publish_study; mint an ad:… handle so
@@ -3187,11 +3862,13 @@ def _dispatch_real_tool_call(
         REPORT_TOOL_NAMES as _REPORT_TOOL_NAMES,
         STUDY_TOOL_KEYS as _STUDY_TOOL_KEYS,
     )
+
     if tool_name in _STUDY_TOOL_KEYS and isinstance(result, dict):
         try:
             from services.pypsa_service import PyPSAService
             from harness import job_adapters as ja
             from services import chat_tools as _ct
+
             study_key = _STUDY_TOOL_KEYS[tool_name]
             if result.get("status") == "running":
                 active_ctx = turn_ctx or PyPSAService.get_active_context()
@@ -3219,7 +3896,8 @@ def _dispatch_real_tool_call(
         except Exception as exc:  # noqa: BLE001 — enrich is best-effort
             logger.exception(
                 "chat: study handoff enrich for %s failed: %s",
-                tool_name, _redact_for_log(exc),
+                tool_name,
+                _redact_for_log(exc),
             )
 
     if tool_name in _REPORT_TOOL_NAMES and isinstance(result, dict):
@@ -3227,6 +3905,7 @@ def _dispatch_real_tool_call(
             from services.pypsa_service import PyPSAService
             from harness import job_adapters as ja
             from services import chat_tools as _ct
+
             if result.get("status") == "running":
                 active_ctx = turn_ctx or PyPSAService.get_active_context()
                 owner = getattr(session, "owner_user_id", None) or _ct.acting_user_id()
@@ -3247,7 +3926,8 @@ def _dispatch_real_tool_call(
         except Exception as exc:  # noqa: BLE001 — enrich is best-effort
             logger.exception(
                 "chat: report handoff enrich for %s failed: %s",
-                tool_name, _redact_for_log(exc),
+                tool_name,
+                _redact_for_log(exc),
             )
 
     try:
@@ -3255,14 +3935,30 @@ def _dispatch_real_tool_call(
     except Exception:
         # The action may have completed. Keep its running checkpoint uncertain,
         # pair the real tool ID, and forbid a silent automatic repeat.
-        yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
-                             "error_kind": "task_checkpoint_failed",
-                             "message": "The action returned but its checkpoint could not be saved. Inspect effects before resuming."}
-        tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
-                                       "is_error": True, "content": "task_checkpoint_failed; inspect effects before retrying"})
+        yield (
+            "tool_error",
+            {
+                "tool_use_id": tool_use_id,
+                "tool_name": tool_name,
+                "error_kind": "task_checkpoint_failed",
+                "message": "The action returned but its checkpoint could not be saved. Inspect effects before resuming.",
+            },
+        )
+        tool_results_collector.append(
+            {
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "is_error": True,
+                "content": "task_checkpoint_failed; inspect effects before retrying",
+            }
+        )
         return
     if task_state is not None:
-        result = {**result, "_task": task_state} if isinstance(result, dict) else {"result": result, "_task": task_state}
+        result = (
+            {**result, "_task": task_state}
+            if isinstance(result, dict)
+            else {"result": result, "_task": task_state}
+        )
 
     if session.assurance_turn is not None:
         session.assurance_turn.capture(tool_name, args or {}, result, tool_use_id)
@@ -3280,8 +3976,11 @@ def _dispatch_real_tool_call(
     result_for_model = result
     if session.navigation_turn is not None:
         session.navigation_turn.note_read(tool_name, result)
-    if isinstance(result, dict) and result.get("_ui_event") \
-            and result.get("kind") == "choice":
+    if (
+        isinstance(result, dict)
+        and result.get("_ui_event")
+        and result.get("kind") == "choice"
+    ):
         # `ask_user` (chat harness issue 04): a Choice card, not navigation.
         # Its own frame so the panel renders a card rather than driving
         # uiStore, and a compact acknowledgement for the model that says the
@@ -3290,12 +3989,17 @@ def _dispatch_real_tool_call(
         ui_event_payload.update({k: v for k, v in result.items() if k != "_ui_event"})
         multi = bool(ui_event_payload.get("multi_select"))
         result_for_model = {
-            "ok": True, "status": "presented", "awaiting": "user",
+            "ok": True,
+            "status": "presented",
+            "awaiting": "user",
             "title": ui_event_payload.get("title"),
             "options": [o.get("label") for o in ui_event_payload.get("options", [])],
             "multi_select": multi,
-            "answer_format": ("the chosen labels joined by '; '" if multi
-                              else "one option label, or the user's own words"),
+            "answer_format": (
+                "the chosen labels joined by '; '"
+                if multi
+                else "one option label, or the user's own words"
+            ),
         }
         yield "choice_request", ui_event_payload
     elif isinstance(result, dict) and result.get("_ui_event"):
@@ -3334,9 +4038,18 @@ def _dispatch_real_tool_call(
             **{
                 k: result[k]
                 for k in (
-                    "project_a", "project_b", "focus", "a", "b",
-                    "delta_b_minus_a", "focus_section", "note",
-                    "discussed", "status", "mode", "fingerprint",
+                    "project_a",
+                    "project_b",
+                    "focus",
+                    "a",
+                    "b",
+                    "delta_b_minus_a",
+                    "focus_section",
+                    "note",
+                    "discussed",
+                    "status",
+                    "mode",
+                    "fingerprint",
                     "evidence_available",
                 )
                 if k in result
@@ -3347,20 +4060,37 @@ def _dispatch_real_tool_call(
         acknowledgement = None
         if session.assurance_turn is None and session.navigation_turn is not None:
             from harness.navigation import issue
+
             try:
-                acknowledgement = issue(session.navigation_turn, {
-                    **{k: v for k, v in ui_event_payload.items() if v is not None},
-                    "tool_use_id": tool_use_id})
+                acknowledgement = issue(
+                    session.navigation_turn,
+                    {
+                        **{k: v for k, v in ui_event_payload.items() if v is not None},
+                        "tool_use_id": tool_use_id,
+                    },
+                )
             except HTTPException as exc:
                 # The Load flow view changed between the tool and the ACK
                 # record: refuse as the tool would, and show nothing.
                 detail = exc.detail if isinstance(exc.detail, dict) else {}
                 kind = detail.get("error_kind", "loadflow_view_unavailable")
-                yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
-                                     "error_kind": kind, "message": _redact_for_log(detail or exc)}
-                tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
-                                               "is_error": True,
-                                               "content": _error_result_content(detail, exc, kind)})
+                yield (
+                    "tool_error",
+                    {
+                        "tool_use_id": tool_use_id,
+                        "tool_name": tool_name,
+                        "error_kind": kind,
+                        "message": _redact_for_log(detail or exc),
+                    },
+                )
+                tool_results_collector.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "is_error": True,
+                        "content": _error_result_content(detail, exc, kind),
+                    }
+                )
                 return
             loadflow_facts = (acknowledgement or {}).pop("loadflow", None)
             if loadflow_facts:
@@ -3368,79 +4098,92 @@ def _dispatch_real_tool_call(
                 result_for_model["highlight"] = loadflow_facts["highlight"]
                 result_for_model["source_binding"] = loadflow_facts["source_binding"]
             if acknowledgement:
-                ui_event_payload.update(acknowledgement=acknowledgement, tool_use_id=tool_use_id)
+                ui_event_payload.update(
+                    acknowledgement=acknowledgement, tool_use_id=tool_use_id
+                )
         yield "ui_event", ui_event_payload
         if ui_event_payload.get("kind") == "navigate":
             from services.result_views import note_shown
+
             if ui_event_payload.get("panel_id") == "results":
                 note_shown(session, ui_event_payload.get("results_tab"))
-        if session.assurance_turn is None and ui_event_payload.get("kind") == "navigate":
+        if (
+            session.assurance_turn is None
+            and ui_event_payload.get("kind") == "navigate"
+        ):
             from harness.navigation import display
-            result_for_model["display"] = display(session.navigation_turn, acknowledgement)
+
+            result_for_model["display"] = display(
+                session.navigation_turn, acknowledgement
+            )
 
     if session.assurance_turn is not None:
-        projection = session.assurance_turn.result_projection(tool_name, result_for_model, tool_use_id)
+        projection = session.assurance_turn.result_projection(
+            tool_name, result_for_model, tool_use_id
+        )
         # `_assurance` goes first: a checked result is never spilled, so a long
         # one is cut for the model, and the cut must keep the outcome and ids.
-        result_for_model = {
-            "_assurance": projection["_assurance"],
-            **{k: v for k, v in result_for_model.items() if k != "_assurance"},
-        } if isinstance(result_for_model, dict) else projection
+        result_for_model = (
+            {
+                "_assurance": projection["_assurance"],
+                **{k: v for k, v in result_for_model.items() if k != "_assurance"},
+            }
+            if isinstance(result_for_model, dict)
+            else projection
+        )
         if tool_name == "ui_open_panel":
             result_for_model["ui_navigated"] = False
 
     # Success — push into result_refs (small summary) and emit tool_result.
-    session.push_result_ref({
-        "tool_use_id": tool_use_id,
-        "tool_name": tool_name,
-        "summary": _truncate_result(result_for_model),
-    })
+    session.push_result_ref(
+        {
+            "tool_use_id": tool_use_id,
+            "tool_name": tool_name,
+            "summary": _truncate_result(result_for_model),
+        }
+    )
     from services.reference_resolution import active_project_key
+
     session.note_touched_components(active_project_key(), tool_name, tu.get("input"))
     if not external:
         from harness import edit_routing
+
         edit_routing.note_success(session, tool_name, tier, args)
-    yield "tool_result", {
-        "tool_use_id": tool_use_id,
-        "tool_name": tool_name,
-        "result": _truncate_result(result_for_model),
-    }
+    yield (
+        "tool_result",
+        {
+            "tool_use_id": tool_use_id,
+            "tool_name": tool_name,
+            "result": _truncate_result(result_for_model),
+        },
+    )
     if tool_name in _WORKFLOW_STATE_TOOLS:
         # The panel's step strip follows the session's state (issue 06
         # follow-up); emitted after the result so the two frames agree.
         yield "workflow_state", _workflow_state_payload(session)
     if tool_name in ("set_goal", "pause_goal", "complete_goal"):
         from harness import goals as _goals
+
         yield "goal_state", _goals.payload(session)
     # Issue 16: a result too large for the model is kept whole and replaced,
     # for the MODEL only, by a preview and a locator (`harness/spill.py`).
     # The frames above are unchanged; a checked turn and a self-paging tool
     # are never spilled, and a failure falls back to the ordinary cut.
     result_for_model = harness_spill.shape_for_model(
-        session, tool_name, tool_use_id, result_for_model)
+        session, tool_name, tool_use_id, result_for_model
+    )
     content = _result_to_anthropic_content(
-        result_for_model, marker_hint=harness_spill.paging_hint(tool_name))
+        result_for_model, marker_hint=harness_spill.paging_hint(tool_name)
+    )
     if result_char_budget is not None:
         content = _apply_turn_tool_result_budget(content, result_char_budget)
-    tool_results_collector.append({
-        "type": "tool_result",
-        "tool_use_id": tool_use_id,
-        "content": content,
-    })
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    tool_results_collector.append(
+        {
+            "type": "tool_result",
+            "tool_use_id": tool_use_id,
+            "content": content,
+        }
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -3494,4 +4237,5 @@ def __getattr__(name: str):
     if home is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     import importlib
+
     return getattr(importlib.import_module(home), name)

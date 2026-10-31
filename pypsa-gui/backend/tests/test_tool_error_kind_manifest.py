@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import re
 
 import pytest
 
@@ -220,7 +221,8 @@ def test_the_forwarder_fallbacks_are_still_what_the_code_invents():
     """
     source = (BACKEND / "harness" / "loop.py").read_text(encoding="utf-8")
     block = source[source.index("# noqa: BLE001 — surface as tool_error"):]
-    block = block[:block.index("yield \"tool_error\"")]
+    # The formatter may wrap the yield as `yield (\n "tool_error", ...`.
+    block = block[:re.search(r'yield\s*\(?\s*"tool_error"', block).start()]
     assigned = {
         value for value in ("tool_error", "validation_error")
         if f'error_kind = "{value}"' in block

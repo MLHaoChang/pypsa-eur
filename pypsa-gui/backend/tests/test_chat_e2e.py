@@ -2156,12 +2156,17 @@ def test_tool_timeout_emits_tool_timeout_and_is_error_result(tmp_projects_dir, i
 def test_solver_tools_excluded_from_timeout_wrapper():
     """Solver tools stay OUT of the per-tool timeout (own their lifecycle)."""
     import inspect
+    import re
     src = inspect.getsource(chat_service._dispatch_real_tool_call)
     # The inline (non-timeout) call is guarded by the solver-tool name check.
     assert 'if tool_name in ("run_simulation", "run_ac_pf_stage"):' in src
     assert "result = handler(**(args or {}))" in src
     # The timeout is read live from harness.budget (chat harness issue 08).
-    assert "tool_deadline = time.monotonic() + harness_budget.PER_TOOL_TIMEOUT_SECONDS" in src
+    # (the formatter may wrap the right-hand side in parentheses)
+    assert re.search(
+        r"tool_deadline = \(?\s*time\.monotonic\(\) \+ harness_budget\.PER_TOOL_TIMEOUT_SECONDS\s*\)?\n",
+        src,
+    )
     assert "future.result(timeout=max(0, tool_deadline - time.monotonic()))" in src
 
 
