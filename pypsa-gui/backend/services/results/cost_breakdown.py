@@ -97,7 +97,8 @@ def compute_cost_breakdown(n, cfg):
 
     Lifted from `routers.results.get_cost_breakdown`, which keeps the network
     lookup, the `_dispatch_ready` gate and the `_state` reads. Returns the
-    payload dict, or `None` where the handler returns 204.
+    payload dict, or `None` where there is nothing to show; an internal
+    exception is logged and raised (the route answers 204).
 
     PyPSA's `n.statistics()` returns a DataFrame indexed by (component, carrier)
     with columns including 'Capital Expenditure' and 'Operational Expenditure'.
@@ -246,8 +247,8 @@ def compute_cost_breakdown(n, cfg):
                 capex_lifetime_by_class[comp_class] = capex_lifetime_sum
                 capex_expansion_lifetime_by_class[comp_class] = exp_lifetime_sum
     except Exception:
-        logger.exception("results endpoint failed; returning 204 (see traceback)")
-        return None
+        logger.exception("results endpoint failed (see traceback)")
+        raise
     if stats is None or stats.empty:
         return None
 

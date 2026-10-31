@@ -5,6 +5,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictBool, StrictInt, field_validator, model_validator
 
 from models.commercial import CommercialConfig
+from models.envelope_floors import EnvelopeFloors
 from services.adequacy.mc import MAX_DRAWS as _MC_MAX_DRAWS
 
 # Frontend Edit-card UX sends `null` for blanked optional bounds (so the
@@ -796,6 +797,9 @@ class SolverConfigSchema(BaseModel):
     # echo is ignored, a change is refused (422 `finance_via_dedicated_route`).
     # A plain dict, compared as stored (the dedicated route validates it).
     finance: dict[str, Any] | None = None
+    # AS-03: the site-wide envelope floors and backup reserve (services/solver/envelope_floors.py).
+    # None = no rows. Changes LP input, so it is in every solve fingerprint.
+    envelope_floors: EnvelopeFloors | None = None
 
 
 class ImportSummary(BaseModel):

@@ -5802,6 +5802,16 @@ def ui_select_component(component_class: str, name: str, open_editor: bool | Non
             })
         return {"_ui_event": True, "kind": "open_properties",
                 "component_class": component_class, "name": name}
+    from services.asset_results import compute as asset_compute
+    try:
+        df = getattr(PyPSAService.get_network(), asset_compute.attr_for(component_class))
+    except KeyError:
+        df = None
+    if df is None or name not in df.index:
+        raise HTTPException(404, detail={
+            "error_kind": "component_not_found", "component_class": component_class, "name": name,
+            "message": f"{component_class} '{name}' is not in the network.",
+        })
     return {"_ui_event": True, "kind": "select_component",
             "component_class": component_class, "name": name}
 
@@ -7371,6 +7381,23 @@ def ui_open_asset_detail(
     chart: bool | None = None,
 ) -> dict:
     """Open the Asset Detail tab pre-configured. No backend mutation."""
+    from services.asset_results import compute as asset_compute
+    from services.asset_results.registry import metric_for
+    try:
+        df = getattr(PyPSAService.get_network(), asset_compute.attr_for(component_class))
+    except KeyError:
+        df = None
+    if df is None or name not in df.index:
+        raise HTTPException(404, detail={
+            "error_kind": "component_not_found", "component_class": component_class, "name": name,
+            "message": f"{component_class} '{name}' is not in the network.",
+        })
+    for m in metrics or []:
+        if metric_for(component_class, str(m)) is None:
+            raise HTTPException(400, detail={
+                "error_kind": "invalid_navigation", "field": "metrics",
+                "message": f"{component_class} has no metric '{m}'.",
+            })
     event: dict[str, Any] = {
         "_ui_event": True, "kind": "open_asset_detail",
         "component_class": component_class, "name": name,

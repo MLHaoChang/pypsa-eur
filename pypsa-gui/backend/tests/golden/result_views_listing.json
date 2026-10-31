@@ -37,7 +37,7 @@
    },
    {
     "id": "capex",
-    "label": "Capacity Expansion",
+    "label": "Capacity expansion",
     "data": "available",
     "shown": false,
     "card": "capacity"
@@ -216,7 +216,7 @@
    },
    {
     "id": "capex",
-    "label": "Capacity Expansion",
+    "label": "Capacity expansion",
     "data": "available",
     "shown": false,
     "card": "capacity"
@@ -415,7 +415,7 @@
    },
    {
     "id": "capex",
-    "label": "Capacity Expansion (advanced)",
+    "label": "Capacity expansion (advanced)",
     "data": "available",
     "shown": false,
     "card": "capacity"
@@ -594,7 +594,7 @@
    },
    {
     "id": "capex",
-    "label": "Capacity Expansion (advanced)",
+    "label": "Capacity expansion (advanced)",
     "data": "available",
     "shown": false,
     "card": "capacity"

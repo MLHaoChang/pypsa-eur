@@ -3,7 +3,7 @@
 
 # AS-04 — GPU envelope → flicker and RVC inputs
 
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: none
 Model: Sonnet
@@ -17,12 +17,14 @@ Spec: [spec.md](../spec.md). Source: research note section 5, [RESULTS.md](../..
 
 ## Acceptance
 
-- [ ] Tests first: S = 30 MW, A = 10 MW, tan φ_swing = 0.1, P_sm = 39.9 MW gives P_res = 0.1 MW and Q_res = 0.1 x 40 = 4.0 Mvar before STATCOM; hand-check the voltage form on a 250 MVA, X/R = 4 grid.
-- [ ] With tan φ_swing = 0 the Q term vanishes and the result equals the P-only form.
-- [ ] Residuals never go negative when smoothing exceeds S + A.
-- [ ] `_flicker_row` reports Pst from the envelope and still works for process-unit loads.
-- [ ] Defaults marked "assumed"; public sources only (SAGC-1).
+- [x] Tests first: S = 30 MW, A = 10 MW, tan φ_swing = 0.1, P_sm = 39.9 MW gives P_res = 0.1 MW and Q_res = 0.1 x 40 = 4.0 Mvar before STATCOM; hand-check the voltage form on a 250 MVA, X/R = 4 grid.
+- [x] With tan φ_swing = 0 the Q term vanishes and the result equals the P-only form.
+- [x] Residuals never go negative when smoothing exceeds S + A.
+- [x] `_flicker_row` reports Pst from the envelope and still works for process-unit loads.
+- [x] Defaults marked "assumed"; public sources only (SAGC-1).
 
 ## PRs
+
+Built on `claude/as-04-flicker-inputs`. Skipped: the RVC row still reads the P-only swing/S_k (switching it to the voltage form moves its 7.5 MW boundary tests; it needs its own decision). X/R is a module default of 4 (assumed) until the project carries one.
 
 ## Comments

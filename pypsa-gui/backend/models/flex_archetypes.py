@@ -15,6 +15,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 from models.commercial import TimeSeriesRef
+from models.design_intent import DesignIntentSpec
 
 RedundancyTier = Literal["N", "N+1", "2N"]
 UtilisationKind = Literal["ai_training", "inference", "mixed", "flat"]
@@ -54,6 +55,8 @@ class AiWorkloadSpec(BaseModel):
     #: Peak (not peak-to-peak) amplitude of the training-step oscillation.
     oscillation_amplitude_share: float = Field(default=0.10, ge=0, le=1)
     oscillation_period_s: float = Field(default=2.0, gt=0)
+    #: Reactive swing of the load as tan φ of its real swing (S + A); assumed until vendor data.
+    tan_phi_swing: float = Field(default=0.1, ge=0)
     #: Whole hours per day at ``idle_share`` (job restarts, maintenance),
     #: from ``idle_start_hour`` on the site clock.
     idle_hours_per_day: int = Field(default=1, ge=0, le=24)
@@ -94,6 +97,8 @@ class DataCentreLoadSpec(BaseModel):
     workload_shift_window_h: float | None = Field(default=None, gt=0)
     gensets: list[GensetSpec] = Field(default_factory=list)
     waste_heat_export: bool = False
+    #: Asset-sizing design intent A-E (AS-01); None = a backup_mode-only project.
+    design_intent: DesignIntentSpec | None = None
 
     @model_validator(mode="after")
     def _shares(self) -> "DataCentreLoadSpec":

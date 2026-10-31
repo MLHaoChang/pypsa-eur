@@ -367,7 +367,10 @@ def get_cost_breakdown():
     # the network state has discount_rate=NaN again after solve — so the
     # annuity factor becomes NaN and statistics returns 0 / drops the row.
     # Re-apply the same fill here, just for the duration of the calculation.
-    payload = compute_cost_breakdown(n, _state['solver_config'])
+    try:
+        payload = compute_cost_breakdown(n, _state['solver_config'])
+    except Exception:  # the service logged it; the route keeps its 204
+        return _not_solved()
     return _not_solved() if payload is None else payload
 
 
@@ -874,7 +877,10 @@ def get_prices(
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
         return _not_solved()
-    payload = compute_prices(n, source, from_, to_, result_df=_result_df)
+    try:
+        payload = compute_prices(n, source, from_, to_, result_df=_result_df)
+    except Exception:  # the service logged it; the route keeps its 204
+        return _not_solved()
     return _not_solved() if payload is None else payload
 
 
@@ -912,7 +918,10 @@ def get_curtailment(
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
         return _not_solved()
-    payload = compute_curtailment(n, from_, to_)
+    try:
+        payload = compute_curtailment(n, from_, to_)
+    except Exception:  # the service logged it; the route keeps its 204
+        return _not_solved()
     return _not_solved() if payload is None else payload
 
 

@@ -212,6 +212,8 @@ ROOTED = (
     "services/library/defaults_pack/versions/2026-10-25/manifest.json",
     # Money-year 01: the seed tariffs converted to 2025 money.
     "services/library/defaults_pack/versions/2026-10-26/manifest.json",
+    # AS-02: the supercapacitor and high-C-rate battery (split power/energy storage).
+    "services/library/defaults_pack/versions/2026-10-30/manifest.json",
     # The shipped common Library items (GS-EU P2d): `common.COMMON_DIR` = the module's
     # sibling `common_items/`; one probe per shipped kind.
     "services/library/common_items/tariff/nl-tennet-2026-hs.json",

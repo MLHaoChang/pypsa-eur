@@ -503,6 +503,28 @@ def _network_input_fingerprint(ctx, *, exact=False):
         for name in sorted(component.dynamic):
             if name in defaults.index and "Input" in str(defaults.at[name, "status"]):
                 parts.append(encode(component.dynamic[name]))
+    # AS-02: a split storage's custom Store columns (hours, C-rate) change the
+    # LP. Appended only when a Store carries them, so the fingerprint of a
+    # network without one stays byte-identical.
+    from services.solver.split_storage import split_storage_tags
+    tags = split_storage_tags(n)
+    if tags is not None:
+        parts.append("split-storage/1")
+        parts.append(_exact_frame_json(tags) if exact else tags.to_json())
+    # AS-03: the envelope-floor flags and run-hour caps, likewise only when present.
+    from services.solver.envelope_floors import GENERATOR_COLUMNS, STORE_COLUMNS
+    for frame, cols in ((n.stores, STORE_COLUMNS), (n.generators, GENERATOR_COLUMNS)):
+        present = [c for c in cols if c in frame.columns]
+        if present:
+            parts.append("envelope-floors/1")
+            parts.append(_exact_frame_json(frame[present]) if exact else frame[present].to_json())
+    # AS-05: the PCS/STATCOM tags and their costs change the LP rows and the
+    # objective. Appended only when a Store or Link carries one.
+    from services.solver.pcs_statcom import pcs_statcom_tags
+    for label, tags in zip(("pcs-statcom-stores/1", "pcs-statcom-links/1"), pcs_statcom_tags(n)):
+        if tags is not None:
+            parts.append(label)
+            parts.append(_exact_frame_json(tags) if exact else tags.to_json())
     parts.extend(str(key) + (encode(series.to_frame()) if exact else series.to_json(date_format="iso"))
                  for key, series in sorted(ctx.user_ts.items()))
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()

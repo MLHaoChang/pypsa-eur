@@ -105,6 +105,7 @@ CODE_SECTION: Final[dict[str, str]] = {
     "inventory_cadence_needs_year": "assets",
     "storage_max_hours_invalid": "assets",
     "storage_soc_oob": "assets",
+    "split_storage_sizes": "assets",
     "uc_start_cost_unweighted": "assets",
     # Per-class value checks (`{class}_…` in validation_service, and the
     # non-finite input categories): filed by the issue's component class.

@@ -198,7 +198,7 @@ export default function FmeaTab() {
           </p>
         ) : (
         <p className="text-[11px] text-muted mt-1">
-          Failure modes ranked by €/yr criticality — engine-computed rows
+          Failure modes ranked by criticality (€ per year): engine-computed rows
           regenerate on every view; expert rows and mitigability notes persist
           with the project and survive re-solves. No number here is comparable
           to a statutory reliability standard (hover a badge for each row's

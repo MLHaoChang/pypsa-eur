@@ -134,8 +134,12 @@ def overview_figures(n, cfg, lost_load: dict | None, result_df) -> OverviewFigur
     from services.results.economics_by_carrier import compute_economics_by_carrier
 
     econ = compute_economics_by_carrier(n, cfg, lost_load, result_df=result_df)
-    cb = compute_cost_breakdown(n, cfg) or {}
     notes: list[str] = []
+    try:
+        cb = compute_cost_breakdown(n, cfg) or {}
+    except Exception:  # noqa: BLE001 — the Overview stays; the cost lines say why they are empty
+        cb = {}
+        notes.append("The cost breakdown failed for this run; its rows are not_established.")
     by_carrier = econ.get("by_carrier") or {}
     if "error" in econ or not econ.get("available"):
         notes.append("The per-carrier economics could not be computed for this run; "
