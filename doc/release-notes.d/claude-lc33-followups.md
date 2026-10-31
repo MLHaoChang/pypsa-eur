@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Time-series upload refuses a timezone-aware CSV with a typed `timeseries_timezone_aware` error, and refuses an off-horizon CSV on a multi-period network (`timeseries_outside_horizon`) instead of storing a series that is never applied.

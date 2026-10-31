@@ -215,7 +215,12 @@ VARIANTS: list[dict] = [
              B + 'test_lc06_d03_chronology_edges.py::test_a_repeated_timestamp_is_refused_and_stores_nothing',
              B + 'test_lc06_d03_chronology_edges.py::test_a_missing_snapshot_is_forward_filled_and_named',
              B + 'test_lc06_d03_chronology_edges.py::test_an_off_horizon_csv_is_refused_and_keeps_the_snapshots'),
-    _pending('LC-D03.timezone_aware', 'timezone-aware or DST-offset inputs and MW-versus-pu mapping not tested; the DST case covers zone-free wall clock only'),
+    _covered('LC-D03.timezone_aware', 'CSV timestamps with a UTC offset (+01:00, +00:00 or mixed offsets) refused as timeseries_timezone_aware, snapshots and series unchanged; '
+             'an off-horizon CSV on a two-period network refused as timeseries_outside_horizon (broadcast and per-period), nothing stored; '
+             'MW-versus-pu mapping not covered',
+             'upload_timeseries',
+             B + 'test_lc06_d03_chronology_edges.py::test_a_timezone_aware_csv_is_refused_typed_and_stores_nothing',
+             B + 'test_lc06_d03_chronology_edges.py::test_an_off_horizon_csv_on_a_period_network_is_refused_and_stores_nothing'),
     _covered('LC-D04.bound_build', 'extendable G2 built to p_nom_max: optimal_capacity 3 = capacity_change 3; fixed G: 20 MW, change 0',
              '',
              B + 'test_capacity_cycles_assurance.py::test_an_extendable_generator_built_to_its_bound',
