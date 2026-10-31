@@ -59,7 +59,7 @@ OWNERS: dict[str, str] = {
     'LC-D13.stale_source_unflagged_readers': 'LC-37 (.scratch/live-copilot/issues/37-adequacy-readers-stale-source.md, done)',
     'LC-D13.stale_source_http_readers': 'LC-39 (.scratch/live-copilot/issues/39-adequacy-http-readers-stale-source.md, done)',
     'LC-D13.stale_source_panels': 'LC-41 (.scratch/live-copilot/issues/41-adequacy-panels-stale-banner.md, done)',
-    'LC-D13.stale_source_solver_config': 'LC-40 (.scratch/live-copilot/issues/40-stale-source-solver-config.md, needs-triage)',
+    'LC-D13.stale_source_solver_config': 'LC-40 (.scratch/live-copilot/issues/40-stale-source-solver-config.md, done)',
 }
 
 

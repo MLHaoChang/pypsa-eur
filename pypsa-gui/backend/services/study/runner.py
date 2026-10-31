@@ -77,6 +77,7 @@ from models.study import (
     FindingsHashes,
     OptionResult,
 )
+from services import dirty_state
 from services.pypsa_service import PyPSAService
 from services.study import forks as study_forks
 from services.study import library as study_library
@@ -457,6 +458,9 @@ def start_study_run(study_id: str, fidelity: Fidelity | str, *, base_row,
         # U2 WP6: the minted export series the forks are bound to and the
         # compiled commercial config's digest (set by the worker).
         "export_series": None, "commercial_digest": None,
+        # LC-40: the base project's edit counter, read BEFORE the study starts
+        # (chat_tools' rule): an edit landing later can only over-report.
+        "network_revision": dirty_state.revision(ctx),
         "thread": None, "stop_event": stop_event,
     }
     worker_args = dict(study_id=study_id, base_row_id=base_uuid,
@@ -509,7 +513,8 @@ def start_study_run(study_id: str, fidelity: Fidelity | str, *, base_row,
                     _on_ctx(ctx, campaign.end, "the worker did not start")
                 _release_base(key, registered)
                 raise
-            record["campaign"] = _on_ctx(ctx, campaign.record, STUDY_KEY, solves)
+            record["campaign"] = _on_ctx(ctx, campaign.record, STUDY_KEY, solves,
+                                       network_revision=record["network_revision"])
     finally:
         lock.release()
     return {"status": "running", "study_id": study_id, "fidelity": fidelity.value,
