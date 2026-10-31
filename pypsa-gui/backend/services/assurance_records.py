@@ -726,6 +726,14 @@ def _series_source(ctx, args):
     source, series = resolve_series(
         ctx.network, args["component"], args["attribute"], args["name"]
     )
+    if series is not None and "start" in args:
+        # Only the window is read and hashed; a window past the last row
+        # is no series (the route refuses it, nothing is clipped).
+        series = (
+            series.iloc[args["start"] : args["end"]]
+            if args["end"] <= len(series)
+            else None
+        )
     hashed = hashlib.sha256(
         json.dumps(
             {"project_id": ctx.project_uuid, "args": args, "source": source},
@@ -818,6 +826,11 @@ def _series_facts(window, labels, periods, steps):
     if window["values_sha256"] != expected["values_sha256"]:
         unavailable("evidence_unavailable")
     return [step for step, ok in zip(steps, certified) if ok]
+
+
+def valid_series_window(start, end):
+    """Whether start/end are exact row offsets: ints (never bools), 0 <= start < end."""
+    return all(type(v) is int for v in (start, end)) and 0 <= start < end
 
 
 def active_series_source(args):
@@ -1150,6 +1163,17 @@ def capture_series(owner, args, result, digest_before):
             },
             "expires_at": time.time() + RETENTION_SECONDS,
         }
+        if "start" in args:
+            record["scope"]["window"] = {
+                "start": args["start"],
+                "end": args["end"],
+                "first": labels[0],
+                "last": labels[-1],
+            }
+            record["validity"]["warnings"].append(
+                f"Rows {args['start']} to {args['end']} (exclusive), "
+                f"{labels[0]} to {labels[-1]}, of the series; not the whole series."
+            )
         save(record, record["evidence_id"])
     return _with_series_facts(record, facts)
 
@@ -1164,11 +1188,14 @@ def _with_series_facts(record, facts):
 
 def series_args(scope):
     """The exact get_timeseries args a series evidence scope was captured for."""
-    return {
+    args = {
         "component": scope["component"],
         "name": scope["entity_id"],
         "attribute": scope["attribute"],
     }
+    if "window" in scope:
+        args["start"], args["end"] = scope["window"]["start"], scope["window"]["end"]
+    return args
 
 
 def _expected_adapter_version(record):

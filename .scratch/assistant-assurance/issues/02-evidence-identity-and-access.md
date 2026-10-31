@@ -320,3 +320,15 @@ Not covered: per-family unit maps for the retained results sections; runs from `
 6. ChatPanel ends the turn as for `assurance_publication_failed`: no spinner, no retry. Met: `ChatPanel.assuranceAcceptance.test.tsx` "a commit refusal %s ends the turn with its banner and no retry", for both kinds.
 7. The WARNING names no project or user id. Met: `test_revocation_logs_carry_no_values` pins the one WARNING line's exact text and that it has no traceback.
 8. The UX copy goes to UX (5) before merge. UX (5) asked that the message not repeat the title; `assert_nothing_published` pins both messages.
+
+### 2026-10-31 — AS02-WINDOW-1: windowed `get_timeseries` args (PR 2)
+
+Owner chose to build (AS02-WINDOW-1). GK B (15) plan GO conditions, and how each is met:
+
+1. `outsourced.md` read; #851's catalogue hunk is the same `get_timeseries` entry. Met: the edit is confined to that entry (description + `start`/`end` properties).
+2. Route validates: `start`/`end` together, `0 <= start < end`, else 422; `end` past the last row is refused (422), never clipped. Met: `test_route_returns_only_the_window_and_refuses_bad_ones`; `assistant_route_parity.py --check`, `assistant_inventory.py --check`, `test_route_chat_disposition`, `test_project_route_acl_policy`, `test_write_surface_lock_policy` pass.
+3. Unwindowed call byte-equal to master: window keys are added only when given. Met: `test_unwindowed_source_digest_and_series_fact_are_pinned` (green on master and on the PR tree), `test_unwindowed_record_is_unchanged`.
+4. The fact, answer and shown result name the window with timestamps (`scope.window` {start, end, first, last}, a validity warning, "rows 1 to 3 (<first> to <last>), not the whole series"). Met: `test_windowed_step_certifies_and_names_the_window`.
+5. Guard mutants (bool, negative, start >= end, extra arg, half a window). Met: `test_guard_refuses_malformed_windows_before_the_handler` and `test_window_validity_is_exact`; the catalogue schema turns away bool before the guard, so `valid_series_window` is also pinned directly. Listed mutants (ignore start, end off by one, window not in the lookup args/digest) each fail named tests. An oversize window reaches the existing `series_too_long_to_check` path.
+6. No new error kind, so no `tool-error-kinds.d` fragment.
+

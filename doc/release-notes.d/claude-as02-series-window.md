@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): `get_timeseries` accepts optional `start`/`end` row offsets, so a window of a long series (for example a year of 15-minute data) can be read and checked; the checked answer names the window.
