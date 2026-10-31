@@ -57,7 +57,7 @@ OWNERS: dict[str, str] = {
     **{f'LC-D13.{v}': LC36 for v in ('multi_energy_heat', 'mc_certify_ens_plan', 'unsupported_scope',
                                      'study_swap', 'stale_source', 'incomplete_campaign')},
     'LC-D13.stale_source_unflagged_readers': 'LC-37 (.scratch/live-copilot/issues/37-adequacy-readers-stale-source.md, done)',
-    'LC-D13.stale_source_http_readers': 'LC-39 (.scratch/live-copilot/issues/39-adequacy-http-readers-stale-source.md, needs-triage)',
+    'LC-D13.stale_source_http_readers': 'LC-39 (.scratch/live-copilot/issues/39-adequacy-http-readers-stale-source.md, done)',
     'LC-D13.stale_source_solver_config': 'LC-40 (.scratch/live-copilot/issues/40-stale-source-solver-config.md, needs-triage)',
 }
 
