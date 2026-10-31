@@ -9,7 +9,7 @@ never sleeps. Everything expensive is behind the callables it is handed:
 
 * ``solve(state) -> result``: one capacity-expansion solve under ``state["cuts"]`` with the library assets in
   ``state["frozen"]`` fixed. ``result`` is ``{"status", "condition", "cost_eur", "sizes"}``; ``sizes`` maps an
-  asset to its solved capacity. A solve failure arrives as a status, never as an exception.
+  asset to its solved capacity; an optional ``info`` dict (snapshots solved, …) is copied onto the row. A solve failure arrives as a status, never as an exception.
 * ``forward(result, state) -> checks``: the forward pass on the fixed capacities. Each check is
   ``{"name", "ok", "lever", "cut", ...}``:
 
@@ -210,7 +210,8 @@ def run_sizing_loop(solve, forward, *, max_rounds: int = MAX_ROUNDS, freeze_afte
         checks = forward(result, state)
         row.update(status=result["status"], condition=result.get("condition", "optimal"),
                    cost_eur=float(result["cost_eur"]), sizes=dict(result.get("sizes") or {}),
-                   forward_s=time.perf_counter() - t, **_evaluate(result, checks))
+                   forward_s=time.perf_counter() - t, info=dict(result.get("info") or {}),
+                   **_evaluate(result, checks))
         prev = rounds[-1] if rounds else None
         rounds.append(row)
         # The LP cost alone: a filter cost may fall for its own reasons.
@@ -273,7 +274,8 @@ def run_sizing_loop(solve, forward, *, max_rounds: int = MAX_ROUNDS, freeze_afte
     checks = forward(result, state)
     row.update(status=result["status"], condition=result.get("condition", "optimal"),
                cost_eur=float(result["cost_eur"]), sizes=dict(result.get("sizes") or {}),
-               forward_s=time.perf_counter() - t, **_evaluate(result, checks))
+               forward_s=time.perf_counter() - t, info=dict(result.get("info") or {}),
+               **_evaluate(result, checks))
     if on_iteration is not None:
         on_iteration(row)
     if row["unresolved"]:

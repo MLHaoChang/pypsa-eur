@@ -3,7 +3,7 @@
 
 # AS-06 — Sizing loop runner
 
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: 03, 04, 05
 Model: Opus
@@ -17,12 +17,12 @@ Add a `*_loop_runner` in the `ADQ/coupling.py` pattern: solve, forward pass on f
 
 ## Acceptance
 
-- [ ] Tests first: cost is non-decreasing across rounds; cuts accumulate.
-- [ ] The weak-flat intent D prototype case passes in 2 rounds (note cuts needed 9).
-- [ ] A synthetic run with cost moving < 0.02 % per round while Pst is 6x over returns "not converged".
-- [ ] A check with no lever (SCR set by grid alone) stops with "unresolved, needs grid reinforcement or EMT study".
-- [ ] Transformer rounds up and is frozen after round 2; it cannot flip sizes.
-- [ ] Full-year uses a tsam-reduced year for inner rounds and a full-year final solve; run time recorded.
+- [x] Tests first: cost is non-decreasing across rounds; cuts accumulate.
+- [x] The weak-flat intent D prototype case passes in 2 rounds (note cuts needed 9).
+- [x] A synthetic run with cost moving < 0.02 % per round while Pst is 6x over returns "not converged".
+- [x] A check with no lever (SCR set by grid alone) stops with "unresolved, needs grid reinforcement or EMT study".
+- [x] Transformer rounds up and is frozen after round 2; it cannot flip sizes.
+- [x] Full-year uses a tsam-reduced year for inner rounds and a full-year final solve; run time recorded.
 
 ## PRs
 
