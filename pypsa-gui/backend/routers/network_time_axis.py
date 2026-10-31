@@ -1345,11 +1345,12 @@ async def upload_timeseries(
     # without guessing the zone, so it is refused typed rather than surfacing
     # as a misleading off-horizon error.
     csv_ts = df.index.get_level_values(-1)
-    if getattr(csv_ts, "tz", None) is not None or not isinstance(csv_ts, pd.DatetimeIndex):
+    offset_strings = csv_ts.dtype == object and csv_ts.astype(str).str.contains(
+        r"(?:[+-]\d{2}:?\d{2}|Z)$", regex=True).any()
+    if getattr(csv_ts, "tz", None) is not None or offset_strings:
         raise HTTPException(422, {
             "error_kind": "timeseries_timezone_aware",
-            "message": "The CSV's timestamps carry a UTC offset or are not plain "
-                       "timestamps. Snapshots are zone-free wall clock: convert "
+            "message": "The CSV's timestamps carry a UTC offset. Snapshots are zone-free wall clock: convert "
                        "the timestamps to local wall time without an offset and "
                        "upload again. Nothing was stored.",
         })

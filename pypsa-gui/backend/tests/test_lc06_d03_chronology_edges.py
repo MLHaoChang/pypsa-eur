@@ -200,3 +200,10 @@ def test_an_off_horizon_csv_on_a_period_network_is_refused_and_stores_nothing(tw
     assert exc.value.detail["error_kind"] == "timeseries_outside_horizon"
     assert list(PyPSAService.get_network().snapshots) == snaps
     assert ("loads", "p_set", "L1") not in _user_ts
+
+
+def test_an_integer_indexed_csv_on_a_range_snapshot_network_is_not_called_timezone_aware(alpha):
+    n = PyPSAService.get_network()
+    n.set_snapshots(pd.RangeIndex(4))
+    result = chat_tools.upload_timeseries("loads", "L1", "p_set", "snapshot,L1\n0,1\n1,2\n2,3\n3,4\n")
+    assert result["rows"] == 4
