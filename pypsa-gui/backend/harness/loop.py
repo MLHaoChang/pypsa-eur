@@ -999,6 +999,12 @@ _ADMISSION_ERRORS: dict[str, dict[str, str]] = {
 }
 
 
+def _refuse_user_input(message, attachment_file_ids, strict_assurance, source_gap_ref, reason):
+    """A harness-written turn (continuation, plan continue, envelope decision) carries no user input."""
+    if message or attachment_file_ids or strict_assurance or source_gap_ref is not None:
+        raise ValueError(reason)
+
+
 def run_turn(
     session: ChatSession,
     message: str,
@@ -1209,8 +1215,7 @@ def run_turn(
             # once per job. It approves nothing.
             from harness import continuation
             try:
-                if message or attachment_file_ids or strict_assurance or source_gap_ref is not None:
-                    raise ValueError("a continuation is not a user message")
+                _refuse_user_input(message, attachment_file_ids, strict_assurance, source_gap_ref, "a continuation is not a user message")
                 message = continuation.claim(session, continuation_job_id)
             except (HTTPException, ValueError, OSError):
                 yield "error", {"error_kind": "continuation_unavailable",
@@ -1222,8 +1227,7 @@ def run_turn(
             # The harness writes the message; it approves nothing.
             from services import assistant_tasks as _plans
             try:
-                if message or attachment_file_ids or strict_assurance or source_gap_ref is not None:
-                    raise ValueError("a plan continue is not a user message")
+                _refuse_user_input(message, attachment_file_ids, strict_assurance, source_gap_ref, "a plan continue is not a user message")
                 message = _plans.continue_at_card(session, continue_task_id)
             except (HTTPException, ValueError, OSError):
                 yield "error", {"error_kind": "plan_continue_unavailable",
@@ -1236,8 +1240,7 @@ def run_turn(
             # harness writes the message; no tool call reaches this.
             from services import run_envelope
             try:
-                if message or attachment_file_ids or strict_assurance or source_gap_ref is not None:
-                    raise ValueError("an envelope decision is not a user message")
+                _refuse_user_input(message, attachment_file_ids, strict_assurance, source_gap_ref, "an envelope decision is not a user message")
                 message = run_envelope.decide(session, **envelope_decision)
             except HTTPException as exc:
                 detail = exc.detail if isinstance(exc.detail, dict) else {}

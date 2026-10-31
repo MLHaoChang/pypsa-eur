@@ -138,8 +138,7 @@ SERIES_DRAFT = json.dumps(
 
 MESSAGES = {
     # The banner title already says access is gone (UX (5)), so the message doesn't repeat it.
-    "assurance_access_revoked":
-        "No answer was published. If your access comes back, open the project again from Projects.",
+    "assurance_access_revoked": "No answer was published. If your access comes back, open the project again from Projects.",
     "assurance_project_deleted": "No answer was published. Open another project from Projects.",
     "assurance_publication_failed": "The checked answer could not be saved. No answer was published.",
 }
@@ -333,7 +332,11 @@ def test_revocation_logs_carry_no_values(
     response = harness.request(RevokingProvider(turns, revoke[kind]))
     assert not any(e == "answer_approved" for e, _ in parse_sse(response.text))
     # REVOKE-KIND: an expected refusal, logged once as a warning with no ids.
-    failure = [r for r in caplog.records if r.name == "pypsa_gui.chat" and r.levelno >= logging.WARNING]
+    failure = [
+        r
+        for r in caplog.records
+        if r.name == "pypsa_gui.chat" and r.levelno >= logging.WARNING
+    ]
     assert [(r.levelname, r.getMessage()) for r in failure] == [
         ("WARNING", "checked answer withdrawn: project access was revoked")
     ]
@@ -341,8 +344,14 @@ def test_revocation_logs_carry_no_values(
     formatter = logging.Formatter()
     for record in caplog.records:
         logged = formatter.format(record)
-        for value in ("5 MW", "5.0", "p_set", draft,
-                      str(seeded_identity["user_id"]), str(seeded_identity["org_id"])):
+        for value in (
+            "5 MW",
+            "5.0",
+            "p_set",
+            draft,
+            str(seeded_identity["user_id"]),
+            str(seeded_identity["org_id"]),
+        ):
             assert value not in logged, (value, record.name)
 
 
@@ -382,13 +391,14 @@ def in_commit_guard(monkeypatch, act):
     monkeypatch.setattr(durable, "network_guard", acting_guard)
     draft = observed_draft()
     return RevokingProvider(
-        [get_component(), text_turn(draft), text_turn(draft)], lambda: armed.append(True)
+        [get_component(), text_turn(draft), text_turn(draft)],
+        lambda: armed.append(True),
     )
 
 
 def resolve_refusing(status):
     def resolve(db, user, project_id, **kwargs):
-        raise HTTPException(status, "refused")
+        raise HTTPException(status, "Project not found")
 
     return resolve
 
@@ -401,10 +411,22 @@ def test_other_project_refusals_in_commit_stay_publication_failures(
     caplog.set_level(logging.DEBUG)
     owner = str(seeded_identity["user_id"])
     before = answer_records(owner)
-    response = harness.request(in_commit_guard(monkeypatch, lambda: monkeypatch.setattr(
-        records.project_registry, "resolve_project", resolve_refusing(status))))
-    assert_nothing_published(parse_sse(response.text), owner, before, "assurance_publication_failed")
-    failure = [r for r in caplog.records if "checked answer could not be committed" in r.message]
+    response = harness.request(
+        in_commit_guard(
+            monkeypatch,
+            lambda: monkeypatch.setattr(
+                records.project_registry, "resolve_project", resolve_refusing(status)
+            ),
+        )
+    )
+    assert_nothing_published(
+        parse_sse(response.text), owner, before, "assurance_publication_failed"
+    )
+    failure = [
+        r
+        for r in caplog.records
+        if "checked answer could not be committed" in r.message
+    ]
     assert len(failure) == 1 and failure[0].levelname == "ERROR"
 
 
@@ -419,9 +441,18 @@ def test_unavailable_evidence_in_commit_stays_a_publication_failure(
         records.unavailable("evidence_unavailable")
 
     response = harness.request(
-        in_commit_guard(monkeypatch, lambda: monkeypatch.setattr(records, "evidence", gone)))
-    assert_nothing_published(parse_sse(response.text), owner, before, "assurance_publication_failed")
-    failure = [r for r in caplog.records if "checked answer could not be committed" in r.message]
+        in_commit_guard(
+            monkeypatch, lambda: monkeypatch.setattr(records, "evidence", gone)
+        )
+    )
+    assert_nothing_published(
+        parse_sse(response.text), owner, before, "assurance_publication_failed"
+    )
+    failure = [
+        r
+        for r in caplog.records
+        if "checked answer could not be committed" in r.message
+    ]
     assert len(failure) == 1 and failure[0].levelname == "ERROR"
 
 
@@ -436,8 +467,12 @@ def test_revocation_seen_by_the_evidence_recheck_in_commit_is_typed(
 
 
 @pytest.mark.parametrize("status", [401, 409, 500])
-def test_authorize_passes_other_project_refusals_through(seeded_identity, monkeypatch, status):
-    monkeypatch.setattr(records.project_registry, "resolve_project", resolve_refusing(status))
+def test_authorize_passes_other_project_refusals_through(
+    seeded_identity, monkeypatch, status
+):
+    monkeypatch.setattr(
+        records.project_registry, "resolve_project", resolve_refusing(status)
+    )
     with pytest.raises(HTTPException) as refused:
         records.authorize(str(seeded_identity["user_id"]), "Demo")
     assert refused.value.status_code == status
@@ -446,19 +481,24 @@ def test_authorize_passes_other_project_refusals_through(seeded_identity, monkey
 
 @pytest.mark.parametrize("status", [403, 404])
 def test_authorize_marks_project_access_refusals(seeded_identity, monkeypatch, status):
-    def resolve(db, user, project_id):
-        raise HTTPException(status, "Project not found")
-
-    monkeypatch.setattr(records.project_registry, "resolve_project", resolve)
+    monkeypatch.setattr(
+        records.project_registry, "resolve_project", resolve_refusing(status)
+    )
     with pytest.raises(records.AccessRevoked) as refused:
         records.authorize(str(seeded_identity["user_id"]), "Demo")
-    assert (refused.value.status_code, refused.value.detail) == (status, "Project not found")
+    assert (refused.value.status_code, refused.value.detail) == (
+        status,
+        "Project not found",
+    )
 
 
 def test_authorize_marks_an_inactive_account():
     with pytest.raises(records.AccessRevoked) as refused:
         records.authorize(str(uuid.uuid4()))
-    assert (refused.value.status_code, refused.value.detail) == (401, "Authentication required")
+    assert (refused.value.status_code, refused.value.detail) == (
+        401,
+        "Authentication required",
+    )
 
 
 def test_deleted_project_in_commit_is_typed_as_deleted(
@@ -468,25 +508,32 @@ def test_deleted_project_in_commit_is_typed_as_deleted(
     before = answer_records(owner)
 
     def deleted():
-        monkeypatch.setattr(records.project_registry, "resolve_project", resolve_refusing(404))
+        monkeypatch.setattr(
+            records.project_registry, "resolve_project", resolve_refusing(404)
+        )
         monkeypatch.setattr(records, "_project_deleted", lambda db, project_id: True)
 
     response = harness.request(in_commit_guard(monkeypatch, deleted))
     assert_nothing_published(
-        parse_sse(response.text), owner, before, "assurance_project_deleted")
+        parse_sse(response.text), owner, before, "assurance_project_deleted"
+    )
 
 
 def test_authorize_reports_a_missing_project_row_as_deleted(seeded_identity):
     with pytest.raises(records.ProjectDeleted) as refused:
         records.authorize(str(seeded_identity["user_id"]), str(uuid.uuid4()))
-    assert (refused.value.status_code, refused.value.detail) == (404, "Project not found")
+    assert (refused.value.status_code, refused.value.detail) == (
+        404,
+        "Project not found",
+    )
 
 
-def test_authorize_keeps_a_refused_existing_project_as_revoked(seeded_identity, monkeypatch):
-    def resolve(db, user, project_id):
-        raise HTTPException(404, "Project not found")
-
-    monkeypatch.setattr(records.project_registry, "resolve_project", resolve)
+def test_authorize_keeps_a_refused_existing_project_as_revoked(
+    seeded_identity, monkeypatch
+):
+    monkeypatch.setattr(
+        records.project_registry, "resolve_project", resolve_refusing(404)
+    )
     monkeypatch.setattr(records, "_project_deleted", lambda db, project_id: False)
     with pytest.raises(records.AccessRevoked) as refused:
         records.authorize(str(seeded_identity["user_id"]), str(uuid.uuid4()))
