@@ -294,3 +294,28 @@ def test_the_latency_note_carries_the_basis_of_the_assumed_latency():
     assert "grid forming" in _row(_sheet(), "latency.fast")["note"]
     assert "grid following" in _row(_sheet([_tier(control="gfl_pq")]), "latency.fast")["note"]
     assert "given" in _row(_sheet([_tier(latency_s=0.1)]), "latency.fast")["note"]
+
+
+# ── the shared store latency (AS-13) ─────────────────────────────────────────
+
+
+def test_the_sheet_and_the_tier_split_read_one_latency_for_a_store_with_no_control_column():
+    from services.adequacy import spectrum as S
+
+    n = _solved()
+    assert "control" not in n.stores.columns
+    (t,) = CS.tiers_from_solved(n)
+    assert t["latency_s"] == S.store_latency(n, "fast")[0] == S.tier_split(n, 2.0)["fast"]["latency_s"]
+    assert t["latency_basis"] == S.store_latency(n, "fast")[1]
+    assert "assumed for high_c_bess" in _row(CS.sheet_from_solved(n, PROTOTYPE, RAMP), "latency.fast")["note"]
+
+
+def test_a_given_tier_latency_is_read_before_the_shared_one():
+    assert "given" in _row(_sheet([_tier(latency_s=0.1, latency_basis="given")]), "latency.fast")["note"]
+
+
+def test_a_trace_sourced_oscillation_sets_the_latency_band_at_the_traces_f_c():
+    osc = {"amplitude_mw": 10.0, "period_s": 2.0, "source": "trace", "f_c_hz": 5.0}
+    env = {"phases": [{**PROTOTYPE["phases"][0], "oscillation": osc}]}
+    sheet = CS.build_sheet(envelope=env, ramp_mw_per_min=RAMP, tiers=[_tier()], gfm=_recommendation())
+    assert sheet["latency_limit_s"] == pytest.approx(CS.band_limit_s(5.0))
