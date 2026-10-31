@@ -93,6 +93,17 @@ def _compute_dispatch_summary(n, periods, is_multi, has_solve, *, cfg=None) -> D
                 for p, v in _per_period_groupby(opex_t, sns, is_multi).items():
                     opex_bucket["by_period"][p] = opex_bucket["by_period"].get(p, 0.0) + v / 1e6
 
+    from services.solver.storage_inventory import SPLIT, list_storages, split_ac_flows
+
+    # AS-11: split storages (Store + charger/discharger Links) and their AC
+    # flows, read once for the energy mix and the cycles below.
+    split_flows = []
+    for e in list_storages(n):
+        if e.layout == SPLIT:
+            flows = split_ac_flows(n, e)
+            if flows is not None:
+                split_flows.append((e, flows[0], flows[1]))
+
     # Storage-unit dispatch — only the discharge half goes into the
     # energy-mix; charging is internal cycling, double-counting it would
     # inflate the energy-mix chart. We use `storage_units_t.p` (signed,
@@ -147,6 +158,17 @@ def _compute_dispatch_summary(n, periods, is_multi, has_solve, *, cfg=None) -> D
     # `_walk_dispatch_side`'s non-storage branch in
     # `_compute_economics_summary` so the two Compare tabs agree by
     # construction.
+    # A split storage's discharge half is its discharger's delivery to the AC
+    # bus (-p1), the StorageUnit's clipped `p`; its VOM sits on the
+    # discharger Link and is booked by the Link walk below.
+    for e, _charge, discharge in split_flows:
+        weighted = discharge * weights
+        total_mwh = float(weighted.sum())
+        if not _math.isfinite(total_mwh) or total_mwh < 1e-9:
+            continue
+        _accum_carrier((e.carrier or "storage").lower(), total_mwh,
+                       _per_period_groupby(weighted, sns, is_multi))
+
     lks = n.links
     p0_t = getattr(n.links_t, "p0", None) if hasattr(n, "links_t") else None
     if p0_t is not None and not p0_t.empty:
@@ -173,7 +195,8 @@ def _compute_dispatch_summary(n, periods, is_multi, has_solve, *, cfg=None) -> D
     # Throughput sums |p| over all snapshots × snapshot_weight (NOT ×
     # ipw.years — we want cycles-per-year, not cycles-over-horizon).
     storage_cycles: dict = {}
-    if not sus.empty and p_storage is not None and not p_storage.empty:
+    has_su_flows = not sus.empty and p_storage is not None and not p_storage.empty
+    if has_su_flows or split_flows:
         # Per-snapshot weight WITHOUT the investment_period_weightings.years
         # multiplier — `_build_snapshot_weights` includes years for
         # energy/cost totals, but cycles is intrinsically a per-year metric
@@ -209,7 +232,7 @@ def _compute_dispatch_summary(n, periods, is_multi, has_solve, *, cfg=None) -> D
                 for p in periods:
                     ec_b["by_period"][str(p)] = ec_b["by_period"].get(str(p), 0.0) + energy_cap
             # Throughput: Σ |p| × snapshot_weight.
-            if s not in p_storage.columns:
+            if not has_su_flows or s not in p_storage.columns:
                 continue
             try:
                 series = p_storage[s].reindex(sns).fillna(0.0).abs().astype(float)
@@ -217,6 +240,22 @@ def _compute_dispatch_summary(n, periods, is_multi, has_solve, *, cfg=None) -> D
                 continue
             throughput_t = series * sw_only  # MWh per snapshot
             tp_b = throughput_by_carrier.setdefault(carrier.lower(), {"total": 0.0, "by_period": {}})
+            tp_b["total"] += float(throughput_t.sum())
+            for p, v in _per_period_groupby(throughput_t, sns, is_multi).items():
+                tp_b["by_period"][p] = tp_b["by_period"].get(p, 0.0) + v
+        # A split storage: its Store's energy, and AC-side charge +
+        # discharge as throughput (a StorageUnit's |p|).
+        for e, charge, discharge in split_flows:
+            if not _math.isfinite(e.p_nom_mw) or e.p_nom_mw <= 1e-9 or e.e_nom_mwh <= 1e-9:
+                continue
+            carrier = (e.carrier or "storage").lower()
+            ec_b = energy_cap_by_carrier.setdefault(carrier, {"total": 0.0, "by_period": {}})
+            ec_b["total"] += e.e_nom_mwh
+            if is_multi:
+                for p in periods:
+                    ec_b["by_period"][str(p)] = ec_b["by_period"].get(str(p), 0.0) + e.e_nom_mwh
+            throughput_t = (charge + discharge) * sw_only
+            tp_b = throughput_by_carrier.setdefault(carrier, {"total": 0.0, "by_period": {}})
             tp_b["total"] += float(throughput_t.sum())
             for p, v in _per_period_groupby(throughput_t, sns, is_multi).items():
                 tp_b["by_period"][p] = tp_b["by_period"].get(p, 0.0) + v

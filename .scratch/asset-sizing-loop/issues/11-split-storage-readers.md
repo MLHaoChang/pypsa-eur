@@ -3,7 +3,7 @@
 
 # AS-11 — Readers of split (Store + Link) storage
 
-Status: needs-triage
+Status: in progress (slice 1)
 Type: task
 Blocked by: 02
 Reviewer: GK A (adequacy) + GK B (results)
@@ -35,3 +35,13 @@ table) and `compare/capacity.py` already read Stores.
 ## PRs
 
 ## Comments
+
+- 2026-10-31, slice 1 (owner decision AS11-SLICE-1): one helper `services/solver/storage_inventory.py`
+  (`list_storages`, `split_ac_flows`) lists both layouts; the adequacy Monte Carlo (`mc.snapshot_inputs`, which
+  `mc_zonal.py` via `eh_stages` and `elcc.py` reuse), `compare/storage_cycling.py` and `compare/dispatch.py` read it.
+  Tests: `pypsa-gui/backend/tests/test_split_storage_readers.py`. Acceptance boxes 1–3 are met by slice 1.
+- Slice 2 (open): `services/adequacy/portfolio.py`, `site_peak.py`, `smoothing.py`, `redundancy.py`, `levers.py`
+  (`storage_duration`), `eh_readiness.py`, `activity.py`; the dispatch walk of `compare/economics.py`;
+  `services/results/dispatch_digest.py`, `results/billing.py`, `results/load_shape.py`;
+  `services/asset_results/compute.py` (StorageUnit energy capacity). Also open from slice 1: per-period vintages of
+  a split storage's Store in storage cycling (today the Store's final size in every period).

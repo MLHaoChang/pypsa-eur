@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The adequacy Monte Carlo, ELCC, storage cycling and Compare dispatch now count a split storage (a Store with charger and discharger Links) like the equal StorageUnit, through one shared storage list (`services/solver/storage_inventory.py`).

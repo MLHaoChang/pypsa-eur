@@ -53,15 +53,21 @@ def _compute_storage_cycling_summary(n, periods, is_multi, has_solve) -> Storage
 
     if not has_solve:
         return StorageCyclingComparison()
+    from services.solver.storage_inventory import SPLIT, list_storages, split_ac_flows
+
     sus = n.storage_units
-    if sus.empty:
-        # The network resolved fine; it simply has no StorageUnit component,
+    # AS-11: split storages (Store + charger/discharger Links) cycle too.
+    splits = [e for e in list_storages(n) if e.layout == SPLIT]
+    if sus.empty and not splits:
+        # The network resolved fine; it simply has no storage component,
         # so "zero cycling" is the real, structurally-guaranteed answer, not
         # an absence — see the `available` field's docstring.
         return StorageCyclingComparison(available=True)
     p_storage = getattr(n.storage_units_t, "p", None) if hasattr(n, "storage_units_t") else None
-    if p_storage is None or p_storage.empty:
+    if (p_storage is None or p_storage.empty) and not splits:
         return StorageCyclingComparison()
+    if p_storage is None or p_storage.empty:
+        p_storage = pd.DataFrame(index=n.snapshots)
 
     sns = n.snapshots
     try:
@@ -115,6 +121,8 @@ def _compute_storage_cycling_summary(n, periods, is_multi, has_solve) -> Storage
     tp_by_carrier_total: dict[str, float] = {}     # horizon throughput
     ec_by_carrier_final: dict[str, float] = {}     # final energy_cap (for flat-net fallback)
 
+    # (name, carrier, p_nom MW, |AC flow| series, per-period MWh, final MWh)
+    units: list[tuple] = []
     for s in sus.index:
         try:
             parent_pnom_opt = float(sus.at[s, "p_nom_opt"]) if "p_nom_opt" in sus.columns else float(sus.at[s, "p_nom"])
@@ -133,16 +141,27 @@ def _compute_storage_cycling_summary(n, periods, is_multi, has_solve) -> Storage
         except Exception:
             continue
 
+        # Per-period effective energy_cap for THIS unit.
+        per_period_pnom = _per_period_pnom(s, parent_pnom_opt)
+        per_period_ec: dict[int, float] = {p: pn * max_hours for p, pn in per_period_pnom.items()}
+        final_ec = parent_pnom_opt * max_hours  # for flat-net or all-horizon fallback
+        units.append((str(s), carrier, parent_pnom_opt, series, per_period_ec, final_ec))
+    # A split storage: AC-side charge + discharge (a StorageUnit's |p|), and
+    # its Store's energy. Vintages of the Store are not split per period yet.
+    for e in splits:
+        flows = split_ac_flows(n, e)
+        if flows is None or not _math.isfinite(e.p_nom_mw) or e.p_nom_mw <= 1e-9 or e.e_nom_mwh <= 1e-9:
+            continue
+        per_period_ec = {int(p): e.e_nom_mwh for p in periods} if is_multi and periods else {}
+        units.append((e.name, (e.carrier or "storage").lower(), e.p_nom_mw, flows[0] + flows[1],
+                      per_period_ec, e.e_nom_mwh))
+
+    for s, carrier, parent_pnom_opt, series, per_period_ec, final_ec in units:
         throughput_t = series * sw_only
         tp_total = float(throughput_t.sum())
         if not _math.isfinite(tp_total):
             continue
         tp_pp = _per_period_groupby(throughput_t, sns, is_multi)
-
-        # Per-period effective energy_cap for THIS unit.
-        per_period_pnom = _per_period_pnom(s, parent_pnom_opt)
-        per_period_ec: dict[int, float] = {p: pn * max_hours for p, pn in per_period_pnom.items()}
-        final_ec = parent_pnom_opt * max_hours  # for flat-net or all-horizon fallback
 
         # Per-period cycles using period-specific energy capacity.
         cycles_pp: dict[str, float] = {}
