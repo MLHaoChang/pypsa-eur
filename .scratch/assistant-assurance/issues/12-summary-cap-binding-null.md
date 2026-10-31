@@ -3,7 +3,8 @@
 
 # SummaryTab: a CO₂ cap with null `binding` reads "not binding"
 
-Status: ready-for-agent
+Status: done
+<!-- 2026-10-31: done, commit 2de625412 (CO2 cap with null binding reads not-recorded). -->
 Type: task
 Gated: UX
 

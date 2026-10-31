@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-# AS-13 — Control-settings sheet reads the shared store latency
+# AS-15 — Control-settings sheet reads the shared store latency
 
 Status: ready-for-human
 Type: task
