@@ -3,7 +3,7 @@
 
 # AS-13 — Control-settings sheet reads the shared store latency
 
-Status: needs-triage
+Status: ready-for-human
 Type: task
 Blocked by: AS-07, AS-09
 
@@ -17,8 +17,8 @@ While there: a trace-sourced oscillation (`source: "trace"`, from `spectrum.repl
 
 ## Acceptance
 
-- [ ] Tests first: a split store with no `control` column gets the same latency on the sheet as in AS-09's `tier_split`.
-- [ ] A trace-sourced oscillation's latency check uses the trace's f_c.
+- [x] Tests first: a split store with no `control` column gets the same latency on the sheet as in AS-09's `tier_split`.
+- [x] A trace-sourced oscillation's latency check uses the trace's f_c.
 
 ## PRs
 

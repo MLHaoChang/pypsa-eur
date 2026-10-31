@@ -3,7 +3,7 @@
 
 # LC-39 — The HTTP adequacy readers serve pre-edit numbers with no freshness marker
 
-Status: needs-triage
+Status: done
 Type: bug
 
 Found by LC-37. The manifest row is `LC-D13.stale_source_http_readers` (`_pending`).
@@ -20,9 +20,10 @@ in each panel.
 
 ## Acceptance
 
-- [ ] `GET /api/results/{frontier,mc,margin_loop}` carry `edited_since_study`, False after a
+- [x] `GET /api/results/{frontier,mc,margin_loop}` carry `edited_since_study`, False after a
       run, True after an edit, cleared by a re-run (one HTTP test per route).
-- [ ] Each panel shows the stale state.
-- [ ] `LC-D13.stale_source_http_readers` becomes `_covered`.
+- [ ] Each panel shows the stale state. Moved to LC-41
+      (`41-adequacy-panels-stale-banner.md`).
+- [x] `LC-D13.stale_source_http_readers` becomes `_covered`.
 
 ## Comments
