@@ -494,7 +494,14 @@ def get_vintage_results() -> dict:
     return _h()
 
 
-def get_timeseries(component: str, name: str, attribute: str, period: int | None = None) -> dict:
+def get_timeseries(
+    component: str,
+    name: str,
+    attribute: str,
+    period: int | None = None,
+    start: int | None = None,
+    end: int | None = None,
+) -> dict:
     """
     Returns one time-series (component, name, attribute).
 
@@ -504,9 +511,10 @@ def get_timeseries(component: str, name: str, attribute: str, period: int | None
     frame, so a profile baked into the imported .nc is returned too. `period` is
     accepted for schema compatibility but the handler returns the full
     (multi-period) frame with a parallel `periods` array — filter client-side.
+    `start`/`end` (together) pick snapshot rows [start, end) of that frame.
     """
     from routers.network import get_timeseries as _h
-    return _h(component=component, attribute=attribute, columns=name)
+    return _h(component=component, attribute=attribute, columns=name, start=start, end=end)
 
 
 def list_all_timeseries(*, offset: int = 0, limit: int | None = None) -> dict:

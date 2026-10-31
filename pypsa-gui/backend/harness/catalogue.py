@@ -397,12 +397,16 @@ TOOLS: list[dict[str, Any]] = [
     _t(
         "get_timeseries",
         "One time-series for a (component, name, attribute) triple. Period "
-        "qualifier only used in multi-period networks. Safety: read.",
+        "qualifier only used in multi-period networks. Optional start and end "
+        "(both, snapshot row offsets) return rows [start, end) only; end past "
+        "the last row is refused. Safety: read.",
         {
             "component": {"type": "string"},
             "name": {"type": "string"},
             "attribute": {"type": "string"},
             "period": {"type": "integer"},
+            "start": {"type": "integer", "minimum": 0},
+            "end": {"type": "integer", "minimum": 1},
         },
         ["component", "name", "attribute"],
     ),

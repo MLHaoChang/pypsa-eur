@@ -32,7 +32,7 @@ import math
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from models.schemas import (
     InvestmentPeriods,
     SampleWeeksConfig,
@@ -1139,14 +1139,25 @@ def index_labels(index):
     return idx, periods
 
 @router.get("/timeseries/{component}/{attribute}")
-def get_timeseries(component: str, attribute: str, columns: str | None = None):
+def get_timeseries(
+    component: str,
+    attribute: str,
+    columns: str | None = None,
+    start: int | None = Query(None, ge=0),
+    end: int | None = Query(None, ge=1),
+):
     """
     Return a time-series DataFrame as JSON.
 
     Optional ``columns`` query param: comma-separated list of column names to
     return (e.g. ``?columns=Wind+BE,Solar+BE``). Prefer user-uploaded data
     (from _user_ts) for any requested column that was uploaded by the user.
+
+    Optional ``start``/``end`` (given together): return only snapshot rows
+    ``[start, end)``; an ``end`` past the last row is refused, never clipped.
     """
+    if (start is None) != (end is None) or (start is not None and start >= end):
+        raise HTTPException(422, "start and end must be given together, with start < end")
     n = PyPSAService.get_network()
     ts_store = getattr(n, f"{component}_t", None)
     if ts_store is None:
@@ -1193,6 +1204,10 @@ def get_timeseries(component: str, attribute: str, columns: str | None = None):
         df = df[keep_cols]
     if df.empty or len(df.columns) == 0:
         return {"index": [], "columns": [], "data": []}
+    if start is not None:
+        if end > len(df):
+            raise HTTPException(422, f"end {end} is past the last of {len(df)} rows")
+        df = df.iloc[start:end]
 
     # Vectorised conversion. The previous nested Python loop with per-cell
     # isinstance/math.isfinite calls took 30+ s for tables in the 8760 × 100

@@ -659,8 +659,11 @@ class Turn:
             # Exact args only: `period` is ignored by the handler, and a comma or
             # padding in a name would make its `columns` filter pick other columns.
             name = args.get("name")
+            window = (args.get("start"), args.get("end"))
             if (
-                set(args) != {"component", "name", "attribute"}
+                set(args) - {"start", "end"} != {"component", "name", "attribute"}
+                or ("start" in args) != ("end" in args)
+                or ("start" in args and not records.valid_series_window(*window))
                 or (args.get("component"), args.get("attribute"))
                 not in records.SERIES_METRICS
                 or not isinstance(name, str)
@@ -903,6 +906,7 @@ class Turn:
                 ],
                 "steps": scope["points"],
                 "certified_steps": scope["certified"],
+                **({"window": scope["window"]} if "window" in scope else {}),
                 "_assurance": metadata,
             }
         if scope.get("kind") == "aggregate_load":
@@ -1079,10 +1083,18 @@ class Turn:
             if scope.get("kind") == "series":
                 *period, step = records.unpointer(fact["path"])[1:]
                 when = _label(step) + (f" (period {_label(period[0])})" if period else "")
+                window = scope.get("window")
+                of = (
+                    f"one step of rows {window['start']} to {window['end']} "
+                    f"({_label(window['first'])} to {_label(window['last'])}), "
+                    "not the whole series"
+                    if window
+                    else "one step, not the whole series"
+                )
                 lines.append(
                     f"Configured {scope['component_class']} time series "
                     f"{_label(fact['entity_id'])}: {fact['metric']} at {when} = "
-                    f"{value_text} {fact['unit']} (one step, not the whole series)."
+                    f"{value_text} {fact['unit']} ({of})."
                 )
                 notes.add("series")
                 continue
