@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): `upload_timeseries` now refuses timestamps with a named-zone suffix (e.g. `Europe/Berlin`) as `timeseries_timezone_aware`, and the `timeseries_outside_horizon` error-kind text points to `/snapshots/multi_period` on period networks.

@@ -1362,10 +1362,19 @@ async def upload_timeseries(
     csv_ts = df.index.get_level_values(-1)
     offset_strings = csv_ts.dtype == object and csv_ts.astype(str).str.contains(
         r"(?:[+-]\d{2}:?\d{2}|Z)$", regex=True).any()
-    if getattr(csv_ts, "tz", None) is not None or offset_strings:
+    # pandas cannot parse a named-zone suffix ("2025-01-01 00:00 Europe/Berlin"),
+    # so the index stays strings: strip a trailing zone name and see whether a
+    # real timestamp is left, so "Q1 Peak" style labels are not misread as zones.
+    named_zone = False
+    if csv_ts.dtype == object and not offset_strings:
+        bare = csv_ts.astype(str).str.replace(
+            r"\s+[A-Za-z][A-Za-z_]*(?:/[A-Za-z0-9_+-]+)*$", "", regex=True)
+        named_zone = bool((bare != csv_ts.astype(str)).any()) and bool(
+            pd.to_datetime(bare, errors="coerce").notna().all())
+    if getattr(csv_ts, "tz", None) is not None or offset_strings or named_zone:
         raise HTTPException(422, {
             "error_kind": "timeseries_timezone_aware",
-            "message": "The CSV's timestamps carry a UTC offset. Snapshots are zone-free wall clock: convert "
+            "message": "The CSV's timestamps carry a UTC offset or zone name. Snapshots are zone-free wall clock: convert "
                        "the timestamps to local wall time without an offset and "
                        "upload again. Nothing was stored.",
         })

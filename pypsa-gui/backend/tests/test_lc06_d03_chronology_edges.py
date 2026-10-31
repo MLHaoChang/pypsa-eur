@@ -166,7 +166,8 @@ def test_the_first_upload_to_a_blank_network_adopts_the_csv_range(alpha, install
     "snapshot,L1\n2026-01-01T00:00:00+00:00,9\n2026-01-01T01:00:00+00:00,9\n"
     "2026-01-01T02:00:00+00:00,9\n2026-01-01T03:00:00+00:00,9\n",
     "snapshot,L1\n2026-01-01 00:00+01:00,9\n2026-01-01 01:00+02:00,9\n",
-], ids=["offset", "utc", "mixed_offsets"])
+    "snapshot,L1\n2026-01-01 00:00 Europe/Berlin,9\n2026-01-01 01:00 Europe/Berlin,9\n",
+], ids=["offset", "utc", "mixed_offsets", "named_zone"])
 def test_a_timezone_aware_csv_is_refused_typed_and_stores_nothing(alpha, csv):
     before = _four(alpha)
     snaps = list(PyPSAService.get_network().snapshots)
