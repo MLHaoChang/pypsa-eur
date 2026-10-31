@@ -319,3 +319,20 @@ def test_a_falling_filter_cost_is_not_flagged():
                       _check("pst", False, cut={"pst_rhs_mva": 5.0})],
                      [_check("harmonics", False, lever="filter_cost", filter_cost_eur=10.0), _check("pst", True)]])
     assert run_sizing_loop(script.solve, script.forward)["warnings"] == []
+
+
+def test_a_round_one_convergence_freezes_the_library_size_for_the_full_year_solve():
+    seen = []
+    script = Script([_ok(100.0)], [[_check("transformer", True, library={"trafo": 80.0}), _check("pst", True)]])
+    out = run_sizing_loop(script.solve, script.forward, final_solve=lambda s: seen.append(dict(s["frozen"])) or
+                          _ok(101.0))
+    assert seen == [{"trafo": 80.0}]
+    assert out["status"] == "converged" and out["frozen"] == {"trafo": 80.0}
+    assert out["final"]["frozen"] == {"trafo": 80.0}
+
+
+def test_without_a_full_year_solve_an_unfrozen_library_size_is_flagged_as_not_in_the_cost():
+    script = Script([_ok(100.0)], [[_check("transformer", True, library={"trafo": 80.0}), _check("pst", True)]])
+    out = run_sizing_loop(script.solve, script.forward)
+    assert out["final"]["library_in_cost"] is False
+    assert any("not yet in the cost" in w and "trafo 80" in w for w in out["warnings"])
