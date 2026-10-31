@@ -297,6 +297,7 @@ def test_voll_and_dsr_slacks_leave_the_project_registry_as_found(monkeypatch):
     monkeypatch.setattr(PyPSAService, "mark_transient",
                         classmethod(lambda cls, c, name: (marked.append(name), real_mark(cls, c, name))))
     ctx = PyPSAService._transient_target(ensure=True)
+    PyPSAService.mark_transient("Generator", "project-solve-slack")   # a mark a project solve holds
     _frozen_vintage_store()["sentinel"] = 1.0
 
     def registry():
@@ -308,15 +309,17 @@ def test_voll_and_dsr_slacks_leave_the_project_registry_as_found(monkeypatch):
     real_forward = slr.forward_checks
 
     def forward(result, state, inp):                         # the restores wait until the forward checks are done
-        during.append(registry()[0] != before[0])
+        own = PyPSAService._transient_target(ensure=False)
+        during.append(own is not ctx and bool(own.transient_rows) and registry()[0] == before[0])
         return real_forward(result, state, inp)
 
     monkeypatch.setattr(slr, "forward_checks", forward)
     cfg = _config(voll=10_000.0, dsr_price_eur_per_mwh=500.0, dsr_share_of_load=0.1, dsr_buses=["mv"])
     out = run_sizing(_tiny(), cfg, _inputs())
     assert out["status"] in ("converged", "not_converged"), out["verdict"]
-    assert marked and during and all(during)                 # the slacks were registered during the loop
-    assert registry() == before
+    assert marked and during and all(during)                 # registered on the loop's own context, not the project's
+    assert registry() == before and "project-solve-slack" in before[0]["Generator"]
+    PyPSAService.unmark_transient("Generator", "project-solve-slack")
 
 
 @pytest.mark.parametrize("mode", ["rolling", "myopic"])
@@ -375,6 +378,7 @@ def test_the_clustering_cache_keeps_no_entry_for_the_runner():
 
 
 def test_reduced_rounds_passing_and_a_failing_full_year_is_not_converged():
+    pytest.importorskip("tsam")
     def solve(base, config, inp, state, *, reduce, **kw):
         return slr.solve_once(base, config, inp, state, reduce=reduce, **kw)
 

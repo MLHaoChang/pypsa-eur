@@ -13,7 +13,7 @@ Wires `services.adequacy.sizing_loop.run_sizing_loop` to real solves and the for
   a rolling, myopic or SCLOPF solve (the loop sizes one full-horizon LP), unit commitment and the project's
   solver options, and a missing tsam (the inner rounds then solve, and are labelled, full year). The transforms'
   restores run when the loop ends, after the forward checks and the sheet, so the open project's transient rows
-  are left as found. A stop request lands between rounds and
+  are left as found; the loop marks and clears them on a private `solving_context`, never the project's. A stop request lands between rounds and
   inside a solve: `runtime._AbortWatcher` interrupts a running LP, and the loop ends `aborted`. Inner rounds solve a tsam-reduced year (`services.time_aggregation_service`, the limited-foresight
   clustering, with `SolverConfig.lf_*`); the final solve is the full year, and its forward pass gives the verdict.
 * **forward**: the checks on the solved, fixed capacities. Each is a scalar check with gridspine or the AS
@@ -505,12 +505,18 @@ def run_sizing(network, config, inp: SizingInputs, *, max_rounds: int = sl.MAX_R
     last: dict = {}
     undo: list = []
     vintages = dict(_frozen_vintage_store())
-    try:
-        return _run(base, config, inp, solve, last, undo, max_rounds=max_rounds, freeze_after=freeze_after,
-                    stop_event=stop_event, on_iteration=on_iteration, solver_name=solver_name,
-                    solver_options=solver_options)
-    finally:
-        _restore(undo, vintages)                              # after the forward checks and the sheet
+    from services.project_context import ProjectContext
+    from services.pypsa_service import PyPSAService
+
+    # The transient marks, and the restore's clear of every mark, land on a private context, never the open
+    # project's (a project solve may hold marks there).
+    with PyPSAService.solving_context(ProjectContext(network=base)):
+        try:
+            return _run(base, config, inp, solve, last, undo, max_rounds=max_rounds, freeze_after=freeze_after,
+                        stop_event=stop_event, on_iteration=on_iteration, solver_name=solver_name,
+                        solver_options=solver_options)
+        finally:
+            _restore(undo, vintages)                          # after the forward checks and the sheet
 
 
 def _run(base, config, inp, solve, last, undo, *, max_rounds, freeze_after, stop_event, on_iteration, solver_name,
