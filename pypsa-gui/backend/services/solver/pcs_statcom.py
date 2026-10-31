@@ -185,7 +185,7 @@ def _wrap_with_pcs_statcom(network: "pypsa.Network", user_fn, log_queue=None):
     network._pcs_statcom_lps = lps
 
     def pcs_statcom_fn(n, snapshots):
-        lps.read_previous(n.model)
+        lps.read(n.model)
         if user_fn is not None:
             user_fn(n, snapshots)
         stores, link = _check(n)
@@ -228,15 +228,9 @@ class _SolvedLps:
     def is_last(self, model) -> bool:
         return self._last is not None and self._last() is model
 
-    def read_previous(self, current) -> None:
-        """Fold the LP built last into the record. `current` is the model now being built (or the solved one at
-        persist time); a pending model that is `current` itself is read only at persist time (`final=True`)."""
-        self._read(current, final=False)
-
-    def read_final(self, current) -> None:
-        self._read(current, final=True)
-
-    def _read(self, current, *, final: bool) -> None:
+    def read(self, current, *, final: bool = False) -> None:
+        """Fold the LP built last into the record. `current` is the model now being built, whose own pending
+        entry is never read then; `persist_solution` passes the solved final model with `final=True`."""
         if self._pending is None:
             return
         model, period = self._pending
@@ -347,7 +341,9 @@ def _read_solution(m) -> dict:
 #: "max_over_solves" (rolling horizon or myopic: the largest size over the window or period LPs, AS-14).
 #: "last_solve" is what a network persisted before AS-14 carries: the last LP's sizes only.
 BASIS_KEY = "pcs_statcom_basis"
+HORIZON_BASIS = "horizon"
 MAX_BASIS = "max_over_solves"
+LAST_SOLVE_BASIS = "last_solve"
 #: `n.meta` keys: how many LPs the sizes are the max over; the LPs (1-based) built with no solution and left
 #: out; and, on a network with investment periods, each cost's split {"statcom": [[period, share], ...],
 #: "stores": {name: [[period, share], ...]}} (`_max_over`).
@@ -355,8 +351,8 @@ LPS_KEY = "pcs_statcom_lps"
 SKIPPED_KEY = "pcs_statcom_skipped_lps"
 PERIODS_KEY = "pcs_statcom_periods"
 LAST_SOLVE_NOTE = "PCS/STATCOM sizes and cost are from the last solve only (rolling/myopic)"
-#: A largest size at or below this (MVA or Mvar) is not split over periods.
-_BUILT_TOL = 1e-6
+#: A size at or below this (MVA or Mvar) counts as zero.
+_ZERO_SIZE_TOL = 1e-6
 
 
 def clear_solution(n: "pypsa.Network") -> None:
@@ -374,7 +370,7 @@ def _increments(values: list[tuple[object, float]]) -> list[list]:
     Δ_k = max(0, v_k - max_{j<k} v_j), so the shares sum to 1 and the size is still costed once (GK A condition 3).
     Periods in LP order, repeated ones merged; a largest value of 0 books its (zero) cost in the first period."""
     top = max(v for _, v in values)
-    if top <= _BUILT_TOL:
+    if top <= _ZERO_SIZE_TOL:
         return [[values[0][0], 1.0]]
     out: dict = {}
     running = 0.0
@@ -400,14 +396,14 @@ def _max_over(readings: list[tuple[object, dict]]) -> tuple[dict, dict]:
         for period, share in _increments([(p, sol[key]) for p, sol in readings]):
             statcom[period] = statcom.get(period, 0.0) + share * out[key]
     total = out["q_ss"] + out["q_dyn"]
-    split = {"statcom": ([[p, v / total] for p, v in statcom.items() if v > 0] if total > _BUILT_TOL
+    split = {"statcom": ([[p, v / total] for p, v in statcom.items() if v > 0] if total > _ZERO_SIZE_TOL
                          else [[readings[0][0], 1.0]]),
              "stores": {str(s): _increments([(p, float(sol["s_x"].get(s, 0.0))) for p, sol in readings])
                         for s in stores}}
     return out, split
 
 
-def persist_solution(n: "pypsa.Network", basis: str = "horizon") -> list[str]:
+def persist_solution(n: "pypsa.Network", basis: str = HORIZON_BASIS) -> list[str]:
     """Write the solved S_x (MVA, per tagged store) and Q_ss, Q_dyn (Mvar, on the PQ Link) to the result columns,
     so they outlive `n.model` and survive the project's .nc round-trip (AS-12). Called after a successful solve,
     with `basis` "max_over_solves" for a rolling or myopic one, which persists the largest size over its LPs
@@ -426,12 +422,16 @@ def persist_solution(n: "pypsa.Network", basis: str = "horizon") -> list[str]:
     lps = getattr(n, "_pcs_statcom_lps", None)
     skipped: list[int] = []
     if lps is not None and lps.is_last(m):
-        lps.read_final(m)
+        lps.read(m, final=True)
         readings, skipped = list(lps.solved), list(lps.skipped)
-    else:  # rows built outside this wrap's record (by hand, or by an earlier wrap): this model alone
+    else:
+        readings = []
+    warnings = []
+    if not readings:  # rows built outside this wrap's record (by hand, or by an earlier wrap): this model alone
         readings = [(None, solution(n))]
-    if not readings:
-        readings = [(None, solution(n))]
+        if basis == MAX_BASIS:
+            warnings.append("the PCS/STATCOM sizes of the earlier windows or periods were not recorded; the "
+                            "persisted sizes are the last LP's only")
     if basis != MAX_BASIS:
         readings, skipped = readings[-1:], []
     sol, split = _max_over(readings)
@@ -446,8 +446,8 @@ def persist_solution(n: "pypsa.Network", basis: str = "horizon") -> list[str]:
     if any(p is not None for p, _ in [*split["statcom"], *(x for v in split["stores"].values() for x in v)]):
         n.meta[PERIODS_KEY] = split
     missing = [] if stores is None else [s for s in stores.index if s not in sol["s_x"].index]
-    return [f"store {s}: tagged for a PCS oversize but the solve built no S_x for it; its size is left blank"
-            for s in missing]
+    return warnings + [f"store {s}: tagged for a PCS oversize but the solve built no S_x for it; its size is left "
+                       "blank" for s in missing]
 
 
 def cost_notes(n: "pypsa.Network") -> list[str]:
@@ -462,7 +462,7 @@ def cost_notes(n: "pypsa.Network") -> list[str]:
         sized = frame.reindex(columns=list(cols)).loc[tagged.index].notna().all(axis=1)
         notes += [f"{what} {name}: tagged for PCS/STATCOM but no solved size; its cost is not counted"
                   for name in sized.index[~sized]]
-    if n.meta.get(BASIS_KEY) == "last_solve":
+    if n.meta.get(BASIS_KEY) == LAST_SOLVE_BASIS:
         notes.append(LAST_SOLVE_NOTE)
     if n.meta.get(BASIS_KEY) == MAX_BASIS:
         notes.append(f"PCS/STATCOM sizes are the largest over {n.meta.get(LPS_KEY, '?')} LPs (rolling windows or "

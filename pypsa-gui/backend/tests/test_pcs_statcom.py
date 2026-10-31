@@ -812,6 +812,7 @@ def _pq_rows(cb):
 def test_a_rolling_solve_persists_the_largest_size_over_its_windows_and_costs_it_once(tmp_path):
     """Two one-hour windows; the first needs the larger STATCOM. The last window alone would size it smaller."""
     from services.results.cost_breakdown import compute_cost_breakdown
+    from services.results.objective_decomposition import compute_objective_decomposition
     from services.solver.periodized_costs import fom_horizon_factor
     from services.solver_service import SolverConfig
 
@@ -832,6 +833,9 @@ def test_a_rolling_solve_persists_the_largest_size_over_its_windows_and_costs_it
         notes = cb["pcs_statcom_notes"]
         assert any("largest over 2 LPs" in s and "counted once" in s and "differs from the sum of the window "
                    "objectives" in s for s in notes), notes
+        # The decomposition skips its LP bridge on a rolling run, so the once-counted cost is never reconciled
+        # against the summed window objectives.
+        assert compute_objective_decomposition(net, cb, cfg)["lp_basis_total"] is None
 
 
 def test_a_myopic_solve_persists_the_largest_size_and_books_it_in_the_period_that_needs_it(tmp_path):
@@ -878,7 +882,7 @@ def test_q_ss_and_q_dyn_are_maxed_apart_and_split_by_period():
     assert ps._increments([(None, 2.0), (None, 3.0)]) == [[None, 1.0]]
 
 
-def test_each_lp_is_read_once_and_a_build_with_no_solution_is_named():
+def test_each_lp_is_read_once_and_a_build_with_no_solution_is_named(tmp_path):
     """GK A conditions 1 and 4: a model built and never solved is skipped, by number, never folded in as 0, and
     a call never reads its own model."""
     n = _hand_case()
@@ -886,14 +890,25 @@ def test_each_lp_is_read_once_and_a_build_with_no_solution_is_named():
     n.optimize.create_model()
     fn(n, n.snapshots)                                          # LP 1: built, never solved
     lps = n._pcs_statcom_lps
-    lps.read_previous(n.model)                                  # its own model: not read
+    lps.read(n.model)                                           # its own model: not read
     assert lps.solved == [] and lps.skipped == []
     assert n.optimize(solver_name="highs", extra_functionality=fn)[0] == "ok"     # LP 2 reads LP 1 first
     assert lps.skipped == [1] and lps.solved == []
     ps.persist_solution(n, basis=ps.MAX_BASIS)
     assert lps.solved and n.meta[ps.LPS_KEY] == 1 and n.meta[ps.SKIPPED_KEY] == [1]
     assert any("LP 1" in s and "not in the max" in s for s in ps.cost_notes(n))
+    assert any("LP 1" in s for s in ps.cost_notes(_round_trip(n, tmp_path)))
     assert _persisted(n)[1] == pytest.approx(solution(n)["q_ss"], rel=1e-12)
+
+
+def test_a_max_basis_with_no_record_of_the_earlier_lps_says_so():
+    """A model the wrap's record does not hold (an earlier wrap, rebuilt since) is persisted alone, with a warning."""
+    n = _hand_case()
+    _solve(n)
+    _wrap_with_pcs_statcom(n, None)                            # a new record, which never saw the solved model
+    warnings = ps.persist_solution(n, basis=ps.MAX_BASIS)
+    assert any("last LP's only" in w for w in warnings), warnings
+    assert n.meta[ps.LPS_KEY] == 1
 
 
 def test_a_rolling_solve_with_an_infeasible_window_fails_and_persists_nothing():
