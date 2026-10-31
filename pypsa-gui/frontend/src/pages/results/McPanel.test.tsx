@@ -15,6 +15,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { goal } from '../../test/fixtures/reliabilityGoal'
 import { resultsApi } from '../../api/simulation'
+import { EDITED_TEXT } from '../hubDesign/cards/ResultsCard'
 import {
   McPanel, blockerMessage, ciRange, loleStatement, elccShare, capMessage,
 } from './McPanel'
@@ -815,5 +816,26 @@ describe('McPanel — aborting a run', () => {
     const note = (await screen.findByTestId('elcc-portfolio-truncated')).textContent ?? ''
     expect(note).toMatch(/stopped before every period was priced/i)
     expect(note).toMatch(/never evaluated, not evaluated at zero/i)
+  })
+})
+
+describe('McPanel — edited since the study (LC-41)', () => {
+  afterEach(() => { cleanup() })
+
+  it.each([
+    [true, true],
+    [false, false],
+    [null, false],
+    [undefined, false],
+  ])('edited_since_study %s -> banner shown: %s', async (flag, shown) => {
+    vi.mocked(resultsApi.getMc).mockResolvedValue({ ...DONE, edited_since_study: flag } as never)
+    renderPanel()
+    await screen.findByTestId('mc-panel')
+    await waitFor(() => expect(vi.mocked(resultsApi.getMc)).toHaveBeenCalled())
+    if (shown) {
+      expect((await screen.findByTestId('mc-edited')).textContent).toBe(EDITED_TEXT)
+    } else {
+      expect(screen.queryByTestId('mc-edited')).toBeNull()
+    }
   })
 })

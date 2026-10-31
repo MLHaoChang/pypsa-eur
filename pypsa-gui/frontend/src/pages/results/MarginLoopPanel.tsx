@@ -10,6 +10,7 @@ import { useReliabilityGoal } from '../../hooks/useReliabilityGoal'
 import { hasTarget, NO_GOAL, ReliabilityGoalSummary, ZERO_TARGET } from '../../components/reliabilityGoal/ReliabilityGoalSummary'
 import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
 import { nk } from '../../utils/queryKeys'
+import { EditedSinceStudyBanner } from './EditedSinceStudyBanner'
 import { basisSuffix, type CoptPayload } from './adequacy'
 import { blockerMessage, trim } from './McPanel'
 import {
@@ -231,6 +232,7 @@ export function MarginLoopPanel() {
         <Gauge size={11} /> Reliability-targeted reserve margin loop{' '}
         {open ? '▾' : '▸'}
       </button>
+      <EditedSinceStudyBanner edited={payload?.edited_since_study} testId="margin-loop-edited" />
       {open && (
         <div className="p-3 flex flex-col gap-3">
           <p className="text-[11px] text-muted">

@@ -9,6 +9,7 @@ import { resultsApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
 import { nk } from '../../utils/queryKeys'
+import { EditedSinceStudyBanner } from './EditedSinceStudyBanner'
 import { CHART_GRID, downloadCSV, refLine } from './shared'
 
 // The cost-vs-availability frontier (spec §5.6, Phase 5) — the trade-off the
@@ -38,6 +39,8 @@ export interface FrontierRow {
 }
 export interface FrontierPayload {
   status: string
+  /** LC-39: true after a network edit since the study; null while running or without a captured revision. */
+  edited_since_study?: boolean | null
   points: FrontierRow[]
   error?: string | null
   warning?: string | null
@@ -197,6 +200,7 @@ export function FrontierPanel({ goalMwh }: {
       >
         <Activity size={11} /> Cost vs availability {open ? '▾' : '▸'}
       </button>
+      <EditedSinceStudyBanner edited={payload?.edited_since_study} testId="frontier-edited" />
       {open && (
         <div className="p-3 flex flex-col gap-3">
           <p className="text-[11px] text-muted">

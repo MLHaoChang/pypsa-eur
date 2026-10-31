@@ -358,6 +358,8 @@ export interface ElccPortfolioBlock {
 }
 
 export interface McStatus {
+  /** LC-39: true after a network edit since the study; null while running or without a captured revision. */
+  edited_since_study?: boolean | null
   /** `aborted` since Phase 12e: stopped by `/results/mc/abort`, carrying the
    *  headline metrics and whichever ELCC rows completed first. */
   status: 'running' | 'done' | 'failed' | 'aborted'
@@ -554,6 +556,8 @@ export type MarginLoopStatus = CouplingLoopStatus
 
 export interface MarginLoopPayload {
   study: 'margin_loop'
+  /** LC-39: true after a network edit since the study; null while running or without a captured revision. */
+  edited_since_study?: boolean | null
   /** ★ THE DISCRIMINATOR (spec §3). The solver-config FIELD this study
    *  writes — `restoreSentence` takes its field name from here, so a margin
    *  run can never tell the user to set the energy cap's field. */

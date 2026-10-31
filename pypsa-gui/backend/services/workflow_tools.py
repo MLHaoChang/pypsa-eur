@@ -552,6 +552,12 @@ def _network_input_fingerprint(ctx, *, exact=False):
         if tags is not None:
             parts.append(label)
             parts.append(_exact_frame_json(tags) if exact else tags.to_json())
+    # AS-06: the sizing loop's cut tags, likewise only when a Store or Link carries one.
+    from services.solver.sizing_cuts import sizing_cuts_tags
+    for label, tags in zip(("sizing-cuts-stores/1", "sizing-cuts-links/1"), sizing_cuts_tags(n)):
+        if tags is not None:
+            parts.append(label)
+            parts.append(_exact_frame_json(tags) if exact else tags.to_json())
     parts.extend(str(key) + (encode(series.to_frame()) if exact else series.to_json(date_format="iso"))
                  for key, series in sorted(ctx.user_ts.items()))
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()
