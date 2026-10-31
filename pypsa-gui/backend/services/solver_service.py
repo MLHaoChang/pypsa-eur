@@ -105,6 +105,7 @@ from services.solver.island import solve_uc as _island_solve_uc
 from services.solver.split_storage import _wrap_with_split_storage
 from services.solver.envelope_floors import _wrap_with_envelope_floors
 from services.solver.pcs_statcom import _wrap_with_pcs_statcom
+from services.solver.sizing_cuts import _wrap_with_sizing_cuts
 from services.solver.pcs_statcom import persist_solution as _persist_pcs_statcom
 from services.solver.pcs_statcom import clear_solution as _clear_pcs_statcom
 from services.solver import lost_production as _lost_production
@@ -614,6 +615,7 @@ def run_simulation(
         # Envelope floors, headroom, backup reserve and run-hour caps (AS-03). No-op when unset.
         extra_fn = _wrap_with_envelope_floors(network, extra_fn, config, log_queue=log_queue)
         extra_fn = _wrap_with_pcs_statcom(network, extra_fn, log_queue=log_queue)  # AS-05 PCS/STATCOM rows
+        extra_fn = _wrap_with_sizing_cuts(network, extra_fn, log_queue=log_queue)  # AS-06 sizing-loop cuts
         # Edge Investment Case LP-level commercial terms (peaks, ratchets,
         # tiers, group caps; spec §5.1). After the reserve margin, before the
         # objective scale, which must stay last.
