@@ -9,27 +9,34 @@ import pytest
 
 from services import chat_tools
 from tests.test_lc06_d05_foresight import seam  # noqa: F401
-from tests.test_lc33_d13_margin_elcc import FR_TARGETS, call, frontier_network, wait_for
-from tests.test_lc37_d13_stale_readers import EUR_TOL, edited_since, frontier_oracle, last_point_cost
+from tests.test_lc33_d13_margin_elcc import FR_TARGETS, call, frontier_network, frontier_oracle, wait_for
+from tests.test_lc37_d13_stale_readers import EUR_TOL, edited_since
 from tests.test_workflow_tools import helpers_state  # noqa: F401
+
+
+def costs(out: dict) -> list[float]:
+    return [p['point']['total_system_cost_eur'] for p in out['points']]
+
+
+def check(out: dict, voll: float) -> None:
+    points, knee = frontier_oracle(voll)
+    assert costs(out) == pytest.approx([c for _, c in points], abs=EUR_TOL)
+    assert out['knee'] == knee
 
 
 def test_a_voll_change_flags_the_frontier_and_a_rerun_clears_it(seam):
     seam(frontier_network(), voll=100.0)
     chat_tools.start_campaign('LC-40 stale frontier', 10)
     call('run_frontier_study', targets_permyriad=FR_TARGETS)
-    wait_for('frontier')
+    check(wait_for('frontier'), 100.0)
     assert edited_since('frontier') is False
 
-    chat_tools.update_solver_config({'voll': 200.0})
+    chat_tools.update_solver_config({'voll': 40.0})
     assert edited_since('frontier') is True
-    assert last_point_cost(chat_tools.get_adequacy_results('frontier')) == pytest.approx(
-        frontier_oracle(100.0)[0][-1][1], abs=EUR_TOL)
+    check(chat_tools.get_adequacy_results('frontier'), 100.0)     # the stored numbers are the old config's
     assert chat_tools.campaign_status()['edited_since_study'] is True
 
     call('run_frontier_study', targets_permyriad=FR_TARGETS)
-    second = wait_for('frontier')
+    check(wait_for('frontier'), 40.0)                              # the hand-moved knee: 1 -> 0
     assert edited_since('frontier') is False
-    assert last_point_cost(second) == pytest.approx(frontier_oracle(200.0)[0][-1][1], abs=EUR_TOL)
-    assert last_point_cost(second) != pytest.approx(last_point_cost(first), abs=EUR_TOL)
     assert chat_tools.campaign_status()['edited_since_study'] is False

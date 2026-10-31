@@ -134,11 +134,12 @@ def test_five_options_five_forks_five_solves_charged_on_the_base_context(
 
     # The campaign: charged on the BASE context, five solves, then closed.
     # LC-40: the study reads the base project's edit counter before it starts,
-    # so the entry carries it and the campaign reads it as not edited since.
+    # so the entry carries it (the snapshot was taken while the study ran, so
+    # its freshness reads None).
     revision = dirty_state.revision(_base_ctx(registry_key_for, "run-five"))
     assert rec["campaign"]["entries"] == [
         {"study": "decision_study", "solves_charged": 5, "at": rec["campaign"]["entries"][0]["at"],
-         "network_revision": revision, "edited_since_study": False}]
+         "network_revision": revision, "edited_since_study": None}]
     assert rec["campaign"]["active"] is False
     fg = session_ctx(client)
     assert fg is not _base_ctx(registry_key_for, "run-five")
