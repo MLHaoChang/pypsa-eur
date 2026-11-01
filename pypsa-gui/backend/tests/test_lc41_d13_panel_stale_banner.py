@@ -13,6 +13,7 @@ PANELS = {
     'FrontierPanel': 'frontier-edited',
     'McPanel': 'mc-edited',
     'MarginLoopPanel': 'margin-loop-edited',
+    'LoopPanel': 'loop-edited',
 }
 
 

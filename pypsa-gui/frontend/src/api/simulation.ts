@@ -454,6 +454,8 @@ export type CouplingLoopStatus =
 export interface CouplingLoopPayload {
   study: 'coupling_loop'
   status: CouplingLoopStatus
+  /** LC-41b: true after an edit since the study started; null while running. */
+  edited_since_study?: boolean | null
   /** HORIZON-basis hours — the panel converts the user's h/yr entry. */
   target_lole_h: number
   /** "hours_per_year" | "hours_per_horizon" — feeds `basisSuffix`. */

@@ -529,6 +529,23 @@ def test_the_plan_hash_probe_skips_the_mc_outright_on_a_plateau(
 
 # ── payload shape on a completed run ──────────────────────────────────────
 
+def test_the_route_flags_an_edit_since_the_study(client, install_network, monkeypatch):
+    """LC-41b: ``edited_since_study`` is False after the run, True after any
+    edit-counter bump, and null while the loop is running (as /margin_loop)."""
+    stubs = _Stubs(lole_seq=[0.5])
+    _install_stubs(monkeypatch, stubs)
+    _setup(client, install_network)
+    r = client.post(LOOP_URL, json={"target_lole_h": 1.0, "draws": DRAWS, "seed": SEED})
+    assert r.status_code == 200, r.text
+    body = _poll(client)
+    assert body["status"] == "met"
+    assert body["edited_since_study"] is False
+    # A solver-config write is an edit (LC40-COUNTER-1).
+    r = client.put("/api/simulation/solver_config", json={"solver_name": "highs", "voll": VOLL + 1})
+    assert r.status_code == 200, r.text
+    assert client.get(LOOP_URL).json()["edited_since_study"] is True
+
+
 def test_the_completed_payload_carries_the_studys_own_shape(
         client, install_network, monkeypatch):
     """No top-level ``engine``/``fidelity`` (plan [N4]): the product of this

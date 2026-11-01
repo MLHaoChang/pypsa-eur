@@ -414,9 +414,15 @@ def start_coupling_loop(
         "error": None,
         "started_at": time.time(),
         "finished_at": None,
+        # LC-41b: the edit counter when the loop STARTED (as margin_loop_runner);
+        # `edited_since_study` compares it.
+        "network_revision": None,
         "thread": None,
         "stop_event": stop_event,
     }
+
+    from services import dirty_state
+    study_ctx = PyPSAService.get_active_context()
 
     def on_iteration(row: dict) -> None:
         """Grow the record by REBINDING, never by appending in place.
@@ -465,8 +471,8 @@ def start_coupling_loop(
                     ens_cap_permyriad=float(eps_star))
                 # LC-40: the hold is a solver-config write; it moves the shared
                 # counter so other studies read stale.
-                from services import dirty_state
-                dirty_state.bump_revision()
+                # The loop's own hold re-captures its record's revision (LC-40).
+                record["network_revision"] = dirty_state.bump_revision(study_ctx)
         else:
             final_cfg = base_cfg
         try:
@@ -628,6 +634,10 @@ def start_coupling_loop(
     # all; post_frontier's in-thread `solver_state["frontier"].update(...)` is the
     # anti-pattern this deliberately does not copy.
     def worker():
+        # LC-41b: captured under the mutation lock before the loop first reads
+        # the network (as margin_loop_runner): a race can only over-report.
+        with lock:
+            record["network_revision"] = dirty_state.revision(study_ctx)
         # The outer stack is the every-path guarantee (a raise before the
         # explicit close in `_worker`); closing it twice is a no-op.
         with contextlib.ExitStack() as topology:
