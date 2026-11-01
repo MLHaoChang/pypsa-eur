@@ -195,7 +195,7 @@ def _block_pu(n, row: str, start: int, end: int, comp: str = "links", attr: str 
 
 def _inflow_fed(n, name: str) -> bool:
     """A StorageUnit refilled by inflow (reservoir hydro: a positive static
-    ``inflow`` or a non-zero ``storage_units_t.inflow`` column). Its
+    ``inflow`` or a positive value in its ``storage_units_t.inflow`` column). Its
     ``p_min_pu`` of 0 says it does not charge from the grid, not that it
     cannot refill; the Monte Carlo models no inflow, so it keeps its
     dispatch-side availability only (GK A on AS-11 slice 2)."""
@@ -206,7 +206,7 @@ def _inflow_fed(n, name: str) -> bool:
         pass
     ts = getattr(getattr(n, "storage_units_t", None), "inflow", None)
     if ts is not None and name in getattr(ts, "columns", ()):
-        return bool((ts[name].fillna(0.0) != 0).any())
+        return bool((ts[name].fillna(0.0) > 0).any())
     return False
 
 

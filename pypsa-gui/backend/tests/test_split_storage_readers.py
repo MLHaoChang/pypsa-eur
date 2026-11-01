@@ -456,3 +456,15 @@ def test_an_inflow_fed_storage_unit_keeps_its_dispatch_power_and_is_named():
     assert inp.storage_notes == ("bess: inflow-fed; counted at its dispatch power, inflow not modelled",)
     n.storage_units.at["bess", "p_max_pu"] = 0.5          # the dispatch side still derates it
     assert M.snapshot_inputs(n).storage[0].p_nom_mw == 10.0
+
+
+def test_a_static_inflow_also_marks_a_storage_unit_inflow_fed():
+    """GK A on #1010: the static ``inflow`` branch; only a positive inflow counts, in either form."""
+    n = _adequacy_site(p_nom=20.0, max_hours=6.0, p_min_pu=0.0)
+    n.storage_units.at["bess", "inflow"] = 2.0
+    inp = M.snapshot_inputs(n)
+    assert (inp.storage[0].p_nom_mw, inp.storage[0].e_nom_mwh) == (20.0, 120.0)
+    assert inp.storage_notes == ("bess: inflow-fed; counted at its dispatch power, inflow not modelled",)
+    n.storage_units.at["bess", "inflow"] = 0.0
+    n.storage_units_t.inflow = pd.DataFrame({"bess": -2.0}, index=n.snapshots)
+    assert not any("inflow-fed" in note for note in M.snapshot_inputs(n).storage_notes)

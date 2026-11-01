@@ -228,7 +228,8 @@ def apply_lever_scenario(
         split = [e for e in list_storages(n) if e.layout == SPLIT]
         has_su = n.storage_units is not None and not n.storage_units.empty
         if not has_su and not split:
-            raise LeverScenarioError("no storage (StorageUnit or split Store + Links) to apply storage_duration")
+            # eh_study soft-skips asset absence by the "no StorageUnits" prefix.
+            raise LeverScenarioError("no StorageUnits or split storages (Store + Links) to apply storage_duration")
         hours = float(value)
         if hours <= 0:
             raise LeverScenarioError("storage_duration must be > 0")
