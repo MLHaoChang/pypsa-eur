@@ -444,3 +444,15 @@ def test_the_portfolio_fingerprint_follows_a_storage_unit_availability():
     before = network_fingerprint(legacy)
     legacy.storage_units.at["bess", "p_max_pu"] = 0.5
     assert network_fingerprint(legacy) != before
+
+
+def test_an_inflow_fed_storage_unit_keeps_its_dispatch_power_and_is_named():
+    """GK A on #1010: reservoir hydro (p_min_pu 0, inflow > 0) keeps its pre-slice P and E; the note says why."""
+    n = _adequacy_site(p_nom=20.0, max_hours=6.0, p_min_pu=0.0)
+    n.storage_units_t.inflow = pd.DataFrame({"bess": 2.0}, index=n.snapshots)
+    inp = M.snapshot_inputs(n)
+    (s,) = inp.storage
+    assert (s.p_nom_mw, s.e_nom_mwh) == (20.0, 120.0)
+    assert inp.storage_notes == ("bess: inflow-fed; counted at its dispatch power, inflow not modelled",)
+    n.storage_units.at["bess", "p_max_pu"] = 0.5          # the dispatch side still derates it
+    assert M.snapshot_inputs(n).storage[0].p_nom_mw == 10.0

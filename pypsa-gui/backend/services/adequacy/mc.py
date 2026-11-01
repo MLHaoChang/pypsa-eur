@@ -193,18 +193,37 @@ def _block_pu(n, row: str, start: int, end: int, comp: str = "links", attr: str 
     return min(max(v, 0.0), 1.0) if math.isfinite(v) else 1.0
 
 
+def _inflow_fed(n, name: str) -> bool:
+    """A StorageUnit refilled by inflow (reservoir hydro: a positive static
+    ``inflow`` or a non-zero ``storage_units_t.inflow`` column). Its
+    ``p_min_pu`` of 0 says it does not charge from the grid, not that it
+    cannot refill; the Monte Carlo models no inflow, so it keeps its
+    dispatch-side availability only (GK A on AS-11 slice 2)."""
+    try:
+        if float(n.storage_units.at[name, "inflow"]) > 0:
+            return True
+    except (KeyError, TypeError, ValueError):
+        pass
+    ts = getattr(getattr(n, "storage_units_t", None), "inflow", None)
+    if ts is not None and name in getattr(ts, "columns", ()):
+        return bool((ts[name].fillna(0.0) != 0).any())
+    return False
+
+
 def _su_availability(n, ctx, name: str, row, p_nom: float, series):
     """``(p_nom_mw, capacity_series, p_activity_max)`` of a StorageUnit with
     its availability applied as a split storage's Links are (AS-11
     follow-up to GK A ruling a): per block, the charge side × the lowest
     ``-p_min_pu`` and the dispatch side × the lowest ``p_max_pu``, combined
-    by ``ac_power``. ``p_activity_max`` is the power before availability,
+    by ``ac_power`` (an inflow-fed unit, ``_inflow_fed``: the dispatch side
+    only). ``p_activity_max`` is the power before availability,
     the E scale. At full availability (the defaults p_max_pu 1, p_min_pu -1)
     the inputs come back unchanged, so the default path is bit-identical."""
     from services.adequacy.activity import _CONST_TOL
     from services.solver.storage_inventory import ac_power
 
-    pus = [(_block_pu(n, name, a, b, "storage_units", "p_min_pu", -1.0),
+    fed = _inflow_fed(n, name)
+    pus = [(1.0 if fed else _block_pu(n, name, a, b, "storage_units", "p_min_pu", -1.0),
             _block_pu(n, name, a, b, "storage_units", "p_max_pu")) for _l, a, b in ctx.blocks]
     if all(c == 1.0 and d == 1.0 for c, d in pus):
         return p_nom, series, p_nom
@@ -347,6 +366,8 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
                 p_nom, su_series = ctxs[e.power_component].capacity_series(e.power_row, row)
                 p_nom, su_series, p_act = _su_availability(
                     n, ctxs[e.power_component], e.power_row, row, p_nom, su_series)
+                if _inflow_fed(n, e.name):
+                    notes.append(f"{e.name}: inflow-fed; counted at its dispatch power, inflow not modelled")
                 if p_nom <= 0 and p_act > 0:
                     notes.append(f"{e.name}: p_max_pu or -p_min_pu is 0 in every block; not counted")
             if p_nom <= 0 and not keep_zero_capacity:
