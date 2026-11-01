@@ -151,13 +151,13 @@ def outage_scan(net, import_links) -> tuple[dict[str, int], list[dict[str, str]]
     # AS-11: a split storage (Store + charger/discharger Links) takes its
     # outage rate from its Store, as the Monte Carlo does; it counts under
     # "StorageUnit" (storage, either layout).
-    from services.solver.split_storage import _tagged
-    tagged = _tagged(net)
-    if tagged is not None:
+    from services.solver.storage_inventory import SPLIT, list_storages
+    split = [e.name for e in list_storages(net) if e.layout == SPLIT]
+    if split:
         params = resolve_outage_params(net, "stores")
         by_class["StorageUnit"] = by_class.get("StorageUnit", 0) + sum(
             int(finite(params.at[s, "rate"]) and finite(params.at[s, "mttr_hours"]))
-            for s in tagged.index if s in params.index)
+            for s in split if s in params.index)
     return by_class, missing
 
 

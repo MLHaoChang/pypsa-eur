@@ -283,6 +283,9 @@ def test_a_split_storage_is_in_service_only_while_all_three_rows_are():
     n.stores.at["rt", "lifetime"] = 20
     n.links.at["rt discharger", "build_year"] = 2033
     assert committed_storage(n, ["rt"], 2031) == ([], [])
+    n.links.at["rt discharger", "build_year"] = 2030
+    n.stores.at["rt", "active"] = False
+    assert committed_storage(n, ["rt"], 2031) == ([], [])
 
 
 def test_the_portfolio_fingerprint_follows_a_split_storage_and_leaves_storage_unit_networks_alone():
@@ -297,6 +300,10 @@ def test_the_portfolio_fingerprint_follows_a_split_storage_and_leaves_storage_un
     split.links.at["bess discharger", "p_max_pu"] = 1.0
     split.links.at["bess charger", "p_min_pu"] = -0.5
     assert network_fingerprint(split) != before
+    split.links.at["bess charger", "p_min_pu"] = -1.0
+    split.add("Bus", "other", carrier="AC")
+    split.links.at["bess discharger", "bus1"] = "other"
+    assert network_fingerprint(split) != before
 
 
 def test_storage_unit_fingerprints_are_byte_identical_to_before_slice_2():
@@ -305,6 +312,8 @@ def test_storage_unit_fingerprints_are_byte_identical_to_before_slice_2():
     n = _adequacy_site(**SU)
     n.add("StorageUnit", "b2", bus="ac", carrier="battery", p_nom=5.0, max_hours=4.0, p_nom_extendable=True,
           p_nom_opt=7.0)
+    assert network_fingerprint(n) == "v2:a511248443c65748bf8be4ff4c9c40ec51caac456c8abb0870e403682de91c7b"
+    n.storage_units_t.p_max_pu = pd.DataFrame({"bess": 1.0}, index=n.snapshots)   # explicit defaults
     assert network_fingerprint(n) == "v2:a511248443c65748bf8be4ff4c9c40ec51caac456c8abb0870e403682de91c7b"
     n.remove("StorageUnit", ["bess", "b2"])
     assert network_fingerprint(n) == "v2:d389fa4a2019f0a1dce4ee39e95475b14a09e010904611ee09984d985da689f0"
@@ -354,6 +363,9 @@ def test_eh_readiness_counts_a_split_storage_and_its_outage_data():
     from services.adequacy.eh_readiness import outage_scan
     legacy, split = _pair(**SU)
     assert outage_scan(split, [])[0]["StorageUnit"] == outage_scan(legacy, [])[0]["StorageUnit"] == 1
+    split.add("Bus", "other", carrier="AC")
+    split.links.at["bess discharger", "bus1"] = "other"      # not counted by the inventory, so not here
+    assert outage_scan(split, [])[0]["StorageUnit"] == 0
 
 
 def test_the_activity_note_names_an_inactive_split_storage():
@@ -382,8 +394,8 @@ def test_links_blocked_in_different_blocks_are_both_named():
                                        "bess discharger": [1.0] * half + [0.0] * half}, index=n.snapshots)
     inp = M.snapshot_inputs(n)
     assert inp.storage == ()
-    assert inp.storage_notes == ("bess: p_max_pu of bess charger or bess discharger is 0 in every block; "
-                                 "not counted",)
+    assert inp.storage_notes == ("bess: no block has both bess charger and bess discharger available "
+                                 "(p_max_pu above 0) with its Store active; not counted",)
 
 
 def test_a_split_storage_whose_links_sit_on_different_buses_is_named_not_counted():
@@ -424,20 +436,6 @@ def test_a_discharge_only_storage_unit_is_named_not_counted():
     inp = M.snapshot_inputs(legacy)
     assert inp.storage == ()
     assert inp.storage_notes == ("bess: p_max_pu or -p_min_pu is 0 in every block; not counted",)
-
-
-def test_a_split_storage_is_in_service_only_while_all_three_rows_are():
-    """GK A: the latest build year and the earliest end of life decide; a Store that retires first ends it."""
-    from services.adequacy.site_peak import committed_storage
-    n = _island_site(True)
-    for df, row in ((n.links, "rt charger"), (n.links, "rt discharger"), (n.stores, "rt")):
-        df.at[row, "build_year"], df.at[row, "lifetime"] = 2030, 20
-    n.stores.at["rt", "lifetime"] = 5
-    assert committed_storage(n, ["rt"], 2034) == (["rt"], [])
-    assert committed_storage(n, ["rt"], 2036) == ([], [])
-    n.stores.at["rt", "lifetime"] = 20
-    n.links.at["rt discharger", "build_year"] = 2033
-    assert committed_storage(n, ["rt"], 2031) == ([], [])
 
 
 def test_the_portfolio_fingerprint_follows_a_storage_unit_availability():

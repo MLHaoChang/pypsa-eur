@@ -130,8 +130,14 @@ def committed_storage(n, names, year: int | None = None) -> tuple[list[str], lis
     fixed with a rating; unsized is extendable, sized by the run, which
     counts 0 as an extendable genset does."""
     entries = _storages(n)
+
+    def live_split(e) -> bool:
+        return all(in_service(df, row, year) and ("active" not in df.columns or bool(df.at[row, "active"]))
+                   for df, row in _rows(n, e))
+
     live = [u for u in names if u in entries
-            and all(in_service(df, row, year) for df, row in _rows(n, entries[u]))]
+            and (live_split(entries[u]) if entries[u].charger is not None
+                 else in_service(n.storage_units, u, year))]
     unsized = [u for u in live if _extendable(n, entries[u])]
     return [u for u in live if u not in unsized and entries[u].p_nom_mw > 0], unsized
 

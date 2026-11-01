@@ -223,7 +223,7 @@ def network_fingerprint(n) -> str:
                     h.update(b"\x1dsu_" + attr.encode())
                     h.update(np.ascontiguousarray(col).tobytes())
             ts = getattr(getattr(n, "storage_units_t", None), attr, None)
-            if ts is not None and not ts.empty:
+            if ts is not None and not ts.empty and not (ts.to_numpy(dtype=np.float64) == default).all():
                 for c in ts.columns:
                     h.update(b"\x1dsu_t_" + attr.encode() + str(c).encode())
                     h.update(np.ascontiguousarray(ts[c].to_numpy(dtype=np.float64)).tobytes())
@@ -231,8 +231,8 @@ def network_fingerprint(n) -> str:
     # battery in another layout; its sizes, efficiencies and vintages decide
     # the dispatch as a StorageUnit's do. Nothing is added without one, so
     # the fingerprint of a network without split storage is unchanged.
-    from services.solver.split_storage import _tagged
-    tagged = _tagged(n)
+    from services.solver.split_storage import split_storage_tags
+    tagged = split_storage_tags(n)
     if tagged is not None:
         for name in sorted(tagged.index):
             h.update(b"\x1dsplit_storage" + str(name).encode())
@@ -247,6 +247,8 @@ def network_fingerprint(n) -> str:
                 h.update(str(row).encode())
                 if row not in frame.index:
                     continue
+                if frame is n.links:        # the buses decide whether the storage is counted
+                    h.update(f"{frame.at[row, 'bus0']}\x1f{frame.at[row, 'bus1']}".encode())
                 for col in cols:
                     if col in frame.columns:
                         h.update(col.encode())

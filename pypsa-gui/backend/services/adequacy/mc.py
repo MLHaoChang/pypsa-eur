@@ -175,19 +175,19 @@ def _efficiency(row, col: str) -> float:
 from services.adequacy.activity import period_blocks as _period_blocks  # noqa: E402
 
 
-def _block_pu(n, link: str, start: int, end: int, comp: str = "links", attr: str = "p_max_pu",
+def _block_pu(n, row: str, start: int, end: int, comp: str = "links", attr: str = "p_max_pu",
               sign: float = 1.0) -> float:
-    """The lowest ``sign × attr`` of ``comp`` row ``link`` (a Link's
+    """The lowest ``sign × attr`` of ``comp`` row ``row`` (a Link's
     ``p_max_pu`` by default) over hours ``[start, end)``, clipped to [0, 1]:
     one availability per block, since a store's power is block-constant in
     the dispatch (``block_capacity``)."""
     pmp = getattr(getattr(n, f"{comp}_t", None), attr, None)
-    if pmp is not None and link in getattr(pmp, "columns", ()):
-        seg = sign * np.asarray(pmp[link].reindex(n.snapshots).to_numpy(), dtype=np.float64)[start:end]
+    if pmp is not None and row in getattr(pmp, "columns", ()):
+        seg = sign * np.asarray(pmp[row].reindex(n.snapshots).to_numpy(), dtype=np.float64)[start:end]
         v = float(np.nanmin(seg)) if seg.size and not np.isnan(seg).all() else 1.0
     else:
         try:
-            v = sign * float(getattr(n, comp).at[link, attr])
+            v = sign * float(getattr(n, comp).at[row, attr])
         except (KeyError, TypeError, ValueError):
             v = 1.0
     return min(max(v, 0.0), 1.0) if math.isfinite(v) else 1.0
@@ -209,7 +209,7 @@ def _su_availability(n, ctx, name: str, row, p_nom: float, series):
     if all(c == 1.0 and d == 1.0 for c, d in pus):
         return p_nom, series, p_nom
     caps = ctx.capacity_by_period(name, row)
-    derated = [ac_power(c * pc, c * pd) for c, (pc, pd) in zip(caps, pus)]
+    derated = [ac_power(c * p_ch, c * p_dis) for c, (p_ch, p_dis) in zip(caps, pus)]
     p_act = max(caps) if caps else 0.0
     cap_max = max(derated) if derated else 0.0
     if cap_max <= 0.0:
@@ -230,22 +230,14 @@ def _split_capacity(n, ctx, e):
     ``p_activity_max`` is the same without ``p_max_pu``: the E scale. A
     block where availability is below the maximum carries proportionally
     less energy (``block_store_arrays``' rule)."""
-    from services.adequacy.activity import _CONST_TOL
+    from services.adequacy.activity import _CONST_TOL, ActivityContext, split_power_by_period
     from services.solver.storage_inventory import ac_power
 
-    from services.adequacy.activity import ActivityContext
-
-    crow, drow = n.links.loc[e.charger], n.links.loc[e.discharger]
-    ch = ctx.capacity_by_period(e.charger, crow)
-    dis = ctx.capacity_by_period(e.discharger, drow)
-    # GK A (AS-11 slice 2): in service only while the Store is too.
-    store_ctx = ActivityContext(n, "stores", ctx.blocks)
-    live = [store_ctx.is_active(e.name, P) for P in ctx.labels]
-    ch = [c if a else 0.0 for c, a in zip(ch, live)]
+    # GK A (AS-11 slice 2): in service only while all three rows are.
+    power = split_power_by_period(n, e, ctx, ActivityContext(n, "stores", ctx.blocks))
     act: list[float] = []
     caps: list[float] = []
-    for (_label, start, end), c, d in zip(ctx.blocks, ch, dis):
-        d_ac = d * e.eff_dispatch
+    for (_label, start, end), (c, d_ac) in zip(ctx.blocks, power):
         act.append(ac_power(c, d_ac))
         caps.append(ac_power(c * _block_pu(n, e.charger, start, end),
                              d_ac * _block_pu(n, e.discharger, start, end)))
@@ -348,9 +340,9 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
                     if blocked:
                         notes.append(f"{e.name}: p_max_pu of {' and '.join(blocked)} is 0 in "
                                      "every block; not counted")
-                    else:   # each block has one of the two at 0, but neither throughout
-                        notes.append(f"{e.name}: p_max_pu of {e.charger} or {e.discharger} is 0 in "
-                                     "every block; not counted")
+                    else:   # no block has both Links available (and its Store active)
+                        notes.append(f"{e.name}: no block has both {e.charger} and {e.discharger} "
+                                     "available (p_max_pu above 0) with its Store active; not counted")
             else:
                 p_nom, su_series = ctxs[e.power_component].capacity_series(e.power_row, row)
                 p_nom, su_series, p_act = _su_availability(
