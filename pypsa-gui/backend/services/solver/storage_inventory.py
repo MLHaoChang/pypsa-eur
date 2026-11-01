@@ -179,3 +179,14 @@ def results_splits(n: pypsa.Network) -> list[StorageEntry]:
     su = getattr(n, "storage_units", None)
     taken = set() if su is None else {str(s) for s in su.index}
     return [e for e in list_storages(n) if e.layout == SPLIT and e.name not in taken]
+
+
+def split_signed_ac_p(n: pypsa.Network, entries: list[StorageEntry]) -> dict[StorageEntry, pd.Series]:
+    """Each solved split storage's signed AC-side p (discharge - charge, a StorageUnit's `p`), by entry; one without
+    Link flows is left out."""
+    out = {}
+    for e in entries:
+        flows = split_ac_flows(n, e)
+        if flows is not None:
+            out[e] = flows[1] - flows[0]
+    return out

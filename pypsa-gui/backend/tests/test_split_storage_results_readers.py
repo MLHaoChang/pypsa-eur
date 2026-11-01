@@ -263,7 +263,7 @@ def test_compare_economics_leaves_an_untagged_store_battery_as_it_was():
 
 # ── storage cycling: per-period vintages of a split storage's Store ───────────────────────────────────────
 
-def _multi(split: bool, store_vintages: bool = True) -> pypsa.Network:
+def _multi(split: bool, store_vintages: bool = True, vintage_key: str = "e_nom_opt") -> pypsa.Network:
     n = pypsa.Network()
     n.set_snapshots(pd.MultiIndex.from_product([PERIODS, range(4)]))
     n.investment_periods = PERIODS
@@ -280,7 +280,9 @@ def _multi(split: bool, store_vintages: bool = True) -> pypsa.Network:
         n.links_t["p1"] = pd.DataFrame({"bess charger": -(-p).clip(lower=0.0), "bess discharger": -p.clip(lower=0.0)})
         # `p_nom_opt` differs from `e_nom_opt` so a reader taking the wrong one fails.
         vr = {"Store": {"bess": {"capacity_field": "e_nom", "initial_capacity": 200.0,
-                                 "periods": [{"build_year": 2040, "e_nom_opt": 200.0, "p_nom_opt": 999.0}]}}}
+                                 "periods": [{"build_year": 2040, "e_nom_opt": 200.0, "p_nom_opt": 999.0}
+                                             if vintage_key == "e_nom_opt" else
+                                             {"build_year": 2040, "p_nom_opt": 200.0}]}}}
     n.meta = {"vintage_results": vr if store_vintages or not split else {}}
     return n
 
@@ -292,6 +294,13 @@ def test_storage_cycling_reads_per_period_vintages_of_a_split_storage_store():
     assert ca["by_period"]["2030"] == pytest.approx(2 * ca["by_period"]["2040"])   # the 2040 vintage doubles E
     assert cb["by_period"] == pytest.approx(ca["by_period"])
     assert cb["total"] == pytest.approx(ca["total"])
+
+
+def test_storage_cycling_reads_a_store_vintage_written_with_p_nom_opt_only():
+    """`vintage_service` writes a Store vintage under `p_nom_opt` alone (`myopic` writes both keys)."""
+    a = _compute_storage_cycling_summary(_multi(False), PERIODS, True, True)
+    b = _compute_storage_cycling_summary(_multi(True, vintage_key="p_nom_opt"), PERIODS, True, True)
+    assert b.by_unit[0].cycles.model_dump()["by_period"] == pytest.approx(a.by_unit[0].cycles.model_dump()["by_period"])
 
 
 def test_storage_cycling_keeps_the_final_store_size_without_a_vintage_entry():

@@ -130,7 +130,7 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
     # AS-11: a split storage (tagged Store + charger/discharger Links) is booked as the equal StorageUnit, in its
     # Store's carrier: the three rows' capex under that carrier, and one AC-side storage dispatch (below). Picked
     # by the inventory's own Link names, never by carrier, so other Links stay in the generic walk.
-    from services.solver.storage_inventory import results_splits, split_ac_flows
+    from services.solver.storage_inventory import results_splits, split_signed_ac_p
     _splits = results_splits(n)
     _split_carrier: dict[tuple[str, str], str] = {}
     for e in _splits:
@@ -456,23 +456,18 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
     # Sector-coupling Links contribute CAPEX + OPEX + dispatch to their
     # carrier bucket (heat-pump-waste, H2, P2X, etc.) so the economics tab
     # surfaces them in the per-carrier rollup.
-    # A shortfall is product NOT delivered: lost revenue at its lost-production value, never an expense as well,
-    # never dispatch and never revenue (ticket 04), from the one accessor (a role Generator, else the solve's capture,
-    # ticket 08). It is booked under the product bus's carrier, as lost load is. A buy-in stays an ordinary expense.
     def _walk_split_storage() -> None:
         """Each split storage as the equal StorageUnit row: signed AC-side p = discharge (-p1 of the discharger)
         minus charge (p0 of the charger), so dispatch, revenue and the charge cost follow the StorageUnit's
         convention. Its VOM is what the LP prices: each Link's marginal_cost x p0 and the Store's marginal_cost x
         its signed p (a migrated unit's marginal_cost sits on the discharger, x efficiency, so it equals the
         StorageUnit's per MWh delivered)."""
-        flows = {e: split_ac_flows(n, e) for e in _splits}
-        flows = {e: f for e, f in flows.items() if f is not None}
+        flows = split_signed_ac_p(n, _splits)
         if not flows:
             return
         static = pd.DataFrame({"carrier": [e.carrier for e in flows], "bus": [e.bus for e in flows]},
                               index=[e.name for e in flows])
-        _walk_dispatch_side(static, pd.DataFrame({e.name: f[1] - f[0] for e, f in flows.items()}, index=sns),
-                            storage=True)
+        _walk_dispatch_side(static, pd.DataFrame({e.name: p for e, p in flows.items()}, index=sns), storage=True)
         p0 = getattr(n.links_t, "p0", None)
         store_p = getattr(n.stores_t, "p", None) if hasattr(n, "stores_t") else None
         for e in flows:
@@ -495,6 +490,9 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
             _accum(b["opex_eur"], total, pp)
             _accum(b["gen_cost_eur"], total, pp)
 
+    # A shortfall is product NOT delivered: lost revenue at its lost-production value, never an expense as well,
+    # never dispatch and never revenue (ticket 04), from the one accessor (a role Generator, else the solve's capture,
+    # ticket 08). It is booked under the product bus's carrier, as lost load is. A buy-in stays an ordinary expense.
     lost_src = shortfalls(n, lost_load_cap,
                           gen_p=getattr(n.generators_t, "p", None) if hasattr(n, "generators_t") else None)
     shortfall_gens = {x.name for x in lost_src if x.source == "generator"}

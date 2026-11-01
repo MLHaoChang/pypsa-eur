@@ -134,14 +134,13 @@ def _storage_frames(n) -> tuple[pd.DataFrame, pd.DataFrame | None]:
     """StorageUnits and their signed `p`, plus each split storage (AS-11) under its Store's name and carrier, its
     signed `p` the AC-side discharge minus charge, as a StorageUnit's is. Without split storage, the StorageUnit
     frames as they are."""
-    from services.solver.storage_inventory import results_splits, split_ac_flows
+    from services.solver.storage_inventory import results_splits, split_signed_ac_p
 
     static, frame = n.storage_units, getattr(n.storage_units_t, 'p', None)
-    flows = {e: split_ac_flows(n, e) for e in results_splits(n)}
-    flows = {e: f for e, f in flows.items() if f is not None}
+    flows = split_signed_ac_p(n, results_splits(n))
     if not flows:
         return static, frame
-    split_p = pd.DataFrame({e.name: f[1] - f[0] for e, f in flows.items()}, index=n.snapshots)
+    split_p = pd.DataFrame({e.name: p for e, p in flows.items()}, index=n.snapshots)
     split_static = pd.DataFrame({'carrier': [e.carrier for e in flows]}, index=list(split_p.columns))
     su = frame.reindex(columns=[c for c in frame.columns if c in static.index]) if frame is not None else None
     return (pd.concat([static[['carrier']] if 'carrier' in static.columns
