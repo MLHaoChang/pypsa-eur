@@ -100,3 +100,24 @@ def test_context_over_300k_is_flagged_rotate(tmp_path):
     assert "412k ROTATE" in big
     assert "120k" in small and "ROTATE" not in small
     assert "ROTATE" not in none
+
+
+def test_blocked_over_filters_by_age(tmp_path):
+    payload = {"data": [
+        {"id": "session_01AAAAAAAAold001", "session_status": "SESSION_STATUS_IDLE",
+         "status_bucket": "SESSION_STATUS_BUCKET_BLOCKED",
+         "updated_at": "2026-11-01T10:00:00Z", "title": "Old"},
+        {"id": "session_01AAAAAAAAnew002", "session_status": "SESSION_STATUS_IDLE",
+         "post_turn_summary": {"status_category": "requires_action"},
+         "updated_at": "2026-11-01T11:50:00Z", "title": "New"},
+        {"id": "session_01AAAAAAAArun003", "session_status": "SESSION_STATUS_RUNNING",
+         "updated_at": "2026-11-01T08:00:00Z", "title": "Busy"},
+    ]}
+    path = tmp_path / "s.json"
+    path.write_text(json.dumps(payload))
+    base = [sys.executable, str(SCRIPT), str(path), "--now", "2026-11-01T12:00:00Z"]
+    run_ = lambda *a: subprocess.run(base + list(a), check=True, capture_output=True, text=True).stdout.splitlines()
+    assert len(run_()) == 3
+    out = run_("--blocked-over", "30")
+    assert len(out) == 1 and "Old" in out[0] and out[0].endswith("BLOCKED 120m")
+    assert len(run_("--blocked-over", "5")) == 2

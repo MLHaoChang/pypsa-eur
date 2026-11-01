@@ -4,6 +4,7 @@
 
 """Brief assembly by ``scripts/coord/brief.py`` from ``docs/agents/session-brief.md``."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -11,13 +12,16 @@ from pathlib import Path
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "coord" / "brief.py"
 
 
-def brief(tmp_path, *args):
+def brief(tmp_path, *args, env=None):
     out = tmp_path / "brief.md"
+    if env is None:  # CI has no session id of its own
+        env = {**os.environ, "CLAUDE_CODE_REMOTE_SESSION_ID": "cse_01TESTCOORD"}
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--out", str(out), *args],
         capture_output=True,
         text=True,
         check=True,
+        env=env,
     )
     return out.read_text(), result.stdout
 
@@ -68,3 +72,26 @@ def test_stay_out_from_open_prs_and_sessions(tmp_path):
     assert "open PR #6: `gridspine/` (1)" in text
     assert "#7" not in text
     assert "live session: abc running Build · RP-04 — tab" in text
+
+
+def test_coordinator_id_written_literally(tmp_path):
+    text, _ = brief(tmp_path, "--task", "t", "--coordinator", "session_01ABC")
+    first = text.split("\n\n")[0]
+    assert "coordinator session `session_01ABC`" in first
+    assert "to the coordinator `session_01ABC` once green" in text
+    assert "@COORDINATOR@" not in text and "docs/agents/coordinator.md" not in text
+
+
+def test_coordinator_defaults_to_own_session_id(tmp_path):
+    env = {**os.environ, "CLAUDE_CODE_REMOTE_SESSION_ID": "cse_01OWNID"}
+    text, _ = brief(tmp_path, "--task", "t", env=env)
+    assert "coordinator session `session_01OWNID`" in text
+
+
+def test_coordinator_required_when_own_id_unknown(tmp_path):
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_REMOTE_SESSION_ID"}
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--task", "t", "--out", str(tmp_path / "b.md")],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 2 and "--coordinator" in result.stderr

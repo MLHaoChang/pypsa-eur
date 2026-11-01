@@ -254,3 +254,15 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **Two packages ran on the same files.** LC-37 and LC-38 both changed the adequacy campaign and loop runners; the second needed a hand master merge and a delta re-review (one 60–80 min CI cycle).
   - Fix: `brief.py --files <likely files>` prints `OVERLAP` and exits 3 when an open PR changes one of them.
   - Lives in: `scripts/coord/brief.py`, coordinator (Taking on tasks, Open), live and template copies; test `tests/test_coord_brief.py`.
+
+## 1 Nov 2026: super-agent ideas (owner picked all three)
+
+- **A builder messaged an archived coordinator and stalled ~4.5 h.** It read `coordinator.md` while the rotation PR was unmerged, then fell back to a card in its own window.
+  - Fix: the brief carries the coordinator id literally (`brief.py --coordinator`, default the caller's id); a failed send re-reads `coordinator.md` on origin/master and retries; the outgoing coordinator stays live until the id PR merges and the new one tells every live session.
+  - Lives in: `scripts/coord/brief.py`, session-brief, steward (opening paragraph), coordinator "Rotation"; test `test/test_coord_brief.py`.
+- **A blocked session could sit unseen for hours.**
+  - Fix: the 2-hourly dashboard routine lists sessions `requires_action`/`blocked` over 30 min (`sessions.py --blocked-over`) and the coordinator brings their question to the owner.
+  - Lives in: coordinator "Wakes" and "Blocked-session watchdog", `scripts/coord/sessions.py`.
+- **Every reviewer message passed through the coordinator.** DeepSeek's thread subscription (later events go straight to the subscribed worker) cut router tokens ~27%.
+  - Fix: reviewers and builders message each other directly; the coordinator hears only `premerge ok`, hand-offs, owner questions, held disagreements and PERMISSION requests; verdicts stay PR comments.
+  - Lives in: steward "Messages to the coordinator", review-gk, review-ux, coordinator "Merging".
