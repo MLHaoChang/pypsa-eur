@@ -20,10 +20,13 @@ had them at module level) but are added here defensively.
 """
 from __future__ import annotations
 
+import copy
 import pathlib
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+from models.design_intent import DesignIntentSpec
 from services import period_utils
 from models.schemas import (
     CompareState,
@@ -471,3 +474,49 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
 
 def _compute_lost_load_summary(project_dir: pathlib.Path, n, periods, is_multi, has_solve):
     return compute_lost_load_summary(_read_lost_load_capture(project_dir), n, periods, is_multi, has_solve)
+
+
+# ── AS-10: preference comparison (one sizing loop per design intent) ─────────
+
+
+class IntentComparisonRequest(BaseModel):
+    """`intents` are the chosen design intents (two or more); `inputs` is the `SizingInputs` fields."""
+    intents: list[DesignIntentSpec]
+    critical_mw: float = Field(gt=0, allow_inf_nan=False)
+    inputs: dict
+    profile: dict = Field(default_factory=dict)
+
+
+def _intent_scenario(network, config, inputs: dict, critical_mw: float):
+    """A `prepare(spec)` for `compare_intents`: the intent's backup reserve goes into a copy of the config; the
+    network and config the caller holds are not changed."""
+    from services.adequacy.sizing_loop_runner import SizingInputs
+    from services.solver.envelope_floors import backup_mwh
+
+    def prepare(spec):
+        cfg = copy.deepcopy(config)
+        cfg.envelope_floors = {**(cfg.envelope_floors or {}), "backup_mwh": backup_mwh(spec, critical_mw)}
+        return network, cfg, SizingInputs(**inputs)
+
+    return prepare
+
+
+@router.post("/{name}/intent-comparison")
+def post_intent_comparison(
+    body: IntentComparisonRequest,
+    project: AuthorizedProject = ProjectAccessDep,
+) -> dict:
+    """Run one sizing loop per chosen design intent on the open project; one table row each (AS-10)."""
+    from services.adequacy.sizing_loop_runner import SizingLoopRefusal, run_sizing
+    from services.compare.intent_table import compare_intents
+
+    try:
+        n = PyPSAService.get_network()
+    except Exception:
+        raise HTTPException(status_code=409, detail="Open the project first: the comparison runs on its network.")
+    prepare = _intent_scenario(n, _live_solver_config(), body.inputs, body.critical_mw)
+    try:
+        return compare_intents(prepare, body.intents, critical_mw=body.critical_mw, profile=body.profile,
+                               runner=run_sizing)
+    except (ValueError, TypeError, SizingLoopRefusal) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))

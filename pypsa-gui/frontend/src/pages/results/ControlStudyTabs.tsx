@@ -19,6 +19,7 @@ import { CAMPUS_KEY } from '../CampusElectricalPanel'
 import { ISLAND_KEY, ISLAND_REPORT_KEY, IslandReportView } from '../CampusIslandSection'
 import CampusIslandCutsSection from '../CampusIslandCutsSection'
 import CampusIslandGfmSection from '../CampusIslandGfmSection'
+import IntentComparisonSection from '../IntentComparisonSection'
 
 /** Next from the Control results (§3.3 A): Reliability when it is in scope, else Hand-off. */
 function ControlNext() {
@@ -136,6 +137,7 @@ export function GridFormingTab() {
       )}
       <p className="text-[11px] text-muted" data-testid="grid-forming-label">Heuristic screening, not a certificate.</p>
       <CampusIslandGfmSection name={name} />
+      <IntentComparisonSection name={name} />
       <ControlNext />
     </div>
   )

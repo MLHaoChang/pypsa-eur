@@ -3,7 +3,7 @@
 
 # AS-10 — Preference comparison UI
 
-Status: ready-for-agent
+Status: in-review
 Type: task
 Blocked by: 01, 06
 Model: Sonnet
@@ -17,11 +17,14 @@ Run intents A–E as scenarios through the compare machinery (`BE/services/compa
 
 ## Acceptance
 
-- [ ] Tests first: selecting two intents runs two scenarios and renders one row per intent.
-- [ ] A "not converged" or "unresolved" loop is visible, never shown as a pass.
-- [ ] Intent D shows the grid-code warning (AS-NOUPS-1); intent A shows the editable 4 h autonomy.
+- [x] Tests first: selecting two intents runs two scenarios and renders one row per intent.
+- [x] A "not converged" or "unresolved" loop is visible, never shown as a pass.
+- [x] Intent D shows the grid-code warning (AS-NOUPS-1); intent A shows the editable 4 h autonomy.
 - [ ] Works in Guided and Expert; UX review checklist passes.
 
 ## PRs
 
 ## Comments
+
+- Cost column is the LP total (capex plus opex, per year): the loop result carries no capex split. Says so in the header.
+- UX checklist (screenshots of both modes) pending.
