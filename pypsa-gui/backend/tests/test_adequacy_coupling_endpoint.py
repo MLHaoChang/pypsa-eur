@@ -546,6 +546,29 @@ def test_the_route_flags_an_edit_since_the_study(client, install_network, monkey
     assert client.get(LOOP_URL).json()["edited_since_study"] is True
 
 
+def test_the_final_hold_moves_the_counter_but_not_its_own_loop_stale(
+        client, install_network, monkeypatch, session_ctx):
+    """LC-41b: ``restore="final"`` writes the solver config (LC-40), so it bumps
+    the shared counter; the loop's own record re-captures it and reads False,
+    while a study stored before the run reads stale."""
+    from services import dirty_state, study_state
+
+    stubs = _Stubs(lole_seq=[0.5])
+    _install_stubs(monkeypatch, stubs)
+    _setup(client, install_network)
+    ctx = session_ctx(client)
+    before = dirty_state.revision(ctx)
+    earlier = {"status": "done", "network_revision": before}
+    r = client.post(LOOP_URL, json={"target_lole_h": 1.0, "draws": DRAWS,
+                                    "seed": SEED, "restore": "final"})
+    assert r.status_code == 200, r.text
+    body = _poll(client)
+    assert body["status"] == "met" and body["base_restored"] is True
+    assert body["edited_since_study"] is False
+    assert dirty_state.revision(ctx) == before + 1
+    assert study_state.edited_since(earlier, revision=dirty_state.revision(ctx)) is True
+
+
 def test_the_completed_payload_carries_the_studys_own_shape(
         client, install_network, monkeypatch):
     """No top-level ``engine``/``fidelity`` (plan [N4]): the product of this
