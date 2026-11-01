@@ -14,6 +14,8 @@ SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "coord" / "brief.py"
 
 def brief(tmp_path, *args, env=None):
     out = tmp_path / "brief.md"
+    if env is None:  # CI has no session id of its own
+        env = {**os.environ, "CLAUDE_CODE_REMOTE_SESSION_ID": "cse_01TESTCOORD"}
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--out", str(out), *args],
         capture_output=True,
