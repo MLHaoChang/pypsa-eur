@@ -3,7 +3,7 @@
 
 # AS-11 — Readers of split (Store + Link) storage
 
-Status: in progress (slice 2)
+Status: done
 Type: task
 Blocked by: 02
 Reviewer: GK A (adequacy) + GK B (results)
@@ -76,3 +76,25 @@ table) and `compare/capacity.py` already read Stores.
   moved anchors listed in the PR body, a release-note line for the change; (6) deliverable energy uses one rule
   for both layouts from the inventory entry, the pair test checks P, E and deliverable MWh; (7) the readiness
   payload docstring names the "StorageUnit" key reuse; (8) existing adequacy suites unchanged at the PR head.
+- 2026-11-01, slice 2 PR A (#1010, merged b4afcf56): adequacy readers (portfolio, site_peak, smoothing, redundancy,
+  levers `storage_duration`, eh_readiness, activity) read split storage; StorageUnit availability reads
+  p_max_pu/p_min_pu (inflow-fed hydro keeps dispatch-only availability, named in `storage_notes`); discharger
+  bus1 == charger bus0 checked; zonal-MC split test. The no-asset `storage_duration` message keeps the
+  "no StorageUnits" prefix that eh_study's soft-skip matches.
+- 2026-11-01, slice 2 PR B (#1012, merged 563a0f1d): results readers (dispatch_digest, billing, load_shape, the
+  compare/economics dispatch walk, storage-cycling vintages) read split storage via
+  `storage_inventory.results_splits`. Tests: `tests/test_split_storage_results_readers.py`.
+  `asset_results/compute.py` needs no change (StorageUnit metric; Stores have their own metric set).
+- GK B conditions (PR B): billing settles a split under its Store name, refusing Store + discharger in one
+  contract; one name rule `storage_inventory.results_splits` (a Store named like a StorageUnit, or discharger bus1
+  != charger bus0, stays out of all five readers); discriminating fixture; mutants; no-split pin; Links picked by
+  name; cycling vintages (flat without entry, p_nom_opt fallback).
+- GK A conditions (PR B, compare/economics): capex via each row's rule under the Store carrier; VOM includes the
+  Store's marginal_cost; StorageUnit sign convention; 2-period pair; untagged batteries unchanged; reconciliation
+  with Capacity.
+- Follow-ups (not opened): a typed `LeverNotApplicable` instead of eh_study's substring soft-skip; pumped hydro
+  with inflow loses its charge-side derate; `storage_duration` repeats `add_split_storage`'s checks (shared
+  helper); site_peak ignores a StorageUnit's own active flag (as on master); untagged PyPSA-Eur battery Stores are
+  only named; `compare/dispatch.py` (slice 1) does not apply `results_splits`' name/cross-bus rule; neither layout
+  books `marginal_cost_storage` in economics; load_shape double-counts SoC on a StorageUnit/Store name collision
+  (as on master).

@@ -81,3 +81,10 @@ A `pytest.raises(Exception)` on a refusal is checked for what actually raises. A
 - A smoothing tier's latency has one source, `spectrum.store_latency`: a given override, then the store's `control` column, then the technology default. AS-07's sheet and AS-09's tier split both read it (AS-15).
 - A trace-sourced latency band uses max(1/T, f_c), never f_c alone: a trace's f_c can fall below 1/T and loosen the check (#988).
 - A solve-like runner that bypasses `run_simulation` solves the project's own LP through the shared wrap-chain helper (`solver_service.build_lp_chain`, from AS-06 #992), and names per setting any pre-solve step it does not reproduce (island apply, commercial PoC writer, user code); a blanket note is not enough.
+- A runner that defers transform restores restores per round; it never holds every solved copy at once (#992).
+- A guard that refuses on "not a DatetimeIndex" is probed with an integer-index (RangeIndex) upload; RangeIndex-snapshot networks are valid (#997).
+- Every solver-config write (routes, loop holds) bumps the network revision; a loop's own hold re-captures its record's revision, and the hold path has its own test (#1001, #1008).
+- `goal_free_config` hashes finance and commercial: they belong in `_network_input_fingerprint` (#1001).
+- A storage availability rule treats inflow-fed hydro separately: an inflow-fed StorageUnit keeps dispatch-only availability and is named in `storage_notes` (#1010).
+- A PR that rewords an exception message runs `git grep "<old text>"` for substring matches on it; a change to `adequacy/levers.py` also runs the EH suites (#1010).
+- A split-storage reader handles a split whose charger and discharger sit on different buses; `storage_inventory.results_splits` keeps such splits out (#1012).

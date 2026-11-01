@@ -3,7 +3,7 @@
 
 # LC-41b — The coupling-loop panel shows no stale state
 
-Status: in progress
+Status: done
 Type: bug
 
 Follow-up to LC-39/LC-41 (owner RESUME-1). `GET /api/results/coupling_loop` carries no
