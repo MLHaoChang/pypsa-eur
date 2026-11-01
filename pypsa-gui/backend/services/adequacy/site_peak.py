@@ -34,7 +34,8 @@ each period reports its binding hour (least headroom), where
   full (the optimistic dispatch), discharging min(shortfall, Σ p_nom,
   energy above R) and recharging from the headroom at ≤ Σ p_nom. Only power
   is free twice (on grid loss the shaving stops); energy is counted once.
-  Committed ``ride_through_storage`` StorageUnits only; a UPS bridges
+  Committed ``ride_through_storage`` StorageUnits and split storages (a
+  Store named, AS-11) only; a UPS bridges
   seconds and is not firm.
 
 ``firm`` is a list of contributions, one entry per source of firm MW, at the
@@ -89,19 +90,63 @@ def in_service(df, name: str, year: int | None) -> bool:
     return built <= 0 or built <= year < built + life
 
 
+def _storages(n) -> dict:
+    """Every storage by name, in either layout (AS-11): a StorageUnit, or a
+    split storage (a ``Store`` with charger and discharger ``Link``s) named
+    by its Store, from ``storage_inventory.list_storages``."""
+    from services.solver.storage_inventory import list_storages
+    return {e.name: e for e in list_storages(n)}
+
+
+def _rows(n, e) -> list[tuple]:
+    """The ``(frame, row)`` pairs of one storage: the StorageUnit, or the
+    split storage's charger, discharger and Store."""
+    if e.charger is None:
+        return [(n.storage_units, e.name)]
+    return [(n.links, e.charger), (n.links, e.discharger), (n.stores, e.name)]
+
+
+def _extendable(n, e) -> bool:
+    """Sized by the run: the StorageUnit, or any of a split storage's three rows."""
+    def flag(df, row):
+        col = "e_nom_extendable" if df is n.stores else "p_nom_extendable"
+        return col in df.columns and bool(df.at[row, col])
+    return any(flag(df, row) for df, row in _rows(n, e))
+
+
+def storage_sizes(n, u: str, entries: dict | None = None) -> tuple[float, float, float, float]:
+    """``(p_mw, stored_mwh, eta_store, eta_dispatch)`` of storage ``u`` from
+    its inventory entry, one rule for both layouts: AC-side P, store-side E
+    (a StorageUnit's p_nom × max_hours, a split storage's Store)."""
+    e = (_storages(n) if entries is None else entries)[u]
+    return e.p_nom_mw, e.e_nom_mwh, e.eff_store, e.eff_dispatch
+
+
 def committed_storage(n, names, year: int | None = None) -> tuple[list[str], list[str]]:
-    """(committed, unsized) StorageUnits among ``names`` in service in
-    ``year``: committed is fixed with a rating; unsized is extendable, sized
-    by the run, which counts 0 as an extendable genset does."""
-    su = n.storage_units
-    live = [u for u in names if u in su.index and in_service(su, u, year)]
-    unsized = [u for u in live if bool(su.at[u, "p_nom_extendable"])]
-    return [u for u in live if u not in unsized and float(su.at[u, "p_nom"]) > 0], unsized
+    """(committed, unsized) storages among ``names`` in service in ``year``:
+    StorageUnits, and split storages named by their Store, in service only
+    while all three of their rows (charger, discharger, Store) are, so the
+    latest build year and the earliest end of life decide. Committed is
+    fixed with a rating; unsized is extendable, sized by the run, which
+    counts 0 as an extendable genset does."""
+    entries = _storages(n)
+
+    def live_split(e) -> bool:
+        return all(in_service(df, row, year) and ("active" not in df.columns or bool(df.at[row, "active"]))
+                   for df, row in _rows(n, e))
+
+    live = [u for u in names if u in entries
+            and (live_split(entries[u]) if entries[u].charger is not None
+                 else in_service(n.storage_units, u, year))]
+    unsized = [u for u in live if _extendable(n, entries[u])]
+    return [u for u in live if u not in unsized and entries[u].p_nom_mw > 0], unsized
 
 
-def deliverable_mwh(su, u: str) -> float:
-    """A StorageUnit's deliverable energy: efficiency_dispatch × p_nom × max_hours."""
-    return float(su.at[u, "efficiency_dispatch"]) * float(su.at[u, "p_nom"]) * float(su.at[u, "max_hours"])
+def deliverable_mwh(n, u: str, entries: dict | None = None) -> float:
+    """A storage's deliverable energy: efficiency_dispatch × stored energy,
+    the same rule for both layouts."""
+    _p, e, _s, d = storage_sizes(n, u, entries)
+    return d * e
 
 
 def ride_through_batteries(n, island: dict | None, year: int | None = None) -> dict:
@@ -118,7 +163,6 @@ def ride_through_batteries(n, island: dict | None, year: int | None = None) -> d
     names = req.get("ride_through_storage")
     if names is None:
         names = [u for u, d in (island.get("units") or {}).items() if d.get("kind") == "bess"]
-    su = n.storage_units
     names, unsized = committed_storage(n, names, year)
     if not names:
         return {**none, "unsized": unsized, "reason": "no committed ride-through battery"}
@@ -127,12 +171,14 @@ def ride_through_batteries(n, island: dict | None, year: int | None = None) -> d
         return {**none, "unsized": unsized,
                 "reason": "no sustained ride-through time in the island requirements: "
                           "no battery is counted as firm"}
-    stored = {u: float(su.at[u, "p_nom"]) * float(su.at[u, "max_hours"]) for u in names}
+    entries = _storages(n)
+    sizes = {u: storage_sizes(n, u, entries) for u in names}
+    stored = {u: sizes[u][1] for u in names}
     total = sum(stored.values()) or 1.0
-    eta_d = sum(float(su.at[u, "efficiency_dispatch"]) * stored[u] for u in names) / total
-    eta_s = sum(float(su.at[u, "efficiency_store"]) * stored[u] for u in names) / total
-    return {"names": names, "unsized": unsized, "p_mw": sum(float(su.at[u, "p_nom"]) for u in names),
-            "e_mwh": sum(deliverable_mwh(su, u) for u in names), "eta_store": eta_s,
+    eta_d = sum(sizes[u][3] * stored[u] for u in names) / total
+    eta_s = sum(sizes[u][2] * stored[u] for u in names) / total
+    return {"names": names, "unsized": unsized, "p_mw": sum(sizes[u][0] for u in names),
+            "e_mwh": sum(deliverable_mwh(n, u, entries) for u in names), "eta_store": eta_s,
             "eta_dispatch": eta_d, "sustained_h": float(d), "reason": None}
 
 

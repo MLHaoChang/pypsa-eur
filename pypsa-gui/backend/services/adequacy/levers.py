@@ -224,21 +224,62 @@ def apply_lever_scenario(
         }
 
     if kind == "storage_duration":
-        if n.storage_units is None or n.storage_units.empty:
-            raise LeverScenarioError("no StorageUnits to apply storage_duration")
-        snap = n.storage_units.copy(deep=True)
+        from services.solver.storage_inventory import SPLIT, list_storages
+        split = [e for e in list_storages(n) if e.layout == SPLIT]
+        has_su = n.storage_units is not None and not n.storage_units.empty
+        if not has_su and not split:
+            # eh_study soft-skips asset absence by the "no StorageUnits" prefix.
+            raise LeverScenarioError("no StorageUnits or split storages (Store + Links) to apply storage_duration")
         hours = float(value)
         if hours <= 0:
             raise LeverScenarioError("storage_duration must be > 0")
-        for name in n.storage_units.index:
-            n.storage_units.at[name, "max_hours"] = hours
+        # GK A (AS-11 slice 2): the checks `add_split_storage` applies; an
+        # infeasible duration is refused by name, never written to the tag.
+        from services.solver.split_storage import STORAGE_TECHNOLOGIES
+        bad = []
+        for e in split:
+            st = n.stores.loc[e.name]
+            tech = STORAGE_TECHNOLOGIES.get(str(st.get("storage_technology")))
+            if tech is not None and not tech.min_hours - 1e-12 <= hours <= tech.max_hours + 1e-12:
+                bad.append(f"{e.name} ({tech.label} range {tech.min_hours:g}–{tech.max_hours:g} h)")
+                continue
+            try:
+                c = float(st.get("c_rate_max"))
+            except (TypeError, ValueError):
+                c = math.inf
+            if math.isfinite(c) and not c * hours >= 1.0 - 1e-12:
+                bad.append(f"{e.name} (c_rate_max {c:g}/h needs at least {1 / c if c > 0 else math.inf:g} h)")
+        if bad:
+            raise LeverScenarioError(f"storage_duration {hours:g} h is infeasible for split storage "
+                                     + "; ".join(bad))
+        su_snap = n.storage_units.copy(deep=True) if has_su else None
+        st_snap = n.stores.copy(deep=True) if split else None
+        if has_su:
+            for name in n.storage_units.index:
+                n.storage_units.at[name, "max_hours"] = hours
+        # AS-11: a split storage takes the same duration as the equal
+        # StorageUnit: E = hours x P (min_hours = max_hours = hours). The
+        # solve sizes an extendable Store; a fixed one is set to hours x its
+        # AC-side P.
+        for e in split:
+            st = n.stores
+            st.at[e.name, "min_hours"] = hours
+            st.at[e.name, "max_hours"] = hours
+            if not bool(st.at[e.name, "e_nom_extendable"]):
+                st.at[e.name, "e_nom"] = hours * e.p_nom_mw
+                if "e_nom_opt" in st.columns:
+                    st.at[e.name, "e_nom_opt"] = hours * e.p_nom_mw
         def undo() -> None:
-            n.storage_units = snap
+            if su_snap is not None:
+                n.storage_units = su_snap
+            if st_snap is not None:
+                n.stores = st_snap
         return undo, {
             "kind": kind,
             "value": hours,
             "unit": "h",
-            "applied_storage": [str(i) for i in n.storage_units.index],
+            "applied_storage": ([str(i) for i in n.storage_units.index] if has_su else [])
+                               + [e.name for e in split],
             "firmness": "planning_limit_only",
             "autonomy_note": (
                 f"{hours:g} h nameplate autonomy (not a multi-day ENS claim)"

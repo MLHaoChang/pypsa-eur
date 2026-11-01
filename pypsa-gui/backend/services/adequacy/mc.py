@@ -175,20 +175,70 @@ def _efficiency(row, col: str) -> float:
 from services.adequacy.activity import period_blocks as _period_blocks  # noqa: E402
 
 
-def _block_pu(n, link: str, start: int, end: int) -> float:
-    """The lowest ``p_max_pu`` of Link ``link`` over hours ``[start, end)``,
-    clipped to [0, 1]: one availability per block, since a store's power is
-    block-constant in the dispatch (``block_capacity``)."""
-    pmp = getattr(getattr(n, "links_t", None), "p_max_pu", None)
-    if pmp is not None and link in getattr(pmp, "columns", ()):
-        seg = np.asarray(pmp[link].reindex(n.snapshots).to_numpy(), dtype=np.float64)[start:end]
+def _block_pu(n, row: str, start: int, end: int, comp: str = "links", attr: str = "p_max_pu",
+              sign: float = 1.0) -> float:
+    """The lowest ``sign × attr`` of ``comp`` row ``row`` (a Link's
+    ``p_max_pu`` by default) over hours ``[start, end)``, clipped to [0, 1]:
+    one availability per block, since a store's power is block-constant in
+    the dispatch (``block_capacity``)."""
+    pmp = getattr(getattr(n, f"{comp}_t", None), attr, None)
+    if pmp is not None and row in getattr(pmp, "columns", ()):
+        seg = sign * np.asarray(pmp[row].reindex(n.snapshots).to_numpy(), dtype=np.float64)[start:end]
         v = float(np.nanmin(seg)) if seg.size and not np.isnan(seg).all() else 1.0
     else:
         try:
-            v = float(n.links.at[link, "p_max_pu"])
+            v = sign * float(getattr(n, comp).at[row, attr])
         except (KeyError, TypeError, ValueError):
             v = 1.0
     return min(max(v, 0.0), 1.0) if math.isfinite(v) else 1.0
+
+
+def _inflow_fed(n, name: str) -> bool:
+    """A StorageUnit refilled by inflow (reservoir hydro: a positive static
+    ``inflow`` or a positive value in its ``storage_units_t.inflow`` column). Its
+    ``p_min_pu`` of 0 says it does not charge from the grid, not that it
+    cannot refill; the Monte Carlo models no inflow, so it keeps its
+    dispatch-side availability only (GK A on AS-11 slice 2)."""
+    try:
+        if float(n.storage_units.at[name, "inflow"]) > 0:
+            return True
+    except (KeyError, TypeError, ValueError):
+        pass
+    ts = getattr(getattr(n, "storage_units_t", None), "inflow", None)
+    if ts is not None and name in getattr(ts, "columns", ()):
+        return bool((ts[name].fillna(0.0) > 0).any())
+    return False
+
+
+def _su_availability(n, ctx, name: str, row, p_nom: float, series):
+    """``(p_nom_mw, capacity_series, p_activity_max)`` of a StorageUnit with
+    its availability applied as a split storage's Links are (AS-11
+    follow-up to GK A ruling a): per block, the charge side × the lowest
+    ``-p_min_pu`` and the dispatch side × the lowest ``p_max_pu``, combined
+    by ``ac_power`` (an inflow-fed unit, ``_inflow_fed``: the dispatch side
+    only). ``p_activity_max`` is the power before availability,
+    the E scale. At full availability (the defaults p_max_pu 1, p_min_pu -1)
+    the inputs come back unchanged, so the default path is bit-identical."""
+    from services.adequacy.activity import _CONST_TOL
+    from services.solver.storage_inventory import ac_power
+
+    fed = _inflow_fed(n, name)
+    pus = [(1.0 if fed else _block_pu(n, name, a, b, "storage_units", "p_min_pu", -1.0),
+            _block_pu(n, name, a, b, "storage_units", "p_max_pu")) for _l, a, b in ctx.blocks]
+    if all(c == 1.0 and d == 1.0 for c, d in pus):
+        return p_nom, series, p_nom
+    caps = ctx.capacity_by_period(name, row)
+    derated = [ac_power(c * p_ch, c * p_dis) for c, (p_ch, p_dis) in zip(caps, pus)]
+    p_act = max(caps) if caps else 0.0
+    cap_max = max(derated) if derated else 0.0
+    if cap_max <= 0.0:
+        return 0.0, None, p_act
+    if all(abs(c - cap_max) <= _CONST_TOL * cap_max for c in derated):
+        return cap_max, None, p_act
+    out = np.empty(ctx.H, dtype=np.float64)
+    for (_label, start, end), c in zip(ctx.blocks, derated):
+        out[start:end] = c
+    return cap_max, out, p_act
 
 
 def _split_capacity(n, ctx, e):
@@ -199,16 +249,14 @@ def _split_capacity(n, ctx, e):
     ``p_activity_max`` is the same without ``p_max_pu``: the E scale. A
     block where availability is below the maximum carries proportionally
     less energy (``block_store_arrays``' rule)."""
-    from services.adequacy.activity import _CONST_TOL
+    from services.adequacy.activity import _CONST_TOL, ActivityContext, split_power_by_period
     from services.solver.storage_inventory import ac_power
 
-    crow, drow = n.links.loc[e.charger], n.links.loc[e.discharger]
-    ch = ctx.capacity_by_period(e.charger, crow)
-    dis = ctx.capacity_by_period(e.discharger, drow)
+    # GK A (AS-11 slice 2): in service only while all three rows are.
+    power = split_power_by_period(n, e, ctx, ActivityContext(n, "stores", ctx.blocks))
     act: list[float] = []
     caps: list[float] = []
-    for (_label, start, end), c, d in zip(ctx.blocks, ch, dis):
-        d_ac = d * e.eff_dispatch
+    for (_label, start, end), (c, d_ac) in zip(ctx.blocks, power):
         act.append(ac_power(c, d_ac))
         caps.append(ac_power(c * _block_pu(n, e.charger, start, end),
                              d_ac * _block_pu(n, e.discharger, start, end)))
@@ -308,10 +356,20 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
                     # throughout (e.g. a migrated discharge-only unit).
                     blocked = [lk for lk in (e.charger, e.discharger)
                                if all(_block_pu(n, lk, a, b) <= 0.0 for _l, a, b in blocks)]
-                    notes.append(f"{e.name}: p_max_pu of {' and '.join(blocked)} is 0 in "
-                                 "every block; not counted")
+                    if blocked:
+                        notes.append(f"{e.name}: p_max_pu of {' and '.join(blocked)} is 0 in "
+                                     "every block; not counted")
+                    else:   # no block has both Links available (and its Store active)
+                        notes.append(f"{e.name}: no block has both {e.charger} and {e.discharger} "
+                                     "available (p_max_pu above 0) with its Store active; not counted")
             else:
                 p_nom, su_series = ctxs[e.power_component].capacity_series(e.power_row, row)
+                p_nom, su_series, p_act = _su_availability(
+                    n, ctxs[e.power_component], e.power_row, row, p_nom, su_series)
+                if _inflow_fed(n, e.name):
+                    notes.append(f"{e.name}: inflow-fed; counted at its dispatch power, inflow not modelled")
+                if p_nom <= 0 and p_act > 0:
+                    notes.append(f"{e.name}: p_max_pu or -p_min_pu is 0 in every block; not counted")
             if p_nom <= 0 and not keep_zero_capacity:
                 continue
             if e.layout == SPLIT:
@@ -326,7 +384,7 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
                     max_hours = 0.0
                 if not math.isfinite(max_hours) or max_hours < 0:
                     max_hours = 0.0
-                e_nom = max_hours * p_nom
+                e_nom = max_hours * p_act
                 occ_comp = "storage_units"
             if occ_comp not in params:
                 params[occ_comp] = resolve_outage_params(n, occ_comp)

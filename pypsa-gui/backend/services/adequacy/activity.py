@@ -254,6 +254,20 @@ class ActivityContext:
         return cap_max, series
 
 
+def split_power_by_period(n, e, link_ctx: ActivityContext,
+                          store_ctx: ActivityContext) -> list[tuple[float, float]]:
+    """A split storage's (AS-11) ``(charge, dispatch)`` AC-side MW per block,
+    before availability: the charger's size and the discharger's size × its
+    efficiency, each by its own vintages, and both 0 in a block where the
+    Store is not active. With the Links' own activity this puts the storage
+    in service only while all three rows are (the latest build year, the
+    earliest end of life, every ``active`` flag)."""
+    ch = link_ctx.capacity_by_period(e.charger, n.links.loc[e.charger])
+    dis = link_ctx.capacity_by_period(e.discharger, n.links.loc[e.discharger])
+    return [(c, d * e.eff_dispatch) if store_ctx.is_active(e.name, P) else (0.0, 0.0)
+            for c, d, P in zip(ch, dis, link_ctx.labels)]
+
+
 def block_capacity(cap_max: float, series, start: int, end: int) -> float:
     """The one capacity a unit or store has over the block ``[start, end)``
     — asserted constant, which the construction above guarantees and a
@@ -320,6 +334,21 @@ def activity_summary(n, blocks) -> dict:
             if base <= 0.0:
                 continue
             rows.append((str(sname), base, su_ctx.capacity_by_period(sname, row)))
+    # AS-11: a split storage (Store + charger/discharger Links), named by its
+    # Store, reads its vintages from the charger Link as the Monte Carlo does,
+    # and is inactive where its discharger or Store is.
+    from services.solver.storage_inventory import SPLIT, ac_power, list_storages
+    split = [e for e in list_storages(n) if e.layout == SPLIT]
+    if split:
+        link_ctx = ActivityContext(n, "links", blocks)
+        store_ctx = ActivityContext(n, "stores", blocks)
+        for e in split:
+            if is_slack_name(e.name) or is_slack_carrier(e.carrier) or e.bus not in elec:
+                continue
+            if float(solved_capacity(n.links.loc[e.charger])) <= 0.0:
+                continue
+            rows.append((e.name, e.p_nom_mw,
+                         [ac_power(c, d) for c, d in split_power_by_period(n, e, link_ctx, store_ctx)]))
 
     by_period: dict = {}
     parts: list[str] = []

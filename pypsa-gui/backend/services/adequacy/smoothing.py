@@ -41,7 +41,8 @@ investment period the phase falls in, as the peak check does. Each
 StorageUnit counts once: a UPS also named for ride-through keeps both its
 bridge and its share of R.
 
-Only committed (non-extendable) StorageUnits count, as in the peak check: an
+Only committed (non-extendable) storages count, StorageUnits and split
+storages (a Store with charger and discharger Links, AS-11), as in the peak check: an
 extendable unit is sized by the run, so the screen cannot know its rating
 (one sizing basis with the peak check). Nothing is time-stepped, solved or
 stored; no input is new. The screen reads the envelope's phases only: it is
@@ -55,7 +56,7 @@ import math
 
 from services.adequacy.site_peak import (_periods, _value, committed_storage, deliverable_mwh, delivered_mw,
                                          named_load, outage_reserve_mwh, period_year,
-                                         ride_through_batteries)
+                                         ride_through_batteries, storage_sizes)
 
 NO_BATTERY = "unknown, no battery/UPS"
 #: A converter battery's response latency by its effective control, after
@@ -173,7 +174,6 @@ def _reserve(n, island: dict, year: int | None) -> dict:
     battery: {mw, mwh}, ups: {mw, mwh, walk_in_s}}``. Batteries shape a step
     to the ramp limit under plant control; a UPS's rectifier walks its load
     onto the grid over its own ``walk_in_s`` (the fastest of them is kept)."""
-    su = n.storage_units
     units = island.get("units") or {}
     req = island.get("requirements") or {}
     _, mask = _period(n, year)
@@ -190,7 +190,7 @@ def _reserve(n, island: dict, year: int | None) -> dict:
     bridge = {}
     for u in upss:
         it = [x for x in units[u].get("it_load") or [] if x in n.loads.index]
-        carried = float(named_load(n, it)[mask].max()) if it else float(su.at[u, "p_nom"])
+        carried = float(named_load(n, it)[mask].max()) if it else storage_sizes(n, u)[0]
         bridge[u] = (carried * bridge_s / 3600.0, carried, bool(it))
 
     def bridge_note(u):
@@ -215,10 +215,11 @@ def _reserve(n, island: dict, year: int | None) -> dict:
         if u in rt["names"]:
             continue
         keep = bridge[u][0]
-        out["mw"] += float(su.at[u, "p_nom"])
-        out["mwh"] += max(0.0, deliverable_mwh(su, u) - keep)
-        out["ups"]["mw"] += float(su.at[u, "p_nom"])
-        out["ups"]["mwh"] += max(0.0, deliverable_mwh(su, u) - keep)
+        p = storage_sizes(n, u)[0]
+        out["mw"] += p
+        out["mwh"] += max(0.0, deliverable_mwh(n, u) - keep)
+        out["ups"]["mw"] += p
+        out["ups"]["mwh"] += max(0.0, deliverable_mwh(n, u) - keep)
         w = _walk_in_s(effective.get(u) or units.get(u) or {})
         if w is not None:
             prev = out["ups"]["walk_in_s"]

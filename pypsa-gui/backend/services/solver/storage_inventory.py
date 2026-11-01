@@ -93,8 +93,8 @@ def _max_hours(row) -> float:
 
 def list_storages(n: pypsa.Network) -> list[StorageEntry]:
     """Every StorageUnit (in frame order), then every split storage (by Store name). A split storage whose
-    charger or discharger Link is absent (for example removed with its bus) is not listed; `storage_notes`
-    names it."""
+    charger or discharger Link is absent (for example removed with its bus), or whose discharger delivers to
+    another bus than its charger draws from, is not listed; `storage_notes` names it."""
     from services.adequacy.copt import solved_capacity
 
     out: list[StorageEntry] = []
@@ -118,6 +118,8 @@ def list_storages(n: pypsa.Network) -> list[StorageEntry]:
         if ch not in links.index or dis not in links.index:
             continue
         crow, drow = links.loc[ch], links.loc[dis]
+        if str(crow.get("bus0")) != str(drow.get("bus1")):
+            continue            # charges and discharges at different buses: `storage_notes` names it
         eff_d = efficiency(drow, "efficiency")
         p_ch, p_dis = float(solved_capacity(crow)), float(solved_capacity(drow)) * eff_d
         out.append(StorageEntry(
@@ -130,7 +132,8 @@ def list_storages(n: pypsa.Network) -> list[StorageEntry]:
 
 def storage_notes(n: pypsa.Network, entries: list[StorageEntry] | None = None) -> list[str]:
     """One sentence per storage the readers do not count as built, or count at less than one of its sizes:
-    a split storage missing a Link, a split storage whose charge and dispatch power differ, and a `Store` with
+    a split storage missing a Link or whose two Links sit on different AC buses, a split storage whose charge
+    and dispatch power differ, and a `Store` with
     charging and discharging Links but no split-storage tag and a battery carrier (an imported PyPSA-Eur battery; not
     read yet)."""
     entries = list_storages(n) if entries is None else entries
@@ -147,7 +150,12 @@ def storage_notes(n: pypsa.Network, entries: list[StorageEntry] | None = None) -
     tagged_names = set() if tagged is None else set(tagged.index)
     listed = {e.name for e in entries if e.layout == SPLIT}
     for name in sorted(tagged_names - listed):
-        notes.append(f"{name}: split storage without its charger or discharger link; not counted")
+        ch, dis = tagged.at[name, "charger"], tagged.at[name, "discharger"]
+        if ch in links.index and dis in links.index:
+            notes.append(f"{name}: charger {ch} draws from {links.at[ch, 'bus0']} but discharger {dis} delivers "
+                         f"to {links.at[dis, 'bus1']}; not counted")
+        else:
+            notes.append(f"{name}: split storage without its charger or discharger link; not counted")
     for name in sorted(set(stores.index) - tagged_names):
         if "batter" not in str(stores.at[name, "carrier"]).lower():
             continue            # H2, heat and other stores are not electricity storage readers count
