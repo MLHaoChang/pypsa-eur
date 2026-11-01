@@ -97,7 +97,10 @@ _NOT_EQUIPMENT_KW = ("slack", "sink", "dump", "spill")
 
 def _outage_units(net, import_links) -> dict[str, Any]:
     """P24: units with usable outage data, per class, and the thermal-like
-    units without it (see ``outage_scan``), the list capped for the card."""
+    units without it (see ``outage_scan``), the list capped for the card.
+    ``by_class["StorageUnit"]`` counts storage in either layout: a split
+    storage (AS-11: Store + charger/discharger Links) counts there through
+    its Store, and the payload's ``storage_units`` counts both layouts too."""
     by_class, missing = outage_scan(net, import_links)
     return {"count": sum(by_class.values()), "by_class": by_class,
             "missing": missing[:_OUTAGE_MISSING_CAP]}

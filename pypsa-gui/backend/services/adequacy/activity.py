@@ -254,6 +254,16 @@ class ActivityContext:
         return cap_max, series
 
 
+def split_capacity_by_period(n, e, link_ctx: ActivityContext, store_ctx: ActivityContext) -> list[float]:
+    """A split storage's (AS-11) power per block, by the charger's vintages,
+    and 0 in a block where its discharger or Store is not active: the
+    storage is in service only while all three rows are (the latest build
+    year, the earliest end of life, every ``active`` flag)."""
+    caps = link_ctx.capacity_by_period(e.charger, n.links.loc[e.charger])
+    return [c if link_ctx.is_active(e.discharger, P) and store_ctx.is_active(e.name, P) else 0.0
+            for c, P in zip(caps, link_ctx.labels)]
+
+
 def block_capacity(cap_max: float, series, start: int, end: int) -> float:
     """The one capacity a unit or store has over the block ``[start, end)``
     — asserted constant, which the construction above guarantees and a
@@ -321,18 +331,19 @@ def activity_summary(n, blocks) -> dict:
                 continue
             rows.append((str(sname), base, su_ctx.capacity_by_period(sname, row)))
     # AS-11: a split storage (Store + charger/discharger Links), named by its
-    # Store, reads its vintages from the charger Link as the Monte Carlo does.
+    # Store, reads its vintages from the charger Link as the Monte Carlo does,
+    # and is inactive where its discharger or Store is.
     from services.solver.storage_inventory import SPLIT, list_storages
     split = [e for e in list_storages(n) if e.layout == SPLIT]
     if split:
         link_ctx = ActivityContext(n, "links", blocks)
+        store_ctx = ActivityContext(n, "stores", blocks)
         for e in split:
             if is_slack_name(e.name) or is_slack_carrier(e.carrier) or e.bus not in elec:
                 continue
-            row = n.links.loc[e.charger]
-            if float(solved_capacity(row)) <= 0.0:
+            if float(solved_capacity(n.links.loc[e.charger])) <= 0.0:
                 continue
-            rows.append((e.name, e.p_nom_mw, link_ctx.capacity_by_period(e.charger, row)))
+            rows.append((e.name, e.p_nom_mw, split_capacity_by_period(n, e, link_ctx, store_ctx)))
 
     by_period: dict = {}
     parts: list[str] = []

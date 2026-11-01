@@ -90,66 +90,56 @@ def in_service(df, name: str, year: int | None) -> bool:
     return built <= 0 or built <= year < built + life
 
 
-def _split_storages(n) -> dict:
-    """The split storages (AS-11: a ``Store`` with charger and discharger
-    ``Link``s), by Store name, from ``storage_inventory.list_storages``."""
-    from services.solver.storage_inventory import SPLIT, list_storages
-    return {e.name: e for e in list_storages(n) if e.layout == SPLIT}
+def _storages(n) -> dict:
+    """Every storage by name, in either layout (AS-11): a StorageUnit, or a
+    split storage (a ``Store`` with charger and discharger ``Link``s) named
+    by its Store, from ``storage_inventory.list_storages``."""
+    from services.solver.storage_inventory import list_storages
+    return {e.name: e for e in list_storages(n)}
 
 
-def _split_extendable(n, e) -> bool:
-    """A split storage is sized by the run when any of its three rows is."""
-    def flag(df, row, col):
+def _rows(n, e) -> list[tuple]:
+    """The ``(frame, row)`` pairs of one storage: the StorageUnit, or the
+    split storage's charger, discharger and Store."""
+    if e.charger is None:
+        return [(n.storage_units, e.name)]
+    return [(n.links, e.charger), (n.links, e.discharger), (n.stores, e.name)]
+
+
+def _extendable(n, e) -> bool:
+    """Sized by the run: the StorageUnit, or any of a split storage's three rows."""
+    def flag(df, row):
+        col = "e_nom_extendable" if df is n.stores else "p_nom_extendable"
         return col in df.columns and bool(df.at[row, col])
-    return (flag(n.links, e.charger, "p_nom_extendable") or flag(n.links, e.discharger, "p_nom_extendable")
-            or flag(n.stores, e.name, "e_nom_extendable"))
+    return any(flag(df, row) for df, row in _rows(n, e))
 
 
-def storage_sizes(n, u: str, split: dict | None = None) -> tuple[float, float, float, float]:
-    """``(p_mw, stored_mwh, eta_store, eta_dispatch)`` of the committed storage
-    ``u``: a StorageUnit's p_nom and p_nom × max_hours, or a split storage's
-    AC-side P and Store E (``list_storages``), so the two layouts of one
-    battery read alike."""
-    su = n.storage_units
-    if u in su.index:
-        p = float(su.at[u, "p_nom"])
-        return (p, p * float(su.at[u, "max_hours"]), float(su.at[u, "efficiency_store"]),
-                float(su.at[u, "efficiency_dispatch"]))
-    e = (_split_storages(n) if split is None else split)[u]
+def storage_sizes(n, u: str, entries: dict | None = None) -> tuple[float, float, float, float]:
+    """``(p_mw, stored_mwh, eta_store, eta_dispatch)`` of storage ``u`` from
+    its inventory entry, one rule for both layouts: AC-side P, store-side E
+    (a StorageUnit's p_nom × max_hours, a split storage's Store)."""
+    e = (_storages(n) if entries is None else entries)[u]
     return e.p_nom_mw, e.e_nom_mwh, e.eff_store, e.eff_dispatch
 
 
 def committed_storage(n, names, year: int | None = None) -> tuple[list[str], list[str]]:
     """(committed, unsized) storages among ``names`` in service in ``year``:
-    StorageUnits, and split storages named by their Store (in service by the
-    charger Link). Committed is fixed with a rating; unsized is extendable,
-    sized by the run, which counts 0 as an extendable genset does."""
-    su = n.storage_units
-    split = _split_storages(n)
-    live, unsized = [], []
-    for u in names:
-        if u in su.index:
-            if not in_service(su, u, year):
-                continue
-            live.append(u)
-            if bool(su.at[u, "p_nom_extendable"]):
-                unsized.append(u)
-        elif u in split:
-            if not in_service(n.links, split[u].charger, year):
-                continue
-            live.append(u)
-            if _split_extendable(n, split[u]):
-                unsized.append(u)
-    return [u for u in live if u not in unsized and storage_sizes(n, u, split)[0] > 0], unsized
+    StorageUnits, and split storages named by their Store, in service only
+    while all three of their rows (charger, discharger, Store) are, so the
+    latest build year and the earliest end of life decide. Committed is
+    fixed with a rating; unsized is extendable, sized by the run, which
+    counts 0 as an extendable genset does."""
+    entries = _storages(n)
+    live = [u for u in names if u in entries
+            and all(in_service(df, row, year) for df, row in _rows(n, entries[u]))]
+    unsized = [u for u in live if _extendable(n, entries[u])]
+    return [u for u in live if u not in unsized and entries[u].p_nom_mw > 0], unsized
 
 
-def deliverable_mwh(n, u: str) -> float:
-    """A storage's deliverable energy: efficiency_dispatch × stored energy
-    (a StorageUnit's p_nom × max_hours; a split storage's Store)."""
-    su = n.storage_units
-    if u in su.index:
-        return float(su.at[u, "efficiency_dispatch"]) * float(su.at[u, "p_nom"]) * float(su.at[u, "max_hours"])
-    _p, e, _s, d = storage_sizes(n, u)
+def deliverable_mwh(n, u: str, entries: dict | None = None) -> float:
+    """A storage's deliverable energy: efficiency_dispatch × stored energy,
+    the same rule for both layouts."""
+    _p, e, _s, d = storage_sizes(n, u, entries)
     return d * e
 
 
@@ -175,14 +165,14 @@ def ride_through_batteries(n, island: dict | None, year: int | None = None) -> d
         return {**none, "unsized": unsized,
                 "reason": "no sustained ride-through time in the island requirements: "
                           "no battery is counted as firm"}
-    split = _split_storages(n)
-    sizes = {u: storage_sizes(n, u, split) for u in names}
+    entries = _storages(n)
+    sizes = {u: storage_sizes(n, u, entries) for u in names}
     stored = {u: sizes[u][1] for u in names}
     total = sum(stored.values()) or 1.0
     eta_d = sum(sizes[u][3] * stored[u] for u in names) / total
     eta_s = sum(sizes[u][2] * stored[u] for u in names) / total
     return {"names": names, "unsized": unsized, "p_mw": sum(sizes[u][0] for u in names),
-            "e_mwh": sum(deliverable_mwh(n, u) for u in names), "eta_store": eta_s,
+            "e_mwh": sum(deliverable_mwh(n, u, entries) for u in names), "eta_store": eta_s,
             "eta_dispatch": eta_d, "sustained_h": float(d), "reason": None}
 
 

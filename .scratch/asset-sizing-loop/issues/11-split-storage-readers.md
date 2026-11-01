@@ -66,3 +66,13 @@ table) and `compare/capacity.py` already read Stores.
   named, not counted, as its migrated twin is); the blocked-Links note names both Links when they are zero in
   different blocks; a split storage whose discharger `bus1` is not its charger's `bus0` is named, not counted; a
   zonal Monte Carlo pair test. PR B (results readers) follows.
+- GK A plan GO for slice 2 PR A (2026-11-01), conditions: (1) a split storage is in service only while its
+  charger, discharger and Store all are (latest build year, earliest end of life, all active; test with a Store
+  that retires first); (2) the fingerprint hashes what the split readers read (Links' p_max_pu/p_min_pu, static and
+  time-varying, the Store's standing_loss, carrier, c_rate_max), adds nothing without split storage, and a test pins
+  StorageUnit-only fingerprints to master's values; (3) the redundancy undo restores `stores` and `stores_t`;
+  (4) `storage_duration` refuses by name a duration outside the technology's range or below 1/c_rate_max;
+  (5) the StorageUnit availability reads static and time-varying p_max_pu/p_min_pu, default limits bit-identical,
+  moved anchors listed in the PR body, a release-note line for the change; (6) deliverable energy uses one rule
+  for both layouts from the inventory entry, the pair test checks P, E and deliverable MWh; (7) the readiness
+  payload docstring names the "StorageUnit" key reuse; (8) existing adequacy suites unchanged at the PR head.

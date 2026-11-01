@@ -236,11 +236,13 @@ def network_fingerprint(n) -> str:
     if tagged is not None:
         for name in sorted(tagged.index):
             h.update(b"\x1dsplit_storage" + str(name).encode())
+            if name in n.stores.index and "carrier" in n.stores.columns:
+                h.update(b"carrier" + str(n.stores.at[name, "carrier"]).encode())
             rows = [(n.stores, name, ("e_nom", "e_nom_opt", "e_nom_extendable", "min_hours", "max_hours",
-                                      "standing_loss", "build_year", "lifetime", "active"))]
+                                      "c_rate_max", "standing_loss", "build_year", "lifetime", "active"))]
             for link in (tagged.at[name, "charger"], tagged.at[name, "discharger"]):
                 rows.append((n.links, link, ("p_nom", "p_nom_opt", "p_nom_extendable", "efficiency", "p_max_pu",
-                                             "build_year", "lifetime", "active")))
+                                             "p_min_pu", "build_year", "lifetime", "active")))
             for frame, row, cols in rows:
                 h.update(str(row).encode())
                 if row not in frame.index:
@@ -253,10 +255,11 @@ def network_fingerprint(n) -> str:
                         except (TypeError, ValueError):
                             v = math.nan
                         h.update(np.float64(v).tobytes())
-                pmp = getattr(getattr(n, "links_t", None), "p_max_pu", None)
-                if frame is n.links and pmp is not None and row in pmp.columns:
-                    h.update(b"p_max_pu_t")
-                    h.update(np.ascontiguousarray(pmp[row].to_numpy(dtype=np.float64)).tobytes())
+                for attr in ("p_max_pu", "p_min_pu"):   # time-varying, as the StorageUnit side is
+                    ts = getattr(getattr(n, "links_t", None), attr, None)
+                    if frame is n.links and ts is not None and row in ts.columns:
+                        h.update(attr.encode() + b"_t")
+                        h.update(np.ascontiguousarray(ts[row].to_numpy(dtype=np.float64)).tobytes())
     # Phase 12d: the persisted vintage breakdown decides the engines'
     # per-period capacity; a breakdown that changes under an unchanged frame
     # (another solve) is a report the block must not compare against (E10).

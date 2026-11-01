@@ -233,9 +233,15 @@ def _split_capacity(n, ctx, e):
     from services.adequacy.activity import _CONST_TOL
     from services.solver.storage_inventory import ac_power
 
+    from services.adequacy.activity import ActivityContext
+
     crow, drow = n.links.loc[e.charger], n.links.loc[e.discharger]
     ch = ctx.capacity_by_period(e.charger, crow)
     dis = ctx.capacity_by_period(e.discharger, drow)
+    # GK A (AS-11 slice 2): in service only while the Store is too.
+    store_ctx = ActivityContext(n, "stores", ctx.blocks)
+    live = [store_ctx.is_active(e.name, P) for P in ctx.labels]
+    ch = [c if a else 0.0 for c, a in zip(ch, live)]
     act: list[float] = []
     caps: list[float] = []
     for (_label, start, end), c, d in zip(ctx.blocks, ch, dis):
