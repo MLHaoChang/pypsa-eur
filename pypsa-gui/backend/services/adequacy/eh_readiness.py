@@ -71,7 +71,7 @@ def _stage_estimate(stage: str, net, pack: ArchetypePack, ctx: dict) -> tuple[
                 and ctx["storage_units"]:
             total += len(lev.DEFAULT_STORAGE_HOURS)
         if total == 0:
-            return 0, "exact", "no applicable lever (no StorageUnits / import Links)"
+            return 0, "exact", "no applicable lever (no storage / import Links)"
         return total, "upper_bound", None
     if stage in ("dtc_stress", "dtc_planning"):
         if not ctx["dtc"]["derivable"]:
@@ -145,6 +145,16 @@ def outage_scan(net, import_links) -> tuple[dict[str, int], list[dict[str, str]]
             if thermal:
                 missing.append({"class": cls, "name": str(name)})
         by_class[cls] = count
+    # AS-11: a split storage (Store + charger/discharger Links) takes its
+    # outage rate from its Store, as the Monte Carlo does; it counts under
+    # "StorageUnit" (storage, either layout).
+    from services.solver.split_storage import _tagged
+    tagged = _tagged(net)
+    if tagged is not None:
+        params = resolve_outage_params(net, "stores")
+        by_class["StorageUnit"] = by_class.get("StorageUnit", 0) + sum(
+            int(finite(params.at[s, "rate"]) and finite(params.at[s, "mttr_hours"]))
+            for s in tagged.index if s in params.index)
     return by_class, missing
 
 
@@ -166,6 +176,7 @@ def eh_readiness(network, pack: ArchetypePack, *, budget_solves: int,
     from services.adequacy import levers as lev
     from services.adequacy import scr_gate as scr_mod
     from services.adequacy import sweep as sw
+    from services.solver.storage_inventory import list_storages
 
     requested = (S.validate_stages(stages) if stages is not None
                  else S.default_stages_for(pack))
@@ -242,7 +253,8 @@ def eh_readiness(network, pack: ArchetypePack, *, budget_solves: int,
     ctx = {"remaining": budget_solves, "budget": budget_solves,
            "class_b": class_b, "dtc": dtc_block, "mc_boundary": mc_boundary,
            "voll": voll_v, "voll_ok": voll_v > 0,
-           "storage_units": int(len(net.storage_units)),
+           # Storage in either layout (AS-11: StorageUnits and split storages).
+           "storage_units": len(list_storages(net)),
            # The levers stage selects with its OWN rule, not the pack's §6.
            "lever_import_links": lev._import_link_ids(net),
            "metered_links": metered}

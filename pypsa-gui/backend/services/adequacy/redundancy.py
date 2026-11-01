@@ -315,6 +315,8 @@ def apply_redundancy_scenario(n, scenario_id: str) -> tuple[Callable[[], None], 
             n.storage_units.copy(deep=True)
             if n.storage_units is not None else None),
         "links": n.links.copy(deep=True) if n.links is not None else None,
+        # AS-11: a solve writes e_nom_opt on a split storage's Store.
+        "stores": n.stores.copy(deep=True) if n.stores is not None else None,
     }
     applied: list[dict[str, Any]] = []
 
@@ -480,6 +482,8 @@ def apply_redundancy_scenario(n, scenario_id: str) -> tuple[Callable[[], None], 
             n.generators = snap["generators"]
         if snap["storage_units"] is not None:
             n.storage_units = snap["storage_units"]
+        if snap["stores"] is not None:
+            n.stores = snap["stores"]
         if snap["links"] is not None:
             n.links = snap["links"]
         elif kind == "n1_conversion":

@@ -3,7 +3,7 @@
 
 # AS-11 — Readers of split (Store + Link) storage
 
-Status: in progress (slice 1)
+Status: in progress (slice 2)
 Type: task
 Blocked by: 02
 Reviewer: GK A (adequacy) + GK B (results)
@@ -58,3 +58,11 @@ table) and `compare/capacity.py` already read Stores.
   `services/results/dispatch_digest.py`, `results/billing.py`, `results/load_shape.py`;
   `services/asset_results/compute.py` (StorageUnit energy capacity). Also open from slice 1: per-period vintages of
   a split storage's Store in storage cycling (today the Store's final size in every period).
+- 2026-11-01, slice 2 PR A (adequacy): `site_peak.py` (ride-through), `smoothing.py`, `portfolio.py`
+  (fingerprint), `redundancy.py` (undo restores Stores), `levers.py` (`storage_duration` sets a split Store to
+  hours x P), `eh_readiness.py` (storage count, outage scan) and `activity.py` read split storage through
+  `storage_inventory`. Folded in: the StorageUnit reader in `mc.snapshot_inputs` applies `p_max_pu` and
+  `-p_min_pu` per block like the split Links (default limits bit-identical; a discharge-only StorageUnit is now
+  named, not counted, as its migrated twin is); the blocked-Links note names both Links when they are zero in
+  different blocks; a split storage whose discharger `bus1` is not its charger's `bus0` is named, not counted; a
+  zonal Monte Carlo pair test. PR B (results readers) follows.

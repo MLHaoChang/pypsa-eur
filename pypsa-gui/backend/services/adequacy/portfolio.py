@@ -212,6 +212,51 @@ def network_fingerprint(n) -> str:
                 h.update(col.encode())
                 h.update(np.ascontiguousarray(
                     su[col].to_numpy(dtype=np.float64, na_value=np.nan)).tobytes())
+    # AS-11: a StorageUnit's availability (p_max_pu, -p_min_pu) derates it
+    # in the Monte Carlo; hashed only where it is not the default, so the
+    # fingerprint of a network at full availability is unchanged.
+    if su is not None and not su.empty:
+        for attr, default in (("p_max_pu", 1.0), ("p_min_pu", -1.0)):
+            if attr in su.columns:
+                col = su[attr].to_numpy(dtype=np.float64, na_value=np.nan)
+                if not np.all(col == default):
+                    h.update(b"\x1dsu_" + attr.encode())
+                    h.update(np.ascontiguousarray(col).tobytes())
+            ts = getattr(getattr(n, "storage_units_t", None), attr, None)
+            if ts is not None and not ts.empty:
+                for c in ts.columns:
+                    h.update(b"\x1dsu_t_" + attr.encode() + str(c).encode())
+                    h.update(np.ascontiguousarray(ts[c].to_numpy(dtype=np.float64)).tobytes())
+    # AS-11: a split storage (Store + charger/discharger Links) is the same
+    # battery in another layout; its sizes, efficiencies and vintages decide
+    # the dispatch as a StorageUnit's do. Nothing is added without one, so
+    # the fingerprint of a network without split storage is unchanged.
+    from services.solver.split_storage import _tagged
+    tagged = _tagged(n)
+    if tagged is not None:
+        for name in sorted(tagged.index):
+            h.update(b"\x1dsplit_storage" + str(name).encode())
+            rows = [(n.stores, name, ("e_nom", "e_nom_opt", "e_nom_extendable", "min_hours", "max_hours",
+                                      "standing_loss", "build_year", "lifetime", "active"))]
+            for link in (tagged.at[name, "charger"], tagged.at[name, "discharger"]):
+                rows.append((n.links, link, ("p_nom", "p_nom_opt", "p_nom_extendable", "efficiency", "p_max_pu",
+                                             "build_year", "lifetime", "active")))
+            for frame, row, cols in rows:
+                h.update(str(row).encode())
+                if row not in frame.index:
+                    continue
+                for col in cols:
+                    if col in frame.columns:
+                        h.update(col.encode())
+                        try:
+                            v = float(frame.at[row, col])
+                        except (TypeError, ValueError):
+                            v = math.nan
+                        h.update(np.float64(v).tobytes())
+                pmp = getattr(getattr(n, "links_t", None), "p_max_pu", None)
+                if frame is n.links and pmp is not None and row in pmp.columns:
+                    h.update(b"p_max_pu_t")
+                    h.update(np.ascontiguousarray(pmp[row].to_numpy(dtype=np.float64)).tobytes())
     # Phase 12d: the persisted vintage breakdown decides the engines'
     # per-period capacity; a breakdown that changes under an unchanged frame
     # (another solve) is a report the block must not compare against (E10).

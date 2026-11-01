@@ -214,9 +214,170 @@ def test_storage_cycling_is_available_on_a_network_with_only_split_storage():
 
 def test_a_migrated_discharge_only_unit_is_named_when_its_charger_is_blocked():
     """GK A ruling (a): the split reading applies the charger's p_max_pu (= -p_min_pu = 0), so the storage is not
-    counted; it is named, not dropped silently. The StorageUnit reader ignores p_min_pu (issue follow-up)."""
+    counted; it is named, not dropped silently. The StorageUnit reader does the same since slice 2."""
     _, split = _pair(**{**SU, "p_min_pu": 0.0})
     inp = M.snapshot_inputs(split)
     assert inp.storage == ()
     assert inp.storage_notes == ("bess: p_max_pu of bess charger is 0 in every block; not counted",)
     assert M.mc_adequacy(inp, draws=50, seed=1, max_draws=50)["storage_notes"] == list(inp.storage_notes)
+
+
+# ── slice 2: the adequacy readers ─────────────────────────────────────────────────────────────────────────────
+
+def _island_site(split: bool) -> pypsa.Network:
+    """A 48-hour site with a 20 MW / 80 MWh ride-through battery and a 40 MW / 10 MWh UPS, either as
+    StorageUnits or migrated to the split layout."""
+    from tests.test_smoothing_screen import _site
+    n = _site([], {"critical": 4.0, "it": 6.0})
+    n.add("Carrier", "battery")
+    for name, p, h in (("rt", 20.0, 4.0), ("ups", 40.0, 0.25)):
+        n.add("StorageUnit", name, bus="site", carrier="battery", p_nom=p, max_hours=h,
+              efficiency_store=0.95, efficiency_dispatch=0.9)
+        if split:
+            migrate_storage_unit(n, name)
+    return n
+
+
+ISLAND = {"units": {"rt": {"kind": "bess"}, "critical": {"kind": "load", "critical": True},
+                    "ups": {"kind": "ups", "it_load": ["it"], "walk_in_s": 600.0}},
+          "requirements": {"sustained_h": {"value": 12.0}, "bridge_s": {"value": 600.0}}}
+
+
+def test_the_ride_through_and_smoothing_screens_read_a_split_storage_like_the_storage_unit():
+    from services.adequacy import smoothing as SM
+    from services.adequacy.site_peak import ride_through_batteries
+    from tests.test_smoothing_screen import _phase
+    legacy, split = _island_site(False), _island_site(True)
+    rt = [ride_through_batteries(n, ISLAND) for n in (legacy, split)]
+    assert rt[0]["names"] == ["rt"] and rt[0]["e_mwh"] == pytest.approx(0.9 * 80.0)
+    assert rt[1] == rt[0]
+    screens = [SM.smoothing_screen(n, ISLAND, {"phases": [_phase(10.0)]}, ramp_limit_mw_per_min=20.0,
+                                   oscillation_limit_pct=1.0, connection_mw=200.0) for n in (legacy, split)]
+    (pa,), (pb,) = screens[0]["phases"], screens[1]["phases"]
+    assert pa["reserve_mw"] == pytest.approx(60.0)
+    for k in ("reserve_mw", "reserve_mwh", "backup_mwh", "need_mwh"):
+        assert pb[k] == pytest.approx(pa[k]), k
+    assert pb["note"] == pa["note"]
+
+
+def test_an_extendable_split_storage_is_unsized_as_the_storage_unit_is():
+    from services.adequacy.site_peak import committed_storage
+    n = _island_site(True)
+    n.stores.at["rt", "e_nom_extendable"] = True
+    assert committed_storage(n, ["rt", "ups"]) == (["ups"], ["rt"])
+
+
+def test_the_portfolio_fingerprint_follows_a_split_storage_and_leaves_storage_unit_networks_alone():
+    from services.adequacy.portfolio import network_fingerprint
+    legacy, split = _pair(**SU)
+    before = network_fingerprint(split)
+    split.stores.at["bess", "e_nom"] = 50.0
+    assert network_fingerprint(split) != before
+    split.stores.at["bess", "e_nom"] = 40.0
+    split.links.at["bess discharger", "p_max_pu"] = 0.5
+    assert network_fingerprint(split) != before
+    # A StorageUnit-only network hashes as before this slice (no split storage, nothing added).
+    assert network_fingerprint(legacy) == network_fingerprint(_adequacy_site(**SU))
+
+
+def test_a_redundancy_scenario_restores_a_split_storage_store():
+    from services.adequacy.redundancy import apply_redundancy_scenario
+    _, split = _pair(**SU)
+    undo, _ = apply_redundancy_scenario(split, "parallel_storage")
+    split.stores.at["bess", "e_nom_opt"] = 123.0      # what a solve writes
+    undo()
+    assert split.stores.at["bess", "e_nom_opt"] != 123.0
+
+
+def test_storage_duration_sets_a_split_storage_to_the_storage_unit_energy():
+    from services.adequacy.levers import apply_lever_scenario
+    legacy, split = _pair(**SU)
+    out = []
+    for n in (legacy, split):
+        undo, meta = apply_lever_scenario(n, "storage_duration", value=4.0)
+        assert meta["applied_storage"] == ["bess"]
+        out.append(M.snapshot_inputs(n))
+        undo()
+    assert out[0].storage[0].e_nom_mwh == pytest.approx(80.0)
+    assert [_spec(s) for s in out[1].storage] == [_spec(s) for s in out[0].storage]
+    assert split.stores.at["bess", "e_nom"] == pytest.approx(40.0)      # undone
+    assert M.mc_adequacy(out[1], draws=100, seed=2, max_draws=100)["eue_mwh"] == \
+        M.mc_adequacy(out[0], draws=100, seed=2, max_draws=100)["eue_mwh"]
+
+
+def test_eh_readiness_counts_a_split_storage_and_its_outage_data():
+    from services.adequacy.eh_readiness import outage_scan
+    legacy, split = _pair(**SU)
+    assert outage_scan(split, [])[0]["StorageUnit"] == outage_scan(legacy, [])[0]["StorageUnit"] == 1
+
+
+def test_the_activity_note_names_an_inactive_split_storage():
+    from services.adequacy.activity import activity_summary, period_blocks
+    legacy, split = _pair(**SU)
+    legacy.storage_units.at["bess", "active"] = False
+    split.links.at["bess charger", "active"] = False
+    notes = [activity_summary(n, period_blocks(n.snapshots)) for n in (legacy, split)]
+    assert notes[0]["by_period"] and notes[1] == notes[0]
+    assert "bess" in notes[1]["note"]
+
+
+def test_links_blocked_in_different_blocks_are_both_named():
+    """GK A nit on slice 1: charger at 0 in one period, discharger in the other, neither throughout."""
+    n = _adequacy_site(**SU)
+    migrate_storage_unit(n, "bess")
+    half = HOURS // 2
+    n.snapshots = pd.MultiIndex.from_arrays([[2030] * half + [2040] * half, n.snapshots])
+    n.links_t.p_max_pu = pd.DataFrame({"bess charger": [0.0] * half + [1.0] * half,
+                                       "bess discharger": [1.0] * half + [0.0] * half}, index=n.snapshots)
+    inp = M.snapshot_inputs(n)
+    assert inp.storage == ()
+    assert inp.storage_notes == ("bess: p_max_pu of bess charger or bess discharger is 0 in every block; "
+                                 "not counted",)
+
+
+def test_a_split_storage_whose_links_sit_on_different_buses_is_named_not_counted():
+    _, split = _pair(**SU)
+    split.add("Bus", "other", carrier="AC")
+    split.links.at["bess discharger", "bus1"] = "other"
+    assert [e.name for e in list_storages(split)] == []
+    assert storage_notes(split) == ["bess: charger bess charger draws from ac but discharger bess discharger "
+                                    "delivers to other; not counted"]
+
+
+def test_the_zonal_monte_carlo_gives_a_split_grid_battery_the_same_blocks():
+    from tests.test_energy_hub_zonal_storage import _assert_same, _blocks, _freeze, _weak
+    legacy = _weak(grid_load=180.0, grid_battery=(100.0, 8.0))
+    split = _weak(grid_load=180.0, grid_battery=(100.0, 8.0))
+    migrate_storage_unit(split, "grid_bat")
+    za, zb = (_freeze(n).zonal_inputs for n in (legacy, split))
+    from services.adequacy import mc_zonal as Z
+    assert Z.single_area(zb).grid.storage
+    _assert_same(_blocks(zb), _blocks(za))
+
+
+@pytest.mark.parametrize("limits", [{"p_max_pu": 0.5}, {"p_min_pu": -0.25}, {"p_max_pu": 0.8, "p_min_pu": -0.6}])
+def test_a_storage_unit_availability_derates_it_as_the_split_links_do(limits):
+    """Follow-up to GK A ruling (a): the StorageUnit reader applies p_max_pu and -p_min_pu like the migrated
+    Links' p_max_pu, so the two layouts agree on non-default limits."""
+    legacy, split = _pair(**{**SU, **limits})
+    a, b = M.snapshot_inputs(legacy), M.snapshot_inputs(split)
+    assert a.storage[0].p_nom_mw < SU["p_nom"]
+    assert a.storage[0].e_nom_mwh == pytest.approx(SU["p_nom"] * SU["max_hours"])
+    assert [_spec(s) for s in a.storage] == [_spec(s) for s in b.storage]
+    assert M.mc_adequacy(a, draws=100, seed=4, max_draws=100)["eue_mwh"] == \
+        M.mc_adequacy(b, draws=100, seed=4, max_draws=100)["eue_mwh"]
+
+
+def test_a_discharge_only_storage_unit_is_named_not_counted():
+    legacy, _ = _pair(**{**SU, "p_min_pu": 0.0})
+    inp = M.snapshot_inputs(legacy)
+    assert inp.storage == ()
+    assert inp.storage_notes == ("bess: p_max_pu or -p_min_pu is 0 in every block; not counted",)
+
+
+def test_the_portfolio_fingerprint_follows_a_storage_unit_availability():
+    from services.adequacy.portfolio import network_fingerprint
+    legacy, _ = _pair(**SU)
+    before = network_fingerprint(legacy)
+    legacy.storage_units.at["bess", "p_max_pu"] = 0.5
+    assert network_fingerprint(legacy) != before

@@ -320,6 +320,19 @@ def activity_summary(n, blocks) -> dict:
             if base <= 0.0:
                 continue
             rows.append((str(sname), base, su_ctx.capacity_by_period(sname, row)))
+    # AS-11: a split storage (Store + charger/discharger Links), named by its
+    # Store, reads its vintages from the charger Link as the Monte Carlo does.
+    from services.solver.storage_inventory import SPLIT, list_storages
+    split = [e for e in list_storages(n) if e.layout == SPLIT]
+    if split:
+        link_ctx = ActivityContext(n, "links", blocks)
+        for e in split:
+            if is_slack_name(e.name) or is_slack_carrier(e.carrier) or e.bus not in elec:
+                continue
+            row = n.links.loc[e.charger]
+            if float(solved_capacity(row)) <= 0.0:
+                continue
+            rows.append((e.name, e.p_nom_mw, link_ctx.capacity_by_period(e.charger, row)))
 
     by_period: dict = {}
     parts: list[str] = []
