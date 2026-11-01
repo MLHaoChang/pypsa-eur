@@ -53,11 +53,11 @@ def _compute_storage_cycling_summary(n, periods, is_multi, has_solve) -> Storage
 
     if not has_solve:
         return StorageCyclingComparison()
-    from services.solver.storage_inventory import SPLIT, list_storages, split_ac_flows
+    from services.solver.storage_inventory import results_splits, split_ac_flows
 
     sus = n.storage_units
     # AS-11: split storages (Store + charger/discharger Links) cycle too.
-    splits = [e for e in list_storages(n) if e.layout == SPLIT]
+    splits = results_splits(n)
     if sus.empty and not splits:
         # The network resolved fine; it simply has no storage component,
         # so "zero cycling" is the real, structurally-guaranteed answer, not
@@ -77,17 +77,19 @@ def _compute_storage_cycling_summary(n, periods, is_multi, has_solve) -> Storage
 
     vintage_root = (n.meta or {}).get("vintage_results", {}) if hasattr(n, "meta") else {}
     su_vr = vintage_root.get("StorageUnit", {}) if isinstance(vintage_root, dict) else {}
+    store_vr = vintage_root.get("Store", {}) if isinstance(vintage_root, dict) else {}
 
-    def _per_period_pnom(s_name: str, parent_opt: float) -> dict[int, float]:
+    def _per_period_pnom(s_name: str, parent_opt: float, vr=su_vr, field: str = "p_nom_opt") -> dict[int, float]:
         """
         Cumulative ``p_nom`` active in each period for storage unit
         ``s_name``: ``initial + Σ vintages with build_year ≤ P``. Non-vintage
         / single-period assets return a flat ``{P: parent_opt}`` for each
-        period.
+        period. A split storage's Store passes its own vintages (`vr`) and
+        reads each vintage's `e_nom_opt` (`field`), else its `p_nom_opt`.
         """
         if not is_multi or not periods:
             return {}
-        meta_entry = su_vr.get(s_name) if isinstance(su_vr, dict) else None
+        meta_entry = vr.get(s_name) if isinstance(vr, dict) else None
         if not isinstance(meta_entry, dict):
             return {int(p): parent_opt for p in periods}
         try:
@@ -102,7 +104,7 @@ def _compute_storage_cycling_summary(n, periods, is_multi, has_solve) -> Storage
                     continue
                 try:
                     by = int(entry.get("build_year"))
-                    pn = float(entry.get("p_nom_opt", 0.0) or 0.0)
+                    pn = float(entry.get(field, entry.get("p_nom_opt", 0.0)) or 0.0)
                 except (TypeError, ValueError):
                     continue
                 if pn <= 1e-9:
@@ -147,12 +149,13 @@ def _compute_storage_cycling_summary(n, periods, is_multi, has_solve) -> Storage
         final_ec = parent_pnom_opt * max_hours  # for flat-net or all-horizon fallback
         units.append((str(s), carrier, parent_pnom_opt, series, per_period_ec, final_ec))
     # A split storage: AC-side charge + discharge (a StorageUnit's |p|), and
-    # its Store's energy. Vintages of the Store are not split per period yet.
+    # its Store's energy, per period from the Store's vintages (`e_nom_opt` of each; a Store without a
+    # vintage entry keeps its final size in every period).
     for e in splits:
         flows = split_ac_flows(n, e)
         if flows is None or not _math.isfinite(e.p_nom_mw) or e.p_nom_mw <= 1e-9 or e.e_nom_mwh <= 1e-9:
             continue
-        per_period_ec = {int(p): e.e_nom_mwh for p in periods} if is_multi and periods else {}
+        per_period_ec = _per_period_pnom(e.name, e.e_nom_mwh, store_vr, "e_nom_opt")
         units.append((e.name, (e.carrier or "storage").lower(), e.p_nom_mw, flows[0] + flows[1],
                       per_period_ec, e.e_nom_mwh))
 

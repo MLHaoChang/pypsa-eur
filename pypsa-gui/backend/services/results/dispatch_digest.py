@@ -130,6 +130,24 @@ def _trim(digest: dict, parts: tuple[str, ...]) -> dict:
     return digest
 
 
+def _storage_frames(n) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+    """StorageUnits and their signed `p`, plus each split storage (AS-11) under its Store's name and carrier, its
+    signed `p` the AC-side discharge minus charge, as a StorageUnit's is. Without split storage, the StorageUnit
+    frames as they are."""
+    from services.solver.storage_inventory import results_splits, split_signed_ac_p
+
+    static, frame = n.storage_units, getattr(n.storage_units_t, 'p', None)
+    flows = split_signed_ac_p(n, results_splits(n))
+    if not flows:
+        return static, frame
+    split_p = pd.DataFrame({e.name: p for e, p in flows.items()}, index=n.snapshots)
+    split_static = pd.DataFrame({'carrier': [e.carrier for e in flows]}, index=list(split_p.columns))
+    su = frame.reindex(columns=[c for c in frame.columns if c in static.index]) if frame is not None else None
+    return (pd.concat([static[['carrier']] if 'carrier' in static.columns
+                       else pd.DataFrame({'carrier': 'unknown'}, index=static.index), split_static]),
+            split_p if su is None or su.columns.empty else pd.concat([su.reindex(n.snapshots), split_p], axis=1))
+
+
 def dispatch_digest(n) -> dict:
     """The digest, or {'status': 'unavailable', 'reason': ...}."""
     if is_multi_period(n):
@@ -141,8 +159,7 @@ def dispatch_digest(n) -> dict:
         'snapshots': len(sns), 'weighted_hours': _num(w.sum()),
         'generators': _part(n.generators, getattr(n.generators_t, 'p', None), sns, w,
                             _generator_rows, 'energy_mwh'),
-        'storage_dispatch': _part(n.storage_units, getattr(n.storage_units_t, 'p', None), sns, w,
-                                  _storage_rows, 'energy_out_mwh'),
+        'storage_dispatch': _part(*_storage_frames(n), sns, w, _storage_rows, 'energy_out_mwh'),
     }
     return _trim(digest, ('generators', 'storage_dispatch'))
 
