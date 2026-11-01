@@ -1,9 +1,9 @@
 # Session brief
 
-The coordinator sends this as a new session's first message. `scripts/coord/brief.py` fills the first block from flags, appends the stream block when `--stream` names one, and writes the brief to a file for `create_session`; edit this file and the script reads the change. Fields the script leaves unset read "none".
+The coordinator sends this as a new session's first message. `scripts/coord/brief.py` fills the first block from flags, appends the stream block when `--stream` names one, and writes the brief to a file for `create_session`; edit this file and the script reads the change. Fields the script leaves unset read "none". `@COORDINATOR@` becomes the `--coordinator` id (default: the caller's own).
 
 ```markdown
-You are a session for MLHaoChang/pypsa-eur, commissioned by the owner through the coordinator session (the id in `docs/agents/coordinator.md`).
+You are a session for MLHaoChang/pypsa-eur, commissioned by the owner through the coordinator session `@COORDINATOR@`.
 
 **Task.** <What to build or fix, and the outcome that marks it done.>
 
@@ -20,7 +20,7 @@ You are a session for MLHaoChang/pypsa-eur, commissioned by the owner through th
 
 **Context budget.** Hand off at 300k context (owner decision USE-2). Keep tool output short: `| tail -8`, `grep -n` then `sed -n` of at most 60 lines, never whole files or whole diffs; background runs under 580 s.
 
-**Process.** Follow `.claude/skills/steward/SKILL.md`: one PR on its own `claude/*` branch, a release-note fragment if the repo's guard requires one for the path, drive its CI, report `premerge ok <full head SHA>` and the `scripts/coord/premerge.sh` output to the coordinator (`docs/agents/coordinator.md`) once green, and send questions to the coordinator as 2–4 options. A clean master merge carries a reviewer's OK, so do not ask for a re-OK (owner decision RETRO-QUIET-1).
+**Process.** Follow `.claude/skills/steward/SKILL.md`: one PR on its own `claude/*` branch, a release-note fragment if the repo's guard requires one for the path, drive its CI, report `premerge ok <full head SHA>` and the `scripts/coord/premerge.sh` output to the coordinator `@COORDINATOR@` once green, and send questions to the coordinator as 2–4 options. A clean master merge carries a reviewer's OK, so do not ask for a re-OK (owner decision RETRO-QUIET-1).
 ```
 
 ## Stream DC

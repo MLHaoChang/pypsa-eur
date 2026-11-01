@@ -17,6 +17,9 @@ session needs action. A session past 300k tokens (owner decisions USE-1, USE-2) 
 ``list_sessions`` does not report context reliably: ``?`` means unknown.
 Before deciding on rotation, the coordinator must read ``get_session``'s
 ``context_usage``; this script reads a saved file and cannot call tools.
+A session whose status or bucket is ``requires_action`` or ``blocked`` gets a
+trailing ``BLOCKED <N>m`` (minutes since ``updated_at``); ``--blocked-over MINUTES``
+prints only the blocked sessions at least that old (the coordinator's watchdog).
 Archived sessions are left out. Missing fields print as ``-``, except context,
 which prints ``?``.
 """
@@ -25,6 +28,7 @@ import argparse
 import json
 import math
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 ARCHIVED = {"SESSION_STATUS_ARCHIVED", "archived"}
@@ -89,7 +93,30 @@ def fmt_context(tokens):
     return f"{round(tokens / 1000)}k{flag}"
 
 
-def row(session):
+BLOCKED = {"requires_action", "blocked"}
+
+
+def blocked_minutes(session, now):
+    """Minutes a blocked session has sat since ``updated_at``, else None."""
+    summary = session.get("post_turn_summary") or {}
+    states = {
+        str(strip_prefix(strip_prefix(v, "SESSION_STATUS_BUCKET_"), "SESSION_STATUS_")).lower()
+        for v in (
+            session.get("session_status"),
+            session.get("status"),
+            session.get("status_bucket"),
+            session.get("status_category"),
+            summary.get("status_category"),
+        )
+        if v
+    }
+    if not states & BLOCKED or not session.get("updated_at"):
+        return None
+    updated = datetime.fromisoformat(session["updated_at"].replace("Z", "+00:00"))
+    return max(0, int((now - updated).total_seconds() // 60))
+
+
+def row(session, now=None):
     summary = session.get("post_turn_summary") or {}
     status = session.get("session_status") or session.get("status")
     category = (
@@ -98,6 +125,7 @@ def row(session):
         or session.get("status_bucket")
     )
     updated = session.get("updated_at") or ""
+    age = blocked_minutes(session, now or datetime.now(timezone.utc))
     return "  ".join(
         [
             fmt(session.get("id", "")[-6:]),
@@ -113,6 +141,7 @@ def row(session):
             fmt_context(context_tokens(session)),
             fmt(summary.get("needs_action", session.get("needs_action"))),
         ]
+        + ([f"BLOCKED {age}m"] if age is not None else [])
     )
 
 
@@ -127,9 +156,18 @@ def live(sessions):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("file", type=Path, help="saved list_sessions JSON")
+    parser.add_argument("--blocked-over", type=int, metavar="MINUTES",
+                        help="only blocked sessions at least this old")
+    parser.add_argument("--now", help="ISO time to measure ages from (tests)")
     args = parser.parse_args(argv)
+    now = (datetime.fromisoformat(args.now.replace("Z", "+00:00")) if args.now
+           else datetime.now(timezone.utc))
     for session in live(sessions_from(load(args.file.read_text()))):
-        print(row(session))
+        if args.blocked_over is not None:
+            age = blocked_minutes(session, now)
+            if age is None or age < args.blocked_over:
+                continue
+        print(row(session, now))
     return 0
 
 

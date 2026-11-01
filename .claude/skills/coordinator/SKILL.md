@@ -32,7 +32,7 @@ Log each event in the state file as `- HH:MMZ ...` ([Time](#time)); `board.py` l
 
 Every wake re-reads the whole context, so fewer wakes cost less.
 - Merges follow the sessions' `premerge ok <sha>` reports. Never `subscribe_pr_activity`: a subscription costs about 3 wakes and 3k tokens of boilerplate per PR.
-- The sweep routine fires every 6 hours, as a safety net. A second routine, cron `9 */2 * * *` UTC, refreshes the dashboards every 2 hours (owner decision DASH-2H-1); a dashboard with no change since its last refresh is skipped and logged. Token usage refreshes once per Berlin day (TOKENS-DAILY-1).
+- The sweep routine fires every 6 hours, as a safety net. A second routine, cron `9 */2 * * *` UTC, refreshes the dashboards every 2 hours (owner decision DASH-2H-1) and runs the [blocked-session watchdog](#blocked-session-watchdog); a dashboard with no change since its last refresh is skipped and logged. Token usage refreshes once per Berlin day (TOKENS-DAILY-1).
 - Call `list_triggers` with `enabled: true`; the full list is large.
 - With no live session, `update_trigger` the routine to `enabled: false`. The next `create_session` re-enables it.
 - A routine created with `create_new_session_on_fire` starts without the repo and without the session tools, so the sweep stays in this session.
@@ -51,12 +51,12 @@ A long context is this session's largest cost. Rotate to a fresh coordinator whe
    The new coordinator runs `touch ~/.claude-coordinator` (see the top of this skill).
    The new coordinator also runs Artifact `open` on each dashboard in [Dashboard](#dashboard). The app lists only the artifacts a session has published or opened, so without it the owner's panel shows no dashboard after a rotation.
 3. **Hand over the routines.** `update_trigger` each routine (the sweep and the dashboard refresh) with `persistent_session_id` set to the new id. If `update_trigger` has no such field, `delete_trigger` and `create_trigger` again with the same cron and prompt.
-4. **Tell the sessions.** `send_message` the new id only to the sessions that send you work, folded into the next message you send them anyway when one is due soon. When any session rotates, reviewer or builder, send its new id the same way: only to the sessions that send it work.
-5. **Archive** this session once the new coordinator confirms the brief is saved. Relay anything that reaches this session before then.
+4. **Tell the sessions.** `send_message` the new id to every live session, builders and reviewers included, not only those that send you work. When a reviewer or builder rotates, send its new id to the sessions that send it work.
+5. **Archive** this session once the new coordinator confirms the brief is saved and the id PR is merged, not before. Until then it stays live and relays anything that reaches it to the new coordinator.
 
 When this coordinator's children would hit the session-chain depth limit, the owner starts the successor at depth 0 (owner decision ROTATE-DEPTH).
 
-Done when the routine fires into the new session, every live session has the new id, and `docs/agents/coordinator.md` on master holds it.
+Done when the routine fires into the new session, every live session has the new id, `docs/agents/coordinator.md` on master holds it and the old coordinator is archived.
 
 ## Deciding or asking
 
@@ -124,7 +124,7 @@ Merge one PR at a time. The coordinator merges a PR whose premerge ends in `ok t
    - On "TEMPLATE NOT UPDATED", ask the session to port the change to `templates/agent-coordination/`.
    - When the change is specific to this project, rerun with `PREMERGE_TEMPLATE_SYNC=skip` instead and log why.
    - Run premerge from a detached origin/master worktree. Once: `git worktree add --detach <scratch>/wt-pm origin/master`, then `ln -sfn /home/user/pypsa-eur/pypsa-gui/frontend/node_modules <scratch>/wt-pm/pypsa-gui/frontend/node_modules`. Before each run: `git fetch -q origin && git checkout -q --detach origin/master`, then `PREMERGE_PYTHON=/root/.venv-pypsa-gui/bin/python scripts/coord/premerge.sh <pr> > <scratch>/pmN.txt 2>&1` and `grep -E '^head:|^RESULT|OK @|NOT OK' <scratch>/pmN.txt`. Never leave a trial merge half-done there (`git merge --abort`): a dirty wt-pm broke ciwait once.
-2. For gridspine and IC engine changes, the gatekeeper's OK must be on the PR; for a PR that changes UI, the UX reviewer's too (owner decision VERDICT-PR). Reviewers post `GK OK @<sha>` / `UX OK @<sha>` as PR comments and the coordinator relays nothing. Premerge's "reviewer verdicts" section prints each as `current`, `carries (clean master merge)` or `stale`. Missing and stale OKs don't block premerge, so you decide: a gated PR needs a current or carried OK from each reviewer it needs. A `NOT OK` newer than the last OK blocks. Two gatekeepers review by area (owner decision GK-SPLIT-1): GK A for gridspine, DC, grid-to-process and IC/adequacy engine code, GK B for the harness, app, finance and outsourced work. A PR spanning both gets one lead GK, named by the coordinator. Any push after a GK or UX OK needs a re-OK, unless it is a clean base merge whose tree equals `git merge-tree --write-tree <old-head> origin/master`. A hand-resolved conflict always needs a re-OK.
+2. For gridspine and IC engine changes, the gatekeeper's OK must be on the PR; for a PR that changes UI, the UX reviewer's too (owner decision VERDICT-PR). Reviewers post `GK OK @<sha>` / `UX OK @<sha>` as PR comments and the coordinator relays nothing. Premerge's "reviewer verdicts" section prints each as `current`, `carries (clean master merge)` or `stale`. Missing and stale OKs don't block premerge, so you decide: a gated PR needs a current or carried OK from each reviewer it needs. A `NOT OK` newer than the last OK blocks. Reviewers message the builder directly and send you no informational OKs (owner decision SUPERAGENT-1): you hear `premerge ok <sha>`, `ci-only` and hand-off notes, owner questions, a disagreement a reviewer holds, reviewer hand-offs at 300k and PERMISSION requests. Two gatekeepers review by area (owner decision GK-SPLIT-1): GK A for gridspine, DC, grid-to-process and IC/adequacy engine code, GK B for the harness, app, finance and outsourced work. A PR spanning both gets one lead GK, named by the coordinator. Any push after a GK or UX OK needs a re-OK, unless it is a clean base merge whose tree equals `git merge-tree --write-tree <old-head> origin/master`. A hand-resolved conflict always needs a re-OK.
 3. Call `merge_pull_request` with `merge_method` merge, `expectedHeadSha` set to the full 40-character `head:` line and `commit_title` "Merge pull request #N from MLHaoChang/<head.ref>". Read `head.ref` from `pull_request_read get`, or `git ls-remote origin | grep <sha>`; never a placeholder (#767 merged as ".../PLACEHOLDER"). GitHub's mergeable state is the one check premerge leaves out; a refused merge reports it. Done when GitHub reports the PR merged. Retry once on a GitHub 500.
 4. Tell each dependent session the state file lists for this PR, then go on to the next PR. Each premerge run measures against the new master.
 
@@ -167,6 +167,16 @@ Each refresh is three calls, made at most once per owner report:
 3. Unless this session already ran it, restore the history: `ArtifactData get` of `state/usage`, download its `snapshots` asset (Artifact `read`, `path` set to the id) to `<scratchpad>/usage/snapshots.json`, and write `{"first_run": "<its first_run>"}` to `<scratchpad>/usage/meta.json`. Without this, the run starts the history again and credits each session's whole total to its last active day.
 4. `python3 -I scripts/coord/usage.py <scratchpad>/usage` writes `daily.json`, `sessions.json` and the new `snapshots.json`.
 5. Upload the three files, then one `ArtifactData batch`: `datasets/daily`, `datasets/sessions`, and `state/usage` with the new `snapshots` url.
+
+### Blocked-session watchdog
+
+Part of every 2-hourly dashboard refresh (SUPERAGENT-1). A session waiting on an `AskUserQuestion` in its own window can stall for hours unseen.
+
+1. A Haiku subagent saves `list_sessions` (`mine: true`, `limit: 25`) and returns the lines of `python3 scripts/coord/sessions.py <file> --blocked-over 30`: sessions `requires_action` or `blocked` for over 30 minutes.
+2. For each one, save its `list_events`, read it with `python3 scripts/coord/events.py <file> --chars 200`, and bring its pending question to the owner as `AskUserQuestion` options. Then send the answer to that session and log it.
+3. No lines: log nothing.
+
+Routine prompt to apply with `update_trigger` (append to the dashboard routine's prompt): "After the dashboard refresh, run the blocked-session watchdog in `.claude/skills/coordinator/SKILL.md` (Dashboard, Blocked-session watchdog): have a Haiku subagent save `list_sessions` and run `scripts/coord/sessions.py <file> --blocked-over 30`; for each line, fetch the session's pending question with `list_events` and `events.py` and bring it to the owner as options. No lines: log nothing."
 
 ## Tool hygiene
 

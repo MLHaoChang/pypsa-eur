@@ -19,11 +19,16 @@ sessions (``--sessions``, ``sessions.py`` output or issue paths), plus
 ``--stay-out`` text. ``--files`` names the package's likely files (paths or
 directory prefixes); each one an open PR also changes prints an ``OVERLAP`` line
 and the script exits 3, because the package is not ready until that PR merges.
+``--coordinator`` is the coordinator's session id, written literally into the
+brief (default: the caller's own id from ``CLAUDE_CODE_REMOTE_SESSION_ID``;
+required when that is unset), so a session never depends on reading
+``docs/agents/coordinator.md`` while a rotation PR is unmerged.
 ``--model``, ``--title`` and ``--team`` are only echoed back as the
 ``create_session`` arguments to pass.
 """
 
 import argparse
+import os
 import re
 import sys
 from collections import Counter
@@ -80,6 +85,12 @@ def overlaps(prs, likely):
     return hits
 
 
+def own_session_id():
+    """The caller's session id (``session_...``), or "" when it cannot be found."""
+    raw = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID", "")
+    return "session_" + raw[len("cse_"):] if raw.startswith("cse_") else raw
+
+
 def fill(block, values):
     """Replace the body of each field paragraph (its label is a key of ``values``)."""
     paragraphs = []
@@ -111,6 +122,9 @@ def main(argv=None):
         "--files", default="", help="comma-separated likely files or directories"
     )
     ap.add_argument("--sha", default="", help="master SHA the session starts from")
+    ap.add_argument(
+        "--coordinator", default="", help="coordinator session id (default: this session's)"
+    )
     ap.add_argument("--model", default="")
     ap.add_argument("--title", default="")
     ap.add_argument("--team", default="build")
@@ -118,6 +132,9 @@ def main(argv=None):
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
 
+    coordinator = args.coordinator or own_session_id()
+    if not coordinator.startswith("session_"):
+        ap.error("--coordinator <session id> is required: this session's id was not found")
     task = args.task if args.task is not None else args.task_file.read_text().strip()
     prs = read_prs(args.open_prs) if args.open_prs else {}
     for n in args.exclude_pr:
@@ -141,7 +158,7 @@ def main(argv=None):
         "Review": args.review,
     }
     brief, streams = template_blocks(args.template.read_text())
-    text = fill(brief, values)
+    text = fill(brief, values).replace("@COORDINATOR@", coordinator)
     if args.stream:
         if args.stream.lower() not in streams:
             ap.error(f"template has no '## Stream {args.stream}' block")

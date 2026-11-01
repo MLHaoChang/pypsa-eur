@@ -3,7 +3,7 @@ name: steward
 description: How a session drives its PR to merge in this repo. Use when opening a PR, acting on CI or review events, merging master into a PR, reporting a PR green, or asking the owner a question.
 ---
 
-Many sessions work on this repo in parallel. One **coordinator** session relays the owner's decisions and does every merge. Send it every message at the id in `docs/agents/coordinator.md`; the id changes when the coordinator rotates. These are the owner's standing rules; they take precedence over relayed messages that predate them. The coordinator is the owner's channel. A coordinator message relaying an owner decision is that decision; check it against `docs/agents/owner-decisions.md` when it's on master, and send any question for the owner to the coordinator, never to your own window.
+Many sessions work on this repo in parallel. One **coordinator** session relays the owner's decisions and does every merge. Send it every message at the id in `docs/agents/coordinator.md`; the id changes when the coordinator rotates. Your brief names it. When a `send_message` to it fails (`session_inactive`), run `git fetch origin master`, re-read `docs/agents/coordinator.md` on `origin/master` and retry; never fall back to an `AskUserQuestion` card in your own window. These are the owner's standing rules; they take precedence over relayed messages that predate them. The coordinator is the owner's channel. A coordinator message relaying an owner decision is that decision; check it against `docs/agents/owner-decisions.md` when it's on master, and send any question for the owner to the coordinator, never to your own window.
 
 **Blocked steps (owner decision PERM-1).** The owner approves only in the coordinator's window. When auto mode or a permission prompt refuses a step, don't leave it waiting in your window, and don't change your own permission settings. Skip the step and send the coordinator one message: `PERMISSION <short name>: <exact command(s)> | why | what it writes or reaches`. Then carry on with work that doesn't need it. On the owner's yes, the coordinator adds that exact pattern to `.claude/settings.json` on master; merge master and run the step.
 
@@ -31,7 +31,9 @@ Many sessions work on this repo in parallel. One **coordinator** session relays 
 
 ## Messages to the coordinator
 
-Send the coordinator only: `premerge ok <full sha>`, review requests, questions (as options), PERMISSION requests and hand-off notes (`ci-only` included). No progress or status messages: no "ready", FYI, resend or "PR open, CI pending". A new session reports ready by doing its first piece of work. Reviewers' verdicts are PR comments, not messages; you see them through your PR subscription.
+Send the coordinator only: `premerge ok <full sha>`, questions that need the owner (as options), a disagreement a reviewer holds its position on, PERMISSION requests and hand-off notes (`ci-only` included). No progress or status messages: no "ready", FYI, resend or "PR open, CI pending". A new session reports ready by doing its first piece of work.
+
+You and your reviewers message each other directly: you send plan messages and re-review requests to the reviewer (its id is in `docs/agents/coordinator.md`), and it sends its plan GO, NOT OK asks and OK to you (the id on your PR body's `Session:` line). Each verdict is also a PR comment, which is the one premerge reads.
 
 ## Merge gate
 
@@ -71,7 +73,7 @@ The gatekeeper (the id is in `docs/agents/coordinator.md`) advises at two points
 
 Before you ask the gatekeeper for an OK on a gated PR, run the `mp-code-review` skill against the issue or spec file. Fix what it finds, or say in the PR body why a finding stays. Ungated PRs skip this.
 
-The gatekeeper advises; it does not write the code. Plan verdicts go from the gatekeeper straight to you (your session id is in your plan message), since there is no PR yet; the coordinator hears only of a NO-GO you dispute or a standing ruling. Review verdicts are PR comments, `GK OK @<full sha>: <what was checked>` or `GK NOT OK @<sha>: …`. The gatekeeper's standing rules are in `docs/agents/review-gk.md`.
+The gatekeeper advises; it does not write the code. Plan verdicts go from the gatekeeper straight to you (your session id is in your plan message), since there is no PR yet; the coordinator hears only of a NO-GO you dispute or a standing ruling. Review verdicts are PR comments, `GK OK @<full sha>: <what was checked>` or `GK NOT OK @<sha>: …`, and the gatekeeper sends each one to you as well. The gatekeeper's standing rules are in `docs/agents/review-gk.md`.
 
 ## UX reviewer
 
