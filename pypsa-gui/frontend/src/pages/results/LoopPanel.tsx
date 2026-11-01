@@ -11,6 +11,7 @@ import { useReliabilityGoal } from '../../hooks/useReliabilityGoal'
 import { hasTarget, NO_GOAL, ReliabilityGoalSummary, ZERO_TARGET } from '../../components/reliabilityGoal/ReliabilityGoalSummary'
 import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
 import { nk } from '../../utils/queryKeys'
+import { EditedSinceStudyBanner } from './EditedSinceStudyBanner'
 import { basisSuffix, type CoptPayload } from './adequacy'
 import { blockerMessage, ciRange, trim } from './McPanel'
 
@@ -360,6 +361,7 @@ export function LoopPanel() {
       >
         <Repeat size={11} /> Reliability-targeted planning loop {open ? '▾' : '▸'}
       </button>
+      <EditedSinceStudyBanner edited={payload?.edited_since_study} testId="loop-edited" />
       {open && (
         <div className="p-3 flex flex-col gap-3">
           <p className="text-[11px] text-muted">

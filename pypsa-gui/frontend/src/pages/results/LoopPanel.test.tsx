@@ -16,6 +16,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { goal } from '../../test/fixtures/reliabilityGoal'
 import { resultsApi } from '../../api/simulation'
+import { EDITED_TEXT } from '../hubDesign/cards/ResultsCard'
 import {
   LoopPanel, targetEcho, loleCell, restoreSentence, entryHorizonYears,
   CAP_LEVER, compact, leverSpelling,
@@ -771,5 +772,24 @@ describe('LoopPanel not-run copy', () => {
     const copy = (await screen.findByTestId('loop-not-run')).textContent ?? ''
     expect(copy).not.toContain('max_solves')
     expect(copy).toMatch(/up to\s*8 full capacity expansions/)
+  })
+})
+
+describe('LoopPanel stale banner (LC-41b)', () => {
+  it.each([
+    [true, true],
+    [false, false],
+    [null, false],
+    [undefined, false],
+  ])('edited_since_study %s -> banner shown: %s', async (flag, shown) => {
+    vi.mocked(resultsApi.getCouplingLoop).mockResolvedValue({ ...MET, edited_since_study: flag } as never)
+    renderPanel()
+    await screen.findByTestId('loop-panel')
+    await waitFor(() => expect(vi.mocked(resultsApi.getCouplingLoop)).toHaveBeenCalled())
+    if (shown) {
+      expect((await screen.findByTestId('loop-edited')).textContent).toBe(EDITED_TEXT)
+    } else {
+      expect(screen.queryByTestId('loop-edited')).toBeNull()
+    }
   })
 })

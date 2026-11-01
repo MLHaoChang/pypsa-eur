@@ -1349,8 +1349,10 @@ def get_coupling_loop():
             return Response(status_code=204)
         # Shallow copy under the lock; `iterations` is REBOUND by the worker,
         # never mutated, so the list this copy captures is frozen for ever.
-        return {k: v for k, v in st.items()
-                if k not in ("thread", "stop_event")}
+        out = {k: v for k, v in st.items()
+               if k not in ("thread", "stop_event")}
+        out["edited_since_study"] = _study_state.edited_since(st)  # LC-41b, as /margin_loop
+        return out
 
 
 @results_router.post("/coupling_loop/abort")
