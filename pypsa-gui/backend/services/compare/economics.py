@@ -127,6 +127,17 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
 
     by_carrier: dict[str, dict] = {}
 
+    # AS-11: a split storage (tagged Store + charger/discharger Links) is booked as the equal StorageUnit, in its
+    # Store's carrier: the three rows' capex under that carrier, and one AC-side storage dispatch (below). Picked
+    # by the inventory's own Link names, never by carrier, so other Links stay in the generic walk.
+    from services.solver.storage_inventory import results_splits, split_ac_flows
+    _splits = results_splits(n)
+    _split_carrier: dict[tuple[str, str], str] = {}
+    for e in _splits:
+        c = (e.carrier or "unknown").lower()
+        _split_carrier.update({("Store", e.name): c, ("Link", e.charger): c, ("Link", e.discharger): c})
+    _split_links = {e.charger for e in _splits} | {e.discharger for e in _splits}
+
     def _bucket(carrier: str) -> dict:
         if carrier not in by_carrier:
             by_carrier[carrier] = {
@@ -231,7 +242,7 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
             if parent_name not in df.index:
                 continue
             row = df.loc[parent_name]
-            carrier = str(row.get("carrier", "unknown") or "unknown").lower()
+            carrier = _split_carrier.get((cls_name, parent_name), str(row.get("carrier", "unknown") or "unknown").lower())
             cc = _safe_capital_cost(row, pcc, _CLS_TO_ATTR[cls_name])
             if cc <= 0:
                 continue
@@ -272,7 +283,7 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
             if _vintage_handled(cls_name, asset_name):
                 continue
             row = df.loc[asset_name]
-            carrier = str(row.get("carrier", "unknown") or "unknown").lower()
+            carrier = _split_carrier.get((cls_name, asset_name), str(row.get("carrier", "unknown") or "unknown").lower())
             cc = _safe_capital_cost(row, pcc, _CLS_TO_ATTR[cls_name])
             if cc <= 0:
                 continue
@@ -286,7 +297,7 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
             total, pp = _capex_commitment(cc, opt, row.get("build_year"), lt, _row_active(row, cls_name))
             _accum(_bucket(carrier)["capex_eur"], total, pp)
 
-    def _walk_dispatch_side(df, t_p_df) -> None:
+    def _walk_dispatch_side(df, t_p_df, storage: bool = False) -> None:
         """
         Per-asset DISPATCH + OPEX + REVENUE. CAPEX is handled separately
         above so the active-period attribution can be vintage-aware.
@@ -304,6 +315,8 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
                 continue
             if df is n.generators and asset_name in shortfall_gens:
                 continue            # booked from the accessor below (lost production, never an expense)
+            if df is n.links and asset_name in _split_links:
+                continue            # booked with its split storage (`_walk_split_storage`)
             b = _bucket(carrier)
             # Storage: split the signed series into discharge (positive) and
             # charge (negative magnitude). The dispatch + revenue series use
@@ -317,7 +330,7 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
             # €/MWh (user-flagged: Battery 1 showed 19.6 €/MWh here vs 16.4
             # in asset_economics; the 3.2 difference was exactly the missing
             # charge_cost term).
-            is_storage_carrier = df is n.storage_units
+            is_storage_carrier = df is n.storage_units or storage
             if is_storage_carrier:
                 discharge_series = series.clip(lower=0)
                 charge_series = (-series).clip(lower=0)
@@ -446,12 +459,49 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
     # A shortfall is product NOT delivered: lost revenue at its lost-production value, never an expense as well,
     # never dispatch and never revenue (ticket 04), from the one accessor (a role Generator, else the solve's capture,
     # ticket 08). It is booked under the product bus's carrier, as lost load is. A buy-in stays an ordinary expense.
+    def _walk_split_storage() -> None:
+        """Each split storage as the equal StorageUnit row: signed AC-side p = discharge (-p1 of the discharger)
+        minus charge (p0 of the charger), so dispatch, revenue and the charge cost follow the StorageUnit's
+        convention. Its VOM is what the LP prices: each Link's marginal_cost x p0 and the Store's marginal_cost x
+        its signed p (a migrated unit's marginal_cost sits on the discharger, x efficiency, so it equals the
+        StorageUnit's per MWh delivered)."""
+        flows = {e: split_ac_flows(n, e) for e in _splits}
+        flows = {e: f for e, f in flows.items() if f is not None}
+        if not flows:
+            return
+        static = pd.DataFrame({"carrier": [e.carrier for e in flows], "bus": [e.bus for e in flows]},
+                              index=[e.name for e in flows])
+        _walk_dispatch_side(static, pd.DataFrame({e.name: f[1] - f[0] for e, f in flows.items()}, index=sns),
+                            storage=True)
+        p0 = getattr(n.links_t, "p0", None)
+        store_p = getattr(n.stores_t, "p", None) if hasattr(n, "stores_t") else None
+        for e in flows:
+            terms = [(n.links, p0, e.charger), (n.links, p0, e.discharger), (n.stores, store_p, e.name)]
+            vom_t = pd.Series(0.0, index=sns)
+            for df, flow, name in terms:
+                try:
+                    mc = float(df.at[name, "marginal_cost"]) if "marginal_cost" in df.columns else 0.0
+                except (TypeError, ValueError):
+                    mc = 0.0
+                if not _math.isfinite(mc) or mc == 0 or flow is None or name not in flow.columns:
+                    continue
+                vom_t = vom_t + flow[name].reindex(sns).fillna(0.0).astype(float) * mc
+            vom_t = vom_t * weights
+            total = float(vom_t.sum())
+            if not _math.isfinite(total) or total == 0:
+                continue
+            b = _bucket((e.carrier or "unknown").lower())
+            pp = _per_period_groupby(vom_t, sns, is_multi)
+            _accum(b["opex_eur"], total, pp)
+            _accum(b["gen_cost_eur"], total, pp)
+
     lost_src = shortfalls(n, lost_load_cap,
                           gen_p=getattr(n.generators_t, "p", None) if hasattr(n, "generators_t") else None)
     shortfall_gens = {x.name for x in lost_src if x.source == "generator"}
     _walk_dispatch_side(n.generators,    getattr(n.generators_t, "p", None) if hasattr(n, "generators_t") else None)
     _walk_dispatch_side(n.storage_units, getattr(n.storage_units_t, "p", None) if hasattr(n, "storage_units_t") else None)
     _walk_dispatch_side(n.links,         getattr(n.links_t, "p0", None) if hasattr(n, "links_t") else None)
+    _walk_split_storage()
     for short in lost_src:
         carrier = n.buses.at[short.bus, "carrier"] if short.bus in n.buses.index else None
         _book_lost_production(_bucket(str(carrier or "unknown").lower()), short)

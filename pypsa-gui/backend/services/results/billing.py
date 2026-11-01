@@ -98,8 +98,13 @@ def _rows(frame, sel, index) -> pd.DataFrame | None:
 def _raw_frames(n, result_df) -> dict:
     """Generator output, StorageUnit discharge and Link output at bus1 as
     SOLVED — NaN kept (the seam's intervals zero-fill, which would settle an
-    unknown hour confidently; review F5). A Store is not an EaaS asset, so
-    only StorageUnits discharge here (F4: no name collisions)."""
+    unknown hour confidently; review F5). A plain Store is not an EaaS asset
+    (F4: no name collisions); a split storage (AS-11) is, under its Store's
+    name, so a StorageUnit's contract settles the same after migration: its
+    discharge is the discharger Link's output at the AC bus. `split_dischargers`
+    maps each such Store to that Link."""
+    from services.solver.storage_inventory import results_splits
+
     sns = n.snapshots
 
     def frame(attr, col, names):
@@ -123,8 +128,21 @@ def _raw_frames(n, result_df) -> dict:
                 1.0 if eff is None else eff.get(c, 1.0))
         else:
             link_out[str(c)] = pd.Series(np.nan, index=sns)
-    return {"generators": gens, "storage_discharge": su.clip(lower=0.0),
-            "link_output": pd.DataFrame(link_out, index=sns)}
+    splits = {e.name: e.discharger for e in results_splits(n)}
+    split_dis = pd.DataFrame({name: (-p1[d].reindex(sns).astype(float) if p1 is not None and d in p1.columns
+                                     else pd.Series(np.nan, index=sns)) for name, d in splits.items()},
+                             index=sns)
+    return {"generators": gens, "storage_discharge": pd.concat([su, split_dis], axis=1).clip(lower=0.0),
+            "link_output": pd.DataFrame(link_out, index=sns), "split_dischargers": splits}
+
+
+def _refuse_double_count(contract, split_dischargers: dict) -> None:
+    """A contract naming both a split storage's Store and its discharger Link would settle the same MWh twice."""
+    ids = set(getattr(contract, "asset_ids", None) or ())
+    both = sorted(s for s, d in split_dischargers.items() if s in ids and d in ids)
+    if both:
+        raise _K.ContractError(f"contract {contract.id!r}: names both split storage {both[0]!r} and its "
+                               f"discharger {split_dischargers[both[0]]!r}; name one")
 
 
 def settlement_lines(n, cfg, pq: dict) -> tuple[list[_K.Line], list[str]]:
@@ -192,6 +210,7 @@ def settlement_lines(n, cfg, pq: dict) -> tuple[list[_K.Line], list[str]]:
             site_link_generation=cut_frame(site_links) if not site_links.empty else None)
         for c in cfg.contracts:
             try:
+                _refuse_double_count(c, raw["split_dischargers"])
                 got = _K.settle(c, inputs)
             except _K.ContractError as exc:
                 flags.append(f"contract_not_settled:{c.id}:{str(exc)[:160]}")

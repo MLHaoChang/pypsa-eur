@@ -169,3 +169,13 @@ def split_ac_flows(n: pypsa.Network, entry: StorageEntry) -> tuple[pd.Series, pd
     charge = p0[entry.charger].reindex(sns).fillna(0.0).astype(float).clip(lower=0.0)
     discharge = (-p1[entry.discharger].reindex(sns).fillna(0.0).astype(float)).clip(lower=0.0)
     return charge, discharge
+
+
+def results_splits(n: pypsa.Network) -> list[StorageEntry]:
+    """The split storages the results readers (dispatch digest, billing, load shape, compare economics and
+    storage cycling) show under their Store's name. One rule for all of them: a split storage whose Store name is
+    also a StorageUnit's is left out, so the name keeps meaning the StorageUnit, and its Links read as plain
+    Links, as before AS-11."""
+    su = getattr(n, "storage_units", None)
+    taken = set() if su is None else {str(s) for s in su.index}
+    return [e for e in list_storages(n) if e.layout == SPLIT and e.name not in taken]

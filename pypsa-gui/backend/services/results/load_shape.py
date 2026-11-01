@@ -147,8 +147,12 @@ def _series(n, R, mask, capture) -> dict[str, dict[str, Any]]:
                 mw = mw + st.x
         out[key] = _ok(_mw=mw)
 
+    # StorageUnits, and the Stores of split storages (AS-11; store-side MWh, as a StorageUnit's state of charge)
+    from services.solver.storage_inventory import results_splits
+    split = {e.name for e in results_splits(n)}
     soc = [st for st in R["storages"]
-           if st.name in n.storage_units.index and _carrier_of(n, "storage_units", [st.name])[0] in BATTERY]
+           if (st.name in n.storage_units.index and _carrier_of(n, "storage_units", [st.name])[0] in BATTERY)
+           or (st.name in split and _carrier_of(n, "stores", [st.name])[0] in BATTERY)]
     out["battery_soc"] = _ok(_mw=np.sum([st.soc for st in soc], axis=0)) if soc \
         else _not_modelled("no battery in this network")
 
