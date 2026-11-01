@@ -157,18 +157,31 @@ def test_bad_profile_is_422(client, api_project):
 
 def test_the_projects_stored_solver_config_reaches_the_runner(client, api_project, monkeypatch):
     name = api_project()
-    seen = []
+    seen, modes = [], []
     monkeypatch.setattr("services.reliability_goal.stored_config",
-                        lambda d: {"envelope_floors": {"power_floor_mw": 7.0}, "not_a_field": 1})
+                        lambda d: {"envelope_floors": {"power_floor_mw": 7.0}, "not_a_field": 1,
+                                   "import_energy_cap_mwh_per_year": 5.0, "mode": "lpf"})
 
     def fake_run(network, config, inp, **kw):
         seen.append(dict(config.envelope_floors))
+        modes.append((config.import_energy_cap_mwh_per_year, config.mode))
         return _result()
 
     monkeypatch.setattr("services.adequacy.sizing_loop_runner.run_sizing", fake_run)
     _post(client, name, [{"intent": "A"}, {"intent": "B"}])
     _wait(client, name)
     assert seen[0]["power_floor_mw"] == 7.0 and seen[0]["backup_mwh"] == 320.0
+    assert modes[0] == (None, "lopf")           # the pack-only import cap is stripped, lpf coerced
+
+
+def test_an_unbuildable_saved_config_is_422_not_defaults(client, api_project, monkeypatch):
+    name = api_project()
+    monkeypatch.setattr("services.reliability_goal.stored_config", lambda d: {"envelope_floors": "oops"})
+    monkeypatch.setattr("routers.projects._solver_config_from_dict",
+                        lambda raw: (_ for _ in ()).throw(ValueError("bad envelope_floors")))
+    r = _post(client, name, [{"intent": "A"}, {"intent": "B"}])
+    assert r.status_code == 422 and "cannot be used" in r.text
+    assert client.get(URL.format(name)).status_code == 404
 
 
 def test_jobs_are_keyed_by_project_uuid_so_a_recreated_project_sees_no_old_rows():

@@ -512,19 +512,21 @@ def _intent_scenario(network, config, inputs: dict, critical_mw: float):
 
 
 def _project_solver_config(directory: pathlib.Path):
-    """The project's own solver config (the live one when it is open, else its saved file), else defaults."""
-    import dataclasses
-
+    """The project's own solver config, built by the loader every solve path uses (`_solver_config_from_dict`:
+    pack-only import caps stripped, legacy modes coerced, invalid goals dropped). A project that never saved
+    one gets the defaults; a saved one that cannot be read or built is a 422, never a silent default."""
+    from routers.projects import _solver_config_from_dict
     from services.reliability_goal import stored_config
 
     raw = stored_config(directory)
-    if not raw:
+    if raw is None:
+        if (directory / "solver_config.json").exists():
+            raise HTTPException(422, "The project's saved solver settings cannot be read: fix or re-save them.")
         return SolverConfig()
-    known = {f.name for f in dataclasses.fields(SolverConfig)}
     try:
-        return SolverConfig(**{k: v for k, v in raw.items() if k in known})
-    except (TypeError, ValueError):
-        return SolverConfig()
+        return _solver_config_from_dict(raw)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(422, f"The project's saved solver settings cannot be used: {exc}")
 
 
 def _load_project_network(directory: pathlib.Path):
