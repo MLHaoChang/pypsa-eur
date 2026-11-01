@@ -361,3 +361,59 @@ def test_a_colliding_split_storage_stays_out_of_storage_cycling(collision):
     units = {u.name: u for u in out.by_unit}
     assert sorted(units) == ["bess", "fw"]
     assert units["bess"].energy_mwh == pytest.approx(400.0)
+
+
+# ── a split storage charging at one bus and discharging at another stays out of every reader ─────────────
+
+@pytest.fixture(scope="module")
+def cross_bus() -> pypsa.Network:
+    """`bat` charges at `ac` and discharges to `b2`, which has its own price."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2025-01-06", periods=24, freq="h"))
+    n.snapshot_weightings.loc[:, :] = W
+    n.add("Bus", "ac", carrier="AC")
+    n.add("Bus", "b2", carrier="AC")
+    n.add("Load", "load", bus="ac", p_set=20.0)
+    n.add("Load", "load b2", bus="b2", p_set=20.0)
+    n.add("Generator", "import", bus="ac", carrier="import", p_nom=1e3,
+          marginal_cost=pd.Series(_price(24), n.snapshots))
+    n.add("Generator", "import b2", bus="b2", carrier="import", p_nom=1e3,
+          marginal_cost=pd.Series(_price(24)[::-1] + 50.0, n.snapshots))
+    add_split_storage(n, "bat", "ac", "energy_bess", carrier="battery", p_nom=10.0, efficiency_charge=0.95,
+                      efficiency_discharge=0.9)
+    n.links.loc["bat discharger", "bus1"] = "b2"
+    _solve(n)
+    assert n.links_t.p0["bat discharger"].sum() > 0
+    return n
+
+
+def test_the_results_name_rule_leaves_out_a_cross_bus_split_storage(cross_bus):
+    assert results_splits(cross_bus) == []
+
+
+def test_a_cross_bus_split_storage_stays_out_of_the_dispatch_digest(cross_bus):
+    assert dispatch_digest(cross_bus)["storage_dispatch"]["units"] == []
+
+
+def test_a_cross_bus_split_storage_stays_out_of_billing(cross_bus):
+    raw = B._raw_frames(cross_bus, _result_df)
+    assert list(raw["storage_discharge"].columns) == [] and raw["split_dischargers"] == {}
+
+
+def test_a_cross_bus_split_storage_stays_out_of_the_load_shape(cross_bus):
+    assert load_shape(cross_bus)["week"]["series"]["battery_soc"]["status"] == "not_modelled"
+
+
+def test_a_cross_bus_split_storage_stays_out_of_compare_economics(cross_bus):
+    """Its Links stay in the generic walk, each priced at its own buses, as before AS-11."""
+    got = _econ(cross_bus)
+    assert {"battery charger", "battery discharger"} <= set(got)
+    w = cross_bus.snapshot_weightings.objective
+    prices = cross_bus.buses_t.marginal_price
+    p0, p1 = cross_bus.links_t.p0["bat discharger"], cross_bus.links_t.p1["bat discharger"]
+    rev = ((-p1 * prices["b2"] - p0 * prices["bat store"]) * w).sum()
+    assert got["battery discharger"]["revenue_meur"]["total"] == pytest.approx(rev / 1e6, rel=1e-4)
+
+
+def test_a_cross_bus_split_storage_stays_out_of_storage_cycling(cross_bus):
+    assert _compute_storage_cycling_summary(cross_bus, [], False, True).by_unit == []
