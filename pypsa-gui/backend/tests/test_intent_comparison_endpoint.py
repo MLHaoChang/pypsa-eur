@@ -15,7 +15,9 @@ URL = "/api/projects/{}/intent-comparison"
 
 
 @pytest.fixture(autouse=True)
-def _clean():
+def _clean(monkeypatch):
+    # The stub network has no campus link: the input check has its own tests below.
+    monkeypatch.setattr("services.adequacy.sizing_loop_runner._check_inputs", lambda n, inp: None)
     intent_jobs.clear()
     yield
     intent_jobs.clear()
@@ -132,3 +134,48 @@ def test_get_and_abort_before_any_run_are_404(client, api_project):
     name = api_project()
     assert client.get(URL.format(name)).status_code == 404
     assert client.post(URL.format(name) + "/abort").status_code == 404
+
+
+def test_bad_sizing_inputs_are_422_not_failed_rows(client, api_project, monkeypatch):
+    from services.adequacy import sizing_loop_runner as slr
+
+    monkeypatch.undo()                                    # use the real input check: the link is not in the network
+    intent_jobs.clear()
+    name = api_project()
+    assert _post(client, name, [{"intent": "A"}, {"intent": "B"}]).status_code == 422
+    assert client.get(URL.format(name)).status_code == 404       # nothing started
+    bad = {**INPUTS, "nonsense": 1}
+    assert _post(client, name, [{"intent": "A"}, {"intent": "B"}], inputs=bad).status_code == 422
+    assert slr is not None
+
+
+def test_bad_profile_is_422(client, api_project):
+    name = api_project()
+    r = _post(client, name, [{"intent": "D"}, {"intent": "B"}], profile={"ride_through_transfer_counts": 5})
+    assert r.status_code == 422
+
+
+def test_the_projects_stored_solver_config_reaches_the_runner(client, api_project, monkeypatch):
+    name = api_project()
+    seen = []
+    monkeypatch.setattr("services.reliability_goal.stored_config",
+                        lambda d: {"envelope_floors": {"power_floor_mw": 7.0}, "not_a_field": 1})
+
+    def fake_run(network, config, inp, **kw):
+        seen.append(dict(config.envelope_floors))
+        return _result()
+
+    monkeypatch.setattr("services.adequacy.sizing_loop_runner.run_sizing", fake_run)
+    _post(client, name, [{"intent": "A"}, {"intent": "B"}])
+    _wait(client, name)
+    assert seen[0]["power_floor_mw"] == 7.0 and seen[0]["backup_mwh"] == 320.0
+
+
+def test_jobs_are_keyed_by_project_uuid_so_a_recreated_project_sees_no_old_rows():
+    class S:
+        intent = "A"
+
+    intent_jobs.start("uuid-1", [S()], lambda stop, note: {"rows": [{"intent": "A"}]})
+    time.sleep(0.2)
+    assert intent_jobs.get("uuid-1")["rows"] == [{"intent": "A"}]
+    assert intent_jobs.get("uuid-2") is None

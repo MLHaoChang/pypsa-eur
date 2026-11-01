@@ -511,6 +511,22 @@ def _intent_scenario(network, config, inputs: dict, critical_mw: float):
     return prepare
 
 
+def _project_solver_config(directory: pathlib.Path):
+    """The project's own solver config (the live one when it is open, else its saved file), else defaults."""
+    import dataclasses
+
+    from services.reliability_goal import stored_config
+
+    raw = stored_config(directory)
+    if not raw:
+        return SolverConfig()
+    known = {f.name for f in dataclasses.fields(SolverConfig)}
+    try:
+        return SolverConfig(**{k: v for k, v in raw.items() if k in known})
+    except (TypeError, ValueError):
+        return SolverConfig()
+
+
 def _load_project_network(directory: pathlib.Path):
     """The named project's own saved network, never the active one."""
     import pypsa as _pypsa
@@ -530,19 +546,30 @@ def post_intent_comparison(
     project: AuthorizedProject = ProjectAccessDep,
 ) -> dict:
     """Start the comparison as a background job on the project's own saved network (AS-10)."""
-    from services.adequacy.sizing_loop_runner import run_sizing
+    from services.adequacy.sizing_loop_runner import SizingInputs, SizingLoopRefusal, _check_inputs, refusals, run_sizing
     from services.compare import intent_jobs
     from services.compare.intent_table import compare_intents
+    from services.design_intent import grid_code_warnings
 
     network = _load_project_network(project.directory)
-    prepare = _intent_scenario(network, SolverConfig(), body.inputs, body.critical_mw)
+    config = _project_solver_config(project.directory)
+    # Refuse a bad request here, as 422, rather than as failed rows later.
+    try:
+        _check_inputs(network, SizingInputs(**body.inputs))
+        if refusals(config):
+            raise SizingLoopRefusal("; ".join(refusals(config)))
+        for spec in body.intents:
+            grid_code_warnings(spec, body.profile)
+    except (SizingLoopRefusal, TypeError, ValueError, KeyError, AttributeError) as exc:
+        raise HTTPException(422, f"The comparison cannot run: {exc}")
+    prepare = _intent_scenario(network, config, body.inputs, body.critical_mw)
 
     def work(stop, on_progress):
         return compare_intents(prepare, body.intents, critical_mw=body.critical_mw, profile=body.profile,
                                runner=run_sizing, stop_event=stop, on_progress=on_progress)
 
     try:
-        return intent_jobs.start(str(project.org_id), project.name, body.intents, work)
+        return intent_jobs.start(project.uuid, body.intents, work)
     except intent_jobs.JobBusy as exc:
         raise HTTPException(409, str(exc))
 
@@ -551,7 +578,7 @@ def post_intent_comparison(
 def get_intent_comparison(project: AuthorizedProject = ProjectAccessDep) -> dict:
     from services.compare import intent_jobs
 
-    rec = intent_jobs.get(str(project.org_id), project.name)
+    rec = intent_jobs.get(project.uuid)
     if rec is None:
         raise HTTPException(404, "No intent comparison has been run for this project.")
     return rec
@@ -561,7 +588,7 @@ def get_intent_comparison(project: AuthorizedProject = ProjectAccessDep) -> dict
 def post_intent_comparison_abort(project: AuthorizedProject = ProjectAccessDep) -> dict:
     from services.compare import intent_jobs
 
-    out = intent_jobs.abort(str(project.org_id), project.name)
+    out = intent_jobs.abort(project.uuid)
     if out is None:
         raise HTTPException(404, "No intent comparison has been run for this project.")
     return out

@@ -12,7 +12,7 @@ import contextvars
 import threading
 import time
 
-_JOBS: dict[tuple[str, str], dict] = {}
+_JOBS: dict[str, dict] = {}
 _LOCK = threading.Lock()
 
 
@@ -20,11 +20,12 @@ class JobBusy(RuntimeError):
     """A comparison for this project is already running."""
 
 
-def _key(org: str, project: str) -> tuple[str, str]:
-    return (org, project)
+def _key(project_uuid: str) -> str:
+    """Jobs are keyed by the project's uuid: a deleted and recreated project of the same name is a new key."""
+    return project_uuid
 
 
-def start(org: str, project: str, specs, work) -> dict:
+def start(project: str, specs, work) -> dict:
     """Start `work(stop_event, on_progress)` (returns `{"rows": [...]}`) in a thread; JobBusy if one is running."""
     stop = threading.Event()
     record = {"status": "running", "progress": {s.intent: "queued" for s in specs}, "rows": [], "error": None,
@@ -49,10 +50,10 @@ def start(org: str, project: str, specs, work) -> dict:
     ctx = contextvars.copy_context()
     thread = threading.Thread(target=lambda: ctx.run(worker), daemon=True, name="intent-comparison")
     with _LOCK:
-        cur = _JOBS.get(_key(org, project))
+        cur = _JOBS.get(_key(project))
         if cur is not None and cur["status"] == "running":
             raise JobBusy("a comparison is already running for this project")
-        _JOBS[_key(org, project)] = record
+        _JOBS[_key(project)] = record
         thread.start()
     return view(record)
 
@@ -63,13 +64,13 @@ def view(record: dict) -> dict:
                 for k, v in record.items() if k not in ("stop_event",)}
 
 
-def get(org: str, project: str) -> dict | None:
-    rec = _JOBS.get(_key(org, project))
+def get(project: str) -> dict | None:
+    rec = _JOBS.get(_key(project))
     return None if rec is None else view(rec)
 
 
-def abort(org: str, project: str) -> dict | None:
-    rec = _JOBS.get(_key(org, project))
+def abort(project: str) -> dict | None:
+    rec = _JOBS.get(_key(project))
     if rec is None:
         return None
     rec["stop_event"].set()
