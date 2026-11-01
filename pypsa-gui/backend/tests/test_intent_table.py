@@ -23,7 +23,7 @@ def _scenario(by_intent, calls):
     def prepare(spec):
         return spec.intent, None, None
 
-    def run(network, config, inp):
+    def run(network, config, inp, stop_event=None):
         calls.append(network)
         return by_intent[network]
     return prepare, run
@@ -50,6 +50,7 @@ def test_requires_two_distinct_intents():
 @pytest.mark.parametrize("status,failing,unresolved,want", [
     ("converged", (), (), "pass"),
     ("converged", ("transformer",), (), "fail"),
+    ("converged", (), ("escr",), "unresolved"),      # unresolved alone, with no failing entry, is not a pass
     ("not_converged", (), (), "not_converged"),
     ("unresolved", ("escr",), ("escr",), "unresolved"),
     ("failed", (), (), "failed"),

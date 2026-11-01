@@ -3,7 +3,7 @@
 
 # AS-10 — Preference comparison UI
 
-Status: in-review
+Status: in-progress (PR 1 of 2 in review)
 Type: task
 Blocked by: 01, 06
 Model: Sonnet
@@ -26,5 +26,16 @@ Run intents A–E as scenarios through the compare machinery (`BE/services/compa
 
 ## Comments
 
-- Cost column is the LP total (capex plus opex, per year): the loop result carries no capex split. Says so in the header.
-- UX checklist (screenshots of both modes) pending.
+## Split (owner decision AS10-SPLIT-1)
+
+- PR 1 (#1009): backend job. `POST/GET /api/projects/{name}/intent-comparison` and `/abort`, 2-5 distinct intents, 422 validation, the named project's own saved network, per-intent failed rows, abort, pass rule `converged and no failing and no unresolved`.
+- PR 2: the UI (Guided and Expert, screenshots light and dark). A first cut is on branch `claude/as-10-ui-draft`; it must move to the job routes and take the UX conditions below.
+- The issue stays open until both land. Acceptance boxes 1-3 are pinned in PR 1 on the backend and need the UI test in PR 2.
+
+## Comments
+
+GK B plan verdict (GO): background job with progress and abort; the named project's network; 422 validation (2-5 distinct, autonomy finite > 0 with an upper bound, no extra fields; a refusal becomes that row's failed status); mutation-test each conjunct of the pass rule; basis_note verbatim per row; route dispositions (not_via_chat row `intent_comparison`, ROUTE_POLICY rows, parity shadow). The job is a self-contained per-project record (`services/compare/intent_jobs.py`), not the global study `_state`, because that is bound to the active project.
+
+UX plan verdict (GO) for PR 2: host panel and Guided home named before coding; labels from the backend table; per-row progress and abort; status words not colour; unit headers; autonomy saved per project; D warning only when the profile does not accept transfer, else say no profile is set; disabled reasons as text; `EditedSinceStudyBanner`; screenshots of six states in both modes, light and dark.
+
+Open: cost column is the LP total (no capex split in the loop result).

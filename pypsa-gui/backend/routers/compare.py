@@ -25,7 +25,7 @@ import pathlib
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from models.design_intent import DesignIntentSpec
 from services import period_utils
 from models.schemas import (
@@ -480,11 +480,21 @@ def _compute_lost_load_summary(project_dir: pathlib.Path, n, periods, is_multi, 
 
 
 class IntentComparisonRequest(BaseModel):
-    """`intents` are the chosen design intents (two or more); `inputs` is the `SizingInputs` fields."""
-    intents: list[DesignIntentSpec]
+    """`intents`: two to five different design intents; `inputs`: the `SizingInputs` fields."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    intents: list[DesignIntentSpec] = Field(min_length=2, max_length=5)
     critical_mw: float = Field(gt=0, allow_inf_nan=False)
     inputs: dict
     profile: dict = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _distinct(self):
+        names = [s.intent for s in self.intents]
+        if len(set(names)) != len(names):
+            raise ValueError("choose different design intents: an intent appears twice")
+        return self
 
 
 def _intent_scenario(network, config, inputs: dict, critical_mw: float):
@@ -501,22 +511,57 @@ def _intent_scenario(network, config, inputs: dict, critical_mw: float):
     return prepare
 
 
-@router.post("/{name}/intent-comparison")
+def _load_project_network(directory: pathlib.Path):
+    """The named project's own saved network, never the active one."""
+    import pypsa as _pypsa
+
+    nc_path = directory / "network.nc"
+    if not nc_path.exists():
+        raise HTTPException(404, "The project has no saved network: save it first.")
+    n = _pypsa.Network()
+    with PyPSAService.get_netcdf_io_lock():
+        n.import_from_netcdf(str(nc_path))
+    return n
+
+
+@router.post("/{name}/intent-comparison", status_code=202)
 def post_intent_comparison(
     body: IntentComparisonRequest,
     project: AuthorizedProject = ProjectAccessDep,
 ) -> dict:
-    """Run one sizing loop per chosen design intent on the open project; one table row each (AS-10)."""
-    from services.adequacy.sizing_loop_runner import SizingLoopRefusal, run_sizing
+    """Start the comparison as a background job on the project's own saved network (AS-10)."""
+    from services.adequacy.sizing_loop_runner import run_sizing
+    from services.compare import intent_jobs
     from services.compare.intent_table import compare_intents
 
-    try:
-        n = PyPSAService.get_network()
-    except Exception:
-        raise HTTPException(status_code=409, detail="Open the project first: the comparison runs on its network.")
-    prepare = _intent_scenario(n, _live_solver_config(), body.inputs, body.critical_mw)
-    try:
+    network = _load_project_network(project.directory)
+    prepare = _intent_scenario(network, SolverConfig(), body.inputs, body.critical_mw)
+
+    def work(stop, on_progress):
         return compare_intents(prepare, body.intents, critical_mw=body.critical_mw, profile=body.profile,
-                               runner=run_sizing)
-    except (ValueError, TypeError, SizingLoopRefusal) as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+                               runner=run_sizing, stop_event=stop, on_progress=on_progress)
+
+    try:
+        return intent_jobs.start(str(project.org_id), project.name, body.intents, work)
+    except intent_jobs.JobBusy as exc:
+        raise HTTPException(409, str(exc))
+
+
+@router.get("/{name}/intent-comparison")
+def get_intent_comparison(project: AuthorizedProject = ProjectAccessDep) -> dict:
+    from services.compare import intent_jobs
+
+    rec = intent_jobs.get(str(project.org_id), project.name)
+    if rec is None:
+        raise HTTPException(404, "No intent comparison has been run for this project.")
+    return rec
+
+
+@router.post("/{name}/intent-comparison/abort")
+def post_intent_comparison_abort(project: AuthorizedProject = ProjectAccessDep) -> dict:
+    from services.compare import intent_jobs
+
+    out = intent_jobs.abort(str(project.org_id), project.name)
+    if out is None:
+        raise HTTPException(404, "No intent comparison has been run for this project.")
+    return out

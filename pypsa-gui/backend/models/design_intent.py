@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 DesignIntent = Literal["A", "B", "C", "D", "E"]
 DESIGN_INTENTS: tuple[str, ...] = ("A", "B", "C", "D", "E")
@@ -46,9 +46,11 @@ def preset(intent: str) -> dict:
 
 
 class DesignIntentSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     intent: DesignIntent
     #: Intent A backup energy = critical load x this many hours (AS-AUTONOMY-1).
-    backup_autonomy_h: float = Field(default=4.0, gt=0)
+    backup_autonomy_h: float = Field(default=4.0, gt=0, le=720, allow_inf_nan=False)
     #: Intents B/C: annual run-hour cap on the genset; None = uncapped.
     genset_run_hours_cap: float | None = Field(default=None, ge=0, le=8760)
     #: Intent D: bridge reserve energy = critical load x this many hours.

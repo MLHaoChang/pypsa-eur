@@ -203,6 +203,23 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
     },
     {
+        'id': 'intent_comparison',
+        'title': 'Design intent comparison',
+        'disposition': 'unbuilt',
+        'reason': 'The design intent comparison (AS-10) runs two to five sizing loops and is not available from chat yet. Start it from the Control study tab once its screen lands.',
+        'page': 'Control study',
+        'panel': None,
+        'keywords': frozenset({
+            'intent',
+            'intents',
+        }),
+        'routes': frozenset({
+            ('GET', '/api/projects/{name}/intent-comparison'),
+            ('POST', '/api/projects/{name}/intent-comparison'),
+            ('POST', '/api/projects/{name}/intent-comparison/abort'),
+        }),
+    },
+    {
         'id': 'site_scene',
         'title': 'Site 3D scene: buildings and proposals',
         'disposition': 'unbuilt',

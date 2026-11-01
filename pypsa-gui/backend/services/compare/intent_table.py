@@ -7,7 +7,7 @@ check and the loop status. Only a converged loop with no failing or unresolved c
 """
 from __future__ import annotations
 
-from typing import Callable, Sequence
+from collections.abc import Callable, Sequence
 
 from models.design_intent import DesignIntentSpec
 from services.design_intent import backup_energy_mwh, grid_code_warnings
@@ -77,19 +77,36 @@ def build_row(spec: DesignIntentSpec, result: dict, critical_mw: float, profile:
     }
 
 
+def _skipped(spec: DesignIntentSpec, reason: str) -> dict:
+    return {"status": "aborted", "verdict": reason, "final": None}
+
+
 def compare_intents(prepare: Callable, specs: Sequence[DesignIntentSpec], *, critical_mw: float, profile: dict,
-                    runner: Callable) -> dict:
+                    runner: Callable, stop_event=None, on_progress: Callable | None = None) -> dict:
     """Run one sizing loop per spec. `prepare(spec)` returns `(network, config, inputs)` for that intent's
-    scenario; `runner(network, config, inputs)` is `run_sizing`. A loop that raises is a failed row."""
+    scenario; `runner(network, config, inputs, stop_event=...)` is `run_sizing`. A loop that raises (a refusal
+    included) is that row's failed status with its reason; a stop request ends the running loop as aborted and
+    marks the intents not yet run aborted too. `on_progress(intent, state, row)` sees queued/running/done."""
     intents = [s.intent for s in specs]
-    if len(specs) < 2 or len(set(intents)) != len(intents):
-        raise ValueError("choose at least two different design intents")
+    if not 2 <= len(specs) <= 5 or len(set(intents)) != len(intents):
+        raise ValueError("choose two to five different design intents")
+    note = on_progress or (lambda *a: None)
+    for spec in specs:
+        note(spec.intent, "queued", None)
     rows = []
     for spec in specs:
-        network, config, inputs = prepare(spec)
+        if stop_event is not None and stop_event.is_set():
+            row = build_row(spec, _skipped(spec, "stopped before this intent ran"), critical_mw, profile)
+            rows.append(row)
+            note(spec.intent, "done", row)
+            continue
+        note(spec.intent, "running", None)
         try:
-            result = runner(network, config, inputs)
+            network, config, inputs = prepare(spec)
+            result = runner(network, config, inputs, stop_event=stop_event)
         except Exception as exc:                       # one intent's refusal must not hide the others
             result = {"status": "failed", "verdict": f"failed: {exc}", "final": None}
-        rows.append(build_row(spec, result, critical_mw, profile))
+        row = build_row(spec, result, critical_mw, profile)
+        rows.append(row)
+        note(spec.intent, "done", row)
     return {"rows": rows}
