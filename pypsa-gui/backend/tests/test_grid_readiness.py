@@ -272,7 +272,7 @@ def test_a_voltage_change_that_passes_only_at_the_assumed_xr_warns(tmp_path):
     rvc = _rows(G.grid_readiness(d, n, PROFILE))["rapid_voltage_change"]
     assert rvc["verdict"] == "warn" and rvc["project_value"] == pytest.approx(8.0399, rel=1e-4)
     assert rvc["voltage_form_pct"] == pytest.approx(2.7164, rel=1e-4)
-    assert "passes only at the assumed X/R 4" in rvc["note"]
+    assert "the voltage form at the assumed X/R 4 passes" in rvc["note"]
 
 
 def test_a_small_voltage_change_passes_on_both_forms(tmp_path):
@@ -281,7 +281,8 @@ def test_a_small_voltage_change_passes_on_both_forms(tmp_path):
     d, n = _with_envelope(tmp_path, swing=5.0)
     rvc = _rows(G.grid_readiness(d, n, PROFILE))["rapid_voltage_change"]
     assert rvc["verdict"] == "pass" and rvc["project_value"] == pytest.approx(0.6791, rel=1e-4)
-    assert rvc["assumed"] and "passes only" not in rvc["note"]
+    assert rvc["assumed"] and "X/R-free bound √(ΔP² + ΔQ²)/S_k is 2.01 %" in rvc["note"]
+    assert "does not" not in rvc["note"]
 
 
 def test_the_voltage_change_reads_the_envelopes_tan_phi(tmp_path):
@@ -854,7 +855,7 @@ def test_a_small_ups_covers_part_of_the_step(tmp_path):
     # AS-16: d = (0.242536·13.4 + 0.970143·2.34)/2.5 = 2.2081 % passes only at the assumed X/R 4;
     # the bound √(13.4² + 2.34²)/2.5 = 13.6028/2.5 = 5.4411 % decides.
     assert rvc["value"] == pytest.approx(5.4411, rel=1e-4)
-    assert rvc["verdict"] == "warn" and "passes only at the assumed X/R 4" in rvc["note"]
+    assert rvc["verdict"] == "warn" and "the voltage form at the assumed X/R 4 passes" in rvc["note"]
     ramp = rows["ramp_rate"]["after_battery"]
     assert ramp["value"] == pytest.approx(40.0 + 13.4 / 23.4 * 1404.0, rel=1e-6)
     assert ramp["verdict"] == "fail"

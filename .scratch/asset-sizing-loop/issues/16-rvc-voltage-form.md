@@ -3,7 +3,7 @@
 
 # AS-16 — RVC row on the voltage form
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Blocked by: AS-04
 
@@ -15,8 +15,8 @@ The rapid-voltage-change row still reads swing / S_k (P-only). Move it to cos ψ
 
 ## Acceptance
 
-- [ ] Decision recorded on what the row shows before mitigation.
-- [ ] Tests first; boundary tests re-derived by hand.
+- [x] Decision recorded on what the row shows before mitigation (AS11B-RVC-1, below).
+- [x] Tests first; boundary tests re-derived by hand.
 
 ## PRs
 
@@ -29,3 +29,9 @@ The rapid-voltage-change row still reads swing / S_k (P-only). Move it to cos ψ
   4. The note keeps the P-only ΔS/S_k reference. The boundary tests sit exactly at the limit and just above it.
   5. If the owner picks other than A, the plan goes back to GK A.
   6. A release note names the verdict change.
+
+- 2026-11-02, decision AS11B-RVC-1 (owner, cards at ~20:17 and ~20:25 CET): "A + GK A's condition".
+  - The row and its after-battery value are judged on the voltage form (cos ψ·ΔP + sin ψ·ΔQ)/S_k, ψ = atan(X/R), using the envelope's tan φ_swing and the PoC X/R. The row is marked assumed while either input is assumed. The note keeps the P-only ΔS/S_k figure as a reference.
+  - While X/R is assumed (always, until a project X/R input exists), a pass also needs the X/R-free bound √(ΔP² + ΔQ²)/S_k under the limit. When the voltage form passes and the bound does not, the row warns and shows the bound.
+  - At 250 MVA, 3 % and tan φ 0.1, the verdict turns at a 7.46 MW swing. The voltage form reaches 3 % at 22.09 MW.
+- 2026-11-02, GK A on how condition 1 is built: option 1 GO. project_value is the figure that decided the verdict, so the assurance check re-judges every row to the same verdict. The row always carries `voltage_form_pct` and `xr_free_bound_pct`. Above the voltage-form boundary the displayed value drops from the bound to the voltage form; that is intended. Option 4 (no bound check) was declined.

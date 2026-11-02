@@ -508,12 +508,13 @@ def _rvc_forms(p_mw: float, swing_mw: float, tan_phi: float, sk: float, limit: f
     p = max(0.0, float(p_mw))
     form = fi.voltage_form_mva(p, q, fi.DEFAULT_XR) / sk * 100.0
     bound = math.hypot(p, q) / sk * 100.0
+    # The guard holds while the PoC X/R is assumed: drop it once a project X/R input exists (none today).
     only_xr = _judge(form, limit, RULE_RVC) == "pass" and _judge(bound, limit, RULE_RVC) != "pass"
     value = bound if only_xr else form
     return {"value": value, "form": form, "bound": bound, "q": q, "only_xr": only_xr,
             "verdict": _judge(value, limit, RULE_RVC),
-            "words": (f"passes only at the assumed X/R {fi.DEFAULT_XR:g} (voltage form {form:.4g} %); the X/R-free "
-                      f"bound √(ΔP² + ΔQ²)/S_k = {bound:.4g} % decides: enter the network operator's X/R"
+            "words": (f"the voltage form at the assumed X/R {fi.DEFAULT_XR:g} passes ({form:.4g} %), the X/R-free "
+                      f"bound √(ΔP² + ΔQ²)/S_k does not ({bound:.4g} %); enter the network operator's X/R"
                       if only_xr else "")}
 
 
@@ -555,7 +556,7 @@ def _rvc_row(inp: _Inputs) -> dict:
                assumed=True,                                   # the PoC X/R is always assumed (AS-16)
                note=(f"Voltage change on the voltage form (cos ψ·ΔP + sin ψ·ΔQ)/S_k, ψ = atan(X/R), IEC TR 61000-3-7: "
                      f"ΔP {swing:.4g} MW, ΔQ {f['q']:.4g} Mvar ({tan_words}), X/R {fi.DEFAULT_XR:g} ({fi.XR_ASSUMED}) "
-                     f"gives {f['form']:.4g} %"
+                     f"gives {f['form']:.4g} %; the X/R-free bound √(ΔP² + ΔQ²)/S_k is {f['bound']:.4g} %"
                      + (f"; {f['words']}" if f["words"] else "")
                      + f"; for reference the P-only ΔS/S_k = {swing:.4g} MW / {sk:g} MVA = {swing / sk * 100.0:.4g} %; "
                      "S_k is the entered S_k'' with the IEC 60909 c factor, so d may be understated by up to 1.1; "
@@ -1578,7 +1579,7 @@ def _after_battery(inp: _Inputs, rows: list[dict]) -> None:
         parts.append(f"the uncovered part ({after['residual_step_mw']:.3g} MW) is counted at the envelope's "
                      f"rate, conservatively, and a {a_res:.3g} MW oscillation remains")
         if rv and rv["words"]:
-            parts.append(f"the voltage change {rv['words']}")
+            parts.append(f"for the voltage change {rv['words']}")
         return r, o, v, "; ".join(parts) + f"; {ph['verdict']} by the smoothing screen: {ph['note']}"
 
     sk = _poc_sk_mva(inp.n)
