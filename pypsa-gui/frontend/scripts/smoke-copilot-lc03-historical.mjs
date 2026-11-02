@@ -271,6 +271,8 @@ try {
   // The file holds what the view shows: the past run's gas row, LCOE 50.
   assert.deepEqual(keptFile.data.economics_by_carrier.by_carrier.gas, past.gas)
   await closeChooser(page)
+  // The project menu's Export… leaves Results; the user opens the past run again.
+  await openPast('after-export')
 
   // LC-T10 (1): the user's own Clear supersedes the past-run view.
   await page.getByTestId('discussed-run-chrome').getByRole('button', { name: 'Clear' }).click()
