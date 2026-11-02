@@ -843,26 +843,13 @@ def _settings_from_meta(meta: dict) -> ProjectSettings:
     missing or malformed — the same tolerance `services/project_settings.py`
     applies on the read side the network routes use.
     """
-    from pydantic import ValidationError
-
     from services import project_settings
 
-    table = meta.get(project_settings.SETTINGS_KEY)
-    if not isinstance(table, dict):
-        return ProjectSettings()
-    # Each stored value passes the PATCH body's own validation, one field at a
-    # time, so a hand-edited bad value (a string flag, a non-finite or
-    # out-of-range autonomy) reads as that field's default without taking its
-    # siblings down with it.
-    known = {}
-    for key, value in table.items():
-        if key not in ProjectSettings.model_fields or value is None:
-            continue
-        try:
-            known[key] = getattr(UpdateProjectSettingsRequest.model_validate({key: value}), key)
-        except ValidationError:
-            continue
-    return ProjectSettings(**known)
+    # The one per-field check `services/project_settings.read_settings` uses,
+    # so ProjectInfo and the network routes agree on every stored value: a
+    # bad one (a string flag, a non-finite or out-of-range autonomy) reads as
+    # that field's default without taking its siblings down with it.
+    return ProjectSettings(**project_settings.settings_from_table(meta.get(project_settings.SETTINGS_KEY)))
 
 
 def _project_info_db(db, project) -> ProjectInfo:
@@ -2394,12 +2381,16 @@ def _carried_settings(existing_meta: dict, bound_dir, loaded: str | None, name: 
     over a third project) takes the SOURCE's table, as its layout and sidecars
     travel (`_carry_sidecars_on_move`): reading the destination's instead
     dropped the choice on a copy to a new name and kept the overwritten
-    project's on a forced one. An unbound first save keeps whatever ``dest``
-    holds. Returns ``{}`` when there is no table to write.
+    project's on a forced one. A network bound to no directory (new, or never
+    saved) has no table, so it writes none (the defaults) and never inherits
+    the destination's leftovers. Returns ``{}`` when there is no table to write.
     """
-    source_meta = existing_meta
-    if bound_dir and not _saves_its_own_directory(bound_dir, loaded, name, dest):
+    if _saves_its_own_directory(bound_dir, loaded, name, dest):
+        source_meta = existing_meta
+    elif bound_dir:
         source_meta = _read_meta(pathlib.Path(bound_dir))
+    else:
+        source_meta = {}
     table = source_meta.get("settings")
     return {"settings": table} if isinstance(table, dict) else {}
 

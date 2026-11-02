@@ -225,3 +225,191 @@ def test_a_forced_save_as_from_a_default_source_drops_the_victims(client, api_pr
     r = client.post(f"/api/projects/{victim}", params={"force": True, "rebind": True})
     assert r.status_code == 200, r.text
     assert _autonomy(client, victim) == BACKUP_AUTONOMY_DEFAULT_H
+
+
+# ── GK B (16) plan conditions ───────────────────────────────────────────────
+
+_CORRUPT = [True, False, "4", "yes", float("nan"), float("inf"), 0, -1, 721, 720.0001, 10**400, None, [4], {"h": 4}]
+
+
+@pytest.mark.parametrize("stored", _CORRUPT, ids=repr)
+def test_both_readers_agree_on_every_stored_value(client, api_project, project_storage_dir, stored):
+    """Condition 1: `read_settings` (the network routes' reader) and
+    `ProjectInfo.settings` share one validator, so they agree on every
+    corrupt value, for both settings."""
+    from services import project_settings as ps
+
+    name = api_project("aut-agree")
+    d = project_storage_dir(name)
+    meta = _read_meta(d)
+    meta["settings"] = {KEY: stored, ps.DERIVE_LENGTHS: stored}
+    (d / "metadata.json").write_text(json.dumps(meta))   # NaN/Infinity tokens on disk
+    expected = dict(ps.DEFAULTS)
+    if isinstance(stored, bool):            # a real flag value, corrupt only as hours
+        expected[ps.DERIVE_LENGTHS] = stored
+    assert _info(client, name)["settings"] == ps.read_settings(d) == expected
+
+
+@pytest.mark.parametrize("stored,read", [(4, 4.0), (8.5, 8.5), (720, 720.0), (1e-9, 1e-9)])
+def test_both_readers_agree_on_valid_values(client, api_project, project_storage_dir, stored, read):
+    from services import project_settings as ps
+
+    name = api_project("aut-agree-ok")
+    d = project_storage_dir(name)
+    meta = _read_meta(d)
+    meta["settings"] = {KEY: stored, ps.DERIVE_LENGTHS: True}
+    _write_meta(d, meta)
+    expected = {KEY: read, ps.DERIVE_LENGTHS: True}
+    assert _info(client, name)["settings"] == ps.read_settings(d) == expected
+    assert isinstance(ps.read_settings(d)[KEY], float)
+
+
+def test_the_dto_and_the_reader_name_the_same_settings():
+    from models.schemas import ProjectSettings, UpdateProjectSettingsRequest
+    from services import project_settings as ps
+
+    assert set(ProjectSettings.model_fields) == set(ps.DEFAULTS) == set(UpdateProjectSettingsRequest.model_fields)
+    assert ProjectSettings().model_dump() == ps.DEFAULTS
+
+
+def test_an_int_is_stored_as_a_float_and_a_resave_is_byte_stable(client, api_project, project_storage_dir):
+    """Condition 2."""
+    name = api_project("aut-int")
+    r = client.patch(URL.format(name), content='{"backup_autonomy_h": 4}',
+                     headers={"Content-Type": "application/json"})
+    assert r.status_code == 200, r.text
+    d = project_storage_dir(name)
+    assert '"backup_autonomy_h": 4.0' in (d / "metadata.json").read_text()
+    before = json.dumps(_read_meta(d)["settings"])
+    assert client.post(f"/api/projects/{name}").status_code == 200
+    assert json.dumps(_read_meta(d)["settings"]) == before
+
+
+def test_bound_constants_are_shared_and_enforced_by_both_models():
+    """Condition 6: 720 accepted, 720.0001 refused, through the comparison
+    request and the settings PATCH body alike."""
+    from pydantic import ValidationError
+
+    from models.schemas import UpdateProjectSettingsRequest
+
+    assert BACKUP_AUTONOMY_MAX_H == 720
+    assert DesignIntentSpec(intent="A", backup_autonomy_h=720).backup_autonomy_h == 720
+    assert UpdateProjectSettingsRequest(backup_autonomy_h=720).backup_autonomy_h == 720
+    with pytest.raises(ValidationError):
+        DesignIntentSpec(intent="A", backup_autonomy_h=720.0001)
+    with pytest.raises(ValidationError):
+        UpdateProjectSettingsRequest(backup_autonomy_h=720.0001)
+
+
+def test_an_unbound_network_saved_over_a_project_writes_no_settings(
+        client, api_project, install_network, project_storage_dir):
+    """Condition 3: a network bound to no directory (new, never saved) has no
+    settings table, so a forced save over a project writes none and never
+    inherits the destination's leftovers."""
+    from tests.conftest import build_network
+
+    victim = api_project("aut-victim4")
+    _set(client, victim, 99)
+    install_network(build_network())        # unbound: no name, no directory
+    r = client.post(f"/api/projects/{victim}", params={"force": True, "rebind": True})
+    assert r.status_code == 200, r.text
+    assert "settings" not in _read_meta(project_storage_dir(victim))
+    assert _autonomy(client, victim) == BACKUP_AUTONOMY_DEFAULT_H
+
+
+def test_an_imported_bundle_keeps_it_through_its_own_save(client, api_project):
+    """Condition 3: an imported project, once opened, saves into its own
+    directory and keeps its table."""
+    name = api_project("aut-imp-src")
+    _set(client, name, 11)
+    blob = client.get(f"/api/projects/{name}/bundle").content
+    r = client.post("/api/projects/import_bundle?name=aut_imp_dst",
+                    files={"file": ("a.pypsaproj.zip", blob, "application/zip")})
+    assert r.status_code in (200, 201), r.text
+    dst = r.json().get("imported") or r.json().get("name") or "aut_imp_dst"
+    r = client.post(f"/api/projects/{_info(client, dst)['id']}/activate")
+    assert r.status_code == 200, r.text
+    assert client.post(f"/api/projects/{dst}").status_code == 200
+    assert _autonomy(client, dst) == 11
+
+
+def test_a_concurrent_save_and_patch_lose_neither_edit(client, api_project, project_storage_dir, monkeypatch):
+    """Condition 4: the save holds the context's mutation lock across its
+    metadata read-modify-write; the PATCH takes the same lock (after the
+    project lock, as the save does), so a PATCH landing mid-save waits and
+    its value survives the save's rewrite."""
+    import sys
+    import threading
+    import time
+
+    import routers.projects as projects
+
+    name = api_project("aut-race")
+    d = project_storage_dir(name)
+    real_read = projects._read_meta
+    save_reading, go = threading.Event(), threading.Event()
+    paused = {"done": False}
+
+    def slow_read(path):
+        meta = real_read(path)
+        # Only the save's own read, the one inside its `with ctx.mutation_lock`
+        # (the endpoint runs on a worker thread, so the caller is the marker).
+        if not paused["done"] and sys._getframe(1).f_code.co_name == "_save_context":
+            paused["done"] = True
+            save_reading.set()
+            go.wait(10)
+        return meta
+
+    monkeypatch.setattr(projects, "_read_meta", slow_read)
+    results = {}
+    saver = threading.Thread(target=lambda: results.setdefault(
+        "save", client.post(f"/api/projects/{name}", params={"objective": 123.0})))
+    patcher = threading.Thread(target=lambda: results.setdefault(
+        "patch", client.patch(URL.format(name), json={KEY: 9})))
+    saver.daemon = patcher.daemon = True
+    saver.start()
+    try:
+        assert save_reading.wait(10), "the save never reached its metadata read"
+        patcher.start()
+        time.sleep(0.5)
+        assert patcher.is_alive(), "the PATCH did not wait for the save's lock"
+    finally:
+        go.set()                             # never leave the save parked
+        saver.join(30)
+        if patcher.is_alive() or patcher.ident:
+            patcher.join(30)
+    assert results["save"].status_code == 200, results["save"].text
+    assert results["patch"].status_code == 200, results["patch"].text
+    meta = real_read(d)
+    assert meta["settings"] == {KEY: 9.0}          # the PATCH's edit
+    assert meta["objective"] == 123.0              # the save's edit
+
+
+def test_the_setting_is_inert_for_the_network_fingerprint(client, api_project):
+    """Condition 5: autonomy feeds no LP, so a PATCH leaves the network
+    input fingerprint (what results and digests are keyed on) unchanged."""
+    from services.pypsa_service import PyPSAService
+    from services.workflow_tools import _network_input_fingerprint
+
+    name = api_project("aut-fp")
+    ctx = PyPSAService.get_active_context()
+    before = _network_input_fingerprint(ctx, exact=True)
+    _set(client, name, 48)
+    assert _network_input_fingerprint(ctx, exact=True) == before
+
+
+def test_no_comparison_result_reads_the_stored_value():
+    """Condition 5: each comparison run records the autonomy its own request
+    carried (`intent_table.build_row`), and nothing on the comparison path
+    reads the stored setting, so a later PATCH cannot relabel an old result.
+    Wiring the comparison to the stored value is a follow-up that must
+    snapshot it into the job record; this pin makes that a deliberate edit."""
+    import inspect
+
+    import routers.compare as compare_router
+    from services.compare import intent_jobs, intent_table
+
+    for module in (compare_router, intent_jobs, intent_table):
+        src = inspect.getsource(module)
+        assert "project_settings" not in src, module.__name__
+        assert "read_settings" not in src, module.__name__
