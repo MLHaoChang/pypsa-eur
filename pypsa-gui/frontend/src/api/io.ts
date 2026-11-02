@@ -17,7 +17,8 @@ export const ioApi = {
   exportMatpower: () => client.get('/io/export/matpower', { responseType: 'blob' }).then(r => r.data as Blob),
 
   /** The result views a workbook can hold; `selected` = included by the project's cards. */
-  resultsWorkbookViews: () => client.get<ResultsWorkbookListing>('/results/workbook/views')
+  /** No error toast: the chooser says in place that the tabs could not be listed. */
+  resultsWorkbookViews: () => client.get<ResultsWorkbookListing>('/results/workbook/views', { skipErrorToast: true })
     .then(r => ({ views: r.data.views, run: r.data.run ?? null })),
   /** The results workbook (RW-TABS-1): the cards' views plus `views`, or every view with `all`.
    *  Null before a solve (204). A refusal carries the backend's sentence in its Blob body. */

@@ -2,7 +2,7 @@ import { manualNavigation } from '../utils/navigationEpoch'
 import RunBoundView from './results/RunBoundView'
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Gauge, TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert, ShieldCheck, Briefcase, Workflow, CalendarClock, Zap } from 'lucide-react'
+import { Gauge, TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert, ShieldCheck, Briefcase, Workflow, CalendarClock, Zap, ArrowRight } from 'lucide-react'
 import { simulationApi, resultsApi } from '../api/simulation'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
@@ -217,6 +217,7 @@ export default function Results() {
   const clearResultsWindowRequest = useUIStore(s => s.clearResultsWindowRequest)
   const discussedRun = useUIStore(s => s.discussedRun)
   const clearDiscussedRun = useUIStore(s => s.clearDiscussedRun)
+  const requestIoModal = useUIStore(s => s.requestIoModal)
   const discussedRunStartedAt = useRunStartedAt(discussedRun?.runId)
   const uiMode = useUIStore(s => s.uiMode)
   // Guided (spec §3.7): a STORED tab Guided does not show is displayed as
@@ -815,9 +816,19 @@ export default function Results() {
           <span className="text-muted">
             Results below read only retained evidence for this run. Live inputs remain unchanged.
           </span>
+          {/* The one Export chooser (SAVE-1), on the results workbook: its
+              note names this run and offers its kept results. */}
           <button
             type="button"
-            className="ml-auto text-muted underline-offset-2 hover:underline"
+            data-testid="discussed-run-export"
+            className="ml-auto inline-flex items-center gap-1 text-accent hover:underline"
+            onClick={() => requestIoModal('export', 'workbook')}
+          >
+            Export… <ArrowRight size={11} />
+          </button>
+          <button
+            type="button"
+            className="text-muted underline-offset-2 hover:underline"
             onClick={() => { manualNavigation(); clearDiscussedRun() }}
           >
             Clear

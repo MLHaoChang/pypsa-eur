@@ -398,14 +398,25 @@ Branch `claude/lc03-past-run-parity`, from master `33e7ab8dc` (RW-03 merged, LC0
   Expert), the chooser's note, the downloaded file's run, section and gas row
   (LCOE 50, as the view shows), the latest-only note after Clear, and the
   refused download after access loss.
+- UX (6) asks, after the master merge: the discussed-run row has "Export… >"
+  in Guided and Expert, opening the one chooser on the results workbook
+  (`requestIoModal('export', 'workbook')`). Cancelling or finishing the chooser
+  returns to Results with the same past run: the chooser and the icon strip's
+  flyout render outside the sidebar's `<aside>`, so App.tsx's slide-panel
+  dismiss closed Results on the first click in them; both are now
+  `data-no-panel-close` (`Sidebar.ioModalReturn.test.tsx`, RED before). The
+  views listing no longer raises a "Project not found" toast: the chooser
+  already says in place that the tabs could not be listed. The smoke checks
+  the row's chooser next to the header check, in Guided and Expert, the
+  Project-menu path's return, and no toast with the refused download.
 
 Kept, with reasons:
 - The workbook is built only from the latest run's live network, so a past run
   exports as its kept evidence (JSON), not as a workbook.
 - The chooser's JSON link exports the section the assistant opened (the run
   row's "Section"), not another tab the user moved to within the past run.
-- With access already gone when the chooser opens, its listing fails and the
-  note is not shown; only a download refused after opening shows the reason.
+- With access already gone when the chooser opens, its listing fails: the
+  note keeps only the past run's link, and the refused download says why.
 
 ## Comments
 
