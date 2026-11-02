@@ -585,3 +585,23 @@ def test_compare_economics_without_marginal_cost_storage_is_byte_identical(pair)
         for c in ("storage_units", "stores"):
             getattr(m, c).drop(columns="marginal_cost_storage", inplace=True)
         assert _econ(n) == _econ(m)
+
+
+def test_compare_dispatch_nets_simultaneous_charge_and_discharge_like_the_storage_unit(pair):
+    """Charger and discharger both flowing in one snapshot (hand-set): the mix takes max(net, 0) and the cycles
+    |net|, as for a StorageUnit whose p is that net; gross charge + discharge would read 2 x 20 MW more."""
+    legacy, split = (_copy(n) for n in pair)
+    t = split.snapshots[3]
+    split.links_t.p0.loc[t, "bess charger"] = 20.0
+    split.links_t.p1.loc[t, "bess discharger"] = -30.0
+    split.links_t.p0.loc[t, "bess discharger"] = 30.0 / 0.9
+    legacy.storage_units_t.p.loc[t, "bess"] = 10.0
+    net = -split.links_t.p1["bess discharger"] - split.links_t.p0["bess charger"]
+    assert net[t] == pytest.approx(10.0)
+    a, b = _dispatch(legacy), _dispatch(split)
+    mix = float((net.clip(lower=0) * W).sum()) / 1e3
+    cycles = float((net.abs() * W).sum()) / (2 * 400.0)
+    assert b.dispatch_gwh_by_carrier["battery"].total == pytest.approx(mix, rel=REL)
+    assert b.storage_cycles_by_carrier["battery"].total == pytest.approx(cycles, rel=REL)
+    assert b.dispatch_gwh_by_carrier["battery"].total == pytest.approx(a.dispatch_gwh_by_carrier["battery"].total, rel=REL)
+    assert b.storage_cycles_by_carrier["battery"].total == pytest.approx(a.storage_cycles_by_carrier["battery"].total, rel=REL)
