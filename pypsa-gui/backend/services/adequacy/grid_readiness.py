@@ -495,6 +495,36 @@ def _rvc_infrequent_row(inp: _Inputs) -> dict:
                 section="connection", target=target)
 
 
+def _rvc_forms(p_mw: float, swing_mw: float, tan_phi: float, sk: float, limit: float) -> dict:
+    """The rapid voltage change of a real step ``p_mw`` with the load's reactive swing
+    ``tan φ·swing_mw`` (a battery takes P only; ``Q_res`` floored at 0), in % of nominal (AS-16, owner
+    decision AS11B-RVC-1): the voltage form ``(cos ψ·ΔP + sin ψ·ΔQ)/S_k`` at the assumed PoC X/R
+    and the X/R-free bound ``√(ΔP² + ΔQ²)/S_k`` (the form's maximum over ψ). The X/R is always
+    assumed today, so a pass needs both under the limit (GK A); otherwise the value shown is the
+    one that decided the verdict, so the stored value re-judges to it."""
+    from services.adequacy import flicker_inputs as fi
+
+    _, q = fi.residual_swing(swing_mw, 0.0, 0.0, tan_phi)
+    p = max(0.0, float(p_mw))
+    form = fi.voltage_form_mva(p, q, fi.DEFAULT_XR) / sk * 100.0
+    bound = math.hypot(p, q) / sk * 100.0
+    only_xr = _judge(form, limit, RULE_RVC) == "pass" and _judge(bound, limit, RULE_RVC) != "pass"
+    value = bound if only_xr else form
+    return {"value": value, "form": form, "bound": bound, "q": q, "only_xr": only_xr,
+            "verdict": _judge(value, limit, RULE_RVC),
+            "words": (f"passes only at the assumed X/R {fi.DEFAULT_XR:g} (voltage form {form:.4g} %); the X/R-free "
+                      f"bound √(ΔP² + ΔQ²)/S_k = {bound:.4g} % decides: enter the network operator's X/R"
+                      if only_xr else "")}
+
+
+def _rvc_tan_phi(inp: _Inputs) -> tuple[float, str]:
+    """The envelope's ``tan_phi_swing`` and its words; the assumed 0.1 when the envelope has none."""
+    raw = ((inp.envelope or {}).get("max") or {}).get("tan_phi_swing")
+    if raw is None:
+        return 0.1, "assumed tan φ_swing 0.1 (the envelope has none)"
+    return float(raw), f"tan φ_swing {float(raw):g} from the envelope"
+
+
 def _rvc_row(inp: _Inputs) -> dict:
     target = _target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"),
                      "eh_sk_mva")
@@ -515,15 +545,25 @@ def _rvc_row(inp: _Inputs) -> dict:
                     note=_NO_ENVELOPE if inp.envelope is None
                     else "No short-circuit level at the point of connection",
                     section="connection", target=target)
+    from services.adequacy import flicker_inputs as fi
+
     swing = float(inp.envelope["max"]["swing_mw"])
-    d = swing / sk * 100.0
-    return _row("rapid_voltage_change", req, rule=RULE_RVC, limit=limit, unit="% of nominal", source=source,
-                project_value=round(d, 4), verdict=_judge(d, limit, RULE_RVC),
-                assumed=lim_assumed or fault_assumed or _envelope_assumed(inp),
-                note=(f"Voltage change ≈ load step / fault level × 100 = {swing:.4g} MW / {sk:g} MVA: a screening upper bound "
-                      "(IEC 61000-3-7 style) that is P-only: it ignores the grid X/R and the load's reactive swing (AS-11); above the limit a power-flow "
-                      f"or EMT study is needed; {_BEFORE_MITIGATION}"),
-                section="connection", target=target)
+    tan_phi, tan_words = _rvc_tan_phi(inp)
+    f = _rvc_forms(swing, swing, tan_phi, sk, limit)
+    row = _row("rapid_voltage_change", req, rule=RULE_RVC, limit=limit, unit="% of nominal", source=source,
+               project_value=round(f["value"], 4), verdict=f["verdict"],
+               assumed=True,                                   # the PoC X/R is always assumed (AS-16)
+               note=(f"Voltage change on the voltage form (cos ψ·ΔP + sin ψ·ΔQ)/S_k, ψ = atan(X/R), IEC TR 61000-3-7: "
+                     f"ΔP {swing:.4g} MW, ΔQ {f['q']:.4g} Mvar ({tan_words}), X/R {fi.DEFAULT_XR:g} ({fi.XR_ASSUMED}) "
+                     f"gives {f['form']:.4g} %"
+                     + (f"; {f['words']}" if f["words"] else "")
+                     + f"; for reference the P-only ΔS/S_k = {swing:.4g} MW / {sk:g} MVA = {swing / sk * 100.0:.4g} %; "
+                     "S_k is the entered S_k'' with the IEC 60909 c factor, so d may be understated by up to 1.1; "
+                     f"above the limit a power-flow or EMT study is needed; {_BEFORE_MITIGATION}"),
+               section="connection", target=target)
+    row["voltage_form_pct"] = round(f["form"], 4)
+    row["xr_free_bound_pct"] = round(f["bound"], 4)
+    return row
 
 
 _HARMONIC_SCREENING = ("a screening estimate (IEC 61000-3-6 summation, U_h = I_h · h / S_k) that ignores network "
@@ -1525,7 +1565,11 @@ def _after_battery(inp: _Inputs, rows: list[dict]) -> None:
         hz = 1.0 / period if period > 0 else math.inf
         o = (2.0 * a_res / inp.connection_mw * 100.0
              if inp.connection_mw and OSCILLATION_BAND_HZ[0] <= hz <= OSCILLATION_BAND_HZ[1] else None)
-        v = after["residual_step_mw"] / sk * 100.0 if sk else None
+        # AS-16: the same voltage form as the row; the battery takes P only, so the load's reactive
+        # swing tan φ·step stays.
+        rv = (_rvc_forms(after["residual_step_mw"], s, tan_phi, sk, rvc_limit)
+              if sk and rvc_limit is not None else None)
+        v = rv["value"] if rv else None
         parts = [f"{ph['cod'][:4] if ph.get('cod') else 'the phase'}: of the {s:.3g} MW step, batteries "
                  f"hold {after['covered_battery_mw']:.3g} MW to the {limit:g} MW/min limit"]
         if after["covered_ups_mw"] > 0:
@@ -1533,9 +1577,13 @@ def _after_battery(inp: _Inputs, rows: list[dict]) -> None:
                          f"({after['ups_ramp_mw_per_min']:.3g} MW/min)")
         parts.append(f"the uncovered part ({after['residual_step_mw']:.3g} MW) is counted at the envelope's "
                      f"rate, conservatively, and a {a_res:.3g} MW oscillation remains")
+        if rv and rv["words"]:
+            parts.append(f"the voltage change {rv['words']}")
         return r, o, v, "; ".join(parts) + f"; {ph['verdict']} by the smoothing screen: {ph['note']}"
 
     sk = _poc_sk_mva(inp.n)
+    tan_phi, _ = _rvc_tan_phi(inp)
+    rvc_limit = (by_id.get("rapid_voltage_change") or {}).get("limit")
     per_phase = [values(ph, after) for ph, after in screened]
 
     def worst(i):
