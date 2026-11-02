@@ -25,6 +25,6 @@ Spec: [spec.md](../spec.md). Source: research note section 5, [RESULTS.md](../..
 
 ## PRs
 
-Built on `claude/as-04-flicker-inputs`. Skipped: the RVC row still reads the P-only swing/S_k (switching it to the voltage form moves its 7.5 MW boundary tests; it needs its own decision). X/R is a module default of 4 (assumed) until the project carries one.
+Built on `claude/as-04-flicker-inputs`. Skipped: the RVC row still reads the P-only swing/S_k (switching it to the voltage form moves its 7.5 MW boundary tests; it needs its own decision; filed as [AS-16](16-rvc-voltage-form.md)). X/R is a module default of 4 (assumed) until the project carries one.
 
 ## Comments
