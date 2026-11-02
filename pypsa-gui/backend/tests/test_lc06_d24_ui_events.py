@@ -84,3 +84,11 @@ def test_the_panels_e2e_journey_is_wired_into_the_browser_job():
     root = Path(__file__).resolve().parents[3]
     assert (root / "pypsa-gui/frontend/scripts/smoke-copilot-lc06-d24.mjs").is_file()
     assert "node scripts/smoke-copilot-lc06-d24.mjs" in (root / ".github/workflows/test.yaml").read_text()
+
+
+def test_the_panels_e2e_journey_runs_the_guard_cases():
+    """LC-D24.panels_e2e: wrong project, disconnect, unknown run and 320 px keyboard are in the journey."""
+    from pathlib import Path
+    script = (Path(__file__).resolve().parents[3] / "pypsa-gui/frontend/scripts/smoke-copilot-lc06-d24.mjs").read_text()
+    for needle in ("Wrong project", "Disconnect", "An old run", "320 px, keyboard", "'Tab'"):
+        assert needle in script, needle
