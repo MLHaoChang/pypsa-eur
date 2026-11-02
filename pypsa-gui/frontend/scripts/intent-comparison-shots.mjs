@@ -96,6 +96,7 @@ try {
         current = st
         await page.reload(); await page.waitForLoadState('networkidle')
         await page.evaluate(async () => { const { useUIStore } = await import('/src/store/uiStore.ts'); useUIStore.getState().setSlidePanel('campusStudy') })
+        await page.waitForTimeout(1500)
         const anchor = page.locator('[data-testid="intent-run"], [data-testid="intent-abort"]').first()
         const section = anchor.locator('xpath=ancestor::section[1]')
         await anchor.waitFor()
@@ -110,7 +111,7 @@ try {
         const file = path.join(OUT, `${mode}-${theme}-${key}.png`)
         await target.first().screenshot({ path: file })
         written.push(path.basename(file))
-      } catch (e) { problems.push(`${mode}/${theme}/${key}: ${e.message.split('\n')[0]}`) }
+      } catch (e) { problems.push(`${mode}/${theme}/${key}: ${e.message.split('\n')[0]}`); if (process.env.DEBUG_SHOT) await page.screenshot({ path: `/tmp/claude-0/fail-${mode}-${theme}-${key}.png` }).catch(() => {}) }
     }
     await ctx.close()
   }
