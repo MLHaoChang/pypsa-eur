@@ -104,7 +104,7 @@ def duration_problem(name: str, tech: StorageTech | None, lo: float, hi: float, 
     if tech is not None and not (tech.min_hours - eps <= lo <= hi <= tech.max_hours + eps):
         return (f"{name}: hours {lo:g}–{hi:g} h are outside the {tech.label} range "
                 f"{tech.min_hours:g}–{tech.max_hours:g} h")
-    if not c_rate >= 1.0 / hi:
+    if not c_rate * hi >= 1.0 - eps:
         return (f"{name}: c_rate_max {c_rate!r}/h needs E/P >= {1 / c_rate if c_rate > 0 else math.inf:g} h,"
                 f" beyond the {hi:g} h maximum")
     return None

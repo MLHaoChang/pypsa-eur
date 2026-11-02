@@ -132,11 +132,11 @@ def committed_storage(n, names, year: int | None = None) -> tuple[list[str], lis
     counts 0 as an extendable genset does."""
     entries = _storages(n)
 
-    def live(e) -> bool:     # a missing ``active`` column means active
+    def in_use(e) -> bool:   # a missing ``active`` column means active
         return all(in_service(df, row, year) and ("active" not in df.columns or bool(df.at[row, "active"]))
                    for df, row in _rows(n, e))
 
-    live = [u for u in names if u in entries and live(entries[u])]
+    live = [u for u in names if u in entries and in_use(entries[u])]
     unsized = [u for u in live if _extendable(n, entries[u])]
     return [u for u in live if u not in unsized and entries[u].p_nom_mw > 0], unsized
 
