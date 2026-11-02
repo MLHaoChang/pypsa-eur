@@ -93,6 +93,8 @@ try {
         push(event, data) { try { ctl.enqueue(enc.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)) } catch { /* closed */ } },
         drop() { try { ctl.error(new TypeError('network error')) } catch { /* closed */ } },
         end() { try { ctl.close() } catch { /* closed */ } },
+        // True once the page's reader has taken every frame pushed so far (the queue is empty again).
+        delivered() { try { return ctl.desiredSize > 0 } catch { return true } },
       }
       init?.signal?.addEventListener('abort', () => { stream.aborted = true; stream.drop() })
       wire.streams.push(stream)
@@ -185,8 +187,15 @@ try {
   await page.waitForFunction(() => localStorage.getItem('network-diagram:current-project') === 'other-grid', null, { timeout: 30000 })
   assert.equal(await shown('L2'), false, 'the other project starts with nothing selected')
   await push(at, 'ui_event', select('L2'))
-  await settle()
+  // Wait for the page to have read the frame (not a fixed delay), then give its handler one turn of the event loop.
+  await page.waitForFunction(i => window.__wire.streams[i].delivered(), at, { timeout: 15000 })
+  await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))))
   assert.equal(await shown('L2'), false, 'a ui_event of the old project moved nothing in the new one')
+  // The same frame on a stream opened in the new project does move the screen, so the absence above is the guard, not a dead handler.
+  const fresh = await send('wrong project, new stream')
+  await push(fresh, 'ui_event', select('L2'))
+  await page.waitForFunction(() => /LINE\s+L2[\s\S]*From bus/i.test(document.body.innerText), null, { timeout: 15000 })
+  await finish(fresh)
 
   // Disconnect: the wire drops mid-turn. What arrived stays; nothing replays; the next turn opens one new stream and moves once.
   at = await send('disconnect')
