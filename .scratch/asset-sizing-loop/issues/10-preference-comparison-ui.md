@@ -43,3 +43,8 @@ Open: cost column is the LP total (no capex split in the loop result).
 PR 2 skipped, by decision: backup autonomy is per run, not saved per project (a project-file write needs an edit-lock decision; AS-AUTONOMY-1 asks per project). Open for the owner.
 
 GK B PR 2 plan verdict (GO): not_run shown next to a converged row; non-converged, unresolved, failed and stopped never render Pass and their sizes are "not final"; abort wired; vitest for polling ending on done, aborted, failed and for a 409 on start (shows the running job, no second job). Ruling 1: `grid_code` id on POST, resolved server-side from the project's own grid-code store, unknown id 422, raw `profile` field removed. Ruling 2: per-project autonomy goes in its own small backend PR (existing per-project store preferred; a new file needs `_BUNDLE_FILES`, `_SAVE_WRITTEN_FILES`, snapshot, copy, atomic write under the write lock, route rows, 422 validation, round-trip tests); PR 2 sends autonomy per run (default 4 h) until then. Still to check against ruling 1: a profile without `ride_through_transfer_counts`, and an omitted id, both read as "not checked"; the UI uses UX's wording for the omitted id ("No grid code set: ...").
+
+## PR 2 notes (owner decision AS10-AUTONOMY-2)
+
+- Backup autonomy (AS-AUTONOMY-1) is per run for now ("Per run now, store later"). Per-project storage is a separate backend PR afterwards, with GK B's conditions; it is not in #1017.
+- Screenshots: `evidence/10/`, eight states, Guided and Expert, light and dark, from `pypsa-gui/frontend/scripts/intent-comparison-shots.mjs` (route-mocked harness, invented numbers). The Guided-home-to-study-part path shot is not taken.

@@ -91,12 +91,14 @@ try {
     await page.evaluate(async () => { const { useUIStore } = await import('/src/store/uiStore.ts'); useUIStore.getState().setSlidePanel('campusStudy') })
 
     for (const [key, st] of Object.entries(STATES)) {
+      if (process.env.ONLY && !key.startsWith(process.env.ONLY)) continue
       try {
         current = st
         await page.reload(); await page.waitForLoadState('networkidle')
         await page.evaluate(async () => { const { useUIStore } = await import('/src/store/uiStore.ts'); useUIStore.getState().setSlidePanel('campusStudy') })
-        const section = page.locator('[data-testid="intent-run"]').locator('xpath=ancestor::section[1]')
-        await page.getByTestId('intent-run').waitFor()
+        const anchor = page.locator('[data-testid="intent-run"], [data-testid="intent-abort"]').first()
+        const section = anchor.locator('xpath=ancestor::section[1]')
+        await anchor.waitFor()
         for (const i of st.pick) await page.getByLabel(new RegExp(`^${i}\\. `)).check()
         if (st.fill) {
           const v = { critical: '80', link: 'poc', ramp: '10', sk: '1000', library: '50,100', swing: '20', amp: '5', period: '2' }
