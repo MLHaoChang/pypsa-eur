@@ -121,4 +121,27 @@ describe('IntentComparisonSection', () => {
     expect(screen.getByTestId('intent-progress-A').textContent).toBe('A: running')
     expect(screen.getByTestId('intent-progress-B').textContent).toBe('B: queued')
   })
+
+  it.each(['done', 'aborted', 'failed'] as const)('stops polling once the job is %s', async status => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    api.get.mockResolvedValue(job([row('A'), row('B')], { status }))
+    renderIt()
+    await screen.findByTestId('intent-row-A')
+    const n = api.get.mock.calls.length
+    await vi.advanceTimersByTimeAsync(7000)
+    expect(api.get.mock.calls.length).toBe(n)
+    vi.useRealTimers()
+  })
+
+  it('a 409 on start shows the running job and does not start a second one', async () => {
+    const user = userEvent.setup()
+    api.get.mockResolvedValueOnce(null).mockResolvedValue(job([], { status: 'running', progress: { B: 'running', C: 'queued' } }))
+    api.start.mockRejectedValue({ response: { status: 409, data: { detail: 'a comparison is already running' } } })
+    renderIt(); await fill(user)
+    await user.click(screen.getByLabelText(/^B\. /)); await user.click(screen.getByLabelText(/^C\. /))
+    await user.click(screen.getByTestId('intent-run'))
+    await screen.findByTestId('intent-progress-B')
+    expect(api.start).toHaveBeenCalledTimes(1)
+    expect(screen.queryByTestId('intent-error')).toBeNull()
+  })
 })

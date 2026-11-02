@@ -63,6 +63,8 @@ export default function IntentComparisonSection({ name, gridCode }: { name: stri
       })
     },
     onSuccess: data => qc.setQueryData(key, data),
+    // 409: a comparison already runs for this project; show that job, never start a second one.
+    onError: e => { if ((e as { response?: { status?: number } })?.response?.status === 409) void qc.invalidateQueries({ queryKey: key }) },
   })
   const abort = useMutation({ mutationFn: () => intentComparisonApi.abort(name), onSuccess: () => qc.invalidateQueries({ queryKey: key }) })
   const toggle = (id: DesignIntent) => setChosen(c => (c.includes(id) ? c.filter(x => x !== id) : [...c, id]))
@@ -114,7 +116,7 @@ export default function IntentComparisonSection({ name, gridCode }: { name: stri
             </Field>
           ))}
       </div>
-      {(start.isError || job.isError) && (
+      {(start.isError || job.isError) && !(start.isError && start.error && (start.error as { response?: { status?: number } }).response?.status === 409) && (
         <p className="text-[12px] text-err" role="alert" data-testid="intent-error">{errorText(start.error ?? job.error)}</p>
       )}
       {job.data?.status === 'failed' && job.data.error && (
