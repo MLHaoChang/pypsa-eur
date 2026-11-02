@@ -1367,8 +1367,10 @@ async def upload_timeseries(
     # real timestamp is left, so "Q1 Peak" style labels are not misread as zones.
     named_zone = False
     if csv_ts.dtype == object and not offset_strings:
+        # The zone name may also lead the timestamp ("Europe/Berlin 2025-01-01 00:00").
         bare = csv_ts.astype(str).str.replace(
-            r"\s+[A-Za-z][A-Za-z_]*(?:/[A-Za-z0-9_+-]+)*$", "", regex=True)
+            r"\s+[A-Za-z][A-Za-z_]*(?:/[A-Za-z0-9_+-]+)*$", "", regex=True).str.replace(
+            r"^[A-Za-z][A-Za-z_]*(?:/[A-Za-z0-9_+-]+)*\s+", "", regex=True)
         named_zone = bool((bare != csv_ts.astype(str)).any()) and bool(
             pd.to_datetime(bare, errors="coerce").notna().all())
     if getattr(csv_ts, "tz", None) is not None or offset_strings or named_zone:
