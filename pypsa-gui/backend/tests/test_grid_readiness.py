@@ -261,7 +261,7 @@ def test_the_voltage_change_row_at_the_profiles_limit(tmp_path, swing, verdict, 
     d, n = _with_envelope(tmp_path, swing=swing)
     rvc = _rows(G.grid_readiness(d, n, PROFILE))["rapid_voltage_change"]
     assert rvc["verdict"] == verdict
-    assert rvc["project_value"] == pytest.approx(value, rel=1e-5)
+    assert rvc["project_value"] == pytest.approx(value, abs=5e-5)              # stored to 4 decimals
     assert G._judge(rvc["project_value"], rvc["limit"], rvc["rule"]) == verdict  # the stored value re-judges
 
 
@@ -833,8 +833,8 @@ def test_the_campus_ups_walks_the_step_in_too_fast_for_the_ramp_limit(tmp_path):
     assert "walks 23.4 MW in over 15 s" in ramp["note"]
     assert rows["oscillation"]["after_battery"]["value"] == 0.0
     # AS-16: the battery takes P only; the reactive swing 0.1·23.4 = 2.34 Mvar stays:
-    # d = 0.970143·2.34/2.5 = 0.9080 %, bound 2.34/2.5 = 0.936 %, both under 3 %.
-    assert rows["rapid_voltage_change"]["after_battery"]["value"] == pytest.approx(0.9080, rel=1e-4)
+    # d = 0.970143·2.34/2.5 = 0.90805 %, bound 2.34/2.5 = 0.936 %, both under 3 %.
+    assert rows["rapid_voltage_change"]["after_battery"]["value"] == pytest.approx(0.9081, abs=5e-5)
     assert rows["oscillation"]["after_battery"]["verdict"] == "pass"
     assert rows["rapid_voltage_change"]["after_battery"]["verdict"] == "pass"
     assert rows["ramp_rate"]["after_battery"]["units"] == ["ups_battery"]
