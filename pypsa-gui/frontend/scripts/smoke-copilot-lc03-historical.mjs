@@ -167,10 +167,12 @@ try {
   await importGrid()
   assert((await context.request.post(base + '/api/projects/oj-grid', { headers })).ok())
   await context.route(url => ['http:', 'https:'].includes(url.protocol) && url.hostname !== '127.0.0.1', route => route.abort())
-  await page.addInitScript(() => {
+  await page.addInitScript(theme => {
     localStorage.setItem('network-diagram:current-project', 'oj-grid')
     localStorage.setItem('network-diagram:assistant-dock', 'open')
-  })
+    // LC03H_THEME=light: the same journey in the light theme, for its screenshots.
+    if (theme) localStorage.setItem('network-diagram:theme', theme)
+  }, process.env.LC03H_THEME || '')
   await page.goto(base + '/app')
   await page.getByTestId('chat-input').waitFor()
 
