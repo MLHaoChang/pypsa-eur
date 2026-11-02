@@ -2369,34 +2369,37 @@ def get_results_workbook_views(user: User = Depends(require_user)):
                              status, "Not available for this project")})
     finally:
         chat_tools.set_acting_user(previous)
-    run = _workbook_run()
+    run = _workbook_run(user)
     # The run the workbook holds (its About sheet names the same one): the
     # chooser says which run it exports, beside a past run on Results.
     return {"views": rows, "run": None if run is None else {
         "run_id": run.get("run_id"), "started_at": run.get("started_at")}}
 
 
-def _workbook_run() -> dict | None:
-    """The latest completed run, the one a results workbook holds; None when
-    nothing is recorded (a scratch network: About says "not recorded")."""
+def _workbook_run(user: User) -> dict | None:
+    """The latest completed run, the one a results workbook holds, read as the
+    requesting user (run reads resolve the project for the acting user); None
+    when nothing is recorded (a scratch network: About says "not recorded")."""
     from services import run_evidence
 
     try:
-        runs = run_evidence.list_project_runs(limit=1, status="completed")["items"]
+        with _result_actor(user):
+            runs = run_evidence.list_project_runs(limit=1, status="completed")["items"]
     except Exception:  # noqa: BLE001 — no run record (a scratch network): About says "not recorded"
         logger.info("results workbook: no run record for the About sheet", exc_info=True)
         return None
     return runs[0] if runs else None
 
 
-def _refuse_other_run(run_id: str, latest: dict | None) -> None:
+def _refuse_other_run(run_id: str, latest: dict | None, user: User) -> None:
     """A workbook asked for `run_id` holds that run or is refused (LC-03
     past-run parity): never the latest run's workbook in place of another."""
     from services import run_evidence
 
     if latest is not None and latest.get("run_id") == run_id:
         return
-    run_evidence.get_run_evidence(run_id)  # no such run here: typed run_not_found
+    with _result_actor(user):
+        run_evidence.get_run_evidence(run_id)  # no such run here: typed run_not_found
     held = f" ({latest['run_id']})" if latest is not None else ""
     raise HTTPException(409, {
         "error_kind": "results_workbook_past_run",
@@ -2437,9 +2440,9 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
         raise HTTPException(409, {
             "error_kind": "results_workbook_stale",
             "message": "A solve is running; export once it finishes."})
-    latest = _workbook_run()
+    latest = _workbook_run(user)
     if run_id is not None:
-        _refuse_other_run(run_id, latest)
+        _refuse_other_run(run_id, latest, user)
     freshness = solve_freshness()
     if not freshness.get("results_current") and not stored:
         why = ("The inputs changed since the solve, so the results describe an earlier model."

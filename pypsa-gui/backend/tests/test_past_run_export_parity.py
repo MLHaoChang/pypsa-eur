@@ -136,10 +136,23 @@ def test_the_file_refuses_like_the_run_view_once_access_is_lost(parity, client, 
 
 def test_the_workbook_names_the_run_it_holds(parity):
     browser = parity['browser']
-    views = _browser_get(browser, '/api/results/workbook/views')
+    latest = _latest()
+    # A browser request has no acting user of its own: the route reads the
+    # runs as its authenticated reader (it named none before, in the real app).
+    previous = chat_tools.acting_user_id()
+    chat_tools.set_acting_user(None)
+    try:
+        views = _browser_get(browser, '/api/results/workbook/views')
+        book = _browser_get(browser, WORKBOOK)
+    finally:
+        chat_tools.set_acting_user(previous)
     assert views.status_code == 200, views.text
     run = views.json()['run']
-    assert run['run_id'] == _latest() and run['started_at']
+    assert run['run_id'] == latest and run['started_at']
+    assert book.status_code == 200, book.text
+    assert book.headers['x-workbook-run-id'] == latest
+    about = dict(row[:2] for row in _sheets(book.content)['About'] if len(row) >= 2)
+    assert about['Run'] == latest
 
 
 def test_the_workbook_refuses_a_past_run_on_the_route(parity):

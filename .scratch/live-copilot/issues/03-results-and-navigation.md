@@ -387,6 +387,13 @@ Branch `claude/lc03-past-run-parity`, from master `33e7ab8dc` (RW-03 merged, LC0
 - The workbook (route and `export_results_workbook`) takes `run_id`: any run but
   the latest completed one refuses `results_workbook_past_run` (409), a run
   this project lacks `run_not_found`. Without `run_id` the workbook is unchanged.
+- RED found (browser): the workbook routes read the latest run with no acting
+  user, so in the real app the run lookup refused and fell back to none: the
+  chooser named no run, and the workbook's About sheet read "Run: not
+  recorded". The lookup now runs as the request's user (`_result_actor`, as
+  the run view does). Test: the listing and workbook read with no acting user
+  name the latest run, About included (RED before). The pytest workbook
+  fixtures always had an acting user, so sheet contents there equal master's.
 - Browser: `smoke-copilot-lc03-historical.mjs` asserts the header (Guided and
   Expert), the chooser's note, the downloaded file's run, section and gas row
   (LCOE 50, as the view shows), the latest-only note after Clear, and the
