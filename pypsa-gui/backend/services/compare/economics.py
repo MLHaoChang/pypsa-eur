@@ -490,6 +490,35 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
             _accum(b["opex_eur"], total, pp)
             _accum(b["gen_cost_eur"], total, pp)
 
+    def _walk_holding_cost() -> None:
+        """`marginal_cost_storage` as the LP prices it: state of charge x cost per MWh held for an hour x the cost
+        weight, static or time-varying. A StorageUnit's state_of_charge, or a split storage's Store `e` (both
+        store-side MWh), booked in the asset's carrier with its VOM. Other Stores are not booked, as their
+        marginal_cost is not."""
+        rows = []
+        su_soc = getattr(n.storage_units_t, "state_of_charge", None) if hasattr(n, "storage_units_t") else None
+        if "marginal_cost_storage" in n.storage_units.columns and su_soc is not None and not su_soc.empty:
+            mcs = n.get_switchable_as_dense("StorageUnit", "marginal_cost_storage")
+            rows += [(su_soc, mcs, name, n.storage_units.at[name, "carrier"]) for name in n.storage_units.index]
+        st_e = getattr(n.stores_t, "e", None) if hasattr(n, "stores_t") else None
+        if _splits and "marginal_cost_storage" in n.stores.columns and st_e is not None and not st_e.empty:
+            mcs = n.get_switchable_as_dense("Store", "marginal_cost_storage")
+            rows += [(st_e, mcs, e.name, e.carrier) for e in _splits]
+        for level, mcs, name, carrier in rows:
+            if name not in level.columns or name not in mcs.columns:
+                continue
+            cost_t = mcs[name].reindex(sns).fillna(0.0).astype(float)
+            if not (cost_t != 0).any():
+                continue
+            held_t = level[name].reindex(sns).fillna(0.0).astype(float) * cost_t * weights
+            total = float(held_t.sum())
+            if not _math.isfinite(total) or total == 0:
+                continue
+            b = _bucket(str(carrier or "unknown").lower())
+            pp = _per_period_groupby(held_t, sns, is_multi)
+            _accum(b["opex_eur"], total, pp)
+            _accum(b["gen_cost_eur"], total, pp)
+
     # A shortfall is product NOT delivered: lost revenue at its lost-production value, never an expense as well,
     # never dispatch and never revenue (ticket 04), from the one accessor (a role Generator, else the solve's capture,
     # ticket 08). It is booked under the product bus's carrier, as lost load is. A buy-in stays an ordinary expense.
@@ -500,6 +529,7 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
     _walk_dispatch_side(n.storage_units, getattr(n.storage_units_t, "p", None) if hasattr(n, "storage_units_t") else None)
     _walk_dispatch_side(n.links,         getattr(n.links_t, "p0", None) if hasattr(n, "links_t") else None)
     _walk_split_storage()
+    _walk_holding_cost()
     for short in lost_src:
         carrier = n.buses.at[short.bus, "carrier"] if short.bus in n.buses.index else None
         _book_lost_production(_bucket(str(carrier or "unknown").lower()), short)

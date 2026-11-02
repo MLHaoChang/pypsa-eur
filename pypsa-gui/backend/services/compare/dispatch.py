@@ -93,16 +93,17 @@ def _compute_dispatch_summary(n, periods, is_multi, has_solve, *, cfg=None) -> D
                 for p, v in _per_period_groupby(opex_t, sns, is_multi).items():
                     opex_bucket["by_period"][p] = opex_bucket["by_period"].get(p, 0.0) + v / 1e6
 
-    from services.solver.storage_inventory import SPLIT, list_storages, split_ac_flows
+    from services.solver.storage_inventory import results_splits, split_ac_flows
 
     # AS-11: split storages (Store + charger/discharger Links) and their AC
-    # flows, read once for the energy mix and the cycles below.
+    # flows, read once for the energy mix and the cycles below. The results
+    # readers' one name rule: a Store named like a StorageUnit, or a split
+    # discharging to another bus than it charges from, stays out.
     split_flows = []
-    for e in list_storages(n):
-        if e.layout == SPLIT:
-            flows = split_ac_flows(n, e)
-            if flows is not None:
-                split_flows.append((e, flows[0], flows[1]))
+    for e in results_splits(n):
+        flows = split_ac_flows(n, e)
+        if flows is not None:
+            split_flows.append((e, flows[0], flows[1]))
 
     # Storage-unit dispatch — only the discharge half goes into the
     # energy-mix; charging is internal cycling, double-counting it would
