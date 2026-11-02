@@ -187,6 +187,19 @@ def test_a_zone_name_before_the_time_is_refused_as_timezone_aware(alpha, csv):
     assert list(PyPSAService.get_network().loads_t.p_set["L1"]) == before
 
 
+@pytest.mark.parametrize("stamp", [
+    "Mon 2026-01-01 00:00", "Jan 1 2026 00:00", "January 1, 2026 00:00", "Thu 01/01/2026 00:00",
+], ids=["weekday", "month_abbr", "month_name", "weekday_slash_date"])
+def test_a_naive_timestamp_led_by_a_weekday_or_month_is_not_called_timezone_aware(alpha, stamp):
+    _four(alpha)
+    csv = f"snapshot,L1\n{stamp},7\n"
+    try:
+        chat_tools.upload_timeseries("loads", "L1", "p_set", csv)
+    except Exception as exc:
+        detail = getattr(exc, "detail", None)
+        assert not (isinstance(detail, dict) and detail.get("error_kind") == "timeseries_timezone_aware")
+
+
 @pytest.mark.parametrize("component, attribute, name", [
     ("loads", "p_set", "L1"),
     ("generators", "p_max_pu", "G1"),
