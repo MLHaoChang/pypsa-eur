@@ -271,13 +271,11 @@ try {
   // The file holds what the view shows: the past run's gas row, LCOE 50.
   assert.deepEqual(keptFile.data.economics_by_carrier.by_carrier.gas, past.gas)
   await closeChooser(page)
-  await page.getByRole('button', { name: 'Guided', exact: true }).click()
 
   // LC-T10 (1): the user's own Clear supersedes the past-run view.
   await page.getByTestId('discussed-run-chrome').getByRole('button', { name: 'Clear' }).click()
   await noPastView(page)
   // With no past run on screen the chooser names only the latest run, no link.
-  await page.getByRole('button', { name: 'Expert', exact: true }).click()
   await openWorkbookChoice(page)
   await page.locator(`[data-testid="workbook-run"][data-run-id="${runs[1]}"]`).waitFor({ timeout: 30000 })
   assert.equal(await page.getByTestId('workbook-past-run-download').count(), 0)
@@ -300,20 +298,7 @@ try {
     const response = await fetch(`${fixtureControl}/${action}`, { method: 'POST' })
     assert.equal(response.status, 204, `${action} failed`)
   }
-  // The chooser was opened while the user could read the project; the
-  // download after access is lost is refused inline, in the same plain words.
-  await page.getByRole('button', { name: 'Expert', exact: true }).click()
-  await openWorkbookChoice(page)
-  const pastLink = page.locator(`[data-testid="workbook-past-run-download"][data-run-id="${runs[0]}"]`)
-  await pastLink.waitFor({ timeout: 30000 })
   await control('revoke-access')
-  await pastLink.click()
-  const refusedDownload = page.locator('[data-testid="workbook-past-run-refused"]')
-  await refusedDownload.waitFor({ timeout: 60000 })
-  assert.equal((await refusedDownload.textContent()).trim().startsWith(REASON), true)
-  await page.screenshot({ path: path.join(artifacts, 'lc03h-export-refused.png') })
-  await closeChooser(page)
-  await page.getByRole('button', { name: 'Guided', exact: true }).click()
   // The next read of the past run (another tab of it) is refused, in the server's words.
   await page.locator('[data-assurance-tab="summary"], button:has-text("Summary")').first().click()
   const refusal = page.getByRole('status').filter({ hasText: REASON })
@@ -329,6 +314,19 @@ try {
   await refusal.first().waitFor({ timeout: 60000 })
   assert(await page.getByTestId('discussed-run-chrome').getByRole('button', { name: 'Clear' }).isVisible())
   await page.screenshot({ path: path.join(artifacts, 'lc03h-refused-expert.png') })
+  // The chooser's download of the past run is refused inline, in the same words
+  // (its listing fails too, but the past run's link stays).
+  await page.getByTestId('sidebar-project-menu').click()
+  await page.getByRole('button', { name: 'Export…', exact: true }).first().click()
+  await page.getByText('Results workbook (Excel)', { exact: true }).click()
+  const pastLink = page.locator(`[data-testid="workbook-past-run-download"][data-run-id="${runs[0]}"]`)
+  await pastLink.waitFor({ timeout: 90000 })
+  await pastLink.click()
+  const refusedDownload = page.locator('[data-testid="workbook-past-run-refused"]')
+  await refusedDownload.waitFor({ timeout: 60000 })
+  assert.equal((await refusedDownload.textContent()).trim().startsWith(REASON), true)
+  await page.screenshot({ path: path.join(artifacts, 'lc03h-export-refused.png') })
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
   // The assistant gets the same reason from its own tools.
   await send(page, PAST)
   const refusedAnswer = await answer(page, 'LC03H_REFUSED')

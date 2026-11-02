@@ -114,6 +114,19 @@ describe('WorkbookRunNote', () => {
     expect(screen.queryByText(/run_project_required/)).toBeNull()
   })
 
+  it('keeps the past run\'s link when the listing failed (access lost), so a refusal says why', async () => {
+    useUIStore.setState({ discussedRun: { runId: PAST, section: 'results_capacity' } })
+    wrap(<WorkbookRunNote run={null} />)
+    const note = await screen.findByTestId('workbook-past-run')
+    await waitFor(() => expect(note.textContent).toBe(`Results shows the run of ${runWhen(PAST_AT)}.`))
+    expect(screen.getByTestId('workbook-past-run-download')).toBeTruthy()
+  })
+
+  it('shows nothing without a listing or a past run', () => {
+    wrap(<WorkbookRunNote run={null} />)
+    expect(screen.queryByTestId('workbook-run')).toBeNull()
+  })
+
   it('says nothing about a past run when Results shows the latest', () => {
     useUIStore.setState({ discussedRun: { runId: LATEST } })
     wrap(<WorkbookRunNote run={run} />)

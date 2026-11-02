@@ -41,10 +41,12 @@ export function WorkbookRunNote({ run }: { run: ResultsWorkbookRun | null | unde
   const pastStartedAt = useRunStartedAt(discussed?.runId)
   const [refused, setRefused] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  if (!run) return null
-  const past = discussed && discussed.runId !== run.run_id ? discussed : null
-  const [pastWhen, latestWhen] = runWhenPair(pastStartedAt, run.started_at)
-  const latest = latestWhen ? `from ${latestWhen}` : runShort(run.run_id)
+  // Without the listing (it failed, as after access loss) the past run's link
+  // stays, so a refused download says why in place.
+  const past = discussed && discussed.runId !== run?.run_id ? discussed : null
+  if (!run && !past) return null
+  const [pastWhen, latestWhen] = runWhenPair(pastStartedAt, run?.started_at)
+  const latest = run ? (latestWhen ? `from ${latestWhen}` : runShort(run.run_id)) : null
   const pastName = pastWhen ? `the run of ${pastWhen}` : past ? `past ${runShort(past.runId)}` : ''
   const download = async () => {
     if (!past) return
@@ -60,12 +62,12 @@ export function WorkbookRunNote({ run }: { run: ResultsWorkbookRun | null | unde
     } finally { setBusy(false) }
   }
   return (
-    <div className="mb-1.5" data-testid="workbook-run" data-run-id={run.run_id}>
+    <div className="mb-1.5" data-testid="workbook-run" data-run-id={run?.run_id ?? ''}>
       {past ? (
         <>
           <p className="text-text" data-testid="workbook-past-run" data-run-id={past.runId}>
-            <span title={`Run ${past.runId}`}>Results shows {pastName}</span>: this workbook holds the latest
-            run, <span title={`Run ${run.run_id}`}>{latest}</span>.
+            <span title={`Run ${past.runId}`}>Results shows {pastName}</span>{run ? <>: this workbook holds the latest
+            run, <span title={`Run ${run.run_id}`}>{latest}</span>.</> : '.'}
           </p>
           <button type="button" data-testid="workbook-past-run-download" disabled={busy}
             data-run-id={past.runId} data-section={past.section ?? ''}
@@ -75,7 +77,7 @@ export function WorkbookRunNote({ run }: { run: ResultsWorkbookRun | null | unde
           </button>
           {refused && <p role="status" className="mt-1 text-warn" data-testid="workbook-past-run-refused">{refused}</p>}
         </>
-      ) : (
+      ) : run && (
         <p className="text-muted">Holds the latest run, <span title={`Run ${run.run_id}`}>{latest}</span>.</p>
       )}
     </div>
@@ -104,7 +106,12 @@ export function ResultsWorkbookPicker({ value, onChange }: {
   const { data, isLoading, isError } = useWorkbookViews()
   const { data: run } = useWorkbookRun()
   if (isLoading) return <p className="mt-2 ml-7 text-[10px] text-muted">Loading result tabs…</p>
-  if (isError || !data) return <p className="mt-2 ml-7 text-[10px] text-muted">The result tabs could not be listed. Download still works with your cards' tabs.</p>
+  if (isError || !data) return (
+    <div className="mt-2 ml-7 text-[10px]">
+      <WorkbookRunNote run={null} />
+      <p className="text-muted">The result tabs could not be listed. Download still works with your cards' tabs.</p>
+    </div>
+  )
 
   const cards = data.reduce<Map<string, { label: string; views: ResultsWorkbookView[] }>>((m, v) => {
     const g = m.get(v.card) ?? { label: cardLabel(v), views: [] }
