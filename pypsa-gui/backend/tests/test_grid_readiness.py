@@ -254,7 +254,7 @@ def test_the_ramp_row_at_its_limit(tmp_path, dp_dt, verdict):
 @pytest.mark.parametrize("swing, verdict, value", [
     (7.5 / math.sqrt(1.01), "pass", 7.5 / math.sqrt(1.01) * 0.339550 / 2.5),   # bound exactly 3 %: d = 1.0136 %
     (7.47, "warn", 7.47 * 1.004988 / 2.5),                                    # bound 3.0029 % decides
-    (22.088, "warn", 22.088 * 1.004988 / 2.5),                                # d = 2.99998 % passes alone: bound 8.8799 %
+    (22.088, "warn", 22.088 * 1.004988 / 2.5),                                # d = 2.99999 % passes alone: bound 8.8793 %
     (22.09, "warn", 22.09 * 0.339550 / 2.5),                                  # d = 3.0003 % over on its own
 ])
 def test_the_voltage_change_row_at_the_profiles_limit(tmp_path, swing, verdict, value):
