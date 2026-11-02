@@ -249,6 +249,10 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
         "compare_loading", "compare_prices", "compare_emissions",
         "compare_curtailment", "compare_lost_load", "compare_storage_cycling",
     }),
+    # AS-10: the intent comparison job routes report sizing-loop results, not CAPEX/fixed-cost economics.
+    ("routers/compare.py", "post_intent_comparison"):         frozenset(),
+    ("routers/compare.py", "get_intent_comparison"):          frozenset(),
+    ("routers/compare.py", "post_intent_comparison_abort"):   frozenset(),
     # ── routers/asset_results.py ────────────────────────────────────────
     ("routers/asset_results.py", "list_assets"):                frozenset(),
     ("routers/asset_results.py", "export_asset_results_xlsx"):   frozenset({"asset_results_xlsx"}),

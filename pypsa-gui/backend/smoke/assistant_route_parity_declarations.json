@@ -696,6 +696,7 @@
    "method": "POST",
    "url": "/api/projects/from_template/{}",
    "shadows": [
+    "/api/projects/{name}/intent-comparison",
     "/api/projects/{name}/reports",
     "/api/projects/{name}/studies/"
    ],

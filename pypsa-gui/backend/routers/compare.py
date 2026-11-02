@@ -20,10 +20,13 @@ had them at module level) but are added here defensively.
 """
 from __future__ import annotations
 
+import copy
 import pathlib
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from models.design_intent import DesignIntentSpec
 from services import period_utils
 from models.schemas import (
     CompareState,
@@ -471,3 +474,123 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
 
 def _compute_lost_load_summary(project_dir: pathlib.Path, n, periods, is_multi, has_solve):
     return compute_lost_load_summary(_read_lost_load_capture(project_dir), n, periods, is_multi, has_solve)
+
+
+# ── AS-10: preference comparison (one sizing loop per design intent) ─────────
+
+
+class IntentComparisonRequest(BaseModel):
+    """`intents`: two to five different design intents; `inputs`: the `SizingInputs` fields."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    intents: list[DesignIntentSpec] = Field(min_length=2, max_length=5)
+    critical_mw: float = Field(gt=0, allow_inf_nan=False)
+    inputs: dict
+    profile: dict = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _distinct(self):
+        names = [s.intent for s in self.intents]
+        if len(set(names)) != len(names):
+            raise ValueError("choose different design intents: an intent appears twice")
+        return self
+
+
+def _intent_scenario(network, config, inputs: dict, critical_mw: float):
+    """A `prepare(spec)` for `compare_intents`: the intent's backup reserve goes into a copy of the config; the
+    network and config the caller holds are not changed."""
+    from services.adequacy.sizing_loop_runner import SizingInputs
+    from services.solver.envelope_floors import backup_mwh
+
+    def prepare(spec):
+        cfg = copy.deepcopy(config)
+        cfg.envelope_floors = {**(cfg.envelope_floors or {}), "backup_mwh": backup_mwh(spec, critical_mw)}
+        return network, cfg, SizingInputs(**inputs)
+
+    return prepare
+
+
+def _project_solver_config(directory: pathlib.Path):
+    """The project's own solver config, built by the loader every solve path uses (`_solver_config_from_dict`:
+    pack-only import caps stripped, legacy modes coerced, invalid goals dropped). A project that never saved
+    one gets the defaults; a saved one that cannot be read or built is a 422, never a silent default."""
+    from routers.projects import _solver_config_from_dict
+    from services.reliability_goal import stored_config
+
+    raw = stored_config(directory)
+    if raw is None:
+        if (directory / "solver_config.json").exists():
+            raise HTTPException(422, "The project's saved solver settings cannot be read: fix or re-save them.")
+        return SolverConfig()
+    try:
+        return _solver_config_from_dict(raw)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(422, f"The project's saved solver settings cannot be used: {exc}")
+
+
+def _load_project_network(directory: pathlib.Path):
+    """The named project's own saved network, never the active one."""
+    import pypsa as _pypsa
+
+    nc_path = directory / "network.nc"
+    if not nc_path.exists():
+        raise HTTPException(404, "The project has no saved network: save it first.")
+    n = _pypsa.Network()
+    with PyPSAService.get_netcdf_io_lock():
+        n.import_from_netcdf(str(nc_path))
+    return n
+
+
+@router.post("/{name}/intent-comparison", status_code=202)
+def post_intent_comparison(
+    body: IntentComparisonRequest,
+    project: AuthorizedProject = ProjectAccessDep,
+) -> dict:
+    """Start the comparison as a background job on the project's own saved network (AS-10)."""
+    from services.adequacy.sizing_loop_runner import SizingInputs, SizingLoopRefusal, _check_inputs, refusals, run_sizing
+    from services.compare import intent_jobs
+    from services.compare.intent_table import compare_intents
+    from services.design_intent import grid_code_warnings
+
+    network = _load_project_network(project.directory)
+    config = _project_solver_config(project.directory)
+    # Refuse a bad request here, as 422, rather than as failed rows later.
+    try:
+        _check_inputs(network, SizingInputs(**body.inputs))
+        if refusals(config):
+            raise SizingLoopRefusal("; ".join(refusals(config)))
+        for spec in body.intents:
+            grid_code_warnings(spec, body.profile)
+    except (SizingLoopRefusal, TypeError, ValueError, KeyError, AttributeError) as exc:
+        raise HTTPException(422, f"The comparison cannot run: {exc}")
+    prepare = _intent_scenario(network, config, body.inputs, body.critical_mw)
+
+    def work(stop, on_progress):
+        return compare_intents(prepare, body.intents, critical_mw=body.critical_mw, profile=body.profile,
+                               runner=run_sizing, stop_event=stop, on_progress=on_progress)
+
+    try:
+        return intent_jobs.start(project.uuid, body.intents, work)
+    except intent_jobs.JobBusy as exc:
+        raise HTTPException(409, str(exc))
+
+
+@router.get("/{name}/intent-comparison")
+def get_intent_comparison(project: AuthorizedProject = ProjectAccessDep) -> dict:
+    from services.compare import intent_jobs
+
+    rec = intent_jobs.get(project.uuid)
+    if rec is None:
+        raise HTTPException(404, "No intent comparison has been run for this project.")
+    return rec
+
+
+@router.post("/{name}/intent-comparison/abort")
+def post_intent_comparison_abort(project: AuthorizedProject = ProjectAccessDep) -> dict:
+    from services.compare import intent_jobs
+
+    out = intent_jobs.abort(project.uuid)
+    if out is None:
+        raise HTTPException(404, "No intent comparison has been run for this project.")
+    return out

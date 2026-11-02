@@ -186,6 +186,11 @@ _R_READ_ONLY_PREVIEW = (
     "`ProjectAccessDep`, builds a throwaway site network (never the live one) "
     "and prices its baseline bill."
 )
+_R_INTENT_COMPARISON = (
+    "starts a background comparison that READS the path project's saved network behind `ProjectAccessDep`, "
+    "solves on private copies and keeps its rows in memory per project; it writes no network input, result "
+    "or config of the project."
+)
 _R_NO_PROJECT = (
     "transcribes the caller's audio and returns the text; it resolves no "
     "project and stores nothing."
@@ -265,6 +270,8 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("PUT", "/api/local-settings/anthropic-key"): (NOT_PROJECT_DATA, _R_LOCAL),
     ("POST", "/api/local-settings/reveal-log"): (NOT_PROJECT_DATA, _R_LOCAL),
     ("POST", "/api/dictation/transcribe"): (NOT_PROJECT_DATA, _R_NO_PROJECT),
+    ("POST", "/api/projects/{name}/intent-comparison"): (NOT_PROJECT_DATA, _R_INTENT_COMPARISON),
+    ("POST", "/api/projects/{name}/intent-comparison/abort"): (STOPS_WORK, _R_STOP),
     ("POST", "/api/projects/{name}/studies/preview"): (NOT_PROJECT_DATA, _R_READ_ONLY_PREVIEW),
     ("POST", "/api/profiles/estimate"): (NOT_PROJECT_DATA,
         "a POST only to carry a body: it generates a SYNTHETIC preview series "
