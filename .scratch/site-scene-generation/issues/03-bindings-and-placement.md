@@ -39,3 +39,21 @@ Deliver this slice's in-place explanation, typed proposed action or truthful UI 
 ## Optional coordinate-first workflow clarification
 
 Map existing native2D/SLD targets only, with per-target prerequisites and in-place parameterization/return. Resolve PoC from native Bus.eh_poc and existing role/config import/export Links (no new PoC class); preserve multiple/ambiguous PoCs and separate Transformer terminal references and typed multi-carrier connection projections; distinguish known logical edge, known physical route and available flow. Unknown routes stay explicitly schematic, buried layers hidden until requested, and no geometry supplies missing electrical/pipe parameters. Cover V80–V86 and applicable process fixtures. Read [optional-site-workflow.md](../optional-site-workflow.md) and [workflow-assessment.md](../workflow-assessment.md).
+
+## Comments
+
+### SC-02d plan verdicts (2026-11-02)
+
+Plan: detach (`detach`, `undo_detach` proposal actions) and group editing (several items in one `place_existing`), by session_01G7qCujZwKU3hhLgFqHRzVf. Record: [../sc-02d/record.md](../sc-02d/record.md).
+
+**GK B (16) GO**, keeping the sites.json binding on detach. Conditions:
+
+1. `undo_detach` is a delta on the current head, never a revert to the detach's parent generation: edits made after the detach to other keys, groups and associations survive the undo.
+2. At Apply, undo re-derives what it restores from the chain and refuses (no write) if that differs from the preview. Undoing twice gives `already_placed`; re-applying the same detach id returns its committed receipt.
+3. The proposal input is checked against the id format and looked up only in this site's own chain. A detach id from another site or project, a missing one and a proposal that is not a detach all give the same `not_found` text.
+4. A new route `error_kind` goes in a `pypsa-gui/tool-error-kinds.d/<branch>.json` fragment.
+5. A binding with no placement and an empty group become reachable: every reader handles them (no 500, no "unbound" finding for a detached-but-bound item).
+6. Detach reuses `place_existing`'s key cap and validation; existing actions' previews and receipts are unchanged.
+7. Mutants, each killed by a named test: drop the `already_placed` check; undo restores the parent generation wholesale; detach drops the binding.
+
+**UX (6) GO** with conditions: display names everywhere (never `Class:name`) and each refusal as a plain sentence naming the item; move fields reuse the single-item axis words and units; "Edit N items" heading, with one item back to the absolute fields and no values carried between modes; Esc clears the selection only when the canvas or list has focus; the detach preview lists what goes by name and says when a group is left empty (kept); the receipt carries an Undo button, the undo card is titled "Undo detach: restore N items", and Undo stays visible but disabled with its reason when the detach can no longer be undone; one selection outline, distinct from hover and gizmo, in light and dark; screenshots in Guided and Expert, light and dark.
