@@ -42,6 +42,16 @@ describe('placementFindings', () => {
     expect(findingColor('outsideBoundary')).toBe('red')
   })
 
+  it('messages show an item name as stored, never capitalised', () => {
+    const base = objectsOf({ ...campus, generators: [...campus.generators, gen({ name: 'roof_pv', carrier: 'solar', p_nom: 2 })] })
+    const bess = obj(base, 'BESS')
+    const objects = base.map(o => o.name === 'roof_pv' ? { ...o, origin: bess.origin, heading: 0 } : o)
+    const f = placementFindings(objects, DEFAULT_LIBRARY, { outside: ['Generator:roof_pv'] })
+    const msgs = f.filter(x => x.key === 'Generator:roof_pv').map(x => x.message)
+    expect(msgs.length).toBeGreaterThan(1)
+    for (const m of msgs) { expect(m.startsWith('roof_pv ')).toBe(true); expect(m).not.toContain('Roof_pv') }
+  })
+
   it('overlap: two objects on the same spot, reported once for the pair, naming both', () => {
     const base = objectsOf(campus)
     const bess = obj(base, 'BESS')

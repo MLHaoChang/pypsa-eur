@@ -76,6 +76,24 @@ describe('fix link return to origin', () => {
     expect(useUIStore.getState().fieldDrawer).toBeNull()
   })
 
+  it('a jump that switches the mode records the mode it left; Back switches back', () => {
+    reset({ uiMode: 'guided', activeSlidePanel: 'hubDesign', activeSection: 'connection' })
+    render(<FlowReturnButton />)
+    act(() => openFlowTarget(prop))
+    expect(useUIStore.getState().uiMode).toBe('expert')
+    expect(useUIStore.getState().flowReturn?.mode).toBe('guided')
+    fireEvent.click(screen.getByTestId('flow-return'))
+    expect(useUIStore.getState().uiMode).toBe('guided')
+    expect(useUIStore.getState().activeSlidePanel).toBe('hubDesign')
+    expect(useUIStore.getState().activeSection).toBe('connection')
+    // And the other way round.
+    reset({ uiMode: 'expert', activeSlidePanel: 'issues', activeSection: 'readiness' })
+    act(() => openFlowTarget(prop))
+    expect(useUIStore.getState().flowReturn?.mode).toBe('expert')
+    fireEvent.click(screen.getByTestId('flow-return'))
+    expect(useUIStore.getState().uiMode).toBe('expert')
+  })
+
   it('other navigation clears the return; opening the view already shown adds none', () => {
     reset({ uiMode: 'expert', activeSlidePanel: 'issues', activeSection: 'readiness' })
     act(() => openFlowTarget(issues))

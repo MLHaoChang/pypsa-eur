@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Site 3D follow-ups. The Issues panel lists the native building and roof findings with the layout ones; layout messages show an item name as stored (`roof_pv`, not `Roof_pv`); a Load's capacity shows its own rate unit (MW, t/h) instead of its bus's energy unit; returning to Guided on the Site 3D canvas no longer reopens Hub design.

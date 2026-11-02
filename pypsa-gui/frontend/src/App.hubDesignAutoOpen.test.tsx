@@ -100,6 +100,7 @@ beforeEach(() => {
   chatPanelMounts.current = 0
   useUIStore.setState({
     activeSlidePanel: null,
+    canvasView: 'blank',
     assistantDockOpen: false,
     compareRailOpen: false,
     currentProject: 'Demo',
@@ -181,6 +182,16 @@ describe('auto-open in Guided', () => {
     expect(useUIStore.getState().activeSlidePanel).toBeNull()
     act(() => { useUIStore.getState().setUiMode('guided', { explicit: true }) })
     expect(useUIStore.getState().activeSlidePanel).toBe('hubDesign')
+  })
+
+  it('returning to Guided on the Site 3D canvas does not open it (and Back to Site 3D keeps the canvas)', () => {
+    useUIStore.setState({ uiMode: 'expert', canvasView: 'site', activeSlidePanel: null })
+    renderApp()
+    act(() => { useUIStore.getState().setUiMode('guided', { explicit: true }) })
+    expect(useUIStore.getState().activeSlidePanel).toBeNull()
+    // Leaving Site 3D later does not count as "nothing is open yet" either.
+    act(() => { useUIStore.setState({ canvasView: 'blank' }) })
+    expect(useUIStore.getState().activeSlidePanel).toBeNull()
   })
 })
 

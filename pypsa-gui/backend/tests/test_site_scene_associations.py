@@ -641,3 +641,19 @@ def test_the_network_is_resolved_while_its_lock_is_held(client, scene, monkeypat
     else:
         _apply(client, p)
     assert held and all(held), held
+
+
+# ── SC-02c: a quantity's unit is its own, not the bus's energy unit ──
+
+def test_a_load_shows_its_own_rate_unit_not_the_bus_unit():
+    from services.site_scene import associations as sa
+
+    n = _network()
+    n.buses.loc["nh3", "unit"] = "MWh"          # an energy bus: its Load's p_set is still a rate
+    n.add("Load", "nh3_offtake", bus="nh3", p_set=2.0)
+    n.buses.loc["h2", "unit"] = "t"
+    assert sa._unit(n, "Load", "nh3_offtake") == "MW"
+    assert sa._unit(n, "Load", "h2_offtake") == "t/h"
+    assert sa._unit(n, "Load", "it") == "MW"
+    assert sa._unit(n, "Store", "nh3_tank") == "MWh"      # a Store holds an amount
+    assert sa._capacity(n, "Load", "nh3_offtake")["unit"] == "MW"
