@@ -98,3 +98,15 @@ table) and `compare/capacity.py` already read Stores.
   only named; `compare/dispatch.py` (slice 1) does not apply `results_splits`' name/cross-bus rule; neither layout
   books `marginal_cost_storage` in economics; load_shape double-counts SoC on a StorageUnit/Store name collision
   (as on master).
+- GK A plan verdict (adequacy follow-ups PR): GO on 1–3 and 5(a), NO-GO on 4's derate rule.
+  1. `levers.LeverNotApplicable(LeverScenarioError)` at the three asset-absence sites (wording unchanged);
+     eh_study soft-skips by type, no substring check left (the only one was eh_study's); `<= 0` and the
+     infeasible-split error stay plain; handlers keyed on `LeverScenarioError` catch the subclass unchanged.
+  2. `split_storage.duration_problem` shared by `add_split_storage` and `storage_duration`; a missing/NaN
+     `c_rate_max` still skips the C-rate check (no behaviour change); add_split_storage's tests unchanged.
+  3. site_peak `committed_storage`: one `live` rule for both layouts; a StorageUnit's own `active` false is out
+     of service; a missing `active` column means active.
+  4. Closed by design (monotonic): every inflow-fed unit keeps charge side 1.0, so adding a pump never lowers
+     adequacy below the pure reservoir; pin test (p_min_pu -0.5 and 0, with inflow, count the pre-AS-11 P and E).
+  5. Declined: untagged PyPSA-Eur battery Stores stay named, not counted; carrier/bus-shape matching would
+     silently change results for every imported network. Migrate/tag to count them.

@@ -479,29 +479,25 @@ def test_an_inactive_storage_unit_is_not_in_service_as_an_inactive_split_storage
     n.storage_units.at["ups", "p_nom_extendable"] = True
     n.storage_units.at["ups", "active"] = False
     assert committed_storage(n, ["rt", "ups"]) == ([], [])
+    n.storage_units = n.storage_units.drop(columns="active")       # no column: active
+    assert committed_storage(n, ["rt", "ups"]) == (["rt"], ["ups"])
 
 
 @pytest.mark.parametrize("inflow", ["series", "static"])
-def test_pumped_hydro_with_inflow_keeps_its_charge_side_derate(inflow):
-    """AS-11 follow-up: a unit that pumps (p_min_pu < 0) takes the charge-side derate whether or not it also
-    has inflow; the inflow note and the dispatch side stay as they are."""
-    n = _adequacy_site(p_nom=20.0, max_hours=6.0, p_min_pu=-0.5)
+@pytest.mark.parametrize("p_min_pu", [-0.5, 0.0])
+def test_pumped_hydro_with_inflow_counts_as_the_pure_reservoir(inflow, p_min_pu):
+    """GK A on the AS-11 follow-ups, by design (monotonic): an inflow-fed unit keeps charge side 1.0, so a pump
+    (here derated to -0.5) never lowers its count below the same plant without one; both keep their pre-AS-11
+    P and E."""
+    n = _adequacy_site(p_nom=20.0, max_hours=6.0, p_min_pu=p_min_pu)
     if inflow == "series":
         n.storage_units_t.inflow = pd.DataFrame({"bess": 2.0}, index=n.snapshots)
     else:
         n.storage_units.at["bess", "inflow"] = 2.0
     inp = M.snapshot_inputs(n)
     (s,) = inp.storage
-    assert s.p_nom_mw == pytest.approx(10.0)
-    assert s.e_nom_mwh == pytest.approx(120.0)
+    assert (s.p_nom_mw, s.e_nom_mwh) == (20.0, 120.0)
     assert inp.storage_notes == ("bess: inflow-fed; counted at its dispatch power, inflow not modelled",)
-
-
-def test_a_reservoir_whose_pump_series_never_goes_below_zero_keeps_its_dispatch_power():
-    n = _adequacy_site(p_nom=20.0, max_hours=6.0, p_min_pu=0.0)
-    n.storage_units_t.inflow = pd.DataFrame({"bess": 2.0}, index=n.snapshots)
-    n.storage_units_t.p_min_pu = pd.DataFrame({"bess": 0.0}, index=n.snapshots)
-    assert M.snapshot_inputs(n).storage[0].p_nom_mw == 20.0
 
 
 @pytest.mark.parametrize("kind", ["storage_duration", "import_cap", "import_energy"])
@@ -531,4 +527,7 @@ def test_storage_duration_refuses_a_c_rate_limit_with_the_add_split_storage_rule
     with pytest.raises(LeverScenarioError, match=r"bess: c_rate_max 0\.25/h needs E/P >= 4 h"):
         apply_lever_scenario(split, "storage_duration", value=3.0)
     undo, _ = apply_lever_scenario(split, "storage_duration", value=4.0)
+    undo()
+    split.stores.at["bess", "c_rate_max"] = np.nan             # no limit tagged: the check is skipped, as before
+    undo, _ = apply_lever_scenario(split, "storage_duration", value=3.0)
     undo()
