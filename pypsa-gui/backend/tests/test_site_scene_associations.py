@@ -645,15 +645,18 @@ def test_the_network_is_resolved_while_its_lock_is_held(client, scene, monkeypat
 
 # ── SC-02c: a quantity's unit is its own, not the bus's energy unit ──
 
-def test_a_load_shows_its_own_rate_unit_not_the_bus_unit():
+@pytest.mark.parametrize("bus_unit, rate, amount", [
+    ("MW", "MW", "MWh"), ("MWh", "MW", "MWh"), ("MWh_el", "MW_el", "MWh_el"), ("MWh_LHV", "MW_LHV", "MWh_LHV"),
+    ("MWh_th", "MW_th", "MWh_th"), ("t", "t/h", "t"), ("t_co2", "t_co2/h", "t_co2"), ("t/h", "t/h", "t"),
+])
+def test_a_quantity_shows_its_own_unit_not_the_bus_unit(bus_unit, rate, amount):
     from services.site_scene import associations as sa
 
     n = _network()
-    n.buses.loc["nh3", "unit"] = "MWh"          # an energy bus: its Load's p_set is still a rate
+    n.buses.loc["nh3", "unit"] = bus_unit
     n.add("Load", "nh3_offtake", bus="nh3", p_set=2.0)
-    n.buses.loc["h2", "unit"] = "t"
-    assert sa._unit(n, "Load", "nh3_offtake") == "MW"
-    assert sa._unit(n, "Load", "h2_offtake") == "t/h"
-    assert sa._unit(n, "Load", "it") == "MW"
-    assert sa._unit(n, "Store", "nh3_tank") == "MWh"      # a Store holds an amount
-    assert sa._capacity(n, "Load", "nh3_offtake")["unit"] == "MW"
+    n.add("Generator", "nh3_src", bus="nh3", p_nom=1.0)
+    assert sa._unit(n, "Load", "nh3_offtake") == rate
+    assert sa._unit(n, "Generator", "nh3_src") == rate
+    assert sa._unit(n, "Store", "nh3_tank") == amount
+    assert sa._capacity(n, "Load", "nh3_offtake")["unit"] == rate

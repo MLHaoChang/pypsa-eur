@@ -178,7 +178,12 @@ def test_a_get_never_writes(client, placed, monkeypatch):
     from services import component_identity as ci
     from services import dirty_state
 
+    from services.site_scene import store
+
     name, project = placed                 # bound, so the read resolves a uid to a name
+    digest = store.legacy_site_digest(ss.read_sites(project), "campus")
+    assert client.post(f"/api/projects/{name}/sites/campus/scene/adopt",
+                       json={"expected_digest": digest}).status_code == 200      # a scene to read
     dirty_state.clear()
     before = (project / ss.SITES_FILE).read_bytes()
 
@@ -188,7 +193,7 @@ def test_a_get_never_writes(client, placed, monkeypatch):
     monkeypatch.setattr(ci, "uid_for", no_mint)
     monkeypatch.setattr(ci, "_root", no_mint)
     assert _sites(client, name)["sites"]
-    assert client.get(f"/api/projects/{name}/sites/campus/scene").status_code in (200, 404)
+    assert client.get(f"/api/projects/{name}/sites/campus/scene").status_code == 200
     assert (project / ss.SITES_FILE).read_bytes() == before
     assert not dirty_state.is_dirty()
 
