@@ -80,7 +80,7 @@ describe('IntentComparisonSection', () => {
       { name: 'harmonics', state: 'not_run' as const, value: null, limit: null, note: '' },
       { name: 'grid_readiness', state: 'not_run' as const, value: null, limit: null, note: '' }]
     await runWith(user, [row('B', { checks }), row('C')], ['B', 'C'])
-    expect(screen.getByTestId('intent-notrun-B').textContent).toBe('2 checks not run')
+    expect(screen.getByTestId('intent-notrun-B').textContent).toBe(' · 2 checks not run')
     expect(screen.getByTestId('intent-row-B').textContent).toContain('Not run')
     expect(screen.queryByTestId('intent-notrun-C')).toBeNull()
   })

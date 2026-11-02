@@ -166,9 +166,9 @@ function ResultTable({ rows }: { rows: IntentRow[] }) {
                   <td className="py-1 pr-2">
                     <Tag tone={w.tone}>{w.text}</Tag>
                     {r.outcome === 'pass' && skipped > 0 && (
-                      <div className="text-muted" data-testid={`intent-notrun-${r.intent}`}>
-                        {skipped} {skipped === 1 ? 'check' : 'checks'} not run
-                      </div>)}
+                      <span className="text-muted" data-testid={`intent-notrun-${r.intent}`}>
+                        {' · '}{skipped} {skipped === 1 ? 'check' : 'checks'} not run
+                      </span>)}
                     {!isFinal(r) && <div className="text-muted">not final</div>}
                     {r.verdict && !isFinal(r) && <div className="text-muted">{r.verdict}</div>}
                     {r.backup_autonomy_h != null && (
