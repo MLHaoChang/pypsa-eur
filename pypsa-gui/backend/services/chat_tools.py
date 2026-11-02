@@ -6119,8 +6119,6 @@ def export_run_evidence(
     Export immutable evidence for a named run, or the session's discussed run
     when ``run_id`` is omitted. Never substitutes another/newer run.
     """
-    import json as _json
-
     from services import run_evidence as re_
 
     resolved = run_id
@@ -6137,12 +6135,8 @@ def export_run_evidence(
             })
         resolved = str(refs["run_id"])
 
-    evidence = re_.get_run_evidence(resolved, section=section)
-    filename = (
-        f"run_{resolved}_{section}.json" if section else f"run_{resolved}.json"
-    )
-    payload = _json.dumps(evidence, allow_nan=False, sort_keys=True, indent=2).encode("utf-8")
-    meta = _save_agent_export(payload, filename, "application/json")
+    payload, filename = re_.export_bytes(resolved, section)
+    meta = _save_agent_export(payload, filename, re_.EXPORT_MEDIA_TYPE)
     return {
         **meta,
         "run_id": resolved,
@@ -7479,15 +7473,20 @@ def export_asset_results(
 
 
 def export_results_workbook(views: list | None = None, all: bool = False,  # noqa: A002 — the route's own name
-                            stored: bool = False, filename: str | None = None) -> dict:
+                            stored: bool = False, filename: str | None = None,
+                            run_id: str | None = None) -> dict:
     """Write the run's results workbook (RW-TABS-1) to the project's uploads/.
 
     The route's own handler builds it, so the file is the one the Export
-    chooser downloads for the same views (`GET /api/results/workbook.xlsx`)."""
+    chooser downloads for the same views (`GET /api/results/workbook.xlsx`).
+    `run_id` names the run the user is looking at; the workbook holds only the
+    latest completed run, so another run is refused `results_workbook_past_run`
+    (export that run with `export_run_evidence`)."""
     from routers import results as R
 
     resp = _route(R.get_results_workbook, views=",".join(str(v) for v in (views or [])),
-                  all_views=bool(all), stored=bool(stored))
+                  all_views=bool(all), stored=bool(stored),
+                  run_id=None if run_id is None else str(run_id))
     if resp.status_code == 204:
         raise HTTPException(
             status_code=409,
@@ -7499,6 +7498,7 @@ def export_results_workbook(views: list | None = None, all: bool = False,  # noq
     meta = _save_agent_export(
         resp.body, fname, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     meta["bytes"] = meta["size"]
+    meta["run_id"] = resp.headers.get("X-Workbook-Run-Id")  # the run the workbook holds
     return meta
 
 

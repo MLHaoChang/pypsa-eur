@@ -43,6 +43,7 @@ export interface RunView {
   data: {
     run_id: string
     status: string
+    started_at?: string | null
     fingerprint?: string
     metrics: Record<string, { value: number | null; unit: string }>
     sections?: Array<{ name: string; available: boolean }>
@@ -58,6 +59,34 @@ export const resultsEvidenceApi = {
     '/results/loadflow-view', { params: { source, window_from: from, window_to: to } }).then(r => r.data),
   run: (runId: string, section?: string, baselineRunId?: string) => client.get<RunView>(
     '/results/run-view', { params: { run_id: runId, section, baseline_run_id: baselineRunId }, skipErrorToast: true }).then(r => r.data),
+  /** One past run's kept evidence as a file: the same bytes and name the
+   *  assistant's export_run_evidence writes (LC-03 past-run parity). */
+  runFile: (runId: string, section?: string) => client.get<Blob>(
+    '/results/run-evidence.json', { params: { run_id: runId, section }, responseType: 'blob', skipErrorToast: true })
+    .then(r => ({ blob: r.data, filename: fileNameOf(r.headers['content-disposition'])
+      ?? (section ? `run_${runId}_${section}.json` : `run_${runId}.json`) })),
+}
+
+function fileNameOf(disposition: unknown): string | null {
+  if (typeof disposition !== 'string') return null
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(disposition)
+  if (star) return decodeURIComponent(star[1])
+  return /filename="?([^";]+)"?/i.exec(disposition)?.[1] ?? null
+}
+
+/** Why a past run's file download was refused, in the server's words: a blob
+ *  response carries its JSON detail as a Blob. The LC03-ACCESS-1 sentence when
+ *  access is gone; a plain fallback for anything else. */
+export async function runFileRefusal(error: unknown): Promise<string> {
+  const data = (error as { response?: { data?: unknown } } | null)?.response?.data
+  if (data instanceof Blob) {
+    try {
+      const reason = projectUnavailableReason({ response: { data: JSON.parse(await data.text()) } })
+      if (reason) return reason
+    } catch { /* not JSON: the fallback below */ }
+  }
+  return projectUnavailableReason(error)
+    ?? "This run's kept results could not be downloaded. Current results were not substituted."
 }
 
 /** The server's own words when a run read refuses because the project is no

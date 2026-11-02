@@ -3,10 +3,9 @@
 Status: ready-for-agent
 Progress: Result-view registry #407, walk #410, retained load flow #416, common adapter + Summary,
 capacity, dispatch, prices and emissions families (#848, #861 and earlier) merged; LC-T08 ACL
-recheck and LC-T09/T10 browser cases (PR-I, below) open. Remaining, after the results
-workbook's RW-03 (LC03-SCOPE-1): UI/export parity for past runs; queue/study/report sections;
-undigestable prices; sections over 16 KB; the remaining LC-T09/T10 browser cases (PR-I list). LC-14
-reach fixes outsourced.
+recheck and LC-T09/T10 browser cases (PR-I) merged; UI/export parity for past runs (PR-J, below)
+open. Remaining: queue/study/report sections; undigestable prices; sections over 16 KB; the
+remaining LC-T09/T10 browser cases (PR-I list). LC-14 reach fixes outsourced.
 Type: task
 Baseline: master `c75ca5584b873418f10f1bca42f868255d445b7b`
 Dependencies: LC-01/02 and current native evidence stores
@@ -369,3 +368,52 @@ a newer turn and a project switch): the other five families' past-run views;
 filter, entity and time selection; an unrelated or legacy mount ACK; Guided vs
 Expert; run/generation change, pending ACK, highlight, speech and stale captions.
 
+### PR-J, past-run UI/export parity (2026-11-02)
+
+Branch `claude/lc03-past-run-parity`, from master `33e7ab8dc` (RW-03 merged, LC03-SCOPE-1 met).
+
+- The Results group header with a past run on screen reads "From the run of
+  <start>" (`data-freshness="past_run"`, the run id in its tooltip), never
+  "From the latest run"; the latest solve's failure line is hidden there.
+- Export parity: `run_evidence.export_bytes` is the one serialiser of a run's
+  kept evidence. `export_run_evidence` writes it, and the new
+  `GET /api/results/run-evidence.json` (same project check as the run view)
+  serves it, so the two files are byte-equal with the same name and type
+  (`tests/test_past_run_export_parity.py`; a route that re-serialises fails).
+- The one Export chooser (SAVE-1) names the run the workbook holds
+  (`/results/workbook/views` returns `run`). While a past run is on screen it
+  says so and offers that run's kept section as JSON in place. A refused
+  download shows the server's plain words inline.
+- The workbook (route and `export_results_workbook`) takes `run_id`: any run but
+  the latest completed one refuses `results_workbook_past_run` (409), a run
+  this project lacks `run_not_found`. Without `run_id` the workbook is unchanged.
+- Browser: `smoke-copilot-lc03-historical.mjs` asserts the header (Guided and
+  Expert), the chooser's note, the downloaded file's run, section and gas row
+  (LCOE 50, as the view shows), the latest-only note after Clear, and the
+  refused download after access loss.
+
+Kept, with reasons:
+- The workbook is built only from the latest run's live network, so a past run
+  exports as its kept evidence (JSON), not as a workbook.
+- The chooser's JSON link exports the section the assistant opened (the run
+  row's "Section"), not another tab the user moved to within the past run.
+- With access already gone when the chooser opens, its listing fails and the
+  note is not shown; only a download refused after opening shows the reason.
+
+## Comments
+
+- GK B (15) plan GO, conditions: (1) at the trial merge run
+  test_route_chat_disposition, test_project_route_acl_policy,
+  test_write_surface_lock_policy and the inventory, route-parity and control-matrix
+  `--check`s; the route's refusals (revoked member, a project the actor cannot
+  see, a missing run_id) are typed, never a 500, never an existence oracle.
+  (2) Route bytes == export_run_evidence bytes through one export_bytes; filename
+  and Content-Type match; a re-serialising mutant fails. (3) results_workbook_past_run
+  in its own tool-error-kinds.d fragment; test_tool_error_kind_manifest and
+  ChatPanel.manifest.test.tsx at the trial merge; route and chat tool each refuse a
+  past run_id, and a run_id naming no run here is typed, never the latest workbook.
+  (4) Without run_id the workbook is byte-equal to master's. (5) The browser journey
+  waits on claim-specific locators (data-freshness="past_run", the file's run_id and
+  section, the picker note), never on text already on screen (#998).
+- UX (6) plan GO with changes: no button in the Results chrome (SAVE-1, the one
+  Export chooser); run labels by start time, id in a tooltip; refusal inline.

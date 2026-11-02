@@ -51,6 +51,7 @@ import {
 import { sectionWords } from './results/sectionWords'
 import { CARD_GROUPS, cardPlaceOf, type CardGroupId, type ResultsTab } from './results/groups'
 import GroupHeader from './results/GroupHeader'
+import { useRunStartedAt } from './results/runWhen'
 import { ScopeGate } from '../components/flowScope/ScopeGate'
 import { useFlowScope } from '../components/flowScope/useFlowScope'
 import { inScope, type ScopeCardId } from '../api/flow'
@@ -216,6 +217,7 @@ export default function Results() {
   const clearResultsWindowRequest = useUIStore(s => s.clearResultsWindowRequest)
   const discussedRun = useUIStore(s => s.discussedRun)
   const clearDiscussedRun = useUIStore(s => s.clearDiscussedRun)
+  const discussedRunStartedAt = useRunStartedAt(discussedRun?.runId)
   const uiMode = useUIStore(s => s.uiMode)
   // Guided (spec §3.7): a STORED tab Guided does not show is displayed as
   // adequacy. Display only — `tab` and `results:active-tab` keep the user's
@@ -865,7 +867,8 @@ export default function Results() {
         </button>
       </div>
       {shownGroup && (
-        <GroupHeader group={shownGroup} status={status} outsideScope={outside} />
+        <GroupHeader group={shownGroup} status={status} outsideScope={outside}
+          pastRun={discussedRun ? { runId: discussedRun.runId, startedAt: discussedRunStartedAt } : null} />
       )}
       {shownGroup && groupTabs.length > 0 && !(shownGroup.id === 'summary') && (
         <div className="flex items-center shrink-0 border-b border-border bg-bg px-2 gap-0 overflow-x-auto"

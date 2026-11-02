@@ -6,6 +6,10 @@ export interface ResultsWorkbookView {
   available: boolean; reason: string | null
 }
 
+/** The run a results workbook holds: the latest completed run; null when none is recorded. */
+export interface ResultsWorkbookRun { run_id: string; started_at: string | null }
+export interface ResultsWorkbookListing { views: ResultsWorkbookView[]; run: ResultsWorkbookRun | null }
+
 export const ioApi = {
   exportNetcdf: () => client.get('/io/export/netcdf', { responseType: 'blob' }).then(r => r.data as Blob),
   exportCsv: () => client.get('/io/export/csv', { responseType: 'blob' }).then(r => r.data as Blob),
@@ -13,8 +17,8 @@ export const ioApi = {
   exportMatpower: () => client.get('/io/export/matpower', { responseType: 'blob' }).then(r => r.data as Blob),
 
   /** The result views a workbook can hold; `selected` = included by the project's cards. */
-  resultsWorkbookViews: () => client.get<{ views: ResultsWorkbookView[] }>('/results/workbook/views')
-    .then(r => r.data.views),
+  resultsWorkbookViews: () => client.get<ResultsWorkbookListing>('/results/workbook/views')
+    .then(r => ({ views: r.data.views, run: r.data.run ?? null })),
   /** The results workbook (RW-TABS-1): the cards' views plus `views`, or every view with `all`.
    *  Null before a solve (204). A refusal carries the backend's sentence in its Blob body. */
   exportResultsWorkbook: async (views: string[], all: boolean): Promise<Blob | null> => {
