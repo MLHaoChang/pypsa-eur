@@ -48,3 +48,4 @@ GK B PR 2 plan verdict (GO): not_run shown next to a converged row; non-converge
 
 - Backup autonomy (AS-AUTONOMY-1) is per run for now ("Per run now, store later"). Per-project storage is a separate backend PR afterwards, with GK B's conditions; it is not in #1017.
 - Screenshots: `evidence/10/`, eight states, Guided and Expert, light and dark, from `pypsa-gui/frontend/scripts/intent-comparison-shots.mjs` (route-mocked harness, invented numbers). The Guided-home-to-study-part path shot is not taken.
+- Chat disposition (not_via_chat row `intent_comparison`, held until the owner decides on a chat tool): `GET /api/projects/{name}/intent-comparison`, `POST /api/projects/{name}/intent-comparison`, `POST /api/projects/{name}/intent-comparison/abort`.

@@ -1,0 +1,22 @@
+{
+ "limitations": [
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/intent-comparison",
+   "reason": "held-by-spec",
+   "issue": ".scratch/asset-sizing-loop/issues/10-preference-comparison-ui.md"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/intent-comparison",
+   "reason": "held-by-spec",
+   "issue": ".scratch/asset-sizing-loop/issues/10-preference-comparison-ui.md"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/intent-comparison/abort",
+   "reason": "held-by-spec",
+   "issue": ".scratch/asset-sizing-loop/issues/10-preference-comparison-ui.md"
+  }
+ ]
+}

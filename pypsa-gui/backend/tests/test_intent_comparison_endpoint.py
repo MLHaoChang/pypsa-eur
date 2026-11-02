@@ -208,3 +208,38 @@ def test_jobs_are_keyed_by_project_uuid_so_a_recreated_project_sees_no_old_rows(
     time.sleep(0.2)
     assert intent_jobs.get("uuid-1")["rows"] == [{"intent": "A"}]
     assert intent_jobs.get("uuid-2") is None
+
+
+# --- the grid code resolved from the project's own store, with nothing stubbed (GK B) ---
+
+def _d_row(client, name, **kw):
+    intent_jobs.clear()
+    assert _post(client, name, [{"intent": "D"}, {"intent": "B"}], **kw).status_code == 202
+    return next(r for r in _wait(client, name)["rows"] if r["intent"] == "D")
+
+
+def test_a_profile_published_into_the_project_store_with_the_key_accepted_gives_d_no_warning(client, api_project, monkeypatch):
+    import yaml
+    name = api_project()
+    monkeypatch.setattr("services.adequacy.sizing_loop_runner.run_sizing", lambda *a, **k: _result())
+    base = f"/api/campus-electrical/{name}/grid-codes"
+    assert client.post(f"{base}/drafts", json={"profile_id": "own_code"}).status_code == 200
+    profile = yaml.safe_load(client.get(f"{base}/drafts/own_code").json()["yaml"])
+    profile["ride_through_transfer_counts"] = {"value": True, "clause": "generic engineering", "source": "assumed"}
+    assert client.put(f"{base}/drafts/own_code", json={"yaml": yaml.safe_dump(profile)}).status_code == 200
+    pub = client.post(f"{base}/drafts/own_code/publish", json={"allow_unconfirmed": True})
+    assert pub.status_code == 200, pub.text
+    assert _d_row(client, name, grid_code="own_code")["warnings"] == []
+
+
+def test_a_shipped_code_without_the_key_gives_d_the_no_ups_warning(client, api_project, monkeypatch):
+    name = api_project()
+    monkeypatch.setattr("services.adequacy.sizing_loop_runner.run_sizing", lambda *a, **k: _result())
+    warnings = _d_row(client, name, grid_code="eu_rfg_dcc_ce")["warnings"]
+    assert len(warnings) == 1 and "ride-through" in warnings[0]
+
+
+def test_a_raw_profile_in_the_body_is_422(client, api_project):
+    name = api_project()
+    r = _post(client, name, [{"intent": "D"}, {"intent": "B"}], profile={"ride_through_transfer_counts": {"value": True}})
+    assert r.status_code == 422

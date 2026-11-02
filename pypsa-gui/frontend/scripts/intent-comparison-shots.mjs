@@ -22,13 +22,13 @@ const PROJECT = 'Intent comparison shots'
 const chk = (name, state) => ({ name, state, value: null, limit: null, note: '' })
 const row = (intent, over = {}) => ({
   intent, status: 'converged', outcome: 'pass', verdict: '', cost_eur: 12400000 + intent.charCodeAt(0) * 91000,
-  assets: { 'store:bess': { value: 320, unit: 'MWh' }, 'link:bess_pcs': { value: 80, unit: 'MW' } },
+  assets: { 'store:bess': { value: 320, unit: 'MWh' }, 'charger:bess': { value: 80, unit: 'MW' }, q_ss: { value: 12, unit: 'Mvar' } },
   transformer_mva: 100, statcom_mvar: 20,
-  checks: [chk('escr', 'ok'), chk('voltage', 'ok'), chk('harmonics', 'not_run')],
+  checks: [chk('escr', 'ok'), chk('transformer', 'ok'), chk('harmonics', 'not_run')],
   basis_note: 'same LP; UC/MIP options not reproduced', warnings: [], backup_autonomy_h: null, backup_energy_mwh: null, ...over,
 })
 const job = (rows, over = {}) => ({ status: 'done', progress: Object.fromEntries(rows.map(r => [r.intent, 'done'])), rows, error: null, ...over })
-const D_WARN = 'This grid code may not count transfer to the BESS as ride-through; check it before relying on this row.'
+const D_WARN = 'This grid code may not count transfer to the BESS as ride-through: check it before relying on this row.'
 const FAILED = { status: 'failed', outcome: 'failed', verdict: 'Solver refused the model', cost_eur: null, assets: {}, transformer_mva: null, statcom_mvar: null, checks: [] }
 const STOPPED = { status: 'aborted', outcome: 'aborted', verdict: 'Stopped before this intent ran', cost_eur: null, assets: {}, transformer_mva: null, statcom_mvar: null, checks: [] }
 // `fill`: the form inputs are typed in (false = left empty, so the run is blocked and says why).
@@ -39,7 +39,7 @@ const STATES = {
   '4-d-grid-code-warning': { pick: [], fill: false, gridCode: 'eu_rfg_dcc_ce', job: job([row('D', { warnings: [D_WARN] }), row('B')]) },
   '5-running': { pick: [], fill: false, job: job([], { status: 'running', progress: { A: 'done', B: 'running', C: 'queued' } }) },
   '6-mixed-results': { pick: [], fill: false, job: job([row('B'), row('C', { status: 'not_converged', outcome: 'not_converged', verdict: 'Loop hit its round limit' }),
-    row('E', { ...FAILED }), row('D', { outcome: 'fail', checks: [chk('escr', 'fail'), chk('voltage', 'ok')] }), row('A', { backup_autonomy_h: 4, backup_energy_mwh: 320, checks: [chk('escr', 'ok'), chk('harmonics', 'not_run'), chk('grid_readiness', 'not_run')] })]) },
+    row('E', { ...FAILED }), row('D', { outcome: 'fail', checks: [chk('escr', 'fail'), chk('transformer', 'ok')] }), row('A', { backup_autonomy_h: 4, backup_energy_mwh: 320, checks: [chk('escr', 'ok'), chk('harmonics', 'not_run'), chk('grid_readiness', 'not_run')] })]) },
   '7-blocked-no-inputs': { pick: ['A', 'B'], fill: false, job: null },
   '8-stopped': { pick: [], fill: false, job: job([row('B'), { ...row('C'), ...STOPPED }], { status: 'aborted' }) },
 }

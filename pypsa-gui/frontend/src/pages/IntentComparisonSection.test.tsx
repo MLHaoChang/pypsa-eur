@@ -6,19 +6,19 @@ import { render, screen, cleanup, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { IntentJob, IntentRow } from '../api/intentComparison'
-import IntentComparisonSection from './IntentComparisonSection'
+import IntentComparisonSection, { assetLabel, checkLabel } from './IntentComparisonSection'
 
 const api = vi.hoisted(() => ({ start: vi.fn(), get: vi.fn(), abort: vi.fn() }))
 vi.mock('../api/intentComparison', async () => {
   const real = await vi.importActual<typeof import('../api/intentComparison')>('../api/intentComparison')
   return { ...real, intentComparisonApi: api }
 })
-const ui = vi.hoisted(() => ({ setSlidePanel: vi.fn() }))
+const ui = vi.hoisted(() => ({ setSlidePanel: vi.fn(), requestGridCodeScroll: vi.fn() }))
 vi.mock('../store/uiStore', () => ({ useUIStore: (sel: (s: typeof ui) => unknown) => sel(ui) }))
 vi.mock('../layout/flowNavigation', () => ({ withReturnFrom: (jump: () => void) => jump() }))
 
 const row = (intent: IntentRow['intent'], over: Partial<IntentRow> = {}): IntentRow => ({
-  intent, status: 'converged', outcome: 'pass', verdict: '', cost_eur: 1000, assets: { 'store:bess': { value: 320, unit: 'MWh' } },
+  intent, status: 'converged', outcome: 'pass', verdict: '', cost_eur: 1000, assets: { 'store:bess': { value: 320, unit: 'MWh' }, q_ss: { value: 12, unit: 'Mvar' } },
   transformer_mva: 100, statcom_mvar: 20, checks: [{ name: 'escr', state: 'ok', value: null, limit: null, note: '' }],
   basis_note: 'same LP; UC/MIP options not reproduced', warnings: [], backup_autonomy_h: null, backup_energy_mwh: null, ...over,
 })
@@ -110,6 +110,7 @@ describe('IntentComparisonSection', () => {
     expect(screen.getByTestId('intent-d-nocode').textContent).toContain('No grid code set')
     await user.click(screen.getByTestId('intent-set-grid-code'))
     expect(ui.setSlidePanel).toHaveBeenCalledWith('campusElectrical')
+    expect(ui.requestGridCodeScroll).toHaveBeenCalled()
     expect(screen.getByTestId('intent-warning-D').textContent).toContain('may not count transfer')
   })
 
@@ -143,5 +144,40 @@ describe('IntentComparisonSection', () => {
     await screen.findByTestId('intent-progress-B')
     expect(api.start).toHaveBeenCalledTimes(1)
     expect(screen.queryByTestId('intent-error')).toBeNull()
+  })
+
+  it('shows plain labels, never a raw key, and falls back to a readable form for an unmapped key', async () => {
+    const user = userEvent.setup()
+    await runWith(user, [row('B', { assets: { 'store:bess': { value: 1, unit: 'MWh' }, weird_key: { value: 2, unit: 'MW' } },
+      checks: [{ name: 'escr', state: 'ok', value: null, limit: null, note: '' }, { name: 'new_check', state: 'ok', value: null, limit: null, note: '' }] }), row('C')], ['B', 'C'])
+    const table = (await screen.findByTestId('intent-table')).textContent ?? ''
+    expect(table).toContain('Store bess: 1 MWh')
+    expect(table).toContain('Weird key: 2 MW')
+    expect(table).toContain('New check')
+    expect(table).not.toMatch(/store:|weird_key|new_check|escr:/)
+    expect(assetLabel('q_dyn')).toBe('STATCOM dynamic')
+    expect(checkLabel('grid_readiness')).toBe('Grid readiness')
+  })
+
+  it('sorts rows and the progress line A to E and shows the intent label', async () => {
+    api.get.mockResolvedValue(job([row('D', { warnings: ['w'] }), row('A'), row('B')], { progress: { D: 'done', B: 'done', A: 'done' } }))
+    renderIt()
+    await screen.findByTestId('intent-table')
+    const rowIds = screen.getAllByTestId(/^intent-row-/).map(e => e.getAttribute('data-testid'))
+    expect(rowIds).toEqual(['intent-row-A', 'intent-row-B', 'intent-row-D'])
+    expect(screen.getAllByTestId(/^intent-progress-/).map(e => e.textContent)).toEqual(['A: done', 'B: done', 'D: done'])
+    expect(screen.getByTestId('intent-row-D').textContent).toContain('No UPS (BESS-EPS in parallel)')
+    expect(screen.getByTestId('intent-row-D').textContent).toContain('Grid-code warning')
+  })
+
+  it('a row that did not converge never shows a Pass or an ok tone on its checks', async () => {
+    api.get.mockResolvedValue(job([row('B', { status: 'unresolved', outcome: 'unresolved',
+      checks: [{ name: 'escr', state: 'ok', value: null, limit: null, note: '' }, { name: 'pst', state: 'unresolved', value: null, limit: null, note: '' }] }), row('C')]))
+    renderIt()
+    const r = await screen.findByTestId('intent-row-B')
+    expect(r.textContent).not.toContain('Pass')
+    expect(r.textContent).toContain('OK in last round')
+    expect(r.innerHTML).not.toMatch(/success/)
+    expect(screen.getByTestId('intent-row-C').textContent).toContain('Pass')
   })
 })
