@@ -127,7 +127,7 @@ async function openWorkbookChoice(page) {
 }
 
 async function closeChooser(page, shot) {
-  await closeChooser(page, 'lc03h-after-refused-chooser.png')
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
   await page.getByTestId('workbook-run').waitFor({ state: 'detached', timeout: 30000 })
   if (shot) await page.screenshot({ path: path.join(artifacts, shot) })
 }
