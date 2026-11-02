@@ -98,3 +98,16 @@ table) and `compare/capacity.py` already read Stores.
   only named; `compare/dispatch.py` (slice 1) does not apply `results_splits`' name/cross-bus rule; neither layout
   books `marginal_cost_storage` in economics; load_shape double-counts SoC on a StorageUnit/Store name collision
   (as on master).
+- 2026-11-02, results/compare follow-ups (branch `claude/as11-results-followups`): `compare/dispatch.py` reads
+  `results_splits` via `split_signed_ac_p`; compare economics books `marginal_cost_storage` (StorageUnit SoC,
+  split Store `e`) in opex/gen_cost; load_shape tells a StorageUnit from a same-named Store (`_Storage.comp`).
+- GK A plan GO (item 2, compare economics), conditions: (a) the VOM's cost weights (period weighting included),
+  a 2-period case checked by hand (n.statistics.opex leaves the period weighting out); (b) migrate_storage_unit
+  refuses marginal_cost_storage by name, so the fixture sets it on the Store after migration and asserts equal
+  objectives; carrying it in the migration is a follow-up for split_storage.py's owner; (c) only StorageUnits and
+  results_splits Stores, untagged Stores unbooked; (d) mcs 0/absent byte-identical, non-finite skipped;
+  (e) mutants: unweighted, Store p for e, split booked twice; (f) release-note line.
+- GK B plan GO (items 1 and 3), conditions: item 1 signed p from `split_signed_ac_p`, collision and cross-bus stay
+  out, split == StorageUnit within REL, no-split byte-equal to master, mutant discharger p0 for -p1; item 3 the
+  double-count pin becomes the correct value (named in the PR body and release note), `_Storage` consumers listed,
+  no-collision byte-equal, mutant ignoring `comp`.

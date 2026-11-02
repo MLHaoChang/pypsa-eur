@@ -507,7 +507,8 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
         for level, mcs, name, carrier in rows:
             if name not in level.columns or name not in mcs.columns:
                 continue
-            cost_t = mcs[name].reindex(sns).fillna(0.0).astype(float)
+            cost_t = mcs[name].reindex(sns).astype(float)
+            cost_t = cost_t.where(cost_t.map(_math.isfinite), 0.0)     # a non-finite cost is skipped, like VOM
             if not (cost_t != 0).any():
                 continue
             held_t = level[name].reindex(sns).fillna(0.0).astype(float) * cost_t * weights

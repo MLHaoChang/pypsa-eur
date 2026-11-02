@@ -532,3 +532,56 @@ def test_compare_economics_books_a_time_varying_marginal_cost_storage():
         assert by_hand == pytest.approx(_holding_lp(n, comp), rel=REL) and by_hand > 0
         got = _econ(n)["battery"]["opex_meur"]["total"] - _econ(_zero_holding(n))["battery"]["opex_meur"]["total"]
         assert got == pytest.approx(by_hand / 1e6, rel=REL), comp
+
+
+def test_compare_dispatch_reads_a_split_storage_like_the_storage_unit(pair):
+    a, b = (_dispatch(n) for n in pair)
+    for carrier in ("battery", "flywheel"):
+        assert a.dispatch_gwh_by_carrier[carrier].total > 0 and a.storage_cycles_by_carrier[carrier].total > 0
+        assert b.dispatch_gwh_by_carrier[carrier].total == pytest.approx(
+            a.dispatch_gwh_by_carrier[carrier].total, rel=REL)
+        assert b.storage_cycles_by_carrier[carrier].total == pytest.approx(
+            a.storage_cycles_by_carrier[carrier].total, rel=REL)
+
+
+def test_compare_economics_books_marginal_cost_storage_on_two_periods_by_hand():
+    """Reconciled by hand, not with n.statistics.opex: the walk's cost weight carries the period weighting the LP's
+    objective applies (10 here), which the statistics term leaves out."""
+    for split in (False, True):
+        n = _two_period_site(split)
+        if split:
+            n.stores.loc["bess", "marginal_cost_storage"] = MCS
+        else:
+            n.storage_units.loc["bess", "marginal_cost_storage"] = MCS
+        _solve(n, multi_investment_periods=True)
+        soc = n.stores_t.e["bess"] if split else n.storage_units_t.state_of_charge["bess"]
+        pw = n.investment_period_weightings["objective"].reindex(n.snapshots.get_level_values(0)).to_numpy()
+        held = soc * MCS * n.snapshot_weightings.objective * pw
+        assert held.sum() > 0
+        got = _econ(n, PERIODS, True)["battery"]["opex_meur"]
+        without = _econ(_zero_holding(n), PERIODS, True)["battery"]["opex_meur"]
+        assert got["total"] - without["total"] == pytest.approx(held.sum() / 1e6, rel=REL)
+        for p in PERIODS:
+            want = float(held.loc[p].sum()) / 1e6
+            assert got["by_period"][str(p)] - without["by_period"][str(p)] == pytest.approx(want, rel=REL), p
+
+
+def test_compare_economics_skips_a_non_finite_marginal_cost_storage(holding_pair):
+    n = _copy(holding_pair[0])
+    mcs = pd.Series(MCS, n.snapshots)
+    mcs.iloc[5], mcs.iloc[9] = np.nan, np.inf
+    n.storage_units_t.marginal_cost_storage["bess"] = mcs
+    soc = n.storage_units_t.state_of_charge["bess"]
+    assert soc.iloc[[5, 9]].sum() > 0
+    want = (soc * mcs.where(np.isfinite(mcs), 0.0) * n.snapshot_weightings.objective).sum()
+    got = _econ(n)["battery"]["opex_meur"]["total"] - _econ(_zero_holding(n))["battery"]["opex_meur"]["total"]
+    assert got == pytest.approx(want / 1e6, rel=REL)
+
+
+def test_compare_economics_without_marginal_cost_storage_is_byte_identical(pair):
+    """mcs 0 (the default) books nothing: every bucket equals the walk with the attribute absent, to the bit."""
+    for n in pair:
+        m = _copy(n)
+        for c in ("storage_units", "stores"):
+            getattr(m, c).drop(columns="marginal_cost_storage", inplace=True)
+        assert _econ(n) == _econ(m)
