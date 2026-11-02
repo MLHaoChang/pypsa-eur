@@ -843,12 +843,25 @@ def _settings_from_meta(meta: dict) -> ProjectSettings:
     missing or malformed — the same tolerance `services/project_settings.py`
     applies on the read side the network routes use.
     """
+    from pydantic import ValidationError
+
     from services import project_settings
 
     table = meta.get(project_settings.SETTINGS_KEY)
     if not isinstance(table, dict):
         return ProjectSettings()
-    known = {k: v for k, v in table.items() if k in ProjectSettings.model_fields and isinstance(v, bool)}
+    # Each stored value passes the PATCH body's own validation, one field at a
+    # time, so a hand-edited bad value (a string flag, a non-finite or
+    # out-of-range autonomy) reads as that field's default without taking its
+    # siblings down with it.
+    known = {}
+    for key, value in table.items():
+        if key not in ProjectSettings.model_fields or value is None:
+            continue
+        try:
+            known[key] = getattr(UpdateProjectSettingsRequest.model_validate({key: value}), key)
+        except ValidationError:
+            continue
     return ProjectSettings(**known)
 
 
@@ -2371,6 +2384,26 @@ def _saves_its_own_directory(bound_dir, loaded: str | None, name: str,
     return loaded is not None and loaded == name
 
 
+def _carried_settings(existing_meta: dict, bound_dir, loaded: str | None, name: str,
+                      dest: pathlib.Path) -> dict:
+    """
+    The `settings` entry a save writes into ``dest``'s metadata.json.
+
+    A save of a directory's own network keeps that directory's table. A save
+    of another bound project's network (Save-As, Save-a-Copy, a forced Save-As
+    over a third project) takes the SOURCE's table, as its layout and sidecars
+    travel (`_carry_sidecars_on_move`): reading the destination's instead
+    dropped the choice on a copy to a new name and kept the overwritten
+    project's on a forced one. An unbound first save keeps whatever ``dest``
+    holds. Returns ``{}`` when there is no table to write.
+    """
+    source_meta = existing_meta
+    if bound_dir and not _saves_its_own_directory(bound_dir, loaded, name, dest):
+        source_meta = _read_meta(pathlib.Path(bound_dir))
+    table = source_meta.get("settings")
+    return {"settings": table} if isinstance(table, dict) else {}
+
+
 def _check_save_allowed(
     ctx,
     name: str,
@@ -2862,11 +2895,10 @@ def _save_context(
             **({k: existing_meta[k] for k in _STUDY_FORK_META_KEYS
                 if k in existing_meta}
                if _saves_its_own_directory(bound_dir, loaded, name, dest) else {}),
-            # Per-project settings (plan M2) round-trip from the existing file:
+            # Per-project settings (plan M2, AS-AUTONOMY-1) round-trip:
             # `PATCH /{name}/settings` is their only writer, and a save that
             # dropped the key would silently reset the user's choice.
-            **({"settings": existing_meta["settings"]}
-               if isinstance(existing_meta.get("settings"), dict) else {}),
+            **_carried_settings(existing_meta, bound_dir, loaded, name, dest),
         })
     ts_columns_saved = len(user_ts_data) if isinstance(user_ts_data, dict) else 0
     # Flat-count the leaves of the nested {comp: {attr: {col: ...}}} structure.
@@ -3882,7 +3914,8 @@ def update_project_settings(
     ENFORCED (acquired) as for the scenario labels.
 
     Errors: 404 no such project (or not yours); 409 locked by another user,
-    or never saved; 422 a non-boolean flag.
+    or never saved; 422 a non-boolean flag, a backup autonomy that is not a
+    finite number in (0, 720] h, or an unknown key.
     """
     from services import project_registry, project_settings
 
@@ -3896,22 +3929,28 @@ def update_project_settings(
     project_dir = project_registry.project_dir(project)
     if not project_dir.is_dir():
         raise HTTPException(409, f"Save '{project.name}' before changing its settings.")
-    meta = _read_meta(project_dir)
-    if not meta:
-        raise HTTPException(
-            409,
-            f"metadata.json for '{project.name}' is missing or unreadable; save the project and retry.",
-        )
-    table = meta.get(project_settings.SETTINGS_KEY)
-    if not isinstance(table, dict):
-        table = {}
-    for key, value in submitted.items():
-        if value is None:
-            table.pop(key, None)       # null = back to the default
-        else:
-            table[key] = value
-    meta[project_settings.SETTINGS_KEY] = table
-    _write_meta(project_dir, meta)
+    # The read-modify-write runs under the resident context's mutation lock,
+    # the one `_save_context` holds around its own metadata.json rewrite, so a
+    # save racing this PATCH cannot write back the table it read before the
+    # edit. No resident context means no save of this project is in flight.
+    resident = PyPSAService.get_context(project_registry.registry_key(project))
+    with resident.mutation_lock if resident is not None else contextlib.nullcontext():
+        meta = _read_meta(project_dir)
+        if not meta:
+            raise HTTPException(
+                409,
+                f"metadata.json for '{project.name}' is missing or unreadable; save the project and retry.",
+            )
+        table = meta.get(project_settings.SETTINGS_KEY)
+        if not isinstance(table, dict):
+            table = {}
+        for key, value in submitted.items():
+            if value is None:
+                table.pop(key, None)       # null = back to the default
+            else:
+                table[key] = value
+        meta[project_settings.SETTINGS_KEY] = table
+        _write_meta(project_dir, meta)
 
     changed = ", ".join(f"{k}={v}" for k, v in submitted.items())
     change_log_service.log(

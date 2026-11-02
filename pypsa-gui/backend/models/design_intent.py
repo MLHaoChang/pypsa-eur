@@ -40,6 +40,14 @@ _PRESETS: dict[str, dict] = {
 }
 
 
+#: Intent A backup autonomy (AS-AUTONOMY-1): the default and the upper bound,
+#: shared by the comparison request and the per-project stored setting
+#: (`ProjectSettings.backup_autonomy_h`), so a stored value is always one the
+#: comparison accepts. 720 h is 30 days, an assumed engineering ceiling.
+BACKUP_AUTONOMY_DEFAULT_H = 4.0
+BACKUP_AUTONOMY_MAX_H = 720.0
+
+
 def preset(intent: str) -> dict:
     """The preset table row for ``intent``; KeyError for an unknown one."""
     return _PRESETS[intent]
@@ -50,7 +58,8 @@ class DesignIntentSpec(BaseModel):
 
     intent: DesignIntent
     #: Intent A backup energy = critical load x this many hours (AS-AUTONOMY-1).
-    backup_autonomy_h: float = Field(default=4.0, gt=0, le=720, allow_inf_nan=False)
+    backup_autonomy_h: float = Field(default=BACKUP_AUTONOMY_DEFAULT_H, gt=0, le=BACKUP_AUTONOMY_MAX_H,
+                                     allow_inf_nan=False)
     #: Intents B/C: annual run-hour cap on the genset; None = uncapped.
     genset_run_hours_cap: float | None = Field(default=None, ge=0, le=8760)
     #: Intent D: bridge reserve energy = critical load x this many hours.

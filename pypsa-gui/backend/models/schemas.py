@@ -5,6 +5,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictBool, StrictInt, field_validator, model_validator
 
 from models.commercial import CommercialConfig
+from models.design_intent import BACKUP_AUTONOMY_DEFAULT_H, BACKUP_AUTONOMY_MAX_H
 from models.envelope_floors import EnvelopeFloors
 from services.adequacy.mc import MAX_DRAWS as _MC_MAX_DRAWS
 
@@ -838,6 +839,10 @@ class ProjectSettings(BaseModel):
     # length of the affected Lines and Links from the map geometry (the route
     # when one exists, else the chord) and offers the impedance rescale.
     derive_lengths_from_geometry: bool = False
+    # AS-AUTONOMY-1 (owner decision AS10-AUTONOMY-2): the intent-A backup
+    # autonomy, in hours, the intent comparison starts from. Same default and
+    # bound as `DesignIntentSpec.backup_autonomy_h`.
+    backup_autonomy_h: float = BACKUP_AUTONOMY_DEFAULT_H
 
 
 class UpdateProjectSettingsRequest(BaseModel):
@@ -846,7 +851,15 @@ class UpdateProjectSettingsRequest(BaseModel):
     PATCH: only the keys present are written, read via `exclude_unset`.
     """
 
+    # Unknown keys are refused, so a misspelled setting is a 422 rather than a
+    # 200 that changed nothing.
+    model_config = ConfigDict(extra="forbid")
+
     derive_lengths_from_geometry: StrictBool | None = None
+    # Finite, > 0 and bounded; a bool or a string is refused. null = default.
+    backup_autonomy_h: Annotated[
+        float, Field(strict=True, gt=0, le=BACKUP_AUTONOMY_MAX_H, allow_inf_nan=False)
+    ] | None = None
 
 
 class ProjectInfo(BaseModel):
