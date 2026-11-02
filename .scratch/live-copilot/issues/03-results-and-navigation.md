@@ -405,8 +405,10 @@ Branch `claude/lc03-past-run-parity`, from master `33e7ab8dc` (RW-03 merged, LC0
   flyout render outside the sidebar's `<aside>`, so App.tsx's slide-panel
   dismiss closed Results on the first click in them; both are now
   `data-no-panel-close` (`Sidebar.ioModalReturn.test.tsx`, RED before). The
-  views listing no longer raises a "Project not found" toast: the chooser
-  already says in place that the tabs could not be listed. The smoke checks
+  "Project not found" toast came from the assistant's access panel, whose
+  `/chat/access` read polls every 15 s and 404s once access is revoked (found
+  by the smoke, which lists the refused reads). It and the workbook views
+  listing now skip the toast; each already says in place that it failed. The smoke checks
   the row's chooser next to the header check, in Guided and Expert, the
   Project-menu path's return, and no toast with the refused download.
 
