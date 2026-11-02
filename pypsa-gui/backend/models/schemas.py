@@ -842,7 +842,8 @@ class ProjectSettings(BaseModel):
     # AS-AUTONOMY-1 (owner decision AS10-AUTONOMY-2): the intent-A backup
     # autonomy, in hours, the intent comparison starts from. Same default and
     # bound as `DesignIntentSpec.backup_autonomy_h`.
-    backup_autonomy_h: float = BACKUP_AUTONOMY_DEFAULT_H
+    backup_autonomy_h: float = Field(default=BACKUP_AUTONOMY_DEFAULT_H, gt=0, le=BACKUP_AUTONOMY_MAX_H,
+                                     allow_inf_nan=False)
 
 
 class UpdateProjectSettingsRequest(BaseModel):
