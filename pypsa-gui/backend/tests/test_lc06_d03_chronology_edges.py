@@ -187,17 +187,21 @@ def test_a_zone_name_before_the_time_is_refused_as_timezone_aware(alpha, csv):
     assert list(PyPSAService.get_network().loads_t.p_set["L1"]) == before
 
 
-@pytest.mark.parametrize("stamp", [
-    "Mon 2026-01-01 00:00", "Jan 1 2026 00:00", "January 1, 2026 00:00", "Thu 01/01/2026 00:00",
-], ids=["weekday", "month_abbr", "month_name", "weekday_slash_date"])
-def test_a_naive_timestamp_led_by_a_weekday_or_month_is_not_called_timezone_aware(alpha, stamp):
-    _four(alpha)
-    csv = f"snapshot,L1\n{stamp},7\n"
-    try:
-        chat_tools.upload_timeseries("loads", "L1", "p_set", csv)
-    except Exception as exc:
-        detail = getattr(exc, "detail", None)
-        assert not (isinstance(detail, dict) and detail.get("error_kind") == "timeseries_timezone_aware")
+@pytest.mark.parametrize("first, second", [
+    ("Thu 2026-01-01 00:00", "Jan 1 2026 01:00"),
+    ("Jan 1 2026 00:00", "Thu 2026-01-01 01:00"),
+    ("January 1, 2026 00:00", "Thu 2026-01-01 01:00"),
+], ids=["weekday_then_month", "month_then_weekday", "month_name_then_weekday"])
+def test_a_naive_timestamp_led_by_a_weekday_or_month_is_not_called_timezone_aware(alpha, first, second):
+    import io
+    csv = f"snapshot,L1\n{first},7\n{second},8\n"
+    # Mixed formats keep the index object-typed, the only path that reaches the zone-name guard.
+    assert pd.read_csv(io.StringIO(csv), index_col=0, parse_dates=True).index.dtype == object
+    before = _four(alpha)
+    # Mixed-format strings are never parsed to times, so the CSV cannot align to the
+    # horizon: it is refused as off-horizon (pre-existing), not as a zone.
+    assert _refused(csv)["error_kind"] == "timeseries_outside_horizon"
+    assert list(PyPSAService.get_network().loads_t.p_set["L1"]) == before
 
 
 @pytest.mark.parametrize("component, attribute, name", [
