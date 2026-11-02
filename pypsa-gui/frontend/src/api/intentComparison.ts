@@ -2,6 +2,7 @@
 import client from './client'
 
 export type DesignIntent = 'A' | 'B' | 'C' | 'D' | 'E'
+/** The preset table of `backend/models/design_intent.py`; `designIntents.parity.test.ts` fails when they drift. */
 export const DESIGN_INTENTS: { id: DesignIntent; label: string }[] = [
   { id: 'A', label: 'Replace diesel' },
   { id: 'B', label: 'Keep diesel + MV smoothing BESS' },
@@ -34,11 +35,29 @@ export interface IntentComparisonRequest {
   intents: IntentSpecIn[]
   critical_mw: number
   inputs: Record<string, unknown>
-  profile?: Record<string, unknown>
+  /** The campus study's grid-code profile id; null = none set. */
+  grid_code: string | null
+}
+export type JobStatus = 'running' | 'done' | 'failed' | 'aborted'
+export type RowProgress = 'queued' | 'running' | 'done'
+export interface IntentJob {
+  status: JobStatus
+  progress: Record<string, RowProgress>
+  rows: IntentRow[]
+  error: string | null
 }
 
+const base = (project: string) => `/projects/${encodeURIComponent(project)}/intent-comparison`
+const quiet = { skipErrorToast: true } as const
+
 export const intentComparisonApi = {
-  run: (project: string, body: IntentComparisonRequest) =>
-    client.post<{ rows: IntentRow[] }>(`/projects/${encodeURIComponent(project)}/intent-comparison`, body,
-      { timeout: 3_600_000 }).then(r => r.data),
+  start: (project: string, body: IntentComparisonRequest) =>
+    client.post<IntentJob>(base(project), body, quiet).then(r => r.data),
+  /** null: no comparison has run for this project. */
+  get: (project: string) =>
+    client.get<IntentJob>(base(project), quiet).then(r => r.data).catch(e => {
+      if ((e as { response?: { status?: number } })?.response?.status === 404) return null
+      throw e
+    }),
+  abort: (project: string) => client.post<{ status: string; aborting: boolean }>(`${base(project)}/abort`, {}, quiet).then(r => r.data),
 }

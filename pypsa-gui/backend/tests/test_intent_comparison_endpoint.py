@@ -149,10 +149,26 @@ def test_bad_sizing_inputs_are_422_not_failed_rows(client, api_project, monkeypa
     assert slr is not None
 
 
-def test_bad_profile_is_422(client, api_project):
+def test_unknown_grid_code_is_422(client, api_project):
     name = api_project()
-    r = _post(client, name, [{"intent": "D"}, {"intent": "B"}], profile={"ride_through_transfer_counts": 5})
+    r = _post(client, name, [{"intent": "D"}, {"intent": "B"}], grid_code="no_such_code")
     assert r.status_code == 422
+
+
+def test_intent_d_warning_follows_the_selected_grid_codes_ride_through_key(client, api_project, monkeypatch):
+    name = api_project()
+    monkeypatch.setattr("services.adequacy.sizing_loop_runner.run_sizing", lambda *a, **k: _result())
+    accepts = {"ride_through_transfer_counts": {"value": True}}
+    monkeypatch.setattr("services.campus_electrical_service.grid_code_profile",
+                        lambda project, pid: accepts if pid == "ok_code" else {})
+    for code, expect in (("ok_code", 0), ("strict_code", 1), (None, 1)):
+        intent_jobs.clear()
+        assert _post(client, name, [{"intent": "D"}, {"intent": "B"}], grid_code=code).status_code == 202
+        rows = _wait(client, name)["rows"]
+        d = next(r for r in rows if r["intent"] == "D")
+        assert len(d["warnings"]) == expect, code
+        if code is None:
+            assert "No grid code set" in d["warnings"][0]
 
 
 def test_the_projects_stored_solver_config_reaches_the_runner(client, api_project, monkeypatch):

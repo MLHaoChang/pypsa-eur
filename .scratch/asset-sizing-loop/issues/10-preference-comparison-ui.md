@@ -3,7 +3,7 @@
 
 # AS-10 — Preference comparison UI
 
-Status: in-progress (PR 1 of 2 in review)
+Status: in-progress (PR 1 merged #1009; PR 2 UI in review)
 Type: task
 Blocked by: 01, 06
 Model: Sonnet
@@ -29,7 +29,7 @@ Run intents A–E as scenarios through the compare machinery (`BE/services/compa
 ## Split (owner decision AS10-SPLIT-1)
 
 - PR 1 (#1009): backend job. `POST/GET /api/projects/{name}/intent-comparison` and `/abort`, 2-5 distinct intents, 422 validation, the named project's own saved network, per-intent failed rows, abort, pass rule `converged and no failing and no unresolved`.
-- PR 2: the UI (Guided and Expert, screenshots light and dark). A first cut is on branch `claude/as-10-ui-draft`; it must move to the job routes and take the UX conditions below.
+- PR 2: the UI (Guided and Expert, screenshots light and dark), branch `claude/as-10-ui`: section "Intent comparison" in the grid study panel (`campusStudy`), polling the job routes. Small backend delta: `POST` takes `grid_code` (profile id, null = none set) instead of a raw profile.
 - The issue stays open until both land. Acceptance boxes 1-3 are pinned in PR 1 on the backend and need the UI test in PR 2.
 
 ## Comments
@@ -39,3 +39,5 @@ GK B plan verdict (GO): background job with progress and abort; the named projec
 UX plan verdict (GO) for PR 2: host panel and Guided home named before coding; labels from the backend table; per-row progress and abort; status words not colour; unit headers; autonomy saved per project; D warning only when the profile does not accept transfer, else say no profile is set; disabled reasons as text; `EditedSinceStudyBanner`; screenshots of six states in both modes, light and dark.
 
 Open: cost column is the LP total (no capex split in the loop result).
+
+PR 2 skipped, by decision: backup autonomy is per run, not saved per project (a project-file write needs an edit-lock decision; AS-AUTONOMY-1 asks per project). Open for the owner.

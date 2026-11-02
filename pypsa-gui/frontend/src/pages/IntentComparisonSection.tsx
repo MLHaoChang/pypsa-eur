@@ -1,76 +1,107 @@
-// The preference comparison (AS-10): one sizing loop per design intent, one table row each.
-// Thin: every number is the backend's. A loop that is not converged, unresolved, failed or stopped is
-// never shown as a pass.
+// The preference comparison (AS-10): one sizing loop per design intent, one table row each, run as a
+// background job the section polls. Thin: every number is the backend's. A loop that is not converged,
+// unresolved, failed or stopped is never shown as a pass, and a converged row says how many checks did not run.
 import { useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { errorText } from '../api/campusElectrical'
 import {
   DESIGN_INTENTS, intentComparisonApi, type CheckState, type DesignIntent, type IntentRow, type Outcome,
 } from '../api/intentComparison'
 import { Btn, Field, PageSection, Tag } from '../components/PageKit'
+import { withReturnFrom } from '../layout/flowNavigation'
+import { useUIStore } from '../store/uiStore'
 
-export const OUTCOME_WORDS: Record<Outcome, { text: string; tone: 'ok' | 'warn' | 'err' }> = {
-  pass: { text: 'Pass', tone: 'ok' },
-  fail: { text: 'Checks fail', tone: 'err' },
+type Tone = 'ok' | 'warn' | 'err' | 'neutral'
+export const OUTCOME_WORDS: Record<Outcome, { text: string; tone: Tone }> = {
+  pass: { text: 'Converged', tone: 'ok' },
+  fail: { text: 'Converged · checks fail', tone: 'err' },
   not_converged: { text: 'Not converged', tone: 'warn' },
-  unresolved: { text: 'Unresolved: needs grid reinforcement or EMT study', tone: 'err' },
-  failed: { text: 'Run failed', tone: 'err' },
+  unresolved: { text: 'Unresolved', tone: 'err' },
+  failed: { text: 'Failed', tone: 'err' },
   aborted: { text: 'Stopped', tone: 'warn' },
 }
-const CHECK_WORDS: Record<CheckState, { text: string; tone: 'ok' | 'warn' | 'err' | 'neutral' }> = {
-  ok: { text: 'ok', tone: 'ok' }, fail: { text: 'fails', tone: 'err' },
-  unresolved: { text: 'unresolved', tone: 'err' }, not_run: { text: 'not run', tone: 'neutral' },
+export const CHECK_WORDS: Record<CheckState, { text: string; tone: Tone }> = {
+  ok: { text: 'Pass', tone: 'ok' }, fail: { text: 'Fail', tone: 'err' },
+  unresolved: { text: 'Unresolved', tone: 'err' }, not_run: { text: 'Not run', tone: 'neutral' },
 }
-const NEED_TWO = 'Choose at least two intents to compare.'
+const NEED_TWO = 'Pick at least two intents.'
+const NO_CODE_LINK = 'Set grid code ›'
 const INPUT = 'px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20'
+const POLL_MS = 2000
 
 const num = (s: string) => (s.trim() === '' ? NaN : Number(s))
+const fmt = (v: number | null | undefined, d = 1) => (v == null ? '–' : v.toLocaleString(undefined, { maximumFractionDigits: d }))
+/** The loop's last round is not a final answer unless it converged: its sizes are shown muted, marked as such. */
+const isFinal = (r: IntentRow) => r.status === 'converged'
+const notRun = (r: IntentRow) => r.checks.filter(c => c.state === 'not_run').length
 
-export default function IntentComparisonSection({ name }: { name: string }) {
+export default function IntentComparisonSection({ name, gridCode }: { name: string; gridCode: string | null }) {
+  const qc = useQueryClient()
+  const setSlidePanel = useUIStore(s => s.setSlidePanel)
   const [chosen, setChosen] = useState<DesignIntent[]>([])
   const [autonomy, setAutonomy] = useState('4')
   const [f, setF] = useState({ critical: '', link: '', ramp: '', sk: '', pst: '1', library: '', swing: '', amp: '', period: '' })
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF(p => ({ ...p, [k]: e.target.value }))
-  const run = useMutation({
+  const key = ['intentComparison', name]
+  const job = useQuery({
+    queryKey: key, queryFn: () => intentComparisonApi.get(name), retry: false,
+    refetchInterval: q => (q.state.data?.status === 'running' ? POLL_MS : false),
+  })
+  const running = job.data?.status === 'running'
+  const start = useMutation({
     mutationFn: () => {
       const swing = num(f.swing), amp = num(f.amp), period = num(f.period)
-      const osc = { amplitude_mw: amp, period_s: period }
-      return intentComparisonApi.run(name, {
+      return intentComparisonApi.start(name, {
         intents: chosen.map(intent => (intent === 'A' ? { intent, backup_autonomy_h: num(autonomy) } : { intent })),
-        critical_mw: num(f.critical),
+        critical_mw: num(f.critical), grid_code: gridCode,
         inputs: {
           link: f.link.trim(), ramp_mw_per_min: num(f.ramp), sk_mva: num(f.sk), pst_limit: num(f.pst),
           transformer_library_mva: f.library.split(',').map(s => Number(s.trim())).filter(Number.isFinite),
-          envelope: { phases: [{ swing_mw: swing, oscillation: osc }],
+          envelope: { phases: [{ swing_mw: swing, oscillation: { amplitude_mw: amp, period_s: period } }],
             max: { swing_mw: swing, oscillation_amplitude_mw: amp, oscillation_period_s: period } },
         },
       })
     },
+    onSuccess: data => qc.setQueryData(key, data),
   })
-  const toggle = (id: DesignIntent) =>
-    setChosen(c => (c.includes(id) ? c.filter(x => x !== id) : [...c, id]))
+  const abort = useMutation({ mutationFn: () => intentComparisonApi.abort(name), onSuccess: () => qc.invalidateQueries({ queryKey: key }) })
+  const toggle = (id: DesignIntent) => setChosen(c => (c.includes(id) ? c.filter(x => x !== id) : [...c, id]))
+  const autonomyBad = chosen.includes('A') && !(Number(autonomy) > 0)
   const complete = [f.critical, f.ramp, f.sk, f.pst, f.swing, f.amp, f.period].every(v => Number(v) > 0) &&
-    f.link.trim() !== '' && f.library.trim() !== '' && (!chosen.includes('A') || Number(autonomy) > 0)
-  const blocked = chosen.length < 2 ? NEED_TWO : !complete ? 'Fill in every input below, all greater than zero.' : null
-  const rows = run.data?.rows
+    f.link.trim() !== '' && f.library.trim() !== ''
+  const blocked = chosen.length < 2 ? NEED_TWO : autonomyBad ? null : !complete ? 'Fill in every input below, all greater than zero.' : null
+  const rows = job.data?.rows ?? []
 
   return (
     <PageSection title="Intent comparison" hint="one sizing loop per design intent" bodyClassName="p-4 space-y-3"
-      right={<Btn variant="primary" disabled={blocked != null || run.isPending} onClick={() => run.mutate()}
-        data-testid="intent-run">{run.isPending ? 'Running…' : 'Compare intents'}</Btn>}>
-      <div className="flex flex-wrap gap-x-4 gap-y-1" role="group" aria-label="Design intents">
+      right={running
+        ? <Btn disabled={abort.isPending} onClick={() => abort.mutate()} data-testid="intent-abort"
+            title="Stops the running loops. A stopped run cannot be resumed.">Abort</Btn>
+        : <Btn variant="primary" disabled={blocked != null || autonomyBad || start.isPending} onClick={() => start.mutate()}
+            data-testid="intent-run">Compare intents</Btn>}>
+      <div className="space-y-1" role="group" aria-label="Design intents">
         {DESIGN_INTENTS.map(i => (
-          <label key={i.id} className="flex items-center gap-1.5 text-[12px]">
-            <input type="checkbox" checked={chosen.includes(i.id)} onChange={() => toggle(i.id)} />
-            {i.id} · {i.label}
-          </label>
+          <div key={i.id}>
+            <label className="flex items-center gap-1.5 text-[12px]">
+              <input type="checkbox" checked={chosen.includes(i.id)} disabled={running} onChange={() => toggle(i.id)} />
+              {i.id}. {i.label}
+            </label>
+            {i.id === 'D' && chosen.includes('D') && gridCode == null && (
+              <p className="ml-5 text-[11px] text-warn" data-testid="intent-d-nocode">
+                No grid code set: whether transfer to BESS counts as ride-through is unknown.{' '}
+                <button type="button" className="underline" data-testid="intent-set-grid-code"
+                  onClick={() => withReturnFrom(() => setSlidePanel('campusElectrical'))}>{NO_CODE_LINK}</button>
+              </p>
+            )}
+          </div>
         ))}
       </div>
       {blocked && <p className="text-[11px] text-muted" data-testid="intent-blocked">{blocked}</p>}
       {chosen.includes('A') && (
-        <Field label="Intent A backup autonomy (h)" hint="Backup energy = critical load × hours; default 4 h.">
+        <Field label="Backup autonomy (h)" hint="Intent A: backup energy = critical load × hours. Default 4 h.">
           <input className={INPUT} inputMode="decimal" value={autonomy} onChange={e => setAutonomy(e.target.value)}
-            data-testid="intent-autonomy" />
+            disabled={running} data-testid="intent-autonomy" />
+          {autonomyBad && <p className="text-[11px] text-err" data-testid="intent-autonomy-error">Enter a number of hours above zero.</p>}
         </Field>
       )}
       <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
@@ -78,45 +109,74 @@ export default function IntentComparisonSection({ name }: { name: string }) {
           ['sk', 'Short-circuit power (MVA)'], ['pst', 'Pst limit'], ['library', 'Transformer sizes (MVA, comma list)'],
           ['swing', 'Load swing (MW)'], ['amp', 'Oscillation amplitude (MW)'], ['period', 'Oscillation period (s)']] as const)
           .map(([k, label]) => (
-            <Field key={k} label={label}><input className={INPUT} value={f[k]} onChange={set(k)} data-testid={`intent-in-${k}`} /></Field>
+            <Field key={k} label={label}>
+              <input className={INPUT} value={f[k]} onChange={set(k)} disabled={running} data-testid={`intent-in-${k}`} />
+            </Field>
           ))}
       </div>
-      {run.isError && <p className="text-[12px] text-err" role="alert" data-testid="intent-error">{errorText(run.error)}</p>}
-      {rows && <ResultTable rows={rows} />}
+      {(start.isError || job.isError) && (
+        <p className="text-[12px] text-err" role="alert" data-testid="intent-error">{errorText(start.error ?? job.error)}</p>
+      )}
+      {job.data?.status === 'failed' && job.data.error && (
+        <p className="text-[12px] text-err" role="alert" data-testid="intent-job-failed">Failed: {job.data.error}</p>
+      )}
+      {job.data && <Progress progress={job.data.progress} />}
+      {rows.length > 0 && <ResultTable rows={rows} />}
     </PageSection>
   )
 }
 
-const fmt = (v: number | null | undefined, d = 1) => (v == null ? '–' : v.toLocaleString(undefined, { maximumFractionDigits: d }))
+function Progress({ progress }: { progress: Record<string, string> }) {
+  const words: Record<string, string> = { queued: 'queued', running: 'running', done: 'done' }
+  return (
+    <ul className="flex flex-wrap gap-x-4 text-[11px] text-muted" data-testid="intent-progress">
+      {Object.entries(progress).map(([intent, st]) => (
+        <li key={intent} data-testid={`intent-progress-${intent}`}>{intent}: {words[st] ?? st}</li>
+      ))}
+    </ul>
+  )
+}
 
 function ResultTable({ rows }: { rows: IntentRow[] }) {
   return (
     <div className="space-y-2" data-testid="intent-table">
-      {rows.some(r => r.warnings.length > 0) && rows.filter(r => r.warnings.length > 0).map(r => (
+      {rows.filter(r => r.warnings.length > 0).map(r => (
         <p key={r.intent} className="text-[11px] text-warn" role="status" data-testid={`intent-warning-${r.intent}`}>
-          Intent {r.intent}: {r.warnings.join(' ')}
+          {r.intent}. {r.warnings.join(' ')}
         </p>
       ))}
       <div className="overflow-x-auto">
         <table className="w-full text-[11px]">
           <thead><tr className="text-left text-muted">
-            <th className="pr-2">Intent</th><th className="pr-2">Loop status</th><th className="pr-2">Cost (€ per year, LP total)</th>
-            <th className="pr-2">Assets</th><th className="pr-2">Transformer (MVA)</th><th className="pr-2">STATCOM (Mvar)</th>
-            <th>Checks</th>
+            <th className="pr-2">Intent</th><th className="pr-2">Loop status</th>
+            <th className="pr-2" title="LP total: capex plus yearly opex, not capex alone">Total cost (€ per year)</th>
+            <th className="pr-2">Assets (MW, MWh, Mvar)</th><th className="pr-2">Transformer (MVA)</th>
+            <th className="pr-2">STATCOM (Mvar)</th><th>Checks</th>
           </tr></thead>
           <tbody>
             {rows.map(r => {
               const w = OUTCOME_WORDS[r.outcome]
+              const skipped = notRun(r)
+              const dim = isFinal(r) ? '' : 'text-muted'
               return (
                 <tr key={r.intent} className="align-top border-t border-border" data-testid={`intent-row-${r.intent}`}>
                   <td className="py-1 pr-2 font-semibold">{r.intent}</td>
-                  <td className="py-1 pr-2"><Tag tone={w.tone}>{w.text}</Tag>
-                    {r.backup_autonomy_h != null && <div className="text-muted">{fmt(r.backup_autonomy_h)} h autonomy · {fmt(r.backup_energy_mwh)} MWh</div>}</td>
-                  <td className="py-1 pr-2 font-mono">{fmt(r.cost_eur, 0)}</td>
-                  <td className="py-1 pr-2 font-mono">{Object.entries(r.assets).map(([k, a]) => (
+                  <td className="py-1 pr-2">
+                    <Tag tone={w.tone}>{w.text}</Tag>
+                    {r.outcome === 'pass' && skipped > 0 && (
+                      <div className="text-muted" data-testid={`intent-notrun-${r.intent}`}>
+                        {skipped} {skipped === 1 ? 'check' : 'checks'} not run
+                      </div>)}
+                    {!isFinal(r) && <div className="text-muted">not final</div>}
+                    {r.verdict && !isFinal(r) && <div className="text-muted">{r.verdict}</div>}
+                    {r.backup_autonomy_h != null && (
+                      <div className="text-muted">{fmt(r.backup_autonomy_h)} h autonomy · {fmt(r.backup_energy_mwh)} MWh</div>)}
+                  </td>
+                  <td className={`py-1 pr-2 font-mono ${dim}`}>{fmt(r.cost_eur, 0)}</td>
+                  <td className={`py-1 pr-2 font-mono ${dim}`}>{Object.entries(r.assets).map(([k, a]) => (
                     <div key={k}>{k}: {fmt(a.value)} {a.unit}</div>))}</td>
-                  <td className="py-1 pr-2 font-mono">{fmt(r.transformer_mva)}</td>
-                  <td className="py-1 pr-2 font-mono">{fmt(r.statcom_mvar)}</td>
+                  <td className={`py-1 pr-2 font-mono ${dim}`}>{fmt(r.transformer_mva)}</td>
+                  <td className={`py-1 pr-2 font-mono ${dim}`}>{fmt(r.statcom_mvar)}</td>
                   <td className="py-1">{r.checks.map(c => (
                     <div key={c.name}>{c.name}: <Tag tone={CHECK_WORDS[c.state].tone}>{CHECK_WORDS[c.state].text}</Tag></div>))}</td>
                 </tr>
@@ -125,7 +185,11 @@ function ResultTable({ rows }: { rows: IntentRow[] }) {
           </tbody>
         </table>
       </div>
-      {rows[0]?.basis_note && <p className="text-[11px] text-muted" data-testid="intent-basis">Basis: {rows[0].basis_note}</p>}
+      {rows[0]?.basis_note && (
+        <p className="text-[11px] text-muted" data-testid="intent-basis">
+          Basis: {rows[0].basis_note}. Total cost is the LP total (capex plus yearly opex), not capex alone. Assumed values
+          are marked as such in the note.
+        </p>)}
     </div>
   )
 }
