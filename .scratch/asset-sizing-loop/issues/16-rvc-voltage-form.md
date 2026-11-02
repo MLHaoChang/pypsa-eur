@@ -20,6 +20,8 @@ The rapid-voltage-change row still reads swing / S_k (P-only). Move it to cos ψ
 
 ## PRs
 
+- #1025 (`claude/as-11b-rvc-voltage-form`)
+
 ## Comments
 
 - 2026-11-02, GK A plan verdict: GO with conditions, assuming the owner picks option A (voltage form). The owner question on what the row shows before mitigation is still open with the coordinator.

@@ -519,10 +519,14 @@ def _rvc_forms(p_mw: float, swing_mw: float, tan_phi: float, sk: float, limit: f
 
 
 def _rvc_tan_phi(inp: _Inputs) -> tuple[float, str]:
-    """The envelope's ``tan_phi_swing`` and its words; the assumed 0.1 when the envelope has none."""
+    """The envelope's ``tan_phi_swing`` and its words; the AI workload's assumed default when the
+    envelope has none."""
+    from models.flex_archetypes import AiWorkloadSpec
+
     raw = ((inp.envelope or {}).get("max") or {}).get("tan_phi_swing")
     if raw is None:
-        return 0.1, "assumed tan φ_swing 0.1 (the envelope has none)"
+        assumed = float(AiWorkloadSpec.model_fields["tan_phi_swing"].default)
+        return assumed, f"assumed tan φ_swing {assumed:g} (the envelope has none)"
     return float(raw), f"tan φ_swing {float(raw):g} from the envelope"
 
 
@@ -550,10 +554,11 @@ def _rvc_row(inp: _Inputs) -> dict:
 
     swing = float(inp.envelope["max"]["swing_mw"])
     tan_phi, tan_words = _rvc_tan_phi(inp)
+    xr_assumed = True                                  # no project PoC X/R input yet: always fi.DEFAULT_XR (AS-16)
     f = _rvc_forms(swing, swing, tan_phi, sk, limit)
     row = _row("rapid_voltage_change", req, rule=RULE_RVC, limit=limit, unit="% of nominal", source=source,
                project_value=round(f["value"], 4), verdict=f["verdict"],
-               assumed=True,                                   # the PoC X/R is always assumed (AS-16)
+               assumed=lim_assumed or fault_assumed or _envelope_assumed(inp) or xr_assumed,
                note=(f"Voltage change on the voltage form (cos ψ·ΔP + sin ψ·ΔQ)/S_k, ψ = atan(X/R), IEC TR 61000-3-7: "
                      f"ΔP {swing:.4g} MW, ΔQ {f['q']:.4g} Mvar ({tan_words}), X/R {fi.DEFAULT_XR:g} ({fi.XR_ASSUMED}) "
                      f"gives {f['form']:.4g} %; the X/R-free bound √(ΔP² + ΔQ²)/S_k is {f['bound']:.4g} %"

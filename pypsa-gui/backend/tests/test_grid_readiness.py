@@ -146,7 +146,8 @@ def test_with_the_ai_profile_the_envelope_rows_are_red_flags_before_mitigation(t
     swing, tan_phi = env["max"]["swing_mw"], env["max"]["tan_phi_swing"]
     form = swing * (0.24254 + 0.97014 * tan_phi) / 250.0 * 100.0
     bound = swing * math.sqrt(1.0 + tan_phi ** 2) / 250.0 * 100.0
-    assert rvc["project_value"] == pytest.approx(form if form > 3.0 else bound, rel=1e-4)
+    assert form > 3.0                                                # the voltage form decides on its own
+    assert rvc["project_value"] == pytest.approx(form, rel=1e-4)
     assert rvc["voltage_form_pct"] == pytest.approx(form, rel=1e-4)
     assert rvc["xr_free_bound_pct"] == pytest.approx(bound, rel=1e-4)
     assert rvc["verdict"] == "warn" and rvc["assumed"] and "X/R 4" in rvc["note"]
