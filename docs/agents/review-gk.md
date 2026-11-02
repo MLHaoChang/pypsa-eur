@@ -69,6 +69,7 @@ A `pytest.raises(Exception)` on a refusal is checked for what actually raises. A
 - A runner that solves a private network copy binds `PyPSAService.solving_context(<private ProjectContext>)` around the transforms, the solve and the restore; otherwise `mark_transient` and `clear_transient` hit the project ctx (#992).
 - A test that skips without tsam uses `pytest.importorskip("tsam")`; cloud containers have no tsam.
 - A browser journey that flips a manifest row to covered waits on a locator specific to each screen effect it claims, not on text that may already be visible (#998).
+- A route that sizes or solves a named project's network reads its solver config through `routers/projects.py::_solver_config_from_dict` (pack-only import-cap strip, lpf coercion, invalid-goal drop) and never forks it. An unbuildable saved config is a 422, never a silent default (#1009).
 
 ## Engineering rules
 
