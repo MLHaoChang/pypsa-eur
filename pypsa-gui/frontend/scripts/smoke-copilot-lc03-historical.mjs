@@ -163,6 +163,13 @@ try {
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', error => errors.push(String(error)))
+  // Refused API reads, so an unexpected error toast names the read behind it.
+  const refusedReads = []
+  page.on('response', response => {
+    if (response.status() >= 400 && response.url().includes('/api/')) {
+      refusedReads.push(`${response.status()} ${response.request().method()} ${new URL(response.url()).pathname}`)
+    }
+  })
   await page.goto(base)
   await page.locator('#email').fill(credentials.email)
   await page.locator('#password').fill(credentials.password)
@@ -332,6 +339,7 @@ try {
     const response = await fetch(`${fixtureControl}/${action}`, { method: 'POST' })
     assert.equal(response.status, 204, `${action} failed`)
   }
+  refusedReads.length = 0
   await control('revoke-access')
   // The next read of the past run (another tab of it) is refused, in the server's words.
   await page.locator('[data-assurance-tab="summary"], button:has-text("Summary")').first().click()
@@ -341,6 +349,8 @@ try {
     throw error
   })
   assert.equal(await page.getByText(/not been substituted/).count(), 0)
+  assert.equal(await page.getByText('Project not found').count(), 0,
+    `error toast; refused reads since access was revoked: ${[...new Set(refusedReads)].join(', ')}`)
   // The way out stays: the run chrome's Clear and the panel's own close.
   assert(await page.getByTestId('discussed-run-chrome').getByRole('button', { name: 'Clear' }).isVisible())
   await page.screenshot({ path: path.join(artifacts, 'lc03h-refused-guided.png') })
@@ -357,7 +367,8 @@ try {
   const refusedDownload = page.locator('[data-testid="workbook-past-run-refused"]')
   await refusedDownload.waitFor({ timeout: 60000 })
   assert.equal((await refusedDownload.textContent()).trim().startsWith(REASON), true)
-  assert.equal(await page.getByText('Project not found').count(), 0)
+  assert.equal(await page.getByText('Project not found').count(), 0,
+    `error toast; refused reads since access was revoked: ${[...new Set(refusedReads)].join(', ')}`)
   await page.screenshot({ path: path.join(artifacts, 'lc03h-export-refused.png') })
   await closeChooser(page, 'lc03h-after-refused-chooser.png')
   await stillOnPastRun(page, runs[0])
