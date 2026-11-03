@@ -127,7 +127,6 @@ def test_the_note_names_the_poc_and_the_governing_one_of_two(tmp_path):
     assert rvc["project_value"] == pytest.approx(2.5516, rel=1e-4)
 
 
-
 def test_a_tie_between_two_pocs_names_the_first_in_bus_index_order(tmp_path):
     """AS-17b (d): equal S_k'' at two PoCs. The first of them in the bus index governs, not the first by name:
     "zz_poc" is added before "aa_poc", and both are weaker than the template's PoC."""
@@ -143,6 +142,7 @@ def test_a_tie_between_two_pocs_names_the_first_in_bus_index_order(tmp_path):
     assert "at PoC zz_poc, the governing (lowest S_k'') of 3 PoCs" in _rvc(d, n)["note"]
     n.buses = n.buses.loc[["aa_poc", *[b for b in n.buses.index if b != "aa_poc"]]]   # reorder: aa first
     assert G._governing_poc(n)[0] == "aa_poc"
+
 
 def test_the_after_battery_voltage_change_takes_the_entered_xr(tmp_path):
     """The small-UPS case (13.4 MW uncovered, ΔQ 2.34 Mvar): at the assumed X/R 4 the bound

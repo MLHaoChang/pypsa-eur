@@ -140,13 +140,17 @@ def test_project_inputs(tmp_path, inputs, stored, xr, source):
     assert inputs == before                                   # the caller's dict is not changed
 
 
+def _bare(**kw) -> slr.SizingInputs:
+    """`SizingInputs` with placeholder fields: only the X/R fields matter here."""
+    return slr.SizingInputs(link="l", envelope={}, ramp_mw_per_min=1.0, sk_mva=1.0, pst_limit=1.0,
+                            transformer_library_mva=(1.0,), **kw)
+
+
 def test_the_dataclass_resolves_and_gates_the_source():
-    base = dict(link="l", envelope={}, ramp_mw_per_min=1.0, sk_mva=1.0, pst_limit=1.0,
-                transformer_library_mva=(1.0,))
-    assert (slr.SizingInputs(**base).xr, slr.SizingInputs(**base).xr_source) == (DEFAULT_XR, "assumed")
-    assert slr.SizingInputs(**base, xr=2.0).xr_source == "request"
+    assert (_bare().xr, _bare().xr_source) == (DEFAULT_XR, "assumed")
+    assert _bare(xr=2.0).xr_source == "request"
     with pytest.raises(slr.SizingLoopRefusal):
-        slr.SizingInputs(**base, xr=2.0, xr_source="operator")
+        _bare(xr=2.0, xr_source="operator")
 
 
 def test_the_scorecard_and_the_loop_read_the_same_project_xr(tmp_path):
@@ -180,15 +184,11 @@ def test_the_pst_step_by_hand_at_xr_1_5_and_4():
     ("project", "X/R 2.5 (entered for the project)"),
 ])
 def test_the_xr_note(source, words):
-    inp = slr.SizingInputs(link="l", envelope={}, ramp_mw_per_min=1.0, sk_mva=1.0, pst_limit=1.0,
-                           transformer_library_mva=(1.0,), xr=2.5, xr_source=source)
-    assert slr.xr_note(inp) == words
+    assert slr.xr_note(_bare(xr=2.5, xr_source=source)) == words
 
 
 def test_the_assumed_xr_note_says_so():
-    inp = slr.SizingInputs(link="l", envelope={}, ramp_mw_per_min=1.0, sk_mva=1.0, pst_limit=1.0,
-                           transformer_library_mva=(1.0,))
-    assert slr.xr_note(inp) == "X/R 4 (assumed; typical grid X/R, replace with the network operator's value)"
+    assert slr.xr_note(_bare()) == "X/R 4 (assumed; typical grid X/R, replace with the network operator's value)"
 
 
 @pytest.mark.parametrize("source", ["project", "assumed"])
