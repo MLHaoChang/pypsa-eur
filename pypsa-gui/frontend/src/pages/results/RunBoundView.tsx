@@ -36,7 +36,7 @@ export default function RunBoundView({ run, tab, tabLabel = () => undefined }: {
     <p className="text-xs text-muted">{project} · {data.fingerprint ? `input fingerprint ${data.fingerprint}` : 'Input fingerprint unavailable'}
       {run.baselineRunId ? ` · baseline ${run.baselineRunId} (retained reference; no comparison implied)` : ''}</p>
     <p className="text-xs text-muted">Historical scope and window come from the recorded artifact; they are unavailable when not recorded. The current horizon filter does not slice historical evidence.</p>
-    {data.section ? <><h4 className="mt-3">{data.section} · native retained evidence</h4><pre className="whitespace-pre-wrap break-words text-xs mt-2">{JSON.stringify(data.data, null, 2)}</pre></>
+    {data.section ? <><h4 className="mt-3">{sectionWords(data.section, tabLabel)} · native retained evidence</h4><pre className="whitespace-pre-wrap break-words text-xs mt-2">{JSON.stringify(data.data, null, 2)}</pre></>
       : <><table className="text-xs mt-3"><tbody>{Object.entries(data.metrics ?? {}).map(([name, metric]) => <tr key={name}><th className="pr-4 text-left">{name}</th><td>{metric.value == null ? 'Unavailable' : metric.value} {metric.unit}</td></tr>)}</tbody></table>
         <p className="mt-3 text-xs">Recorded sections: {(data.sections ?? []).map(s => `${sectionWords(s.name, tabLabel)} (${s.status === 'not_kept' ? `not kept: ${notKeptShort(s.reason)}` : s.available ? 'available' : 'unavailable'})`).join(', ') || 'none'}</p></>}
     {(data.warnings ?? []).map(w => <p key={w} role="status">{w}</p>)}

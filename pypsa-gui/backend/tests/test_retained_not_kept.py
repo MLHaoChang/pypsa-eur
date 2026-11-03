@@ -181,6 +181,8 @@ def test_discussing_a_run_binds_its_stub_section_without_data(multi_period):
         chat_tools.set_chat_session(None)
     assert event['kind'] == 'open_run_result' and event['evidence_available'] is True
     assert 'data' not in event and 'data' not in event['discussed']
+    assert event['discussed']['section_status'] == 'not_kept'
+    assert event['discussed']['section_reason'] == MULTI_PERIOD_NOT_DIGESTED
 
 
 def test_the_run_summary_the_workbook_reads_is_unchanged_by_a_stub(multi_period):
