@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from db.models import User
@@ -40,6 +40,12 @@ class RebindBody(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     generation: int = Field(..., ge=1)
+
+
+class ProfileBody(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    generation: int = Field(..., ge=1)
+    profile_id: str = Field(..., min_length=1, max_length=64)
 
 
 def _bind_actor(user: User) -> None:
@@ -88,3 +94,33 @@ def rebind_thread(
 ):
     _bind_actor(user)
     return dc.rebind_scope(thread_id, generation=body.generation)
+
+
+@router.post('/{thread_id}/profile')
+def switch_thread_profile(
+    thread_id: str,
+    body: ProfileBody,
+    user: User = Depends(require_user),
+):
+    """Switch provider profile; unknown and keyless profiles refuse alike.
+
+    One refusal for both, naming neither the profile nor any key or env
+    variable, so the answer never says whether a credential is set.
+    """
+    from routers.chat import _profile_chat_ready
+    from services import llm_config
+
+    _bind_actor(user)
+    try:
+        profile = llm_config.resolve_profile(body.profile_id)
+    except llm_config.ProfileNotConfiguredError:
+        profile = None
+    if profile is None or not _profile_chat_ready(profile):
+        raise HTTPException(status_code=422, detail={
+            'error_kind': 'profile_unavailable',
+            'message': 'That model profile is not available. Pick one from the model menu.',
+        })
+    thread, _session = dc.switch_profile(
+        thread_id, generation=body.generation, profile=profile,
+    )
+    return thread
