@@ -34,6 +34,8 @@ function OpenRun({ taskId, title, onConversation }: { taskId: string; title: str
     // The companion renders the card on its next frames: scroll once it is there.
     let tries = 0
     const scroll = () => {
+      // The retry loop can outlive the page (or a test's DOM): stop once it is gone.
+      if (typeof document === 'undefined') return
       const card = runCard(taskId)
       if (card) card.scrollIntoView({ block: 'nearest' })
       else if (++tries < 40) window.setTimeout(scroll, 50)
