@@ -80,11 +80,17 @@ configured in the shipped app. A final segment yields a one-time
 `speech:<segment_id>` ticket that `run_turn` redeems against the exact
 recognised text before utterance admission (`speech_final_unknown` /
 `speech_final_mismatch` otherwise). Rebind and episode rotation close the
-session (`rebind`, `stale_generation`, `restart` on takeover); abrupt exits
-settle the reservation cap flagged `usage_unverified` (never under-count), a
-clean end settles reported usage. Ledger refactor: `_reserve_in`/`_settle_in`
+session (`rebind`, `stale_generation`, `restart` on takeover). `end` closes the
+room and waits up to `USAGE_GRACE_S` for the worker's `final` usage report,
+then settles reported usage; a start that fails settles reported usage (0);
+every other exit, a lapsed grace or a crash while `starting` settles the
+reservation cap flagged `usage_unverified` (never under-count). Transport open
+and close run outside the durable-thread lock; a start superseded by a rebind
+while the room opens is refused and the room closed. Tickets carry their
+admission generation.
+Ledger refactor: `_reserve_in`/`_settle_in`
 (public `reserve_budget`/`settle_budget` unchanged). Tests:
-`tests/test_live_speech_session_lc07.py` (38 passed); durable/admission/
+`tests/test_live_speech_session_lc07.py` (57 passed); durable/admission/
 transport/manifest neighbours 163 passed; route_chat_disposition,
 project_route_acl_policy, write_surface_lock_policy pass; inventory,
 route-parity and control-matrix `--check` ok.

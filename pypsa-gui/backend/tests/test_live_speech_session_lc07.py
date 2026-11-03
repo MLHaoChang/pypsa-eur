@@ -511,7 +511,14 @@ def test_speech_routes_over_http(client, transport, monkeypatch):
     assert MEDIA_SECRET not in got.text
     ended = client.post(f'/api/durable-conversations/{tid}/speech/end',
                         json={'generation': gen, 'session_id': sid})
-    assert ended.json()['session']['closed_reason'] == 'end'
+    assert ended.json()['status'] == 'closing'
+    final = client.post(f'/api/durable-conversations/{tid}/speech/usage',
+                        headers={'X-Bridge-Token': token},
+                        json={'session_id': sid, 'usage_id': 'u2', 'kind': 'media',
+                              'amount': 4, 'unit': 'media_seconds', 'final': True})
+    assert final.json()['status'] == 'settled'
+    assert client.get(f'/api/durable-conversations/{tid}/speech').json()['session'][
+        'closed_reason'] == 'end'
     monkeypatch.delenv(ls.ENABLE_ENV)
     off = client.get(f'/api/durable-conversations/{tid}/speech')
     assert (off.status_code, off.json()['detail']['error_kind']) == (503, 'speech_disabled')
@@ -594,11 +601,16 @@ def test_transport_is_called_without_the_thread_lock():
             import threading
 
             seen = []
-            t = threading.Thread(target=lambda: seen.append(dc._LOCK.acquire(timeout=1)))
+
+            def probe():
+                got = dc._LOCK.acquire(timeout=1)
+                seen.append(got)
+                if got:
+                    dc._LOCK.release()
+
+            t = threading.Thread(target=probe)
             t.start()
             t.join()
-            if seen and seen[0]:
-                dc._LOCK.release()
             held['other_thread_got_lock'] = bool(seen and seen[0])
             return super().open_session(**kwargs)
 
@@ -615,7 +627,7 @@ def test_failed_start_settles_reported_usage_once(monkeypatch):
     _refusal(ls.start, tid, generation=gen, language='en')
     sid = _thread_json(tid)['speech']['session_id']
     charges = _settled_once(tid, sid)
-    assert all(c['amount'] == 0 and c['flags'] == [] for c in charges.values())
+    assert all(c['amount'] == 0 and 'flags' not in c for c in charges.values())
     assert _thread_json(tid)['speech']['closed_reason'] == 'error'
 
 
