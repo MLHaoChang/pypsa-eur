@@ -41,6 +41,10 @@ const STATES = {
   '6-mixed-results': { pick: [], fill: false, job: job([row('B'), row('C', { status: 'not_converged', outcome: 'not_converged', verdict: 'Loop hit its round limit' }),
     row('E', { ...FAILED }), row('D', { outcome: 'fail', checks: [chk('escr', 'fail'), chk('transformer', 'ok')] }), row('A', { backup_autonomy_h: 4, backup_energy_mwh: 320, checks: [chk('escr', 'ok'), chk('harmonics', 'not_run'), chk('grid_readiness', 'not_run')] })]) },
   '7-blocked-no-inputs': { pick: ['A', 'B'], fill: false, job: null },
+  // Prefilled from the (mocked) network and grid code; autonomy loaded from the project's stored value.
+  '9-prefilled': { pick: ['B', 'C'], fill: false, gridCode: 'eu_rfg_dcc_ce', prefill: true, job: null },
+  '10-autonomy-stored': { pick: ['A', 'B'], fill: false, gridCode: 'eu_rfg_dcc_ce', prefill: true, autonomy: 12, job: null },
+  '11-blank-with-reasons': { pick: ['B', 'C'], fill: false, gridCode: 'eu_rfg_dcc_ce', noPst: true, job: null },
   '8-stopped': { pick: [], fill: false, job: job([row('B'), { ...row('C'), ...STOPPED }], { status: 'aborted' }) },
 }
 
@@ -69,15 +73,28 @@ try {
       localStorage.setItem('network-diagram:theme', theme)
     }, { mode, theme, project: PROJECT })
     const page = await ctx.newPage()
+    if (process.env.DEBUG_REQ) page.on('response', r => { if (r.url().includes('/api/')) { console.log(r.status(), r.url()); if (/campus-electrical\/[^/]+$/.test(r.url())) r.text().then(t => console.log(t.slice(0, 200))).catch(() => {}) } })
     page.setDefaultTimeout(10000)
     page.on('pageerror', e => problems.push(`${mode}/${theme}: page error: ${e.message}`))
     let current = STATES['1-nothing-picked']
+    const NET = { buses: [{ name: 'Hub 33 kV', eh_critical: true }, { name: 'PCC', eh_poc: true, eh_sk_mva: 1200 }],
+      loads: [{ name: 'Process', bus: 'Hub 33 kV', p_set: 80 }],
+      links: [{ name: 'grid import', eh_role: 'grid_import', bus0: 'Grid', bus1: 'PCC', p_min_pu: 0 }, { name: 'tie 2', bus0: 'Hub 33 kV', bus1: 'PCC', p_min_pu: 0 }] }
+    for (const k of ['buses', 'loads', 'links'])
+      await page.route(u => u.pathname === `/api/network/${k}` || u.pathname === `/api/network/equipment/${k}`, r => r.fulfill({ json: current.prefill || current.fill ? NET[k] : [] }))
     const campusState = () => ({ campus_yaml: null, skipped: [], profiles: {}, stale: false, hub_cost: null, hub_cost_reason: null,
       results: null, settings: current.gridCode ? { profile: current.gridCode } : null })
+    await page.route(u => /\/api\/projects(\/?$|\?)/.test(u.pathname + u.search), async r => {
+      if (r.request().method() !== 'GET') return r.continue()
+      const res = await r.fetch(); const list = await res.json()
+      r.fulfill({ response: res, json: list.map(p => (p.name === PROJECT && current.autonomy ? { ...p, settings: { ...(p.settings || {}), backup_autonomy_h: current.autonomy } } : p)) })
+    })
     await page.route(u => u.pathname.includes('/intent-comparison'), r => r.request().method() === 'GET'
       ? (current.job ? r.fulfill({ json: current.job }) : r.fulfill({ status: 404, json: { detail: 'none' } })) : r.fulfill({ json: current.job }))
     await page.route(u => /\/api\/campus-electrical\/[^/]+$/.test(u.pathname), r => r.fulfill({ json: campusState() }))
-    await page.route(u => u.pathname.startsWith('/api/campus-electrical/') && !/\/[^/]+$/.test(u.pathname.replace('/api/campus-electrical/', '')), r => r.fulfill({ json: {} }))
+    await page.route(u => /\/api\/campus-electrical\/[^/]+\/.+/.test(u.pathname), r => r.fulfill({ json: {} }))
+    // Registered last: Playwright runs the newest matching route first, so this beats the catch-all above.
+    await page.route(u => u.pathname.includes('/published/'), r => r.fulfill({ json: { id: 'eu_rfg_dcc_ce', yaml: '', profile: current.noPst ? {} : { pst_limit: { value: 0.8 } }, review: null, unconfirmed: [], document: null } }))
     await page.goto(`${BASE}/`)
     await page.waitForLoadState('networkidle')
     await page.evaluate(async ({ url, name }) => {
@@ -102,8 +119,10 @@ try {
         await anchor.waitFor()
         for (const i of st.pick) await page.getByLabel(new RegExp(`^${i}\\. `)).check()
         if (st.fill) {
-          const v = { critical: '80', link: 'poc', ramp: '10', sk: '1000', library: '50,100', swing: '20', amp: '5', period: '2' }
+          const v = { critical: '80', ramp: '10', sk: '1000', pst: '1', library: '50,100', swing: '20', amp: '5', period: '2' }
           for (const [k, val] of Object.entries(v)) await page.getByTestId(`intent-in-${k}`).fill(val)
+          const opt = await page.getByTestId('intent-in-link').locator('option').nth(1).getAttribute('value').catch(() => null)
+          if (opt) await page.getByTestId('intent-in-link').selectOption(opt)
         }
         await page.waitForTimeout(300)
         const target = (await section.count()) ? section : page.locator('main')

@@ -3,7 +3,12 @@
 // unresolved, failed or stopped is never shown as a pass, and a converged row says how many checks did not run.
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { errorText } from '../api/campusElectrical'
+import { campusApi, errorText } from '../api/campusElectrical'
+import { networkApi } from '../api/network'
+import { nk } from '../utils/queryKeys'
+import { intentDefaults } from './intentDefaults'
+import { projectsApi } from '../api/projects'
+import type { ProjectInfo } from '../api/types'
 import {
   DESIGN_INTENTS, intentComparisonApi, type CheckState, type DesignIntent, type IntentRow, type Outcome,
 } from '../api/intentComparison'
@@ -28,6 +33,8 @@ export const CHECK_WORDS: Record<CheckState, { text: string; tone: Tone }> = {
 const ASSET_LABELS: Record<string, string> = {
   q_ss: 'STATCOM steady-state', q_dyn: 'STATCOM dynamic', p_sm: 'Smoothing power', e_sm: 'Smoothing energy',
 }
+/** Carrier names that are acronyms, shown upper case in an asset label. */
+const ACRONYMS = /\b(bess|ups|pv|dc|ac)\b/gi
 const ASSET_PREFIX: Record<string, string> = { store: 'Store', charger: 'Charger', s_x: 'Converter rating' }
 export const CHECK_LABELS: Record<string, string> = {
   transformer: 'Transformer', pq: 'PQ capability', escr: 'ESCR', smoothing: 'Smoothing', pst: 'Flicker (Pst)',
@@ -42,7 +49,7 @@ const humanise = (s: string) => {
 export const assetLabel = (key: string) => {
   if (ASSET_LABELS[key]) return ASSET_LABELS[key]
   const [kind, rest] = key.split(':', 2)
-  return rest !== undefined && ASSET_PREFIX[kind] ? `${ASSET_PREFIX[kind]} ${rest}` : humanise(key)
+  return rest !== undefined && ASSET_PREFIX[kind] ? `${ASSET_PREFIX[kind]} ${rest.replace(ACRONYMS, m => m.toUpperCase())}` : humanise(key)
 }
 export const checkLabel = (name: string) => CHECK_LABELS[name] ?? humanise(name)
 const byIntent = <T,>(items: T[], id: (t: T) => string) => [...items].sort((a, b) => id(a).localeCompare(id(b)))
@@ -52,6 +59,9 @@ const NO_CODE_LINK = 'Set grid code ›'
 const INPUT = 'px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20'
 const POLL_MS = 2000
 
+const AUTONOMY_DEFAULT_H = 4
+const AUTONOMY_MAX_H = 720 // the backend's ceiling (0 < h <= 720)
+const autonomyOk = (s: string) => { const v = Number(s); return s.trim() !== '' && v > 0 && v <= AUTONOMY_MAX_H }
 const num = (s: string) => (s.trim() === '' ? NaN : Number(s))
 const fmt = (v: number | null | undefined, d = 1) => (v == null ? '–' : v.toLocaleString(undefined, { maximumFractionDigits: d }))
 /** The loop's last round is not a final answer unless it converged: its sizes are shown muted, marked as such. */
@@ -63,9 +73,39 @@ export default function IntentComparisonSection({ name, gridCode }: { name: stri
   const setSlidePanel = useUIStore(s => s.setSlidePanel)
   const requestGridCodeScroll = useUIStore(s => s.requestGridCodeScroll)
   const [chosen, setChosen] = useState<DesignIntent[]>([])
-  const [autonomy, setAutonomy] = useState('4')
-  const [f, setF] = useState({ critical: '', link: '', ramp: '', sk: '', pst: '1', library: '', swing: '', amp: '', period: '' })
-  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF(p => ({ ...p, [k]: e.target.value }))
+  const projects = useQuery({ queryKey: ['projects'], queryFn: () => projectsApi.list(), staleTime: 30_000 })
+  const storedAutonomy = (projects.data as ProjectInfo[] | undefined)?.find(p => p.name === name)?.settings?.backup_autonomy_h
+  // The stored value is only the default a run starts from; an edit is this run's own (AS10-AUTONOMY-2).
+  const [edited, setAutonomy] = useState<string | null>(null)
+  const autonomy = edited ?? String(storedAutonomy ?? AUTONOMY_DEFAULT_H)
+  // Fields with a network or grid-code source hold only what the user typed (undefined = the prefill shows).
+  const [typed, setF] = useState<Partial<Record<'critical' | 'link' | 'sk' | 'pst', string>>>({})
+  const [g, setG] = useState({ ramp: '', library: '', swing: '', amp: '', period: '' })
+  const q = (root: string, queryFn: () => Promise<unknown>) => ({ queryKey: nk(name, root), queryFn, staleTime: 30_000, retry: false })
+  const buses = useQuery(q('buses', networkApi.getBuses))
+  const loads = useQuery(q('loads', networkApi.getLoads))
+  const links = useQuery(q('links', networkApi.getLinks))
+  const profile = useQuery({
+    queryKey: ['intentGridCode', name, gridCode], enabled: gridCode != null, retry: false, staleTime: 30_000,
+    queryFn: () => campusApi.getPublishedGridCode(name, gridCode as string),
+  })
+  const defaults = intentDefaults({
+    buses: (buses.data ?? []) as never, loads: (loads.data ?? []) as never, links: (links.data ?? []) as never,
+    pstLimit: profile.data?.profile.pst_limit?.value ?? null, gridCode,
+    status: { buses: buses.status === 'pending' ? 'loading' : buses.status === 'error' ? 'error' : 'ok',
+      loads: loads.status === 'pending' ? 'loading' : loads.status === 'error' ? 'error' : 'ok',
+      links: links.status === 'pending' ? 'loading' : links.status === 'error' ? 'error' : 'ok',
+      grid: gridCode == null || profile.status === 'success' ? 'ok' : profile.status === 'error' ? 'error' : 'loading' },
+  })
+  const f = {
+    critical: typed.critical ?? defaults.critical.value, link: typed.link ?? defaults.link.value,
+    sk: typed.sk ?? defaults.sk.value, pst: typed.pst ?? defaults.pst.value, ...g,
+  }
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const v = e.target.value
+    if (k === 'critical' || k === 'link' || k === 'sk' || k === 'pst') setF(p => ({ ...p, [k]: v }))
+    else setG(p => ({ ...p, [k]: v }))
+  }
   const key = ['intentComparison', name]
   const job = useQuery({
     queryKey: key, queryFn: () => intentComparisonApi.get(name), retry: false,
@@ -92,7 +132,16 @@ export default function IntentComparisonSection({ name, gridCode }: { name: stri
   })
   const abort = useMutation({ mutationFn: () => intentComparisonApi.abort(name), onSuccess: () => qc.invalidateQueries({ queryKey: key }) })
   const toggle = (id: DesignIntent) => setChosen(c => (c.includes(id) ? c.filter(x => x !== id) : [...c, id]))
-  const autonomyBad = chosen.includes('A') && !(Number(autonomy) > 0)
+  const autonomyValid = autonomyOk(autonomy)
+  const autonomyBad = chosen.includes('A') && !autonomyValid
+  const saveAutonomy = useMutation({
+    mutationFn: () => projectsApi.updateSettings(name, { backup_autonomy_h: Number(autonomy) }),
+    onSuccess: updated => {
+      qc.setQueryData<ProjectInfo[]>(['projects'], prev =>
+        prev?.map(p => (p.name === updated.name ? { ...p, settings: updated.settings } : p)) ?? prev)
+      void qc.invalidateQueries({ queryKey: ['projects'] })
+    },
+  })
   const complete = [f.critical, f.ramp, f.sk, f.pst, f.swing, f.amp, f.period].every(v => Number(v) > 0) &&
     f.link.trim() !== '' && f.library.trim() !== ''
   const blocked = chosen.length < 2 ? NEED_TWO : autonomyBad ? null : !complete ? 'Fill in every input below, all greater than zero.' : null
@@ -124,10 +173,17 @@ export default function IntentComparisonSection({ name, gridCode }: { name: stri
       </div>
       {blocked && <p className="text-[11px] text-muted" data-testid="intent-blocked">{blocked}</p>}
       {chosen.includes('A') && (
-        <Field label="Backup autonomy (h)" hint="Intent A: backup energy = critical load × hours. Used for this run only; default 4 h.">
+        <Field label="Backup autonomy (h)" hint={`Intent A: backup energy = critical load × hours. Each run uses the value shown and records it. ${storedAutonomy != null ? `The project default is ${fmt(storedAutonomy, 4)} h.` : `No project default is saved, so ${AUTONOMY_DEFAULT_H} h applies.`}`}>
           <input className={INPUT} inputMode="decimal" value={autonomy} onChange={e => setAutonomy(e.target.value)}
             disabled={running} data-testid="intent-autonomy" />
-          {autonomyBad && <p className="text-[11px] text-err" data-testid="intent-autonomy-error">Enter a number of hours above zero.</p>}
+          {autonomyBad && <p className="text-[11px] text-err" data-testid="intent-autonomy-error">Enter a number of hours above zero, up to 720.</p>}
+          <div className="mt-1 flex items-center gap-2">
+            <Btn disabled={!autonomyValid || saveAutonomy.isPending || Number(autonomy) === storedAutonomy}
+              onClick={() => saveAutonomy.mutate()} data-testid="intent-autonomy-save"
+              title="Stores this value in the project as the default for later runs. Results already shown keep the value they used.">
+              Save as project default</Btn>
+          </div>
+          {saveAutonomy.isError && <p className="text-[11px] text-err" role="alert" data-testid="intent-autonomy-save-error">{errorText(saveAutonomy.error)}</p>}
         </Field>
       )}
       <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
@@ -136,7 +192,17 @@ export default function IntentComparisonSection({ name, gridCode }: { name: stri
           ['swing', 'Load swing (MW)'], ['amp', 'Oscillation amplitude (MW)'], ['period', 'Oscillation period (s)']] as const)
           .map(([k, label]) => (
             <Field key={k} label={label}>
-              <input className={INPUT} value={f[k]} onChange={set(k)} disabled={running} data-testid={`intent-in-${k}`} />
+              {k === 'link' ? (
+                <select className={INPUT} value={f.link} onChange={set('link')} disabled={running} data-testid="intent-in-link">
+                  <option value="">Choose a link</option>
+                  {defaults.links.map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+              ) : (
+                <input className={INPUT} value={f[k]} onChange={set(k)} disabled={running} data-testid={`intent-in-${k}`} />
+              )}
+              {(k === 'critical' || k === 'link' || k === 'sk' || k === 'pst') && f[k] === '' && defaults[k].reason && (
+                <p className="text-[11px] text-muted" data-testid={`intent-why-${k}`}>{defaults[k].reason}</p>
+              )}
             </Field>
           ))}
       </div>
