@@ -23,7 +23,8 @@ Refusals are `SceneError`s with a route detail `code` (never a chat tool
 error kind): `unsupported_target`, `unknown_target`, `ambiguous_target`,
 `orphan_member`, `cycle`, `invalid_allocation`, `duplicate`,
 `confirmation_required`, `not_roof_eligible`, `off_roof`, `unbound_target`,
-`project_not_open` (422) and `target_changed` (409). Messages name things in
+`not_placed`, `already_placed`, `project_not_open` (422), `target_changed`
+(409) and `detach_not_found` (404). Messages name things in
 words (`it · load`), never as a class path.
 """
 from __future__ import annotations
@@ -528,10 +529,18 @@ def _unbound_text(n, cls: str, name: str) -> str:
             "attach it again first")
 
 
-def prepare_place(scene: dict[str, Any], n, inputs: dict[str, Any],
-                  recorded: dict[str, str]) -> tuple[dict[str, Any], dict[str, Any]]:
+def _placeable(key: Any) -> tuple[str, str]:
+    """`<Class>:<name>` of a placeable class, else `unsupported_target` (place_existing and detach)."""
     from services.site_service import PLACEABLE_CLASSES
 
+    cls, name = _split(key) if isinstance(key, str) else ("", "")
+    if cls not in PLACEABLE_CLASSES or not name:
+        raise _refuse("unsupported_target", f"{key}: not a placeable model item")
+    return cls, name
+
+
+def prepare_place(scene: dict[str, Any], n, inputs: dict[str, Any],
+                  recorded: dict[str, str]) -> tuple[dict[str, Any], dict[str, Any]]:
     placements = inputs.get("placements")
     if not isinstance(placements, dict) or not placements or len(placements) > MAX_ASSOCIATIONS:
         raise _refuse("invalid_placements", "Place: send the items to place")
@@ -539,9 +548,7 @@ def prepare_place(scene: dict[str, Any], n, inputs: dict[str, Any],
     footprints = scene.get("asset_footprints") or {}
     plan, findings = {}, []
     for key, p in placements.items():
-        cls, name = _split(key) if isinstance(key, str) else ("", "")
-        if cls not in PLACEABLE_CLASSES or not name:
-            raise _refuse("unsupported_target", f"{key}: not a placeable model item")
+        cls, name = _placeable(key)
         label = _label(n, cls, name)
         if not _exists(n, cls, name):
             raise _refuse("unknown_target", f"{label}: not in the model", target={"class": cls, "name": name})
@@ -560,9 +567,9 @@ def prepare_place(scene: dict[str, Any], n, inputs: dict[str, Any],
                 raise _refuse("orphan_member", f"{label}: no such building roof", member=on)
             carrier = (_carrier(n, cls, name) or "").lower() if cls == "Generator" else ""
             if not any(c in carrier for c in ROOF_CARRIERS):
-                raise _refuse("not_roof_eligible", f"{label}: only solar panels go on a roof")
+                raise _refuse("not_roof_eligible", f"{label}: only solar panels go on a roof", key=key)
             if not building.get("height_m") or not all(_inside(pt, building["footprint"]) for pt in outline):
-                raise _refuse("off_roof", f"{label}: not within the roof of building {bid}")
+                raise _refuse("off_roof", f"{label}: not within the roof of building {bid}", key=key)
             entry["on"] = on
         else:
             for bid, b in sorted(buildings.items()):
@@ -594,6 +601,181 @@ def apply_place(scene: dict[str, Any], n, stored: dict[str, Any],
         bindings[key] = _mint(n, step["expect"]["class"], step["expect"]["name"])
         placements[key] = step["entry"]
     return {"placements": placements}, bindings
+
+
+# ── detach and undo (SC-02d) ────────────────────────────────────────────────
+# Detach takes placed items off the scene; their components stay in the model
+# and their sites.json D06 bindings are kept. It drops each item's group
+# memberships (groups stay, even empty) and the attachments whose feature it
+# is. Undo is a delta on the current head, never a revert: it re-derives what
+# the detach removed from the detach's parent generation (never from the
+# client) and adds it back, re-checking every instance by uid.
+
+DETACH_NOT_FOUND = "This detach can’t be undone now: the scene changed since"
+
+
+def _uid_name(n, cls: str, uid: str | None, name: str) -> str | None:
+    """The live name of the instance a key was bound to; by name only when it never had a uid."""
+    if uid:
+        return component_identity.name_of(n, cls, uid)
+    return name if _exists(n, cls, name) else None
+
+
+def _detach_keys(scene: dict[str, Any], n, inputs: dict[str, Any]) -> list[str]:
+    keys = inputs.get("keys")
+    if not isinstance(keys, list) or not keys or len(keys) > MAX_ASSOCIATIONS:
+        raise _refuse("invalid_placements", "Detach: send the items to detach")
+    placements = (scene.get("site") or {}).get("placements") or {}
+    seen: set[str] = set()
+    for key in keys:
+        cls, name = _placeable(key)
+        if key in seen:
+            raise _refuse("duplicate", f"{_label(n, cls, name)} is listed twice", key=key)
+        seen.add(key)
+        if key not in placements:
+            raise _refuse("not_placed", f"{_label(n, cls, name)}: not placed in this scene", key=key)
+    return list(keys)
+
+
+def _assoc_label(n, a: dict[str, Any]) -> str:
+    live = component_identity.name_of(n, a["class"], a["uid"]) if a.get("uid") else None
+    if live is None and not a.get("uid"):
+        return f"{a.get('carrier')} load (unavailable)"
+    return _label(n, a["class"], live or a.get("name_at_bind") or "")
+
+
+def _detached(scene: dict[str, Any], keys: list[str]) -> dict[str, Any]:
+    """The scene without `keys`: placements, memberships and their attachments pruned."""
+    gone = set(keys)
+    placements = {k: v for k, v in ((scene.get("site") or {}).get("placements") or {}).items() if k not in gone}
+    groups = [{**g, "members": [m for m in g["members"] if m not in gone]} for g in scene.get("groups") or []]
+    associations = [a for a in scene.get("associations") or [] if a["feature"] not in gone]
+    return {"placements": placements, "groups": groups, "associations": associations}
+
+
+def prepare_detach(scene: dict[str, Any], n, inputs: dict[str, Any],
+                   _recorded: dict[str, str]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Caller holds the network lock. Never writes or mints."""
+    keys = _detach_keys(scene, n, inputs)
+    after = _detached(scene, keys)
+    _check_allocation(_rows_of(n, after["associations"]))       # a share left without its item is refused
+    left = {g["id"]: g["members"] for g in after["groups"]}
+    items = []
+    for key in keys:
+        cls, name = _split(key)
+        items.append({
+            "key": key, "label": _label(n, cls, name), "kept_in_model": True,
+            "groups": [{"id": g["id"], "label": g["label"], "left_empty": not left[g["id"]]}
+                       for g in scene.get("groups") or [] if key in g["members"]],
+            "associations": [{"id": a["id"], "class": a["class"], "label": _assoc_label(n, a)}
+                             for a in scene.get("associations") or [] if a["feature"] == key],
+        })
+    return {"keys": keys}, {"items": items, "findings": []}
+
+
+def apply_detach(scene: dict[str, Any], n, stored: dict[str, Any],
+                 recorded: dict[str, str]) -> tuple[dict[str, Any], dict[str, str | None]]:
+    """
+    Scene changes only; the binding stays. `_detached` (key -> the uid it was
+    bound to) goes into the receipt, so undo checks the same instance even
+    after a later sites.json write prunes the binding. Mints nothing.
+    """
+    keys = _detach_keys(scene, n, {"keys": stored["keys"]})
+    after = _detached(scene, keys)
+    _check_allocation(_rows_of(n, after["associations"]))
+    uids = {}
+    for key in keys:
+        cls, name = _split(key)
+        prior = recorded.get(key)
+        uids[key] = prior if isinstance(prior, str) else component_identity.get(n, cls, name)
+    return {**after, "_detached": uids}, {}
+
+
+def _restore(scene: dict[str, Any], n, record: dict[str, Any], *, at_apply: bool) -> dict[str, Any]:
+    """
+    What undo adds to the current head: per detached key, its placement under
+    the instance's current name, its memberships of groups that still exist
+    and its attachments. Refuses when an item is placed again, its instance or
+    an attachment's target is gone, or a split would break.
+    """
+    current = (scene.get("site") or {}).get("placements") or {}
+    groups = {g["id"]: g for g in scene.get("groups") or []}
+    ids = {a["id"] for a in scene.get("associations") or []}
+    restore, findings, rows = {}, [], []
+    for key, uid in record["keys"].items():
+        cls, name = _split(key)
+        live = _uid_name(n, cls, uid, name)
+        if live is None:
+            text = _unbound_text(n, cls, name)
+            raise _changed(text, "unbound_target") if at_apply else _refuse("unbound_target", text, key=key)
+        now = f"{cls}:{live}"
+        if now in current or now in restore or any(a["id"] in ids for a in record["associations"]
+                                                     if a["feature"] == key):
+            text = f"{_label(n, cls, live)}: it was placed again since the detach, so it can’t be restored"
+            raise _changed(text, "already_placed") if at_apply else _refuse("already_placed", text, key=now)
+        member_of, missing = [], []
+        for g in record["groups"]:
+            if key in g["members"]:
+                (member_of if g["id"] in groups else missing).append(g)
+        for g in missing:
+            findings.append({"code": "membership_not_restored", "severity": "warn", "objects": [now, g["id"]],
+                             "group": g["label"],
+                             "message": f"{_label(n, cls, live)} is not put back in group {g['label']}: "
+                                        "the group was deleted"})
+        attached = []
+        for a in record["associations"]:
+            if a["feature"] != key:
+                continue
+            if a.get("uid") and component_identity.name_of(n, a["class"], a["uid"]) is None:
+                raise _changed(f"{_label(n, a['class'], a.get('name_at_bind') or '')} was deleted or replaced "
+                               "since the detach: review again")
+            attached.append({**copy.deepcopy(a), "feature": now})
+        rows += attached
+        restore[now] = {"uid": uid, "class": cls, "name": live, "entry": copy.deepcopy(record["placements"][key]),
+                        "groups": [g["id"] for g in member_of], "associations": attached}
+    _check_allocation(_rows_of(n, list(scene.get("associations") or []) + rows))
+    return {"restore": restore, "findings": findings}
+
+
+def _record_of(inputs: dict[str, Any], lookup) -> dict[str, Any]:
+    record = lookup(inputs.get("proposal"))
+    if record is None:
+        raise _refuse("detach_not_found", DETACH_NOT_FOUND, "not_found")
+    return record
+
+
+def prepare_undo_detach(scene: dict[str, Any], n, inputs: dict[str, Any], _recorded: dict[str, str],
+                        *, lookup) -> tuple[dict[str, Any], dict[str, Any]]:
+    """`lookup(proposal id)` -> the detach's record from this site's own chain, else None."""
+    derived = _restore(scene, n, _record_of(inputs, lookup), at_apply=False)
+    items = [{"key": k, "label": _label(n, r["class"], r["name"]),
+              "groups": [{"id": g, "label": next((x["label"] for x in scene.get("groups") or [] if x["id"] == g), g)}
+                         for g in r["groups"]],
+              "associations": [{"id": a["id"], "class": a["class"], "label": _assoc_label(n, a)}
+                               for a in r["associations"]]}
+             for k, r in derived["restore"].items()]
+    return {"proposal": inputs.get("proposal"), "derived": derived}, {"items": items, "findings": derived["findings"]}
+
+
+def apply_undo_detach(scene: dict[str, Any], n, stored: dict[str, Any], _recorded: dict[str, str],
+                      *, lookup) -> tuple[dict[str, Any], dict[str, str | None]]:
+    """Re-derives from the chain and refuses, writing nothing, if that differs from the preview."""
+    record = _record_of({"proposal": stored["proposal"]}, lookup)
+    derived = _restore(scene, n, record, at_apply=True)
+    if derived != stored["derived"]:
+        raise _changed("What this undo restores changed since you reviewed it: review again")
+    placements = copy.deepcopy((scene.get("site") or {}).get("placements") or {})
+    groups = copy.deepcopy(scene.get("groups") or [])
+    associations = copy.deepcopy(scene.get("associations") or [])
+    bindings: dict[str, str | None] = {}
+    for key, r in derived["restore"].items():
+        placements[key] = r["entry"]
+        for g in groups:
+            if g["id"] in r["groups"] and key not in g["members"]:
+                g["members"].append(key)
+        associations += r["associations"]
+        bindings[key] = r["uid"] or _mint(n, r["class"], r["name"])
+    return {"placements": placements, "groups": groups, "associations": associations}, bindings
 
 
 # ── read-back (scene GET; never writes) ─────────────────────────────────────

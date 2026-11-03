@@ -220,7 +220,7 @@ def main():
             elif steps[0][0] == "list_project_runs" and len(steps) == 3 and steps[1][1].get("results_tab") in LC03H_FAMILIES:
                 read = results[2]
                 text = (f"LC03H_FAMILY {steps[1][1]['results_tab']} Run {steps[1][1]['run_id']} "
-                        f"({read.get('scope')}).")
+                        f"({read.get('scope')}) from {(results[1].get('discussed') or {}).get('section')}.")
             elif steps[0][0] == "list_project_runs" and steps[-1][0] == "get_results":
                 read = results[2]
                 gas = ((read.get("data") or {}).get("by_carrier") or {}).get("gas") or {}

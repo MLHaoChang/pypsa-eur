@@ -1,0 +1,4 @@
+M1 drop the already_placed check: KILLED by test_undoing_twice_is_already_placed_and_a_reapply_reads_back
+M2 undo restores the parent generation wholesale: KILLED by test_undo_is_a_delta_on_the_current_head
+M3 detach drops the binding: KILLED by test_detach_takes_the_item_off_the_scene_and_keeps_component_and_binding
+restored: test_site_scene_detach.py exit 0

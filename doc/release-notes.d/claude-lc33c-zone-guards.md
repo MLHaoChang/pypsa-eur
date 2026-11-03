@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A time-series CSV whose timestamps end in a zone abbreviation ("CET", "CEST", "EST", "PST"…) is refused as `timeseries_timezone_aware` instead of silently losing the zone, and naive text after the time ("Mon", "PM") is no longer mistaken for a zone.

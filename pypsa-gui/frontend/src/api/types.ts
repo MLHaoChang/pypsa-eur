@@ -721,6 +721,12 @@ export interface ProjectSettings {
    * impedance rescale, as a bus drag does for lines today.
    */
   derive_lengths_from_geometry?: boolean
+  /**
+   * AS-10 intent A's default backup autonomy in hours, 0 < h <= 720 (server
+   * default 4). Only the default a comparison run starts from: each run
+   * records the value it used.
+   */
+  backup_autonomy_h?: number
 }
 
 // Compact summary returned by GET /api/projects/{name}/compare-state.

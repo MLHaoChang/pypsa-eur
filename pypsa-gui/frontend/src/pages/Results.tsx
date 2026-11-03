@@ -223,9 +223,10 @@ export default function Results() {
   // Guided (spec §3.7): a STORED tab Guided does not show is displayed as
   // adequacy. Display only — `tab` and `results:active-tab` keep the user's
   // choice, so switching back to Expert restores it. An explicitly requested
-  // hidden tab is shown (§10 addendum, B3) as `advancedTab`.
+  // hidden tab is shown (§10 addendum, B3) as `advancedTab`. So is the tab of a
+  // past run on screen (LC-03 c): the run stays as it was across the mode switch.
   const advancedTab: ResultsTab | null =
-    (uiMode === 'guided' && requestedTab === tab && !GUIDED_TABS.has(tab)) ? tab : null
+    (uiMode === 'guided' && (requestedTab === tab || discussedRun?.resultsTab === tab) && !GUIDED_TABS.has(tab)) ? tab : null
   const effectiveTab: ResultsTab =
     (uiMode === 'guided' && !GUIDED_TABS.has(tab) && advancedTab == null) ? 'adequacy' : tab
   const splitWrapRef = useRef<HTMLDivElement>(null)
@@ -703,7 +704,10 @@ export default function Results() {
       <button
         key={id}
         onClick={() => pickTab(id)}
-        title={advanced ? `${tip} — an advanced tab, shown because it was asked for; it leaves the strip when you pick another tab.` : tip}
+        title={!advanced ? tip
+          : discussedRun?.resultsTab === id
+            ? `${tip}. Advanced tab: shown because the past run on screen was opened here; it leaves when you pick another tab or clear the run.`
+            : `${tip}. Advanced tab: shown because it was asked for; it leaves the strip when you pick another tab.`}
         data-testid={`results-tab-${id}`}
         data-advanced={advanced ? 'true' : undefined}
         className={`h-8 px-3 shrink-0 flex items-center gap-1.5 text-[12px] font-medium border-b-2 -mb-px transition-colors
