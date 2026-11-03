@@ -52,9 +52,14 @@ Tests in `pypsa-gui/backend/tests/test_site_scene_detach.py`.
 - Frontend: `groupEdit.test.ts` (7), `PlacedEquipment.test.tsx` (11); `src/site3d` and SiteCanvas suites (54 files) pass; `tsc --noEmit` clean.
 - Green: `test_site_scene_detach.py` (34), `test_site_scene_*.py`, `test_site_identity.py`, `test_site_service.py`, `test_sites_routes.py`, the three policy tests and `test_tool_error_kind_manifest.py`: exit 0.
 
+## Screenshots
+
+[evidence/](evidence/), viewport 1600x1000, a seeded demo project: `01-selection` (full page, the magenta outline), `02-group-form`, `03-group-preview` (an overlap finding; a ground move into a building is a finding, not a refusal), `04-detach-preview`, `05-receipt-undo`, `06-undo-preview` (membership warning), `07-undo-disabled` (404 intercepted), `08-disabled-reason` (lock held by another user, intercepted); Expert: `01-selection-expert`, `04-detach-preview-expert`, `05-receipt-undo-expert`; dark: `01-selection-dark`, `04-detach-preview-dark`. Taken before two fixes they found: the undo-gone refusal no longer adds a generic "site no longer exists" line, and a read-only group Preview now gives the read-only reason (both tested).
+
 ## Residual risk and unfinished work
 
-- **Canvas Shift+click and the outline** are covered by screenshots, not by a unit test (no R3F pointer harness in the suite).
+- **Canvas Shift+click** is not covered by a test or a screenshot (headless WebGL hit-testing was not reliable); the outline is in `01-selection`.
+- **Not changed, seen in screenshots:** "Add model asset in Expert" stays active when read-only; in Expert the colour legend covers the Results pill; the Model panel scrolls at 1000 px height.
 - **The Undo receipt lives in the client store**: a page reload drops it; the detach is then undone by placing the items again.
 - **Undo after a copy.** A copied project carries only the pointed generation, so a detach made before the copy cannot be undone in the copy (`detach_not_found`); the user places the item again.
 - **Another site's detach id** gives `detach_not_found` by construction (the lookup reads only this site's chain); no test spans two enabled sites.

@@ -42,7 +42,7 @@ export default function PlacedEquipment({ siteId, placements, itemName, writable
   const group = n >= 2
   useEffect(() => { setMove(NO_MOVE) }, [group, siteId])
 
-  const moveReason = !moveValid(move) ? FIX_FIELDS : isNoMove(move) ? NOTHING_TO_MOVE : blockedReason
+  const moveReason = blockedReason ?? (!moveValid(move) ? FIX_FIELDS : isNoMove(move) ? NOTHING_TO_MOVE : null)
   const receipt = lastDetach?.siteId === siteId ? lastDetach : null
   if (keys.length === 0 && !receipt) return null
 

@@ -131,6 +131,8 @@ describe('Placed equipment', () => {
     tick(BESS)
     expect(btn('detach-preview').disabled).toBe(true)
     expect(screen.getByTestId('detach-preview-reason').textContent).toBe('Read-only: ask an editor')
+    tick(PV)
+    expect(screen.getByTestId('group-preview-reason').textContent).toBe('Read-only: ask an editor')
   })
 
   it('a refused group move names the item', async () => {
@@ -184,6 +186,7 @@ describe('Detach and undo', () => {
     fireEvent.click(btn('detach-undo'))
     await waitFor(() => expect(btn('detach-undo').disabled).toBe(true))
     expect(screen.getByTestId('detach-undo-reason').textContent).toBe(UNDO_GONE)
+    expect(screen.queryByTestId('assoc-error')).toBeNull()               // no second, generic error line
   })
 
   it('an undo refused because the item was placed again names it', async () => {

@@ -287,8 +287,9 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
     } catch (e) {
       // A refusal that stays true (gone from history, placed again, its item replaced) disables Undo with its reason.
       const d = sceneErrorDetail(e)
-      if (d?.code === 'detach_not_found') setLastDetach({ ...receipt, blocked: UNDO_GONE })
-      else if (d?.code === 'already_placed' || d?.code === 'unbound_target') setLastDetach({ ...receipt, blocked: detachRefusalCopy(d.code, keyName(d.key ?? undefined)) })
+      // Gone from history: the disabled Undo carries the reason; no second, generic error line.
+      if (d?.code === 'detach_not_found') { setLastDetach({ ...receipt, blocked: UNDO_GONE }); return }
+      if (d?.code === 'already_placed' || d?.code === 'unbound_target') setLastDetach({ ...receipt, blocked: detachRefusalCopy(d.code, keyName(d.key ?? undefined)) })
       throw e
     }
   }, (code, key) => (code === 'detach_not_found' ? null : detachRefusalCopy(code, keyName(key))))
