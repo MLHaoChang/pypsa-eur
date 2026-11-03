@@ -7,7 +7,7 @@
  * Needs Vite on :5173. Vite's own auth gate asks the backend at :8000 for /api/health, so the script starts a
  * stub there (health only) unless something already answers.
  *
- * States: `legend` (the legend column against the Results pill), `readonly` (lock held by someone else),
+ * States: `legend` (the legend column against the Results pill), `readonly` (lock held by someone else), `readonly-item` (the same with an item chosen in Place),
  * `undo-reload` (the detach receipt comes back from the scene after a reload), `results-building` (SC-03: the Eye on, a
  * building selected and its group open, quarter-hourly labels), `results-unavailable` (SC-03: the run out of date, every
  * value unavailable in words). Add a state to STATES to extend.
@@ -82,6 +82,7 @@ const sceneResults = (snapshot, current) => {
 const STATES = {
   legend: { lastReceipt: null, readOnly: false },
   readonly: { lastReceipt: null, readOnly: true },
+  'readonly-item': { lastReceipt: null, readOnly: true, pick: true },
   'undo-reload': { lastReceipt: DETACH, readOnly: false },
   'results-building': { lastReceipt: null, readOnly: false, results: { current: true } },
   'results-unavailable': { lastReceipt: null, readOnly: false, results: { current: false } },
@@ -153,7 +154,7 @@ try {
       const ui = useUIStore.getState()
       ui.setCanvasView('site')
       if (readOnly) ui.setLockState({ readOnly: true, holderEmail: 'other@example.com', reason: 'locked-by-user' })
-    }, { readOnly: st.readOnly })
+    }, { readOnly: st.readOnly && !st.pick })
     if (key === 'undo-reload') { await page.reload(); await page.waitForLoadState('networkidle')
       await page.evaluate(async () => { (await import('/src/store/uiStore.ts')).useUIStore.getState().setCanvasView('site') }) }
     // The mock backend has no assistant or map-context service, so their error toasts are not part of the shot.
@@ -167,6 +168,11 @@ try {
       await page.getByTestId('scene-result-group-plant').click()
     } else if (key !== 'legend') await page.getByRole('tab', { name: 'Model', exact: true }).click().catch(() => page.getByText('Model', { exact: true }).first().click())
     await page.waitForTimeout(2000)
+    if (st.pick) {   // the select is disabled under a lock, so the item is chosen first and the lock arrives after
+      await page.getByTestId('place-item').selectOption({ index: 1 })
+      await page.evaluate(async () => { (await import('/src/store/uiStore.ts')).useUIStore.getState().setLockState({ readOnly: true, holderEmail: 'other@example.com', reason: 'locked-by-user' }) })
+      await page.waitForTimeout(500)
+    }
     const file = path.join(OUT, `${mode}-${key}.png`)
     await page.screenshot({ path: file }); written.push(path.basename(file))
     if (process.env.DEBUG) console.log(`${mode}/${key} unmocked:`, [...unmocked].join(' | '))

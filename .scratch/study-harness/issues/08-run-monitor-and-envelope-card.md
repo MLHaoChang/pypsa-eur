@@ -3,7 +3,8 @@
 
 # 08 — Run monitor and envelope approval in the companion
 
-Status: ready-for-agent
+Status: done
+<!-- 3 Nov: done by the code. `frontend/src/components/runMonitor/` (RunMonitor, EnvelopeSection, OpenRun, with tests) and `tests/test_harness_run_monitor.py` are on master. The builder left the criteria unticked, so the screenshot conditions were not re-verified here. -->
 Type: task
 Blocked by: 02, 03
 Gated: yes (UX reviewer for placement; GK B for the backend payload)

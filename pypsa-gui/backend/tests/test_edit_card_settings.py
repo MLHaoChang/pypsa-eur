@@ -82,6 +82,35 @@ def test_project_settings_not_set_then_old_to_new_then_unchanged(client, api_pro
         edit_card.preview("update_project_settings", {"name": name, "derive_lengths_from_geometry": "yes"})
 
 
+def test_project_settings_autonomy_and_poc_xr_before_after(client, api_project):
+    name = api_project("card-autonomy")
+    args = {"name": name, "backup_autonomy_h": 48.0, "poc_xr": 7.5}
+    card = edit_card.preview("update_project_settings", args)
+    assert _cells(card) == [("backup_autonomy_h", None, 48.0), ("poc_xr", None, 7.5)]
+    chat_tools.update_project_settings(name, backup_autonomy_h=48.0, poc_xr=7.5)
+    # The unchanged field is left out of the card; only the changed one shows old -> new.
+    changed = edit_card.preview("update_project_settings", {**args, "poc_xr": 9.0})
+    assert _cells(changed) == [("poc_xr", 7.5, 9.0)]
+    with pytest.raises(HTTPException) as same:
+        edit_card.preview("update_project_settings", args)
+    assert same.value.detail["error_kind"] == "empty_edit"
+    with pytest.raises(HTTPException) as none:
+        edit_card.preview("update_project_settings", {"name": name})
+    assert none.value.detail["error_kind"] == "empty_edit"
+
+
+def test_project_settings_bad_autonomy_and_xr_refused_typed(client, api_project):
+    name = api_project("card-badvalue")
+    for bad in ({"backup_autonomy_h": 0}, {"backup_autonomy_h": 721}, {"backup_autonomy_h": "48"},
+                {"poc_xr": -1}, {"poc_xr": 101}, {"poc_xr": True}):
+        with pytest.raises(HTTPException) as refused:
+            edit_card.preview("update_project_settings", {"name": name, **bad})
+        assert refused.value.detail["error_kind"] == "invalid_edit_value", bad
+        with pytest.raises(HTTPException) as direct:
+            chat_tools.update_project_settings(name, **bad)
+        assert direct.value.status_code == 422, bad
+
+
 def test_scenario_metadata_old_new_unchanged_and_cleared(client, api_project):
     name = api_project("card-scenario")
     first = edit_card.preview("update_project_scenario_metadata", {"name": name, "description": "cold winter"})

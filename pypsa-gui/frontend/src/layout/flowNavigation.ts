@@ -285,6 +285,22 @@ export function openSiteAnchor(opts: { fromSite3D?: boolean } = {}): void {
   withReturn(SITE_ANCHOR_TARGET, jump, !!opts.fromSite3D)
 }
 
+/** The PoC X/R field (AS-18): Project info → Settings. Expert, the Project info panel; Guided, a drawer
+ *  over the card (the field itself, never the full-screen panel). */
+export const POC_XR_TARGET: FlowTarget = {
+  section: 'project', panel: 'overview', component: null, entity: null, field: 'poc_xr',
+}
+
+/** "Set PoC X/R ›": request-then-scroll to the field; Back returns to the readiness view. */
+export function openPocXr(): void {
+  withReturn(POC_XR_TARGET, () => {
+    const ui = useUIStore.getState()
+    ui.requestPocXr()
+    if (ui.uiMode === 'guided') openFlowTargetInPlaceNow(POC_XR_TARGET)
+    else openFlowTargetNow(POC_XR_TARGET)
+  })
+}
+
 /** Show the one "Create 3D site" action (rule 2): the Project & site card in
  *  Guided (in place, never Expert), the horizon panel in Expert. */
 export function openSiteEntry(opts: { fromSite3D?: boolean } = {}): void {

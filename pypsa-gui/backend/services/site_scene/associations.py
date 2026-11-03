@@ -673,22 +673,27 @@ def prepare_detach(scene: dict[str, Any], n, inputs: dict[str, Any],
     return {"keys": keys}, {"items": items, "findings": []}
 
 
-def apply_detach(scene: dict[str, Any], n, stored: dict[str, Any],
-                 recorded: dict[str, str]) -> tuple[dict[str, Any], dict[str, str | None]]:
+def detached_uids(n, keys: list[str], recorded: dict[str, str]) -> dict[str, str]:
     """
-    Scene changes only; the binding stays. `_detached` (key -> the uid it was
-    bound to) goes into the receipt, so undo checks the same instance even
-    after a later sites.json write prunes the binding. Mints nothing.
+    key -> the uid it was bound to, for the detach receipt, so undo checks the
+    same instance even after a later sites.json write prunes the binding.
+    Mints nothing (`component_identity.get` reads).
     """
-    keys = _detach_keys(scene, n, {"keys": stored["keys"]})
-    after = _detached(scene, keys)
-    _check_allocation(_rows_of(n, after["associations"]))
     uids = {}
     for key in keys:
         cls, name = _split(key)
         prior = recorded.get(key)
         uids[key] = prior if isinstance(prior, str) else component_identity.get(n, cls, name)
-    return {**after, "_detached": uids}, {}
+    return uids
+
+
+def apply_detach(scene: dict[str, Any], n, stored: dict[str, Any],
+                 recorded: dict[str, str]) -> tuple[dict[str, Any], dict[str, str | None]]:
+    """Scene changes only; the binding stays. The receipt's uids come from `detached_uids`."""
+    keys = _detach_keys(scene, n, {"keys": stored["keys"]})
+    after = _detached(scene, keys)
+    _check_allocation(_rows_of(n, after["associations"]))
+    return after, {}
 
 
 def _restore(scene: dict[str, Any], n, record: dict[str, Any], *, at_apply: bool) -> dict[str, Any]:
