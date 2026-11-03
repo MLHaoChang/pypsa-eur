@@ -144,6 +144,12 @@ UI_INTERNAL: dict[str, dict] = {
             ('POST', '/api/durable-conversations/{thread_id}/rebind'),
             ('POST', '/api/durable-conversations/{thread_id}/resume'),
             ('POST', '/api/durable-conversations/{thread_id}/profile'),
+            # LC-07: the speech session's own media lifecycle and bridge.
+            ('GET', '/api/durable-conversations/{thread_id}/speech'),
+            ('POST', '/api/durable-conversations/{thread_id}/speech/start'),
+            ('POST', '/api/durable-conversations/{thread_id}/speech/end'),
+            ('POST', '/api/durable-conversations/{thread_id}/speech/segment'),
+            ('POST', '/api/durable-conversations/{thread_id}/speech/usage'),
         }),
     },
     'mcp': {

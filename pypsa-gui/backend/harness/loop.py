@@ -1224,6 +1224,19 @@ def run_turn(
     elif utterance_id is not None and generation is not None:
         from services.utterance_admission import StableUtterance, admit_utterance
 
+        # LC-07: a speech id is admitted only for its exact finalized text,
+        # once; partials never receive one (services/live_speech.py).
+        from services import live_speech
+
+        if live_speech.is_speech_utterance(utterance_id):
+            refused = live_speech.redeem_final(
+                session.session_id, utterance_id, message, generation
+            )
+            if refused is not None:
+                yield "error", refused
+                yield "session_done", {"reason": refused["error_kind"]}
+                return
+
         decision = admit_utterance(
             StableUtterance(
                 utterance_id=utterance_id,

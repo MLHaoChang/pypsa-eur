@@ -171,16 +171,27 @@ def _save(path: Path, thread: dict[str, Any]) -> None:
         temp.unlink(missing_ok=True)
 
 
-def _read(thread_id: str) -> tuple[Path, dict[str, Any]]:
-    app_workers.require_single_worker()
-    path, project_id, owner = _path(thread_id)
+def _load(path: Path) -> dict[str, Any]:
+    """Load a thread file under this process's store lock; no ACL check.
+
+    ``_read`` is the ACL'd entry point. Only internal callers that captured
+    ``path`` from an ACL'd ``_read`` (or the boot sweep, which owns every
+    store it locks) may use this directly.
+    """
     app_workers.hold_store_lock(path.parent)
     try:
-        thread = json.loads(path.read_text(encoding='utf-8'))
+        return json.loads(path.read_text(encoding='utf-8'))
     except FileNotFoundError:
         _refuse('thread_not_found', 'Thread not found in this project.', 404)
     except (OSError, ValueError):
         _refuse('thread_unreadable', 'The durable thread checkpoint needs repair.')
+    return {}
+
+
+def _read(thread_id: str) -> tuple[Path, dict[str, Any]]:
+    app_workers.require_single_worker()
+    path, project_id, owner = _path(thread_id)
+    thread = _load(path)
     if thread.get('project_id') != project_id or thread.get('owner_id') != owner:
         _refuse('thread_not_found', 'Thread not found in this project.', 404)
     if not thread.get('owner_id'):
@@ -347,6 +358,9 @@ def _rotate_episode(thread: dict[str, Any], *, reason: str, takeover: bool = Fal
     from services import chat_service
 
     _live_episode(thread)
+    # LC-07: the speech session belongs to the old episode; settle it once.
+    from services import live_speech
+    live_speech.close_in(thread, 'restart' if takeover else 'stale_generation')
     old_episode = thread.get('episode_id')
     effects = _uncertain_effects(thread, old_episode, takeover=takeover)
     _revoke_checked_episode(thread)
@@ -580,6 +594,10 @@ def rebind_scope(thread_id: str, *, generation: int) -> dict[str, Any]:
         _require_authoritative_replica(thread)
         _require_generation(thread, generation)
         _revoke_checked_episode(thread)
+        # LC-07: rebind rotates the media credential: the speech session closes
+        # and settles; a new start mints a new grant at the new generation.
+        from services import live_speech
+        live_speech.close_in(thread, 'rebind')
         thread['generation'] = int(thread.get('generation', 1)) + 1
         thread['checkpoint_rev'] = int(thread.get('checkpoint_rev', 0)) + 1
         thread['updated_at'] = datetime.now(timezone.utc).isoformat()
@@ -625,30 +643,83 @@ def reserve_budget(
         _refuse('invalid_budget_amount', 'amount must be a non-negative number.', 422)
     with _LOCK:
         path, thread = _read(thread_id)
-        budgets = thread.setdefault('budgets', {
-            'reservations': [], 'final_charges': [], 'cached_usage': {},
-        })
-        if any(c.get('key') == key for c in budgets.get('final_charges', [])):
-            _refuse('budget_already_settled', 'This budget key is already settled.')
-        existing = next(
-            (r for r in budgets.get('reservations', []) if r.get('key') == key),
-            None,
-        )
-        if existing is not None:
-            if (
-                existing.get('kind') != kind
-                or existing.get('amount') != amount
-                or existing.get('unit') != unit
-            ):
-                _refuse('budget_key_conflict', 'This key already reserves a different amount.')
-            return {'status': 'reserved', 'key': key}
-        budgets.setdefault('reservations', []).append({
-            'key': key, 'kind': kind, 'amount': amount, 'unit': unit,
-        })
-        thread['checkpoint_rev'] = int(thread.get('checkpoint_rev', 0)) + 1
-        thread['updated_at'] = datetime.now(timezone.utc).isoformat()
-        _save(path, thread)
+        if _reserve_in(thread, key=key, kind=kind, amount=amount, unit=unit):
+            thread['checkpoint_rev'] = int(thread.get('checkpoint_rev', 0)) + 1
+            thread['updated_at'] = datetime.now(timezone.utc).isoformat()
+            _save(path, thread)
         return {'status': 'reserved', 'key': key}
+
+
+def _budgets(thread: dict[str, Any]) -> dict[str, Any]:
+    return thread.setdefault('budgets', {
+        'reservations': [], 'final_charges': [], 'cached_usage': {},
+    })
+
+
+def _reserve_in(
+    thread: dict[str, Any], *, key: str, kind: str, amount: int | float, unit: str,
+) -> bool:
+    """Reserve ``key`` on an in-memory thread; the caller saves.
+
+    Returns False when the identical reservation is already open.
+    """
+    budgets = _budgets(thread)
+    if any(c.get('key') == key for c in budgets.get('final_charges', [])):
+        _refuse('budget_already_settled', 'This budget key is already settled.')
+    existing = next(
+        (r for r in budgets.get('reservations', []) if r.get('key') == key),
+        None,
+    )
+    if existing is not None:
+        if (
+            existing.get('kind') != kind
+            or existing.get('amount') != amount
+            or existing.get('unit') != unit
+        ):
+            _refuse('budget_key_conflict', 'This key already reserves a different amount.')
+        return False
+    budgets.setdefault('reservations', []).append({
+        'key': key, 'kind': kind, 'amount': amount, 'unit': unit,
+    })
+    return True
+
+
+def _settle_in(
+    thread: dict[str, Any],
+    *,
+    key: str,
+    amount: int | float,
+    unit: str,
+    cached: int | float = 0,
+    flags: list[str] | None = None,
+) -> None:
+    """Move a reservation into final_charges on an in-memory thread; caller saves."""
+    budgets = _budgets(thread)
+    if any(c.get('key') == key for c in budgets.get('final_charges', [])):
+        _refuse('budget_already_settled', 'This budget key is already settled.')
+    reservation = next(
+        (r for r in budgets.get('reservations', []) if r.get('key') == key),
+        None,
+    )
+    if reservation is None:
+        _refuse('budget_not_reserved', 'Reserve this key before settling.', 404)
+    budgets['reservations'] = [
+        r for r in budgets.get('reservations', []) if r.get('key') != key
+    ]
+    charge = {
+        'key': key,
+        'kind': reservation.get('kind'),
+        'amount': amount,
+        'unit': unit,
+    }
+    if flags:
+        charge['flags'] = list(flags)
+    budgets.setdefault('final_charges', []).append(charge)
+    usage = budgets.setdefault('cached_usage', {})
+    usage[unit] = float(usage.get(unit, 0)) + float(cached)
+    # Keep integer tokens as ints when both sides are whole numbers.
+    if float(usage[unit]).is_integer():
+        usage[unit] = int(usage[unit])
 
 
 def find_thread_for_episode(episode_id: str) -> str | None:
@@ -732,31 +803,7 @@ def settle_budget(
         _refuse('invalid_budget_amount', 'cached must be a non-negative number.', 422)
     with _LOCK:
         path, thread = _read(thread_id)
-        budgets = thread.setdefault('budgets', {
-            'reservations': [], 'final_charges': [], 'cached_usage': {},
-        })
-        if any(c.get('key') == key for c in budgets.get('final_charges', [])):
-            _refuse('budget_already_settled', 'This budget key is already settled.')
-        reservation = next(
-            (r for r in budgets.get('reservations', []) if r.get('key') == key),
-            None,
-        )
-        if reservation is None:
-            _refuse('budget_not_reserved', 'Reserve this key before settling.', 404)
-        budgets['reservations'] = [
-            r for r in budgets.get('reservations', []) if r.get('key') != key
-        ]
-        budgets.setdefault('final_charges', []).append({
-            'key': key,
-            'kind': reservation.get('kind'),
-            'amount': amount,
-            'unit': unit,
-        })
-        usage = budgets.setdefault('cached_usage', {})
-        usage[unit] = float(usage.get(unit, 0)) + float(cached)
-        # Keep integer tokens as ints when both sides are whole numbers.
-        if float(usage[unit]).is_integer():
-            usage[unit] = int(usage[unit])
+        _settle_in(thread, key=key, amount=amount, unit=unit, cached=cached)
         thread['checkpoint_rev'] = int(thread.get('checkpoint_rev', 0)) + 1
         thread['updated_at'] = datetime.now(timezone.utc).isoformat()
         _save(path, thread)

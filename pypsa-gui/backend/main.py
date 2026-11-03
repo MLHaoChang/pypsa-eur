@@ -1467,6 +1467,13 @@ app.include_router(
 
 
 @app.on_event("startup")
+def _speech_boot_sweep() -> None:
+    """LC-07: settle speech sessions a previous process left holding budget."""
+    from services import live_speech
+    live_speech.start_boot_sweep()
+
+
+@app.on_event("startup")
 def _chatbot_startup_check() -> None:
     """
     Soft probe — log whether ANTHROPIC_API_KEY is set so operators see a

@@ -1,0 +1,60 @@
+{
+"kinds": {
+"speech_disabled": {
+"surface": "inline",
+"why": "LC-07 speech routes refuse while PYPSA_GUI_LIVE_SPEECH is not 1 (the default); the user types instead."
+},
+"speech_not_configured": {
+"surface": "inline",
+"why": "LC-07 speech start refuses when no media transport is configured on the server; the user types instead."
+},
+"speech_transport_failed": {
+"surface": "inline",
+"why": "LC-07 the media transport failed or returned a grant outside the TTL bound; reservations settle at reported usage and reconcile items stay; the user types instead."
+},
+"speech_session_open": {
+"surface": "inline",
+"why": "LC-07 a speech session is already open on this durable thread; end it before starting another."
+},
+"speech_session_not_found": {
+"surface": "inline",
+"why": "LC-07 the session id names no speech session on this thread."
+},
+"speech_session_closed": {
+"surface": "inline",
+"why": "LC-07 a segment arrived for a speech session that has already ended and settled; it is not used."
+},
+"speech_episode_required": {
+"surface": "inline",
+"why": "LC-07 speech needs a live episode; resume the durable thread first."
+},
+"speech_request_invalid": {
+"surface": "inline",
+"why": "LC-07 a speech id, sequence number, language or transcript failed validation."
+},
+"speech_final_out_of_order": {
+"surface": "inline",
+"why": "LC-07 a final segment arrived after a later one; it is refused so an older correction cannot overtake a newer one."
+},
+"speech_usage_invalid": {
+"surface": "inline",
+"why": "LC-07 bridge usage was not finite, was negative, named an unknown kind or was not in the reserved unit."
+},
+"speech_final_unknown": {
+"surface": "inline",
+"why": "LC-07 a speech: utterance id reached the chat stream without an unredeemed final ticket (a partial, a replay or a lost ticket); nothing runs."
+},
+"speech_final_mismatch": {
+"surface": "inline",
+"why": "LC-07 the chat stream text or generation differs from the recognised final for that speech ticket; nothing runs and the ticket is spent."
+},
+"bridge_credentials_invalid": {
+"surface": "inline",
+"why": "LV-09/LC-07 the audio bridge token is missing, wrong or belongs to another owner; the bridge stops reporting for that session."
+},
+"bridge_credentials_stale": {
+"surface": "inline",
+"why": "LV-09/LC-07 the audio bridge token was revoked by rebind or has expired; the bridge stops and the session is settled."
+}
+}
+}

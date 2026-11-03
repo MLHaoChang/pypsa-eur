@@ -3,12 +3,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from db.models import User
 from deps import require_user
-from services import chat_tools, durable_conversation as dc
+from services import chat_tools, durable_conversation as dc, live_speech
 
 router = APIRouter()
 
@@ -124,3 +124,86 @@ def switch_thread_profile(
         thread_id, generation=body.generation, profile=profile,
     )
     return thread
+
+
+# ── LC-07: continuous speech session (off unless PYPSA_GUI_LIVE_SPEECH=1) ──
+
+class SpeechStartBody(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    generation: int = Field(..., ge=1)
+    language: str = Field(..., min_length=2, max_length=35)
+
+
+class SpeechEndBody(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    generation: int = Field(..., ge=1)
+    session_id: str = Field(..., min_length=1, max_length=48)
+
+
+class SpeechSegmentBody(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    session_id: str = Field(..., min_length=1, max_length=48)
+    segment_id: str = Field(..., min_length=1, max_length=48)
+    seq: int = Field(..., ge=0)
+    text: str = Field(..., max_length=4000)
+    final: bool
+
+
+class SpeechUsageBody(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    session_id: str = Field(..., min_length=1, max_length=48)
+    usage_id: str = Field(..., min_length=1, max_length=48)
+    kind: str = Field(..., min_length=1, max_length=16)
+    amount: float
+    unit: str = Field(..., min_length=1, max_length=32)
+    final: bool = False
+
+
+@router.post('/{thread_id}/speech/start')
+def start_speech(thread_id: str, body: SpeechStartBody, user: User = Depends(require_user)):
+    """Open a speech session; the media grant is returned here and nowhere else."""
+    _bind_actor(user)
+    return live_speech.start(thread_id, generation=body.generation, language=body.language)
+
+
+@router.get('/{thread_id}/speech')
+def get_speech(thread_id: str, user: User = Depends(require_user)):
+    _bind_actor(user)
+    return live_speech.state(thread_id)
+
+
+@router.post('/{thread_id}/speech/end')
+def end_speech(thread_id: str, body: SpeechEndBody, user: User = Depends(require_user)):
+    _bind_actor(user)
+    return live_speech.end(thread_id, generation=body.generation, session_id=body.session_id)
+
+
+@router.post('/{thread_id}/speech/segment')
+def speech_segment(
+    thread_id: str,
+    body: SpeechSegmentBody,
+    user: User = Depends(require_user),
+    x_bridge_token: str = Header(default=''),
+):
+    """The audio bridge reports one recognition segment; only finals count."""
+    _bind_actor(user)
+    return live_speech.submit_segment(
+        thread_id, token=x_bridge_token, session_id=body.session_id,
+        segment_id=body.segment_id, seq=body.seq, text=body.text, final=body.final,
+    )
+
+
+@router.post('/{thread_id}/speech/usage')
+def speech_usage(
+    thread_id: str,
+    body: SpeechUsageBody,
+    user: User = Depends(require_user),
+    x_bridge_token: str = Header(default=''),
+):
+    """The audio bridge reports provider usage, once per usage_id; ``final`` last."""
+    _bind_actor(user)
+    return live_speech.report_usage(
+        thread_id, token=x_bridge_token, session_id=body.session_id,
+        usage_id=body.usage_id, kind=body.kind, amount=body.amount, unit=body.unit,
+        final=body.final,
+    )
