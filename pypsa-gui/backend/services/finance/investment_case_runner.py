@@ -347,8 +347,9 @@ def start_investment_case(
 
 
 def public_record(record: dict | None) -> dict | None:
-    """The record without the worker handle and the stop event."""
+    """The record without the worker handle, the stop event and the run-evidence token."""
     if not record:
         return None
-    return {k: (list(v) if isinstance(v, list) else v) for k, v in record.items()
-            if k not in ("thread", "stop_event")}
+    from services import run_evidence
+    return {k: (list(v) if isinstance(v, list) else v)
+            for k, v in run_evidence.wire_record(record).items()}
