@@ -32,9 +32,9 @@ const scene = (): Enabled => ({ state: 'enabled', site_id: 'campus', revision: 3
   buildings: [], asset_footprints: {}, last_receipt: null, unbound_keys: [], associations: [], targets: [],
   groups: [{ id: 'yard', label: 'Yard', members: [BESS] }] })
 
-const view = (canWrite = true) => render(
+const view = (canWrite = true, sc: Enabled = scene()) => render(
   <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-    <AssociationPanel site={site} scene={scene()} canWrite={canWrite} blockedReason={canWrite ? null : 'Read-only: ask an editor'} />
+    <AssociationPanel site={site} scene={sc} canWrite={canWrite} blockedReason={canWrite ? null : 'Read-only: ask an editor'} />
   </QueryClientProvider>,
 )
 const refused = (status: number, detail: Record<string, unknown>) => {
@@ -133,6 +133,26 @@ describe('Placed equipment', () => {
     expect(screen.getByTestId('detach-preview-reason').textContent).toBe('Read-only: ask an editor')
     tick(PV)
     expect(screen.getByTestId('group-preview-reason').textContent).toBe('Read-only: ask an editor')
+  })
+
+  it('after a reload the Undo offer comes back from the scene\u2019s last receipt', () => {
+    useModelProposal.setState({ lastDetach: null })
+    view(true, { ...scene(), last_receipt: { proposal_id: 'p-d', revision: 3, changed: ['placements'], detached: { [BESS]: 'u1', [PV]: 'u2' } } })
+    expect(screen.getByTestId('detach-receipt').textContent).toMatch(/^Detached 2 items/)
+    expect(btn('detach-undo').disabled).toBe(false)
+  })
+
+  it('a last receipt that is not a detach offers no Undo', () => {
+    useModelProposal.setState({ lastDetach: null })
+    view(true, { ...scene(), last_receipt: { proposal_id: 'p-x', revision: 3, changed: ['placements'] } })
+    expect(screen.queryByTestId('detach-receipt')).toBeNull()
+  })
+
+  it('read-only: Add model asset is disabled with the reason', () => {
+    view(false)
+    expect(btn('add-asset-link').disabled).toBe(true)
+    expect(btn('add-asset-link').title).toBe('Read-only: ask an editor')
+    expect(screen.getByTestId('add-asset-reason').textContent).toBe('Read-only: ask an editor')
   })
 
   it('a refused group move names the item', async () => {

@@ -46,7 +46,7 @@ describe('IssuesPanel — Site layout group (S2)', () => {
 
   it('lists the findings under "Site layout" and deep-links each to its component without touching the preflight result', async () => {
     usePlacementFindings.getState().publish({ id: 'a', name: 'Campus' }, [
-      { key: 'Generator:GEN', other: 'Load:HALL', kind: 'keepOut', severity: 'warn', distanceM: 10, message: 'GEN is 10 m from HALL; it should keep 30 m away' },
+      { key: 'Generator:GEN', other: 'Load:HALL', kind: 'keepOut', severity: 'warn', distanceM: 10, message: 'GEN is 10 m from HALL. It should keep 30 m away.' },
       { key: 'Transformer:TR1', kind: 'notBetweenBuses', severity: 'info', distanceM: 140, message: 'TR1 is 140 m from the line between the HV and MV yards; it should sit between its two buses' },
     ])
     renderPanel()
@@ -54,7 +54,7 @@ describe('IssuesPanel — Site layout group (S2)', () => {
     expect(screen.getByText('Site layout')).toBeTruthy()
     expect(screen.getByText(/Campus · from the 3D site view/)).toBeTruthy()
     const group = screen.getByTestId('site-layout-group')
-    expect(group.textContent).toContain('GEN is 10 m from HALL; it should keep 30 m away')
+    expect(group.textContent).toContain('GEN is 10 m from HALL. It should keep 30 m away.')
     expect(group.textContent).toContain('Inside a keep-out distance')
     expect(group.textContent).toContain('Not between its two buses')
     const views = screen.getAllByRole('button', { name: /View/ })

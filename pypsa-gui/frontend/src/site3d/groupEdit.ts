@@ -75,3 +75,6 @@ export function detachRefusalCopy(code: string | undefined, item: string | null)
     default: return null
   }
 }
+
+/** A canvas click picks (instead of selecting) only with Shift held, on a scene-enabled Site, on a placed item. */
+export const clickPicks = (shift: boolean, sceneEnabled: boolean, placed: boolean) => shift && sceneEnabled && placed

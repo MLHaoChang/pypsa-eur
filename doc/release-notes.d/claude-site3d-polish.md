@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Site 3D polish: the detach Undo offer survives a reload, "Add model asset" is disabled when the project is read-only, the Expert legend column no longer covers the Results pill, Issues rows no longer show raw finding tags, and the keep-out message is two plain sentences.
