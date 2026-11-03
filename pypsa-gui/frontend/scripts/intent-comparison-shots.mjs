@@ -80,7 +80,6 @@ try {
       links: [{ name: 'grid import', eh_role: 'grid_import', bus0: 'Grid', bus1: 'PCC', p_min_pu: 0 }, { name: 'tie 2', bus0: 'Hub 33 kV', bus1: 'PCC', p_min_pu: 0 }] }
     for (const k of ['buses', 'loads', 'links'])
       await page.route(u => u.pathname === `/api/network/${k}` || u.pathname === `/api/network/equipment/${k}`, r => r.fulfill({ json: current.prefill || current.fill ? NET[k] : [] }))
-    await page.route(u => u.pathname.includes('/published/'), r => r.fulfill({ json: { id: 'eu_rfg_dcc_ce', yaml: '', profile: { pst_limit: { value: 0.8 } }, review: null, unconfirmed: [], document: null } }))
     const campusState = () => ({ campus_yaml: null, skipped: [], profiles: {}, stale: false, hub_cost: null, hub_cost_reason: null,
       results: null, settings: current.gridCode ? { profile: current.gridCode } : null })
     await page.route(u => /\/api\/projects(\/?$|\?)/.test(u.pathname + u.search), async r => {
@@ -92,6 +91,8 @@ try {
       ? (current.job ? r.fulfill({ json: current.job }) : r.fulfill({ status: 404, json: { detail: 'none' } })) : r.fulfill({ json: current.job }))
     await page.route(u => /\/api\/campus-electrical\/[^/]+$/.test(u.pathname), r => r.fulfill({ json: campusState() }))
     await page.route(u => u.pathname.startsWith('/api/campus-electrical/') && !/\/[^/]+$/.test(u.pathname.replace('/api/campus-electrical/', '')), r => r.fulfill({ json: {} }))
+    // Registered last: Playwright runs the newest matching route first, so this beats the catch-all above.
+    await page.route(u => u.pathname.includes('/published/'), r => r.fulfill({ json: { id: 'eu_rfg_dcc_ce', yaml: '', profile: { pst_limit: { value: 0.8 } }, review: null, unconfirmed: [], document: null } }))
     await page.goto(`${BASE}/`)
     await page.waitForLoadState('networkidle')
     await page.evaluate(async ({ url, name }) => {
