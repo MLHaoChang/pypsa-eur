@@ -117,6 +117,30 @@ _ZONE_ABBREVIATIONS = frozenset({
     "SGT", "AEST", "AEDT", "ACST", "ACDT", "AWST", "NZST", "NZDT", "SAST",
     "CAT", "EAT", "WAT",
 })
+# Abbreviations that are ordinary words or data tokens once lower-cased ("cat", "west",
+# "z", "ist"): they match upper-case only. Every other curated abbreviation matches in
+# any case ("cet", "Est").
+_CASE_SENSITIVE_ZONES = frozenset({"CAT", "EAT", "WAT", "WET", "WEST", "UT", "Z", "IST"})
+_ZONE_ABBREVIATIONS_FOLDED = _ZONE_ABBREVIATIONS - _CASE_SENSITIVE_ZONES
+# Upper-case spellings of these are naive text, never an unlisted zone.
+_NAIVE_UPPER_TOKENS = frozenset({
+    "AM", "PM", "MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN", "JAN", "FEB", "MAR", "APR",
+    "MAY", "JUN", "JUL", "AUG", "SEP", "SEPT", "OCT", "NOV", "DEC",
+})
+
+
+def _is_zone_token(token: str, named_zones: frozenset) -> bool:
+    return (token in named_zones or token in _ZONE_ABBREVIATIONS
+            or token.upper() in _ZONE_ABBREVIATIONS_FOLDED)
+
+
+def _looks_like_unlisted_zone(token: str) -> bool:
+    """2-5 letters, mostly capitals ("ChST"), and not AM/PM or a day/month word."""
+    if not (token.isascii() and token.isalpha() and 2 <= len(token) <= 5):
+        return False
+    if token.upper() in _NAIVE_UPPER_TOKENS:
+        return False
+    return sum(c.isupper() for c in token) * 2 >= len(token) + (len(token) % 2)
 
 
 
@@ -1377,6 +1401,7 @@ async def upload_timeseries(
     # so the index stays strings: strip a zone name and see whether a
     # real timestamp is left, so "Q1 Peak" style labels are not misread as zones.
     named_zone = False
+    unlisted: list[str] = []
     if not offset_strings and getattr(csv_ts, "tz", None) is None:
         # pandas silently drops an unrecognised abbreviation ("... 00:00 CEST") and
         # returns a naive index, so the guard reads the raw first column instead.
@@ -1387,22 +1412,35 @@ async def upload_timeseries(
         # "Jan 1 2025 00:00", "2025-01-01 00:00 Mon" or "1/1/2025 12:00 PM" are
         # naive timestamps, not zones.
         from zoneinfo import available_timezones
-        _zones = available_timezones() | _ZONE_ABBREVIATIONS
+        _zones = frozenset(available_timezones())
 
-        def _strip_zone(text: str) -> str:
+        def _strip_zone(text: str, unlisted_ok: bool = False) -> str:
             head, _, rest = text.partition(" ")
-            if rest and head in _zones:
+            if rest and (_is_zone_token(head, _zones) or (unlisted_ok and _looks_like_unlisted_zone(head))):
                 return rest
             rest, _, tail = text.rpartition(" ")
-            return rest if rest and tail in _zones else text
+            if rest and (_is_zone_token(tail, _zones) or (unlisted_ok and _looks_like_unlisted_zone(tail))):
+                return rest
+            return text
 
         bare = raw_ts.map(_strip_zone)
         named_zone = bool((bare != raw_ts).any()) and bool(
             pd.to_datetime(bare, errors="coerce").notna().all())
+        if not named_zone:
+            # An unlisted abbreviation ("ChST") is silently dropped by pandas: refuse it
+            # when it is all that stands between the column and real timestamps.
+            loose = raw_ts.map(lambda t: _strip_zone(t, True))
+            if bool((loose != raw_ts).any()) and bool(pd.to_datetime(loose, errors="coerce").notna().all()):
+                unlisted = sorted({a for t, b in zip(raw_ts, loose) if t != b
+                                   for a in (t.partition(" ")[0], t.rpartition(" ")[2])
+                                   if _looks_like_unlisted_zone(a)})
+                named_zone = True
     if getattr(csv_ts, "tz", None) is not None or offset_strings or named_zone:
         raise HTTPException(422, {
             "error_kind": "timeseries_timezone_aware",
-            "message": "The CSV's timestamps carry a UTC offset or zone name. Snapshots are zone-free wall clock: convert "
+            "message": ("The CSV's timestamps carry a zone abbreviation this app does not recognise "
+                        f"({', '.join(unlisted)}). " if unlisted else "")
+                       + "The CSV's timestamps carry a UTC offset or zone name. Snapshots are zone-free wall clock: convert "
                        "the timestamps to local wall time without an offset and "
                        "upload again. Nothing was stored.",
         })
