@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Durable assistant conversations refuse to run under more than one application worker (`503 multi_worker_unsupported`). The worker count is read from the desktop launcher, `--workers` / `-w` on the uvicorn or gunicorn command line, or `WEB_CONCURRENCY`. A deployment smoke procedure is in `pypsa-gui/docs/live-voice-deployment-smoke.md`.

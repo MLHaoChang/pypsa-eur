@@ -19,6 +19,7 @@ from typing import Any
 
 from fastapi import HTTPException
 from harness.history import trim_session_messages
+from services import app_workers
 from services.pypsa_service import PyPSAService
 
 _LOCK = threading.RLock()
@@ -169,6 +170,7 @@ def _save(path: Path, thread: dict[str, Any]) -> None:
 
 
 def _read(thread_id: str) -> tuple[Path, dict[str, Any]]:
+    app_workers.require_single_worker()
     path, project_id, owner = _path(thread_id)
     try:
         thread = json.loads(path.read_text(encoding='utf-8'))
@@ -188,6 +190,7 @@ def _view(thread: dict[str, Any]) -> dict[str, Any]:
 
 
 def create_thread() -> dict[str, Any]:
+    app_workers.require_single_worker()
     root, project_id, owner = _authority()
     thread_id = str(uuid.uuid4())
     path = root / 'durable_conversations' / (thread_id + '.json')

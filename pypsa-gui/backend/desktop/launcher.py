@@ -356,6 +356,10 @@ class DesktopServer:
             timeout_graceful_shutdown=graceful_timeout,
         )
         self._server = uvicorn.Server(self.config)
+        # Durable conversations refuse more than one worker; this server is
+        # exactly one, whatever `WEB_CONCURRENCY` says (`services.app_workers`).
+        from services import app_workers
+        app_workers.declare(self.config.workers, source='desktop')
 
     @property
     def running(self) -> bool:

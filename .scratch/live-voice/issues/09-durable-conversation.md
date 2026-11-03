@@ -127,3 +127,19 @@ carries. `profile_lineage` holds ids, wire and episode only, capped at 32.
 Stale generation and an in-flight turn refuse without writing. Reads
 (`get`, bridge auth) no longer renew the lease in the returned view.
 Tests: `tests/test_durable_conversation_profile_switch.py` (7 passed).
+
+2026-11-03: PR3 one worker + smoke (`claude/lv09-one-worker-smoke`, after PR2).
+`services/app_workers.py` reads the worker count from: a launcher declaration
+(the desktop launcher pins `workers=1` and declares it) > `--workers N`,
+`--workers=N` or gunicorn `-w N` in argv (spawned workers inherit argv) >
+`WEB_CONCURRENCY` > 1, uvicorn's documented default. Unreadable values fall
+through. Every durable control (create/get/checkpoint/resume/rebind/profile/
+bridge auth) is `503 multi_worker_unsupported` above one worker. Deployment
+smoke procedure: `pypsa-gui/docs/live-voice-deployment-smoke.md` (mocked suite
++ curl steps for stale generation, rebind, profile, restart takeover after the
+90 s lease, multi-worker refusal). Tests:
+`tests/test_durable_conversation_one_worker.py` (13 passed).
+Gates (need a real credential or deployment, not built): LiveKit room-token
+refresh on rebind; hosted audio worker network/CPU/memory/concurrency
+provisioning and load test; paid STT/TTS; multi-worker distributed pin/lease
+coordination. Running the deployed smoke itself is an owner/deployment gate.
