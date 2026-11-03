@@ -55,3 +55,12 @@ Design: [design.md](../design.md) §6.1, §6.3, §6.4, §6.5
   7. Any exception in the gap check reads `not_a_gap`, so the call gets a card.
 
   Also in this PR: an L1 edit outside the failed rules' `tunable` lists is refused as `not_tunable`, and a round that errors still charges its tokens. Follow-up: the user notice on exhaustion is [issue 25](25-l1-exhaustion-notice.md) (needs a channel).
+
+## Folded from #970
+
+Owner decision HARNESS-970-1 (3 Nov): #970's reliability items are folded into the study-harness plan. This issue's agent loop is the first consumer of three of them; each is its own issue, so nothing here changes the build in progress.
+
+- **HH-02, requirements on assistant edits** → issue 23: the agent's edits are checked against the user's confirmed requirements at dispatch, and a violating edit is carded and counted as a refusal. Build after this issue.
+- **HH-03, a durable reservation before each model send** → issue 24: the agent turn's model call is the first send it covers. It starts after this issue and after #1059 merges; this issue keeps counting rounds and tokens from `harness/budget.py` as written above.
+- **HH-01A, atomic envelope edit** → issue 22: the envelope's unattended edits (including this loop's tunables) compare and write inside one project lock. Blocked by LC-40b, not by this issue.
+- **Dropped:** HH-04 (typed domain references; `services/reference_resolution.py` already covers it) and HH-09B (delegation to worker agents; SH-FOLD-1 and AI-567 keep one agent loop).

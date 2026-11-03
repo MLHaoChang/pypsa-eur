@@ -38,3 +38,15 @@ Owner decision: SH-RESEARCH-CAP-1 (€2 default per run, raisable on the envelop
 `pypsa-gui/backend/harness/providers/`, `pypsa-gui/backend/harness/runner.py`, `pypsa-gui/backend/services/run_envelope.py`, `pypsa-gui/backend/tests/test_harness_research.py` (new)
 
 ## Comments
+
+## Folded from #970
+
+Owner decision HARNESS-970-1 (3 Nov). HH-07 (sourced research, values the user confirms) adds checks to this issue's source ledger. Nothing below touches SH-RESEARCH-CAP-1.
+
+1. **Verified quotes.** A source row records the fetched content's hash and where the quote sits in it (`FetchedSource`: url, fetched time, content sha256, retained content, locator). Only server code writes the verification field; the model only proposes a source. A quote the retrieved text does not contain is `unverified` and is never shown as a source for a value. A plausible-looking citation is not engineering truth.
+2. **Value, unit and basis.** The proposed value carries its unit and basis (EUR/MWh versus EUR per litre of fuel, nameplate MW versus configured MW). A value in another unit is refused, as step 4 above says; a fuel price is never reinterpreted as an electricity tariff.
+3. **Conflicts and ranges.** Competing sources for one gap are kept side by side with their ranges; the user picks one or rejects all. The pick, the rejected rows and the assumption left uncertain all enter the report (issue 07's source ledger chapter).
+4. **Proposal first.** A proposal the user selects is useful on its own, so the first delivery is proposal-only. A value is applied only where the target has a qualified reader and edit adapter: for eh_site@1 the tariff (`attach_tariff`) and the weather choice, each through its card. #970's first application (`Generator.p_nom` from a datasheet) is not an eh_site@1 gap; decide whether to add it only on an owner request.
+5. **Cap.** The research step's cost cap stays €2 by default and €10 at most (SH-RESEARCH-CAP-1). Issue 24's durable reservation counts research sends against this cap and the run's total; it must not lower or block it.
+
+HH-07 also lists HH-10 (immutable solves, issue 05's folded section) as a prerequisite before any automatic solve follows a researched value; here every researched value is carded anyway, so nothing automatic follows until 05's section is built.
