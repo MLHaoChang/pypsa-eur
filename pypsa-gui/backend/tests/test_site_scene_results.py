@@ -633,3 +633,14 @@ def test_an_unreadable_efficiency_gives_an_unknown_role_and_an_explicit_mw_wins_
     haber = got["features"]["shed"]["targets"][0]
     assert _port(haber, 2)["role"] == "unknown" and _port(haber, 2)["reversed"] is False
     _approx(_port(haber, 3)["rate"], 1.0, "MW")
+
+
+@pytest.mark.parametrize("unit,expected", [("MW", "MW"), ("MWh", "MW"), ("", "t/h"), (float("nan"), "t/h"),
+                                           ("None", "t/h")])
+def test_on_a_tonne_catalogue_bus_a_declared_mw_wins_and_an_empty_unit_defers(unit, expected):
+    """GK A NOT OK @30f2d2ec: the N2 carrier is catalogued in t, so only an empty unit takes the catalogue's t."""
+    n = oracle_network()
+    n.buses.loc["n2", "unit"] = unit
+    _solved(n)
+    got = _project(n, _scene(("shed", "Link", "haber", None)), snapshot=T3)
+    _approx(_port(got["features"]["shed"]["targets"][0], 3)["rate"], 1.0, expected)
