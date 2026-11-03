@@ -150,6 +150,9 @@ UI_INTERNAL: dict[str, dict] = {
             ('POST', '/api/durable-conversations/{thread_id}/speech/end'),
             ('POST', '/api/durable-conversations/{thread_id}/speech/segment'),
             ('POST', '/api/durable-conversations/{thread_id}/speech/usage'),
+            # LC-07 PR2: the bridge takes checked answers to speak and cancels playback.
+            ('POST', '/api/durable-conversations/{thread_id}/speech/output/claim'),
+            ('POST', '/api/durable-conversations/{thread_id}/speech/barge-in'),
         }),
     },
     'mcp': {
