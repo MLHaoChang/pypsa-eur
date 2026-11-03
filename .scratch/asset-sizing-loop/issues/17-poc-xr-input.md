@@ -34,3 +34,13 @@ Out of scope: a UI field (no settings UI exists for `backup_autonomy_h` either; 
 ## PRs
 
 ## Comments
+- 2026-11-03, GK A plan verdict: GO with conditions.
+  1. Which PoC: the note names the PoC the X/R is applied to ("X/R <v> (entered for the project), at PoC <bus>"). With more than one `eh_poc` bus, the note says the entered X/R is applied to the governing (lowest S_k'') PoC. Tested with two PoCs.
+  2. Guard semantics: the guard drops only when X/R is entered. `assumed` still follows tan φ, the limit, the fault level and the envelope. Test: entered X/R with tan φ assumed → no guard, row still assumed. The existing X/R-unset guard test stays; the entered case is a new test.
+  3. Validation: a finite float in (0, 100]. Refuse 0, negative, NaN, inf, a bool and a string at the request model (422), and read a stored invalid value as None. Each case is tested, and so are the PATCH round-trip and null-clears. If a chat tool reaches the write, the same validation runs there.
+  4. Staleness: anything that caches or fingerprints grid-readiness or flicker outputs keys on `poc_xr`, or the PR body says nothing caches.
+  5. Byte-identity: with no input, the scorecard JSON (every row, including flicker and after-battery) equals master's on a fixture project.
+  6. Hand calc: X/R 1.5 (cos ψ 0.5547, sin ψ 0.8321) at 250 MVA, tan φ 0.1. `xr_free_bound_pct` is unchanged by X/R.
+  7. Flicker: `envelope_unit` uses the entered X/R, and the note's provenance follows it. Pst moves in the hand-checked direction. The infrequent RVC tier is unchanged.
+  8. API surface: run the assistant inventory, route-parity and control-matrix `--check`s, `test_route_chat_disposition`, and the project-settings route tests.
+  9. Release note: an entered X/R replaces the assumed 4 and lifts the X/R guard. No UI field yet.
