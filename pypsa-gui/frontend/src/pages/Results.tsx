@@ -704,7 +704,10 @@ export default function Results() {
       <button
         key={id}
         onClick={() => pickTab(id)}
-        title={advanced ? `${tip} — an advanced tab, shown because it was asked for; it leaves the strip when you pick another tab.` : tip}
+        title={!advanced ? tip
+          : discussedRun?.resultsTab === id
+            ? `${tip} Advanced tab: shown because the past run on screen was opened here; it leaves when you pick another tab or clear the run.`
+            : `${tip} — an advanced tab, shown because it was asked for; it leaves the strip when you pick another tab.`}
         data-testid={`results-tab-${id}`}
         data-advanced={advanced ? 'true' : undefined}
         className={`h-8 px-3 shrink-0 flex items-center gap-1.5 text-[12px] font-medium border-b-2 -mb-px transition-colors

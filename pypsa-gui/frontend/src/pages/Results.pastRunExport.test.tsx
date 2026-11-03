@@ -125,6 +125,12 @@ describe('the past run across the Expert/Guided switch (LC-03 c)', () => {
       const sections = vi.mocked(resultsEvidenceApi.run).mock.calls.map(c => c[1])
       expect(sections).toContain('results_capacity')
       expect(sections).not.toContain('adequacy')
+      if (to === 'guided') {
+        // The advanced tab says why it is there: a colon, no em dash.
+        const title = screen.getByTestId('results-tab-capex').getAttribute('title') ?? ''
+        expect(title).toContain('Advanced tab: shown because the past run on screen was opened here')
+        expect(title).not.toContain('\u2014')
+      }
     })
   }
 })
