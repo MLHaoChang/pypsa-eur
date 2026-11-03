@@ -179,7 +179,11 @@ def test_a_timezone_aware_csv_is_refused_typed_and_stores_nothing(alpha, csv):
 @pytest.mark.parametrize("csv", [
     "snapshot,L1\nEurope/Berlin 2026-01-01 00:00,9\nEurope/Berlin 2026-01-01 01:00,9\n",
     "snapshot,L1\nUTC 2026-01-01 00:00,9\nUTC 2026-01-01 01:00,9\n",
-], ids=["zone_before_time", "utc_before_time"])
+    "snapshot,L1\nCET 2026-01-01 00:00,9\nCET 2026-01-01 01:00,9\n",
+    "snapshot,L1\n2026-01-01 00:00 CEST,9\n2026-01-01 01:00 CEST,9\n",
+    "snapshot,L1\n2026-01-01 00:00 EST,9\n2026-01-01 01:00 EST,9\n",
+    "snapshot,L1\n2026-01-01 00:00 PST,9\n2026-01-01 01:00 PST,9\n",
+], ids=["zone_before_time", "utc_before_time", "cet_before", "cest_after", "est_after", "pst_after"])
 def test_a_zone_name_before_the_time_is_refused_as_timezone_aware(alpha, csv):
     before = _four(alpha)
     detail = _refused(csv)
@@ -190,8 +194,11 @@ def test_a_zone_name_before_the_time_is_refused_as_timezone_aware(alpha, csv):
 @pytest.mark.parametrize("first, second", [
     ("Thu 2026-01-01 00:00", "Jan 1 2026 01:00"),
     ("Jan 1 2026 00:00", "Thu 2026-01-01 01:00"),
-    ("January 1, 2026 00:00", "Thu 2026-01-01 01:00"),
-], ids=["weekday_then_month", "month_then_weekday", "month_name_then_weekday"])
+    ("2026-01-01 00:00 Mon", "Jan 1 2026 01:00"),
+    ("1/1/2026 12:00 PM", "Thu 2026-01-01 01:00"),
+    ('"January 1, 2026 00:00"', "Thu 2026-01-01 01:00"),
+], ids=["weekday_then_month", "month_then_weekday", "weekday_after", "am_pm_after",
+         "month_name_then_weekday"])
 def test_a_naive_timestamp_led_by_a_weekday_or_month_is_not_called_timezone_aware(alpha, first, second):
     import io
     csv = f"snapshot,L1\n{first},7\n{second},8\n"

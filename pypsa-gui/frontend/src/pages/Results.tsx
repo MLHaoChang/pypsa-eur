@@ -223,9 +223,10 @@ export default function Results() {
   // Guided (spec §3.7): a STORED tab Guided does not show is displayed as
   // adequacy. Display only — `tab` and `results:active-tab` keep the user's
   // choice, so switching back to Expert restores it. An explicitly requested
-  // hidden tab is shown (§10 addendum, B3) as `advancedTab`.
+  // hidden tab is shown (§10 addendum, B3) as `advancedTab`. So is the tab of a
+  // past run on screen (LC-03 c): the run stays as it was across the mode switch.
   const advancedTab: ResultsTab | null =
-    (uiMode === 'guided' && requestedTab === tab && !GUIDED_TABS.has(tab)) ? tab : null
+    (uiMode === 'guided' && (requestedTab === tab || discussedRun?.resultsTab === tab) && !GUIDED_TABS.has(tab)) ? tab : null
   const effectiveTab: ResultsTab =
     (uiMode === 'guided' && !GUIDED_TABS.has(tab) && advancedTab == null) ? 'adequacy' : tab
   const splitWrapRef = useRef<HTMLDivElement>(null)

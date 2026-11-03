@@ -216,6 +216,43 @@ def _chain_receipt(project_dir: pathlib.Path, site_id: str, pointer: dict[str, A
     return None
 
 
+PROPOSAL_ID_RE = re.compile(r"^p-[0-9a-f]{32}$")
+
+
+def detach_record(project_dir: pathlib.Path, site_id: str, proposal_id: Any) -> dict[str, Any] | None:
+    """
+    SC-02d: what the detach `proposal_id` removed, read from this site's own
+    pointed chain: its receipt's keys and their parent generation's
+    placements, groups and associations. None for an id of the wrong form,
+    one not in this chain, a proposal that is not a detach, or a chain that no
+    longer holds the parent (a copy carries only the pointed generation).
+    """
+    if not isinstance(proposal_id, str) or not PROPOSAL_ID_RE.match(proposal_id):
+        return None
+    with project_lock(project_dir):
+        pointer = _read_pointer(project_dir, site_id)
+        gen_id: str | None = None if pointer is None else pointer["generation"]
+        while gen_id and GENERATION_ID_RE.match(gen_id):
+            path = scene_dir(project_dir, site_id) / GENERATIONS / gen_id / GENERATION_FILE
+            if not path.exists():
+                return None
+            gen = json.loads(path.read_text(encoding="utf-8"))
+            receipt = gen.get("receipt") or {}
+            if receipt.get("proposal_id") == proposal_id:
+                parent_id = gen.get("parent")
+                if not isinstance(receipt.get("detached"), dict) or not isinstance(parent_id, str) \
+                        or not GENERATION_ID_RE.match(parent_id):
+                    return None
+                parent_path = scene_dir(project_dir, site_id) / GENERATIONS / parent_id / GENERATION_FILE
+                if not parent_path.exists():
+                    return None
+                parent = json.loads(parent_path.read_text(encoding="utf-8"))
+                return {"keys": receipt["detached"], "placements": (parent.get("site") or {}).get("placements") or {},
+                        "groups": parent.get("groups") or [], "associations": parent.get("associations") or []}
+            gen_id = gen.get("parent")
+    return None
+
+
 APPLY_KEYS = frozenset({"buildings", "placements", "asset_footprints", "associations", "groups"})
 
 
@@ -257,6 +294,9 @@ def apply(project_dir: pathlib.Path, site_id: str, proposal: dict[str, Any], exp
         revision = pointer["revision"] + 1
         receipt = {"proposal_id": proposal["id"], "input_hash": proposal["input_hash"],
                    "revision": revision, "changed": sorted(changes)}
+        if proposal.get("detached"):
+            # SC-02d: key -> the uid it was bound to, so an undo finds the same instances.
+            receipt["detached"] = copy.deepcopy(proposal["detached"])
         gen.update(parent=pointer["generation"], receipt=receipt)
         _commit(project_dir, site_id, gen, revision, receipt, crash)
         return receipt

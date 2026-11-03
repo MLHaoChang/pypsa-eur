@@ -259,7 +259,7 @@ def test_both_readers_agree_on_valid_values(client, api_project, project_storage
     meta = _read_meta(d)
     meta["settings"] = {KEY: stored, ps.DERIVE_LENGTHS: True}
     _write_meta(d, meta)
-    expected = {KEY: read, ps.DERIVE_LENGTHS: True}
+    expected = {**ps.DEFAULTS, KEY: read, ps.DERIVE_LENGTHS: True}
     assert _info(client, name)["settings"] == ps.read_settings(d) == expected
     assert isinstance(ps.read_settings(d)[KEY], float)
 

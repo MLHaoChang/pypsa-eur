@@ -123,3 +123,12 @@ table) and `compare/capacity.py` already read Stores.
      adequacy below the pure reservoir; pin test (p_min_pu -0.5 and 0, with inflow, count the pre-AS-11 P and E).
   5. Declined: untagged PyPSA-Eur battery Stores stay named, not counted; carrier/bus-shape matching would
      silently change results for every imported network. Migrate/tag to count them.
+- 2026-11-03, migration carries `marginal_cost_storage` (branch `claude/as11-migrate-mcs`, the #1023 ticket):
+  `migrate_storage_unit` puts a StorageUnit's static marginal_cost_storage on the Store (both price store-side MWh).
+  GK A plan GO on static only, conditions: (1) exactness on a fixture with standing loss, unequal efficiencies,
+  objective weight != 1 and cyclic SoC: equal objectives and Store e == SU state_of_charge per snapshot; (2) mcs in
+  any multi-period migration case (the file has none: its two-period test builds the split storage directly);
+  (3) a time-varying mcs is refused by name, network untouched; (4) mutant dropping the carry fails the objective
+  test; (5) no UI/chat/error-kind copy lists it as refused (git grep); (6) known gap for GK B's lane:
+  `harness/storage_costs.py` storage_holding_expenditure reads StorageUnits only, so it no longer applies to a
+  migrated unit (as for any split storage); compare economics (#1023) books the Store's term; (7) split suites.
