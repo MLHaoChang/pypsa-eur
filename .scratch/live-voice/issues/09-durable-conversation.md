@@ -127,3 +127,31 @@ carries. `profile_lineage` holds ids, wire and episode only, capped at 32.
 Stale generation and an in-flight turn refuse without writing. Reads
 (`get`, bridge auth) no longer renew the lease in the returned view.
 Tests: `tests/test_durable_conversation_profile_switch.py` (7 passed).
+
+2026-11-03: PR3 one worker + smoke (`claude/lv09-one-worker-smoke`, after PR2).
+`services/app_workers.py` reads the worker count from: a launcher declaration
+(the desktop launcher pins `workers=1` and declares it) > `--workers N`,
+`--workers=N` or gunicorn `-w N` in argv (spawned workers inherit argv) >
+`WEB_CONCURRENCY` > 1, uvicorn's documented default. Unreadable values fall
+through. Every durable control (create/get/checkpoint/resume/rebind/profile/
+bridge auth) is `503 multi_worker_unsupported` above one worker. Deployment
+smoke procedure: `pypsa-gui/docs/live-voice-deployment-smoke.md` (mocked suite
++ curl steps for stale generation, rebind, profile, restart takeover after the
+90 s lease, multi-worker refusal). Tests:
+`tests/test_durable_conversation_one_worker.py` (13 passed).
+Gates (need a real credential or deployment, not built): LiveKit room-token
+refresh on rebind; hosted audio worker network/CPU/memory/concurrency
+provisioning and load test; paid STT/TTS; multi-worker distributed pin/lease
+coordination. Running the deployed smoke itself is an owner/deployment gate.
+
+2026-11-03: PR3 rework after GK B (17) NOT OK on #1051. The argv/env reading
+failed open: under `python -m uvicorn … --workers 4` (how `pypsa-gui/start.sh`
+launches) argv[0] is `uvicorn/__main__.py`. The gate now fails closed:
+`app_workers.hold_store_lock` takes a non-blocking exclusive lock
+(`harness.durable.file_lock`, timeout 0) on `<project>/durable_conversations/
+.worker.lock` on the first durable control. The lock is held for the process
+lifetime and released by the OS when the process dies. A second process gets
+503 `multi_worker_unsupported` with `source: lock`. The argv reading stays as
+an early refusal (now covering `python -m uvicorn`). Undetected by argv,
+caught by the lock: gunicorn `-c`, `GUNICORN_CMD_ARGS`, `uvicorn.run(workers=N)`.
+Two-process test, red before the lock; the no-lock mutant fails it.
