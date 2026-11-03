@@ -3,7 +3,7 @@
 
 # 21 — Chat data intake: attachments and pasted values feed setup, the run creates the project, and asks only for what is missing
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Blocked by: 03, 04 (the L1 data-gap rule and its `needs_user` exit); 08 renders the card rows
 Gated: yes (GK B)
@@ -402,3 +402,12 @@ section.
   in-process. A1 now names the cross-process `durable.file_lock` on a sidecar
   of the host task file, held across intent, creation and task start, and
   adds the two-process test.
+- 2026-11-03 (~21:30 CET), owner (SH21-ACCEPT-1, `docs/agents/owner-decisions.md`):
+  spec accepted. Choice 1: (a) create at grant and hand over to the new
+  project (the starting task ends `handed_over`). Choice 2: (a) card writes to
+  the requested items count as answers and the run re-checks its gate; any
+  other change pauses. Choice 3: (a) a number typed in chat counts, shown as
+  "you wrote '…'"; a number with no unit is asked again. GK B wants the code
+  plan first, plus route-policy, route-parity and control-matrix runs.
+  Related: LOAD-SHAPE-1 (a shaped load profile needs a card or a
+  user-confirmed intake value, never an unattended reshape).
