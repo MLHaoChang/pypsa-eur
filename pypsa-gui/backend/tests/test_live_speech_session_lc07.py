@@ -807,3 +807,34 @@ def test_transcript_checks_stay_linear_on_pathological_input():
     assert not ls.ambiguous_quantity('1 ' * 1995)
     assert ls.is_bare_approval('  approve   please ! ')
     assert time.monotonic() - started < 1.0
+
+
+def test_boot_sweep_leaves_a_thread_another_live_replica_holds(transport, monkeypatch, tmp_path):
+    import json
+
+    import security
+
+    tid, gen = _thread()
+    _, sid, _ = _start(tid, gen)
+    with ls._REAPERS_LOCK:
+        for timer in ls._REAPERS.values():
+            timer.cancel()
+        ls._REAPERS.clear()
+    data = _thread_json(tid)
+    data['owner_replica_id'] = 'replica-other'
+    data['owner_lease_until'] = time.time() + 3600  # the other host is alive
+    _file(tid).write_text(json.dumps(data), encoding='utf-8')
+    monkeypatch.setattr(security, 'replica_id', lambda: 'replica-booting')
+    before = _file(tid).read_bytes()
+    assert ls.sweep_at_boot([tmp_path / PROJECT]) == 0
+    ls.wait_for_closes()
+    assert _file(tid).read_bytes() == before
+    assert transport.closed == []
+    # Once its lease lapses the other replica is gone: settle exactly once.
+    later = time.time() + 7200
+    monkeypatch.setattr(dc, '_wall_clock', lambda: later)
+    assert ls.sweep_at_boot([tmp_path / PROJECT]) == 1
+    _settled_once(tid, sid)
+    assert ls.sweep_at_boot([tmp_path / PROJECT]) == 0
+    ls.wait_for_closes()
+    assert transport.closed == [f'pypsa-{sid}']

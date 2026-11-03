@@ -736,11 +736,22 @@ def _project_dirs() -> list[Any]:
         db.close()
 
 
+def _owned_elsewhere(thread: dict[str, Any]) -> bool:
+    """Pinned to another replica whose owner lease has not lapsed."""
+    import security
+
+    pinned = thread.get('owner_replica_id')
+    if not pinned or pinned == security.replica_id():
+        return False
+    return float(thread.get('owner_lease_until') or 0) > dc._wall_clock()
+
+
 def sweep_at_boot(project_dirs: list[Any] | None = None) -> int:
     """Settle every speech session a dead process left holding reservations.
 
     Sessions are process-bound (room, worker, tickets), so at boot none can
-    belong to this process. Only stores that hold a live session are locked,
+    belong to this process; a thread another replica still holds (its owner
+    lease has not lapsed) is left alone. Only stores that hold a live session are locked,
     so the store lock stays lazy for everything else. Returns the count.
     """
     import json
@@ -771,6 +782,9 @@ def sweep_at_boot(project_dirs: list[Any] | None = None) -> int:
             try:
                 with dc._LOCK:
                     thread = dc._load(path)
+                    if _owned_elsewhere(thread):
+                        log.info('speech boot sweep left %s: another replica holds it', path.name)
+                        continue
                     if close_in(thread, 'restart'):
                         _touch(thread)
                         dc._save(path, thread)
