@@ -190,12 +190,8 @@ def get_scene_results(site_id: str, snapshot: str | None = None, period: str | N
         raise SceneError("not_found", "This site has no 3D scene yet: create it first")
     with PyPSAService.get_lock():
         n = site_bindings.open_network(project.directory)      # resolved under the lock: no switch in between
-        query = None
-        if n is not None:
-            query = results.parse_query(n, snapshot=snapshot, period=period,
-                                        window_from=window_from, window_to=window_to)
-        elif not snapshot:
-            raise SceneError("invalid_input", "Snapshot: give a snapshot label")
+        query = None if n is None else results.parse_query(n, snapshot=snapshot, period=period,
+                                                           window_from=window_from, window_to=window_to)
         verdict = results.gate(PyPSAService.get_active_context(), n, run)
         payload = results.project(scene, n, gate=verdict, query=query)
     return {"project": project.name, "site_id": site_id, "scene_revision": scene["revision"], **payload}

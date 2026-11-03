@@ -211,3 +211,18 @@ The frontend overlay consumes the response after PR #1040 lands, behind the exis
   - A group with any member not fully inside it reads `group_partial_allocation`. That includes a target with no shares bound to buildings both inside and outside the group.
 - Units (GK A condition 1): a raw `""`/`"None"`/NaN/`"MW"`/`"MWh"` counts as MW, unless the carrier catalogue says t (`process_products.bus_unit`, the N2 case). After a project save and load, the netCDF round trip leaves `buses.unit` as NaN, and the catalogue then decides.
 - Route parity: the route has no GUI binding yet, so `assistant_route_parity --check` passes with no declaration. The overlay PR adds one with its binding. The route is in `not_via_chat`'s `site_scene` family.
+- **Pre-review pass** (`mp-code-review`). Fixed:
+  - a window's snapshot count is null when the gate is closed (ADR-0001);
+  - the snapshot's `weight_generators` (h) and `period_years` (a) are `quantity()` leaves;
+  - a NaN efficiency gives role `unknown`;
+  - a group whose buses are all internal reads the new code `group_has_no_boundary`, not `mixed_units`;
+  - groups carry `totals` per (carrier, unit) beside the single `total`;
+  - a window partly outside the horizon is `window_out_of_range`, never clipped;
+  - an explicit share also gives `window_allocated`;
+  - a declared `MW`/`MWh` beats a tonne catalogue carrier (only an empty unit defers to the catalogue);
+  - group windows survive a snapshot outside the run.
+- **Kept, by design:**
+  - A window lies within the request's one `period`, so a cross-period window cannot be asked for: it is refused by construction (GK A condition 8, the "or is refused" branch).
+  - `energy_in_snapshot` is not served. The window total is `window_energy`, and its basis is named in `window.basis`.
+  - An unbound or vintaged target has no numerical leaves to null, so it shows `ports: []` and a target-level `reason`.
+  - Keys renamed from the draft: `snapshot.label` (not `timestamp`, as a RangeIndex label is an int), `group.total` with `totals` and `unavailable_member` (not `unavailable_total`), and the per-port `allocated` (not `allocation.native_total`, as the native value is the port's own `rate`).

@@ -53,7 +53,7 @@ REASONS: tuple[str, ...] = (
     "project_not_open", "run_not_solved", "run_failed", "run_cancelled", "run_running", "results_not_current",
     "run_changed", "snapshot_not_in_run", "window_out_of_range", "unbound_target", "series_missing",
     "non_finite_value", "unit_unknown", "conversion_factor_missing", "vintage_rows_unsupported", "mixed_units",
-    "group_partial_allocation", "member_unavailable")
+    "group_partial_allocation", "member_unavailable", "group_has_no_boundary")
 
 # (static frame, time accessor, rate attr, level attr, sign) per bindable class (associations.ROLES).
 _SINGLE = {
@@ -64,7 +64,8 @@ _SINGLE = {
 }
 _ROLE = {"Generator": "output", "Load": "input", "Store": "storage", "StorageUnit": "storage"}
 _MAX_LINK_PORTS = 5
-_MW_WORDS = {"", "none", "nan", "mw", "mwh"}
+_EMPTY_WORDS = {"", "none", "nan"}            # nothing declared: the carrier catalogue may say t
+_MW_WORDS = _EMPTY_WORDS | {"mw", "mwh"}
 _EPS = 1e-9
 
 
@@ -181,7 +182,7 @@ def _units(n, bus: str) -> tuple[str | None, str | None]:
     """(rate unit, energy unit) of a bus; (None, None) when its declared unit is unknown."""
     raw = n.buses.at[bus, "unit"] if "unit" in n.buses.columns and bus in n.buses.index else ""
     text = "" if raw is None or (isinstance(raw, float) and math.isnan(raw)) else str(raw).strip()
-    if text == "t" or (text.lower() in _MW_WORDS and bus_unit(n, bus) == "t"):
+    if text == "t" or (text.lower() in _EMPTY_WORDS and bus_unit(n, bus) == "t"):
         return "t/h", "t"
     if text.lower() in _MW_WORDS:
         return "MW", "MWh"
@@ -222,7 +223,8 @@ def _ports(n, cls: str, name: str) -> list[_Port]:
             if not _text(bus):
                 continue
             eff = 1.0 if i == 0 else row.get("efficiency" if i == 1 else f"efficiency{i}", 1.0)
-            role = "input" if i == 0 or (_finite(eff) or 0.0) < 0 else "output"
+            e = _finite(eff)
+            role = "input" if i == 0 else "unknown" if e is None else "input" if e < 0 else "output"
             out.append(_Port(i, str(bus), role, "withdrawal_positive",
                              _frame_col(getattr(n.links_t, f"p{i}", None), name), +1))
         return out
@@ -250,6 +252,9 @@ def _window_mask(n, q: Query) -> pd.Series | None:
     mask = (steps >= q.window[0]) & (steps <= q.window[1])
     if q.period is not None:
         mask &= pd.Series(n.snapshots.get_level_values(0) == q.period, index=n.snapshots)
+        steps = steps[n.snapshots.get_level_values(0) == q.period]
+    if steps.empty or q.window[0] < steps.min() or q.window[1] > steps.max():
+        return pd.Series(False, index=n.snapshots)     # partly outside the horizon: never clipped
     return mask
 
 
@@ -321,6 +326,10 @@ def _port_view(c: _Ctx, p: _Port, cls: str, weight: float | None) -> dict:
                             else quantity(None, rate["unit"], rate["reason"]))
     if c.mask is not None:
         out["window_energy"] = c.window(p.series, energy_unit)
+        if weight is not None:
+            we = out["window_energy"]
+            out["window_allocated"] = (quantity(_finite(we["value"] * weight), we["unit"]) if we["available"]
+                                       else quantity(None, we["unit"], we["reason"]))
     return out
 
 
@@ -381,12 +390,13 @@ def _bus_users(n) -> dict[str, set[tuple[str, str]]]:
 
 
 def _unavailable_group(reason: str, member: str | None = None) -> dict:
-    return {"boundary": [], "internal_buses": [], "total": quantity(None, None, reason), "unavailable_member": member}
+    return {"boundary": [], "internal_buses": [], "totals": [], "total": quantity(None, None, reason),
+            "unavailable_member": member}
 
 
 def _group_view(c: _Ctx, gid: str, groups: dict, assocs: list[dict], by_target: dict) -> dict:
-    if c.closed:
-        return _unavailable_group(c.closed)
+    if not c.gate["current"] or c.n is None:
+        return _unavailable_group(c.gate["reason"] or "project_not_open")
     features = _members(groups, gid)
     members: dict[tuple[str, str], str] = {}           # (class, name) → "Class:name"
     for a in assocs:
@@ -419,12 +429,32 @@ def _group_view(c: _Ctx, gid: str, groups: dict, assocs: list[dict], by_target: 
         if c.mask is not None:
             row["window_energy"] = c.window(series, energy_unit)
         rows.append(row)
-    return {"boundary": rows, "internal_buses": internal, "total": _total(rows), "unavailable_member": None}
+    return {"boundary": rows, "internal_buses": internal, "totals": _totals(rows), "total": _total(rows),
+            "unavailable_member": None}
+
+
+def _totals(rows: list[dict]) -> list[dict]:
+    """One total per (carrier, unit), never across them (plan §2.7.3)."""
+    out = []
+    for key in sorted({(r["carrier"] or "", r["net_import"]["unit"] or "") for r in rows}):
+        same = [r for r in rows if (r["carrier"] or "", r["net_import"]["unit"] or "") == key]
+        total = {"carrier": same[0]["carrier"], "net_import": _sum([r["net_import"] for r in same])}
+        if "window_energy" in same[0]:
+            total["window_energy"] = _sum([r["window_energy"] for r in same])
+        out.append(total)
+    return out
+
+
+def _sum(leaves: list[dict]) -> dict:
+    bad = next((x for x in leaves if not x["available"]), None)
+    if bad is not None:
+        return quantity(None, leaves[0]["unit"], bad["reason"])
+    return quantity(_finite(sum(x["value"] for x in leaves)), leaves[0]["unit"])
 
 
 def _total(rows: list[dict]) -> dict:
     if not rows:
-        return quantity(None, None, "mixed_units")
+        return quantity(None, None, "group_has_no_boundary")
     bad = next((r["net_import"] for r in rows if not r["net_import"]["available"]), None)
     if bad is not None:
         return quantity(None, None, bad["reason"])
@@ -456,12 +486,14 @@ def project(scene: dict[str, Any], n, *, gate: dict[str, Any], query: Query | No
         years = 1.0
         if q.period is not None:
             years = float(n.investment_period_weightings["years"].get(q.period, float("nan")))
+        wv = _finite(w.get(q.key)) if w is not None else None
         snap = {"index": int(n.snapshots.get_loc(q.key)), "label": _echo(q.label), "period": q.period,
-                "weight_generators_h": _finite(w.get(q.key)) if w is not None else None,
-                "period_years": _finite(years)}
+                "weight_generators": quantity(wv, "h") if wv is not None else quantity(None, "h", "series_missing"),
+                "period_years": (quantity(_finite(years), "a") if _finite(years) is not None
+                                 else quantity(None, "a", "series_missing"))}
     window = None
     if q.window is not None:
-        count = int(c.mask.sum()) if current else 0
+        count = int(c.mask.sum()) if current else None      # not computed: null, never a defaulted 0
         window = {"from": _echo(q.window[0]), "to": _echo(q.window[1]), "snapshots": count, "basis": "generators"}
     return {"run": {"digest": gate["digest"], "current": gate["current"], "reason": gate["reason"]},
             "snapshot": snap, "window": window, "features": features,

@@ -167,8 +167,8 @@ def _approx(leaf, value, unit):
 def test_the_known_hour_shows_native_ports_signs_and_units(client, solved):
     got = _results(client, snapshot=T3)
     assert got["run"]["current"] is True and got["run"]["reason"] is None and len(got["run"]["digest"]) == 32
-    assert got["snapshot"] == {"index": 3, "label": T3, "period": None, "weight_generators_h": 1.0,
-                               "period_years": 1.0}
+    assert got["snapshot"] == {"index": 3, "label": T3, "period": None, "weight_generators": q(1.0, "h"),
+                               "period_years": q(1.0, "a")}
     haber = _target(got, B, "haber")
     assert [p["port"] for p in haber["ports"]] == [0, 1, 2, 3]
     _approx(_port(haber, 0)["rate"], 5.0, "MW")
@@ -215,6 +215,9 @@ def test_the_group_boundary_excludes_the_internal_h2_transfer(client, solved):
     _approx(rows["n2"]["net_import"], 1.0, "t/h")
     _approx(rows["nh3"]["net_import"], -4.0, "MW")       # the idle tank is a member: rate 0
     assert group["total"] == gone("mixed_units", None)
+    totals = {(t["carrier"], t["net_import"]["unit"]): t["net_import"]["value"] for t in group["totals"]}
+    assert totals == pytest.approx({("AC", "MW"): 10.25, ("heat", "MW"): -1.0, ("N2", "t/h"): 1.0,
+                                    ("NH3", "MW"): -4.0})
 
 
 # ── V57: exact null and zero shapes ─────────────────────────────────────────
@@ -361,6 +364,8 @@ def test_an_explicit_share_is_labelled_allocated_and_conserves_the_native_value(
     assert hall["allocation"] == {"basis": "explicit", "weight": 0.4}
     _approx(hall["ports"][0]["rate"], 3.0, "MW")               # the native value, unchanged
     _approx(hall["ports"][0]["allocated"], 1.2, "MW")
+    windowed = _results(client, snapshot=T3, window_from="2030-01-01T00:00:00", window_to=T3)
+    _approx(_target(windowed, A, "office")["ports"][0]["window_allocated"], 0.4 * (2 + 3 + 4 + 3), "MWh")
     _approx(office["ports"][0]["allocated"], 1.8, "MW")
     # The plant holds only the hall's share of the office load: no boundary is claimed for it.
     group = got["groups"]["plant"]
@@ -412,7 +417,7 @@ def test_cadence_and_representative_weights_change_energy_not_rate(freq, weight,
     port = _port(got["features"]["hall"]["targets"][0], 0)
     _approx(port["rate"], 10.0, "MW")
     _approx(port["window_energy"], energy, "MWh")
-    assert got["snapshot"]["weight_generators_h"] == weight
+    assert got["snapshot"]["weight_generators"] == q(weight, "h")
 
 
 def test_window_energy_uses_the_generators_weighting_never_stores():
@@ -460,7 +465,7 @@ def test_a_multi_period_network_needs_its_period_and_applies_its_years():
     assert e.value.kind == "invalid_input"
     got = _project(n, _scene(("c", "Load", "office", None)), snapshot="2030-01-01T01:00:00", period="2040",
                    window_from="2030-01-01T00:00:00", window_to="2030-01-01T01:00:00")
-    assert got["snapshot"]["period"] == 2040 and got["snapshot"]["period_years"] == 5.0
+    assert got["snapshot"]["period"] == 2040 and got["snapshot"]["period_years"] == q(5.0, "a")
     port = got["features"]["c"]["targets"][0]["ports"][0]
     _approx(port["rate"], 7.0, "MW")
     _approx(port["window_energy"], (6 + 7) * 1.0 * 5, "MWh")      # the 2040 period's own years only
@@ -540,7 +545,7 @@ def test_the_reason_codes_are_a_closed_list():
         "project_not_open", "run_not_solved", "run_failed", "run_cancelled", "run_running", "results_not_current",
         "run_changed", "snapshot_not_in_run", "window_out_of_range", "unbound_target", "series_missing",
         "non_finite_value", "unit_unknown", "conversion_factor_missing", "vintage_rows_unsupported", "mixed_units",
-        "group_partial_allocation", "member_unavailable")
+        "group_partial_allocation", "member_unavailable", "group_has_no_boundary")
 
 
 def test_every_number_in_a_payload_is_finite():
@@ -593,3 +598,38 @@ def test_an_unbound_member_makes_the_group_unavailable():
     group = got["groups"]["plant"]
     assert group["boundary"] == [] and group["total"] == gone("member_unavailable", None)
     assert group["unavailable_member"] == "Link:haber"
+
+
+def test_a_window_partly_outside_the_horizon_is_never_clipped(client, solved):
+    got = _results(client, snapshot=T3, window_from="2029-12-31T23:00:00", window_to=T3)
+    assert _port(_target(got, A, "electrolyser"), 0)["window_energy"] == gone("window_out_of_range", "MWh")
+
+
+def test_a_closed_gate_leaves_the_window_count_null(client, project):
+    got = _results(client, snapshot=T3, window_from="2030-01-01T00:00:00", window_to=T3)
+    assert got["window"]["snapshots"] is None and got["snapshot"] is None
+
+
+def test_a_group_with_only_internal_buses_names_that_not_mixed_units():
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=1, freq="h"))
+    n.add("Bus", "a", carrier="AC")
+    n.add("Generator", "g", bus="a", p_nom=10, marginal_cost=1)
+    n.add("Load", "l", bus="a", p_set=2)
+    _solved(n)
+    got = _project(n, _scene(("x", "Generator", "g", None), ("x", "Load", "l", None),
+                             groups=[{"id": "g1", "label": "G", "members": ["x"]}]), snapshot="2030-01-01T00:00:00")
+    group = got["groups"]["g1"]
+    assert group["internal_buses"] == ["a"] and group["boundary"] == [] and group["totals"] == []
+    assert group["total"] == gone("group_has_no_boundary", None)
+
+
+def test_an_unreadable_efficiency_gives_an_unknown_role_and_an_explicit_mw_wins_over_the_catalogue():
+    n = oracle_network()
+    n.buses.loc["n2", "unit"] = "MWh"                    # declared: the N2 catalogue's t does not override it
+    _solved(n)
+    n.links.loc["haber", "efficiency2"] = float("nan")    # after the solve: the role reads unknown, not output
+    got = _project(n, _scene(("shed", "Link", "haber", None)), snapshot=T3)
+    haber = got["features"]["shed"]["targets"][0]
+    assert _port(haber, 2)["role"] == "unknown" and _port(haber, 2)["reversed"] is False
+    _approx(_port(haber, 3)["rate"], 1.0, "MW")
