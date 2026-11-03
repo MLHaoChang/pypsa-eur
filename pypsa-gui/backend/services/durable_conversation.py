@@ -148,12 +148,14 @@ def _empty_thread(thread_id: str, *, owner_id: str, project_id: str) -> dict[str
 
 def _path(thread_id: str) -> tuple[Path, str, str]:
     try:
-        if str(uuid.UUID(thread_id)) != thread_id:
+        canonical = str(uuid.UUID(thread_id))
+        if canonical != thread_id:
             raise ValueError()
     except (ValueError, TypeError, AttributeError):
         _refuse('thread_not_found', 'Thread not found in this project.', 404)
     root, project_id, owner = _authority()
-    return root / 'durable_conversations' / (thread_id + '.json'), project_id, owner
+    # The file name comes from the parsed UUID, never the caller's string.
+    return root / 'durable_conversations' / (canonical + '.json'), project_id, owner
 
 
 def _save(path: Path, thread: dict[str, Any]) -> None:
@@ -380,29 +382,49 @@ def switch_profile(thread_id: str, *, generation: int, profile: Any):
         session = _live_episode(thread)
         bound = getattr(session, 'bound_wire', None) if session is not None else None
         if session is not None and bound in (None, profile.wire):
-            carried = 'episode'
-            thread['generation'] = int(thread.get('generation', 1)) + 1
-            thread['checkpoint_rev'] = int(thread.get('checkpoint_rev', 0)) + 1
-            thread['updated_at'] = datetime.now(timezone.utc).isoformat()
-        else:
-            carried = 'facts_budgets'
-            session = _rotate_episode(thread, reason='profile_switch')
-        with session._lock:
-            session.profile_id = profile.id
-            session.bound_wire = profile.wire
-            session.model = profile.model
-        _bounded_extend(thread, 'profile_lineage', [{
-            'profile_id': profile.id,
-            'wire': profile.wire,
-            'episode_id': session.session_id,
-            'generation': thread['generation'],
-            'carried': carried,
-            'at': thread['updated_at'],
-        }], EPISODE_LINEAGE_MAX, keep='newest')
+            # Re-check under the session lock the loop sets the flag under,
+            # and change nothing until it holds: a turn that started after
+            # `_live_episode` must neither be rebound mid-turn nor see the
+            # thread written. The thread is saved before the rebind, so a
+            # failed save leaves the episode on its old profile.
+            with session._lock:
+                if session._turn_in_flight:
+                    _refuse('turn_already_in_flight', 'Wait for the episode turn to finish.')
+                thread['generation'] = int(thread.get('generation', 1)) + 1
+                thread['checkpoint_rev'] = int(thread.get('checkpoint_rev', 0)) + 1
+                thread['updated_at'] = datetime.now(timezone.utc).isoformat()
+                _append_profile_lineage(thread, profile, session, 'episode')
+                _save(path, thread)
+                _bind_profile(session, profile)
+            return _view(thread), session
+        session = _rotate_episode(thread, reason='profile_switch')
+        _append_profile_lineage(thread, profile, session, 'facts_budgets')
         _save(path, thread)
-        if carried == 'facts_budgets':
-            _hydrate_discussed_refs(session, thread)
+        # The child episode is new to this call: no turn can be running on it.
+        with session._lock:
+            _bind_profile(session, profile)
+        _hydrate_discussed_refs(session, thread)
         return _view(thread), session
+
+
+def _bind_profile(session: Any, profile: Any) -> None:
+    """Caller holds ``session._lock``."""
+    session.profile_id = profile.id
+    session.bound_wire = profile.wire
+    session.model = profile.model
+
+
+def _append_profile_lineage(
+    thread: dict[str, Any], profile: Any, session: Any, carried: str,
+) -> None:
+    _bounded_extend(thread, 'profile_lineage', [{
+        'profile_id': profile.id,
+        'wire': profile.wire,
+        'episode_id': session.session_id,
+        'generation': thread['generation'],
+        'carried': carried,
+        'at': thread['updated_at'],
+    }], EPISODE_LINEAGE_MAX, keep='newest')
 
 
 def _bounded_extend(

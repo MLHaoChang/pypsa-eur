@@ -8,6 +8,7 @@ from models.commercial import CommercialConfig
 from models.design_intent import BACKUP_AUTONOMY_DEFAULT_H, BACKUP_AUTONOMY_MAX_H
 from models.envelope_floors import EnvelopeFloors
 from services.adequacy.mc import MAX_DRAWS as _MC_MAX_DRAWS
+from services.project_settings import POC_XR_MAX
 
 # Frontend Edit-card UX sends `null` for blanked optional bounds (so the
 # spread-then-override idiom can actually un-set a previously-typed value).
@@ -844,6 +845,9 @@ class ProjectSettings(BaseModel):
     # bound as `DesignIntentSpec.backup_autonomy_h`.
     backup_autonomy_h: float = Field(default=BACKUP_AUTONOMY_DEFAULT_H, gt=0, le=BACKUP_AUTONOMY_MAX_H,
                                      allow_inf_nan=False)
+    # AS-17 (owner decision FILL-10-2): the point-of-connection X/R the network
+    # operator gives; None = not entered (the grid-readiness scorecard assumes one).
+    poc_xr: float | None = Field(default=None, gt=0, le=POC_XR_MAX, allow_inf_nan=False)
 
 
 class UpdateProjectSettingsRequest(BaseModel):
@@ -860,6 +864,10 @@ class UpdateProjectSettingsRequest(BaseModel):
     # Finite, > 0 and bounded; a bool or a string is refused. null = default.
     backup_autonomy_h: Annotated[
         float, Field(strict=True, gt=0, le=BACKUP_AUTONOMY_MAX_H, allow_inf_nan=False)
+    ] | None = None
+    # Finite, > 0 and at most 100; a bool or a string is refused. null = none entered.
+    poc_xr: Annotated[
+        float, Field(strict=True, gt=0, le=POC_XR_MAX, allow_inf_nan=False)
     ] | None = None
 
 

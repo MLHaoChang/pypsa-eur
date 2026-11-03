@@ -9,6 +9,8 @@ export const OUTSIDE_COLOR = '#dc2626'
 /** A layout finding that is not red (S2: overlap, clearance, not between its buses, not facing far). */
 export const WARN_COLOR = '#f59e0b'
 export const HOVER_COLOR = '#fde68a'
+/** SC-02d: the outline of placed items picked for group editing or detach — apart from hover, findings and the gizmo axes. */
+export const PICKED_COLOR = '#d946ef'
 
 export interface ObjectState {
   selected: boolean

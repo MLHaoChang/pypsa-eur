@@ -41,6 +41,14 @@ interface ModelProposalState {
   /** A placed key whose item was deleted or replaced, being attached again (`rebind {placement}`). */
   placementRebind: { siteId: string; key: string } | null
   setPlacementRebind: (r: { siteId: string; key: string } | null) => void
+  /** SC-02d: the placed items picked for group editing or detach (canvas Shift+click or the list), per Site. */
+  picked: { siteId: string; keys: string[] } | null
+  togglePicked: (siteId: string, key: string) => void
+  setPicked: (siteId: string, keys: string[]) => void
+  clearPicked: () => void
+  /** The last detach this Site applied, offered for Undo; `blocked` is why it can no longer be undone. */
+  lastDetach: { siteId: string; proposalId: string; count: number; blocked: string | null } | null
+  setLastDetach: (d: { siteId: string; proposalId: string; count: number; blocked: string | null } | null) => void
 }
 
 export const useModelProposal = create<ModelProposalState>(set => ({
@@ -50,4 +58,14 @@ export const useModelProposal = create<ModelProposalState>(set => ({
   setAddAssetFrom: addAssetFrom => set({ addAssetFrom }),
   placementRebind: null,
   setPlacementRebind: placementRebind => set({ placementRebind }),
+  picked: null,
+  togglePicked: (siteId, key) => set(s => {
+    const keys = s.picked?.siteId === siteId ? s.picked.keys : []
+    const next = keys.includes(key) ? keys.filter(k => k !== key) : [...keys, key]
+    return { picked: next.length ? { siteId, keys: next } : null }
+  }),
+  setPicked: (siteId, keys) => set({ picked: keys.length ? { siteId, keys: [...keys] } : null }),
+  clearPicked: () => set({ picked: null }),
+  lastDetach: null,
+  setLastDetach: lastDetach => set({ lastDetach }),
 }))

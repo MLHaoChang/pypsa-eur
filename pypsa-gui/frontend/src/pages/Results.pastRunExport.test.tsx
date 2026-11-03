@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
+import { resultsEvidenceApi } from '../api/resultsEvidence'
 
 // LC-03 past-run parity (UX ask 1): the discussed-run row offers the one
 // Export chooser, on the results workbook, in Guided and in Expert.
@@ -37,6 +38,10 @@ vi.mock('../api/simulation', () => ({
     getSummary: vi.fn().mockResolvedValue({}),
   },
 }))
+vi.mock('../api/resultsEvidence', async importOriginal => {
+  const real = await importOriginal<typeof import('../api/resultsEvidence')>()
+  return { ...real, resultsEvidenceApi: { ...real.resultsEvidenceApi, run: vi.fn() } }
+})
 vi.mock('../api/network', () => ({
   networkApi: {
     getSnapshots: vi.fn(async () => ({
@@ -88,4 +93,44 @@ describe('the discussed-run row', () => {
     await renderResults()
     expect(screen.queryByTestId('discussed-run-export')).toBeNull()
   })
+})
+
+describe('the past run across the Expert/Guided switch (LC-03 c)', () => {
+  for (const [from, to] of [['expert', 'guided'], ['guided', 'expert']] as const) {
+    it(`keeps the run, its tab and its header from ${from} to ${to}, also when Results remounts`, async () => {
+      vi.mocked(resultsEvidenceApi.run).mockResolvedValue({
+        status: 'ok', binding: { run_id: 'run-past' } as never,
+        data: { run_id: 'run-past', status: 'completed', metrics: {} },
+      })
+      localStorage.setItem('results:active-tab', 'capex')
+      useUIStore.setState({
+        uiMode: from, currentProject: 'oj-grid', activeSlidePanel: 'results',
+        discussedRun: { runId: 'run-past', resultsTab: 'capex', section: 'results_capacity' },
+        resultsTabRequest: null,
+      })
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      const view = render(<QueryClientProvider client={client}><Results /></QueryClientProvider>)
+      await act(async () => { await new Promise(r => setTimeout(r, 20)) })
+      view.unmount()
+      vi.mocked(resultsEvidenceApi.run).mockClear()
+      await act(async () => { useUIStore.getState().setUiMode(to) })
+      render(<QueryClientProvider client={client}><Results /></QueryClientProvider>)
+      await act(async () => { await new Promise(r => setTimeout(r, 20)) })
+      expect(useUIStore.getState().discussedRun?.runId).toBe('run-past')
+      expect(screen.getByTestId('discussed-run-chrome').getAttribute('data-run-id')).toBe('run-past')
+      const ghead = screen.getByTestId('results-ghead-freshness')
+      expect(ghead.getAttribute('data-freshness')).toBe('past_run')
+      expect(ghead.getAttribute('data-run-id')).toBe('run-past')
+      // The run's own section stays on screen, not Guided's stand-in tab.
+      const sections = vi.mocked(resultsEvidenceApi.run).mock.calls.map(c => c[1])
+      expect(sections).toContain('results_capacity')
+      expect(sections).not.toContain('adequacy')
+      if (to === 'guided') {
+        // The advanced tab says why it is there: a colon, no em dash.
+        const title = screen.getByTestId('results-tab-capex').getAttribute('title') ?? ''
+        expect(title).toContain('. Advanced tab: shown because the past run on screen was opened here')
+        expect(title).not.toContain('\u2014')
+      }
+    })
+  }
 })
