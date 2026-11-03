@@ -200,3 +200,14 @@ The frontend overlay consumes the response after PR #1040 lands, behind the exis
 - The route amends D02's table. GK B owns D02 and may want to see it.
 - No chat tool: the SC-07 results unit adds one.
 - On a large network, a per-snapshot request costs one frame read per bound target. The chunked prefetch (one request per chunk of snapshots) is left to Step 2, under the D12 budget.
+
+## 8. Implementation notes (SC-03 PR)
+
+- Code: `pypsa-gui/backend/services/site_scene/results.py` (`gate`, `parse_query`, `project`, `REASONS`) and the route in `routers/site_scene.py`. Tests: `pypsa-gui/backend/tests/test_site_scene_results.py`. Red before the route: [evidence/red-before-route.txt](evidence/red-before-route.txt). Gate mutant: [evidence/mutation-gate.txt](evidence/mutation-gate.txt).
+- These deviate from the draft:
+  - The closed list drops `group_branch_member`. `associations.ROLES` refuses to bind a Line or Transformer, so a branch can never be a group member, and the list pins only reachable codes.
+  - Line and Transformer flows on placed objects stay with the existing placed-object overlay (`site3d/useSiteResults.ts`).
+  - The response nests `allocation` per target: `{"basis": "explicit", "weight"}`, or `{"basis": "shared", "features"}` for a target with no shares bound to several buildings.
+  - A group with any member not fully inside it reads `group_partial_allocation`. That includes a target with no shares bound to buildings both inside and outside the group.
+- Units (GK A condition 1): a raw `""`/`"None"`/NaN/`"MW"`/`"MWh"` counts as MW, unless the carrier catalogue says t (`process_products.bus_unit`, the N2 case). After a project save and load, the netCDF round trip leaves `buses.unit` as NaN, and the catalogue then decides.
+- Route parity: the route has no GUI binding yet, so `assistant_route_parity --check` passes with no declaration. The overlay PR adds one with its binding. The route is in `not_via_chat`'s `site_scene` family.

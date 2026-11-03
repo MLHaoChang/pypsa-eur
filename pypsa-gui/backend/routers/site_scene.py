@@ -4,6 +4,7 @@ The Site 3D native scene routes (SC-01a; D01/D02 in
 
   * ``GET/PUT /{name}/site-anchor``: the confirmed site anchor (revisioned sidecar).
   * ``GET  /{name}/sites/{site_id}/scene``: the canonical scene, or ``unadopted``.
+  * ``GET  /{name}/sites/{site_id}/scene/results``: SC-03 native results on buildings and groups (D07).
   * ``POST /{name}/sites/{site_id}/scene/adopt``: explicit, digest-checked adoption.
   * ``POST /{name}/sites/{site_id}/scene/proposals``: an in-request native preview.
   * ``GET  …/proposals/{proposal_id}``, ``POST …/apply``, ``POST …/cancel``.
@@ -170,6 +171,34 @@ def _read_back(project: AuthorizedProject, scene: dict) -> dict:
     with PyPSAService.get_lock():
         n = site_bindings.open_network(project.directory)      # resolved under the lock: no switch in between
         return associations.read_back(scene, n)
+
+
+@router.get("/{name}/sites/{site_id}/scene/results")
+def get_scene_results(site_id: str, snapshot: str | None = None, period: str | None = None,
+                      run: str | None = None, window_from: str | None = None, window_to: str | None = None,
+                      project: AuthorizedProject = ProjectAccessDep) -> dict:
+    """SC-03 (D07): native results at one exact snapshot on the scene's buildings and groups. Read only:
+    no solve, write, mint or dirty mark; every unresolved number is `{value: null, available: false, reason}`."""
+    from services import site_bindings
+    from services.pypsa_service import PyPSAService
+    from services.site_scene import results
+
+    _site_known(project, site_id)
+    with store.project_lock(project.directory):
+        scene = store.read_scene(project.directory, site_id)
+    if scene["state"] != "enabled":
+        raise SceneError("not_found", "This site has no 3D scene yet: create it first")
+    with PyPSAService.get_lock():
+        n = site_bindings.open_network(project.directory)      # resolved under the lock: no switch in between
+        query = None
+        if n is not None:
+            query = results.parse_query(n, snapshot=snapshot, period=period,
+                                        window_from=window_from, window_to=window_to)
+        elif not snapshot:
+            raise SceneError("invalid_input", "Snapshot: give a snapshot label")
+        verdict = results.gate(PyPSAService.get_active_context(), n, run)
+        payload = results.project(scene, n, gate=verdict, query=query)
+    return {"project": project.name, "site_id": site_id, "scene_revision": scene["revision"], **payload}
 
 
 @router.post("/{name}/sites/{site_id}/scene/adopt")
