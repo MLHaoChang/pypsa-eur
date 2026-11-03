@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-# 21 — Notify the user when an agent loop ends without a pass
+# 25 — Notify the user when an agent loop ends without a pass
 
 Status: needs-triage
 Type: task

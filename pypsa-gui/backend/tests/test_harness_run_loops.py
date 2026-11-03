@@ -19,11 +19,11 @@ from services.pypsa_service import PyPSAService
 from tests.test_assistant_tasks_study_brief import (  # noqa: F401
     baseline, dispatch, edit, helpers_state, session, wait_until,
 )
-from tests.test_harness_envelope import BLOCK, envelope_of, granted, profile  # noqa: F401
+from tests.test_harness_envelope import BLOCK, envelope_of, granted, on_run, profile  # noqa: F401
 from tests.test_harness_run_skeleton import site, start  # noqa: F401
 from tests.test_harness_runner import detached, frames_of, settle, task_path  # noqa: F401
 
-SHAPE = {"kind": "load_generator", "archetype": "industrial", "year": 2023, "energy": "static_p_set"}
+SHAPE = {"kind": "load_generator", "archetype": "industrial", "year": 2023, "energy": "fixture_energy"}
 WEATHER = {"kind": "weather_choices", "choices": [{"source": "synthetic", "year": 2023}]}
 GAPS = [{"tool": "apply_generated_profile", "target": {"component": "Load", "name": "L*", "attr": "p_set"},
          "source": SHAPE},
@@ -33,6 +33,18 @@ GAPS = [{"tool": "apply_generated_profile", "target": {"component": "Load", "nam
          "source": WEATHER}]
 WITH_GAPS = {**BLOCK, "gaps": GAPS}
 USAGE = {"input_tokens": 1200, "output_tokens": 300, "cache_read_tokens": 4000, "cache_create_tokens": 0}
+
+
+def fixture_energy(network, load):
+    """A test-only energy source (none ships yet, GK B): the load's static
+    p_set as its annual energy, to drive the gap mechanism."""
+    p_set = float(network.loads.at[load, "p_set"])
+    return {"annual_mwh": round(p_set * 8760, 6)} if p_set > 0 else None
+
+
+@pytest.fixture(autouse=True)
+def energy_source(monkeypatch):
+    monkeypatch.setitem(run_envelope.LOAD_ENERGY_SOURCES, "fixture_energy", fixture_energy)
 
 
 class Script:
@@ -372,6 +384,12 @@ def test_attach_tariff_is_admitted_only_from_a_listed_gap_a_held_tariff_and_wher
     assert match(listed, {"name": "made-up"}, tariff_card(None)) == "not_granted_source"
     assert match(listed, {"name": "grid-import", "replace_inline": True}, tariff_card(None)) == "outside_entry"
     assert match(listed, {"name": "grid-import"}, tariff_card("old-tariff v2")) == "not_a_gap"
+    # With two tariffs granted for the setting, which one is the user's call: the card.
+    two = {**TARIFF, "at_grant": {"Commercial": {"tariffs": {"sha-held": ["grid-import", 1],
+                                                             "sha-new": ["made-up", 1]}}}}
+    assert match({**listed, "gaps": [two]}, {"name": "grid-import"}, tariff_card(None)) == "not_granted_source"
+    assert "grid-import v1" in run_envelope._says_source(TARIFF)
+    assert "exactly one" in run_envelope._says_source(two)
     weather = {"complete": True, "rows": [{"component_class": "Settings", "name": "Weather", "field": "source",
                                            "old": None, "new": "synthetic", "role": "typed"}]}
     assert run_envelope._match_gap(listed, "set_weather_choice", {}, weather, None, {}) == "unlisted_tool"
@@ -454,6 +472,36 @@ def test_a_series_the_user_set_after_the_grant_is_not_a_gap(session, site, profi
                                         "old": None, "new": "series", "role": "typed"}]}
     assert run_envelope._match_gap(envelope, "apply_generated_profile", {"component": "L1", "job_id": "j"}, card,
                                    PyPSAService.get_active_context(), {}) == "not_a_gap"
+
+
+def test_a_series_landing_between_the_checks_is_refused_under_the_locks(session, site, profile):
+    """GK B condition 1: "still a gap" is read again under the step's locks
+    (after the decision guard), so a series that lands between the first
+    check and the locks is refused, and nothing is admitted to write."""
+    from harness.catalogue import safety_tier_for
+    project_id, root = site
+    profile(WITH_GAPS)
+    no_series()
+    task = start()
+    run_envelope.decide(session, task["task_id"], "unattended")
+    path = task_path(root, task)
+    args = generate(project_id)[1]
+
+    def lands_a_series(tool, call_args):
+        PyPSAService.get_active_context().network.loads_t.p_set["L1"] = 4.0
+        return True
+    with on_run(task, path, guard=lands_a_series) as run:
+        assert run_envelope.admit(run, call_id="c1", tool="generate_load_profile", args=args,
+                                  tier=safety_tier_for("generate_load_profile"), external=None,
+                                  edit_card=None) is None
+    assert refused(path) == [("generate_load_profile", "not_a_gap")]
+    assert not [a for a in envelope_of(path)["audit"] if a["event"] == "used"]
+    with on_run(task, path) as run:  # the same call, nothing landing: admitted
+        PyPSAService.get_active_context().network.loads_t.p_set = \
+            PyPSAService.get_active_context().network.loads_t.p_set.drop(columns=["L1"])
+        assert run_envelope.admit(run, call_id="c2", tool="generate_load_profile", args=args,
+                                  tier=safety_tier_for("generate_load_profile"), external=None,
+                                  edit_card=None) == "admitted"
 
 
 def test_a_value_the_model_picks_is_refused(session, site, profile):

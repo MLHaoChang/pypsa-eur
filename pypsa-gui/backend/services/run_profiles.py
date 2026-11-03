@@ -199,7 +199,7 @@ def scope_for(template: dict | None) -> dict:
     return {"preset": preset_id, "cards": {card: list(options) for card, options in preset.items()}}
 
 
-# The completed weather and demand-shape year eh_site fills a data gap from.
+# The completed weather year eh_site fills a weather gap from.
 EH_SITE_YEAR = 2023
 
 EH_SITE = {
@@ -248,10 +248,9 @@ EH_SITE = {
         # Issue 04: the data gaps the input loop may fill, never replace (§6.1, §7).
         # Each names the source its fill copies, fixed here and resolved at the
         # grant (GK B, AI-567b): the model never picks a value.
-        "gaps": [{"tool": "apply_generated_profile", "target": {"component": "Load", "name": "*", "attr": "p_set"},
-                  "source": {"kind": "load_generator", "archetype": "commercial", "year": EH_SITE_YEAR,
-                             "energy": "static_p_set"}},
-                 *[{"tool": "set_weather_choice", "target": {"component": "Settings", "name": "Weather", "attr": attr},
+        # No Load gap yet: a static p_set is demand, not a gap (GK B); one comes
+        # with a ruled energy source (`run_envelope.LOAD_ENERGY_SOURCES`).
+        "gaps": [*[{"tool": "set_weather_choice", "target": {"component": "Settings", "name": "Weather", "attr": attr},
                     "source": {"kind": "weather_choices", "choices": [{"source": "synthetic", "year": EH_SITE_YEAR}]}}
                    for attr in ("source", "year")],
                  {"tool": "attach_tariff",

@@ -8,8 +8,7 @@ those rules pass.
   gap (a load with no demand series, a missing tariff or weather choice).
 - Fill a gap, never replace a value that is there, and only from the source
   listed for it under "Data gaps you may fill": copy its archetype, year and
-  params (the load's own static demand as annual energy), its weather choice,
-  or a tariff it names. Never pick a number of your own; a call that does not
+  params, its weather choice, or the tariff it names. Never pick a number of your own; a call that does not
   copy the listed source is refused. Apply a demand series only from the
   pending profile you generated in this round.
 - Never delete a component, and never change the objective, the horizon, a

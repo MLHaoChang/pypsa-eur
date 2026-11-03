@@ -84,8 +84,8 @@ GAP_PREPARE = {"generate_load_profile": "apply_generated_profile"}
 # GK B's conditions on the gaps grant (issue 04, AI-567b): a fill's value never
 # comes from the model. Each gap names a source, fixed in the profile and
 # resolved to concrete values at the grant; L1 may only copy them.
-#   load_generator: the generator run on the load's own static p_set as its
-#     annual energy (p_set x 8760 MWh), with the profile's archetype and year;
+#   load_generator: the generator run with the profile's archetype and year,
+#     its energy from a source in LOAD_ENERGY_SOURCES;
 #   weather_choices: one of the profile's listed (source, year) pairs;
 #   library_tariff: a Library tariff the project's organisation already holds,
 #     listed at the grant by its hash (L1 never creates or uploads one).
@@ -93,7 +93,12 @@ GAP_PREPARE = {"generate_load_profile": "apply_generated_profile"}
 GAP_SOURCES = {"apply_generated_profile": "load_generator", "set_weather_choice": "weather_choices",
                "attach_tariff": "library_tariff"}
 LOAD_ARCHETYPES = ("industrial", "commercial", "residential", "ev_charging", "heat", "data_centre")
-HOURS_PER_YEAR = 8760
+# The energies a load_generator source may name, each resolving
+# (network, load) to the generator's params, or None when it has none for that
+# load. Empty until one is ruled (GK B, issue 04): a static p_set is constant
+# demand, not a gap, and reshaping it raises the peak (§6.0). An SH-21 intake
+# row or an owner decision adds one; until then a Load fill gets a card.
+LOAD_ENERGY_SOURCES: dict = {}
 _PREPARE_ARGS = {"project_id", "archetype", "loads", "params", "year", "replay_refinements"}
 
 _GLOB = re.compile(r"[*?\[\]]")
@@ -194,8 +199,9 @@ def _check_source(tool, source):
     if kind == "load_generator":
         if set(source) != {"kind", "archetype", "year", "energy"} or source["archetype"] not in LOAD_ARCHETYPES \
                 or isinstance(source["year"], bool) or not isinstance(source["year"], int) \
-                or source["energy"] != "static_p_set":
-            raise EnvelopeError("A load_generator source names archetype, year and energy static_p_set.")
+                or source["energy"] not in LOAD_ENERGY_SOURCES:
+            raise EnvelopeError(f"A load_generator source names archetype, year and an energy source "
+                                f"({sorted(LOAD_ENERGY_SOURCES) or 'none is ruled yet'}).")
     elif kind == "weather_choices":
         choices = source.get("choices")
         if set(source) != {"kind", "choices"} or not isinstance(choices, list) or not choices or not all(
@@ -372,7 +378,7 @@ def _rows(envelope):
             f"{k} {v:g}" if k != "rel" else f"±{v:.0%} of the value at grant" for k, v in e["bounds"].items())
         lines.append(f"- Edit {t['component']} `{t['name']}` {t['attr']} ({allowed}) with {e['tool']}")
     lines += [f"- Fill a missing {g['target']['component']} `{g['target']['name']}` {g['target']['attr']} with "
-              f"{g['tool']} from {_says_source(g['source'])} (only where none is set; never replaces one)"
+              f"{g['tool']} from {_says_source(g)} (only where none is set; never replaces one)"
               for g in envelope.get("gaps", [])]
     lines += [f"- Run {r['tool']}" + (f" ({r['kind']})" if r.get("kind") else "") for r in envelope["runs"]]
     b = envelope["budget"]
@@ -383,12 +389,18 @@ def _rows(envelope):
     return "\n".join(lines)
 
 
-def _says_source(source):
+def _says_source(gap):
+    source = gap["source"]
     if source["kind"] == "load_generator":
-        return f"a {source['archetype']} {source['year']} profile keeping the load's own annual energy"
+        return f"a {source['archetype']} {source['year']} profile from {source['energy']}"
     if source["kind"] == "weather_choices":
         return "one of " + ", ".join(f"{c['source']} {c['year']}" for c in source["choices"])
-    return "a Library tariff your organisation already holds"
+    held = [f"{name} v{version}" for record in (gap.get("at_grant") or {}).values()
+            for name, version in (record.get("tariffs") or {}).values()]
+    if len(held) == 1:
+        return f"the Library tariff {held[0]}"
+    return ("none: " if not held else f"none ({', '.join(held)} are held, so each asks you): ") + \
+        "a tariff is filled only when exactly one is held at the grant"
 
 
 def describe(envelope):
@@ -492,12 +504,11 @@ def _gap_instances(ctx, gap):
         if not fnmatch.fnmatchcase(str(name), target["name"]) or _has_series(ctx, name):
             continue
         try:
-            p_set = float(network.loads.at[name, "p_set"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if math.isfinite(p_set) and p_set > 0:
-            out[str(name)] = {"archetype": source["archetype"], "year": source["year"],
-                              "params": {"annual_mwh": round(p_set * HOURS_PER_YEAR, 6)},
+            params = LOAD_ENERGY_SOURCES[source["energy"]](network, name)
+        except Exception:  # noqa: BLE001 — a source that cannot be read names no gap
+            params = None
+        if isinstance(params, dict) and params:
+            out[str(name)] = {"archetype": source["archetype"], "year": source["year"], "params": params,
                               "identity": _identity(network, name)}
     return out
 
@@ -727,6 +738,8 @@ def _match_fill(envelope, tool, args, edit_card, ctx, note):
             return "new_instance"
         if not _still_gap(ctx, row):
             return "not_a_gap"
+        if any("identity" in g and not _same_load(ctx, row["name"], g) for g in granted):
+            return "new_instance"  # each row against its own grant record
         records += granted
     if tool == "set_weather_choice":
         pick = {"source": args.get("source"), "year": args.get("year")}
@@ -736,8 +749,9 @@ def _match_fill(envelope, tool, args, edit_card, ctx, note):
     elif tool == "attach_tariff":
         if args.get("replace_inline"):
             return "outside_entry"  # a fill never replaces a tariff
+        # Exactly one granted tariff (GK B): with several, the choice is the user's, on a card.
         digest = _tariff_hash(args)
-        if not all(digest in r["tariffs"] for r in records):
+        if not all(len(r["tariffs"]) == 1 and digest in r["tariffs"] for r in records):
             return "not_granted_source"
         note["source"] = digest
     else:
@@ -747,8 +761,6 @@ def _match_fill(envelope, tool, args, edit_card, ctx, note):
                 or args.get("point_id") not in (None, args.get("component")) \
                 or args.get("time_basis") not in (None, "UTC"):
             return "outside_entry"  # another load's column, or a shifted series: not the granted source
-        if any(not _same_load(ctx, r["name"], g) for r in typed for g in records if "identity" in g):
-            return "new_instance"
         job = next((j for j in envelope.get("prepared", []) if j["job_id"] == args.get("job_id")), None)
         loop_round = (note.get("scope") or {}).get("round")
         if job is None or job["task_id"] != envelope.get("task_id") or job["round"] != loop_round \

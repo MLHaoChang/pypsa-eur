@@ -54,4 +54,4 @@ Design: [design.md](../design.md) §6.1, §6.3, §6.4, §6.5
   6. `narrow` checks the sources too (same generator inputs, a subset of the weather choices). Admitted calls take the ordinary edit-card path (`require_current`, `_edit_receipt`).
   7. Any exception in the gap check reads `not_a_gap`, so the call gets a card.
 
-  Also in this PR: an L1 edit outside the failed rules' `tunable` lists is refused as `not_tunable`, and a round that errors still charges its tokens. Follow-up: the user notice on exhaustion is [issue 21](21-l1-exhaustion-notice.md) (needs a channel).
+  Also in this PR: an L1 edit outside the failed rules' `tunable` lists is refused as `not_tunable`, and a round that errors still charges its tokens. Follow-up: the user notice on exhaustion is [issue 25](25-l1-exhaustion-notice.md) (needs a channel).
