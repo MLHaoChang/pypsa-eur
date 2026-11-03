@@ -458,11 +458,13 @@ def start_study_run(study_id: str, fidelity: Fidelity | str, *, base_row,
         # U2 WP6: the minted export series the forks are bound to and the
         # compiled commercial config's digest (set by the worker).
         "export_series": None, "commercial_digest": None,
-        # LC-40: the base project's edit counter, read BEFORE the study starts
-        # (chat_tools' rule): an edit landing later can only over-report.
-        "network_revision": dirty_state.revision(ctx),
+        # LC-40: captured on the next line, BEFORE the study starts.
+        "network_revision": None,
         "thread": None, "stop_event": stop_event,
     }
+    # Same thread, before the Thread, the lock and the registry insert, so no
+    # reader sees this record's None (see `dirty_state.capture`).
+    dirty_state.capture(record, ctx)
     worker_args = dict(study_id=study_id, base_row_id=base_uuid,
                        base_dir=base_dir, user_id=user_id, fidelity=fidelity,
                        record=record, stop_event=stop_event, ctx=ctx,

@@ -403,14 +403,8 @@ def start_eh_study(
 
     def worker():
         try:
-            # ★ Captured HERE, not on the request thread: an edit completing
-            # between the request and the private copy (including an HTTP
-            # edit whose bump lands after `call_next`) would otherwise be IN
-            # the copy and still read "edited". Not inside `run_eh_study`
-            # either — the suite's fake runs replace it. The window left
-            # (lock released here, re-taken for the copy) only over-reports.
-            with lock:
-                record["network_revision"] = dirty_state.revision(study_ctx)
+            # ★ Here, not on the request thread nor in `run_eh_study`: see `dirty_state.capture`.
+            dirty_state.capture(record, study_ctx, lock=lock)
             report = run_eh_study(
                 n,
                 pack,

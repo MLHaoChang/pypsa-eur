@@ -469,10 +469,8 @@ def start_coupling_loop(
                 solver_state["solver_config"] = dataclasses.replace(
                     solver_state["solver_config"],
                     ens_cap_permyriad=float(eps_star))
-                # LC-40: the hold is a solver-config write; it moves the shared
-                # counter so other studies read stale.
-                # The loop's own hold re-captures its record's revision (LC-40).
-                record["network_revision"] = dirty_state.bump_revision(study_ctx)
+                # LC-40 hold (see `dirty_state.hold`).
+                dirty_state.hold(record, study_ctx)
         else:
             final_cfg = base_cfg
         try:
@@ -634,10 +632,8 @@ def start_coupling_loop(
     # all; post_frontier's in-thread `solver_state["frontier"].update(...)` is the
     # anti-pattern this deliberately does not copy.
     def worker():
-        # LC-41b: captured under the mutation lock before the loop first reads
-        # the network (as margin_loop_runner): a race can only over-report.
-        with lock:
-            record["network_revision"] = dirty_state.revision(study_ctx)
+        # LC-41b: captured under the mutation lock (see `dirty_state.capture`).
+        dirty_state.capture(record, study_ctx, lock=lock)
         # The outer stack is the every-path guarantee (a raise before the
         # explicit close in `_worker`); closing it twice is a no-op.
         with contextlib.ExitStack() as topology:

@@ -164,9 +164,12 @@ def refuse_edit_during_live_study() -> None:
 def edited_since(record, *, revision: int | None = None) -> bool | None:
     """Has an edit seam been crossed since this study STARTED? (P33b 10b)
 
-    The record carries the project's `network_revision` captured in the study
-    worker, under the ctx lock, immediately before the private copy is taken;
-    this compares it with the current counter (`!=`, not `>`: a Saved-snapshot
+    The record carries the project's `network_revision`, stored by
+    `dirty_state.capture` (the only capture path; a loop's own hold re-captures
+    through `dirty_state.hold`): in the study worker, under the ctx lock,
+    immediately before the private copy is taken, or for a decision study in
+    the caller's thread before its thread starts. This compares it with the
+    current counter (`!=`, not `>`: a Saved-snapshot
     restore moves the counter back together with the record it belongs to).
 
     ``None`` — Unavailable, never ``False`` — when the record is not a dict,
