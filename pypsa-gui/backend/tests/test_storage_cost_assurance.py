@@ -582,6 +582,19 @@ def test_storage_cost_named_network_keeps_type_during_clarification(
     clarified(frames, provider, "conversation_scope_changed")
 
 
+def record_split_solve(ctx):
+    """As `record_solve`, with the tie rows the app's solve adds for a tagged split storage."""
+    from services.solver.split_storage import _wrap_with_split_storage
+
+    n = ctx.network
+    status = n.optimize(
+        solver_name="highs", extra_functionality=_wrap_with_split_storage(n, None)
+    )
+    assert status == ("ok", "optimal")
+    ctx.solver_state.update(status="completed", condition="optimal")
+    workflow_tools._record_solve_inputs(n, ctx.solver_state["solver_config"])
+
+
 def static_priced(storage):
     n = storage.network
     n.storage_units.loc["Battery", ["capital_cost", "marginal_cost"]] = 3, 2
@@ -618,7 +631,7 @@ def test_migrated_store_keeps_its_holding_cost_once(storage):
     before = cost_values(static_priced(storage))
     assert before == pytest.approx(STATIC)
     migrate_storage_unit(storage.network, "Battery")
-    record_solve(storage)
+    record_split_solve(storage)
     assert list(storage.network.stores_t.e.Battery) == pytest.approx([8, 4, 0])
     assert cost_values(storage) == pytest.approx(STATIC)
 
@@ -630,3 +643,169 @@ def test_untagged_store_is_not_a_storage_unit(storage):
     record_solve(storage)
     with pytest.raises(ValueError, match="unknown_storage_unit"):
         calculations.scoped_source(storage, {**scope(storage), "entity_id": "Tank"})
+
+
+ROUND_TRIP_RTOL = 1e-6
+
+
+def unit_view(ctx):
+    """Raw cost-profile inputs of `Battery` (StorageUnit or migrated split) on a solved network."""
+    record_split_solve(ctx)
+    raw = calculations.scoped_source(ctx, scope(ctx))["storage_unit"]
+    keep = ("capacity", "max_hours", "cyclic", "initial_state")
+    return {
+        **{k: raw[k] for k in keep},
+        **raw["inputs"],
+        **{k: v for k, v in raw["costs"].items() if k != "version"},
+    }
+
+
+@pytest.mark.parametrize("extendable", [False, True], ids=["fixed", "extendable"])
+@pytest.mark.parametrize("varying", [False, True], ids=["static", "time-varying"])
+def test_migrated_split_round_trips_the_unit_inputs(storage, extendable, varying):
+    """GK B (17) condition (a): the view returns the unit's own inputs, and the same costs."""
+    from services.solver.split_storage import migrate_storage_unit
+
+    n = storage.network
+    unit = {
+        "capital_cost": 3,
+        "marginal_cost": 2,
+        "marginal_cost_storage": 0.25,
+        "standing_loss": 0.01,
+        "p_nom_extendable": extendable,
+        "p_min_pu": -0.9,
+        "p_max_pu": 0.95,
+    }
+    for attribute, value in unit.items():
+        n.storage_units.at["Battery", attribute] = value
+    series = {"p_max_pu": [1, 0.9, 1], "p_min_pu": [-1, -1, -0.8]}
+    if varying:
+        for attribute, values in series.items():
+            n.storage_units_t[attribute] = pd.DataFrame(
+                {"Battery": values}, index=n.snapshots
+            )
+    before = unit_view(storage)
+    if varying:  # Migration refuses series; an edited split carries them on its Links.
+        for attribute in series:
+            n.storage_units_t[attribute] = pd.DataFrame(index=n.snapshots)
+    migrate_storage_unit(n, "Battery")
+    if varying:
+        n.links_t.p_max_pu = pd.DataFrame(
+            {
+                "Battery discharger": series["p_max_pu"],
+                "Battery charger": [-v for v in series["p_min_pu"]],
+            },
+            index=n.snapshots,
+        )
+    after = unit_view(storage)
+    assert set(after) == set(before)
+    for key, value in before.items():
+        assert after[key] == pytest.approx(
+            value, rel=ROUND_TRIP_RTOL, abs=ROUND_TRIP_RTOL
+        ), key
+
+
+def test_dispatch_and_cycles_profiles_read_a_migrated_split_as_master_does(storage):
+    """GK B (17) condition (b): only the cost profile opts in to the split view."""
+    from harness import storage_cycles_calculations as cycles
+    from services.solver.split_storage import migrate_storage_unit
+
+    migrate_storage_unit(storage.network, "Battery")
+    record_split_solve(storage)
+    dispatch = {**scope(storage), "profile": "storage-unit-dispatch/1"}
+    dispatch.pop("cost_basis")
+    with pytest.raises(ValueError, match="^unknown_storage_unit$"):
+        calculations.scoped_source(storage, dispatch)
+    with pytest.raises(ValueError, match="^unknown_storage$"):
+        cycles.source(storage, "Battery", "StorageUnit")
+    raw = cycles.source(storage, "Battery", "Store")
+    assert "costs" not in str(sorted(raw)) and raw["entity_id"] == "Battery"
+
+
+def _migrated(storage):
+    from services.solver.split_storage import migrate_storage_unit
+
+    migrate_storage_unit(storage.network, "Battery")
+    record_split_solve(storage)
+    return storage.network
+
+
+def _set(component, name, attribute, value):
+    def mutate(n):
+        getattr(n, component).at[name, attribute] = value
+
+    return mutate
+
+
+def _add(*args, **kwargs):
+    def mutate(n):
+        n.add(*args, **kwargs)
+
+    return mutate
+
+
+def _other_ac_bus(n):
+    n.add("Bus", "B2")
+    n.links.at["Battery discharger", "bus1"] = "B2"
+
+
+def _reversed_charger(n):
+    n.links.loc["Battery charger", ["bus0", "bus1"]] = ["Battery store", "B1"]
+
+
+def _third_port(n):
+    n.links["bus2"] = ""
+    n.links.at["Battery discharger", "bus2"] = "B1"
+
+
+def _varying_charger_cost(n):
+    n.links_t.marginal_cost = pd.DataFrame(
+        {"Battery charger": [0, 1, 0]}, index=n.snapshots
+    )
+
+
+LAYOUTS = {
+    "same_link": _set("stores", "Battery", "discharger", "Battery charger"),
+    "missing_link": _set("stores", "Battery", "discharger", "gone"),
+    "reversed_charger": _reversed_charger,
+    "different_ac_buses": _other_ac_bus,
+    "third_port": _third_port,
+    "extra_on_store_bus": _add("Generator", "Leak", bus="Battery store", p_nom=1),
+    "store_marginal_cost": _set("stores", "Battery", "marginal_cost", 1),
+    "store_quadratic_cost": _set("stores", "Battery", "marginal_cost_quadratic", 1),
+    "store_e_min_pu": _set("stores", "Battery", "e_min_pu", 0.1),
+    "charger_marginal_cost": _set("links", "Battery charger", "marginal_cost", 1),
+    "charger_varying_cost": _varying_charger_cost,
+    "charger_quadratic_cost": _set(
+        "links", "Battery charger", "marginal_cost_quadratic", 1
+    ),
+    "charger_p_min_pu": _set("links", "Battery charger", "p_min_pu", 0.1),
+    "discharger_p_min_pu": _set("links", "Battery discharger", "p_min_pu", 0.1),
+    "store_e_max_pu": _set("stores", "Battery", "e_max_pu", 0.5),
+    "store_sign": _set("stores", "Battery", "sign", -1),
+    "extendable_mismatch": _set("stores", "Battery", "e_nom_extendable", True),
+    "hours_range": _set("stores", "Battery", "min_hours", 1),
+    "power_tie": _set("links", "Battery discharger", "p_nom", 99),
+    "energy_tie": _set("stores", "Battery", "e_nom", 99),
+    "no_dispatch_efficiency": _set("links", "Battery discharger", "efficiency", 0),
+}
+
+
+@pytest.mark.parametrize("layout", LAYOUTS)
+def test_a_split_that_is_not_the_migrate_layout_is_refused_by_name(storage, layout):
+    """GK B (17) condition (c), GK A (10) caveat 1: never folded into the StorageUnit view."""
+    n = _migrated(storage)
+    LAYOUTS[layout](n)
+    with pytest.raises(ValueError, match="^unsupported_split_storage_layout$"):
+        calculations.scoped_source(storage, scope(storage))
+
+
+def test_an_untagged_store_and_a_same_name_storage_unit_keep_the_old_path(storage):
+    """GK B (17) condition (e): a StorageUnit named like a tagged Store is read as the StorageUnit."""
+    before = cost_values(static_priced(storage))
+    n = storage.network
+    n.add("Bus", "Battery store")
+    n.add("Store", "Battery", bus="Battery store", e_nom=1, marginal_cost_storage=100)
+    n.stores["charger"], n.stores["discharger"] = "x", "y"
+    record_solve(storage)
+    assert cost_values(storage) == before
