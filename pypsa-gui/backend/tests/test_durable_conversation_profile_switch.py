@@ -201,3 +201,25 @@ def test_http_switch_returns_thread_without_credentials(http, monkeypatch):
     stale = _post_profile(client, tid, 'local', generation=1)
     assert stale.status_code == 409
     assert stale.json()['detail']['error_kind'] == 'stale_generation'
+
+
+def test_same_wire_switch_rechecks_in_flight_under_session_lock(monkeypatch):
+    """A turn that starts after the first in-flight check must still refuse."""
+    tid, view, session = _bound_thread(SONNET)
+    before = dc.get_thread(tid)
+    real_live_episode = dc._live_episode
+
+    def turn_starts_right_after(thread):
+        live = real_live_episode(thread)
+        with live._lock:
+            live._turn_in_flight = True  # the loop sets it under this lock
+        return live
+
+    monkeypatch.setattr(dc, '_live_episode', turn_starts_right_after)
+    with pytest.raises(HTTPException) as failure:
+        dc.switch_profile(tid, generation=view['generation'], profile=OPUS)
+    assert failure.value.detail['error_kind'] == 'turn_already_in_flight'
+    assert dc.get_thread(tid) == before
+    assert (session.profile_id, session.bound_wire, session.model) == (
+        'sonnet', 'anthropic', 'claude-sonnet',
+    )
