@@ -285,13 +285,15 @@ export default function App() {
     if (uiMode !== 'guided' || !currentProject) return
     if (hubDesignAutoOpenedFor.current === currentProject) return
     if (guidedTourHolds > 0) return
-    if (activeSlidePanel != null) {
+    // Site 3D with no panel is a place the user chose (also what "Back to
+    // Site 3D" restores from Expert): the hub design does not cover it.
+    if (canvasView === 'site' || activeSlidePanel != null) {
       hubDesignAutoOpenedFor.current = currentProject
       return
     }
     hubDesignAutoOpenedFor.current = currentProject
     setSlidePanel('hubDesign')
-  }, [uiMode, currentProject, activeSlidePanel, guidedTourHolds, setSlidePanel])
+  }, [uiMode, currentProject, activeSlidePanel, canvasView, guidedTourHolds, setSlidePanel])
 
   // Apply theme + density to <html> so CSS-var overrides in index.css kick in.
   // Done on <html> (not <body>) because the @theme block lives at :root scope —

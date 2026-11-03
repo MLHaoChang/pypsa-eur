@@ -151,8 +151,9 @@ class _Storage:
     """One storage with a state: its bus, charge/discharge MW, efficiencies.
 
     `soc0` is the state it starts the period in: its own initial state for the
-    first snapshot, otherwise the state the previous period ended in."""
-    __slots__ = ("name", "bus", "x", "d", "eta_s", "eta_d", "sl", "soc", "cyclic", "soc0")
+    first snapshot, otherwise the state the previous period ended in. `comp` is
+    "StorageUnit" or "Store": a Store may share a StorageUnit's name."""
+    __slots__ = ("name", "comp", "bus", "x", "d", "eta_s", "eta_d", "sl", "soc", "cyclic", "soc0")
 
 
 def _before(df: pd.DataFrame, name: str, rows: np.ndarray, fallback: float) -> float:
@@ -178,7 +179,7 @@ def _storages(n, result_df, rows, bus_ix, dt) -> list[_Storage]:
         s = _cols(soc, names, "storage state of charge", rows)
         for i, nm in enumerate(names):
             st = _Storage()
-            st.name, st.bus = str(nm), bus_ix[str(su.at[nm, "bus"])]
+            st.name, st.comp, st.bus = str(nm), "StorageUnit", bus_ix[str(su.at[nm, "bus"])]
             st.x, st.d, st.soc = x[:, i], d[:, i], s[:, i]
             st.eta_s, st.eta_d = float(su.at[nm, "efficiency_store"]), float(su.at[nm, "efficiency_dispatch"])
             st.sl = float(su.at[nm, "standing_loss"])
@@ -193,7 +194,7 @@ def _storages(n, result_df, rows, bus_ix, dt) -> list[_Storage]:
         e = _cols(e_df, names, "store energy", rows)
         for i, nm in enumerate(names):
             st = _Storage()
-            st.name, st.bus = str(nm), bus_ix[str(sto.at[nm, "bus"])]
+            st.name, st.comp, st.bus = str(nm), "Store", bus_ix[str(sto.at[nm, "bus"])]
             st.d, st.x, st.soc = np.maximum(p[:, i], 0.0), np.maximum(-p[:, i], 0.0), e[:, i]
             st.eta_s = st.eta_d = 1.0
             st.sl = float(sto.at[nm, "standing_loss"])

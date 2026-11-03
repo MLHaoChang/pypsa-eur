@@ -176,6 +176,51 @@ def test_a_timezone_aware_csv_is_refused_typed_and_stores_nothing(alpha, csv):
     assert list(n.snapshots) == snaps and list(n.loads_t.p_set["L1"]) == before
 
 
+@pytest.mark.parametrize("csv", [
+    "snapshot,L1\nEurope/Berlin 2026-01-01 00:00,9\nEurope/Berlin 2026-01-01 01:00,9\n",
+    "snapshot,L1\nUTC 2026-01-01 00:00,9\nUTC 2026-01-01 01:00,9\n",
+], ids=["zone_before_time", "utc_before_time"])
+def test_a_zone_name_before_the_time_is_refused_as_timezone_aware(alpha, csv):
+    before = _four(alpha)
+    detail = _refused(csv)
+    assert detail["error_kind"] == "timeseries_timezone_aware"
+    assert list(PyPSAService.get_network().loads_t.p_set["L1"]) == before
+
+
+@pytest.mark.parametrize("first, second", [
+    ("Thu 2026-01-01 00:00", "Jan 1 2026 01:00"),
+    ("Jan 1 2026 00:00", "Thu 2026-01-01 01:00"),
+    ("January 1, 2026 00:00", "Thu 2026-01-01 01:00"),
+], ids=["weekday_then_month", "month_then_weekday", "month_name_then_weekday"])
+def test_a_naive_timestamp_led_by_a_weekday_or_month_is_not_called_timezone_aware(alpha, first, second):
+    import io
+    csv = f"snapshot,L1\n{first},7\n{second},8\n"
+    # Mixed formats keep the index object-typed, the only path that reaches the zone-name guard.
+    assert pd.read_csv(io.StringIO(csv), index_col=0, parse_dates=True).index.dtype == object
+    before = _four(alpha)
+    # Mixed-format strings are never parsed to times, so the CSV cannot align to the
+    # horizon: it is refused as off-horizon (pre-existing), not as a zone.
+    assert _refused(csv)["error_kind"] == "timeseries_outside_horizon"
+    assert list(PyPSAService.get_network().loads_t.p_set["L1"]) == before
+
+
+@pytest.mark.parametrize("component, attribute, name", [
+    ("loads", "p_set", "L1"),
+    ("generators", "p_max_pu", "G1"),
+], ids=["mw_valued", "per_unit"])
+@pytest.mark.parametrize("stamp", [
+    "2026-01-01 00:00+01:00", "2026-01-01 00:00 Europe/Berlin", "Europe/Berlin 2026-01-01 00:00",
+], ids=["offset", "zone_after", "zone_before"])
+def test_a_timezone_aware_column_is_refused_the_same_for_mw_and_per_unit(alpha, component, attribute, name, stamp):
+    from fastapi import HTTPException
+    csv = f"snapshot,{name}\n{stamp},1\n"
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.upload_timeseries(component, name, attribute, csv)
+    assert exc.value.status_code == 422
+    assert exc.value.detail["error_kind"] == "timeseries_timezone_aware"
+    assert name not in getattr(PyPSAService.get_network(), f"{component}_t")[attribute].columns
+
+
 @pytest.fixture
 def two_periods(alpha):
     n = PyPSAService.get_network()

@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A time-series CSV whose timestamps carry a zone name before the time (for example `Europe/Berlin 2025-01-01 00:00`) is now refused as `timeseries_timezone_aware`, as a trailing zone name already was, instead of being reported as outside the horizon. Tests pin that a tz-aware column is refused identically for MW-valued and per-unit series.

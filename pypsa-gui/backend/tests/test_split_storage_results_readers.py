@@ -342,9 +342,21 @@ def test_a_colliding_split_storage_stays_out_of_billing(collision):
 def test_a_colliding_split_storage_stays_out_of_the_load_shape(collision):
     _, clash = collision
     got = load_shape(clash)["week"]["series"]["battery_soc"]["mw"]
-    # the StorageUnit and the same-named Store both match the StorageUnit test, as before AS-11
-    want = clash.storage_units_t.state_of_charge["bess"] + clash.stores_t.e["bess"]
+    # the StorageUnit's state of charge, once: the same-named Store is not a results split (was counted too)
+    assert clash.stores_t.e["bess"].max() > 1.0
+    want = clash.storage_units_t.state_of_charge["bess"]
     assert got == pytest.approx(want.to_numpy()[: len(got)], rel=REL, abs=1e-4)
+
+
+def test_a_store_named_like_a_storage_unit_keeps_its_own_carrier_in_the_load_shape(collision):
+    """The EV series reads the colliding Store's own carrier, not the StorageUnit's."""
+    clash = _copy(collision[1])
+    clash.stores.loc["bess", "carrier"] = "ev"
+    got = load_shape(clash)["week"]["series"]["ev"]
+    assert got["status"] == "ok"
+    want = (-clash.stores_t.p["bess"]).clip(lower=0)
+    assert want.max() > 1.0
+    assert got["mw"] == pytest.approx(want.to_numpy()[: len(got["mw"])], rel=REL, abs=1e-4)
 
 
 def test_a_colliding_split_storage_stays_out_of_compare_economics(collision):
@@ -417,3 +429,179 @@ def test_a_cross_bus_split_storage_stays_out_of_compare_economics(cross_bus):
 
 def test_a_cross_bus_split_storage_stays_out_of_storage_cycling(cross_bus):
     assert _compute_storage_cycling_summary(cross_bus, [], False, True).by_unit == []
+
+
+# ── AS-11 follow-ups: compare dispatch applies the one name rule ────────────────────────────────────────
+
+def _copy(n: pypsa.Network) -> pypsa.Network:
+    """A copy of a solved network (PyPSA refuses to copy one that still holds its solver model)."""
+    if getattr(n, "model", None) is not None:
+        n.model.solver_model = None
+    return n.copy()
+
+
+def _dispatch(n):
+    from services.compare.dispatch import _compute_dispatch_summary
+    return _compute_dispatch_summary(n, [], False, True)
+
+
+def _without_split(n: pypsa.Network) -> pypsa.Network:
+    """`n` with its split storage's Store and Links removed; the solved flows of everything else are kept."""
+    ref = _copy(n)
+    ref.remove("Store", "bess")
+    ref.remove("Link", ["bess charger", "bess discharger"])
+    return ref
+
+
+def test_a_colliding_split_storage_stays_out_of_compare_dispatch(collision):
+    _, clash = collision
+    got, want = _dispatch(clash), _dispatch(_without_split(clash))
+    assert want.dispatch_gwh_by_carrier["battery"].total > 0
+    assert got.dispatch_gwh_by_carrier["battery"].total == pytest.approx(
+        want.dispatch_gwh_by_carrier["battery"].total, rel=REL)
+    assert got.storage_cycles_by_carrier["battery"].total == pytest.approx(
+        want.storage_cycles_by_carrier["battery"].total, rel=REL)
+
+
+def test_a_cross_bus_split_storage_stays_out_of_compare_dispatch(cross_bus):
+    got = _dispatch(cross_bus)
+    assert "battery" not in got.dispatch_gwh_by_carrier and "battery" not in got.storage_cycles_by_carrier
+
+
+# ── AS-11 follow-ups: compare economics books marginal_cost_storage in both layouts ────────────────────
+
+MCS = 0.4                                   # per MWh held for one hour
+
+
+def _holding_site(split: bool, varying: bool = False) -> pypsa.Network:
+    n = _site(split)
+    mcs = pd.Series(MCS * (1 + (np.arange(HOURS) % 5)), n.snapshots) if varying else MCS
+    if split:                               # migration refuses marginal_cost_storage, so it is set after
+        if varying:
+            n.stores_t.marginal_cost_storage["bess"] = mcs
+        else:
+            n.stores.loc["bess", "marginal_cost_storage"] = mcs
+    elif varying:
+        n.storage_units_t.marginal_cost_storage["bess"] = mcs
+    else:
+        n.storage_units.loc["bess", "marginal_cost_storage"] = mcs
+    return n
+
+
+@pytest.fixture(scope="module")
+def holding_pair() -> tuple[pypsa.Network, pypsa.Network]:
+    legacy, split = _solve(_holding_site(False)), _solve(_holding_site(True))
+    assert float(split.objective) == pytest.approx(float(legacy.objective), rel=REL)
+    return legacy, split
+
+
+def _holding_lp(n: pypsa.Network, comp: str) -> float:
+    """PyPSA's own marginal_cost_storage term for `comp` (Σ state of charge x cost x objective weight)."""
+    return float(n.statistics.opex(components=comp, cost_types="marginal_cost_storage").sum())
+
+
+def _zero_holding(n: pypsa.Network) -> pypsa.Network:
+    m = _copy(n)
+    for c in ("storage_units", "stores"):
+        getattr(m, c)["marginal_cost_storage"] = 0.0
+        getattr(m, c + "_t").marginal_cost_storage = getattr(m, c + "_t").marginal_cost_storage.iloc[:, :0]
+    return m
+
+
+@pytest.mark.parametrize("comp,idx", [("StorageUnit", 0), ("Store", 1)])
+def test_compare_economics_books_marginal_cost_storage_as_the_lp_does(holding_pair, comp, idx):
+    """Reconciliation: the holding cost the walk books equals PyPSA's objective term, in each layout."""
+    n = holding_pair[idx]
+    lp = _holding_lp(n, comp)
+    assert lp > 0
+    got, without = _econ(n)["battery"], _econ(_zero_holding(n))["battery"]
+    for k in ("opex_meur", "gen_cost_meur"):
+        assert got[k]["total"] - without[k]["total"] == pytest.approx(lp / 1e6, rel=REL), k
+
+
+def test_compare_economics_books_marginal_cost_storage_alike_in_both_layouts(holding_pair):
+    a, b = (_econ(n) for n in holding_pair)
+    _assert_same_buckets(a, b)
+
+
+def test_compare_economics_books_a_time_varying_marginal_cost_storage():
+    for split, comp in ((False, "StorageUnit"), (True, "Store")):
+        n = _solve(_holding_site(split, varying=True))
+        soc = n.stores_t.e["bess"] if split else n.storage_units_t.state_of_charge["bess"]
+        by_hand = float((soc * MCS * (1 + (np.arange(HOURS) % 5)) * n.snapshot_weightings.objective).sum())
+        assert by_hand == pytest.approx(_holding_lp(n, comp), rel=REL) and by_hand > 0
+        got = _econ(n)["battery"]["opex_meur"]["total"] - _econ(_zero_holding(n))["battery"]["opex_meur"]["total"]
+        assert got == pytest.approx(by_hand / 1e6, rel=REL), comp
+
+
+def test_compare_dispatch_reads_a_split_storage_like_the_storage_unit(pair):
+    a, b = (_dispatch(n) for n in pair)
+    for carrier in ("battery", "flywheel"):
+        assert a.dispatch_gwh_by_carrier[carrier].total > 0 and a.storage_cycles_by_carrier[carrier].total > 0
+        assert b.dispatch_gwh_by_carrier[carrier].total == pytest.approx(
+            a.dispatch_gwh_by_carrier[carrier].total, rel=REL)
+        assert b.storage_cycles_by_carrier[carrier].total == pytest.approx(
+            a.storage_cycles_by_carrier[carrier].total, rel=REL)
+
+
+def test_compare_economics_books_marginal_cost_storage_on_two_periods_by_hand():
+    """Reconciled by hand, not with n.statistics.opex: the walk's cost weight carries the period weighting the LP's
+    objective applies (10 here), which the statistics term leaves out."""
+    for split in (False, True):
+        n = _two_period_site(split)
+        if split:
+            n.stores.loc["bess", "marginal_cost_storage"] = MCS
+        else:
+            n.storage_units.loc["bess", "marginal_cost_storage"] = MCS
+        _solve(n, multi_investment_periods=True)
+        soc = n.stores_t.e["bess"] if split else n.storage_units_t.state_of_charge["bess"]
+        pw = n.investment_period_weightings["objective"].reindex(n.snapshots.get_level_values(0)).to_numpy()
+        held = soc * MCS * n.snapshot_weightings.objective * pw
+        assert held.sum() > 0
+        got = _econ(n, PERIODS, True)["battery"]["opex_meur"]
+        without = _econ(_zero_holding(n), PERIODS, True)["battery"]["opex_meur"]
+        assert got["total"] - without["total"] == pytest.approx(held.sum() / 1e6, rel=REL)
+        for p in PERIODS:
+            want = float(held.loc[p].sum()) / 1e6
+            assert got["by_period"][str(p)] - without["by_period"][str(p)] == pytest.approx(want, rel=REL), p
+
+
+def test_compare_economics_skips_a_non_finite_marginal_cost_storage(holding_pair):
+    n = _copy(holding_pair[0])
+    mcs = pd.Series(MCS, n.snapshots)
+    mcs.iloc[5], mcs.iloc[9] = np.nan, np.inf
+    n.storage_units_t.marginal_cost_storage["bess"] = mcs
+    soc = n.storage_units_t.state_of_charge["bess"]
+    assert soc.iloc[[5, 9]].sum() > 0
+    want = (soc * mcs.where(np.isfinite(mcs), 0.0) * n.snapshot_weightings.objective).sum()
+    got = _econ(n)["battery"]["opex_meur"]["total"] - _econ(_zero_holding(n))["battery"]["opex_meur"]["total"]
+    assert got == pytest.approx(want / 1e6, rel=REL)
+
+
+def test_compare_economics_without_marginal_cost_storage_is_byte_identical(pair):
+    """mcs 0 (the default) books nothing: every bucket equals the walk with the attribute absent, to the bit."""
+    for n in pair:
+        m = _copy(n)
+        for c in ("storage_units", "stores"):
+            getattr(m, c).drop(columns="marginal_cost_storage", inplace=True)
+        assert _econ(n) == _econ(m)
+
+
+def test_compare_dispatch_nets_simultaneous_charge_and_discharge_like_the_storage_unit(pair):
+    """Charger and discharger both flowing in one snapshot (hand-set): the mix takes max(net, 0) and the cycles
+    |net|, as for a StorageUnit whose p is that net; gross charge + discharge would read 2 x 20 MW more."""
+    legacy, split = (_copy(n) for n in pair)
+    t = split.snapshots[3]
+    split.links_t.p0.loc[t, "bess charger"] = 20.0
+    split.links_t.p1.loc[t, "bess discharger"] = -30.0
+    split.links_t.p0.loc[t, "bess discharger"] = 30.0 / 0.9
+    legacy.storage_units_t.p.loc[t, "bess"] = 10.0
+    net = -split.links_t.p1["bess discharger"] - split.links_t.p0["bess charger"]
+    assert net[t] == pytest.approx(10.0)
+    a, b = _dispatch(legacy), _dispatch(split)
+    mix = float((net.clip(lower=0) * W).sum()) / 1e3
+    cycles = float((net.abs() * W).sum()) / (2 * 400.0)
+    assert b.dispatch_gwh_by_carrier["battery"].total == pytest.approx(mix, rel=REL)
+    assert b.storage_cycles_by_carrier["battery"].total == pytest.approx(cycles, rel=REL)
+    assert b.dispatch_gwh_by_carrier["battery"].total == pytest.approx(a.dispatch_gwh_by_carrier["battery"].total, rel=REL)
+    assert b.storage_cycles_by_carrier["battery"].total == pytest.approx(a.storage_cycles_by_carrier["battery"].total, rel=REL)

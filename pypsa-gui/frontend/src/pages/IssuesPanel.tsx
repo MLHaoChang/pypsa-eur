@@ -11,7 +11,7 @@ import { parseSuggestedCo2Value } from '../utils/carrierZeroCo2'
 import type { Carrier, ValidationIssue } from '../api/types'
 import { PageBody, PageSection, RowGrid, StatCard, Btn } from '../components/PageKit'
 import { componentOfKey, usePlacementFindings } from '../site3d/placementFindingsStore'
-import type { FindingKind, PlacementFinding } from '../site3d/placementCheck'
+import type { FindingKind, NativeFinding, NativeFindingKind, PlacementFinding } from '../site3d/placementCheck'
 import { RunFromReadiness } from '../components/RunFromReadiness'
 import { FlowStateDot } from '../components/FlowStateDot'
 import { FLOW_SECTIONS, type FlowSectionId } from '../api/flow'
@@ -101,7 +101,9 @@ export default function IssuesPanel() {
   // by the site view: advisory, with the same deep link as the preflight
   // rows. Absent until a site view has been opened this session.
   const layoutSite = usePlacementFindings(s => s.site)
-  const layoutFindings = usePlacementFindings(s => s.findings)
+  const placementOnly = usePlacementFindings(s => s.findings)
+  const nativeFindings = usePlacementFindings(s => s.native)
+  const layoutFindings = useMemo(() => [...placementOnly, ...nativeFindings], [placementOnly, nativeFindings])
   // The map's topology check (visual-layers plan 2 M5): the model against
   // the map's routes and the sites' boundaries, computed here from the
   // shared queries and sidecar stores — no map needs to be open.
@@ -344,7 +346,11 @@ export default function IssuesPanel() {
   )
 }
 
-const LAYOUT_FINDING_TITLES: Record<FindingKind, string> = {
+const LAYOUT_FINDING_TITLES: Record<FindingKind | NativeFindingKind, string> = {
+  overlapsBuilding: 'Overlaps a building',
+  offRoof: 'Off its roof',
+  notRoofEligible: 'Not for a roof',
+  noRule: 'No placement rule checked',
   outsideBoundary: 'Outside the site boundary',
   overlap: 'Overlaps another asset',
   keepOut: 'Inside a keep-out distance',
@@ -356,7 +362,7 @@ const LAYOUT_FINDING_TITLES: Record<FindingKind, string> = {
 // One layout finding: the message the check wrote for the user, and the
 // same View deep link the preflight rows offer (setSelectedComponent via
 // jumpTo). `warn` findings wear the warning tile, `info` a quiet one.
-function LayoutFindingRow({ finding, onJumpTo }: { finding: PlacementFinding; onJumpTo: (type: string, name: string) => void }) {
+function LayoutFindingRow({ finding, onJumpTo }: { finding: PlacementFinding | NativeFinding; onJumpTo: (type: string, name: string) => void }) {
   const { type, name } = componentOfKey(finding.key)
   const warn = finding.severity === 'warn'
   const Icon = warn ? AlertTriangle : Info

@@ -877,7 +877,7 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
   // Issues panel reads them from the store. Advisory: nothing blocks a save.
   const findings = useMemo(() => placementFindings(objects, DEFAULT_LIBRARY, { outside: fit?.outside ?? [] }), [objects, fit])
   // SC-02: a ground item inside a native building, an item off its roof or not for a roof (V17–V19).
-  // Shown in the overlay and outlined here; the Issues panel still reads only `findings`.
+  // Shown in the overlay, outlined here and published to the Issues panel with the layout findings.
   const sceneFindings = useMemo(() => nativeFindings(objects, DEFAULT_LIBRARY, { buildings: sceneBuildings }), [objects, sceneBuildings])
   const redSet = useMemo(() => new Set([...findingKeys(findings, 'red'), ...nativeFindingKeys(sceneFindings, 'red')]), [findings, sceneFindings])
   const amberSet = useMemo(() => new Set([...findingKeys(findings, 'amber'), ...nativeFindingKeys(sceneFindings, 'amber')]), [findings, sceneFindings])
@@ -885,9 +885,9 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
   const clearFindings = usePlacementFindings(s => s.clear)
   const siteName = site?.name ?? null
   useEffect(() => {
-    if (siteId && siteName) publishFindings({ id: siteId, name: siteName }, findings)
+    if (siteId && siteName) publishFindings({ id: siteId, name: siteName }, findings, sceneFindings)
     else clearFindings()
-  }, [siteId, siteName, findings, publishFindings, clearFindings])
+  }, [siteId, siteName, findings, sceneFindings, publishFindings, clearFindings])
   useEffect(() => () => clearFindings(), [clearFindings])
 
   // Ground: tile range around the SITE origin sized to the extent, stitched
