@@ -1,5 +1,6 @@
 import { client } from './client'
 import type { ResultsSourceBinding } from '../utils/resultsSource'
+import { notKeptSentence } from '../pages/results/sectionWords'
 
 export interface BranchLoadingRow {
   name: string
@@ -77,26 +78,33 @@ function fileNameOf(disposition: unknown): string | null {
 /** Why a past run's file download was refused, in the server's words: a blob
  *  response carries its JSON detail as a Blob. The LC03-ACCESS-1 sentence when
  *  access is gone; a plain fallback for anything else. */
-export async function runFileRefusal(error: unknown): Promise<string> {
+export async function runFileRefusal(error: unknown,
+  tabLabel: (id: string) => string | undefined = () => undefined): Promise<string> {
   const data = (error as { response?: { data?: unknown } } | null)?.response?.data
   if (data instanceof Blob) {
     try {
       const parsed = { response: { data: JSON.parse(await data.text()) } }
-      const reason = projectUnavailableReason(parsed) ?? notKeptReason(parsed)
+      const reason = projectUnavailableReason(parsed) ?? notKeptWords(parsed, tabLabel)
       if (reason) return reason
     } catch { /* not JSON: the fallback below */ }
   }
-  return projectUnavailableReason(error) ?? notKeptReason(error)
+  return projectUnavailableReason(error) ?? notKeptWords(error, tabLabel)
     ?? "This run's kept results could not be downloaded. Current results were not substituted."
 }
 
-/** The server's own words when the section asked for was kept as a not_kept stub
- * (a multi-period or price-less digest, or over the 16 KB cap): absent, with why.
- * Null for any other failure. */
-export function notKeptReason(error: unknown): string | null {
-  const detail = (error as { response?: { data?: { detail?: { section_status?: string; message?: string } } } } | null)
+/** The section and reason when the section asked for was kept as a not_kept stub
+ * (a multi-period or price-less digest, or over the 16 KB cap); null for any other failure. */
+export function notKeptRefusal(error: unknown): { section: string; reason?: string } | null {
+  const detail = (error as { response?: { data?: { detail?: { section_status?: string; section?: string; reason?: string } } } } | null)
     ?.response?.data?.detail
-  return detail?.section_status === 'not_kept' && detail.message ? detail.message : null
+  return detail?.section_status === 'not_kept' && detail.section
+    ? { section: detail.section, reason: detail.reason } : null
+}
+
+/** That refusal as the one sentence the past-run view and the Export picker show. */
+export function notKeptWords(error: unknown, tabLabel: (id: string) => string | undefined): string | null {
+  const r = notKeptRefusal(error)
+  return r ? notKeptSentence(r.section, r.reason, tabLabel) : null
 }
 
 /** The server's own words when a run read refuses because the project is no

@@ -17,10 +17,10 @@ function refused(detail: unknown) {
   return Object.assign(new Error('Request failed with status code 404'), { response: { status: 404, data: { detail } } })
 }
 
-function show() {
+function show(tabLabel?: (id: string) => string | undefined) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(<QueryClientProvider client={client}>
-    <RunBoundView run={{ runId: 'fg-old', resultsTab: 'capex', section: 'results_capacity' }} tab="capex" />
+    <RunBoundView run={{ runId: 'fg-old', resultsTab: 'capex', section: 'results_capacity' }} tab="capex" tabLabel={tabLabel} />
   </QueryClientProvider>)
 }
 
@@ -57,23 +57,24 @@ describe('RunBoundView refusals (LC-T08)', () => {
       .toBeTruthy()
   })
 
-  it('names why a section kept as a not_kept stub is absent (LC-03 slice 2)', async () => {
-    const why = 'This run kept no results_capacity: the section was over the 16 KB cap a run keeps, and its values are never trimmed.'
+  it('names why a section kept as a not_kept stub is absent (LC-03 slice 2), in words', async () => {
     vi.mocked(resultsEvidenceApi.run).mockRejectedValue(refused({
-      error_kind: 'evidence_unavailable', reason: 'over_section_cap', section_status: 'not_kept', message: why }))
-    show()
-    expect(await screen.findByText(`${why} Current results have not been substituted.`)).toBeTruthy()
-    expect(screen.queryByText(/evidence unavailable for run/)).toBeNull()
+      error_kind: 'evidence_unavailable', section: 'results_capacity', reason: 'over_section_cap',
+      section_status: 'not_kept', message: 'This run kept no results_capacity: …' }))
+    show(id => (id === 'capex' ? 'Capacity expansion' : undefined))
+    expect((await screen.findByTestId('run-not-kept')).textContent)
+      .toBe('This run kept no Capacity expansion: too large to keep. Current results are not shown in their place.')
+    expect(screen.queryByText(/results_capacity|over_section_cap|evidence unavailable for run/)).toBeNull()
   })
 })
 
-describe('runFileRefusal (Export chooser, LC-03 slice 2)', () => {
-  it('names the not_kept reason from the download refusal', async () => {
+describe('runFileRefusal (Export picker, LC-03 slice 2)', () => {
+  it('shows the same sentence as the past-run view, never the raw ids', async () => {
     const { runFileRefusal } = await import('../../api/resultsEvidence')
-    const message = "This run kept no results_prices: a multi-period run's dispatch and prices are not digested."
     const blob = new Blob([JSON.stringify({ detail: { error_kind: 'evidence_unavailable', section_status: 'not_kept',
-      reason: 'multi_period_not_digested', message } })])
-    expect(await runFileRefusal({ response: { data: blob } })).toBe(message)
+      section: 'results_prices', reason: 'multi_period_not_digested', message: 'raw' } })])
+    expect(await runFileRefusal({ response: { data: blob } }, id => (id === 'prices' ? 'Prices' : undefined)))
+      .toBe('This run kept no Prices: multi-period runs keep no dispatch or prices. Current results are not shown in their place.')
     expect(await runFileRefusal(refused({ error_kind: 'evidence_unavailable', message: 'x' })))
       .toBe("This run's kept results could not be downloaded. Current results were not substituted.")
   })
