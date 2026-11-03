@@ -35,6 +35,8 @@ Today a harness run's model cost is charged after the call (issue 02's total cos
 
 `pypsa-gui/backend/services/durable_conversation.py`, `pypsa-gui/backend/harness/budget.py`, `pypsa-gui/backend/harness/runner.py`, `pypsa-gui/backend/harness/providers/`, `pypsa-gui/backend/tests/test_harness_budget_reservation.py` (new)
 
+GK B note (3 Nov): restart reconciliation also runs as a boot sweep, not only when a run resumes.
+
 ## Not in scope
 
 #970's HH-03B (a shared broker for HH-06–09 stages): one reservation path is enough for this plan. Media spend. Raising any existing cap.

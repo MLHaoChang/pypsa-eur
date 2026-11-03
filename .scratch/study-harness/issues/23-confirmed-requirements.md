@@ -35,6 +35,8 @@ A requirement the user states and confirms ("keep the model horizon", "the BESS 
 
 `pypsa-gui/backend/services/durable_conversation.py`, `pypsa-gui/backend/harness/confirm.py`, `pypsa-gui/backend/harness/edit_card.py`, `pypsa-gui/backend/harness/compose.py` (per-turn context), `pypsa-gui/backend/services/assistant_tasks.py` (brief revision), `pypsa-gui/backend/tests/test_durable_conversation_requirements.py` (new)
 
+GK B note (3 Nov): the check must cover bulk and preview writers too, not only single-edit calls.
+
 ## Not in scope
 
 Predicates on solver outputs, finance or reliability (a requirement on `p_nom_opt` is not a bound on configured capacity). A requirements panel. Issue 22 (the lock-level check) and 24.
