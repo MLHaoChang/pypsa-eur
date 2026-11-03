@@ -1,7 +1,7 @@
 // AS-10: choosing intents starts one background job and renders one row per intent; a loop that did not
 // converge is never a pass; a converged row names its not-run checks; intent A has an editable autonomy;
 // intent D says when no grid code is set.
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, cleanup, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -15,6 +15,13 @@ vi.mock('../api/intentComparison', async () => {
 })
 const proj = vi.hoisted(() => ({ list: vi.fn(), updateSettings: vi.fn() }))
 vi.mock('../api/projects', () => ({ projectsApi: proj }))
+const net = vi.hoisted(() => ({ getBuses: vi.fn(), getLoads: vi.fn(), getLinks: vi.fn() }))
+vi.mock('../api/network', () => ({ networkApi: net }))
+const codes = vi.hoisted(() => ({ getPublishedGridCode: vi.fn() }))
+vi.mock('../api/campusElectrical', async () => {
+  const real = await vi.importActual<typeof import('../api/campusElectrical')>('../api/campusElectrical')
+  return { ...real, campusApi: codes }
+})
 const ui = vi.hoisted(() => ({ setSlidePanel: vi.fn(), requestGridCodeScroll: vi.fn() }))
 vi.mock('../store/uiStore', () => ({ useUIStore: (sel: (s: typeof ui) => unknown) => sel(ui) }))
 vi.mock('../layout/flowNavigation', () => ({ withReturnFrom: (jump: () => void) => jump() }))
@@ -29,8 +36,9 @@ const job = (rows: IntentRow[], over: Partial<IntentJob> = {}): IntentJob => ({
 })
 
 async function fill(user: ReturnType<typeof userEvent.setup>) {
-  const v: Record<string, string> = { critical: '80', link: 'poc', ramp: '10', sk: '1000', library: '50,100', swing: '20', amp: '5', period: '2' }
+  const v: Record<string, string> = { critical: '80', ramp: '10', sk: '1000', pst: '1', library: '50,100', swing: '20', amp: '5', period: '2' }
   for (const [k, val] of Object.entries(v)) await user.type(screen.getByTestId(`intent-in-${k}`), val)
+  await user.selectOptions(screen.getByTestId('intent-in-link'), 'poc')
 }
 function renderIt(gridCode: string | null = 'eu_rfg_dcc_ce') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -44,7 +52,13 @@ async function runWith(user: ReturnType<typeof userEvent.setup>, rows: IntentRow
   await user.click(screen.getByTestId('intent-run'))
   await waitFor(() => expect(screen.getByTestId(`intent-row-${rows[0].intent}`)).toBeTruthy())
 }
-afterEach(() => { cleanup(); Object.values(api).forEach(m => m.mockReset()); Object.values(proj).forEach(m => m.mockReset()) })
+afterEach(() => { cleanup(); Object.values(api).forEach(m => m.mockReset()); Object.values(proj).forEach(m => m.mockReset())
+  Object.values(net).forEach(m => m.mockReset()); codes.getPublishedGridCode.mockReset() })
+beforeEach(() => {
+  net.getBuses.mockResolvedValue([]); net.getLoads.mockResolvedValue([])
+  net.getLinks.mockResolvedValue([{ name: 'poc', bus0: 'grid', bus1: 'hub', p_min_pu: 0 }])
+  codes.getPublishedGridCode.mockResolvedValue({ profile: {} })
+})
 const stored = (h?: number) => proj.list.mockResolvedValue([{ name: 'Hub A', settings: h == null ? {} : { backup_autonomy_h: h } }])
 
 describe('IntentComparisonSection', () => {
@@ -235,6 +249,37 @@ describe('IntentComparisonSection', () => {
       await user.clear(input); await user.type(input, '720')
       await user.click(screen.getByTestId('intent-autonomy-save'))
       await waitFor(() => expect(screen.getByTestId('intent-autonomy-save-error').textContent).toContain('never been saved'))
+    })
+  })
+
+  describe('prefills from the network and the grid code', () => {
+    it('prefills critical load, Sk, link and Pst, still editable', async () => {
+      const user = userEvent.setup()
+      net.getBuses.mockResolvedValue([{ name: 'a', eh_critical: true }, { name: 'p', eh_poc: true, eh_sk_mva: 1200 }])
+      net.getLoads.mockResolvedValue([{ name: 'l', bus: 'a', p_set: 42 }])
+      net.getLinks.mockResolvedValue([{ name: 'z', bus0: 'g', bus1: 'h', p_min_pu: 0 }, { name: 'imp', eh_role: 'grid_import', bus0: 'g', bus1: 'h', p_min_pu: 0 }])
+      codes.getPublishedGridCode.mockResolvedValue({ profile: { pst_limit: { value: 0.8 } } })
+      api.get.mockResolvedValue(null)
+      renderIt()
+      await waitFor(() => expect((screen.getByTestId('intent-in-critical') as HTMLInputElement).value).toBe('42'))
+      expect((screen.getByTestId('intent-in-sk') as HTMLInputElement).value).toBe('1200')
+      expect((screen.getByTestId('intent-in-pst') as HTMLInputElement).value).toBe('0.8')
+      expect((screen.getByTestId('intent-in-link') as HTMLSelectElement).value).toBe('imp')
+      expect(Array.from((screen.getByTestId('intent-in-link') as HTMLSelectElement).options).map(o => o.value)).toEqual(['', 'imp', 'z'])
+      expect(screen.queryByTestId('intent-why-sk')).toBeNull()
+      await user.clear(screen.getByTestId('intent-in-sk')); await user.type(screen.getByTestId('intent-in-sk'), '900')
+      expect((screen.getByTestId('intent-in-sk') as HTMLInputElement).value).toBe('900')
+    })
+
+    it('leaves a field blank with its reason when the source is missing', async () => {
+      api.get.mockResolvedValue(null)
+      renderIt(null)
+      await waitFor(() => expect(screen.getByTestId('intent-why-critical')).toBeTruthy())
+      for (const k of ['critical', 'sk', 'pst']) {
+        expect((screen.getByTestId(`intent-in-${k}`) as HTMLInputElement).value).toBe('')
+        expect(screen.getByTestId(`intent-why-${k}`).textContent?.length).toBeGreaterThan(10)
+      }
+      expect(screen.getByTestId('intent-why-link').textContent).toContain('grid_import')
     })
   })
 })

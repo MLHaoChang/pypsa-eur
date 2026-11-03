@@ -3,7 +3,10 @@
 // unresolved, failed or stopped is never shown as a pass, and a converged row says how many checks did not run.
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { errorText } from '../api/campusElectrical'
+import { campusApi, errorText } from '../api/campusElectrical'
+import { networkApi } from '../api/network'
+import { nk } from '../utils/queryKeys'
+import { intentDefaults } from './intentDefaults'
 import { projectsApi } from '../api/projects'
 import type { ProjectInfo } from '../api/types'
 import {
@@ -73,8 +76,30 @@ export default function IntentComparisonSection({ name, gridCode }: { name: stri
   // The stored value is only the default a run starts from; an edit is this run's own (AS10-AUTONOMY-2).
   const [edited, setAutonomy] = useState<string | null>(null)
   const autonomy = edited ?? String(storedAutonomy ?? AUTONOMY_DEFAULT_H)
-  const [f, setF] = useState({ critical: '', link: '', ramp: '', sk: '', pst: '1', library: '', swing: '', amp: '', period: '' })
-  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF(p => ({ ...p, [k]: e.target.value }))
+  // Fields with a network or grid-code source hold only what the user typed (undefined = the prefill shows).
+  const [typed, setF] = useState<Partial<Record<'critical' | 'link' | 'sk' | 'pst', string>>>({})
+  const [g, setG] = useState({ ramp: '', library: '', swing: '', amp: '', period: '' })
+  const q = (root: string, queryFn: () => Promise<unknown>) => ({ queryKey: nk(name, root), queryFn, staleTime: 30_000, retry: false })
+  const buses = useQuery(q('buses', networkApi.getBuses))
+  const loads = useQuery(q('loads', networkApi.getLoads))
+  const links = useQuery(q('links', networkApi.getLinks))
+  const profile = useQuery({
+    queryKey: ['intentGridCode', name, gridCode], enabled: gridCode != null, retry: false, staleTime: 30_000,
+    queryFn: () => campusApi.getPublishedGridCode(name, gridCode as string),
+  })
+  const defaults = intentDefaults({
+    buses: (buses.data ?? []) as never, loads: (loads.data ?? []) as never, links: (links.data ?? []) as never,
+    pstLimit: profile.data?.profile.pst_limit?.value ?? null,
+  })
+  const f = {
+    critical: typed.critical ?? defaults.critical.value, link: typed.link ?? defaults.link.value,
+    sk: typed.sk ?? defaults.sk.value, pst: typed.pst ?? defaults.pst.value, ...g,
+  }
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const v = e.target.value
+    if (k === 'critical' || k === 'link' || k === 'sk' || k === 'pst') setF(p => ({ ...p, [k]: v }))
+    else setG(p => ({ ...p, [k]: v }))
+  }
   const key = ['intentComparison', name]
   const job = useQuery({
     queryKey: key, queryFn: () => intentComparisonApi.get(name), retry: false,
@@ -162,7 +187,17 @@ export default function IntentComparisonSection({ name, gridCode }: { name: stri
           ['swing', 'Load swing (MW)'], ['amp', 'Oscillation amplitude (MW)'], ['period', 'Oscillation period (s)']] as const)
           .map(([k, label]) => (
             <Field key={k} label={label}>
-              <input className={INPUT} value={f[k]} onChange={set(k)} disabled={running} data-testid={`intent-in-${k}`} />
+              {k === 'link' ? (
+                <select className={INPUT} value={f.link} onChange={set('link')} disabled={running} data-testid="intent-in-link">
+                  <option value="">Choose a link</option>
+                  {defaults.links.map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+              ) : (
+                <input className={INPUT} value={f[k]} onChange={set(k)} disabled={running} data-testid={`intent-in-${k}`} />
+              )}
+              {(k === 'critical' || k === 'link' || k === 'sk' || k === 'pst') && f[k] === '' && defaults[k].reason && (
+                <p className="text-[11px] text-muted" data-testid={`intent-why-${k}`}>{defaults[k].reason}</p>
+              )}
             </Field>
           ))}
       </div>
