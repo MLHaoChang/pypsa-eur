@@ -35,3 +35,7 @@ If context runs low, save live state: selected issue/branch/fullhead, executed r
 ## What has not happened
 
 These are design/specification artifacts. The plan-writing task runs document/source-reference checks and independent agent reviews, not new application tests, native solves, model calls, deployment or domain calibration. Runtime functionality is unchanged until implementation PRs land. Current review status is authoritative only in the review manifest and final verdict file.
+
+## Current-source continuation checkpoint
+
+The refreshed integration contract explicitly inspects master `a3239f48f88635805ded97ba83d0ac249ccdec32`. Preserve its one-worker lifetime store claim, profile/episode/lease transitions, all speech timer/boot parent writers and native retained queue capture. Read baseline.md's source refresh and the HH-02/03/09/10 amendments before implementation. Shared transaction/capacity migration must include these real writers; old file lists or a historical plan GO cannot be used to omit them. New required initial controls are HH-03 test25, HH-09A:A20, HH-10:IS34 and X20. The latest exact-payload final review supersedes earlier content approvals. No runtime implementation or activation follows from this checkpoint.

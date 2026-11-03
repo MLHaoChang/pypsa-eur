@@ -3,7 +3,7 @@
 
 Start with [spec.md](spec.md) for ownership/shared contracts and [workflow-strategy.md](workflow-strategy.md) for the product flow. [user-requirements.md](user-requirements.md) is the review source; [baseline.md](baseline.md) distinguishes shipped behavior from proposed integration. [test-matrix.md](test-matrix.md) defines qualification and [rollout.md](rollout.md) activation/recovery. Implementers follow [handoff.md](handoff.md).
 
-Planning base:60d8332d64b2edef1b204fb5980311e6102229a8. The [research package](../harness-research-2026/assessment.md) retains its own earlier source dates/SHAs and does not substitute for these implementation contracts.
+Planning base:60d8332d64b2edef1b204fb5980311e6102229a8. Latest inspected source: `a3239f48f88635805ded97ba83d0ac249ccdec32`; baseline.md and affected tickets explicitly cover its lifecycle/speech/store-ownership/retained-evidence changes. The [research package](../harness-research-2026/assessment.md) retains its own earlier source dates/SHAs and does not substitute for these implementation contracts.
 
 ## What improves for users
 

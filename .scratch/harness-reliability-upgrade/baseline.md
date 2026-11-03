@@ -44,3 +44,15 @@ Fresh fetched master: `30c79cf750c42314eedd0597d06b1780b92a81fe` (after pinned p
 - Owner decisions AS-BUILD-1/AS-AUTONOMY-1/AS-NOUPS-1 specify native asset-sizing work and defaults. These specs add no alternative autonomy default or sizing loop.
 
 Reassessment outcome: these changes do not remove the ten proposed harness deltas, but narrow their integration contracts as listed. No application tests on the combined tree were run or claimed. Each implementation rechecks actual then-current master and current official PRs; a source-delta assessment is not runtime compatibility evidence.
+
+## Additional source refresh: `a3239f48f88635805ded97ba83d0ac249ccdec32`
+
+This later master was fetched and its relevant seams inspected without merging application source into this documentation branch. It supersedes historical “current baseline” descriptions only for the seams listed here; the original planning base remains explicit.
+
+- Durable threads now have owner-lease renewal/adoption, same/cross-wire profile switching, bounded episode lineage and read-only unverified reconciliation. Preserve these shipped controls. They are not persistent typed requirements, effect proof or v2 physical inference admission.
+- `services/app_workers.py` owns a process-lifetime `.worker.lock` and configured one-worker refusal. Keep this in addition to the proposed short `.owner.lock` transaction. The new lifecycle integration must validate held store identity and safely preserve ownership across rename/delete/restore; a cached pathname alone is insufficient.
+- `services/live_speech.py` writes the same parent through foreground controls, read-triggered reap, timer `_reap_path` and `sweep_at_boot`; rotation/rebind can close speech and settle its legacy resource keys. These are now explicit participants in common transactions, field preservation, lifecycle and byte/headroom checks. Their media seconds/audio seconds/characters and `usage_unverified`/`over_reservation` flags are not certified inference or monetary receipts. Ordinary assistant inference entered by redeemed speech text remains an HH-03A send; media transport stays outside covered spending.
+- Queue publication already passes its exact `ctx` into `run_evidence.publish_queue_run` and captures retained sections. Reuse it; do not implement another summary-only-to-sections publisher. Required `not_kept` stubs/missed families remain unavailable despite intact manifest bytes. Strict frozen inputs/start fence/seal/publication and numerical gate contracts remain new.
+- Native sizing/control/storage-cost work and settings edits added since the prior source snapshot retain their own owners. The first unattended adapter remains closed and does not gain those domains through a template label or new native setting.
+
+The focused supporting source audit is in `reviews/current-master-impact.md`. The refreshed normative contracts and allowlists below require exact-payload re-review; historical GO remains attached to its own payload. No new runtime test or native solve was run by this source refresh.
