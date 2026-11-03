@@ -3,7 +3,7 @@
 
 # SC-02d implementation record: detach and group editing
 
-Status: backend and frontend built on branch `claude/site3d-sc02d` (master merged after SC-02c #1022). Plan verdicts and their conditions: [issues/03-bindings-and-placement.md](../issues/03-bindings-and-placement.md) `## Comments`. Follows [../sc-02/record.md](../sc-02/record.md) follow-up "detach and group editing are not built; placement is one item per preview".
+Status: backend and frontend merged (#1040, ac51d61d); follow-ups in [../sc-02/record.md](../sc-02/record.md) (Site 3D follow-ups). Plan verdicts and their conditions: [issues/03-bindings-and-placement.md](../issues/03-bindings-and-placement.md) `## Comments`. Follows [../sc-02/record.md](../sc-02/record.md) follow-up "detach and group editing are not built; placement is one item per preview".
 
 ## Frozen contract
 
@@ -60,6 +60,6 @@ Tests in `pypsa-gui/backend/tests/test_site_scene_detach.py`.
 
 - **Canvas Shift+click** is not covered by a test or a screenshot (headless WebGL hit-testing was not reliable); the outline is in `01-selection`.
 - **Not changed, seen in screenshots:** "Add model asset in Expert" stays active when read-only; in Expert the colour legend covers the Results pill; the Model panel scrolls at 1000 px height.
-- **The Undo receipt lives in the client store**: a page reload drops it; the detach is then undone by placing the items again.
+- **The Undo receipt lives in the client store**: a page reload drops it; since #1040 the offer is read back from the scene's `last_receipt` (see the sc-02 follow-ups for why only the latest change).
 - **Undo after a copy.** A copied project carries only the pointed generation, so a detach made before the copy cannot be undone in the copy (`detach_not_found`); the user places the item again.
 - **Another site's detach id** gives `detach_not_found` by construction (the lookup reads only this site's chain); no test spans two enabled sites.
