@@ -1568,7 +1568,7 @@ class SolveQueue:
                 # that sees the terminal status reads the evidence next.
                 try:
                     from services import run_evidence as _re
-                    _re.publish_queue_run(job, status=final_status)
+                    _re.publish_queue_run(job, status=final_status, ctx=ctx)
                 except Exception:  # noqa: BLE001
                     logger.exception(
                         "solve_queue: run evidence publish failed for %s", job.id,

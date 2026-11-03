@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A run from the solve queue now keeps its own past-run results (summary, capacity, dispatch, prices, emissions, load flow) like a chat-started solve, so the assistant can answer it after a newer solve instead of refusing with its run ID.
