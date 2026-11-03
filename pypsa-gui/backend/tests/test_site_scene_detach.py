@@ -136,13 +136,15 @@ def test_undo_is_a_delta_on_the_current_head(client, scene):
     _place(client, TANK, x=80.0)                                  # an unrelated edit after the detach
     _bind(client, [{"id": a["id"]} for a in _get(client)["associations"]]
           + [{"feature": GAS, "target": {"class": "Load", "name": "L1"}}],
-          [{"id": g["id"], "label": g["label"], "members": g["members"]} for g in _get(client)["groups"]])
+          [{"id": g["id"], "label": g["label"], "members": g["members"]} for g in _get(client)["groups"]]
+          + [{"id": "tanks", "label": "Tanks", "members": [TANK]}])                  # a group made after the detach
     _apply(client, _propose(client, "undo_detach", {"proposal": detach["id"]}))
     got = _get(client)
     assert {BESS, TANK, GAS} <= set(got["site"]["placements"])
     assert [a["name"] for a in got["associations"] if a["feature"] == GAS] == ["L1"]
     assert [a["name"] for a in got["associations"] if a["feature"] == BESS] == ["nh3_tank"]
     assert {g["id"]: g["members"] for g in got["groups"]}["yard"] == [BESS]
+    assert {g["id"]: g["members"] for g in got["groups"]}["tanks"] == [TANK]
 
 
 def test_undoing_twice_is_already_placed_and_a_reapply_reads_back(client, scene):

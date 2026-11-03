@@ -193,5 +193,7 @@ describe('Detach and undo', () => {
     fireEvent.click(btn('detach-undo'))
     await waitFor(() => expect(screen.getByTestId('assoc-error').textContent)
       .toMatch(/bess.*: it was placed again since the detach, so it can’t be restored/))
+    expect(btn('detach-undo').disabled).toBe(true)                      // it stays true: Undo is disabled with that reason
+    expect(screen.getByTestId('detach-undo-reason').textContent).toMatch(/placed again since the detach/)
   })
 })

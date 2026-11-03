@@ -285,7 +285,10 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
       const p = await propose<DetachPreview>(qc, project!, site.id, 'undo_detach', { proposal: receipt.proposalId })
       setProposal({ ...p, action: 'undo_detach' })
     } catch (e) {
-      if (sceneErrorDetail(e)?.code === 'detach_not_found') setLastDetach({ ...receipt, blocked: UNDO_GONE })
+      // A refusal that stays true (gone from history, placed again, its item replaced) disables Undo with its reason.
+      const d = sceneErrorDetail(e)
+      if (d?.code === 'detach_not_found') setLastDetach({ ...receipt, blocked: UNDO_GONE })
+      else if (d?.code === 'already_placed' || d?.code === 'unbound_target') setLastDetach({ ...receipt, blocked: detachRefusalCopy(d.code, keyName(d.key ?? undefined)) })
       throw e
     }
   }, (code, key) => (code === 'detach_not_found' ? null : detachRefusalCopy(code, keyName(key))))

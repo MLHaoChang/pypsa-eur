@@ -698,7 +698,7 @@ def _restore(scene: dict[str, Any], n, record: dict[str, Any], *, at_apply: bool
     and its attachments. Refuses when an item is placed again, its instance or
     an attachment's target is gone, or a split would break.
     """
-    current = scene.get("site", {}).get("placements") or {}
+    current = (scene.get("site") or {}).get("placements") or {}
     groups = {g["id"]: g for g in scene.get("groups") or []}
     ids = {a["id"] for a in scene.get("associations") or []}
     restore, findings, rows = {}, [], []

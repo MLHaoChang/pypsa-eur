@@ -70,6 +70,7 @@ export function detachRefusalCopy(code: string | undefined, item: string | null)
     case 'unbound_target': return `${it}: its model item was deleted or replaced since the detach, so it can’t be restored`
     case 'target_changed': return `${it}: something it was attached to changed since the detach, so it can’t be restored`
     case 'invalid_allocation': return `${it}: it carries a share of a split; change the split first`
+    case 'unsupported_target': return `${it}: it is not equipment that can be placed or detached`
     case 'detach_not_found': return UNDO_GONE
     default: return null
   }
