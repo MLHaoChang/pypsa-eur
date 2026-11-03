@@ -273,6 +273,23 @@ describe('useLiveSpeech: every exit stops the device track', () => {
     expect(link.connect).not.toHaveBeenCalled()
   })
 
+  it('a late start from a stopped run never replaces the new run session', async () => {
+    const first = deferred<ReturnType<typeof started>>()
+    api.startSpeech.mockReturnValueOnce(first.promise)
+    const hook = renderHook(({ on }) => useLiveSpeech(on), { initialProps: { on: true } })
+    await waitFor(() => expect(hook.result.current.available).toBe(true))
+    act(() => hook.result.current.start())
+    await waitFor(() => expect(api.startSpeech).toHaveBeenCalledTimes(1))
+    act(() => hook.result.current.stop())
+    api.startSpeech.mockResolvedValueOnce({ ...started(), session: { session_id: 'sp-2', state: 'open', expires_at: new Date(Date.now() + 600_000).toISOString() } })
+    await act(async () => { hook.result.current.start() })
+    await waitFor(() => expect(hook.result.current.state).toBe('listening'))
+    await act(async () => { first.resolve(started()) })
+    expect(api.endSpeech).toHaveBeenCalledWith('t-live', 3, 'sp-1')
+    act(() => hook.result.current.stop())
+    expect(api.endSpeech).toHaveBeenCalledWith('t-live', 3, 'sp-2')
+  })
+
   it('the typed fallback stays on the same durable thread', async () => {
     const { result } = await listening()
     act(() => result.current.stop())

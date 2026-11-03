@@ -151,8 +151,10 @@ export class LiveSpeechSession {
         this.fail(run, refusalCode(e))
         return
       }
-      this.server = { threadId, generation: started.generation, sessionId: started.session.session_id }
-      if (run !== this.generation) { this.endServer(); return }
+      const server = { threadId, generation: started.generation, sessionId: started.session.session_id }
+      // A stale run ends its own session and never touches a newer run's ref.
+      if (run !== this.generation) { endQuietly(server); return }
+      this.server = server
 
       const link = factory()
       this.link = link
@@ -202,7 +204,7 @@ export class LiveSpeechSession {
     this.server = null
     // Best effort: a rebind, timeout or restart already closed it server-side,
     // and the server reaps an unended session at its deadline.
-    if (server) void endSpeech(server.threadId, server.generation, server.sessionId).catch(() => {})
+    if (server) endQuietly(server)
   }
 
   private finish(reason: SpeechStopReason, code?: SpeechErrorCode): void {
@@ -219,4 +221,8 @@ export class LiveSpeechSession {
 
 function stopTracks(stream: MediaStream): void {
   stream.getTracks().forEach(t => t.stop())
+}
+
+function endQuietly(server: { threadId: string; generation: number; sessionId: string }): void {
+  void endSpeech(server.threadId, server.generation, server.sessionId).catch(() => {})
 }
