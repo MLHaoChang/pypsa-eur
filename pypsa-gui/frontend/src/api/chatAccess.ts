@@ -26,6 +26,9 @@ export async function getChatAccess(project: string | null, session: string | nu
   mode: 'expert' | 'guided', checked: boolean, signal?: AbortSignal): Promise<ChatAccessSnapshot> {
   const { data } = await client.get<ChatAccessSnapshot>('/chat/access', {
     params: { project_id: project ?? undefined, session_id: session ?? undefined, ui_mode: mode, checked }, signal,
+    // No error toast: this read polls every 15 s, and the access panel says in
+    // place that current access is unavailable (a revoked project 404s here).
+    skipErrorToast: true,
   })
   return data
 }

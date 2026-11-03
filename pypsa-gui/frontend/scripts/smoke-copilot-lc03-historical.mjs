@@ -7,6 +7,11 @@
  * the current 60; the answer says the same number (LC-T09).
  * LC-T10: the user's own Clear, a newer turn about the latest run, and a
  * project switch each drop the past-run view; nothing of it is left showing.
+ * Past-run parity: while the past run is on screen the Results header names
+ * that run ("From the run of …", never "From the latest run"), and the one
+ * Export chooser says the workbook holds the latest run and downloads the past
+ * run's kept section, whose gas row is the one the view shows; a download after
+ * access is lost is refused inline in the LC03-ACCESS-1 words.
  * LC-T08: while the past run is on screen the user loses access to the
  * project (the fixture makes it a colleague's and demotes the user from org
  * admin to member: a real database ACL change). Access loss clears the
@@ -100,6 +105,48 @@ async function pastView(page, runId) {
   return { binding, gas: kept.economics_by_carrier.by_carrier.gas }
 }
 
+/** The Results group header names the past run, never "From the latest run". */
+async function pastHeader(page, runId) {
+  const header = page.locator(`[data-testid="results-ghead-freshness"][data-freshness="past_run"][data-run-id="${runId}"]`)
+  await header.waitFor({ timeout: 30000 })
+  assert.equal(await page.locator('[data-testid="results-ghead-freshness"]:not([data-freshness="past_run"])').count(), 0)
+  return (await header.textContent()).trim()
+}
+
+/** The one Export chooser (Expert sidebar, Project menu › Export…) on its Results workbook choice. */
+async function openWorkbookChoice(page) {
+  const item = page.getByRole('button', { name: 'Export…', exact: true }).first()
+  if (!(await item.isVisible())) await page.getByTestId('sidebar-project-menu').click()
+  await item.click()
+  await page.getByText('Results workbook (Excel)', { exact: true }).click()
+  // The listing probes every result view first.
+  await page.getByTestId('workbook-run').waitFor({ timeout: 90000 }).catch(async error => {
+    await page.screenshot({ path: path.join(artifacts, 'lc03h-failed-chooser.png') })
+    throw error
+  })
+}
+
+/** The discussed-run row's Export…: the same chooser, opened on its Results workbook choice. */
+async function openRowExport(page) {
+  await page.getByTestId('discussed-run-export').click()
+  assert.equal(await page.locator('input[name="fmt"][value="workbook"]').isChecked(), true)
+  await page.getByTestId('workbook-run').waitFor({ timeout: 90000 }).catch(async error => {
+    await page.screenshot({ path: path.join(artifacts, 'lc03h-failed-row-export.png') })
+    throw error
+  })
+}
+
+/** Back from the chooser, Results still shows the same past run. */
+async function stillOnPastRun(page, runId) {
+  await page.locator(`[data-testid="discussed-run-chrome"][data-run-id="${runId}"]`).waitFor({ timeout: 10000 })
+}
+
+async function closeChooser(page, shot) {
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await page.getByTestId('workbook-run').waitFor({ state: 'detached', timeout: 30000 })
+  if (shot) await page.screenshot({ path: path.join(artifacts, shot) })
+}
+
 async function noPastView(page) {
   await page.getByTestId('discussed-run-chrome').waitFor({ state: 'detached', timeout: 30000 })
   assert.equal(await page.locator('[data-result-binding*="\\"scope\\":\\"historical\\""]').count(), 0)
@@ -116,6 +163,13 @@ try {
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', error => errors.push(String(error)))
+  // Refused API reads, so an unexpected error toast names the read behind it.
+  const refusedReads = []
+  page.on('response', response => {
+    if (response.status() >= 400 && response.url().includes('/api/')) {
+      refusedReads.push(`${response.status()} ${response.request().method()} ${new URL(response.url()).pathname}`)
+    }
+  })
   await page.goto(base)
   await page.locator('#email').fill(credentials.email)
   await page.locator('#password').fill(credentials.password)
@@ -135,10 +189,12 @@ try {
   await importGrid()
   assert((await context.request.post(base + '/api/projects/oj-grid', { headers })).ok())
   await context.route(url => ['http:', 'https:'].includes(url.protocol) && url.hostname !== '127.0.0.1', route => route.abort())
-  await page.addInitScript(() => {
+  await page.addInitScript(theme => {
     localStorage.setItem('network-diagram:current-project', 'oj-grid')
     localStorage.setItem('network-diagram:assistant-dock', 'open')
-  })
+    // LC03H_THEME=light: the same journey in the light theme, for its screenshots.
+    if (theme) localStorage.setItem('network-diagram:theme', theme)
+  }, process.env.LC03H_THEME || '')
   await page.goto(base + '/app')
   await page.getByTestId('chat-input').waitFor()
 
@@ -215,9 +271,59 @@ try {
   assert.equal(past.binding.project_name, 'oj-grid')
   assert.equal(past.gas.lcoe_eur_per_mwh.total, 50)   // the hand oracle; the current run's is 60
 
+  // Past-run parity: the Results chrome names the run it shows, in Guided and
+  // Expert, and the one Export chooser says the workbook holds the latest run
+  // and downloads the past run's kept results, the section on screen.
+  const pastWords = await pastHeader(page, runs[0])
+  assert.match(pastWords, /^From the run of \d{1,2} \w{3}, \d{2}:\d{2}(:\d{2})?$/)
+  await page.screenshot({ path: path.join(artifacts, 'lc03h-past-header-guided.png') })
+  // The row's Export… in Guided: the chooser names the past run, and Cancel
+  // returns to Results with that run still on screen.
+  await openRowExport(page)
+  await page.locator(`[data-testid="workbook-past-run"][data-run-id="${runs[0]}"]`).waitFor({ timeout: 30000 })
+  await page.screenshot({ path: path.join(artifacts, 'lc03h-export-past-run-guided.png') })
+  await closeChooser(page)
+  await stillOnPastRun(page, runs[0])
+  await page.getByRole('button', { name: 'Expert', exact: true }).click()
+  assert.equal(await pastHeader(page, runs[0]), pastWords)
+  await page.screenshot({ path: path.join(artifacts, 'lc03h-past-header-expert.png') })
+  // Past-run parity, export: the row's Export… opens the one chooser on the
+  // workbook, which says it holds the latest run and downloads the past run's
+  // kept section on screen. Cancelled, Results still shows the same past run.
+  await openRowExport(page)
+  const note = page.locator(`[data-testid="workbook-past-run"][data-run-id="${runs[0]}"]`)
+  await note.waitFor({ timeout: 30000 })
+  assert.equal(await page.getByTestId('workbook-run').getAttribute('data-run-id'), runs[1])
+  const exportNote = (await note.textContent()).trim()
+  assert.match(exportNote, /^Results shows the run of .+: this workbook holds the latest run, from .+\.$/)
+  await page.screenshot({ path: path.join(artifacts, 'lc03h-export-past-run.png') })
+  const link = page.locator(`[data-testid="workbook-past-run-download"][data-run-id="${runs[0]}"][data-section="results_capacity"]`)
+  const [download] = await Promise.all([page.waitForEvent('download', { timeout: 60000 }), link.click()])
+  assert.equal(download.suggestedFilename(), `run_${runs[0]}_results_capacity.json`)
+  const keptFile = JSON.parse(await fs.readFile(await download.path(), 'utf8'))
+  assert.equal(keptFile.run_id, runs[0])
+  assert.equal(keptFile.section, 'results_capacity')
+  // The file holds what the view shows: the past run's gas row, LCOE 50.
+  assert.deepEqual(keptFile.data.economics_by_carrier.by_carrier.gas, past.gas)
+  await closeChooser(page)
+  await stillOnPastRun(page, runs[0])
+  await page.screenshot({ path: path.join(artifacts, 'lc03h-after-chooser-expert.png') })
+  // The Project menu's Export… returns to Results too.
+  await openWorkbookChoice(page)
+  await closeChooser(page)
+  await stillOnPastRun(page, runs[0])
+
   // LC-T10 (1): the user's own Clear supersedes the past-run view.
   await page.getByTestId('discussed-run-chrome').getByRole('button', { name: 'Clear' }).click()
   await noPastView(page)
+  // With no past run on screen the chooser names only the latest run, no link.
+  await openWorkbookChoice(page)
+  await page.locator(`[data-testid="workbook-run"][data-run-id="${runs[1]}"]`).waitFor({ timeout: 30000 })
+  assert.equal(await page.getByTestId('workbook-past-run-download').count(), 0)
+  assert.match((await page.getByTestId('workbook-run').textContent()).trim(), /^Holds the latest run, from .+\.$/)
+  await page.screenshot({ path: path.join(artifacts, 'lc03h-export-latest.png') })
+  await closeChooser(page)
+  await page.getByRole('button', { name: 'Guided', exact: true }).click()
 
   // LC-T10 (2): a newer turn about the latest run supersedes it too.
   await openPast(1)
@@ -233,6 +339,7 @@ try {
     const response = await fetch(`${fixtureControl}/${action}`, { method: 'POST' })
     assert.equal(response.status, 204, `${action} failed`)
   }
+  refusedReads.length = 0
   await control('revoke-access')
   // The next read of the past run (another tab of it) is refused, in the server's words.
   await page.locator('[data-assurance-tab="summary"], button:has-text("Summary")').first().click()
@@ -242,6 +349,8 @@ try {
     throw error
   })
   assert.equal(await page.getByText(/not been substituted/).count(), 0)
+  assert.equal(await page.getByText('Project not found').count(), 0,
+    `error toast; refused reads since access was revoked: ${[...new Set(refusedReads)].join(', ')}`)
   // The way out stays: the run chrome's Clear and the panel's own close.
   assert(await page.getByTestId('discussed-run-chrome').getByRole('button', { name: 'Clear' }).isVisible())
   await page.screenshot({ path: path.join(artifacts, 'lc03h-refused-guided.png') })
@@ -249,6 +358,20 @@ try {
   await refusal.first().waitFor({ timeout: 60000 })
   assert(await page.getByTestId('discussed-run-chrome').getByRole('button', { name: 'Clear' }).isVisible())
   await page.screenshot({ path: path.join(artifacts, 'lc03h-refused-expert.png') })
+  // The chooser's download of the past run is refused inline, in the same words
+  // (its listing fails too, but the past run's link stays), with no toast.
+  await page.getByTestId('discussed-run-export').click()
+  const pastLink = page.locator(`[data-testid="workbook-past-run-download"][data-run-id="${runs[0]}"]`)
+  await pastLink.waitFor({ timeout: 90000 })
+  await pastLink.click()
+  const refusedDownload = page.locator('[data-testid="workbook-past-run-refused"]')
+  await refusedDownload.waitFor({ timeout: 60000 })
+  assert.equal((await refusedDownload.textContent()).trim().startsWith(REASON), true)
+  assert.equal(await page.getByText('Project not found').count(), 0,
+    `error toast; refused reads since access was revoked: ${[...new Set(refusedReads)].join(', ')}`)
+  await page.screenshot({ path: path.join(artifacts, 'lc03h-export-refused.png') })
+  await closeChooser(page, 'lc03h-after-refused-chooser.png')
+  await stillOnPastRun(page, runs[0])
   // The assistant gets the same reason from its own tools.
   await send(page, PAST)
   const refusedAnswer = await answer(page, 'LC03H_REFUSED')
@@ -276,8 +399,13 @@ try {
   report = { journey: 'LC-T09/T10 historical', passed: true, solves: runs.length,
     past: { answer: past.words.replace(runs[0], '<first run>'), scope: past.binding.scope,
       section: past.binding.section, gasLcoe: past.gas.lcoe_eur_per_mwh.total },
+    parity: { header: pastWords, exportNote, file: `run_<first run>_${keptFile.section}.json`,
+      fileGasLcoe: keptFile.data.economics_by_carrier.by_carrier.gas.lcoe_eur_per_mwh.total },
     superseded: ['clear', 'newer turn', 'project switch'], latest, refused: refusedAnswer,
-    screenshots: ['lc03h-past-run.png', 'lc03h-latest.png', 'lc03h-refused-guided.png',
+    screenshots: ['lc03h-past-run.png', 'lc03h-past-header-guided.png', 'lc03h-past-header-expert.png',
+      'lc03h-export-past-run.png', 'lc03h-export-past-run-guided.png', 'lc03h-after-chooser-expert.png',
+      'lc03h-export-latest.png', 'lc03h-export-refused.png',
+      'lc03h-latest.png', 'lc03h-refused-guided.png',
       'lc03h-refused-expert.png', 'lc03h-refused-chat.png', 'lc03h-switched.png'] }
   await context.close()
 } finally {

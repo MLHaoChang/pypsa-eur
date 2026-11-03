@@ -573,6 +573,9 @@ interface UIStore {
   compareNavRequest: { a?: string; b?: string; tab?: string } | null
   // Chat / agent: open Import/Export modal ('import' | 'export').
   ioModalRequest: 'import' | 'export' | null
+  // The export format to preselect with that request (the discussed-run
+  // row's Export… picks the results workbook); consumed with it.
+  ioModalFormat: 'workbook' | null
   // Multi-user edit lock (Task 14). `readOnly` is true when another user holds
   // the active project's lock (or acquisition failed) — every destructive /
   // mutating affordance is gated on it. `lockHolderEmail` names the current
@@ -731,7 +734,7 @@ interface UIStore {
   clearDiscussedRun: () => void
   requestCompareNav: (nav: { a?: string; b?: string; tab?: string }) => void
   clearCompareNavRequest: () => void
-  requestIoModal: (tab: 'import' | 'export') => void
+  requestIoModal: (tab: 'import' | 'export', format?: 'workbook') => void
   clearIoModalRequest: () => void
   // Apply a derived lock state (from utils/lockState.lockStateFromAcquire).
   setLockState: (s: LockState) => void
@@ -815,6 +818,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   discussedRun: null,
   compareNavRequest: null,
   ioModalRequest: null,
+  ioModalFormat: null,
   readOnly: false,
   lockHolderEmail: null,
   readOnlyReason: 'writable',
@@ -1110,8 +1114,8 @@ export const useUIStore = create<UIStore>((set, get) => ({
   clearDiscussedRun: () => { navigationChanged(); set({ discussedRun: null }) },
   requestCompareNav: (nav) => { navigationChanged(); set({ compareNavRequest: nav }) },
   clearCompareNavRequest: () => set({ compareNavRequest: null }),
-  requestIoModal: (tab) => set({ ioModalRequest: tab }),
-  clearIoModalRequest: () => set({ ioModalRequest: null }),
+  requestIoModal: (tab, format) => set({ ioModalRequest: tab, ioModalFormat: format ?? null }),
+  clearIoModalRequest: () => set({ ioModalRequest: null, ioModalFormat: null }),
   setLockState: (s) => set((state) => {
     const { readOnly, reason } = effectiveLockState(s.readOnly, state.solvingReadOnly)
     return {

@@ -524,6 +524,22 @@ def get_run_evidence(run_id: str, section: str | None = None) -> dict:
         return out
 
 
+EXPORT_MEDIA_TYPE = 'application/json'
+
+
+def export_bytes(run_id: str, section: str | None = None) -> tuple[bytes, str]:
+    """One run's kept evidence as the exported file: (bytes, file name).
+
+    The one serialiser behind both downloads of a past run, the assistant's
+    `export_run_evidence` and the Exports chooser's
+    `GET /api/results/run-evidence.json`, so the two files are byte-equal
+    (LC-03 past-run parity). Reads, and refuses, exactly as `get_run_evidence`.
+    """
+    evidence = get_run_evidence(run_id, section=section)
+    filename = f'run_{run_id}_{section}.json' if section else f'run_{run_id}.json'
+    return json.dumps(evidence, allow_nan=False, sort_keys=True, indent=2).encode('utf-8'), filename
+
+
 def checked_run_manifest(run_id: Any) -> tuple[str, dict | None, str]:
     """(project id, manifest, status) for a checked answer about one run.
 
