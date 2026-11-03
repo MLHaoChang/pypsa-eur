@@ -360,10 +360,16 @@ try {
     families.push({ tab: family.tab, section: view.binding.section })
   }
   // Guided and Expert agree on the last family's header and run.
-  await page.getByRole('button', { name: 'Guided', exact: true }).click()
-  await familyPast(page, FAMILIES.at(-1), runs[0], 'oj-grid')
-  await page.getByRole('button', { name: 'Expert', exact: true }).click()
-  await familyPast(page, FAMILIES.at(-1), runs[0], 'oj-grid')
+  // LC-03 (c): the past run stays on screen across Expert→Guided, with its
+  // "From the run of …" header, until Clear or a newer run is chosen.
+  const last = FAMILIES.at(-1)
+  for (const mode of ['Guided', 'Expert', 'Guided', 'Expert']) {
+    await page.getByRole('button', { name: mode, exact: true }).click()
+    await familyPast(page, last, runs[0], 'oj-grid')
+    const fresh = page.getByTestId('results-ghead-freshness')
+    assert.equal(await fresh.getAttribute('data-freshness'), 'past_run', `${mode}: the past run was lost`)
+    assert.equal(await fresh.getAttribute('data-run-id'), runs[0], `${mode}: another run is shown`)
+  }
 
   // LC-T10 (1): the user's own Clear supersedes the past-run view.
   await page.getByTestId('discussed-run-chrome').getByRole('button', { name: 'Clear' }).click()
