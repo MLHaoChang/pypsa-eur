@@ -38,27 +38,27 @@ POC_XR_MAX = 100.0
 DEFAULTS: dict[str, object] = {DERIVE_LENGTHS: False, BACKUP_AUTONOMY: BACKUP_AUTONOMY_DEFAULT_H, POC_XR: None}
 
 
-def _hours(value: object) -> float | None:
-    """A finite number in (0, BACKUP_AUTONOMY_MAX_H] as a float, else None.
+def _bounded(value: object, upper: float) -> float | None:
+    """A finite number in (0, upper] as a float, else None.
     A bool is refused explicitly: it is an int to Python."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     # The bound check first: NaN fails both comparisons and +inf fails the
     # upper one, and a huge int never reaches float().
-    if not 0 < value <= BACKUP_AUTONOMY_MAX_H:
+    if not 0 < value <= upper:
         return None
-    hours = float(value)
-    return hours if math.isfinite(hours) else None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
+def _hours(value: object) -> float | None:
+    """A backup autonomy in (0, BACKUP_AUTONOMY_MAX_H] h, else None."""
+    return _bounded(value, BACKUP_AUTONOMY_MAX_H)
 
 
 def _xr(value: object) -> float | None:
-    """A finite number in (0, POC_XR_MAX] as a float, else None; a bool is refused."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    if not 0 < value <= POC_XR_MAX:
-        return None
-    xr = float(value)
-    return xr if math.isfinite(xr) else None
+    """A PoC X/R in (0, POC_XR_MAX], else None."""
+    return _bounded(value, POC_XR_MAX)
 
 
 def _flag(value: object) -> bool | None:
