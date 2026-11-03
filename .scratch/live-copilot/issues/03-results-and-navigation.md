@@ -4,8 +4,9 @@ Status: ready-for-agent
 Progress: Result-view registry #407, walk #410, retained load flow #416, common adapter + Summary,
 capacity, dispatch, prices and emissions families (#848, #861 and earlier) merged; LC-T08 ACL
 recheck and LC-T09/T10 browser cases (PR-I) merged; UI/export parity for past runs (PR-J, below)
-open. Remaining: study/report sections (queue: PR-L); undigestable prices; sections over 16 KB; the
-remaining LC-T09/T10 browser cases (PR-I list). LC-14 reach fixes outsourced.
+open. Slice 2: queue capture (PR-L, #1036) and study/report sections (PR-M, #1038) merged;
+undigestable prices and sections over 16 KB as typed not_kept stubs (PR-N, #1053) open.
+Remaining: the remaining LC-T09/T10 browser cases (PR-I list). LC-14 reach fixes outsourced.
 Type: task
 Baseline: master `c75ca5584b873418f10f1bca42f868255d445b7b`
 Dependencies: LC-01/02 and current native evidence stores
