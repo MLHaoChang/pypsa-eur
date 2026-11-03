@@ -171,7 +171,8 @@ def adapter(section: str) -> Retained:
 def capture(ctx: Any, token: dict) -> tuple[dict[str, dict], list[str]]:
     """Every family's section for a completed run, and the ones not captured.
 
-    Binds the run's project context and actor once. A failure, a refusal or a
+    Binds the run's project context (request and turn cell) and actor once,
+    so every read sees that context, never the caller's. A failure, a refusal or a
     section over the store's size cap stores nothing for that family (an
     oversized section would refuse the whole manifest).
     """
@@ -181,6 +182,9 @@ def capture(ctx: Any, token: dict) -> tuple[dict[str, dict], list[str]]:
     sections: dict[str, dict] = {}
     missed: list[str] = []
     binding = PyPSAService.bind_request_context(ctx)
+    # A turn cell outranks the request binding; a fresh one holds this run's
+    # context, so a caller's cell (another project's turn) is never read.
+    cell = PyPSAService.bind_turn_cell()
     previous = chat_tools.acting_user_id()
     chat_tools.set_acting_user(token.get('actor_id'))
     try:
@@ -200,6 +204,7 @@ def capture(ctx: Any, token: dict) -> tuple[dict[str, dict], list[str]]:
                 sections[a.section] = out
     finally:
         chat_tools.set_acting_user(previous)
+        PyPSAService._turn_cell.reset(cell)
         PyPSAService.reset_request_context(binding)
     return sections, missed
 
@@ -223,7 +228,7 @@ def historical(section: str, run_id: str) -> tuple[dict | None, dict | None]:
             return None, unavailable(
                 a.refusal,
                 f'No {a.label} was kept for this run: it was solved before {a.label} was '
-                'captured, ran outside a chat-started solve, or its section is missing, '
+                'captured, ran outside a chat-started or queued solve, or its section is missing, '
                 'corrupt or not finished. The current results are not this run.',
                 run_id=run_id, reason=detail.get('reason') or detail.get('error_kind'),
                 scope='historical')

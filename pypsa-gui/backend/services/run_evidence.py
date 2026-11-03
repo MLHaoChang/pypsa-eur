@@ -791,10 +791,39 @@ def _input_fingerprint(ctx: Any) -> str | None:
         return None
 
 
-def publish_foreground_run(token: dict | None, ctx: Any) -> dict | None:
-    """Publish the terminal manifest once the solver state is terminal; else do nothing."""
+def _capture_retained(ctx: Any, token: dict) -> tuple[dict[str, dict], str | None, list[str]]:
+    """A completed solve's retained sections, its solved-inputs fingerprint and warnings.
+
+    Shared by every runner that solves a project's network (a chat-started
+    solve, a solve-queue job). The fingerprint is the solved inputs': the one
+    the solve recorded under its lock. An edit queued on that lock applies as
+    the solve releases it, before this publish; then the live inputs are not
+    the solved ones, and the sections would describe other inputs.
+    """
     from services import retained_results
 
+    live = _input_fingerprint(ctx)
+    solved = (getattr(ctx.network, 'meta', None) or {}).get('assistant_solve_input_fingerprint')
+    fingerprint = solved or live
+    warnings: list[str] = []
+    kept: dict[str, dict] = {}
+    # LC-03: each family's retained section (retained_results), read while
+    # this run's results are the current ones. An edit landing before or
+    # during the capture drops them all.
+    missed = [a.section for a in retained_results.ADAPTERS]
+    if solved is not None and live != solved:
+        warnings.append('inputs_changed_before_publish')
+    else:
+        captured, not_kept = retained_results.capture(ctx, token)
+        if _input_fingerprint(ctx) == fingerprint:
+            kept = captured
+            missed = not_kept
+    warnings.extend(f'{name}_not_captured' for name in missed)
+    return kept, fingerprint, warnings
+
+
+def publish_foreground_run(token: dict | None, ctx: Any) -> dict | None:
+    """Publish the terminal manifest once the solver state is terminal; else do nothing."""
     if not token:
         return None
     with ctx.solver_state_lock:
@@ -828,25 +857,8 @@ def publish_foreground_run(token: dict | None, ctx: Any) -> dict | None:
     warnings: list[str] = []
     if run_status == 'completed':
         sections = {'summary': summary}
-        # The fingerprint is the solved inputs': the one the solve recorded
-        # under its lock. An edit queued on that lock applies as the solve
-        # releases it, before this publish; then the live inputs are not the
-        # solved ones, and the section would describe other inputs.
-        live = _input_fingerprint(ctx)
-        solved = (getattr(ctx.network, 'meta', None) or {}).get('assistant_solve_input_fingerprint')
-        fingerprint = solved or live
-        # LC-03: each family's retained section (retained_results), read
-        # while this run's results are the current ones. An edit landing
-        # before or during the capture drops them all.
-        missed = [a.section for a in retained_results.ADAPTERS]
-        if solved is not None and live != solved:
-            warnings.append('inputs_changed_before_publish')
-        else:
-            kept, not_kept = retained_results.capture(ctx, token)
-            if _input_fingerprint(ctx) == fingerprint:
-                sections.update(kept)
-                missed = not_kept
-        warnings.extend(f'{name}_not_captured' for name in missed)
+        kept, fingerprint, warnings = _capture_retained(ctx, token)
+        sections.update(kept)
     try:
         return publish_run(
             token['root'], token['project_id'], run_id=token['run_id'], kind=token['kind'],
@@ -990,13 +1002,14 @@ def start_queue_run(job: Any) -> dict | None:
         return None
 
 
-def publish_queue_run(job: Any, status: str | None = None) -> dict | None:
+def publish_queue_run(job: Any, status: str | None = None, ctx: Any = None) -> dict | None:
     """Publish a terminal solve-queue / GridSpine run from the job record.
 
     ``status`` is the terminal status the job is about to take. The queue
     publishes before it flips ``job.status``, so a caller that sees the
     terminal status can always read the evidence; without it ``job.status``
-    is used.
+    is used. ``ctx`` is the context the job solved in: a completed job keeps
+    its retained sections from it (LC-03), as a chat-started solve does.
     """
     try:
         token = getattr(job, 'run_evidence_token', None)
@@ -1035,14 +1048,21 @@ def publish_queue_run(job: Any, status: str | None = None) -> dict | None:
                 'error_kind': 'solver_failed',
                 'message': str(err or 'The queued job failed.')[:500],
             }
+        actor_id = (token or {}).get('actor_id') or (
+            str(job.enqueued_by_user_id) if getattr(job, 'enqueued_by_user_id', None) is not None else None)
+        sections = {'summary': summary} if status == 'completed' else None
+        fingerprint = None
+        warnings: list[str] = []
+        if status == 'completed' and ctx is not None:
+            kept, fingerprint, warnings = _capture_retained(
+                ctx, {**(token or {}), 'run_id': run_id, 'actor_id': actor_id})
+            sections.update(kept)
         return publish_run(
             root, project_id, run_id=run_id, kind=kind, status=status,
             started_at=(token or {}).get('started_at'),
-            mode=kind, job_id=job_id,
-            actor_id=(token or {}).get('actor_id') or (
-                str(job.enqueued_by_user_id) if getattr(job, 'enqueued_by_user_id', None) is not None else None),
-            metrics=metrics, error=error,
-            sections={'summary': summary} if status == 'completed' else None,
+            mode=kind, job_id=job_id, actor_id=actor_id,
+            fingerprint=fingerprint, warnings=warnings or None,
+            metrics=metrics, error=error, sections=sections,
         )
     except HTTPException:
         return None

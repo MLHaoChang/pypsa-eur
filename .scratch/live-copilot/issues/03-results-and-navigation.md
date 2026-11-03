@@ -461,3 +461,20 @@ Owner decision FILL-10-1. Branch `claude/lc03-historical-families`, from master 
   section, the picker note), never on text already on screen (#998).
 - UX (6) plan GO with changes: no button in the Results chrome (SAVE-1, the one
   Export chooser); run labels by start time, id in a tooltip; refusal inline.
+- GK B (16) slice 2 plan GO (FILL-10-2): Q1 study + report in one PR; Q2 typed
+  `not_kept` stub, values never trimmed. Conditions. PR-L: (a) fingerprint,
+  recheck and capture bind to the queue job's own ctx, never the foreground; test
+  the foreground network and its results_current untouched; (b) one helper for
+  both paths, foreground capture byte-equal (master's retained tests); (c)
+  disowned, superseded and failed jobs capture nothing (test one). PR-M: (d)
+  study_result byte-equal to the status route's payload, stored verbatim, no
+  derived adequacy fields (else GK A); (e) report_output ids and counts only;
+  (f) both sections refuse past-run reads as the others do (revoked, non-member,
+  unknown run byte-equal with /run-view, no existence oracle); (g)
+  historical_scope_mismatch in a tool-error-kinds.d fragment, tested on
+  get_results and any route serving it. PR-N: (h) the stub is a stored-format
+  change: old runs' exports and reads byte-equal (pin), stub only for new runs;
+  (i) every reader iterating kept sections (export_run_evidence, run view,
+  compare, discuss_project_run, workbook Scenarios, the chooser) treats
+  status=not_kept as absent-with-reason, never data; (j) live digest failure and
+  past-run read name the same reason from one constant.

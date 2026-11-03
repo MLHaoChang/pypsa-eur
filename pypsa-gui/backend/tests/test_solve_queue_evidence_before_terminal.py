@@ -24,7 +24,7 @@ from services import solve_queue as sq
 def publishes(monkeypatch):
     seen: list[dict] = []
 
-    def hook(job, status=None):
+    def hook(job, status=None, ctx=None):
         with sq.solve_queue._lock:
             seen.append({"job_status": job.status, "status": status})
         return None
@@ -74,7 +74,7 @@ def failing_publish(monkeypatch):
 
     recorded: list[str] = []
 
-    def hook(job, status=None):
+    def hook(job, status=None, ctx=None):
         raise RuntimeError("evidence store down")
 
     monkeypatch.setattr(run_evidence, "publish_queue_run", hook)
