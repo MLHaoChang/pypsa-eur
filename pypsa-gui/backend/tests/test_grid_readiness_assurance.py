@@ -10,7 +10,7 @@ from services.adequacy import grid_readiness as G
 from tests.assurance_acceptance.support import approval, public_text
 from tests.test_answer_assurance import checked  # noqa: F401
 from tests.test_assurance_metrics import NumericalProvider
-from tests.test_grid_readiness import PROFILE, T, _harmonic_site, _project, _rows
+from tests.test_grid_readiness import PROFILE, T, _harmonic_site, _project, _rows, _with_envelope
 from tests.test_workflow_tools import baseline  # noqa: F401
 
 
@@ -55,6 +55,18 @@ def test_each_declared_rule_checks_its_row(tmp_path):
     assert R.disposition(reactive) == ("checked", "pass")
     line = next(x for x in R.notes(raw_for([rows["rapid_voltage_change"]]), str) if x.startswith("Rapid"))
     assert "before mitigation; a screening upper bound" in line
+
+
+@pytest.mark.parametrize("swing, verdict", [
+    (5.0, "pass"),      # both pass: d = 0.6791 %, bound 2.0100 %
+    (20.0, "warn"),     # the bound decides: d = 2.7164 % at the assumed X/R 4, bound 8.0399 %
+    (22.09, "warn"),    # the voltage form decides: d = 3.0003 %
+])
+def test_the_voltage_change_row_re_judges_in_every_regime(tmp_path, swing, verdict):
+    """AS-16: the stored value is the figure that decided the verdict, so no regime is a disagreement."""
+    d, n = _with_envelope(tmp_path, swing=swing)
+    row = _rows(G.grid_readiness(d, n, PROFILE))["rapid_voltage_change"]
+    assert R.disposition(row) == ("checked", verdict)
 
 
 def test_a_rounded_boundary_is_withheld_not_re_verdicted(tmp_path):

@@ -47,6 +47,11 @@ class LeverScenarioError(ValueError):
     pass
 
 
+class LeverNotApplicable(LeverScenarioError):
+    """The network has no asset the lever acts on (no import Links, no storage). A study soft-skips the kind;
+    every other `LeverScenarioError` is a config error and fails closed."""
+
+
 def _import_link_ids(n) -> list[str]:
     """Return identifiable import Links only — never guess ``index[0]``.
 
@@ -159,7 +164,7 @@ def apply_lever_scenario(
         links = [str(x) for x in (getattr(cfg, "import_energy_links", None) or [])]
         links = [l for l in links if l in n.links.index]
         if not links:
-            raise LeverScenarioError(
+            raise LeverNotApplicable(
                 "no metered import Links for import_energy (the weak_flexible "
                 "pack orients them)")
         cap = float(value)
@@ -178,7 +183,7 @@ def apply_lever_scenario(
     if kind == "import_cap":
         links = _import_link_ids(n)
         if not links:
-            raise LeverScenarioError("no import Links to apply import_cap")
+            raise LeverNotApplicable("no import Links to apply import_cap")
         snap = n.links.copy(deep=True)
         cap = float(value)
         ts_snap: dict[str, object] = {}
@@ -228,27 +233,26 @@ def apply_lever_scenario(
         split = [e for e in list_storages(n) if e.layout == SPLIT]
         has_su = n.storage_units is not None and not n.storage_units.empty
         if not has_su and not split:
-            # eh_study soft-skips asset absence by the "no StorageUnits" prefix.
-            raise LeverScenarioError("no StorageUnits or split storages (Store + Links) to apply storage_duration")
+            raise LeverNotApplicable("no StorageUnits or split storages (Store + Links) to apply storage_duration")
         hours = float(value)
         if hours <= 0:
             raise LeverScenarioError("storage_duration must be > 0")
-        # GK A (AS-11 slice 2): the checks `add_split_storage` applies; an
-        # infeasible duration is refused by name, never written to the tag.
-        from services.solver.split_storage import STORAGE_TECHNOLOGIES
+        # GK A (AS-11 slice 2): the checks `add_split_storage` applies, from the
+        # same helper; an infeasible duration is refused by name, never written
+        # to the tag. A tag without a known technology or a c_rate_max skips
+        # that check, as before.
+        from services.solver.split_storage import STORAGE_TECHNOLOGIES, duration_problem
         bad = []
         for e in split:
             st = n.stores.loc[e.name]
-            tech = STORAGE_TECHNOLOGIES.get(str(st.get("storage_technology")))
-            if tech is not None and not tech.min_hours - 1e-12 <= hours <= tech.max_hours + 1e-12:
-                bad.append(f"{e.name} ({tech.label} range {tech.min_hours:g}–{tech.max_hours:g} h)")
-                continue
             try:
                 c = float(st.get("c_rate_max"))
             except (TypeError, ValueError):
                 c = math.inf
-            if math.isfinite(c) and not c * hours >= 1.0 - 1e-12:
-                bad.append(f"{e.name} (c_rate_max {c:g}/h needs at least {1 / c if c > 0 else math.inf:g} h)")
+            problem = duration_problem(e.name, STORAGE_TECHNOLOGIES.get(str(st.get("storage_technology"))),
+                                       hours, hours, c if math.isfinite(c) else math.inf)
+            if problem is not None:
+                bad.append(problem)
         if bad:
             raise LeverScenarioError(f"storage_duration {hours:g} h is infeasible for split storage "
                                      + "; ".join(bad))

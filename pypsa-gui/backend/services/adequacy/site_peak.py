@@ -126,18 +126,17 @@ def committed_storage(n, names, year: int | None = None) -> tuple[list[str], lis
     """(committed, unsized) storages among ``names`` in service in ``year``:
     StorageUnits, and split storages named by their Store, in service only
     while all three of their rows (charger, discharger, Store) are, so the
-    latest build year and the earliest end of life decide. Committed is
+    latest build year and the earliest end of life decide; a row whose own
+    ``active`` is false is out of service. Committed is
     fixed with a rating; unsized is extendable, sized by the run, which
     counts 0 as an extendable genset does."""
     entries = _storages(n)
 
-    def live_split(e) -> bool:
+    def in_use(e) -> bool:   # a missing ``active`` column means active
         return all(in_service(df, row, year) and ("active" not in df.columns or bool(df.at[row, "active"]))
                    for df, row in _rows(n, e))
 
-    live = [u for u in names if u in entries
-            and (live_split(entries[u]) if entries[u].charger is not None
-                 else in_service(n.storage_units, u, year))]
+    live = [u for u in names if u in entries and in_use(entries[u])]
     unsized = [u for u in live if _extendable(n, entries[u])]
     return [u for u in live if u not in unsized and entries[u].p_nom_mw > 0], unsized
 

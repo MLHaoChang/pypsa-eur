@@ -1,7 +1,10 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ioApi, type ResultsWorkbookView } from '../../api/io'
+import { ioApi, type ResultsWorkbookRun, type ResultsWorkbookView } from '../../api/io'
+import { resultsEvidenceApi, runFileRefusal } from '../../api/resultsEvidence'
 import { TABS } from '../../pages/Results'
 import { CARD_GROUPS } from '../../pages/results/groups'
+import { runShort, runWhenPair, useRunStartedAt } from '../../pages/results/runWhen'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 
@@ -13,8 +16,72 @@ export function useWorkbookViews(enabled = true) {
   return useQuery({
     queryKey: nk(currentProject, 'results', 'workbook-views'),
     queryFn: ioApi.resultsWorkbookViews,
+    select: d => d.views,
     enabled,
   })
+}
+
+/** The run the workbook holds (the same listing, so no second request). */
+export function useWorkbookRun(enabled = true) {
+  const currentProject = useUIStore(s => s.currentProject)
+  return useQuery({
+    queryKey: nk(currentProject, 'results', 'workbook-views'),
+    queryFn: ioApi.resultsWorkbookViews,
+    select: d => d.run,
+    enabled,
+  })
+}
+
+/** Which run the workbook holds and, while Results shows a past run, that it
+ *  is not the one on screen, with that run's kept results to download in place
+ *  (LC-03 past-run parity; the one Export chooser, SAVE-1). The download is the
+ *  file the assistant's export_run_evidence writes for the same run and section. */
+export function WorkbookRunNote({ run }: { run: ResultsWorkbookRun | null | undefined }) {
+  const discussed = useUIStore(s => s.discussedRun)
+  const pastStartedAt = useRunStartedAt(discussed?.runId)
+  const [refused, setRefused] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  // Without the listing (it failed, as after access loss) the past run's link
+  // stays, so a refused download says why in place.
+  const past = discussed && discussed.runId !== run?.run_id ? discussed : null
+  if (!run && !past) return null
+  const [pastWhen, latestWhen] = runWhenPair(pastStartedAt, run?.started_at)
+  const latest = run ? (latestWhen ? `from ${latestWhen}` : runShort(run.run_id)) : null
+  const pastName = pastWhen ? `the run of ${pastWhen}` : past ? `past ${runShort(past.runId)}` : ''
+  const download = async () => {
+    if (!past) return
+    setBusy(true); setRefused(null)
+    try {
+      const { blob, filename } = await resultsEvidenceApi.runFile(past.runId, past.section)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = filename; a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setRefused(await runFileRefusal(e))
+    } finally { setBusy(false) }
+  }
+  return (
+    <div className="mb-1.5" data-testid="workbook-run" data-run-id={run?.run_id ?? ''}>
+      {past ? (
+        <>
+          <p className="text-text" data-testid="workbook-past-run" data-run-id={past.runId}>
+            <span title={`Run ${past.runId}`}>Results shows {pastName}</span>{run ? <>: this workbook holds the latest
+            run, <span title={`Run ${run.run_id}`}>{latest}</span>.</> : '.'}
+          </p>
+          <button type="button" data-testid="workbook-past-run-download" disabled={busy}
+            data-run-id={past.runId} data-section={past.section ?? ''}
+            onClick={() => { void download() }}
+            className="text-accent hover:underline disabled:opacity-50">
+            Download the kept results of {pastName} (JSON)
+          </button>
+          {refused && <p role="status" className="mt-1 text-warn" data-testid="workbook-past-run-refused">{refused}</p>}
+        </>
+      ) : run && (
+        <p className="text-muted">Holds the latest run, <span title={`Run ${run.run_id}`}>{latest}</span>.</p>
+      )}
+    </div>
+  )
 }
 
 // The Results panel's own words: a tab's label and a card's heading.
@@ -37,8 +104,14 @@ export function ResultsWorkbookPicker({ value, onChange }: {
   value: WorkbookChoice; onChange: (v: WorkbookChoice) => void
 }) {
   const { data, isLoading, isError } = useWorkbookViews()
+  const { data: run } = useWorkbookRun()
   if (isLoading) return <p className="mt-2 ml-7 text-[10px] text-muted">Loading result tabs…</p>
-  if (isError || !data) return <p className="mt-2 ml-7 text-[10px] text-muted">The result tabs could not be listed. Download still works with your cards' tabs.</p>
+  if (isError || !data) return (
+    <div className="mt-2 ml-7 text-[10px]">
+      <WorkbookRunNote run={null} />
+      <p className="text-muted">The result tabs could not be listed. Download still works with your cards' tabs.</p>
+    </div>
+  )
 
   const cards = data.reduce<Map<string, { label: string; views: ResultsWorkbookView[] }>>((m, v) => {
     const g = m.get(v.card) ?? { label: cardLabel(v), views: [] }
@@ -53,6 +126,7 @@ export function ResultsWorkbookPicker({ value, onChange }: {
   return (
     <fieldset className="mt-2 ml-7 text-[10px]" data-testid="workbook-picker">
       <legend className="sr-only">Result tabs in the workbook</legend>
+      <WorkbookRunNote run={run} />
       <p className="text-muted mb-1.5">
         One sheet per tab, plus Overview. Your cards' tabs are included; tick more if you need them.
       </p>

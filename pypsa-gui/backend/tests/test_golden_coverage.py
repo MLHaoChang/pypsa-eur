@@ -114,6 +114,10 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/results.py", "get_loadflow_view"): frozenset(),  # loading, no economics
     # Retained metrics/sections are verbatim evidence, not a new economics roll-up.
     ("routers/results.py", "get_run_view"): frozenset(),
+    # The run view's kept evidence as a file (LC-03 past-run parity): the
+    # same bytes as export_run_evidence, re-serialised by no one, so no own
+    # economics surface.
+    ("routers/results.py", "get_run_evidence_file"): frozenset(),
     ("routers/results.py", "get_cost_breakdown"):          frozenset({"cost_breakdown"}),
     ("routers/results.py", "get_objective_decomposition"):  frozenset(),
     ("routers/results.py", "get_economics_by_carrier"):     frozenset({"economics_by_carrier"}),

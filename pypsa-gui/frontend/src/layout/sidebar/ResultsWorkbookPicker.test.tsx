@@ -26,7 +26,7 @@ function Harness({ seen }: { seen: (v: WorkbookChoice) => void }) {
 }
 
 function setup() {
-  vi.mocked(ioApi.resultsWorkbookViews).mockResolvedValue(VIEWS)
+  vi.mocked(ioApi.resultsWorkbookViews).mockResolvedValue({ views: VIEWS, run: null })
   const seen = vi.fn()
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>

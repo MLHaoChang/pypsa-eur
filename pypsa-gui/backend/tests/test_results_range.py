@@ -402,7 +402,8 @@ def test_the_endpoint_list_covers_every_series_endpoint():
     # run-view serves an immutable recorded section without slicing it.
     # Their window/no-fallback behavior is exercised by
     # test_results_source_navigation.py and test_loadflow_summary.py.
-    aggregates.update({"/loadflow-view", "/run-view"})
+    # run-evidence.json serves that same section as a file (LC-03 past-run parity).
+    aggregates.update({"/loadflow-view", "/run-view", "/run-evidence.json"})
     unclassified = declared - ranged - aggregates
     assert not unclassified, (
         f"unclassified /results endpoints: {sorted(unclassified)} — add each to "

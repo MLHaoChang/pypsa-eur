@@ -97,6 +97,19 @@ def _technology(key: str) -> StorageTech:
             f"unknown storage technology {key!r} (known: {', '.join(STORAGE_TECHNOLOGIES)})") from None
 
 
+def duration_problem(name: str, tech: StorageTech | None, lo: float, hi: float, c_rate: float) -> str | None:
+    """Why storage `name` cannot take E/P in [lo, hi] h, or None: the technology's range (skipped when `tech` is
+    None) and P <= c_rate x E at the longest duration. `add_split_storage` and the storage_duration lever share it."""
+    eps = 1e-12
+    if tech is not None and not (tech.min_hours - eps <= lo <= hi <= tech.max_hours + eps):
+        return (f"{name}: hours {lo:g}–{hi:g} h are outside the {tech.label} range "
+                f"{tech.min_hours:g}–{tech.max_hours:g} h")
+    if not c_rate * hi >= 1.0 - eps:
+        return (f"{name}: c_rate_max {c_rate!r}/h needs E/P >= {1 / c_rate if c_rate > 0 else math.inf:g} h,"
+                f" beyond the {hi:g} h maximum")
+    return None
+
+
 def add_split_storage(
     n: "pypsa.Network",
     name: str,
@@ -124,15 +137,10 @@ def add_split_storage(
     """
     tech = _technology(technology)
     lo, hi = hours if hours is not None else (tech.min_hours, tech.max_hours)
-    eps = 1e-12
-    if not (tech.min_hours - eps <= lo <= hi <= tech.max_hours + eps):
-        raise SplitStorageError(
-            f"{name}: hours {lo:g}–{hi:g} h are outside the {tech.label} range "
-            f"{tech.min_hours:g}–{tech.max_hours:g} h")
     c_rate = tech.c_rate_max if c_rate_max is None else float(c_rate_max)
-    if not c_rate >= 1.0 / hi:
-        raise SplitStorageError(f"{name}: c_rate_max {c_rate!r}/h needs E/P >= {1 / c_rate if c_rate > 0 else math.inf:g} h,"
-                                f" beyond the {hi:g} h maximum")
+    problem = duration_problem(name, tech, lo, hi, c_rate)
+    if problem is not None:
+        raise SplitStorageError(problem)
     if not (0 < efficiency_charge <= 1 and 0 < efficiency_discharge <= 1):
         raise SplitStorageError(f"{name}: efficiencies must be in (0, 1]")
     carrier = carrier or technology

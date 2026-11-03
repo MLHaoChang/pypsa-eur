@@ -185,6 +185,30 @@ def get_run_view(
     }
 
 
+@results_router.get("/run-evidence.json")
+def get_run_evidence_file(
+    run_id: str = "",
+    section: str | None = None,
+    actor: User = Depends(require_user),
+):
+    """One past run's kept evidence as a download (LC-03 past-run parity): the
+    exact bytes, file name and type `export_run_evidence` writes, from the one
+    `run_evidence.export_bytes`. Same project check as the run view; never the
+    discussed run, the newest run or current results in place of `run_id`."""
+    from services import run_evidence
+    from services.http_filenames import content_disposition
+
+    from harness.durable import network_guard
+
+    if not run_id:
+        raise HTTPException(404, {"error_kind": "run_not_found",
+                                  "message": "No run was named, so there is nothing to export."})
+    with _result_actor(actor), network_guard():
+        blob, filename = run_evidence.export_bytes(run_id, section)
+    return Response(content=blob, media_type=run_evidence.EXPORT_MEDIA_TYPE,
+                    headers={"Content-Disposition": content_disposition(filename)})
+
+
 # ── Results endpoints ─────────────────────────────────────────────────────────
 
 def _not_solved():
@@ -2345,12 +2369,50 @@ def get_results_workbook_views(user: User = Depends(require_user)):
                              status, "Not available for this project")})
     finally:
         chat_tools.set_acting_user(previous)
-    return {"views": rows}
+    run = _workbook_run(user)
+    # The run the workbook holds (its About sheet names the same one): the
+    # chooser says which run it exports, beside a past run on Results.
+    return {"views": rows, "run": None if run is None else {
+        "run_id": run.get("run_id"), "started_at": run.get("started_at")}}
+
+
+def _workbook_run(user: User) -> dict | None:
+    """The latest completed run, the one a results workbook holds, read as the
+    requesting user (run reads resolve the project for the acting user); None
+    when nothing is recorded (a scratch network: About says "not recorded")."""
+    from services import run_evidence
+
+    try:
+        with _result_actor(user):
+            runs = run_evidence.list_project_runs(limit=1, status="completed")["items"]
+    except Exception:  # noqa: BLE001 — no run record (a scratch network): About says "not recorded"
+        logger.info("results workbook: no run record for the About sheet", exc_info=True)
+        return None
+    return runs[0] if runs else None
+
+
+def _refuse_other_run(run_id: str, latest: dict | None, user: User) -> None:
+    """A workbook asked for `run_id` holds that run or is refused (LC-03
+    past-run parity): never the latest run's workbook in place of another."""
+    from services import run_evidence
+
+    if latest is not None and latest.get("run_id") == run_id:
+        return
+    with _result_actor(user):
+        run_evidence.get_run_evidence(run_id)  # no such run here: typed run_not_found
+    held = f" ({latest['run_id']})" if latest is not None else ""
+    raise HTTPException(409, {
+        "error_kind": "results_workbook_past_run",
+        "message": (f"The results workbook holds only the latest run{held}, not run {run_id}. "
+                    "Export that run's kept results instead (export_run_evidence, or "
+                    "Download the kept results in the Export chooser)."),
+        "run_id": run_id, "workbook_run_id": None if latest is None else latest.get("run_id")})
 
 
 @results_router.get("/workbook.xlsx")
 def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="all"),
-                         stored: bool = False, user: User = Depends(require_user)):
+                         stored: bool = False, run_id: str | None = None,
+                         user: User = Depends(require_user)):
     """The run's results as one workbook (results-workbook spec; RW-TABS-1):
     About, Overview (investment-grade KPIs with native charts) and a sheet per
     included result view — the project's selected cards, plus `views`
@@ -2360,8 +2422,11 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
     `stored=true` exports the stored run (About says so); 422
     `unknown_result_view`; 413 `file_too_large` over 25 MB. Never solves and
     never runs the investment case (RW-KPI-1). With sensitivity runs the user
-    may open, a Scenarios sheet compares them with this run (RW-SCEN-1)."""
-    from services import chat_tools, run_evidence
+    may open, a Scenarios sheet compares them with this run (RW-SCEN-1).
+    `run_id` names the run the caller is looking at: any run but the latest
+    completed one is refused, 409 `results_workbook_past_run` (or
+    `run_not_found` when this project has no such run)."""
+    from services import chat_tools
     from services import results_workbook as RW
     from services.finance.report import load_ic_report
     from services.http_filenames import content_disposition
@@ -2375,6 +2440,9 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
         raise HTTPException(409, {
             "error_kind": "results_workbook_stale",
             "message": "A solve is running; export once it finishes."})
+    latest = _workbook_run(user)
+    if run_id is not None:
+        _refuse_other_run(run_id, latest, user)
     freshness = solve_freshness()
     if not freshness.get("results_current") and not stored:
         why = ("The inputs changed since the solve, so the results describe an earlier model."
@@ -2391,11 +2459,7 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
         included = resolve_views(scope, views.split(","), all_views)
     except UnknownView as exc:
         raise HTTPException(422, {"error_kind": "unknown_result_view", "message": str(exc)})
-    try:
-        runs = run_evidence.list_project_runs(limit=1, status="completed")["items"]
-    except Exception:  # noqa: BLE001 — no run record (a scratch network): About says "not recorded"
-        logger.info("results workbook: no run record for the About sheet", exc_info=True)
-        runs = []
+    runs = [latest] if latest is not None else []
     project = PyPSAService.get_loaded_project()
     report = load_ic_report(_state)
     case_state = None
@@ -2426,7 +2490,9 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
     return Response(
         content=blob,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": content_disposition(f"results_{project or 'network'}.xlsx")})
+        headers={"Content-Disposition": content_disposition(f"results_{project or 'network'}.xlsx"),
+                 # The run this workbook holds, for the chat tool's result.
+                 **({"X-Workbook-Run-Id": latest["run_id"]} if latest and latest.get("run_id") else {})})
 
 
 @results_router.get("/eh_readiness")

@@ -1,0 +1,1 @@
+{"kinds": {"results_workbook_past_run": {"surface": "inline", "why": "export_results_workbook (and GET /api/results/workbook.xlsx) was given the run_id of a run other than the latest completed one: the workbook holds only the latest run. The assistant says which run the workbook holds and exports the named run's kept results with export_run_evidence instead."}}}

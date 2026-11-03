@@ -4982,11 +4982,14 @@ TOOLS.extend([
        "and one sheet with charts per result view. By default it holds the views of the cards switched on for the project; views=[view ids] adds more, "
        "all=true holds every result view. The ids are the Results tabs' (list_result_views). Same file the Export chooser's 'Results workbook (Excel)' downloads. "
        "Refuses while a solve runs or when the inputs changed since the solve (stored=true exports the stored run, which About labels), "
-       "and never solves or runs the investment case. Returns {filename, bytes, kind}. Safety: write.",
+       "and never solves or runs the investment case. It holds the latest completed run only: while the user looks at a past run (open_run_result, "
+       "discuss_project_run) pass run_id; another run than the latest returns results_workbook_past_run, so export that run with export_run_evidence. "
+       "Returns {filename, bytes, kind, run_id}. Safety: write.",
        {"views": {"type": "array", "items": {"type": "string", "maxLength": 64}, "maxItems": 40},
         "all": {"type": "boolean"},
         "stored": {"type": "boolean"},
-        "filename": {"type": "string", "maxLength": 120}},
+        "filename": {"type": "string", "maxLength": 120},
+        "run_id": {"type": "string", "maxLength": 64}},
        []),
 ])
 

@@ -293,12 +293,12 @@ export function placementFindings(objects: readonly CheckObject[], lib: readonly
   for (let i = 0; i < solid.length; i++) {
     const a = solid[i], ar = rects.get(a)!, aRule = ruleOf(a.kind)
     if (outside.has(keyOf(a))) {
-      out.push({ key: keyOf(a), kind: 'outsideBoundary', severity: 'warn', message: `${capital(nameOf(a))} sticks out of the site boundary` })
+      out.push({ key: keyOf(a), kind: 'outsideBoundary', severity: 'warn', message: `${subject(a)} sticks out of the site boundary` })
     }
     for (let j = i + 1; j < solid.length; j++) {
       const b = solid[j], br = rects.get(b)!, bRule = ruleOf(b.kind)
       if (rectsOverlap(ar, br)) {
-        out.push({ key: keyOf(a), other: keyOf(b), kind: 'overlap', severity: 'warn', message: `${capital(nameOf(a))} overlaps ${nameOf(b)}` })
+        out.push({ key: keyOf(a), other: keyOf(b), kind: 'overlap', severity: 'warn', message: `${subject(a)} overlaps ${nameOf(b)}` })
         continue
       }
       const d = rectDistance(ar, br)
@@ -306,14 +306,14 @@ export function placementFindings(objects: readonly CheckObject[], lib: readonly
       const keepOut = Math.max(ka, kb)
       if (keepOut > 0 && d < keepOut) {
         const [who, whom] = kb > ka ? [b, a] : [a, b]
-        out.push({ key: keyOf(who), other: keyOf(whom), kind: 'keepOut', severity: 'warn', distanceM: metres(d), message: `${capital(nameOf(who))} is ${metres(d)} m from ${nameOf(whom)}; it should keep ${keepOut} m away` })
+        out.push({ key: keyOf(who), other: keyOf(whom), kind: 'keepOut', severity: 'warn', distanceM: metres(d), message: `${subject(who)} is ${metres(d)} m from ${nameOf(whom)}; it should keep ${keepOut} m away` })
         continue
       }
       const ca = aRule?.clearanceM ?? 0, cb = bRule?.clearanceM ?? 0
       const clearance = Math.max(ca, cb)
       if (clearance > 0 && d < clearance) {
         const [who, whom] = cb > ca ? [b, a] : [a, b]
-        out.push({ key: keyOf(who), other: keyOf(whom), kind: 'clearance', severity: 'info', distanceM: metres(d), message: `${capital(nameOf(who))} is ${metres(d)} m from ${nameOf(whom)}; it needs ${clearance} m clear` })
+        out.push({ key: keyOf(who), other: keyOf(whom), kind: 'clearance', severity: 'info', distanceM: metres(d), message: `${subject(who)} is ${metres(d)} m from ${nameOf(whom)}; it needs ${clearance} m clear` })
       }
     }
     const owner = yards.get(a.bus), far = a.far ? yards.get(a.far) : undefined
@@ -321,13 +321,13 @@ export function placementFindings(objects: readonly CheckObject[], lib: readonly
       const seg = betweenSegment(rects.get(owner)!, rects.get(far)!)
       const d = seg ? segmentRectDistance(seg.a, seg.b, ar) : 0
       if (seg && d > PACKING.betweenToleranceM) {
-        out.push({ key: keyOf(a), kind: 'notBetweenBuses', severity: 'info', distanceM: metres(d), message: `${capital(nameOf(a))} is ${metres(d)} m from the line between the ${owner.name} and ${far.name} yards; it should sit between its two buses` })
+        out.push({ key: keyOf(a), kind: 'notBetweenBuses', severity: 'info', distanceM: metres(d), message: `${subject(a)} is ${metres(d)} m from the line between the ${owner.name} and ${far.name} yards; it should sit between its two buses` })
       }
     }
     if (aRule?.orientation === 'faceFar' && far && far !== a) {
       const off = angleDiffDeg(a.heading, bearingDeg(a.origin, far.origin))
       if (off > PACKING.facingToleranceDeg) {
-        out.push({ key: keyOf(a), other: keyOf(far), kind: 'notFacingFar', severity: 'info', message: `${capital(nameOf(a))} faces ${Math.round(off)}° away from ${nameOf(far)}; it should face it` })
+        out.push({ key: keyOf(a), other: keyOf(far), kind: 'notFacingFar', severity: 'info', message: `${subject(a)} faces ${Math.round(off)}° away from ${nameOf(far)}; it should face it` })
       }
     }
   }

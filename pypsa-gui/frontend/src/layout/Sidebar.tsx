@@ -44,11 +44,11 @@ const SIDEBAR_ICON_W = 48
 const slugify = slugifyName
 
 // ── IO Modal ───────────────────────────────────────────────────────────────────
-function IoModal({ onClose, initialTab = 'import', projectName }: {
-  onClose: () => void; initialTab?: 'import' | 'export'; projectName: string
+function IoModal({ onClose, initialTab = 'import', initialFormat, projectName }: {
+  onClose: () => void; initialTab?: 'import' | 'export'; initialFormat?: 'workbook' | null; projectName: string
 }) {
   const [tab, setTab] = useState<'import' | 'export'>(initialTab)
-  const [exportFmt, setExportFmt] = useState<'bundle' | 'netcdf' | 'csv' | 'excel' | 'matpower' | 'workbook'>('bundle')
+  const [exportFmt, setExportFmt] = useState<'bundle' | 'netcdf' | 'csv' | 'excel' | 'matpower' | 'workbook'>(initialFormat ?? 'bundle')
   const [workbook, setWorkbook] = useState<WorkbookChoice>(WORKBOOK_DEFAULT)
   const workbookViews = useWorkbookViews(tab === 'export' && exportFmt === 'workbook')
   const workbookOff = exportFmt === 'workbook' && workbookBlock(workbookViews.data, workbook) !== null
@@ -119,8 +119,12 @@ function IoModal({ onClose, initialTab = 'import', projectName }: {
     } finally { setExporting(false) }
   }
 
+  // Marked so a click in the chooser, or on its backdrop, leaves the slide
+  // panel behind it open: cancelling or exporting returns to Results with the
+  // same past run (LC-03 past-run parity).
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center"
+      data-no-panel-close data-testid="io-modal"
       style={{ background: 'rgba(0,0,0,0.45)' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
@@ -1252,6 +1256,9 @@ function FlyoutPanel({
     <div
       ref={ref}
       data-testid="sidebar-flyout"
+      // The flyout stands in for the sidebar: a click in it keeps the open
+      // slide panel, as a click in the <aside> does.
+      data-no-panel-close
       className="fixed z-[800] flex flex-col overflow-hidden"
       style={{
         left: SIDEBAR_ICON_W, top: 44,
@@ -1293,7 +1300,7 @@ export default function Sidebar() {
     sidebarMode, setSidebarMode, toggleSidebar, canvasMode, setCanvasMode,
     activeSlidePanel, projectName,
     setCurrentProject, setProjectName, currentProject, addTab,
-    ioModalRequest, clearIoModalRequest, uiMode,
+    ioModalRequest, ioModalFormat, clearIoModalRequest, uiMode,
   } = useUIStore()
   // Guided (spec §3.5) is a render condition only — `sections` below is untouched.
   const guided = uiMode === 'guided'
@@ -1303,6 +1310,7 @@ export default function Sidebar() {
   const [activeFlyout, setActiveFlyout] = useState<FlyoutSection | null>(null)
   const [ioOpen, setIoOpen] = useState(false)
   const [ioTab, setIoTab] = useState<'import' | 'export'>('import')
+  const [ioFormat, setIoFormat] = useState<'workbook' | null>(null)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle')
   const [newProjectOpen, setNewProjectOpen] = useState(false)
   const qc = useQueryClient()
@@ -1311,9 +1319,10 @@ export default function Sidebar() {
   useEffect(() => {
     if (!ioModalRequest) return
     setIoTab(ioModalRequest)
+    setIoFormat(ioModalFormat)
     setIoOpen(true)
     clearIoModalRequest()
-  }, [ioModalRequest, clearIoModalRequest])
+  }, [ioModalRequest, ioModalFormat, clearIoModalRequest])
 
   const { data: allProjects = [] } = useQuery({
     queryKey: ['projects'],
@@ -1355,7 +1364,7 @@ export default function Sidebar() {
   }, [])
 
   const openIo = useCallback((tab: 'import' | 'export') => {
-    setIoTab(tab); setIoOpen(true)
+    setIoTab(tab); setIoFormat(null); setIoOpen(true)
   }, [])
 
   const toggleSection = (k: FlyoutSection) => setSections(s => ({ ...s, [k]: !s[k] }))
@@ -1464,7 +1473,7 @@ export default function Sidebar() {
           />
         )}
 
-        {ioOpen && <IoModal onClose={() => setIoOpen(false)} initialTab={ioTab} projectName={projectName} />}
+        {ioOpen && <IoModal onClose={() => setIoOpen(false)} initialTab={ioTab} initialFormat={ioFormat} projectName={projectName} />}
         {newProjectOpen && (
           <NewProjectWizard
             existingProjects={allProjects as ProjectInfo[]}
@@ -1543,7 +1552,7 @@ export default function Sidebar() {
         <PreferencesFooter />
       </aside>
 
-      {ioOpen && <IoModal onClose={() => setIoOpen(false)} initialTab={ioTab} projectName={projectName} />}
+      {ioOpen && <IoModal onClose={() => setIoOpen(false)} initialTab={ioTab} initialFormat={ioFormat} projectName={projectName} />}
       {newProjectOpen && (
         <NewProjectWizard
           existingProjects={allProjects as ProjectInfo[]}

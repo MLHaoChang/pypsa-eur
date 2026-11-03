@@ -8,10 +8,12 @@ import type { SimulationStatus } from '../../api/types'
 import { useUIStore } from '../../store/uiStore'
 import { openSectionInExpert, openSectionInGuided } from '../../layout/flowNavigation'
 import type { CardGroup } from './groups'
+import { runShort, runWhen } from './runWhen'
 
 /** The group's freshness: from the solve's dispatch freshness (the rail's
  *  `results.freshness` reads the same one). The solve carries no timestamp, so
- *  a current result reads "From the latest run". */
+ *  a current result reads "From the latest run"; a past run on screen reads
+ *  "From the run of <start>" instead. */
 export function freshnessOf(status: SimulationStatus | undefined): NonValueState | 'fresh' {
   if (!status) return 'not_run'
   if (status.running) return 'running'
@@ -24,20 +26,31 @@ export function freshnessOf(status: SimulationStatus | undefined): NonValueState
  *  no assistant entry; the slot stays empty. */
 export const GROUP_HEADER_SLOT = 'results-ghead-slot'
 
-export default function GroupHeader({ group, status, outsideScope, children }: {
+/** A past run on screen (LC-03): the header names that run, never the latest. */
+export interface PastRun { runId: string; startedAt: string | null }
+
+export default function GroupHeader({ group, status, outsideScope, pastRun, children }: {
   group: CardGroup
   status: SimulationStatus | undefined
   outsideScope: boolean
+  pastRun?: PastRun | null
   children?: ReactNode
 }) {
   const fresh = freshnessOf(status)
   const uiMode = useUIStore(st => st.uiMode)
-  const failed = !!status && !status.running && !!status.failure
+  // The latest solve's failure says nothing about a past run on screen.
+  const failed = !pastRun && !!status && !status.running && !!status.failure
+  const pastWhen = pastRun ? runWhen(pastRun.startedAt) : null
   return (
     <div data-testid="results-ghead" data-group={group.id}
       className="shrink-0 border-b border-border bg-bg px-3 py-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
       <h2 className="text-[13px] font-semibold text-text">{group.label}</h2>
-      {!outsideScope && group.tabs.length > 0 && !group.fromStudy && (
+      {pastRun ? (
+        <span data-testid="results-ghead-freshness" data-freshness="past_run" data-run-id={pastRun.runId}
+          title={`Run ${pastRun.runId}`} className="text-[11px] text-muted">
+          {pastWhen ? `From the run of ${pastWhen}` : `From past ${runShort(pastRun.runId)}`}
+        </span>
+      ) : !outsideScope && group.tabs.length > 0 && !group.fromStudy && (
         <span data-testid="results-ghead-freshness" data-freshness={fresh}
           className="flex items-center gap-2 text-[11px] text-muted">
           {fresh === 'fresh' ? 'From the latest run' : <StatePill state={fresh} />}

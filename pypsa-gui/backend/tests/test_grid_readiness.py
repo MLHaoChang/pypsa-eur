@@ -140,8 +140,18 @@ def test_with_the_ai_profile_the_envelope_rows_are_red_flags_before_mitigation(t
     assert ramp["verdict"] == "fail" and "before mitigation" in ramp["note"]
     assert rows["oscillation"]["verdict"] == "fail"
     rvc = rows["rapid_voltage_change"]
-    assert rvc["project_value"] == pytest.approx(env["max"]["swing_mw"] / 250.0 * 100.0, rel=1e-4)
-    assert rvc["verdict"] == "warn" and "upper bound" in rvc["note"] and "X/R" in rvc["note"]
+    # AS-16: the voltage form (cos ψ·ΔP + sin ψ·ΔQ)/S_k at the assumed X/R 4 (cos ψ = 0.24254,
+    # sin ψ = 0.97014) with ΔQ = tan φ_swing·ΔP; the X/R-free bound √(ΔP²+ΔQ²)/S_k decides when the
+    # voltage form passes on the assumed X/R alone.
+    swing, tan_phi = env["max"]["swing_mw"], env["max"]["tan_phi_swing"]
+    form = swing * (0.24254 + 0.97014 * tan_phi) / 250.0 * 100.0
+    bound = swing * math.sqrt(1.0 + tan_phi ** 2) / 250.0 * 100.0
+    assert form > 3.0                                                # the voltage form decides on its own
+    assert rvc["project_value"] == pytest.approx(form, rel=1e-4)
+    assert rvc["voltage_form_pct"] == pytest.approx(form, rel=1e-4)
+    assert rvc["xr_free_bound_pct"] == pytest.approx(bound, rel=1e-4)
+    assert rvc["verdict"] == "warn" and rvc["assumed"] and "X/R 4" in rvc["note"]
+    assert f"{swing:.4g} MW / 250 MVA" in rvc["note"]                # the P-only reference
     assert out["envelope"] is True
 
 
@@ -237,10 +247,69 @@ def test_the_ramp_row_at_its_limit(tmp_path, dp_dt, verdict):
     assert _rows(G.grid_readiness(d, n, PROFILE))["ramp_rate"]["verdict"] == verdict
 
 
-@pytest.mark.parametrize("swing, verdict", [(7.5, "pass"), (7.51, "warn")])
-def test_the_voltage_change_row_at_the_profiles_limit(tmp_path, swing, verdict):
-    d, n = _with_envelope(tmp_path, swing=swing)             # 3 % of 250 MVA = 7.5 MW
-    assert _rows(G.grid_readiness(d, n, PROFILE))["rapid_voltage_change"]["verdict"] == verdict
+# AS-16 (owner decision AS11B-RVC-1, GK A condition 1), at 250 MVA, the 3 % limit, X/R 4 assumed and
+# the template's tan φ_swing 0.1: cos ψ = 1/√17 = 0.242536, sin ψ = 4/√17 = 0.970143.
+#   voltage form d = S·(0.242536 + 0.1·0.970143)/250·100 = S·0.339550/2.5 → 3 % at S = 7.5/0.339550 = 22.0881 MW
+#   X/R-free bound = S·√(1 + 0.1²)/250·100 = S·1.004988/2.5               → 3 % at S = 7.5/1.004988 = 7.46278 MW
+# While X/R is assumed a pass needs both under the limit, so the verdict turns at 7.46278 MW.
+@pytest.mark.parametrize("swing, verdict, value", [
+    (7.5 / math.sqrt(1.01), "pass", 7.5 / math.sqrt(1.01) * 0.339550 / 2.5),   # bound exactly 3 %: d = 1.0136 %
+    (7.47, "warn", 7.47 * 1.004988 / 2.5),                                    # bound 3.0029 % decides
+    (22.088, "warn", 22.088 * 1.004988 / 2.5),                                # d = 2.99999 % passes alone: bound 8.8793 %
+    (22.09, "warn", 22.09 * 0.339550 / 2.5),                                  # d = 3.0003 % over on its own
+])
+def test_the_voltage_change_row_at_the_profiles_limit(tmp_path, swing, verdict, value):
+    d, n = _with_envelope(tmp_path, swing=swing)
+    rvc = _rows(G.grid_readiness(d, n, PROFILE))["rapid_voltage_change"]
+    assert rvc["verdict"] == verdict
+    assert rvc["project_value"] == pytest.approx(value, abs=5e-5)              # stored to 4 decimals
+    assert G._judge(rvc["project_value"], rvc["limit"], rvc["rule"]) == verdict  # the stored value re-judges
+
+
+def test_a_voltage_change_that_passes_only_at_the_assumed_xr_warns(tmp_path):
+    """20 MW: d = 20·0.339550/2.5 = 2.7164 % passes at X/R 4, but √(1.01)·20/2.5 = 8.0399 % does not:
+    an assumed X/R never makes a pass (at X/R 1, d = 20·(0.7071 + 0.1·0.7071)/2.5 = 6.2225 %)."""
+    d, n = _with_envelope(tmp_path, swing=20.0)
+    rvc = _rows(G.grid_readiness(d, n, PROFILE))["rapid_voltage_change"]
+    assert rvc["verdict"] == "warn" and rvc["project_value"] == pytest.approx(8.0399, rel=1e-4)
+    assert rvc["voltage_form_pct"] == pytest.approx(2.7164, rel=1e-4)
+    assert "the voltage form at the assumed X/R 4 passes" in rvc["note"]
+
+
+def test_a_small_voltage_change_passes_on_both_forms(tmp_path):
+    """5 MW: d = 5·0.339550/2.5 = 0.6791 % and the bound 5·1.004988/2.5 = 2.0100 %: both pass; the
+    row shows the voltage form."""
+    d, n = _with_envelope(tmp_path, swing=5.0)
+    rvc = _rows(G.grid_readiness(d, n, PROFILE))["rapid_voltage_change"]
+    assert rvc["verdict"] == "pass" and rvc["project_value"] == pytest.approx(0.6791, rel=1e-4)
+    assert rvc["assumed"] and "X/R-free bound √(ΔP² + ΔQ²)/S_k is 2.01 %" in rvc["note"]
+    assert "does not" not in rvc["note"]
+
+
+def test_the_voltage_change_reads_the_envelopes_tan_phi(tmp_path):
+    """tan φ 0.5 at 4 MW: d = 4·(0.242536 + 0.5·0.970143)/2.5 = 1.1642 %; bound 4·√1.25/2.5 = 1.7889 %."""
+    d, n = _with_envelope(tmp_path, swing=4.0)
+    meta = json.loads((d / "eh_template.json").read_text())
+    meta["dc_load"]["envelope"]["max"]["tan_phi_swing"] = 0.5
+    (d / "eh_template.json").write_text(json.dumps(meta))
+    rvc = _rows(G.grid_readiness(d, n, PROFILE))["rapid_voltage_change"]
+    assert rvc["verdict"] == "pass" and rvc["project_value"] == pytest.approx(1.1642, rel=1e-4)
+    assert "tan φ_swing 0.5" in rvc["note"]
+
+
+def test_a_capacitive_or_missing_tan_phi_never_lowers_the_voltage_change(tmp_path):
+    """A negative tan φ floors ΔQ at 0 (d = 5·0.242536/2.5 = 0.4851 %); a missing one takes the
+    assumed 0.1 (0.6791 %) and says so."""
+    d, n = _with_envelope(tmp_path, swing=5.0)
+    meta = json.loads((d / "eh_template.json").read_text())
+    meta["dc_load"]["envelope"]["max"]["tan_phi_swing"] = -0.3
+    (d / "eh_template.json").write_text(json.dumps(meta))
+    assert _rows(G.grid_readiness(d, n, PROFILE))["rapid_voltage_change"]["project_value"] == \
+        pytest.approx(0.4851, rel=1e-3)
+    del meta["dc_load"]["envelope"]["max"]["tan_phi_swing"]
+    (d / "eh_template.json").write_text(json.dumps(meta))
+    rvc = _rows(G.grid_readiness(d, n, PROFILE))["rapid_voltage_change"]
+    assert rvc["project_value"] == pytest.approx(0.6791, rel=1e-4) and "assumed tan φ_swing 0.1" in rvc["note"]
 
 
 @pytest.mark.parametrize("amp, period, verdict", [
@@ -764,7 +833,9 @@ def test_the_campus_ups_walks_the_step_in_too_fast_for_the_ramp_limit(tmp_path):
     assert ramp["value"] == pytest.approx(93.6) and ramp["verdict"] == "fail"
     assert "walks 23.4 MW in over 15 s" in ramp["note"]
     assert rows["oscillation"]["after_battery"]["value"] == 0.0
-    assert rows["rapid_voltage_change"]["after_battery"]["value"] == 0.0
+    # AS-16: the battery takes P only; the reactive swing 0.1·23.4 = 2.34 Mvar stays:
+    # d = 0.970143·2.34/2.5 = 0.90805 %, bound 2.34/2.5 = 0.936 %, both under 3 %.
+    assert rows["rapid_voltage_change"]["after_battery"]["value"] == pytest.approx(0.9081, abs=5e-5)
     assert rows["oscillation"]["after_battery"]["verdict"] == "pass"
     assert rows["rapid_voltage_change"]["after_battery"]["verdict"] == "pass"
     assert rows["ramp_rate"]["after_battery"]["units"] == ["ups_battery"]
@@ -782,8 +853,10 @@ def test_a_small_ups_covers_part_of_the_step(tmp_path):
         n.storage_units.at["ups_battery", "max_hours"] = 2.0
     _, rows = _envelope_rows(tmp_path, dc_load={}, edit=shrink)
     rvc = rows["rapid_voltage_change"]["after_battery"]
-    assert rvc["value"] == pytest.approx(round(13.4 / 250.0 * 100.0, 4))
-    assert rvc["verdict"] == "warn"                                  # 5.36 % above the 3 % limit
+    # AS-16: d = (0.242536·13.4 + 0.970143·2.34)/2.5 = 2.2081 % passes only at the assumed X/R 4;
+    # the bound √(13.4² + 2.34²)/2.5 = 13.6028/2.5 = 5.4411 % decides.
+    assert rvc["value"] == pytest.approx(5.4411, rel=1e-4)
+    assert rvc["verdict"] == "warn" and "the voltage form at the assumed X/R 4 passes" in rvc["note"]
     ramp = rows["ramp_rate"]["after_battery"]
     assert ramp["value"] == pytest.approx(40.0 + 13.4 / 23.4 * 1404.0, rel=1e-6)
     assert ramp["verdict"] == "fail"

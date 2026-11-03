@@ -67,6 +67,20 @@ describe('IssuesPanel — Site layout group (S2)', () => {
     expect(useUIStore.getState().activeSlidePanel).toBe('issues')
   })
 
+  it('lists the native building findings beside the layout ones', async () => {
+    usePlacementFindings.getState().publish({ id: 'a', name: 'Campus' }, [], [
+      { key: 'Generator:roof_pv', other: 'building:7', kind: 'offRoof', severity: 'warn', message: 'roof_pv: off the roof of OSM building 7' },
+      { key: 'Load:hall', other: 'building:3', kind: 'overlapsBuilding', severity: 'warn', message: 'hall: inside OSM building 3' },
+    ])
+    renderPanel()
+    const group = await screen.findByTestId('site-layout-group')
+    expect(group.textContent).toContain('roof_pv: off the roof of OSM building 7')
+    expect(group.textContent).toContain('Off its roof')
+    expect(group.textContent).toContain('Overlaps a building')
+    await userEvent.click(screen.getAllByRole('button', { name: /View/ })[0])
+    expect(useUIStore.getState().selectedComponent).toEqual({ type: 'Generator', name: 'roof_pv' })
+  })
+
   it('follows the store: the group disappears when the site view clears it', async () => {
     usePlacementFindings.getState().publish({ id: 'a', name: 'Campus' }, [
       { key: 'Load:HALL', kind: 'outsideBoundary', severity: 'warn', message: 'HALL sticks out of the site boundary' },

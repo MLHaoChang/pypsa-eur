@@ -172,20 +172,29 @@ def test_a_legacy_document_reads_by_name_until_the_first_put_binds_it(client, ap
     assert _absent(_sites(client, name))
 
 
-def test_a_get_never_writes(client, api_project, project_storage_dir):
+def test_a_get_never_writes(client, placed, monkeypatch):
+    """A read neither mints a uid nor writes the file. Minting is watched where the requests run (the test
+    thread's `get_network()` is not the requests' network): a minting call fails the request."""
+    from services import component_identity as ci
     from services import dirty_state
-    from services.pypsa_service import PyPSAService
 
-    name = api_project("readonly")
-    project = project_storage_dir(name)
-    ss.write_sites(project, {**DOC, "sites": [dict(SITE)]})
+    from services.site_scene import store
+
+    name, project = placed                 # bound, so the read resolves a uid to a name
+    digest = store.legacy_site_digest(ss.read_sites(project), "campus")
+    assert client.post(f"/api/projects/{name}/sites/campus/scene/adopt",
+                       json={"expected_digest": digest}).status_code == 200      # a scene to read
     dirty_state.clear()
     before = (project / ss.SITES_FILE).read_bytes()
-    meta = json.dumps(PyPSAService.get_network().meta, sort_keys=True, default=str)
-    _sites(client, name)
-    client.get(f"/api/projects/{name}/sites/campus/scene")
+
+    def no_mint(*_a, **_k):
+        raise AssertionError("a read minted a uid")
+
+    monkeypatch.setattr(ci, "uid_for", no_mint)
+    monkeypatch.setattr(ci, "_root", no_mint)
+    assert _sites(client, name)["sites"]
+    assert client.get(f"/api/projects/{name}/sites/campus/scene").status_code == 200
     assert (project / ss.SITES_FILE).read_bytes() == before
-    assert json.dumps(PyPSAService.get_network().meta, sort_keys=True, default=str) == meta
     assert not dirty_state.is_dirty()
 
 
