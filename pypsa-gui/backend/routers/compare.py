@@ -568,10 +568,11 @@ def post_intent_comparison(
     profile = None if body.grid_code is None else campus.grid_code_profile(row, body.grid_code)
     network = _load_project_network(project.directory)
     config = _project_solver_config(project.directory)
-    # AS-17b: the project's PoC X/R when the request gives none.
-    inputs = project_inputs(body.inputs, project.directory)
     # Refuse a bad request here, as 422, rather than as failed rows later.
     try:
+        # AS-17b: the PoC X/R resolved once (request, else the project's, else assumed); the pre-check and every
+        # intent's run take the same inputs.
+        inputs = project_inputs(body.inputs, project.directory)
         _check_inputs(network, SizingInputs(**inputs))
         if refusals(config):
             raise SizingLoopRefusal("; ".join(refusals(config)))

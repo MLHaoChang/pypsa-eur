@@ -22,14 +22,14 @@ Out of scope: a UI field (no settings UI exists for `backup_autonomy_h` either; 
 
 ## Acceptance
 
-- [ ] Tests first:
+- [x] Tests first:
   - the settings validator accepts and refuses the right values;
   - PATCH round-trips the setting and null clears it;
   - an RVC case that warns at the assumed X/R passes with an entered X/R whose voltage form is under the limit, with `assumed` no longer driven by X/R;
   - the entered X/R changes the voltage-form value;
   - the flicker envelope unit's `xr` follows the input;
   - with no input, the scorecard output equals today's.
-- [ ] GK A OK; CI green.
+- [x] GK A OK; CI green.
 
 ## PRs
 
@@ -47,3 +47,12 @@ Out of scope: a UI field (no settings UI exists for `backup_autonomy_h` either; 
   7. Flicker: `envelope_unit` uses the entered X/R, and the note's provenance follows it. Pst moves in the hand-checked direction. The infrequent RVC tier is unchanged.
   8. API surface: run the assistant inventory, route-parity and control-matrix `--check`s, `test_route_chat_disposition`, and the project-settings route tests.
   9. Release note: an entered X/R replaces the assumed 4 and lifts the X/R guard. No UI field yet.
+- 2026-11-03, GK A (10) AS-17b plan verdict (the sizing loop reads `poc_xr`): GO with conditions.
+  1. Provenance: the loop result carries `xr` and `xr_source` ∈ {request, project, assumed}; the Pst check's note names it ("X/R 2.5 (entered for the project)" / "X/R 4 (assumed; …)", reusing `fi.XR_ASSUMED`). Check any frontend type or golden test that pins the result shape.
+  2. Precedence: request > project > assumed. The request X/R and the project X/R both go through `_check_inputs`; a stored invalid value → 4.0.
+  3. Callers: both `SizingInputs` sites in `routers/compare.py` (the 422 pre-check and `_intent_scenario`) take the resolved dict; a test fails a mutant that resolves only one.
+  4. Consistency: with `poc_xr` 2.5, the scorecard's flicker envelope X/R equals the loop's Pst X/R.
+  5. Hand check: `pst_step_mva` at X/R 1.5 vs 4 with both P_res and Q_res > 0, values stated.
+  6. Tie-break (d): index order made explicit, no behaviour change; docstring plus a non-alphabetical two-PoC test. Name sort declined.
+  7. Caching: `intent_jobs` keeps the last job only and nothing fingerprints inputs; stored inputs, if any, show the resolved X/R.
+  8. Trial merge: test_intent_comparison_endpoint, the sizing-loop suites, test_grid_readiness_poc_xr, test_route_chat_disposition, and the parity / control-matrix checks if the route's response model changes. Release note and housekeeping.

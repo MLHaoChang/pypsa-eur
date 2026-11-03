@@ -4,17 +4,22 @@ AS-17 (#1035) stored `poc_xr` in the project's `metadata.json` settings and the 
 scorecard uses it. The sizing loop's Pst check takes `SizingInputs.xr`; a run started for a project
 (the AS-10 intent comparison) now takes that X/R from the project when the request gives none, and
 falls back to `flicker_inputs.DEFAULT_XR` (4, assumed) only when the project has none. A request's own
-`inputs.xr` still wins. The runner is stubbed; no LP.
+`inputs.xr` still wins. The loop's result carries `xr` and `xr_source`, and its Pst check's note names
+the X/R (GK A plan conditions, AS-17b). The route tests stub the runner; no LP.
 """
 from __future__ import annotations
 
 import json
+import math
 
 import pytest
 
 from services.adequacy import sizing_loop_runner as slr
 from services.adequacy.flicker_inputs import DEFAULT_XR
 from services.compare import intent_jobs
+from services.adequacy import grid_readiness as G
+from services.solver import sizing_cuts as sc
+from tests.test_grid_readiness import PROFILE, _project, _rows
 from tests.test_intent_comparison_endpoint import INPUTS, URL, _wait
 from tests.test_intent_table import _result
 
@@ -28,15 +33,17 @@ def _clean(monkeypatch):
 
 
 @pytest.fixture
-def seen_xr(monkeypatch):
-    seen: list[float] = []
+def seen(monkeypatch):
+    """(where, xr, xr_source) for the 422 pre-check and each intent's run."""
+    out: list[tuple[str, float, str]] = []
+    monkeypatch.setattr(slr, "_check_inputs", lambda n, inp: out.append(("check", inp.xr, inp.xr_source)))
 
     def fake_run(network, config, inp, **kw):
-        seen.append(inp.xr)
+        out.append(("run", inp.xr, inp.xr_source))
         return _result()
 
-    monkeypatch.setattr("services.adequacy.sizing_loop_runner.run_sizing", fake_run)
-    return seen
+    monkeypatch.setattr(slr, "run_sizing", fake_run)
+    return out
 
 
 def _run(client, name, inputs=INPUTS) -> None:
@@ -51,64 +58,147 @@ def _enter_xr(client, name, xr) -> None:
     assert r.status_code == 200, r.text
 
 
-def test_a_run_on_a_project_with_poc_xr_uses_it(client, api_project, seen_xr):
+def _all(xr, source):
+    """The pre-check and both intents' runs saw the same X/R (GK A condition 3)."""
+    return [("check", xr, source), ("run", xr, source), ("run", xr, source)]
+
+
+def test_a_run_on_a_project_with_poc_xr_uses_it_in_the_check_and_every_run(client, api_project, seen):
     name = api_project("xr-entered")
     _enter_xr(client, name, 2.5)
     _run(client, name)
-    assert seen_xr == [2.5, 2.5]
+    assert seen == _all(2.5, "project")
 
 
-def test_a_run_on_a_project_without_poc_xr_uses_the_default(client, api_project, seen_xr):
+def test_a_run_on_a_project_without_poc_xr_uses_the_default(client, api_project, seen):
     _run(client, api_project("xr-unset"))
-    assert seen_xr == [DEFAULT_XR, DEFAULT_XR]
+    assert seen == _all(DEFAULT_XR, "assumed")
 
 
-def test_a_cleared_poc_xr_falls_back_to_the_default(client, api_project, seen_xr):
+def test_a_cleared_poc_xr_falls_back_to_the_default(client, api_project, seen):
     name = api_project("xr-cleared")
     _enter_xr(client, name, 2.5)
     _enter_xr(client, name, None)
     _run(client, name)
-    assert seen_xr == [DEFAULT_XR, DEFAULT_XR]
+    assert seen == _all(DEFAULT_XR, "assumed")
 
 
-def test_the_requests_own_xr_wins_over_the_project(client, api_project, seen_xr):
+def test_the_requests_own_xr_wins_over_the_project(client, api_project, seen):
     name = api_project("xr-request")
     _enter_xr(client, name, 2.5)
     _run(client, name, {**INPUTS, "xr": 7.0})
-    assert seen_xr == [7.0, 7.0]
+    assert seen == _all(7.0, "request")
 
 
-def test_a_stored_invalid_poc_xr_reads_as_unset(client, api_project, project_storage_dir, seen_xr):
+def test_a_stored_invalid_poc_xr_reads_as_unset(client, api_project, project_storage_dir, seen):
     name = api_project("xr-invalid")
     path = project_storage_dir(name) / "metadata.json"
     meta = json.loads(path.read_text())
     meta["settings"] = {**(meta.get("settings") or {}), "poc_xr": 0}
     path.write_text(json.dumps(meta))
     _run(client, name)
-    assert seen_xr == [DEFAULT_XR, DEFAULT_XR]
+    assert seen == _all(DEFAULT_XR, "assumed")
 
 
-def test_the_422_input_check_sees_the_project_xr(client, api_project, monkeypatch):
-    """The pre-start check runs on the same resolved inputs the runs get."""
-    checked: list[float] = []
-    monkeypatch.setattr(slr, "_check_inputs", lambda n, inp: checked.append(inp.xr))
-    monkeypatch.setattr(slr, "run_sizing", lambda network, config, inp, **kw: _result())
-    name = api_project("xr-check")
-    _enter_xr(client, name, 2.5)
-    _run(client, name)
-    assert checked == [2.5]
+def test_a_sent_xr_source_is_422(client, api_project):
+    """`xr_source` is the server's to set: a request carrying one is refused before any run starts."""
+    name = api_project("xr-source")
+    body = {"intents": [{"intent": "A"}, {"intent": "B"}], "critical_mw": 80.0,
+            "inputs": {**INPUTS, "xr": 2.0, "xr_source": "project"}}
+    r = client.post(URL.format(name), json=body)
+    assert r.status_code == 422 and "xr_source" in r.text, r.text
+    assert client.get(URL.format(name)).status_code == 404
 
 
-@pytest.mark.parametrize("inputs, stored, xr", [
-    ({"link": "l"}, 2.5, 2.5),                  # the project's
-    ({"link": "l"}, None, None),                # none: the dataclass default applies
-    ({"link": "l", "xr": 7.0}, 2.5, 7.0),       # the request's own
-    ({"link": "l"}, 0, None),                   # a stored invalid value reads as none
+@pytest.mark.parametrize("xr", [-1.0, 0.0, float("nan"), float("inf")])
+def test_a_bad_request_xr_meets_the_one_input_check(tmp_path, monkeypatch, xr):
+    """GK A condition 2: a request's X/R and the project's go through the same `_check_inputs` gate."""
+    from tests.test_sizing_loop_runner import _inputs, _tiny
+
+    monkeypatch.undo()                                    # the real input check
+
+    resolved = slr.project_inputs({"xr": xr}, tmp_path)
+    assert resolved == {"xr": xr, "xr_source": "request"}
+    with pytest.raises(slr.SizingLoopRefusal, match="xr must be > 0"):
+        slr._check_inputs(_tiny(), _inputs(**resolved))
+
+
+@pytest.mark.parametrize("inputs, stored, xr, source", [
+    ({"link": "l"}, 2.5, 2.5, "project"),
+    ({"link": "l"}, None, None, "assumed"),        # the dataclass resolves None to DEFAULT_XR
+    ({"link": "l", "xr": 7.0}, 2.5, 7.0, "request"),
+    ({"link": "l", "xr": None}, 2.5, 2.5, "project"),   # an explicit null is no X/R
+    ({"link": "l"}, 0, None, "assumed"),           # a stored invalid value reads as none
 ])
-def test_project_inputs(tmp_path, inputs, stored, xr):
+def test_project_inputs(tmp_path, inputs, stored, xr, source):
     if stored is not None:
         (tmp_path / "metadata.json").write_text(json.dumps({"settings": {"poc_xr": stored}}))
+    before = dict(inputs)
     out = slr.project_inputs(inputs, tmp_path)
-    assert out.get("xr") == xr
-    assert {k: v for k, v in out.items() if k != "xr"} == {k: v for k, v in inputs.items() if k != "xr"}
-    assert "xr" not in inputs or inputs["xr"] == 7.0             # the caller's dict is not changed
+    assert (out["xr"], out["xr_source"]) == (xr, source)
+    assert {k: v for k, v in out.items() if k not in ("xr", "xr_source")} == {"link": "l"}
+    assert inputs == before                                   # the caller's dict is not changed
+
+
+def test_the_dataclass_resolves_and_gates_the_source():
+    base = dict(link="l", envelope={}, ramp_mw_per_min=1.0, sk_mva=1.0, pst_limit=1.0,
+                transformer_library_mva=(1.0,))
+    assert (slr.SizingInputs(**base).xr, slr.SizingInputs(**base).xr_source) == (DEFAULT_XR, "assumed")
+    assert slr.SizingInputs(**base, xr=2.0).xr_source == "request"
+    with pytest.raises(slr.SizingLoopRefusal):
+        slr.SizingInputs(**base, xr=2.0, xr_source="operator")
+
+
+def test_the_scorecard_and_the_loop_read_the_same_project_xr(tmp_path):
+    """GK A condition 4: the grid-readiness flicker envelope and the loop's Pst check cannot drift."""
+    d, n = _project(tmp_path, "eh_datacenter", dc_load={})
+    for stored, xr in ((None, DEFAULT_XR), (2.5, 2.5)):
+        if stored is not None:
+            path = d / "metadata.json"
+            meta = json.loads(path.read_text()) if path.is_file() else {}
+            meta["settings"] = {**(meta.get("settings") or {}), "poc_xr": stored}
+            path.write_text(json.dumps(meta))
+        flicker = _rows(G.grid_readiness(d, n, PROFILE))["flicker"]
+        loop = slr.SizingInputs(**slr.project_inputs({**INPUTS}, d))
+        assert flicker["flicker"]["envelope"]["xr"] == loop.xr == xr
+
+
+def test_the_pst_step_by_hand_at_xr_1_5_and_4():
+    """GK A condition 5, with both residuals > 0. Swing 10 MW, P_sm 6 MW, tan φ 0.2, Q_dyn 0.5 Mvar:
+    P_res = 10 - 6 = 4 MW, Q_res = 0.2·10 - 0.5 = 1.5 Mvar. Step = cos ψ·P_res + sin ψ·Q_res, ψ = atan(X/R):
+      X/R 4:   (4 + 1.5·4)   / √17   = 10   / 4.123106 = 2.425356 MVA;
+      X/R 1.5: (4 + 1.5·1.5) / √3.25 = 6.25 / 1.802776 = 3.466876 MVA.
+    The real residual dominates here, so the lower X/R gives the larger step."""
+    at4 = sc.pst_step_mva(10.0, 6.0, 0.5, 0.2, 4.0)
+    at15 = sc.pst_step_mva(10.0, 6.0, 0.5, 0.2, 1.5)
+    assert at4 == pytest.approx(10 / math.sqrt(17), rel=1e-12) == pytest.approx(2.425356, rel=1e-6)
+    assert at15 == pytest.approx(6.25 / math.sqrt(3.25), rel=1e-12) == pytest.approx(3.466876, rel=1e-6)
+
+
+@pytest.mark.parametrize("source, words", [
+    ("request", "X/R 2.5 (given for this run)"),
+    ("project", "X/R 2.5 (entered for the project)"),
+])
+def test_the_xr_note(source, words):
+    inp = slr.SizingInputs(link="l", envelope={}, ramp_mw_per_min=1.0, sk_mva=1.0, pst_limit=1.0,
+                           transformer_library_mva=(1.0,), xr=2.5, xr_source=source)
+    assert slr.xr_note(inp) == words
+
+
+def test_the_assumed_xr_note_says_so():
+    inp = slr.SizingInputs(link="l", envelope={}, ramp_mw_per_min=1.0, sk_mva=1.0, pst_limit=1.0,
+                           transformer_library_mva=(1.0,))
+    assert slr.xr_note(inp) == "X/R 4 (assumed; typical grid X/R, replace with the network operator's value)"
+
+
+@pytest.mark.parametrize("source", ["project", "assumed"])
+def test_the_loop_result_and_its_pst_check_carry_the_xr(source):
+    """A real (two-hour) loop: the result names the X/R its Pst check used, and the check's note says so."""
+    from tests.test_sizing_loop_runner import _config, _inputs, _tiny
+
+    kw = {"xr": 2.5, "xr_source": "project"} if source == "project" else {"xr": None}
+    out = slr.run_sizing(_tiny(), _config(), _inputs(**kw))
+    xr = 2.5 if source == "project" else DEFAULT_XR
+    assert (out["xr"], out["xr_source"]) == (xr, source)
+    pst = [c for r in out["rounds"] for c in r["checks"] if c["name"] == "pst"]
+    assert pst and all(c["note"].startswith(f"X/R {xr:g} (") for c in pst)
