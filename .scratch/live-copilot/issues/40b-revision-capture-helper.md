@@ -134,6 +134,8 @@ New, in `tests/test_lc40b_revision_capture.py`:
 
 ## Scope options for the owner
 
+Decided: **B** (owner decision LC40B-SCOPE-1). Options kept for the record.
+
 - **A. Helper plus the six worker sites** (#1–#6): smallest, one PR, no #8.
 - **B. A plus #8** (decision study / tornado): all record captures on one helper. One code PR.
   Recommended.
@@ -152,7 +154,7 @@ New, in `tests/test_lc40b_revision_capture.py`:
 
 ## Acceptance
 
-- [ ] Owner picks the scope option.
+- [x] Owner picks the scope option: **B** (helper + the 6 worker sites + `study/runner.py:463`), decision LC40B-SCOPE-1.
 - [ ] Helper exists in `dirty_state.py` and every in-scope site calls it.
 - [ ] One stale-banner test per reader listed above, all green; LC-37/39/40/41 suites unchanged.
 - [ ] `study_state.edited_since`'s docstring names the helper as the only capture path.
