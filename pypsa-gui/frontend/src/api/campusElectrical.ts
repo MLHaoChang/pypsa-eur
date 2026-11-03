@@ -779,6 +779,8 @@ export interface GridReadinessRow {
   project_value: number | string | Record<string, unknown> | null
   verdict: GridReadinessVerdict
   assumed: boolean
+  /** The rapid-voltage-change and flicker rows only (AS-18): the point-of-connection X/R is the assumed default. */
+  xr_assumed?: boolean
   note: string | null
   section: string
   target: GridReadinessTarget

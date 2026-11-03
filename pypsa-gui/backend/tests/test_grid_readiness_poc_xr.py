@@ -42,8 +42,11 @@ def test_an_entered_xr_lifts_the_guard_and_the_voltage_form_decides(tmp_path):
     d, n = _with_envelope(tmp_path, swing=10.0)
     before = _rvc(d, n)
     assert before["verdict"] == "warn" and before["project_value"] == pytest.approx(4.0200, rel=1e-4)
+    assert before["xr_assumed"] is True                       # AS-18: the scorecard links to the field
+    assert "enter the network operator's X/R in Project info, Settings" in before["note"]
     _enter_xr(d, 1.5)
     rvc = _rvc(d, n)
+    assert "xr_assumed" not in rvc
     assert rvc["verdict"] == "pass" and rvc["project_value"] == pytest.approx(2.5516, rel=1e-4)
     assert rvc["voltage_form_pct"] == pytest.approx(2.5516, rel=1e-4)
     assert rvc["xr_free_bound_pct"] == before["xr_free_bound_pct"] == pytest.approx(4.0200, rel=1e-4)

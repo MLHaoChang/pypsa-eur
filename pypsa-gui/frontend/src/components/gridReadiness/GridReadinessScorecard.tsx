@@ -18,7 +18,7 @@ import { create } from 'zustand'
 import { campusApi, type GridReadiness, type GridReadinessAfterUnit, type GridReadinessRow,
   type GridReadinessVerdict } from '../../api/campusElectrical'
 import type { FlowTarget } from '../../api/flow'
-import { openFlowTargetInPlace } from '../../layout/flowNavigation'
+import { openFlowTargetInPlace, openPocXr } from '../../layout/flowNavigation'
 import { useUIStore } from '../../store/uiStore'
 import { useChatReadiness } from '../../hooks/useChatProfiles'
 import { ask, ASK_TITLE } from '../../pages/hubDesign/delegate'
@@ -208,6 +208,11 @@ function ScoreRow({ row, mode, onJump, fieldLabels, noAssistant }: {
             {row.assumed && (
               <span data-testid="gr-assumed"
                 className="ml-1 rounded border border-warn/30 bg-warn/5 px-1 text-[10px] text-warn">assumed</span>
+            )}
+            {row.xr_assumed && (
+              <button type="button" data-testid={`gr-set-xr-${row.id}`} onClick={openPocXr}
+                title="Open the PoC X/R field in Project info, Settings"
+                className="ml-1.5 text-[11px] text-accent hover:underline">Set PoC X/R ›</button>
             )}
             <span className="mx-1.5">·</span>
             Project:{'\u00A0'}<span className="text-text">
