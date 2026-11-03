@@ -114,9 +114,27 @@ def _carrier(n, cls: str, name: str) -> str | None:
     return own or _bus_attr(n, _bus_of(n, cls, name), "carrier")
 
 
+def _rate(unit: str) -> str:
+    """A rate in the bus's unit: `…/h` stays, `MWh<sfx>` becomes `MW<sfx>`, `MW…` stays, anything else per hour."""
+    if unit.endswith("/h") or unit.startswith("MW") and not unit.startswith("MWh"):
+        return unit
+    return "MW" + unit[3:] if unit.startswith("MWh") else f"{unit}/h"
+
+
+def _amount(unit: str) -> str:
+    """An amount in the bus's unit: `…/h` drops `/h`, `MW<sfx>` becomes `MWh<sfx>`, `MWh…` and the rest stay."""
+    if unit.endswith("/h"):
+        return unit[:-2]
+    return "MWh" + unit[2:] if unit.startswith("MW") and not unit.startswith("MWh") else unit
+
+
 def _unit(n, cls: str, name: str) -> str:
-    """The bus's `unit` when set, else PyPSA's own unit for the quantity (MW for power, MWh for a Store)."""
-    return _bus_attr(n, _bus_of(n, cls, name), "unit") or ("MWh" if cls == "Store" else "MW")
+    """The unit of the component's own quantity: a rate for p_nom and a Load's p_set, an amount for a Store.
+    The bus's `unit` names what its carrier is counted in; the quantity's unit follows from it."""
+    bus = _bus_attr(n, _bus_of(n, cls, name), "unit")
+    if not bus:
+        return "MWh" if cls == "Store" else "MW"
+    return _amount(bus) if cls == "Store" else _rate(bus)
 
 
 def _capacity(n, cls: str, name: str) -> dict[str, Any]:
