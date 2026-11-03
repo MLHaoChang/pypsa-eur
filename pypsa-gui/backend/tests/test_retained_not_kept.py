@@ -18,10 +18,11 @@ from fastapi import HTTPException
 
 import harness.confirm as harness_confirm
 from services import chat_service, chat_tools, retained_results, run_evidence
-from services.period_utils import MULTI_PERIOD_NOT_DIGESTED
+from services.not_kept import MULTI_PERIOD_NOT_DIGESTED
 from services.pypsa_service import PyPSAService
 from tests.oj_grid import NAME, build_oj_grid
 from tests.test_oj01_latest_loadflow_journey import _solve_once
+from tests.test_study_report_sections import _finish_study, project  # noqa: F401
 from tests.test_workflow_tools import helpers_state  # noqa: F401
 
 GENERATORS = 2000
@@ -168,6 +169,65 @@ def test_comparing_a_run_with_a_stub_reads_its_metrics(multi_period):
     run_id, base = multi_period['older']['run_id'], multi_period['latest']['run_id']
     out = run_evidence.compare_project_runs(run_id, base)
     assert out['comparable'] is True
+
+
+def test_discussing_a_run_binds_its_stub_section_without_data(multi_period):
+    run_id = multi_period['older']['run_id']
+    chat_tools.set_chat_session(chat_service.ChatSession())
+    try:
+        event = chat_tools.discuss_project_run(run_id, results_tab='prices',
+                                               section=retained_results.PRICES_SECTION)
+    finally:
+        chat_tools.set_chat_session(None)
+    assert event['kind'] == 'open_run_result' and event['evidence_available'] is True
+    assert 'data' not in event and 'data' not in event['discussed']
+
+
+def test_the_run_summary_the_workbook_reads_is_unchanged_by_a_stub(multi_period):
+    """The workbook (and its Scenarios sheet) reads list_project_runs, never a section."""
+    item = next(i for i in run_evidence.list_project_runs(limit=5)['items']
+                if i['run_id'] == multi_period['older']['run_id'])
+    assert set(item) == {'run_id', 'kind', 'status', 'started_at', 'finished_at', 'mode',
+                         'fingerprint', 'job_id', 'unsaved_inputs', 'evidence_available'}
+    assert item['evidence_available'] is True
+
+
+def test_the_refusal_message_says_why(multi_period):
+    with pytest.raises(HTTPException) as exc:
+        run_evidence.get_run_evidence(multi_period['older']['run_id'], retained_results.PRICES_SECTION)
+    assert exc.value.detail['message'] == (
+        "This run kept no results_prices: a multi-period run's dispatch and prices are not digested.")
+
+
+# ── study runs: over the cap and superseded stay distinct ──────────────────
+
+
+def test_an_oversized_study_keeps_an_over_cap_stub(project):  # noqa: F811
+    run_id = _finish_study(project, rows=['x' * 64] * 400)
+    record = run_evidence.get_run_evidence(run_id)
+    entry = next(s for s in record['sections'] if s['name'] == run_evidence.STUDY_SECTION)
+    assert entry == {'name': 'study_result', 'available': False, 'status': 'not_kept',
+                     'reason': run_evidence.OVER_SECTION_CAP}
+    assert 'study_result_not_captured' in record['warnings']
+    with pytest.raises(HTTPException) as exc:
+        run_evidence.get_run_evidence(run_id, run_evidence.STUDY_SECTION)
+    assert exc.value.detail['reason'] == run_evidence.OVER_SECTION_CAP
+    assert exc.value.detail['section_bytes'] > run_evidence.MAX_SECTION_BYTES
+
+
+def test_a_superseded_study_keeps_no_section_at_all(project):  # noqa: F811
+    record = {'status': 'running', 'result': None, 'error': None, 'started_at': 1.0,
+              'network_revision': 0, 'thread': None, 'stop_event': None}
+    project.solver_state['mc'] = record
+    token = run_evidence.start_study_run('mc', record)
+    record.update(status='done', result={'lole_h': 1.5})
+    project.solver_state['mc'] = {**record, 'started_at': 2.0, 'result': {'lole_h': 99.0}}
+    run_evidence.publish_study_run('mc', record)
+    published = run_evidence.get_run_evidence(token['run_id'])
+    assert 'study_result' not in {s['name'] for s in published['sections']}
+    with pytest.raises(HTTPException) as exc:
+        run_evidence.get_run_evidence(token['run_id'], run_evidence.STUDY_SECTION)
+    assert exc.value.detail['reason'] == 'section_not_recorded'
 
 
 # ── (h): old runs' reads and exports are byte-equal ────────────────────────

@@ -21,7 +21,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from services.period_utils import MULTI_PERIOD_NOT_DIGESTED, is_multi_period, snapshot_weights
+from services.not_kept import MULTI_PERIOD_NOT_DIGESTED
+from services.period_utils import is_multi_period, snapshot_weights
 
 BUDGET_BYTES = 12 * 1024   # under run_evidence.MAX_SECTION_BYTES with room for the envelope
 _ON_MW = 1e-6               # below this a unit counts as idle (solver noise)

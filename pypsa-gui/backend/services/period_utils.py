@@ -32,11 +32,6 @@ from typing import Any
 import pandas as pd
 
 
-# A digest's reason for a multi-period network (results/dispatch_digest,
-# results/prices_digest); a past run's not_kept stub keeps the same value.
-MULTI_PERIOD_NOT_DIGESTED = "multi_period_not_digested"
-
-
 def is_multi_period(n) -> bool:
     """True when the network's snapshots are a (period, timestep) MultiIndex."""
     return isinstance(getattr(n, "snapshots", None), pd.MultiIndex)

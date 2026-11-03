@@ -26,7 +26,7 @@ from collections.abc import Callable
 from fastapi import HTTPException
 
 from services import run_evidence
-from services.period_utils import MULTI_PERIOD_NOT_DIGESTED
+from services import not_kept
 from services.results import dispatch_digest, prices_digest
 
 logger = logging.getLogger(__name__)
@@ -149,17 +149,8 @@ def _capture_digest(build: Callable[[], dict]) -> dict | None:
     if out.get('status') == 'ok':
         return out
     reason = out.get('reason')
-    return run_evidence.not_kept_stub(reason) if reason in NOT_KEPT_REASONS else None
+    return run_evidence.not_kept_stub(reason) if reason in not_kept.WHY else None
 
-
-# Why a section was kept as a not_kept stub, as a past-run read says it.
-NOT_KEPT_REASONS: dict[str, str] = {
-    MULTI_PERIOD_NOT_DIGESTED: 'a multi-period run\'s dispatch and prices are not digested',
-    prices_digest.NO_PRICES: 'the solve left no prices to keep',
-    run_evidence.OVER_SECTION_CAP: (
-        f'the section was over the {run_evidence.MAX_SECTION_BYTES // 1024} KB '
-        'cap a run keeps, and its values are never trimmed'),
-}
 
 ADAPTERS: tuple[Retained, ...] = (
     Retained('loadflow', _capture_loadflow,
@@ -245,7 +236,7 @@ def historical(section: str, run_id: str) -> tuple[dict | None, dict | None]:
         detail = exc.detail if isinstance(exc.detail, dict) else {}
         if detail.get('section_status') == run_evidence.NOT_KEPT:
             reason = detail.get('reason')
-            why = NOT_KEPT_REASONS.get(reason, 'it could not be kept')
+            why = not_kept.why(reason)
             extra = ({} if detail.get('section_bytes') is None
                      else {'section_bytes': detail['section_bytes']})
             return None, unavailable(

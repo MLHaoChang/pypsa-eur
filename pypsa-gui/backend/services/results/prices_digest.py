@@ -28,12 +28,11 @@ import numpy as np
 import pandas as pd
 
 from services.compare.prices import weighted_stats
-from services.period_utils import MULTI_PERIOD_NOT_DIGESTED, is_multi_period, snapshot_weights
+from services.not_kept import MULTI_PERIOD_NOT_DIGESTED, NO_PRICES
+from services.period_utils import is_multi_period, snapshot_weights
 from services.results.dispatch_digest import BUDGET_BYTES, _num, _size
 from services.results.load_frames import corrected_marginal_prices
 
-# The digest's reason when the solve left no prices; a past run's not_kept stub keeps it.
-NO_PRICES = 'no_prices'
 _SLACK = 64   # the omitted counters' digits grow while trimming
 
 

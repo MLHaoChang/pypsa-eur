@@ -46,7 +46,7 @@ export interface RunView {
     started_at?: string | null
     fingerprint?: string
     metrics: Record<string, { value: number | null; unit: string }>
-    sections?: Array<{ name: string; available: boolean }>
+    sections?: Array<{ name: string; available: boolean; status?: 'not_kept'; reason?: string }>
     section?: string
     data?: unknown
     warnings?: string[]
@@ -81,12 +81,22 @@ export async function runFileRefusal(error: unknown): Promise<string> {
   const data = (error as { response?: { data?: unknown } } | null)?.response?.data
   if (data instanceof Blob) {
     try {
-      const reason = projectUnavailableReason({ response: { data: JSON.parse(await data.text()) } })
+      const parsed = { response: { data: JSON.parse(await data.text()) } }
+      const reason = projectUnavailableReason(parsed) ?? notKeptReason(parsed)
       if (reason) return reason
     } catch { /* not JSON: the fallback below */ }
   }
-  return projectUnavailableReason(error)
+  return projectUnavailableReason(error) ?? notKeptReason(error)
     ?? "This run's kept results could not be downloaded. Current results were not substituted."
+}
+
+/** The server's own words when the section asked for was kept as a not_kept stub
+ * (a multi-period or price-less digest, or over the 16 KB cap): absent, with why.
+ * Null for any other failure. */
+export function notKeptReason(error: unknown): string | null {
+  const detail = (error as { response?: { data?: { detail?: { section_status?: string; message?: string } } } } | null)
+    ?.response?.data?.detail
+  return detail?.section_status === 'not_kept' && detail.message ? detail.message : null
 }
 
 /** The server's own words when a run read refuses because the project is no

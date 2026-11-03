@@ -56,4 +56,25 @@ describe('RunBoundView refusals (LC-T08)', () => {
     expect(await screen.findByText(/Retained results_capacity evidence unavailable for run fg-old\. Current results have not been substituted\./))
       .toBeTruthy()
   })
+
+  it('names why a section kept as a not_kept stub is absent (LC-03 slice 2)', async () => {
+    const why = 'This run kept no results_capacity: the section was over the 16 KB cap a run keeps, and its values are never trimmed.'
+    vi.mocked(resultsEvidenceApi.run).mockRejectedValue(refused({
+      error_kind: 'evidence_unavailable', reason: 'over_section_cap', section_status: 'not_kept', message: why }))
+    show()
+    expect(await screen.findByText(`${why} Current results have not been substituted.`)).toBeTruthy()
+    expect(screen.queryByText(/evidence unavailable for run/)).toBeNull()
+  })
+})
+
+describe('runFileRefusal (Export chooser, LC-03 slice 2)', () => {
+  it('names the not_kept reason from the download refusal', async () => {
+    const { runFileRefusal } = await import('../../api/resultsEvidence')
+    const message = "This run kept no results_prices: a multi-period run's dispatch and prices are not digested."
+    const blob = new Blob([JSON.stringify({ detail: { error_kind: 'evidence_unavailable', section_status: 'not_kept',
+      reason: 'multi_period_not_digested', message } })])
+    expect(await runFileRefusal({ response: { data: blob } })).toBe(message)
+    expect(await runFileRefusal(refused({ error_kind: 'evidence_unavailable', message: 'x' })))
+      .toBe("This run's kept results could not be downloaded. Current results were not substituted.")
+  })
 })

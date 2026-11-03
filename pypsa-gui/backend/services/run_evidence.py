@@ -55,6 +55,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from services.not_kept import NOT_KEPT, OVER_SECTION_CAP, SECTION_CAP_KB, why as _not_kept_why
 from services.pypsa_service import PyPSAService
 
 MANIFEST_VERSION = 1
@@ -62,8 +63,7 @@ MAX_SECTION_BYTES = 16 * 1024
 # LC-03 slice 2: a section that could not be kept is stored as a typed stub,
 # {'status': NOT_KEPT, 'reason': ..., 'bytes': ...}. It verifies like any
 # section, and every read treats it as absent with its reason, never as data.
-NOT_KEPT = 'not_kept'
-OVER_SECTION_CAP = 'over_section_cap'
+assert MAX_SECTION_BYTES == SECTION_CAP_KB * 1024
 _STUB_KEYS = frozenset({'status', 'reason', 'bytes'})
 _STUB_MAX_BYTES = 256
 MAX_RUNS_WITH_ARTIFACTS = 20
@@ -552,8 +552,9 @@ def get_run_evidence(run_id: str, section: str | None = None) -> dict:
         if reason is not None or stub is not None:
             extra = ({} if stub is None else
                      {'section_status': NOT_KEPT, 'section_bytes': stub['bytes']})
-            _refuse('evidence_unavailable',
-                    'The requested evidence is not available for this run.',
+            message = ('The requested evidence is not available for this run.' if stub is None
+                       else f'This run kept no {section}: {_not_kept_why(stub["reason"])}.')
+            _refuse('evidence_unavailable', message,
                     run_id=run_id, section=section,
                     reason=reason if stub is None else stub['reason'],
                     run_status=record['status'], **extra,
@@ -1143,14 +1144,19 @@ _STUDY_ROUTE = {
 
 
 def _bounded(section: str, payload: dict | None, run_id: str) -> tuple[dict, list[str]]:
-    """({section: payload}, []) when it fits the store's cap, else ({}, [warning])."""
-    if payload is not None and len(_json_bytes(payload)) <= MAX_SECTION_BYTES:
+    """({section: payload}, []) when it fits the store's cap. Over the cap, a
+    not_kept stub (OVER_SECTION_CAP, its size) and a warning; with no payload
+    (none read, or a newer study replaced the record), nothing and a warning."""
+    warning = [f'{section}_not_captured']
+    if payload is None:
+        return {}, warning
+    size = len(_json_bytes(payload))
+    if size <= MAX_SECTION_BYTES:
         return {section: payload}, []
-    if payload is not None:
-        import logging
-        logging.getLogger(__name__).warning('%s for %s exceeds the section cap; not kept',
-                                            section, run_id)
-    return {}, [f'{section}_not_captured']
+    import logging
+    logging.getLogger(__name__).warning('%s for %s exceeds the section cap; not kept',
+                                        section, run_id)
+    return {section: not_kept_stub(OVER_SECTION_CAP, size)}, warning
 
 
 def _study_result(study_key: str, record: dict) -> dict | None:
