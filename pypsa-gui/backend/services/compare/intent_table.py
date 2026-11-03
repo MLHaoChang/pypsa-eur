@@ -49,7 +49,7 @@ def _outcome(result: dict) -> str:
     return "pass" if status == "converged" else "failed"
 
 
-def build_row(spec: DesignIntentSpec, result: dict, critical_mw: float, profile: dict) -> dict:
+def build_row(spec: DesignIntentSpec, result: dict, critical_mw: float, profile: dict | None) -> dict:
     final = result.get("final") or {}
     sizes = final.get("sizes") or {}
     assets = {k: {"value": float(v), "unit": _unit(k)} for k, v in sizes.items()}
@@ -81,7 +81,7 @@ def _skipped(spec: DesignIntentSpec, reason: str) -> dict:
     return {"status": "aborted", "verdict": reason, "final": None}
 
 
-def compare_intents(prepare: Callable, specs: Sequence[DesignIntentSpec], *, critical_mw: float, profile: dict,
+def compare_intents(prepare: Callable, specs: Sequence[DesignIntentSpec], *, critical_mw: float, profile: dict | None,
                     runner: Callable, stop_event=None, on_progress: Callable | None = None) -> dict:
     """Run one sizing loop per spec. `prepare(spec)` returns `(network, config, inputs)` for that intent's
     scenario; `runner(network, config, inputs, stop_event=...)` is `run_sizing`. A loop that raises (a refusal

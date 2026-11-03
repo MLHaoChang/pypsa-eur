@@ -89,4 +89,4 @@ Route detail codes (under the existing `invalid_input` 422 and `revision_conflic
   - ~~an NH3 Load shows MWh from its bus unit (backend)~~ fixed: `associations._unit` gives a quantity's own unit, a rate (MW, t/h) for p_nom and p_set, an amount (MWh, t) for a Store (`test_a_load_shows_its_own_rate_unit_not_the_bus_unit`);
   - ~~flowReturn does not record the mode~~ explained: `FlowReturn.mode` is recorded by every jump and `returnToOrigin` switches back (SC-02b's Add-model-asset trip keeps it, asserted there). No defect found; added the round-trip test for a jump that changes the mode (`flowReturn.test.tsx`). The real symptom was the auto-open above;
   - ~~GK B (5)'s `test_site_identity::test_a_get_never_writes`~~ fixed: it now reads a bound document and patches `uid_for` and `_root` to fail inside the requests, instead of comparing `get_network().meta` from the test thread (mutation-checked);
-  - still open: detach and group editing are not built; placement is one item per preview.
+  - detach and group editing: built in SC-02d ([../sc-02d/record.md](../sc-02d/record.md)).

@@ -178,7 +178,8 @@ def _tag_store(n, name, technology, lo, hi, c_rate) -> None:
 #: StorageUnit attributes the migration maps exactly; any other attribute must keep its default.
 _CARRIED = {"bus", "carrier", "p_nom", "p_nom_extendable", "p_nom_min", "p_nom_max", "p_min_pu", "p_max_pu",
             "capital_cost", "marginal_cost", "efficiency_store", "efficiency_dispatch", "standing_loss",
-            "max_hours", "cyclic_state_of_charge", "state_of_charge_initial", "build_year", "lifetime"}
+            "max_hours", "cyclic_state_of_charge", "state_of_charge_initial", "build_year", "lifetime",
+            "marginal_cost_storage"}
 #: Attributes that do not change the LP, or that `_migration_blockers` checks by name.
 _IGNORED = {"active", "sign", "type", "control", "q_set"}
 
@@ -186,13 +187,14 @@ _IGNORED = {"active", "sign", "type", "control", "q_set"}
 def migrate_storage_unit(n: "pypsa.Network", name: str, technology: str | None = None) -> None:
     """Replace StorageUnit `name` by a Store `name` with charger and discharger Links, E/P fixed at its
     `max_hours`, so the LP and its objective are unchanged. Exact or refused: anything the layout does not map
-    exactly (inflow, spill cost, marginal_cost_storage, a set SOC or dispatch, any time-varying input, the
+    exactly (inflow, spill cost, a set SOC or dispatch, any time-varying input, the
     per-period SOC options, build_year or lifetime in a multi-period network, any other non-default attribute)
     raises `SplitStorageError` naming it, and the network is left unchanged.
 
     The mapping: P is the AC-side MW, so charger p_nom = P and discharger p_nom = P / efficiency_dispatch
     (the PyPSA-Eur tie); E = max_hours x P; the unit's capital_cost goes on the charger; its marginal_cost,
-    per MWh dispatched, becomes the discharger's per MWh drawn (x efficiency_dispatch). No route or chat tool
+    per MWh dispatched, becomes the discharger's per MWh drawn (x efficiency_dispatch); its marginal_cost_storage,
+    per MWh held, goes on the Store unchanged (both price store-side MWh: SOC and e). No route or chat tool
     calls this yet; a caller that offers it to users needs its own review.
     """
     if name not in n.storage_units.index:
@@ -224,7 +226,8 @@ def migrate_storage_unit(n: "pypsa.Network", name: str, technology: str | None =
     n.add("Store", name, bus=store_bus, carrier=carrier, e_nom=hours * float(su["p_nom"]),
           e_nom_extendable=extendable, e_nom_min=hours * float(su["p_nom_min"]),
           e_nom_max=hours * float(su["p_nom_max"]), standing_loss=su["standing_loss"],
-          e_cyclic=bool(su["cyclic_state_of_charge"]), e_initial=su["state_of_charge_initial"], **both)
+          e_cyclic=bool(su["cyclic_state_of_charge"]), e_initial=su["state_of_charge_initial"],
+          marginal_cost_storage=su["marginal_cost_storage"], **both)
     _add_links(n, name, su["bus"], store_bus, carrier, p_nom=float(su["p_nom"]), extendable=extendable,
                efficiency_charge=float(su["efficiency_store"]), efficiency_discharge=eff_d,
                power_capital_cost=float(su["capital_cost"]), marginal_cost=float(su["marginal_cost"]),

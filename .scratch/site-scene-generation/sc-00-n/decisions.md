@@ -3,7 +3,7 @@
 
 # SC-00 N decision closures
 
-Status: **proposed** for D01–D05, D08, D11, D12. Each becomes accepted only through the GK B and UX OK on this PR's merged head; no closure here is self-accepted. D06 stays **open** and blocks SC-02. D07 (SC-03), D09 (B) and D10 (P) are not N decisions.
+Status: **accepted** for D01–D05, D08, D11, D12, by UX OK @1ed9a0bee25b795099522e3b842f04bbb1c4a34e and GK B OK @1ed9a0bee25b795099522e3b842f04bbb1c4a34e on PR #794's merged head (merged 2026-10-27). D06 is **accepted** too (below). D07 (SC-03), D09 (B) and D10 (P) are not N decisions.
 
 Source base: master `60bf3a4bb41f2acbe486f43adefdbe8ea6b4b343`. Spec revision: the `.scratch/site-scene-generation/` package as merged on that master (#711, plus #785's ticket Status line). Plan GO: UX (session `01G7qCujyq1J…`, with four conditions, folded in below) and GK B (session `01G7qCujuZX7…`, seven conditions, folded in). Prototype: `pypsa-gui/backend/tests/site_scene_proto/` (imported by no production module; `test_site_scene_proto_isolation.py`). Commands are run from `pypsa-gui/backend` with the repo's Python 3.12 environment; evidence files sit in [evidence/](evidence/).
 
@@ -89,7 +89,7 @@ Source base: master `60bf3a4bb41f2acbe486f43adefdbe8ea6b4b343`. Spec revision: t
 
 ## D06: native target lifecycle identity
 
-Status: proposed closure on branch `claude/site3d-d06` ([plan](../d06/plan.md)). Accepted only through GK B's OK on that PR's merged head. SC-02 stays blocked until then.
+Status: **accepted** by GK B OK @7f3038782796d131c0b061535ae47567aad8efb6 on PR #817's merged head (merged 2026-10-28); earlier GK B verdicts on that PR: NOT OK @0f8d8b20, OK @7ef55969. SC-02 is unblocked ([plan](../d06/plan.md)).
 
 ### Trace on master (unchanged record)
 
@@ -102,7 +102,7 @@ Traced on master ([evidence/gap-probe.txt](evidence/gap-probe.txt)):
 
 The prototype's generation-scoped re-keying (`scene_store.rename_component`/`remove_component`) avoids editing sites.json behind the pointer, but it is still name-keyed. SC-02 must add a lifecycle identity (or record a reviewed scope amendment) before any binding relies on it. Not closed in N, by design; closed by the D06 PR below.
 
-### Closure (proposed)
+### Closure (accepted)
 
 Plan verdict: GK B GO on option 1 (strict: never re-attach by name), with conditions. Accepted only through GK B's OK on the D06 PR's merged head.
 

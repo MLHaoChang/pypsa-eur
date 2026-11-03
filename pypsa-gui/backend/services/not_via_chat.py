@@ -206,8 +206,8 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         'id': 'intent_comparison',
         'title': 'Design intent comparison',
         'disposition': 'unbuilt',
-        'reason': 'The design intent comparison (AS-10) runs two to five sizing loops and is not available from chat yet. Start it from the Control study tab once its screen lands.',
-        'page': 'Control study',
+        'reason': 'The design intent comparison (AS-10) runs two to five sizing loops and is not available from chat yet. Start it from the Intent comparison section of the Grid study tab.',
+        'page': 'Grid study',
         'panel': None,
         'keywords': frozenset({
             'intent',

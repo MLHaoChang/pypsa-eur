@@ -13,8 +13,9 @@ geometry (plan M2).
 
 Defaults are the fallback for every failure: a missing file, a corrupt one,
 a `settings` that is not an object, a flag that is not a boolean, an autonomy
-that is not a finite number in (0, 720] h. A setting that cannot be read is
-its default.
+that is not a finite number in (0, 720] h, a PoC X/R that is not a finite
+number in (0, 100]. A setting that cannot be read is its default; the PoC X/R's
+default is None (none entered: the scorecard assumes one).
 """
 from __future__ import annotations
 
@@ -29,20 +30,35 @@ DERIVE_LENGTHS = "derive_lengths_from_geometry"
 #: AS-AUTONOMY-1: the intent-A backup autonomy in hours (owner decision
 #: AS10-AUTONOMY-2), the value the intent comparison starts from.
 BACKUP_AUTONOMY = "backup_autonomy_h"
-DEFAULTS: dict[str, object] = {DERIVE_LENGTHS: False, BACKUP_AUTONOMY: BACKUP_AUTONOMY_DEFAULT_H}
+#: AS-17 (owner decision FILL-10-2): the point-of-connection X/R the network
+#: operator gives. None = not entered: the grid-readiness scorecard then assumes
+#: `flicker_inputs.DEFAULT_XR` and says so.
+POC_XR = "poc_xr"
+POC_XR_MAX = 100.0
+DEFAULTS: dict[str, object] = {DERIVE_LENGTHS: False, BACKUP_AUTONOMY: BACKUP_AUTONOMY_DEFAULT_H, POC_XR: None}
 
 
-def _hours(value: object) -> float | None:
-    """A finite number in (0, BACKUP_AUTONOMY_MAX_H] as a float, else None.
+def _bounded(value: object, upper: float) -> float | None:
+    """A finite number in (0, upper] as a float, else None.
     A bool is refused explicitly: it is an int to Python."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     # The bound check first: NaN fails both comparisons and +inf fails the
     # upper one, and a huge int never reaches float().
-    if not 0 < value <= BACKUP_AUTONOMY_MAX_H:
+    if not 0 < value <= upper:
         return None
-    hours = float(value)
-    return hours if math.isfinite(hours) else None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
+def _hours(value: object) -> float | None:
+    """A backup autonomy in (0, BACKUP_AUTONOMY_MAX_H] h, else None."""
+    return _bounded(value, BACKUP_AUTONOMY_MAX_H)
+
+
+def _xr(value: object) -> float | None:
+    """A PoC X/R in (0, POC_XR_MAX], else None."""
+    return _bounded(value, POC_XR_MAX)
 
 
 def _flag(value: object) -> bool | None:
@@ -51,7 +67,7 @@ def _flag(value: object) -> bool | None:
 
 
 #: One check per setting: the value as stored, or None when it is not valid.
-_CHECKS = {DERIVE_LENGTHS: _flag, BACKUP_AUTONOMY: _hours}
+_CHECKS = {DERIVE_LENGTHS: _flag, BACKUP_AUTONOMY: _hours, POC_XR: _xr}
 
 
 def settings_from_table(table: object) -> dict:
@@ -86,3 +102,8 @@ def read_settings(project_dir: pathlib.Path | str | None) -> dict:
 def derive_lengths_enabled(project_dir: pathlib.Path | str | None) -> bool:
     """"Derive lengths from geometry" for this project; False when unknown."""
     return read_settings(project_dir)[DERIVE_LENGTHS]
+
+
+def poc_xr(project_dir: pathlib.Path | str | None) -> float | None:
+    """The PoC X/R entered for this project; None when none is (or it is not valid)."""
+    return read_settings(project_dir)[POC_XR]

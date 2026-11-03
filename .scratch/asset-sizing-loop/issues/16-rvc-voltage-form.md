@@ -3,7 +3,7 @@
 
 # AS-16 — RVC row on the voltage form
 
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: AS-04
 
@@ -20,7 +20,7 @@ The rapid-voltage-change row still reads swing / S_k (P-only). Move it to cos ψ
 
 ## PRs
 
-- #1025 (`claude/as-11b-rvc-voltage-form`)
+- #1025 (`claude/as-11b-rvc-voltage-form`), merged
 
 ## Comments
 

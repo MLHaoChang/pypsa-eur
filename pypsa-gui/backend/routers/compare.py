@@ -22,9 +22,13 @@ from __future__ import annotations
 
 import copy
 import pathlib
+import uuid
 
 import pandas as pd
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session as DBSession
+from db.session import get_db
+from db.models import Project as ProjectRow
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from models.design_intent import DesignIntentSpec
 from services import period_utils
@@ -487,7 +491,8 @@ class IntentComparisonRequest(BaseModel):
     intents: list[DesignIntentSpec] = Field(min_length=2, max_length=5)
     critical_mw: float = Field(gt=0, allow_inf_nan=False)
     inputs: dict
-    profile: dict = Field(default_factory=dict)
+    #: The campus study's grid-code profile id; None = no grid code set (intent D then says so).
+    grid_code: str | None = Field(default=None, max_length=64)
 
     @model_validator(mode="after")
     def _distinct(self):
@@ -546,6 +551,7 @@ def _load_project_network(directory: pathlib.Path):
 def post_intent_comparison(
     body: IntentComparisonRequest,
     project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
 ) -> dict:
     """Start the comparison as a background job on the project's own saved network (AS-10)."""
     from services.adequacy.sizing_loop_runner import SizingInputs, SizingLoopRefusal, _check_inputs, refusals, run_sizing
@@ -553,6 +559,12 @@ def post_intent_comparison(
     from services.compare.intent_table import compare_intents
     from services.design_intent import grid_code_warnings
 
+    from services import campus_electrical_service as campus
+
+    row = db.get(ProjectRow, uuid.UUID(project.uuid))
+    if row is None:
+        raise HTTPException(404, f"Project '{project.name}' not found")
+    profile = None if body.grid_code is None else campus.grid_code_profile(row, body.grid_code)
     network = _load_project_network(project.directory)
     config = _project_solver_config(project.directory)
     # Refuse a bad request here, as 422, rather than as failed rows later.
@@ -561,13 +573,13 @@ def post_intent_comparison(
         if refusals(config):
             raise SizingLoopRefusal("; ".join(refusals(config)))
         for spec in body.intents:
-            grid_code_warnings(spec, body.profile)
+            grid_code_warnings(spec, profile)
     except (SizingLoopRefusal, TypeError, ValueError, KeyError, AttributeError) as exc:
         raise HTTPException(422, f"The comparison cannot run: {exc}")
     prepare = _intent_scenario(network, config, body.inputs, body.critical_mw)
 
     def work(stop, on_progress):
-        return compare_intents(prepare, body.intents, critical_mw=body.critical_mw, profile=body.profile,
+        return compare_intents(prepare, body.intents, critical_mw=body.critical_mw, profile=profile,
                                runner=run_sizing, stop_event=stop, on_progress=on_progress)
 
     try:

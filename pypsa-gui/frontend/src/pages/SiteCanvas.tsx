@@ -52,7 +52,7 @@ import {
 } from '../site3d/context'
 import { buildSiteLayout, objectKey, type SiteObject } from '../site3d/layout'
 import { objectGeometry, type ObjectGeometry } from '../site3d/objectGeometry'
-import { emissiveFor } from '../site3d/resultStyle'
+import { emissiveFor, PICKED_COLOR } from '../site3d/resultStyle'
 import { HERO_MODELS } from '../site3d/heroes'
 import { HeroInstances, preloadHeroes, useHero } from '../site3d/heroLoader'
 import SceneErrorBoundary from '../site3d/SceneErrorBoundary'
@@ -63,7 +63,7 @@ import { registerSiteDropTarget, unregisterSiteDropTarget } from '../site3d/drop
 import SiteOverlay from '../components/SiteOverlay'
 import NativeBuildings from '../site3d/NativeBuildings'
 import SiteScenePanel from '../site3d/SiteScenePanel'
-import { useSceneProposal, useSiteScene } from '../site3d/useSiteScene'
+import { useModelProposal, useSceneProposal, useSiteScene } from '../site3d/useSiteScene'
 import { emptyLayoutFor, sceneOsmIds } from '../site3d/nativeSite'
 import AssetFootprintEditor from '../components/AssetFootprintEditor'
 import { useDispatchFresh, useSolveSettled } from '../site3d/useDispatchFresh'
@@ -127,7 +127,13 @@ function geometrySignature(o: SiteObject): string {
  * outside-the-boundary warning glow through the emissive channel only
  * (`emissiveFor`); vertex colours keep each part's own colour.
  */
-const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hovered, outside, warn, pivot, flowPath = null, onHover, onSelect }: {
+/** The picked outline: the footprint plus a 0.6 m margin, just above the ground (scene frame: z = −north). */
+function pickedOutline([w, d]: [number, number]): [number, number, number][] {
+  const x = w / 2 + 0.6, z = d / 2 + 0.6, y = 0.1
+  return [[-x, y, -z], [x, y, -z], [x, y, z], [-x, y, z], [-x, y, -z]]
+}
+
+const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hovered, outside, warn, picked = false, pivot, flowPath = null, onHover, onSelect }: {
   obj: SiteObject
   /** A branch's map route in site metres (S3): its flow chevrons run along it instead of its own anchor. */
   flowPath?: XY[] | null
@@ -137,11 +143,14 @@ const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hover
   outside: boolean
   /** The amber outline: any other layout finding (S2). */
   warn: boolean
+  /** SC-02d: picked for group editing or detach — a ground outline in its own colour. */
+  picked?: boolean
   /** Wrapped in a PivotControls whose matrix carries position and heading — render at identity. */
   pivot?: boolean
   /** Called with the object's key (`Class:name`) on pointer-over, null on pointer-out. */
   onHover: (key: string | null) => void
-  onSelect: (obj: SiteObject) => void
+  /** `shift`: the click held Shift (SC-02d: toggles the pick of a placed item). */
+  onSelect: (obj: SiteObject, shift: boolean) => void
 }) {
   countRender(`mesh:${obj.type}:${obj.name}`)
   const [ox, oy] = pivot ? [0, 0] : obj.origin
@@ -188,10 +197,14 @@ const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hover
       position={toScene(ox, oy, obj.elevation ?? 0)}
       // Heading is clockwise from north; a rotation about the up axis by −heading.
       rotation={[0, (-heading * Math.PI) / 180, 0]}
-      onClick={(e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onSelect(obj) }}
+      onClick={(e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onSelect(obj, e.nativeEvent.shiftKey) }}
       onPointerOver={(e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); onHover(objectKey(obj)) }}
       onPointerOut={() => onHover(null)}
     >
+      {picked && (
+        // A ground outline around the footprint, in the object's frame (it turns with the heading).
+        <Line points={pickedOutline(obj.footprint)} color={PICKED_COLOR} lineWidth={2.5} />
+      )}
       {model && rest && hero.status === 'ready' ? (
         // The parametric form while the model loads and if it fails (E8); the
         // boundary only guards drawing a loaded model.
@@ -203,7 +216,7 @@ const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hover
     </group>
   )
 }, (a, b) =>
-  a.selected === b.selected && a.hovered === b.hovered && a.outside === b.outside && a.warn === b.warn && a.pivot === b.pivot &&
+  a.selected === b.selected && a.hovered === b.hovered && a.outside === b.outside && a.warn === b.warn && a.picked === b.picked && a.pivot === b.pivot &&
   a.onHover === b.onHover && a.onSelect === b.onSelect && samePath(a.flowPath, b.flowPath) &&
   // The same object if the layout rebuilt it with the same content and place.
   (a.obj === b.obj || (objectKey(a.obj) === objectKey(b.obj) && a.obj.origin[0] === b.obj.origin[0] && a.obj.origin[1] === b.obj.origin[1] &&
@@ -1024,7 +1037,17 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
     return ids.size ? { ...context, buildings: context.buildings.filter(b => !ids.has(b.id)) } : context
   }, [context, acceptedBuildings, previewBuildings])
 
-  const onSelectObject = useCallback((obj: SiteObject) => setSelectedComponent({ type: obj.type, name: obj.name }), [setSelectedComponent])
+  // SC-02d: Shift+click a placed item of a scene-enabled Site picks it for group editing or detach
+  // (the Model panel's "Placed equipment" list is the keyboard path); a plain click selects as before.
+  const picked = useModelProposal(s => s.picked)
+  const togglePicked = useModelProposal(s => s.togglePicked)
+  const clearPicked = useModelProposal(s => s.clearPicked)
+  const pickedSet = useMemo(() => new Set(picked && site && picked.siteId === site.id ? picked.keys : []), [picked, site])
+  const onSelectObject = useCallback((obj: SiteObject, shift: boolean) => {
+    const key = objectKey(obj)
+    if (shift && site && scenePlacements?.[key]) { togglePicked(site.id, key); return }
+    setSelectedComponent({ type: obj.type, name: obj.name })
+  }, [setSelectedComponent, site, scenePlacements, togglePicked])
   const labelRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   // ── Empty states ──────────────────────────────────────────────────────────
@@ -1054,7 +1077,9 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
   const labelObjects = objects.filter(o => { const k = objectKey(o); return k === selectedKey || k === hovered })
 
   return (
-    <div className="relative h-full w-full bg-canvas" data-site-pane>
+    // tabIndex -1: a click gives the view focus, so Esc here clears the picks (never stopping another Esc handler).
+    <div className="relative h-full w-full bg-canvas outline-none" data-site-pane tabIndex={-1}
+      onKeyDown={e => { if (e.key === 'Escape' && pickedSet.size > 0) clearPicked() }}>
       {/* key: a new site gets a fresh camera; a parameter edit does not. */}
       <Canvas
         key={site.id}
@@ -1104,6 +1129,7 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
               hovered={key === hovered}
               outside={redSet.has(key)}
               warn={amberSet.has(key)}
+              picked={pickedSet.has(key)}
               pivot={isSelected}
               flowPath={distanceOf(o)?.path ?? null}
               onHover={setHovered}
