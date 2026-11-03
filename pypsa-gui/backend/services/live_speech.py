@@ -122,7 +122,10 @@ _TICKETS: dict[str, dict[str, dict[str, Any]]] = {}
 _SPOKEN: dict[str, dict[str, dict[str, Any]]] = {}
 # session_id -> outputs in publication order; dropped when the session closes.
 _OUTPUTS: dict[str, list[dict[str, Any]]] = {}
-OUTPUTS_MAX = 32
+# Per-session queue bound (GK B (h)): overflow drops the oldest unclaimed answer.
+OUTPUTS_MAX = 8
+# session_id -> answers dropped by that bound (logged as a warning each time).
+_OUTPUT_DROPS: dict[str, int] = {}
 SPOKEN_PER_EPISODE_MAX = 16
 # episode_id -> count of turns started since speech was first redeemed there.
 # A newer turn (typed, spoken, a drained correction) supersedes every answer
@@ -222,6 +225,7 @@ def _drop_tickets(episode_id: str | None, session_id: str | None = None) -> None
             _TURN_EPOCH.pop(episode_id, None)
         if session_id:
             _OUTPUTS.pop(session_id, None)
+            _OUTPUT_DROPS.pop(session_id, None)
 
 
 def ambiguous_quantity(text: str) -> bool:
@@ -797,7 +801,7 @@ def queue_answer(
             return 'superseded'
         if ua._DEFAULT.generation(episode_id) != spoken['generation']:
             return 'stale_generation'
-        _bounded_append(_OUTPUTS.setdefault(spoken['session_id'], []), {
+        _enqueue(spoken['session_id'], {
             'output_id': uuid.uuid4().hex,
             'answer_id': answer_id,
             'utterance_id': utterance_id,
@@ -807,8 +811,24 @@ def queue_answer(
             'generation': spoken['generation'],
             'epoch': epoch,
             'state': 'queued',
-        }, OUTPUTS_MAX)
+        })
     return 'queued'
+
+
+def _enqueue(session_id: str, output: dict[str, Any]) -> None:
+    """Append under ``_TICKETS_LOCK``; finished answers go first, then the
+    oldest unclaimed one, counted and logged."""
+    outputs = [o for o in _OUTPUTS.get(session_id) or [] if o['state'] in {'queued', 'claimed'}]
+    if len(outputs) >= OUTPUTS_MAX:
+        queued = [o for o in outputs if o['state'] == 'queued']
+        outputs.remove(queued[0] if queued else outputs[0])
+        _OUTPUT_DROPS[session_id] = _OUTPUT_DROPS.get(session_id, 0) + 1
+        log.warning(
+            'speech session %s dropped an unspoken answer (queue bound %d; %d dropped)',
+            session_id, OUTPUTS_MAX, _OUTPUT_DROPS[session_id],
+        )
+    outputs.append(output)
+    _OUTPUTS[session_id] = outputs
 
 
 def _remember_spoken(episode_id: str, utterance_id: str, record: dict[str, Any]) -> None:
@@ -858,7 +878,10 @@ def claim_output(thread_id: str, *, token: str, session_id: str) -> dict[str, An
             cap = RESERVATIONS['tts'][0]
             if float(session['usage'].get('tts', 0)) + output['chars'] > cap:
                 output['state'] = 'over_budget'
-                return {'status': 'over_budget', 'output_id': output['output_id']}
+                _refuse(
+                    'speech_output_over_budget',
+                    'This answer exceeds the remaining speech budget; it is shown, not spoken.',
+                )
             output['state'] = 'claimed'
             view = _output_view(output)
         _record_usage(thread, session, f"tts-{view['output_id']}", 'tts', view['chars'], False)
@@ -866,19 +889,25 @@ def claim_output(thread_id: str, *, token: str, session_id: str) -> dict[str, An
         return {'status': 'speak', 'language': session['language'], 'output': view}
 
 
-def barge_in(thread_id: str, *, token: str, session_id: str) -> dict[str, Any]:
-    """The user spoke over playback: drop every queued or claimed answer.
+def barge_in(
+    thread_id: str, *, token: str, session_id: str, generation: int,
+) -> dict[str, Any]:
+    """The user spoke over playback: drop every queued or claimed answer of
+    this session, at this thread generation.
 
     Playback only. The running turn, its admission lease and any solver job
-    are untouched, and nothing already charged is refunded.
+    are untouched, and nothing already charged is refunded (a claimed answer
+    that is cancelled stays charged). A stale generation or a closed session
+    refuses and cancels nothing.
     """
     _require_enabled()
     _require_id(session_id, 'session_id')
     with dc._LOCK:
         _, thread = _bridge_thread(thread_id, token)
+        dc._require_generation(thread, generation)
         session = _find_session(thread, session_id)
         if session.get('state') != 'open':
-            return {'status': 'ignored', 'cancelled': []}
+            _refuse('speech_session_closed', 'This speech session has ended.')
         with _TICKETS_LOCK:
             cancelled = []
             for item in _OUTPUTS.get(session_id) or []:
@@ -1080,4 +1109,5 @@ def _reset_for_tests() -> None:
         _TICKETS.clear()
         _SPOKEN.clear()
         _OUTPUTS.clear()
+        _OUTPUT_DROPS.clear()
         _TURN_EPOCH.clear()

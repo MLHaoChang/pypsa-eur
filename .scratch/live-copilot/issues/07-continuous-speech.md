@@ -156,3 +156,34 @@ Remaining gates (recorded, not built), in addition to PR1's:
 - Worker-side playback stop and audio-frame flushing live in the audio worker
   (agent hosting gate); the backend refuses any further claim of a cancelled
   answer.
+
+GK B plan GO for PR2 with additions (recorded as given):
+(g) budget before sound: a claim whose characters exceed the remaining TTS
+reservation refuses with a typed refusal and nothing is spoken; never
+truncated; charging at claim accepted, a claimed-then-cancelled answer stays
+charged. (h) bounded per-session queue (e.g. 8), overflow drops the oldest
+unclaimed answer with a counted warning; outputs carry the generation and a
+claim after rebind or rotation refuses. (i) any suppression of code, tables
+or tool logs yields exact in-order substrings of the approved text, shown as
+the caption; without it the whole text is spoken; byte-equal test with
+"7.5 MW" and "1 200 kWh" against the sha256. (j) barge-in is session-scoped:
+stale generation or closed session refuses and cancels nothing; the
+untouched-turn test spies on abort_event and the job/solver entry points.
+(k) PR1's rules at the trial merge (policy suites, inventory, route-parity,
+control-matrix `--check`, manifest test), byte-equal refusals for unknown,
+non-owner and other-project threads, `speech_disabled` on every route while
+the flag is off.
+
+PR2 against them: (g) `speech_output_over_budget` (409, own fragment
+`tool-error-kinds.d/claude-lc07-speech-output.json`), no usage row, the
+worker's synthesize step is never reached. (h) `OUTPUTS_MAX = 8`; finished
+answers are pruned first, then the oldest queued one is dropped, counted in
+`_OUTPUT_DROPS` and logged; a closed session (rebind, rotation, any exit)
+drops its queue and refuses claims. (i) no suppression is built: the whole
+approved text is the caption and the spoken text; test passes "7.5 MW" and
+"1 200 kWh" through `HttpTtsAdapter` and checks the sha256. (j) `barge_in`
+takes the thread generation (`stale_generation` 409) and refuses a closed
+session (`speech_session_closed`); the test spies on `abort_event`,
+`chat_tools.abort_*`, `assistant_tasks.cancel_task`, `runner.stop_default`,
+`experiment_execution.cancel_experiment` and `cancel_if_queued`. (k) both new
+routes are covered by the byte-equal refusal and flag-off tests.

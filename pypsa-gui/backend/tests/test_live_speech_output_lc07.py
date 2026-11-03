@@ -10,9 +10,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
+import threading
 
 import httpx
 import pytest
+
+from fastapi import HTTPException
 
 from harness.providers import live_media
 from services import chat_service
@@ -30,7 +34,8 @@ from tests.test_live_speech_session_lc07 import (  # noqa: F401 — _reset is au
 )
 
 # Engineering numbers and units, non-ASCII included: spoken exactly as shown.
-ANSWER = 'Battery p_nom is 7.5 MW; line loading 98.4 % at 13:00 (≈ 1 200 €/kW).'
+ANSWER = ('Battery p_nom is 7.5 MW and stores 1 200 kWh; '
+          'line loading 98.4 % at 13:00 (≈ 1 200 €/kW).')
 
 
 @pytest.fixture
@@ -125,6 +130,8 @@ def test_synthesis_sends_the_caption_verbatim(transport, monkeypatch):
     audio = asyncio.run(ls.synthesize_output(tts, output, language='en'))
     assert audio.mime == 'audio/wav'
     assert sent[0]['input'].encode('utf-8') == ANSWER.encode('utf-8')
+    assert hashlib.sha256(sent[0]['input'].encode('utf-8')).hexdigest() == output['sha256']
+    assert '7.5 MW' in sent[0]['input'] and '1 200 kWh' in sent[0]['input']
 
     tampered = {**output, 'text': ANSWER.replace('7.5', '75')}
     with pytest.raises(live_media.LiveMediaError):
@@ -265,10 +272,40 @@ def test_barge_in_cancels_playback_but_not_the_running_turn(transport, monkeypat
     running = ls.capture_for(episode, 'speech:s3')
     episode._turn_in_flight = True
 
-    result = ls.barge_in(tid, token=token, session_id=sid)
+    # Spies on the turn's abort signal and on every job/solver stop entry point.
+    import harness.experiment_execution as experiment_execution
+    import harness.runner as runner
+    from services import assistant_tasks, chat_tools, solve_queue
+
+    stops = []
+
+    class SpyEvent(threading.Event):
+        def set(self):
+            stops.append('abort_event')
+            super().set()
+
+    episode.abort_event = SpyEvent()
+    for module, name in (
+        (chat_tools, 'abort_simulation'), (chat_tools, 'abort_investment_case'),
+        (chat_tools, 'abort_adequacy_study'), (chat_tools, 'abort_decision_study'),
+        (assistant_tasks, 'cancel_task'), (runner, 'stop_default'),
+        (experiment_execution, 'cancel_experiment'),
+    ):
+        monkeypatch.setattr(module, name, lambda *a, _n=name, **k: stops.append(_n))
+    for cls in [c for c in vars(solve_queue).values()
+                if isinstance(c, type) and hasattr(c, 'cancel_if_queued')]:
+        monkeypatch.setattr(cls, 'cancel_if_queued', lambda *a, **k: stops.append('queue'))
+
+    with pytest.raises(HTTPException) as stale:
+        ls.barge_in(tid, token=token, session_id=sid, generation=gen + 1)
+    assert stale.value.detail['error_kind'] == 'stale_generation'
+    assert [o['state'] for o in ls._OUTPUTS[sid]] == ['claimed', 'queued']
+
+    result = ls.barge_in(tid, token=token, session_id=sid, generation=gen)
 
     assert result['status'] == 'cancelled'
     assert playing['output_id'] in result['cancelled'] and len(result['cancelled']) == 2
+    assert stops == []
     assert not episode.abort_event.is_set()
     assert episode._turn_in_flight is True
     assert ua._DEFAULT.active_lease(episode.session_id) == lease
@@ -315,9 +352,24 @@ def test_tts_characters_settle_once_through_the_ledger(transport, monkeypatch):
 def test_answer_beyond_the_tts_reservation_is_not_spoken(transport, monkeypatch):
     monkeypatch.setitem(ls.RESERVATIONS, 'tts', (10, 'characters'))
     tid, sid, token, _, _ = _spoken_turn(monkeypatch)
-    claimed = ls.claim_output(tid, token=token, session_id=sid)
-    assert claimed['status'] == 'over_budget'
-    assert _thread_json(tid)['speech']['usage']['tts'] == 0
+    synthesized = []
+
+    class SpyTts:
+        name = 'spy'
+
+        async def synthesize(self, text, *, language, cancel=None):
+            synthesized.append(text)
+
+    def worker_step():  # what the audio worker does: claim, then synthesize
+        output = ls.claim_output(tid, token=token, session_id=sid)['output']
+        asyncio.run(ls.synthesize_output(SpyTts(), output, language='en'))
+
+    status, detail = _refusal(worker_step)
+    assert (status, detail['error_kind']) == (409, 'speech_output_over_budget')
+    assert synthesized == []
+    speech = _thread_json(tid)['speech']
+    assert speech['usage']['tts'] == 0
+    assert not [u for u in speech['usage_seen'] if u.startswith('tts-')]
     assert ls.claim_output(tid, token=token, session_id=sid) == {'status': 'empty'}
 
 
@@ -326,19 +378,22 @@ def test_answer_beyond_the_tts_reservation_is_not_spoken(transport, monkeypatch)
 def test_output_routes_need_the_bridge_token_and_the_flag(client, transport, monkeypatch):
     tid, sid, token, _, _ = _spoken_turn(monkeypatch)
     base = f'/api/durable-conversations/{tid}/speech'
+    gen = _thread_json(tid)['generation']
     for path in ('/output/claim', '/barge-in'):
-        bare = client.post(base + path, json={'session_id': sid})
+        bare = client.post(base + path, json={'session_id': sid, 'generation': gen}
+                           if path == '/barge-in' else {'session_id': sid})
         assert bare.status_code == 401, path
     claimed = client.post(base + '/output/claim', headers={'X-Bridge-Token': token},
                           json={'session_id': sid})
     assert claimed.status_code == 200 and claimed.json()['output']['text'] == ANSWER
     barged = client.post(base + '/barge-in', headers={'X-Bridge-Token': token},
-                         json={'session_id': sid})
+                         json={'session_id': sid, 'generation': _thread_json(tid)['generation']})
     assert barged.json()['cancelled'] == [claimed.json()['output']['output_id']]
     monkeypatch.delenv(ls.ENABLE_ENV)
     for path in ('/output/claim', '/barge-in'):
         off = client.post(base + path, headers={'X-Bridge-Token': token},
-                          json={'session_id': sid})
+                          json={'session_id': sid, 'generation': gen}
+                          if path == '/barge-in' else {'session_id': sid})
         assert (off.status_code, off.json()['detail']['error_kind']) == (503, 'speech_disabled')
 
 
@@ -350,4 +405,58 @@ def test_bridge_calls_refuse_on_a_closed_session(transport, monkeypatch):
     ls.end(tid, generation=gen, session_id=sid)
     status, detail = _refusal(ls.claim_output, tid, token=token, session_id=sid)
     assert (status, detail['error_kind']) == (409, 'speech_session_closed')
-    assert ls.barge_in(tid, token=token, session_id=sid) == {'status': 'ignored', 'cancelled': []}
+    status, detail = _refusal(ls.barge_in, tid, token=token, session_id=sid, generation=gen)
+    assert (status, detail['error_kind']) == (409, 'speech_session_closed')
+
+
+def test_queue_is_bounded_and_drops_the_oldest_unclaimed_answer(transport, monkeypatch, caplog):
+    tid, sid, token, _, _ = _spoken_turn(monkeypatch)
+    playing = ls.claim_output(tid, token=token, session_id=sid)['output']
+    epoch = ls._TURN_EPOCH[_thread_json(tid)['speech']['episode_id']]
+    generation = ls._OUTPUTS[sid][0]['generation']
+
+    def item(n):
+        return {'output_id': f'o{n}', 'answer_id': f'a{n}', 'utterance_id': f'speech:x{n}',
+                'text': f'answer {n}', 'sha256': ls._sha256(f'answer {n}'),
+                'chars': len(f'answer {n}'), 'generation': generation, 'epoch': epoch,
+                'state': 'queued'}
+
+    caplog.set_level(logging.WARNING, logger=ls.__name__)
+    with ls._TICKETS_LOCK:
+        for n in range(ls.OUTPUTS_MAX):  # one more than fits beside the claimed one
+            ls._enqueue(sid, item(n))
+    ids = [o['output_id'] for o in ls._OUTPUTS[sid]]
+    assert len(ids) == ls.OUTPUTS_MAX == 8
+    assert playing['output_id'] in ids and 'o0' not in ids and 'o7' in ids
+    assert ls._OUTPUT_DROPS[sid] == 1
+    assert [r for r in caplog.records if 'dropped an unspoken answer' in r.getMessage()]
+    assert ls.claim_output(tid, token=token, session_id=sid)['output']['output_id'] == 'o1'
+
+
+def test_bridge_output_routes_refuse_unknown_other_owner_and_other_project_alike(
+    transport, monkeypatch, tmp_path,
+):
+    from services import durable_conversation as dc
+    from tests.test_live_speech_session_lc07 import PROJECT
+
+    tid, sid, token, _, _ = _spoken_turn(monkeypatch)
+    gen = _thread_json(tid)['generation']
+    calls = {
+        'claim': lambda t: ls.claim_output(t, token=token, session_id=sid),
+        'barge': lambda t: ls.barge_in(t, token=token, session_id=sid, generation=gen),
+    }
+    for name, call in calls.items():
+        unknown = _refusal(call, '22222222-2222-2222-2222-222222222222')
+        with monkeypatch.context() as m:
+            m.setattr(dc, '_authority', lambda: (tmp_path / PROJECT, PROJECT, 'owner-bbb'))
+            other_owner = _refusal(call, tid)
+        other_root = tmp_path / f'other-{name}'
+        (other_root / 'durable_conversations').mkdir(parents=True)
+        (other_root / 'durable_conversations' / f'{tid}.json').write_bytes(
+            (tmp_path / PROJECT / 'durable_conversations' / f'{tid}.json').read_bytes())
+        with monkeypatch.context() as m:
+            m.setattr(dc, '_authority', lambda: (other_root, 'project-other', 'owner-aaa'))
+            other_project = _refusal(call, tid)
+        assert unknown == other_owner == other_project, name
+    # Nothing was claimed or cancelled by any refused call.
+    assert [o['state'] for o in ls._OUTPUTS[sid]] == ['queued']

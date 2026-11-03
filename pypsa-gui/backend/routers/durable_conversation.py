@@ -214,6 +214,12 @@ class SpeechOutputBody(BaseModel):
     session_id: str = Field(..., min_length=1, max_length=48)
 
 
+class SpeechBargeInBody(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    session_id: str = Field(..., min_length=1, max_length=48)
+    generation: int = Field(..., ge=1)
+
+
 @router.post('/{thread_id}/speech/output/claim')
 def speech_output_claim(
     thread_id: str,
@@ -229,10 +235,12 @@ def speech_output_claim(
 @router.post('/{thread_id}/speech/barge-in')
 def speech_barge_in(
     thread_id: str,
-    body: SpeechOutputBody,
+    body: SpeechBargeInBody,
     user: User = Depends(require_user),
     x_bridge_token: str = Header(default=''),
 ):
     """The user spoke over playback: drop queued and claimed answers; the turn runs on."""
     _bind_actor(user)
-    return live_speech.barge_in(thread_id, token=x_bridge_token, session_id=body.session_id)
+    return live_speech.barge_in(
+        thread_id, token=x_bridge_token, session_id=body.session_id, generation=body.generation,
+    )
