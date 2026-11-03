@@ -88,6 +88,9 @@ log = logging.getLogger(__name__)
 _TRANSPORT: live_media.MediaTransport | None = None
 _CLOSES_LOCK = threading.Lock()
 _CLOSES: list[threading.Thread] = []
+_REAPERS_LOCK = threading.Lock()
+# session_id -> timer that settles the session at its deadline with no other call.
+_REAPERS: dict[str, threading.Timer] = {}
 SPEECH_ID_PREFIX = 'speech:'
 _TICKETS_LOCK = threading.Lock()
 # episode_id -> utterance_id -> ticket. Process-local: a restart closes the
@@ -315,6 +318,7 @@ def close_in(thread: dict[str, Any], reason: str) -> bool:
         thread.setdefault('speech_closed', []), session['session_id'], CLOSED_SESSIONS_MAX,
     )
     _drop_tickets(session.get('episode_id'))
+    _cancel_reap(session['session_id'])
     return True
 
 
@@ -439,6 +443,7 @@ def start(thread_id: str, *, generation: int, language: str) -> dict[str, Any]:
         })
         thread['reconcile'] = []
         _save_if(path, thread, True)
+        _schedule_reap(path, current['session_id'], expires_ts)
         return {
             'session': _session_view(current),
             'generation': int(thread.get('generation', 1)),
@@ -626,7 +631,146 @@ def end(thread_id: str, *, generation: int, session_id: str) -> dict[str, Any]:
             session['state'] = 'closing'
             session['closing_deadline'] = time.time() + USAGE_GRACE_S
         _save_if(path, thread, True)
+        if session['state'] == 'closing':
+            _schedule_reap(path, session_id, session['closing_deadline'])
         return {'status': session['state'], 'session': _session_view(session)}
+
+
+# ── deadline reaper and boot sweep (GK B NOT OK on #1058, condition (d)) ───
+
+def _deadline(session: dict[str, Any]) -> float | None:
+    if session.get('state') == 'closing':
+        return float(session.get('closing_deadline') or 0)
+    if session.get('state') == 'open':
+        return float(session.get('expires_ts') or 0)
+    return None
+
+
+def _schedule_reap(path: Any, session_id: str, at_ts: float) -> None:
+    """Settle ``session_id`` at ``at_ts`` even if no request ever comes.
+
+    ``path`` is the thread file resolved by an ACL'd read at start or end; the
+    timer re-reads it under the thread lock and the store lock.
+    """
+    delay = max(0.0, at_ts - time.time()) + 0.05
+    timer = threading.Timer(delay, _reap_path, args=(path, session_id))
+    timer.daemon = True
+    timer.name = f'speech-reap-{session_id}'
+    with _REAPERS_LOCK:
+        previous = _REAPERS.pop(session_id, None)
+        _REAPERS[session_id] = timer
+    if previous is not None:
+        previous.cancel()
+    timer.start()
+
+
+def _cancel_reap(session_id: str) -> None:
+    with _REAPERS_LOCK:
+        timer = _REAPERS.pop(session_id, None)
+    if timer is not None and timer is not threading.current_thread():
+        timer.cancel()
+
+
+def _reap_path(path: Any, session_id: str) -> None:
+    import security
+    from services import app_workers
+
+    with _REAPERS_LOCK:
+        if _REAPERS.get(session_id) is threading.current_thread():
+            _REAPERS.pop(session_id, None)
+    try:
+        with dc._LOCK:
+            app_workers.require_single_worker()
+            thread = dc._load(path)
+            session = _live_session(thread)
+            if session is None or session.get('session_id') != session_id:
+                return
+            if thread.get('owner_replica_id') != security.replica_id():
+                return  # pinned to another worker; its own reaper or takeover settles it
+            if _reap(thread):
+                _touch(thread)
+                dc._save(path, thread)
+                return
+            deadline = _deadline(session)
+        if deadline is not None:
+            _schedule_reap(path, session_id, deadline)
+    except Exception as exc:  # noqa: BLE001 — a reaper never takes the process down
+        log.warning('speech reap of %s failed: %s', session_id, type(exc).__name__)
+
+
+def wait_for_reaps(timeout: float = 5.0) -> None:
+    """Join reapers due within ``timeout`` (tests)."""
+    end_at = time.monotonic() + timeout
+    while time.monotonic() < end_at:
+        with _REAPERS_LOCK:
+            pending = list(_REAPERS.values())
+        if not pending:
+            return
+        for timer in pending:
+            timer.join(max(0.0, end_at - time.monotonic()))
+    wait_for_closes()
+
+
+def _project_dirs() -> list[Any]:
+    from db.models import Project
+    from db.session import SessionLocal
+    from services import project_registry
+
+    db = SessionLocal()
+    try:
+        return [project_registry.project_dir(p) for p in db.query(Project).all()]
+    finally:
+        db.close()
+
+
+def sweep_at_boot(project_dirs: list[Any] | None = None) -> int:
+    """Settle every speech session a dead process left holding reservations.
+
+    Sessions are process-bound (room, worker, tickets), so at boot none can
+    belong to this process. Only stores that hold a live session are locked,
+    so the store lock stays lazy for everything else. Returns the count.
+    """
+    import json
+    from pathlib import Path
+
+    from fastapi import HTTPException
+
+    from services import app_workers
+
+    try:
+        app_workers.require_single_worker()
+        dirs = _project_dirs() if project_dirs is None else project_dirs
+    except Exception as exc:  # noqa: BLE001
+        log.warning('speech boot sweep skipped: %s', type(exc).__name__)
+        return 0
+    settled = 0
+    for project_dir in dirs:
+        store = Path(project_dir) / 'durable_conversations'
+        if not store.is_dir():
+            continue
+        for path in sorted(store.glob('*.json')):
+            try:
+                peek = json.loads(path.read_text(encoding='utf-8'))
+            except (OSError, ValueError):
+                continue
+            if _live_session(peek) is None:
+                continue
+            try:
+                with dc._LOCK:
+                    thread = dc._load(path)
+                    if close_in(thread, 'restart'):
+                        _touch(thread)
+                        dc._save(path, thread)
+                        settled += 1
+            except HTTPException as exc:
+                log.warning('speech boot sweep left %s: %s', path.name,
+                            (exc.detail or {}).get('error_kind'))
+    return settled
+
+
+def start_boot_sweep() -> None:
+    """Run ``sweep_at_boot`` off the startup path."""
+    threading.Thread(target=sweep_at_boot, name='speech-boot-sweep', daemon=True).start()
 
 
 def state(thread_id: str) -> dict[str, Any]:
@@ -642,6 +786,11 @@ def state(thread_id: str) -> dict[str, Any]:
 
 def _reset_for_tests() -> None:
     global _TRANSPORT
+    with _REAPERS_LOCK:
+        timers = list(_REAPERS.values())
+        _REAPERS.clear()
+    for timer in timers:
+        timer.cancel()
     wait_for_closes()
     _TRANSPORT = None
     with _TICKETS_LOCK:

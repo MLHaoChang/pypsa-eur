@@ -171,16 +171,27 @@ def _save(path: Path, thread: dict[str, Any]) -> None:
         temp.unlink(missing_ok=True)
 
 
-def _read(thread_id: str) -> tuple[Path, dict[str, Any]]:
-    app_workers.require_single_worker()
-    path, project_id, owner = _path(thread_id)
+def _load(path: Path) -> dict[str, Any]:
+    """Load a thread file under this process's store lock; no ACL check.
+
+    ``_read`` is the ACL'd entry point. Only internal callers that captured
+    ``path`` from an ACL'd ``_read`` (or the boot sweep, which owns every
+    store it locks) may use this directly.
+    """
     app_workers.hold_store_lock(path.parent)
     try:
-        thread = json.loads(path.read_text(encoding='utf-8'))
+        return json.loads(path.read_text(encoding='utf-8'))
     except FileNotFoundError:
         _refuse('thread_not_found', 'Thread not found in this project.', 404)
     except (OSError, ValueError):
         _refuse('thread_unreadable', 'The durable thread checkpoint needs repair.')
+    return {}
+
+
+def _read(thread_id: str) -> tuple[Path, dict[str, Any]]:
+    app_workers.require_single_worker()
+    path, project_id, owner = _path(thread_id)
+    thread = _load(path)
     if thread.get('project_id') != project_id or thread.get('owner_id') != owner:
         _refuse('thread_not_found', 'Thread not found in this project.', 404)
     if not thread.get('owner_id'):

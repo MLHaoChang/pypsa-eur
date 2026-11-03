@@ -88,9 +88,17 @@ reservation cap flagged `usage_unverified` (never under-count). Transport open
 and close run outside the durable-thread lock; a start superseded by a rebind
 while the room opens is refused and the room closed. Tickets carry their
 admission generation.
+GK B NOT OK @3c4dfe69 (d): timeout and end-without-report settled only on a
+later speech call. Fixed: each open/closing session has a timer at its
+deadline that re-reads the thread file (path captured by the ACL'd start/end)
+under the thread lock and store lock and settles it; a boot sweep
+(`live_speech.sweep_at_boot`, started from `main.py` startup off the boot path)
+settles every live session a dead process left, locking only stores that hold
+one. Tests settle with no later call; a later `state()` writes nothing; the
+no-timer and no-sweep mutants fail.
 Ledger refactor: `_reserve_in`/`_settle_in`
 (public `reserve_budget`/`settle_budget` unchanged). Tests:
-`tests/test_live_speech_session_lc07.py` (57 passed); durable/admission/
+`tests/test_live_speech_session_lc07.py` (61 passed); durable/admission/
 transport/manifest neighbours 163 passed; route_chat_disposition,
 project_route_acl_policy, write_surface_lock_policy pass; inventory,
 route-parity and control-matrix `--check` ok.

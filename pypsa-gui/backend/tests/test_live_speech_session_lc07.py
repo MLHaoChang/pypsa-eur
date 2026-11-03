@@ -727,3 +727,73 @@ def test_ticket_from_an_older_generation_is_refused(transport):
     refused = ls.redeem_final(out['session']['episode_id'], 'speech:s1', 'show results',
                               accepted['generation'] + 1)
     assert refused['error_kind'] == 'speech_final_mismatch'
+
+
+# ── GK B NOT OK on #1058: deadlines settle with no later speech call ───────
+
+def _wait_settled(tid, sid):
+    ls.wait_for_reaps(timeout=5)
+    return _settled_once(tid, sid)
+
+
+def test_timeout_settles_at_the_cap_with_no_later_call(transport, monkeypatch):
+    monkeypatch.setattr(ls, 'MAX_SESSION_SECONDS', 0.3)
+    tid, gen = _thread()
+    _, sid, _ = _start(tid, gen)
+    charges = _wait_settled(tid, sid)  # no state(), end() or bridge call in between
+    assert _thread_json(tid)['speech']['closed_reason'] == 'timeout'
+    assert all(c['flags'] == ['usage_unverified'] for c in charges.values())
+    assert charges['media']['amount'] == ls.RESERVATIONS['media'][0]
+    ls.wait_for_closes()
+    assert transport.closed == [f'pypsa-{sid}']
+    before = _file(tid).read_bytes()
+    ls.state(tid)  # a later read never settles again
+    assert _file(tid).read_bytes() == before
+    _settled_once(tid, sid)
+
+
+def test_end_without_final_report_settles_at_the_cap_with_no_later_call(transport, monkeypatch):
+    monkeypatch.setattr(ls, 'USAGE_GRACE_S', 0.3)
+    tid, gen = _thread()
+    _, sid, token = _start(tid, gen)
+    _usage(tid, token, sid, 'u1', 'stt', 3, 'audio_seconds')
+    assert ls.end(tid, generation=gen, session_id=sid)['status'] == 'closing'
+    charges = _wait_settled(tid, sid)
+    assert _thread_json(tid)['speech']['closed_reason'] == 'usage_unreported'
+    assert all(c['flags'] == ['usage_unverified'] for c in charges.values())
+    before = _file(tid).read_bytes()
+    ls.state(tid)
+    assert _file(tid).read_bytes() == before
+
+
+def test_a_settled_session_cancels_its_reaper(transport, monkeypatch):
+    monkeypatch.setattr(ls, 'USAGE_GRACE_S', 0.3)
+    tid, gen = _thread()
+    _, sid, token = _start(tid, gen)
+    ls.end(tid, generation=gen, session_id=sid)
+    ls.report_usage(tid, token=token, session_id=sid, usage_id='u1', kind='media',
+                    amount=5, unit='media_seconds', final=True)
+    assert ls._REAPERS == {}
+    before = _file(tid).read_bytes()
+    time.sleep(0.5)
+    assert _file(tid).read_bytes() == before
+    assert _settled_once(tid, sid)['media']['amount'] == 5
+
+
+def test_boot_sweep_settles_sessions_a_dead_process_left(transport, monkeypatch, tmp_path):
+    from tests.test_durable_conversation_restart_rotation import _die_and_restart
+
+    tid, gen = _thread()
+    _, sid, _ = _start(tid, gen)
+    # The process dies: its timers die with it; a new one boots.
+    with ls._REAPERS_LOCK:
+        for timer in ls._REAPERS.values():
+            timer.cancel()
+        ls._REAPERS.clear()
+    _die_and_restart(monkeypatch)
+    assert ls.sweep_at_boot([tmp_path / PROJECT, tmp_path / 'no-such-project']) == 1
+    charges = _settled_once(tid, sid)
+    assert _thread_json(tid)['speech']['closed_reason'] == 'restart'
+    assert all(c['flags'] == ['usage_unverified'] for c in charges.values())
+    assert ls.sweep_at_boot([tmp_path / PROJECT]) == 0
+    _settled_once(tid, sid)
