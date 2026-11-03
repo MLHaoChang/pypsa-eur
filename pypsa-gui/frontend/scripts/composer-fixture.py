@@ -15,6 +15,15 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+# LC-03 LC-T09 (lc03h): result tab -> (kept section, the get_results/loadflow read for it).
+LC03H_FAMILIES = {
+    "summary": ("results_summary", "get_results", {"result_kind": "statistics"}),
+    "dispatch": ("results_dispatch", "get_results", {"result_kind": "generators"}),
+    "loadflow": ("loadflow", "get_loadflow_summary", {}),
+    "prices": ("results_prices", "get_results", {"result_kind": "prices"}),
+    "emissions": ("results_emissions", "get_results", {"result_kind": "emissions"}),
+}
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -154,6 +163,15 @@ def main():
                          ("get_results", {"result_kind": "economics_by_carrier", "run_id": first})]
                 if results and "items" not in results[0]:
                     steps = steps[:1]  # the runs are refused (LC-T08): say why, read nothing else
+            elif "results of the first run" in said and any(f"Show me the {t} results" in said for t in LC03H_FAMILIES):
+                # LC-03 LC-T09 for the other families: the first run, from the family's kept section.
+                tab = next(t for t in LC03H_FAMILIES if f"Show me the {t} results" in said)
+                section, tool, args = LC03H_FAMILIES[tab]
+                items = (results[0].get("items") or [{}]) if results else [{}]
+                first = items[-1].get("run_id")
+                steps = [("list_project_runs", {"limit": 10, "status": "completed"}),
+                         ("discuss_project_run", {"run_id": first, "results_tab": tab, "section": section}),
+                         (tool, {**args, "run_id": first})]
             elif "capacity results of the latest run" in said:
                 # LC-T10: a newer turn about the current results supersedes the past-run view.
                 steps = [("get_results", {"result_kind": "economics_by_carrier"}),
@@ -199,6 +217,10 @@ def main():
             elif steps == [("list_project_runs", {"limit": 10, "status": "completed"})]:
                 raw = texts[0] if texts else ""
                 text = f"LC03H_REFUSED {raw.split('<untrusted_data>')[-1].split('</untrusted_data>')[0].strip()[:400]}"
+            elif steps[0][0] == "list_project_runs" and len(steps) == 3 and steps[1][1].get("results_tab") in LC03H_FAMILIES:
+                read = results[2]
+                text = (f"LC03H_FAMILY {steps[1][1]['results_tab']} Run {steps[1][1]['run_id']} "
+                        f"({read.get('scope')}).")
             elif steps[0][0] == "list_project_runs" and steps[-1][0] == "get_results":
                 read = results[2]
                 gas = ((read.get("data") or {}).get("by_carrier") or {}).get("gas") or {}
