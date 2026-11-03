@@ -91,3 +91,59 @@ export async function ensureLiveDurableThread(): Promise<DurableThread | Durable
   }
   return rebindDurableConversation(durableThreadId, utteranceGeneration)
 }
+
+// ── LC-07: continuous speech session (server flag PYPSA_GUI_LIVE_SPEECH) ──
+
+export interface SpeechSessionView {
+  session_id: string
+  state: string
+  generation?: number
+  language?: string
+  expires_at?: string
+  closed_reason?: string
+}
+
+/** The browser's scoped media grant; returned by start only and never stored. */
+export interface SpeechMediaGrant {
+  url: string
+  token: string
+  expires_at: number
+}
+
+export interface SpeechStartResult {
+  session: SpeechSessionView
+  generation: number
+  media: SpeechMediaGrant
+  reconcile: unknown[]
+}
+
+export async function getSpeechState(
+  threadId: string,
+): Promise<{ generation: number; session: SpeechSessionView | null }> {
+  const r = await client.get(`/durable-conversations/${threadId}/speech`)
+  return r.data
+}
+
+export async function startSpeech(
+  threadId: string,
+  generation: number,
+  language: string,
+): Promise<SpeechStartResult> {
+  const r = await client.post(`/durable-conversations/${threadId}/speech/start`, {
+    generation,
+    language,
+  })
+  return r.data as SpeechStartResult
+}
+
+export async function endSpeech(
+  threadId: string,
+  generation: number,
+  sessionId: string,
+): Promise<{ status: string; session: SpeechSessionView | null }> {
+  const r = await client.post(`/durable-conversations/${threadId}/speech/end`, {
+    generation,
+    session_id: sessionId,
+  })
+  return r.data
+}

@@ -114,3 +114,28 @@ Remaining gates (recorded, not built):
 - Device, language, latency and accuracy measurements; paid calls; deployment
   smoke; multi-worker leases (reserve/settle still have no replica check of
   their own; speech routes inherit the store lock and pin through `_read`).
+
+2026-11-03: PR3 (branch `claude/lc07-speech-frontend`), frontend only.
+`utils/liveSpeechSession.ts` (`LiveSpeechSession`) owns the mic stream, the
+`/speech/start|end` session and a `SpeechMediaLink` seam
+(`configureSpeechMediaLink`; none ships, no LiveKit SDK). Order: mic, then
+start (a denied mic reserves nothing), then `link.connect(grant, track)`. The
+grant is passed straight to the link and never kept in state. Every exit runs
+one `stop()`: tracks stop first, synchronously, then the link closes and `end`
+is sent (best effort; the server reaps an unended session). A stop racing a
+pending mic prompt or a pending start stops the late track or ends the
+late session. `hooks/useLiveSpeech.ts` offers the control only while Live
+is open, the thread is bound, a link is configured and `GET /speech`
+answers (flag on). Exits wired: Stop, error (mic denied, start refused, link
+connect failure, link drop), Live closed, unmount, `visibilitychange`
+hidden, `pagehide`, project switch, rebind (thread or generation change),
+track `ended` (revoked/unplugged), session `expires_at`. The typed composer
+stays on the same durable thread; each stop leaves a caption with the reason.
+Tests: `hooks/useLiveSpeech.test.tsx` (22, a test per exit; mutants that drop
+the closed/hidden/project wiring fail), `CompanionLauncher.test.tsx`
+(+4). Shots: `scripts/live-speech-shots.mjs` (route-mocked, fake mic) →
+`.scratch/live-copilot/evidence/07/` (Guided and Expert: off, listening,
+stopped-hidden, unavailable).
+Remaining: a concrete media link (LiveKit client) arrives with the transport
+gate; `end` on `pagehide` is a normal request that may not finish, so the
+server deadline reaper settles that session.
