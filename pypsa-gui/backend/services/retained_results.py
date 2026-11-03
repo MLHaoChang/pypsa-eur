@@ -26,6 +26,7 @@ from collections.abc import Callable
 from fastapi import HTTPException
 
 from services import run_evidence
+from services.period_utils import MULTI_PERIOD_NOT_DIGESTED
 from services.results import dispatch_digest, prices_digest
 
 logger = logging.getLogger(__name__)
@@ -135,14 +136,30 @@ def _digest_family(section: str, label: str, kinds: tuple[str, ...], build: Call
 
 
 def _capture_digest(build: Callable[[], dict]) -> dict | None:
-    """A digest family's section, under the same rule as `_capture_kinds`."""
+    """A digest family's section, under the same rule as `_capture_kinds`.
+
+    A digest that cannot be built for this run (NOT_KEPT_REASONS) keeps a
+    not_kept stub naming its reason, the one the live read names too.
+    """
     from services.workflow_tools import solve_freshness
 
     if solve_freshness().get('results_current') is not True:
         return None
     out = build()
-    return out if out.get('status') == 'ok' else None
+    if out.get('status') == 'ok':
+        return out
+    reason = out.get('reason')
+    return run_evidence.not_kept_stub(reason) if reason in NOT_KEPT_REASONS else None
 
+
+# Why a section was kept as a not_kept stub, as a past-run read says it.
+NOT_KEPT_REASONS: dict[str, str] = {
+    MULTI_PERIOD_NOT_DIGESTED: 'a multi-period run\'s dispatch and prices are not digested',
+    prices_digest.NO_PRICES: 'the solve left no prices to keep',
+    run_evidence.OVER_SECTION_CAP: (
+        f'the section was over the {run_evidence.MAX_SECTION_BYTES // 1024} KB '
+        'cap a run keeps, and its values are never trimmed'),
+}
 
 ADAPTERS: tuple[Retained, ...] = (
     Retained('loadflow', _capture_loadflow,
@@ -172,9 +189,10 @@ def capture(ctx: Any, token: dict) -> tuple[dict[str, dict], list[str]]:
     """Every family's section for a completed run, and the ones not captured.
 
     Binds the run's project context (request and turn cell) and actor once,
-    so every read sees that context, never the caller's. A failure, a refusal or a
-    section over the store's size cap stores nothing for that family (an
-    oversized section would refuse the whole manifest).
+    so every read sees that context, never the caller's. A failure or a refusal
+    stores nothing for that family. A section over the store's size cap (which
+    would refuse the whole manifest) and a digest that cannot be built store a
+    not_kept stub naming why. A stub is counted as not captured too.
     """
     from services import chat_tools
     from services.pypsa_service import PyPSAService
@@ -194,13 +212,14 @@ def capture(ctx: Any, token: dict) -> tuple[dict[str, dict], list[str]]:
             except Exception:  # noqa: BLE001 — a capture failure never breaks a solve
                 logger.exception('%s capture failed for %s', a.section, token.get('run_id'))
                 out = None
-            if out is not None and len(run_evidence._json_bytes(out)) > run_evidence.MAX_SECTION_BYTES:
+            size = None if out is None else len(run_evidence._json_bytes(out))
+            if size is not None and size > run_evidence.MAX_SECTION_BYTES:
                 logger.warning('%s for %s exceeds the section cap; not kept',
                                a.section, token.get('run_id'))
-                out = None
-            if out is None:
+                out = run_evidence.not_kept_stub(run_evidence.OVER_SECTION_CAP, size)
+            if out is None or out.get('status') == run_evidence.NOT_KEPT:
                 missed.append(a.section)
-            else:
+            if out is not None:
                 sections[a.section] = out
     finally:
         chat_tools.set_acting_user(previous)
@@ -224,6 +243,17 @@ def historical(section: str, run_id: str) -> tuple[dict | None, dict | None]:
         return run_evidence.get_run_evidence(run_id, section), None
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, dict) else {}
+        if detail.get('section_status') == run_evidence.NOT_KEPT:
+            reason = detail.get('reason')
+            why = NOT_KEPT_REASONS.get(reason, 'it could not be kept')
+            extra = ({} if detail.get('section_bytes') is None
+                     else {'section_bytes': detail['section_bytes']})
+            return None, unavailable(
+                a.refusal,
+                f'No {a.label} was kept for this run: {why}. '
+                'The current results are not this run.',
+                run_id=run_id, reason=reason, section_status=run_evidence.NOT_KEPT,
+                scope='historical', **extra)
         if detail.get('error_kind') in ('run_not_found', 'evidence_unavailable'):
             return None, unavailable(
                 a.refusal,

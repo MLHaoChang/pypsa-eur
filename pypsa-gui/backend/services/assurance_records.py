@@ -1562,6 +1562,8 @@ def run_section_source(run_id, section):
         gap = (
             "the run does not record this section"
             if status == "not_recorded"
+            else "the run kept no data for this section"
+            if status == run_evidence.NOT_KEPT
             else f"this run is {status.replace('_', ' ')}"
         )
         return project_id, None, [], gap

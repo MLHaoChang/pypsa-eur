@@ -21,7 +21,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from services.period_utils import is_multi_period, snapshot_weights
+from services.period_utils import MULTI_PERIOD_NOT_DIGESTED, is_multi_period, snapshot_weights
 
 BUDGET_BYTES = 12 * 1024   # under run_evidence.MAX_SECTION_BYTES with room for the envelope
 _ON_MW = 1e-6               # below this a unit counts as idle (solver noise)
@@ -151,7 +151,7 @@ def _storage_frames(n) -> tuple[pd.DataFrame, pd.DataFrame | None]:
 def dispatch_digest(n) -> dict:
     """The digest, or {'status': 'unavailable', 'reason': ...}."""
     if is_multi_period(n):
-        return {'status': 'unavailable', 'reason': 'multi_period_not_digested'}
+        return {'status': 'unavailable', 'reason': MULTI_PERIOD_NOT_DIGESTED}
     sns = n.snapshots
     w = snapshot_weights(n, 'generators').reindex(sns).fillna(0.0).astype(float)
     digest = {
