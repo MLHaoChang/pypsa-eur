@@ -156,6 +156,7 @@ class SpeechUsageBody(BaseModel):
     kind: str = Field(..., min_length=1, max_length=16)
     amount: float
     unit: str = Field(..., min_length=1, max_length=32)
+    final: bool = False
 
 
 @router.post('/{thread_id}/speech/start')
@@ -199,9 +200,10 @@ def speech_usage(
     user: User = Depends(require_user),
     x_bridge_token: str = Header(default=''),
 ):
-    """The audio bridge reports provider usage, once per usage_id."""
+    """The audio bridge reports provider usage, once per usage_id; ``final`` last."""
     _bind_actor(user)
     return live_speech.report_usage(
         thread_id, token=x_bridge_token, session_id=body.session_id,
         usage_id=body.usage_id, kind=body.kind, amount=body.amount, unit=body.unit,
+        final=body.final,
     )

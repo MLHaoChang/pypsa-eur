@@ -46,7 +46,7 @@
 },
 "speech_final_mismatch": {
 "surface": "inline",
-"why": "LC-07 the chat stream text differs from the recognised final for that speech ticket; nothing runs and the ticket is spent."
+"why": "LC-07 the chat stream text or generation differs from the recognised final for that speech ticket; nothing runs and the ticket is spent."
 },
 "bridge_credentials_invalid": {
 "surface": "inline",

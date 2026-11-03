@@ -1226,10 +1226,12 @@ def run_turn(
 
         # LC-07: a speech id is admitted only for its exact finalized text,
         # once; partials never receive one (services/live_speech.py).
-        if utterance_id.startswith("speech:"):
-            from services import live_speech
+        from services import live_speech
 
-            refused = live_speech.redeem_final(session.session_id, utterance_id, message)
+        if live_speech.is_speech_utterance(utterance_id):
+            refused = live_speech.redeem_final(
+                session.session_id, utterance_id, message, generation
+            )
             if refused is not None:
                 yield "error", refused
                 yield "session_done", {"reason": refused["error_kind"]}

@@ -93,8 +93,10 @@ def test_partial_never_admits_and_final_issues_one_ticket(transport):
                               seq=3, text='set the battery to 7.5 MW', final=True)
     assert again['status'] == 'duplicate'
     episode = out['session']['episode_id']
-    assert ls.redeem_final(episode, 'speech:s1', 'set the battery to 7.5 MW') is None
-    assert ls.redeem_final(episode, 'speech:s1', 'set the battery to 7.5 MW')['error_kind'] == 'speech_final_unknown'
+    g = final['generation']
+    text = 'set the battery to 7.5 MW'
+    assert ls.redeem_final(episode, 'speech:s1', text, g) is None
+    assert ls.redeem_final(episode, 'speech:s1', text, g)['error_kind'] == 'speech_final_unknown'
 
 
 # ── helpers ────────────────────────────────────────────────────────────────
@@ -149,7 +151,7 @@ def test_final_after_rebind_uses_a_revoked_token_and_gets_no_ticket(transport):
     assert status == 401
     assert detail['error_kind'] in {'bridge_credentials_invalid', 'bridge_credentials_stale'}
     episode = out['session']['episode_id']
-    assert ls.redeem_final(episode, 'speech:s1', 'run the load flow') is not None
+    assert ls.redeem_final(episode, 'speech:s1', 'run the load flow', 1) is not None
 
 
 def test_spoken_yes_never_approves_a_pending_card(transport):
@@ -160,7 +162,7 @@ def test_spoken_yes_never_approves_a_pending_card(transport):
     for seq, word in enumerate(['yes', 'Confirm.', 'approve', 'yes please'], start=1):
         result = _final(tid, token, sid, f'y{seq}', seq, word)
         assert result['status'] == 'not_an_approval'
-        assert ls.redeem_final(episode.session_id, f'speech:y{seq}', word) is not None
+        assert ls.redeem_final(episode.session_id, f'speech:y{seq}', word, 1) is not None
     assert list(episode.pending_confirmations) == ['card-1']
 
 
@@ -181,7 +183,7 @@ def test_one_segment_correcting_a_number_asks_which_value(transport, text):
     result = _final(tid, token, sid, 'q1', 1, text)
     assert result['status'] == 'clarify'
     assert result['text'] == text
-    assert ls.redeem_final(out['session']['episode_id'], 'speech:q1', text) is not None
+    assert ls.redeem_final(out['session']['episode_id'], 'speech:q1', text, 1) is not None
 
 
 @pytest.mark.parametrize('text', [
@@ -321,6 +323,7 @@ def test_grant_beyond_the_ttl_bound_is_refused_and_settled(monkeypatch):
     sid = _thread_json(tid)['speech']['session_id']
     charges = _settled_once(tid, sid)
     assert all(c['amount'] == 0 for c in charges.values())
+    ls.wait_for_closes()
     assert long_lived.closed == [f'pypsa-{sid}']
 
 
@@ -351,16 +354,24 @@ def test_end_settles_reported_usage_once_and_late_usage_is_a_no_op(transport):
     assert _usage(tid, token, sid, 'u1', 'stt', 12.5, 'audio_seconds')['status'] == 'recorded'
     assert _usage(tid, token, sid, 'u1', 'stt', 12.5, 'audio_seconds')['status'] == 'duplicate'
     _usage(tid, token, sid, 'u2', 'media', 30, 'media_seconds')
-    closed = ls.end(tid, generation=gen, session_id=sid)
-    assert closed['session']['closed_reason'] == 'end'
+    closing = ls.end(tid, generation=gen, session_id=sid)
+    assert closing['status'] == 'closing'  # room closed; waiting for the final report
+    assert _thread_json(tid)['budgets']['reservations']
+    status, detail = _refusal(_final, tid, token, sid, 'z', 9, 'one more thing')
+    assert (status, detail['error_kind']) == (409, 'speech_session_closed')
+    done = ls.report_usage(tid, token=token, session_id=sid, usage_id='u9', kind='media',
+                           amount=2, unit='media_seconds', final=True)
+    assert done['status'] == 'settled'
+    assert _thread_json(tid)['speech']['closed_reason'] == 'end'
     charges = _settled_once(tid, sid)
-    assert charges['stt']['amount'] == 12.5 and charges['media']['amount'] == 30
+    assert charges['stt']['amount'] == 12.5 and charges['media']['amount'] == 32
     assert charges['tts']['amount'] == 0
     before = _file(tid).read_bytes()
     late = _usage(tid, token, sid, 'u3', 'stt', 4, 'audio_seconds')
     assert late == {'status': 'ignored', 'reason': 'settled'}
     assert ls.end(tid, generation=gen, session_id=sid)['status'] == 'closed'
     assert _file(tid).read_bytes() == before
+    ls.wait_for_closes()
     assert transport.closed == [f'pypsa-{sid}']
 
 
@@ -385,8 +396,9 @@ def test_usage_over_the_reservation_settles_at_the_cap_flagged(transport):
     tid, gen = _thread()
     _, sid, token = _start(tid, gen)
     cap = ls.RESERVATIONS['tts'][0]
-    _usage(tid, token, sid, 'u1', 'tts', cap + 500, 'characters')
-    ls.end(tid, generation=gen, session_id=sid)
+    ls.report_usage(tid, token=token, session_id=sid, usage_id='u1', kind='tts',
+                    amount=cap + 500, unit='characters', final=True)
+    assert ls.end(tid, generation=gen, session_id=sid)['status'] == 'closed'
     tts = _settled_once(tid, sid)['tts']
     assert tts['amount'] == cap and tts['flags'] == ['over_reservation']
 
@@ -410,6 +422,7 @@ def test_rebind_closes_the_session_and_settles_once(transport):
     dc.rebind_scope(tid, generation=gen)
     assert _thread_json(tid)['speech']['closed_reason'] == 'rebind'
     _settled_once(tid, sid)
+    ls.wait_for_closes()
     assert transport.closed == [f'pypsa-{sid}']
     # A new start mints a new grant and a new bridge token at the new generation.
     out = ls.start(tid, generation=gen + 1, language='en')
@@ -502,3 +515,203 @@ def test_speech_routes_over_http(client, transport, monkeypatch):
     monkeypatch.delenv(ls.ENABLE_ENV)
     off = client.get(f'/api/durable-conversations/{tid}/speech')
     assert (off.status_code, off.json()['detail']['error_kind']) == (503, 'speech_disabled')
+
+
+# ── review follow-ups ──────────────────────────────────────────────────────
+
+def test_end_without_a_final_report_settles_the_cap_after_the_grace(transport, monkeypatch):
+    tid, gen = _thread()
+    _, sid, token = _start(tid, gen)
+    _usage(tid, token, sid, 'u1', 'stt', 3, 'audio_seconds')
+    assert ls.end(tid, generation=gen, session_id=sid)['status'] == 'closing'
+    later = time.time() + ls.USAGE_GRACE_S + 1
+    monkeypatch.setattr(ls.time, 'time', lambda: later)
+    assert ls.state(tid)['session']['closed_reason'] == 'usage_unreported'
+    charges = _settled_once(tid, sid)
+    assert all(c['flags'] == ['usage_unverified'] for c in charges.values())
+    assert charges['stt']['amount'] == ls.RESERVATIONS['stt'][0]
+
+
+def test_session_outgrown_by_its_thread_settles_as_stale_generation(transport):
+    import json
+
+    tid, gen = _thread()
+    _, sid, _ = _start(tid, gen)
+    data = _thread_json(tid)
+    data['generation'] += 1  # a rotation this process never saw
+    _file(tid).write_text(json.dumps(data), encoding='utf-8')
+    assert ls.state(tid)['session']['closed_reason'] == 'stale_generation'
+    _settled_once(tid, sid)
+
+
+class _Crash(BaseException):
+    pass
+
+
+def test_crash_while_starting_settles_the_cap_on_restart(transport, monkeypatch):
+    from tests.test_durable_conversation_restart_rotation import _die_and_restart
+
+    tid, gen = _thread()
+
+    def crash(*_a, **_k):
+        raise _Crash()
+
+    monkeypatch.setattr(ls, '_open_room', crash)
+    with pytest.raises(_Crash):
+        ls.start(tid, generation=gen, language='en')
+    sid = _thread_json(tid)['speech']['session_id']
+    assert _thread_json(tid)['speech']['state'] == 'starting'
+    _die_and_restart(monkeypatch)
+    dc.resume_episode(tid, generation=gen)
+    charges = _settled_once(tid, sid)
+    assert all(c['flags'] == ['usage_unverified'] for c in charges.values())
+
+
+def test_rebind_while_the_room_opens_supersedes_the_start(monkeypatch):
+    class Racing(FakeTransport):
+        def open_session(self, **kwargs):
+            dc.rebind_scope(self.tid, generation=self.gen)  # another request wins the lock
+            return super().open_session(**kwargs)
+
+    racing = Racing()
+    ls.configure_transport(racing)
+    tid, gen = _thread()
+    racing.tid, racing.gen = tid, gen
+    status, detail = _refusal(ls.start, tid, generation=gen, language='en')
+    assert (status, detail['error_kind']) == (502, 'speech_transport_failed')
+    sid = _thread_json(tid)['speech']['session_id']
+    assert _thread_json(tid)['speech']['closed_reason'] == 'rebind'
+    _settled_once(tid, sid)
+    ls.wait_for_closes()
+    assert f'pypsa-{sid}' in racing.closed
+
+
+def test_transport_is_called_without_the_thread_lock():
+    held = {}
+
+    class Probe(FakeTransport):
+        def open_session(self, **kwargs):
+            import threading
+
+            seen = []
+            t = threading.Thread(target=lambda: seen.append(dc._LOCK.acquire(timeout=1)))
+            t.start()
+            t.join()
+            if seen and seen[0]:
+                dc._LOCK.release()
+            held['other_thread_got_lock'] = bool(seen and seen[0])
+            return super().open_session(**kwargs)
+
+    ls.configure_transport(Probe())
+    tid, gen = _thread()
+    _start(tid, gen)
+    assert held['other_thread_got_lock'] is True
+
+
+def test_failed_start_settles_reported_usage_once(monkeypatch):
+    failing = FakeTransport(fail=True)
+    ls.configure_transport(failing)
+    tid, gen = _thread()
+    _refusal(ls.start, tid, generation=gen, language='en')
+    sid = _thread_json(tid)['speech']['session_id']
+    charges = _settled_once(tid, sid)
+    assert all(c['amount'] == 0 and c['flags'] == [] for c in charges.values())
+    assert _thread_json(tid)['speech']['closed_reason'] == 'error'
+
+
+def _route_calls(tid, gen, token='t', sid='abc'):
+    return {
+        'state': lambda: ls.state(tid),
+        'start': lambda: ls.start(tid, generation=gen, language='en'),
+        'end': lambda: ls.end(tid, generation=gen, session_id=sid),
+        'segment': lambda: ls.submit_segment(tid, token=token, session_id=sid,
+                                             segment_id='s', seq=1, text='x', final=True),
+        'usage': lambda: ls.report_usage(tid, token=token, session_id=sid, usage_id='u',
+                                         kind='stt', amount=1, unit='audio_seconds'),
+    }
+
+
+@pytest.mark.parametrize('route', ['state', 'start', 'end', 'segment', 'usage'])
+def test_every_route_refuses_unknown_and_foreign_threads_alike(transport, monkeypatch,
+                                                                tmp_path, route):
+    tid, gen = _thread()
+    _, sid, token = _start(tid, gen)
+    unknown = _refusal(_route_calls('22222222-2222-2222-2222-222222222222', gen,
+                                    token, sid)[route])
+    before = _file(tid).read_bytes()
+    monkeypatch.setattr(dc, '_authority', lambda: (tmp_path / PROJECT, PROJECT, 'owner-bbb'))
+    other_owner = _refusal(_route_calls(tid, gen, token, sid)[route])
+    assert unknown == other_owner
+    assert unknown[0] == 404 and unknown[1]['error_kind'] == 'thread_not_found'
+    assert _file(tid).read_bytes() == before
+
+
+def test_stale_generation_end_is_409_and_writes_nothing(transport):
+    tid, gen = _thread()
+    _, sid, _ = _start(tid, gen)
+    before = _file(tid).read_bytes()
+    status, detail = _refusal(ls.end, tid, generation=gen - 1, session_id=sid)
+    assert (status, detail['error_kind']) == (409, 'stale_generation')
+    assert _file(tid).read_bytes() == before
+
+
+@pytest.mark.parametrize('route', ['state', 'end', 'segment', 'usage'])
+def test_second_process_holding_the_store_refuses_every_route(transport, route):
+    from services import app_workers
+    from tests.test_durable_conversation_one_worker import _spawn_holder
+
+    tid, gen = _thread()
+    _, sid, token = _start(tid, gen)
+    before = _file(tid).read_bytes()
+    app_workers._reset_for_tests()
+    holder = _spawn_holder(_file(tid).parent)
+    try:
+        status, detail = _refusal(_route_calls(tid, gen, token, sid)[route])
+        assert (status, detail['error_kind']) == (503, 'multi_worker_unsupported')
+        assert _file(tid).read_bytes() == before
+    finally:
+        holder.kill()
+        holder.wait()
+
+
+def test_media_credential_is_not_stored_while_the_session_is_open(transport):
+    tid, gen = _thread()
+    out, sid, token = _start(tid, gen)
+    assert _thread_json(tid)['speech']['state'] == 'open'
+    assert MEDIA_SECRET not in _file(tid).read_text(encoding='utf-8')
+    _final(tid, token, sid, 's1', 1, 'show results')
+    assert MEDIA_SECRET not in _file(tid).read_text(encoding='utf-8')
+
+
+def test_redeemed_final_reaches_admission_with_its_own_text(transport, monkeypatch):
+    from harness import loop
+    from services import utterance_admission
+
+    tid, gen = _thread()
+    out, sid, token = _start(tid, gen)
+    episode = chat_service.get_session(out['session']['episode_id'])
+    accepted = _final(tid, token, sid, 's1', 1, 'set the battery to 7.5 MW')
+    admitted = []
+
+    def record(utterance):
+        admitted.append(utterance)
+        return utterance_admission.AdmissionDecision('duplicate', None, utterance.generation, None)
+
+    monkeypatch.setattr(utterance_admission, 'admit_utterance', record)
+    frames = list(loop.run_turn(episode, 'set the battery to 7.5 MW', client=object(),
+                                utterance_id='speech:s1', generation=accepted['generation']))
+    assert [(u.utterance_id, u.text) for u in admitted] == [('speech:s1', 'set the battery to 7.5 MW')]
+    assert frames[0][1]['error_kind'] != 'speech_final_unknown'
+    # The ticket is spent: a replay never reaches admission again.
+    frames = list(loop.run_turn(episode, 'set the battery to 7.5 MW', client=object(),
+                                utterance_id='speech:s1', generation=accepted['generation']))
+    assert frames[0][1]['error_kind'] == 'speech_final_unknown' and len(admitted) == 1
+
+
+def test_ticket_from_an_older_generation_is_refused(transport):
+    tid, gen = _thread()
+    out, sid, token = _start(tid, gen)
+    accepted = _final(tid, token, sid, 's1', 1, 'show results')
+    refused = ls.redeem_final(out['session']['episode_id'], 'speech:s1', 'show results',
+                              accepted['generation'] + 1)
+    assert refused['error_kind'] == 'speech_final_mismatch'
