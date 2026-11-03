@@ -160,3 +160,14 @@ Decided: **B** (owner decision LC40B-SCOPE-1). Options kept for the record.
 - [ ] `study_state.edited_since`'s docstring names the helper as the only capture path.
 
 ## Comments
+
+### Plan GO (GK A, option B) — conditions
+
+1. Each `with lock: record[...] = revision(...)` block is replaced whole by `capture(record, ctx, lock=lock)`, never nested inside a `with lock:` (the mutation lock is not re-entrant). A unit test with a recording lock shows the read happens while the lock is held.
+2. `hold` takes no lock. Its docstring says the caller holds the solver-state read-modify-write and calls it after the config write, as today. It bumps once, re-captures, and returns the new counter. A test shows the loop's own record reads `edited_since` False while another study's record reads True.
+3. In `study/runner.py`, `capture(record, ctx)` sits on the line right after the literal, before `worker_args`, the Thread, the lock acquire and any registry insert, so no reader sees that record's `None`. A test patches `Thread.start` to assert the record already holds an int.
+4. The guard test greps `services/` for both `["network_revision"] =` and a `"network_revision": dirty_state.revision` literal. Its explicit allowlist names `mc_loop_runner.py:138` and `chat_tools.py:4055`, each with its reason. A test shows a planted bare write fails it.
+5. Review mutants, each must fail a test: capture not storing on the record; capture ignoring `lock`; hold not bumping; hold not re-capturing.
+6. The existing LC-37/39/40/41 and `test_eh_study_edited_since` files are byte-unchanged (empty `git diff` on them).
+7. Each reader's stale-banner test edits through a real seam (HTTP edit middleware, chat edit seam or `update_solver_config`), never a direct `bump_revision`.
+8. Why `mc_loop_runner.py:138` stays: it reads the active ctx inside `PyPSAService.get_lock()` with no worker, and calls `revision()` with no ctx.
