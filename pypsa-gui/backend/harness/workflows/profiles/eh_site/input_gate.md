@@ -5,7 +5,8 @@ and the next tools `project_readiness` names follow below. Fix the inputs so
 those rules pass.
 
 - Change only what the failed rules name: their tunable attributes, or a data
-  gap (a load with no demand series, a missing tariff or weather choice).
+  gap listed below (a missing tariff or weather choice). A load's constant
+  demand is the user's: never reshape it into a profile.
 - Fill a gap, never replace a value that is there, and only from the source
   listed for it under "Data gaps you may fill": copy its archetype, year and
   params, its weather choice, or the tariff it names. Never pick a number of your own; a call that does not

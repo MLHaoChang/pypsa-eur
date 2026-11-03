@@ -42,9 +42,27 @@ def fixture_energy(network, load):
     return {"annual_mwh": round(p_set * 8760, 6)} if p_set > 0 else None
 
 
+# Tests that read the profile and the registry exactly as they ship.
+SHIPPED = {"test_a_static_load_passes_the_eh_site_input_gate_as_before",
+           "test_no_energy_source_ships_and_an_unregistered_one_is_refused"}
+SERIES_RULE = {"id": "in.loads.series", "fact": "loads.without_series", "op": "empty", "severity": "block",
+               "basis": "Test only: an electric load with no demand series is the gap L1 fills."}
+
+
 @pytest.fixture(autouse=True)
-def energy_source(monkeypatch):
+def energy_source(request, monkeypatch):
+    """Test-only, never shipped (GK B, LOAD-SHAPE-1): an energy source and an
+    eh_site input rule that makes a load with no series a gap, to drive L1."""
+    if request.node.originalname in SHIPPED:
+        return
     monkeypatch.setitem(run_envelope.LOAD_ENERGY_SOURCES, "fixture_energy", fixture_energy)
+    resolve = run_profiles.resolve
+
+    def with_series_rule(ref):
+        out = copy.deepcopy(resolve(ref))
+        out["stages"]["input_gate"]["rules"].append(copy.deepcopy(SERIES_RULE))
+        return out
+    monkeypatch.setattr(run_profiles, "resolve", with_series_rule)
 
 
 class Script:
@@ -92,9 +110,14 @@ def rated(monkeypatch):
 
 
 def no_series():
-    """L1 loses its demand series: the eh_site input gate's data gap."""
+    """L1 has no demand series: the test rule's data gap."""
     network = PyPSAService.get_active_context().network
-    network.loads_t.p_set = network.loads_t.p_set.drop(columns=["L1"])
+    network.loads_t.p_set = network.loads_t.p_set.drop(columns=["L1"], errors="ignore")
+
+
+def with_series():
+    network = PyPSAService.get_active_context().network
+    network.loads_t.p_set = network.loads_t.p_set.reindex(columns=["L1"]).fillna(5.0)
 
 
 def record_of(path):
@@ -180,7 +203,7 @@ def test_a_defect_outside_the_tunables_ends_no_progress_and_needs_the_user(grant
 
 @pytest.fixture
 def tunable_rule(monkeypatch):
-    """The eh_site series rule, as a profile might write it, names
+    """The test series rule, as a profile might write it, names
     Generator.marginal_cost as its tunable (§6.1): what L1 may change for it."""
     resolve = run_profiles.resolve
 
@@ -339,6 +362,7 @@ def test_listed_data_gap_tools_are_admitted_for_their_target_only(granted, profi
 def test_a_gap_entry_never_replaces_a_series_that_is_there(session, site, profile):
     project_id, root = site
     profile(WITH_GAPS)
+    with_series()
     task = start()
     run_envelope.decide(session, task["task_id"], "unattended")
     envelope = envelope_of(task_path(root, task))
@@ -589,3 +613,31 @@ def test_a_gap_without_a_source_is_refused():
         run_envelope.check_block({**BLOCK, "gaps": [{k: v for k, v in GAPS[0].items() if k != "source"}]})
     with pytest.raises(run_envelope.EnvelopeError):
         run_envelope.check_block({**BLOCK, "gaps": [{**GAPS[0], "source": {"kind": "intake"}}]})
+
+
+# ── LOAD-SHAPE-1: no Load gap ships (GK B, owner) ───────────────────────────
+
+
+def test_a_static_load_passes_the_eh_site_input_gate_as_before(granted, profile, site, rated, monkeypatch):
+    """A site load with a constant p_set is the user's demand, not a gap: the
+    shipped eh_site run passes its input gate, and L1 never starts."""
+    monkeypatch.setitem(run_profiles.PROFILES, "eh_site@1", run_profiles.EH_SITE)  # as shipped
+    no_series()  # the baseline's L1 is a constant p_set
+    task, path, _ = granted()
+    script = Script()  # any model call fails the test
+    record = go(harness_runner.Runner("a", agent_provider=script), path, task)
+    run = record["run"]
+    assert run["stages"]["input_gate"]["status"] == "passed", run["stages"]["input_gate"]
+    assert run["status"] != "needs_user" and "loop" not in run and script.requests == []
+    assert not any(g["tool"] == "apply_generated_profile"
+                   for g in run_profiles.EH_SITE["envelope"]["gaps"])
+
+
+def test_no_energy_source_ships_and_an_unregistered_one_is_refused(session, site, profile):
+    assert run_envelope.LOAD_ENERGY_SOURCES == {}
+    for energy in ("static_p_set", "fixture_energy"):
+        with pytest.raises(run_envelope.EnvelopeError):
+            run_envelope.check_block({**BLOCK, "gaps": [{**GAPS[0], "source": {**SHAPE, "energy": energy}}]})
+    with pytest.raises(HTTPException):  # nor can a grant name one
+        run_envelope.narrow(run_envelope.check_block(BLOCK),
+                            {**BLOCK, "gaps": [{**GAPS[0], "source": {**SHAPE, "energy": "static_p_set"}}]})

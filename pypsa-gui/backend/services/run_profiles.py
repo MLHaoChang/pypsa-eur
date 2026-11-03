@@ -215,13 +215,6 @@ EH_SITE = {
             _rule("set.project.template", "project.template", "eq", "eh_site",
                   basis="The profile serves the eh_site template only."),
         ]},
-        # Issue 04: a load with no demand series is a data gap the input loop
-        # L1 fills from a generated profile inside the envelope's gaps (§6.1).
-        "input_gate": {**GENERIC["input_gate"], "rules": [
-            *CORE_INPUT_RULES,
-            _rule("in.loads.series", "loads.without_series", "empty",
-                  basis="Every eh_site load carries a demand time series; a static value has no profile."),
-        ]},
         # Issue 01: the result gate reads the solver status only; LC-20 (05)
         # and the eh_site KPI rules (07) join it later.
     },

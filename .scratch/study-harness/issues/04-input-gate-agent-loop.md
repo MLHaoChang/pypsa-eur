@@ -55,6 +55,11 @@ Design: [design.md](../design.md) §6.1, §6.3, §6.4, §6.5
   7. Any exception in the gap check reads `not_a_gap`, so the call gets a card.
 
   Also in this PR: an L1 edit outside the failed rules' `tunable` lists is refused as `not_tunable`, and a round that errors still charges its tokens. Follow-up: the user notice on exhaustion is [issue 25](25-l1-exhaustion-notice.md) (needs a channel).
+- 3 Nov, GK B NOT OK @7f37c8ca, then owner decision LOAD-SHAPE-1: a constant `p_set` is the user's demand, not a gap. Reshaping it with the same annual energy raises the peak (§6.0). An unattended run may not reshape it; a shaped profile needs a card, or an SH-21 intake value the user confirmed (peak or annual energy). So, with GK B's agreement on option (A):
+  - eh_site ships no Load gap entry and no `in.loads.series` rule. A constant-load eh_site run passes its input gate as before, and L1 does not start (regression test).
+  - The `load_generator` mechanism stays: grant resolution, exact-copy check, prepare binding and identity. Its energy comes from `run_envelope.LOAD_ENERGY_SOURCES`, a code registry that ships empty. A profile or grant naming an unregistered source (`static_p_set` included) is refused (test).
+  - The L1 tests drive a test-only rule and energy source through an autouse fixture; nothing ships them. So acceptance criterion 1 ("L1 attaches a missing series") holds only with a registered source, which SH-21 or a later owner decision supplies.
+  - Also: a tariff fill needs exactly one tariff granted for the setting (the card names it); "still a gap" under the locks has its own test; each row is checked against its own grant record; the exhaustion notice is now issue 25.
 
 ## Folded from #970
 
