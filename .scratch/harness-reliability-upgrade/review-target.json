@@ -1,20 +1,20 @@
 {
   "schema_version": 1,
   "base_commit": "60d8332d64b2edef1b204fb5980311e6102229a8",
-  "additional_source_inspected": "30c79cf750c42314eedd0597d06b1780b92a81fe",
-  "payload_sha256": "b217a515c8043f51f3b1d5722d5ec8d4adb081b0ee558d8b8987993c5440b15c",
+  "additional_source_inspected": "a3239f48f88635805ded97ba83d0ac249ccdec32",
+  "payload_sha256": "78a59685373cdb722facec81909db4f49606394ef728f012457730923efa757e",
   "files": [
     {
       "path": ".scratch/harness-reliability-upgrade/README.md",
-      "sha256": "566040c662bf349d81cbfedf9b5c2a6d4f595f6bddc1e538b2813cd1f533bf5d"
+      "sha256": "e646c60164cf54ad86f5af8dd4d84eff59df368129eda9c8d7670953ebf50dd6"
     },
     {
       "path": ".scratch/harness-reliability-upgrade/baseline.md",
-      "sha256": "d92f1e91a2b5f7c3cbb5d56254f27a9f98eb841ecaca99efe3c6be4400e1d5e4"
+      "sha256": "6a42146287b9c4ff32bd757bc1a6e77115c7f1e2588d8401a378d80f9a647560"
     },
     {
       "path": ".scratch/harness-reliability-upgrade/handoff.md",
-      "sha256": "c2a32f196b5bfaab0b67bff456bd991ac6d01e7bd5bd6b68c51e0f9185d07fb5"
+      "sha256": "de4776a24d2915592729f710cb492f9ca282c9d12692e6e13fdadcc1e5bcfe50"
     },
     {
       "path": ".scratch/harness-reliability-upgrade/issues/01-atomic-mutation-admission.md",
@@ -22,11 +22,11 @@
     },
     {
       "path": ".scratch/harness-reliability-upgrade/issues/02-persistent-requirements.md",
-      "sha256": "4ca183bc5ba52fdfaf1b6018f4a8bf8dd19971785ec8ec7bac884b722488deaf"
+      "sha256": "b383b5aec089af270ac63b5a5e9df9421dbd526f1bf208b75baf29d21866c8d6"
     },
     {
       "path": ".scratch/harness-reliability-upgrade/issues/03-durable-call-budgets.md",
-      "sha256": "eb33bc07d4f5d48e96d9b1b9432b6d0ec244e005ac2f675285de6d3be32935ae"
+      "sha256": "ec672e36acc585eedb1b9a1d29cffb49975335594223208b6ceafe1408fff4c6"
     },
     {
       "path": ".scratch/harness-reliability-upgrade/issues/04-typed-domain-references.md",
@@ -34,7 +34,7 @@
     },
     {
       "path": ".scratch/harness-reliability-upgrade/issues/05-trajectory-evaluation.md",
-      "sha256": "ce6cacc30cff85b6b54e091778b0f50fbeb82be0391e3d515bd00816bf47e539"
+      "sha256": "ed5bde57540da443b244d5df1d7d823bb16cc7fd39005c1f8a6e4e05390855a4"
     },
     {
       "path": ".scratch/harness-reliability-upgrade/issues/06-study-correction-cycles.md",
@@ -50,11 +50,11 @@
     },
     {
       "path": ".scratch/harness-reliability-upgrade/issues/09-coordinator-delegation.md",
-      "sha256": "38461536f12d62f65f511c427753be930e67f510239df1ee3f1c454e7a60e76e"
+      "sha256": "cf22258b7847696dbe710405b95af4b8fc3c4edd960740e1f3dc1eed7c05e82e"
     },
     {
       "path": ".scratch/harness-reliability-upgrade/issues/10-immutable-solve-admission.md",
-      "sha256": "fa07e3b1e6849b7af31f5287d10419425642d4acc0f0d37ec4f333dacaad312b"
+      "sha256": "d2bed9cd8d4751a36fa28e3e53856e4b9fdcc8c632176a1d02ba00f904f5cd51"
     },
     {
       "path": ".scratch/harness-reliability-upgrade/rollout.md",
@@ -62,11 +62,11 @@
     },
     {
       "path": ".scratch/harness-reliability-upgrade/spec.md",
-      "sha256": "2a375e6c3188d6dd96f79ae30acc14ab2236f9276f4b58293bb690bbcdd23fdb"
+      "sha256": "c1f4d1c85e8efece4156a7c632a51d06294c61d449ecb3c72ad7fcf99089901f"
     },
     {
       "path": ".scratch/harness-reliability-upgrade/test-matrix.md",
-      "sha256": "085c44389189967fefca02a03a590093bf7c5e47a4c66ca7008b9946545d8dbb"
+      "sha256": "88c1feb97ae23d1f94abc4adbde3e18dc89e210fcd8f4e3f20087c1b67678f60"
     },
     {
       "path": ".scratch/harness-reliability-upgrade/user-requirements.md",
