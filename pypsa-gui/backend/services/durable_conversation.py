@@ -147,12 +147,14 @@ def _empty_thread(thread_id: str, *, owner_id: str, project_id: str) -> dict[str
 
 def _path(thread_id: str) -> tuple[Path, str, str]:
     try:
-        if str(uuid.UUID(thread_id)) != thread_id:
+        canonical = str(uuid.UUID(thread_id))
+        if canonical != thread_id:
             raise ValueError()
     except (ValueError, TypeError, AttributeError):
         _refuse('thread_not_found', 'Thread not found in this project.', 404)
     root, project_id, owner = _authority()
-    return root / 'durable_conversations' / (thread_id + '.json'), project_id, owner
+    # The file name comes from the parsed UUID, never the caller's string.
+    return root / 'durable_conversations' / (canonical + '.json'), project_id, owner
 
 
 def _save(path: Path, thread: dict[str, Any]) -> None:
