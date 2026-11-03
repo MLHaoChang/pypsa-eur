@@ -3,7 +3,7 @@
 
 # D07: native result quantity registry (draft)
 
-Status: **proposed**. GK A (11) plan GO @a0fdf73f with 12 conditions, recorded in [issues/04-result-projection.md](../issues/04-result-projection.md#comments). Not accepted by the owner yet. Needs GK A review and then the owner's acceptance through the coordinator (owner decision SC03-D07-1: "D07 first, then build"). No projection code is written until it is accepted.
+Status: **accepted** by the owner (decision D07-ACCEPT-1, 2026-11-03: "Accept as drafted"), on GK A (11) plan GO @a0fdf73f04f921644e62517e733cd859e0e23e25 with 12 conditions, recorded in [issues/04-result-projection.md](../issues/04-result-projection.md#comments). Owner choices: A backend route; B vintage rows unavailable in SC-03; C unavailable after an AC power flow.
 
 - Base: master `8616af5778` (PR #1053 merge). Spec revision: `.scratch/site-scene-generation/` on the same commit.
 - Gates: SC-03 (V22–V28, V57, V87–V88) and the SC-07 results unit.
