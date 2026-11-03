@@ -404,9 +404,33 @@ def test_the_grant_resolves_each_gap_load_to_its_own_annual_energy(session, site
     no_series()
     envelope = grant(session, site[1])
     gap = next(g for g in envelope["gaps"] if g["tool"] == "apply_generated_profile")
+    network = PyPSAService.get_active_context().network
     assert gap["at_grant"] == {"L1": {"archetype": "industrial", "year": 2023,
-                                      "params": {"annual_mwh": granted_energy()}}}
+                                      "params": {"annual_mwh": granted_energy()},
+                                      "identity": {"bus": str(network.loads.at["L1", "bus"]),
+                                                   "p_set": float(network.loads.at["L1", "p_set"])}}}
     assert prepare(envelope, generate(site[0])[1]) is None
+
+
+def test_a_load_renamed_onto_a_granted_name_never_matches(session, site, profile):
+    profile(WITH_GAPS)
+    no_series()
+    envelope = grant(session, site[1])
+    args = generate(site[0])[1]
+    network = PyPSAService.get_active_context().network
+    bus = network.loads.at["L1", "bus"]
+    network.remove("Load", "L1")
+    network.add("Load", "L1", bus=bus, p_set=50.0)  # another load under the granted name
+    assert prepare(envelope, args) == "new_instance"
+
+
+def test_the_series_gap_fact_counts_electric_loads_only(session, site, profile):
+    from services import run_gates
+    no_series()
+    ctx = PyPSAService.get_active_context()
+    ctx.network.add("Bus", "h2", carrier="H2")
+    ctx.network.add("Load", "L_h2", bus="h2", p_set=3.0)
+    assert run_gates._loads_without_series(type("Env", (), {"ctx": ctx})()) == ["L1"]
 
 
 def test_a_load_made_after_the_grant_never_matches_the_glob(session, site, profile):
@@ -480,6 +504,11 @@ def test_a_fill_is_admitted_only_from_a_pending_profile_this_round_prepared(sess
     assert fill([mine], round_no=2) == "unbound_prepare"
     assert fill([{**mine, "loads": ["L2"]}]) == "unbound_prepare"
     assert fill([mine]) is None
+    # Another load's column of the job, or a shifted series, is not the granted source.
+    for other in ({"point_id": "L2"}, {"time_basis": "Europe/Berlin"}, {"component_type": "Generator"}):
+        bound = {**envelope, "prepared": [mine]}
+        assert run_envelope._match_gap(bound, "apply_generated_profile", {**args, **other}, card, ctx,
+                                       {"scope": {"round": 1, "tunable": frozenset()}}) == "outside_entry", other
 
 
 def test_a_weather_choice_outside_the_profiles_list_is_refused(session, site, profile):

@@ -148,6 +148,7 @@ def _gap_sources(envelope):
     for gap in envelope.get("gaps", []):
         target = gap["target"]
         for name, record in (gap.get("at_grant") or {}).items():
+            record = {k: v for k, v in record.items() if k != "identity"}  # the harness's check, not a value to copy
             if "tariffs" in record:
                 record = {"tariffs": [{"name": n, "version": v} for n, v in record["tariffs"].values()]}
             out.append({"tool": gap["tool"], "component": target["component"], "name": name,
@@ -184,6 +185,11 @@ def _ledger_row(call, receipt, *, approval, round_no, source=None):
             "unit": first.get("unit") or "" if one else "",
             "reason": reason, "source": source, "approval": approval,
             "receipt": f"{receipt['digest']}:{call['id']}", "tool": call["tool"], "reverted": False}
+
+
+def _spent(session, before):
+    """The tokens the session used since `before` (its `usage_acc` then)."""
+    return {k: max(0, int(session.usage_acc.get(k, 0)) - int(before.get(k, 0))) for k in before}
 
 
 def agent_turn(path, ctx, session, *, tools, message, provider=None, recheck, scope=None):
@@ -268,7 +274,7 @@ def agent_turn(path, ctx, session, *, tools, message, provider=None, recheck, sc
         session.stage_tools = None
         session.loop_scope = None
         session.decision_guard = None
-    usage = {k: max(0, int(session.usage_acc.get(k, 0)) - int(usage_before.get(k, 0))) for k in usage_before}
+    usage = _spent(session, usage_before)
     return {"calls": [calls[t] for t in order], "usage": usage, "offered": offered}
 
 
@@ -300,8 +306,7 @@ def run_round(path, ctx, session, *, provider=None, recheck):
                              provider=provider, recheck=recheck, scope={"round": round_no, "tunable": tunable})
     except BaseException:
         # A round that errors still spent its tokens: they count (§6.5).
-        runner.charge(path, {k: max(0, int(session.usage_acc.get(k, 0)) - int(usage_before.get(k, 0)))
-                             for k in usage_before}, model)
+        runner.charge(path, _spent(session, usage_before), model)
         raise
     sources = {a["call_id"]: a["source"] for a in (run_envelope.read(path) or {}).get("audit", [])
                if a.get("event") == "used" and a.get("source")}

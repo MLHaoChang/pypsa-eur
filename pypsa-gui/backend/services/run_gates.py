@@ -142,9 +142,12 @@ def _ic_baseline_keeps(env):
 def _loads_without_series(env):
     """The loads whose demand has no time series (a static `p_set` only): a
     data gap the input loop may fill (design §6.1), never a demand change."""
+    from services.adequacy.site_peak import electric_loads
     network = env.ctx.network
-    series = network.loads_t.p_set.columns
-    return sorted(str(name) for name in network.loads.index if name not in series)
+    series = {str(c) for c in network.loads_t.p_set.columns}
+    # Electric site loads only: an offtake or process load is demand the
+    # loop never fills (§6.0), so it is never this gap.
+    return sorted(str(name) for name in electric_loads(network) if str(name) not in series)
 
 
 def _run(key):

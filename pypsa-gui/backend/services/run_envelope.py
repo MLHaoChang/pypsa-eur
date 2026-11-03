@@ -486,7 +486,7 @@ def _gap_instances(ctx, gap):
     except Exception:  # noqa: BLE001 — an unreadable network names no gap
         return {}
     if not _GLOB.search(target["name"]) and target["name"] in {o[0] for o in other}:
-        _invalid(f"Load {target['name']} is an offtake or process demand: never a data gap (§6.0).")
+        _invalid(f"Load {target['name']} is an offtake or process demand: it is never filled as a data gap.")
     out = {}
     for name in electric:
         if not fnmatch.fnmatchcase(str(name), target["name"]) or _has_series(ctx, name):
@@ -497,8 +497,22 @@ def _gap_instances(ctx, gap):
             continue
         if math.isfinite(p_set) and p_set > 0:
             out[str(name)] = {"archetype": source["archetype"], "year": source["year"],
-                              "params": {"annual_mwh": round(p_set * HOURS_PER_YEAR, 6)}}
+                              "params": {"annual_mwh": round(p_set * HOURS_PER_YEAR, 6)},
+                              "identity": _identity(network, name)}
     return out
+
+
+def _identity(network, name):
+    """What makes a gap load the one granted: a load renamed onto a granted
+    name, or made again under it, reads another bus or static value."""
+    return {"bus": str(network.loads.at[name, "bus"]), "p_set": float(network.loads.at[name, "p_set"])}
+
+
+def _same_load(ctx, name, record):
+    try:
+        return _identity(ctx.network, name) == record["identity"]
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 def decide(session, task_id, verdict, envelope=None, notify_email=False):
@@ -678,6 +692,8 @@ def _match_prepare(envelope, tool, args, ctx, note):
             return "new_instance"
         if _has_series(ctx, name):
             return "not_a_gap"
+        if not _same_load(ctx, name, record):
+            return "new_instance"
         if not _same_source(args, record):
             return "not_granted_source"
         records.append(record)
@@ -727,8 +743,12 @@ def _match_fill(envelope, tool, args, edit_card, ctx, note):
     else:
         # The prepare binding (GK B condition 4): only a pending profile this
         # run's own round prepared from the granted source, for this load.
-        if (args.get("component_type") or "Load") != "Load" or (args.get("attribute") or "p_set") != "p_set":
-            return "outside_entry"
+        if (args.get("component_type") or "Load") != "Load" or (args.get("attribute") or "p_set") != "p_set" \
+                or args.get("point_id") not in (None, args.get("component")) \
+                or args.get("time_basis") not in (None, "UTC"):
+            return "outside_entry"  # another load's column, or a shifted series: not the granted source
+        if any(not _same_load(ctx, r["name"], g) for r in typed for g in records if "identity" in g):
+            return "new_instance"
         job = next((j for j in envelope.get("prepared", []) if j["job_id"] == args.get("job_id")), None)
         loop_round = (note.get("scope") or {}).get("round")
         if job is None or job["task_id"] != envelope.get("task_id") or job["round"] != loop_round \
