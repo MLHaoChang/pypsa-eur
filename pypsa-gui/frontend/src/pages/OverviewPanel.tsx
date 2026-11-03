@@ -316,7 +316,7 @@ function PocXrField({ currentProject, stored, readOnly }: {
 
   return (
     <div className="mt-3 flex flex-col gap-1">
-      <label htmlFor="poc-xr" className="font-medium text-text">PoC X/R</label>
+      <label htmlFor="poc-xr" className="text-xs font-medium text-text">PoC X/R</label>
       <input
         id="poc-xr"
         type="text"
