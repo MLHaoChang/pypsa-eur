@@ -132,3 +132,19 @@ table) and `compare/capacity.py` already read Stores.
   test; (5) no UI/chat/error-kind copy lists it as refused (git grep); (6) known gap for GK B's lane:
   `harness/storage_costs.py` storage_holding_expenditure reads StorageUnits only, so it no longer applies to a
   migrated unit (as for any split storage); compare economics (#1023) books the Store's term; (7) split suites.
+- 2026-11-03, AS-11d storage holding cost after migration (FILL-10-2; branch `claude/as11d-store-holding-cost`):
+  closes gap (6) above. `storage-unit-cost/1` reads a split tagged by `migrate_storage_unit` as its StorageUnit
+  (AC-side p_store = charger p0, p_dispatch = -discharger p1, SOC = Store e, mc = discharger mc / eta_d, mcs from
+  the Store); anything not the exact migrate layout is refused `unsupported_split_storage_layout`. GK A (10)
+  consult: mapping right; refuse non-migrate layouts, read series densely, p_nom_opt when extendable, never net.
+  GK B (17) plan GO, conditions: (a) round-trip pin: static and time-varying p_max_pu/p_min_pu, non-zero mc,
+  mcs, standing_loss, extendable and fixed: the view returns the unit's own raw inputs (stated rtol) and after a
+  solve holding/discharge/total equal the SU run (10/16/41 EUR); (b) the view is opt-in by parameter for the cost
+  profile only; dispatch and cycles profiles answer a tagged Store as master does, a test each; (c) refusals
+  compare `_opt` when extendable with a named tolerance; also refuse charger == discharger, a link with bus2 or
+  other extra outputs, charger and discharger on different AC buses (#1012), a tag naming a missing link; each
+  refusal tested and mutation-checked against its own guard (#807); (d) the new reason joins every list that
+  names `unknown_storage_unit`, and a `tool-error-kinds.d/` fragment if it reaches chat as an error_kind (then
+  manifest tests at trial merge); (e) non-migrated networks byte-equal: master's storage-cost tests pass here,
+  a same-name SU takes the old path, an untagged Store stays `unknown_storage_unit`; (f) every per-snapshot
+  input dense via `_series`, charge and discharge never netted, holding weighted as the SU path weights it.

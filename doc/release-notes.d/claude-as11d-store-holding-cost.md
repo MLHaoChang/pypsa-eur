@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Checked StorageUnit costs (holding, discharge, fixed and total) still answer for a unit migrated to a Store with charger and discharger Links, counted once and in the same units; a split storage that is not exactly the migration's layout is refused as `unsupported_split_storage_layout`.

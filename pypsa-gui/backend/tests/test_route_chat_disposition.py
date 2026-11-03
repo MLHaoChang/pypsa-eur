@@ -143,6 +143,7 @@ UI_INTERNAL: dict[str, dict] = {
             ('POST', '/api/durable-conversations/{thread_id}/checkpoint'),
             ('POST', '/api/durable-conversations/{thread_id}/rebind'),
             ('POST', '/api/durable-conversations/{thread_id}/resume'),
+            ('POST', '/api/durable-conversations/{thread_id}/profile'),
         }),
     },
     'mcp': {

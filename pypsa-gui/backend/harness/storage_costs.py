@@ -39,9 +39,11 @@ METRICS = {
 def source(ctx, entity):
     from harness.calculations import _number, _series
 
-    raw = storage.source(ctx, entity)
+    raw = storage.source(ctx, entity, split=True)
     n = ctx.network
     component = n.components["StorageUnit"]
+    if entity not in component.static.index:
+        return {**raw, "costs": _split_costs(n, entity)}
     row = component.static.loc[entity]
     costs = {
         "version": 1,
@@ -60,6 +62,46 @@ def source(ctx, entity):
     ):
         costs[attribute] = _series(component, attribute, entity, n.snapshots)
     return {**raw, "costs": costs}
+
+
+def _split_costs(n, entity):
+    """A migrated unit's costs in StorageUnit terms: its capital_cost on the charger (per MW), its
+    marginal_cost per MWh dispatched = the discharger's per MWh drawn / efficiency, its
+    marginal_cost_storage on the Store (store-side MWh held, as the unit's state of charge)."""
+    from harness.calculations import _number, _series
+
+    store, charger, discharger, _, _ = storage.split_view(n, entity)
+    stores, links, index = n.components["Store"], n.components["Link"], n.snapshots
+    members = ((store, "e_nom_mod"), (charger, "p_nom_mod"), (discharger, "p_nom_mod"))
+    drawn = _series(links, "marginal_cost", discharger.name, index)
+    eta = _series(links, "efficiency", discharger.name, index)
+    quadratic = _series(links, "marginal_cost_quadratic", discharger.name, index)
+
+    def divide(v, e, power=1):
+        return None if v is None or e is None or e <= 0 else v / e**power
+
+    return {
+        "version": 1,
+        "objective_weight": [_number(v) for v in n.snapshot_weightings["objective"]],
+        "capital_cost": _number(charger["capital_cost"]),
+        # Only the charger's capital_cost is the unit's annual charge; any other fixed term is unsupported.
+        "direct_capital_charge": all(
+            bool(pd.isna(row["overnight_cost"])) and _number(row["fom_cost"]) == 0
+            for row, _ in members
+        )
+        and _number(store["capital_cost"]) == 0
+        and _number(discharger["capital_cost"]) == 0,
+        "linear_model": all(
+            bool(row["active"]) and _number(row[mod]) == 0 for row, mod in members
+        ),
+        "marginal_cost": [divide(v, e) for v, e in zip(drawn, eta, strict=True)],
+        "marginal_cost_storage": _series(
+            stores, "marginal_cost_storage", store.name, index
+        ),
+        "marginal_cost_quadratic": [
+            divide(v, e, 2) for v, e in zip(quadratic, eta, strict=True)
+        ],
+    }
 
 
 def calculate(raw, scope):

@@ -325,6 +325,7 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/durable-conversations/{thread_id}/checkpoint"): (CHAT_SESSION, _R_DURABLE_THREAD),
     ("POST", "/api/durable-conversations/{thread_id}/resume"): (CHAT_SESSION, _R_DURABLE_THREAD),
     ("POST", "/api/durable-conversations/{thread_id}/rebind"): (CHAT_SESSION, _R_DURABLE_THREAD),
+    ("POST", "/api/durable-conversations/{thread_id}/profile"): (CHAT_SESSION, _R_DURABLE_THREAD),
     # gridspine studies
     ("POST", "/api/gridspine/{name}/dispatch-source"): (STUDY_NOT_LOCK_COORDINATED, _R_STUDY),
     ("PUT", "/api/gridspine/{name}/config"): (STUDY_NOT_LOCK_COORDINATED, _R_STUDY),

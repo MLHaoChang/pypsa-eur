@@ -762,6 +762,15 @@ def _results_for_run(result_kind: str, run_id: Any, *, reshaped: bool = False) -
             data = digest.for_kind(live, result_kind)
         return {"status": "ok", "scope": "current", "result_kind": result_kind,
                 "data": data, "run_id": run_id, "run": run, **facts}
+    own = run_evidence.own_section(run_id) if run is None else None
+    if own is not None:
+        return retained_results.unavailable(
+            "historical_scope_mismatch",
+            f"Run {run_id} is a {own[0]} run, not a solve, so it keeps no {result_kind!r} "
+            f"results. It keeps its own {own[1]!r} section: open it with "
+            "discuss_project_run or export_run_evidence.",
+            run_id=run_id, scope="historical", result_kind=result_kind,
+            run_kind=own[0], kept_section=own[1], **facts)
     record, refused = retained_results.historical(section, run_id)
     if refused is not None:
         return {**refused, "result_kind": result_kind, "run_id": run_id, **facts,

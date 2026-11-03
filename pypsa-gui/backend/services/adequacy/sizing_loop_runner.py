@@ -36,7 +36,8 @@ After a converged run the AS-07 control-settings sheet is built from the final s
 attached, and written next to `dyr_path` when one is given.
 
 Assumed values, marked as such (SAGC-1): tan phi_swing 0.1 (the GPU load's reactive swing per MW needs vendor
-data), X/R 4 (`flicker_inputs.DEFAULT_XR`), the GFM fault-current credit 1.2 pu, ESCR >= 3.
+data), X/R 4 (`flicker_inputs.DEFAULT_XR`) unless the project enters its PoC X/R (`project_inputs`, AS-17b), the
+GFM fault-current credit 1.2 pu, ESCR >= 3.
 """
 from __future__ import annotations
 
@@ -51,7 +52,7 @@ import numpy as np
 import pandas as pd
 
 from services.adequacy import sizing_loop as sl
-from services.adequacy.flicker_inputs import DEFAULT_XR
+from services.adequacy.flicker_inputs import DEFAULT_XR, XR_ASSUMED
 from services.solver import sizing_cuts as sc
 from services.solver.envelope_floors import _flagged, floors_from_envelope
 from services.solver.pcs_statcom import pcs_statcom_tags, solution
@@ -67,6 +68,9 @@ TAN_PHI_SWING_ASSUMED = 0.1
 #: Fault-current credit per MVA of grid-forming converter, pu (assumed).
 GFM_CREDIT = 1.2
 ESCR_MIN = 3.0
+#: Where `SizingInputs.xr` came from (AS-17b): the request's own, the project's `poc_xr`, or `DEFAULT_XR`.
+XR_SOURCE_REQUEST, XR_SOURCE_PROJECT, XR_SOURCE_ASSUMED = "request", "project", "assumed"
+XR_SOURCES = (XR_SOURCE_REQUEST, XR_SOURCE_PROJECT, XR_SOURCE_ASSUMED)
 #: What every result's sizes rest on, before the per-setting lines of `basis_lines`.
 BASIS_NOTE = ("the loop's LP matches the project solve's: the same extra_functionality chain "
               "(solver_service.build_lp_chain), energization and modelling assumptions, on a private copy")
@@ -124,14 +128,18 @@ class SizingLoopRefusal(ValueError):
 
 @dataclasses.dataclass
 class SizingInputs:
-    """What the loop needs beyond the network. `envelope` is a `dynamic_envelope` result (its `phases` and `max`)."""
+    """What the loop needs beyond the network. `envelope` is a `dynamic_envelope` result (its `phases` and `max`).
+    `xr` is the PoC X/R; with none, `DEFAULT_XR` (assumed). `xr_source` says where it came from: "request" (the
+    caller's own), "project" (the project's `poc_xr`, set only by `project_inputs`) or "assumed"."""
+
     link: str
     envelope: dict
     ramp_mw_per_min: float
     sk_mva: float
     pst_limit: float
     transformer_library_mva: tuple
-    xr: float = DEFAULT_XR
+    xr: float | None = None
+    xr_source: str | None = None
     tan_phi_swing: float | None = None
     escr_min: float = ESCR_MIN
     gfm_credit: float = GFM_CREDIT
@@ -141,8 +149,40 @@ class SizingInputs:
     campus: dict = dataclasses.field(default_factory=dict)
     dyr_path: str | None = None
 
+    def __post_init__(self):
+        if self.xr is None:
+            self.xr, self.xr_source = DEFAULT_XR, XR_SOURCE_ASSUMED
+        elif self.xr_source is None:
+            self.xr_source = XR_SOURCE_REQUEST
+        if self.xr_source not in XR_SOURCES:
+            raise SizingLoopRefusal(f"xr_source must be one of {', '.join(XR_SOURCES)}, got {self.xr_source!r}")
+
 
 # ── inputs ──────────────────────────────────────────────────────────────────
+
+
+def project_inputs(inputs: dict, project_dir) -> dict:
+    """`inputs` (the `SizingInputs` fields) for a run on the project at `project_dir`, with the PoC X/R resolved:
+    the request's own `xr`, else the project's (AS-17 `poc_xr`), else `DEFAULT_XR` (assumed). Each path still
+    goes through `_check_inputs`. `xr_source` is the server's to set, so a request carrying one is refused.
+    `inputs` is not changed."""
+    from services.project_settings import poc_xr
+
+    if "xr_source" in inputs:
+        raise SizingLoopRefusal("xr_source is not an input: it is set from where the X/R comes from")
+    if inputs.get("xr") is not None:
+        return {**inputs, "xr_source": XR_SOURCE_REQUEST}
+    xr = poc_xr(project_dir)
+    if xr is None:
+        return {**inputs, "xr": None, "xr_source": XR_SOURCE_ASSUMED}
+    return {**inputs, "xr": xr, "xr_source": XR_SOURCE_PROJECT}
+
+
+def xr_note(inp: SizingInputs) -> str:
+    """The X/R the Pst check used, and where it came from."""
+    words = {XR_SOURCE_REQUEST: "given for this run", XR_SOURCE_PROJECT: "entered for the project",
+             XR_SOURCE_ASSUMED: XR_ASSUMED}[inp.xr_source]
+    return f"X/R {inp.xr:g} ({words})"
 
 
 def _envelope_max(env: dict) -> dict:
@@ -463,13 +503,14 @@ def _pst(n, inp, state, sizes, q_dyn_free) -> dict:
     d_pct = step / sk_min * 100.0
     pst = fl.pst(d_pct, r)
     if pst <= inp.pst_limit * (1 + 1e-6):
-        return _check("pst", True, value=pst, limit=inp.pst_limit)
+        return _check("pst", True, value=pst, limit=inp.pst_limit, note=xr_note(inp))
     rhs0 = sc.pst_rhs_mva(inp.pst_limit, r, inp.sk_mva)
     d_lim_pct = rhs0 / sk_min * 100.0
     step_lp = sc.pst_step_mva(swing, sizes["p_sm"], sizes["q_dyn"], tan_phi, inp.xr)
     rhs = sc.tightened_pst_rhs(state["cuts"].get("pst_rhs_mva", rhs0), step_lp_mva=step_lp, d_pct=d_pct,
                                d_lim_pct=d_lim_pct, sk_min_mva=sk_min)
-    return _check("pst", False, cut={"pst_rhs_mva": max(rhs, 0.0)}, value=pst, limit=inp.pst_limit)
+    return _check("pst", False, cut={"pst_rhs_mva": max(rhs, 0.0)}, value=pst, limit=inp.pst_limit,
+                  note=xr_note(inp))
 
 
 def forward_checks(result: dict, state: dict, inp: SizingInputs) -> list[dict]:
@@ -549,6 +590,7 @@ def _run(base, config, inp, solve, last, undo, *, max_rounds, freeze_after, stop
         lines.append("tsam not available: inner rounds solve the full year" if not _tsam_available()
                      else "the year reduction fell back to the full year for some inner rounds")
     out["basis_note"] = "; ".join([BASIS_NOTE, *lines])
+    out["xr"], out["xr_source"] = inp.xr, inp.xr_source           # AS-17b: the X/R the Pst check used
     out["sheet"], out["sheet_paths"] = None, []
     if out["status"] == "converged" and last.get("network") is not None:
         from services import control_settings
