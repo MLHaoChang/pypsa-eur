@@ -1,0 +1,24 @@
+hourly ok optimal t3= 2030-01-01 03:00:00
+  p0 {'electrolyser': 10.0, 'haber': 5.0}
+  p1 {'electrolyser': -5.0, 'haber': -4.0}
+  p2 {'electrolyser': -1.0, 'haber': 0.25}
+  p3 {'electrolyser': 0.0, 'haber': 1.0}
+  gen {'grid': 13.25, 'boiler': 4.0, 'n2_supply': 1.0} loads {'office': 3.0, 'heat_demand': 5.0, 'nh3_offtake': 4.0}
+  t2 haber p1 0.0
+  electrolyser p0 weighted MWh 50.0
+quarter ok optimal t3= 2030-01-01 00:45:00
+  p0 {'electrolyser': 10.0, 'haber': 5.0}
+  p1 {'electrolyser': -5.0, 'haber': -4.0}
+  p2 {'electrolyser': -1.0, 'haber': 0.25}
+  p3 {'electrolyser': 0.0, 'haber': 1.0}
+  gen {'grid': 13.25, 'boiler': 4.0, 'n2_supply': 1.0} loads {'office': 3.0, 'heat_demand': 5.0, 'nh3_offtake': 4.0}
+  t2 haber p1 0.0
+  electrolyser p0 weighted MWh 12.5
+representative ok optimal t3= 2030-01-01 03:00:00
+  p0 {'electrolyser': 10.0, 'haber': 5.0}
+  p1 {'electrolyser': -5.0, 'haber': -4.0}
+  p2 {'electrolyser': -1.0, 'haber': 0.25}
+  p3 {'electrolyser': 0.0, 'haber': 1.0}
+  gen {'grid': 13.25, 'boiler': 4.0, 'n2_supply': 1.0} loads {'office': 3.0, 'heat_demand': 5.0, 'nh3_offtake': 4.0}
+  t2 haber p1 0.0
+  electrolyser p0 weighted MWh 500.0

@@ -3,7 +3,7 @@
 
 # Contract decision register
 
-Status: D01–D05, D08, D11 and D12 are accepted in [sc-00-n/decisions.md](sc-00-n/decisions.md) by the GK B and UX OK @1ed9a0bee25b795099522e3b842f04bbb1c4a34e on PR #794's merged head; D06 is closed: [d06/plan.md](d06/plan.md) and [sc-00-n/decisions.md](sc-00-n/decisions.md#d06-native-target-lifecycle-identity), accepted by GK B's OK @7f3038782796d131c0b061535ae47567aad8efb6 on PR #817's merged head (merged 2026-10-28), so SC-02 is open; D07, D09 and D10 are unresolved. Architecture rules already specified remain binding
+Status: D01–D05, D08, D11 and D12 are accepted in [sc-00-n/decisions.md](sc-00-n/decisions.md) by the GK B and UX OK @1ed9a0bee25b795099522e3b842f04bbb1c4a34e on PR #794's merged head; D06 is closed: [d06/plan.md](d06/plan.md) and [sc-00-n/decisions.md](sc-00-n/decisions.md#d06-native-target-lifecycle-identity), accepted by GK B's OK @7f3038782796d131c0b061535ae47567aad8efb6 on PR #817's merged head (merged 2026-10-28), so SC-02 is open; D07 is accepted by the owner (decision D07-ACCEPT-1, 2026-11-03) on GK A's plan GO @a0fdf73f04f921644e62517e733cd859e0e23e25 with its 12 conditions: [d07/plan.md](d07/plan.md) and [issues/04-result-projection.md](issues/04-result-projection.md#comments), so SC-03 is open; D09 and D10 are unresolved. Architecture rules already specified remain binding
 
 These are questions requiring source inspection/prototype evidence, not invitations to redesign the agreed workflow. The implementation agent proposes a closure; the applicable owner/coordinator/reviewer accepts it through existing rules. No acceptance or reviewer contact is implied here. Populate the decision record before the blocked unit starts; link exact records from its PR.
 
