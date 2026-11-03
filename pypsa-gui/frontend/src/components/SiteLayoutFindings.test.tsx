@@ -6,7 +6,7 @@ import { useUIStore } from '../store/uiStore'
 import type { PlacementFinding } from '../site3d/placementCheck'
 
 const findings: PlacementFinding[] = [
-  { key: 'Generator:GEN', other: 'Load:HALL', kind: 'keepOut', severity: 'warn', distanceM: 10, message: 'GEN is 10 m from HALL; it should keep 30 m away' },
+  { key: 'Generator:GEN', other: 'Load:HALL', kind: 'keepOut', severity: 'warn', distanceM: 10, message: 'GEN is 10 m from HALL. It should keep 30 m away.' },
   { key: 'Transformer:TR1', kind: 'notBetweenBuses', severity: 'info', distanceM: 140, message: 'TR1 is 140 m from the line between the HV and MV yards; it should sit between its two buses' },
 ]
 

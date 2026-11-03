@@ -73,7 +73,7 @@ describe('placementFindings', () => {
     const f = placementFindings(objects, DEFAULT_LIBRARY).filter(x => x.kind === 'keepOut')
     expect(f).toHaveLength(1)
     expect(f[0]).toMatchObject({ key: 'Generator:GEN', other: 'Load:HALL', severity: 'warn', distanceM: 10 })
-    expect(f[0].message).toBe('GEN is 10 m from HALL; it should keep 30 m away')
+    expect(f[0].message).toBe('GEN is 10 m from HALL. It should keep 30 m away.')
     expect(findingColor('keepOut')).toBe('red')
   })
 

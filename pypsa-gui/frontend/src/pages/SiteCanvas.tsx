@@ -57,6 +57,7 @@ import { HERO_MODELS } from '../site3d/heroes'
 import { HeroInstances, preloadHeroes, useHero } from '../site3d/heroLoader'
 import SceneErrorBoundary from '../site3d/SceneErrorBoundary'
 import { DEFAULT_LIBRARY, legendFor } from '../site3d/assetLibrary'
+import { clickPicks } from '../site3d/groupEdit'
 import { matrixFor, placementFromMatrix } from '../site3d/placementMath'
 import { screenToGround, groundToScreen } from '../site3d/raycast'
 import { registerSiteDropTarget, unregisterSiteDropTarget } from '../site3d/dropRegistry'
@@ -1045,7 +1046,7 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
   const pickedSet = useMemo(() => new Set(picked && site && picked.siteId === site.id ? picked.keys : []), [picked, site])
   const onSelectObject = useCallback((obj: SiteObject, shift: boolean) => {
     const key = objectKey(obj)
-    if (shift && site && scenePlacements?.[key]) { togglePicked(site.id, key); return }
+    if (clickPicks(shift, !!site, !!scenePlacements?.[key])) { if (site) togglePicked(site.id, key); return }
     setSelectedComponent({ type: obj.type, name: obj.name })
   }, [setSelectedComponent, site, scenePlacements, togglePicked])
   const labelRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -1206,7 +1207,7 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
 
       {/* The control strip with the legend under it, stacked so a wrapped
           strip (a narrow pane) pushes the legend down instead of hiding under it. */}
-      <div className="pointer-events-none absolute left-3 top-12 z-[400] flex max-w-[calc(100%-24px)] flex-col items-start gap-1.5 [&>*]:pointer-events-auto">
+      <div className="pointer-events-none absolute left-3 top-12 z-[400] flex max-h-[calc(100%-7.5rem)] max-w-[calc(100%-24px)] flex-col items-start gap-1.5 overflow-y-auto [&>*]:pointer-events-auto">
         <SiteOverlay
           sites={sitesDoc.sites}
           site={site}

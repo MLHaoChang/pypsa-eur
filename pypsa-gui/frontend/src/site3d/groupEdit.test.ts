@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { PlaceEntry } from '../api/siteScene'
-import { detachRefusalCopy, detachTitle, groupCentre, moveGroup, undoTitle, UNDO_GONE } from './groupEdit'
+import { clickPicks, detachRefusalCopy, detachTitle, groupCentre, moveGroup, undoTitle, UNDO_GONE } from './groupEdit'
 
 const P: Record<string, PlaceEntry> = {
   'StorageUnit:bess': { x: 0, y: 0, heading: 0, on: 'ground' },
@@ -54,5 +54,14 @@ describe('detach words', () => {
     expect(detachTitle(2)).toBe('Detach 2 items from the scene. They stay in the model.')
     expect(detachTitle(1)).toBe('Detach 1 item from the scene. It stays in the model.')
     expect(undoTitle(2)).toBe('Undo detach: restore 2 items')
+  })
+})
+
+describe('canvas click (SiteCanvas onSelectObject)', () => {
+  it('Shift+click on a placed item of a scene-enabled Site picks it', () => {
+    expect(clickPicks(true, true, true)).toBe(true)
+  })
+  it.each([[false, true, true], [true, false, true], [true, true, false]])('shift=%s scene=%s placed=%s selects as before', (s, e, p) => {
+    expect(clickPicks(s, e, p)).toBe(false)
   })
 })
