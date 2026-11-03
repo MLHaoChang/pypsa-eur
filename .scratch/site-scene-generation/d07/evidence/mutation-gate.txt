@@ -1,0 +1,2 @@
+GK A condition 6 mutant: gate() with `if False and not calculations.solve_matches_inputs(ctx)` (gate skipped)
+result: 10 of 10 gate tests FAILED (run_not_solved, results_not_current x3 incl. AC PF and the monkeypatched guard, run_cancelled x2, run_failed x3, run_running); original restored.

@@ -135,8 +135,10 @@ def _is_zone_token(token: str, named_zones: frozenset) -> bool:
 
 
 def _looks_like_unlisted_zone(token: str) -> bool:
-    """2-5 letters, mostly capitals ("ChST"), and not AM/PM or a day/month word."""
-    if not (token.isascii() and token.isalpha() and 2 <= len(token) <= 5):
+    """3-5 letters, mostly capitals ("ChST"), and not AM/PM or a day/month word.
+
+    A 2-letter token ("Hr", "LT") is never a zone candidate (LC-33e)."""
+    if not (token.isascii() and token.isalpha() and 3 <= len(token) <= 5):
         return False
     if token.upper() in _NAIVE_UPPER_TOKENS:
         return False
@@ -1439,7 +1441,9 @@ async def upload_timeseries(
         raise HTTPException(422, {
             "error_kind": "timeseries_timezone_aware",
             "message": ("The CSV's timestamps carry a zone abbreviation this app does not recognise "
-                        f"({', '.join(unlisted)}). " if unlisted else "")
+                        f"({', '.join(unlisted[:5])}"
+                        f"{f', +{len(unlisted) - 5} more' if len(unlisted) > 5 else ''}). "
+                        if unlisted else "")
                        + "The CSV's timestamps carry a UTC offset or zone name. Snapshots are zone-free wall clock: convert "
                        "the timestamps to local wall time without an offset and "
                        "upload again. Nothing was stored.",

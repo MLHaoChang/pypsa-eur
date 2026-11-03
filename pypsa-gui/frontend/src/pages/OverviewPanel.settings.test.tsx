@@ -168,14 +168,17 @@ it('PoC X/R: an out-of-range value is refused inline without a request', async (
 it('PoC X/R: the API 422 reason shows inline under the field and the typed value stays', async () => {
   vi.mocked(projectsApi.list).mockResolvedValue([info()])
   vi.mocked(projectsApi.updateSettings).mockRejectedValue(
-    { isAxiosError: true, response: { status: 422, data: { detail: 'PoC X/R must be above 0 and at most 100.' } } },
+    // What FastAPI sends for poc_xr = 150: a pydantic error list, not a string.
+    { isAxiosError: true, response: { status: 422, data: { detail: [{
+      type: 'less_than_equal', loc: ['body', 'poc_xr'], msg: 'Input should be less than or equal to 100',
+      input: 150, ctx: { le: 100 } }] } } },
   )
   renderPanel()
   await waitFor(() => expect(xr().value).toBe(''))
   await userEvent.type(xr(), '5')
   await userEvent.tab()
   const alert = await screen.findByRole('alert')
-  expect(alert.textContent).toMatch(/must be above 0 and at most 100/)
+  expect(alert.textContent).toMatch(/Input should be less than or equal to 100/)
   expect(xr().getAttribute('aria-invalid')).toBe('true')
   expect(xr().value).toBe('5')
 })
@@ -186,4 +189,14 @@ it('PoC X/R: disabled while read-only, with the reason as visible text', async (
   renderPanel()
   await waitFor(() => expect(xr().disabled).toBe(true))
   expect(screen.getByText(/read-only/i)).toBeTruthy()
+  expect(xr().className).toMatch(/disabled:opacity-60/)       // a visible disabled cue, not only the attribute
+})
+
+it('PoC X/R: a Set PoC X/R request focuses the field and is cleared', async () => {
+  vi.mocked(projectsApi.list).mockResolvedValue([info()])
+  useUIStore.setState({ pocXrRequest: true })
+  Element.prototype.scrollIntoView = vi.fn()
+  renderPanel()
+  await waitFor(() => expect(document.activeElement).toBe(xr()))
+  expect(useUIStore.getState().pocXrRequest).toBe(false)
 })

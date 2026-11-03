@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The chat tool `update_project_settings` also sets the project's backup autonomy (`backup_autonomy_h`) and the point-of-connection X/R (`poc_xr`), validated by the settings route's own rules; its edit card shows the before and after values.

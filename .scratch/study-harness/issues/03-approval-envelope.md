@@ -3,7 +3,8 @@
 
 # 03 — Approval envelope: approve once, run unattended inside it
 
-Status: ready-for-agent
+Status: done
+<!-- 3 Nov: done. All 15 criteria are ticked, with the builder's comment of 28 Oct; `services/run_envelope.py` and `tests/test_harness_envelope.py` are on master. The "Known limit" in the harness README is closed by issue 22. -->
 Type: task
 Blocked by: 01
 Gated: yes (GK B; UX for the card in 08)

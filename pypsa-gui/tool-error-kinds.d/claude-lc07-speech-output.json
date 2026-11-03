@@ -1,0 +1,8 @@
+{
+"kinds": {
+"speech_output_over_budget": {
+"surface": "inline",
+"why": "LC-07 speech output: the audio bridge's claim refuses an answer whose characters exceed the session's remaining TTS reservation; nothing is synthesized or charged, the answer is never truncated, and it stays in the caption."
+}
+}
+}

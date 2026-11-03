@@ -198,21 +198,29 @@ def adopt(project_dir: pathlib.Path, site_id: str, expected_legacy_digest: str,
         return _commit(project_dir, site_id, gen, 1, None, crash)
 
 
-def _chain_receipt(project_dir: pathlib.Path, site_id: str, pointer: dict[str, Any],
-                   proposal_id: str) -> dict[str, Any] | None:
-    """The committed receipt of `proposal_id` anywhere in the pointed chain, else None."""
-    gen_id: str | None = pointer["generation"]
+def _chain(project_dir: pathlib.Path, site_id: str, gen_id: str | None):
+    """
+    The generations from `gen_id` back through their parents, newest first.
+    The walk ends at a missing file: a copy carries only the pointed
+    generation (the closure), so its history ends there and older receipts
+    belong to the source project.
+    """
     while gen_id and GENERATION_ID_RE.match(gen_id):
         path = scene_dir(project_dir, site_id) / GENERATIONS / gen_id / GENERATION_FILE
         if not path.exists():
-            # A copy carries only the pointed generation (the closure), so its
-            # history ends there: older receipts belong to the source project.
-            return None
+            return
         gen = json.loads(path.read_text(encoding="utf-8"))
+        yield gen
+        gen_id = gen.get("parent")
+
+
+def _chain_receipt(project_dir: pathlib.Path, site_id: str, pointer: dict[str, Any],
+                   proposal_id: str) -> dict[str, Any] | None:
+    """The committed receipt of `proposal_id` anywhere in the pointed chain, else None."""
+    for gen in _chain(project_dir, site_id, pointer["generation"]):
         receipt = gen.get("receipt")
         if receipt and receipt["proposal_id"] == proposal_id:
             return receipt
-        gen_id = gen.get("parent")
     return None
 
 
@@ -231,25 +239,19 @@ def detach_record(project_dir: pathlib.Path, site_id: str, proposal_id: Any) -> 
         return None
     with project_lock(project_dir):
         pointer = _read_pointer(project_dir, site_id)
-        gen_id: str | None = None if pointer is None else pointer["generation"]
-        while gen_id and GENERATION_ID_RE.match(gen_id):
-            path = scene_dir(project_dir, site_id) / GENERATIONS / gen_id / GENERATION_FILE
-            if not path.exists():
-                return None
-            gen = json.loads(path.read_text(encoding="utf-8"))
+        if pointer is None:
+            return None
+        # The detach's generation is followed by its parent: the state before it.
+        chain = _chain(project_dir, site_id, pointer["generation"])
+        for gen in chain:
             receipt = gen.get("receipt") or {}
-            if receipt.get("proposal_id") == proposal_id:
-                parent_id = gen.get("parent")
-                if not isinstance(receipt.get("detached"), dict) or not isinstance(parent_id, str) \
-                        or not GENERATION_ID_RE.match(parent_id):
-                    return None
-                parent_path = scene_dir(project_dir, site_id) / GENERATIONS / parent_id / GENERATION_FILE
-                if not parent_path.exists():
-                    return None
-                parent = json.loads(parent_path.read_text(encoding="utf-8"))
-                return {"keys": receipt["detached"], "placements": (parent.get("site") or {}).get("placements") or {},
-                        "groups": parent.get("groups") or [], "associations": parent.get("associations") or []}
-            gen_id = gen.get("parent")
+            if receipt.get("proposal_id") != proposal_id:
+                continue
+            parent = next(chain, None)
+            if not isinstance(receipt.get("detached"), dict) or parent is None:
+                return None
+            return {"keys": receipt["detached"], "placements": (parent.get("site") or {}).get("placements") or {},
+                    "groups": parent.get("groups") or [], "associations": parent.get("associations") or []}
     return None
 
 

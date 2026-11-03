@@ -202,3 +202,16 @@ def test_the_loop_result_and_its_pst_check_carry_the_xr(source):
     assert (out["xr"], out["xr_source"]) == (xr, source)
     pst = [c for r in out["rounds"] for c in r["checks"] if c["name"] == "pst"]
     assert pst and all(c["note"].startswith(f"X/R {xr:g} (") for c in pst)
+
+
+def test_a_string_request_xr_is_read_as_a_number(tmp_path):
+    """A numeric string ("2") is coerced to a float; the result still says the X/R was given for the run."""
+    out = slr.project_inputs({"xr": "2"}, tmp_path)
+    assert out["xr"] == 2.0 and isinstance(out["xr"], float) and out["xr_source"] == slr.XR_SOURCE_REQUEST
+
+
+@pytest.mark.parametrize("bad", ["abc", "", True, [2], {"a": 1}])
+def test_a_request_xr_that_is_not_a_number_is_refused(tmp_path, bad):
+    with pytest.raises(slr.SizingLoopRefusal, match="xr must be a number"):
+        slr.project_inputs({"xr": bad}, tmp_path)
+

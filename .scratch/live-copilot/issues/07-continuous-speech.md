@@ -115,6 +115,81 @@ Remaining gates (recorded, not built):
   smoke; multi-worker leases (reserve/settle still have no replica check of
   their own; speech routes inherit the store lock and pin through `_read`).
 
+2026-11-03: PR2 speech output (LC-T14, branch `claude/lc07-speech-output`, on
+master `cbfd6cbcd`). `run_turn` hands every client frame of a turn whose
+utterance is a redeemed `speech:<segment>` ticket to
+`live_speech.AnswerCapture`. At `turn_done` naming the `answer_approved`
+answer, the turn's `token` frames (all after the approval) must equal the
+assurance-approved text byte for byte; then the answer is queued for that
+speech session if the turn was not aborted, no newer turn has started on
+the conversation (typed, spoken or a drained correction; LC-T10) and the
+ticket's admission generation is still current. A newer turn also drops
+answers already queued but not yet claimed. Never queued: legacy (unvalidated) text, prose
+before approval, an error frame, an approval whose turn never reached
+`turn_done` (checked but publication pending), a `turn_done` naming another
+answer, typed turns, superseded generations, text over
+`live_media.MAX_TTS_TEXT_CHARS`. Bridge routes (owner context plus
+`X-Bridge-Token`): `…/speech/output/claim` hands the worker the next answer
+once (text, sha256, chars; stale-generation items are dropped) and charges
+`len(text)` characters to the session's TTS usage through `report_usage`'s own
+record (usage id `tts-<output_id>`; the worker's report under that id is a
+duplicate), refusing (`over_budget`, caption only) an answer the reservation
+cannot cover; `…/speech/barge-in` cancels queued and claimed answers only (no
+abort, lease, admission-generation or job change; no refund). Every session
+exit drops its queue. `live_speech.synthesize_output` passes the claimed text
+to a `TtsAdapter` verbatim after its sha256 check. Tests:
+`tests/test_live_speech_output_lc07.py` (21; ten mutants each fail a test).
+mp-code-review (standards + spec) findings fixed: newer-turn supersede, and
+`redeem_final` records the spoken ticket in the same lock block as the pop.
+Kept: characters are charged at claim, not refunded on barge-in or failed
+synthesis (never under-count); a worker TTS report under another usage id
+double-counts (over, never under); `len(text)` counts code points, vendor
+billing units are a vendor gate; `synthesize_output` has no production caller
+until the audio worker exists.
+
+Remaining gates (recorded, not built), in addition to PR1's:
+- Pronunciation of engineering numbers and units (LC-T14 "pronounced
+  correctly") needs the vendor voice and listening evidence; text is passed
+  verbatim, never rewritten.
+- Answers longer than one TTS request are not spoken (no chunking until the
+  vendor's request limit is known).
+- Worker-side playback stop and audio-frame flushing live in the audio worker
+  (agent hosting gate); the backend refuses any further claim of a cancelled
+  answer.
+
+GK B plan GO for PR2 with additions (recorded as given):
+(g) budget before sound: a claim whose characters exceed the remaining TTS
+reservation refuses with a typed refusal and nothing is spoken; never
+truncated; charging at claim accepted, a claimed-then-cancelled answer stays
+charged. (h) bounded per-session queue (e.g. 8), overflow drops the oldest
+unclaimed answer with a counted warning; outputs carry the generation and a
+claim after rebind or rotation refuses. (i) any suppression of code, tables
+or tool logs yields exact in-order substrings of the approved text, shown as
+the caption; without it the whole text is spoken; byte-equal test with
+"7.5 MW" and "1 200 kWh" against the sha256. (j) barge-in is session-scoped:
+stale generation or closed session refuses and cancels nothing; the
+untouched-turn test spies on abort_event and the job/solver entry points.
+(k) PR1's rules at the trial merge (policy suites, inventory, route-parity,
+control-matrix `--check`, manifest test), byte-equal refusals for unknown,
+non-owner and other-project threads, `speech_disabled` on every route while
+the flag is off.
+
+PR2 against them: (g) `speech_output_over_budget` (409, own fragment
+`tool-error-kinds.d/claude-lc07-speech-output.json`), no usage row, the
+worker's synthesize step is never reached. (h) `OUTPUTS_MAX = 8` bounds unclaimed
+answers only (GK B (18) NOT OK @eac89f21: played answers had taken slots);
+only the latest claimed answer is kept, for barge-in; when 8 are waiting the
+oldest unclaimed one is dropped, counted in `_OUTPUT_DROPS` and logged; a
+long session of one-at-a-time answers drops nothing (tested); a closed session (rebind, rotation, any exit)
+drops its queue and refuses claims. (i) no suppression is built: the whole
+approved text is the caption and the spoken text; test passes "7.5 MW" and
+"1 200 kWh" through `HttpTtsAdapter` and checks the sha256. (j) `barge_in`
+takes the thread generation (`stale_generation` 409) and refuses a closed
+session (`speech_session_closed`); the test spies on `abort_event`,
+`chat_tools.abort_*`, `assistant_tasks.cancel_task`, `runner.stop_default`,
+`experiment_execution.cancel_experiment` and `cancel_if_queued`. (k) both new
+routes are covered by the byte-equal refusal and flag-off tests.
+
 2026-11-03: PR3 (branch `claude/lc07-speech-frontend`), frontend only.
 `utils/liveSpeechSession.ts` (`LiveSpeechSession`) owns the mic stream, the
 `/speech/start|end` session and a `SpeechMediaLink` seam

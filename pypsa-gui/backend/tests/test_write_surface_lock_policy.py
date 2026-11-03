@@ -337,6 +337,8 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/durable-conversations/{thread_id}/speech/end"): (CHAT_SESSION, _R_SPEECH_SESSION),
     ("POST", "/api/durable-conversations/{thread_id}/speech/segment"): (CHAT_SESSION, _R_SPEECH_SESSION),
     ("POST", "/api/durable-conversations/{thread_id}/speech/usage"): (CHAT_SESSION, _R_SPEECH_SESSION),
+    ("POST", "/api/durable-conversations/{thread_id}/speech/output/claim"): (CHAT_SESSION, _R_SPEECH_SESSION),
+    ("POST", "/api/durable-conversations/{thread_id}/speech/barge-in"): (CHAT_SESSION, _R_SPEECH_SESSION),
     # gridspine studies
     ("POST", "/api/gridspine/{name}/dispatch-source"): (STUDY_NOT_LOCK_COORDINATED, _R_STUDY),
     ("PUT", "/api/gridspine/{name}/config"): (STUDY_NOT_LOCK_COORDINATED, _R_STUDY),

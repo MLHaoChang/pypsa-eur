@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FolderOpen } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -275,6 +275,23 @@ function ProjectSettingsSection({ currentProject }: { currentProject: string }) 
   )
 }
 
+/** The same field on its own, for the Guided drawer (AS-18): reads the project's stored value itself. */
+export function PocXrDrawerField() {
+  const currentProject = useUIStore(s => s.currentProject)
+  const readOnly = useUIStore(s => s.readOnly)
+  const { data: projects = [] } = useQuery({
+    queryKey: ['projects'], queryFn: () => projectsApi.list(), staleTime: 30_000,
+  })
+  if (!currentProject) return null
+  const info = (projects as ProjectInfo[]).find(p => p.name === currentProject)
+  return (
+    <div className="px-3 pb-3">
+      {readOnly && <p className="text-[11px] text-muted mt-2">This project is read-only, so its settings cannot be changed.</p>}
+      <PocXrField currentProject={currentProject} stored={info?.settings?.poc_xr ?? null} readOnly={readOnly} />
+    </div>
+  )
+}
+
 // ── Project PoC X/R (AS-17c) ────────────────────────────────────────────────
 // The grid-readiness RVC and flicker rows read this source X/R at the point of
 // connection. Empty = none entered, so the default 4 applies. Saves on blur or
@@ -292,6 +309,16 @@ function PocXrField({ currentProject, stored, readOnly }: {
   // Follow the server's value when it changes under us (reload, other tab).
   const [seen, setSeen] = useState(storedText)
   if (seen !== storedText) { setSeen(storedText); setText(storedText); setError(null) }
+
+  // AS-18: a "Set PoC X/R ›" link asked for this field: bring it into view and focus it.
+  const inputRef = useRef<HTMLInputElement>(null)
+  const request = useUIStore(s => s.pocXrRequest)
+  useEffect(() => {
+    if (!request || !inputRef.current) return
+    inputRef.current.scrollIntoView({ block: 'center' })
+    if (!inputRef.current.disabled) inputRef.current.focus()
+    useUIStore.getState().clearPocXrRequest()
+  }, [request])
 
   const mut = useMutation({
     mutationFn: (v: number | null) => projectsApi.updateSettings(currentProject, { poc_xr: v }),
@@ -319,6 +346,7 @@ function PocXrField({ currentProject, stored, readOnly }: {
       <label htmlFor="poc-xr" className="text-xs font-medium text-text">PoC X/R</label>
       <input
         id="poc-xr"
+        ref={inputRef}
         type="text"
         inputMode="decimal"
         value={text}
@@ -329,7 +357,7 @@ function PocXrField({ currentProject, stored, readOnly }: {
         onChange={e => setText(e.target.value)}
         onBlur={commit}
         onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-        className="w-32 rounded border border-border bg-surface px-2 py-1 text-[12px] text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20"
+        className="w-32 rounded border border-border bg-surface px-2 py-1 text-[12px] text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20 disabled:cursor-not-allowed disabled:opacity-60 disabled:bg-bg-2"
       />
       <span id="poc-xr-hint" className="text-[11px] text-muted leading-snug">{POC_XR_HINT}</span>
       {error && <span id="poc-xr-error" role="alert" className="text-[11px] text-danger leading-snug">{error}</span>}

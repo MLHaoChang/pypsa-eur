@@ -18,7 +18,7 @@ const PICK_HINT = 'Shift+click placed equipment in the view, or tick it here, to
 const NOTHING_TO_MOVE = 'Enter a distance or an angle first'
 const FIX_FIELDS = 'Fix the fields marked above first'
 
-export default function PlacedEquipment({ siteId, placements, itemName, writable, blockedReason, onPreviewMove, onPreviewDetach, onUndo }: {
+export default function PlacedEquipment({ siteId, placements, itemName, writable, blockedReason, reasonAbove = false, onPreviewMove, onPreviewDetach, onUndo }: {
   siteId: string
   placements: Readonly<Record<string, PlaceEntry>>
   /** The item's display name, as the Model panel names it (never the raw key). */
@@ -26,6 +26,8 @@ export default function PlacedEquipment({ siteId, placements, itemName, writable
   writable: boolean
   /** Why nothing can be written here (read-only, locked); null when it can. */
   blockedReason: string | null
+  /** The tab already shows `blockedReason` at its top: not repeated beside each disabled button. */
+  reasonAbove?: boolean
   onPreviewMove: (keys: string[], move: GroupMove) => void
   onPreviewDetach: (keys: string[]) => void
   onUndo: () => void
@@ -42,6 +44,7 @@ export default function PlacedEquipment({ siteId, placements, itemName, writable
   const group = n >= 2
   useEffect(() => { setMove(NO_MOVE) }, [group, siteId])
 
+  const note = (r: string | null) => (reasonAbove && r === blockedReason ? null : r)
   const moveReason = blockedReason ?? (!moveValid(move) ? FIX_FIELDS : isNoMove(move) ? NOTHING_TO_MOVE : null)
   const receipt = lastDetach?.siteId === siteId ? lastDetach : null
   if (keys.length === 0 && !receipt) return null
@@ -91,7 +94,7 @@ export default function PlacedEquipment({ siteId, placements, itemName, writable
             <button type="button" data-testid="group-preview" className={primary} disabled={!writable || !!moveReason}
               onClick={() => onPreviewMove(mine, move)}>Preview</button>
           </div>
-          {moveReason && <span className="text-[11px] text-muted" data-testid="group-preview-reason">{moveReason}</span>}
+          {note(moveReason) && <span className="text-[11px] text-muted" data-testid="group-preview-reason">{moveReason}</span>}
         </div>
       )}
 
@@ -101,7 +104,7 @@ export default function PlacedEquipment({ siteId, placements, itemName, writable
             <button type="button" data-testid="detach-preview" className={secondary} disabled={!writable || !!blockedReason}
               onClick={() => onPreviewDetach(mine)}>Detach from scene</button>
           </div>
-          {blockedReason && <span className="text-[11px] text-muted" data-testid="detach-preview-reason">{blockedReason}</span>}
+          {note(blockedReason) && <span className="text-[11px] text-muted" data-testid="detach-preview-reason">{blockedReason}</span>}
         </div>
       )}
 
@@ -112,7 +115,7 @@ export default function PlacedEquipment({ siteId, placements, itemName, writable
             <button type="button" data-testid="detach-undo" className={secondary}
               disabled={!writable || !!receipt.blocked || !!blockedReason} onClick={onUndo}>Undo</button>
           </div>
-          {(receipt.blocked ?? blockedReason) && (
+          {note(receipt.blocked ?? blockedReason) && (
             <span className="text-[11px] text-muted" data-testid="detach-undo-reason">{receipt.blocked ?? blockedReason}</span>
           )}
         </div>

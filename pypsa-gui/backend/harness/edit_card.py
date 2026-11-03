@@ -1520,7 +1520,12 @@ register("update_project_flow_scope", Adapter("settings_edit", _flow_scope_previ
 
 # update_project_settings: the `settings` table in metadata.json.
 
-def _stored_project_setting(args: dict):
+_SETTINGS_LABELS = {"derive_lengths_from_geometry": "Derive lengths from geometry",
+                    "backup_autonomy_h": "Backup autonomy", "poc_xr": "Point-of-connection X/R"}
+_SETTINGS_UNITS = {"backup_autonomy_h": "h"}
+
+
+def _stored_project_settings(args: dict) -> dict:
     from services import chat_tools, project_registry, project_settings
 
     with chat_tools._acting() as (db, user):
@@ -1532,26 +1537,47 @@ def _stored_project_setting(args: dict):
     except (OSError, ValueError):
         _refuse("project_unsaved", f"Save '{project.name}' before changing its settings.", 409)
     table = meta.get(project_settings.SETTINGS_KEY) if isinstance(meta, dict) else None
-    return table.get(project_settings.DERIVE_LENGTHS) if isinstance(table, dict) else None
+    return table if isinstance(table, dict) else {}
 
 
 def _project_settings_preview(args: dict) -> list[dict]:
-    from services import project_settings
+    from pydantic import ValidationError
 
-    flag = args.get("derive_lengths_from_geometry")
-    if not isinstance(flag, bool):
-        _refuse("invalid_edit_value", "Derive lengths from geometry takes true or false.")
-    old = _stored_project_setting(args)
-    if old is flag:
-        _refuse("empty_edit", "Derive lengths from geometry is already " + ("on." if flag else "off."))
-    row = _settings_row("Project settings", project_settings.DERIVE_LENGTHS, "Derive lengths from geometry", old, flag,
-                        says_name="Derive lengths from geometry")
-    row["words"] = {"old": "not set" if old is None else "On" if old else "Off", "new": "On" if flag else "Off"}
-    return [row]
+    from models.schemas import UpdateProjectSettingsRequest
+
+    sent = {k: args[k] for k in _SETTINGS_LABELS if k in args}
+    if not sent:
+        _refuse("empty_edit", "Send at least one setting to change.")
+    # The router's own request model validates: one rule, not a copy of it here.
+    try:
+        checked = UpdateProjectSettingsRequest(**sent).model_dump(exclude_unset=True)
+    except ValidationError as exc:
+        field = str(exc.errors()[0]["loc"][0]) if exc.errors() else "settings"
+        _refuse("invalid_edit_value", f"{_SETTINGS_LABELS.get(field, field)} was refused: {exc.errors()[0]['msg']}.")
+    stored = _stored_project_settings(args)
+    rows = []
+    for key, new in checked.items():
+        if new is None:
+            _refuse("invalid_edit_value", f"{_SETTINGS_LABELS[key]} takes a value.")
+        old = stored.get(key)
+        if old == new and type(old) is type(new):
+            continue
+        label = _SETTINGS_LABELS[key]
+        row = _settings_row("Project settings", key, label, old, new, _SETTINGS_UNITS.get(key, ""), says_name=label)
+        if isinstance(new, bool):
+            row["words"] = {"old": "not set" if old is None else "On" if old else "Off", "new": "On" if new else "Off"}
+        rows.append(row)
+    if not rows:
+        only = next(iter(checked)) if len(checked) == 1 else None
+        if isinstance(checked.get(only), bool):
+            _refuse("empty_edit", f"{_SETTINGS_LABELS[only]} is already " + ("on." if checked[only] else "off."))
+        _refuse("empty_edit", "Those settings already hold these values.")
+    return rows
 
 
 def _project_settings_readback(args: dict, rows: list[dict]) -> list[Any]:
-    return [_setting(_stored_project_setting(args))]
+    stored = _stored_project_settings(args)
+    return [_setting(stored.get(row["field"])) for row in rows]
 
 
 register("update_project_settings", Adapter("settings_edit", _project_settings_preview,

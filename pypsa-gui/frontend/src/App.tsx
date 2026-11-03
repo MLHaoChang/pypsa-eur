@@ -24,7 +24,7 @@ import CapacityBoundsEditor from './pages/CapacityBoundsEditor'
 import Results from './pages/Results'
 import SnapshotsPanel from './pages/SnapshotsPanel'
 import IssuesPanel from './pages/IssuesPanel'
-import OverviewPanel from './pages/OverviewPanel'
+import OverviewPanel, { PocXrDrawerField } from './pages/OverviewPanel'
 import ScenariosPanel from './pages/ScenariosPanel'
 import WorkspacePanel from './pages/WorkspacePanel'
 import CompareView from './pages/CompareView'
@@ -66,7 +66,7 @@ import { appLog, useSimulationStore } from './store/simulationStore'
 import { PanelChromeContext, type PanelChrome } from './components/PageKit'
 import { NextSectionButton } from './components/NextSectionButton'
 import { PANEL_SECTION } from './layout/flowSections'
-import { SITE_ANCHOR_TARGET, openSectionInExpert } from './layout/flowNavigation'
+import { POC_XR_TARGET, SITE_ANCHOR_TARGET, openSectionInExpert } from './layout/flowNavigation'
 import BackToHubResults from './components/BackToHubResults'
 import SiteAnchorField from './site3d/SiteAnchorField'
 
@@ -818,6 +818,9 @@ export default function App() {
               {t => t.field === SITE_ANCHOR_TARGET.field
                 // Site 3D rule 4: the coordinate field's Guided home.
                 ? <div className="px-3 py-2"><SiteAnchorField /></div>
+                : t.field === POC_XR_TARGET.field
+                // AS-18: the PoC X/R field's Guided home, the field alone over the Project card.
+                ? <PocXrDrawerField />
                 : LIMIT_FIELDS[t.field ?? '']
                 // The grid-readiness limits' one editor (DC 03 slice 6): a to-check ramp or oscillation
                 // limit opens its line; the fault level's value and source are one line too.

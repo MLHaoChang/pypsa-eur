@@ -3674,12 +3674,22 @@ def update_project_scenario_metadata(name: str, description: str | None | _Unset
     return _route(_h, name, body)
 
 
-def update_project_settings(name: str, derive_lengths_from_geometry: bool) -> dict:
-    """`PATCH .../settings`: the project's settings table in metadata.json."""
+def update_project_settings(name: str, derive_lengths_from_geometry: bool | _Unset = _UNSET,
+                            backup_autonomy_h: float | _Unset = _UNSET,
+                            poc_xr: float | _Unset = _UNSET) -> dict:
+    """`PATCH .../settings`: the settings table in metadata.json; only the keys sent are written.
+    The request model is the router's own, so a bad value is refused by its validation (422)."""
     from models.schemas import UpdateProjectSettingsRequest
     from routers.projects import update_project_settings as _h
 
-    body = UpdateProjectSettingsRequest(derive_lengths_from_geometry=derive_lengths_from_geometry)
+    from pydantic import ValidationError
+
+    try:
+        body = UpdateProjectSettingsRequest(**{k: v for k, v in (
+            ("derive_lengths_from_geometry", derive_lengths_from_geometry),
+            ("backup_autonomy_h", backup_autonomy_h), ("poc_xr", poc_xr)) if v is not _UNSET})
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors(include_url=False)) from exc
     return _route(_h, name, body)
 
 

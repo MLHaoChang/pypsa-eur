@@ -70,6 +70,14 @@ A `pytest.raises(Exception)` on a refusal is checked for what actually raises. A
 - A test that skips without tsam uses `pytest.importorskip("tsam")`; cloud containers have no tsam.
 - A browser journey that flips a manifest row to covered waits on a locator specific to each screen effect it claims, not on text that may already be visible (#998).
 - A route that sizes or solves a named project's network reads its solver config through `routers/projects.py::_solver_config_from_dict` (pack-only import-cap strip, lpf coercion, invalid-goal drop) and never forks it. An unbuildable saved config is a 422, never a silent default (#1009).
+- An X/R-dependent verdict never passes on an assumed X/R alone; while X/R is assumed, a pass also needs the X/R-free bound (AS11B-RVC-1).
+- Voltage-form direction depends on the P/Q mix: hand-check with both P and Q > 0, not only P.
+- A typed refusal needs a fail-closed test at the catching site, with a base-class mutant that the test kills.
+- An inflow-fed unit keeps its charge side at 1.0 even with a pump.
+- The split-storage reverse mapping is exact only for the migrate layout; a hand-built or add_split_storage layout is refused, not approximated (SPLIT-COST-1).
+- A gate that infers deployment shape from argv or env fails closed behind a process-exclusive lock: `python -m uvicorn`, `gunicorn -c` and `GUNICORN_CMD_ARGS` are invisible to argv (#1051).
+- A deadline exit (timeout, grace period) settles with its own timer and a boot sweep, never only on the next touch, and the boot sweep honours the replica pin and lease (#1058).
+- A capture that reads a shared live slot (`_state[key]`) checks the identity of the record it publishes, under the slot's lock (#1038).
 
 ## Engineering rules
 

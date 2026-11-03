@@ -234,6 +234,7 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
             ('POST', '/api/projects/{name}/sites/{site_id}/scene/adopt'),
             ('POST', '/api/projects/{name}/sites/{site_id}/scene/proposals'),
             ('GET', '/api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}'),
+            ('GET', '/api/projects/{name}/sites/{site_id}/scene/results'),
             ('POST', '/api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/apply'),
             ('POST', '/api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/cancel'),
         }),

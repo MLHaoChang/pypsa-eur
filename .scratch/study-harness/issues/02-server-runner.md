@@ -3,7 +3,8 @@
 
 # 02 — Server-side runner: advance without a panel, restart, notify
 
-Status: ready-for-agent
+Status: done
+<!-- 3 Nov: done. All 12 criteria are ticked, with the builder's comment of 28 Oct; `harness/runner.py` and `tests/test_harness_runner.py` are on master. -->
 Type: task
 Blocked by: 01
 Gated: yes (GK B)

@@ -1,0 +1,2 @@
+E       AssertionError: {"detail":"Frontend not built. Run `npm run build`."}
+E       AssertionError: {"detail":"Frontend not built. Run `npm run build`."}
