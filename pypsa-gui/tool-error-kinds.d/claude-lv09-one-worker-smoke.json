@@ -1,0 +1,1 @@
+{"kinds": {"multi_worker_unsupported": {"surface": "inline", "why": "Durable conversations refuse every control while the server runs more than one application worker (desktop declaration, --workers / -w, or WEB_CONCURRENCY above one); the operator restarts it with one worker."}}}
