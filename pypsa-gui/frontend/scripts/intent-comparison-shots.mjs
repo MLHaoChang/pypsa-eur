@@ -72,6 +72,7 @@ try {
       localStorage.setItem('network-diagram:theme', theme)
     }, { mode, theme, project: PROJECT })
     const page = await ctx.newPage()
+    if (process.env.DEBUG_REQ) page.on('response', r => { if (r.url().includes('/api/')) { console.log(r.status(), r.url()); if (/campus-electrical\/[^/]+$/.test(r.url())) r.text().then(t => console.log(t.slice(0, 200))).catch(() => {}) } })
     page.setDefaultTimeout(10000)
     page.on('pageerror', e => problems.push(`${mode}/${theme}: page error: ${e.message}`))
     let current = STATES['1-nothing-picked']
@@ -90,7 +91,7 @@ try {
     await page.route(u => u.pathname.includes('/intent-comparison'), r => r.request().method() === 'GET'
       ? (current.job ? r.fulfill({ json: current.job }) : r.fulfill({ status: 404, json: { detail: 'none' } })) : r.fulfill({ json: current.job }))
     await page.route(u => /\/api\/campus-electrical\/[^/]+$/.test(u.pathname), r => r.fulfill({ json: campusState() }))
-    await page.route(u => u.pathname.startsWith('/api/campus-electrical/') && !/\/[^/]+$/.test(u.pathname.replace('/api/campus-electrical/', '')), r => r.fulfill({ json: {} }))
+    await page.route(u => /\/api\/campus-electrical\/[^/]+\/.+/.test(u.pathname), r => r.fulfill({ json: {} }))
     // Registered last: Playwright runs the newest matching route first, so this beats the catch-all above.
     await page.route(u => u.pathname.includes('/published/'), r => r.fulfill({ json: { id: 'eu_rfg_dcc_ce', yaml: '', profile: { pst_limit: { value: 0.8 } }, review: null, unconfirmed: [], document: null } }))
     await page.goto(`${BASE}/`)
