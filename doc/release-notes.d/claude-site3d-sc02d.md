@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Site 3D can detach placed equipment from the scene (the model item stays in the model) and undo the detach, and can move or rotate several placed items together in one preview and one commit (Shift+click or the "Placed equipment" list).
