@@ -1068,6 +1068,82 @@ def wire_record(record: dict | None) -> dict | None:
     return {k: v for k, v in record.items() if k not in _PROCESS_KEYS}
 
 
+# LC-03 slice 2: a study or report run keeps its own section. A study keeps
+# what its status route served when it finished, verbatim (no derived field);
+# a report run keeps ids and counts only.
+STUDY_SECTION = 'study_result'
+REPORT_SECTION = 'report_output'
+_STUDY_ROUTE = {
+    'fmea_sweep': 'get_fmea_sweep', 'frontier': 'get_frontier', 'mc': 'get_mc',
+    'coupling_loop': 'get_coupling_loop', 'margin_loop': 'get_margin_loop',
+    'eh_study': 'get_eh_study', 'investment_case': 'get_investment_case',
+}
+
+
+def _bounded(section: str, payload: dict | None, run_id: str) -> tuple[dict, list[str]]:
+    """({section: payload}, []) when it fits the store's cap, else ({}, [warning])."""
+    if payload is not None and len(_json_bytes(payload)) <= MAX_SECTION_BYTES:
+        return {section: payload}, []
+    if payload is not None:
+        import logging
+        logging.getLogger(__name__).warning('%s for %s exceeds the section cap; not kept',
+                                            section, run_id)
+    return {}, [f'{section}_not_captured']
+
+
+def _study_result(study_key: str) -> dict | None:
+    """The study's status route payload, as the route serializes it."""
+    from fastapi import Response
+    from fastapi.encoders import jsonable_encoder
+
+    import routers.results as results_routes
+
+    name = _STUDY_ROUTE.get(study_key)
+    if name is None:
+        return None
+    try:
+        out = getattr(results_routes, name)()
+    except Exception:  # noqa: BLE001 — a capture failure never breaks the publish
+        import logging
+        logging.getLogger(__name__).exception('study_result capture failed for %s', study_key)
+        return None
+    if isinstance(out, Response) or not isinstance(out, dict):
+        return None
+    return jsonable_encoder(out)
+
+
+def _report_output(record: dict) -> dict:
+    progress = record.get('progress') if isinstance(record.get('progress'), dict) else {}
+    failures = record.get('prose_failures')
+    return {
+        'report_id': record.get('report_id'),
+        'version': record.get('version'),
+        'mode': record.get('mode'),
+        'section': record.get('section'),
+        'sections_total': progress.get('total'),
+        'sections_done': progress.get('done'),
+        'repairs': record.get('repairs'),
+        'prose_failures': len(failures) if isinstance(failures, list) else None,
+    }
+
+
+def own_section(run_id: str) -> tuple[str, str] | None:
+    """(run kind, its own section) for a study or report run; None for any other.
+
+    Those runs solve no network, so no results family applies to them.
+    """
+    try:
+        record = get_run_evidence(run_id)
+    except HTTPException:
+        return None
+    kind = record.get('kind')
+    if kind == 'report':
+        return kind, REPORT_SECTION
+    if kind in _STUDY_KIND.values():
+        return kind, STUDY_SECTION
+    return None
+
+
 def start_study_run(study_key: str, record: dict) -> dict | None:
     """Mark an adequacy/study mesh worker as a running evidence run."""
     try:
@@ -1123,12 +1199,16 @@ def publish_study_run(study_key: str, record: dict) -> dict | None:
                 'error_kind': 'study_failed',
                 'message': message,
             }
+        sections = None
+        warnings: list[str] = []
+        if status == 'completed':
+            kept, warnings = _bounded(STUDY_SECTION, _study_result(study_key), token['run_id'])
+            sections = {'summary': summary, **kept}
         return publish_run(
             token['root'], token['project_id'], run_id=token['run_id'],
             kind=token['kind'], status=status, started_at=token.get('started_at'),
             mode=study_key, job_id=token['run_id'], actor_id=token.get('actor_id'),
-            error=error,
-            sections={'summary': summary} if status == 'completed' else None,
+            error=error, sections=sections, warnings=warnings or None,
         )
     except HTTPException:
         return None
@@ -1216,12 +1296,17 @@ def publish_report_run(record: dict) -> dict | None:
                 'error_kind': 'report_failed',
                 'message': str(record.get('error') or 'The report job failed.')[:500],
             }
+        sections = None
+        warnings: list[str] = []
+        if status == 'completed':
+            kept, warnings = _bounded(REPORT_SECTION, _report_output(record), token['run_id'])
+            sections = {'summary': summary, **kept}
         return publish_run(
             token['root'], token['project_id'], run_id=token['run_id'],
             kind='report', status=status, started_at=token.get('started_at'),
             mode=summary.get('mode') or 'report', job_id=token['run_id'],
             actor_id=token.get('actor_id'), error=error,
-            sections={'summary': summary} if status == 'completed' else None,
+            sections=sections, warnings=warnings or None,
         )
     except HTTPException:
         return None
