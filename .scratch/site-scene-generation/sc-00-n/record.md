@@ -3,7 +3,7 @@
 
 # SC-00 N implementation record
 
-Status: native prototype and proposed contract closures; nothing user-visible ships. Copied from [implementation-record-template.md](../implementation-record-template.md).
+Status: native prototype and accepted contract closures (D01–D05, D08, D11, D12 by UX and GK OK on #794's merged head; D06 by GK B OK on #817's merged head); nothing user-visible ships. Copied from [implementation-record-template.md](../implementation-record-template.md).
 
 ## Assignment contract
 
