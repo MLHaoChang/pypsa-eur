@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A CSV time column with a lower- or mixed-case zone abbreviation ("cet", "Est") or an unlisted zone-like one ("ChST") is now refused as timezone-aware instead of the zone being silently dropped; ordinary words ("cat", "west") and naive "Mon"/"PM" stay accepted.

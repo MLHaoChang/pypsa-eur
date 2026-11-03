@@ -260,3 +260,61 @@ def test_an_integer_indexed_csv_on_a_range_snapshot_network_is_not_called_timezo
     n.set_snapshots(pd.RangeIndex(4))
     result = chat_tools.upload_timeseries("loads", "L1", "p_set", "snapshot,L1\n0,1\n1,2\n2,3\n3,4\n")
     assert result["rows"] == 4
+
+
+def _refusal_or_none(csv):
+    from fastapi import HTTPException
+    try:
+        chat_tools.upload_timeseries("loads", "L1", "p_set", csv)
+    except HTTPException as exc:
+        return exc.detail
+    return None
+
+
+# LC-33d: zone matching. Unambiguous multi-letter abbreviations match in any case;
+# an abbreviation that is also an ordinary word or data token when lower-cased
+# (cat, eat, wat, wet, west, ut, z, ist) stays case-sensitive, so 'west' or 'z' in
+# a data column is not taken for a zone. Unlisted zone-like tokens are refused.
+@pytest.mark.parametrize("zone", ["cet", "Cet", "cest", "est", "Est", "pst", "utc", "Utc", "gmt", "aest"])
+@pytest.mark.parametrize("where", ["after", "before"])
+def test_a_lowercase_or_mixed_case_zone_abbreviation_is_refused_as_timezone_aware(alpha, zone, where):
+    t0, t1 = ("2026-01-01 00:00", "2026-01-01 01:00")
+    rows = [f"{t0} {zone}", f"{t1} {zone}"] if where == "after" else [f"{zone} {t0}", f"{zone} {t1}"]
+    before = _four(alpha)
+    assert _refused(f"snapshot,L1\n{rows[0]},9\n{rows[1]},9\n")["error_kind"] == "timeseries_timezone_aware"
+    assert list(PyPSAService.get_network().loads_t.p_set["L1"]) == before
+
+
+@pytest.mark.parametrize("word", ["CAT", "EAT", "WAT", "WET", "WEST", "UT", "IST", "Z"])
+def test_the_upper_case_form_of_a_case_sensitive_word_is_still_a_zone(alpha, word):
+    csv = f"snapshot,L1\n2026-01-01 00:00 {word},9\n2026-01-01 01:00 {word},9\n"
+    assert _refused(csv)["error_kind"] == "timeseries_timezone_aware"
+
+
+def test_a_non_timestamp_row_with_a_zone_like_tail_is_not_called_a_zone(alpha):
+    csv = "snapshot,L1\nQ1 Peak,9\nQ2 OFF,9\n"
+    assert (_refusal_or_none(csv) or {}).get("error_kind") != "timeseries_timezone_aware"
+
+
+@pytest.mark.parametrize("word", ["cat", "eat", "wat", "wet", "west", "ut", "z", "ist", "Cat", "West", "Ist"])
+def test_an_ordinary_word_or_token_is_not_taken_for_a_zone(alpha, word):
+    csv = f"snapshot,L1\n2026-01-01 00:00 {word},9\n2026-01-01 01:00 {word},9\n"
+    assert (_refusal_or_none(csv) or {}).get("error_kind") != "timeseries_timezone_aware"
+
+
+@pytest.mark.parametrize("token", ["ChST", "CHST", "SAMT", "ChsT", "NCT", "LT", "QXZT"])
+@pytest.mark.parametrize("where", ["after", "before"])
+def test_an_unlisted_zone_like_token_is_refused_with_a_reason_naming_it(alpha, token, where):
+    t0, t1 = ("2026-01-01 00:00", "2026-01-01 01:00")
+    rows = [f"{t0} {token}", f"{t1} {token}"] if where == "after" else [f"{token} {t0}", f"{token} {t1}"]
+    before = _four(alpha)
+    detail = _refused(f"snapshot,L1\n{rows[0]},9\n{rows[1]},9\n")
+    assert detail["error_kind"] == "timeseries_timezone_aware"
+    assert token in detail["message"]
+    assert list(PyPSAService.get_network().loads_t.p_set["L1"]) == before
+
+
+@pytest.mark.parametrize("token", ["PM", "AM", "pm", "A.M.", "P.M.", "Mon", "MON", "jan", "THURS", "Thurs", "Tues", "Thur", "Sept", "SEPT", "Sun"])
+def test_a_naive_am_pm_weekday_or_month_token_is_not_called_a_zone(alpha, token):
+    csv = f"snapshot,L1\n2026-01-01 00:00 {token},9\n2026-01-01 01:00 {token},9\n"
+    assert (_refusal_or_none(csv) or {}).get("error_kind") != "timeseries_timezone_aware"

@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The study status routes (`/api/results/fmea_sweep`, `frontier`, `mc`, `coupling_loop`, `margin_loop`, `eh_study`, `investment_case`) and the report generation status no longer serve the worker's internal run-evidence token, which disclosed the server's evidence folder path.

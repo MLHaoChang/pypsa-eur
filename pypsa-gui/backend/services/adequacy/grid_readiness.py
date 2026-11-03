@@ -1318,7 +1318,8 @@ def _poc_sk_mva(n) -> float | None:
 
 
 def _governing_poc(n) -> tuple[str | None, int]:
-    """The PoC bus whose S_k'' governs (the lowest), and how many PoCs there are."""
+    """The PoC bus whose S_k'' governs (the lowest), and how many PoCs there are. On a tie the first of the
+    tied buses in `n.buses` index order governs (`min` keeps the first minimum); not the name order."""
     vals = _poc_sks(n)
     return (min(vals, key=lambda vb: vb[0])[1], len(vals)) if vals else (None, 0)
 

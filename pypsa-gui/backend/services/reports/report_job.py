@@ -631,7 +631,8 @@ def start_mapping_job(*, project_name: str, project_dir: pathlib.Path,
 
 
 def public_record(record: dict[str, Any] | None) -> dict[str, Any] | None:
-    """The record for the wire: no thread handle, no event."""
+    """The record for the wire: no thread handle, no event, no run-evidence token."""
     if not record:
         return None
-    return {k: v for k, v in record.items() if k not in ("thread", "stop_event")}
+    from services import run_evidence
+    return run_evidence.wire_record(record)

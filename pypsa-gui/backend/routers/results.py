@@ -92,6 +92,7 @@ from services.solver_service import (
 # payloads still emit the "is_multi_period" JSON key; only the variable moved.
 
 from services import study_state as _study_state
+from services import run_evidence
 from services.adequacy import slack as _slack
 # The arithmetic behind the endpoints below lives in `services/results/`
 # (see the Phase 2 addendum of the decomposition spec). Each handler here
@@ -1118,7 +1119,7 @@ def get_fmea_sweep():
     st = _state.get("fmea_sweep")
     if not st:
         return Response(status_code=204)
-    return {k: v for k, v in st.items() if k not in ("thread", "stop_event")}
+    return run_evidence.wire_record(st)
 
 
 @results_router.post("/fmea_sweep/abort")
@@ -1173,7 +1174,7 @@ def get_frontier():
     st = _state.get("frontier")
     if not st:
         return Response(status_code=204)
-    out = {k: v for k, v in st.items() if k not in ("thread", "stop_event")}
+    out = run_evidence.wire_record(st)
     # LC-39: has the network been edited since this study started? Same basis
     # as the EH route and the chat readers (null: running / no captured revision).
     out["edited_since_study"] = _study_state.edited_since(st)
@@ -1239,7 +1240,7 @@ def get_mc():
         return Response(status_code=204)
     # `stop_event` is a threading.Event: unserialisable, and the abort route's
     # only handle on a live run. Same filter the loops' GETs use.
-    out = {k: v for k, v in st.items() if k not in ("thread", "stop_event")}
+    out = run_evidence.wire_record(st)
     out["edited_since_study"] = _study_state.edited_since(st)  # LC-39, as /frontier
     return out
 
@@ -1373,8 +1374,7 @@ def get_coupling_loop():
             return Response(status_code=204)
         # Shallow copy under the lock; `iterations` is REBOUND by the worker,
         # never mutated, so the list this copy captures is frozen for ever.
-        out = {k: v for k, v in st.items()
-               if k not in ("thread", "stop_event")}
+        out = run_evidence.wire_record(st)
         out["edited_since_study"] = _study_state.edited_since(st)  # LC-41b, as /margin_loop
         return out
 
@@ -1467,8 +1467,7 @@ def get_margin_loop():
             return Response(status_code=204)
         # Shallow copy under the lock; `iterations` is REBOUND by the worker,
         # never mutated, so the list this copy captures is frozen for ever.
-        out = {k: v for k, v in st.items()
-               if k not in ("thread", "stop_event")}
+        out = run_evidence.wire_record(st)
         out["edited_since_study"] = _study_state.edited_since(st)  # LC-39, as /frontier
         return out
 
@@ -1589,7 +1588,7 @@ def get_eh_study():
     if not st:
         return Response(status_code=204)
     from services.study_state import edited_since
-    out = {k: v for k, v in st.items() if k not in ("thread", "stop_event")}
+    out = run_evidence.wire_record(st)
     # P33b 10b: has the network been edited since this study started? null
     # (Unavailable) while running or for a record without a captured revision.
     out["edited_since_study"] = edited_since(st)
