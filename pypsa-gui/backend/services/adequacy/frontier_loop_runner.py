@@ -100,11 +100,8 @@ def start_frontier(
 
     def worker():
         try:
-            # Captured in the worker under the mutation lock, right before the
-            # sweep first takes it (eh_study_runner's rule): a race can only
-            # over-report an edit.
-            with lock:
-                record["network_revision"] = dirty_state.revision(study_ctx)
+            # Captured under the mutation lock (see `dirty_state.capture`).
+            dirty_state.capture(record, study_ctx, lock=lock)
             res = run_frontier_sweep(n, lock, cfg, targets, stop_event=stop_event,
                                      final_state_update=state_update)
             voll = float(getattr(cfg, "voll", 0.0) or 0.0)

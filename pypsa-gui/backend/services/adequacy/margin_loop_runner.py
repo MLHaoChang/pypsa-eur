@@ -775,11 +775,8 @@ def start_margin_loop(
             with PyPSAService.get_solver_state_lock():
                 solver_state["solver_config"] = dataclasses.replace(
                     solver_state["solver_config"], reserve_margin=float(m_star))
-                # LC-40: the hold is a solver-config write, so it moves the
-                # shared counter (other studies go stale); this loop's own
-                # record re-captures it, as the held margin is what its
-                # verdict describes.
-                record["network_revision"] = dirty_state.bump_revision(study_ctx)
+                # LC-40 hold (see `dirty_state.hold`).
+                dirty_state.hold(record, study_ctx)
         else:
             final_cfg = base_cfg
         try:
@@ -969,11 +966,8 @@ def start_margin_loop(
     # the `restore="final"` config write would land in the PROCESS foreground
     # — a different project's state from the one the caller is polling.
     def worker():
-        # Captured in the worker under the mutation lock, before the loop
-        # first reads the network (eh_study_runner's rule): a race can only
-        # over-report an edit.
-        with lock:
-            record["network_revision"] = dirty_state.revision(study_ctx)
+        # Captured under the mutation lock (see `dirty_state.capture`).
+        dirty_state.capture(record, study_ctx, lock=lock)
         # The outer stack is the every-path guarantee (a raise before the
         # explicit close in `_worker`); closing it twice is a no-op.
         with contextlib.ExitStack() as topology:

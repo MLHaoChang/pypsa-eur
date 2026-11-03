@@ -1,0 +1,1 @@
+* Refactor(pypsa-gui): Every study record now captures its network revision through one helper (`dirty_state.capture`, and `dirty_state.hold` for the margin and coupling loops' final hold), with a source guard against bare captures and one stale-banner test per reader; no behaviour change.

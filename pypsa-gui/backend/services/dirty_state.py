@@ -84,3 +84,44 @@ def bump_revision(ctx: ProjectContext | None = None) -> int:
 def revision(ctx: ProjectContext | None = None) -> int:
     """The context's current edit counter (see `bump_revision`)."""
     return int((ctx or _active()).network_revision or 0)
+
+
+def capture(record: dict, ctx: ProjectContext | None = None, *, lock=None) -> int:
+    """
+    Store the context's current edit counter on `record["network_revision"]`
+    and return it: the one path a study record captures its revision by
+    (LC-40b). `study_state.edited_since` compares the stored value with the
+    counter at read time.
+
+    With `lock` (a worker's capture: the mutation lock, taken whole here, so
+    never call this inside a `with lock:` of the same lock; it is not
+    re-entrant), the read happens under it, immediately before the study's
+    first network read. Without, the counter is read alone (one int read) in
+    the caller's thread before the study's thread starts. Either way an edit
+    landing after the capture can only over-report "edited since", never
+    miss one. Takes no other lock (no `solver_state_lock`).
+    """
+    target = ctx or _active()
+    if lock is None:
+        record["network_revision"] = revision(target)
+    else:
+        with lock:
+            record["network_revision"] = revision(target)
+    return record["network_revision"]
+
+
+def hold(record: dict, ctx: ProjectContext | None = None) -> int:
+    """
+    A loop's own `restore="final"` hold (LC-40): bump the counter once, then
+    re-capture it on `record`, and return the new counter.
+
+    The hold is a solver-config write, so it moves the shared counter and
+    every other study reads stale; the loop's own verdict describes the held
+    setting, so its record re-captures the bumped value and reads fresh.
+
+    Takes no lock: the caller holds the solver-state read-modify-write and
+    calls this right after the config write, as the margin and coupling
+    loops do.
+    """
+    record["network_revision"] = bump_revision(ctx)
+    return record["network_revision"]
