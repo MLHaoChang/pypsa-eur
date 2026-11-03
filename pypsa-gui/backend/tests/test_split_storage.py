@@ -126,8 +126,8 @@ def _with_storage_unit(price: np.ndarray, **su) -> pypsa.Network:
          efficiency_dispatch=0.9, standing_loss=0.001, marginal_cost=1.5, cyclic_state_of_charge=True),
     dict(p_nom=30.0, max_hours=6.0, efficiency_store=0.92, efficiency_dispatch=0.92,
          state_of_charge_initial=60.0, p_max_pu=0.8, p_min_pu=-0.5),
-    dict(p_nom=30.0, max_hours=6.0, efficiency_store=0.92, efficiency_dispatch=0.92,
-         marginal_cost_storage=0.5),
+    dict(p_nom=30.0, max_hours=6.0, efficiency_store=0.95, efficiency_dispatch=0.88, standing_loss=0.002,
+         cyclic_state_of_charge=True, marginal_cost_storage=0.5),
 ], ids=["extendable", "fixed", "holding_cost"])
 def test_a_legacy_storage_unit_project_gives_the_same_objective_after_migration(su):
     price = _peaks(on=5, off=7)
@@ -146,6 +146,22 @@ def test_a_legacy_storage_unit_project_gives_the_same_objective_after_migration(
     assert migrated.stores.at["bess", "marginal_cost_storage"] == su.get("marginal_cost_storage", 0.0)
 
 
+def test_a_carried_holding_cost_prices_the_same_stored_energy_in_every_hour():
+    """GK A: e is the StorageUnit's state of charge hour by hour (standing loss, unequal efficiencies, objective
+    weight 8760/48, cyclic), so marginal_cost_storage x level is the same term in both layouts."""
+    su = dict(p_nom=30.0, max_hours=6.0, efficiency_store=0.95, efficiency_dispatch=0.88, standing_loss=0.002,
+              cyclic_state_of_charge=True, marginal_cost_storage=0.5)
+    price = _peaks(on=5, off=7)
+    legacy = _with_storage_unit(price, **su)
+    assert legacy.optimize(solver_name="highs")[0] == "ok"
+    migrated = _with_storage_unit(price, **su)
+    migrate_storage_unit(migrated, "bess")
+    assert _solve(migrated) == pytest.approx(float(legacy.objective), rel=1e-6)
+    soc = legacy.storage_units_t.state_of_charge["bess"]
+    assert soc.max() > 1.0
+    np.testing.assert_allclose(migrated.stores_t.e["bess"].to_numpy(), soc.to_numpy(), rtol=1e-6, atol=1e-6)
+
+
 def test_a_carried_holding_cost_changes_the_objective():
     """The holding_cost case above discriminates: marginal_cost_storage is in the objective, and SoC is held."""
     su = dict(p_nom=30.0, max_hours=6.0, efficiency_store=0.92, efficiency_dispatch=0.92)
@@ -162,6 +178,7 @@ def test_migration_refuses_a_time_varying_holding_cost_by_name():
     with pytest.raises(SplitStorageError, match="marginal_cost_storage varies in time"):
         migrate_storage_unit(n, "bess")
     assert "bess" in n.storage_units.index
+    assert n.stores.empty and n.links.empty and list(n.buses.index) == ["ac"]
 
 
 def test_migration_refuses_what_it_cannot_carry():
