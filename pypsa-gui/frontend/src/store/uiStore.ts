@@ -669,6 +669,10 @@ interface UIStore {
   setSitePartSelection: (s: SitePartSelection | null) => void
   /** Request-then-scroll to the site coordinate field; its home clears it once shown. */
   siteAnchorRequest: boolean
+  /** AS-18: a link asked for the PoC X/R field in Project info → Settings; the field focuses and scrolls itself. */
+  pocXrRequest: boolean
+  requestPocXr: () => void
+  clearPocXrRequest: () => void
   requestSiteAnchor: () => void
   clearSiteAnchorRequest: () => void
   /** Start the Satellite map's "New site" boundary tool; the map clears it once started. */
@@ -991,6 +995,9 @@ export const useUIStore = create<UIStore>((set, get) => ({
   sitePartSelection: null,
   setSitePartSelection: (sel) => set({ sitePartSelection: sel }),
   siteAnchorRequest: false,
+  pocXrRequest: false,
+  requestPocXr: () => set({ pocXrRequest: true }),
+  clearPocXrRequest: () => set({ pocXrRequest: false }),
   requestSiteAnchor: () => set({ siteAnchorRequest: true }),
   clearSiteAnchorRequest: () => set({ siteAnchorRequest: false }),
   siteDrawRequest: false,

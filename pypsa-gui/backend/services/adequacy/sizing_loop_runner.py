@@ -161,6 +161,17 @@ class SizingInputs:
 # ── inputs ──────────────────────────────────────────────────────────────────
 
 
+def _request_xr(v) -> float:
+    """A request's `xr` as a float: a number, or a string that reads as one ("2" → 2.0). A bool, a string that is
+    not a number or anything else is refused with the reason, so a typed-wrong value never reaches the Pst check."""
+    if isinstance(v, bool) or not isinstance(v, (int, float, str)):
+        raise SizingLoopRefusal(f"xr must be a number, got {type(v).__name__}")
+    try:
+        return float(v)
+    except ValueError:
+        raise SizingLoopRefusal("xr must be a number, got a text that is not one") from None
+
+
 def project_inputs(inputs: dict, project_dir) -> dict:
     """`inputs` (the `SizingInputs` fields) for a run on the project at `project_dir`, with the PoC X/R resolved:
     the request's own `xr`, else the project's (AS-17 `poc_xr`), else `DEFAULT_XR` (assumed). Each path still
@@ -171,7 +182,7 @@ def project_inputs(inputs: dict, project_dir) -> dict:
     if "xr_source" in inputs:
         raise SizingLoopRefusal("xr_source is not an input: it is set from where the X/R comes from")
     if inputs.get("xr") is not None:
-        return {**inputs, "xr_source": XR_SOURCE_REQUEST}
+        return {**inputs, "xr": _request_xr(inputs["xr"]), "xr_source": XR_SOURCE_REQUEST}
     xr = poc_xr(project_dir)
     if xr is None:
         return {**inputs, "xr": None, "xr_source": XR_SOURCE_ASSUMED}

@@ -520,7 +520,7 @@ def _rvc_forms(p_mw: float, swing_mw: float, tan_phi: float, sk: float, limit: f
     return {"value": value, "form": form, "bound": bound, "q": q, "only_xr": only_xr,
             "verdict": _judge(value, limit, RULE_RVC),
             "words": (f"the voltage form at the assumed X/R {fi.DEFAULT_XR:g} passes ({form:.4g} %), the X/R-free "
-                      f"bound √(ΔP² + ΔQ²)/S_k does not ({bound:.4g} %); enter the network operator's X/R"
+                      f"bound √(ΔP² + ΔQ²)/S_k does not ({bound:.4g} %); enter the network operator's X/R in Project info, Settings"
                       if only_xr else "")}
 
 
@@ -584,6 +584,8 @@ def _rvc_row(inp: _Inputs) -> dict:
                      "S_k is the entered S_k'' with the IEC 60909 c factor, so d may be understated by up to 1.1; "
                      f"above the limit a power-flow or EMT study is needed; {_BEFORE_MITIGATION}"),
                section="connection", target=target)
+    if xr_assumed:
+        row["xr_assumed"] = True                       # AS-18: the scorecard links to the PoC X/R field
     row["voltage_form_pct"] = round(f["form"], 4)
     row["xr_free_bound_pct"] = round(f["bound"], 4)
     return row
@@ -1020,6 +1022,8 @@ def _flicker_row(inp: _Inputs) -> dict:
     if env_unit is not None:
         row["flicker"]["envelope"] = env_unit
         row["assumed"] = True
+        if inp.poc_xr is None:
+            row["xr_assumed"] = True                   # AS-18: the scorecard links to the PoC X/R field
         row["note"] += (f"; GPU envelope (the one row that applies the grid X/R, through the voltage form) after smoothing: {env_unit['p_res_mw']:.3g} MW and "
                         f"{env_unit['q_res_mvar']:.3g} Mvar residual ({env_unit['p_sm_mw']:.3g} MW smoothed), "
                         f"step cos ψ·ΔP + sin ψ·ΔQ = {env_unit['step_mva']:.3g} MVA at {env_unit['changes_per_min']:g} "

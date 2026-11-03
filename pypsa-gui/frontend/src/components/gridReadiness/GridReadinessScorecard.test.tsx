@@ -8,6 +8,7 @@ import userEvent from '@testing-library/user-event'
 import type { GridReadiness, GridReadinessRow } from '../../api/campusElectrical'
 import { useChatStore } from '../../store/chatStore'
 import { useUIStore } from '../../store/uiStore'
+import { returnToOrigin } from '../../layout/flowNavigation'
 import { fmt, GridReadinessScorecard, summaryText, useScorecardOpen } from './GridReadinessScorecard'
 
 const readiness = vi.hoisted(() => ({ ready: true as boolean | undefined }))
@@ -55,6 +56,44 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe('GridReadinessScorecard', () => {
+  describe('Set PoC X/R link (AS-18)', () => {
+    const xrData = { ...DATA, rows: [
+      row({ id: 'rapid_voltage_change', requirement: 'Rapid voltage change', xr_assumed: true }),
+      row({ id: 'scr', requirement: 'SCR', assumed: false }),
+    ] }
+    it('shows only on the row that assumes the X/R', () => {
+      render(<GridReadinessScorecard data={xrData} mode="expert" />)
+      expect(screen.getByTestId('gr-set-xr-rapid_voltage_change').textContent).toBe('Set PoC X/R ›')
+      expect(screen.queryByTestId('gr-set-xr-scr')).toBeNull()
+    })
+    it('Expert: opens Project info with the field requested, and Back returns to the readiness view', async () => {
+      useUIStore.setState({ uiMode: 'expert', activeSlidePanel: 'issues', activeSection: 'readiness', pocXrRequest: false })
+      render(<GridReadinessScorecard data={xrData} mode="expert" />)
+      await userEvent.click(screen.getByTestId('gr-set-xr-rapid_voltage_change'))
+      const s = useUIStore.getState()
+      expect(s.uiMode).toBe('expert')
+      expect(s.activeSlidePanel).toBe('overview')
+      expect(s.pocXrRequest).toBe(true)
+      expect(s.flowReturn?.panel).toBe('issues')
+      returnToOrigin()
+      expect(useUIStore.getState().activeSlidePanel).toBe('issues')
+    })
+    it('Guided: opens the field in place, stays in Guided, and Back restores the card', async () => {
+      useUIStore.setState({ uiMode: 'guided', activeSlidePanel: 'hubDesign', activeSection: 'connection',
+        fieldDrawer: null, pocXrRequest: false })
+      render(<GridReadinessScorecard data={xrData} mode="guided" />)
+      await userEvent.click(screen.getByTestId('gr-set-xr-rapid_voltage_change'))
+      const s = useUIStore.getState()
+      expect(s.uiMode).toBe('guided')
+      expect(s.fieldDrawer?.field).toBe('poc_xr')
+      expect(s.pocXrRequest).toBe(true)
+      expect(s.flowReturn).not.toBeNull()
+      returnToOrigin()
+      expect(useUIStore.getState().fieldDrawer).toBeNull()
+      expect(useUIStore.getState().uiMode).toBe('guided')
+    })
+  })
+
   describe('the grid code since the last campus run (SCORECARD-STALE-1)', () => {
     const since = (status: 'same' | 'changed' | 'other_profile') => ({
       ...DATA, profile: { ...DATA.profile, since_run: { run_profile: 'pq_x', run_profile_title: 'Project code', status } },
