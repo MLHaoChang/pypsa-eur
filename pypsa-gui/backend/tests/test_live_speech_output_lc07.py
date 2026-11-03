@@ -196,6 +196,36 @@ def test_queued_answer_superseded_before_playback_is_dropped(transport, monkeypa
     assert _thread_json(tid)['speech']['usage']['tts'] == 0
 
 
+def test_a_newer_turn_supersedes_an_unspoken_answer(transport, monkeypatch):
+    # LC-T10: the user types (or a correction drains) before playback starts.
+    tid, sid, token, episode, _ = _spoken_turn(monkeypatch)
+    assert ls._OUTPUTS[sid][0]['state'] == 'queued'
+    _run(monkeypatch, episode, 'and the line?', utterance_id='typed-1',
+         generation=ua._DEFAULT.generation(episode.session_id), frames=[])
+    assert ls.claim_output(tid, token=token, session_id=sid) == {'status': 'empty'}
+    assert _thread_json(tid)['speech']['usage']['tts'] == 0
+
+
+def test_answer_of_a_turn_overtaken_while_it_ran_is_never_queued(transport, monkeypatch):
+    tid, sid, token, _, _ = _spoken_turn(
+        monkeypatch, before=lambda session: ls.capture_for(session, 'typed-2'),
+    )
+    assert not ls._OUTPUTS.get(sid)
+
+
+def test_redeem_after_the_session_closed_leaves_nothing_behind(transport, monkeypatch):
+    from services import durable_conversation as dc
+
+    tid, gen = _thread()
+    out, sid, token = _start(tid, gen)
+    episode_id = out['session']['episode_id']
+    accepted = _final(tid, token, sid, 's1', 1, 'question')
+    dc.rebind_scope(tid, generation=gen)
+    assert ls.redeem_final(episode_id, 'speech:s1', 'question', accepted['generation'])[
+        'error_kind'] == 'speech_final_unknown'
+    assert episode_id not in ls._SPOKEN and episode_id not in ls._TURN_EPOCH
+
+
 def test_closing_the_session_drops_unspoken_answers(transport, monkeypatch):
     from services import durable_conversation as dc
 
@@ -214,12 +244,13 @@ def test_barge_in_cancels_playback_but_not_the_running_turn(transport, monkeypat
     tid, gen = _thread()
     out, sid, token = _start(tid, gen)
     episode = cs.get_session(out['session']['episode_id'])
-    # Two answers: one claimed (playing), one queued.
+    # Two answers: the first claimed (playing), the next one queued.
+    playing = None
     for seg, seq in (('s1', 1), ('s2', 2)):
         accepted = _final(tid, token, sid, seg, seq, f'question {seg}')
         _run(monkeypatch, episode, f'question {seg}', utterance_id=f'speech:{seg}',
              generation=accepted['generation'], frames=_checked_frames(answer_id='ans-1'))
-    playing = ls.claim_output(tid, token=token, session_id=sid)['output']
+        playing = playing or ls.claim_output(tid, token=token, session_id=sid)['output']
 
     # A turn is running and holds an admission lease while the user barges in.
     accepted = _final(tid, token, sid, 's3', 3, 'question s3')
@@ -231,6 +262,7 @@ def test_barge_in_cancels_playback_but_not_the_running_turn(transport, monkeypat
     ))
     lease = ua._DEFAULT.active_lease(episode.session_id)
     assert decision.status == 'admitted' and lease
+    running = ls.capture_for(episode, 'speech:s3')
     episode._turn_in_flight = True
 
     result = ls.barge_in(tid, token=token, session_id=sid)
@@ -246,10 +278,15 @@ def test_barge_in_cancels_playback_but_not_the_running_turn(transport, monkeypat
     assert ls.claim_output(tid, token=token, session_id=sid) == {'status': 'empty'}
     # The running turn still publishes and is spoken.
     episode._turn_in_flight = False
-    ls.queue_answer(episode.session_id, 'speech:s3', 'ans-3', 'Loading is 98 %.')
+    running.note('answer_approved', {'answer_id': 'ans-3'})
+    running.note('token', {'delta': 'Loading is 98 %.'})
+    episode.assurance_turn = FakeTurn('Loading is 98 %.', 'ans-3')
+    running.note('turn_done', {'answer_id': 'ans-3'})
+    assert running.result == 'queued'
     assert ls.claim_output(tid, token=token, session_id=sid)['output']['text'] == 'Loading is 98 %.'
     # Charged characters are not refunded by a barge-in.
     assert _thread_json(tid)['speech']['usage']['tts'] == len(ANSWER) + len('Loading is 98 %.')
+    assert ls.claim_output(tid, token=token, session_id=sid) == {'status': 'empty'}
 
 
 # ── TTS characters settle once through the session ledger ──────────────────

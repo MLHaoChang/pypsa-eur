@@ -123,6 +123,11 @@ _SPOKEN: dict[str, dict[str, dict[str, Any]]] = {}
 # session_id -> outputs in publication order; dropped when the session closes.
 _OUTPUTS: dict[str, list[dict[str, Any]]] = {}
 OUTPUTS_MAX = 32
+SPOKEN_PER_EPISODE_MAX = 16
+# episode_id -> count of turns started since speech was first redeemed there.
+# A newer turn (typed, spoken, a drained correction) supersedes every answer
+# an earlier turn queued or has yet to queue (LC-T10).
+_TURN_EPOCH: dict[str, int] = {}
 
 
 def _refuse(kind: str, message: str, status: int = 409) -> None:
@@ -214,6 +219,7 @@ def _drop_tickets(episode_id: str | None, session_id: str | None = None) -> None
         if episode_id:
             _TICKETS.pop(episode_id, None)
             _SPOKEN.pop(episode_id, None)
+            _TURN_EPOCH.pop(episode_id, None)
         if session_id:
             _OUTPUTS.pop(session_id, None)
 
@@ -579,22 +585,26 @@ def redeem_final(
     """
     with _TICKETS_LOCK:
         ticket = (_TICKETS.get(episode_id) or {}).pop(utterance_id, None)
+        redeemed = (
+            ticket is not None and ticket['text'] == text and ticket['generation'] == generation
+        )
+        if redeemed:
+            # Same lock block as the pop: a session close in between drops both.
+            _remember_spoken(episode_id, utterance_id, {
+                'session_id': ticket['session_id'],
+                'generation': ticket['generation'],
+            })
     if ticket is None:
         return {
             'error_kind': 'speech_final_unknown',
             'message': 'This speech was not a finalized utterance for this conversation; '
             'nothing was sent.',
         }
-    if ticket['text'] != text or ticket['generation'] != generation:
+    if not redeemed:
         return {
             'error_kind': 'speech_final_mismatch',
             'message': 'The text or generation differs from what was recognised; nothing was sent.',
         }
-    with _TICKETS_LOCK:
-        _remember_spoken(episode_id, utterance_id, {
-            'session_id': ticket['session_id'],
-            'generation': ticket['generation'],
-        })
     return None
 
 
@@ -686,8 +696,6 @@ def end(thread_id: str, *, generation: int, session_id: str) -> dict[str, Any]:
 
 # ── speech output (LC-07 PR2, LC-T14) ─────────────────────────────────────
 
-SPOKEN_PER_EPISODE_MAX = 16
-
 
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
@@ -701,14 +709,16 @@ class AnswerCapture:
     reaches ``turn_done`` naming the answer that ``answer_approved``
     announced, every ``token`` frame of the turn came after that approval and
     together they equal the assurance-approved text byte for byte (the caption
-    is the spoken text), the turn was not aborted and the utterance's admission
-    generation is still current. Legacy unvalidated text, a refused, errored or
+    is the spoken text), the turn was not aborted, no newer turn has started on
+    the conversation and the utterance's admission generation is still
+    current. Legacy unvalidated text, a refused, errored or
     aborted turn and an approval whose turn never completed are never spoken.
     """
 
-    def __init__(self, session: Any, utterance_id: str) -> None:
+    def __init__(self, session: Any, utterance_id: str, epoch: int) -> None:
         self._session = session
         self._utterance_id = utterance_id
+        self._epoch = epoch
         self._answer_id: str | None = None
         self._caption: list[str] = []
         self._unchecked = False
@@ -750,24 +760,41 @@ class AnswerCapture:
             return 'empty'
         if len(text) > live_media.MAX_TTS_TEXT_CHARS:
             return 'too_long'
-        return queue_answer(self._session.session_id, self._utterance_id, answer_id, text)
+        return queue_answer(
+            self._session.session_id, self._utterance_id, answer_id, text, epoch=self._epoch,
+        )
 
 
 def capture_for(session: Any, utterance_id: str | None) -> AnswerCapture | None:
-    """A capture for a turn started by a speech final; None for any other turn."""
+    """Called by ``run_turn`` as every turn starts.
+
+    Supersedes what earlier turns on this conversation queued for speech, and
+    returns a capture for a turn started by a speech final (None otherwise).
+    """
+    episode_id = session.session_id
+    with _TICKETS_LOCK:
+        if episode_id not in _TURN_EPOCH:
+            return None  # no speech was ever redeemed here
+        _TURN_EPOCH[episode_id] += 1
+        epoch = _TURN_EPOCH[episode_id]
     if utterance_id is None or not is_speech_utterance(utterance_id):
         return None
-    return AnswerCapture(session, utterance_id)
+    return AnswerCapture(session, utterance_id, epoch)
 
 
-def queue_answer(episode_id: str, utterance_id: str, answer_id: str, text: str) -> str:
-    """Queue a checked answer for the session whose final started the turn."""
+def queue_answer(
+    episode_id: str, utterance_id: str, answer_id: str, text: str, *, epoch: int,
+) -> str:
+    """Queue a checked answer for the speech session whose final started the
+    turn. ``episode_id`` is the chat session id of the durable thread's episode."""
     from services import utterance_admission as ua
 
     with _TICKETS_LOCK:
         spoken = (_SPOKEN.get(episode_id) or {}).pop(utterance_id, None)
         if spoken is None:
             return 'not_speech'  # never redeemed here, or the session closed
+        if _TURN_EPOCH.get(episode_id) != epoch:
+            return 'superseded'
         if ua._DEFAULT.generation(episode_id) != spoken['generation']:
             return 'stale_generation'
         _bounded_append(_OUTPUTS.setdefault(spoken['session_id'], []), {
@@ -778,12 +805,14 @@ def queue_answer(episode_id: str, utterance_id: str, answer_id: str, text: str) 
             'sha256': _sha256(text),
             'chars': len(text),
             'generation': spoken['generation'],
+            'epoch': epoch,
             'state': 'queued',
         }, OUTPUTS_MAX)
     return 'queued'
 
 
 def _remember_spoken(episode_id: str, utterance_id: str, record: dict[str, Any]) -> None:
+    _TURN_EPOCH.setdefault(episode_id, 0)
     spoken = _SPOKEN.setdefault(episode_id, {})
     spoken[utterance_id] = record
     for stale in list(spoken)[:-SPOKEN_PER_EPISODE_MAX]:
@@ -814,11 +843,12 @@ def claim_output(thread_id: str, *, token: str, session_id: str) -> dict[str, An
             _refuse('speech_session_closed', 'This speech session has ended.')
         current = ua._DEFAULT.generation(session['episode_id'])
         with _TICKETS_LOCK:
+            epoch = _TURN_EPOCH.get(session['episode_id'])
             output = None
             for item in _OUTPUTS.get(session_id) or []:
                 if item['state'] != 'queued':
                     continue
-                if item['generation'] != current:
+                if item['generation'] != current or item['epoch'] != epoch:
                     item['state'] = 'stale'
                     continue
                 output = item
@@ -1050,3 +1080,4 @@ def _reset_for_tests() -> None:
         _TICKETS.clear()
         _SPOKEN.clear()
         _OUTPUTS.clear()
+        _TURN_EPOCH.clear()

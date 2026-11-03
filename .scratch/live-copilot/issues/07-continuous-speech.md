@@ -121,8 +121,10 @@ utterance is a redeemed `speech:<segment>` ticket to
 `live_speech.AnswerCapture`. At `turn_done` naming the `answer_approved`
 answer, the turn's `token` frames (all after the approval) must equal the
 assurance-approved text byte for byte; then the answer is queued for that
-speech session if the turn was not aborted and the ticket's admission
-generation is still current. Never queued: legacy (unvalidated) text, prose
+speech session if the turn was not aborted, no newer turn has started on
+the conversation (typed, spoken or a drained correction; LC-T10) and the
+ticket's admission generation is still current. A newer turn also drops
+answers already queued but not yet claimed. Never queued: legacy (unvalidated) text, prose
 before approval, an error frame, an approval whose turn never reached
 `turn_done` (checked but publication pending), a `turn_done` naming another
 answer, typed turns, superseded generations, text over
@@ -136,7 +138,14 @@ cannot cover; `…/speech/barge-in` cancels queued and claimed answers only (no
 abort, lease, admission-generation or job change; no refund). Every session
 exit drops its queue. `live_speech.synthesize_output` passes the claimed text
 to a `TtsAdapter` verbatim after its sha256 check. Tests:
-`tests/test_live_speech_output_lc07.py` (18; eight mutants each fail a test).
+`tests/test_live_speech_output_lc07.py` (21; ten mutants each fail a test).
+mp-code-review (standards + spec) findings fixed: newer-turn supersede, and
+`redeem_final` records the spoken ticket in the same lock block as the pop.
+Kept: characters are charged at claim, not refunded on barge-in or failed
+synthesis (never under-count); a worker TTS report under another usage id
+double-counts (over, never under); `len(text)` counts code points, vendor
+billing units are a vendor gate; `synthesize_output` has no production caller
+until the audio worker exists.
 
 Remaining gates (recorded, not built), in addition to PR1's:
 - Pronunciation of engineering numbers and units (LC-T14 "pronounced
