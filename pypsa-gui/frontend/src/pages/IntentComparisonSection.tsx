@@ -33,6 +33,8 @@ export const CHECK_WORDS: Record<CheckState, { text: string; tone: Tone }> = {
 const ASSET_LABELS: Record<string, string> = {
   q_ss: 'STATCOM steady-state', q_dyn: 'STATCOM dynamic', p_sm: 'Smoothing power', e_sm: 'Smoothing energy',
 }
+/** Carrier names that are acronyms, shown upper case in an asset label. */
+const ACRONYMS = /\b(bess|ups|pv|dc|ac)\b/gi
 const ASSET_PREFIX: Record<string, string> = { store: 'Store', charger: 'Charger', s_x: 'Converter rating' }
 export const CHECK_LABELS: Record<string, string> = {
   transformer: 'Transformer', pq: 'PQ capability', escr: 'ESCR', smoothing: 'Smoothing', pst: 'Flicker (Pst)',
@@ -47,7 +49,7 @@ const humanise = (s: string) => {
 export const assetLabel = (key: string) => {
   if (ASSET_LABELS[key]) return ASSET_LABELS[key]
   const [kind, rest] = key.split(':', 2)
-  return rest !== undefined && ASSET_PREFIX[kind] ? `${ASSET_PREFIX[kind]} ${rest}` : humanise(key)
+  return rest !== undefined && ASSET_PREFIX[kind] ? `${ASSET_PREFIX[kind]} ${rest.replace(ACRONYMS, m => m.toUpperCase())}` : humanise(key)
 }
 export const checkLabel = (name: string) => CHECK_LABELS[name] ?? humanise(name)
 const byIntent = <T,>(items: T[], id: (t: T) => string) => [...items].sort((a, b) => id(a).localeCompare(id(b)))

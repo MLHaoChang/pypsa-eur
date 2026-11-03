@@ -168,7 +168,7 @@ describe('IntentComparisonSection', () => {
     await runWith(user, [row('B', { assets: { 'store:bess': { value: 1, unit: 'MWh' }, weird_key: { value: 2, unit: 'MW' } },
       checks: [{ name: 'escr', state: 'ok', value: null, limit: null, note: '' }, { name: 'new_check', state: 'ok', value: null, limit: null, note: '' }] }), row('C')], ['B', 'C'])
     const table = (await screen.findByTestId('intent-table')).textContent ?? ''
-    expect(table).toContain('Store bess: 1 MWh')
+    expect(table).toContain('Store BESS: 1 MWh')
     expect(table).toContain('Weird key: 2 MW')
     expect(table).toContain('New check')
     expect(table).not.toMatch(/store:|weird_key|new_check|escr:/)
