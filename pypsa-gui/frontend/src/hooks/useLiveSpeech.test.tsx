@@ -6,7 +6,7 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
-import { configureSpeechMediaLink, TYPED_FALLBACK, type SpeechMediaLink } from '../utils/liveSpeechSession'
+import { configureSpeechMediaLink, LISTENING_CAPTION, stopCaption, type SpeechMediaLink } from '../utils/liveSpeechSession'
 import { deferred } from '../utils/audioRecorder.testHelpers'
 
 const api = vi.hoisted(() => ({
@@ -71,12 +71,11 @@ async function listening(active = true) {
   return hook
 }
 
-function expectReleased(caption: RegExp) {
+function expectReleased() {
   expect(track.stop).toHaveBeenCalledTimes(1)
   expect(link.close).toHaveBeenCalledTimes(1)
   expect(api.endSpeech).toHaveBeenCalledWith('t-live', 3, 'sp-1')
   expect(api.endSpeech).toHaveBeenCalledTimes(1)
-  return caption
 }
 
 describe('useLiveSpeech availability', () => {
@@ -94,12 +93,21 @@ describe('useLiveSpeech availability', () => {
     expect(result.current.available).toBe(false)
   })
 
-  it('is not offered without a media link (no SDK ships), and asks the server nothing', async () => {
+  it('flag on but no media link (no SDK ships): disabled with a visible reason', async () => {
     configureSpeechMediaLink(null)
     const { result } = renderHook(() => useLiveSpeech(true))
-    await act(async () => {})
+    await waitFor(() => expect(result.current.blocked).toBe(
+      'Voice unavailable: this app has no media connection set up, so use reviewed dictation.'))
     expect(result.current.available).toBe(false)
-    expect(api.getSpeechState).not.toHaveBeenCalled()
+  })
+
+  it('flag off: no reason line of its own (the launcher keeps "not connected")', async () => {
+    configureSpeechMediaLink(null)
+    api.getSpeechState.mockRejectedValue(refusal('speech_disabled', 'Continuous speech is not enabled.'))
+    const { result } = renderHook(() => useLiveSpeech(true))
+    await waitFor(() => expect(api.getSpeechState).toHaveBeenCalled())
+    await act(async () => {})
+    expect(result.current.blocked).toBe('')
   })
 
   it('is not offered while Live is closed', async () => {
@@ -117,6 +125,12 @@ describe('useLiveSpeech start', () => {
     expect(link.connect).toHaveBeenCalledWith(GRANT, track, expect.any(Function))
   })
 
+  it('while listening the caption is the listening line', async () => {
+    const { result } = await listening()
+    expect(result.current.caption).toBe(LISTENING_CAPTION)
+    expect(LISTENING_CAPTION).toBe('Listening: speak, then pause.')
+  })
+
   it('never keeps the grant token in hook state', async () => {
     const { result } = await listening()
     expect(JSON.stringify(result.current)).not.toContain('grant-secret')
@@ -127,9 +141,9 @@ describe('useLiveSpeech: every exit stops the device track', () => {
   it('Stop (end)', async () => {
     const { result } = await listening()
     act(() => result.current.stop())
-    expectReleased(/Speech stopped\./)
+    expectReleased()
     expect(result.current.state).toBe('off')
-    expect(result.current.caption).toBe(`Speech stopped. ${TYPED_FALLBACK}`)
+    expect(result.current.caption).toBe('Voice stopped: you turned it off.')
   })
 
   it('error: the server refuses start; the mic stops and nothing is ended', async () => {
@@ -142,8 +156,7 @@ describe('useLiveSpeech: every exit stops the device track', () => {
     expect(track.stop).toHaveBeenCalledTimes(1)
     expect(link.connect).not.toHaveBeenCalled()
     expect(api.endSpeech).not.toHaveBeenCalled()
-    expect(result.current.caption).toBe(
-      `Speech stopped after an error. No speech media service is configured. ${TYPED_FALLBACK}`)
+    expect(result.current.caption).toBe('Voice stopped: no speech media service is configured.')
   })
 
   it('error: the mic is denied; the server is never asked', async () => {
@@ -151,7 +164,7 @@ describe('useLiveSpeech: every exit stops the device track', () => {
     const { result } = renderHook(() => useLiveSpeech(true))
     await waitFor(() => expect(result.current.available).toBe(true))
     await act(async () => { result.current.start() })
-    await waitFor(() => expect(result.current.caption).toMatch(/Microphone access denied/))
+    await waitFor(() => expect(result.current.caption).toMatch(/^Voice stopped: microphone access denied\./))
     expect(api.startSpeech).not.toHaveBeenCalled()
     expect(result.current.state).toBe('off')
   })
@@ -162,49 +175,50 @@ describe('useLiveSpeech: every exit stops the device track', () => {
     await waitFor(() => expect(result.current.available).toBe(true))
     await act(async () => { result.current.start() })
     await waitFor(() => expect(result.current.state).toBe('off'))
-    expectReleased(/./)
-    expect(result.current.caption).toMatch(/media room refused/)
+    expectReleased()
+    expect(result.current.caption).toBe('Voice stopped: the media room refused the connection.')
   })
 
   it('error: the media link drops while listening', async () => {
     const { result } = await listening()
     act(() => link.drop?.('The media connection was lost.'))
-    expectReleased(/./)
-    expect(result.current.caption).toMatch(/media connection was lost/)
+    expectReleased()
+    expect(result.current.caption).toBe('Voice stopped: the media connection was lost.')
   })
 
   it('Live closed (navigation away from the composer)', async () => {
     const hook = await listening()
     hook.rerender({ on: false })
-    expectReleased(/./)
+    expectReleased()
+    expect(hook.result.current.caption).toBe('Voice stopped: the chat here was closed.')
   })
 
   it('unmount', async () => {
     const hook = await listening()
     hook.unmount()
-    expectReleased(/./)
+    expectReleased()
   })
 
   it('tab hidden', async () => {
     const { result } = await listening()
     Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
     act(() => { document.dispatchEvent(new Event('visibilitychange')) })
-    expectReleased(/./)
-    expect(result.current.caption).toMatch(/tab was hidden/)
+    expectReleased()
+    expect(result.current.caption).toBe('Voice stopped: this tab was hidden.')
   })
 
   it('page left (pagehide)', async () => {
     const { result } = await listening()
     act(() => { window.dispatchEvent(new Event('pagehide')) })
-    expectReleased(/./)
-    expect(result.current.caption).toMatch(/page was left/)
+    expectReleased()
+    expect(result.current.caption).toBe('Voice stopped: the page was left.')
   })
 
   it('project switch', async () => {
     const { result } = await listening()
     act(() => { useUIStore.setState({ currentProject: 'Beta' }) })
-    expectReleased(/./)
-    expect(result.current.caption).toMatch(/project changed/)
+    expectReleased()
+    expect(result.current.caption).toBe('Voice stopped: the project changed.')
   })
 
   it('rebind (the thread generation advanced)', async () => {
@@ -212,7 +226,7 @@ describe('useLiveSpeech: every exit stops the device track', () => {
     act(() => { useChatStore.setState({ utteranceGeneration: 4 }) })
     expect(track.stop).toHaveBeenCalledTimes(1)
     expect(link.close).toHaveBeenCalledTimes(1)
-    expect(result.current.caption).toMatch(/conversation was reconnected/)
+    expect(result.current.caption).toBe('Voice stopped: the conversation was reconnected.')
   })
 
   it('mic revoked or unplugged (track ended)', async () => {
@@ -220,7 +234,7 @@ describe('useLiveSpeech: every exit stops the device track', () => {
     act(() => track.onended?.())
     expect(link.close).toHaveBeenCalledTimes(1)
     expect(api.endSpeech).toHaveBeenCalledTimes(1)
-    expect(result.current.caption).toMatch(/microphone was turned off or disconnected/)
+    expect(result.current.caption).toBe('Voice stopped: the microphone was turned off or unplugged.')
   })
 
   it('session expiry', async () => {
@@ -228,8 +242,8 @@ describe('useLiveSpeech: every exit stops the device track', () => {
     api.startSpeech.mockResolvedValue(started(new Date(Date.now() + 5_000).toISOString()))
     const { result } = await listening()
     await act(async () => { vi.advanceTimersByTime(5_001) })
-    expectReleased(/./)
-    expect(result.current.caption).toMatch(/time limit/)
+    expectReleased()
+    expect(result.current.caption).toBe('Voice stopped: the session reached its time limit.')
   })
 
   it('a stop while the mic prompt is open stops the late track and starts nothing', async () => {
@@ -264,5 +278,27 @@ describe('useLiveSpeech: every exit stops the device track', () => {
     act(() => result.current.stop())
     expect(useChatStore.getState().durableThreadId).toBe('t-live')
     expect(useChatStore.getState().utteranceGeneration).toBe(3)
+  })
+})
+
+describe('stopCaption: one plain line per exit reason', () => {
+  it.each([
+    ['ended', 'Voice stopped: you turned it off.'],
+    ['error', 'Voice stopped: the voice service did not answer.'],
+    ['closed', 'Voice stopped: the chat here was closed.'],
+    ['hidden', 'Voice stopped: this tab was hidden.'],
+    ['pagehide', 'Voice stopped: the page was left.'],
+    ['unmount', 'Voice stopped: the assistant was closed.'],
+    ['project', 'Voice stopped: the project changed.'],
+    ['rebind', 'Voice stopped: the conversation was reconnected.'],
+    ['revoked', 'Voice stopped: the microphone was turned off or unplugged.'],
+    ['expired', 'Voice stopped: the session reached its time limit.'],
+  ] as const)('%s', (reason, line) => {
+    expect(stopCaption(reason)).toBe(line)
+    expect(line).not.toMatch(/—|_|\n/)
+  })
+
+  it('an error keeps its own words, joined with a colon', () => {
+    expect(stopCaption('error', 'No microphone was found.')).toBe('Voice stopped: no microphone was found.')
   })
 })

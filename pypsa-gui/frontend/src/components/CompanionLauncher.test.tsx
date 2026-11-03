@@ -206,48 +206,56 @@ describe('CompanionLauncher', () => {
   })
 })
 
-describe('CompanionLauncher continuous speech (LC-07)', () => {
+describe('CompanionLauncher continuous voice (LC-07)', () => {
   const base = { profileLabel: 'Claude', onCompose: vi.fn(), onSpeak: vi.fn(), onLive: vi.fn(), onProfiles: vi.fn() }
-  const speech = (state: 'off' | 'starting' | 'listening', available = true) =>
-    ({ available, state, start: vi.fn(), stop: vi.fn() })
+  const speech = (state: 'off' | 'starting' | 'listening', available = true, extra: { caption?: string; blocked?: string } = {}) =>
+    ({ available, state, start: vi.fn(), stop: vi.fn(), ...extra })
+  const toggle = () => screen.getByTestId('companion-voice-toggle')
 
-  it('shows no Speak control when speech is unavailable, and media stays off', () => {
+  it('unavailable: the disabled Start voice keeps "not connected", media stays off', () => {
     mockMotion(false)
     render(<CompanionLauncher {...base} liveOpen speech={speech('off', false)} />)
-    expect(screen.queryByTestId('companion-live-speak')).toBeNull()
-    expect(screen.getByTestId('companion-launcher').getAttribute('data-media-state')).toBe('off')
+    expect(screen.queryByTestId('companion-voice-toggle')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Start voice' }).hasAttribute('disabled')).toBe(true)
     expect(screen.getByText(/Continuous voice is not connected/)).toBeTruthy()
+    expect(screen.getByTestId('companion-launcher').getAttribute('data-media-state')).toBe('off')
   })
 
-  it('when speech is available the voice note points to Speak instead of a disabled Start voice', () => {
+  it('flag on, no media link: still disabled, with that reason visible instead of "not connected"', () => {
     mockMotion(false)
-    render(<CompanionLauncher {...base} liveOpen speech={speech('off')} />)
-    expect(screen.queryByRole('button', { name: 'Start voice' })).toBeNull()
-    expect(screen.getByTestId('companion-voice-note').textContent).toMatch(/press Speak beside Send/)
+    render(<CompanionLauncher {...base} liveOpen
+      speech={speech('off', false, { blocked: 'Voice unavailable: this app has no media connection set up, so use reviewed dictation.' })} />)
+    expect(screen.getByRole('button', { name: 'Start voice' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByTestId('companion-voice-note').textContent).toMatch(/no media connection set up/)
+    expect(screen.queryByText(/not connected/)).toBeNull()
   })
 
-  it('Speak starts; while listening the toggle reads Stop and media is live', async () => {
+  it('one entry point: Start voice toggles to Stop voice; no second control beside Send', async () => {
     mockMotion(false)
     const off = speech('off')
     const { rerender } = render(<CompanionLauncher {...base} liveOpen speech={off} />)
-    await userEvent.click(screen.getByTestId('companion-live-speak'))
+    expect(screen.queryByText(/not connected/)).toBeNull()
+    expect(screen.getAllByRole('button', { name: /voice/i })).toHaveLength(1)
+    expect(screen.getByTestId('companion-live-composer').textContent).not.toMatch(/voice|Speak/i)
+    await userEvent.click(toggle())
     expect(off.start).toHaveBeenCalledTimes(1)
-    const on = speech('listening')
+    const on = speech('listening', true, { caption: 'Listening: speak, then pause.' })
     rerender(<CompanionLauncher {...base} liveOpen speech={on} />)
-    const toggle = screen.getByTestId('companion-live-speak')
-    expect(toggle.textContent).toBe('Stop')
-    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    expect(toggle().textContent).toBe('Stop voice')
+    expect(toggle().getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByTestId('companion-voice-caption').textContent).toBe('Listening: speak, then pause.')
     expect(screen.getByTestId('companion-launcher').getAttribute('data-media-state')).toBe('live')
-    await userEvent.click(toggle)
+    await userEvent.click(toggle())
     expect(on.stop).toHaveBeenCalledTimes(1)
   })
 
-  it('after speech stops, the typed composer still sends from the same Live composer', async () => {
+  it('after voice stops, the note shows the reason and typing still sends from the same composer', async () => {
     mockMotion(false)
     const onLiveSubmit = vi.fn()
-    render(<CompanionLauncher {...base} liveOpen speech={speech('off')} onLiveSubmit={onLiveSubmit}
-      liveCaption="Speech stopped because this tab was hidden. Type here to continue in the same conversation." />)
-    expect(screen.getByTestId('companion-live-caption').textContent).toMatch(/Type here to continue/)
+    render(<CompanionLauncher {...base} liveOpen onLiveSubmit={onLiveSubmit}
+      speech={speech('off', true, { caption: 'Voice stopped: this tab was hidden.' })} />)
+    expect(toggle().textContent).toBe('Start voice')
+    expect(screen.getByTestId('companion-voice-caption').textContent).toBe('Voice stopped: this tab was hidden.')
     await userEvent.type(screen.getByTestId('companion-live-input'), 'size the battery{Enter}')
     expect(onLiveSubmit).toHaveBeenCalledWith('size the battery')
   })

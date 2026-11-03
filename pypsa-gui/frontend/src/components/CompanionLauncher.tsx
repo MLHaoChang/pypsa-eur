@@ -30,8 +30,12 @@ type Props = {
   liveEcho?: string
   modelKeyMissing?: boolean
   onLiveSubmit?: (text: string) => void
-  /** LC-07: continuous speech in the Live composer; absent or unavailable, no control shows. */
-  speech?: { available: boolean; state: 'off' | 'starting' | 'listening'; start: () => void; stop: () => void }
+  /** LC-07: continuous voice. `available` enables "Start voice"; `blocked` is the visible reason it
+   *  stays disabled (flag on, no media link); `caption` is the listening or last stop line. */
+  speech?: {
+    available: boolean; blocked?: string; caption?: string
+    state: 'off' | 'starting' | 'listening'; start: () => void; stop: () => void
+  }
   children?: ReactNode
 }
 
@@ -159,23 +163,6 @@ export default function CompanionLauncher({
               aria-label="Message the assistant"
               className="min-w-0 flex-1 rounded-full border border-border bg-bg px-3 py-1.5 text-[12px] text-text"
             />
-            {speech && (speech.available || speech.state !== 'off') && (
-              <button
-                type="button"
-                data-testid="companion-live-speak"
-                aria-pressed={speech.state !== 'off'}
-                disabled={speech.state === 'starting'}
-                onClick={speech.state === 'off' ? speech.start : speech.stop}
-                title={speech.state === 'off'
-                  ? 'Speak continuously. The microphone stops when you stop, close Live or leave this tab.'
-                  : 'Stop speaking and turn the microphone off.'}
-                className={`flex items-center gap-1 rounded-full border px-2.5 py-1.5 text-[11px] font-medium disabled:opacity-60 ${
-                  speech.state === 'off' ? 'border-border text-text hover:text-accent' : 'border-accent text-accent'}`}
-              >
-                {speech.state === 'listening' && <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent" />}
-                {speech.state === 'off' ? 'Speak' : speech.state === 'starting' ? 'Starting…' : 'Stop'}
-              </button>
-            )}
             <button
               type="submit"
               data-testid="companion-live-send"
@@ -259,15 +246,27 @@ export default function CompanionLauncher({
       </div>
       <div className="companion-extras max-w-72 rounded-lg border border-border bg-bg-2 px-3 py-2 text-[10px] text-muted"
         data-testid="companion-voice-note">
-        {speech?.available ? (
-          <p id={voiceReasonId}>Continuous voice is available: press Speak beside Send. The microphone stops when you stop, close this chat or leave the tab.</p>
+        {speech && (speech.available || speech.state !== 'off') ? (
+          <>
+            <button type="button" aria-describedby={voiceReasonId} data-testid="companion-voice-toggle"
+              aria-pressed={speech.state !== 'off'}
+              disabled={speech.state === 'starting'}
+              onClick={speech.state === 'off' ? speech.start : speech.stop}
+              className={`flex items-center gap-1 font-medium disabled:opacity-60 ${speech.state === 'off' ? 'text-text hover:text-accent' : 'text-accent'}`}>
+              {speech.state === 'listening' && <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent" />}
+              {speech.state === 'off' ? 'Start voice' : speech.state === 'starting' ? 'Starting voice…' : 'Stop voice'}
+            </button>
+            <p id={voiceReasonId} data-testid="companion-voice-caption">
+              {speech.caption || 'Voice ready: the microphone turns off when you stop, close this chat or leave the tab.'}
+            </p>
+          </>
         ) : (
           <>
             <button type="button" disabled aria-describedby={voiceReasonId}
               className="font-medium text-muted disabled:cursor-not-allowed">
               Start voice
             </button>
-            <p id={voiceReasonId}>Continuous voice is not connected. Use reviewed dictation for speech.</p>
+            <p id={voiceReasonId}>{speech?.blocked || 'Continuous voice is not connected. Use reviewed dictation for speech.'}</p>
           </>
         )}
       </div>

@@ -131,11 +131,15 @@ connect failure, link drop), Live closed, unmount, `visibilitychange`
 hidden, `pagehide`, project switch, rebind (thread or generation change),
 track `ended` (revoked/unplugged), session `expires_at`. The typed composer
 stays on the same durable thread; each stop leaves a caption with the reason.
+UX (7) placement conditions: one entry point, the existing "Start voice"
+button in the voice note (toggle "Start voice"/"Stop voice"); captions
+"Voice stopped: <reason>." / "Listening: speak, then pause."; flag on without
+a link stays disabled with a visible reason.
 Tests: `hooks/useLiveSpeech.test.tsx` (22, a test per exit; mutants that drop
 the closed/hidden/project wiring fail), `CompanionLauncher.test.tsx`
 (+4). Shots: `scripts/live-speech-shots.mjs` (route-mocked, fake mic) →
 `.scratch/live-copilot/evidence/07/` (Guided and Expert: off, listening,
-stopped-hidden, unavailable).
+stopped-hidden, flag off, flag on without a link).
 Remaining: a concrete media link (LiveKit client) arrives with the transport
 gate; `end` on `pagehide` is a normal request that may not finish, so the
 server deadline reaper settles that session.

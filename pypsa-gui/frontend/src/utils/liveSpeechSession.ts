@@ -41,23 +41,27 @@ export type SpeechStopReason =
   | 'ended' | 'error' | 'closed' | 'hidden' | 'pagehide' | 'unmount'
   | 'project' | 'rebind' | 'revoked' | 'expired'
 
+/** One plain line per exit reason (UX: "Voice stopped: <reason>."). */
 const STOP_COPY: Record<SpeechStopReason, string> = {
-  ended: 'Speech stopped.',
-  error: 'Speech stopped after an error.',
-  closed: 'Speech stopped.',
-  hidden: 'Speech stopped because this tab was hidden.',
-  pagehide: 'Speech stopped because the page was left.',
-  unmount: 'Speech stopped.',
-  project: 'Speech stopped because the project changed.',
-  rebind: 'Speech stopped because the conversation was reconnected.',
-  revoked: 'Speech stopped: the microphone was turned off or disconnected.',
-  expired: 'Speech stopped: the session reached its time limit.',
+  ended: 'you turned it off',
+  error: 'the voice service did not answer',
+  closed: 'the chat here was closed',
+  hidden: 'this tab was hidden',
+  pagehide: 'the page was left',
+  unmount: 'the assistant was closed',
+  project: 'the project changed',
+  rebind: 'the conversation was reconnected',
+  revoked: 'the microphone was turned off or unplugged',
+  expired: 'the session reached its time limit',
 }
 
-export const TYPED_FALLBACK = 'Type here to continue in the same conversation.'
+export const LISTENING_CAPTION = 'Listening: speak, then pause.'
 
+/** `detail` (an error's own words) replaces the generic error reason. */
 export function stopCaption(reason: SpeechStopReason, detail = ''): string {
-  return [STOP_COPY[reason], detail, TYPED_FALLBACK].filter(Boolean).join(' ')
+  const words = (reason === 'error' && detail.trim()) || STOP_COPY[reason]
+  const line = words.charAt(0).toLowerCase() + words.slice(1)
+  return `Voice stopped: ${/[.!?]$/.test(line) ? line : `${line}.`}`
 }
 
 export type SpeechHandlers = {
@@ -82,7 +86,7 @@ export class LiveSpeechSession {
     if (this.state !== 'off') return
     const factory = linkFactory
     if (!factory) {
-      this.finish('error', 'No speech media link is configured.')
+      this.finish('error', 'No voice connection is set up in this app.')
       return
     }
     const run = ++this.generation
@@ -99,7 +103,7 @@ export class LiveSpeechSession {
       if (run !== this.generation) { stopTracks(stream); return }
       this.stream = stream
       const track = stream.getAudioTracks()[0]
-      if (!track) { this.fail(run, 'No microphone track.'); return }
+      if (!track) { this.fail(run, 'No microphone was found.'); return }
       track.onended = () => { if (run === this.generation) this.stop('revoked') }
 
       let started
@@ -126,7 +130,7 @@ export class LiveSpeechSession {
       }
       this.setState('listening')
     } catch (e) {
-      this.fail(run, e instanceof Error && e.message ? e.message : 'The speech media link failed.')
+      this.fail(run, e instanceof Error && e.message ? e.message : 'The voice connection failed.')
     }
   }
 
@@ -183,5 +187,5 @@ function refusalText(e: unknown): string {
   const kind = errorKind(e)
   const text = errorText(e)
   // The server's own copy already ends with "Type your message instead."
-  return kind ? text.replace(/\s*Type your message instead\.?$/, '') : 'The speech service could not start.'
+  return kind ? text.replace(/\s*Type your message instead\.?$/, '') : 'The voice service could not start.'
 }

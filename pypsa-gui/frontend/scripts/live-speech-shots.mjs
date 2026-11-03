@@ -8,8 +8,9 @@
  * Needs Vite on :5173. Vite's auth gate asks :8000 for /api/health, so a health-only stub starts there
  * unless something already answers.
  *
- * States: `1-off` (Speak offered), `2-listening`, `3-stopped-hidden` (tab hidden: track stopped, typed
- * fallback caption), `4-unavailable` (server flag off: no Speak control).
+ * States: `1-off` (Start voice offered), `2-listening`, `3-stopped-hidden` (tab hidden: track stopped,
+ * reason line), `4-unavailable` (server flag off: disabled, "not connected"), `5-no-link` (flag on, no media
+ * link: disabled with that reason).
  *
  * Usage: node scripts/live-speech-shots.mjs [outDir]      env: BASE, DEBUG=1 (unmocked routes, console errors)
  */
@@ -40,7 +41,8 @@ const stub = await ensureStub()
 const browser = await chromium.launch()
 const problems = [], written = []
 try {
-  for (const mode of ['guided', 'expert']) for (const flagOn of [true, false]) {
+  for (const mode of ['guided', 'expert']) for (const variant of ['on', 'off', 'no-link']) {
+    const flagOn = variant !== 'off'
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' })
     await ctx.route(u => ['http:', 'https:'].includes(u.protocol) && u.hostname !== '127.0.0.1', r => r.abort())
     await ctx.addInitScript(({ mode, project }) => {
@@ -91,7 +93,7 @@ try {
     await page.waitForLoadState('networkidle')
     const resume = page.getByRole('link', { name: /Resume project/ })
     if (await resume.count()) { await resume.first().click(); await page.waitForURL(u => !u.pathname.startsWith('/projects')); await page.waitForLoadState('networkidle') }
-    await page.evaluate(async () => {
+    if (variant !== 'no-link') await page.evaluate(async () => {
       const { configureSpeechMediaLink } = await import('/src/utils/liveSpeechSession.ts')
       configureSpeechMediaLink(() => ({ connect: async () => {}, close() {} }))
     })
@@ -120,19 +122,23 @@ try {
       if ((await page.getByTestId('companion-launcher').getAttribute('data-live')) === 'open') break
     }
     await page.getByTestId('companion-live-composer').waitFor()
-    const speak = page.getByTestId('companion-live-speak')
-    if (!flagOn) {
-      await step('4-unavailable', async () => {
+    const speak = page.getByTestId('companion-voice-toggle')
+    const note = page.getByTestId('companion-voice-note')
+    if (variant !== 'on') {
+      const [key, expect] = variant === 'off' ? ['4-unavailable', /not connected/] : ['5-no-link', /no media connection set up/]
+      await step(key, async () => {
         await page.waitForTimeout(800)
-        if (await speak.count()) throw new Error('Speak is offered while the server flag is off')
-        await shot('4-unavailable')
+        if (await speak.count()) throw new Error('Start voice is enabled without the flag and a media link')
+        const text = await note.textContent()
+        if (!expect.test(text)) throw new Error(`voice note reads: ${text}`)
+        await shot(key)
       })
       await ctx.close(); continue
     }
     await step('1-off', async () => { await speak.waitFor(); await shot('1-off') })
     await step('2-listening', async () => {
       await speak.dispatchEvent('click')
-      await page.getByTestId('companion-live-speak').filter({ hasText: 'Stop' }).waitFor()
+      await speak.filter({ hasText: 'Stop voice' }).waitFor()
       const media = await page.getByTestId('companion-launcher').getAttribute('data-media-state')
       if (media !== 'live') throw new Error(`data-media-state is ${media}`)
       await shot('2-listening')
@@ -143,7 +149,7 @@ try {
         document.dispatchEvent(new Event('visibilitychange'))
         Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
       })
-      await page.getByTestId('companion-live-speak').filter({ hasText: 'Speak' }).waitFor()
+      await speak.filter({ hasText: 'Start voice' }).waitFor()
       const stopped = await page.evaluate(() => window.__tracksStopped)
       if (stopped !== 1) throw new Error(`tracks stopped: ${stopped}`)
       await shot('3-stopped-hidden')

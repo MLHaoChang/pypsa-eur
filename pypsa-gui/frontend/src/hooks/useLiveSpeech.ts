@@ -5,7 +5,8 @@
  * LC-07 PR3: continuous speech for the Companion Live composer.
  *
  * Offered only while Live is open, the durable thread is bound, a media link
- * is configured and the server answers `GET /speech` (the flag is on). The
+ * is configured and the server answers `GET /speech` (the flag is on); with
+ * the flag on and no link, `blocked` gives the visible reason. The
  * session stops, and its device tracks with it, when Live closes, the
  * component unmounts, the tab is hidden, the page is left, the project
  * changes or the thread is rebound. The typed composer stays on the same
@@ -16,13 +17,15 @@ import { getSpeechState } from '../api/durableConversations'
 import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import {
-  LiveSpeechSession, speechMediaLinkConfigured, type SpeechState, type SpeechStopReason,
+  LISTENING_CAPTION, LiveSpeechSession, speechMediaLinkConfigured, type SpeechState, type SpeechStopReason,
 } from '../utils/liveSpeechSession'
 
 export interface LiveSpeech {
   available: boolean
+  /** The visible reason voice stays disabled although the server flag is on (no media link). */
+  blocked: string
   state: SpeechState
-  /** The last stop's caption; cleared on the next start. */
+  /** The listening line, else the last stop's line; cleared on the next start. */
   caption: string
   start: () => void
   stop: () => void
@@ -39,7 +42,7 @@ export function useLiveSpeech(active: boolean): LiveSpeech {
   const project = useUIStore((s) => s.currentProject)
   const [state, setState] = useState<SpeechState>('off')
   const [caption, setCaption] = useState('')
-  const [available, setAvailable] = useState(false)
+  const [flagOn, setFlagOn] = useState(false)
   const session = useRef<LiveSpeechSession | null>(null)
   if (!session.current) {
     session.current = new LiveSpeechSession({
@@ -49,14 +52,18 @@ export function useLiveSpeech(active: boolean): LiveSpeech {
   }
   const stopWith = useCallback((reason: SpeechStopReason) => session.current?.stop(reason), [])
 
-  // Availability: the flag is on server-side (GET /speech answers) and a link exists.
+  // The flag is on server-side when GET /speech answers; voice needs a media link as well.
   useEffect(() => {
-    setAvailable(false)
-    if (!active || !threadId || !speechMediaLinkConfigured()) return
+    setFlagOn(false)
+    if (!active || !threadId) return
     let live = true
-    getSpeechState(threadId).then(() => { if (live) setAvailable(true) }, () => {})
+    getSpeechState(threadId).then(() => { if (live) setFlagOn(true) }, () => {})
     return () => { live = false }
   }, [active, threadId])
+  const linked = speechMediaLinkConfigured()
+  const available = flagOn && linked
+  const blocked = flagOn && !linked
+    ? 'Voice unavailable: this app has no media connection set up, so use reviewed dictation.' : ''
 
   // Live closed, unmount.
   useEffect(() => {
@@ -93,5 +100,5 @@ export function useLiveSpeech(active: boolean): LiveSpeech {
   }, [])
   const stop = useCallback(() => stopWith('ended'), [stopWith])
 
-  return { available, state, caption, start, stop }
+  return { available, blocked, state, caption: state === 'listening' ? LISTENING_CAPTION : caption, start, stop }
 }
