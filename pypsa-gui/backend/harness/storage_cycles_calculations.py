@@ -20,7 +20,7 @@ REFUSALS = frozenset({
     "unknown_storage", "component_class_required", "unsupported_storage_boundary",
     "unsupported_snapshot_scope", "misaligned_source",
     # Raised by the StorageUnit profile's own source, named here too.
-    "unknown_storage_unit", "unsupported_storage_inflow", "unsupported_storage_spill",
+    "unknown_storage_unit", "unsupported_split_storage_layout", "unsupported_storage_inflow", "unsupported_storage_spill",
     "misaligned_storage_output", "misaligned_storage_weights", "unsupported_storage_snapshot_scope",
 })
 METRICS = {

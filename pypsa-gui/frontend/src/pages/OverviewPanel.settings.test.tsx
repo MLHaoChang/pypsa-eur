@@ -116,3 +116,74 @@ it('is inert while the project is read-only', async () => {
 
   expect(projectsApi.updateSettings).not.toHaveBeenCalled()
 })
+
+// ── AS-17c: the project's PoC X/R ──────────────────────────────────────────
+const xr = () => screen.getByRole('textbox', { name: /poc x\/r/i }) as HTMLInputElement
+
+it('PoC X/R: empty shows the default as placeholder and the range hint', async () => {
+  vi.mocked(projectsApi.list).mockResolvedValue([info()])
+  renderPanel()
+  await waitFor(() => expect(xr().value).toBe(''))
+  expect(xr().placeholder).toBe('4 (default)')
+  expect(screen.getByText(/0 < X\/R ≤ 100\. Empty: the default 4 applies\./)).toBeTruthy()
+})
+
+it('PoC X/R: a value saves on blur, PATCHes only poc_xr, and shows the stored value', async () => {
+  vi.mocked(projectsApi.list).mockResolvedValue([info()])
+  const saved = info({ settings: { poc_xr: 7.5 } })
+  vi.mocked(projectsApi.updateSettings).mockImplementation(async () => {
+    vi.mocked(projectsApi.list).mockResolvedValue([saved])
+    return saved
+  })
+  renderPanel()
+  await waitFor(() => expect(xr().value).toBe(''))
+  await userEvent.type(xr(), '7.5')
+  await userEvent.tab()
+  await waitFor(() => expect(projectsApi.updateSettings).toHaveBeenCalledWith('Demo', { poc_xr: 7.5 }))
+  await waitFor(() => expect(xr().value).toBe('7.5'))
+})
+
+it('PoC X/R: clearing a stored value sends null', async () => {
+  vi.mocked(projectsApi.list).mockResolvedValue([info({ settings: { poc_xr: 7.5 } })])
+  vi.mocked(projectsApi.updateSettings).mockResolvedValue(info())
+  renderPanel()
+  await waitFor(() => expect(xr().value).toBe('7.5'))
+  await userEvent.clear(xr())
+  await userEvent.tab()
+  await waitFor(() => expect(projectsApi.updateSettings).toHaveBeenCalledWith('Demo', { poc_xr: null }))
+})
+
+it('PoC X/R: an out-of-range value is refused inline without a request', async () => {
+  vi.mocked(projectsApi.list).mockResolvedValue([info()])
+  renderPanel()
+  await waitFor(() => expect(xr().value).toBe(''))
+  await userEvent.type(xr(), '150')
+  await userEvent.tab()
+  expect(await screen.findByRole('alert')).toBeTruthy()
+  expect(xr().getAttribute('aria-invalid')).toBe('true')
+  expect(xr().value).toBe('150')
+  expect(projectsApi.updateSettings).not.toHaveBeenCalled()
+})
+
+it('PoC X/R: the API 422 reason shows inline under the field and the typed value stays', async () => {
+  vi.mocked(projectsApi.list).mockResolvedValue([info()])
+  vi.mocked(projectsApi.updateSettings).mockRejectedValue(
+    { isAxiosError: true, response: { status: 422, data: { detail: 'PoC X/R must be above 0 and at most 100.' } } },
+  )
+  renderPanel()
+  await waitFor(() => expect(xr().value).toBe(''))
+  await userEvent.type(xr(), '5')
+  await userEvent.tab()
+  const alert = await screen.findByRole('alert')
+  expect(alert.textContent).toMatch(/must be above 0 and at most 100/)
+  expect(xr().getAttribute('aria-invalid')).toBe('true')
+  expect(xr().value).toBe('5')
+})
+
+it('PoC X/R: disabled while read-only, with the reason as visible text', async () => {
+  vi.mocked(projectsApi.list).mockResolvedValue([info()])
+  useUIStore.setState({ readOnly: true, readOnlyReason: 'locked-by-user' })
+  renderPanel()
+  await waitFor(() => expect(xr().disabled).toBe(true))
+  expect(screen.getByText(/read-only/i)).toBeTruthy()
+})

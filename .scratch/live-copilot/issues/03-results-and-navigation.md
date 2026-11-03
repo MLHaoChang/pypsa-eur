@@ -480,6 +480,42 @@ Kept, with reasons:
 - GridSpine and campus jobs (`_finish`) keep the summary only: they hold no
   LOPF result in a project context.
 
+### PR-S, run-evidence token off the wire (2026-11-03), #1037
+
+GK B (16) asked for it before PR-M. `run_evidence.wire_record` drops `thread`,
+`stop_event` and `_run_evidence` (its `root` is the server's evidence path); the
+six study GETs, `investment_case_runner.public_record` and
+`report_job.public_record` use it. Tests: `tests/test_study_record_wire.py`
+(RED on every study GET and investment_case; the record keeps the token and
+`publish_study_run` still publishes from it). No frontend reads the key.
+
+### PR-M, study and report sections (2026-11-03)
+
+Branch `claude/lc03-study-report-capture`, stacked on PR-S. Plan GO from GK B (16),
+conditions (d)-(g).
+
+- `study_result`: `publish_study_run` keeps the study's status route payload
+  (`_STUDY_ROUTE`, key -> `routers.results` GET), serialised as the route does
+  (`jsonable_encoder`), after `wire_record`; over 16 KB it is not kept and the run
+  warns `study_result_not_captured`.
+- `report_output`: report id, version, mode, regenerated section, sections
+  total/done, repairs and the count of prose failures; no prose.
+- `get_results(run_id=<study or report run>)` refuses `historical_scope_mismatch`
+  with `run_kind` and `kept_section` (was the solve family's generic refusal).
+- Tests (`tests/test_study_report_sections.py`): the kept study section equals
+  `GET /api/results/mc` at completion, has no token, and the run view serves it;
+  the results read names the run kind and section; an oversized study result is
+  not kept and warned; the report section is ids and counts only; after access
+  loss the run view refuses both sections, and a never-recorded run id, exactly as
+  it refuses a solve's past run.
+
+Kept, with reasons:
+- (g) `historical_scope_mismatch` is an `unavailable_kind` from PR-D (a status
+  answer, not an `error_kind`); `tool-error-kinds.d` lists `error_kind`s only, so no
+  fragment.
+- The study payload includes `edited_since_study` as the route served it at
+  completion; it is not recomputed later.
+
 ## Comments
 
 - GK B (15) plan GO, conditions: (1) at the trial merge run

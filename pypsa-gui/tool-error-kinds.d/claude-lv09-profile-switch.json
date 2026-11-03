@@ -1,0 +1,1 @@
+{"kinds": {"profile_unavailable": {"surface": "inline", "why": "A durable conversation was asked to switch to a model profile that is unknown or not ready to answer. One refusal for both, naming no profile, key or env variable; the thread is unchanged and the user picks another profile from the model menu."}}}

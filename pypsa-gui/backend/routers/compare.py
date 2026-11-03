@@ -554,7 +554,8 @@ def post_intent_comparison(
     db: DBSession = Depends(get_db),
 ) -> dict:
     """Start the comparison as a background job on the project's own saved network (AS-10)."""
-    from services.adequacy.sizing_loop_runner import SizingInputs, SizingLoopRefusal, _check_inputs, refusals, run_sizing
+    from services.adequacy.sizing_loop_runner import (SizingInputs, SizingLoopRefusal, _check_inputs, project_inputs,
+                                                      refusals, run_sizing)
     from services.compare import intent_jobs
     from services.compare.intent_table import compare_intents
     from services.design_intent import grid_code_warnings
@@ -569,14 +570,17 @@ def post_intent_comparison(
     config = _project_solver_config(project.directory)
     # Refuse a bad request here, as 422, rather than as failed rows later.
     try:
-        _check_inputs(network, SizingInputs(**body.inputs))
+        # AS-17b: the PoC X/R resolved once (request, else the project's, else assumed); the pre-check and every
+        # intent's run take the same inputs.
+        inputs = project_inputs(body.inputs, project.directory)
+        _check_inputs(network, SizingInputs(**inputs))
         if refusals(config):
             raise SizingLoopRefusal("; ".join(refusals(config)))
         for spec in body.intents:
             grid_code_warnings(spec, profile)
     except (SizingLoopRefusal, TypeError, ValueError, KeyError, AttributeError) as exc:
         raise HTTPException(422, f"The comparison cannot run: {exc}")
-    prepare = _intent_scenario(network, config, body.inputs, body.critical_mw)
+    prepare = _intent_scenario(network, config, inputs, body.critical_mw)
 
     def work(stop, on_progress):
         return compare_intents(prepare, body.intents, critical_mw=body.critical_mw, profile=profile,
