@@ -580,3 +580,53 @@ def test_storage_cost_named_network_keeps_type_during_clarification(
         ui_context={"selected_component": {"class": "Generator", "name": "network"}},
     )
     clarified(frames, provider, "conversation_scope_changed")
+
+
+def static_priced(storage):
+    n = storage.network
+    n.storage_units.loc["Battery", ["capital_cost", "marginal_cost"]] = 3, 2
+    n.storage_units.at["Battery", "marginal_cost_storage"] = 0.5
+    record_solve(storage)
+    # Discharge 2*3*2 + 2*1*2 = 16; holding (8*1 + 4*3)*.5 = 10; allocated
+    # fixed 10*3/2 = 15; total 41 (as the static-price test above).
+    return storage
+
+
+STATIC = {
+    "storage_discharge_expenditure": 16,
+    "storage_holding_expenditure": 10,
+    "storage_operating_expenditure": 26,
+    "annual_fixed_cost": 30,
+    "allocated_fixed_cost": 15,
+    "total_cost": 41,
+}
+
+
+def cost_values(ctx):
+    raw = calculations.scoped_source(ctx, scope(ctx, metrics=list(STATIC)))
+    facts, slots = calculations.scoped_calculate(raw, scope(ctx, metrics=list(STATIC)))
+    assert all(s["disposition"] == "answered" for s in slots), slots
+    return {f["metric"]: f["value"] for f in facts}
+
+
+def test_migrated_store_keeps_its_holding_cost_once(storage):
+    """AS-11d: a StorageUnit migrated to a Store and Links keeps the holding
+    cost (store-side MWh x marginal_cost_storage x objective weight) and every
+    other direct cost of the unit, counted once."""
+    from services.solver.split_storage import migrate_storage_unit
+
+    before = cost_values(static_priced(storage))
+    assert before == pytest.approx(STATIC)
+    migrate_storage_unit(storage.network, "Battery")
+    record_solve(storage)
+    assert list(storage.network.stores_t.e.Battery) == pytest.approx([8, 4, 0])
+    assert cost_values(storage) == pytest.approx(STATIC)
+
+
+def test_untagged_store_is_not_a_storage_unit(storage):
+    n = storage.network
+    n.add("Bus", "S")
+    n.add("Store", "Tank", bus="S", e_nom=1, marginal_cost_storage=1)
+    record_solve(storage)
+    with pytest.raises(ValueError, match="unknown_storage_unit"):
+        calculations.scoped_source(storage, {**scope(storage), "entity_id": "Tank"})
