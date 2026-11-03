@@ -6,7 +6,7 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
-import { configureSpeechMediaLink, LISTENING_CAPTION, stopCaption, type SpeechMediaLink } from '../utils/liveSpeechSession'
+import { configureSpeechMediaLink, LISTENING_CAPTION, refusalCode, stopCaption, TYPED_FALLBACK, type SpeechMediaLink } from '../utils/liveSpeechSession'
 import { deferred } from '../utils/audioRecorder.testHelpers'
 
 const api = vi.hoisted(() => ({
@@ -28,7 +28,7 @@ const started = (expires_at = new Date(Date.now() + 600_000).toISOString()) => (
 
 let track: { stop: ReturnType<typeof vi.fn>; onended: (() => void) | null; kind: string }
 let getUserMedia: ReturnType<typeof vi.fn>
-let link: { connect: ReturnType<typeof vi.fn>; close: ReturnType<typeof vi.fn>; drop?: (m: string) => void }
+let link: { connect: ReturnType<typeof vi.fn>; close: ReturnType<typeof vi.fn>; drop?: () => void }
 
 function refusal(kind: string, message: string, status = 503) {
   return Object.assign(new Error('Request failed'), {
@@ -43,7 +43,7 @@ beforeEach(() => {
   getUserMedia = vi.fn().mockResolvedValue(stream)
   Object.defineProperty(navigator, 'mediaDevices', { value: { getUserMedia }, configurable: true })
   link = {
-    connect: vi.fn(async (_g, _t, onDrop: (m: string) => void) => { link.drop = onDrop }),
+    connect: vi.fn(async (_g, _t, onDrop: () => void) => { link.drop = onDrop }),
     close: vi.fn(),
   }
   configureSpeechMediaLink(() => link as unknown as SpeechMediaLink)
@@ -143,7 +143,7 @@ describe('useLiveSpeech: every exit stops the device track', () => {
     act(() => result.current.stop())
     expectReleased()
     expect(result.current.state).toBe('off')
-    expect(result.current.caption).toBe('Voice stopped: you turned it off.')
+    expect(result.current.caption).toBe(`Voice stopped: you turned it off. ${TYPED_FALLBACK}`)
   })
 
   it('error: the server refuses start; the mic stops and nothing is ended', async () => {
@@ -156,7 +156,7 @@ describe('useLiveSpeech: every exit stops the device track', () => {
     expect(track.stop).toHaveBeenCalledTimes(1)
     expect(link.connect).not.toHaveBeenCalled()
     expect(api.endSpeech).not.toHaveBeenCalled()
-    expect(result.current.caption).toBe('Voice stopped: no speech media service is configured.')
+    expect(result.current.caption).toBe(`Voice stopped: voice is not set up on this server. ${TYPED_FALLBACK}`)
   })
 
   it('error: the mic is denied; the server is never asked', async () => {
@@ -164,7 +164,7 @@ describe('useLiveSpeech: every exit stops the device track', () => {
     const { result } = renderHook(() => useLiveSpeech(true))
     await waitFor(() => expect(result.current.available).toBe(true))
     await act(async () => { result.current.start() })
-    await waitFor(() => expect(result.current.caption).toMatch(/^Voice stopped: microphone access denied\./))
+    await waitFor(() => expect(result.current.caption).toBe(`Voice stopped: microphone access was not allowed. ${TYPED_FALLBACK}`))
     expect(api.startSpeech).not.toHaveBeenCalled()
     expect(result.current.state).toBe('off')
   })
@@ -176,21 +176,21 @@ describe('useLiveSpeech: every exit stops the device track', () => {
     await act(async () => { result.current.start() })
     await waitFor(() => expect(result.current.state).toBe('off'))
     expectReleased()
-    expect(result.current.caption).toBe('Voice stopped: the media room refused the connection.')
+    expect(result.current.caption).toBe(`Voice stopped: the voice connection did not start. ${TYPED_FALLBACK}`)
   })
 
   it('error: the media link drops while listening', async () => {
     const { result } = await listening()
-    act(() => link.drop?.('The media connection was lost.'))
+    act(() => link.drop?.())
     expectReleased()
-    expect(result.current.caption).toBe('Voice stopped: the media connection was lost.')
+    expect(result.current.caption).toBe(`Voice stopped: the voice connection was lost. ${TYPED_FALLBACK}`)
   })
 
   it('Live closed (navigation away from the composer)', async () => {
     const hook = await listening()
     hook.rerender({ on: false })
     expectReleased()
-    expect(hook.result.current.caption).toBe('Voice stopped: the chat here was closed.')
+    expect(hook.result.current.caption).toBe(`Voice stopped: the chat here was closed. ${TYPED_FALLBACK}`)
   })
 
   it('unmount', async () => {
@@ -204,21 +204,21 @@ describe('useLiveSpeech: every exit stops the device track', () => {
     Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
     act(() => { document.dispatchEvent(new Event('visibilitychange')) })
     expectReleased()
-    expect(result.current.caption).toBe('Voice stopped: this tab was hidden.')
+    expect(result.current.caption).toBe(`Voice stopped: this tab was hidden. ${TYPED_FALLBACK}`)
   })
 
   it('page left (pagehide)', async () => {
     const { result } = await listening()
     act(() => { window.dispatchEvent(new Event('pagehide')) })
     expectReleased()
-    expect(result.current.caption).toBe('Voice stopped: the page was left.')
+    expect(result.current.caption).toBe(`Voice stopped: the page was left. ${TYPED_FALLBACK}`)
   })
 
   it('project switch', async () => {
     const { result } = await listening()
     act(() => { useUIStore.setState({ currentProject: 'Beta' }) })
     expectReleased()
-    expect(result.current.caption).toBe('Voice stopped: the project changed.')
+    expect(result.current.caption).toBe(`Voice stopped: the project changed. ${TYPED_FALLBACK}`)
   })
 
   it('rebind (the thread generation advanced)', async () => {
@@ -226,7 +226,7 @@ describe('useLiveSpeech: every exit stops the device track', () => {
     act(() => { useChatStore.setState({ utteranceGeneration: 4 }) })
     expect(track.stop).toHaveBeenCalledTimes(1)
     expect(link.close).toHaveBeenCalledTimes(1)
-    expect(result.current.caption).toBe('Voice stopped: the conversation was reconnected.')
+    expect(result.current.caption).toBe(`Voice stopped: the conversation was reconnected. ${TYPED_FALLBACK}`)
   })
 
   it('mic revoked or unplugged (track ended)', async () => {
@@ -234,7 +234,7 @@ describe('useLiveSpeech: every exit stops the device track', () => {
     act(() => track.onended?.())
     expect(link.close).toHaveBeenCalledTimes(1)
     expect(api.endSpeech).toHaveBeenCalledTimes(1)
-    expect(result.current.caption).toBe('Voice stopped: the microphone was turned off or unplugged.')
+    expect(result.current.caption).toBe(`Voice stopped: the microphone was turned off or unplugged. ${TYPED_FALLBACK}`)
   })
 
   it('session expiry', async () => {
@@ -243,7 +243,7 @@ describe('useLiveSpeech: every exit stops the device track', () => {
     const { result } = await listening()
     await act(async () => { vi.advanceTimersByTime(5_001) })
     expectReleased()
-    expect(result.current.caption).toBe('Voice stopped: the session reached its time limit.')
+    expect(result.current.caption).toBe(`Voice stopped: the session reached its time limit. ${TYPED_FALLBACK}`)
   })
 
   it('a stop while the mic prompt is open stops the late track and starts nothing', async () => {
@@ -294,11 +294,29 @@ describe('stopCaption: one plain line per exit reason', () => {
     ['revoked', 'Voice stopped: the microphone was turned off or unplugged.'],
     ['expired', 'Voice stopped: the session reached its time limit.'],
   ] as const)('%s', (reason, line) => {
-    expect(stopCaption(reason)).toBe(line)
+    expect(stopCaption(reason)).toBe(`${line} ${TYPED_FALLBACK}`)
     expect(line).not.toMatch(/—|_|\n/)
   })
 
-  it('an error keeps its own words, joined with a colon', () => {
-    expect(stopCaption('error', 'No microphone was found.')).toBe('Voice stopped: no microphone was found.')
+  it.each([
+    ['mic_denied', 'microphone access was not allowed'],
+    ['mic_missing', 'no microphone was found'],
+    ['mic_busy', 'the microphone is in use by another app'],
+    ['mic_failed', 'the microphone could not start'],
+    ['not_set_up', 'voice is not set up on this server'],
+    ['session_open', 'voice is already on for this conversation elsewhere'],
+    ['resume_first', 'the conversation needs to resume first'],
+    ['reconnected', 'the conversation was reconnected'],
+    ['service_failed', 'the voice service did not start'],
+    ['link_failed', 'the voice connection did not start'],
+    ['link_lost', 'the voice connection was lost'],
+  ] as const)('error %s is a fixed sentence', (code, words) => {
+    expect(stopCaption('error', code)).toBe(`Voice stopped: ${words}. ${TYPED_FALLBACK}`)
+  })
+
+  it('a server message never reaches the caption', () => {
+    const line = stopCaption('error', refusalCode(Object.assign(new Error('x'), {
+      response: { data: { detail: { error_kind: 'speech_transport_failed', message: 'Internal room id r-9 failed' } } } })))
+    expect(line).toBe(`Voice stopped: the voice service did not start. ${TYPED_FALLBACK}`)
   })
 })

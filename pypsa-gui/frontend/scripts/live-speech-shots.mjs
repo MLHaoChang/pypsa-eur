@@ -8,9 +8,9 @@
  * Needs Vite on :5173. Vite's auth gate asks :8000 for /api/health, so a health-only stub starts there
  * unless something already answers.
  *
- * States: `1-off` (Start voice offered), `2-listening`, `3-stopped-hidden` (tab hidden: track stopped,
- * reason line), `4-unavailable` (server flag off: disabled, "not connected"), `5-no-link` (flag on, no media
- * link: disabled with that reason).
+ * States: `1-off` (Start voice beside Send), `2-listening`, `3-stopped-hidden` (tab hidden: track stopped,
+ * reason line), `4-unavailable` (server flag off: master's voice note), `5-no-link` (flag on, no media link:
+ * a disabled Start voice beside Send, the reason in the composer caption).
  *
  * Usage: node scripts/live-speech-shots.mjs [outDir]      env: BASE, DEBUG=1 (unmocked routes, console errors)
  */
@@ -124,14 +124,23 @@ try {
     await page.getByTestId('companion-live-composer').waitFor()
     const speak = page.getByTestId('companion-voice-toggle')
     const note = page.getByTestId('companion-voice-note')
-    if (variant !== 'on') {
-      const [key, expect] = variant === 'off' ? ['4-unavailable', /not connected/] : ['5-no-link', /no media connection set up/]
-      await step(key, async () => {
+    const caption = page.getByTestId('companion-live-caption')
+    if (variant === 'off') {
+      await step('4-unavailable', async () => {
         await page.waitForTimeout(800)
-        if (await speak.count()) throw new Error('Start voice is enabled without the flag and a media link')
-        const text = await note.textContent()
-        if (!expect.test(text)) throw new Error(`voice note reads: ${text}`)
-        await shot(key)
+        if (await speak.count()) throw new Error('Start voice is in the composer while the server flag is off')
+        if (!/not connected/.test(await note.textContent())) throw new Error('the master voice note changed')
+        await shot('4-unavailable')
+      })
+      await ctx.close(); continue
+    }
+    if (variant === 'no-link') {
+      await step('5-no-link', async () => {
+        await speak.waitFor()
+        if (!(await speak.isDisabled())) throw new Error('Start voice is enabled without a media link')
+        if (await note.count()) throw new Error('the voice note shows while the flag is on')
+        if (!/no media connection set up/.test(await caption.textContent())) throw new Error('the reason is not visible')
+        await shot('5-no-link')
       })
       await ctx.close(); continue
     }

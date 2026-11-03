@@ -131,10 +131,13 @@ connect failure, link drop), Live closed, unmount, `visibilitychange`
 hidden, `pagehide`, project switch, rebind (thread or generation change),
 track `ended` (revoked/unplugged), session `expires_at`. The typed composer
 stays on the same durable thread; each stop leaves a caption with the reason.
-UX (7) placement conditions: one entry point, the existing "Start voice"
-button in the voice note (toggle "Start voice"/"Stop voice"); captions
-"Voice stopped: <reason>." / "Listening: speak, then pause."; flag on without
-a link stays disabled with a visible reason.
+UX (7) rulings: option (b), "Start voice"/"Starting…"/"Stop voice" beside
+Send while the server flag is on (disabled with the reason in the composer
+caption when no media link is set up), the voice note hidden then; flag off
+leaves master's note as it is. Captions: "Listening: speak, then pause." and
+"Voice stopped: <reason>. Type here to continue in the same conversation.",
+one map per exit reason and a fixed sentence per error code (no error or
+server text shown). Expert clipping of the voice note: follow-up `07b`.
 Tests: `hooks/useLiveSpeech.test.tsx` (22, a test per exit; mutants that drop
 the closed/hidden/project wiring fail), `CompanionLauncher.test.tsx`
 (+4). Shots: `scripts/live-speech-shots.mjs` (route-mocked, fake mic) →

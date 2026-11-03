@@ -87,8 +87,12 @@ export default function AssistantDock() {
   const echoTimer = useRef<number | null>(null)
   const liveGeneration = useRef(0)
   // LC-07: continuous voice; every exit stops the microphone (see useLiveSpeech).
-  // Its listening and stop lines show in the launcher's voice note.
   const speech = useLiveSpeech(liveOpen)
+  // The composer caption is the voice state line (UX (7)): listening, the last stop, or why it is off.
+  useEffect(() => {
+    if (speech.state === 'listening' || speech.caption) setLiveCaption(speech.caption)
+    else if (speech.blocked) setLiveCaption(speech.blocked)
+  }, [speech.state, speech.caption, speech.blocked])
   // Conversation/decision state is independent of in-page text and audio.
   // Continuous speech (LC-07) is the only media here; see useLiveSpeech.
   const workState: CompanionWorkState = pending ? 'waiting_for_approval'
