@@ -143,3 +143,15 @@ Gates (need a real credential or deployment, not built): LiveKit room-token
 refresh on rebind; hosted audio worker network/CPU/memory/concurrency
 provisioning and load test; paid STT/TTS; multi-worker distributed pin/lease
 coordination. Running the deployed smoke itself is an owner/deployment gate.
+
+2026-11-03: PR3 rework after GK B (17) NOT OK on #1051. The argv/env reading
+failed open: under `python -m uvicorn … --workers 4` (how `pypsa-gui/start.sh`
+launches) argv[0] is `uvicorn/__main__.py`. The gate now fails closed:
+`app_workers.hold_store_lock` takes a non-blocking exclusive lock
+(`harness.durable.file_lock`, timeout 0) on `<project>/durable_conversations/
+.worker.lock` on the first durable control. The lock is held for the process
+lifetime and released by the OS when the process dies. A second process gets
+503 `multi_worker_unsupported` with `source: lock`. The argv reading stays as
+an early refusal (now covering `python -m uvicorn`). Undetected by argv,
+caught by the lock: gunicorn `-c`, `GUNICORN_CMD_ARGS`, `uvicorn.run(workers=N)`.
+Two-process test, red before the lock; the no-lock mutant fails it.

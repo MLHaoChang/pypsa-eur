@@ -174,6 +174,7 @@ def _save(path: Path, thread: dict[str, Any]) -> None:
 def _read(thread_id: str) -> tuple[Path, dict[str, Any]]:
     app_workers.require_single_worker()
     path, project_id, owner = _path(thread_id)
+    app_workers.hold_store_lock(path.parent)
     try:
         thread = json.loads(path.read_text(encoding='utf-8'))
     except FileNotFoundError:
@@ -196,6 +197,7 @@ def create_thread() -> dict[str, Any]:
     root, project_id, owner = _authority()
     thread_id = str(uuid.uuid4())
     path = root / 'durable_conversations' / (thread_id + '.json')
+    app_workers.hold_store_lock(path.parent)
     thread = _empty_thread(thread_id, owner_id=owner, project_id=project_id)
     with _LOCK:
         _save(path, thread)

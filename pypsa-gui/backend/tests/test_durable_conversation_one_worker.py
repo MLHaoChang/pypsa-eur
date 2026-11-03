@@ -114,3 +114,54 @@ def test_multi_worker_refusal_over_http(client, monkeypatch):
     response = client.post('/api/durable-conversations')
     assert response.status_code == 503
     assert response.json()['detail']['error_kind'] == 'multi_worker_unsupported'
+
+
+# ── fail closed: a second process cannot serve the same durable store ───────
+
+_HOLDER = """
+import sys, time
+sys.path.insert(0, {backend!r})
+from services import app_workers
+app_workers.hold_store_lock({store!r})
+print('held', flush=True)
+time.sleep(60)
+"""
+
+
+def _spawn_holder(store):
+    import pathlib
+    import subprocess
+
+    backend = str(pathlib.Path(__file__).resolve().parents[1])
+    proc = subprocess.Popen(
+        [__import__('sys').executable, '-c', _HOLDER.format(backend=backend, store=str(store))],
+        stdout=subprocess.PIPE, text=True,
+    )
+    assert proc.stdout.readline().strip() == 'held'
+    return proc
+
+
+def test_second_process_on_the_same_store_is_refused(tmp_path):
+    store = tmp_path / PROJECT / 'durable_conversations'
+    store.mkdir(parents=True)
+    holder = _spawn_holder(store)
+    try:
+        with pytest.raises(HTTPException) as failure:
+            dc.create_thread()
+        detail = failure.value.detail
+        assert failure.value.status_code == 503
+        assert (detail['error_kind'], detail['source']) == ('multi_worker_unsupported', 'lock')
+        assert not [p for p in store.iterdir() if p.suffix == '.json']
+    finally:
+        holder.kill()
+        holder.wait()
+    # The other worker is gone: this one may now own the store.
+    assert dc.create_thread()['generation'] == 1
+
+
+def test_python_dash_m_uvicorn_workers_is_detected(monkeypatch):
+    monkeypatch.setattr(app_workers.sys, 'argv', [
+        '/env/lib/python3.12/site-packages/uvicorn/__main__.py',
+        'main:app', '--workers', '4',
+    ])
+    assert app_workers.detected() == (4, 'argv')

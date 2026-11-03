@@ -15,11 +15,21 @@ deployment that serves the conversation API.
   process that created it. Nothing coordinates those pins across processes
   yet. So every durable-conversation control answers `503
   multi_worker_unsupported` when the server runs more than one worker.
-- **How the worker count is read** (`services/app_workers.py`): the desktop
-  launcher's declaration comes first (it pins `workers=1`). Then
-  `--workers N` / `-w N` on the uvicorn or gunicorn command line. Then
-  `WEB_CONCURRENCY`. Otherwise the count is one, uvicorn's default when
-  neither the flag nor the variable is set.
+- **How a second worker is refused** (`services/app_workers.py`). The gate
+  fails closed. Each process takes a non-blocking exclusive lock on every
+  durable store it serves (`<project>/durable_conversations/.worker.lock`,
+  flock or msvcrt) and holds it until the process ends. A second process on
+  the same store gets `503 multi_worker_unsupported` with `source: "lock"`,
+  however it was started. When a worker dies, the OS releases its lock.
+- **Early refusal from the launch command.** Before taking the lock, the app
+  reads the worker count, which gives a clearer message (`workers: N`). The
+  desktop launcher's declaration comes first (it pins `workers=1`). Then
+  `--workers N` / `--workers=N` / gunicorn `-w N` on the command line,
+  including `python -m uvicorn`. Then `WEB_CONCURRENCY`. Otherwise the count
+  is one, uvicorn's default. This reading cannot see a gunicorn `-c` config
+  file, `GUNICORN_CMD_ARGS` or `uvicorn.run(workers=N)` in code. Those
+  launches are refused by the lock instead, on the first durable control
+  that reaches a second worker.
 - **Restart.** A restarted worker has a new replica identity. A thread's
   ownership lease lasts `harness.runner.LEASE_SECONDS` (90 s) after its last
   control. Until the lease lapses, the new worker answers `409 wrong_replica`.
@@ -76,8 +86,10 @@ equal to `owner_replica_id`.
    `GET …/$TID` still shows `goals == ["smoke"]` and the same budget charges.
 5. **One worker.** Start a second instance with `--workers 2` (or
    `WEB_CONCURRENCY=2`) against a scratch data directory. Expect `POST
-   /api/durable-conversations` to answer `503 multi_worker_unsupported`,
-   with `workers: 2` and the source named.
+   /api/durable-conversations` to answer `503 multi_worker_unsupported` with
+   `workers: 2`. Then start the app twice as separate single-worker processes
+   on the same data directory. Once the first has served a durable control,
+   the second answers `503` with `source: "lock"` for the same project.
 
 Record the deployment, the commit and each step's status in the release
 evidence.
