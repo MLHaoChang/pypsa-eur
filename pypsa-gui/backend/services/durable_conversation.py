@@ -11,6 +11,7 @@ import copy
 import json
 import os
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +22,22 @@ from harness.history import trim_session_messages
 from services.pypsa_service import PyPSAService
 
 _LOCK = threading.RLock()
+
+# Rotation keeps the newest episodes; older ones are counted, not kept.
+EPISODE_LINEAGE_MAX = 32
+# Unverified effects awaiting reconciliation; the overflow is counted.
+RECONCILE_MAX = 64
+
+
+def _wall_clock() -> float:
+    """Wall time, as ``harness.runner`` leases use (one clock for all)."""
+    return time.time()
+
+
+def _lease_seconds() -> float:
+    from harness import runner
+
+    return float(runner.LEASE_SECONDS)
 
 
 def _refuse(kind: str, message: str, status: int = 409, **extra) -> None:
@@ -57,21 +74,37 @@ def _authority() -> tuple[Path, str, str]:
         return project_registry.project_dir(project), str(project.id), str(user.id)
 
 
-def _require_authoritative_replica(thread: dict[str, Any]) -> None:
-    """Refuse controls when this process is not the thread's pinned replica."""
+def _require_authoritative_replica(
+    thread: dict[str, Any], *, adopt: bool = False,
+) -> bool:
+    """Refuse controls when this process is not the thread's pinned replica.
+
+    The owner renews ``owner_lease_until`` (wall time, ``runner.LEASE_SECONDS``)
+    on every control; mutating callers save it. Another replica is refused
+    while the lease is live. Once it has lapsed the owner process is taken to
+    be gone: only ``resume_episode`` (``adopt=True``) may take the thread over,
+    which re-pins it here and counts as a restart. Returns True on takeover.
+    """
     import security
 
     pinned = thread.get('owner_replica_id')
-    if not pinned:
-        return
     current = security.replica_id()
-    if pinned != current:
-        _refuse(
-            'wrong_replica',
-            'This durable thread is pinned to another application worker.',
-            409,
-            owner_replica_id=pinned,
-        )
+    now = _wall_clock()
+    takeover = False
+    if pinned and pinned != current:
+        lapsed = float(thread.get('owner_lease_until') or 0) <= now
+        if not (lapsed and adopt):
+            _refuse(
+                'wrong_replica',
+                'This durable thread is pinned to another application worker.',
+                409,
+                owner_replica_id=pinned,
+                resume_required=lapsed,
+            )
+        thread['owner_replica_id'] = current
+        takeover = True
+    thread['owner_lease_until'] = now + _lease_seconds()
+    return takeover
 
 
 def _empty_thread(thread_id: str, *, owner_id: str, project_id: str) -> dict[str, Any]:
@@ -84,6 +117,7 @@ def _empty_thread(thread_id: str, *, owner_id: str, project_id: str) -> dict[str
         'owner_id': owner_id,
         'project_id': project_id,
         'owner_replica_id': security.replica_id(),
+        'owner_lease_until': _wall_clock() + _lease_seconds(),
         'generation': 1,
         'episode_id': None,
         'goals': [],
@@ -100,6 +134,10 @@ def _empty_thread(thread_id: str, *, owner_id: str, project_id: str) -> dict[str
             'final_charges': [],
             'cached_usage': {},
         },
+        'episode_lineage': [],
+        'episode_lineage_dropped': 0,
+        'reconcile': [],
+        'reconcile_dropped': 0,
         'checkpoint_rev': 0,
         'created_at': now,
         'updated_at': now,
@@ -272,22 +310,112 @@ def resume_episode(thread_id: str, *, generation: int):
 
     with _LOCK:
         path, thread = _read(thread_id)
-        _require_authoritative_replica(thread)
+        takeover = _require_authoritative_replica(thread, adopt=True)
         _require_generation(thread, generation)
         old_episode = thread.get('episode_id')
+        old_session = chat_service.get_session(old_episode) if old_episode else None
+        if old_session is not None and old_session._turn_in_flight:
+            # A live turn on this worker: never drop it under its own effects.
+            _refuse('turn_already_in_flight', 'Wait for the episode turn to finish.')
+        effects = _uncertain_effects(thread, old_episode, takeover=takeover)
         _revoke_checked_episode(thread)
         if old_episode:
             chat_service.drop_session(old_episode)
         new_session = chat_service.get_or_create_session(
             owner_user_id=thread['owner_id'],
         )
+        now = datetime.now(timezone.utc).isoformat()
         thread['episode_id'] = new_session.session_id
         thread['generation'] = int(thread.get('generation', 1)) + 1
         thread['checkpoint_rev'] = int(thread.get('checkpoint_rev', 0)) + 1
-        thread['updated_at'] = datetime.now(timezone.utc).isoformat()
+        _bounded_extend(thread, 'episode_lineage', [{
+            'episode_id': new_session.session_id,
+            'generation': thread['generation'],
+            'reason': 'takeover' if takeover else 'resume',
+            'at': now,
+        }], EPISODE_LINEAGE_MAX, keep='newest')
+        _bounded_extend(thread, 'reconcile', effects, RECONCILE_MAX, keep='oldest')
+        thread['updated_at'] = now
         _save(path, thread)
         _hydrate_discussed_refs(new_session, thread)
         return _view(thread), new_session
+
+
+def _bounded_extend(
+    thread: dict[str, Any], field: str, items: list[dict[str, Any]],
+    cap: int, *, keep: str,
+) -> None:
+    """Append under a cap; the overflow is counted in ``<field>_dropped``."""
+    merged = list(thread.get(field) or []) + items
+    overflow = max(0, len(merged) - cap)
+    if overflow:
+        merged = merged[overflow:] if keep == 'newest' else merged[:cap]
+    thread[field] = merged
+    thread[field + '_dropped'] = int(thread.get(field + '_dropped') or 0) + overflow
+
+
+def _uncertain_effects(
+    thread: dict[str, Any], episode_id: str | None, *, takeover: bool,
+) -> list[dict[str, Any]]:
+    """What the prior episode may have done without a recorded outcome.
+
+    Read-only: the episode's event log is read, never repaired or replayed,
+    and no tool is called. A turn that started and never ended (or that a
+    repair closed as interrupted) is unverified, and so is each tool call in
+    it without a real result. Only identifiers and tool names are kept, never
+    tool inputs. A takeover (the owner worker died) also lists the thread's
+    jobs, whose state must be read back before anything relies on it.
+    """
+    from types import SimpleNamespace
+
+    from harness import eventlog
+
+    known = {
+        (e.get('kind'), e.get('episode_id'), e.get('tool_use_id'), e.get('job_id'))
+        for e in thread.get('reconcile') or []
+    }
+    found: list[dict[str, Any]] = []
+    now = datetime.now(timezone.utc).isoformat()
+
+    def add(entry: dict[str, Any]) -> None:
+        marker = (entry['kind'], entry.get('episode_id'),
+                  entry.get('tool_use_id'), entry.get('job_id'))
+        if marker not in known:
+            known.add(marker)
+            found.append({**entry, 'status': 'unverified', 'recorded_at': now})
+
+    if episode_id:
+        path = eventlog.path_for(SimpleNamespace(
+            session_id=episode_id, owner_user_id=thread['owner_id'],
+        ))
+        events = eventlog.read_events(path) if path.exists() else []
+        starts = [i for i, e in enumerate(events) if e.get('type') == 'turn/start']
+        tail = events[starts[-1]:] if starts else []
+        ends = [e for e in tail if e.get('type') == 'turn/end']
+        if tail and (not ends or ends[-1].get('reason') == 'interrupted'):
+            add({'kind': 'turn', 'episode_id': episode_id})
+            answered = {
+                block.get('tool_use_id')
+                for e in tail
+                if e.get('type') == 'tool/result' and e.get('error_kind') != 'interrupted'
+                for block in (e.get('message') or {}).get('content') or []
+                if isinstance(block, dict)
+            }
+            for e in tail:
+                if e.get('type') != 'assistant/attempt':
+                    continue
+                for block in (e.get('message') or {}).get('content') or []:
+                    if (isinstance(block, dict) and block.get('type') == 'tool_use'
+                            and block.get('id') not in answered):
+                        add({
+                            'kind': 'tool_call', 'episode_id': episode_id,
+                            'tool_use_id': str(block.get('id')),
+                            'tool': str(block.get('name')),
+                        })
+    if takeover:
+        for job_id in thread.get('job_ids') or []:
+            add({'kind': 'job', 'job_id': str(job_id)})
+    return found
 
 
 def _hydrate_discussed_refs(session, thread: dict[str, Any]) -> None:
