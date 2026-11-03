@@ -58,7 +58,7 @@ export function WorkbookRunNote({ run }: { run: ResultsWorkbookRun | null | unde
       a.href = url; a.download = filename; a.click()
       URL.revokeObjectURL(url)
     } catch (e) {
-      setRefused(await runFileRefusal(e))
+      setRefused(await runFileRefusal(e, id => TABS.find(t => t.id === id)?.label))
     } finally { setBusy(false) }
   }
   return (

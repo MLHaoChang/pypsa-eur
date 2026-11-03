@@ -28,6 +28,7 @@ import numpy as np
 import pandas as pd
 
 from services.compare.prices import weighted_stats
+from services.not_kept import MULTI_PERIOD_NOT_DIGESTED, NO_PRICES
 from services.period_utils import is_multi_period, snapshot_weights
 from services.results.dispatch_digest import BUDGET_BYTES, _num, _size
 from services.results.load_frames import corrected_marginal_prices
@@ -107,11 +108,11 @@ def prices_digest(n, *, result_df=None, price_drivers: Any = None) -> dict:
     is the route's payload for that read, kept as it is (trimmed rows counted).
     """
     if is_multi_period(n):
-        return {'status': 'unavailable', 'reason': 'multi_period_not_digested'}
+        return {'status': 'unavailable', 'reason': MULTI_PERIOD_NOT_DIGESTED}
     sns = n.snapshots
     prices = corrected_marginal_prices(n, from_state=result_df is not None, result_df=result_df)
     if prices is None or prices.empty:
-        return {'status': 'unavailable', 'reason': 'no_prices'}
+        return {'status': 'unavailable', 'reason': NO_PRICES}
     prices = prices.reindex(sns).astype(float)
     w = snapshot_weights(n, 'objective').reindex(sns).fillna(0.0).astype(float)
     wv, pv = w.to_numpy(), prices.to_numpy()

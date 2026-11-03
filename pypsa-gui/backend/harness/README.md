@@ -1453,7 +1453,11 @@ rows and unavailable entries at 500 and chart series at ten branches × the firs
 downsampled. Unknown ratings and unaligned AC convergence are unavailable.
 
 `GET /api/results/run-view` reads owned retained evidence and an optional owned
-baseline reference. Missing/corrupt sections remain unavailable; no live fallback,
+baseline reference. Missing/corrupt sections remain unavailable. A section kept as a
+`not_kept` stub (`{status, reason, bytes}`: a multi-period or price-less digest, or
+a section over the 16 KB cap) lists as unavailable with its reason, and every read
+of it (run view, export, `get_results` with `run_id`, checked reads) refuses with
+that reason and `section_status: not_kept`, never its bytes as data. No live fallback,
 input restore, arbitrary historical slicing or implicit comparison is performed.
 The Results chrome shows the source; per-turn UI context carries only source
 identifiers/window positions, fenced as untrusted hints. Tools re-read evidence.

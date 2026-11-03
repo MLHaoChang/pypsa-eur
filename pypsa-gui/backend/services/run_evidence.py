@@ -55,10 +55,17 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from services.not_kept import NOT_KEPT, OVER_SECTION_CAP, SECTION_CAP_KB, why as _not_kept_why
 from services.pypsa_service import PyPSAService
 
 MANIFEST_VERSION = 1
 MAX_SECTION_BYTES = 16 * 1024
+# LC-03 slice 2: a section that could not be kept is stored as a typed stub,
+# {'status': NOT_KEPT, 'reason': ..., 'bytes': ...}. It verifies like any
+# section, and every read treats it as absent with its reason, never as data.
+assert MAX_SECTION_BYTES == SECTION_CAP_KB * 1024
+_STUB_KEYS = frozenset({'status', 'reason', 'bytes'})
+_STUB_MAX_BYTES = 256
 MAX_RUNS_WITH_ARTIFACTS = 20
 MAX_MANIFESTS = 200
 DEFAULT_LIMIT = 10
@@ -120,6 +127,26 @@ def _json_bytes(value: Any) -> bytes:
     except (TypeError, ValueError):
         _refuse('invalid_run_evidence', 'Run evidence must be finite, JSON-serialisable values.', 422)
     raise AssertionError  # pragma: no cover
+
+
+def not_kept_stub(reason: str, size: int | None = None) -> dict:
+    """The stub stored for a section that was not kept: why, and its size when
+    that was the reason (OVER_SECTION_CAP)."""
+    return {'status': NOT_KEPT, 'reason': reason, 'bytes': size}
+
+
+def _stub(blob: bytes | None) -> dict | None:
+    """The not_kept stub a verified section holds, else None (it holds data)."""
+    if blob is None or len(blob) > _STUB_MAX_BYTES:
+        return None
+    try:
+        data = json.loads(blob)
+    except ValueError:
+        return None
+    if (isinstance(data, dict) and set(data) == _STUB_KEYS and data['status'] == NOT_KEPT
+            and isinstance(data['reason'], str)):
+        return data
+    return None
 
 
 def _valid_run_id(run_id: Any) -> bool:
@@ -401,7 +428,18 @@ def _section_state(root: Path, record: dict, name: str) -> tuple[bytes | None, s
     return blob, None
 
 
+def _section_entry(root: Path, record: dict, name: str) -> dict:
+    """One section as a run's listing names it; a stub is unavailable with its reason."""
+    blob, reason = _section_state(root, record, name)
+    stub = _stub(blob)
+    if stub is not None:
+        return {'name': name, 'available': False, 'status': NOT_KEPT, 'reason': stub['reason']}
+    return {'name': name, 'available': reason is None}
+
+
 def _evidence_available(root: Path, record: dict) -> bool:
+    # Integrity: every recorded section verifies. A stub verifies (it is absent
+    # by design, not missing or corrupt), so it does not make a run unavailable.
     names = list((record.get('sections') or {}))
     return bool(names) and all(_section_state(root, record, n)[1] is None for n in names)
 
@@ -504,21 +542,24 @@ def get_run_evidence(run_id: str, section: str | None = None) -> dict:
         out['error'] = copy.deepcopy(record.get('error'))
         declared = list((record.get('sections') or {}))
         if section is None:
-            out['sections'] = [
-                {'name': n, 'available': _section_state(root, record, n)[1] is None}
-                for n in declared
-            ]
+            out['sections'] = [_section_entry(root, record, n) for n in declared]
             return out
         if record['status'] == 'running':
             _refuse('evidence_unavailable', 'This run has not finished.', run_id=run_id,
                     section=section, reason='run_not_finished', run_status='running')
         blob, reason = _section_state(root, record, section)
-        if reason is not None:
-            _refuse('evidence_unavailable',
-                    'The requested evidence is not available for this run.',
-                    run_id=run_id, section=section, reason=reason, run_status=record['status'],
+        stub = _stub(blob)
+        if reason is not None or stub is not None:
+            extra = ({} if stub is None else
+                     {'section_status': NOT_KEPT, 'section_bytes': stub['bytes']})
+            message = ('The requested evidence is not available for this run.' if stub is None
+                       else f'This run kept no {section}: {_not_kept_why(stub["reason"])}.')
+            _refuse('evidence_unavailable', message,
+                    run_id=run_id, section=section,
+                    reason=reason if stub is None else stub['reason'],
+                    run_status=record['status'], **extra,
                     available_sections=[n for n in declared
-                                        if _section_state(root, record, n)[1] is None])
+                                        if _section_entry(root, record, n)['available']])
         out['section'] = section
         out['data'] = json.loads(blob)
         return out
@@ -583,7 +624,7 @@ def checked_run_section(run_id: Any, section: Any) -> tuple[str, dict | None, An
     """(project id, manifest, section data, status) for a checked answer about
     one recorded section of one run: the manifest and data only when the run
     checks as in checked_run_manifest and records that section ('not_recorded'
-    when it does not)."""
+    when it does not, NOT_KEPT when it records a not_kept stub)."""
     root, project_id, _owner = _authority()
     with _LOCK:
         manifest, status = _checked_manifest(root, project_id, run_id)
@@ -594,6 +635,8 @@ def checked_run_section(run_id: Any, section: Any) -> tuple[str, dict | None, An
         blob, reason = _section_state(root, manifest, section)
         if reason is not None:
             return project_id, None, None, 'unverified'
+        if _stub(blob) is not None:
+            return project_id, None, None, NOT_KEPT
         return project_id, manifest, json.loads(blob), 'completed'
 
 
@@ -1101,14 +1144,19 @@ _STUDY_ROUTE = {
 
 
 def _bounded(section: str, payload: dict | None, run_id: str) -> tuple[dict, list[str]]:
-    """({section: payload}, []) when it fits the store's cap, else ({}, [warning])."""
-    if payload is not None and len(_json_bytes(payload)) <= MAX_SECTION_BYTES:
+    """({section: payload}, []) when it fits the store's cap. Over the cap, a
+    not_kept stub (OVER_SECTION_CAP, its size) and a warning; with no payload
+    (none read, or a newer study replaced the record), nothing and a warning."""
+    warning = [f'{section}_not_captured']
+    if payload is None:
+        return {}, warning
+    size = len(_json_bytes(payload))
+    if size <= MAX_SECTION_BYTES:
         return {section: payload}, []
-    if payload is not None:
-        import logging
-        logging.getLogger(__name__).warning('%s for %s exceeds the section cap; not kept',
-                                            section, run_id)
-    return {}, [f'{section}_not_captured']
+    import logging
+    logging.getLogger(__name__).warning('%s for %s exceeds the section cap; not kept',
+                                        section, run_id)
+    return {section: not_kept_stub(OVER_SECTION_CAP, size)}, warning
 
 
 def _study_result(study_key: str, record: dict) -> dict | None:

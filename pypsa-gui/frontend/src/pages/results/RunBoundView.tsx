@@ -1,10 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
-import { projectUnavailableReason, resultsEvidenceApi } from '../../api/resultsEvidence'
+import { notKeptWords, projectUnavailableReason, resultsEvidenceApi } from '../../api/resultsEvidence'
+import { notKeptShort, sectionWords } from './sectionWords'
 import { useUIStore, type RunResultRequest } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 
 /** Native retained evidence; no live result component is mounted in this view. */
-export default function RunBoundView({ run, tab }: { run: RunResultRequest; tab: string }) {
+export default function RunBoundView({ run, tab, tabLabel = () => undefined }: {
+  run: RunResultRequest; tab: string
+  /** A Results tab's label by id (Results passes its TABS), for section names in words. */
+  tabLabel?: (id: string) => string | undefined
+}) {
   const project = useUIStore(s => s.currentProject)
   const section = tab === 'summary' ? undefined
     : run.resultsTab === tab && run.section ? run.section : tab
@@ -17,6 +22,9 @@ export default function RunBoundView({ run, tab }: { run: RunResultRequest; tab:
   // LC-T08: access lost since the run is refused on read; say so plainly.
   const lost = query.isError ? projectUnavailableReason(query.error) : null
   if (lost) return <p className="p-4" role="status">{lost}</p>
+  // A section kept as a not_kept stub is absent: say why, never show the stub as data.
+  const notKept = query.isError ? notKeptWords(query.error, tabLabel) : null
+  if (notKept) return <p className="p-4" role="status" data-testid="run-not-kept">{notKept}</p>
   if (query.isError || !query.data) return <p className="p-4" role="status">Retained {section ?? 'summary'} evidence unavailable for run {run.runId}. Current results have not been substituted.</p>
   const { data, binding } = query.data
   if (binding.project_name !== project || binding.run_id !== run.runId
@@ -28,9 +36,9 @@ export default function RunBoundView({ run, tab }: { run: RunResultRequest; tab:
     <p className="text-xs text-muted">{project} · {data.fingerprint ? `input fingerprint ${data.fingerprint}` : 'Input fingerprint unavailable'}
       {run.baselineRunId ? ` · baseline ${run.baselineRunId} (retained reference; no comparison implied)` : ''}</p>
     <p className="text-xs text-muted">Historical scope and window come from the recorded artifact; they are unavailable when not recorded. The current horizon filter does not slice historical evidence.</p>
-    {data.section ? <><h4 className="mt-3">{data.section} · native retained evidence</h4><pre className="whitespace-pre-wrap break-words text-xs mt-2">{JSON.stringify(data.data, null, 2)}</pre></>
+    {data.section ? <><h4 className="mt-3">{sectionWords(data.section, tabLabel)} · native retained evidence</h4><pre className="whitespace-pre-wrap break-words text-xs mt-2">{JSON.stringify(data.data, null, 2)}</pre></>
       : <><table className="text-xs mt-3"><tbody>{Object.entries(data.metrics ?? {}).map(([name, metric]) => <tr key={name}><th className="pr-4 text-left">{name}</th><td>{metric.value == null ? 'Unavailable' : metric.value} {metric.unit}</td></tr>)}</tbody></table>
-        <p className="mt-3 text-xs">Recorded sections: {(data.sections ?? []).map(s => `${s.name} (${s.available ? 'available' : 'unavailable'})`).join(', ') || 'none'}</p></>}
+        <p className="mt-3 text-xs">Recorded sections: {(data.sections ?? []).map(s => `${sectionWords(s.name, tabLabel)} (${s.status === 'not_kept' ? `not kept: ${notKeptShort(s.reason)}` : s.available ? 'available' : 'unavailable'})`).join(', ') || 'none'}</p></>}
     {(data.warnings ?? []).map(w => <p key={w} role="status">{w}</p>)}
     {data.error != null && <pre>{JSON.stringify(data.error, null, 2)}</pre>}
   </section>

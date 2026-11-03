@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A past run whose dispatch or prices could not be digested (multi-period, no prices) or whose section was over the 16 KB cap now keeps a typed `not_kept` stub, and reading that run's results says why instead of "ran outside a chat-started solve". Runs kept before this change read and export unchanged.

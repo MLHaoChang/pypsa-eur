@@ -6078,6 +6078,12 @@ def discuss_project_run(
         discussed["source"] = results_tab
     if section:
         discussed["section"] = section
+        # A section kept as a not_kept stub is absent: say so with its reason,
+        # never as evidence (LC-03 slice 2).
+        entry = next((e for e in summary.get("sections") or [] if e.get("name") == section), None)
+        if entry and entry.get("status") == re_.NOT_KEPT:
+            discussed["section_status"] = re_.NOT_KEPT
+            discussed["section_reason"] = entry.get("reason")
     if baseline_run_id:
         discussed["baseline_run_id"] = baseline_run_id
 

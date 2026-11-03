@@ -4,8 +4,9 @@ Status: ready-for-agent
 Progress: Result-view registry #407, walk #410, retained load flow #416, common adapter + Summary,
 capacity, dispatch, prices and emissions families (#848, #861 and earlier) merged; LC-T08 ACL
 recheck and LC-T09/T10 browser cases (PR-I) merged; UI/export parity for past runs (PR-J, below)
-open. Remaining: study/report sections (queue: PR-L); undigestable prices; sections over 16 KB; the
-remaining LC-T09/T10 browser cases (PR-I list). LC-14 reach fixes outsourced.
+open. Slice 2: queue capture (PR-L, #1036) and study/report sections (PR-M, #1038) merged;
+undigestable prices and sections over 16 KB as typed not_kept stubs (PR-N, #1053) open.
+Remaining: the remaining LC-T09/T10 browser cases (PR-I list). LC-14 reach fixes outsourced.
 Type: task
 Baseline: master `c75ca5584b873418f10f1bca42f868255d445b7b`
 Dependencies: LC-01/02 and current native evidence stores
@@ -515,6 +516,33 @@ Kept, with reasons:
   fragment.
 - The study payload includes `edited_since_study` as the route served it at
   completion; it is not recomputed later.
+
+### PR-N, typed `not_kept` stub (2026-11-03)
+
+Owner decision FILL-10-2, GK B (16) Q2 option 1 (values never trimmed). Branch
+`claude/lc03-not-kept-stub`, stacked on PR-L (`claude/lc03-queue-capture`).
+
+- Capture (`retained_results.capture`, `_capture_digest`): a digest that cannot be
+  built (`multi_period_not_digested`, `no_prices`) and any section over the 16 KB
+  cap (`over_section_cap`, with its size) store a section holding
+  `{status: 'not_kept', reason, bytes}`. Such a section still counts as
+  `*_not_captured`. Other failures (`results_current` false, an exception, a
+  no-data read) store nothing, as before.
+- Store (`run_evidence`): a stub verifies like any section, so `evidence_available`,
+  checked manifests and compare are unchanged. The listing names it
+  `{available: false, status: 'not_kept', reason}`. A section read, and so the run
+  view, both exports and `get_results(run_id=)`, refuses `evidence_unavailable`
+  with that reason and `section_status: not_kept`. `checked_run_section` answers
+  status `not_kept` with no data (the assurance gap says so).
+- (j) One constant per reason: `period_utils.MULTI_PERIOD_NOT_DIGESTED`,
+  `prices_digest.NO_PRICES`, `run_evidence.OVER_SECTION_CAP`. The live digest
+  failure and the past-run read both name it.
+- (h) Pinned: an old-format run's whole-run and section exports keep the sha256
+  taken on the base before this change, and its listing is unchanged.
+- Tests: `tests/test_retained_not_kept.py`: multi-period oj-grid (prices,
+  price_drivers, generators, storage_dispatch); a 2,000-generator network's
+  statistics and cost_breakdown; listing, run view, both exports, checked read,
+  compare; the pin.
 
 ## Comments
 
