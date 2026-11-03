@@ -36,7 +36,8 @@ After a converged run the AS-07 control-settings sheet is built from the final s
 attached, and written next to `dyr_path` when one is given.
 
 Assumed values, marked as such (SAGC-1): tan phi_swing 0.1 (the GPU load's reactive swing per MW needs vendor
-data), X/R 4 (`flicker_inputs.DEFAULT_XR`), the GFM fault-current credit 1.2 pu, ESCR >= 3.
+data), X/R 4 (`flicker_inputs.DEFAULT_XR`) unless the project enters its PoC X/R (`project_inputs`, AS-17b), the
+GFM fault-current credit 1.2 pu, ESCR >= 3.
 """
 from __future__ import annotations
 
@@ -143,6 +144,18 @@ class SizingInputs:
 
 
 # ── inputs ──────────────────────────────────────────────────────────────────
+
+
+def project_inputs(inputs: dict, project_dir) -> dict:
+    """`inputs` (the `SizingInputs` fields) for a run on the project at `project_dir`: the project's PoC X/R
+    (AS-17 `poc_xr`) when the request gives no `xr`. A request's own `xr` wins; with neither, `SizingInputs.xr`
+    keeps `DEFAULT_XR` (assumed). `inputs` is not changed."""
+    from services.project_settings import poc_xr
+
+    if "xr" in inputs:
+        return inputs
+    xr = poc_xr(project_dir)
+    return inputs if xr is None else {**inputs, "xr": xr}
 
 
 def _envelope_max(env: dict) -> dict:

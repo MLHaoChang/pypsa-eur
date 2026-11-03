@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The asset-sizing loop's Pst check now uses the project's point-of-connection X/R (`poc_xr`, entered through `PATCH /api/projects/{name}/settings`) for the design-intent comparison, instead of always assuming X/R 4. A request's own `inputs.xr` still wins; with neither, the loop keeps the assumed 4.

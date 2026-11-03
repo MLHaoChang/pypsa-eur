@@ -3,7 +3,7 @@
 
 # AS-17 — Project PoC X/R input
 
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: AS-16
 
@@ -32,6 +32,9 @@ Out of scope: a UI field (no settings UI exists for `backup_autonomy_h` either; 
 - [ ] GK A OK; CI green.
 
 ## PRs
+
+- #1035 (claude/as17-poc-xr-input), merged
+- AS-17b (claude/as17b-sizing-poc-xr): the sizing loop's `SizingInputs.xr` reads `poc_xr` (FILL-10-2 merged follow-up)
 
 ## Comments
 - 2026-11-03, GK A plan verdict: GO with conditions.
