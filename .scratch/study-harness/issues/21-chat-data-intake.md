@@ -232,11 +232,16 @@ These bind whichever owner choice is taken; they are about safety only.
 **Hand-over at grant (§2).**
 - A1. Creation is idempotent and crash-safe. Before calling
   `create_from_template`, the harness writes an intent record to the host
-  task (`run.origin` plus the planned project name and uuid) under a
-  process-exclusive lock (the task lock, `assistant_tasks.py:18` `_LOCK`, or
-  `services/site_scene/store.py:53` `project_lock`). A retry or a concurrent
-  second grant finds the intent and never creates twice; a crash between
-  creation and task start resumes from the intent. The gate fails closed.
+  task (`run.origin` plus the planned project name and uuid), by atomic
+  replace. The guard is cross-process: `harness/durable.py:61` `file_lock` on
+  a sidecar of the host task file, as the runner's lease does
+  (`harness/runner.py:104-111`), held across the intent write, the creation
+  and the task start. The in-process `threading.RLock`s
+  (`assistant_tasks._LOCK`, `site_scene.store.project_lock`) are not enough:
+  two workers would each create a project. A retry or a concurrent second
+  grant finds the intent and never creates twice; a crash between creation
+  and task start resumes from the intent. The gate fails closed: a lock that
+  cannot be taken refuses the grant.
 - A2. The envelope on the new project is not a harness self-grant. It
   carries the host card's decision id (`approvals.decided(by="user")`) and
   the grant digest, and it is admitted only when both match. Issue 03's §7
@@ -334,9 +339,10 @@ control-matrix checks, because the setup path calls a route handler.
 - [ ] No item is asked twice in one run (test).
 - [ ] The model never supplies a value: an intake citation carrying a `value`
       field is refused (test).
-- [ ] A1: a double grant creates one project; a crash after creation and
-      before task start resumes from the intent record without a second
-      project (tests).
+- [ ] A1: a double grant creates one project; two processes (or two
+      simulated `file_lock` holders) granting at once create one project; a
+      crash after creation and before task start resumes from the intent
+      record without a second project (tests).
 - [ ] A2: an envelope on the new project without the host card's decision id
       and grant digest, or with a mismatched one, is refused (test).
 - [ ] A3: the foreground session's active project is unchanged after the
@@ -392,3 +398,7 @@ section.
   D1–D4. The rulings are about safety only; open choices 1–3 stay the
   owner's. All conditions are written into §6 above, with tests in the
   acceptance criteria.
+- 2026-11-03, GK B (18), GK NOT OK @01e9e9d7 on A1: the locks it named are
+  in-process. A1 now names the cross-process `durable.file_lock` on a sidecar
+  of the host task file, held across intent, creation and task start, and
+  adds the two-process test.
