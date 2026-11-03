@@ -31,6 +31,12 @@ def _enter_xr(d, xr) -> None:
     path.write_text(json.dumps(meta))
 
 
+def _plain(tmp_path):
+    sub = tmp_path / "plain"
+    sub.mkdir()
+    return sub
+
+
 def _rvc(d, n, **kw):
     return _rows(G.grid_readiness(d, n, PROFILE, **kw))["rapid_voltage_change"]
 
@@ -178,6 +184,19 @@ def test_the_flicker_envelope_takes_the_entered_xr_and_its_pst_follows_the_step(
     assert env["step_mva"] == pytest.approx(2.7 * 1.5 / math.sqrt(3.25), rel=1e-9) == pytest.approx(2.2465, rel=1e-4)
     assert after["flicker"]["pst"] < before["flicker"]["pst"]
     assert "X/R 1.5 (entered for the project), at PoC" in after["note"] and after["assumed"]
+
+
+def test_the_flicker_row_flags_an_assumed_xr_only_with_an_envelope_and_no_entered_xr(tmp_path):
+    """AS-18: `xr_assumed` (the scorecard's "Set PoC X/R" link) is on the flicker row when the GPU envelope
+    applies the grid X/R and none is entered; entering one removes it; with no envelope the row reads no
+    X/R, so it never carries the flag."""
+    d, n = _project(tmp_path, "eh_datacenter", dc_load={})
+    assert _rows(G.grid_readiness(d, n, PROFILE))["flicker"]["xr_assumed"] is True
+    _enter_xr(d, 1.5)
+    assert "xr_assumed" not in _rows(G.grid_readiness(d, n, PROFILE))["flicker"]
+    d2, n2 = _project(_plain(tmp_path), "eh_datacenter")
+    flicker = _rows(G.grid_readiness(d2, n2, PROFILE))["flicker"]
+    assert "envelope" not in (flicker.get("flicker") or {}) and "xr_assumed" not in flicker
 
 
 def test_an_entered_xr_changes_only_the_rvc_and_flicker_rows(tmp_path):
