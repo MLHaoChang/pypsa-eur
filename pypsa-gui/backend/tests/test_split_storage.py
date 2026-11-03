@@ -126,7 +126,9 @@ def _with_storage_unit(price: np.ndarray, **su) -> pypsa.Network:
          efficiency_dispatch=0.9, standing_loss=0.001, marginal_cost=1.5, cyclic_state_of_charge=True),
     dict(p_nom=30.0, max_hours=6.0, efficiency_store=0.92, efficiency_dispatch=0.92,
          state_of_charge_initial=60.0, p_max_pu=0.8, p_min_pu=-0.5),
-], ids=["extendable", "fixed"])
+    dict(p_nom=30.0, max_hours=6.0, efficiency_store=0.92, efficiency_dispatch=0.92,
+         marginal_cost_storage=0.5),
+], ids=["extendable", "fixed", "holding_cost"])
 def test_a_legacy_storage_unit_project_gives_the_same_objective_after_migration(su):
     price = _peaks(on=5, off=7)
     legacy = _with_storage_unit(price, **su)
@@ -141,6 +143,25 @@ def test_a_legacy_storage_unit_project_gives_the_same_objective_after_migration(
     assert _solve(migrated) == pytest.approx(float(legacy.objective), rel=1e-6)
     p, e = _p_e(migrated, "bess")
     assert e == pytest.approx(su["max_hours"] * p, rel=1e-6)
+    assert migrated.stores.at["bess", "marginal_cost_storage"] == su.get("marginal_cost_storage", 0.0)
+
+
+def test_a_carried_holding_cost_changes_the_objective():
+    """The holding_cost case above discriminates: marginal_cost_storage is in the objective, and SoC is held."""
+    su = dict(p_nom=30.0, max_hours=6.0, efficiency_store=0.92, efficiency_dispatch=0.92)
+    price = _peaks(on=5, off=7)
+    free, held = _with_storage_unit(price, **su), _with_storage_unit(price, **su, marginal_cost_storage=0.5)
+    for n in (free, held):
+        migrate_storage_unit(n, "bess")
+    assert _solve(held) > _solve(free) + 1.0
+
+
+def test_migration_refuses_a_time_varying_holding_cost_by_name():
+    n = _with_storage_unit(_peaks(on=5, off=7), p_nom=10.0, max_hours=2.0,
+                           marginal_cost_storage=pd.Series(0.5, pd.RangeIndex(HOURS)))
+    with pytest.raises(SplitStorageError, match="marginal_cost_storage varies in time"):
+        migrate_storage_unit(n, "bess")
+    assert "bess" in n.storage_units.index
 
 
 def test_migration_refuses_what_it_cannot_carry():
@@ -311,7 +332,6 @@ def test_the_tags_survive_a_netcdf_round_trip_and_a_project_copy(tmp_path):
 
 
 @pytest.mark.parametrize("attr, value, why", [
-    ("marginal_cost_storage", 0.5, "marginal_cost_storage"),
     ("cyclic_state_of_charge_per_period", True, "cyclic_state_of_charge_per_period"),
     ("spill_cost", 2.0, "spill_cost"),
 ])
