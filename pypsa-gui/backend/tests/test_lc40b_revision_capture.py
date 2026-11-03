@@ -161,6 +161,15 @@ ALLOWLIST = {
 }
 
 
+# Runners whose record captures no revision at all (path -> why, and what fixes it).
+NO_CAPTURE = {
+    "study/tornado_runner.py":
+        "start_tornado's record literal (~:275) has no network_revision and never "
+        "calls dirty_state.capture, so its campaign entries read null (Unavailable); "
+        "LC-40c (.scratch/live-copilot/issues/40c-tornado-revision-capture.md) adds the capture",
+}
+
+
 def bare_captures(root: Path) -> list[tuple[str, int, str]]:
     hits = []
     for path in sorted(root.rglob("*.py")):
@@ -181,6 +190,14 @@ def test_no_runner_captures_the_revision_outside_the_helper():
 def test_each_allowlisted_read_is_still_there(rel, line):
     source = (SERVICES / rel).read_text(encoding="utf-8").splitlines()
     assert line in [s.strip() for s in source], f"{rel}: drop or update its allowlist entry"
+
+
+@pytest.mark.parametrize("rel", list(NO_CAPTURE))
+def test_each_runner_known_not_to_capture_still_does_not(rel):
+    source = (SERVICES / rel).read_text(encoding="utf-8")
+    assert "dirty_state.capture(" not in source and "network_revision" not in source.split(
+        "record: dict[str, Any] = {", 1)[1].split("}", 1)[0], \
+        f"{rel} captures now: drop its NO_CAPTURE entry ({NO_CAPTURE[rel]})"
 
 
 @pytest.mark.parametrize("planted", [
