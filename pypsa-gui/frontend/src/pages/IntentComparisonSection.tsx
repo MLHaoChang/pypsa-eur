@@ -4,6 +4,8 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { errorText } from '../api/campusElectrical'
+import { projectsApi } from '../api/projects'
+import type { ProjectInfo } from '../api/types'
 import {
   DESIGN_INTENTS, intentComparisonApi, type CheckState, type DesignIntent, type IntentRow, type Outcome,
 } from '../api/intentComparison'
@@ -52,6 +54,9 @@ const NO_CODE_LINK = 'Set grid code ›'
 const INPUT = 'px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20'
 const POLL_MS = 2000
 
+const AUTONOMY_DEFAULT_H = 4
+const AUTONOMY_MAX_H = 720 // the backend's ceiling (0 < h <= 720)
+const autonomyOk = (s: string) => { const v = Number(s); return s.trim() !== '' && v > 0 && v <= AUTONOMY_MAX_H }
 const num = (s: string) => (s.trim() === '' ? NaN : Number(s))
 const fmt = (v: number | null | undefined, d = 1) => (v == null ? '–' : v.toLocaleString(undefined, { maximumFractionDigits: d }))
 /** The loop's last round is not a final answer unless it converged: its sizes are shown muted, marked as such. */
@@ -63,7 +68,11 @@ export default function IntentComparisonSection({ name, gridCode }: { name: stri
   const setSlidePanel = useUIStore(s => s.setSlidePanel)
   const requestGridCodeScroll = useUIStore(s => s.requestGridCodeScroll)
   const [chosen, setChosen] = useState<DesignIntent[]>([])
-  const [autonomy, setAutonomy] = useState('4')
+  const projects = useQuery({ queryKey: ['projects'], queryFn: () => projectsApi.list(), staleTime: 30_000 })
+  const storedAutonomy = (projects.data as ProjectInfo[] | undefined)?.find(p => p.name === name)?.settings?.backup_autonomy_h
+  // The stored value is only the default a run starts from; an edit is this run's own (AS10-AUTONOMY-2).
+  const [edited, setAutonomy] = useState<string | null>(null)
+  const autonomy = edited ?? String(storedAutonomy ?? AUTONOMY_DEFAULT_H)
   const [f, setF] = useState({ critical: '', link: '', ramp: '', sk: '', pst: '1', library: '', swing: '', amp: '', period: '' })
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF(p => ({ ...p, [k]: e.target.value }))
   const key = ['intentComparison', name]
@@ -92,7 +101,16 @@ export default function IntentComparisonSection({ name, gridCode }: { name: stri
   })
   const abort = useMutation({ mutationFn: () => intentComparisonApi.abort(name), onSuccess: () => qc.invalidateQueries({ queryKey: key }) })
   const toggle = (id: DesignIntent) => setChosen(c => (c.includes(id) ? c.filter(x => x !== id) : [...c, id]))
-  const autonomyBad = chosen.includes('A') && !(Number(autonomy) > 0)
+  const autonomyValid = autonomyOk(autonomy)
+  const autonomyBad = chosen.includes('A') && !autonomyValid
+  const saveAutonomy = useMutation({
+    mutationFn: () => projectsApi.updateSettings(name, { backup_autonomy_h: Number(autonomy) }),
+    onSuccess: updated => {
+      qc.setQueryData<ProjectInfo[]>(['projects'], prev =>
+        prev?.map(p => (p.name === updated.name ? { ...p, settings: updated.settings } : p)) ?? prev)
+      void qc.invalidateQueries({ queryKey: ['projects'] })
+    },
+  })
   const complete = [f.critical, f.ramp, f.sk, f.pst, f.swing, f.amp, f.period].every(v => Number(v) > 0) &&
     f.link.trim() !== '' && f.library.trim() !== ''
   const blocked = chosen.length < 2 ? NEED_TWO : autonomyBad ? null : !complete ? 'Fill in every input below, all greater than zero.' : null
@@ -124,10 +142,18 @@ export default function IntentComparisonSection({ name, gridCode }: { name: stri
       </div>
       {blocked && <p className="text-[11px] text-muted" data-testid="intent-blocked">{blocked}</p>}
       {chosen.includes('A') && (
-        <Field label="Backup autonomy (h)" hint="Intent A: backup energy = critical load × hours. Used for this run only; default 4 h.">
+        <Field label="Backup autonomy (h)" hint="Intent A: backup energy = critical load × hours. Each run uses the value shown and records it. Default 4 h.">
           <input className={INPUT} inputMode="decimal" value={autonomy} onChange={e => setAutonomy(e.target.value)}
             disabled={running} data-testid="intent-autonomy" />
-          {autonomyBad && <p className="text-[11px] text-err" data-testid="intent-autonomy-error">Enter a number of hours above zero.</p>}
+          {autonomyBad && <p className="text-[11px] text-err" data-testid="intent-autonomy-error">Enter a number of hours above zero, up to 720.</p>}
+          <div className="mt-1 flex items-center gap-2">
+            <Btn disabled={!autonomyValid || saveAutonomy.isPending || Number(autonomy) === storedAutonomy}
+              onClick={() => saveAutonomy.mutate()} data-testid="intent-autonomy-save"
+              title="Stores this value in the project as the default for later runs. Results already shown keep the value they used.">
+              Save as project default</Btn>
+            {storedAutonomy != null && <span className="text-[11px] text-muted">Project default: {fmt(storedAutonomy, 4)} h</span>}
+          </div>
+          {saveAutonomy.isError && <p className="text-[11px] text-err" role="alert" data-testid="intent-autonomy-save-error">{errorText(saveAutonomy.error)}</p>}
         </Field>
       )}
       <div className="grid grid-cols-2 gap-2 md:grid-cols-3">

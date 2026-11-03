@@ -13,6 +13,8 @@ vi.mock('../api/intentComparison', async () => {
   const real = await vi.importActual<typeof import('../api/intentComparison')>('../api/intentComparison')
   return { ...real, intentComparisonApi: api }
 })
+const proj = vi.hoisted(() => ({ list: vi.fn(), updateSettings: vi.fn() }))
+vi.mock('../api/projects', () => ({ projectsApi: proj }))
 const ui = vi.hoisted(() => ({ setSlidePanel: vi.fn(), requestGridCodeScroll: vi.fn() }))
 vi.mock('../store/uiStore', () => ({ useUIStore: (sel: (s: typeof ui) => unknown) => sel(ui) }))
 vi.mock('../layout/flowNavigation', () => ({ withReturnFrom: (jump: () => void) => jump() }))
@@ -42,7 +44,8 @@ async function runWith(user: ReturnType<typeof userEvent.setup>, rows: IntentRow
   await user.click(screen.getByTestId('intent-run'))
   await waitFor(() => expect(screen.getByTestId(`intent-row-${rows[0].intent}`)).toBeTruthy())
 }
-afterEach(() => { cleanup(); Object.values(api).forEach(m => m.mockReset()) })
+afterEach(() => { cleanup(); Object.values(api).forEach(m => m.mockReset()); Object.values(proj).forEach(m => m.mockReset()) })
+const stored = (h?: number) => proj.list.mockResolvedValue([{ name: 'Hub A', settings: h == null ? {} : { backup_autonomy_h: h } }])
 
 describe('IntentComparisonSection', () => {
   it('needs two intents, then starts one job and renders one row per intent', async () => {
@@ -179,5 +182,59 @@ describe('IntentComparisonSection', () => {
     expect(r.textContent).toContain('OK in last round')
     expect(r.innerHTML).not.toMatch(/success/)
     expect(screen.getByTestId('intent-row-C').textContent).toContain('Pass')
+  })
+
+  describe('stored backup autonomy (AS10-AUTONOMY-2)', () => {
+    const pickA = async (user: ReturnType<typeof userEvent.setup>) => { await user.click(screen.getByLabelText(/^A\. /)) }
+
+    it('loads the stored value as the run default and sends it', async () => {
+      const user = userEvent.setup()
+      stored(12); api.get.mockResolvedValue(null); api.start.mockResolvedValue(job([row('A'), row('B')]))
+      renderIt(); await fill(user); await pickA(user); await user.click(screen.getByLabelText(/^B\. /))
+      await waitFor(() => expect((screen.getByTestId('intent-autonomy') as HTMLInputElement).value).toBe('12'))
+      await user.click(screen.getByTestId('intent-run'))
+      await waitFor(() => expect(api.start).toHaveBeenCalled())
+      expect(api.start.mock.calls[0][1].intents[0]).toEqual({ intent: 'A', backup_autonomy_h: 12 })
+    })
+
+    it('defaults to 4 h when the project stores nothing', async () => {
+      const user = userEvent.setup()
+      stored(); api.get.mockResolvedValue(null)
+      renderIt(); await pickA(user)
+      expect((screen.getByTestId('intent-autonomy') as HTMLInputElement).value).toBe('4')
+    })
+
+    it('saves the value to the project with PATCH settings; the run keeps its own value', async () => {
+      const user = userEvent.setup()
+      stored(); api.get.mockResolvedValue(null)
+      proj.updateSettings.mockResolvedValue({ name: 'Hub A', settings: { backup_autonomy_h: 8 } })
+      renderIt(); await pickA(user)
+      const input = screen.getByTestId('intent-autonomy')
+      await user.clear(input); await user.type(input, '8')
+      await user.click(screen.getByTestId('intent-autonomy-save'))
+      await waitFor(() => expect(proj.updateSettings).toHaveBeenCalledWith('Hub A', { backup_autonomy_h: 8 }))
+    })
+
+    it.each(['0', '-1', '720.5', 'abc', ''])('refuses %j with text and a disabled Save', async v => {
+      const user = userEvent.setup()
+      stored(); api.get.mockResolvedValue(null)
+      renderIt(); await pickA(user)
+      const input = screen.getByTestId('intent-autonomy')
+      await user.clear(input); if (v) await user.type(input, v)
+      expect((screen.getByTestId('intent-autonomy-save') as HTMLButtonElement).disabled).toBe(true)
+      expect(screen.getByTestId('intent-autonomy-error').textContent).toContain('720')
+      expect(proj.updateSettings).not.toHaveBeenCalled()
+    })
+
+    it('accepts 720 and shows the server refusal inline', async () => {
+      const user = userEvent.setup()
+      stored(); api.get.mockResolvedValue(null)
+      proj.updateSettings.mockRejectedValue({ response: { status: 409, data: { detail: 'Project has never been saved' } } })
+      renderIt(); await pickA(user)
+      const input = screen.getByTestId('intent-autonomy')
+      await user.clear(input); await user.type(input, '720')
+      await user.click(screen.getByTestId('intent-autonomy-save'))
+      await waitFor(() => expect(screen.getByTestId('intent-autonomy-save-error').textContent).toContain('never been saved'))
+    })
   })
 })
