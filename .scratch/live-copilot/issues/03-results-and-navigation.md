@@ -4,7 +4,7 @@ Status: ready-for-agent
 Progress: Result-view registry #407, walk #410, retained load flow #416, common adapter + Summary,
 capacity, dispatch, prices and emissions families (#848, #861 and earlier) merged; LC-T08 ACL
 recheck and LC-T09/T10 browser cases (PR-I) merged; UI/export parity for past runs (PR-J, below)
-open. Remaining: queue/study/report sections; undigestable prices; sections over 16 KB; the
+open. Remaining: study/report sections (queue: PR-L); undigestable prices; sections over 16 KB; the
 remaining LC-T09/T10 browser cases (PR-I list). LC-14 reach fixes outsourced.
 Type: task
 Baseline: master `c75ca5584b873418f10f1bca42f868255d445b7b`
@@ -443,6 +443,42 @@ Owner decision FILL-10-1. Branch `claude/lc03-historical-families`, from master 
   `passed: true` with six families; `vitest Results.pastRunExport.test.tsx` (3).
 - Still open: filter/entity/time selection, legacy ACK, Guided vs Expert for the
   other families, speech and stale captions. ESLint config error is unchanged.
+
+### PR-L, solve-queue capture (2026-11-03)
+
+Owner decision FILL-10-2. Branch `claude/lc03-queue-capture`, from master `a6bd3972d`.
+Plan GO from GK B (16), conditions (a)-(c) under ## Comments.
+
+- `run_evidence._capture_retained(ctx, token)`: the foreground block (solved
+  fingerprint, recheck, `retained_results.capture`, `*_not_captured` warnings)
+  moved into one helper; `publish_foreground_run` and `publish_queue_run` both
+  call it. `publish_queue_run(job, status, ctx=None)`: a completed job with the
+  context it solved in keeps the six families and records its fingerprint;
+  `solve_queue._run_job` passes its ctx. `_finish` (gridspine/campus runners)
+  passes none, so those keep the summary only, as before.
+- RED found by condition (a): `retained_results.capture` bound only the request
+  context, and a caller's turn cell outranks it, so a capture from a context other
+  than the caller's read the caller's network (LCOE 60 instead of 70). The
+  capture now binds a fresh turn cell holding the run's context.
+- Tests (`tests/test_retained_queue.py`, oj-grid, hand oracle gas LCOE 70 vs 60,
+  opex 70 x sum(90 - 80 pu_t)): a queued run answers `economics_by_carrier` and
+  `cost_breakdown` from its own sections after a newer foreground solve (RED on
+  master: `historical_results_unavailable`); it records a fingerprint and no
+  `_not_captured` warning; a job publishing from a context held apart keeps that
+  context's results and leaves the foreground network, meta and freshness as they
+  were (RED before the turn-cell fix); failed and aborted jobs keep nothing.
+- Commands: `pytest tests/test_retained_queue.py` (5) and `tests/test_retained_*.py
+  tests/test_oj01_latest_loadflow_journey.py tests/test_solve_queue*.py
+  tests/test_run_evidence_*.py tests/test_queue*.py
+  tests/test_queued_solve_saves_its_own_config.py tests/test_gridspine_queue.py
+  tests/test_shutdown_queue_kind.py tests/test_past_run_export_parity.py
+  tests/test_result_views.py tests/test_loadflow_navigation.py` (475) pass.
+
+Kept, with reasons:
+- The capture runs on the queue thread before the job's status flips (evidence
+  before terminal, #648), so the next queued job starts after it.
+- GridSpine and campus jobs (`_finish`) keep the summary only: they hold no
+  LOPF result in a project context.
 
 ## Comments
 
