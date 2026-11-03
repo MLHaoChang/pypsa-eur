@@ -3674,11 +3674,11 @@ def update_project_scenario_metadata(name: str, description: str | None | _Unset
     return _route(_h, name, body)
 
 
-def update_project_settings(name: str, derive_lengths_from_geometry: bool | _Unset = _UNSET,
-                            backup_autonomy_h: float | _Unset = _UNSET,
-                            poc_xr: float | _Unset = _UNSET) -> dict:
-    """`PATCH .../settings`: the settings table in metadata.json; only the keys sent are written.
-    The request model is the router's own, so a bad value is refused by its validation (422)."""
+def update_project_settings(name: str, derive_lengths_from_geometry: bool | None | _Unset = _UNSET,
+                            backup_autonomy_h: float | None | _Unset = _UNSET,
+                            poc_xr: float | None | _Unset = _UNSET) -> dict:
+    """`PATCH .../settings`: the settings table in metadata.json; only the keys sent are written;
+    null resets a key to its default. The request model is the router's own, so a bad value is refused by its validation (422)."""
     from models.schemas import UpdateProjectSettingsRequest
     from routers.projects import update_project_settings as _h
 

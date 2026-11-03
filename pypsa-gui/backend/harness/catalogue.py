@@ -4748,12 +4748,13 @@ TOOLS: list[dict[str, Any]] = [
         "derive_lengths_from_geometry: whether line/link lengths follow the map geometry. "
         "backup_autonomy_h: the backup autonomy in hours, above 0 and at most 720. "
         "poc_xr: the point-of-connection X/R the network operator gives, above 0 and at most 100. "
+        "Send null for a key to reset it to its default. "
         "Send at least one. Returns the project's info. 409 when the project has never been saved or "
         "another user holds its edit lock. Safety: write.",
         {"name": {"type": "string"},
-         "derive_lengths_from_geometry": {"type": "boolean"},
-         "backup_autonomy_h": {"type": "number", "exclusiveMinimum": 0, "maximum": 720},
-         "poc_xr": {"type": "number", "exclusiveMinimum": 0, "maximum": 100}},
+         "derive_lengths_from_geometry": {"type": ["boolean", "null"]},
+         "backup_autonomy_h": {"type": ["number", "null"], "exclusiveMinimum": 0, "maximum": 720},
+         "poc_xr": {"type": ["number", "null"], "exclusiveMinimum": 0, "maximum": 100}},
         ["name"],
     ),
     # ── Network topology and sites (8) — LV08 B1 ─────────────────────────
