@@ -489,6 +489,35 @@ claims. The tool-error kinds the harness adds (`invalid_envelope`,
   reliability, gridspine) is `not_runnable` with that reason. It is never
   silently dropped.
 
+### 6.8 Chat data intake (issue 21, proposed)
+
+Data handed over in the chat feeds stages 0–2 (CHAT-DATA-SPEC-1); the
+details and the open choices are in
+[issue 21](issues/21-chat-data-intake.md).
+
+- **Intake (stage 0).** The agent proposes citations (a table cell, a PDF
+  page and quote, or a quote from the user's own message), never values. The
+  harness checks each with the data-to-model readers
+  (`equipment_table.read_table`, `document_values.read_pages`/`locate`/`_value`)
+  against a per-profile param field table that gives each creation param its
+  unit, and records `run.intake` rows with their source. Conflicting sources
+  and refused values become gaps.
+- **Confirmation.** The plan-review card lists every row with value, unit and
+  source, marks values read from documents, and shows preset defaults as
+  defaults. The grant confirms exactly those rows (digest-bound); nothing from
+  a document reaches the project without that click or, step by step, a card.
+- **Setup (stage 1).** Proposed: the envelope's `setup` entry creates the
+  project from the template at grant and the run starts on the new project
+  (`run.origin` names the host task), so tasks never rebind and §7's project
+  binding is unchanged.
+- **Missing data.** One harness-written request at intake (required params
+  and inputs minus intake rows); during the run, issue 04's L1 exit to
+  `needs_user` carries every gap in one notice (`run.waiting.kind == "data"`).
+  No new stop.
+- **Mid-run data.** Proposed: carded writes that answer an open request are
+  answer rows on the freshness chain and the run re-checks its gate; any other
+  write is drift as today.
+
 ## 7. The approval envelope (SH-ENVELOPE-1)
 
 ### Data model
