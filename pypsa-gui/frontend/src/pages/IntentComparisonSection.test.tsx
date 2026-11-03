@@ -279,7 +279,19 @@ describe('IntentComparisonSection', () => {
         expect((screen.getByTestId(`intent-in-${k}`) as HTMLInputElement).value).toBe('')
         expect(screen.getByTestId(`intent-why-${k}`).textContent?.length).toBeGreaterThan(10)
       }
-      expect(screen.getByTestId('intent-why-link').textContent).toContain('grid_import')
+      expect(screen.getByTestId('intent-why-link').textContent).toContain('grid import')
+      expect(screen.getByTestId('intent-why-pst').textContent).toBe('No grid code is set.')
+    })
+
+    it('shows no reason while loading, and says what failed on an error', async () => {
+      api.get.mockResolvedValue(null)
+      net.getBuses.mockReturnValue(new Promise(() => {}))
+      renderIt()
+      expect(screen.queryByTestId('intent-why-sk')).toBeNull()
+      cleanup()
+      net.getBuses.mockRejectedValue(new Error('x'))
+      renderIt()
+      await waitFor(() => expect(screen.getByTestId('intent-why-sk').textContent).toContain('could not be read'))
     })
   })
 })

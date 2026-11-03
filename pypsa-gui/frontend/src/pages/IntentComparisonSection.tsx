@@ -91,7 +91,11 @@ export default function IntentComparisonSection({ name, gridCode }: { name: stri
   })
   const defaults = intentDefaults({
     buses: (buses.data ?? []) as never, loads: (loads.data ?? []) as never, links: (links.data ?? []) as never,
-    pstLimit: profile.data?.profile.pst_limit?.value ?? null,
+    pstLimit: profile.data?.profile.pst_limit?.value ?? null, gridCode,
+    status: { buses: buses.status === 'pending' ? 'loading' : buses.status === 'error' ? 'error' : 'ok',
+      loads: loads.status === 'pending' ? 'loading' : loads.status === 'error' ? 'error' : 'ok',
+      links: links.status === 'pending' ? 'loading' : links.status === 'error' ? 'error' : 'ok',
+      grid: gridCode == null || profile.status === 'success' ? 'ok' : profile.status === 'error' ? 'error' : 'loading' },
   })
   const f = {
     critical: typed.critical ?? defaults.critical.value, link: typed.link ?? defaults.link.value,
@@ -169,7 +173,7 @@ export default function IntentComparisonSection({ name, gridCode }: { name: stri
       </div>
       {blocked && <p className="text-[11px] text-muted" data-testid="intent-blocked">{blocked}</p>}
       {chosen.includes('A') && (
-        <Field label="Backup autonomy (h)" hint="Intent A: backup energy = critical load × hours. Each run uses the value shown and records it. Default 4 h.">
+        <Field label="Backup autonomy (h)" hint={`Intent A: backup energy = critical load × hours. Each run uses the value shown and records it. ${storedAutonomy != null ? `The project default is ${fmt(storedAutonomy, 4)} h.` : `No project default is saved, so ${AUTONOMY_DEFAULT_H} h applies.`}`}>
           <input className={INPUT} inputMode="decimal" value={autonomy} onChange={e => setAutonomy(e.target.value)}
             disabled={running} data-testid="intent-autonomy" />
           {autonomyBad && <p className="text-[11px] text-err" data-testid="intent-autonomy-error">Enter a number of hours above zero, up to 720.</p>}
@@ -178,7 +182,6 @@ export default function IntentComparisonSection({ name, gridCode }: { name: stri
               onClick={() => saveAutonomy.mutate()} data-testid="intent-autonomy-save"
               title="Stores this value in the project as the default for later runs. Results already shown keep the value they used.">
               Save as project default</Btn>
-            {storedAutonomy != null && <span className="text-[11px] text-muted">Project default: {fmt(storedAutonomy, 4)} h</span>}
           </div>
           {saveAutonomy.isError && <p className="text-[11px] text-err" role="alert" data-testid="intent-autonomy-save-error">{errorText(saveAutonomy.error)}</p>}
         </Field>

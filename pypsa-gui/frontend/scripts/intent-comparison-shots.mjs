@@ -44,6 +44,7 @@ const STATES = {
   // Prefilled from the (mocked) network and grid code; autonomy loaded from the project's stored value.
   '9-prefilled': { pick: ['B', 'C'], fill: false, gridCode: 'eu_rfg_dcc_ce', prefill: true, job: null },
   '10-autonomy-stored': { pick: ['A', 'B'], fill: false, gridCode: 'eu_rfg_dcc_ce', prefill: true, autonomy: 12, job: null },
+  '11-blank-with-reasons': { pick: ['B', 'C'], fill: false, gridCode: 'eu_rfg_dcc_ce', noPst: true, job: null },
   '8-stopped': { pick: [], fill: false, job: job([row('B'), { ...row('C'), ...STOPPED }], { status: 'aborted' }) },
 }
 
@@ -93,7 +94,7 @@ try {
     await page.route(u => /\/api\/campus-electrical\/[^/]+$/.test(u.pathname), r => r.fulfill({ json: campusState() }))
     await page.route(u => /\/api\/campus-electrical\/[^/]+\/.+/.test(u.pathname), r => r.fulfill({ json: {} }))
     // Registered last: Playwright runs the newest matching route first, so this beats the catch-all above.
-    await page.route(u => u.pathname.includes('/published/'), r => r.fulfill({ json: { id: 'eu_rfg_dcc_ce', yaml: '', profile: { pst_limit: { value: 0.8 } }, review: null, unconfirmed: [], document: null } }))
+    await page.route(u => u.pathname.includes('/published/'), r => r.fulfill({ json: { id: 'eu_rfg_dcc_ce', yaml: '', profile: current.noPst ? {} : { pst_limit: { value: 0.8 } }, review: null, unconfirmed: [], document: null } }))
     await page.goto(`${BASE}/`)
     await page.waitForLoadState('networkidle')
     await page.evaluate(async ({ url, name }) => {
