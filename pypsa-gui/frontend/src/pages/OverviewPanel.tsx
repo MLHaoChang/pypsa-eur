@@ -329,7 +329,7 @@ function PocXrField({ currentProject, stored, readOnly }: {
         onChange={e => setText(e.target.value)}
         onBlur={commit}
         onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-        className="w-32 rounded border border-border bg-surface px-2 py-1 text-[12px] text-text"
+        className="w-32 rounded border border-border bg-surface px-2 py-1 text-[12px] text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20"
       />
       <span id="poc-xr-hint" className="text-[11px] text-muted leading-snug">{POC_XR_HINT}</span>
       {error && <span id="poc-xr-error" role="alert" className="text-[11px] text-danger leading-snug">{error}</span>}
