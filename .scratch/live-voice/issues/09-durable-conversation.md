@@ -114,3 +114,16 @@ capped at 64 (oldest kept), `episode_lineage` at 32 (newest kept), overflow
 counted in `*_dropped`. Tests: `tests/test_durable_conversation_restart_rotation.py`
 (8 passed). Nothing clears `reconcile` yet; revalidation lands with the voice
 bridge. Multi-worker idle-owner takeover is unsafe until PR3 refuses >1 worker.
+
+2026-11-03: PR2 profile switch (`claude/lv09-profile-switch`, after PR1).
+`switch_profile` + `POST /api/durable-conversations/{id}/profile` with
+generation CAS. The router resolves the profile (`llm_config.resolve_profile`)
+and its readiness (`routers.chat._profile_chat_ready`); unknown and keyless
+profiles are both 422 `profile_unavailable` with one fixed message. A same-wire
+switch (or an unbound episode) rebinds the episode in place; a cross-wire switch
+rotates to a child episode (shared `_rotate_episode`, lineage reason
+`profile_switch`) whose history is empty, so no foreign thinking/tool block
+carries. `profile_lineage` holds ids, wire and episode only, capped at 32.
+Stale generation and an in-flight turn refuse without writing. Reads
+(`get`, bridge auth) no longer renew the lease in the returned view.
+Tests: `tests/test_durable_conversation_profile_switch.py` (7 passed).

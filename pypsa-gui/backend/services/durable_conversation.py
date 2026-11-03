@@ -75,12 +75,12 @@ def _authority() -> tuple[Path, str, str]:
 
 
 def _require_authoritative_replica(
-    thread: dict[str, Any], *, adopt: bool = False,
+    thread: dict[str, Any], *, adopt: bool = False, renew: bool = True,
 ) -> bool:
     """Refuse controls when this process is not the thread's pinned replica.
 
     The owner renews ``owner_lease_until`` (wall time, ``runner.LEASE_SECONDS``)
-    on every control; mutating callers save it. Another replica is refused
+    on every control that saves (``renew``); reads leave it as persisted. Another replica is refused
     while the lease is live. Once it has lapsed the owner process is taken to
     be gone: only ``resume_episode`` (``adopt=True``) may take the thread over,
     which re-pins it here and counts as a restart. Returns True on takeover.
@@ -103,7 +103,8 @@ def _require_authoritative_replica(
             )
         thread['owner_replica_id'] = current
         takeover = True
-    thread['owner_lease_until'] = now + _lease_seconds()
+    if renew or takeover:
+        thread['owner_lease_until'] = now + _lease_seconds()
     return takeover
 
 
@@ -199,7 +200,7 @@ def create_thread() -> dict[str, Any]:
 def get_thread(thread_id: str) -> dict[str, Any]:
     with _LOCK:
         _, thread = _read(thread_id)
-        _require_authoritative_replica(thread)
+        _require_authoritative_replica(thread, renew=False)
         return _view(thread)
 
 
@@ -306,39 +307,99 @@ def resume_episode(thread_id: str, *, generation: int):
     still readable under the current ACL; otherwise the durable identifiers
     alone are restored.
     """
-    from services import chat_service
-
     with _LOCK:
         path, thread = _read(thread_id)
         takeover = _require_authoritative_replica(thread, adopt=True)
         _require_generation(thread, generation)
-        old_episode = thread.get('episode_id')
-        old_session = chat_service.get_session(old_episode) if old_episode else None
-        if old_session is not None and old_session._turn_in_flight:
-            # A live turn on this worker: never drop it under its own effects.
-            _refuse('turn_already_in_flight', 'Wait for the episode turn to finish.')
-        effects = _uncertain_effects(thread, old_episode, takeover=takeover)
-        _revoke_checked_episode(thread)
-        if old_episode:
-            chat_service.drop_session(old_episode)
-        new_session = chat_service.get_or_create_session(
-            owner_user_id=thread['owner_id'],
+        new_session = _rotate_episode(
+            thread, reason='takeover' if takeover else 'resume', takeover=takeover,
         )
-        now = datetime.now(timezone.utc).isoformat()
-        thread['episode_id'] = new_session.session_id
-        thread['generation'] = int(thread.get('generation', 1)) + 1
-        thread['checkpoint_rev'] = int(thread.get('checkpoint_rev', 0)) + 1
-        _bounded_extend(thread, 'episode_lineage', [{
-            'episode_id': new_session.session_id,
-            'generation': thread['generation'],
-            'reason': 'takeover' if takeover else 'resume',
-            'at': now,
-        }], EPISODE_LINEAGE_MAX, keep='newest')
-        _bounded_extend(thread, 'reconcile', effects, RECONCILE_MAX, keep='oldest')
-        thread['updated_at'] = now
         _save(path, thread)
         _hydrate_discussed_refs(new_session, thread)
         return _view(thread), new_session
+
+
+def _live_episode(thread: dict[str, Any]):
+    """The current episode's session; refuse while its turn is running."""
+    from services import chat_service
+
+    episode_id = thread.get('episode_id')
+    session = chat_service.get_session(episode_id) if episode_id else None
+    if session is not None and session._turn_in_flight:
+        # A live turn on this worker: never drop or rebind it mid-turn.
+        _refuse('turn_already_in_flight', 'Wait for the episode turn to finish.')
+    return session
+
+
+def _rotate_episode(thread: dict[str, Any], *, reason: str, takeover: bool = False):
+    """Replace the episode: reconcile, revoke and drop the old, mint a new one.
+
+    The caller holds ``_LOCK``, has checked authority and generation, and
+    saves. Only structured facts and budgets carry; the new history is empty.
+    """
+    from services import chat_service
+
+    _live_episode(thread)
+    old_episode = thread.get('episode_id')
+    effects = _uncertain_effects(thread, old_episode, takeover=takeover)
+    _revoke_checked_episode(thread)
+    if old_episode:
+        chat_service.drop_session(old_episode)
+    new_session = chat_service.get_or_create_session(owner_user_id=thread['owner_id'])
+    now = datetime.now(timezone.utc).isoformat()
+    thread['episode_id'] = new_session.session_id
+    thread['generation'] = int(thread.get('generation', 1)) + 1
+    thread['checkpoint_rev'] = int(thread.get('checkpoint_rev', 0)) + 1
+    _bounded_extend(thread, 'episode_lineage', [{
+        'episode_id': new_session.session_id,
+        'generation': thread['generation'],
+        'reason': reason,
+        'at': now,
+    }], EPISODE_LINEAGE_MAX, keep='newest')
+    _bounded_extend(thread, 'reconcile', effects, RECONCILE_MAX, keep='oldest')
+    thread['updated_at'] = now
+    return new_session
+
+
+def switch_profile(thread_id: str, *, generation: int, profile: Any):
+    """Bind a resolved, ready provider profile to the thread's episode.
+
+    The router resolves the profile and refuses an unknown or keyless one
+    before this runs. A same-wire switch (or an unbound episode) rebinds the
+    episode in place, since messages are model-agnostic within a wire. A
+    cross-wire switch never replays the old history: it starts a child
+    episode that carries only the thread's structured facts and budgets.
+    """
+    with _LOCK:
+        path, thread = _read(thread_id)
+        _require_authoritative_replica(thread)
+        _require_generation(thread, generation)
+        session = _live_episode(thread)
+        bound = getattr(session, 'bound_wire', None) if session is not None else None
+        if session is not None and bound in (None, profile.wire):
+            carried = 'episode'
+            thread['generation'] = int(thread.get('generation', 1)) + 1
+            thread['checkpoint_rev'] = int(thread.get('checkpoint_rev', 0)) + 1
+            thread['updated_at'] = datetime.now(timezone.utc).isoformat()
+        else:
+            carried = 'facts_budgets'
+            session = _rotate_episode(thread, reason='profile_switch')
+        with session._lock:
+            session.profile_id = profile.id
+            session.bound_wire = profile.wire
+            session.model = profile.model
+        _bounded_extend(thread, 'profile_lineage', [{
+            'profile_id': profile.id,
+            'wire': profile.wire,
+            'episode_id': session.session_id,
+            'generation': thread['generation'],
+            'carried': carried,
+            'at': thread['updated_at'],
+        }], EPISODE_LINEAGE_MAX, keep='newest')
+        _save(path, thread)
+        if carried == 'facts_budgets':
+            _hydrate_discussed_refs(session, thread)
+        return _view(thread), session
 
 
 def _bounded_extend(
@@ -468,7 +529,7 @@ def authorize_bridge_credentials(thread_id: str, token: str) -> dict[str, Any]:
     """Validate a previously minted bridge token against the current generation."""
     with _LOCK:
         _, thread = _read(thread_id)
-        _require_authoritative_replica(thread)
+        _require_authoritative_replica(thread, renew=False)
         creds = thread.get('bridge_credentials') or {}
         if not token or creds.get('token') != token:
             _refuse('bridge_credentials_invalid', 'Bridge credentials are not valid.', 401)
