@@ -412,8 +412,13 @@ def test_attach_tariff_is_admitted_only_from_a_listed_gap_a_held_tariff_and_wher
     two = {**TARIFF, "at_grant": {"Commercial": {"tariffs": {"sha-held": ["grid-import", 1],
                                                              "sha-new": ["made-up", 1]}}}}
     assert match({**listed, "gaps": [two]}, {"name": "grid-import"}, tariff_card(None)) == "not_granted_source"
-    assert "grid-import v1" in run_envelope._says_source(TARIFF)
-    assert "exactly one" in run_envelope._says_source(two)
+    assert run_envelope._gap_row(TARIFF).endswith(
+        "with attach_tariff from the Library tariff grid-import v1 (only where none is set; never replaces one)")
+    assert run_envelope._gap_row(two) == \
+        "- No tariff is filled: grid-import v1 and made-up v1 are both held, so you choose one yourself."
+    assert run_envelope._gap_row({**TARIFF, "at_grant": {"Commercial": {"tariffs": {}}}}) == \
+        "- No tariff is filled: none is held in the Library when you approve."
+    assert "only when exactly one is held when you approve" in run_envelope._gap_row({**TARIFF, "at_grant": {}})
     weather = {"complete": True, "rows": [{"component_class": "Settings", "name": "Weather", "field": "source",
                                            "old": None, "new": "synthetic", "role": "typed"}]}
     assert run_envelope._match_gap(listed, "set_weather_choice", {}, weather, None, {}) == "unlisted_tool"

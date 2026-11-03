@@ -377,9 +377,7 @@ def _rows(envelope):
         allowed = ", ".join(map(str, e["enum"])) if "enum" in e else ", ".join(
             f"{k} {v:g}" if k != "rel" else f"±{v:.0%} of the value at grant" for k, v in e["bounds"].items())
         lines.append(f"- Edit {t['component']} `{t['name']}` {t['attr']} ({allowed}) with {e['tool']}")
-    lines += [f"- Fill a missing {g['target']['component']} `{g['target']['name']}` {g['target']['attr']} with "
-              f"{g['tool']} from {_says_source(g)} (only where none is set; never replaces one)"
-              for g in envelope.get("gaps", [])]
+    lines += [_gap_row(g) for g in envelope.get("gaps", [])]
     lines += [f"- Run {r['tool']}" + (f" ({r['kind']})" if r.get("kind") else "") for r in envelope["runs"]]
     b = envelope["budget"]
     lines.append(f"- Up to {b['solves']} solves and {b['rounds']} rounds, for at most {b['wall_time_h']:g} h")
@@ -389,18 +387,25 @@ def _rows(envelope):
     return "\n".join(lines)
 
 
-def _says_source(gap):
-    source = gap["source"]
+def _gap_row(gap):
+    """One plan-review row for a gap entry, in the user's words (UX)."""
+    t, source = gap["target"], gap["source"]
+    fill = f"- Fill a missing {t['component']} `{t['name']}` {t['attr']} with {gap['tool']}"
+    never = " (only where none is set; never replaces one)"
     if source["kind"] == "load_generator":
-        return f"a {source['archetype']} {source['year']} profile from {source['energy']}"
+        return f"{fill} from a {source['archetype']} {source['year']} profile from {source['energy']}{never}"
     if source["kind"] == "weather_choices":
-        return "one of " + ", ".join(f"{c['source']} {c['year']}" for c in source["choices"])
-    held = [f"{name} v{version}" for record in (gap.get("at_grant") or {}).values()
+        return f"{fill} from one of " + ", ".join(f"{c['source']} {c['year']}" for c in source["choices"]) + never
+    if not gap.get("at_grant"):  # the plan, before you approve it
+        return f"{fill} from a Library tariff, only when exactly one is held when you approve{never}"
+    held = [f"{name} v{version}" for record in gap["at_grant"].values()
             for name, version in (record.get("tariffs") or {}).values()]
     if len(held) == 1:
-        return f"the Library tariff {held[0]}"
-    return ("none: " if not held else f"none ({', '.join(held)} are held, so each asks you): ") + \
-        "a tariff is filled only when exactly one is held at the grant"
+        return f"{fill} from the Library tariff {held[0]}{never}"
+    if not held:
+        return "- No tariff is filled: none is held in the Library when you approve."
+    both = "both" if len(held) == 2 else "all"
+    return f"- No tariff is filled: {', '.join(held[:-1])} and {held[-1]} are {both} held, so you choose one yourself."
 
 
 def describe(envelope):
