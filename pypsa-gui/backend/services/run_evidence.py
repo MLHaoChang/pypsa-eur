@@ -1052,6 +1052,22 @@ def publish_queue_run(job: Any, status: str | None = None) -> dict | None:
         return None
 
 
+# Keys on a study or report worker record that are process state, not the
+# record: the worker thread, its stop event, and this module's run token
+# (which holds the server's evidence root path).
+_PROCESS_KEYS = frozenset({'thread', 'stop_event', '_run_evidence'})
+
+
+def wire_record(record: dict | None) -> dict | None:
+    """A study or report record as a route may serve it: without process keys.
+
+    The record itself is not changed; the publisher reads `_run_evidence` there.
+    """
+    if not record:
+        return None
+    return {k: v for k, v in record.items() if k not in _PROCESS_KEYS}
+
+
 def start_study_run(study_key: str, record: dict) -> dict | None:
     """Mark an adequacy/study mesh worker as a running evidence run."""
     try:
