@@ -114,3 +114,36 @@ Remaining gates (recorded, not built):
 - Device, language, latency and accuracy measurements; paid calls; deployment
   smoke; multi-worker leases (reserve/settle still have no replica check of
   their own; speech routes inherit the store lock and pin through `_read`).
+
+2026-11-03: PR2 speech output (LC-T14, branch `claude/lc07-speech-output`, on
+master `cbfd6cbcd`). `run_turn` hands every client frame of a turn whose
+utterance is a redeemed `speech:<segment>` ticket to
+`live_speech.AnswerCapture`. At `turn_done` naming the `answer_approved`
+answer, the turn's `token` frames (all after the approval) must equal the
+assurance-approved text byte for byte; then the answer is queued for that
+speech session if the turn was not aborted and the ticket's admission
+generation is still current. Never queued: legacy (unvalidated) text, prose
+before approval, an error frame, an approval whose turn never reached
+`turn_done` (checked but publication pending), a `turn_done` naming another
+answer, typed turns, superseded generations, text over
+`live_media.MAX_TTS_TEXT_CHARS`. Bridge routes (owner context plus
+`X-Bridge-Token`): `…/speech/output/claim` hands the worker the next answer
+once (text, sha256, chars; stale-generation items are dropped) and charges
+`len(text)` characters to the session's TTS usage through `report_usage`'s own
+record (usage id `tts-<output_id>`; the worker's report under that id is a
+duplicate), refusing (`over_budget`, caption only) an answer the reservation
+cannot cover; `…/speech/barge-in` cancels queued and claimed answers only (no
+abort, lease, admission-generation or job change; no refund). Every session
+exit drops its queue. `live_speech.synthesize_output` passes the claimed text
+to a `TtsAdapter` verbatim after its sha256 check. Tests:
+`tests/test_live_speech_output_lc07.py` (18; eight mutants each fail a test).
+
+Remaining gates (recorded, not built), in addition to PR1's:
+- Pronunciation of engineering numbers and units (LC-T14 "pronounced
+  correctly") needs the vendor voice and listening evidence; text is passed
+  verbatim, never rewritten.
+- Answers longer than one TTS request are not spoken (no chunking until the
+  vendor's request limit is known).
+- Worker-side playback stop and audio-frame flushing live in the audio worker
+  (agent hosting gate); the backend refuses any further claim of a cancelled
+  answer.

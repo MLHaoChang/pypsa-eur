@@ -207,3 +207,32 @@ def speech_usage(
         usage_id=body.usage_id, kind=body.kind, amount=body.amount, unit=body.unit,
         final=body.final,
     )
+
+
+class SpeechOutputBody(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    session_id: str = Field(..., min_length=1, max_length=48)
+
+
+@router.post('/{thread_id}/speech/output/claim')
+def speech_output_claim(
+    thread_id: str,
+    body: SpeechOutputBody,
+    user: User = Depends(require_user),
+    x_bridge_token: str = Header(default=''),
+):
+    """The audio bridge takes the next checked answer to speak, byte-equal to its caption."""
+    _bind_actor(user)
+    return live_speech.claim_output(thread_id, token=x_bridge_token, session_id=body.session_id)
+
+
+@router.post('/{thread_id}/speech/barge-in')
+def speech_barge_in(
+    thread_id: str,
+    body: SpeechOutputBody,
+    user: User = Depends(require_user),
+    x_bridge_token: str = Header(default=''),
+):
+    """The user spoke over playback: drop queued and claimed answers; the turn runs on."""
+    _bind_actor(user)
+    return live_speech.barge_in(thread_id, token=x_bridge_token, session_id=body.session_id)
