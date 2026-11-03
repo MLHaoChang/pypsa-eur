@@ -360,8 +360,17 @@ try {
     families.push({ tab: family.tab, section: view.binding.section })
   }
   // Guided and Expert agree on the last family's header and run.
-  await page.getByRole('button', { name: 'Guided', exact: true }).click()
-  await familyPast(page, FAMILIES.at(-1), runs[0], 'oj-grid')
+  // LC-03 (c): every family's past run stays on screen across Expert→Guided,
+  // with its "From the run of …" header, until Clear or a newer run is chosen.
+  for (const family of FAMILIES) {
+    await page.getByRole('button', { name: 'Expert', exact: true }).click()
+    await familyPast(page, family, runs[0], 'oj-grid')
+    await page.getByRole('button', { name: 'Guided', exact: true }).click()
+    await familyPast(page, family, runs[0], 'oj-grid')
+    const fresh = page.getByTestId('results-ghead-freshness')
+    assert.equal(await fresh.getAttribute('data-freshness'), 'past_run', `${family.tab}: Guided lost the past run`)
+    assert.equal(await fresh.getAttribute('data-run-id'), runs[0], `${family.tab}: Guided shows another run`)
+  }
   await page.getByRole('button', { name: 'Expert', exact: true }).click()
   await familyPast(page, FAMILIES.at(-1), runs[0], 'oj-grid')
 
