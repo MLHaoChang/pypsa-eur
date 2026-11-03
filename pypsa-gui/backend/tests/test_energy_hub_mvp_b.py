@@ -251,6 +251,43 @@ def test_soft_skip_does_not_swallow_config_errors():
     assert "soft-skipped" not in note.lower()
 
 
+def test_an_infeasible_storage_duration_fails_the_lever_stage_closed():
+    """AS-11 follow-up (GK A): only LeverNotApplicable soft-skips. A real config
+    refusal from compare_lever_scenarios (the default 4 h rung on a 0.25-1 h
+    split storage) is recorded as the stage's error, not as a skipped kind."""
+    from services.adequacy import eh_study as S
+    from services.pypsa_service import PyPSAService
+    from services.solver.split_storage import add_split_storage
+
+    n = _weak_mvp_b_network()
+    n.add("Carrier", "high_c_bess")
+    add_split_storage(n, "ride", "crit", "high_c_bess", p_nom=10.0, e_nom_max=10.0, energy_capital_cost=1.0)
+    pack = default_weak_flexible_pack().model_copy(update={
+        "availability": AvailabilityTarget(ens_cap_permyriad=5000.0),
+        "mc_certify_required": False,
+        "dtc_stress_default": False,
+        "levers": default_weak_flexible_pack().levers.model_copy(update={
+            "import_cap": False,
+            "storage_duration": True,
+        }),
+    })
+    PyPSAService.set_network(n)
+    store: dict = {}
+    report = S.run_eh_study(
+        n, pack, SolverConfig(voll=500.0, ens_cap_permyriad=5000.0),
+        lock=PyPSAService.get_lock(),
+        stop_event=threading.Event(),
+        log_queue=queue.SimpleQueue(),
+        stages=("apply_pack", "ens_solve", "levers", "assemble"),
+        store=store,
+    )
+    assert report.completeness["levers"] == "not_established"
+    note = report.sections["levers"].note or ""
+    assert note.startswith("storage_duration 4 h is infeasible for split storage ride")
+    assert report.sections["levers"].payload is None       # no skipped_kinds anywhere
+    assert "eh_lever_comparison" not in store
+
+
 def test_all_kinds_soft_skipped_marks_pipeline_skipped():
     """Binding: total soft-skip → not_established + pipeline skipped, skip list kept."""
     from services.adequacy import eh_study as S

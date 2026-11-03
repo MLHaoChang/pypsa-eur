@@ -1008,13 +1008,9 @@ def _stage_levers(st: _Study) -> None:
                     assumptions_hash=_assumptions_hash(st.cfg),
                     max_solves=st.budget_solves - st.solves - attempted,
                 )
-            except lev.LeverScenarioError as exc:
-                msg = str(exc)
-                # Soft-skip only asset-absence — config/unknown-kind errors
-                # must fail closed with the original message.
-                if not ("no StorageUnits" in msg or "no import Links" in msg
-                        or "no metered import Links" in msg):
-                    raise
+            except lev.LeverNotApplicable as exc:
+                # Soft-skip only asset absence; every other LeverScenarioError
+                # (config, unknown kind) fails closed with its message.
                 skipped_kinds.append(f"{kind}:{exc}")
                 logger.info("lever kind %s not applicable: %s", kind, exc)
                 continue
