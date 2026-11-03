@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { READ_ONLY_MUTATION_MESSAGE } from '../utils/mutationGuard'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BuildingInputs, Proposal, SceneBuilding, SiteScene } from '../api/siteScene'
@@ -214,6 +215,18 @@ describe('Site 3D scene panel', () => {
     fireEvent.click(screen.getByTestId('scene-refusal-generate'))
     expect(useUIStore.getState().sitePart).toBe('generate')
     expect(useSitesStore.getState().sceneRefusal.p).toBeUndefined()
+  })
+
+  it('read-only in Model: the reason shows once, and the buttons stay disabled', async () => {
+    vi.mocked(siteSceneApi.getScene).mockResolvedValue(enabled([osm]))
+    const flow = flowState.flow as { scene: { actions: { action: string }[] } }
+    flow.scene.actions = flow.scene.actions.map(a => (a.action === 'assign_native' ? available('assign_native') : a))
+    useUIStore.setState({ sitePart: 'model', readOnly: true, readOnlyReason: 'locked-by-user' })
+    view()
+    await screen.findByTestId('association-panel')
+    const text = document.body.textContent ?? ''
+    expect(text.split(READ_ONLY_MUTATION_MESSAGE).length - 1).toBe(1)
+    expect((screen.getByTestId('place-preview') as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('read-only: the reason is visible and nothing can be generated', () => {

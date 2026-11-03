@@ -237,6 +237,15 @@ describe('Model part: place equipment', () => {
     expect([...(screen.getByTestId('place-on') as HTMLSelectElement).options].map(o => o.textContent)).toEqual(['Ground'])
   })
 
+  it('read-only with an item chosen: the reason shows once in the Place block', async () => {
+    view(scene({ asset_footprints: { 'StorageUnit:bess': { width_m: 6, depth_m: 2.5, source: 'library' } } }), false)
+    const item = screen.getByTestId('place-item') as HTMLSelectElement
+    await waitFor(() => expect(item.options.length).toBe(4))
+    fireEvent.change(item, { target: { value: 'StorageUnit:bess' } })
+    expect(screen.getByTestId('place-preview-reason').textContent).toBe('Read-only: ask an editor')
+    expect(screen.queryByTestId('add-asset-reason')).toBeNull()
+  })
+
   it('a fitted (library) size shows "Approximate size" and no no-size line', async () => {
     view(scene({ asset_footprints: { 'StorageUnit:bess': { width_m: 6, depth_m: 2.5, source: 'library' } } }))
     const item = screen.getByTestId('place-item') as HTMLSelectElement

@@ -1509,6 +1509,11 @@ def run_turn(
 
         _attention.followed_up(session, getattr(_wal_ctx, "project_uuid", None))
         _checked = session.assurance_turn is not None
+        # LC-07 PR2: a turn started by a speech final queues its checked
+        # answer for speech, exactly as captioned, at turn_done.
+        from services import live_speech as _live_speech
+
+        _speech_answer = _live_speech.capture_for(session, utterance_id)
         body = _run_turn_body(
             session,
             message,
@@ -1542,6 +1547,8 @@ def run_turn(
                 if event == "session_done" and _goals.active(session):
                     _held_done = payload
                     continue
+                if _speech_answer is not None:
+                    _speech_answer.note(event, payload)
                 yield event, payload
         except GeneratorExit:
             _ended_by = "disconnected"
