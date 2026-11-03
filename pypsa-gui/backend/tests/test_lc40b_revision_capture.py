@@ -126,8 +126,10 @@ def test_the_decision_study_record_holds_its_revision_before_the_thread_starts(
 
     def start(self):
         if self.name.startswith("decision-study-"):
+            # The record reaches the worker through the target lambda's closure.
             cells = dict(zip(self._target.__code__.co_freevars,
-                             (c.cell_contents for c in self._target.__closure__)))
+                             (c.cell_contents for c in self._target.__closure__ or ())))
+            assert "worker_args" in cells, f"the study thread's target changed: {cells}"
             seen.append(cells["worker_args"]["record"]["network_revision"])
         return real_start(self)
 
@@ -149,17 +151,24 @@ CAPTURE_RE = re.compile(
     r'|"network_revision":\s*dirty_state\.revision'
     r'|\bnetwork_revision\s*=\s*dirty_state\.revision\(')
 
-# (path under services/, stripped line) -> why it stays.
+# (path under services/, stripped line) -> why it stays. Every entry matches
+# CAPTURE_RE (checked below), so none is dead.
 ALLOWLIST = {
     ("adequacy/mc_loop_runner.py", "network_revision = dirty_state.revision()"):
         "no worker: it reads the active ctx inside PyPSAService.get_lock() while "
         "snapshotting, into a local stored later, and calls revision() with no ctx",
-    ("chat_tools.py", "revision = dirty_state.revision()"):
-        "the chat entry's campaign read before start() (site 10, option C): out of scope",
     ("network_undo.py", '"network_revision": dirty_state.revision(),'):
         "the undo-status payload the hub polls, not a study record",
 }
 
+
+# Captures CAPTURE_RE cannot tell from a reader's `revision = dirty_state.revision()`,
+# kept out of the helper on purpose; each is checked to still read as listed.
+OUT_OF_SCOPE = {
+    ("chat_tools.py", "revision = dirty_state.revision()"):
+        "the chat entry's campaign read before start() (site 10): a second capture of "
+        "the study the record already captures; option C, out of scope (LC40B-SCOPE-1)",
+}
 
 # Runners whose record captures no revision at all (path -> why, and what fixes it).
 NO_CAPTURE = {
@@ -187,6 +196,11 @@ def test_no_runner_captures_the_revision_outside_the_helper():
 
 
 @pytest.mark.parametrize(("rel", "line"), list(ALLOWLIST))
+def test_each_allowlist_entry_is_a_guard_hit(rel, line):
+    assert CAPTURE_RE.search(line), f"{rel}: the guard never flags {line!r}; drop the entry"
+
+
+@pytest.mark.parametrize(("rel", "line"), [*ALLOWLIST, *OUT_OF_SCOPE])
 def test_each_allowlisted_read_is_still_there(rel, line):
     source = (SERVICES / rel).read_text(encoding="utf-8").splitlines()
     assert line in [s.strip() for s in source], f"{rel}: drop or update its allowlist entry"
@@ -195,9 +209,8 @@ def test_each_allowlisted_read_is_still_there(rel, line):
 @pytest.mark.parametrize("rel", list(NO_CAPTURE))
 def test_each_runner_known_not_to_capture_still_does_not(rel):
     source = (SERVICES / rel).read_text(encoding="utf-8")
-    assert "dirty_state.capture(" not in source and "network_revision" not in source.split(
-        "record: dict[str, Any] = {", 1)[1].split("}", 1)[0], \
-        f"{rel} captures now: drop its NO_CAPTURE entry ({NO_CAPTURE[rel]})"
+    captures = "dirty_state.capture(" in source or '"network_revision":' in source
+    assert not captures, f"{rel} captures now: drop its NO_CAPTURE entry ({NO_CAPTURE[rel]})"
 
 
 @pytest.mark.parametrize("planted", [

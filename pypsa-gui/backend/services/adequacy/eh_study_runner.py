@@ -403,9 +403,7 @@ def start_eh_study(
 
     def worker():
         try:
-            # ★ Captured in the worker under the mutation lock, not on the
-            # request thread nor inside `run_eh_study` (the suite's fake runs
-            # replace it); see `dirty_state.capture`.
+            # ★ Here, not on the request thread nor in `run_eh_study`: see `dirty_state.capture`.
             dirty_state.capture(record, study_ctx, lock=lock)
             report = run_eh_study(
                 n,

@@ -111,7 +111,9 @@ New, in `tests/test_lc40b_revision_capture.py`:
      sibling frontier stale)
    - `/api/results/coupling_loop` (coupling_loop_runner, plus the hold case)
    - `/api/results/eh_study` (eh_study_runner)
-   - decision study and tornado via the campaign entries (`campaign.py:155`, runner #8)
+   - decision study and tornado via the campaign entries (`campaign.py:155`, runner #8).
+     The tornado never captured (it does not share #8): out of scope here, filed as LC-40c
+     (`40c-tornado-revision-capture.md`; coordinator ruling, option 1).
    - the chat readers: grid-readiness (`grid_readiness.py:1765`) and flow (`flow_service.py:881`)
    Each test goes through the runner's real capture, not a hand-set `network_revision`, so it fails
    if a runner stops calling the helper. A source-level guard test greps the runners for a bare
