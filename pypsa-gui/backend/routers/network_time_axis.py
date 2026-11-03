@@ -108,6 +108,17 @@ from services.user_timeseries import (  # noqa: F401
     _reject_nonfinite_timeseries,
 )
 
+# Zone abbreviations refused like zone names. Day, month and AM/PM words are
+# deliberately absent so naive "Mon", "Jan" or "PM" text stays naive.
+_ZONE_ABBREVIATIONS = frozenset({
+    "UTC", "GMT", "Z", "UT", "BST", "IST", "CET", "CEST", "EET", "EEST", "WET",
+    "WEST", "MSK", "EST", "EDT", "CST", "CDT", "MST", "MDT", "PST", "PDT",
+    "AKST", "AKDT", "HST", "AST", "ADT", "NST", "NDT", "JST", "KST", "HKT",
+    "SGT", "AEST", "AEDT", "ACST", "ACDT", "AWST", "NZST", "NZDT", "SAST",
+    "CAT", "EAT", "WAT",
+})
+
+
 
 # This module's own router; `routers/network.py` includes it, so every path
 # below is served exactly where it was before the split.
@@ -1363,24 +1374,30 @@ async def upload_timeseries(
     offset_strings = csv_ts.dtype == object and csv_ts.astype(str).str.contains(
         r"(?:[+-]\d{2}:?\d{2}|Z)$", regex=True).any()
     # pandas cannot parse a named-zone suffix ("2025-01-01 00:00 Europe/Berlin"),
-    # so the index stays strings: strip a trailing zone name and see whether a
+    # so the index stays strings: strip a zone name and see whether a
     # real timestamp is left, so "Q1 Peak" style labels are not misread as zones.
     named_zone = False
-    if csv_ts.dtype == object and not offset_strings:
-        # The zone name may also lead the timestamp ("Europe/Berlin 2025-01-01 00:00").
-        # Only a real zone name is stripped from the front: "Mon 2025-01-01" or
-        # "Jan 1 2025 00:00" are naive timestamps, not zones.
+    if not offset_strings and getattr(csv_ts, "tz", None) is None:
+        # pandas silently drops an unrecognised abbreviation ("... 00:00 CEST") and
+        # returns a naive index, so the guard reads the raw first column instead.
+        raw_ts = pd.read_csv(io.BytesIO(content), index_col=0, dtype=str).index.astype(str)
+        # The zone may lead or trail the timestamp ("Europe/Berlin 2025-01-01 00:00",
+        # "2025-01-01 00:00 CET"). Only a real zone name or a common zone
+        # abbreviation is stripped, from either end: "Mon 2025-01-01",
+        # "Jan 1 2025 00:00", "2025-01-01 00:00 Mon" or "1/1/2025 12:00 PM" are
+        # naive timestamps, not zones.
         from zoneinfo import available_timezones
-        _zones = available_timezones() | {"UTC", "GMT", "Z"}
+        _zones = available_timezones() | _ZONE_ABBREVIATIONS
 
-        def _strip_leading_zone(text: str) -> str:
+        def _strip_zone(text: str) -> str:
             head, _, rest = text.partition(" ")
-            return rest if rest and head in _zones else text
+            if rest and head in _zones:
+                return rest
+            rest, _, tail = text.rpartition(" ")
+            return rest if rest and tail in _zones else text
 
-        bare = csv_ts.astype(str).str.replace(
-            r"\s+[A-Za-z][A-Za-z_]*(?:/[A-Za-z0-9_+-]+)*$", "", regex=True).map(
-            _strip_leading_zone)
-        named_zone = bool((bare != csv_ts.astype(str)).any()) and bool(
+        bare = raw_ts.map(_strip_zone)
+        named_zone = bool((bare != raw_ts).any()) and bool(
             pd.to_datetime(bare, errors="coerce").notna().all())
     if getattr(csv_ts, "tz", None) is not None or offset_strings or named_zone:
         raise HTTPException(422, {

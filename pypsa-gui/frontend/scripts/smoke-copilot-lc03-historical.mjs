@@ -150,7 +150,8 @@ async function closeChooser(page, shot) {
 
 /** The six result families; capacity (`capex`) is the journey's main case. The others are opened the same way. */
 const FAMILIES = [
-  { tab: 'summary', section: 'results_summary' },
+  // The summary view is the run-level summary: its binding has no section, the discussed run's section is results_summary.
+  { tab: 'summary', section: 'results_summary', bound: null },
   { tab: 'dispatch', section: 'results_dispatch' },
   { tab: 'loadflow', section: 'loadflow' },
   { tab: 'prices', section: 'results_prices' },
@@ -165,7 +166,7 @@ async function familyPast(page, family, runId, project) {
   assert.equal(binding.scope, 'historical', family.tab)
   assert.equal(binding.run_id, runId, `${family.tab}: shows another run than the first`)
   assert.equal(binding.project_name, project)
-  if (family.tab !== 'summary') assert.equal(binding.section, family.section, family.tab)
+  assert.equal(binding.section ?? null, 'bound' in family ? family.bound : family.section, family.tab)
   assert.equal(await page.getByTestId('discussed-run-chrome').getAttribute('data-run-id'), runId, family.tab)
   await pastHeader(page, runId)
   // The view says which run it holds; the latest run's id appears nowhere in it.
@@ -353,17 +354,32 @@ try {
       await page.waitForTimeout(250)
     }
     const words = await answer(page, 'LC03H_FAMILY', answered)
-    assert.equal(words, `LC03H_FAMILY ${family.tab} Run ${runs[0]} (historical).`)
+    assert.equal(words, `LC03H_FAMILY ${family.tab} Run ${runs[0]} (historical) from ${family.section}.`)
     const view = await familyPast(page, family, runs[0], 'oj-grid')
     assert(!view.text.includes(runs[1]), `${family.tab}: the latest run's id is in the first run's view`)
     await page.screenshot({ path: path.join(artifacts, `lc03h-past-${family.tab}.png`) })
+    // Guided vs Expert (LC-T09): the same run, kept section and header in both modes, for every family.
+    for (const mode of ['Guided', 'Expert']) {
+      await page.getByRole('button', { name: mode, exact: true }).click()
+      const modeView = await familyPast(page, family, runs[0], 'oj-grid')
+      assert.equal(modeView.binding.data_sha256, view.binding.data_sha256, `${family.tab} ${mode}: another rendering of the run`)
+      const fresh = page.getByTestId('results-ghead-freshness')
+      assert.equal(await fresh.getAttribute('data-freshness'), 'past_run', `${family.tab} ${mode}: the past run was lost`)
+      assert.equal(await fresh.getAttribute('data-run-id'), runs[0], `${family.tab} ${mode}: another run is shown`)
+    }
     families.push({ tab: family.tab, section: view.binding.section })
   }
   // Guided and Expert agree on the last family's header and run.
-  await page.getByRole('button', { name: 'Guided', exact: true }).click()
-  await familyPast(page, FAMILIES.at(-1), runs[0], 'oj-grid')
-  await page.getByRole('button', { name: 'Expert', exact: true }).click()
-  await familyPast(page, FAMILIES.at(-1), runs[0], 'oj-grid')
+  // LC-03 (c): the past run stays on screen across Expert→Guided, with its
+  // "From the run of …" header, until Clear or a newer run is chosen.
+  const last = FAMILIES.at(-1)
+  for (const mode of ['Guided', 'Expert', 'Guided', 'Expert']) {
+    await page.getByRole('button', { name: mode, exact: true }).click()
+    await familyPast(page, last, runs[0], 'oj-grid')
+    const fresh = page.getByTestId('results-ghead-freshness')
+    assert.equal(await fresh.getAttribute('data-freshness'), 'past_run', `${mode}: the past run was lost`)
+    assert.equal(await fresh.getAttribute('data-run-id'), runs[0], `${mode}: another run is shown`)
+  }
 
   // LC-T10 (1): the user's own Clear supersedes the past-run view.
   await page.getByTestId('discussed-run-chrome').getByRole('button', { name: 'Clear' }).click()

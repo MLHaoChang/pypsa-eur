@@ -127,4 +127,111 @@ describe('mounted view acknowledgements', () => {
     expect(client.post).toHaveBeenCalledOnce()
     stop()
   })
+
+  // LC-03 LC-T09/T10: a past run's ACK certifies one exact rendered source, nothing near it.
+  describe('a past run on screen (LC-03)', () => {
+    const SHA = 'a'.repeat(64)
+    const past = { version: 1 as const, project_id: 'project-1', project_name: 'Demo', scope: 'historical' as const,
+      data_sha256: SHA, run_id: 'run-1', section: 'results_dispatch', window_from: 0, window_to: 23 }
+    const action: NavigationAcknowledgement = { ...expected, version: 2,
+      target: { panel_id: 'results', results_tab: 'dispatch' }, source_binding: past }
+    const render = (marker: string | null, tab = 'dispatch') => {
+      mount('Demo', tab)
+      const data = document.querySelector<HTMLElement>('[data-assurance-tab]')!
+      data.dataset.resultTab = tab
+      if (marker !== null) data.dataset.resultBinding = marker
+      return data
+    }
+
+    // A filter, an entity or a time selection changes the rendered data (its hash) or its window;
+    // another run, section or scope is another source. None of them may certify this one.
+    it.each([
+      ['another filter or entity (data hash)', { data_sha256: 'b'.repeat(64) }],
+      ['another time window start', { window_from: 1 }],
+      ['another time window end', { window_to: 11 }],
+      ['the latest run (current scope)', { scope: 'current' as const }],
+      ['another run', { run_id: 'run-2' }],
+      ['another kept section', { section: 'results_prices' }],
+      ['another baseline run', { baseline_run_id: 'run-0' }],
+      ['another project', { project_id: 'project-2' }],
+    ])('is not certified by %s', async (_name, change) => {
+      const verified = vi.fn()
+      const stop = acknowledgeMountedView(action, () => true, verified)
+      const data = render(JSON.stringify({ ...past, ...change }))
+      await tick()
+      expect(client.post).not.toHaveBeenCalled()
+      data.dataset.resultBinding = JSON.stringify(past)
+      await tick()
+      expect(client.post).toHaveBeenCalledOnce()
+      expect(verified).toHaveBeenCalledOnce()
+      stop()
+    })
+
+    // A legacy or unrelated mount carries no usable marker for this tab.
+    it.each([
+      ['no marker (a bare tab mount)', null, 'dispatch'],
+      ['a legacy marker without a version', JSON.stringify({ ...past, version: undefined }), 'dispatch'],
+      ['an unknown marker version', JSON.stringify({ ...past, version: 2 }), 'dispatch'],
+      ['a marker without a data hash', JSON.stringify({ ...past, data_sha256: undefined }), 'dispatch'],
+      ['a malformed marker', '{not json', 'dispatch'],
+      ['a marker of another tab', JSON.stringify(past), 'prices'],
+    ])('is not certified by %s', async (_name, marker, markerTab) => {
+      const verified = vi.fn()
+      const stop = acknowledgeMountedView(action, () => true, verified)
+      mount('Demo', 'dispatch')
+      const tab = document.querySelector<HTMLElement>('[data-assurance-tab]')!
+      tab.dataset.resultTab = markerTab
+      if (marker !== null) tab.dataset.resultBinding = marker
+      await tick()
+      expect(client.post).not.toHaveBeenCalled()
+      expect(verified).not.toHaveBeenCalled()
+      stop()
+    })
+
+    it('a version 1 ACK on the same mount certifies the mount only, as before', async () => {
+      const verified = vi.fn()
+      const stop = acknowledgeMountedView({ ...expected, target: action.target }, () => true, verified)
+      render(JSON.stringify({ ...past, data_sha256: 'b'.repeat(64) }))
+      await tick()
+      expect(client.post).toHaveBeenCalledWith('/chat/ui-ack', expect.not.objectContaining({ source_binding: expect.anything() }),
+        { skipErrorToast: true })
+      stop()
+    })
+
+    // A user navigation, a new turn or a project switch makes the ACK no longer current.
+    it('a superseded ACK never posts when the view appears afterwards', async () => {
+      let current = true
+      const verified = vi.fn()
+      acknowledgeMountedView(action, () => current, verified)
+      current = false
+      render(JSON.stringify(past))
+      await tick()
+      expect(client.post).not.toHaveBeenCalled()
+      expect(verified).not.toHaveBeenCalled()
+    })
+
+    it('leaving the past-run view before the server answers drops the verification', async () => {
+      let answer: (value: unknown) => void = () => {}
+      vi.mocked(client.post).mockReturnValue(new Promise(resolve => { answer = resolve }) as never)
+      const verified = vi.fn()
+      acknowledgeMountedView(action, () => true, verified)
+      render(JSON.stringify(past))
+      await tick()
+      expect(client.post).toHaveBeenCalledOnce()
+      document.body.replaceChildren() // the user navigated away: nothing is mounted any more
+      answer({ data: { outcome: 'completed' } })
+      await tick()
+      expect(verified).not.toHaveBeenCalled()
+    })
+
+    it('stopping the ACK (project switch, new turn) cancels a pending wait', async () => {
+      const verified = vi.fn()
+      const stop = acknowledgeMountedView(action, () => true, verified)
+      stop()
+      render(JSON.stringify(past))
+      await tick()
+      expect(client.post).not.toHaveBeenCalled()
+      expect(verified).not.toHaveBeenCalled()
+    })
+  })
 })

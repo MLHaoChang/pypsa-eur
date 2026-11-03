@@ -45,6 +45,7 @@ import { Btn, Field, PageBody, PageSection, Tag } from '../components/PageKit'
 import { ConnectionLimits } from '../components/gridReadiness/ConnectionLimits'
 import { SiteConnectionEditor } from './economics/SiteConnectionLink'
 import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
+import IntentComparisonSection from './IntentComparisonSection'
 import CampusInvestmentSection, { TableScroll, formatEur, iterationsText } from './CampusInvestmentSection'
 import CampusHarmonicScanSection from './CampusHarmonicScanSection'
 import CampusUnitQCurveSection from './CampusUnitQCurveSection'
@@ -264,6 +265,7 @@ function CampusView({ name, part }: { name: string; part: CampusPart }) {
           </PageSection>
         )}
         <CampusIslandSection name={name} />
+        <IntentComparisonSection name={name} gridCode={state.data.settings?.profile ?? null} />
       </>)}
       {part === 'results' && (state.data.results
         ? <ResultsSection state={state.data} pending={pending} />

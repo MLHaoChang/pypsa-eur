@@ -514,3 +514,18 @@ Kept, with reasons:
   compare, discuss_project_run, workbook Scenarios, the chooser) treats
   status=not_kept as absent-with-reason, never data; (j) live digest failure and
   past-run read name the same reason from one constant.
+
+### LC-03 follow-ups (2026-11-03)
+
+- Advanced-tab tooltip names the past-run reason (colon, no em dash).
+- vitest `verifiedNavigation.test.ts`: a past run's v2 ACK is certified only by its exact
+  source; another data hash (filter/entity selection), time window, run, section, scope,
+  baseline or project, and a legacy, unversioned, hashless, malformed or other-tab marker,
+  do not certify; a superseded ACK (not current, panel left, stopped) never completes.
+  Mutation (`sameResultsSource` loosened) fails 10 cases.
+- Smoke: Guided/Expert for each family (same run, same data hash, `past_run` header);
+  the summary family asserts the discussed run's section `results_summary` (its view is the
+  run-level summary, binding section null by design).
+- Not covered in the browser: pending speech/highlight and filter/entity/time controls on a
+  past run; speech is only reachable with live LiveKit and the past-run view is a read-only
+  retained-evidence render with no selection controls, so selection is covered at the ACK level.

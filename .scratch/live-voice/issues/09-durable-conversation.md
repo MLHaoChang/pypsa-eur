@@ -74,3 +74,43 @@ sum final charges exactly, and a stale-generation checkpoint/rebind after the
 journey is 409 without clobbering facts. Pre-rebind bridge token is 401 after
 resume. Still open: real LiveKit credentials, deployment smoke, multi-worker
 coordination.
+
+2026-11-03: Rebaseline on master a6bd3972d (FILL-10-2 lifted the voice hold).
+B-I1, B-I2, B-I3 and B-C1 still hold: `tests/test_durable_conversation_*.py`
+28/28 pass. Rebind credential refresh (bridge tokens) and wrong-replica
+refusal are done. Gap found: the replica pin had no expiry, so a restarted
+single worker (new `replica_id`) refused its own threads forever.
+GK B (16) GO for three PRs, with conditions:
+- PR1 restart/rotation: (a) a live in-flight turn refuses resume 409, an
+  abandoned one (owner lease lapsed, reusing `harness.runner.LEASE_SECONDS`
+  wall-time leases) resumes and lists its effects as unverified; (b) reconcile
+  never replays a tool or write (spy); (c) lineage bounded, cap and drop tested,
+  N rotations keep ledger totals and refs exact.
+- PR2 profile switch: (d) stale generation 409 writes nothing, in-flight turn
+  refused like (a), one typed refusal for an unknown/unconfigured profile that
+  never reveals another user's key state, no credential value or env name in
+  responses/ledger; (e) a non-portable switch carries facts and budgets only,
+  no foreign-provider block in the child history; (f) the new route passes
+  route_chat_disposition, project_route_acl_policy, write_surface_lock_policy,
+  with route-parity and tool-error-kinds fragments.
+- PR3 one worker + smoke: (g) say how the worker count is detected (uvicorn
+  --workers, WEB_CONCURRENCY, desktop launcher), test each source, undetectable
+  counts as one only if that is the documented default; deployment doc under
+  pypsa-gui docs or doc/, not docs/agents.
+- All: keep the harness README contract.
+
+2026-11-03: PR1 restart/rotation (`claude/lv09-restart-rotation`). The thread
+carries `owner_lease_until` (wall time, `runner.LEASE_SECONDS`), renewed by
+every control on the owner replica. Another replica is `wrong_replica` 409
+while the lease is live; after it lapses only `resume` may adopt (re-pin,
+`takeover` in `episode_lineage`); other controls say `resume_required`.
+Abandoned = the owner's lease lapsed (its process is gone); in the owner
+process a turn is live while `_turn_in_flight`, and resume then refuses
+`turn_already_in_flight` without dropping the episode. Resume reads the old
+episode's event log read-only: an unended or interrupted last turn and its
+unanswered tool calls (ids and names only, no inputs) go into `reconcile` as
+`unverified`; a takeover also lists the thread's `job_ids`. `reconcile` is
+capped at 64 (oldest kept), `episode_lineage` at 32 (newest kept), overflow
+counted in `*_dropped`. Tests: `tests/test_durable_conversation_restart_rotation.py`
+(8 passed). Nothing clears `reconcile` yet; revalidation lands with the voice
+bridge. Multi-worker idle-owner takeover is unsafe until PR3 refuses >1 worker.

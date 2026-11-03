@@ -99,7 +99,7 @@ export interface PlaceEntry { x: number; y: number; heading: number; on?: PlaceO
 export interface PlaceInputs { placements: Record<string, PlaceEntry> }
 
 /** A non-blocking finding on a preview: `double_counted_demand`, `overlap`. */
-export interface SceneFinding { code: string; severity: 'warn' | 'info'; message: string; objects?: string[]; feature?: string }
+export interface SceneFinding { code: string; severity: 'warn' | 'info'; message: string; objects?: string[]; feature?: string; group?: string }
 
 export interface BindPreviewRow {
   feature: string
@@ -124,6 +124,18 @@ export interface RebindPreview {
 }
 export interface PlacePreview { placements: Record<string, PlaceEntry>; findings: SceneFinding[] }
 
+/** SC-02d: one item a detach takes off the scene, or an undo puts back. */
+export interface DetachItem {
+  key: string
+  label: string
+  kept_in_model?: boolean
+  groups: { id: string; label: string; left_empty?: boolean }[]
+  associations: { id: string; class: string; label: string }[]
+}
+export interface DetachPreview { items: DetachItem[]; findings: SceneFinding[] }
+export interface DetachInputs { keys: string[] }
+export interface UndoDetachInputs { proposal: string }
+
 /** A proposed rectangle in Site-local metres (`native.greenfield_building`). */
 export interface GreenfieldInput {
   id: string
@@ -145,8 +157,8 @@ export interface SourceInput {
 }
 
 export interface BuildingInputs { greenfield?: GreenfieldInput[]; sources?: SourceInput[] }
-export type ProposalInputs = BuildingInputs | BindInputs | RebindInputs | PlaceInputs
-export type ProposalAction = 'generate_native' | 'edit_buildings' | 'bind_targets' | 'rebind' | 'place_existing'
+export type ProposalInputs = BuildingInputs | BindInputs | RebindInputs | PlaceInputs | DetachInputs | UndoDetachInputs
+export type ProposalAction = 'generate_native' | 'edit_buildings' | 'bind_targets' | 'rebind' | 'place_existing' | 'detach' | 'undo_detach'
 
 export interface BuildingsPreview { buildings: SceneBuilding[]; stats: { buildings: number; triangles: number; bytes: number } }
 
@@ -166,6 +178,8 @@ export type ModelProposal =
   | (Proposal<BindPreview> & { action: 'bind_targets' })
   | (Proposal<RebindPreview> & { action: 'rebind' })
   | (Proposal<PlacePreview> & { action: 'place_existing' })
+  | (Proposal<DetachPreview> & { action: 'detach' })
+  | (Proposal<DetachPreview> & { action: 'undo_detach' })
 
 const enc = encodeURIComponent
 const anchorPath = (p: string) => `/projects/${enc(p)}/site-anchor`

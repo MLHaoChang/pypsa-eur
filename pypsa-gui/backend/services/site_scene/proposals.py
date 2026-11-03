@@ -21,6 +21,7 @@ store's compare-and-swap on the scene revision.
 from __future__ import annotations
 
 import copy
+import functools
 import threading
 import time
 import uuid
@@ -31,14 +32,16 @@ from services.site_scene import associations, native, store
 from services.site_scene.contract import SceneError
 from services.site_scene.verdicts import REASON_NO_BOUNDARY
 
-ACTIONS = ("generate_native", "edit_buildings", "bind_targets", "rebind", "place_existing")
+ACTIONS = ("generate_native", "edit_buildings", "bind_targets", "rebind", "place_existing", "detach", "undo_detach")
 # SC-02a: the inputs each action takes. The model actions read the open network.
 INPUT_KEYS = {"generate_native": {"greenfield", "sources"}, "edit_buildings": {"greenfield", "sources"},
               "bind_targets": {"associations", "groups"}, "rebind": {"association", "placement", "target", "confirmed"},
-              "place_existing": {"placements"}}
+              "place_existing": {"placements"}, "detach": {"keys"}, "undo_detach": {"proposal"}}
 MODEL_ACTIONS = {"bind_targets": (associations.prepare_bind, associations.apply_bind),
                  "rebind": (associations.prepare_rebind, associations.apply_rebind),
-                 "place_existing": (associations.prepare_place, associations.apply_place)}
+                 "place_existing": (associations.prepare_place, associations.apply_place),
+                 "detach": (associations.prepare_detach, associations.apply_detach),
+                 "undo_detach": (associations.prepare_undo_detach, associations.apply_undo_detach)}
 MAX_PROPOSALS = 64
 MAX_TOTAL_BYTES = 64 * 1024 * 1024
 TTL_SECONDS = 30 * 60
@@ -140,7 +143,16 @@ def _prepare_model(project_dir, action: str, scene: dict[str, Any], inputs: dict
 
     with PyPSAService.get_lock():
         n = _open_network(project_dir)                 # resolved under the lock: no switch in between
-        return MODEL_ACTIONS[action][0](scene, n, inputs, _recorded_bindings(project_dir))
+        return _model_step(project_dir, scene, action, 0)(scene, n, inputs, _recorded_bindings(project_dir))
+
+
+def _model_step(project_dir, scene: dict[str, Any], action: str, step: int):
+    """The action's prepare (0) or apply (1); undo reads the detach from this site's own chain only."""
+    fn = MODEL_ACTIONS[action][step]
+    if action != "undo_detach":
+        return fn
+    site_id = scene["site_id"]
+    return functools.partial(fn, lookup=lambda pid: store.detach_record(project_dir, site_id, pid))
 
 
 def view(entry: dict[str, Any]) -> dict[str, Any]:
@@ -245,9 +257,13 @@ def _commit_entry(project_dir, site_id: str, pid: str, entry: dict[str, Any], ex
     if expected != scene["revision"]:
         return store.apply(project_dir, site_id, {**proposal, "changes": {}}, expected)
     # Apply re-validates every target against the live network before anything is written.
-    changes, bindings = MODEL_ACTIONS[entry["action"]][1](scene, n, entry["stored"], _recorded_bindings(project_dir))
+    changes, bindings = _model_step(project_dir, scene, entry["action"], 1)(
+        scene, n, entry["stored"], _recorded_bindings(project_dir))
+    detached = changes.pop("_detached", None)
     if bindings:
         _record_bindings(project_dir, bindings)
+    if detached:
+        proposal["detached"] = detached
     return store.apply(project_dir, site_id, {**proposal, "changes": changes}, expected)
 
 
