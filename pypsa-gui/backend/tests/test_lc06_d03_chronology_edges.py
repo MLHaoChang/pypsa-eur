@@ -302,7 +302,7 @@ def test_an_ordinary_word_or_token_is_not_taken_for_a_zone(alpha, word):
     assert (_refusal_or_none(csv) or {}).get("error_kind") != "timeseries_timezone_aware"
 
 
-@pytest.mark.parametrize("token", ["ChST", "CHST", "SAMT", "ChsT", "NCT", "LT", "QXZT"])
+@pytest.mark.parametrize("token", ["ChST", "CHST", "SAMT", "ChsT", "NCT", "QXZT"])
 @pytest.mark.parametrize("where", ["after", "before"])
 def test_an_unlisted_zone_like_token_is_refused_with_a_reason_naming_it(alpha, token, where):
     t0, t1 = ("2026-01-01 00:00", "2026-01-01 01:00")
@@ -318,3 +318,24 @@ def test_an_unlisted_zone_like_token_is_refused_with_a_reason_naming_it(alpha, t
 def test_a_naive_am_pm_weekday_or_month_token_is_not_called_a_zone(alpha, token):
     csv = f"snapshot,L1\n2026-01-01 00:00 {token},9\n2026-01-01 01:00 {token},9\n"
     assert (_refusal_or_none(csv) or {}).get("error_kind") != "timeseries_timezone_aware"
+
+
+@pytest.mark.parametrize("token", ["Hr", "LT", "hr", "Xy"])
+def test_a_two_letter_token_is_not_an_unlisted_zone(alpha, token):
+    csv = f"snapshot,L1\n2026-01-01 00:00 {token},9\n2026-01-01 01:00 {token},9\n"
+    assert (_refusal_or_none(csv) or {}).get("error_kind") != "timeseries_timezone_aware"
+
+
+def test_chst_is_still_refused_as_an_unlisted_zone(alpha):
+    detail = _refused("snapshot,L1\n2026-01-01 00:00 ChST,9\n2026-01-01 01:00 ChST,9\n")
+    assert detail["error_kind"] == "timeseries_timezone_aware"
+    assert "ChST" in detail["message"]
+
+
+def test_the_refusal_echoes_at_most_five_tokens_with_a_more_tail(alpha):
+    toks = ["ABCT", "BCDT", "CDET", "DEFT", "EFGT", "FGHT", "GHIT"]
+    rows = [f"2026-01-01 {h:02d}:00 {t}" for h, t in enumerate(toks)]
+    detail = _refused("snapshot,L1\n" + "".join(f"{r},9\n" for r in rows))
+    msg = detail["message"]
+    assert "ABCT, BCDT, CDET, DEFT, EFGT, +2 more" in msg
+    assert "FGHT" not in msg and "GHIT" not in msg

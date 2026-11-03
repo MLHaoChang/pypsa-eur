@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A CSV time-zone refusal now lists at most five unrecognised abbreviations with a "+N more" tail, and a 2-letter token such as "Hr" is no longer refused as an unlisted zone ("ChST" still is).
