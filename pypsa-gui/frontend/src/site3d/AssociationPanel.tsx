@@ -79,7 +79,7 @@ function openCreationForm(item: PaletteItemData): void {
   else open()
 }
 
-const link = 'whitespace-nowrap text-accent hover:underline'
+const link = 'whitespace-nowrap text-accent hover:underline disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50'
 const primary = 'px-3 py-1 rounded bg-accent text-white font-semibold hover:bg-accent/90 disabled:opacity-50'
 const secondary = 'px-3 py-1 rounded border border-border text-text hover:border-accent disabled:opacity-50'
 
@@ -279,6 +279,14 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
     setProposal({ ...p, action: 'detach' })
   }, (code, key) => detachRefusalCopy(code, keyName(key)))
   const receipt = lastDetach?.siteId === site.id ? lastDetach : null
+  // A reload drops the store, so the Undo offer is read back from the scene's own last receipt (the server keeps
+  // it with the head generation, no backend change): offered while the detach is the latest change.
+  const persisted = scene.last_receipt
+  useEffect(() => {
+    const det = persisted?.detached
+    if (!det || typeof det !== 'object' || useModelProposal.getState().lastDetach?.siteId === site.id) return
+    setLastDetach({ siteId: site.id, proposalId: persisted.proposal_id, count: Object.keys(det).length, blocked: null })
+  }, [persisted, site.id, setLastDetach])
   const undoDetach = () => run(async () => {
     if (!receipt) return
     try {
@@ -537,8 +545,9 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
               <button type="button" data-testid="place-preview" className={primary} disabled={!writable || !!placeReason}
                 onClick={() => void previewPlace()}>Preview</button>
               <button type="button" data-testid="add-asset-link" className={link} aria-expanded={mode === 'expert' ? addOpen : undefined}
-                onClick={addAsset}>{mode === 'expert' ? '› Add model asset' : '› Add model asset in Expert'}</button>
+                disabled={!canWrite} title={!canWrite ? blockedReason ?? undefined : undefined} onClick={addAsset}>{mode === 'expert' ? '› Add model asset' : '› Add model asset in Expert'}</button>
             </div>
+            {!canWrite && blockedReason && <span className="text-[11px] text-muted" data-testid="add-asset-reason">{blockedReason}</span>}
             {mode === 'expert' && addOpen && (
               <label className="flex flex-col gap-0.5 text-[11px]">
                 <span className="text-muted">Kind to add</span>

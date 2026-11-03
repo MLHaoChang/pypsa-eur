@@ -6,7 +6,7 @@ beforeEach(() => usePlacementFindings.getState().clear())
 describe('placementFindingsStore', () => {
   it('starts empty, publishes a site\'s findings, clears', () => {
     expect(usePlacementFindings.getState()).toMatchObject({ site: null, findings: [] })
-    const f = [{ key: 'Generator:GEN', kind: 'keepOut' as const, severity: 'warn' as const, message: 'GEN is 10 m from HALL; it should keep 30 m away', other: 'Load:HALL' }]
+    const f = [{ key: 'Generator:GEN', kind: 'keepOut' as const, severity: 'warn' as const, message: 'GEN is 10 m from HALL. It should keep 30 m away.', other: 'Load:HALL' }]
     usePlacementFindings.getState().publish({ id: 'a', name: 'Campus' }, f)
     expect(usePlacementFindings.getState().site).toEqual({ id: 'a', name: 'Campus' })
     expect(usePlacementFindings.getState().findings).toBe(f)

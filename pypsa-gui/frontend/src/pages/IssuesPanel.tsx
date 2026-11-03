@@ -375,7 +375,6 @@ function LayoutFindingRow({ finding, onJumpTo }: { finding: PlacementFinding | N
         <div className="flex items-baseline gap-2 mb-0.5 min-w-0">
           <span className="text-[12px] font-semibold text-text" data-testid="issue-title">{LAYOUT_FINDING_TITLES[finding.kind]}</span>
           <span className="text-[10px] text-muted truncate">{type} <span className="font-mono text-ink-700">{name}</span></span>
-          <span className="ml-auto shrink-0 text-[9.5px] font-mono text-ink-400" title="Finding kind">{finding.kind}</span>
         </div>
         <div className="text-[11.5px] text-ink-700 leading-relaxed whitespace-pre-wrap">{finding.message}</div>
       </div>
@@ -407,7 +406,6 @@ function TopologyFindingRow({ finding, onJumpTo }: { finding: TopologyFinding; o
         <div className="flex items-baseline gap-2 mb-0.5 min-w-0">
           <span className="text-[12px] font-semibold text-text" data-testid="issue-title">{TOPOLOGY_FINDING_TITLES[finding.kind]}</span>
           <span className="text-[10px] text-muted truncate">{type} <span className="font-mono text-ink-700">{name}</span></span>
-          <span className="ml-auto shrink-0 text-[9.5px] font-mono text-ink-400" title="Finding kind">{finding.kind}</span>
         </div>
         <div className="text-[11.5px] text-ink-700 leading-relaxed whitespace-pre-wrap">{finding.message}</div>
       </div>

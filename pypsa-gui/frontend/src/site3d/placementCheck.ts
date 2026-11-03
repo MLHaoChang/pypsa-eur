@@ -306,7 +306,7 @@ export function placementFindings(objects: readonly CheckObject[], lib: readonly
       const keepOut = Math.max(ka, kb)
       if (keepOut > 0 && d < keepOut) {
         const [who, whom] = kb > ka ? [b, a] : [a, b]
-        out.push({ key: keyOf(who), other: keyOf(whom), kind: 'keepOut', severity: 'warn', distanceM: metres(d), message: `${subject(who)} is ${metres(d)} m from ${nameOf(whom)}; it should keep ${keepOut} m away` })
+        out.push({ key: keyOf(who), other: keyOf(whom), kind: 'keepOut', severity: 'warn', distanceM: metres(d), message: `${subject(who)} is ${metres(d)} m from ${nameOf(whom)}. It should keep ${keepOut} m away.` })
         continue
       }
       const ca = aRule?.clearanceM ?? 0, cb = bRule?.clearanceM ?? 0
