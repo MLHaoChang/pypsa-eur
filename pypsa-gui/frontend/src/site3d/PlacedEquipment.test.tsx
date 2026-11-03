@@ -152,6 +152,7 @@ describe('Placed equipment', () => {
     view(false)
     expect(btn('add-asset-link').disabled).toBe(true)
     expect(btn('add-asset-link').title).toBe('Read-only: ask an editor')
+    expect(screen.getByTestId('add-asset-reason').textContent).toBe('Read-only: ask an editor')
   })
 
   it('a refused group move names the item', async () => {

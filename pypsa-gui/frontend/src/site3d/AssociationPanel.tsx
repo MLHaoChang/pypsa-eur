@@ -547,6 +547,7 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
               <button type="button" data-testid="add-asset-link" className={link} aria-expanded={mode === 'expert' ? addOpen : undefined}
                 disabled={!canWrite} title={!canWrite ? blockedReason ?? undefined : undefined} onClick={addAsset}>{mode === 'expert' ? '› Add model asset' : '› Add model asset in Expert'}</button>
             </div>
+            {!canWrite && blockedReason && <span className="text-[11px] text-muted" data-testid="add-asset-reason">{blockedReason}</span>}
             {mode === 'expert' && addOpen && (
               <label className="flex flex-col gap-0.5 text-[11px]">
                 <span className="text-muted">Kind to add</span>
