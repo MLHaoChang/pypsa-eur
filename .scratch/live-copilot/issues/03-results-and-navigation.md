@@ -420,6 +420,30 @@ Kept, with reasons:
 - With access already gone when the chooser opens, its listing fails: the
   note keeps only the past run's link, and the refused download says why.
 
+### PR-K, past-run browser cases for the other five families (2026-11-03)
+
+Owner decision FILL-10-1. Branch `claude/lc03-historical-families`, from master `b83b9a92`.
+
+- `smoke-copilot-lc03-historical.mjs` opens summary, dispatch, load flow, prices
+  and emissions on the first run (after capacity, before Clear), through the
+  scripted model (`composer-fixture.py`, `LC03H_FAMILIES`: tab to kept section and
+  read). Each is waited on by claim-specific locators: the view's
+  `data-result-tab` + `data-result-binding` (scope historical, the first run's id,
+  project, the family's section; summary keeps no section), the run chrome's
+  `data-run-id` and the header's `data-freshness="past_run"` with that run id; the
+  answer must say `(historical)`. The latest run's id may appear nowhere in the
+  view. Guided and Expert are both checked on the last family.
+- Re-binding to the run the conversation already holds raises no approval card, so
+  the smoke clicks it only when it appears.
+- Closed the "Cancel by name" ambiguity: the chooser's Cancel is the one beside
+  its Download button. The row's "Export…" lost its arrow icon (UX nit).
+- RED/mutation: the fixture opening prices on the latest run fails at the answer
+  (`current` instead of `historical`, wrong run id).
+- Ran: build, then the smoke in dark and in light (`LC03H_THEME=light`), both
+  `passed: true` with six families; `vitest Results.pastRunExport.test.tsx` (3).
+- Still open: filter/entity/time selection, legacy ACK, Guided vs Expert for the
+  other families, speech and stale captions. ESLint config error is unchanged.
+
 ## Comments
 
 - GK B (15) plan GO, conditions: (1) at the trial merge run

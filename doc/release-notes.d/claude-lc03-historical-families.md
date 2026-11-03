@@ -1,0 +1,1 @@
+* Test(pypsa-gui): The LC-03 historical browser journey now opens the summary, dispatch, load flow, prices and emissions views on a past run and checks each is bound to that run's kept section, never the latest; the export chooser's Cancel is targeted unambiguously, and the discussed-run row's "Export…" drops its arrow icon.

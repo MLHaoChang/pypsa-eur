@@ -142,9 +142,34 @@ async function stillOnPastRun(page, runId) {
 }
 
 async function closeChooser(page, shot) {
-  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  // The chooser's own Cancel: the one beside its Download button (Sidebar's other modals have a Cancel too).
+  await page.locator('div:has(> button:has-text("Download File"))').getByRole('button', { name: 'Cancel', exact: true }).click()
   await page.getByTestId('workbook-run').waitFor({ state: 'detached', timeout: 30000 })
   if (shot) await page.screenshot({ path: path.join(artifacts, shot) })
+}
+
+/** The six result families; capacity (`capex`) is the journey's main case. The others are opened the same way. */
+const FAMILIES = [
+  { tab: 'summary', section: 'results_summary' },
+  { tab: 'dispatch', section: 'results_dispatch' },
+  { tab: 'loadflow', section: 'loadflow' },
+  { tab: 'prices', section: 'results_prices' },
+  { tab: 'emissions', section: 'results_emissions' },
+]
+
+/** A family's past-run view as rendered: bound to the first run's kept section, header and chrome naming that run. */
+async function familyPast(page, family, runId, project) {
+  const shown = page.locator(`[data-result-binding][data-result-tab="${family.tab}"]`)
+  await shown.first().waitFor({ timeout: 30000 })
+  const binding = JSON.parse(await shown.first().getAttribute('data-result-binding'))
+  assert.equal(binding.scope, 'historical', family.tab)
+  assert.equal(binding.run_id, runId, `${family.tab}: shows another run than the first`)
+  assert.equal(binding.project_name, project)
+  if (family.tab !== 'summary') assert.equal(binding.section, family.section, family.tab)
+  assert.equal(await page.getByTestId('discussed-run-chrome').getAttribute('data-run-id'), runId, family.tab)
+  await pastHeader(page, runId)
+  // The view says which run it holds; the latest run's id appears nowhere in it.
+  return { binding, text: await shown.first().textContent() }
 }
 
 async function noPastView(page) {
@@ -313,6 +338,33 @@ try {
   await closeChooser(page)
   await stillOnPastRun(page, runs[0])
 
+  // LC-T09 for the other five families: each past-run view is opened on the first run
+  // (the assistant opens it from the family's kept section), bound to that run, never the latest.
+  const families = []
+  for (const family of FAMILIES) {
+    const answered = await page.getByTestId('chat-messages').getByText(/LC03H_FAMILY/).count()
+    await send(page, `Show me the ${family.tab} results of the first run.`)
+    // Re-binding the conversation to a run it already holds needs no new approval; otherwise the user approves its card.
+    const approvals = await page.getByTestId('chat-confirm-approve').count()
+    const card = page.getByTestId('chat-confirm-approve').nth(approvals)
+    const done = page.getByTestId('chat-messages').getByText(/LC03H_FAMILY/).nth(answered)
+    for (let i = 0; !(await done.count()) && i < 240; i += 1) {
+      if (await card.isVisible()) { await card.click(); break }
+      await page.waitForTimeout(250)
+    }
+    const words = await answer(page, 'LC03H_FAMILY', answered)
+    assert.equal(words, `LC03H_FAMILY ${family.tab} Run ${runs[0]} (historical).`)
+    const view = await familyPast(page, family, runs[0], 'oj-grid')
+    assert(!view.text.includes(runs[1]), `${family.tab}: the latest run's id is in the first run's view`)
+    await page.screenshot({ path: path.join(artifacts, `lc03h-past-${family.tab}.png`) })
+    families.push({ tab: family.tab, section: view.binding.section })
+  }
+  // Guided and Expert agree on the last family's header and run.
+  await page.getByRole('button', { name: 'Guided', exact: true }).click()
+  await familyPast(page, FAMILIES.at(-1), runs[0], 'oj-grid')
+  await page.getByRole('button', { name: 'Expert', exact: true }).click()
+  await familyPast(page, FAMILIES.at(-1), runs[0], 'oj-grid')
+
   // LC-T10 (1): the user's own Clear supersedes the past-run view.
   await page.getByTestId('discussed-run-chrome').getByRole('button', { name: 'Clear' }).click()
   await noPastView(page)
@@ -401,6 +453,7 @@ try {
       section: past.binding.section, gasLcoe: past.gas.lcoe_eur_per_mwh.total },
     parity: { header: pastWords, exportNote, file: `run_<first run>_${keptFile.section}.json`,
       fileGasLcoe: keptFile.data.economics_by_carrier.by_carrier.gas.lcoe_eur_per_mwh.total },
+    families,
     superseded: ['clear', 'newer turn', 'project switch'], latest, refused: refusedAnswer,
     screenshots: ['lc03h-past-run.png', 'lc03h-past-header-guided.png', 'lc03h-past-header-expert.png',
       'lc03h-export-past-run.png', 'lc03h-export-past-run-guided.png', 'lc03h-after-chooser-expert.png',
