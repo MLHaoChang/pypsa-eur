@@ -333,7 +333,7 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
       {part === 'model' && (
         <div className="flex flex-col gap-1" data-testid="site-part-model-body">
           {enabled && action('assign_native')?.available
-            ? <AssociationPanel key={site.id} site={site} scene={enabled} canWrite={canWrite} blockedReason={blocked ?? (busy ? 'Working: wait for the current step to finish' : null)} />
+            ? <AssociationPanel key={site.id} site={site} scene={enabled} canWrite={canWrite} reasonAbove={!!blocked} blockedReason={blocked ?? (busy ? 'Working: wait for the current step to finish' : null)} />
             : <Blocker action={action('assign_native')} />}
         </div>
       )}

@@ -133,14 +133,17 @@ const centroid = (ring: readonly [number, number][]): [number, number] => {
   return [ring.reduce((s, p) => s + p[0], 0) / n, ring.reduce((s, p) => s + p[1], 0) / n]
 }
 
-export default function AssociationPanel({ site, scene, canWrite, blockedReason }: {
+export default function AssociationPanel({ site, scene, canWrite, blockedReason, reasonAbove = false }: {
   site: Site
   scene: Enabled
   canWrite: boolean
   /** Why writing is off (read-only, busy elsewhere), shown where a button is disabled. */
   blockedReason: string | null
+  /** The panel already shows `blockedReason` at the top of the tab: not repeated beside each disabled button. */
+  reasonAbove?: boolean
 }) {
   const project = useUIStore(s => s.currentProject)
+  const note = (r: string | null) => (reasonAbove && r === blockedReason ? null : r)
   const mode = useUIStore(s => s.uiMode) as UiMode
   const selection = useUIStore(s => s.sitePartSelection)
   const qc = useQueryClient()
@@ -397,7 +400,7 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
             <button type="button" data-testid="place-rebind-cancel" className={secondary}
               onClick={() => { setPlacementRebind(null); setRebindPick(null) }}>Cancel</button>
           </div>
-          {rebindReason && <span className="text-[11px] text-muted" data-testid="place-rebind-preview-reason">{rebindReason}</span>}
+          {note(rebindReason) && <span className="text-[11px] text-muted" data-testid="place-rebind-preview-reason">{rebindReason}</span>}
         </div>
       )}
 
@@ -405,7 +408,7 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
         <Review proposal={mine} mode={mode} buildings={buildings} groups={groups} itemName={itemName} sizeLine={sizeLine}
           shortName={key => componentOfKey(key).name}
           sized={key => !!sizeOf(key)} onApply={() => void apply()} onDiscard={() => void discard()}
-          canApply={writable} applyReason={!canWrite ? blockedReason : null} busy={busy} />
+          canApply={writable} applyReason={!canWrite ? note(blockedReason) : null} busy={busy} />
       ) : (
         <>
           {selected ? (
@@ -486,7 +489,7 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
                   <button type="button" data-testid="assoc-cancel" className={secondary} onClick={resetAttach}>Cancel</button>
                 )}
               </div>
-              {attachReason && <span className="text-[11px] text-muted" data-testid="assoc-preview-reason">{attachReason}</span>}
+              {note(attachReason) && <span className="text-[11px] text-muted" data-testid="assoc-preview-reason">{attachReason}</span>}
             </div>
           ) : (
             <span className="text-[11px] text-muted" data-testid="assoc-select-hint">
@@ -547,7 +550,7 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
               <button type="button" data-testid="add-asset-link" className={link} aria-expanded={mode === 'expert' ? addOpen : undefined}
                 disabled={!canWrite} title={!canWrite ? blockedReason ?? undefined : undefined} onClick={addAsset}>{mode === 'expert' ? '› Add model asset' : '› Add model asset in Expert'}</button>
             </div>
-            {!canWrite && blockedReason && placeReason !== blockedReason && <span className="text-[11px] text-muted" data-testid="add-asset-reason">{blockedReason}</span>}
+            {!canWrite && note(blockedReason) && placeReason !== blockedReason && <span className="text-[11px] text-muted" data-testid="add-asset-reason">{blockedReason}</span>}
             {mode === 'expert' && addOpen && (
               <label className="flex flex-col gap-0.5 text-[11px]">
                 <span className="text-muted">Kind to add</span>
@@ -558,11 +561,11 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
                 </select>
               </label>
             )}
-            {placeReason && <span className="text-[11px] text-muted" data-testid="place-preview-reason">{placeReason}</span>}
+            {note(placeReason) && <span className="text-[11px] text-muted" data-testid="place-preview-reason">{placeReason}</span>}
           </div>
 
           <PlacedEquipment siteId={site.id} placements={placements} itemName={itemName} writable={writable}
-            blockedReason={!canWrite ? blockedReason : null} onPreviewMove={(k, m) => void previewMove(k, m)}
+            blockedReason={!canWrite ? blockedReason : null} reasonAbove={reasonAbove} onPreviewMove={(k, m) => void previewMove(k, m)}
             onPreviewDetach={k => void previewDetach(k)} onUndo={() => void undoDetach()} />
         </>
       )}
