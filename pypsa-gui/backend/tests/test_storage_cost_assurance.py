@@ -809,3 +809,15 @@ def test_an_untagged_store_and_a_same_name_storage_unit_keep_the_old_path(storag
     n.stores["charger"], n.stores["discharger"] = "x", "y"
     record_solve(storage)
     assert cost_values(storage) == before
+
+
+def test_an_unsolved_extendable_split_is_not_called_a_layout_fault(storage):
+    """GK A (10) caveat 3: before a solve the sizes are unknown, not mismatched."""
+    from services.solver.split_storage import migrate_storage_unit
+
+    n = storage.network
+    n.storage_units.at["Battery", "p_nom_extendable"] = True
+    migrate_storage_unit(n, "Battery")
+    with pytest.raises(ValueError) as refused:
+        calculations.scoped_source(storage, scope(storage))
+    assert str(refused.value) != "unsupported_split_storage_layout"
