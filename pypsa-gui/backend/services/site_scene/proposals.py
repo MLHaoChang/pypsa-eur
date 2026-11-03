@@ -257,13 +257,12 @@ def _commit_entry(project_dir, site_id: str, pid: str, entry: dict[str, Any], ex
     if expected != scene["revision"]:
         return store.apply(project_dir, site_id, {**proposal, "changes": {}}, expected)
     # Apply re-validates every target against the live network before anything is written.
-    changes, bindings = _model_step(project_dir, scene, entry["action"], 1)(
-        scene, n, entry["stored"], _recorded_bindings(project_dir))
-    detached = changes.pop("_detached", None)
+    recorded = _recorded_bindings(project_dir)
+    changes, bindings = _model_step(project_dir, scene, entry["action"], 1)(scene, n, entry["stored"], recorded)
     if bindings:
         _record_bindings(project_dir, bindings)
-    if detached:
-        proposal["detached"] = detached
+    if entry["action"] == "detach":
+        proposal["detached"] = associations.detached_uids(n, entry["stored"]["keys"], recorded)
     return store.apply(project_dir, site_id, {**proposal, "changes": changes}, expected)
 
 
