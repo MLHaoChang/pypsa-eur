@@ -3,7 +3,7 @@
 
 # 04 — Input gate loop L1: headless agent turns and the change ledger
 
-Status: ready-for-agent
+Status: in-progress
 Type: task
 Blocked by: 02, 03
 Gated: yes (GK B)
@@ -33,3 +33,5 @@ Design: [design.md](../design.md) §6.1, §6.3, §6.4, §6.5
 `pypsa-gui/backend/harness/runner.py`, `pypsa-gui/backend/harness/loop.py` (headless entry only), `pypsa-gui/backend/services/run_gates.py`, `pypsa-gui/backend/services/run_profiles.py`, `pypsa-gui/backend/harness/workflows/profiles/eh_site/` (new), `pypsa-gui/backend/tests/test_harness_run_loops.py` (new)
 
 ## Comments
+
+- 3 Nov (SH04-OPEN-1), session session_01G7qCumQaK5z1YKhiBJ34Du on `claude/sh04-input-gate-loop`. Built in `harness/run_loops.py`, the runner's `_agent_round`, `_advance_run` and an envelope `gaps` list in `run_envelope.py`. The eh_site input gate gains `in.loads.series`. The data-gap admission rule (fill only, never replace) went to GK B as a plan question. Stage 2's agent fill has no trigger fact yet, so it is not built here: L1 covers the gaps the input gate names.

@@ -23,7 +23,11 @@ BRIEF = {'objective': 'Size the own site supply through 2035.', 'cards': ['capac
 @pytest.fixture
 def site(baseline):
     """The baseline project, stamped as an eh_site project (its template file)."""
-    _, project_id, root = baseline
+    ctx, project_id, root = baseline
+    # An eh_site project's loads carry demand series (`in.loads.series`, issue 04).
+    network = ctx.network
+    network.loads_t.p_set = network.loads_t.p_set.reindex(columns=["L1"]).fillna(5.0)
+    chat_tools.save_project("Tool Baseline", force=True)
     (root / flow_service.TEMPLATE_FILE).write_text(json.dumps({'id': 'eh_site', 'site_type': 'industrial'}))
     return project_id, root
 

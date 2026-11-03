@@ -40,6 +40,19 @@ NEVER_TUNABLE = frozenset({
 })
 _NEVER_COMPONENTS = frozenset({"grid_code", "solver", "gate", "profile", "envelope"})
 
+# §6.3: an agent turn offers its stage's allowlist only. The input loop L1
+# (§6.1) gets reads, Library reads and the data-gap and edit tools; the
+# envelope still decides each write at dispatch, and anything it does not
+# admit is a card the headless turn never shows.
+L1_ROUNDS = 3  # §6.1: at most 3 rounds; a profile may lower it
+AGENT_STAGES = ("input_gate",)
+L1_TOOLS = (
+    "validate_network", "project_readiness", "diagnose_network", "get_weather_choice", "get_component",
+    "list_components", "get_current_series", "list_all_timeseries", "list_load_profile_archetypes",
+    "list_library_items", "get_library_item", "list_library_series", "get_library_series",
+    "update_component", "attach_tariff", "set_weather_choice", "generate_load_profile", "apply_generated_profile",
+)
+
 
 def _rule(id, fact, op, value=None, severity="block", basis=""):
     rule = {"id": id, "fact": fact, "op": op, "severity": severity, "basis": basis}
@@ -80,7 +93,8 @@ GENERIC: dict[str, dict] = {
     ]},
     "inputs": {"actions": [_call("get_weather_choice", project_id=PROJECT)], "rules": []},
     "input_gate": {"actions": [_call("validate_network"), _call("project_readiness", project_id=PROJECT),
-                               _call("diagnose_network")], "rules": CORE_INPUT_RULES},
+                               _call("diagnose_network")], "rules": CORE_INPUT_RULES,
+                   "agent": {"tools": list(L1_TOOLS), "rounds": L1_ROUNDS}},
     "solve": {"actions": [_call("solve_queue_enqueue", project_id=PROJECT)], "rules": [
         _rule("sv.solve.state", "solve.state", "eq", "completed", basis="The run's own solve job finished."),
     ]},
@@ -103,6 +117,23 @@ def _check_tunable(entries):
         if attr in NEVER_TUNABLE or "grid_code" in attr or component.split(":")[0] in _NEVER_COMPONENTS:
             raise ProfileError(f"{component}.{attr} is never tunable: the agent changes design levers, "
                                "never the question.")
+
+
+def _check_agent(name, agent):
+    """A stage's agent turn (§6.3): its allowlist and round bound."""
+    from harness import confirm
+    from harness.catalogue import TOOLS
+    if name not in AGENT_STAGES:
+        raise ProfileError(f"Stage {name}: no agent turn runs there yet.")
+    if not isinstance(agent, dict) or set(agent) != {"tools", "rounds"} or not isinstance(agent["tools"], list) \
+            or not agent["tools"] or isinstance(agent["rounds"], bool) or not isinstance(agent["rounds"], int) \
+            or not 1 <= agent["rounds"] <= L1_ROUNDS:
+        raise ProfileError(f"Stage {name}: an agent turn names tools and 1-{L1_ROUNDS} rounds.")
+    known = {t["name"] for t in TOOLS}
+    for tool in agent["tools"]:
+        if tool not in known or tool not in L1_TOOLS or confirm._safety_tier_for(tool) == "destructive":
+            raise ProfileError(f"Stage {name}: {tool!r} is not a tool the input loop may offer.")
+    return {"tools": list(dict.fromkeys(agent["tools"])), "rounds": agent["rounds"]}
 
 
 def load(profile: dict) -> dict:
@@ -144,6 +175,8 @@ def load(profile: dict) -> dict:
             if own.get(core["id"]) != core:
                 raise ProfileError(f"Stage {name}: rule {core['id']} is inherited and cannot be dropped or changed.")
         stages[name] = {"actions": actions, "rules": rules}
+        if "agent" in stage:
+            stages[name]["agent"] = _check_agent(name, stage["agent"])
     loaded = {**copy.deepcopy(profile), "stages": stages}
     if "envelope" in profile:
         # Issue 03: what a run of this profile may propose; a grant narrows it, never widens it.
@@ -180,6 +213,13 @@ EH_SITE = {
             _rule("set.project.template", "project.template", "eq", "eh_site",
                   basis="The profile serves the eh_site template only."),
         ]},
+        # Issue 04: a load with no demand series is a data gap the input loop
+        # L1 fills from a generated profile inside the envelope's gaps (§6.1).
+        "input_gate": {**GENERIC["input_gate"], "rules": [
+            *CORE_INPUT_RULES,
+            _rule("in.loads.series", "loads.without_series", "empty",
+                  basis="Every eh_site load carries a demand time series; a static value has no profile."),
+        ]},
         # Issue 01: the result gate reads the solver status only; LC-20 (05)
         # and the eh_site KPI rules (07) join it later.
     },
@@ -203,6 +243,12 @@ EH_SITE = {
                    "bounds": {"min": 0.0, "rel": 0.5}},
                   {"tool": "update_component", "target": {"component": "StorageUnit", "name": "bess_new_*", "attr": "max_hours"},
                    "bounds": {"min": 1.0, "max": 8.0}}],
+        # Issue 04: the data gaps the input loop may fill, never replace (§6.1, §7).
+        "gaps": [{"tool": "apply_generated_profile", "target": {"component": "Load", "name": "*", "attr": "p_set"}},
+                 {"tool": "set_weather_choice", "target": {"component": "Settings", "name": "Weather", "attr": "source"}},
+                 {"tool": "set_weather_choice", "target": {"component": "Settings", "name": "Weather", "attr": "year"}},
+                 {"tool": "attach_tariff",
+                  "target": {"component": "Settings", "name": "Commercial", "attr": "import_tariff_ref"}}],
         "runs": [{"tool": "solve_queue_enqueue"}],
         "budget": {"solves": 6, "rounds": 6, "wall_time_h": 8.0},
         "research": {"allowed": False, "cost_cap_eur": 2.0},

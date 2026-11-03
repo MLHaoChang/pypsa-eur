@@ -312,10 +312,13 @@ class Runner:
     would otherwise wait on, used once. The application's runner has none.
     """
 
-    def __init__(self, instance=None, *, clock=time.time, decisions=None):
+    def __init__(self, instance=None, *, clock=time.time, decisions=None, agent_provider=None):
         self.instance = instance or f"{os.getpid()}:{uuid.uuid4().hex[:8]}"
         self.clock = clock
         self._decisions = decisions
+        # Issue 04: the provider an agent turn streams from; None builds the
+        # session's own (production). Tests pass a scripted one.
+        self._agent_provider = agent_provider
         self._wakeup = threading.Event()
         self._stopping = threading.Event()
         self._due = set()
@@ -628,6 +631,7 @@ class Runner:
         _update(path, change)
 
     def _step(self, path, ctx, session):
+        from harness import run_loops
         from services import run_envelope, run_profiles
         tasks = _tasks()
         taken = {}
@@ -668,6 +672,8 @@ class Runner:
         run = task["run"]
         if run["status"] != "running":
             return run["status"]
+        if run_loops.due(task):
+            return self._agent_round(path, ctx, session, task)
         if task["status"] == "paused_at_card":
             card = task["pause"]["card"]
             decision = decide(task, card, None)
@@ -709,6 +715,31 @@ class Runner:
         self._inflight[task["task_id"]] = (path, thread)
         thread.start()
         return "dispatched"
+
+    def _agent_round(self, path, ctx, session, task):
+        """An input-loop round (issue 04) on a helper thread, as a step's
+        dispatch: the tick keeps the lease alive while the model works, and
+        the project is the run's until the round ends."""
+        from harness import run_loops
+        from services import harness_locks
+        harness_locks.hold(task["project_id"], task["task_id"])
+        task_id = task["task_id"]
+
+        def round_():
+            session._undo_snapshotted = []  # the round is one undo step, as a chat turn is
+            try:
+                run_loops.run_round(path, ctx, session, provider=self._agent_provider,
+                                    recheck=lambda: self.recheck(task_id, path, ctx))
+            except Exception:  # noqa: BLE001 — a round that errors ends the loop; never retried unattended
+                logger.exception("harness runner: input-loop round of %s errored", task_id)
+                run_loops.end(path, "error")
+            finally:
+                self.wake(path)
+        context = contextvars.copy_context()
+        thread = threading.Thread(target=context.run, args=(round_,), name=f"harness-l1-{task_id[:8]}", daemon=True)
+        self._inflight[task_id] = (path, thread)
+        thread.start()
+        return "l1_round"
 
     def _hold_if_effectful(self, task, step):
         from services import harness_locks

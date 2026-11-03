@@ -150,6 +150,9 @@ class ChatSession:
     goal: dict[str, Any] | None = None
     # Catalogue view; kept separate from project identity and permissions.
     toolset: str = "all"
+    # Study harness issue 04: a run's headless agent turn offers only its
+    # stage's allowlist (`harness/run_loops.py`); None everywhere else.
+    stage_tools: frozenset | None = None
     # External MCP tools (issue 19): listed once per session by
     # `harness.mcp_client.session_tools`; None until then.
     external_tools: list[dict[str, Any]] | None = None

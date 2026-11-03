@@ -67,6 +67,21 @@ RESEARCH_SOURCE = "research:"
 # notifies (§7 "Scope and audit", the freshness chain).
 PAUSING = frozenset({"expired", "revoked", "exhausted", "drift", "fingerprint_unreadable", "brief_stale"})
 
+# Data-gap tools (§7, GK B; issue 04): admitted only from a `gaps` entry that
+# names the target, and only to fill a gap: the instance had no series (or the
+# setting no value) at the grant and still has none. A value that is there is
+# never replaced, so §6.0 holds: demand is filled where it is missing, never
+# changed. Each tool fills these (component, attr) targets only.
+GAP_TARGETS = {
+    "apply_generated_profile": frozenset({("Load", "p_set")}),
+    "attach_tariff": frozenset({("Settings", "import_tariff_ref")}),
+    "set_weather_choice": frozenset({("Settings", "source"), ("Settings", "year")}),
+}
+# The step that prepares a fill: it writes only the pending profile store, for
+# the loads its args name, and is admitted only for gaps a listed entry names.
+GAP_PREPARE = {"generate_load_profile": "apply_generated_profile"}
+_SERIES = {"Load": ("loads_t", "loads"), "Generator": ("generators_t", "generators")}
+
 _GLOB = re.compile(r"[*?\[\]]")
 _CLASS = re.compile(r"^[A-Z][A-Za-z]{1,40}$")
 
@@ -158,6 +173,20 @@ def _check_run(entry):
     return dict(entry)
 
 
+def _check_gap(entry):
+    if not isinstance(entry, dict) or set(entry) != {"tool", "target"} or entry["tool"] not in GAP_TARGETS:
+        raise EnvelopeError(f"A gap names one of {sorted(GAP_TARGETS)} and its target: {entry!r}")
+    target = entry["target"]
+    if not isinstance(target, dict) or set(target) != {"component", "name", "attr"} \
+            or not all(isinstance(v, str) and v for v in target.values()) or len(target["name"]) > 64:
+        raise EnvelopeError("A gap's target names component, name and attr.")
+    if (target["component"], target["attr"]) not in GAP_TARGETS[entry["tool"]]:
+        raise EnvelopeError(f"{entry['tool']} fills only {sorted(GAP_TARGETS[entry['tool']])}.")
+    if target["component"] == "Settings" and _GLOB.search(target["name"]):
+        raise EnvelopeError("A settings gap names its setting, never a glob.")
+    return {"tool": entry["tool"], "target": dict(target)}
+
+
 def _check_budget(budget):
     if not isinstance(budget, dict) or set(budget) != set(CAPS):
         raise EnvelopeError(f"A budget sets {sorted(CAPS)}.")
@@ -178,11 +207,14 @@ def _check_research(research):
 
 def check_block(block):
     """A profile's `envelope` block, validated (`run_profiles.load`)."""
-    if not isinstance(block, dict) or not {"edits", "runs", "budget"} <= set(block) <= {"edits", "runs", "budget", "research"}:
-        raise EnvelopeError("An envelope block has edits, runs, budget and optional research.")
-    if not isinstance(block["edits"], list) or not isinstance(block["runs"], list):
-        raise EnvelopeError("edits and runs are lists.")
+    if not isinstance(block, dict) or not {"edits", "runs", "budget"} <= set(block) \
+            <= {"edits", "runs", "budget", "research", "gaps"}:
+        raise EnvelopeError("An envelope block has edits, runs, budget and optional research and gaps.")
+    if not isinstance(block["edits"], list) or not isinstance(block["runs"], list) \
+            or not isinstance(block.get("gaps", []), list):
+        raise EnvelopeError("edits, runs and gaps are lists.")
     return {"edits": [_check_edit(e) for e in block["edits"]], "runs": [_check_run(r) for r in block["runs"]],
+            "gaps": [_check_gap(g) for g in block.get("gaps", [])],
             "budget": _check_budget(block["budget"]),
             "research": _check_research(block.get("research", {"allowed": False, "cost_cap_eur": RESEARCH_DEFAULT_EUR}))}
 
@@ -218,6 +250,14 @@ def narrow(block, candidate):
     for edit in mine["edits"]:
         if not any(_within(edit, wide) for wide in block["edits"]):
             _invalid(f"{edit['tool']} on {edit['target']} is wider than the profile's envelope.")
+    for gap in mine["gaps"]:
+        if not any(gap["tool"] == wide["tool"] and gap["target"]["component"] == wide["target"]["component"]
+                   and gap["target"]["attr"] == wide["target"]["attr"]
+                   and (gap["target"]["name"] == wide["target"]["name"] or (
+                       not _GLOB.search(gap["target"]["name"])
+                       and fnmatch.fnmatchcase(gap["target"]["name"], wide["target"]["name"])))
+                   for wide in block["gaps"]):
+            _invalid(f"{gap['tool']} on {gap['target']} is wider than the profile's envelope.")
     for run in mine["runs"]:
         if run not in block["runs"]:
             _invalid(f"{run} is not in the profile's envelope.")
@@ -274,6 +314,7 @@ def propose(task_path, task, profile):
                 "fingerprint": None, "chain": [], "profile": task["run"]["profile"],
                 "edits": [dict(e, at_grant={}) for e in copy.deepcopy(block["edits"])],
                 "runs": copy.deepcopy(block["runs"]), "budget": dict(block["budget"]),
+                "gaps": [dict(g, at_grant={}) for g in copy.deepcopy(block.get("gaps", []))],
                 "research": dict(block["research"]), "notify": {"email": False},
                 "state": "proposed", "audit": []}
     _save(task_path, envelope)
@@ -287,6 +328,8 @@ def _rows(envelope):
         allowed = ", ".join(map(str, e["enum"])) if "enum" in e else ", ".join(
             f"{k} {v:g}" if k != "rel" else f"±{v:.0%} of the value at grant" for k, v in e["bounds"].items())
         lines.append(f"- Edit {t['component']} `{t['name']}` {t['attr']} ({allowed}) with {e['tool']}")
+    lines += [f"- Fill a missing {g['target']['component']} `{g['target']['name']}` {g['target']['attr']} with "
+              f"{g['tool']} (only where none is set; never replaces one)" for g in envelope.get("gaps", [])]
     lines += [f"- Run {r['tool']}" + (f" ({r['kind']})" if r.get("kind") else "") for r in envelope["runs"]]
     b = envelope["budget"]
     lines.append(f"- Up to {b['solves']} solves and {b['rounds']} rounds, for at most {b['wall_time_h']:g} h")
@@ -303,6 +346,7 @@ def describe(envelope):
     audit = envelope["audit"]
     return {"id": envelope["id"], "state": envelope["state"], "expires_at": envelope["expires_at"],
             "edits": [{k: v for k, v in e.items() if k != "at_grant"} for e in envelope["edits"]],
+            "gaps": [{k: v for k, v in g.items() if k != "at_grant"} for g in envelope.get("gaps", [])],
             "runs": envelope["runs"], "budget": envelope["budget"], "research": envelope["research"],
             "notify": envelope["notify"],
             "used": sum(1 for a in audit if a["event"] == "used"),
@@ -334,6 +378,25 @@ def _instances(ctx, edit):
         value = value.item() if hasattr(value, "item") else value
         out[str(name)] = value if isinstance(value, str) or _number(value) else None
     return out
+
+
+def _has_series(ctx, component, name, attr):
+    series, _ = _SERIES[component]
+    return str(name) in {str(c) for c in getattr(getattr(ctx.network, series), attr).columns}
+
+
+def _gap_instances(ctx, gap):
+    """`at_grant` of a gap entry: each instance it names that is a gap now
+    ("gap"). A setting is recorded by name; its row shows whether it is set."""
+    target = gap["target"]
+    if target["component"] == "Settings":
+        return {target["name"]: "gap"}
+    try:
+        frame = getattr(ctx.network, _SERIES[target["component"]][1])
+        return {str(n): "gap" for n in frame.index if fnmatch.fnmatchcase(str(n), target["name"])
+                and not _has_series(ctx, target["component"], n, target["attr"])}
+    except Exception:  # noqa: BLE001 — an unreadable network names no gap
+        return {}
 
 
 def decide(session, task_id, verdict, envelope=None, notify_email=False):
@@ -383,6 +446,7 @@ def decide(session, task_id, verdict, envelope=None, notify_email=False):
                            expires_at=_iso(now + chosen["budget"]["wall_time_h"] * 3600),
                            fingerprint=fingerprint, chain=[],
                            edits=[dict(e, at_grant=_instances(ctx, e)) for e in chosen["edits"]],
+                           gaps=[dict(g, at_grant=_gap_instances(ctx, g)) for g in chosen["gaps"]],
                            runs=chosen["runs"], budget=chosen["budget"], research=chosen["research"],
                            notify={"email": bool(notify_email)}, state="granted")
             _audit(granted, "granted", reason="user")
@@ -431,7 +495,8 @@ def covers(task_path, tool):
     """A live envelope lists `tool` (the runner then dispatches without
     waiting; admission still decides, at dispatch)."""
     envelope = _load(task_path) if live(task_path) else None
-    return envelope is not None and any(e["tool"] == tool for e in envelope["edits"] + envelope["runs"])
+    return envelope is not None and (any(e["tool"] == tool for e in envelope["edits"] + envelope["runs"]) or any(
+        tool in (g["tool"], *[p for p, t in GAP_PREPARE.items() if t == g["tool"]]) for g in envelope.get("gaps", [])))
 
 
 def last_refusal(task_path):
@@ -482,6 +547,51 @@ def _match_edit(envelope, tool, edit_card):
     return None
 
 
+def _still_gap(ctx, row):
+    component = row.get("component_class")
+    if component == "Settings":
+        return row.get("old") in (None, "")
+    return component in _SERIES and not _has_series(ctx, component, row.get("name"), str(row.get("field")).split(".")[0])
+
+
+def _match_gap(envelope, tool, args, edit_card, ctx):
+    """None when the call fills only gaps a listed entry names, else the reason."""
+    gaps = envelope.get("gaps", [])
+    if tool in GAP_PREPARE:
+        names = args.get("loads") if isinstance(args, dict) else None
+        if not isinstance(names, list) or not names:
+            return "outside_entry"
+        entries = [g for g in gaps if g["tool"] == GAP_PREPARE[tool] and g["target"]["component"] == "Load"]
+        if not entries:
+            return "unlisted_tool"
+        for name in names:
+            if not any(str(name) in g["at_grant"] for g in entries):
+                return "outside_entry"
+            if _has_series(ctx, "Load", name, "p_set"):
+                return "not_a_gap"
+        return None
+    entries = [g for g in gaps if g["tool"] == tool]
+    if not entries:
+        return "unlisted_tool"
+    if not edit_card or not edit_card.get("complete"):
+        return "unresolved_target"
+    typed = [r for r in edit_card.get("rows") or [] if r.get("role") == "typed"]
+    if not typed or any(r.get("field") == "exists" for r in edit_card.get("rows") or []):
+        return "unresolved_target" if not typed else "outside_entry"
+    for row in typed:
+        attr = str(row.get("field")).split(".")[0]
+        matched = [g for g in entries if g["target"]["component"] == row.get("component_class")
+                   and g["target"]["attr"] in (attr, row.get("field"))
+                   and fnmatch.fnmatchcase(str(row.get("name")), g["target"]["name"])]
+        if not matched:
+            return "outside_entry"
+        if not any(str(row["name"]) in g["at_grant"] for g in matched):
+            return "new_instance"
+        if not _still_gap(ctx, row):
+            return "not_a_gap"
+    return None
+
+
 def _in_bounds(entry, new, at_grant):
     if "enum" in entry:
         return any(new == v and type(new) is type(v) for v in entry["enum"])
@@ -519,6 +629,8 @@ def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx
     if is_run:
         kinds = [r.get("kind") for r in envelope["runs"] if r["tool"] == tool]
         return None if None in kinds or (isinstance(args, dict) and args.get("kind") in kinds) else "outside_entry"
+    if tool in GAP_PREPARE or (tool in GAP_TARGETS and not any(e["tool"] == tool for e in envelope["edits"])):
+        return _match_gap(envelope, tool, args, edit_card, ctx)
     if not any(e["tool"] == tool for e in envelope["edits"]):
         return "unlisted_tool"
     return _match_edit(envelope, tool, edit_card)

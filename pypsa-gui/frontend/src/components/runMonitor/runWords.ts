@@ -29,6 +29,7 @@ export const FACT_WORDS: Record<string, string> = {
   'validate.errors': 'The model has no errors',
   'readiness.ready': 'The model is ready to solve',
   'diagnose.unserved_islands': 'Every load is connected',
+  'loads.without_series': 'Every load has a demand profile',
   'solve.state': 'The solve finished',
   'solve.status': 'The solve found a solution',
   fresh: 'The results match the inputs',
