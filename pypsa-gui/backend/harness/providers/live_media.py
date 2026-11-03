@@ -138,6 +138,71 @@ class TtsAdapter(Protocol):
     ) -> SpeechAudio: ...
 
 
+@dataclass(frozen=True)
+class MediaGrant:
+    """A scoped, short-lived credential for one participant in one media room.
+
+    Returned once to the caller of a speech start; never persisted or logged.
+    """
+
+    url: str
+    token: str
+    expires_at: float
+
+    def __repr__(self) -> str:  # never let the token reach a log line
+        return f"MediaGrant(url={self.url!r}, expires_at={self.expires_at!r})"
+
+
+@runtime_checkable
+class MediaTransport(Protocol):
+    """Managed WebRTC media (LiveKit Cloud under the approved design, LC-07).
+
+    ``open_session`` provisions one room for one owner, hands ``bridge_token``
+    to the audio worker it dispatches, and returns the browser's grant.
+    ``close_session`` tears the room down; it must be safe to call twice.
+    A vendor implementation imports its SDK lazily, never at module load.
+    """
+
+    name: str
+
+    def open_session(
+        self,
+        *,
+        room: str,
+        identity: str,
+        ttl_s: int,
+        bridge_token: str,
+        language: str,
+    ) -> MediaGrant: ...
+
+    def close_session(self, *, room: str) -> None: ...
+
+
+@dataclass(frozen=True)
+class TranscriptEvent:
+    """One streaming recognition event; only ``final`` events may be acted on."""
+
+    segment_id: str
+    seq: int
+    text: str
+    final: bool
+
+
+@runtime_checkable
+class StreamingSttAdapter(Protocol):
+    """Streaming recognition (Deepgram under the approved design, LC-07)."""
+
+    name: str
+
+    def stream(
+        self,
+        frames: Any,
+        *,
+        language: str,
+        cancel: CancelToken | None = None,
+    ) -> Any: ...  # AsyncIterator[TranscriptEvent]
+
+
 ClientFactory = Callable[[], httpx.AsyncClient]
 Credential = Callable[[], "str | None"]
 

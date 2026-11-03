@@ -209,6 +209,13 @@ _R_DURABLE_THREAD = (
     "chat-episode state and bridge credentials, never network inputs, results "
     "or config, so a non-holder's thread changes nothing the holder sees."
 )
+_R_SPEECH_SESSION = (
+    "the speech session on a durable conversation thread (LC-07): the same "
+    "owner-scoped record, read through the same owner/project/replica checks. "
+    "Start/end/segment/usage move media-session state, speech tickets and "
+    "parent budget charges, never network inputs, results or config; a "
+    "recognised final only becomes a turn through the ordinary chat stream."
+)
 _R_EXPERIMENT_PLAN = (
     "records an experiment PLAN, owner-scoped, under the project dir "
     "(`experiments/`) and read back only by its owner. It executes nothing "
@@ -326,6 +333,10 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/durable-conversations/{thread_id}/resume"): (CHAT_SESSION, _R_DURABLE_THREAD),
     ("POST", "/api/durable-conversations/{thread_id}/rebind"): (CHAT_SESSION, _R_DURABLE_THREAD),
     ("POST", "/api/durable-conversations/{thread_id}/profile"): (CHAT_SESSION, _R_DURABLE_THREAD),
+    ("POST", "/api/durable-conversations/{thread_id}/speech/start"): (CHAT_SESSION, _R_SPEECH_SESSION),
+    ("POST", "/api/durable-conversations/{thread_id}/speech/end"): (CHAT_SESSION, _R_SPEECH_SESSION),
+    ("POST", "/api/durable-conversations/{thread_id}/speech/segment"): (CHAT_SESSION, _R_SPEECH_SESSION),
+    ("POST", "/api/durable-conversations/{thread_id}/speech/usage"): (CHAT_SESSION, _R_SPEECH_SESSION),
     # gridspine studies
     ("POST", "/api/gridspine/{name}/dispatch-source"): (STUDY_NOT_LOCK_COORDINATED, _R_STUDY),
     ("PUT", "/api/gridspine/{name}/config"): (STUDY_NOT_LOCK_COORDINATED, _R_STUDY),

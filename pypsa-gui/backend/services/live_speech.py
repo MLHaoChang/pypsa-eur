@@ -1,0 +1,572 @@
+# SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
+# SPDX-License-Identifier: MIT
+
+"""Continuous speech session on a durable thread (LC-07 PR1; LC-C8, LC-C9).
+
+One speech session at a time per durable thread, bound to its owner, project,
+generation and pinned worker (every call goes through
+``durable_conversation._read``, so the one-worker store lock and replica pin
+apply). The media room comes from a ``live_media.MediaTransport``; none is
+configured in the shipped app, and the whole surface is off unless
+``PYPSA_GUI_LIVE_SPEECH=1``.
+
+Only a *final* recognition segment can become a harness turn: it yields a
+one-time ticket (``speech:<segment_id>``) that ``harness.loop.run_turn``
+redeems against the exact recognised text before utterance admission.
+Partials are acknowledged and dropped. Spoken "yes" never approves a card.
+
+Resources: media, recognition and synthesis are reserved on the parent ledger
+before the transport opens, and settled exactly once on whichever exit comes
+first (end, error, timeout, rebind, stale generation, restart). A clean end
+settles reported usage; an abrupt exit, where the worker may hold unreported
+usage, settles the reservation cap flagged ``usage_unverified``. Usage above
+the reservation settles at the cap flagged ``over_reservation``.
+
+The browser's media credential is returned by ``start`` alone. It is never
+written to the thread file, logged or echoed by a read.
+"""
+
+from __future__ import annotations
+
+import math
+import os
+import re
+import threading
+import time
+import uuid
+from datetime import UTC, datetime
+from typing import Any
+
+from harness.providers import live_media
+from services import durable_conversation as dc
+
+ENABLE_ENV = 'PYPSA_GUI_LIVE_SPEECH'
+
+MAX_SESSION_SECONDS = 1800
+CREDENTIAL_TTL_S = 600
+MAX_CREDENTIAL_TTL_S = 900
+BRIDGE_TTL_S = MAX_SESSION_SECONDS + 300
+
+# kind -> (reserved amount, provider billing unit)
+RESERVATIONS: dict[str, tuple[int, str]] = {
+    'media': (MAX_SESSION_SECONDS, 'media_seconds'),
+    'stt': (MAX_SESSION_SECONDS, 'audio_seconds'),
+    'tts': (60_000, 'characters'),
+}
+
+SEEN_SEGMENTS_MAX = 256
+SEEN_USAGE_MAX = 512
+CLOSED_SESSIONS_MAX = 16
+
+ABRUPT_EXITS = frozenset({'timeout', 'rebind', 'stale_generation', 'restart'})
+
+_ID_RE = re.compile(r'^[A-Za-z0-9_-]{1,48}$')
+_CONTROL_RE = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
+_NUMBER = r'(\d+(?:[.,]\d+)?)'
+# One segment, two numbers joined by a correction word: "7.5, no, 75 MW".
+_CORRECTION_RE = re.compile(
+    _NUMBER + r'\s*[A-Za-z%]{0,4}\s*[,;.]?\s*'
+    r'(?:no|not|sorry|i mean|rather|or rather|actually|correction|make that)\b'
+    r'[\s,;:]*' + _NUMBER,
+    re.IGNORECASE,
+)
+_APPROVAL_RE = re.compile(
+    r'^\s*(?:yes|yeah|yep|confirm(?:ed)?|approve(?:d)?|ok(?:ay)?|go ahead|do it)'
+    r'(?:\s+please)?\s*[.!]?\s*$',
+    re.IGNORECASE,
+)
+
+_TRANSPORT: live_media.MediaTransport | None = None
+_TICKETS_LOCK = threading.Lock()
+# episode_id -> utterance_id -> ticket. Process-local: a restart closes the
+# speech session, so a lost ticket can never be redeemed later.
+_TICKETS: dict[str, dict[str, dict[str, Any]]] = {}
+
+
+def _refuse(kind: str, message: str, status: int = 409) -> None:
+    from fastapi import HTTPException
+
+    raise HTTPException(status, {'error_kind': kind, 'message': message})
+
+
+# ── configuration ──────────────────────────────────────────────────────────
+
+def configure_transport(transport: live_media.MediaTransport | None) -> None:
+    """Install the media transport (a deployment step; none ships enabled)."""
+    global _TRANSPORT
+    if transport is not None and not isinstance(transport, live_media.MediaTransport):
+        raise TypeError('transport must implement live_media.MediaTransport')
+    _TRANSPORT = transport
+
+
+def enabled() -> bool:
+    return os.environ.get(ENABLE_ENV, '').strip() == '1'
+
+
+def _require_enabled() -> None:
+    if not enabled():
+        _refuse(
+            'speech_disabled',
+            'Continuous speech is not enabled on this server. Type your message instead.',
+            503,
+        )
+
+
+def _transport() -> live_media.MediaTransport:
+    if _TRANSPORT is None:
+        _refuse(
+            'speech_not_configured',
+            'No speech media service is configured. Type your message instead.',
+            503,
+        )
+    return _TRANSPORT
+
+
+# ── helpers ────────────────────────────────────────────────────────────────
+
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _touch(thread: dict[str, Any]) -> None:
+    thread['checkpoint_rev'] = int(thread.get('checkpoint_rev', 0)) + 1
+    thread['updated_at'] = _now_iso()
+
+
+def _open_session(thread: dict[str, Any]) -> dict[str, Any] | None:
+    session = thread.get('speech')
+    if isinstance(session, dict) and session.get('state') in {'starting', 'open'}:
+        return session
+    return None
+
+
+def _session_view(session: dict[str, Any] | None) -> dict[str, Any] | None:
+    if session is None:
+        return None
+    keep = (
+        'session_id', 'state', 'generation', 'episode_id', 'language',
+        'started_at', 'expires_at', 'closed_reason', 'closed_at', 'usage',
+        'settlement',
+    )
+    return {k: session[k] for k in keep if k in session}
+
+
+def _require_id(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not _ID_RE.fullmatch(value):
+        _refuse('speech_request_invalid', f'{field} must be 1–48 letters, digits, _ or -.', 422)
+    return value
+
+
+def _bounded_append(items: list, value: Any, limit: int) -> None:
+    items.append(value)
+    del items[:-limit]
+
+
+def _drop_tickets(episode_id: str | None) -> None:
+    if episode_id:
+        with _TICKETS_LOCK:
+            _TICKETS.pop(episode_id, None)
+
+
+def ambiguous_quantity(text: str) -> bool:
+    """True when one segment corrects one number with a different one."""
+    for match in _CORRECTION_RE.finditer(text):
+        first, second = (m.replace(',', '.') for m in match.groups())
+        try:
+            if float(first) != float(second):
+                return True
+        except ValueError:
+            return True
+    return False
+
+
+def _pending_card(episode_id: str | None) -> bool:
+    from services import chat_service
+
+    session = chat_service.get_session(episode_id) if episode_id else None
+    return bool(session is not None and getattr(session, 'pending_confirmations', None))
+
+
+def _ensure_bridge_credentials(thread: dict[str, Any]) -> dict[str, Any]:
+    creds = thread.get('bridge_credentials') or {}
+    if (
+        not creds.get('token')
+        or int(creds.get('generation', -1)) != int(thread.get('generation', 1))
+        or float(creds.get('expires_at') or 0) <= time.time() + MAX_SESSION_SECONDS
+    ):
+        creds = dc._mint_bridge_credentials(thread)
+        creds['expires_at'] = time.time() + BRIDGE_TTL_S
+        thread['bridge_credentials'] = creds
+    return creds
+
+
+def _authorize_bridge(thread_id: str, token: Any) -> None:
+    if not isinstance(token, str):
+        _refuse('bridge_credentials_invalid', 'Bridge credentials are not valid.', 401)
+    creds = dc.authorize_bridge_credentials(thread_id, token)
+    if float(creds.get('expires_at') or 0) <= time.time():
+        _refuse('bridge_credentials_stale', 'Bridge credentials have expired.', 401)
+
+
+# ── close / settle (every exit) ────────────────────────────────────────────
+
+def close_in(thread: dict[str, Any], reason: str) -> bool:
+    """Close the open session on an in-memory thread and settle it once.
+
+    The caller holds ``durable_conversation._LOCK`` and saves. Safe to call
+    when no session is open (returns False). Never raises for the transport.
+    """
+    session = _open_session(thread)
+    if session is None:
+        return False
+    if _TRANSPORT is not None and session.get('room'):
+        try:
+            _TRANSPORT.close_session(room=session['room'])
+        except Exception as exc:  # noqa: BLE001 — record, never block the exit
+            session['transport_close'] = type(exc).__name__
+    abrupt = reason in ABRUPT_EXITS and session.get('state') == 'open'
+    settlement: dict[str, Any] = {}
+    for kind, key in (session.get('keys') or {}).items():
+        cap, unit = RESERVATIONS[kind]
+        used = float((session.get('usage') or {}).get(kind, 0))
+        flags: list[str] = []
+        if abrupt:
+            amount, flags = cap, ['usage_unverified']
+        elif used > cap:
+            amount, flags = cap, ['over_reservation']
+        else:
+            amount = int(used) if used.is_integer() else used
+        dc._settle_in(thread, key=key, amount=amount, unit=unit, flags=flags)
+        settlement[kind] = {'amount': amount, 'unit': unit, 'flags': flags}
+    session['state'] = 'closed'
+    session['closed_reason'] = reason
+    session['closed_at'] = _now_iso()
+    session['settlement'] = settlement
+    _bounded_append(
+        thread.setdefault('speech_closed', []), session['session_id'], CLOSED_SESSIONS_MAX,
+    )
+    _drop_tickets(session.get('episode_id'))
+    return True
+
+
+def _reap(thread: dict[str, Any]) -> bool:
+    """Close a session the thread has outgrown (generation) or that expired."""
+    session = _open_session(thread)
+    if session is None:
+        return False
+    if int(session.get('generation', -1)) != int(thread.get('generation', 1)):
+        return close_in(thread, 'stale_generation')
+    if float(session.get('expires_ts') or 0) <= time.time():
+        return close_in(thread, 'timeout')
+    return False
+
+
+# ── public API ─────────────────────────────────────────────────────────────
+
+def start(thread_id: str, *, generation: int, language: str) -> dict[str, Any]:
+    """Reserve, open the media room and return the browser's grant once.
+
+    The response also carries the thread's unresolved ``reconcile`` items; they
+    are cleared only in the save that records the opened session.
+    """
+    from services import chat_service
+
+    _require_enabled()
+    transport = _transport()
+    try:
+        language = live_media.pin_language(language)
+    except live_media.LiveMediaError:
+        _refuse('speech_request_invalid', 'Choose a supported language tag.', 422)
+    with dc._LOCK:
+        path, thread = dc._read(thread_id)
+        dc._require_authoritative_replica(thread)
+        dc._require_generation(thread, generation)
+        if _reap(thread):
+            _touch(thread)
+            dc._save(path, thread)
+        if _open_session(thread) is not None:
+            _refuse('speech_session_open', 'A speech session is already open on this thread.')
+        episode_id = thread.get('episode_id')
+        if not episode_id or chat_service.get_session(episode_id) is None:
+            _refuse(
+                'speech_episode_required',
+                'Resume the conversation before starting speech.',
+            )
+        session_id = uuid.uuid4().hex
+        keys = {kind: f'speech-{session_id}-{kind}' for kind in RESERVATIONS}
+        for kind, key in keys.items():
+            amount, unit = RESERVATIONS[kind]
+            dc._reserve_in(thread, key=key, kind=f'speech_{kind}', amount=amount, unit=unit)
+        session: dict[str, Any] = {
+            'session_id': session_id,
+            'state': 'starting',
+            'generation': int(thread.get('generation', 1)),
+            'episode_id': episode_id,
+            'language': language,
+            'room': f'pypsa-{session_id}',
+            'replica_id': thread.get('owner_replica_id'),
+            'keys': keys,
+            'usage': {kind: 0 for kind in RESERVATIONS},
+            'usage_seen': [],
+            'segments_seen': [],
+            'last_seq': -1,
+            'started_at': _now_iso(),
+        }
+        thread['speech'] = session
+        bridge = _ensure_bridge_credentials(thread)
+        _touch(thread)
+        # Reservation is durable before any media exists (GK B (d)).
+        dc._save(path, thread)
+
+        try:
+            grant = transport.open_session(
+                room=session['room'],
+                identity=f"owner-{thread['owner_id']}",
+                ttl_s=CREDENTIAL_TTL_S,
+                bridge_token=bridge['token'],
+                language=language,
+            )
+            ttl = float(grant.expires_at) - time.time()
+            if not isinstance(grant, live_media.MediaGrant) or not 0 < ttl <= MAX_CREDENTIAL_TTL_S:
+                raise ValueError('media grant ttl out of bounds')
+        except Exception:  # noqa: BLE001 — any transport failure is one typed refusal
+            close_in(thread, 'error')
+            _touch(thread)
+            dc._save(path, thread)
+            _refuse(
+                'speech_transport_failed',
+                'The speech media service did not start. Type your message instead.',
+                502,
+            )
+
+        reconcile = list(thread.get('reconcile') or [])
+        session['state'] = 'open'
+        expires_ts = time.time() + MAX_SESSION_SECONDS
+        session['expires_ts'] = expires_ts
+        session['expires_at'] = datetime.fromtimestamp(expires_ts, UTC).isoformat()
+        thread['reconcile'] = []
+        _touch(thread)
+        dc._save(path, thread)
+        return {
+            'session': _session_view(session),
+            'generation': int(thread.get('generation', 1)),
+            'media': {
+                'url': grant.url,
+                'token': grant.token,
+                'expires_at': grant.expires_at,
+            },
+            'reconcile': reconcile,
+        }
+
+
+def _bridge_session(thread: dict[str, Any], session_id: str) -> dict[str, Any] | None:
+    session = thread.get('speech')
+    if isinstance(session, dict) and session.get('session_id') == session_id:
+        return session
+    if session_id in (thread.get('speech_closed') or []):
+        return {'session_id': session_id, 'state': 'closed'}
+    _refuse('speech_session_not_found', 'No such speech session on this thread.', 404)
+    return None
+
+
+def submit_segment(
+    thread_id: str,
+    *,
+    token: str,
+    session_id: str,
+    segment_id: str,
+    seq: int,
+    text: str,
+    final: bool,
+) -> dict[str, Any]:
+    """The audio worker reports one recognition segment.
+
+    Partials are dropped. A final becomes at most one admission ticket per
+    segment id, in order; an ambiguous correction asks for clarification, and
+    a bare approval word never approves a pending card.
+    """
+    _require_enabled()
+    _require_id(session_id, 'session_id')
+    _require_id(segment_id, 'segment_id')
+    if not isinstance(seq, int) or isinstance(seq, bool) or seq < 0:
+        _refuse('speech_request_invalid', 'seq must be a non-negative integer.', 422)
+    if (
+        not isinstance(text, str)
+        or len(text) > live_media.MAX_TRANSCRIPT_CHARS
+        or _CONTROL_RE.search(text)
+    ):
+        _refuse('speech_request_invalid', 'The transcript text is not usable.', 422)
+    with dc._LOCK:
+        _authorize_bridge(thread_id, token)
+        path, thread = dc._read(thread_id)
+        dc._require_authoritative_replica(thread, renew=False)
+        if _reap(thread):
+            _touch(thread)
+            dc._save(path, thread)
+        session = _bridge_session(thread, session_id)
+        if session.get('state') != 'open':
+            _refuse('speech_session_closed', 'This speech session has ended.')
+        if not final:
+            return {'status': 'partial_ignored', 'segment_id': segment_id}
+        if segment_id in session['segments_seen']:
+            return {'status': 'duplicate', 'segment_id': segment_id}
+        if seq <= int(session['last_seq']):
+            _refuse(
+                'speech_final_out_of_order',
+                'This final arrived after a later one and was not used.',
+            )
+        text = text.strip()
+        if not text:
+            _refuse('speech_request_invalid', 'The transcript text is empty.', 422)
+        _bounded_append(session['segments_seen'], segment_id, SEEN_SEGMENTS_MAX)
+        session['last_seq'] = seq
+        _touch(thread)
+        episode_id = session['episode_id']
+        if ambiguous_quantity(text):
+            dc._save(path, thread)
+            return {
+                'status': 'clarify',
+                'segment_id': segment_id,
+                'text': text,
+                'message': 'I heard two different numbers. Which value did you mean?',
+            }
+        if _APPROVAL_RE.match(text) and _pending_card(episode_id):
+            dc._save(path, thread)
+            return {
+                'status': 'not_an_approval',
+                'segment_id': segment_id,
+                'text': text,
+                'message': 'Speech does not approve changes. Use Confirm on the card.',
+            }
+        from services import utterance_admission as ua
+
+        utterance_id = f'speech:{segment_id}'
+        admission_generation = ua._DEFAULT.generation(episode_id)
+        dc._save(path, thread)
+        with _TICKETS_LOCK:
+            _TICKETS.setdefault(episode_id, {})[utterance_id] = {
+                'text': text,
+                'generation': admission_generation,
+                'session_id': session_id,
+            }
+        return {
+            'status': 'final_accepted',
+            'segment_id': segment_id,
+            'utterance_id': utterance_id,
+            'generation': admission_generation,
+            'text': text,
+        }
+
+
+def redeem_final(episode_id: str, utterance_id: str, text: str) -> dict[str, str] | None:
+    """Consume a speech ticket; None when ``text`` is exactly the recognised final.
+
+    Returns the refusal detail otherwise. Called by ``run_turn`` before admission
+    for every ``speech:`` utterance id, so only finalized speech is admitted.
+    """
+    with _TICKETS_LOCK:
+        ticket = (_TICKETS.get(episode_id) or {}).pop(utterance_id, None)
+    if ticket is None:
+        return {
+            'error_kind': 'speech_final_unknown',
+            'message': 'This speech was not a finalized utterance for this conversation; '
+            'nothing was sent.',
+        }
+    if ticket['text'] != text:
+        return {
+            'error_kind': 'speech_final_mismatch',
+            'message': 'The text differs from what was recognised; nothing was sent.',
+        }
+    return None
+
+
+def report_usage(
+    thread_id: str,
+    *,
+    token: str,
+    session_id: str,
+    usage_id: str,
+    kind: str,
+    amount: Any,
+    unit: str,
+) -> dict[str, Any]:
+    """Add provider usage to the open session, once per ``usage_id``.
+
+    Usage for a session that has already settled is acknowledged and ignored.
+    """
+    _require_enabled()
+    _require_id(session_id, 'session_id')
+    _require_id(usage_id, 'usage_id')
+    if kind not in RESERVATIONS:
+        _refuse('speech_usage_invalid', 'Unknown usage kind.', 422)
+    if (
+        isinstance(amount, bool)
+        or not isinstance(amount, (int, float))
+        or not math.isfinite(amount)
+        or amount < 0
+    ):
+        _refuse('speech_usage_invalid', 'Usage must be a finite, non-negative number.', 422)
+    if unit != RESERVATIONS[kind][1]:
+        _refuse('speech_usage_invalid', 'Usage is not in the reserved unit.', 422)
+    with dc._LOCK:
+        _authorize_bridge(thread_id, token)
+        path, thread = dc._read(thread_id)
+        dc._require_authoritative_replica(thread, renew=False)
+        if _reap(thread):
+            _touch(thread)
+            dc._save(path, thread)
+        session = _bridge_session(thread, session_id)
+        if session.get('state') != 'open':
+            return {'status': 'ignored', 'reason': 'settled'}
+        if usage_id in session['usage_seen']:
+            return {'status': 'duplicate', 'usage_id': usage_id}
+        _bounded_append(session['usage_seen'], usage_id, SEEN_USAGE_MAX)
+        total = float(session['usage'].get(kind, 0)) + float(amount)
+        session['usage'][kind] = int(total) if total.is_integer() else total
+        _touch(thread)
+        dc._save(path, thread)
+        return {'status': 'recorded', 'usage_id': usage_id}
+
+
+def end(thread_id: str, *, generation: int, session_id: str) -> dict[str, Any]:
+    """The owner ends the session; settles reported usage. Idempotent."""
+    _require_enabled()
+    _require_id(session_id, 'session_id')
+    with dc._LOCK:
+        path, thread = dc._read(thread_id)
+        dc._require_authoritative_replica(thread)
+        dc._require_generation(thread, generation)
+        session = thread.get('speech')
+        if not isinstance(session, dict) or session.get('session_id') != session_id:
+            if session_id in (thread.get('speech_closed') or []):
+                return {'status': 'closed', 'session': {'session_id': session_id}}
+            _refuse('speech_session_not_found', 'No such speech session on this thread.', 404)
+        if session.get('state') == 'closed':
+            return {'status': 'closed', 'session': _session_view(session)}
+        if not _reap(thread):
+            close_in(thread, 'end')
+        _touch(thread)
+        dc._save(path, thread)
+        return {'status': 'closed', 'session': _session_view(session)}
+
+
+def state(thread_id: str) -> dict[str, Any]:
+    """The owner's view of the current speech session; carries no credential."""
+    _require_enabled()
+    with dc._LOCK:
+        path, thread = dc._read(thread_id)
+        dc._require_authoritative_replica(thread, renew=False)
+        if _reap(thread):
+            _touch(thread)
+            dc._save(path, thread)
+        return {
+            'generation': int(thread.get('generation', 1)),
+            'session': _session_view(thread.get('speech')),
+        }
+
+
+def _reset_for_tests() -> None:
+    global _TRANSPORT
+    _TRANSPORT = None
+    with _TICKETS_LOCK:
+        _TICKETS.clear()

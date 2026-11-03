@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Continuous speech session groundwork on durable conversations (LC-07, off by default): a provider-isolated media-transport and streaming-recognition seam, an owner-scoped speech session whose finalized utterances alone can start a chat turn, and parent-budget reservations settled exactly once on every exit. No media vendor is configured or enabled.
