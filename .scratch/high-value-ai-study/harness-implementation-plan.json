@@ -1,0 +1,1444 @@
+{
+  "schema_version": 1,
+  "status": "implementation_spec_for_review",
+  "runtime_implemented": false,
+  "assessed_master": "089aea276c75b098c8d349cb5fa0eb4cb7267d64",
+  "authoritative_task_spec": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/.scratch/live-copilot/issues/23-study-copilot.md",
+  "closed_design_choices": {
+    "plain_steps_max": 12,
+    "brief_steps_max": 24,
+    "plain_steps_chars_max": 16000,
+    "brief_steps_chars_max": 32000,
+    "step_args_chars_max": 1800,
+    "task_view_chars_max": 3800,
+    "network_cases_executable_max": 2,
+    "every_brief_write_run_requires_click": true,
+    "card_boundary_requires_continue": true,
+    "working_context_bytes_max": 6144,
+    "mutable_history_bytes_max": 65536,
+    "token_size_if_unknown": "unknown_not_guessed",
+    "new_top_level_modules": false,
+    "general_agent_team_or_shell": "deferred_out_of_scope",
+    "checkpoint_ack": "existing continue_task_id -> continue_at_card; exact paused_at_card boundary generation/revision/view reference; resume_task cannot clear pause",
+    "diagnostic_loop": {
+      "validation_passes_per_step_max": 3,
+      "diagnostic_reads_per_step_max": 2,
+      "correction_drafts_per_step_max": 1,
+      "tool_calls_per_step_max": 6,
+      "provider_requests_per_step_max": 4,
+      "unchanged_equivalent_failures_max": 2,
+      "persistent_task_wide_allowance_across_attempts": true,
+      "automatic_effect_retry": false
+    }
+  },
+  "units": [
+    {
+      "id": "HS-01",
+      "title": "Capability and schema contracts",
+      "existing_owners": [
+        "LC-01/LC-06/LC-22",
+        "W0/W9/S7"
+      ],
+      "depends_on": [],
+      "code_targets": [
+        "pypsa-gui/backend/services/assistant_tools.py",
+        "pypsa-gui/backend/services/component_discovery.py",
+        "pypsa-gui/backend/services/chat_tools.py",
+        "pypsa-gui/backend/harness/catalogue.py",
+        "pypsa-gui/backend/harness/providers/wiring.py",
+        "pypsa-gui/backend/smoke/assistant_inventory.py",
+        "pypsa-gui/backend/smoke/assistant_control_matrix.py"
+      ],
+      "acceptance_cases": [
+        "CAP-01",
+        "CAP-02",
+        "CAP-03",
+        "CAP-04",
+        "CAP-05",
+        "CAP-06"
+      ],
+      "build_gates": [
+        "existing owning package queue",
+        "applicable harness/engine/UX review",
+        "native adapter availability",
+        "exact implementation-head CI/premerge"
+      ],
+      "status": "residual_contracts_planned"
+    },
+    {
+      "id": "HS-02",
+      "title": "Native task completion proof",
+      "existing_owners": [
+        "LC-23 slice1",
+        "LC-05/LC-12/LC-19"
+      ],
+      "depends_on": [
+        "HS-01"
+      ],
+      "code_targets": [
+        "pypsa-gui/backend/services/assistant_tasks.py",
+        "pypsa-gui/backend/harness/continuation.py",
+        "pypsa-gui/backend/harness/job_adapters.py",
+        "pypsa-gui/backend/harness/loop.py",
+        "pypsa-gui/backend/services/run_evidence.py"
+      ],
+      "acceptance_cases": [
+        "CMP-01",
+        "CMP-02",
+        "CMP-03",
+        "CMP-04",
+        "CMP-05",
+        "CMP-06"
+      ],
+      "build_gates": [
+        "existing owning package queue",
+        "applicable harness/engine/UX review",
+        "native adapter availability",
+        "exact implementation-head CI/premerge"
+      ],
+      "status": "residual_contracts_planned"
+    },
+    {
+      "id": "HS-03",
+      "title": "Source-revalidated working context",
+      "existing_owners": [
+        "durable conversation/history/compose",
+        "W9/S7"
+      ],
+      "depends_on": [
+        "HS-01"
+      ],
+      "code_targets": [
+        "pypsa-gui/backend/services/durable_conversation.py",
+        "pypsa-gui/backend/harness/history.py",
+        "pypsa-gui/backend/harness/compose.py",
+        "pypsa-gui/backend/harness/eventlog.py",
+        "pypsa-gui/backend/harness/providers/wiring.py",
+        "pypsa-gui/backend/harness/metrics.py"
+      ],
+      "acceptance_cases": [
+        "CTX-01",
+        "CTX-02",
+        "CTX-03",
+        "CTX-04",
+        "CTX-05",
+        "CTX-06"
+      ],
+      "build_gates": [
+        "existing owning package queue",
+        "applicable harness/engine/UX review",
+        "native adapter availability",
+        "exact implementation-head CI/premerge"
+      ],
+      "status": "residual_contracts_planned"
+    },
+    {
+      "id": "HS-04",
+      "title": "Checked result coverage and native adapters",
+      "existing_owners": [
+        "checked-results S7/S8",
+        "LC-20/LC-21",
+        "card-workspaces H2"
+      ],
+      "depends_on": [
+        "HS-01",
+        "HS-02"
+      ],
+      "code_targets": [
+        "pypsa-gui/backend/services/result_views.py",
+        "pypsa-gui/backend/harness/assurance_scope.py",
+        "pypsa-gui/backend/harness/assurance.py",
+        "pypsa-gui/backend/harness/calculations.py",
+        "pypsa-gui/backend/services/reports/evidence.py",
+        "pypsa-gui/backend/services/reports/number_audit.py"
+      ],
+      "acceptance_cases": [
+        "ANA-01",
+        "ANA-02",
+        "ANA-03",
+        "ANA-04",
+        "ANA-05",
+        "ANA-06"
+      ],
+      "build_gates": [
+        "existing owning package queue",
+        "applicable harness/engine/UX review",
+        "native adapter availability",
+        "exact implementation-head CI/premerge"
+      ],
+      "status": "residual_contracts_planned"
+    },
+    {
+      "id": "HS-05",
+      "title": "Reviewed cross-domain study execution",
+      "existing_owners": [
+        "LC-23 slices2-4",
+        "LC-05/LC-12/LC-19"
+      ],
+      "depends_on": [
+        "HS-02",
+        "HS-03"
+      ],
+      "code_targets": [
+        "pypsa-gui/backend/services/assistant_tasks.py",
+        "pypsa-gui/backend/harness/job_adapters.py",
+        "pypsa-gui/backend/harness/continuation.py",
+        "pypsa-gui/backend/harness/confirm.py",
+        "pypsa-gui/backend/harness/loop.py",
+        "pypsa-gui/backend/routers/chat.py",
+        "pypsa-gui/frontend/src/api/chat.ts",
+        "pypsa-gui/frontend/src/components/AssistantResultCard.tsx",
+        "pypsa-gui/frontend/src/components/ChatPanel.tsx",
+        "pypsa-gui/frontend/src/hooks/usePlanContinuation.ts",
+        "pypsa-gui/backend/harness/budget.py",
+        "pypsa-gui/backend/harness/goals.py"
+      ],
+      "acceptance_cases": [
+        "RUN-01",
+        "RUN-02",
+        "RUN-03",
+        "RUN-04",
+        "RUN-05",
+        "RUN-06",
+        "LOOP-01",
+        "LOOP-02",
+        "LOOP-03",
+        "LOOP-04",
+        "LOOP-05",
+        "LOOP-06"
+      ],
+      "build_gates": [
+        "existing owning package queue",
+        "applicable harness/engine/UX review",
+        "native adapter availability",
+        "exact implementation-head CI/premerge"
+      ],
+      "status": "residual_contracts_planned"
+    },
+    {
+      "id": "HS-06",
+      "title": "Journey evidence and diagnostic linkage",
+      "existing_owners": [
+        "issue05/08 owner journeys",
+        "eventlog/replay/metrics",
+        "CI"
+      ],
+      "depends_on": [
+        "HS-01",
+        "HS-02",
+        "HS-03",
+        "HS-04",
+        "HS-05"
+      ],
+      "code_targets": [
+        "pypsa-gui/backend/smoke/assistant_control_matrix.py",
+        "pypsa-gui/backend/harness/replay.py",
+        "pypsa-gui/backend/harness/metrics.py",
+        "pypsa-gui/backend/harness/eventlog.py"
+      ],
+      "acceptance_cases": [
+        "E2E-01",
+        "E2E-02",
+        "E2E-03",
+        "E2E-04",
+        "E2E-05",
+        "E2E-06",
+        "E2E-07",
+        "E2E-08",
+        "E2E-09",
+        "E2E-10",
+        "E2E-11",
+        "E2E-12",
+        "E2E-13",
+        "E2E-14"
+      ],
+      "build_gates": [
+        "existing owning package queue",
+        "applicable harness/engine/UX review",
+        "native adapter availability",
+        "exact implementation-head CI/premerge"
+      ],
+      "status": "residual_contracts_planned"
+    },
+    {
+      "id": "HS-07",
+      "title": "Trusted native domain procedures",
+      "existing_owners": [
+        "existing skills/workflows",
+        "W9/H1/H2"
+      ],
+      "depends_on": [
+        "HS-01",
+        "HS-04",
+        "HS-05"
+      ],
+      "code_targets": [
+        "pypsa-gui/backend/harness/skills/registry.py",
+        "pypsa-gui/backend/harness/workflows/registry.py"
+      ],
+      "acceptance_cases": [
+        "SKL-01",
+        "SKL-02",
+        "SKL-03"
+      ],
+      "build_gates": [
+        "existing owning package queue",
+        "applicable harness/engine/UX review",
+        "native adapter availability",
+        "exact implementation-head CI/premerge"
+      ],
+      "status": "residual_contracts_planned"
+    }
+  ],
+  "acceptance_cases": [
+    {
+      "id": "CAP-01",
+      "unit": "HS-01",
+      "title": "Discovery compatibility",
+      "fixture": "Use existing catalogue and legacy callers with no new args.",
+      "action": "Call default/overview discovery then paged detailed schema.",
+      "required_assertions": "Legacy fields/defaults unchanged; every returned tool exists; pages <=3800 chars, complete constraints; changed schema refuses cursor.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_capability_contract[CAP-01]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED"
+      ]
+    },
+    {
+      "id": "CAP-02",
+      "unit": "HS-01",
+      "title": "Native parameter mapping",
+      "fixture": "Owned battery, tariff and Link/profile fields with units and enum metadata.",
+      "action": "Ask for exact field/schema and an ambiguous same-name target.",
+      "required_assertions": "Matches native schema, no guessed units/basis; ambiguity asks; no write/submission occurs.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_capability_contract[CAP-02]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED"
+      ]
+    },
+    {
+      "id": "CAP-03",
+      "unit": "HS-01",
+      "title": "Unsupported/manual scope",
+      "fixture": "Unauthenticated/foreign project, admin/secret action and unsupported converter control.",
+      "action": "Discover each capability and inspect native destination.",
+      "required_assertions": "Safe prohibited/manual/not-implemented reason, no protected identifiers or made-up callable tool.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_capability_contract[CAP-03]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED"
+      ]
+    },
+    {
+      "id": "CAP-04",
+      "unit": "HS-01",
+      "title": "Offered-tool reachability",
+      "fixture": "Catalogue over128 with task-active and ordinary follow-up queries.",
+      "action": "Discover required tool then make next offered request through each supported provider seam.",
+      "required_assertions": "Tool can become offered within cap; controls/task tools remain; unoffered calls blocked before handler.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_capability_contract[CAP-04]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED"
+      ]
+    },
+    {
+      "id": "CAP-05",
+      "unit": "HS-01",
+      "title": "Disposition drift",
+      "fixture": "Synthetic new router/editor/result target with no mapping.",
+      "action": "Run inventory/control disposition check.",
+      "required_assertions": "Fails until native tool/manual/security disposition exists; schema-only mapping cannot mark behavioral pass.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_capability_contract[CAP-05]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED"
+      ]
+    },
+    {
+      "id": "CAP-06",
+      "unit": "HS-01",
+      "title": "Limits and stale access",
+      "fixture": "Boundary query/offset/boolean args; schema revision/ACL changes between pages.",
+      "action": "Page/inspect and attempt ordinary admission.",
+      "required_assertions": "Typed validation; no clipped schema; current source/access checked; discovery is never approval.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_capability_contract[CAP-06]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED"
+      ]
+    },
+    {
+      "id": "CMP-01",
+      "unit": "HS-02",
+      "title": "Invented manual completion",
+      "fixture": "Uncertain edit/run and made-up completed result under valid confirmation.",
+      "action": "Resolve completed through ordinary dispatch.",
+      "required_assertions": "Caller bytes ignored; native proof decides; missing proof keeps To review and dependent effect counter zero.",
+      "test_target": "pypsa-gui/backend/tests/test_assistant_task_outcomes.py::test_native_completion_contract[CMP-01]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-ORIGIN"
+      ]
+    },
+    {
+      "id": "CMP-02",
+      "unit": "HS-02",
+      "title": "Positive proof",
+      "fixture": "Exact edit readback and owned successful run with manifest/source/attempt.",
+      "action": "Complete normally, settle queued work, capture a late receipt and reconcile; consume exact proof in next step.",
+      "required_assertions": "All completion entrypoints share native verifier; receipt/proof persisted before completed/dependent effects; correct result/attempt/source; no new solve/write by verifier.",
+      "test_target": "pypsa-gui/backend/tests/test_assistant_task_outcomes.py::test_native_completion_contract[CMP-02]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-ORIGIN"
+      ]
+    },
+    {
+      "id": "CMP-03",
+      "unit": "HS-02",
+      "title": "Wrong origin",
+      "fixture": "Generic success without receipt, unrelated same-input job, replacement worker, corrupt proof/evidence, wrong owner or source.",
+      "action": "Attempt completion proof and dependency reference.",
+      "required_assertions": "Normal finish/late receipt/automatic settlement/reconciliation all refuse without exact proof; zero dependent effects; no leak/latest fallback/reservation reset/retry.",
+      "test_target": "pypsa-gui/backend/tests/test_assistant_task_outcomes.py::test_native_completion_contract[CMP-03]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-ORIGIN"
+      ]
+    },
+    {
+      "id": "CMP-04",
+      "unit": "HS-02",
+      "title": "Legacy task migration",
+      "fixture": "Version1 completed effect without proof plus saved read result.",
+      "action": "Load/resume and resolve effect reference.",
+      "required_assertions": "Historical disposition readable, no verified label/replay; effect dependency blocked pending native proof.",
+      "test_target": "pypsa-gui/backend/tests/test_assistant_task_outcomes.py::test_native_completion_contract[CMP-04]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-ORIGIN"
+      ]
+    },
+    {
+      "id": "CMP-05",
+      "unit": "HS-02",
+      "title": "Worker still alive",
+      "fixture": "Timeout leaves native handler/solver running; restart clears in-memory registry; crash at receipt/proof/status boundaries.",
+      "action": "Try both reconciliation outcomes, then inspect after quiescence.",
+      "required_assertions": "Positive native terminal/fence required after restart; live/unknown origin blocks completed and retry; crash leaves uncertain durable state; no duplicated effects.",
+      "test_target": "pypsa-gui/backend/tests/test_assistant_task_outcomes.py::test_native_completion_contract[CMP-05]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-ORIGIN"
+      ]
+    },
+    {
+      "id": "CMP-06",
+      "unit": "HS-02",
+      "title": "History versus current state",
+      "fixture": "Verified edit A followed by approved edit B to same field.",
+      "action": "Inspect historical proof and current-source readiness.",
+      "required_assertions": "A remains historical proof; B defines current input; source drift outside verified chain blocks further effects.",
+      "test_target": "pypsa-gui/backend/tests/test_assistant_task_outcomes.py::test_native_completion_contract[CMP-06]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-ORIGIN"
+      ]
+    },
+    {
+      "id": "CTX-01",
+      "unit": "HS-03",
+      "title": "Durable exact intent",
+      "fixture": "Goal excludes line expansion, exact MW/MWh units, current and discussed run differ.",
+      "action": "Force trims and new authorized episode.",
+      "required_assertions": "Exact source-backed intent/ref distinctions retained, old approvals invalidated, no inferred default.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_working_context_contract[CTX-01]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-CONTEXT"
+      ]
+    },
+    {
+      "id": "CTX-02",
+      "unit": "HS-03",
+      "title": "Byte and pair bounds",
+      "fixture": "Unicode long tool pairs; 400-message boundary; essential packet 6144-byte boundary.",
+      "action": "Pack before provider invocation and inspect actual request/event fold.",
+      "required_assertions": "History <=65536 UTF8 bytes and <=400 messages; packet<=6144; tool pairs complete and omissions explicit.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_working_context_contract[CTX-02]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-CONTEXT"
+      ]
+    },
+    {
+      "id": "CTX-03",
+      "unit": "HS-03",
+      "title": "Required overflow",
+      "fixture": "Newest required group or essential constraints exceed cap.",
+      "action": "Request dependent effect.",
+      "required_assertions": "Typed context refusal/clarification before effect; no silent hard-constraint drop or paid summary/retry loop.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_working_context_contract[CTX-03]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-CONTEXT"
+      ]
+    },
+    {
+      "id": "CTX-04",
+      "unit": "HS-03",
+      "title": "Access/source drift",
+      "fixture": "Revoked project permission, advanced generation and stale discussed artifact.",
+      "action": "Resume/build packet then attempt tool dispatch.",
+      "required_assertions": "No foreign fallback; exact unavailable reasons and fresh admission; packet hash grants nothing.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_working_context_contract[CTX-04]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-CONTEXT"
+      ]
+    },
+    {
+      "id": "CTX-05",
+      "unit": "HS-03",
+      "title": "Untrusted memory",
+      "fixture": "File/user note/model summary says change permission, zero budget or approve run.",
+      "action": "Store as imported/model-origin then reconstruct context.",
+      "required_assertions": "No authority promotion, script/tool invocation, budget rewrite or approval restoration.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_working_context_contract[CTX-05]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-CONTEXT"
+      ]
+    },
+    {
+      "id": "CTX-06",
+      "unit": "HS-03",
+      "title": "Cache and usage semantics",
+      "fixture": "Same stable system/tools, changed live source; tokenizer unknown.",
+      "action": "Compose two requests and inspect usage diagnostics.",
+      "required_assertions": "Stable prefix order; packet per-turn; bytes exact/tokens unknown unless known; reported cache tokens not double-counted or converted to fake savings.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_working_context_contract[CTX-06]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-CONTEXT",
+        "FX-USAGE"
+      ]
+    },
+    {
+      "id": "ANA-01",
+      "unit": "HS-04",
+      "title": "Supported versus unsupported slots",
+      "fixture": "Valid generator/branch metrics plus unsupported AC/cost attribution quantity.",
+      "action": "Compile checked result request and publish.",
+      "required_assertions": "Only admitted exact slots published; unsupported named unavailable; raw result reads not blanket-whitelisted.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_result_verification_contract[ANA-01]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED"
+      ]
+    },
+    {
+      "id": "ANA-02",
+      "unit": "HS-04",
+      "title": "Independent S7 arithmetic",
+      "fixture": "Synthetic weighted dispatch with known energy residual; nonuniform percentile and representative-year gap.",
+      "action": "Run native S7 profile checks.",
+      "required_assertions": "Matches independent weighted arithmetic or explicit unavailable; no fabricated monthly year or attribution.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_result_verification_contract[ANA-02]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-S7"
+      ]
+    },
+    {
+      "id": "ANA-03",
+      "unit": "HS-04",
+      "title": "Independent S8 finance",
+      "fixture": "Shipped investment-case/1 real-basis cash[-100,60,60] at10% and nonunique IRR variant; SEPARATE nominal-basis investment-lcoe/1 retained energy[0,10,10]/value[0,100,100],inflation2%.",
+      "action": "Check NPV/IRR on the real-basis fixture, and nominal/real LCOE on the separately stored nominal-basis report; test missing inputs/zero generation.",
+      "required_assertions": "NPV500/121; nonunique IRR refused; nominal LCOE205/21 currency/MWh by exact native definition, real denominator at1.1/1.02-1; missing/zero generation refuses; exact source/money basis, no payback claim.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_result_verification_contract[ANA-03]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-S8"
+      ]
+    },
+    {
+      "id": "ANA-04",
+      "unit": "HS-04",
+      "title": "Plausibility not certification",
+      "fixture": "Native rule with threshold/evidence, missing rule and known engine caveat.",
+      "action": "Explain and export supported chapters.",
+      "required_assertions": "Native verdict only; missing rule not evaluated; no claim of AC/compliance/full report from proxy/provenance.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_result_verification_contract[ANA-04]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED"
+      ]
+    },
+    {
+      "id": "ANA-05",
+      "unit": "HS-04",
+      "title": "Semantic mismatch",
+      "fixture": "Correct digit token attached to wrong unit, sign, case, source/window or ranking.",
+      "action": "Attempt ordinary and strict bounded explanation.",
+      "required_assertions": "Unsupported interpretation withheld; strict gate fails closed; <=12 admitted facts; missing data not zero.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_result_verification_contract[ANA-05]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED"
+      ]
+    },
+    {
+      "id": "ANA-06",
+      "unit": "HS-04",
+      "title": "Actual view data proof",
+      "fixture": "Mounted result tab with old data/source; then exact v2 bound load-flow adapter.",
+      "action": "Navigate under changed source and exact source.",
+      "required_assertions": "Mount alone cannot certify data; only matching source/render/native ACK satisfies supported displayed-data proof.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_result_verification_contract[ANA-06]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED"
+      ]
+    },
+    {
+      "id": "RUN-01",
+      "unit": "HS-05",
+      "title": "Brief bounds/schema",
+      "fixture": "Plain12/13 steps; brief24/25; 16k/32k serialized-character limits (not UTF8 bytes), phase partition and invalid forward refs.",
+      "action": "Call start_task with boundary/malformed plans.",
+      "required_assertions": "LC23 exact bounds/defaults; invalid plan saved zero times; repeated identical request returns same task, changed request conflicts.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_study_execution_contract[RUN-01]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-PHASE",
+        "FX-ORIGIN"
+      ]
+    },
+    {
+      "id": "RUN-02",
+      "unit": "HS-05",
+      "title": "Approval and boundary",
+      "fixture": "Valid cross-card brief in Guided and Expert; repeated/stale Continue.",
+      "action": "Approve brief, deny write/run, cross card boundary and resume.",
+      "required_assertions": "Every effect requires own click; paused_at_card blocks model/MCP resume; existing continue_task_id with exact native boundary/phase/revision/view ref clears once; delayed A click cannot clear B; cancellation/source/ACL changes refuse; reads need no extra stop.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_study_execution_contract[RUN-02]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-PHASE",
+        "FX-ORIGIN"
+      ]
+    },
+    {
+      "id": "RUN-03",
+      "unit": "HS-05",
+      "title": "Exact queue settlement",
+      "fixture": "Two supported network cases as separate admitted calls; unrelated/missing queue run.",
+      "action": "Advance/wait/refresh through native experiment receipt path.",
+      "required_assertions": "One-job per step, <=2 executable cases; queued not complete; only exact queue/run receipt advances; no hidden loop.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_study_execution_contract[RUN-03]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-PHASE",
+        "FX-ORIGIN"
+      ]
+    },
+    {
+      "id": "RUN-04",
+      "unit": "HS-05",
+      "title": "Terminal is not success",
+      "fixture": "ad/report/native outcomes done, met, unreachable, exhausted, partial, unknown and missing artifact.",
+      "action": "Observe and attempt automatic plan settlement.",
+      "required_assertions": "Only admitted family with exact evidence advances; unsupported family remains blocked; no false success/retry.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_study_execution_contract[RUN-04]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-PHASE",
+        "FX-ORIGIN"
+      ]
+    },
+    {
+      "id": "RUN-05",
+      "unit": "HS-05",
+      "title": "Interruption and composer",
+      "fixture": "Long running solve, unsent draft, pending Choice/card, dismiss waiting, close/reopen.",
+      "action": "Complete native solve and poll continuation; cancel task separately.",
+      "required_assertions": "One claim; hold/dismiss honored; draft/focus intact; future steps stop on cancel, actual job status truthful.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_study_execution_contract[RUN-05]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-PHASE",
+        "FX-ORIGIN"
+      ]
+    },
+    {
+      "id": "RUN-06",
+      "unit": "HS-05",
+      "title": "Plan card parity",
+      "fixture": "Native proof/uncertain/stale/checkpoint states and field targets.",
+      "action": "Use existing task card on keyboard/narrow screen in Guided/Expert.",
+      "required_assertions": "One progress surface and companion; correct copy/Open here; no raw IDs; unsupported/missing Hand-off chapter explicit.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_study_execution_contract[RUN-06]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-PHASE",
+        "FX-ORIGIN"
+      ]
+    },
+    {
+      "id": "E2E-01",
+      "unit": "HS-06",
+      "title": "Projects/scenarios/templates",
+      "fixture": "Two synthetic owners; root project P and saved scenario S with p_nom=10MW, immutable IDs.",
+      "action": "Create synthetic owned project, save, create Scenario and reopen; try foreign project.",
+      "required_assertions": "Save/reopen P/S preserves owner,parent,input hash and10MW; foreign-owner open returns safe denial without mutations.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-01]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-J01"
+      ]
+    },
+    {
+      "id": "E2E-02",
+      "unit": "HS-06",
+      "title": "Network/topology/asset parameters",
+      "fixture": "P has generator10MW and line L; preview generator p_nom10\u219212MW, then deny L deletion.",
+      "action": "Inspect native schema, preview/apply generator p_nom10\u219212MW, then deny line L deletion.",
+      "required_assertions": "Card/readback12MW, old10MW, source fingerprint changes; denied deletion leaves exact topology hash unchanged.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-02]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-J02"
+      ]
+    },
+    {
+      "id": "E2E-03",
+      "unit": "HS-06",
+      "title": "Time series/horizon/multi-period",
+      "fixture": "Use upload_load_profile(csv_content_b64,filename) for snapshot,L1 CSV with2030-01-01 00:00:00/01:00:00 and2/4MW on the exact two-row UTC-naive native axis (UTC declared); not the measured full-calendar importer. Separate staged period labels2030/2040 share that explicit2030 representative timestep axis. Invalid variant has +inf in a matched L1 cell.",
+      "action": "Upload the bounded CSV, inspect native array and explicit staged-axis configuration, then attempt the matched +inf cell.",
+      "required_assertions": "Single-period upload/readback L1[2,4]MW and source-cell hash exact; staged axis explicitly preserves(period,timestep) identity or native refusal with zero apply; matched +inf L1 refuses422 before profile/network write. Preserve/disclose native timezone stripping and duplicate-axis normalization; no invented duplicate/timezone refusal or annual measured-load coverage.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-03]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-J03"
+      ]
+    },
+    {
+      "id": "E2E-04",
+      "unit": "HS-06",
+      "title": "Solver/simulation",
+      "fixture": "FX-S7 real HiGHS model and independent native barriers, successful run then cancellation-before-pickup variant.",
+      "action": "Start supported solver with confirmation, release turn, observe/cancel and resume.",
+      "required_assertions": "14MWh served/generation; matching job/run/fingerprint; denied/cancel-before-pickup starts0solves, no duplicate start.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-04]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-J04",
+        "FX-S7"
+      ]
+    },
+    {
+      "id": "E2E-05",
+      "unit": "HS-06",
+      "title": "All results",
+      "fixture": "FX-S7 current and retained snapshots, then load changed2\u21923MW without new solve.",
+      "action": "Read current and retained result views, change inputs and ask strict unsupported quantity.",
+      "required_assertions": "Old retained source stays14MWh; current stale view refuses; unsupported AC/voltage figure never published checked.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-05]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-J05",
+        "FX-S7"
+      ]
+    },
+    {
+      "id": "E2E-06",
+      "unit": "HS-06",
+      "title": "Reliability/health/adequacy",
+      "fixture": "Reuse test_adequacy_stress._network:100MWload,90MWfirmgas,2snapshots each3h; ClassC cold snap multiplier1.3, frequency0.05/year, VoLL3000EUR/MWh.",
+      "action": "Run the declared Class C cold-snap adequacy stress case, inspect its native evidence/basis and request an unsupported annual LOLE guarantee.",
+      "required_assertions": "Base EUE60MWh, stressed240MWh,delta180MWh; frequency*delta*VoLL=27000EUR/year; explicit synthetic occurrence and6h horizon, never annual LOLE guarantee.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-06]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-J06"
+      ]
+    },
+    {
+      "id": "E2E-07",
+      "unit": "HS-06",
+      "title": "GridSpine/campus electrical",
+      "fixture": "Owned saved hub_network from test_campus_electrical_service:110/20kV,60MWLink efficiency0.99,40MWload,20MWPV,10MW/2hBESS. Settings k1,pf0.95,margin0.1,n_minus_1true.",
+      "action": "Open admitted planning/campus project, read native connection assessment and unavailable dynamics.",
+      "required_assertions": "Native draft/run/read retains settings; five check IDs exactly pcc_reactive,pcc_voltage,campus_voltage,transformer_loading,switchgear; pf source assumed, margin0.1; missing engine\u2192unavailable. This is adapter/contract coverage, not independent physical certification.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-07]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-J07"
+      ]
+    },
+    {
+      "id": "E2E-08",
+      "unit": "HS-06",
+      "title": "Economics/investment/Library",
+      "fixture": "FX-S8 plus committed bills/tou_weekday_evening.json:five15min4MWimports,Europe/Berlin weekdays/weekend,0.30peak/0.10offpeakEUR/kWh.",
+      "action": "Inspect supported tariff/bill/investment counterfactual with unsupported tariff component.",
+      "required_assertions": "Per-intervalEUR[100,300,300,300,100],total1100; NPV500/121; unsupported extra tariff item flags incomplete, not zero or fabricated price.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-08]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-J08",
+        "FX-S8"
+      ]
+    },
+    {
+      "id": "E2E-09",
+      "unit": "HS-06",
+      "title": "Experiments/sensitivity",
+      "fixture": "Two-case firm generator4MW availability[1,1], demand[2,4] versus[3,4]MW, marginalcost10EUR/MWh,objective weights[1,3],no wind/fixedcosts; FX-ORIGIN/PHASE.",
+      "action": "Preflight two supported network cases, approve each and compare intact same-basis evidence.",
+      "required_assertions": "Case objectives140/150EUR,delta10EUR on declared identical basis; separate owned receipts; unknown origin blocks comparison and requeue.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-09]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-J09",
+        "FX-ORIGIN",
+        "FX-PHASE"
+      ]
+    },
+    {
+      "id": "E2E-10",
+      "unit": "HS-06",
+      "title": "Import/export/delivery",
+      "fixture": "Same two-row upload_load_profile CSV and explicit UTC-naive native axis asFX-J03, owned full SHA256, byte-exact synthetic evidence ZIP; no measured full-calendar importer.",
+      "action": "Inspect synthetic owned source, preview import/apply and retrieve authenticated evidence artifact.",
+      "required_assertions": "Mapped2/4MW native readback, hash/cell lineage; authorized download bytes/hash exactly match; foreign download denied.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-10]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-J10"
+      ]
+    },
+    {
+      "id": "E2E-11",
+      "unit": "HS-06",
+      "title": "Reports/templates/edit round trip",
+      "fixture": "Supported native delivery from FX-S7 14MWh evidence; model narrative attempts14\u219215 numeric mutation, plus unavailable chapter.",
+      "action": "Generate one supported report chapter set, review edit/rebuild and download.",
+      "required_assertions": "Source-linked chapter retains14MWh or rejects changed numeric text; exact artifact hash; missing chapter explicit and no universal-report claim.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-11]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-J11"
+      ]
+    },
+    {
+      "id": "E2E-12",
+      "unit": "HS-06",
+      "title": "Audit/undo/checkpoints",
+      "fixture": "Snapshot with generator10MW; unsaved current12MW, then restore snapshot; inject save failure and post-preview source race.",
+      "action": "Inspect event/proof history and existing Saved snapshot path; try unsupported restore behavior.",
+      "required_assertions": "Restored10MW only after safety capture preserves12MW; failed save/race restores nothing; no receipt/approval restoration or universal undo.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-12]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-J12"
+      ]
+    },
+    {
+      "id": "E2E-13",
+      "unit": "HS-06",
+      "title": "Harness/workflows/providers",
+      "fixture": "FX-S7 scripted provider wires request same declared read\u2192approvedsolve\u2192source result, then force unoffered tool and exhaustedbudget.",
+      "action": "Run a supported workflow on fake/scripted provider wires, restore thread and force offered-tool refusal.",
+      "required_assertions": "Same native IDs/source values and gates on each supported wire; unoffered handler0calls; exhaustedbudget0providercalls; event fold exactly matches supplied history.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-13]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-J13"
+      ]
+    },
+    {
+      "id": "E2E-14",
+      "unit": "HS-06",
+      "title": "UI/preferences/monitoring",
+      "fixture": "Existing result_project load-flow terminal/window fixture; stale then exact rendered ACK; unsent draft and held/dismissed continuation.",
+      "action": "Navigate source-bound view, change local view/filter, hold/dismiss native continuation.",
+      "required_assertions": "Independent terminal/window oracle matches native view; wrong/stale ACK never completes, exact idempotent ACK does; no auto-send/canceljob on dismiss; keyboard/focus intact.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-14]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-J14",
+        "FX-PHASE"
+      ]
+    },
+    {
+      "id": "SKL-01",
+      "unit": "HS-07",
+      "title": "Procedure integrity",
+      "fixture": "Procedure names missing/renamed tools or unsupported native method.",
+      "action": "Load registry and invoke procedure.",
+      "required_assertions": "Static validation/fixture refuses; no hallucinated tool or policy override.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_skills_and_workflows.py::test_domain_procedure_contract[SKL-01]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED"
+      ]
+    },
+    {
+      "id": "SKL-02",
+      "unit": "HS-07",
+      "title": "Untrusted skill file",
+      "fixture": "Uploaded project contains SKILL.md/hook/script conflicting with installed procedure.",
+      "action": "Inspect/import project and ask domain help.",
+      "required_assertions": "File stays data, install-owned precedence unchanged, no script or automatic hook execution.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_skills_and_workflows.py::test_domain_procedure_contract[SKL-02]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED"
+      ]
+    },
+    {
+      "id": "SKL-03",
+      "unit": "HS-07",
+      "title": "Procedure parity",
+      "fixture": "Readiness, critical-service or commercial procedure with real supported source and one denied effect.",
+      "action": "Invoke in Guided/Expert through single H1/H2 entry.",
+      "required_assertions": "Same native tools, explicit stop conditions and normal cards; on-demand body only, no duplicate UI or delegation.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_skills_and_workflows.py::test_domain_procedure_contract[SKL-03]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED"
+      ]
+    },
+    {
+      "id": "LOOP-01",
+      "unit": "HS-05",
+      "title": "Repeated unchanged validation failure",
+      "fixture": "Native validator returns the same refusal for canonical-equivalent tools/defaulted args and unchanged source.",
+      "action": "Run diagnose/validate twice, alternate equivalent tools and attempt a third pass.",
+      "required_assertions": "Second equivalent failure ends epoch; third call/provider work zero; safe blocker/partial state, no effect or success claim.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_validation_loops.py::test_bounded_diagnostic_epoch[LOOP-01]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-ORIGIN",
+        "FX-LOOP"
+      ]
+    },
+    {
+      "id": "LOOP-02",
+      "unit": "HS-05",
+      "title": "Bounded correction and revalidation",
+      "fixture": "Native validator, two diagnostic sources, correction preview; deny then approve one correction.",
+      "action": "Read/propose/validate, deny correction, approve it separately and revalidate before dependent run.",
+      "required_assertions": "Denial writes zero; no automatic repair; exact native validation precedes dependent effect; <=3 validation passes,2 reads,1 draft,6 tools,4 provider requests and lower caps win.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_validation_loops.py::test_bounded_diagnostic_epoch[LOOP-02]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-ORIGIN",
+        "FX-LOOP"
+      ]
+    },
+    {
+      "id": "LOOP-03",
+      "unit": "HS-05",
+      "title": "Persistent diagnostic allowance",
+      "fixture": "Exhausted native task/step ledger; new session/provider, context trim, goal completion/reset and explicit retry.",
+      "action": "Reconstruct/resume same task; repeat same-origin continuation and vary tool arguments/step attempts.",
+      "required_assertions": "No allowance reset or extra draft/provider dispatch; task-wide sum bounded by declared steps; missing/corrupt counters fail closed; no double-charge for one multi-step provider request. Cross-process barrier proves no overdraw/double boundary claim; busy lock starts zero work; reserved crash stays unresolved.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_validation_loops.py::test_bounded_diagnostic_epoch[LOOP-03]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-ORIGIN",
+        "FX-LOOP"
+      ]
+    },
+    {
+      "id": "LOOP-04",
+      "unit": "HS-05",
+      "title": "Budget admission without usage",
+      "fixture": "Fake provider reports unknown usage; lower H2a/session/daily/goal bounds and exhausted diagnostic cap.",
+      "action": "Attempt next read/provider call at each bound and cancel while waiting.",
+      "required_assertions": "Native call/round counters still finite; lower existing cap refuses before invocation; terminal partial/To review not completed; no forged zero usage/cost; cancellation prevents future dispatch.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_validation_loops.py::test_bounded_diagnostic_epoch[LOOP-04]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-ORIGIN",
+        "FX-LOOP"
+      ]
+    },
+    {
+      "id": "LOOP-05",
+      "unit": "HS-05",
+      "title": "Uncertain effect is never repair-replayed",
+      "fixture": "Origin worker timeout/partial result, queued job or same-input replacement; transient provider error after output.",
+      "action": "Enter diagnosis/reconciliation and request retries while native worker lives or effect is uncertain.",
+      "required_assertions": "No automatic effect repeat, reservation reset or replacement proof; existing quiescence/confirmation required; provider retry cannot replay admitted handlers; native waiter has finite bound.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_validation_loops.py::test_bounded_diagnostic_epoch[LOOP-05]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-ORIGIN",
+        "FX-LOOP"
+      ]
+    },
+    {
+      "id": "LOOP-06",
+      "unit": "HS-05",
+      "title": "Missing validation and changing source",
+      "fixture": "Declared dependent claim/run lacks an adapter; source changes during diagnostic loop or proof publication.",
+      "action": "Ask for completion, change source between native checks, then attempt next phase.",
+      "required_assertions": "Unavailable validator stays not evaluated; unsupported dependency blocked; source change requires refresh/review without budget reset; only exact verified evidence permits progression.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_validation_loops.py::test_bounded_diagnostic_epoch[LOOP-06]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-ORIGIN",
+        "FX-LOOP"
+      ]
+    }
+  ],
+  "coverage_families": [
+    "Projects/scenarios/templates",
+    "Network/topology/asset parameters",
+    "Time series/horizon/multi-period",
+    "Solver/simulation",
+    "All results",
+    "Reliability/health/adequacy",
+    "GridSpine/campus electrical",
+    "Economics/investment/Library",
+    "Experiments/sensitivity",
+    "Import/export/delivery",
+    "Reports/templates/edit round trip",
+    "Audit/undo/checkpoints",
+    "Harness/workflows/providers",
+    "UI/preferences/monitoring"
+  ],
+  "validation": {
+    "spec_validation": "passed",
+    "runtime_acceptance": "not_run_not_implemented",
+    "historical_tests": "370 existing tests and 244-case offline gate on322df0c; not rerun or relabeled for this spec",
+    "current_inventory": "passed:276tools/17tabs/20panels",
+    "current_control_matrix": "passed:170controls/14families/full_coverage_not_established",
+    "paid_calls": 0,
+    "reviewers_contacted": false
+  },
+  "source_pins": [
+    {
+      "path": ".scratch/checked-results/audit.md",
+      "sha256": "ebc41ab43e92c441adef82aeb7b26e967a09af48d74fdde3e1b7b0c83b27bb3a",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/.scratch/checked-results/audit.md"
+    },
+    {
+      "path": ".scratch/live-copilot/issues/23-study-copilot.md",
+      "sha256": "c2090ca4a7fb6db32becd6e34196e5a04396c5a4b210c2da5146d733fb8f5519",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/.scratch/live-copilot/issues/23-study-copilot.md"
+    },
+    {
+      "path": "docs/agents/owner-decisions.md",
+      "sha256": "d8ba80b11b15aa99f4eac206730ab8bc3ff8fbb5248dc827c21628b1835e4efc",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/docs/agents/owner-decisions.md"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/README.md",
+      "sha256": "a2269a72b95c0b59978a497756a4ebda23dd826cce111ff71fc72ac53fbe165d",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/harness/README.md"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/assurance.py",
+      "sha256": "66f02d06d228b7b0135d093875497bbac38addec1ead14e36b972e7c678f236f",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/harness/assurance.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/assurance_scope.py",
+      "sha256": "b5187ad02109e3d3c1b144fa3d62539bc49dd37d51fa0d8fc1767704b03cfdc9",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/harness/assurance_scope.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/calculations.py",
+      "sha256": "c1e159fda44b036d6ee0e7281bb36ae7cc38611c0a9bc080af072d60e63a8196",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/harness/calculations.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/catalogue.py",
+      "sha256": "f05adff1b74f668a90e7ee8c7de872c07b6e0898d04a45a4602e6d5baf181cd5",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/harness/catalogue.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/compose.py",
+      "sha256": "bc27e8a9abead02e01019526378ba2e6d8400c40e31014a823bdf61b903096ca",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/harness/compose.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/confirm.py",
+      "sha256": "f367e3dd1ec2717e6565b69d6503f73d999dcd4fd81046b0c21cb92ab9512c07",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/harness/confirm.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/continuation.py",
+      "sha256": "e8a23471c7e8b13a9af816fbe05059be2d6f348823f8a38b2cfcda344a0cf51a",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/harness/continuation.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/eventlog.py",
+      "sha256": "aee0cb80bf85bbf19c762864c5af13eb7a6166868a47b498afa35cc1575d2fd3",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/harness/eventlog.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/history.py",
+      "sha256": "77842bb064ba77415f17221c11982fa69ce8f6e8c84c25806950bb812ff5bf66",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/harness/history.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/job_adapters.py",
+      "sha256": "6f6e8d199197a4116d2e97a2d383fb5ea11b1978e06a9a486930c14e701ad9ba",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/harness/job_adapters.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/loop.py",
+      "sha256": "feb632cde791160ec335721f90a1199c78c18e2bb415b3e8f0bee10416d16c07",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/harness/loop.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/metrics.py",
+      "sha256": "2d1c99c835923ebfce42e38fe55506c2b854da0fd4c2258ec4e62e96ed9c20f5",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/harness/metrics.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/providers/wiring.py",
+      "sha256": "85a7d06ae8a4b9f65b7ee57a14b30254a7a3986c6ae06a861e5cd3df68dda1fb",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/harness/providers/wiring.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/replay.py",
+      "sha256": "e72ad6d24c281c062569cfafccf4e0da6e1ba8376c7de87c8bdcd47ffd3a3126",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/harness/replay.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/skills/registry.py",
+      "sha256": "68d2a447693d49fb2f0a03933b9a137c056aa4b8ee58b81bf6bc8153ed3d5afb",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/harness/skills/registry.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/workflows/registry.py",
+      "sha256": "1b3f02f2b3f13e8ef183a8617de5377fb483ac47f8479c22506c1bbae48a45ba",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/harness/workflows/registry.py"
+    },
+    {
+      "path": "pypsa-gui/backend/routers/chat.py",
+      "sha256": "d96647c49ae22aed76c5655c01ddf79add4cf6f799fc17b0d932de7511baa5bc",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/routers/chat.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/assistant_tasks.py",
+      "sha256": "19a438c005b54a235f2317bad736bed6a2e233f5c54bd15a0a0d962c051b01b4",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/services/assistant_tasks.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/assistant_tools.py",
+      "sha256": "fafb1edd36952045e24b3a4cd4b232b81f5a2365c22471e935a5253861d1d598",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/services/assistant_tools.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/chat_tools.py",
+      "sha256": "c7b8223f3357da0789c82bbe15a3bef2caa57f117cb09636839be03450d99443",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/services/chat_tools.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/component_discovery.py",
+      "sha256": "7873fe0c7726e2394f93c3febd45555fe7abf93f6ece010cb7bbdab0a4d9b631",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/services/component_discovery.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/durable_conversation.py",
+      "sha256": "afb7f4abed6b4e984e38dd57bdf9d33db87fefe0571867b7db63b33ac0fc2846",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/services/durable_conversation.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/reports/evidence.py",
+      "sha256": "bf1b7c9c133c30fcc2cb2aebc400439cba7fe4cd63562069d4afe08305916053",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/services/reports/evidence.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/reports/number_audit.py",
+      "sha256": "12901fef78978e4d7a3e3768bba5726566ac4790a22a3f7caf89fbad75728367",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/services/reports/number_audit.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/result_views.py",
+      "sha256": "d334d2a0ff7f77bc43bccc789eb98be000cb5397ce94ef17ff99660a984917a5",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/services/result_views.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/run_evidence.py",
+      "sha256": "3d1198124dbec39bde2a373a8980d22a8321c21eee2b0959329f0504a3833f57",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/services/run_evidence.py"
+    },
+    {
+      "path": "pypsa-gui/backend/smoke/assistant_control_matrix.py",
+      "sha256": "3ac086953db90b4398d3a4eaffba6012712a47d4765ec9e0bec35aac8d15e6ff",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/smoke/assistant_control_matrix.py"
+    },
+    {
+      "path": "pypsa-gui/backend/smoke/assistant_inventory.py",
+      "sha256": "3231cf40a6db7b0a102cb6783166499a8d547470c4024e641eb3df8c4ca8e60d",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/smoke/assistant_inventory.py"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/api/chat.ts",
+      "sha256": "428d8f92cc739bb38cac4bde511c544901d169873f95666f0765a530f4eb75e0",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/frontend/src/api/chat.ts"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/components/AssistantResultCard.tsx",
+      "sha256": "e2d0e1f9248e00caf42a2026e38672fda4f190e145bb59cf44bc70ddfc662483",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/frontend/src/components/AssistantResultCard.tsx"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/components/ChatPanel.tsx",
+      "sha256": "f1215fbc0f4e1436202536162876362204b4cf99f1464e6eee24519b38e9e0a9",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/frontend/src/components/ChatPanel.tsx"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/hooks/usePlanContinuation.ts",
+      "sha256": "6ef44811cdef65e82374e44bc509c1016acbf3e59e6633c5b6a083fc151b0c17",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/frontend/src/hooks/usePlanContinuation.ts"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/budget.py",
+      "sha256": "d4d9da12f0d6668187211b82a4694b2770d4261e5984c25482a982b087585c31",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/harness/budget.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/goals.py",
+      "sha256": "8410c92567b5c797fe213852174fc63636adc02cc434160f644d5eeed63d761e",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/harness/goals.py"
+    }
+  ],
+  "non_goals": [
+    "runtime implementation in this PR",
+    "new top-level product packages/modules",
+    "new evidence map/advisor UI",
+    "new answer cache/task-profile/price accounting",
+    "arbitrary code or recursive agent execution",
+    "paid/live calibration or domain approval"
+  ],
+  "fixtures": [
+    {
+      "id": "FX-OWNED",
+      "description": "Isolated temporary database/storage; two authenticated owners in distinct organizations; owned project A and foreign project B; no production roots or live provider.",
+      "oracle": "Denied foreign operation produces zero handler effects and no hidden identifiers."
+    },
+    {
+      "id": "FX-S7",
+      "description": "One electricity bus, 4 MW wind generator, availability [0.5,1], dispatch/load [2,4] MW, native generator weights [1,3] h; no storage/links/export.",
+      "oracle": {
+        "generation_mwh": 14,
+        "served_mwh": 14,
+        "unserved_mwh": 0,
+        "energy_residual_mwh": 0,
+        "weighted_q95_mw": 4
+      },
+      "method": "For nonuniform-weight quantiles use weighted empirical inverse CDF: smallest sorted x with cumulative positive weight >=q*total. The native reader/check must declare and share this method, or withhold until its owning S7 gate accepts it. No full calendar-year monthly claim."
+    },
+    {
+      "id": "FX-S8",
+      "description": "Real EUR2030 cashflows at years0,1,2: [-100,60,60], rate0.10; separate multiple-root flow [-100,230,-132].",
+      "oracle": {
+        "npv_eur": "500/121",
+        "irr_unique": 0.1306623862918075,
+        "multiple_root_irr_disposition": "irr_not_unique"
+      },
+      "tolerance": "NPV/IRR residual <=1e-6*sum(abs(CF)) per native approved semantics. No guessed price-year/currency conversion.",
+      "lcoe_extension": {
+        "profile": "investment-lcoe/1",
+        "energy_mwh": [
+          0,
+          10,
+          10
+        ],
+        "value": [
+          0,
+          100,
+          100
+        ],
+        "equity_cash": [
+          -100,
+          60,
+          60
+        ],
+        "rate": 0.1,
+        "inflation": 0.02,
+        "price_basis": "nominal",
+        "oracle": "Nominal LCOE=(PV(value)-PV(equity))/PV(energy)=205/21 currency/MWh; real denominator uses(1.1/1.02)-1, same numerator. Missing retained inputs unavailable; zero discounted generation refused; counterfactual disclosed. No cost-completeness/payback/physics claim."
+      }
+    },
+    {
+      "id": "FX-ORIGIN",
+      "description": "Job A and unrelated job B have identical input fingerprint/objective; B finishes after A receipt is lost. Explicit test barriers control interleaving; no timing sleeps.",
+      "oracle": "Only exact A attempt/job/run receipt may verify A; B cannot replace it. Partial/unknown remains unresolved with zero requeue."
+    },
+    {
+      "id": "FX-CONTEXT",
+      "description": "Exact user decision Do not extend lines, MW/MWh units, distinct current/discussed refs; canonical JSON padded with multibyte Unicode at6144/6145 and65536/65537 UTF8 bytes, paired tool messages, then repeated resume.",
+      "oracle": "Complete pairs and exact required intent; oversize required data blocks; old approvals absent; no forged memory authority."
+    },
+    {
+      "id": "FX-USAGE",
+      "description": "Fake provider reports input_tokens100 (uncached), output_tokens20, cache_read_tokens80, cache_create_tokens0.",
+      "oracle": "Keep uncached input100 and cache read80 separate; no double counting, invented dollar cost, TTL or saving estimate."
+    },
+    {
+      "id": "FX-PHASE",
+      "description": "Capacity then Reliability then Hand-off phases; per-step denied/approved write/run; current and stale native checkpoint revisions.",
+      "oracle": "Every effect has own click; one native Continue clears one current boundary; model/MCP-only or replayed intent cannot skip."
+    },
+    {
+      "id": "FX-LOOP",
+      "setup": "Injected native validator/read barriers, deterministic provider counters, immutable task/step/attempt IDs, durable ledger, lower existing task/session/goal budgets and equivalent normalized tool requests.",
+      "oracle": "Exact attempted/admitted provider/tool/effect counts at each cap; repeated native refusal stops on second occurrence; no reset across reconstruction/goal changes/attempts; missing validation blocks dependent claim.",
+      "safety": "Synthetic owners/DB/storage, fake/scripted providers only, no live fallback or timed sleeps."
+    },
+    {
+      "id": "FX-J01",
+      "setup": "Two synthetic owners; root project P and saved scenario S with p_nom=10MW, immutable IDs.",
+      "oracle": "Save/reopen P/S preserves owner,parent,input hash and10MW; foreign-owner open returns safe denial without mutations.",
+      "native_anchor": "pypsa-gui/backend/tests/test_assistant_capabilities.py::test_task_owner_isolation_and_path_refusal",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J02",
+      "setup": "P has generator10MW and line L; preview generator p_nom10\u219212MW, then deny L deletion.",
+      "oracle": "Card/readback12MW, old10MW, source fingerprint changes; denied deletion leaves exact topology hash unchanged.",
+      "native_anchor": "pypsa-gui/backend/tests/test_assistant_capabilities.py::test_preview_apply_atomic_stale_refusal_and_undo",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J03",
+      "setup": "Use upload_load_profile(csv_content_b64,filename) for snapshot,L1 CSV with2030-01-01 00:00:00/01:00:00 and2/4MW on the exact two-row UTC-naive native axis (UTC declared); not the measured full-calendar importer. Separate staged period labels2030/2040 share that explicit2030 representative timestep axis. Invalid variant has +inf in a matched L1 cell.",
+      "oracle": "Single-period upload/readback L1[2,4]MW and source-cell hash exact; staged axis explicitly preserves(period,timestep) identity or native refusal with zero apply; matched +inf L1 refuses422 before profile/network write. Preserve/disclose native timezone stripping and duplicate-axis normalization; no invented duplicate/timezone refusal or annual measured-load coverage.",
+      "native_anchor": "pypsa-gui/backend/tests/test_chat_tools_dispatch.py::test_upload_load_profile_decodes_base64_and_dispatches",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J04",
+      "setup": "FX-S7 real HiGHS model and independent native barriers, successful run then cancellation-before-pickup variant.",
+      "oracle": "14MWh served/generation; matching job/run/fingerprint; denied/cancel-before-pickup starts0solves, no duplicate start.",
+      "native_anchor": "pypsa-gui/backend/tests/test_task_solver_outcome.py",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J05",
+      "setup": "FX-S7 current and retained snapshots, then load changed2\u21923MW without new solve.",
+      "oracle": "Old retained source stays14MWh; current stale view refuses; unsupported AC/voltage figure never published checked.",
+      "native_anchor": "pypsa-gui/backend/tests/test_results_source_navigation.py::test_retained_projection_never_reads_live_results_and_missing_section_refuses",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J06",
+      "setup": "Reuse test_adequacy_stress._network:100MWload,90MWfirmgas,2snapshots each3h; ClassC cold snap multiplier1.3, frequency0.05/year, VoLL3000EUR/MWh.",
+      "oracle": "Base EUE60MWh, stressed240MWh,delta180MWh; frequency*delta*VoLL=27000EUR/year; explicit synthetic occurrence and6h horizon, never annual LOLE guarantee.",
+      "native_anchor": "pypsa-gui/backend/tests/test_adequacy_stress.py::test_cold_snap_prices_exactly",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J07",
+      "setup": "Owned saved hub_network from test_campus_electrical_service:110/20kV,60MWLink efficiency0.99,40MWload,20MWPV,10MW/2hBESS. Settings k1,pf0.95,margin0.1,n_minus_1true.",
+      "oracle": "Native draft/run/read retains settings; five check IDs exactly pcc_reactive,pcc_voltage,campus_voltage,transformer_loading,switchgear; pf source assumed, margin0.1; missing engine\u2192unavailable. This is adapter/contract coverage, not independent physical certification.",
+      "native_anchor": "pypsa-gui/backend/tests/test_campus_electrical_service.py::test_a_run_sizes_the_campus_and_its_results_read_back",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J08",
+      "setup": "FX-S8 plus committed bills/tou_weekday_evening.json:five15min4MWimports,Europe/Berlin weekdays/weekend,0.30peak/0.10offpeakEUR/kWh.",
+      "oracle": "Per-intervalEUR[100,300,300,300,100],total1100; NPV500/121; unsupported extra tariff item flags incomplete, not zero or fabricated price.",
+      "native_anchor": "pypsa-gui/backend/tests/test_tariff_engine_core.py::test_the_csv_cross_check_agrees_with_the_json_fixture",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J09",
+      "setup": "Two-case firm generator4MW availability[1,1], demand[2,4] versus[3,4]MW, marginalcost10EUR/MWh,objective weights[1,3],no wind/fixedcosts; FX-ORIGIN/PHASE.",
+      "oracle": "Case objectives140/150EUR,delta10EUR on declared identical basis; separate owned receipts; unknown origin blocks comparison and requeue.",
+      "native_anchor": "pypsa-gui/backend/tests/test_assistant_tasks_study_brief.py::test_queue_step_settles_completed_only_from_native_records",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J10",
+      "setup": "Same two-row upload_load_profile CSV and explicit UTC-naive native axis asFX-J03, owned full SHA256, byte-exact synthetic evidence ZIP; no measured full-calendar importer.",
+      "oracle": "Mapped2/4MW native readback, hash/cell lineage; authorized download bytes/hash exactly match; foreign download denied.",
+      "native_anchor": "pypsa-gui/backend/tests/test_assistant_capabilities.py::test_inspect_csv_hash_chart_and_delivery",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J11",
+      "setup": "Supported native delivery from FX-S7 14MWh evidence; model narrative attempts14\u219215 numeric mutation, plus unavailable chapter.",
+      "oracle": "Source-linked chapter retains14MWh or rejects changed numeric text; exact artifact hash; missing chapter explicit and no universal-report claim.",
+      "native_anchor": "pypsa-gui/backend/tests/test_assistant_capabilities.py::test_real_task_export_delivery_recovers_new_session",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J12",
+      "setup": "Snapshot with generator10MW; unsaved current12MW, then restore snapshot; inject save failure and post-preview source race.",
+      "oracle": "Restored10MW only after safety capture preserves12MW; failed save/race restores nothing; no receipt/approval restoration or universal undo.",
+      "native_anchor": "pypsa-gui/backend/tests/test_restore_safety.py::test_the_safety_snapshot_keeps_an_unsaved_edit",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J13",
+      "setup": "FX-S7 scripted provider wires request same declared read\u2192approvedsolve\u2192source result, then force unoffered tool and exhaustedbudget.",
+      "oracle": "Same native IDs/source values and gates on each supported wire; unoffered handler0calls; exhaustedbudget0providercalls; event fold exactly matches supplied history.",
+      "native_anchor": "pypsa-gui/backend/tests/test_assistant_capabilities.py::test_default_args_match_and_stale_parameter_chart_is_refused",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J14",
+      "setup": "Existing result_project load-flow terminal/window fixture; stale then exact rendered ACK; unsent draft and held/dismissed continuation.",
+      "oracle": "Independent terminal/window oracle matches native view; wrong/stale ACK never completes, exact idempotent ACK does; no auto-send/canceljob on dismiss; keyboard/focus intact.",
+      "native_anchor": "pypsa-gui/backend/tests/test_results_source_navigation.py::test_public_view_and_chat_match_independent_terminal_window_oracle",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    }
+  ],
+  "current_master_reconciliation": "current-master-reconciliation.json"
+}

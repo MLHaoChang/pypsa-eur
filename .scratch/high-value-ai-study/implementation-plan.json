@@ -1,0 +1,638 @@
+{
+  "schema_version": 1,
+  "status": "research_only_not_implementation_authorization",
+  "assessed_master": "87546ef5d184a9b20c80a65e2164f7fac0930f15",
+  "priority_basis": "qualitative_total_user_value_not_measured_roi",
+  "runtime_changes": false,
+  "capabilities": [
+    {
+      "id": "HV-S",
+      "priority": 1,
+      "name": "Goal-to-study copilot"
+    },
+    {
+      "id": "HV-D",
+      "priority": 2,
+      "name": "Decision study explanations and robustness"
+    },
+    {
+      "id": "HV-I",
+      "priority": 3,
+      "name": "Data-to-model onboarding assistant"
+    }
+  ],
+  "slices": [
+    {
+      "id": "HV-S1",
+      "title": "Study brief and support mapping",
+      "existing_owners": [
+        "card-workspaces H1/W9",
+        "start_task/LC-05",
+        "W0"
+      ],
+      "depends_on": [],
+      "external_gates": [
+        "current_owner_design_and_package_order",
+        "native_adapter_support",
+        "applicable_UX_and_domain_review_before_build"
+      ],
+      "tests": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05"
+      ],
+      "status": "proposed_not_started"
+    },
+    {
+      "id": "HV-S2",
+      "title": "Reviewed native study traversal",
+      "existing_owners": [
+        "LC-05",
+        "S7",
+        "native execution adapters"
+      ],
+      "depends_on": [
+        "HV-S1"
+      ],
+      "external_gates": [
+        "current_owner_design_and_package_order",
+        "native_adapter_support",
+        "applicable_UX_and_domain_review_before_build"
+      ],
+      "tests": [
+        "S06",
+        "S07",
+        "S08",
+        "S09",
+        "S10",
+        "S11"
+      ],
+      "status": "proposed_not_started"
+    },
+    {
+      "id": "HV-S3",
+      "title": "Durable resume and bounded delivery",
+      "existing_owners": [
+        "LC-12",
+        "LC-19",
+        "LC-21"
+      ],
+      "depends_on": [
+        "HV-S2"
+      ],
+      "external_gates": [
+        "current_owner_design_and_package_order",
+        "native_adapter_support",
+        "applicable_UX_and_domain_review_before_build"
+      ],
+      "tests": [
+        "S12",
+        "S13",
+        "S14",
+        "S15",
+        "S16"
+      ],
+      "status": "proposed_not_started"
+    },
+    {
+      "id": "HV-D1",
+      "title": "Comparable sources and evidence coverage",
+      "existing_owners": [
+        "LC-18/S6",
+        "W10"
+      ],
+      "depends_on": [],
+      "external_gates": [
+        "current_owner_design_and_package_order",
+        "native_adapter_support",
+        "applicable_UX_and_domain_review_before_build"
+      ],
+      "tests": [
+        "D01",
+        "D02",
+        "D03",
+        "D04",
+        "D05"
+      ],
+      "status": "proposed_not_started"
+    },
+    {
+      "id": "HV-D2",
+      "title": "Domain-specific native robustness",
+      "existing_owners": [
+        "native study/adequacy engines",
+        "LC-20"
+      ],
+      "depends_on": [
+        "HV-D1"
+      ],
+      "external_gates": [
+        "current_owner_design_and_package_order",
+        "native_adapter_support",
+        "applicable_UX_and_domain_review_before_build"
+      ],
+      "tests": [
+        "D06",
+        "D07",
+        "D08",
+        "D09",
+        "D10",
+        "D11"
+      ],
+      "status": "proposed_not_started"
+    },
+    {
+      "id": "HV-D3",
+      "title": "Bounded recommendation and next evidence",
+      "existing_owners": [
+        "card-workspaces H2/S8",
+        "LC-21"
+      ],
+      "depends_on": [
+        "HV-D2"
+      ],
+      "external_gates": [
+        "current_owner_design_and_package_order",
+        "native_adapter_support",
+        "applicable_UX_and_domain_review_before_build"
+      ],
+      "tests": [
+        "D12",
+        "D13",
+        "D14",
+        "D15",
+        "D16"
+      ],
+      "status": "proposed_not_started"
+    },
+    {
+      "id": "HV-I1",
+      "title": "Source/schema mapping and validation",
+      "existing_owners": [
+        "profile upload/TS-01/TS-04",
+        "LC-16 spreadsheet/equipment mapping",
+        "W9/W10"
+      ],
+      "depends_on": [],
+      "external_gates": [
+        "current_owner_design_and_package_order",
+        "native_adapter_support",
+        "applicable_UX_and_domain_review_before_build"
+      ],
+      "tests": [
+        "I01",
+        "I02",
+        "I03",
+        "I04",
+        "I05"
+      ],
+      "status": "proposed_not_started"
+    },
+    {
+      "id": "HV-I2",
+      "title": "Reviewed native apply and readback",
+      "existing_owners": [
+        "native field/profile apply",
+        "S7"
+      ],
+      "depends_on": [
+        "HV-I1"
+      ],
+      "external_gates": [
+        "current_owner_design_and_package_order",
+        "native_adapter_support",
+        "applicable_UX_and_domain_review_before_build"
+      ],
+      "tests": [
+        "I06",
+        "I07",
+        "I08",
+        "I09",
+        "I10",
+        "I11"
+      ],
+      "status": "proposed_not_started"
+    },
+    {
+      "id": "HV-I3",
+      "title": "Document-family extraction after spreadsheet mapping",
+      "existing_owners": [
+        "LC-16 slice 2: PDF/datasheet/tariff/PPA mapping",
+        "native engine field adapters"
+      ],
+      "depends_on": [
+        "HV-I2"
+      ],
+      "external_gates": [
+        "current_owner_design_and_package_order",
+        "native_adapter_support",
+        "applicable_UX_and_domain_review_before_build"
+      ],
+      "tests": [
+        "I12",
+        "I13",
+        "I14",
+        "I15",
+        "I16"
+      ],
+      "status": "proposed_not_started"
+    }
+  ],
+  "acceptance_cases": [
+    {
+      "id": "S01",
+      "slice": "HV-S1",
+      "level": "contract",
+      "stimulus": "Objective omits critical-service definition, stage dates or target units.",
+      "expected": "Missing required fields shown as questions; no guessed values, edits, sends or submissions.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "S02",
+      "slice": "HV-S1",
+      "level": "integration",
+      "stimulus": "Goal requests unsupported frequency/dynamics or standalone AC without admitted dispatch.",
+      "expected": "Fresh native support reason; unsupported steps blocked, no substitute adequacy/compliance claim.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "S03",
+      "slice": "HV-S1",
+      "level": "browser",
+      "stimulus": "Open one card walkthrough in Guided, change a native field in Expert and return.",
+      "expected": "Single companion/entry; shared source reflected, focus/keyboard/reduced-motion usable; composer never auto-sends.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "S04",
+      "slice": "HV-S1",
+      "level": "integration",
+      "stimulus": "Card deselected but another selected run consumes its price/VOLL input.",
+      "expected": "Outside-scope results excluded; consumed prerequisites remain visible; no silent selection or parameter loss.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "S05",
+      "slice": "HV-S1",
+      "level": "contract",
+      "stimulus": "Provider proposes a plan above the current admitted finite cap, nested task control, project-rebinding or invalid forward refs.",
+      "expected": "Native admission refuses; bounded cap increases land only in LC-05 with tests, no hidden loops or crossing project scope.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "S06",
+      "slice": "HV-S2",
+      "level": "integration",
+      "stimulus": "In Guided and Expert, inspect exact write/run step then deny its required card; attempt auto-approval from brief acceptance.",
+      "expected": "Native write/queue counters stay zero; every write/run needs its own click; no alternate tool, direct file route or brief-based grant.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "S07",
+      "slice": "HV-S2",
+      "level": "integration",
+      "stimulus": "Approve edit on owned source; source, lock or restriction changes before admission.",
+      "expected": "Fresh denial/stale refusal, zero effect; prior inspected plan grants no bypass.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "S08",
+      "slice": "HV-S2",
+      "level": "integration",
+      "stimulus": "Apply supported exact edit and read back before starting dependent work.",
+      "expected": "Only declared fields change; source/target digests and native receipt match; dependent step waits for verified readback.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "S09",
+      "slice": "HV-S2",
+      "level": "integration",
+      "stimulus": "Submit supported bounded case, then lose worker or queue acknowledgment.",
+      "expected": "Uncertain effect blocks dependents; no retry/reservation reset; unrelated same-input job cannot certify it.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "S10",
+      "slice": "HV-S2",
+      "level": "integration",
+      "stimulus": "Exhaust engine/campaign/session allowance and propose larger plan-domain capability.",
+      "expected": "Existing limits and narrower execution adapter prevail; no hidden solves, cap changes or inferred dollar allowance.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "S11",
+      "slice": "HV-S2",
+      "level": "integration",
+      "stimulus": "Reach a card boundary, then change objective or assumptions after proposal review.",
+      "expected": "Plan card pauses at Continue to card; boundary/brief grants no write/run approval; changed preview invalidated and reviewed again.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "S12",
+      "slice": "HV-S3",
+      "level": "integration",
+      "stimulus": "Restart or reopen completed, interrupted and unresolved task; manually reconcile with a caller-supplied completed result.",
+      "expected": "Completed effects not replayed; uncertainty/ACL preserved; old approvals not restored; claimed completion needs independently re-read matching native evidence.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "S13",
+      "slice": "HV-S3",
+      "level": "integration",
+      "stimulus": "Cancel while current native job continues.",
+      "expected": "Future steps stop; job truthfully running until native cancellation/terminal proof; no false quiescence.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "S14",
+      "slice": "HV-S3",
+      "level": "integration",
+      "stimulus": "Native result is infeasible, partial, failed or missing exact artifacts.",
+      "expected": "No completed-study claim; typed native diagnosis, correction draft only, no auto-retry.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "S15",
+      "slice": "HV-S3",
+      "level": "browser",
+      "stimulus": "Prepare final Hand-off with unsupported chapter and stale historical result.",
+      "expected": "Exact source/status links and gaps; no silent live fallback, universal report claim or input restore.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "S16",
+      "slice": "HV-S3",
+      "level": "integration",
+      "stimulus": "Resume user whose project permission was revoked or browser view changed.",
+      "expected": "No foreign sources or effects; navigation claim requires available native ACK, not model text.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "D01",
+      "slice": "HV-D1",
+      "level": "contract",
+      "stimulus": "Ask best option with no objective or cost/reliability weights.",
+      "expected": "Clarify criterion; do not invent weights/probabilities or choose an unconditional winner.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "D02",
+      "slice": "HV-D1",
+      "level": "numerical",
+      "stimulus": "Compare fixtures differing in horizon, currency/price year, demand, weights or dispatch basis.",
+      "expected": "Native incompatible-basis refusal with reasons; no fabricated deltas or silent conversions.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "D03",
+      "slice": "HV-D1",
+      "level": "integration",
+      "stimulus": "Compare intentionally changed designs with admitted equivalent basis and exact receipts.",
+      "expected": "Declared changes retained; independent expected native delta agrees; no identical-input-only shortcut.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "D04",
+      "slice": "HV-D1",
+      "level": "integration",
+      "stimulus": "Compare feasible design with cheaper infeasible, missing or corrupt alternative.",
+      "expected": "Non-feasible alternative not ranked successful; exact unavailable/feasibility reasons retained.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "D05",
+      "slice": "HV-D1",
+      "level": "browser",
+      "stimulus": "Inspect cross-card decision when Control is off and grid evidence is linear-only.",
+      "expected": "Outside scope and proxy fidelity explicit; no compliance/frequency proof; source links and accessibility verified.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "D06",
+      "slice": "HV-D2",
+      "level": "numerical",
+      "stimulus": "BESS plus PV fixture, PV-only counterfactual and zero-sized battery.",
+      "expected": "Independent incremental value oracle agrees; PV savings not assigned to battery; zero-size has no investment verdict.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "D07",
+      "slice": "HV-D2",
+      "level": "numerical",
+      "stimulus": "Supported tornado crosses native investment threshold or lacks required range.",
+      "expected": "Native marginal/not-established verdict used; fixed-size re-dispatch versus revaluation disclosed.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "D08",
+      "slice": "HV-D2",
+      "level": "numerical",
+      "stimulus": "Supported adequacy frontier with known cost/service points and infeasible target.",
+      "expected": "Independent domain oracle; only admitted feasible points compared, no invented cross-domain Pareto/ranking.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "D09",
+      "slice": "HV-D2",
+      "level": "contract",
+      "stimulus": "User supplies low/high bounds with no probabilities and correlated assumptions.",
+      "expected": "Ranges preserved with provenance; no distribution, probability of success or independence assumption invented.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "D10",
+      "slice": "HV-D2",
+      "level": "integration",
+      "stimulus": "Native plausibility rule unsupported or threshold unavailable.",
+      "expected": "Rule not-evaluated with reason; no model-defined pass or calls to removed tool stubs.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "D11",
+      "slice": "HV-D2",
+      "level": "numerical",
+      "stimulus": "Higher storage cost coincides with changed constraints/dispatch and unexpected sensitivity sign.",
+      "expected": "No automatic bug claim; actual varied inputs/method stated; native controlled fixture needed for causal conclusion.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "D12",
+      "slice": "HV-D3",
+      "level": "contract",
+      "stimulus": "Provider uses correct numeric token with wrong unit, sign, source case or causal attribution.",
+      "expected": "Semantic/source gate withholds claim even when token-only number audit would match.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "D13",
+      "slice": "HV-D3",
+      "level": "contract",
+      "stimulus": "Provider proposes 13 facts, invented break-even, missing NPV or aggregate confidence percentage.",
+      "expected": "Fact bound enforced; unsupported numeric/decision claim withheld, strict publication refuses disagreement.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "D14",
+      "slice": "HV-D3",
+      "level": "browser",
+      "stimulus": "Inspect existing decision study/explanation source/status disclosures with assumed inputs and no domain review.",
+      "expected": "Assumptions and verification gaps visible inline; no separate evidence map/advisor panel, approval score or certification.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "D15",
+      "slice": "HV-D3",
+      "level": "integration",
+      "stimulus": "Ask which extra study could help and inspect proposed scenarios.",
+      "expected": "Explanation/proposal only, no queue/send; LC-17 cap/ranges and existing edit preview retained.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "D16",
+      "slice": "HV-D3",
+      "level": "integration",
+      "stimulus": "Export comparison after source changes or a chapter is unavailable.",
+      "expected": "Digest recheck refuses stale export; availability explicit; no full network/report certification.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "I01",
+      "slice": "HV-I1",
+      "level": "security",
+      "stimulus": "Upload hostile prompts, macro/formula workbook, foreign file reference or oversized/archive payload.",
+      "expected": "Existing bounds/ACL apply; no code/formula/link execution, secrets disclosure or effect from file text.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "I02",
+      "slice": "HV-I1",
+      "level": "numerical",
+      "stimulus": "EU local-time meter fixtures across spring/autumn DST, mixed offsets, gaps and partial year.",
+      "expected": "Native importer rules preserved; unit/time conversions match independent energy oracle; repairs/refusals visible.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "I03",
+      "slice": "HV-I1",
+      "level": "numerical",
+      "stimulus": "North American 15-minute kWh versus average-kW meter values and missing unit.",
+      "expected": "Energy/power conversion matches interval oracle; missing/conflicting unit unresolved; no silent default MW.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "I04",
+      "slice": "HV-I1",
+      "level": "contract",
+      "stimulus": "Map equipment column to multiple entities or H2 mass/energy/currency-year field without basis.",
+      "expected": "Ambiguity stays unmapped; typed schema validation, exact source cells/hash and required basis shown.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "I05",
+      "slice": "HV-I1",
+      "level": "browser",
+      "stimulus": "Preview a profile via load family versus Library series and correct mapping in Expert.",
+      "expected": "Each parser retains its timezone/coverage semantics; one shared preview, no writes or sends; corrected target visible in Guided.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "I06",
+      "slice": "HV-I2",
+      "level": "integration",
+      "stimulus": "Deny apply after staging mapping.",
+      "expected": "Native model/profile unchanged and no solve; ordinary denial retained.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "I07",
+      "slice": "HV-I2",
+      "level": "integration",
+      "stimulus": "Replace source bytes, edit target or revoke access after mapping inspection.",
+      "expected": "Digest/ACL/restriction recheck refuses stale apply; old preview cannot authorize new content.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "I08",
+      "slice": "HV-I2",
+      "level": "integration",
+      "stimulus": "Apply reviewed small profile/asset mapping through admitted tools.",
+      "expected": "Exact fields/profile applied once; native readback, full source hash, transformations and provenance retained.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "I09",
+      "slice": "HV-I2",
+      "level": "integration",
+      "stimulus": "Repeat import request with same content/target, then changed mapping.",
+      "expected": "Existing native idempotency/explicit duplicate choice; no duplicate assets/series; conflicting request refused.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "I10",
+      "slice": "HV-I2",
+      "level": "integration",
+      "stimulus": "Fail halfway through a nontransactional multi-operation apply.",
+      "expected": "Partial effects recorded and further work stopped; no all-or-nothing/auto-rollback or snapshot-undo claim.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "I11",
+      "slice": "HV-I2",
+      "level": "integration",
+      "stimulus": "Native profile repairs small gaps or assumes UTC, then corrected source is applied.",
+      "expected": "Repair/assumption lineage explicit in preview/readback; corrected write reviewed; original evidence not silently erased.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "I12",
+      "slice": "HV-I3",
+      "level": "contract",
+      "stimulus": "Readable PDF contains unsupported tariff component, PPA clause or ambiguous equipment basis.",
+      "expected": "No executable/full-support claim; incomplete native semantics reported; manual clarification route.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "I13",
+      "slice": "HV-I3",
+      "level": "contract",
+      "stimulus": "PDF datasheet, tariff or PPA fixture includes repeated values on different pages and extraction error.",
+      "expected": "Exact page/quote and full source digest; incorrect/unsupported extraction withheld; each admitted value confirmed before native write.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "I14",
+      "slice": "HV-I3",
+      "level": "security",
+      "stimulus": "Request external lookup, redistribution or paid model processing of sensitive file.",
+      "expected": "No automatic feed/terms clearance/provider call; permitted disclosure controls and manual path available.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "I15",
+      "slice": "HV-I3",
+      "level": "integration",
+      "stimulus": "Try to use short millisecond trace as annual planning demand and claim dynamic proof.",
+      "expected": "Native coverage/refusal and fidelity boundary shown; no silent shape fabrication or claimed dynamic validation.",
+      "status": "planned_not_run"
+    },
+    {
+      "id": "I16",
+      "slice": "HV-I3",
+      "level": "browser",
+      "stimulus": "User rejects/corrects extracted field and proceeds manually on narrow screen/keyboard.",
+      "expected": "No forced model usage; native editor and remaining gaps usable; no duplicate import, Save/Export or assistant entries.",
+      "status": "planned_not_run"
+    }
+  ],
+  "non_goals": [
+    "new top-level modules or agents",
+    "new execution or preview system",
+    "paid calls or reviewer contact in this research",
+    "live operational control",
+    "deferred cache/task-profile/price accounting",
+    "independent domain approval or full coverage claim"
+  ],
+  "owner_disposition": "OWNER-DISPOSITION.md; AI-567b amends AI-567; COP-1 step and card-boundary gates"
+}
