@@ -176,9 +176,11 @@ the flag is off.
 
 PR2 against them: (g) `speech_output_over_budget` (409, own fragment
 `tool-error-kinds.d/claude-lc07-speech-output.json`), no usage row, the
-worker's synthesize step is never reached. (h) `OUTPUTS_MAX = 8`; finished
-answers are pruned first, then the oldest queued one is dropped, counted in
-`_OUTPUT_DROPS` and logged; a closed session (rebind, rotation, any exit)
+worker's synthesize step is never reached. (h) `OUTPUTS_MAX = 8` bounds unclaimed
+answers only (GK B (18) NOT OK @eac89f21: played answers had taken slots);
+only the latest claimed answer is kept, for barge-in; when 8 are waiting the
+oldest unclaimed one is dropped, counted in `_OUTPUT_DROPS` and logged; a
+long session of one-at-a-time answers drops nothing (tested); a closed session (rebind, rotation, any exit)
 drops its queue and refuses claims. (i) no suppression is built: the whole
 approved text is the caption and the spoken text; test passes "7.5 MW" and
 "1 200 kWh" through `HttpTtsAdapter` and checks the sha256. (j) `barge_in`

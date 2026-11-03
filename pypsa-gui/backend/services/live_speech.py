@@ -816,19 +816,24 @@ def queue_answer(
 
 
 def _enqueue(session_id: str, output: dict[str, Any]) -> None:
-    """Append under ``_TICKETS_LOCK``; finished answers go first, then the
-    oldest unclaimed one, counted and logged."""
-    outputs = [o for o in _OUTPUTS.get(session_id) or [] if o['state'] in {'queued', 'claimed'}]
-    if len(outputs) >= OUTPUTS_MAX:
-        queued = [o for o in outputs if o['state'] == 'queued']
-        outputs.remove(queued[0] if queued else outputs[0])
+    """Append under ``_TICKETS_LOCK``.
+
+    Only unclaimed answers take a slot. Of the claimed ones, only the latest
+    (the one that may still be playing, for barge-in) is kept; finished ones go.
+    When ``OUTPUTS_MAX`` unclaimed answers are waiting, the oldest is dropped,
+    counted and logged.
+    """
+    current = _OUTPUTS.get(session_id) or []
+    claimed = [o for o in current if o['state'] == 'claimed'][-1:]
+    queued = [o for o in current if o['state'] == 'queued']
+    if len(queued) >= OUTPUTS_MAX:
+        queued.pop(0)
         _OUTPUT_DROPS[session_id] = _OUTPUT_DROPS.get(session_id, 0) + 1
         log.warning(
             'speech session %s dropped an unspoken answer (queue bound %d; %d dropped)',
             session_id, OUTPUTS_MAX, _OUTPUT_DROPS[session_id],
         )
-    outputs.append(output)
-    _OUTPUTS[session_id] = outputs
+    _OUTPUTS[session_id] = claimed + queued + [output]
 
 
 def _remember_spoken(episode_id: str, utterance_id: str, record: dict[str, Any]) -> None:
@@ -883,6 +888,10 @@ def claim_output(thread_id: str, *, token: str, session_id: str) -> dict[str, An
                     'This answer exceeds the remaining speech budget; it is shown, not spoken.',
                 )
             output['state'] = 'claimed'
+            # Keep the waiting answers and this one (barge-in may still need it).
+            _OUTPUTS[session_id] = [
+                o for o in _OUTPUTS[session_id] if o['state'] == 'queued' or o is output
+            ]
             view = _output_view(output)
         _record_usage(thread, session, f"tts-{view['output_id']}", 'tts', view['chars'], False)
         _save_if(path, thread, True)

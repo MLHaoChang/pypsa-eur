@@ -411,7 +411,7 @@ def test_bridge_calls_refuse_on_a_closed_session(transport, monkeypatch):
 
 def test_queue_is_bounded_and_drops_the_oldest_unclaimed_answer(transport, monkeypatch, caplog):
     tid, sid, token, _, _ = _spoken_turn(monkeypatch)
-    playing = ls.claim_output(tid, token=token, session_id=sid)['output']
+    ls.claim_output(tid, token=token, session_id=sid)
     epoch = ls._TURN_EPOCH[_thread_json(tid)['speech']['episode_id']]
     generation = ls._OUTPUTS[sid][0]['generation']
 
@@ -421,16 +421,32 @@ def test_queue_is_bounded_and_drops_the_oldest_unclaimed_answer(transport, monke
                 'chars': len(f'answer {n}'), 'generation': generation, 'epoch': epoch,
                 'state': 'queued'}
 
-    caplog.set_level(logging.WARNING, logger=ls.__name__)
-    with ls._TICKETS_LOCK:
-        for n in range(ls.OUTPUTS_MAX):  # one more than fits beside the claimed one
+    def enqueue(n):
+        with ls._TICKETS_LOCK:
             ls._enqueue(sid, item(n))
-    ids = [o['output_id'] for o in ls._OUTPUTS[sid]]
-    assert len(ids) == ls.OUTPUTS_MAX == 8
-    assert playing['output_id'] in ids and 'o0' not in ids and 'o7' in ids
+
+    caplog.set_level(logging.WARNING, logger=ls.__name__)
+    # A long session: answers queued and spoken one at a time never drop.
+    for n in range(3 * ls.OUTPUTS_MAX):
+        enqueue(n)
+        assert ls.claim_output(tid, token=token, session_id=sid)['output']['output_id'] == f'o{n}'
+    assert sid not in ls._OUTPUT_DROPS
+    assert not [r for r in caplog.records if 'dropped an unspoken answer' in r.getMessage()]
+    # Only the latest claimed answer is kept (barge-in may still need it).
+    assert [o['output_id'] for o in ls._OUTPUTS[sid] if o['state'] == 'claimed'] == [
+        f'o{3 * ls.OUTPUTS_MAX - 1}']
+
+    # OUTPUTS_MAX + 1 back to back: exactly the oldest unspoken one is dropped.
+    for n in range(100, 101 + ls.OUTPUTS_MAX):
+        enqueue(n)
+    queued = [o['output_id'] for o in ls._OUTPUTS[sid] if o['state'] == 'queued']
+    assert ls.OUTPUTS_MAX == 8 and len(queued) == ls.OUTPUTS_MAX
+    assert 'o100' not in queued and queued[0] == 'o101' and queued[-1] == f'o{100 + ls.OUTPUTS_MAX}'
     assert ls._OUTPUT_DROPS[sid] == 1
-    assert [r for r in caplog.records if 'dropped an unspoken answer' in r.getMessage()]
-    assert ls.claim_output(tid, token=token, session_id=sid)['output']['output_id'] == 'o1'
+    assert len([r for r in caplog.records if 'dropped an unspoken answer' in r.getMessage()]) == 1
+    claimed = [ls.claim_output(tid, token=token, session_id=sid)['output']['output_id']
+               for _ in range(ls.OUTPUTS_MAX)]
+    assert claimed == queued
 
 
 def test_bridge_output_routes_refuse_unknown_other_owner_and_other_project_alike(
