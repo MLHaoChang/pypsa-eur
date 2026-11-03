@@ -191,6 +191,9 @@ class _Inputs:
         self.links = import_links(n) if n is not None else []
         self.connection_mw = (sum(float(n.links.at[l, "p_nom"]) for l in self.links)
                               if self.links else None)
+        from services.project_settings import poc_xr
+        # AS-17: the PoC X/R the project enters (metadata.json settings); None = assume fi.DEFAULT_XR.
+        self.poc_xr = poc_xr(self.dir)
 
     def marking(self, item):
         """The limit's row: the user's own (``origin: user``) first, then the
@@ -495,27 +498,43 @@ def _rvc_infrequent_row(inp: _Inputs) -> dict:
                 section="connection", target=target)
 
 
-def _rvc_forms(p_mw: float, swing_mw: float, tan_phi: float, sk: float, limit: float) -> dict:
+def _rvc_forms(p_mw: float, swing_mw: float, tan_phi: float, sk: float, limit: float,
+               xr: float | None = None) -> dict:
     """The rapid voltage change of a real step ``p_mw`` with the load's reactive swing
     ``tan φ·swing_mw`` (a battery takes P only; ``Q_res`` floored at 0), in % of nominal (AS-16, owner
-    decision AS11B-RVC-1): the voltage form ``(cos ψ·ΔP + sin ψ·ΔQ)/S_k`` at the assumed PoC X/R
-    and the X/R-free bound ``√(ΔP² + ΔQ²)/S_k`` (the form's maximum over ψ). The X/R is always
-    assumed today, so a pass needs both under the limit (GK A); otherwise the value shown is the
-    one that decided the verdict, so the stored value re-judges to it."""
+    decision AS11B-RVC-1): the voltage form ``(cos ψ·ΔP + sin ψ·ΔQ)/S_k`` at the PoC X/R and the
+    X/R-free bound ``√(ΔP² + ΔQ²)/S_k`` (the form's maximum over ψ). ``xr`` is the X/R the project
+    enters (AS-17); None assumes ``fi.DEFAULT_XR``, and then a pass needs both under the limit
+    (GK A); otherwise the value shown is the one that decided the verdict, so the stored value
+    re-judges to it. An entered X/R is judged on the voltage form alone."""
     from services.adequacy import flicker_inputs as fi
 
     _, q = fi.residual_swing(swing_mw, 0.0, 0.0, tan_phi)
     p = max(0.0, float(p_mw))
-    form = fi.voltage_form_mva(p, q, fi.DEFAULT_XR) / sk * 100.0
+    form = fi.voltage_form_mva(p, q, fi.DEFAULT_XR if xr is None else xr) / sk * 100.0
     bound = math.hypot(p, q) / sk * 100.0
-    # The guard holds while the PoC X/R is assumed: drop it once a project X/R input exists (none today).
-    only_xr = _judge(form, limit, RULE_RVC) == "pass" and _judge(bound, limit, RULE_RVC) != "pass"
+    # The guard holds only while the PoC X/R is assumed (AS11B-RVC-1).
+    only_xr = (xr is None and _judge(form, limit, RULE_RVC) == "pass"
+               and _judge(bound, limit, RULE_RVC) != "pass")
     value = bound if only_xr else form
     return {"value": value, "form": form, "bound": bound, "q": q, "only_xr": only_xr,
             "verdict": _judge(value, limit, RULE_RVC),
             "words": (f"the voltage form at the assumed X/R {fi.DEFAULT_XR:g} passes ({form:.4g} %), the X/R-free "
                       f"bound √(ΔP² + ΔQ²)/S_k does not ({bound:.4g} %); enter the network operator's X/R"
                       if only_xr else "")}
+
+
+def _xr_words(inp: _Inputs) -> str:
+    """The PoC X/R and where it comes from: the assumed default's words, unchanged, or the entered
+    value at the PoC it is applied to, the governing (lowest S_k'') one when there are several (GK A)."""
+    from services.adequacy import flicker_inputs as fi
+
+    if inp.poc_xr is None:
+        return f"X/R {fi.DEFAULT_XR:g} ({fi.XR_ASSUMED})"
+    bus, count = _governing_poc(inp.n) if inp.n is not None else (None, 0)
+    at = "" if bus is None else f", at PoC {bus}" + (
+        f", the governing (lowest S_k'') of {count} PoCs" if count > 1 else "")
+    return f"X/R {inp.poc_xr:g} (entered for the project){at}"
 
 
 def _rvc_tan_phi(inp: _Inputs) -> tuple[float, str]:
@@ -550,17 +569,15 @@ def _rvc_row(inp: _Inputs) -> dict:
                     note=_NO_ENVELOPE if inp.envelope is None
                     else "No short-circuit level at the point of connection",
                     section="connection", target=target)
-    from services.adequacy import flicker_inputs as fi
-
     swing = float(inp.envelope["max"]["swing_mw"])
     tan_phi, tan_words = _rvc_tan_phi(inp)
-    xr_assumed = True                                  # no project PoC X/R input yet: always fi.DEFAULT_XR (AS-16)
-    f = _rvc_forms(swing, swing, tan_phi, sk, limit)
+    xr_assumed = inp.poc_xr is None                    # AS-17: else the X/R the project enters
+    f = _rvc_forms(swing, swing, tan_phi, sk, limit, inp.poc_xr)
     row = _row("rapid_voltage_change", req, rule=RULE_RVC, limit=limit, unit="% of nominal", source=source,
                project_value=round(f["value"], 4), verdict=f["verdict"],
                assumed=lim_assumed or fault_assumed or _envelope_assumed(inp) or xr_assumed,
                note=(f"Voltage change on the voltage form (cos ψ·ΔP + sin ψ·ΔQ)/S_k, ψ = atan(X/R), IEC TR 61000-3-7: "
-                     f"ΔP {swing:.4g} MW, ΔQ {f['q']:.4g} Mvar ({tan_words}), X/R {fi.DEFAULT_XR:g} ({fi.XR_ASSUMED}) "
+                     f"ΔP {swing:.4g} MW, ΔQ {f['q']:.4g} Mvar ({tan_words}), {_xr_words(inp)} "
                      f"gives {f['form']:.4g} %; the X/R-free bound √(ΔP² + ΔQ²)/S_k is {f['bound']:.4g} %"
                      + (f"; {f['words']}" if f["words"] else "")
                      + f"; for reference the P-only ΔS/S_k = {swing:.4g} MW / {sk:g} MVA = {swing / sk * 100.0:.4g} %; "
@@ -931,7 +948,7 @@ def _flicker_row(inp: _Inputs) -> dict:
         p_sm = 0.0
         if inp.island_raw is not None:
             p_sm = float(_reserve(inp.n, inp.island_raw, _year((inp.envelope["phases"][-1] or {}).get("cod")))["mw"])
-        env_unit = fi.envelope_unit(inp.envelope, p_sm)
+        env_unit = fi.envelope_unit(inp.envelope, p_sm, fi.DEFAULT_XR if inp.poc_xr is None else inp.poc_xr)
         cycles = env_unit.pop("cycles_per_min")
         env_unit["changes_per_min"] = fl.changes_per_min(cycles) if cycles is not None else None
         units = pd.concat([units, pd.DataFrame([{"unit": env_unit["unit"], "poc": "PoC",
@@ -1006,7 +1023,7 @@ def _flicker_row(inp: _Inputs) -> dict:
         row["note"] += (f"; GPU envelope (the one row that applies the grid X/R, through the voltage form) after smoothing: {env_unit['p_res_mw']:.3g} MW and "
                         f"{env_unit['q_res_mvar']:.3g} Mvar residual ({env_unit['p_sm_mw']:.3g} MW smoothed), "
                         f"step cos ψ·ΔP + sin ψ·ΔQ = {env_unit['step_mva']:.3g} MVA at {env_unit['changes_per_min']:g} "
-                        f"voltage changes/min (two per cycle), X/R {env_unit['xr']:g} ({fi.XR_ASSUMED}); tan φ_swing is assumed")
+                        f"voltage changes/min (two per cycle), {_xr_words(inp)}; tan φ_swing is assumed")
     return row
 
 
@@ -1286,13 +1303,24 @@ def readiness_fact(card: dict, row_id: str):
     return NoEvidence("missing", f"no scorecard row {row_id!r}")
 
 
-def _poc_sk_mva(n) -> float | None:
+def _poc_sks(n) -> list[tuple[float, str]]:
+    """``(S_k'' MVA, bus)`` of every marked PoC bus with a positive short-circuit level."""
     if "eh_poc" not in n.buses.columns or "eh_sk_mva" not in n.buses.columns:
-        return None
-    vals = [_num(n.buses.at[b, "eh_sk_mva"]) for b in n.buses.index
+        return []
+    vals = [(_num(n.buses.at[b, "eh_sk_mva"]), b) for b in n.buses.index
             if n.buses.at[b, "eh_poc"] is True or str(n.buses.at[b, "eh_poc"]).lower() in ("true", "1")]
-    vals = [v for v in vals if v is not None and v > 0]
-    return min(vals) if vals else None
+    return [(v, b) for v, b in vals if v is not None and v > 0]
+
+
+def _poc_sk_mva(n) -> float | None:
+    vals = _poc_sks(n)
+    return min(v for v, _ in vals) if vals else None
+
+
+def _governing_poc(n) -> tuple[str | None, int]:
+    """The PoC bus whose S_k'' governs (the lowest), and how many PoCs there are."""
+    vals = _poc_sks(n)
+    return (min(vals, key=lambda vb: vb[0])[1], len(vals)) if vals else (None, 0)
 
 
 def _services(inp: _Inputs):
@@ -1573,7 +1601,7 @@ def _after_battery(inp: _Inputs, rows: list[dict]) -> None:
              if inp.connection_mw and OSCILLATION_BAND_HZ[0] <= hz <= OSCILLATION_BAND_HZ[1] else None)
         # AS-16: the same voltage form as the row; the battery takes P only, so the load's reactive
         # swing tan φ·step stays.
-        rv = (_rvc_forms(after["residual_step_mw"], s, tan_phi, sk, rvc_limit)
+        rv = (_rvc_forms(after["residual_step_mw"], s, tan_phi, sk, rvc_limit, inp.poc_xr)
               if sk and rvc_limit is not None else None)
         v = rv["value"] if rv else None
         parts = [f"{ph['cod'][:4] if ph.get('cod') else 'the phase'}: of the {s:.3g} MW step, batteries "
