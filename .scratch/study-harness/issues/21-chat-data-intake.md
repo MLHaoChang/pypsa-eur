@@ -225,6 +225,76 @@ confirms but never something L1 may fill; grid-only profiles have no creation
 params beyond the network. Issue 17 generates workflow files from profiles and
 picks up the "Inputs from the chat" step.
 
+### 6. Safety conditions (GK B plan verdict, 3 Nov: GO WITH CHANGES)
+
+These bind whichever owner choice is taken; they are about safety only.
+
+**Hand-over at grant (§2).**
+- A1. Creation is idempotent and crash-safe. Before calling
+  `create_from_template`, the harness writes an intent record to the host
+  task (`run.origin` plus the planned project name and uuid) under a
+  process-exclusive lock (the task lock, `assistant_tasks.py:18` `_LOCK`, or
+  `services/site_scene/store.py:53` `project_lock`). A retry or a concurrent
+  second grant finds the intent and never creates twice; a crash between
+  creation and task start resumes from the intent. The gate fails closed.
+- A2. The envelope on the new project is not a harness self-grant. It
+  carries the host card's decision id (`approvals.decided(by="user")`) and
+  the grant digest, and it is admitted only when both match. Issue 03's §7
+  refusal matrix runs against it.
+- A3. The run reaches the new project only through the runner's explicit
+  context (`harness/runner.py` module docstring: `base_context`, owner ACL
+  re-checked each tick); the foreground session's active project is never
+  read or moved. The grant takes the new project's `mutation_lock` for the
+  create-and-start sequence, so a foreground switch, delete or ACL change
+  cannot interleave; the existing access-revoked and project-deleted
+  refusals (`runner.py:533-552`, `_Stop("needs_user", "access")`) apply to the
+  new project.
+- A4. Cited `upload_id`s resolve only through the host project's upload store,
+  as the owner. An id that exists only in another project is `not_found`,
+  byte-equal to an unknown id, so content-addressed ids are never a
+  cross-project oracle. Copied files keep their sha256.
+
+**Answer writes on the freshness chain (§4).**
+- B1. An answer row is admitted only when `run.waiting.kind == "data"`, its
+  `ref` is the current open request, the actor is the run's owner, the project
+  is the run's own, and the decision is a card decision (`by="user"`).
+- B2. The write's whole diff lies inside the open items. A card that writes
+  an item plus any other field (bulk, preview, sweep or mapping tools) is all
+  drift, not a partial answer.
+- B3. Chain continuity, checked under the task lock: the chain head equals
+  the fingerprint just before the write, and the appended link is the
+  fingerprint just after it. Any write in between makes the whole thing drift.
+- B4. The answer row records the card decision id. `resume_task` still
+  re-checks the gate from native facts and never takes the answer row as the
+  fact.
+
+**Stage-2 apply tools (§2).**
+- C1. Admission reuses each tool's own card digest (`edit_card.py:892-941`)
+  over the plan computed at admission on the live network, with target
+  components bound by uid (`services/component_identity`), not by name. No
+  parallel digest.
+- C2. Plan check and write share one network revision, atomically: a revision
+  bump between them sends the write to a card.
+- C3. Each tool joins `BOUND_CONTEXT_TOOLS` only with its §6.6 sweep test; no
+  tool from the sweep or study family joins (the #875 rule).
+
+**Intake sources and texts (§1, §3).**
+- D1. A `turn_id` source is a user-role turn of the host thread written by the
+  run's owner. Assistant text, tool results, injected document text and
+  another member's messages are refused.
+- D2. Text-only enums and bools (`site_type`, `load_profile`, `fuel`,
+  `ride_through`, `candidates.<k>.enabled`): the assistant chooses the id, so
+  the card marks the row "mapped by the assistant from: '<quote>'". The quote
+  must pass `locate`; an id outside the enum is refused.
+- D3. A citation carrying a model-supplied `value` is refused, and so is one
+  whose `value_text` differs from what `_value` reads.
+- D4. The intake message and the data-request notice are harness text: they
+  never echo a document beyond the bounded quote (≤300 characters) and never
+  include an error's raw text other than `SiteParamsError`'s field message.
+
+When this is built, the PRs run the route-policy, route-parity and
+control-matrix checks, because the setup path calls a route handler.
+
 ## Acceptance criteria
 
 - [ ] Intake from an XLSX attachment with a stages table (`year`, `peak (kW)`)
@@ -264,6 +334,26 @@ picks up the "Inputs from the chat" step.
 - [ ] No item is asked twice in one run (test).
 - [ ] The model never supplies a value: an intake citation carrying a `value`
       field is refused (test).
+- [ ] A1: a double grant creates one project; a crash after creation and
+      before task start resumes from the intent record without a second
+      project (tests).
+- [ ] A2: an envelope on the new project without the host card's decision id
+      and grant digest, or with a mismatched one, is refused (test).
+- [ ] A3: the foreground session's active project is unchanged after the
+      grant; access revoked and project deleted on the new project stop the
+      run with the existing refusals (tests).
+- [ ] A4: an upload id present only in another project is `not_found`,
+      byte-equal to an unknown id; copied files keep their sha256 (tests).
+- [ ] B2: a card that writes an open item plus one extra field pauses the run
+      as drift (test).
+- [ ] B3: a write between the chain head and the answer write makes the
+      answer drift (test, under the task lock).
+- [ ] C2: a network revision bump between the plan check and the write sends
+      it to a card (test).
+- [ ] D1: a `turn_id` naming an assistant turn, a tool result, injected
+      document text or another member's message is refused (one test each).
+- [ ] D2/D3: an enum id outside the enum is refused; a `value_text` that
+      differs from what `_value` reads is refused (tests).
 
 ## Likely files
 
@@ -294,3 +384,11 @@ section.
    a file; text gives only enums and yes/no.
 
 ## Comments
+
+- 2026-11-03, GK B (18), plan verdict @9876616c: GO WITH CHANGES. (a) The
+  hand-over at grant is safe compared with a rebind, under A1–A4. (b) Answer
+  writes on the freshness chain are safe only under B1–B4. (c) Digest-bound
+  admission of the stage-2 apply tools is safe as scoped, under C1–C3. Also
+  D1–D4. The rulings are about safety only; open choices 1–3 stay the
+  owner's. All conditions are written into §6 above, with tests in the
+  acceptance criteria.

@@ -517,6 +517,11 @@ details and the open choices are in
 - **Mid-run data.** Proposed: carded writes that answer an open request are
   answer rows on the freshness chain and the run re-checks its gate; any other
   write is drift as today.
+- **Safety conditions.** GK B's plan verdict (GO WITH CHANGES, 3 Nov) binds
+  the hand-over (idempotent intent record, no self-grant, foreground untouched,
+  host-only upload ids), the answer writes (owner card, whole diff inside the
+  open items, chain continuity) and the stage-2 tools (own card digest by uid,
+  one revision); issue 21 §6 lists them.
 
 ## 7. The approval envelope (SH-ENVELOPE-1)
 
