@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Intent comparison section in the grid study panel: choose design intents A-E, run them as a background job with progress and abort, and compare sizes, checks and loop status in one table (a loop that is not converged is never shown as a pass).

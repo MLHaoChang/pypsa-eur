@@ -202,6 +202,15 @@ _INERT_PROFILE_KEYS = frozenset({"title", "name", "notes", "document"})
 _INERT_LIMIT_KEYS = frozenset({"page", "quote"})
 
 
+def grid_code_profile(project, profile_id: str) -> dict:
+    """Grid-code profile ``profile_id`` as the engine loads it (shipped or the project's own); 422 when it
+    does not load."""
+    try:
+        return cs.load_grid_code(profile_id, extra_dirs=(grid_codes_dir(project),))
+    except ContractError as exc:
+        raise _unprocessable(exc)
+
+
 def _fingerprint(profile: dict) -> str:
     def strip(v):
         if isinstance(v, dict):

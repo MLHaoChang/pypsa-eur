@@ -18,6 +18,7 @@ import {
   type GridCodeDocument, type GridCodeDraft, type GridCodeSummary, type GridLimit,
 } from '../api/campusElectrical'
 import { Btn, Field, PageSection, Tag } from '../components/PageKit'
+import { useUIStore } from '../store/uiStore'
 
 export const GRID_CODES_KEY = (name: string) => ['campusElectrical', 'gridCodes', name] as const
 const DRAFT_KEY = (name: string, id: string) => ['campusElectrical', 'gridCodeDraft', name, id] as const
@@ -174,6 +175,15 @@ export default function CampusGridCodeSection({ name, onProfilesChanged }: {
     onSuccess: () => { refreshList(); onProfilesChanged() },
     onError: e => setError(errorText(e)),
   })
+
+  // "Set grid code ›" in the intent comparison asks for this section: scroll to it once it is on screen.
+  const scrollRequest = useUIStore(s => s.gridCodeScrollRequest)
+  const clearScrollRequest = useUIStore(s => s.clearGridCodeScrollRequest)
+  useEffect(() => {
+    if (!scrollRequest) return
+    document.querySelector('[data-testid="grid-codes"]')?.scrollIntoView?.({ block: 'start' })
+    clearScrollRequest()
+  }, [scrollRequest, clearScrollRequest])
 
   const data = codes.data
   const confirmThen = (what: string, run: () => void) => { if (window.confirm(what)) run() }

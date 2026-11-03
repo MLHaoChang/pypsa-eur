@@ -61,11 +61,16 @@ def technology_bounds(spec: DesignIntentSpec, critical_mw: float) -> dict[str, d
     return out
 
 
-def grid_code_warnings(spec: DesignIntentSpec, profile: dict) -> list[str]:
+NO_GRID_CODE_WARNING = ("No grid code set: whether transfer to BESS counts as ride-through is unknown.")
+
+
+def grid_code_warnings(spec: DesignIntentSpec, profile: dict | None) -> list[str]:
     """Intent D: warn unless the profile accepts transfer to BESS as ride-through
     (AS-NOUPS-1), by its ``ride_through_transfer_counts`` key. A missing key
     counts as not accepted. Never blocks."""
     if spec.intent != "D":
         return []
+    if profile is None:
+        return [NO_GRID_CODE_WARNING]
     warning = ride_through_transfer_warning(profile)
     return [warning] if warning else []
