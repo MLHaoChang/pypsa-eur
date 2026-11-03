@@ -69,19 +69,32 @@ REPORTED_EXITS = frozenset({'end', 'error'})
 
 _ID_RE = re.compile(r'^[A-Za-z0-9_-]{1,48}$')
 _CONTROL_RE = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
-_NUMBER = r'(\d+(?:[.,]\d+)?)'
+_NUMBER = r'(\d{1,12}(?:[.,]\d{1,12})?)'
 # One segment, two numbers joined by a correction word: "7.5, no, 75 MW".
+# Matched on whitespace-collapsed text with single optional spaces, so no two
+# unbounded runs overlap (CodeQL polynomial-regex on #1058).
 _CORRECTION_RE = re.compile(
-    _NUMBER + r'\s*[A-Za-z%]{0,4}\s*[,;.]?\s*'
+    _NUMBER + r' ?[A-Za-z%]{0,4} ?[,;.]? ?'
     r'(?:no|not|sorry|i mean|rather|or rather|actually|correction|make that)\b'
-    r'[\s,;:]*' + _NUMBER,
+    r'[ ,;:]{0,4}' + _NUMBER,
     re.IGNORECASE,
 )
-_APPROVAL_RE = re.compile(
-    r'^\s*(?:yes|yeah|yep|confirm(?:ed)?|approve(?:d)?|ok(?:ay)?|go ahead|do it)'
-    r'(?:\s+please)?\s*[.!]?\s*$',
-    re.IGNORECASE,
-)
+_APPROVAL_WORDS = frozenset({
+    'yes', 'yeah', 'yep', 'confirm', 'confirmed', 'approve', 'approved',
+    'ok', 'okay', 'go ahead', 'do it',
+})
+
+
+def _collapse(text: str) -> str:
+    return ' '.join(text.split())
+
+
+def is_bare_approval(text: str) -> bool:
+    """"yes", "Confirm.", "approve please" and the like, nothing more."""
+    phrase = _collapse(text).lower().rstrip('.!').strip()
+    if phrase.endswith(' please'):
+        phrase = phrase[: -len(' please')]
+    return phrase in _APPROVAL_WORDS
 
 log = logging.getLogger(__name__)
 
@@ -190,7 +203,7 @@ def _drop_tickets(episode_id: str | None) -> None:
 
 def ambiguous_quantity(text: str) -> bool:
     """True when one segment corrects one number with a different one."""
-    for match in _CORRECTION_RE.finditer(text):
+    for match in _CORRECTION_RE.finditer(_collapse(text)):
         first, second = (m.replace(',', '.') for m in match.groups())
         try:
             if float(first) != float(second):
@@ -507,7 +520,7 @@ def submit_segment(
                 'text': text,
                 'message': 'I heard two different numbers. Which value did you mean?',
             }
-        if _APPROVAL_RE.match(text) and _pending_card(episode_id):
+        if is_bare_approval(text) and _pending_card(episode_id):
             return {
                 'status': 'not_an_approval',
                 'segment_id': segment_id,

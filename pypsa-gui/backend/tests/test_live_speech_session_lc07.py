@@ -797,3 +797,13 @@ def test_boot_sweep_settles_sessions_a_dead_process_left(transport, monkeypatch,
     assert all(c['flags'] == ['usage_unverified'] for c in charges.values())
     assert ls.sweep_at_boot([tmp_path / PROJECT]) == 0
     _settled_once(tid, sid)
+
+
+def test_transcript_checks_stay_linear_on_pathological_input():
+    # CodeQL polynomial-regex alert on #1058: long whitespace or digit runs.
+    started = time.monotonic()
+    assert not ls.is_bare_approval('yes' + ' ' * 3990 + 'x')
+    assert not ls.ambiguous_quantity('1' * 3990 + ' x')
+    assert not ls.ambiguous_quantity('1 ' * 1995)
+    assert ls.is_bare_approval('  approve   please ! ')
+    assert time.monotonic() - started < 1.0
