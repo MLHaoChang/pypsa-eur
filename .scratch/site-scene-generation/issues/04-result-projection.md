@@ -37,3 +37,24 @@ Deliver this slice's in-place explanation, typed proposed action or truthful UI 
 ## Optional coordinate-first workflow clarification
 
 Playback uses the actual native snapshot cadence, including quarter-hourly, hourly, representative and multi-period data; the title's hourly case is an example, not a restriction. Project native edge/port quantities and units onto valid physical mappings. Keep stale/missing quantities unavailable and interpolation purely visual. Cover V87–V88 and prior freshness/numerical cases. Read [optional-site-workflow.md](../optional-site-workflow.md) and [workflow-assessment.md](../workflow-assessment.md).
+
+## Comments
+
+### 2026-11-03: D07 plan verdict, GK A (11): GO @a0fdf73f with conditions
+
+Draft: [d07/plan.md](../d07/plan.md). Oracle re-derived by GK A at t3. Conditions binding on Step 2:
+
+1. Units: read the raw `buses.unit` beside `process_products.bus_unit`. `""`, `"None"`, NaN, `"MW"` and `"MWh"` mean MW, `t` means t/h, and anything else (kg, GJ) is `unit_unknown`. Tested.
+2. A StorageUnit's rate and SoC take the bus unit, as a Store's do (t/h and t on a tonne bus). Tested on a t bus.
+3. The Link port role from the efficiency sign is nominal. Add `reversed: true` when the value's sign disagrees with it (p_min_pu < 0). Tested. A link with two ports on one bus: the group sums both. Tested.
+4. `snapshot` accepts the native integer label of a RangeIndex network. A tz-aware query against a naive index, or a missing `period` on a multi-period network, gives `invalid_input`, never a 500. Each is tested.
+5. The run id is `services.dispatch_status.dispatch_digest` (str), not `services.results.dispatch_digest` (dict). `run_changed` is tested.
+6. Freshness has one source: availability is gated by `solve_matches_inputs(ctx)` itself, and the finer reasons only label it. One test per reason, including after an AC PF. A mutant that drops the gate must fail.
+7. Run `test_route_chat_disposition`, `test_project_route_acl_policy`, `test_write_surface_lock_policy` and `assistant_route_parity --check` at the trial merge. The GET leaves the network revision, `n.meta`, solver_state and the D06 uids unchanged. Tested.
+8. Store `e` and SoC are never window-summed. Test with generators ≠ stores weightings. A window across two periods applies years per period, with a test, or is refused.
+9. Internal bus: enumerate every class with a port on the bus (Line, Transformer, ShuntImpedance, and bus2..4 of non-member Links). A non-member Link's bus3 on a would-be-internal bus makes it a boundary bus. Tested.
+10. Shares of one target summing above 1 (beyond tolerance) are refused. Tested.
+11. The closed reason-code list is pinned by a test.
+12. The oracle values go into the tests as hand values.
+
+GK A leanings on the owner choices: A backend route, B vintage rows unavailable in SC-03, C unavailable after an AC PF.
