@@ -10,7 +10,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { networkApi } from '../api/network'
 import {
-  sceneErrorCopy, sceneErrorDetail, sceneErrorWantsReload, type BindPreview, type ModelProposal, type PlaceEntry, type PlacePreview, type RebindPreview,
+  sceneErrorCopy, sceneErrorDetail, sceneErrorWantsReload, type BindPreview, type DetachPreview, type ModelProposal, type PlaceEntry, type PlacePreview, type RebindPreview,
   type SceneAssociation, type SceneBuilding, type SceneFinding, type SiteScene, type TargetClass,
 } from '../api/siteScene'
 import { openSectionInExpert, openSectionInGuided, withReturnFromSite3D } from '../layout/flowNavigation'
@@ -28,6 +28,8 @@ import { PALETTE_SECTIONS_DATA, PROCESS_UNIT_ITEM, type PaletteItemData } from '
 import { componentOfKey } from './placementFindingsStore'
 import NumberField from './NumberField'
 import { applyProposal, discardProposal, propose, sceneKey, SitesNotSaved } from './sceneActions'
+import PlacedEquipment from './PlacedEquipment'
+import { detachRefusalCopy, detachTitle, moveGroup, undoTitle, UNDO_GONE, type GroupMove } from './groupEdit'
 import { useModelProposal } from './useSiteScene'
 import type { AssetFootprint, Site } from './types'
 
@@ -159,6 +161,10 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
   const atHome = useUIStore(s => !s.flowReturn && !s.creationItem)
   const placementRebind = useModelProposal(s => s.placementRebind)
   const setPlacementRebind = useModelProposal(s => s.setPlacementRebind)
+  const picked = useModelProposal(s => s.picked)
+  const clearPicked = useModelProposal(s => s.clearPicked)
+  const lastDetach = useModelProposal(s => s.lastDetach)
+  const setLastDetach = useModelProposal(s => s.setLastDetach)
 
   // Another building: nothing chosen for the last one carries over (its pick, shares, rebind or roof).
   const selectedId = selection?.kind === 'building' ? selection.id : null
@@ -184,13 +190,13 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
     return c.type in KIND_WORDS ? targetLabel(c.type as TargetClass, c.name, mode) : c.name
   }
 
-  const run = async (fn: () => Promise<void>, refusal?: (code: string | undefined) => string | null) => {
+  const run = async (fn: () => Promise<void>, refusal?: (code: string | undefined, key: string | undefined) => string | null) => {
     if (!project) return
     setBusy(true); setError(null)
     try { await fn() } catch (e) {
       const d = sceneErrorDetail(e)
       if (['proposal_expired', 'proposal_cancelled'].includes(d?.error_kind ?? '')) setProposal(null)
-      const copy = e instanceof SitesNotSaved ? e.message : (refusal?.(d?.code) ?? sceneErrorCopy(e))
+      const copy = e instanceof SitesNotSaved ? e.message : (refusal?.(d?.code, d?.key ?? undefined) ?? sceneErrorCopy(e))
       // One fix per reason: a placement whose item is gone is attached again; a scene that changed is reloaded.
       const rebindKey = d?.code === 'unbound_target' ? (d.key ?? (mine?.action === 'place_existing' ? Object.keys(mine.preview.placements)[0] : place.key) ?? undefined) : undefined
       const reload = !rebindKey && (sceneErrorWantsReload(e) || d?.code === 'unknown_association')
@@ -250,9 +256,47 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
   }, code => placeRefusalCopy(code, placeItem ? placeItem.name : 'this item',
     roofBuilding ? bName(roofBuilding) : null))
 
+  // ── several placed items (SC-02d) ─────────────────────────────────────────
+  const pickedKeys = picked?.siteId === site.id ? picked.keys.filter(k => k in placements) : []
+  // One item picked: its placement comes back in the usual "Place equipment" fields.
+  const single = pickedKeys.length === 1 ? pickedKeys[0] : null
+  useEffect(() => {
+    if (!single) return
+    const e = placements[single]
+    const roof = e.on?.startsWith('roof:') ? e.on.slice(5) : null
+    setPlace({ key: single, on: roof ? 'roof' : 'ground', roofOf: roof, x: e.x, y: e.y, heading: e.heading })
+  }, [single]) // eslint-disable-line react-hooks/exhaustive-deps
+  const keyName = (key: string | undefined) => (key ? itemName(key) : null)
+  const previewMove = (keys: string[], move: GroupMove) => run(async () => {
+    const p = await propose<PlacePreview>(qc, project!, site.id, 'place_existing', { placements: moveGroup(placements, keys, move) })
+    setProposal({ ...p, action: 'place_existing' })
+  }, (code, key) => {
+    const e = key ? placements[key] : undefined
+    return placeRefusalCopy(code, keyName(key) ?? 'One of them', e?.on?.startsWith('roof:') ? bName(e.on.slice(5)) : null)
+  })
+  const previewDetach = (keys: string[]) => run(async () => {
+    const p = await propose<DetachPreview>(qc, project!, site.id, 'detach', { keys })
+    setProposal({ ...p, action: 'detach' })
+  }, (code, key) => detachRefusalCopy(code, keyName(key)))
+  const receipt = lastDetach?.siteId === site.id ? lastDetach : null
+  const undoDetach = () => run(async () => {
+    if (!receipt) return
+    try {
+      const p = await propose<DetachPreview>(qc, project!, site.id, 'undo_detach', { proposal: receipt.proposalId })
+      setProposal({ ...p, action: 'undo_detach' })
+    } catch (e) {
+      if (sceneErrorDetail(e)?.code === 'detach_not_found') setLastDetach({ ...receipt, blocked: UNDO_GONE })
+      throw e
+    }
+  }, (code, key) => (code === 'detach_not_found' ? null : detachRefusalCopy(code, keyName(key))))
+
   // ── review ────────────────────────────────────────────────────────────────
   const apply = () => run(async () => {
     await applyProposal(qc, project!, mine!)
+    if (mine!.action === 'detach') {
+      setLastDetach({ siteId: site.id, proposalId: mine!.id, count: mine!.preview.items.length, blocked: null })
+      clearPicked()
+    } else if (mine!.action === 'undo_detach') setLastDetach(null)
     setProposal(null); resetAttach(); setPlace(emptyPlace); setPlacementRebind(null); setRebindPick(null)
   })
   const reload = () => {
@@ -503,6 +547,10 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason 
             )}
             {placeReason && <span className="text-[11px] text-muted" data-testid="place-preview-reason">{placeReason}</span>}
           </div>
+
+          <PlacedEquipment siteId={site.id} placements={placements} itemName={itemName} writable={writable}
+            blockedReason={!canWrite ? blockedReason : null} onPreviewMove={(k, m) => void previewMove(k, m)}
+            onPreviewDetach={k => void previewDetach(k)} onUndo={() => void undoDetach()} />
         </>
       )}
 
@@ -570,6 +618,20 @@ function Review({ proposal, mode, buildings, groups, itemName, shortName, sizeLi
     lines.push({ key: 'r', text: p.placement
       ? `Attach the placed ${p.was ?? componentOfKey(p.placement).name} to ${what} again`
       : `Attach ${p.feature ? fName(p.feature) : 'it'} to ${what} again${p.was ? ` · was ${p.was}` : ''}` })
+  } else if (proposal.action === 'detach' || proposal.action === 'undo_detach') {
+    const undo = proposal.action === 'undo_detach'
+    for (const it of proposal.preview.items) {
+      const note: { text: string; testId: string }[] = []
+      for (const g of it.groups) {
+        note.push({ text: undo ? `Back in group ${g.label}` : `Leaves group ${g.label}`, testId: 'proposal-group' })
+        if (!undo && g.left_empty) note.push({ text: `Group ${g.label} will be empty (kept).`, testId: 'proposal-group-empty' })
+      }
+      for (const a of it.associations) {
+        const what = a.class in KIND_WORDS ? a.label.split(' · ')[0] : a.label
+        note.push({ text: undo ? `Attached to ${what} again` : `Its attachment to ${what} goes`, testId: 'proposal-attachment' })
+      }
+      lines.push({ key: it.key, text: undo ? `Restore ${itemName(it.key)}` : `Detach ${itemName(it.key)}`, note })
+    }
   } else {
     for (const [key, e] of Object.entries(proposal.preview.placements)) {
       const where = e.on && e.on.startsWith('roof:') ? `on the roof of ${bName(e.on.slice(5))}` : 'on the ground'
@@ -589,6 +651,8 @@ function Review({ proposal, mode, buildings, groups, itemName, shortName, sizeLi
     : allChecked ? 'No overlap with buildings found' : `No overlap with buildings found: ${checked.map(shortName).join(', ')}`
   return (
     <div className="flex flex-col gap-1.5" data-testid="assoc-proposal" data-action={proposal.action}>
+      {proposal.action === 'detach' && <span className="text-text font-medium" data-testid="proposal-title">{detachTitle(proposal.preview.items.length)}</span>}
+      {proposal.action === 'undo_detach' && <span className="text-text font-medium" data-testid="proposal-title">{undoTitle(proposal.preview.items.length)}</span>}
       <span className="text-text">Preview: nothing is saved until Apply</span>
       <ul className="flex flex-col gap-0.5 text-[11px] text-text">
         {lines.map(l => (
@@ -605,7 +669,9 @@ function Review({ proposal, mode, buildings, groups, itemName, shortName, sizeLi
               <button type="button" data-testid={`assoc-finding-${i}`} data-code={f.code}
                 className={`text-left text-[11px] hover:underline ${f.severity === 'warn' ? 'text-warn' : 'text-muted'}`}
                 onClick={() => selectFinding(f, buildings)}>
-                {findingCopy(f, names)}
+                {f.code === 'membership_not_restored' && f.objects?.[0]
+                  ? `${itemName(f.objects[0])} is not put back in group ${f.group ?? f.objects[1]}: the group was deleted`
+                  : findingCopy(f, names)}
               </button>
             </li>
           ))}

@@ -3,7 +3,7 @@
 
 # SC-02d implementation record: detach and group editing
 
-Status: backend built (branch `claude/site3d-sc02d`); frontend waits for SC-02c (site3d/) to merge. Plan verdicts and their conditions: [issues/03-bindings-and-placement.md](../issues/03-bindings-and-placement.md) `## Comments`. Follows [../sc-02/record.md](../sc-02/record.md) follow-up "detach and group editing are not built; placement is one item per preview".
+Status: backend and frontend built on branch `claude/site3d-sc02d` (master merged after SC-02c #1022). Plan verdicts and their conditions: [issues/03-bindings-and-placement.md](../issues/03-bindings-and-placement.md) `## Comments`. Follows [../sc-02/record.md](../sc-02/record.md) follow-up "detach and group editing are not built; placement is one item per preview".
 
 ## Frozen contract
 
@@ -14,6 +14,14 @@ Two new actions on the existing `POST .../scene/proposals` (then `apply` / `canc
 - Group editing needs no new action: `place_existing` already takes several keys and commits them as one revision; one refused key refuses all.
 
 Route detail codes (under existing error kinds, so no new `error_kind` and no tool-error-kinds fragment): `not_placed`, `already_placed`, `duplicate`, `unsupported_target`, `invalid_placements`, `invalid_allocation` (a detach that would leave a split short), `unbound_target` (422 at prepare, 409 at Apply), `target_changed` (409), `detach_not_found` (404 `not_found`, one text for every miss: "This detach can’t be undone now: the scene changed since").
+
+## Frontend
+
+- `site3d/PlacedEquipment.tsx` (new): the "Placed equipment" list in the Model part, the keyboard path to the same selection the canvas makes with Shift+click; "N selected · Clear"; with two or more picked, "Edit N items" with Move east (m), Move north (m), Rotate by (°) (hint: about their centre) and one Preview; "Detach from scene"; the receipt "Detached N items" with an Undo button, disabled with its reason once the server answers `detach_not_found`.
+- `site3d/groupEdit.ts` (new, pure): the group move (clockwise rotation about the mean position, then the offset; roof items keep `on`), and the refusal sentences (UX 1).
+- `site3d/AssociationPanel.tsx`: one picked item loads into the usual "Place equipment" fields; the shared Review card renders `detach` ("Detach N items from the scene. They stay in the model.", groups left, "Group X will be empty (kept).", attachments that go) and `undo_detach` ("Undo detach: restore N items", the membership warning by name).
+- `site3d/useSiteScene.ts`: `picked` and `lastDetach` in the Model proposal store. `api/siteScene.ts`: the two actions and their preview type.
+- `pages/SiteCanvas.tsx`: Shift+click on a placed item of a scene-enabled Site toggles its pick; a picked item gets a ground outline in `PICKED_COLOR` (magenta, apart from hover, findings and the gizmo axes); Esc clears the picks while the view has focus.
 
 ## Plan conditions and the test that proves each
 
@@ -29,15 +37,24 @@ Tests in `pypsa-gui/backend/tests/test_site_scene_detach.py`.
 | GK B 6: same cap and validation; other actions unchanged | `_placeable` shared with `place_existing`; `test_detach_over_the_place_cap_is_refused`, `test_other_actions_keep_their_receipt_shape`; the SC-02a suites pass unchanged |
 | GK B 7: mutants | [evidence/mutation-checks.txt](evidence/mutation-checks.txt): M1–M3 each killed by its named test, green restored |
 | Access | `test_another_org_cannot_apply_a_prepared_detach` (404), `test_a_stale_detach_refuses_and_writes_nothing` (409); prepare never writes or mints: `test_detach_and_undo_prepare_never_write` |
+| UX 1 names, never keys | `groupEdit.test.ts` (every refusal starts with the name), `PlacedEquipment.test.tsx` (list, cards and refusals carry no `Class:` key); backend roof refusals now carry the refused `key` |
+| UX 2 axis words | `PlacedEquipment.test.tsx` "edits two items as one" (Move east / Move north / Rotate by, hint) |
+| UX 3 one versus several | "with one item picked, its placement comes back in the usual fields; group values do not carry over" |
+| UX 4 Esc | "Esc clears the picks only while the list has focus, and lets other Esc handlers run" (a window listener still sees both presses) |
+| UX 5 detach preview | "previews a detach by name, applies it, and offers Undo" |
+| UX 6 undo | the same test (Undo is a button), "Undo opens the undo card; a group deleted since is a warning line by name", "when the server can no longer undo it, Undo stays visible, disabled, with the reason" |
+| UX 7 one selection | "Clear keeps the count in sync with the store the canvas reads"; outline colour in screenshots |
 | Group editing | `test_several_items_place_in_one_revision`, `test_one_refused_item_refuses_the_whole_group_move`, `test_findings_of_a_group_move_are_per_item` |
 
 ## Evidence
 
 - Red first: the detach and undo tests failed on `Proposal: action must be one of ...` before the actions existed; the three group-editing tests passed from the start (they pin existing behaviour).
+- Frontend: `groupEdit.test.ts` (7), `PlacedEquipment.test.tsx` (11); `src/site3d` and SiteCanvas suites (54 files) pass; `tsc --noEmit` clean.
 - Green: `test_site_scene_detach.py` (34), `test_site_scene_*.py`, `test_site_identity.py`, `test_site_service.py`, `test_sites_routes.py`, the three policy tests and `test_tool_error_kind_manifest.py`: exit 0.
 
 ## Residual risk and unfinished work
 
-- **Frontend not built yet** (waits for SC-02c).
+- **Canvas Shift+click and the outline** are covered by screenshots, not by a unit test (no R3F pointer harness in the suite).
+- **The Undo receipt lives in the client store**: a page reload drops it; the detach is then undone by placing the items again.
 - **Undo after a copy.** A copied project carries only the pointed generation, so a detach made before the copy cannot be undone in the copy (`detach_not_found`); the user places the item again.
 - **Another site's detach id** gives `detach_not_found` by construction (the lookup reads only this site's chain); no test spans two enabled sites.

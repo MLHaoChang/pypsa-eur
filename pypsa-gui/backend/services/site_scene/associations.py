@@ -567,9 +567,9 @@ def prepare_place(scene: dict[str, Any], n, inputs: dict[str, Any],
                 raise _refuse("orphan_member", f"{label}: no such building roof", member=on)
             carrier = (_carrier(n, cls, name) or "").lower() if cls == "Generator" else ""
             if not any(c in carrier for c in ROOF_CARRIERS):
-                raise _refuse("not_roof_eligible", f"{label}: only solar panels go on a roof")
+                raise _refuse("not_roof_eligible", f"{label}: only solar panels go on a roof", key=key)
             if not building.get("height_m") or not all(_inside(pt, building["footprint"]) for pt in outline):
-                raise _refuse("off_roof", f"{label}: not within the roof of building {bid}")
+                raise _refuse("off_roof", f"{label}: not within the roof of building {bid}", key=key)
             entry["on"] = on
         else:
             for bid, b in sorted(buildings.items()):

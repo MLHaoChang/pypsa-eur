@@ -294,6 +294,7 @@ def test_one_refused_item_refuses_the_whole_group_move(client, scene):
         BESS: {"x": 61.0, "y": -50.0, "heading": 0},
         SOLAR: {"x": 0.0, "y": 0.0, "heading": 0, "on": f"roof:{A}"}}}, ok=False)
     assert r.status_code == 422 and _detail(r)["code"] == "off_roof" and "solar" in _detail(r)["message"]
+    assert _detail(r)["key"] == SOLAR                              # the UI names the refused item
     got = _get(client)
     assert got["revision"] == before["revision"] and got["site"]["placements"] == before["site"]["placements"]
 
