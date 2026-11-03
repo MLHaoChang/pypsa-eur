@@ -45,7 +45,7 @@ def test_reader_sees_the_flag_and_ignores_truthy_strings(tmp_path):
 
 def test_default_is_off_in_project_info(client, api_project):
     name = api_project("settings-default")
-    assert _info(client, name)["settings"] == {"derive_lengths_from_geometry": False}
+    assert _info(client, name)["settings"] == {"derive_lengths_from_geometry": False, "backup_autonomy_h": 4.0}
 
 
 def test_patch_turns_it_on_and_persists_in_metadata(client, api_project, project_storage_dir):
@@ -118,4 +118,4 @@ def test_project_info_tolerates_old_metadata(client, api_project, project_storag
     meta.pop("settings", None)
     meta.update(payload)
     (pdir / "metadata.json").write_text(json.dumps(meta))
-    assert _info(client, name)["settings"] == {"derive_lengths_from_geometry": False}
+    assert _info(client, name)["settings"] == {"derive_lengths_from_geometry": False, "backup_autonomy_h": 4.0}
