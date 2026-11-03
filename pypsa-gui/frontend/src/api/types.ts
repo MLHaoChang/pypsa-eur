@@ -727,6 +727,12 @@ export interface ProjectSettings {
    * records the value it used.
    */
   backup_autonomy_h?: number
+  /**
+   * The grid-readiness RVC and flicker rows' source X/R at the point of
+   * connection, 0 < x <= 100. null/absent = none entered (the default 4
+   * applies); PATCH null clears it.
+   */
+  poc_xr?: number | null
 }
 
 // Compact summary returned by GET /api/projects/{name}/compare-state.

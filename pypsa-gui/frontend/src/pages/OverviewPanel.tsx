@@ -255,6 +255,11 @@ function ProjectSettingsSection({ currentProject }: { currentProject: string }) 
   })
   return (
     <PageSection title="Settings" hint="Stored with the project">
+      {readOnly && (
+        <p className="text-[11px] text-muted mb-2">
+          This project is read-only, so its settings cannot be changed.
+        </p>
+      )}
       <Toggle
         on={derive}
         onChange={readOnly || mut.isPending ? undefined : (v) => mut.mutate(v)}
@@ -265,7 +270,70 @@ function ProjectSettingsSection({ currentProject }: { currentProject: string }) 
           </span>
         }
       />
+      <PocXrField currentProject={currentProject} stored={info?.settings?.poc_xr ?? null} readOnly={readOnly} />
     </PageSection>
+  )
+}
+
+// ── Project PoC X/R (AS-17c) ────────────────────────────────────────────────
+// The grid-readiness RVC and flicker rows read this source X/R at the point of
+// connection. Empty = none entered, so the default 4 applies. Saves on blur or
+// Enter; a refusal (client range check or the API's 422) stays under the field.
+export const POC_XR_HINT = '0 < X/R ≤ 100. Empty: the default 4 applies.'
+const POC_XR_RANGE_ERROR = 'PoC X/R must be above 0 and at most 100.'
+
+function PocXrField({ currentProject, stored, readOnly }: {
+  currentProject: string; stored: number | null; readOnly: boolean
+}) {
+  const qc = useQueryClient()
+  const storedText = stored == null ? '' : String(stored)
+  const [text, setText] = useState(storedText)
+  const [error, setError] = useState<string | null>(null)
+  // Follow the server's value when it changes under us (reload, other tab).
+  const [seen, setSeen] = useState(storedText)
+  if (seen !== storedText) { setSeen(storedText); setText(storedText); setError(null) }
+
+  const mut = useMutation({
+    mutationFn: (v: number | null) => projectsApi.updateSettings(currentProject, { poc_xr: v }),
+    onSuccess: (updated) => {
+      setError(null)
+      qc.setQueryData<ProjectInfo[]>(['projects'], prev =>
+        prev?.map(p => (p.name === updated.name ? { ...p, settings: updated.settings } : p)) ?? prev)
+      qc.invalidateQueries({ queryKey: ['projects'] })
+      toast.success(updated.settings?.poc_xr == null ? 'PoC X/R cleared' : `PoC X/R set to ${updated.settings.poc_xr}`)
+    },
+    onError: (e: unknown) => setError(errorText(e)),
+  })
+
+  const commit = () => {
+    const t = text.trim()
+    if (t === storedText) { setError(null); return }
+    if (t === '') { mut.mutate(null); return }
+    const n = Number(t)
+    if (!Number.isFinite(n) || n <= 0 || n > 100) { setError(POC_XR_RANGE_ERROR); return }
+    mut.mutate(n)
+  }
+
+  return (
+    <div className="mt-3 flex flex-col gap-1">
+      <label htmlFor="poc-xr" className="text-xs font-medium text-text">PoC X/R</label>
+      <input
+        id="poc-xr"
+        type="text"
+        inputMode="decimal"
+        value={text}
+        placeholder="4 (default)"
+        disabled={readOnly || mut.isPending}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? 'poc-xr-error' : 'poc-xr-hint'}
+        onChange={e => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+        className="w-32 rounded border border-border bg-surface px-2 py-1 text-[12px] text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20"
+      />
+      <span id="poc-xr-hint" className="text-[11px] text-muted leading-snug">{POC_XR_HINT}</span>
+      {error && <span id="poc-xr-error" role="alert" className="text-[11px] text-danger leading-snug">{error}</span>}
+    </div>
   )
 }
 
