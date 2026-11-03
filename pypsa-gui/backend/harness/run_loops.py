@@ -38,7 +38,6 @@ from importlib import resources
 LOOP = "L1"
 STAGE = "input_gate"
 REASON_CHARS = 240
-ENDINGS = ("no_progress", "exhausted", "unverified_write", "error", "no_envelope", "passed")
 
 
 def _tasks():
@@ -143,7 +142,20 @@ def due(task):
 # ── One round (the runner, in the run's bound context) ──────────────────────
 
 
-def _message(task, profile_ref, due_now):
+def _gap_sources(envelope):
+    """What each granted data gap may be filled from: the values to copy."""
+    out = []
+    for gap in envelope.get("gaps", []):
+        target = gap["target"]
+        for name, record in (gap.get("at_grant") or {}).items():
+            if "tariffs" in record:
+                record = {"tariffs": [{"name": n, "version": v} for n, v in record["tariffs"].values()]}
+            out.append({"tool": gap["tool"], "component": target["component"], "name": name,
+                        "attr": target["attr"], "source": record})
+    return out
+
+
+def _message(task, profile_ref, due_now, envelope):
     from services import workflow_tools
     try:
         readiness = workflow_tools.project_readiness(task["project_id"])
@@ -153,10 +165,11 @@ def _message(task, profile_ref, due_now):
     failed = [{"rule": r["rule"], "facts": r["facts"], **({"reason": r["reason"]} if r.get("reason") else {})}
               for r in due_now["rules"]]
     return (instruction(profile_ref, STAGE) + "\n\nFailed rules:\n" + json.dumps(failed, default=str)
-            + "\n\nNext tools from project_readiness: " + json.dumps(next_tools))
+            + "\n\nNext tools from project_readiness: " + json.dumps(next_tools)
+            + "\n\nData gaps you may fill, each only from this source:\n" + json.dumps(_gap_sources(envelope)))
 
 
-def _ledger_row(call, receipt, *, approval, round_no):
+def _ledger_row(call, receipt, *, approval, round_no, source=None):
     """One ChangeRow (§6.4) from a verified receipt: the call's target, its
     old and new values (a dict per field when the card showed several)."""
     typed = [r for r in receipt["rows"] if r.get("role") not in ("note", "at_solve")]
@@ -169,11 +182,11 @@ def _ledger_row(call, receipt, *, approval, round_no):
             "old": first["old"] if one else {r["field"]: r["old"] for r in typed},
             "new": first["new"] if one else {r["field"]: r["new"] for r in typed},
             "unit": first.get("unit") or "" if one else "",
-            "reason": reason, "source": None, "approval": approval,
+            "reason": reason, "source": source, "approval": approval,
             "receipt": f"{receipt['digest']}:{call['id']}", "tool": call["tool"], "reverted": False}
 
 
-def agent_turn(path, ctx, session, *, tools, message, provider=None, recheck):
+def agent_turn(path, ctx, session, *, tools, message, provider=None, recheck, scope=None):
     """One headless agent turn. Returns what happened, counted by harness
     code: `calls` (each with ran, carded, error and its receipt), the usage
     the session accrued, and the offered tool list."""
@@ -205,6 +218,7 @@ def agent_turn(path, ctx, session, *, tools, message, provider=None, recheck):
 
     usage_before = dict(session.usage_acc)
     session.stage_tools = frozenset(tools)
+    session.loop_scope = scope
     session.decision_guard = guard
     offered = []
     said = []  # the model's words before a call: the ledger row's reason
@@ -241,6 +255,10 @@ def agent_turn(path, ctx, session, *, tools, message, provider=None, recheck):
                 result = payload.get("result")
                 if isinstance(result, dict) and isinstance(result.get("_edit_receipt"), dict):
                     call["receipt"] = result["_edit_receipt"]
+                if call["ran"] and scope is not None and call["tool"] in run_envelope.GAP_PREPARE \
+                        and isinstance(result, dict):
+                    # GK B condition 4: the pending profile this round made, bound to it.
+                    run_envelope.prepared(path, tid, result.get("job_id"), scope["round"])
             if call is not None and call["ran"] and kind in ("tool_result", "tool_error") \
                     and edit_card.is_edit(call["tool"]):
                 # The freshness chain's next link (issue 03): only from the chain's last link.
@@ -248,6 +266,7 @@ def agent_turn(path, ctx, session, *, tools, message, provider=None, recheck):
     finally:
         locks.close()
         session.stage_tools = None
+        session.loop_scope = None
         session.decision_guard = None
     usage = {k: max(0, int(session.usage_acc.get(k, 0)) - int(usage_before.get(k, 0))) for k in usage_before}
     return {"calls": [calls[t] for t in order], "usage": usage, "offered": offered}
@@ -269,8 +288,23 @@ def run_round(path, ctx, session, *, provider=None, recheck):
     round_no = run["loop"]["rounds"] + 1
     envelope = run_envelope.read(path) or {}
     started = time.time()
-    outcome = agent_turn(path, ctx, session, tools=agent["tools"], message=_message(task, run["profile"], due_now),
-                         provider=provider, recheck=recheck)
+    # §6.1: the failed rules' `tunable` attributes are all an edit may change.
+    rules = {r["id"]: r for r in profile["stages"][STAGE]["rules"]}
+    tunable = frozenset(tuple(t.rsplit(".", 1)) for rule in due_now["failing"]
+                        for t in rules.get(rule, {}).get("tunable", []) if "." in t)
+    model = getattr(session, "model", None)
+    usage_before = dict(session.usage_acc)
+    try:
+        outcome = agent_turn(path, ctx, session, tools=agent["tools"],
+                             message=_message(task, run["profile"], due_now, envelope),
+                             provider=provider, recheck=recheck, scope={"round": round_no, "tunable": tunable})
+    except BaseException:
+        # A round that errors still spent its tokens: they count (§6.5).
+        runner.charge(path, {k: max(0, int(session.usage_acc.get(k, 0)) - int(usage_before.get(k, 0)))
+                             for k in usage_before}, model)
+        raise
+    sources = {a["call_id"]: a["source"] for a in (run_envelope.read(path) or {}).get("audit", [])
+               if a.get("event") == "used" and a.get("source")}
     rows, unverified, refusals = [], [], 0
     for call in outcome["calls"]:
         if call["carded"]:
@@ -282,8 +316,8 @@ def run_round(path, ctx, session, *, provider=None, recheck):
         if not isinstance(receipt, dict) or receipt.get("outcome") != "verified" or not receipt.get("rows"):
             unverified.append(call["id"])
             continue
-        rows.append(_ledger_row(call, receipt, approval="envelope:" + str(envelope.get("id")), round_no=round_no))
-    model = getattr(session, "model", None)
+        rows.append(_ledger_row(call, receipt, approval="envelope:" + str(envelope.get("id")), round_no=round_no,
+                                source=sources.get(call["id"])))
     runner.charge(path, outcome["usage"], model)
 
     def change(t):

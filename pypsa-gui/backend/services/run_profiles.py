@@ -121,8 +121,7 @@ def _check_tunable(entries):
 
 def _check_agent(name, agent):
     """A stage's agent turn (§6.3): its allowlist and round bound."""
-    from harness import confirm
-    from harness.catalogue import TOOLS
+    from harness.catalogue import TOOLS, safety_tier_for
     if name not in AGENT_STAGES:
         raise ProfileError(f"Stage {name}: no agent turn runs there yet.")
     if not isinstance(agent, dict) or set(agent) != {"tools", "rounds"} or not isinstance(agent["tools"], list) \
@@ -131,7 +130,7 @@ def _check_agent(name, agent):
         raise ProfileError(f"Stage {name}: an agent turn names tools and 1-{L1_ROUNDS} rounds.")
     known = {t["name"] for t in TOOLS}
     for tool in agent["tools"]:
-        if tool not in known or tool not in L1_TOOLS or confirm._safety_tier_for(tool) == "destructive":
+        if tool not in known or tool not in L1_TOOLS or safety_tier_for(tool) == "destructive":
             raise ProfileError(f"Stage {name}: {tool!r} is not a tool the input loop may offer.")
     return {"tools": list(dict.fromkeys(agent["tools"])), "rounds": agent["rounds"]}
 
@@ -200,6 +199,9 @@ def scope_for(template: dict | None) -> dict:
     return {"preset": preset_id, "cards": {card: list(options) for card, options in preset.items()}}
 
 
+# The completed weather and demand-shape year eh_site fills a data gap from.
+EH_SITE_YEAR = 2023
+
 EH_SITE = {
     "id": "eh_site", "version": 1,
     "templates": ["eh_site"],
@@ -244,11 +246,17 @@ EH_SITE = {
                   {"tool": "update_component", "target": {"component": "StorageUnit", "name": "bess_new_*", "attr": "max_hours"},
                    "bounds": {"min": 1.0, "max": 8.0}}],
         # Issue 04: the data gaps the input loop may fill, never replace (§6.1, §7).
-        "gaps": [{"tool": "apply_generated_profile", "target": {"component": "Load", "name": "*", "attr": "p_set"}},
-                 {"tool": "set_weather_choice", "target": {"component": "Settings", "name": "Weather", "attr": "source"}},
-                 {"tool": "set_weather_choice", "target": {"component": "Settings", "name": "Weather", "attr": "year"}},
+        # Each names the source its fill copies, fixed here and resolved at the
+        # grant (GK B, AI-567b): the model never picks a value.
+        "gaps": [{"tool": "apply_generated_profile", "target": {"component": "Load", "name": "*", "attr": "p_set"},
+                  "source": {"kind": "load_generator", "archetype": "commercial", "year": EH_SITE_YEAR,
+                             "energy": "static_p_set"}},
+                 *[{"tool": "set_weather_choice", "target": {"component": "Settings", "name": "Weather", "attr": attr},
+                    "source": {"kind": "weather_choices", "choices": [{"source": "synthetic", "year": EH_SITE_YEAR}]}}
+                   for attr in ("source", "year")],
                  {"tool": "attach_tariff",
-                  "target": {"component": "Settings", "name": "Commercial", "attr": "import_tariff_ref"}}],
+                  "target": {"component": "Settings", "name": "Commercial", "attr": "import_tariff_ref"},
+                  "source": {"kind": "library_tariff"}}],
         "runs": [{"tool": "solve_queue_enqueue"}],
         "budget": {"solves": 6, "rounds": 6, "wall_time_h": 8.0},
         "research": {"allowed": False, "cost_cap_eur": 2.0},

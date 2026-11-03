@@ -11,6 +11,7 @@ import json
 import re
 
 import pytest
+from fastapi import HTTPException
 from harness import run_loops, runner as harness_runner
 from harness.protocol import LLMEvent
 from services import run_envelope, run_profiles
@@ -22,9 +23,14 @@ from tests.test_harness_envelope import BLOCK, envelope_of, granted, profile  # 
 from tests.test_harness_run_skeleton import site, start  # noqa: F401
 from tests.test_harness_runner import detached, frames_of, settle, task_path  # noqa: F401
 
-GAPS = [{"tool": "apply_generated_profile", "target": {"component": "Load", "name": "L*", "attr": "p_set"}},
-        {"tool": "set_weather_choice", "target": {"component": "Settings", "name": "Weather", "attr": "source"}},
-        {"tool": "set_weather_choice", "target": {"component": "Settings", "name": "Weather", "attr": "year"}}]
+SHAPE = {"kind": "load_generator", "archetype": "industrial", "year": 2023, "energy": "static_p_set"}
+WEATHER = {"kind": "weather_choices", "choices": [{"source": "synthetic", "year": 2023}]}
+GAPS = [{"tool": "apply_generated_profile", "target": {"component": "Load", "name": "L*", "attr": "p_set"},
+         "source": SHAPE},
+        {"tool": "set_weather_choice", "target": {"component": "Settings", "name": "Weather", "attr": "source"},
+         "source": WEATHER},
+        {"tool": "set_weather_choice", "target": {"component": "Settings", "name": "Weather", "attr": "year"},
+         "source": WEATHER}]
 WITH_GAPS = {**BLOCK, "gaps": GAPS}
 USAGE = {"input_tokens": 1200, "output_tokens": 300, "cache_read_tokens": 4000, "cache_create_tokens": 0}
 
@@ -95,9 +101,15 @@ def refused(path):
     return [(a["tool"], a["reason"]) for a in envelope_of(path)["audit"] if a["event"] == "refused"]
 
 
-def generate(project_id):
-    return ("generate_load_profile", {"project_id": project_id, "archetype": "industrial", "loads": ["L1"],
-                                      "params": {"shifts": 3, "annual_mwh": 43800.0}, "year": 2026})
+def granted_energy(load="L1"):
+    """The annual MWh the grant fixed for a gap load: its own static p_set x 8760."""
+    return round(float(PyPSAService.get_active_context().network.loads.at[load, "p_set"]) * 8760, 6)
+
+
+def generate(project_id, load="L1", **override):
+    args = {"project_id": project_id, "archetype": "industrial", "loads": [load],
+            "params": {"annual_mwh": granted_energy(load)}, "year": 2023}
+    return ("generate_load_profile", {**args, **override})
 
 
 def apply_from(project_id):
@@ -154,8 +166,23 @@ def test_a_defect_outside_the_tunables_ends_no_progress_and_needs_the_user(grant
         ["in.loads.series"]
 
 
+@pytest.fixture
+def tunable_rule(monkeypatch):
+    """The eh_site series rule, as a profile might write it, names
+    Generator.marginal_cost as its tunable (§6.1): what L1 may change for it."""
+    resolve = run_profiles.resolve
+
+    def with_tunable(ref):
+        out = copy.deepcopy(resolve(ref))
+        for rule in out["stages"]["input_gate"]["rules"]:
+            if rule["id"] == "in.loads.series":
+                rule["tunable"] = ["Generator.marginal_cost"]
+        return out
+    monkeypatch.setattr(run_profiles, "resolve", with_tunable)
+
+
 def test_changes_that_never_clear_the_rule_end_after_three_rounds_with_the_ledger_intact(granted, profile, site,
-                                                                                          rated):
+                                                                                          rated, tunable_rule):
     profile(BLOCK)
     no_series()
     task, path, _ = granted()
@@ -184,18 +211,21 @@ def test_an_edit_outside_the_tunables_or_the_envelope_is_carded_not_run_and_coun
                                               "attrs": {"p_nom": 1000.0}}),  # outside the bounds
                     call("update_component", {"component_class": "Load", "name": "L1",
                                               "attrs": {"p_set": 9.0}}, 1),  # demand: never tunable
-                    say("Both were refused."))
+                    call("update_component", {"component_class": "Generator", "name": "G1",
+                                              "attrs": {"p_nom": 25.0}}, 2),  # in bounds, not the rule's tunable
+                    say("All three were refused."))
     record = go(harness_runner.Runner("a", agent_provider=script), path, task)
     network = PyPSAService.get_active_context().network
     assert network.generators.at["G1", "p_nom"] == 20.0 and network.loads.at["L1", "p_set"] == 5.0
     run = record["run"]
     seen = [(f["frame"], f.get("error_kind")) for f in frames_of(task["task_id"], record["owner_id"])
             if f.get("loop") == "L1"]
-    assert run["loop"]["refusals"] == 2 and run["loop"]["history"][0]["refusals"] == 2, (seen, refused(path))
+    assert run["loop"]["refusals"] == 3 and run["loop"]["history"][0]["refusals"] == 3, (seen, refused(path))
     assert run.get("ledger", []) == []
-    assert refused(path) == [("update_component", "out_of_bounds"), ("update_component", "outside_entry")]
+    assert refused(path) == [("update_component", "out_of_bounds"), ("update_component", "outside_entry"),
+                             ("update_component", "not_tunable")]
     frames = [f["frame"] for f in frames_of(task["task_id"], record["owner_id"]) if f.get("loop") == "L1"]
-    assert frames.count("tool_pending_confirmation") == 2 and "tool_running" not in frames
+    assert frames.count("tool_pending_confirmation") == 3 and "tool_running" not in frames
 
 
 # ── Acceptance 4: the headless turn offers the allowlist only ───────────────
@@ -253,7 +283,7 @@ def test_rounds_and_tokens_in_the_run_budget_match_the_session_counts_not_the_te
     assert used["cost_eur"] > 0 and not used["unmetered"]
 
 
-def test_the_envelopes_round_budget_caps_the_loop(granted, profile, site, rated):
+def test_the_envelopes_round_budget_caps_the_loop(granted, profile, site, rated, tunable_rule):
     profile({**BLOCK, "budget": {**BLOCK["budget"], "rounds": 1}})
     no_series()
     task, path, _ = granted()
@@ -286,7 +316,7 @@ def test_listed_data_gap_tools_are_admitted_for_their_target_only(granted, profi
     profile(WITH_GAPS)
     no_series()
     task, path, _ = granted()
-    script = Script(call("set_weather_choice", {"project_id": project_id, "source": "synthetic", "year": 2020}),
+    script = Script(call("set_weather_choice", {"project_id": project_id, "source": "synthetic", "year": 2023}),
                     call(*generate(project_id), n=1), apply_from(project_id), say("Filled."))
     record = go(harness_runner.Runner("a", agent_provider=script), path, task)
     used = [a["tool"] for a in envelope_of(path)["audit"] if a["event"] == "used"]
@@ -309,7 +339,7 @@ def test_a_gap_entry_is_refused_for_a_target_its_tool_does_not_fill():
     with pytest.raises(run_envelope.EnvelopeError):
         run_envelope.check_block({**BLOCK, "gaps": [{"tool": "apply_generated_profile",
                                                      "target": {"component": "Generator", "name": "G1",
-                                                                "attr": "p_nom"}}]})
+                                                                "attr": "p_nom"}, "source": SHAPE}]})
     with pytest.raises(run_envelope.EnvelopeError):
         run_envelope.check_block({**BLOCK, "gaps": [{"tool": "update_component",
                                                      "target": {"component": "Load", "name": "L1",
@@ -322,18 +352,163 @@ def tariff_card(old):
                                         "role": "typed"}]}
 
 
-def test_attach_tariff_is_admitted_only_from_a_listed_gap_and_only_where_none_is_set():
+TARIFF = {"tool": "attach_tariff", "target": {"component": "Settings", "name": "Commercial", "attr": "import_tariff_ref"},
+          "source": {"kind": "library_tariff"}, "at_grant": {"Commercial": {"tariffs": {"sha-held": ["grid-import", 1]}}}}
+
+
+def test_attach_tariff_is_admitted_only_from_a_listed_gap_a_held_tariff_and_where_none_is_set(monkeypatch):
     """The tariff case at the admission seam (the Library item it needs is
     outside the baseline project): unlisted → the card; listed → admitted
-    for an unset tariff only."""
-    tariff = {"tool": "attach_tariff",
-              "target": {"component": "Settings", "name": "Commercial", "attr": "import_tariff_ref"},
-              "at_grant": {"Commercial": "gap"}}
+    for an unset tariff, and only one the grant listed by its hash."""
+    hashes = {"grid-import": "sha-held", "made-up": "sha-new"}
+    monkeypatch.setattr(run_envelope, "_tariff_hash", lambda args: hashes[args["name"]])
     unlisted = {"edits": [], "runs": [], "gaps": []}
-    listed = {"edits": [], "runs": [], "gaps": [tariff]}
-    assert run_envelope._match_gap(unlisted, "attach_tariff", {}, tariff_card(None), None) == "unlisted_tool"
-    assert run_envelope._match_gap(listed, "attach_tariff", {}, tariff_card(None), None) is None
-    assert run_envelope._match_gap(listed, "attach_tariff", {}, tariff_card("old-tariff v2"), None) == "not_a_gap"
+    listed = {"edits": [], "runs": [], "gaps": [TARIFF]}
+
+    def match(envelope, args, card):
+        return run_envelope._match_gap(envelope, "attach_tariff", args, card, None, {})
+    assert match(unlisted, {"name": "grid-import"}, tariff_card(None)) == "unlisted_tool"
+    assert match(listed, {"name": "grid-import"}, tariff_card(None)) is None
+    assert match(listed, {"name": "made-up"}, tariff_card(None)) == "not_granted_source"
+    assert match(listed, {"name": "grid-import", "replace_inline": True}, tariff_card(None)) == "outside_entry"
+    assert match(listed, {"name": "grid-import"}, tariff_card("old-tariff v2")) == "not_a_gap"
     weather = {"complete": True, "rows": [{"component_class": "Settings", "name": "Weather", "field": "source",
                                            "old": None, "new": "synthetic", "role": "typed"}]}
-    assert run_envelope._match_gap(listed, "set_weather_choice", {}, weather, None) == "unlisted_tool"
+    assert run_envelope._match_gap(listed, "set_weather_choice", {}, weather, None, {}) == "unlisted_tool"
+
+
+def test_an_unreadable_gap_check_counts_as_no_gap(monkeypatch):
+    def broken(args):
+        raise OSError("Library unreachable")
+    monkeypatch.setattr(run_envelope, "_tariff_hash", broken)
+    listed = {"edits": [], "runs": [], "gaps": [TARIFF]}
+    assert run_envelope._match_gap(listed, "attach_tariff", {"name": "x"}, tariff_card(None), None, {}) == "not_a_gap"
+
+
+# ── GK B's conditions on the gaps grant (issue 04, `## Comments`) ───────────
+
+
+def grant(session, root, envelope=None):
+    task = start()
+    run_envelope.decide(session, task["task_id"], "unattended", envelope=envelope)
+    return envelope_of(task_path(root, task))
+
+
+def prepare(envelope, args):
+    return run_envelope._match_gap(envelope, "generate_load_profile", args, None,
+                                   PyPSAService.get_active_context(), {})
+
+
+def test_the_grant_resolves_each_gap_load_to_its_own_annual_energy(session, site, profile):
+    profile(WITH_GAPS)
+    no_series()
+    envelope = grant(session, site[1])
+    gap = next(g for g in envelope["gaps"] if g["tool"] == "apply_generated_profile")
+    assert gap["at_grant"] == {"L1": {"archetype": "industrial", "year": 2023,
+                                      "params": {"annual_mwh": granted_energy()}}}
+    assert prepare(envelope, generate(site[0])[1]) is None
+
+
+def test_a_load_made_after_the_grant_never_matches_the_glob(session, site, profile):
+    profile(WITH_GAPS)
+    no_series()
+    envelope = grant(session, site[1])
+    network = PyPSAService.get_active_context().network
+    network.add("Load", "L9", bus=network.loads.at["L1", "bus"], p_set=2.0)
+    assert prepare(envelope, generate(site[0], load="L9")[1]) == "new_instance"
+
+
+def test_a_series_the_user_set_after_the_grant_is_not_a_gap(session, site, profile):
+    profile(WITH_GAPS)
+    no_series()
+    envelope = grant(session, site[1])
+    args = generate(site[0])[1]
+    network = PyPSAService.get_active_context().network
+    network.loads_t.p_set["L1"] = 4.0
+    assert prepare(envelope, args) == "not_a_gap"
+    card = {"complete": True, "rows": [{"component_class": "Load", "name": "L1", "field": "p_set",
+                                        "old": None, "new": "series", "role": "typed"}]}
+    assert run_envelope._match_gap(envelope, "apply_generated_profile", {"component": "L1", "job_id": "j"}, card,
+                                   PyPSAService.get_active_context(), {}) == "not_a_gap"
+
+
+def test_a_value_the_model_picks_is_refused(session, site, profile):
+    """AI-567b: no bounds never means any value the model picks."""
+    profile(WITH_GAPS)
+    no_series()
+    envelope = grant(session, site[1])
+    project_id = site[0]
+    energy = granted_energy()
+    for own in ({"params": {"annual_mwh": energy * 2}}, {"params": {"peak_mw": 9.0}},
+                {"params": {"annual_mwh": energy, "shifts": 3}}, {"archetype": "commercial"}, {"year": 2020},
+                {"replay_refinements": True}):
+        assert prepare(envelope, generate(project_id, **own)[1]) in ("not_granted_source", "outside_entry"), own
+
+
+def test_an_offtake_is_never_a_gap_and_naming_one_refuses_the_grant(session, site, profile):
+    profile(WITH_GAPS)
+    no_series()
+    network = PyPSAService.get_active_context().network
+    network.add("Bus", "h2", carrier="H2")
+    network.add("Load", "L_h2", bus="h2", p_set=3.0)
+    named = {**WITH_GAPS, "gaps": [{**GAPS[0], "target": {**GAPS[0]["target"], "name": "L_h2"}}]}
+    with pytest.raises(HTTPException) as refused_grant:
+        grant(session, site[1], envelope=named)
+    assert refused_grant.value.detail["error_kind"] == "invalid_envelope"
+    envelope = grant(session, site[1])  # the same run, granted without naming it
+    gap = next(g for g in envelope["gaps"] if g["tool"] == "apply_generated_profile")
+    assert "L_h2" not in gap["at_grant"] and "L1" in gap["at_grant"]
+    assert prepare(envelope, generate(site[0], load="L_h2")[1]) == "new_instance"
+
+
+def test_a_fill_is_admitted_only_from_a_pending_profile_this_round_prepared(session, site, profile):
+    profile(WITH_GAPS)
+    no_series()
+    envelope = grant(session, site[1])
+    ctx = PyPSAService.get_active_context()
+    card = {"complete": True, "rows": [{"component_class": "Load", "name": "L1", "field": "p_set",
+                                        "old": None, "new": "series", "role": "typed"}]}
+    args = {"component": "L1", "job_id": "job-1"}
+
+    def fill(prepared, round_no=1):
+        bound = {**envelope, "prepared": prepared}
+        return run_envelope._match_gap(bound, "apply_generated_profile", args, card, ctx,
+                                       {"scope": {"round": round_no, "tunable": frozenset()}})
+    mine = {"job_id": "job-1", "task_id": envelope["task_id"], "round": 1, "loads": ["L1"], "source": "d"}
+    assert fill([]) == "unbound_prepare"
+    assert fill([{**mine, "task_id": "another-run"}]) == "unbound_prepare"
+    assert fill([mine], round_no=2) == "unbound_prepare"
+    assert fill([{**mine, "loads": ["L2"]}]) == "unbound_prepare"
+    assert fill([mine]) is None
+
+
+def test_a_weather_choice_outside_the_profiles_list_is_refused(session, site, profile):
+    profile(WITH_GAPS)
+    envelope = grant(session, site[1])
+    card = {"complete": True, "rows": [{"component_class": "Settings", "name": "Weather", "field": f,
+                                        "old": None, "new": v, "role": "typed"}
+                                       for f, v in (("source", "synthetic"), ("year", 2020))]}
+    ctx = PyPSAService.get_active_context()
+    assert run_envelope._match_gap(envelope, "set_weather_choice", {"source": "synthetic", "year": 2020}, card,
+                                   ctx, {}) == "not_granted_source"
+    assert run_envelope._match_gap(envelope, "set_weather_choice", {"source": "synthetic", "year": 2023}, card,
+                                   ctx, {}) is None
+
+
+def test_a_grant_only_narrows_the_profiles_sources():
+    block = run_envelope.check_block(WITH_GAPS)
+    wider = {**WITH_GAPS, "gaps": [{**GAPS[1], "source": {"kind": "weather_choices",
+                                                           "choices": [{"source": "atlite", "year": 2023}]}}]}
+    with pytest.raises(HTTPException):
+        run_envelope.narrow(block, wider)
+    other = {**WITH_GAPS, "gaps": [{**GAPS[0], "source": {**SHAPE, "archetype": "commercial"}}]}
+    with pytest.raises(HTTPException):
+        run_envelope.narrow(block, other)
+    assert run_envelope.narrow(block, {**WITH_GAPS, "gaps": GAPS[:1]})["gaps"][0]["source"] == SHAPE
+
+
+def test_a_gap_without_a_source_is_refused():
+    with pytest.raises(run_envelope.EnvelopeError):
+        run_envelope.check_block({**BLOCK, "gaps": [{k: v for k, v in GAPS[0].items() if k != "source"}]})
+    with pytest.raises(run_envelope.EnvelopeError):
+        run_envelope.check_block({**BLOCK, "gaps": [{**GAPS[0], "source": {"kind": "intake"}}]})
