@@ -4746,11 +4746,15 @@ TOOLS: list[dict[str, Any]] = [
         "update_project_settings",
         "Change a project's settings (metadata.json). Only the keys sent are written. "
         "derive_lengths_from_geometry: whether line/link lengths follow the map geometry. "
-        "Returns the project's info. 409 when the project has never been saved or "
+        "backup_autonomy_h: the backup autonomy in hours, above 0 and at most 720. "
+        "poc_xr: the point-of-connection X/R the network operator gives, above 0 and at most 100. "
+        "Send at least one. Returns the project's info. 409 when the project has never been saved or "
         "another user holds its edit lock. Safety: write.",
         {"name": {"type": "string"},
-         "derive_lengths_from_geometry": {"type": "boolean"}},
-        ["name", "derive_lengths_from_geometry"],
+         "derive_lengths_from_geometry": {"type": "boolean"},
+         "backup_autonomy_h": {"type": "number", "exclusiveMinimum": 0, "maximum": 720},
+         "poc_xr": {"type": "number", "exclusiveMinimum": 0, "maximum": 100}},
+        ["name"],
     ),
     # ── Network topology and sites (8) — LV08 B1 ─────────────────────────
     _t(
