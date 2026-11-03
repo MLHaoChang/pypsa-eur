@@ -34,6 +34,7 @@ is a limitation and this issue is one `route-parity:held:<this file>` full-cover
 is still held, or when a held route is no longer named below.
 
 - GET /api/projects/{name}/sites/{site_id}/scene
+- GET /api/projects/{name}/sites/{site_id}/scene/results (SC-03 overlay; its chat read is the SC-07 results unit)
 - POST /api/projects/{name}/sites/{site_id}/scene/adopt
 - POST /api/projects/{name}/sites/{site_id}/scene/proposals
 - POST /api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/apply
