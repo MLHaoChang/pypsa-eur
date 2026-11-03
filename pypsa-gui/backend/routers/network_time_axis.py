@@ -124,7 +124,7 @@ _CASE_SENSITIVE_ZONES = frozenset({"CAT", "EAT", "WAT", "WET", "WEST", "UT", "Z"
 _ZONE_ABBREVIATIONS_FOLDED = _ZONE_ABBREVIATIONS - _CASE_SENSITIVE_ZONES
 # Upper-case spellings of these are naive text, never an unlisted zone.
 _NAIVE_UPPER_TOKENS = frozenset({
-    "AM", "PM", "MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN", "JAN", "FEB", "MAR", "APR",
+    "AM", "PM", "MON", "TUE", "TUES", "WED", "THU", "THUR", "THURS", "FRI", "SAT", "SUN", "JAN", "FEB", "MAR", "APR",
     "MAY", "JUN", "JUL", "AUG", "SEP", "SEPT", "OCT", "NOV", "DEC",
 })
 

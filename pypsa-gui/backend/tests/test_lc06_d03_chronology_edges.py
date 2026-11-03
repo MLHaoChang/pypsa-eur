@@ -285,13 +285,24 @@ def test_a_lowercase_or_mixed_case_zone_abbreviation_is_refused_as_timezone_awar
     assert list(PyPSAService.get_network().loads_t.p_set["L1"]) == before
 
 
-@pytest.mark.parametrize("word", ["cat", "eat", "wat", "wet", "west", "ut", "z", "ist", "Cat", "West"])
+@pytest.mark.parametrize("word", ["CAT", "EAT", "WAT", "WET", "WEST", "UT", "IST", "Z"])
+def test_the_upper_case_form_of_a_case_sensitive_word_is_still_a_zone(alpha, word):
+    csv = f"snapshot,L1\n2026-01-01 00:00 {word},9\n2026-01-01 01:00 {word},9\n"
+    assert _refused(csv)["error_kind"] == "timeseries_timezone_aware"
+
+
+def test_a_non_timestamp_row_with_a_zone_like_tail_is_not_called_a_zone(alpha):
+    csv = "snapshot,L1\nQ1 Peak,9\nQ2 OFF,9\n"
+    assert (_refusal_or_none(csv) or {}).get("error_kind") != "timeseries_timezone_aware"
+
+
+@pytest.mark.parametrize("word", ["cat", "eat", "wat", "wet", "west", "ut", "z", "ist", "Cat", "West", "Ist"])
 def test_an_ordinary_word_or_token_is_not_taken_for_a_zone(alpha, word):
     csv = f"snapshot,L1\n2026-01-01 00:00 {word},9\n2026-01-01 01:00 {word},9\n"
     assert (_refusal_or_none(csv) or {}).get("error_kind") != "timeseries_timezone_aware"
 
 
-@pytest.mark.parametrize("token", ["ChST", "CHST", "SAMT", "ChsT", "NCT"])
+@pytest.mark.parametrize("token", ["ChST", "CHST", "SAMT", "ChsT", "NCT", "LT", "QXZT"])
 @pytest.mark.parametrize("where", ["after", "before"])
 def test_an_unlisted_zone_like_token_is_refused_with_a_reason_naming_it(alpha, token, where):
     t0, t1 = ("2026-01-01 00:00", "2026-01-01 01:00")
@@ -303,7 +314,7 @@ def test_an_unlisted_zone_like_token_is_refused_with_a_reason_naming_it(alpha, t
     assert list(PyPSAService.get_network().loads_t.p_set["L1"]) == before
 
 
-@pytest.mark.parametrize("token", ["PM", "AM", "Mon", "MON", "JAN", "Sun"])
+@pytest.mark.parametrize("token", ["PM", "AM", "pm", "A.M.", "P.M.", "Mon", "MON", "jan", "THURS", "Thurs", "Tues", "Thur", "Sept", "SEPT", "Sun"])
 def test_a_naive_am_pm_weekday_or_month_token_is_not_called_a_zone(alpha, token):
     csv = f"snapshot,L1\n2026-01-01 00:00 {token},9\n2026-01-01 01:00 {token},9\n"
     assert (_refusal_or_none(csv) or {}).get("error_kind") != "timeseries_timezone_aware"
