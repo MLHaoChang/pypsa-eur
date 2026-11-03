@@ -1091,18 +1091,28 @@ def _bounded(section: str, payload: dict | None, run_id: str) -> tuple[dict, lis
     return {}, [f'{section}_not_captured']
 
 
-def _study_result(study_key: str) -> dict | None:
-    """The study's status route payload, as the route serializes it."""
+def _study_result(study_key: str, record: dict) -> dict | None:
+    """The study's status route payload, as the route serializes it.
+
+    Only while `record` is still the study's live record: a study of the same
+    key started after this one finished replaces it, and its payload is not
+    this run's. Held under the solver-state lock (reentrant; the route takes
+    it too), where a new study installs its record, so it cannot swap mid-read.
+    """
     from fastapi import Response
     from fastapi.encoders import jsonable_encoder
 
     import routers.results as results_routes
+    from routers.simulation import _state
 
     name = _STUDY_ROUTE.get(study_key)
     if name is None:
         return None
     try:
-        out = getattr(results_routes, name)()
+        with PyPSAService.get_solver_state_lock():
+            if _state.get(study_key) is not record:
+                return None
+            out = getattr(results_routes, name)()
     except Exception:  # noqa: BLE001 — a capture failure never breaks the publish
         import logging
         logging.getLogger(__name__).exception('study_result capture failed for %s', study_key)
@@ -1202,7 +1212,7 @@ def publish_study_run(study_key: str, record: dict) -> dict | None:
         sections = None
         warnings: list[str] = []
         if status == 'completed':
-            kept, warnings = _bounded(STUDY_SECTION, _study_result(study_key), token['run_id'])
+            kept, warnings = _bounded(STUDY_SECTION, _study_result(study_key, record), token['run_id'])
             sections = {'summary': summary, **kept}
         return publish_run(
             token['root'], token['project_id'], run_id=token['run_id'],

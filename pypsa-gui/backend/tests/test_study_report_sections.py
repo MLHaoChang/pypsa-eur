@@ -17,7 +17,8 @@ import pytest
 from services import chat_tools, run_evidence
 from services.pypsa_service import PyPSAService
 from tests.oj_grid import NAME, build_oj_grid
-from tests.test_retained_acl import _browser_get, _view, past_run  # noqa: F401
+from tests.test_oj01_latest_loadflow_journey import oj_grid  # noqa: F401
+from tests.test_retained_acl import _browser_get, _refusal, _view, past_run  # noqa: F401
 from tests.test_workflow_tools import helpers_state  # noqa: F401
 
 
@@ -99,9 +100,30 @@ def test_a_report_run_keeps_ids_and_counts_only(project):
     assert refused['run_kind'] == 'report' and refused['kept_section'] == 'report_output'
 
 
-def test_a_solve_run_is_unchanged(project):
-    """A solve's results read never takes the study/report refusal."""
-    assert run_evidence.own_section('never-recorded-run') is None
+def test_a_newer_study_of_the_same_key_is_never_kept_as_this_run(project):
+    """A study started after this one finished replaced its record: the
+    finished run keeps nothing rather than the newer study's payload."""
+    record = {'status': 'running', 'result': None, 'error': None, 'started_at': 1.0,
+              'network_revision': 0, 'thread': None, 'stop_event': None}
+    project.solver_state['mc'] = record
+    token = run_evidence.start_study_run('mc', record)
+    record.update(status='done', result={'lole_h': 1.5})
+    project.solver_state['mc'] = {'status': 'running', 'result': {'lole_h': 99.0}, 'error': None,
+                                  'started_at': 2.0, 'network_revision': 0,
+                                  'thread': None, 'stop_event': None}
+    run_evidence.publish_study_run('mc', record)
+    published = run_evidence.get_run_evidence(token['run_id'])
+    assert published['status'] == 'completed'
+    assert 'study_result' not in {s['name'] for s in published['sections'] if s['available']}
+    assert 'study_result_not_captured' in published['warnings']
+
+
+def test_a_solve_run_is_unchanged(oj_grid):
+    """A real solve run never takes the study/report refusal."""
+    run_id = oj_grid['older']['run_id']
+    assert run_evidence.own_section(run_id) is None
+    old = chat_tools.get_results(result_kind='cost_breakdown', run_id=run_id)
+    assert old['status'] == 'ok' and old['scope'] == 'historical', old
 
 
 def test_study_and_report_sections_refuse_like_a_solves_once_access_is_lost(past_run):
@@ -121,3 +143,9 @@ def test_study_and_report_sections_refuse_like_a_solves_once_access_is_lost(past
         assert (view.status_code, view.json()['detail']) == solve_refused, section
     # A run id never recorded refuses the same way: no existence oracle.
     assert _view(browser, 'never-recorded-run') == solve_refused
+    # The chat path: a results read of either run refuses as one never recorded.
+    never = _refusal(lambda: chat_tools.get_results(result_kind='statistics',
+                                                    run_id='never-recorded-run'))
+    for run_id in (study_run, report_run):
+        assert _refusal(lambda: chat_tools.get_results(result_kind='statistics',
+                                                       run_id=run_id)) == never, run_id
