@@ -233,7 +233,11 @@ export function groupView(g: ResultGroup, mode: UiMode, stated: string | null = 
   }))
   const notes: string[] = []
   if (g.internal_buses.length) notes.push(`Inside the group and not counted: ${g.internal_buses.join(', ')}`)
-  if (g.unavailable_member) notes.push(unavailableWords('member_unavailable'))
+  if (g.unavailable_member) {
+    const m = g.unavailable_member, i = m.indexOf(':'), cls = m.slice(0, i), name = m.slice(i + 1)
+    const who = i > 0 ? (cls in KIND_WORDS ? targetLabel(cls as TargetClass, name, mode) : `${name} · ${cls}`) : m
+    notes.push(`Unavailable: ${reasonWords(g.total.reason ?? 'member_unavailable')} (${who}).`)
+  }
   return { boundary, totals, total: quantityWords(g.total, stated), notes }
 }
 

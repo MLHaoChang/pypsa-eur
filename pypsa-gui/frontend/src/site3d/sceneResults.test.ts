@@ -62,7 +62,7 @@ const oracle = (): SceneResults => ({
       { carrier: 'N2', net_import: Q(1, 't/h') }, { carrier: 'NH3', net_import: Q(-4, 'MW') },
     ],
     total: NA('mixed_units'),
-    unavailable_member: false,
+    unavailable_member: null,
   } },
 })
 
@@ -153,11 +153,19 @@ describe('a group', () => {
     expect(g.total).toBe('Unavailable: there is no single total because the carriers have different units.')
     expect(g.notes).toEqual(['Inside the group and not counted: h2'])
   })
-  it('a partial or unavailable member is said in words', () => {
-    const g = { ...oracle().groups.plant, total: NA('group_partial_allocation'), unavailable_member: true }
-    const v = groupView(g, 'guided')
+  // The server's shape (results._unavailable_group): no rows, the reason on `total`, the member's label.
+  const unavailableGroup = (reason: string, member: string) =>
+    ({ boundary: [], internal_buses: [], totals: [], total: NA(reason), unavailable_member: member })
+  it('a partially allocated member is named with that reason', () => {
+    const v = groupView(unavailableGroup('group_partial_allocation', 'Load:office'), 'guided')
     expect(v.total).toBe('Unavailable: a member is shared with buildings outside the group.')
-    expect(v.notes).toContain('Unavailable: a member’s result is unavailable.')
+    expect(v.notes).toEqual(['Unavailable: a member is shared with buildings outside the group (office · load).'])
+  })
+  it('an unavailable member is named with that reason', () => {
+    const v = groupView(unavailableGroup('member_unavailable', 'Link:haber'), 'expert')
+    expect(v.total).toBe('Unavailable: a member’s result is unavailable.')
+    expect(v.notes).toEqual(['Unavailable: a member’s result is unavailable (haber · Link).'])
+    expect(v.boundary).toEqual([]); expect(v.totals).toEqual([])
   })
   it('lists the groups a building sits in, nested ones too', () => {
     const groups = [...names.groups, { id: 'site', label: 'Site', members: ['plant'] }, { id: 'other', label: 'Other', members: ['b3'] }]

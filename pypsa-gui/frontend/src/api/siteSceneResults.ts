@@ -36,7 +36,8 @@ export interface ResultGroup {
   internal_buses: string[]
   totals: GroupTotal[]
   total: ResultQuantity
-  unavailable_member: boolean
+  /** The member that made the group unavailable, as "Class:name" (`total.reason` says why), else null. */
+  unavailable_member: string | null
 }
 
 export interface SceneResults {

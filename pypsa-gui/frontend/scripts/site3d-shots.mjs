@@ -74,7 +74,7 @@ const sceneResults = (snapshot, current) => {
       internal_buses: ['h2'],
       totals: [{ carrier: 'AC', net_import: v(10.25, 'MW') }, { carrier: 'heat', net_import: v(-1, 'MW') },
         { carrier: 'N2', net_import: v(1, 't/h') }, { carrier: 'NH3', net_import: v(-4, 'MW') }],
-      total: NA(current ? 'mixed_units' : 'results_not_current'), unavailable_member: false,
+      total: NA(current ? 'mixed_units' : 'results_not_current'), unavailable_member: null,
     } },
   }
 }

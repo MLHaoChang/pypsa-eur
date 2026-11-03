@@ -34,7 +34,7 @@ const answer = (snapshot: string, current = true): SceneResults => ({
     boundary: [{ bus: 'elec', carrier: 'AC', net_import: q(10.25, 'MW') }, { bus: 'n2', carrier: 'N2', net_import: q(1, 't/h') }],
     internal_buses: ['h2'],
     totals: [{ carrier: 'AC', net_import: q(10.25, 'MW') }, { carrier: 'N2', net_import: q(1, 't/h') }],
-    total: q(null, '', 'mixed_units'), unavailable_member: false,
+    total: q(null, '', 'mixed_units'), unavailable_member: null,
   } },
 })
 
