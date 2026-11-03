@@ -1208,7 +1208,7 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
 
       {/* The control strip with the legend under it, stacked so a wrapped
           strip (a narrow pane) pushes the legend down instead of hiding under it. */}
-      <div className="pointer-events-none absolute left-3 top-12 z-[400] flex max-h-[calc(100%-7.5rem)] max-w-[calc(100%-24px)] flex-col items-start gap-1.5 overflow-y-auto [&>*]:pointer-events-auto">
+      <div className="pointer-events-none absolute left-3 top-12 z-[400] flex max-h-[calc(100%-7.5rem)] max-w-[calc(100%-24px)] flex-col items-start gap-1.5 overflow-y-auto [&>*]:pointer-events-auto [&>*]:shrink-0">
         <SiteOverlay
           sites={sitesDoc.sites}
           site={site}

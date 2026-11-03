@@ -24,8 +24,8 @@ export const REASON_WORDS: Readonly<Record<string, string>> = {
   run_failed: 'the last solve failed',
   run_cancelled: 'the last solve was cancelled',
   run_running: 'a solve is running',
-  results_not_current: 'the results are out of date: the model changed after the solve',
-  run_changed: 'the results are out of date: a newer solve replaced them',
+  results_not_current: 'the results are out of date because the model changed after the solve',
+  run_changed: 'the results are out of date because a newer solve replaced them',
   snapshot_not_in_run: 'this snapshot is not in the solved run',
   window_out_of_range: 'the time window is outside the solved horizon',
   unbound_target: 'the model item is no longer in the model',
@@ -34,7 +34,7 @@ export const REASON_WORDS: Readonly<Record<string, string>> = {
   unit_unknown: 'the bus unit is not one the overlay knows (MW or t)',
   conversion_factor_missing: 'the carrier has no MWh-per-tonne factor',
   vintage_rows_unsupported: 'items with several build years are not shown per hour yet',
-  mixed_units: 'no single total: the carriers have different units',
+  mixed_units: 'there is no single total because the carriers have different units',
   group_partial_allocation: 'a member is shared with buildings outside the group',
   member_unavailable: 'a member’s result is unavailable',
   group_has_no_boundary: 'every bus is inside the group, so nothing crosses its boundary',
@@ -43,6 +43,9 @@ export const REASON_WORDS: Readonly<Record<string, string>> = {
 export const reasonWords = (reason: string | null | undefined): string =>
   (reason && REASON_WORDS[reason]) || 'no value for this snapshot'
 
+/** One sentence, one colon: "Unavailable: <reason>." */
+export const unavailableWords = (reason: string | null | undefined): string => `Unavailable: ${reasonWords(reason)}.`
+
 /** A served number in its own unit, at most 4 significant digits; a negative zero reads 0. */
 export function num(v: number): string {
   const x = Object.is(v, -0) ? 0 : v
@@ -50,18 +53,21 @@ export function num(v: number): string {
 }
 
 /**
- * A quantity in words: "13.25 MW", "0 t/h", or "Unavailable: <reason>" — never 0.00 for a missing value.
+ * A quantity in words: "13.25 MW", "0 t/h", or "Unavailable: <reason>." — never 0.00 for a missing value.
  * `stated`: a reason already said once above (the run's), which a leaf then reads as plain "Unavailable".
  */
 export function quantityWords(q: ResultQuantity | null | undefined, stated: string | null = null): string {
   if (!q || !q.available || q.value == null || !Number.isFinite(q.value)) {
-    return stated && q?.reason === stated ? 'Unavailable' : `Unavailable: ${reasonWords(q?.reason)}`
+    return stated && q?.reason === stated ? 'Unavailable' : unavailableWords(q?.reason)
   }
   return q.unit ? `${num(q.value)} ${q.unit}` : num(q.value)
 }
 
 export const isAvailable = (q: ResultQuantity | null | undefined): boolean =>
   !!q && q.available && q.value != null && Number.isFinite(q.value)
+
+/** The same quantity without its sign (Guided puts the direction in a word instead). */
+const magnitude = (q: ResultQuantity): ResultQuantity => (isAvailable(q) ? { ...q, value: Math.abs(q.value!) } : q)
 
 // ── the timeline's snapshot as native labels ───────────────────────────────
 
@@ -125,15 +131,25 @@ function titleOf(t: ResultTarget, mode: UiMode): string {
 /** The run's reason when its gate is closed: said once in the heading, so the leaves do not repeat it. */
 export const runReason = (r: SceneResults): string | null => (r.run.current ? null : r.run.reason)
 
+/**
+ * Guided: the flow's actual direction as a word ("in" into the item, "out" of it), from the served value's
+ * sign and the port's sign convention, so the number is shown without a minus. Zero or unavailable: the role.
+ */
+function direction(p: ResultPort, q: ResultQuantity): string {
+  if (!isAvailable(q) || q.value === 0) return ROLE_WORDS[p.role] ?? p.role
+  return (p.sign === 'withdrawal_positive') === (q.value! > 0) ? 'in' : 'out'
+}
+
 function portLine(p: ResultPort, explicit: boolean, mode: UiMode, stated: string | null): PortLine {
-  const where = p.carrier || p.bus
-  const label = mode === 'guided' ? `${where} ${ROLE_WORDS[p.role] ?? p.role}` : `${p.port} · ${p.bus} · ${ROLE_WORDS[p.role] ?? p.role}`
-  const notes: string[] = []
+  const guided = mode === 'guided'
   const main = explicit && p.allocated ? p.allocated : p.rate
-  if (explicit && p.allocated && isAvailable(p.rate)) notes.push(`of ${quantityWords(p.rate)} native`)
-  if (p.rate_t && isAvailable(p.rate_t)) notes.push(quantityWords(p.rate_t))
+  const shown = (q: ResultQuantity) => quantityWords(guided ? magnitude(q) : q, stated)
+  const label = guided ? `${p.carrier || p.bus} ${direction(p, main)}` : `${p.port} · ${p.bus} · ${ROLE_WORDS[p.role] ?? p.role}`
+  const notes: string[] = []
+  if (explicit && p.allocated && isAvailable(p.rate)) notes.push(`of ${shown(p.rate)} in total`)
+  if (p.rate_t && isAvailable(p.rate_t)) notes.push(shown(p.rate_t))
   if (p.reversed) notes.push('reversed')
-  return { key: p.port, label, value: quantityWords(main, stated), available: isAvailable(main), tag: explicit && p.allocated ? 'allocated' : null, notes }
+  return { key: p.port, label, value: shown(main), available: isAvailable(main), tag: explicit && p.allocated ? 'allocated' : null, notes }
 }
 
 function allocationWords(t: ResultTarget, here: string | null, names: Names): string | null {
@@ -150,7 +166,7 @@ export function targetView(t: ResultTarget, here: string | null, names: Names, m
     key: targetKey(t),
     title: titleOf(t, mode),
     allocation: allocationWords(t, here, names),
-    reason: t.reason ? `Unavailable: ${reasonWords(t.reason)}` : null,
+    reason: t.reason ? unavailableWords(t.reason) : null,
     level: t.level ? quantityWords(t.level, stated) : null,
     ports: t.ports.map(p => portLine(p, explicit, mode, stated)),
   }
@@ -194,21 +210,30 @@ export interface GroupView {
   notes: string[]
 }
 
-/** A group's boundary rows and per-carrier totals, as served; positive is a net import into the group. */
+/**
+ * A group's boundary rows and per-carrier totals, as served; positive is a net import into the group.
+ * Expert shows the signed net import; Guided says import or export and shows the number without a sign.
+ */
 export function groupView(g: ResultGroup, mode: UiMode, stated: string | null = null): GroupView {
+  const guided = mode === 'guided'
+  const flow = (where: string, q: ResultQuantity) => {
+    if (!guided) return { label: where, value: quantityWords(q, stated) }
+    const word = !isAvailable(q) || q.value === 0 ? 'net import' : q.value! > 0 ? 'import' : 'export'
+    return { label: `${where} ${word}`, value: quantityWords(magnitude(q), stated) }
+  }
   const boundary = g.boundary.map(b => ({
     key: `${b.bus}|${b.carrier ?? ''}`,
-    label: mode === 'guided' ? (b.carrier || b.bus) : `${b.bus} · ${b.carrier ?? 'no carrier'}`,
-    value: quantityWords(b.net_import, stated), available: isAvailable(b.net_import),
+    ...flow(guided ? (b.carrier || b.bus) : `${b.bus} · ${b.carrier ?? 'no carrier'}`, b.net_import),
+    available: isAvailable(b.net_import),
   }))
   const totals = g.totals.map((t, i) => ({
     key: `${t.carrier ?? ''}|${t.net_import.unit ?? ''}|${i}`,
-    label: t.carrier || 'no carrier',
-    value: quantityWords(t.net_import, stated), available: isAvailable(t.net_import),
+    ...flow(t.carrier || 'no carrier', t.net_import),
+    available: isAvailable(t.net_import),
   }))
   const notes: string[] = []
-  if (g.internal_buses.length) notes.push(`Inside the group, not counted: ${g.internal_buses.join(', ')}`)
-  if (g.unavailable_member) notes.push(`A member is unavailable: ${reasonWords('member_unavailable')}`)
+  if (g.internal_buses.length) notes.push(`Inside the group and not counted: ${g.internal_buses.join(', ')}`)
+  if (g.unavailable_member) notes.push(unavailableWords('member_unavailable'))
   return { boundary, totals, total: quantityWords(g.total, stated), notes }
 }
 

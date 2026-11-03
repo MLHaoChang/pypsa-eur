@@ -130,6 +130,11 @@ try {
         ? { ...scene(st.lastReceipt), buildings: BUILDINGS, groups: [{ id: 'plant', label: 'Ammonia plant', members: ['b1', 'b2'] }] }
         : scene(st.lastReceipt))
       if (st.results && p.endsWith(`/sites/${SITE}/scene/results`)) return ok(sceneResults(new URL(r.request().url()).searchParams.get('snapshot'), st.results.current))
+      // A solved run, so the Results pill is enabled; out of date in the unavailable state.
+      if (st.results && p === '/api/simulation/status') return ok({ running: false, status: 'completed', condition: 'optimal', objective: 1234.5,
+        solve_time: 2.5, dispatch: st.results.current ? 'fresh' : 'stale' })
+      // The placed objects' own series are out of scope for these shots: none, as for a run that wrote none.
+      if (st.results && p.startsWith('/api/results/')) return r.fulfill({ status: 200, contentType: 'application/json', body: 'null' })
       if (st.results && p === '/api/network/snapshots') return ok({ count: LABELS.length, snapshots: LABELS, weightings: [] })
       if (p.endsWith('/sites') && m === 'GET') return ok(sitesDoc())
       if (p.endsWith('/context')) return r.fulfill({ status: 404, json: { detail: 'none' } })

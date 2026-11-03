@@ -15,7 +15,7 @@ import { sceneErrorCopy } from '../api/siteScene'
 import { useUIStore } from '../store/uiStore'
 import { featureName, type UiMode } from './associations'
 import { useSceneResults } from './useSceneResults'
-import { featureView, groupsOf, groupView, reasonWords, runReason, sceneSummary, snapshotWords, type GroupLine, type TargetView } from './sceneResults'
+import { featureView, groupsOf, groupView, runReason, unavailableWords, sceneSummary, snapshotWords, type GroupLine, type TargetView } from './sceneResults'
 
 type EnabledScene = Extract<SiteScene, { state: 'enabled' }>
 
@@ -94,7 +94,7 @@ export default function SceneResultsPanel({ project, siteId, scene, current, fre
     body = (
       <>
         <p className="text-muted" data-testid="scene-results-snapshot">{snapshotWords(data)}</p>
-        {!data.run.current && <p className="text-muted italic" data-testid="scene-results-run">Unavailable: {reasonWords(data.run.reason)}</p>}
+        {!data.run.current && <p className="text-muted italic" data-testid="scene-results-run">{unavailableWords(data.run.reason)}</p>}
         {buildingId && <h4 className="mt-1 font-semibold text-text">{featureName(buildingId, names.buildings, names.groups)}</h4>}
         {views && (views.length
           ? <ul aria-label="Attached items">{views.map(t => <Target key={t.key} t={t} />)}</ul>

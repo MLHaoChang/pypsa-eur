@@ -81,7 +81,7 @@ describe('SceneResultsPanel', () => {
     const g = screen.getByTestId('scene-result-group')
     expect(screen.getByTestId('scene-result-boundary').textContent).toContain('elec · AC: 10.25 MW')
     expect(screen.getByTestId('scene-result-totals').textContent).toContain('N2: 1 t/h')
-    expect(screen.getByTestId('scene-result-total').textContent).toContain('Unavailable: no single total: the carriers have different units')
+    expect(screen.getByTestId('scene-result-total').textContent).toContain('Unavailable: there is no single total because the carriers have different units.')
     expect(g.textContent).not.toMatch(/11\.25/)               // nothing summed across units
   })
 

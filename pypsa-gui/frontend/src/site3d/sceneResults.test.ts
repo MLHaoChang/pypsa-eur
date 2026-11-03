@@ -69,7 +69,7 @@ const oracle = (): SceneResults => ({
 describe('quantities (V57)', () => {
   it('an unavailable number reads its reason in words, never 0.00', () => {
     const w = quantityWords(NA('results_not_current', 'MW'))
-    expect(w).toBe('Unavailable: the results are out of date: the model changed after the solve')
+    expect(w).toBe('Unavailable: the results are out of date because the model changed after the solve.')
     expect(w).not.toMatch(/\d/)
     expect(quantityWords({ value: 0, available: false, reason: 'series_missing', unit: 'MW' })).toMatch(/^Unavailable: /)
   })
@@ -123,7 +123,7 @@ describe('a building’s items', () => {
   it('an explicit share is labelled allocated, with the native rate beside it', () => {
     const office = featureView(oracle(), 'b2', names, 'guided').find(t => t.title === 'office · load')!
     expect(office.allocation).toBe('allocated 40 %')
-    expect(office.ports[0]).toMatchObject({ value: '0.1 MW', tag: 'allocated', notes: ['of 0.25 MW native'] })
+    expect(office.ports[0]).toMatchObject({ label: 'AC in', value: '0.1 MW', tag: 'allocated', notes: ['of 0.25 MW in total'] })
   })
   it('a shared target names the other building and is not split', () => {
     const hall = featureView(oracle(), 'b2', names, 'guided').find(t => t.title === 'hall · load')!
@@ -132,7 +132,7 @@ describe('a building’s items', () => {
   })
   it('a vintaged target reads its reason; a zero output reads 0', () => {
     const v = featureView(oracle(), 'b3', names, 'expert')
-    expect(v.find(t => t.title.startsWith('bess'))!.reason).toBe('Unavailable: items with several build years are not shown per hour yet')
+    expect(v.find(t => t.title.startsWith('bess'))!.reason).toBe('Unavailable: items with several build years are not shown per hour yet.')
     expect(v.find(t => t.title === 'pv · Generator')!.ports[0].value).toBe('0 MW')
   })
   it('the scene summary shows a shared target once, with every building it sits on', () => {
@@ -150,14 +150,14 @@ describe('a group', () => {
     expect(g.boundary.map(b => `${b.label}: ${b.value}`)).toEqual([
       'elec · AC: 10.25 MW', 'heat · heat: -1 MW', 'n2 · N2: 1 t/h', 'nh3 · NH3: -4 MW'])
     expect(g.totals.map(t => t.value)).toEqual(['10.25 MW', '-1 MW', '1 t/h', '-4 MW'])
-    expect(g.total).toBe('Unavailable: no single total: the carriers have different units')
-    expect(g.notes).toEqual(['Inside the group, not counted: h2'])
+    expect(g.total).toBe('Unavailable: there is no single total because the carriers have different units.')
+    expect(g.notes).toEqual(['Inside the group and not counted: h2'])
   })
   it('a partial or unavailable member is said in words', () => {
     const g = { ...oracle().groups.plant, total: NA('group_partial_allocation'), unavailable_member: true }
     const v = groupView(g, 'guided')
-    expect(v.total).toBe('Unavailable: a member is shared with buildings outside the group')
-    expect(v.notes).toContain('A member is unavailable: a member’s result is unavailable')
+    expect(v.total).toBe('Unavailable: a member is shared with buildings outside the group.')
+    expect(v.notes).toContain('Unavailable: a member’s result is unavailable.')
   })
   it('lists the groups a building sits in, nested ones too', () => {
     const groups = [...names.groups, { id: 'site', label: 'Site', members: ['plant'] }, { id: 'other', label: 'Other', members: ['b3'] }]
@@ -175,7 +175,32 @@ describe('a closed run gate', () => {
     expect(featureView(r, 'b1', names, 'expert')[0].ports[0].value).toBe('Unavailable')
     const office = featureView(r, 'b2', names, 'expert').find(t => t.title === 'office · Load')!
     expect(office.ports[0]).toMatchObject({ value: 'Unavailable', tag: 'allocated', notes: [] })
-    expect(quantityWords(NA('unit_unknown'), 'results_not_current')).toBe('Unavailable: the bus unit is not one the overlay knows (MW or t)')
+    expect(quantityWords(NA('unit_unknown'), 'results_not_current')).toBe('Unavailable: the bus unit is not one the overlay knows (MW or t).')
     expect(groupView({ ...r.groups.plant, total: NA('results_not_current') }, 'expert', 'results_not_current').total).toBe('Unavailable')
+  })
+})
+
+describe('Guided directions (no double negative)', () => {
+  it('a port says in or out from the served sign and shows the number without a minus', () => {
+    const haber = featureView(oracle(), 'b2', names, 'guided').find(t => t.title === 'haber · process unit')!
+    expect(haber.ports.map(p => `${p.label}: ${p.value}`)).toEqual(['N2 in: 1 t/h', 'NH3 out: 4 MW'])
+    const pv = featureView(oracle(), 'b3', names, 'guided').find(t => t.title === 'pv · generator')!
+    expect(`${pv.ports[0].label}: ${pv.ports[0].value}`).toBe('solar out: 0 MW')   // zero: the role word
+    const inj = { ...oracle().features.b3.targets[1].ports[0], rate: Q(2, 'MW') }
+    const r = oracle(); r.features.b3.targets[1].ports[0] = inj
+    expect(featureView(r, 'b3', names, 'guided').find(t => t.title === 'pv · generator')!.ports[0].label).toBe('solar out')
+    r.features.b3.targets[1].ports[0] = { ...inj, rate: Q(-2, 'MW') }
+    expect(featureView(r, 'b3', names, 'guided').find(t => t.title === 'pv · generator')!.ports[0]).toMatchObject({ label: 'solar in', value: '2 MW' })
+  })
+  it('Expert keeps the signed value', () => {
+    const haber = featureView(oracle(), 'b2', names, 'expert').find(t => t.title === 'haber · Link')!
+    expect(haber.ports[1]).toMatchObject({ label: 'p2 · nh3 · out', value: '-4 MW' })
+  })
+  it('a group says import or export per row and total', () => {
+    const g = groupView(oracle().groups.plant, 'guided')
+    expect(g.boundary.map(b => `${b.label}: ${b.value}`)).toEqual(['AC import: 10.25 MW', 'heat export: 1 MW', 'N2 import: 1 t/h', 'NH3 export: 4 MW'])
+    expect(g.totals.map(b => `${b.label}: ${b.value}`)).toEqual(['AC import: 10.25 MW', 'heat export: 1 MW', 'N2 import: 1 t/h', 'NH3 export: 4 MW'])
+    const z = groupView({ ...oracle().groups.plant, totals: [{ carrier: 'AC', net_import: Q(0, 'MW') }, { carrier: 'N2', net_import: NA('series_missing', 't/h') }] }, 'guided')
+    expect(z.totals.map(b => `${b.label}: ${b.value}`)).toEqual(['AC net import: 0 MW', 'N2 net import: Unavailable: the solve wrote no result for this item.'])
   })
 })
