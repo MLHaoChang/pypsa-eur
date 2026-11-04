@@ -3,7 +3,7 @@
 
 # LC-40c — The tornado study captures its network revision
 
-Status: needs-triage
+Status: done
 Type: behaviour change (gated: GK A)
 
 Found while building LC-40b (`40b-revision-capture-helper.md`). The LC-40b spec assumed the
@@ -36,6 +36,6 @@ so the fix drops the entry.
 
 ## Acceptance
 
-- [ ] The tornado record captures through `dirty_state.capture` before its thread starts.
-- [ ] Its campaign entries read True after an edit through a real seam, False after a re-run.
-- [ ] LC-37/39/40/41 and LC-40b test files unchanged apart from the `NO_CAPTURE` entry.
+- [x] The tornado record captures through `dirty_state.capture` before its thread starts.
+- [x] Its campaign entries read True after an edit through a real seam, False after a re-run.
+- [x] LC-37/39/40/41 and LC-40b test files unchanged apart from the `NO_CAPTURE` entry.
