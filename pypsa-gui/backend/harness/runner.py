@@ -235,6 +235,8 @@ def _notify(path):
     paused: an attention record, and an email when the deployment sends
     them and the user opted in (≤ 1 per change, ≤ 10 per run). The text is
     built here from fixed fields, never from model text or values."""
+    from harness import loop_notice
+    loop_notice.send_if_due(path)  # an ended agent loop: one notice (issue 25)
     pending = {}
 
     def change(task):
