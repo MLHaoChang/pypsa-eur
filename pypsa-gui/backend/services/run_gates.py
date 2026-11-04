@@ -98,9 +98,11 @@ def _solve_job(env):
 
 def _not_applied(job):
     """HH-10 (issue 05, C6f): a captured solve whose result was not applied
-    (the inputs changed while it waited) is never read as the project's."""
-    capture = job.get("capture") or {}
-    if job.get("status") == "completed" and capture.get("applied") is False:
+    (the inputs changed while it waited) is never read as the project's. A
+    captured job counts only when `applied` is exactly True; a missing field
+    is no evidence."""
+    capture = job.get("capture")
+    if job.get("status") == "completed" and capture is not None and capture.get("applied") is not True:
         reason = capture.get("reason") or "not_applied"
         return NoEvidence(reason, f"{reason}: the run's captured solve was not applied to the project")
     return None

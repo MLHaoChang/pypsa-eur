@@ -1240,7 +1240,8 @@ class SolveQueue:
             else:
                 probe = PyPSAService.build_context()
                 _hydrate_context_from_disk(probe, project_dir, job.project_id)
-            if not solve_capture.unchanged(manifest, solve_capture.current(probe, project_dir)):
+            now = solve_capture.current(probe, project_dir)
+            if not solve_capture.unchanged(manifest, now):
                 settle(False, "inputs_changed")
                 return
             # The solved context was hydrated from the capture; it saves into
@@ -1256,6 +1257,13 @@ class SolveQueue:
                 raise
             if resident is not None:
                 _hydrate_context_from_disk(resident, project_dir, job.project_id)
+            # Sidecar writers (campus and island routes, the island-cuts apply
+            # loop, grid limits) hold no context lock, so one may have landed
+            # between the compare and the save: the result is then not the
+            # project's (GK B, 4 Nov).
+            if solve_capture.sidecar_hashes(project_dir) != now["sidecars"]:
+                settle(False, "inputs_changed")
+                return
             settle(True)
 
     def _run_solve_job(self, job: SolveJob) -> None:

@@ -117,6 +117,25 @@ def test_the_applied_write_back_keeps_the_projects_settings_and_study_ownership(
     assert after.get("owner_study_id") == "study-1", after
 
 
+def test_a_sidecar_write_between_the_compare_and_the_save_is_not_applied(eh, site, held_queue, monkeypatch):
+    # Sidecar writers hold no context lock: one landing after the compare
+    # passed leaves the result not the project's (GK B, 4 Nov).
+    from routers import projects
+    _, root = site
+    real = projects._save_context
+
+    def racing(*args, **kwargs):
+        (pathlib.Path(root) / "eh_template.json").write_text(json.dumps({"id": "eh_site", "site_type": "raced"}))
+        return real(*args, **kwargs)
+    job_id, _ = _enqueued(eh, site)
+    monkeypatch.setattr(projects, "_save_context", racing)
+    held_queue.resume()
+    job = _terminal(job_id)
+    assert job["status"] == "completed", job
+    assert job["capture"]["applied"] is False and job["capture"]["reason"] == "inputs_changed", job["capture"]
+    assert json.loads((pathlib.Path(root) / "eh_template.json").read_text())["site_type"] == "raced"
+
+
 # ── C6a: the capture is the one the job recorded ────────────────────────────
 
 def _settled_after(eh, site, held_queue, change):
@@ -132,7 +151,8 @@ def _settled_after(eh, site, held_queue, change):
     lambda d: (d / "manifest.json").write_text(json.dumps({**json.loads((d / "manifest.json").read_text()),
                                                            "network_revision": 999})),  # the manifest
     lambda d: shutil.rmtree(d),  # the directory
-], ids=["file", "manifest", "missing"])
+    lambda d: (d / solve_capture.sidecars()[0]).write_text("{}"),  # a sidecar the capture did not hold
+], ids=["file", "manifest", "missing", "planted"])
 def test_a_capture_that_is_not_the_jobs_fails_with_nothing_solved(eh, site, held_queue, change):
     job = _settled_after(eh, site, held_queue, change)
     assert job["status"] == "failed" and job["condition"] == solve_capture.MISMATCH, job
@@ -263,6 +283,12 @@ def test_a_capture_not_applied_is_no_evidence_for_the_solve_rules(monkeypatch):
     job["capture"]["applied"] = True
     results = run_gates.evaluate(rules, run_gates.Env(task={}, ctx=None, project=None, project_dir=None))
     assert [r["verdict"] for r in results] == ["pass", "pass"]
+    # Only `applied is True` counts: a captured job with the field missing
+    # (or not a bool) is no evidence.
+    for capture in ({"identity": "x"}, {"applied": "yes"}):
+        job["capture"] = capture
+        results = run_gates.evaluate(rules, run_gates.Env(task={}, ctx=None, project=None, project_dir=None))
+        assert [r["verdict"] for r in results] == ["not_evaluated", "not_evaluated"], capture
 
 
 def test_the_run_evidence_names_the_capture_and_whether_it_was_applied(eh, site, held_queue):

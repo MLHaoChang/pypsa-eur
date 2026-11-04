@@ -177,6 +177,11 @@ def verify(record: dict) -> dict:
     for name, digest in manifest["files"].items():
         if not (path / name).is_file() or _sha256(path / name) != digest:
             raise CaptureMismatch(f"{name} differs from the manifest")
+    for name in solve_inputs():
+        # A file the capture did not hold must stay absent: the loaders would
+        # read a planted one as the project's sidecar.
+        if name not in manifest["files"] and (path / name).exists():
+            raise CaptureMismatch(f"{name} is not in the manifest")
     return manifest
 
 

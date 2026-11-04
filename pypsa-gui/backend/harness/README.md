@@ -1375,12 +1375,21 @@ else.
   - **Write-back.** Under the project's locks, the result is saved to the
     project only when the full identity (exact fingerprint, edit counter,
     sidecar sha256) still equals the capture's. Otherwise nothing is written,
-    and the job records `capture.applied: false, reason: inputs_changed`. The
-    `solve.*` gate facts read it as no evidence, so the run stops for the
-    user, and the run evidence's summary names the capture.
+    and the job records `capture.applied: false, reason: inputs_changed`.
+    Sidecar writers (campus and island routes, the island-cuts apply loop,
+    grid limits) hold no context lock, so the compare and the save are not
+    atomic for sidecars: after the save, still under the locks, the sidecars
+    are hashed again, and any change also records `applied: false,
+    inputs_changed` (the saved network then sits beside the newer sidecar,
+    and is not the run's evidence). Only `applied: true` counts: the
+    `solve.*` gate facts read anything else on a captured job as no
+    evidence, so the run stops for the user, and the run evidence's summary
+    names the capture.
   - **Refusals and cleanup.** A run's enqueue is refused
     `solve_already_queued` while another job of the project is active: it is
-    never merged into one. A settled job's capture is removed once its
+    never merged into one. One naming another project is refused
+    `capture_project_mismatch` with nothing captured. At pickup, a solve
+    input the manifest does not list must be absent from the capture. A settled job's capture is removed once its
     evidence is recorded. Boot removes any capture that no queued or running
     job row names and that is older than the runner lease. Bundle export and
     Save-As copy named files and directories only, so `.harness/` never
