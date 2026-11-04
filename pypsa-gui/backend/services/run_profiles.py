@@ -40,6 +40,19 @@ NEVER_TUNABLE = frozenset({
 })
 _NEVER_COMPONENTS = frozenset({"grid_code", "solver", "gate", "profile", "envelope"})
 
+# §6.3: an agent turn offers its stage's allowlist only. The input loop L1
+# (§6.1) gets reads, Library reads and the data-gap and edit tools; the
+# envelope still decides each write at dispatch, and anything it does not
+# admit is a card the headless turn never shows.
+L1_ROUNDS = 3  # §6.1: at most 3 rounds; a profile may lower it
+AGENT_STAGES = ("input_gate",)
+L1_TOOLS = (
+    "validate_network", "project_readiness", "diagnose_network", "get_weather_choice", "get_component",
+    "list_components", "get_current_series", "list_all_timeseries", "list_load_profile_archetypes",
+    "list_library_items", "get_library_item", "list_library_series", "get_library_series",
+    "update_component", "attach_tariff", "set_weather_choice", "generate_load_profile", "apply_generated_profile",
+)
+
 
 def _rule(id, fact, op, value=None, severity="block", basis=""):
     rule = {"id": id, "fact": fact, "op": op, "severity": severity, "basis": basis}
@@ -80,7 +93,8 @@ GENERIC: dict[str, dict] = {
     ]},
     "inputs": {"actions": [_call("get_weather_choice", project_id=PROJECT)], "rules": []},
     "input_gate": {"actions": [_call("validate_network"), _call("project_readiness", project_id=PROJECT),
-                               _call("diagnose_network")], "rules": CORE_INPUT_RULES},
+                               _call("diagnose_network")], "rules": CORE_INPUT_RULES,
+                   "agent": {"tools": list(L1_TOOLS), "rounds": L1_ROUNDS}},
     "solve": {"actions": [_call("solve_queue_enqueue", project_id=PROJECT)], "rules": [
         _rule("sv.solve.state", "solve.state", "eq", "completed", basis="The run's own solve job finished."),
     ]},
@@ -103,6 +117,22 @@ def _check_tunable(entries):
         if attr in NEVER_TUNABLE or "grid_code" in attr or component.split(":")[0] in _NEVER_COMPONENTS:
             raise ProfileError(f"{component}.{attr} is never tunable: the agent changes design levers, "
                                "never the question.")
+
+
+def _check_agent(name, agent):
+    """A stage's agent turn (§6.3): its allowlist and round bound."""
+    from harness.catalogue import TOOLS, safety_tier_for
+    if name not in AGENT_STAGES:
+        raise ProfileError(f"Stage {name}: no agent turn runs there yet.")
+    if not isinstance(agent, dict) or set(agent) != {"tools", "rounds"} or not isinstance(agent["tools"], list) \
+            or not agent["tools"] or isinstance(agent["rounds"], bool) or not isinstance(agent["rounds"], int) \
+            or not 1 <= agent["rounds"] <= L1_ROUNDS:
+        raise ProfileError(f"Stage {name}: an agent turn names tools and 1-{L1_ROUNDS} rounds.")
+    known = {t["name"] for t in TOOLS}
+    for tool in agent["tools"]:
+        if tool not in known or tool not in L1_TOOLS or safety_tier_for(tool) == "destructive":
+            raise ProfileError(f"Stage {name}: {tool!r} is not a tool the input loop may offer.")
+    return {"tools": list(dict.fromkeys(agent["tools"])), "rounds": agent["rounds"]}
 
 
 def load(profile: dict) -> dict:
@@ -144,6 +174,8 @@ def load(profile: dict) -> dict:
             if own.get(core["id"]) != core:
                 raise ProfileError(f"Stage {name}: rule {core['id']} is inherited and cannot be dropped or changed.")
         stages[name] = {"actions": actions, "rules": rules}
+        if "agent" in stage:
+            stages[name]["agent"] = _check_agent(name, stage["agent"])
     loaded = {**copy.deepcopy(profile), "stages": stages}
     if "envelope" in profile:
         # Issue 03: what a run of this profile may propose; a grant narrows it, never widens it.
@@ -166,6 +198,9 @@ def scope_for(template: dict | None) -> dict:
     preset_id, preset = flow_scope.preset_for(template)
     return {"preset": preset_id, "cards": {card: list(options) for card, options in preset.items()}}
 
+
+# The completed weather year eh_site fills a weather gap from.
+EH_SITE_YEAR = 2023
 
 EH_SITE = {
     "id": "eh_site", "version": 1,
@@ -203,6 +238,17 @@ EH_SITE = {
                    "bounds": {"min": 0.0, "rel": 0.5}},
                   {"tool": "update_component", "target": {"component": "StorageUnit", "name": "bess_new_*", "attr": "max_hours"},
                    "bounds": {"min": 1.0, "max": 8.0}}],
+        # Issue 04: the data gaps the input loop may fill, never replace (§6.1, §7).
+        # Each names the source its fill copies, fixed here and resolved at the
+        # grant (GK B, AI-567b): the model never picks a value.
+        # No Load gap yet: a static p_set is demand, not a gap (GK B); one comes
+        # with a ruled energy source (`run_envelope.LOAD_ENERGY_SOURCES`).
+        "gaps": [*[{"tool": "set_weather_choice", "target": {"component": "Settings", "name": "Weather", "attr": attr},
+                    "source": {"kind": "weather_choices", "choices": [{"source": "synthetic", "year": EH_SITE_YEAR}]}}
+                   for attr in ("source", "year")],
+                 {"tool": "attach_tariff",
+                  "target": {"component": "Settings", "name": "Commercial", "attr": "import_tariff_ref"},
+                  "source": {"kind": "library_tariff"}}],
         "runs": [{"tool": "solve_queue_enqueue"}],
         "budget": {"solves": 6, "rounds": 6, "wall_time_h": 8.0},
         "research": {"allowed": False, "cost_cap_eur": 2.0},

@@ -380,6 +380,11 @@ def _tools_payload_for_profile(profile: Any, query: str = "", history=None) -> l
     tools = _tools_payload()
     from services import chat_tools
     session = chat_tools.chat_session()
+    stage_tools = getattr(session, "stage_tools", None)
+    if stage_tools is not None:
+        # A harness run's agent turn (study harness issue 04, §6.3): its stage's
+        # allowlist only, in catalogue order; no toolset, no external tools.
+        return [t for t in tools if t.get("name") in stage_tools]
     toolset = getattr(session, "toolset", "all")
     tools = filter_tools(tools, toolset)
     if toolset in (None, "all"):

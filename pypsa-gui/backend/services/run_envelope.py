@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import copy
 import fnmatch
+import hashlib
 import json
 import logging
 import math
@@ -66,6 +67,39 @@ RESEARCH_SOURCE = "research:"
 # Refusals that end the envelope's use for this run: the runner pauses and
 # notifies (§7 "Scope and audit", the freshness chain).
 PAUSING = frozenset({"expired", "revoked", "exhausted", "drift", "fingerprint_unreadable", "brief_stale"})
+
+# Data-gap tools (§7, GK B; issue 04): admitted only from a `gaps` entry that
+# names the target, and only to fill a gap: the instance had no series (or the
+# setting no value) at the grant and still has none. A value that is there is
+# never replaced, so §6.0 holds: demand is filled where it is missing, never
+# changed. Each tool fills these (component, attr) targets only.
+GAP_TARGETS = {
+    "apply_generated_profile": frozenset({("Load", "p_set")}),
+    "attach_tariff": frozenset({("Settings", "import_tariff_ref")}),
+    "set_weather_choice": frozenset({("Settings", "source"), ("Settings", "year")}),
+}
+# The step that prepares a fill: it writes only the pending profile store, for
+# the loads its args name, and is admitted only for gaps a listed entry names.
+GAP_PREPARE = {"generate_load_profile": "apply_generated_profile"}
+# GK B's conditions on the gaps grant (issue 04, AI-567b): a fill's value never
+# comes from the model. Each gap names a source, fixed in the profile and
+# resolved to concrete values at the grant; L1 may only copy them.
+#   load_generator: the generator run with the profile's archetype and year,
+#     its energy from a source in LOAD_ENERGY_SOURCES;
+#   weather_choices: one of the profile's listed (source, year) pairs;
+#   library_tariff: a Library tariff the project's organisation already holds,
+#     listed at the grant by its hash (L1 never creates or uploads one).
+# A new kind (an SH-21 intake row) is one more entry here and in the checks.
+GAP_SOURCES = {"apply_generated_profile": "load_generator", "set_weather_choice": "weather_choices",
+               "attach_tariff": "library_tariff"}
+LOAD_ARCHETYPES = ("industrial", "commercial", "residential", "ev_charging", "heat", "data_centre")
+# The energies a load_generator source may name, each resolving
+# (network, load) to the generator's params, or None when it has none for that
+# load. Empty until one is ruled (GK B, issue 04): a static p_set is constant
+# demand, not a gap, and reshaping it raises the peak (§6.0). An SH-21 intake
+# row or an owner decision adds one; until then a Load fill gets a card.
+LOAD_ENERGY_SOURCES: dict = {}
+_PREPARE_ARGS = {"project_id", "archetype", "loads", "params", "year", "replay_refinements"}
 
 _GLOB = re.compile(r"[*?\[\]]")
 _CLASS = re.compile(r"^[A-Z][A-Za-z]{1,40}$")
@@ -158,6 +192,49 @@ def _check_run(entry):
     return dict(entry)
 
 
+def _check_source(tool, source):
+    kind = GAP_SOURCES[tool]
+    if not isinstance(source, dict) or source.get("kind") != kind:
+        raise EnvelopeError(f"A {tool} gap names its source, of kind {kind}.")
+    if kind == "load_generator":
+        if set(source) != {"kind", "archetype", "year", "energy"} or source["archetype"] not in LOAD_ARCHETYPES \
+                or isinstance(source["year"], bool) or not isinstance(source["year"], int) \
+                or source["energy"] not in LOAD_ENERGY_SOURCES:
+            raise EnvelopeError(f"A load_generator source names archetype, year and an energy source "
+                                f"({sorted(LOAD_ENERGY_SOURCES) or 'none is ruled yet'}).")
+    elif kind == "weather_choices":
+        choices = source.get("choices")
+        if set(source) != {"kind", "choices"} or not isinstance(choices, list) or not choices or not all(
+                isinstance(c, dict) and set(c) == {"source", "year"} and isinstance(c["source"], str)
+                and isinstance(c["year"], int) and not isinstance(c["year"], bool) for c in choices):
+            raise EnvelopeError("A weather_choices source lists its (source, year) choices.")
+    elif set(source) != {"kind"}:
+        raise EnvelopeError("A library_tariff source carries its kind only; the grant lists the tariffs.")
+    return copy.deepcopy(source)
+
+
+def _check_gap(entry):
+    if not isinstance(entry, dict) or set(entry) != {"tool", "target", "source"} or entry["tool"] not in GAP_TARGETS:
+        raise EnvelopeError(f"A gap names one of {sorted(GAP_TARGETS)}, its target and its source: {entry!r}")
+    target = entry["target"]
+    if not isinstance(target, dict) or set(target) != {"component", "name", "attr"} \
+            or not all(isinstance(v, str) and v for v in target.values()) or len(target["name"]) > 64:
+        raise EnvelopeError("A gap's target names component, name and attr.")
+    if (target["component"], target["attr"]) not in GAP_TARGETS[entry["tool"]]:
+        raise EnvelopeError(f"{entry['tool']} fills only {sorted(GAP_TARGETS[entry['tool']])}.")
+    if target["component"] == "Settings" and _GLOB.search(target["name"]):
+        raise EnvelopeError("A settings gap names its setting, never a glob.")
+    return {"tool": entry["tool"], "target": dict(target), "source": _check_source(entry["tool"], entry["source"])}
+
+
+def _source_within(mine, wide):
+    """A grant's source narrows the profile's: the same generator inputs, a
+    subset of the weather choices, the same tariff rule."""
+    if mine["kind"] == "weather_choices":
+        return all(c in wide["choices"] for c in mine["choices"])
+    return mine == wide
+
+
 def _check_budget(budget):
     if not isinstance(budget, dict) or set(budget) != set(CAPS):
         raise EnvelopeError(f"A budget sets {sorted(CAPS)}.")
@@ -178,11 +255,14 @@ def _check_research(research):
 
 def check_block(block):
     """A profile's `envelope` block, validated (`run_profiles.load`)."""
-    if not isinstance(block, dict) or not {"edits", "runs", "budget"} <= set(block) <= {"edits", "runs", "budget", "research"}:
-        raise EnvelopeError("An envelope block has edits, runs, budget and optional research.")
-    if not isinstance(block["edits"], list) or not isinstance(block["runs"], list):
-        raise EnvelopeError("edits and runs are lists.")
+    if not isinstance(block, dict) or not {"edits", "runs", "budget"} <= set(block) \
+            <= {"edits", "runs", "budget", "research", "gaps"}:
+        raise EnvelopeError("An envelope block has edits, runs, budget and optional research and gaps.")
+    if not isinstance(block["edits"], list) or not isinstance(block["runs"], list) \
+            or not isinstance(block.get("gaps", []), list):
+        raise EnvelopeError("edits, runs and gaps are lists.")
     return {"edits": [_check_edit(e) for e in block["edits"]], "runs": [_check_run(r) for r in block["runs"]],
+            "gaps": [_check_gap(g) for g in block.get("gaps", [])],
             "budget": _check_budget(block["budget"]),
             "research": _check_research(block.get("research", {"allowed": False, "cost_cap_eur": RESEARCH_DEFAULT_EUR}))}
 
@@ -218,6 +298,15 @@ def narrow(block, candidate):
     for edit in mine["edits"]:
         if not any(_within(edit, wide) for wide in block["edits"]):
             _invalid(f"{edit['tool']} on {edit['target']} is wider than the profile's envelope.")
+    for gap in mine["gaps"]:
+        if not any(gap["tool"] == wide["tool"] and gap["target"]["component"] == wide["target"]["component"]
+                   and gap["target"]["attr"] == wide["target"]["attr"]
+                   and (gap["target"]["name"] == wide["target"]["name"] or (
+                       not _GLOB.search(gap["target"]["name"])
+                       and fnmatch.fnmatchcase(gap["target"]["name"], wide["target"]["name"])))
+                   and _source_within(gap["source"], wide["source"])
+                   for wide in block["gaps"]):
+            _invalid(f"{gap['tool']} on {gap['target']} is wider than the profile's envelope.")
     for run in mine["runs"]:
         if run not in block["runs"]:
             _invalid(f"{run} is not in the profile's envelope.")
@@ -274,6 +363,7 @@ def propose(task_path, task, profile):
                 "fingerprint": None, "chain": [], "profile": task["run"]["profile"],
                 "edits": [dict(e, at_grant={}) for e in copy.deepcopy(block["edits"])],
                 "runs": copy.deepcopy(block["runs"]), "budget": dict(block["budget"]),
+                "gaps": [dict(g, at_grant={}) for g in copy.deepcopy(block.get("gaps", []))],
                 "research": dict(block["research"]), "notify": {"email": False},
                 "state": "proposed", "audit": []}
     _save(task_path, envelope)
@@ -287,6 +377,7 @@ def _rows(envelope):
         allowed = ", ".join(map(str, e["enum"])) if "enum" in e else ", ".join(
             f"{k} {v:g}" if k != "rel" else f"±{v:.0%} of the value at grant" for k, v in e["bounds"].items())
         lines.append(f"- Edit {t['component']} `{t['name']}` {t['attr']} ({allowed}) with {e['tool']}")
+    lines += [_gap_row(g) for g in envelope.get("gaps", [])]
     lines += [f"- Run {r['tool']}" + (f" ({r['kind']})" if r.get("kind") else "") for r in envelope["runs"]]
     b = envelope["budget"]
     lines.append(f"- Up to {b['solves']} solves and {b['rounds']} rounds, for at most {b['wall_time_h']:g} h")
@@ -296,6 +387,27 @@ def _rows(envelope):
     return "\n".join(lines)
 
 
+def _gap_row(gap):
+    """One plan-review row for a gap entry, in the user's words (UX)."""
+    t, source = gap["target"], gap["source"]
+    fill = f"- Fill a missing {t['component']} `{t['name']}` {t['attr']} with {gap['tool']}"
+    never = " (only where none is set; never replaces one)"
+    if source["kind"] == "load_generator":
+        return f"{fill} from a {source['archetype']} {source['year']} profile from {source['energy']}{never}"
+    if source["kind"] == "weather_choices":
+        return f"{fill} from one of " + ", ".join(f"{c['source']} {c['year']}" for c in source["choices"]) + never
+    if not gap.get("at_grant"):  # the plan, before you approve it
+        return f"{fill} from a Library tariff, only when exactly one is held when you approve{never}"
+    held = [f"{name} v{version}" for record in gap["at_grant"].values()
+            for name, version in (record.get("tariffs") or {}).values()]
+    if len(held) == 1:
+        return f"{fill} from the Library tariff {held[0]}{never}"
+    if not held:
+        return "- No tariff is filled: none is held in the Library when you approve."
+    both = "both" if len(held) == 2 else "all"
+    return f"- No tariff is filled: {', '.join(held[:-1])} and {held[-1]} are {both} held, so you choose one yourself."
+
+
 def describe(envelope):
     """What the plan-review card shows (issue 08 renders it)."""
     if envelope is None:
@@ -303,6 +415,7 @@ def describe(envelope):
     audit = envelope["audit"]
     return {"id": envelope["id"], "state": envelope["state"], "expires_at": envelope["expires_at"],
             "edits": [{k: v for k, v in e.items() if k != "at_grant"} for e in envelope["edits"]],
+            "gaps": [{k: v for k, v in g.items() if k != "at_grant"} for g in envelope.get("gaps", [])],
             "runs": envelope["runs"], "budget": envelope["budget"], "research": envelope["research"],
             "notify": envelope["notify"],
             "used": sum(1 for a in audit if a["event"] == "used"),
@@ -334,6 +447,88 @@ def _instances(ctx, edit):
         value = value.item() if hasattr(value, "item") else value
         out[str(name)] = value if isinstance(value, str) or _number(value) else None
     return out
+
+
+def _has_series(ctx, name):
+    return str(name) in {str(c) for c in ctx.network.loads_t.p_set.columns}
+
+
+def source_digest(record):
+    """The digest an admitted fill is bound to: its grant-time source record."""
+    return hashlib.sha256(json.dumps(record, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _library_tariffs():
+    """{hash: [name, version]} of the Library tariffs the project's
+    organisation holds now (read as `attach_tariff` reads them)."""
+    from routers.library import ItemKind, list_items
+    from services import chat_tools
+    items = chat_tools._library_call(list_items, ItemKind.tariff)
+    items = items.get("items", items) if isinstance(items, dict) else items
+    out = {}
+    for item in items or []:
+        item = item if isinstance(item, dict) else item.model_dump(mode="json")
+        ref = item.get("ref") if isinstance(item.get("ref"), dict) else item
+        if isinstance(ref.get("hash"), str) and ref["hash"]:
+            out[ref["hash"]] = [str(ref.get("name") or item.get("name")), ref.get("version")]
+    return out
+
+
+def _tariff_hash(args):
+    from routers.library import ItemKind, get_item
+    from services import chat_tools
+    ref = chat_tools._library_call(get_item, ItemKind.tariff, args.get("name"), version=args.get("version")).ref
+    return ref.hash
+
+
+def _gap_instances(ctx, gap):
+    """`at_grant` of a gap entry: each instance it names that is a gap now,
+    with the concrete source its fill must copy (GK B, AI-567b). A component
+    made or renamed later is never in it. A Load gap is an electric site load
+    only: a named offtake or process load refuses the grant, a glob skips it.
+    Anything unreadable names no gap (fail closed)."""
+    target, source = gap["target"], gap["source"]
+    if target["component"] == "Settings":
+        try:
+            if source["kind"] == "weather_choices":
+                return {target["name"]: {"choices": copy.deepcopy(source["choices"])}}
+            return {target["name"]: {"tariffs": _library_tariffs()}}
+        except Exception:  # noqa: BLE001 — an unreadable Library grants no tariff
+            logger.warning("run envelope: the Library tariffs could not be listed at the grant", exc_info=True)
+            return {}
+    from services.adequacy.site_peak import load_split
+    try:
+        network = ctx.network
+        electric, other = load_split(network)
+    except Exception:  # noqa: BLE001 — an unreadable network names no gap
+        return {}
+    if not _GLOB.search(target["name"]) and target["name"] in {o[0] for o in other}:
+        _invalid(f"Load {target['name']} is an offtake or process demand: it is never filled as a data gap.")
+    out = {}
+    for name in electric:
+        if not fnmatch.fnmatchcase(str(name), target["name"]) or _has_series(ctx, name):
+            continue
+        try:
+            params = LOAD_ENERGY_SOURCES[source["energy"]](network, name)
+        except Exception:  # noqa: BLE001 — a source that cannot be read names no gap
+            params = None
+        if isinstance(params, dict) and params:
+            out[str(name)] = {"archetype": source["archetype"], "year": source["year"], "params": params,
+                              "identity": _identity(network, name)}
+    return out
+
+
+def _identity(network, name):
+    """What makes a gap load the one granted: a load renamed onto a granted
+    name, or made again under it, reads another bus or static value."""
+    return {"bus": str(network.loads.at[name, "bus"]), "p_set": float(network.loads.at[name, "p_set"])}
+
+
+def _same_load(ctx, name, record):
+    try:
+        return _identity(ctx.network, name) == record["identity"]
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 def decide(session, task_id, verdict, envelope=None, notify_email=False):
@@ -374,6 +569,7 @@ def decide(session, task_id, verdict, envelope=None, notify_email=False):
                 _refuse("brief_inputs_unreadable", "The project's inputs cannot be read, so nothing can be granted.")
             if assistant_tasks._stale(task, fingerprint):
                 _refuse("task_brief_stale", "The inputs changed since the brief; review a new brief first.")
+            gaps = [dict(g, at_grant=_gap_instances(ctx, g)) for g in chosen["gaps"]]  # may refuse (§6.0)
             envelope_id, now = str(uuid.uuid4()), _now()
             if not approvals.decided(session, call_id="envelope-" + envelope_id, tool="grant_envelope",
                                      tier="envelope", outcome="approved", by="user",
@@ -383,6 +579,7 @@ def decide(session, task_id, verdict, envelope=None, notify_email=False):
                            expires_at=_iso(now + chosen["budget"]["wall_time_h"] * 3600),
                            fingerprint=fingerprint, chain=[],
                            edits=[dict(e, at_grant=_instances(ctx, e)) for e in chosen["edits"]],
+                           gaps=gaps, prepared=[],
                            runs=chosen["runs"], budget=chosen["budget"], research=chosen["research"],
                            notify={"email": bool(notify_email)}, state="granted")
             _audit(granted, "granted", reason="user")
@@ -431,7 +628,8 @@ def covers(task_path, tool):
     """A live envelope lists `tool` (the runner then dispatches without
     waiting; admission still decides, at dispatch)."""
     envelope = _load(task_path) if live(task_path) else None
-    return envelope is not None and any(e["tool"] == tool for e in envelope["edits"] + envelope["runs"])
+    return envelope is not None and (any(e["tool"] == tool for e in envelope["edits"] + envelope["runs"]) or any(
+        tool in (g["tool"], *[p for p, t in GAP_PREPARE.items() if t == g["tool"]]) for g in envelope.get("gaps", [])))
 
 
 def last_refusal(task_path):
@@ -482,6 +680,114 @@ def _match_edit(envelope, tool, edit_card):
     return None
 
 
+def _still_gap(ctx, row):
+    if row.get("component_class") == "Settings":
+        return row.get("old") in (None, "")
+    return row.get("component_class") == "Load" and not _has_series(ctx, row.get("name"))
+
+
+def _same_source(args, record):
+    params = args.get("params")
+    return args.get("archetype") == record["archetype"] and args.get("year") == record["year"] \
+        and isinstance(params, dict) and set(params) == set(record["params"]) and all(
+            _number(params[k]) and math.isclose(params[k], v, rel_tol=1e-9) for k, v in record["params"].items())
+
+
+def _match_prepare(envelope, tool, args, ctx, note):
+    entries = [g for g in envelope.get("gaps", []) if g["tool"] == GAP_PREPARE[tool]]
+    if not entries:
+        return "unlisted_tool"
+    names = args.get("loads") if isinstance(args, dict) else None
+    if not isinstance(names, list) or not names or not set(args) <= _PREPARE_ARGS \
+            or args.get("replay_refinements") not in (None, False):
+        return "outside_entry"
+    records = []
+    for name in names:
+        record = next((g["at_grant"][str(name)] for g in entries if str(name) in g["at_grant"]), None)
+        if record is None:
+            return "new_instance"
+        if _has_series(ctx, name):
+            return "not_a_gap"
+        if not _same_load(ctx, name, record):
+            return "new_instance"
+        if not _same_source(args, record):
+            return "not_granted_source"
+        records.append(record)
+    note["source"] = source_digest(records[0]) if len(records) == 1 else source_digest(records)
+    note["prepare"] = {"loads": [str(n) for n in names], "source": note["source"]}
+    return None
+
+
+def _match_fill(envelope, tool, args, edit_card, ctx, note):
+    entries = [g for g in envelope.get("gaps", []) if g["tool"] == tool]
+    if not entries:
+        return "unlisted_tool"
+    if not edit_card or not edit_card.get("complete"):
+        return "unresolved_target"
+    rows = edit_card.get("rows") or []
+    typed = [r for r in rows if r.get("role") == "typed"]
+    if not typed:
+        return "unresolved_target"
+    if any(r.get("field") == "exists" for r in rows):
+        return "outside_entry"
+    records = []
+    for row in typed:
+        attr = str(row.get("field")).split(".")[0]
+        matched = [g for g in entries if g["target"]["component"] == row.get("component_class")
+                   and g["target"]["attr"] in (attr, row.get("field"))
+                   and fnmatch.fnmatchcase(str(row.get("name")), g["target"]["name"])]
+        if not matched:
+            return "outside_entry"
+        granted = [g["at_grant"][str(row["name"])] for g in matched if str(row["name"]) in g["at_grant"]]
+        if not granted:
+            return "new_instance"
+        if not _still_gap(ctx, row):
+            return "not_a_gap"
+        if any("identity" in g and not _same_load(ctx, row["name"], g) for g in granted):
+            return "new_instance"  # each row against its own grant record
+        records += granted
+    if tool == "set_weather_choice":
+        pick = {"source": args.get("source"), "year": args.get("year")}
+        if not all(pick in r["choices"] for r in records):
+            return "not_granted_source"
+        note["source"] = source_digest(pick)
+    elif tool == "attach_tariff":
+        if args.get("replace_inline"):
+            return "outside_entry"  # a fill never replaces a tariff
+        # Exactly one granted tariff (GK B): with several, the choice is the user's, on a card.
+        digest = _tariff_hash(args)
+        if not all(len(r["tariffs"]) == 1 and digest in r["tariffs"] for r in records):
+            return "not_granted_source"
+        note["source"] = digest
+    else:
+        # The prepare binding (GK B condition 4): only a pending profile this
+        # run's own round prepared from the granted source, for this load.
+        if (args.get("component_type") or "Load") != "Load" or (args.get("attribute") or "p_set") != "p_set" \
+                or args.get("point_id") not in (None, args.get("component")) \
+                or args.get("time_basis") not in (None, "UTC"):
+            return "outside_entry"  # another load's column, or a shifted series: not the granted source
+        job = next((j for j in envelope.get("prepared", []) if j["job_id"] == args.get("job_id")), None)
+        loop_round = (note.get("scope") or {}).get("round")
+        if job is None or job["task_id"] != envelope.get("task_id") or job["round"] != loop_round \
+                or str(args.get("component")) not in job["loads"] or any(str(r["name"]) not in job["loads"] for r in typed):
+            return "unbound_prepare"
+        note["source"] = job["source"]
+    return None
+
+
+def _match_gap(envelope, tool, args, edit_card, ctx, note):
+    """None when the call fills only gaps a listed entry names, from the
+    source fixed at the grant, else the reason. A check that cannot run
+    counts as no gap: the card (GK B condition 7)."""
+    try:
+        if tool in GAP_PREPARE:
+            return _match_prepare(envelope, tool, args, ctx, note)
+        return _match_fill(envelope, tool, args if isinstance(args, dict) else {}, edit_card, ctx, note)
+    except Exception:  # noqa: BLE001 — fail closed
+        logger.warning("run envelope: the gap check for %s could not run", tool, exc_info=True)
+        return "not_a_gap"
+
+
 def _in_bounds(entry, new, at_grant):
     if "enum" in entry:
         return any(new == v and type(new) is type(v) for v in entry["enum"])
@@ -496,7 +802,7 @@ def _in_bounds(entry, new, at_grant):
     return True
 
 
-def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx):
+def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx, note):
     from harness.catalogue import TOOLS
     if external:
         return "external"
@@ -519,9 +825,19 @@ def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx
     if is_run:
         kinds = [r.get("kind") for r in envelope["runs"] if r["tool"] == tool]
         return None if None in kinds or (isinstance(args, dict) and args.get("kind") in kinds) else "outside_entry"
+    if tool in GAP_PREPARE or (tool in GAP_TARGETS and not any(e["tool"] == tool for e in envelope["edits"])):
+        return _match_gap(envelope, tool, args, edit_card, ctx, note)
     if not any(e["tool"] == tool for e in envelope["edits"]):
         return "unlisted_tool"
-    return _match_edit(envelope, tool, edit_card)
+    reason = _match_edit(envelope, tool, edit_card)
+    scope = note.get("scope")
+    if reason is None and scope is not None:
+        # An L1 turn (§6.1) changes only the failed rules' `tunable` attributes.
+        tunable = scope.get("tunable") or frozenset()
+        if any((r.get("component_class"), r.get("field")) not in tunable
+               for r in edit_card["rows"] if r.get("role") == "typed"):
+            return "not_tunable"
+    return reason
 
 
 def _names_another_project(args, ctx):
@@ -586,10 +902,15 @@ def admit(session, *, call_id, tool, args, tier, external, edit_card):
         return None
     if envelope is None or not task.get("run"):
         return None
-    reason = _refusal(session, envelope, task, tool, args, tier, external, edit_card, assistant_tasks.RUN_CONTEXT.get())
+    ctx = assistant_tasks.RUN_CONTEXT.get()
+    note = {"scope": getattr(session, "loop_scope", None)}
+    reason = _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx, note)
     guard = getattr(session, "decision_guard", None)
     if reason is None and (guard is None or not guard(tool, args)):
         reason = "recheck"  # the project, owner, ACL or locks moved: re-checked under the locks
+    if reason is None and (tool in GAP_PREPARE or "source" in note):
+        # GK B condition 1: still a gap, read again under the step's locks.
+        reason = _match_gap(envelope, tool, args, edit_card, ctx, note)
     link = {"envelope_id": envelope["id"]}
     with assistant_tasks._LOCK:
         envelope = _load(path)
@@ -599,7 +920,9 @@ def admit(session, *, call_id, tool, args, tier, external, edit_card):
             recorded = approvals.decided(session, call_id=call_id, tool=tool, tier=tier, outcome="approved",
                                          by="envelope:" + envelope["id"], link={**approvals.links(session, args), **link})
             _audit(envelope, "used" if recorded else "refused", call_id=call_id, tool=tool,
-                   reason=None if recorded else "approval_unavailable")
+                   reason=None if recorded else "approval_unavailable",
+                   **({"source": note["source"]} if "source" in note else {}),
+                   **({"prepare": note["prepare"]} if "prepare" in note else {}))
             try:
                 _save(path, envelope)
             except OSError:
@@ -617,6 +940,25 @@ def admit(session, *, call_id, tool, args, tier, external, edit_card):
         except OSError:
             logger.warning("run envelope: refusal of %s could not be written", tool, exc_info=True)
     return None
+
+
+def prepared(task_path, call_id, job_id, round_no):
+    """Bind the pending profile an admitted `generate_load_profile` call made
+    to this run and round (GK B condition 4): `apply_generated_profile` is
+    admitted only for a job on this list, for the loads it was prepared for."""
+    from services import assistant_tasks
+    with assistant_tasks._LOCK:
+        envelope = _load(task_path)
+        if envelope is None or envelope["state"] != "granted" or not isinstance(job_id, str) or not job_id:
+            return False
+        used = next((a for a in reversed(envelope["audit"]) if a.get("event") == "used"
+                     and a.get("call_id") == call_id and a.get("prepare")), None)
+        if used is None:
+            return False  # not admitted from the envelope: nothing to bind
+        envelope.setdefault("prepared", []).append({"job_id": job_id, "task_id": envelope["task_id"],
+                                                    "round": round_no, "call_id": call_id, **used["prepare"]})
+        _save(task_path, envelope)
+    return True
 
 
 def refused_before_gate(task_path, call_id, tool, reason):

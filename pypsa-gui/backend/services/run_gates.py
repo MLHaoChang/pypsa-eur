@@ -139,6 +139,17 @@ def _ic_baseline_keeps(env):
     return NoEvidence(fact["state"], f"{fact['state']}: {', '.join(fact['reasons'])}")
 
 
+def _loads_without_series(env):
+    """The loads whose demand has no time series (a static `p_set` only): a
+    data gap the input loop may fill (design §6.1), never a demand change."""
+    from services.adequacy.site_peak import electric_loads
+    network = env.ctx.network
+    series = {str(c) for c in network.loads_t.p_set.columns}
+    # Electric site loads only: an offtake or process load is demand the
+    # loop never fills (§6.0), so it is never this gap.
+    return sorted(str(name) for name in electric_loads(network) if str(name) not in series)
+
+
 def _run(key):
     return lambda env: env.task.get("run", {}).get(key)
 
@@ -154,6 +165,7 @@ FACTS: dict[str, Fact] = {
     # Core input facts.
     "validate.errors": Fact("services.chat_tools.validate_network", "errors", "count", _validate),
     "readiness.ready": Fact("services.workflow_tools.project_readiness", "ready", None, _readiness),
+    "loads.without_series": Fact("services.run_gates._loads_without_series", "names", None, _loads_without_series),
     "diagnose.unserved_islands": Fact("services.chat_tools.diagnose_network", "islands_without_generation",
                                       "count", _unserved_islands),
     # Core result facts.

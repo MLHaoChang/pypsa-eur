@@ -577,6 +577,7 @@ def _advance_run(path, ctx=None):
     Gates read the network, so they are evaluated outside the task lock and
     written only if (stage, attempts, fingerprint) did not move meanwhile; a
     caller that may not edit the project writes nothing (`gate_due`)."""
+    from harness import run_loops
     from services import flow_service, run_gates, run_profiles
     ctx = ctx or RUN_CONTEXT.get() or PyPSAService.get_active_context()
     for _ in range(2 * len(run_profiles.STAGES)):
@@ -607,6 +608,8 @@ def _advance_run(path, ctx=None):
             if stage["status"] != "active" or any(
                     s["status"] != "completed" for s in task["steps"] if s["id"].startswith(name + ".")):
                 return
+            if run_loops.due(task):
+                return  # an input-loop round is due: the runner's agent turn first (issue 04)
             attempts = stage["attempts"]
         gate = _gate_now(task, profile["stages"][name]["rules"], ctx)
         with _LOCK:
@@ -620,8 +623,14 @@ def _advance_run(path, ctx=None):
             stage["attempts"], stage["gate"] = attempts + 1, gate
             following = _next_stage(run, name)
             if not gate["passed"]:
+                if name == run_loops.STAGE and run_loops.after_failed_gate(Path(path), task, gate, profile):
+                    _save(path, task)  # L1 (§6.1): the stage stays active while a round is due
+                    _wake(path)
+                    return
                 stage["status"], run["status"], task["status"] = "failed", "needs_user", "needs_review"
             else:
+                if name == run_loops.STAGE:
+                    run_loops.after_passed_gate(task)
                 stage.update(status="passed", exited_at=_now())
                 if name == "setup":
                     run["scope"] = run_profiles.scope_for(flow_service.read_template(path.parent.parent))
@@ -654,7 +663,10 @@ def _run_view(task):
             **({"waiting": {k: run["waiting"][k] for k in ("kind", "ref", "since")}} if run.get("waiting") else {}),
             **({"reason": run["reason"]} if run.get("reason") else {}),
             "next_stage": _next_stage(run, run["stage"]), "scope": (run.get("scope") or {}).get("preset"),
-            "stages": stages}
+            "stages": stages,
+            **({"loop": {k: run["loop"][k] for k in ("kind", "stage", "rounds", "limit", "refusals", "ended")
+                         if k in run["loop"]}} if run.get("loop") else {}),
+            **({"ledger": copy.deepcopy(run["ledger"])} if run.get("ledger") else {})}
 
 
 def get_task(task_id: str) -> dict:
