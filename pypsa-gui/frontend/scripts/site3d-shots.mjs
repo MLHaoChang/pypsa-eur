@@ -8,7 +8,9 @@
  * stub there (health only) unless something already answers.
  *
  * States: `legend` (the legend column against the Results pill), `readonly` (lock held by someone else), `readonly-item` (the same with an item chosen in Place),
- * `undo-reload` (the detach receipt comes back from the scene after a reload). Add a state to STATES to extend.
+ * `undo-reload` (the detach receipt comes back from the scene after a reload), `results-building` (SC-03: the Eye on, a
+ * building selected and its group open, quarter-hourly labels), `results-unavailable` (SC-03: the run out of date, every
+ * value unavailable in words). Add a state to STATES to extend.
  *
  * Usage: node scripts/site3d-shots.mjs [outDir]      env: BASE, ONLY=<state prefix>, DEBUG=1
  */
@@ -40,11 +42,50 @@ const scene = (lastReceipt) => ({ state: 'enabled', site_id: SITE, revision: 4, 
   groups: [{ id: 'yard', label: 'Yard', members: ['StorageUnit:bess'] }] })
 const DETACH = { proposal_id: 'p-detach-1', revision: 4, changed: ['placements', 'groups'], detached: { 'Generator:pv': 'uid-pv', 'Load:hall': 'uid-hall' } }
 
+// SC-03: two buildings, an ammonia group and the D07 oracle's hand values (d07/plan.md §3) on quarter-hourly labels.
+const square = (cx, cy, s) => [[cx - s, cy - s], [cx + s, cy - s], [cx + s, cy + s], [cx - s, cy + s]]
+const BUILDINGS = [
+  { id: 'b1', footprint: square(-15, 25, 8), height_m: 9, height_evidence: 'greenfield', source: { namespace: 'manual', source_id: 'm1' } },
+  { id: 'b2', footprint: square(15, 25, 8), height_m: 6, height_evidence: 'greenfield', source: { namespace: 'manual', source_id: 'm2' } },
+]
+const LABELS = ['2030-01-01T00:00:00', '2030-01-01T00:15:00', '2030-01-01T00:30:00', '2030-01-01T00:45:00']
+const Qn = (value, unit) => ({ value, available: true, reason: null, unit })
+const NA = (reason, unit = null) => ({ value: null, available: false, reason, unit })
+const sceneResults = (snapshot, current) => {
+  const v = (x, unit) => (current ? Qn(x, unit) : NA('results_not_current', unit))
+  const port = (port, bus, carrier, role, rate, extra = {}) => ({ port, bus, carrier, role, reversed: false, sign: 'withdrawal_positive', rate, ...extra })
+  return {
+    project: PROJECT, site_id: SITE, scene_revision: 4, run: { digest: 'd', current, reason: current ? null : 'results_not_current' },
+    snapshot: { index: LABELS.indexOf(snapshot), label: snapshot, period: null, weight_generators: Qn(0.25, 'h'), period_years: Qn(1, 'a') },
+    window: null,
+    features: {
+      b1: { targets: [{ class: 'Link', uid: 'u-el', name: 'electrolyser', allocation: null, ports: [
+        port('p0', 'elec', 'AC', 'input', v(10, 'MW')), port('p1', 'h2', 'H2', 'output', v(-5, 'MW')), port('p2', 'heat', 'heat', 'output', v(-1, 'MW'))] }] },
+      b2: { targets: [
+        { class: 'Link', uid: 'u-hb', name: 'haber', allocation: null, ports: [
+          port('p0', 'h2', 'H2', 'input', v(5, 'MW')), port('p1', 'n2', 'N2', 'input', v(1, 't/h')), port('p2', 'nh3', 'NH3', 'output', v(-4, 'MW'), { rate_t: v(-0.7692, 't/h') })] },
+        { class: 'Load', uid: 'u-hall', name: 'hall', allocation: { basis: 'explicit', weight: 0.4 }, ports: [
+          port('p', 'mv', 'AC', 'input', v(4, 'MW'), { allocated: v(1.6, 'MW') })] },
+      ] },
+    },
+    groups: { plant: {
+      boundary: [{ bus: 'elec', carrier: 'AC', net_import: v(10.25, 'MW') }, { bus: 'heat', carrier: 'heat', net_import: v(-1, 'MW') },
+        { bus: 'n2', carrier: 'N2', net_import: v(1, 't/h') }, { bus: 'nh3', carrier: 'NH3', net_import: v(-4, 'MW') }],
+      internal_buses: ['h2'],
+      totals: [{ carrier: 'AC', net_import: v(10.25, 'MW') }, { carrier: 'heat', net_import: v(-1, 'MW') },
+        { carrier: 'N2', net_import: v(1, 't/h') }, { carrier: 'NH3', net_import: v(-4, 'MW') }],
+      total: NA(current ? 'mixed_units' : 'results_not_current'), unavailable_member: null,
+    } },
+  }
+}
+
 const STATES = {
   legend: { lastReceipt: null, readOnly: false },
   readonly: { lastReceipt: null, readOnly: true },
   'readonly-item': { lastReceipt: null, readOnly: true, pick: true },
   'undo-reload': { lastReceipt: DETACH, readOnly: false },
+  'results-building': { lastReceipt: null, readOnly: false, results: { current: true } },
+  'results-unavailable': { lastReceipt: null, readOnly: false, results: { current: false } },
 }
 
 async function ensureStub() {
@@ -86,7 +127,16 @@ try {
       if (sch) return SCHEMAS[sch[1]] ? ok(SCHEMAS[sch[1]]) : r.fulfill({ status: 404, json: { detail: 'none' } })
       if (p === '/api/health') return ok({ status: 'ok', auth_enabled: false })
       if (p === '/api/projects/' || p === '/api/projects') return ok([{ name: PROJECT, bus_count: 2, snapshot_count: 24, has_results: false, created_at: '2026-01-01T00:00:00Z', is_root: true, parent: null }])
-      if (p.endsWith(`/sites/${SITE}/scene`)) return ok(scene(st.lastReceipt))
+      if (p.endsWith(`/sites/${SITE}/scene`)) return ok(st.results
+        ? { ...scene(st.lastReceipt), buildings: BUILDINGS, groups: [{ id: 'plant', label: 'Ammonia plant', members: ['b1', 'b2'] }] }
+        : scene(st.lastReceipt))
+      if (st.results && p.endsWith(`/sites/${SITE}/scene/results`)) return ok(sceneResults(new URL(r.request().url()).searchParams.get('snapshot'), st.results.current))
+      // A solved run, so the Results pill is enabled; out of date in the unavailable state.
+      if (st.results && p === '/api/simulation/status') return ok({ running: false, status: 'completed', condition: 'optimal', objective: 1234.5,
+        solve_time: 2.5, dispatch: st.results.current ? 'fresh' : 'stale' })
+      // The placed objects' own series are out of scope for these shots: none, as for a run that wrote none.
+      if (st.results && p.startsWith('/api/results/')) return r.fulfill({ status: 200, contentType: 'application/json', body: 'null' })
+      if (st.results && p === '/api/network/snapshots') return ok({ count: LABELS.length, snapshots: LABELS, weightings: [] })
       if (p.endsWith('/sites') && m === 'GET') return ok(sitesDoc())
       if (p.endsWith('/context')) return r.fulfill({ status: 404, json: { detail: 'none' } })
       const table = { '/api/network/buses': BUSES, '/api/network/generators': GENS, '/api/network/storage_units': SUS, '/api/network/loads': LOADS }
@@ -109,7 +159,14 @@ try {
       await page.evaluate(async () => { (await import('/src/store/uiStore.ts')).useUIStore.getState().setCanvasView('site') }) }
     // The mock backend has no assistant or map-context service, so their error toasts are not part of the shot.
     await page.addStyleTag({ content: 'div[style*="z-index: 9999"] { display: none !important }' })
-    if (key !== 'legend') await page.getByRole('tab', { name: 'Model', exact: true }).click().catch(() => page.getByText('Model', { exact: true }).first().click())
+    if (st.results) {
+      await page.evaluate(async () => {
+        const ui = (await import('/src/store/uiStore.ts')).useUIStore.getState()
+        ui.setResultsOverlay(true)
+        ui.setSitePartSelection({ kind: 'building', id: 'b2' })
+      })
+      await page.getByTestId('scene-result-group-plant').click()
+    } else if (key !== 'legend') await page.getByRole('tab', { name: 'Model', exact: true }).click().catch(() => page.getByText('Model', { exact: true }).first().click())
     await page.waitForTimeout(2000)
     if (st.pick) {   // the select is disabled under a lock, so the item is chosen first and the lock arrives after
       await page.getByTestId('place-item').selectOption({ index: 1 })

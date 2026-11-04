@@ -75,6 +75,7 @@ import { createResultsStore, type ResultsStore } from '../site3d/resultsStore'
 import { siteVisuals, type Visual } from '../site3d/resultStyle'
 import SiteLegend from '../components/SiteLegend'
 import SiteResultsReadout from '../components/SiteResultsReadout'
+import SceneResultsPanel from '../site3d/SceneResultsPanel'
 import { effectiveSizing } from '../site3d/sizing'
 import { toScene, fitCamera, chooseSite, unionBounds, halfSizeFor, type Bounds } from '../site3d/scene'
 import { useSitesStore } from '../site3d/sitesStore'
@@ -1207,7 +1208,7 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
 
       {/* The control strip with the legend under it, stacked so a wrapped
           strip (a narrow pane) pushes the legend down instead of hiding under it. */}
-      <div className="pointer-events-none absolute left-3 top-12 z-[400] flex max-h-[calc(100%-7.5rem)] max-w-[calc(100%-24px)] flex-col items-start gap-1.5 overflow-y-auto [&>*]:pointer-events-auto">
+      <div className="pointer-events-none absolute left-3 top-12 z-[400] flex max-h-[calc(100%-7.5rem)] max-w-[calc(100%-24px)] flex-col items-start gap-1.5 overflow-y-auto [&>*]:pointer-events-auto [&>*]:shrink-0">
         <SiteOverlay
           sites={sitesDoc.sites}
           site={site}
@@ -1251,6 +1252,11 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
             collapsed by default in a narrow pane so it does not cover the scene. */}
         <div className="w-[min(22rem,100%)]">
           <SiteResultsReadout store={resultsStore} objects={objects} distances={distances} />
+        </div>
+        {/* SC-03: the scene's buildings and groups at the snapshot, native values in words. */}
+        <div className="w-[min(22rem,100%)]">
+          <SceneResultsPanel project={currentProject} siteId={site.id} current={solved} freshSince={freshSince}
+            scene={sceneQuery.data?.state === 'enabled' ? sceneQuery.data : null} />
         </div>
       </div>
 

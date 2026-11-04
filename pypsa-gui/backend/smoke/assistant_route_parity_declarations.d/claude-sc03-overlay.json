@@ -1,0 +1,10 @@
+{
+ "limitations": [
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/sites/{site_id}/scene/results",
+   "reason": "held-by-spec",
+   "issue": ".scratch/site-scene-generation/issues/08-ai-guided-project-flow.md"
+  }
+ ]
+}
