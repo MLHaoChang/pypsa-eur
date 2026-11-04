@@ -307,6 +307,32 @@ def _resolve_callee(node, glb):
 # ─── matrix ─────────────────────────────────────────────────────────────────
 
 
+OWNER_DECISIONS = Path('docs/agents/owner-decisions.md')
+
+
+def _owner_decision_ids() -> set[str]:
+    """Ids (second cell) of the owner-decisions table rows."""
+    path = ROOT / OWNER_DECISIONS
+    if not path.is_file():
+        return set()
+    ids = set()
+    for line in path.read_text().splitlines():
+        cells = [c.strip() for c in line.split('|')]
+        if line.startswith('|') and len(cells) > 3 and cells[2]:
+            ids.add(cells[2])
+    return ids
+
+
+def _pointer_problems(key, decision) -> list[str]:
+    """Why a ``ui-pointer`` limitation's ``decision`` names no owner decision (empty when it does)."""
+    where = f'ui-pointer limitation {key}'
+    if not isinstance(decision, str) or not decision.strip():
+        return [f'{where}: needs a non-empty "decision" naming an owner decision in {OWNER_DECISIONS}']
+    if decision not in _owner_decision_ids():
+        return [f'{where}: decision {decision!r} is not an id in {OWNER_DECISIONS}']
+    return []
+
+
 def _held_problems(key: tuple[str, str], issue) -> list[str]:
     """Why a ``held-by-spec`` limitation's ``issue`` does not hold the route (empty when it does)."""
     where = f'held-by-spec limitation {key}'
@@ -393,8 +419,10 @@ def build(app=None, declarations: dict | None = None, frontend: tuple | None = N
             problems.append(f'limitation {key}: reason {d.get("reason")!r} not in {LIMITATION_REASONS}')
         elif d.get('reason') == 'held-by-spec':
             problems += _held_problems(key, d.get('issue'))
-        elif d.get('reason') == 'ui-pointer' and not (isinstance(d.get('decision'), str) and d['decision'].strip()):
-            problems.append(f'ui-pointer limitation {key}: needs a non-empty "decision" naming the owner decision')
+        elif d.get('reason') == 'ui-pointer':
+            problems += _pointer_problems(key, d.get('decision'))
+        if d.get('reason') != 'ui-pointer' and 'decision' in d:
+            problems.append(f'limitation {key}: "decision" is only allowed on a ui-pointer limitation')
     for key, d in needs.items():
         if d.get('family') not in FAMILIES:
             problems.append(f'needs-tool {key}: family {d.get("family")!r} not in {FAMILIES}')
