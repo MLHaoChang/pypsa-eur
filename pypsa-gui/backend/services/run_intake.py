@@ -92,6 +92,7 @@ class Host:
     """The project intake reads: its name and its authorised directory
     (resolved through the owner's project ACL by the caller), the owner, and
     the host thread's stored turns (`harness.history.read_all_turns`)."""
+
     name: str
     dir: Path
     owner_id: str
