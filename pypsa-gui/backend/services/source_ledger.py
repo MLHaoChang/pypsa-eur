@@ -190,6 +190,7 @@ def card_view(row: dict[str, Any]) -> dict[str, Any]:
         "unit": row["unit"],
         "basis": row["basis"],
         "status": row["status"],
+        "confirmable": row["status"] == "proposed" and sourced(row),
         **({"jurisdiction": row["jurisdiction"]} if "jurisdiction" in row else {}),
     }
     if not sourced(row):

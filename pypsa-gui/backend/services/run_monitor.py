@@ -100,6 +100,10 @@ def _budgets(task, envelope):
                                      and a.get("tool") in run_envelope.RUN_TOOLS),
                          "of": envelope["budget"]["solves"]}
         out["expires_at"] = envelope["expires_at"]
+        if (envelope.get("research") or {}).get("allowed"):  # issue 09: research spend from SH-24's ledger
+            from harness import send_reservation as ledger
+            out["research_eur"] = {"used": round(ledger._research_spent(task["run"]), 4),
+                                   "limit": envelope["research"]["cost_cap_eur"]}
     from harness import send_reservation
     reserved = send_reservation.summary(task["run"])
     if reserved is not None:  # issue 24: the send ledger, bounds counted as spent

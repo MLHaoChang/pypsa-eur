@@ -43,6 +43,8 @@ export type UnattendedBlock = 'runner_off' | 'no_provider' | 'locked' | 'no_noti
 export interface ResearchRow {
   row: string; gap: string; value: number; unit: string; basis: string
   status: 'proposed' | 'confirmed' | 'rejected'; jurisdiction?: string
+  /** The server's word: this row may be used (proposed and verified). */
+  confirmable: boolean
   source: 'sourced' | 'unverified source'
   url?: string; title?: string; quote?: string; fetched_at?: string; reason?: string
 }
@@ -66,6 +68,8 @@ export interface RunMonitorView {
       expires_at?: string
       /** The send ledger (issue 24): sends that count at their upper bound because their usage was lost. */
       reserved?: { unit: 'eur' | 'output_tokens' | 'total_tokens'; spent: number; open: number; at_bound: number }
+      /** Research spend against the envelope's research cap (issue 09). */
+      research_eur?: { used: number; limit: number }
     }
     unattended: { available: boolean; reason?: UnattendedBlock }
     email: { available: boolean }

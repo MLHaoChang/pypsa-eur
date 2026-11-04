@@ -890,3 +890,68 @@ def test_a_refused_research_send_ends_the_turn_and_never_stops_the_run(
     assert step["status"] == status and step["gaps"] == ["import_tariff"]
     assert {k: step[k] for k in extra} == extra
     assert record["run"]["status"] == "running"
+
+
+def test_the_monitor_reports_research_spend_against_its_cap(granted, profile, client):
+    """`run.budget.used.research_eur` from SH-24's settled research holds."""
+    profile({**BLOCK, "research": {"allowed": True, "cost_cap_eur": 2.0}})
+    task, path, _ = granted(
+        envelope={**BLOCK, "research": {"allowed": True, "cost_cap_eur": 2.0}},
+        detach=False,
+    )
+    from harness import send_reservation
+
+    record = json.loads(path.read_text())
+    record["run"].setdefault("budgets", {})["final_charges"] = [
+        {"kind": send_reservation.KINDS["research"], "eur": 0.31},
+        {"kind": send_reservation.KINDS["run"], "eur": 1.0},
+    ]
+    path.write_text(json.dumps(record))
+    budgets = client.get(f"/api/chat/runs/{task['task_id']}/view").json()["monitor"][
+        "budgets"
+    ]
+    assert budgets["research_eur"] == {"used": 0.31, "limit": 2.0}
+
+
+def test_a_refusal_mid_turn_keeps_what_was_found_and_stops_research(granted, profile):
+    """The cap stops research mid-stage: a row from the first send stays, the
+    refused second send ends the turn cap_reached, and the run waits on the row."""
+    from harness import send_reservation
+    from services import chat_tools
+
+    profile({**BLOCK, "research": {"allowed": True, "cost_cap_eur": 2.0}})
+    task, path, _ = granted(
+        envelope={**BLOCK, "research": {"allowed": True, "cost_cap_eur": 2.0}}
+    )
+    row = {
+        "type": "tool_use",
+        "id": "tu-row",
+        "name": "record_source",
+        "input": {
+            k: v for k, v in proposal(gap="import_tariff").items() if k != "title"
+        },
+    }
+
+    class SecondRefused(Scripted):
+        def stream(self, request):
+            if self.requests:
+                raise send_reservation.SendRefused(
+                    "research_budget", "over the research cap"
+                )
+            yield from super().stream(request)
+
+    provider = SecondRefused([fetch_block(), row])
+    chat_tools.set_acting_user(json.loads(path.read_text())["owner_id"])
+    try:
+        out = _turn(path, task, base_provider=provider)
+    finally:
+        chat_tools.set_acting_user(None)
+    assert out["status"] == "cap_reached" and [
+        r["verification"] for r in out["rows"]
+    ] == ["verified"]
+    record = json.loads(path.read_text())
+    assert record["run"]["research"]["steps"][-1]["status"] == "cap_reached"
+    assert (
+        record["run"]["waiting"]["kind"] == "research_confirm"
+        and record["run"]["status"] == "needs_user"
+    )

@@ -1439,7 +1439,9 @@ waits for them), and only when
 the run's granted envelope has `research.allowed`: a run granted without it
 never researches.
 
-The turn's provider is `ResearchProvider(ReservingProvider(base, scope="research"))`:
+The turn's provider is `ResearchProvider(ReservingProvider(base))`; each send
+runs inside `send_reservation.research()`, so the reservation holds it under
+scope "research":
 web search and fetch are added to its requests only (never to a chat, L1 or L2
 request), and every send is held against `envelope.research.cost_cap_eur`
 (SH-RESEARCH-CAP-1, €2 by default, €10 at most) and the run's total before it

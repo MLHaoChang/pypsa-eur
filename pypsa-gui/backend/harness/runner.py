@@ -780,15 +780,6 @@ class Runner:
                 return None  # the loop reports the missing provider; nothing is sent
         return send_reservation.ReservingProvider(inner, path, boot=self.instance, clock=self.clock)
 
-    def _research_base(self, session):
-        """The research turn's provider before the reservation: the test seam,
-        else the run session's own (None: research reads not_available)."""
-        if self._research_provider is not None:
-            return self._research_provider
-        from harness.providers import wiring
-        inner, _ = wiring._provider_for_profile(wiring._resolve_turn_profile(session))
-        return inner
-
     def _research_turn(self, path, ctx, session, task):
         """The stage's research turn (issue 09) on a helper thread, as an
         input-loop round: once per stage, never inside a loop round."""
@@ -804,7 +795,7 @@ class Runner:
                 # Research(Reserving(base)) (GK B Q3): every research send is held
                 # under scope "research" before it goes out; a refusal ends the turn.
                 instance, clock = self.instance, self.clock
-                research.run_for(path, session, stage=stage, provider=self._research_base(session),
+                research.run_for(path, session, stage=stage, provider=self._research_provider,
                                  reserving=lambda inner: send_reservation.ReservingProvider(
                                      inner, path, boot=instance, clock=clock))
             except Exception:  # noqa: BLE001 — a research turn that errors lists its gaps; never retried

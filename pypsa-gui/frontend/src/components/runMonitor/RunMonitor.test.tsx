@@ -221,6 +221,7 @@ describe('RunMonitor', () => {
     show('research_cap')
     expect((await screen.findByTestId('run-research-step')).textContent)
       .toBe('Research stopped at its cost cap: Import tariff stays as the template has it.')
+    expect(screen.getByTestId('run-budgets').textContent).toContain('Web research €2.00 of €2.00')
     expect(screen.queryByTestId('run-research-card')).toBeNull()
   })
 

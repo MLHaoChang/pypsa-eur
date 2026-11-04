@@ -64,6 +64,7 @@ function Budgets({ view }: { view: RunMonitorView }) {
       : `Plus ${n} model calls with no usage report, counted at their upper bound`)
   }
   if (b.solves) parts.push(`Solves ${b.solves.used} of ${b.solves.of}`)
+  if (b.research_eur) parts.push(`Web research ${fmtCurrency(b.research_eur.used)} of ${fmtCurrency(b.research_eur.limit)}`)
   if (b.expires_at && !paused) parts.push(`Expires ${when(b.expires_at)}`)
   return <div data-testid="run-budgets">{parts.join(' · ')}</div>
 }
@@ -101,6 +102,7 @@ function ResearchCard({ row, others, busy, onDecide }: {
   onDecide: (verdict: 'confirmed' | 'rejected') => void
 }) {
   const sourced = row.source === 'sourced' && row.url
+  const usable = row.confirmable && sourced
   return <div data-testid="run-research-card" className="mt-1 rounded border border-border p-2">
     <div className="font-medium">{gapWords(row.gap)} found on the web</div>
     <div data-testid="run-research-value">
@@ -114,12 +116,12 @@ function ResearchCard({ row, others, busy, onDecide }: {
     {others > 0 && <div className="text-muted" data-testid="run-research-others">
       {others} other {others === 1 ? 'source' : 'sources'} for this value: using this one rejects {others === 1 ? 'it' : 'them'}.</div>}
     <div className="mt-1 flex gap-3">
-      {sourced && <button type="button" disabled={busy} data-testid="run-research-use"
+      {usable && <button type="button" disabled={busy} data-testid="run-research-use"
         className="text-accent hover:underline disabled:opacity-40" onClick={() => onDecide('confirmed')}>Use this value</button>}
       <button type="button" disabled={busy} data-testid="run-research-reject"
         className="text-muted hover:text-text disabled:opacity-40" onClick={() => onDecide('rejected')}>Reject</button>
     </div>
-    {sourced && <p className="text-muted">Using it adds it to the Library and attaches it, each on its own card.</p>}
+    {usable && <p className="text-muted">Using it adds it to the Library and attaches it, each on its own card.</p>}
   </div>
 }
 
