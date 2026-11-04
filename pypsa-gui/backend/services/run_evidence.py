@@ -597,6 +597,35 @@ def checked_run_manifest(run_id: Any) -> tuple[str, dict | None, str]:
         return (project_id, *_checked_manifest(root, project_id, run_id))
 
 
+_PF_COUNTS = ('ac_pf_converged_count', 'ac_pf_total_snapshots')
+
+
+def _convergence(record: dict) -> str | None:
+    """Why a completed run's numbers cannot be checked for convergence, else None.
+
+    An AC power flow is sealed "completed" even when only some snapshots
+    converged: a run recording fewer converged snapshots than it ran is
+    'partly_converged (k of n snapshots converged)'. An AC power-flow run must
+    record both counts as integers in snapshots with 0 < converged == total;
+    otherwise it is 'not_known_to_have_converged', as is any run recording one
+    count or a malformed pair. Missing validity is never read as converged.
+    """
+    metrics = record['metrics']
+    entries = [metrics.get(key) for key in _PF_COUNTS]
+    values = [
+        e.get('value') if isinstance(e, dict) and e.get('unit') == 'snapshots' else None
+        for e in entries
+    ]
+    known = all(type(v) is int for v in values)
+    if known and 0 <= values[0] < values[1]:
+        return f'partly_converged ({values[0]} of {values[1]} snapshots converged)'
+    if known and 0 < values[0] == values[1]:
+        return None
+    if record.get('kind') == 'ac_pf' or any(e is not None for e in entries):
+        return 'not_known_to_have_converged'
+    return None
+
+
 def _checked_manifest(root: Path, project_id: str, run_id: Any) -> tuple[dict | None, str]:
     """(manifest, status) as checked_run_manifest gives them; call under _LOCK."""
     record = _load_run(root, project_id, run_id, sealed=True)
@@ -617,6 +646,10 @@ def _checked_manifest(root: Path, project_id: str, run_id: Any) -> tuple[dict | 
     # Last, so a malformed or unfinished run keeps naming its status.
     if not _seal_verifies(record, mac):
         return None, 'unverified'
+    # After the MAC, so the reason a user reads comes only from a sealed run.
+    convergence = _convergence(record)
+    if convergence is not None:
+        return None, convergence
     return copy.deepcopy(record), 'completed'
 
 

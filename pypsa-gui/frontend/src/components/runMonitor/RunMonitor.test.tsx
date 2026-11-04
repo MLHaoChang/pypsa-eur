@@ -72,6 +72,25 @@ describe('RunMonitor', () => {
     }
   })
 
+  it('says whether the email about an ended agent loop went out, under why the run stopped (issue 25)', async () => {
+    const texts = {
+      loop_notice_sent: 'An email told you the run needs you.',
+      loop_notice_failed: 'No email sent: sending failed. The run waits for you here.',
+      loop_notice_no_address: 'No email sent: your account has no email address. The run waits for you here.',
+      loop_notice_uncertain: 'The email may not have been sent. The run waits for you here.',
+    } as const
+    for (const [state, text] of Object.entries(texts)) {
+      show(state as keyof typeof texts)
+      const notice = await screen.findByTestId('run-loop-notice')
+      expect(notice.textContent).toBe(text)
+      expect(screen.getByTestId('run-failure').textContent).toMatch(/^The assistant used all its rounds: the run waits for you: Resume/)
+      cleanup()
+    }
+    show('gate_pass')
+    await screen.findByTestId('run-current-stage')
+    expect(screen.queryByTestId('run-loop-notice')).toBeNull()
+  })
+
   it('Guided and Expert show the same card; Expert only adds a closed Details', async () => {
     show('gate_fail', 'guided')
     await screen.findByTestId('run-failure')

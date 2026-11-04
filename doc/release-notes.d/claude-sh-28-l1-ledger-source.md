@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): An unattended run's input-gate round now records each data-gap fill's grant-time source on its ledger row and tells the agent which gaps it may fill (fenced as data). Before, it read the plan card, so the source was always empty and the gap list was never sent.

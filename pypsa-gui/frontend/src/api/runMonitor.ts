@@ -57,6 +57,8 @@ export interface RunMonitorView {
     profile: string; mode: string; status: string; stage: string; reason?: string
     gate_due?: boolean; next_stage?: string | null; stages: RunStage[]
     waiting?: { kind: string; ref: string }
+    /** The agent loop's ending (issue 25); `notice` is the email about it, once claimed. */
+    loop?: { ended?: string; notice?: { sent: boolean | null; error?: 'send_failed' | 'no_address' | 'uncertain' | string } }
   }
   paused_at_card?: string
   brief_stale?: string
