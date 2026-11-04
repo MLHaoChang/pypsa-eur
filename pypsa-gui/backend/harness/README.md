@@ -1167,6 +1167,23 @@ only: no runner, no envelope, no loops.
   (`run.status: needs_user`, task `needs_review`), and no later stage's step
   exists, so nothing is enqueued. `resume_task` checks the failed gate again
   (attempts + 1) once the user fixed the inputs; no loop budget yet (issue 04).
+- **Fix and re-run (L2, issue 05).** `harness/run_loops.py`. A failed
+  result rule, or a solve step whose job ran and did not finish optimal
+  (`run_loops.judged`: judged by the solve gate while L2 can run, else a
+  failed step as before), starts L2 inside a live envelope: the harness reads
+  the triage (job, log tail, diagnose, validate) fenced and capped, then one
+  agent turn with `run_profiles.L2_TOOLS` and the profile's network-column
+  tunables. At most `L2_ROUNDS` = 2 rounds and `L2_CHANGES` = 2 admitted
+  changes a round (the third is `round_change_cap`, counted in `admit` under
+  the envelope lock). A round with a settled change supersedes the stage's
+  solve steps (`superseded`, never `_next`) and re-enters the input gate,
+  then a new solve step; one with none ends `no_change`. Endings
+  (`cap_reached`, `exhausted`, `no_change`, `triage_unreadable`,
+  `inputs_changed`, …) fail the stage with that `reason`, run `needs_user`.
+  Each round is an HH-06 cycle on `run.loop.history` (job, findings,
+  changes, next job, outcome). `run_envelope.solves_used` is the one solve
+  count: `_standing`, the re-check where `admit` records a solve, and
+  `run.budget.used.solves` read it; a solve refused at pickup is not counted.
 - **The input gate holds until the solve.** Before a later stage's write or
   run step, the input gate's fingerprint is compared with the current inputs
   (on stage entry and after the user's Continue). An edit since then checks

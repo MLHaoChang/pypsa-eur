@@ -1,0 +1,8 @@
+{
+  "kinds": {
+    "round_change_cap": {
+      "surface": "inline",
+      "why": "Inside a harness run's fix-and-rerun loop (L2), a round already made its allowed changes (at most 2): the envelope refuses the next edit at admission and nothing is written. The assistant stops editing; the run re-solves with the changes it made."
+    }
+  }
+}
