@@ -3,7 +3,7 @@
 
 # 22 — An envelope edit checks its expected input identity and writes inside one project lock
 
-Status: needs-triage (waits for the LC-40b code PR)
+Status: in-progress
 Type: task
 Blocked by: LC-40b code (`.scratch/live-copilot/issues/40b-revision-capture-helper.md`, session `session_01G7qCujWvzctR1i8DZ6y3a6`, in progress); 03 (landed)
 Gated: yes (GK B plans it and reviews the PR; harness engine code)
