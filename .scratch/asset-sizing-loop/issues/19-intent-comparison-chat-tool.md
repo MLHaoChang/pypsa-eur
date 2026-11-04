@@ -26,4 +26,4 @@ Should chat start, watch and abort an intent comparison (two to five sizing loop
 
 ## Comments
 
-- 2026-11-04: Owner decision AS19-POINTER-1 ("Pointer only"): chat explains and links to the Grid study tab for a design intent comparison; it does not start, watch or abort one. Chat control is won't-do. The three routes are declared `ui-pointer` (reason `AS19-POINTER-1`) in `smoke/assistant_route_parity_declarations.d/claude-as-10-ui.json`, so closing this issue no longer fails route-parity.
+- 2026-11-04: Owner decision AS19-POINTER-1 ("Pointer only"): chat explains and links to the Grid study tab for a design intent comparison; it does not start, watch or abort one. Chat control is won't-do. The three routes are declared `ui-pointer` (decision `AS19-POINTER-1`) in `smoke/assistant_route_parity_declarations.d/claude-as-10-ui.json`, so closing this issue no longer fails route-parity.

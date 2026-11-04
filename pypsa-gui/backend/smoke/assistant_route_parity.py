@@ -318,7 +318,7 @@ def _owner_decision_ids() -> set[str]:
     ids = set()
     for line in path.read_text().splitlines():
         cells = [c.strip() for c in line.split('|')]
-        if line.startswith('|') and len(cells) > 3 and cells[2]:
+        if line.startswith('|') and len(cells) > 3 and cells[2] and cells[2] != 'Id' and not set(cells[2]) <= {'-', ':'}:
             ids.add(cells[2])
     return ids
 

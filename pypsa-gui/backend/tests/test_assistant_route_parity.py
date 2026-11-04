@@ -358,6 +358,8 @@ def test_a_ui_pointer_route_naming_a_known_decision_is_a_limitation(tmp_path, mo
     ({'decision': '  '}, 'needs a non-empty "decision"'),
     ({'decision': 7}, 'needs a non-empty "decision"'),
     ({'decision': 'NOPE-9'}, "is not an id in docs/agents/owner-decisions.md"),
+    ({'decision': 'Id'}, "is not an id in docs/agents/owner-decisions.md"),
+    ({'decision': '---'}, "is not an id in docs/agents/owner-decisions.md"),
 ])
 def test_a_ui_pointer_route_needs_a_known_decision(tmp_path, monkeypatch, extra, expected):
     _, problems = _pointer(tmp_path, monkeypatch, **extra)
