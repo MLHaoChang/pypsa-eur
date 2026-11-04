@@ -3,7 +3,7 @@
 
 # AS-19 — Design intent comparison from chat
 
-Status: needs-triage
+Status: ready-for-human
 Type: task
 Blocked by: none
 Reviewer: GK B
@@ -23,3 +23,7 @@ Routes this issue holds (route-parity `held-by-spec`):
 ## Owner question
 
 Should chat start, watch and abort an intent comparison (two to five sizing loops), or stay a pointer to the Grid study tab?
+
+## Comments
+
+- 2026-11-04: Owner decision AS19-POINTER-1 ("Pointer only"): chat explains and links to the Grid study tab for a design intent comparison; it does not start, watch or abort one. Chat control is won't-do. The issue stays open (`ready-for-human`) because `smoke/assistant_route_parity.py` has no limitation reason for a route that is deliberately not chat-controllable, and a closed (`done`/`wontfix`) hold fails route-parity and the control matrix. Closing it as `wontfix` needs a new `LIMITATION_REASONS` entry (a Python change, GK B review) and the three intent-comparison declarations moved onto it.
