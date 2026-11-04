@@ -184,7 +184,8 @@ def _resolve(value, steps):
 
 
 def _next(task):
-    return next((s for s in task["steps"] if s["status"] != "completed"), None)
+    """The first step not done; a step a re-solve superseded (L2, issue 05) is never next."""
+    return next((s for s in task["steps"] if s["status"] != "completed" and not s.get("superseded")), None)
 
 
 def _check_brief(brief, ids, phased=True):
@@ -688,7 +689,8 @@ def _advance_run(path, ctx=None):
             name = run["stage"]
             stage = run["stages"][name]
             if stage["status"] == "pending":
-                steps = run_profiles.materialise(profile, name, task["project_id"])
+                steps = run_profiles.materialise(profile, name, task["project_id"], start=1 + sum(
+                    1 for s in task["steps"] if s["id"].split(".")[0] == name))
                 stage.update(status="active", entered_at=_now())
                 task["steps"].extend(steps)
                 if any(_effectful(s["tool"]) for s in steps):
@@ -702,7 +704,8 @@ def _advance_run(path, ctx=None):
                 _save(path, task)
                 name, stage = "input_gate", run["stages"]["input_gate"]
             if stage["status"] != "active" or any(
-                    s["status"] != "completed" for s in task["steps"] if s["id"].startswith(name + ".")):
+                    s["status"] != "completed" and not s.get("superseded") and not run_loops.judged(Path(path), profile, s)
+                    for s in task["steps"] if s["id"].startswith(name + ".")):
                 return
             if run_loops.due(task):
                 return  # an input-loop round is due: the runner's agent turn first (issue 04)
@@ -722,16 +725,18 @@ def _advance_run(path, ctx=None):
             stage["attempts"], stage["gate"] = attempts + 1, gate
             following = _next_stage(run, name)
             if not gate["passed"]:
-                if name == run_loops.STAGE and run_loops.after_failed_gate(Path(path), task, gate, profile):
-                    _save(path, task)  # L1 (§6.1): the stage stays active while a round is due
+                if (name == run_loops.STAGE and run_loops.after_failed_gate(Path(path), task, gate, profile)) \
+                        or (name in run_loops.RESULT_STAGES
+                            and run_loops.after_failed_result(Path(path), task, gate, profile)):
+                    _save(path, task)  # L1 (§6.1), L2 (§6.2): the stage stays active while a round is due
                     _wake(path)
                     return
                 stage["status"], run["status"], task["status"] = "failed", "needs_user", "needs_review"
                 if name == run_loops.STAGE and (run.get("loop") or {}).get("ended") and gaps:
                     run_loops.data_request(task, gaps)  # one notice listing every data gap
             else:
-                if name == run_loops.STAGE:
-                    run_loops.after_passed_gate(task)
+                if name in (run_loops.STAGE, run_loops.RESULT_STAGE):
+                    run_loops.after_passed_gate(task, name)
                 stage.update(status="passed", exited_at=_now())
                 if name == "setup":
                     run["scope"] = run_profiles.scope_for(flow_service.read_template(path.parent.parent))
@@ -985,7 +990,7 @@ def admit(session, tool, args):
             return
         step = _next(task)
         for later in task["steps"]:
-            if later["status"] == "completed" or later["tool"] != tool:
+            if later["status"] == "completed" or later.get("superseded") or later["tool"] != tool:
                 continue
             try:
                 expected = _resolve(later["args"], task["steps"])

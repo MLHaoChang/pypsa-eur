@@ -238,6 +238,12 @@ def _confirm_destructive_tool(
                                       external=external, edit_card=edit_card)
     if admitted == "admitted":
         return True
+    if admitted == run_envelope.CHANGE_CAP_KIND:
+        # Issue 05 (C2): an L2 round's change cap is spent; nothing runs, no card.
+        yield from _deny(tool_use_id, tool_name, _CHANGE_CAP["error_kind"],
+                         f"this round's changes are spent; {tool_name!r} did not run",
+                         tool_results_collector)
+        return False
     if admitted == "unavailable":
         yield from _deny(tool_use_id, tool_name, _UNAVAILABLE["error_kind"],
                          f"approval for {tool_name!r} could not be recorded",
@@ -313,6 +319,9 @@ _REFUSALS: dict[str, dict[str, str]] = {
 _UNKNOWN: dict[str, str] = {"error_kind": "unknown_decision"}
 # Issue 18: an approval that could not be put on record does not run.
 _UNAVAILABLE: dict[str, str] = {"error_kind": "approval_unavailable"}
+# Issue 05 (C2): an L2 round's third change, refused at envelope admission
+# (`run_envelope.CHANGE_CAP_KIND`; a literal here so the kind manifest sees it).
+_CHANGE_CAP: dict[str, str] = {"error_kind": "round_change_cap"}
 
 # Issue 18: what `wait_for_decision` returned, as (outcome, by) for the log.
 _DECISION_OUTCOMES: dict[str, tuple[str, str]] = {

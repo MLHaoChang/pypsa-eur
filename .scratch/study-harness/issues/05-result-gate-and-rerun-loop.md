@@ -49,3 +49,45 @@ Owner decision HARNESS-970-1 (3 Nov). HH-06 (bounded solve → check → correct
 5. **Native loops.** AS-06's sizing loop (#991, #992) and the margin and coupling loops are native study engines, not a second agent loop. If a profile registers one, the agent does not wrap another loop around it. #970's source map predates AS-06 and AS-10; recheck against master.
 
 Test first (HH-10's barrier): an external edit lands between the gate pass and the job's pickup; the solve still uses the captured input and the evidence says so.
+
+## Plan verdicts (4 Nov, builder session_01G7qCunbwx8oa1iofP1qkqa)
+
+Split: PR A (L2, solve budget, scorecard verdict rules, HH-06 cycle records), PR B (HH-10), PR C (engine loops). Plausibility stays out (Comment 4). Q3 confirmed: the user-facing read is K's `get_results(result_kind="plausibility")`, no new tool.
+
+### GK B (19): GO WITH CHANGES
+
+Q1: L2 goes into eh_site@1 in place (SH-04's L1 precedent, #1072), on condition C8. Q2: a capture solved after the inputs changed is not applied (C6f).
+
+- **C1 SH-22 path.** L2 edits go through the generalised `run_loops` write_guard into `run_envelope.admitted_write`; the fail-closed default for `ATOMIC_TOOLS` stays. L1's run_loops tests pass unchanged after the generalisation, and the PR says so.
+- **C2 max_changes.** Admitted calls are counted at envelope admission, under the envelope's lock, per round. A call refused at admission or pickup does not count. The 3rd is refused with a typed kind (tool-error-kinds.d fragment). A "verified change" for no_change is a receipt-settled link (`settle_own`), not a ledger row or tool_result.
+- **C3 Triage.** Native triage outputs reach the model fenced as untrusted data and size-capped. A triage read that raises stops the run `needs_user` `triage_unreadable`, never a blind round.
+- **C4 One solve counter.** `run.budget.used.solves` and `_standing`'s envelope check read one function, or a test pins that they agree. Engine-loop solves add to the same counter. Check-and-enqueue runs under the held locks (two enqueues at budget−1 never both pass; tested). L2 rounds count against `budget.rounds`. A failed or cancelled job counts as spent.
+- **C5 Readiness reader.** A family prefix must be a known family (refused at load otherwise). A block rule reading not_evaluated (zero rows) never passes; the run goes `needs_user`.
+- **C6 HH-10 capture.**
+  - a. Temp dir, manifest written last, atomic rename. At pickup each file's sha256 is checked against the manifest, and the manifest's sha256 against the identity on the job row. A missing dir is `capture_mismatch`.
+  - b. One function lists the sidecars, called by both the normal pre-solve path and the capture; a test shows that a sidecar the pre-solve reads is captured.
+  - c. Test that `_network_input_fingerprint(exact=True)` of the hydrated private network equals the project's at enqueue.
+  - d. `solving_context(private)` binds the transforms, the solve and the restore (#992); the PR names per setting any pre-solve step not reproduced (island apply, commercial PoC writer, user code).
+  - e. The write-back compare runs under the project locks against the full recomputed identity (exact fingerprint + network_revision + sidecar hashes).
+  - f. On `applied: false` the gate never reads the job's results as the project's; the run goes `needs_user` `inputs_changed`, the cycle record and evidence say so, and the solve counts as spent.
+  - g. A capture is removed once its job is settled and the evidence recorded. A boot sweep removes orphans and honours the replica pin and lease (#1058). `.harness/captures` is excluded from project export, the fingerprint, sidecar listings and template byte-identity (tested).
+  - h. The barrier test is red on master first.
+- **C7 HH-06.** When the gate's last verdict is fail or not_evaluated, no path ends the run as success. The cap-reached, exhausted and no_change cases are each tested.
+- **C8 (Q1).** An envelope granted before L2 existed does not silently gain L2's update_component scope: the recorded grant governs, and an L2 edit outside it is refused (tested). SH-22's eh_site@1 byte-identity pin is updated deliberately, and the PR body names it.
+- **C9 PR C (GK A co-reviews).** A provider that fails if called shows that no agent turn starts for an engine-driven rule. max_solves = min(tunable, budget left), counted per C4. The multi-year LOLE conversion is pinned. Never nested: if only engine rules fail, no L2 round runs.
+- **C10.** Each PR lists the conditions it closes. PR A waits for #1079 before touching run_loops or assistant_tasks.
+
+### GK A (11): GO on item 4 (PR C)
+
+- Horizon conversion: through `reliability_goal.loop_goal` (`metrics.horizon_years(n)`, fed by `active_loop_goal`, as `margin_loop_runner` already does), not eh_study's `inputs.nyears` or the snapshot span. Pinned by a 3-year test whose snapshot weights are not 1 h.
+- Solve count from the result record, no engine change: `solves_used` + `probe_solves` + a `restore="final"` re-solve if one runs. A test shows `used.solves` includes the probe.
+1. A round runs from the start call to the loop's terminal record (converged, not_converged, aborted, error). A cancelled run stops the loop through its stop path (tested).
+2. `max_solves` = min(profile value, solves left), capped at `MAX_LOOP_SOLVES`; below 1 the loop is not started and the run goes `needs_user` (budget spent), never a 422 or a silent skip (tested).
+3. `restore` defaults to "base". "final" (a solver-config write, LC-40) is allowed only when the profile's approval covers that write, otherwise refused (tested).
+4. Not nested: an engine-driven rule is out of L2's failing set and starts no agent turn. A second engine rule in the same round waits for the first loop's terminal state; two loops never run at once on one ctx.
+5. `adequacy.loop.converged` reads the loop's own result record. A missing record, not-converged result or goal-less target (`loop_goal` → None) fails the rule, `needs_user`. `goal_sources` is copied as served.
+6. The native call goes through the chat_tools handler on the run's bound context, so the 422 set surfaces as a typed refusal; a fail-closed test at the catching site, with a mutant that catches the base class (#1020 rule).
+
+### C6f split (4 Nov, builder session_01G7qCuio3L298TQBsceFqor; GK B accepted)
+
+PR B (#1083) closes the gate side of C6f: a captured job is read as the project's only when `applied is True`, and `false`, missing or non-bool is no evidence. PR A carries the rest of C6f: on `applied: false` the run goes `needs_user` `inputs_changed`, the cycle record and evidence say so, and the solve counts as spent (tested there, with the HH-06 cycle records and the L2 budget).

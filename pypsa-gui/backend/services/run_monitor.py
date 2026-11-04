@@ -96,9 +96,7 @@ def _budgets(task, envelope):
     out = {"cost_eur": {"used": round(budget["used"]["cost_eur"], 2), "limit": budget["limit"]["cost_eur"],
                         "unmetered": bool(budget["used"]["unmetered"])}}
     if envelope is not None and envelope["state"] == "granted":
-        out["solves"] = {"used": sum(1 for a in envelope["audit"] if a["event"] == "used"
-                                     and a.get("tool") in run_envelope.RUN_TOOLS),
-                         "of": envelope["budget"]["solves"]}
+        out["solves"] = {"used": run_envelope.solves_used(envelope), "of": envelope["budget"]["solves"]}
         out["expires_at"] = envelope["expires_at"]
     from harness import send_reservation
     reserved = send_reservation.summary(task["run"])
