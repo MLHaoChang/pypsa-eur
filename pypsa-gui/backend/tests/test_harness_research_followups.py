@@ -409,3 +409,22 @@ def test_a_research_write_waits_for_the_runs_file_lock(granted, profile):  # noq
         writer.join(5)
     assert wrote.is_set()
     assert json.loads(path.read_text())["run"]["research"]["probe"] is True
+
+
+def test_confirming_a_range_row_adds_no_write(granted, profile):  # noqa: F811
+    """SH-06 Q1 (b): a range is confirmed on research's own card; confirming
+    sets it confirmed and adds no write step; ranges() returns its status."""
+    from harness import runner
+
+    task, path, _ = granted()
+    row = _propose(_range())
+    research._update(
+        path, lambda t: t["run"].setdefault("research", {}).setdefault("rows", []).append(row)
+    )
+    research.settle(path, row["id"], "confirmed", by="user")
+    run = runner._read(path)["run"]
+    assert [r["status"] for r in run["research"]["rows"]] == ["confirmed"]
+    assert not [s for s in run.get("steps", []) if s.get("research_ref") == row["id"]]
+    assert [r["status"] for r in source_ledger.ranges(run["research"]["rows"], "bess_capex")] == [
+        "confirmed"
+    ]

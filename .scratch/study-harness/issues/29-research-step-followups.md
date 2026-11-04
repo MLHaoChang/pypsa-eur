@@ -18,7 +18,7 @@ The open items from #1104 ("Not in this PR" in its description, plus a risk no r
 
 1. **R3 fence inside the research turn.** GK B's plan ruling R3 on 09: "fetched content offered back to the model is fenced as untrusted data". #1104 keeps fetched pages out of every *later* request (`research._forget`, GK B ask 1), but inside the research turn each re-send after a `record_source` call carries the provider's own `web_*_tool_result` blocks verbatim, in the assistant role, framed only by the turn instruction. Fence them: on every send after the first of a research turn, the earlier provider-run search and fetch blocks are offered back only inside a harness-written untrusted-data fence.
 2. **Researched text on disk.** The research turn's messages go to the session event log (`assistant/attempt`, `tool/result`) and its turn record to the project's `chat.jsonl` (`turn/record`, `append_turn`), each with whole fetched pages. `_forget` changes only the derived history; the raw pages stay on disk, where a fork, a replay to a mid-turn seq, `GET /history`, a snapshot or copy bundle, and the chat-history tool can bring them back. Remove them from what persists, and fail closed: after the write, read the files back and verify no page content remains; if any does, stop the run before any later round, as an error that lists the gaps.
-3. **Stage-6 explore ranges.** A source-ledger row that carries a sourced range (low and high, the gap's unit and basis, both numbers stated in the quote) for the explore stage, in the shape issue 06 reads when it admits a case change. Shape agreed with SH-06's session.
+3. **Stage-6 explore ranges.** A source-ledger row that carries a sourced range (low and high, the gap's unit and basis, both numbers stated in the quote) for the explore stage, in the shape issue 06 reads when it admits a case change. Shape agreed with SH-06's session (see Comments). A range row is confirmed on research's own `research_confirm` card, which shows the range; confirming it adds no write steps.
 4. **File-lock test (GK B, #1104 GK OK @cceed8ad "left for later").** No test pins the run's file lock on research ledger writes by itself; the lease check is the only tested guard against a stale writer. Add one: a research write while another process holds `runner._file_lock` waits for it and does not interleave.
 
 ## Acceptance criteria
@@ -29,6 +29,7 @@ The open items from #1104 ("Not in this PR" in its description, plus a risk no r
 - [ ] The cleanup fails closed: when the read-back still finds page text (forced in a test), the run stops with an error that lists the gaps, and no later L1/L2 round is sent.
 - [ ] `derive_messages(log) == session.messages` still holds after a research turn (`test_harness_eventlog_truth`).
 - [ ] A range row for an explore gap: verified only when both bounds parse from the quote in the gap's unit; low ≤ high; another unit refused; `source_ledger` exposes it in the shape issue 06 agreed.
+- [ ] Confirming a range row on the research card sets it `confirmed` and adds no write step; the card shows low–high with unit, source and quote.
 - [ ] A test pins the file lock alone (lease check left in place): a mutant without the lock goes red.
 - [ ] Layout test still passes: no vendor word outside `harness/providers`.
 
@@ -52,3 +53,12 @@ GO WITH CHANGES: Q1 (a) rewrite re-sends behind a fence; Q2 (a) stub, read back,
 - F8. With no chat.jsonl record, `GET /history` and the chat panel still render; the turn is absent, not an error. Run the chat history tests.
 - F9. The attach/confirm card path refuses a range row (`value: null`) with a typed kind; it is never divided by 1000 or written. Verified needs both bounds read from the quote, low ≤ high, and the unit. A quote with one bound only is unverified. The shape is agreed with SH-06 and recorded in both issues.
 - F10. In the file-lock test, the mutant drops only `runner._file_lock` and keeps the lease check, and the test goes red.
+
+### Range shape agreed with SH-06 (4 Nov, GK B condition E11 on SH-06)
+
+- **Gap.** A gap for stage `explore` declares `research: {unit, basis, shape: "range"}`. Its `target` is the lever's `{component, name, attr}` exactly, as eh_site@1's explore levers name them, so SH-06 matches a row to a lever by target with no key convention.
+- **Row.** `{value: null, range: {low, high}, unit, basis, url, title, quote, turn_id, status, verification, …}`. It is verified only when both bounds are read from the quote in the gap's unit, low ≤ high, and the quote is verbatim on a page fetched in this turn.
+- **Confirmation (SH-06 Q1 (b), GK B E2 on SH-06).** A range row is confirmed by the user on research's own `research_confirm` card. Case admission under an envelope is unattended, so only confirmed range rows are admissible. Confirming adds no write step. The attach path refuses a range row (F9).
+- **Read.** `source_ledger.ranges(rows, gap_key)` returns the verified, non-rejected range rows with their `status`. SH-06 filters `status == "confirmed"` after its own re-read under the lock.
+- **Case change (SH-06 Q2 (a)).** A case change holds `{component, name, attr, value, range: {low, high, unit}, source: "research:<row id>"}`. Admission checks that low, high and unit equal the row's. No central value or step count.
+- **UI.** The research card shows a range row as low–high with its unit (RunMonitor), which needs a UX review.
