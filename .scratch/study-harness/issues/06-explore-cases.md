@@ -70,6 +70,8 @@ Code waits on SH-05 PR C, #1100 and #1104.
 - `Env` and `_solve_job` stay as they are in PR C; SH-06 adds `Env.case` after it merges.
 - Case gates skip rules with an `engine` key (`LOOP_FACT`).
 - `solves_used` sums the `reserved` / `solves` audit rows. SH-06 writes `{"event": "explore", "tool", "call_id", "case", "reserved"}`, plus `"solves"` at settle.
+- `run_sensitivity_sweep` is in `RUN_TOOLS`, so its admitted `used` row already counts one solve. The explore row must not count that sweep again: it carries the case jobs beyond the first, or the `used` row is excluded for an explore call (tested).
+- Open with GK B: `run_envelope.py:57` records GK B (8)'s ruling (issue 08) that no envelope lists a sweep or an EH study, which are always the user's own card. E1 and the plan assume an envelope may list `run_sensitivity_sweep`.
 
 ### Agreed with SH-29 (SH-09 follow-ups, session_01G7qCukyXRkELTh91Va9cgB)
 
