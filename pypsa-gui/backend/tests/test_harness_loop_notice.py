@@ -1,7 +1,10 @@
 # SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
 # SPDX-License-Identifier: MIT
 """Study harness issue 25: the notice when an agent loop ends without a pass."""
+# ruff: noqa: F811 -- imported pytest fixtures
 import json
+import multiprocessing
+import os
 import time
 
 import pytest
@@ -91,7 +94,7 @@ def test_a_claim_with_no_result_is_shown_uncertain_and_never_resent(
     outbox.clear()
 
     def stale(t):
-        t["run"]["loop"]["notice"] = {"claimed_at": time.time() - 3600, "sent": None}
+        t["run"]["loop"]["notice"] = {"claimed_at": time.time() - 3600, "sent": None, "token": "tk"}
     harness_runner._update(path, stale)
     harness_runner._notify(path)
     notice = harness_runner._read(path)["run"]["loop"]["notice"]
@@ -125,3 +128,59 @@ def test_every_ending_sends_and_a_resumed_loops_ending_is_a_new_notice(
     assert len(mails) == 1 and mails[0]["metadata"]["ended"] == ending
     harness_runner._notify(path)
     assert len([m for m in outbox if m["metadata"].get("kind") == "harness_loop_end"]) == 1
+
+
+def test_a_proposed_envelope_with_notify_email_sends_nothing(
+        granted, profile, site, rated, tunable_rule, outbox, owner, monkeypatch):
+    path, record = exhaust(granted, profile, True, monkeypatch)
+    outbox.clear()
+    harness_runner._update(path, lambda t: t["run"]["loop"].pop("notice"))
+    env = run_envelope.path_for(path)
+    data = json.loads(env.read_text())
+    data["state"] = "proposed"
+    env.write_text(json.dumps(data))
+    harness_runner._notify(path)
+    assert not outbox and "notice" not in harness_runner._read(path)["run"]["loop"]
+
+
+def test_a_loop_replaced_between_claim_and_settle_keeps_the_new_loops_notice_clean(
+        granted, profile, site, rated, tunable_rule, outbox, owner, monkeypatch):
+    path, record = exhaust(granted, profile, True, monkeypatch)
+    outbox.clear()
+    harness_runner._update(path, lambda t: t["run"]["loop"].pop("notice"))
+
+    def replace_loop(envelope):  # the user resumed: a new loop, between the claim and the settle
+        harness_runner._update(path, lambda t: t["run"].update(loop={"kind": "L1", "stage": "input_gate",
+                                                                      "rounds": 0, "history": []}))
+    email_service.set_delivery_hook_for_tests(replace_loop)
+    loop_notice.send_if_due(path)
+    assert "notice" not in harness_runner._read(path)["run"]["loop"]
+
+
+def _race_child(path, log, delay):
+    real = harness_runner._update
+
+    def slow(p, change):  # widen the window between a claim's read and its save
+        def slowed(t):
+            out = change(t)
+            time.sleep(delay)
+            return out
+        return real(p, slowed)
+    harness_runner._update = slow
+    email_service.set_delivery_hook_for_tests(lambda e: open(log, "a").write("x\n"))
+    loop_notice.send_if_due(path)
+    os._exit(0)
+
+
+def test_two_processes_send_the_notice_exactly_once(
+        granted, profile, site, rated, tunable_rule, outbox, owner, monkeypatch, tmp_path):
+    path, record = exhaust(granted, profile, True, monkeypatch)
+    harness_runner._update(path, lambda t: t["run"]["loop"].pop("notice"))
+    log = str(tmp_path / "sent.log")
+    ctx = multiprocessing.get_context("fork")
+    procs = [ctx.Process(target=_race_child, args=(path, log, 0.4)) for _ in range(2)]
+    for p in procs:
+        p.start()
+    for p in procs:
+        p.join(60)
+    assert open(log).read().count("x") == 1

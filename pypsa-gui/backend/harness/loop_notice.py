@@ -16,6 +16,7 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
+GRANTED_STATES = ("granted", "exhausted", "expired")
 STALE_S = 60  # a claim with no result this long after is a crash between claim and send
 ENDINGS = ("no_progress", "exhausted", "unverified_write", "error")
 _WORDS = {"no_progress": "stopped making progress", "exhausted": "used its rounds",
@@ -28,7 +29,6 @@ def _cell(value):
 
 
 def _body(task, loop, link):
-    from harness import runner
     run = task["run"]
     gate = (run["stages"].get(loop.get("stage")) or {}).get("gate") or {}
     lines = [f"The input check loop of your harness run {_WORDS[loop['ended']]} and the run needs you.", "",
@@ -53,28 +53,45 @@ def _body(task, loop, link):
     return "\n".join(lines) + "\n"
 
 
+def _consented(path):
+    """`notify.email` on the envelope's own file, and only for an envelope that was granted (it may since be
+    exhausted or expired): a `proposed` or revoked one sends nothing."""
+    from services import run_envelope
+    envelope = run_envelope.read(path)
+    return bool(envelope) and envelope["state"] in GRANTED_STATES and (envelope.get("notify") or {}).get("email") is True
+
+
+def _repair_stale(path, loop):
+    """A claim with no result long after (a crash between claim and send) is shown uncertain, never re-sent."""
+    notice = loop["notice"]
+    if notice.get("sent") is None and time.time() - notice["claimed_at"] > STALE_S:
+        _settle(path, notice.get("token"), {"sent": False, "error": "uncertain"})
+
+
 def send_if_due(path):
     """Claim and send the notice of an ended loop, once. Never raises."""
     from harness import runner
     try:
         task = runner._read(path)
         loop = ((task or {}).get("run") or {}).get("loop") or {}
-        if loop.get("ended") not in ENDINGS or "notice" in loop:
-            notice = loop.get("notice") or {}
-            if "notice" in loop and notice.get("sent") is None and time.time() - notice["claimed_at"] > STALE_S:
-                _settle(path, {"sent": False, "error": "uncertain"}, only_unsettled=True)
+        if loop.get("ended") not in ENDINGS:
             return
-        if not runner._email_opted_in(path, task["task_id"]):
+        if "notice" in loop:
+            _repair_stale(path, loop)
             return
+        if not _consented(path):
+            return
+        token = uuid.uuid4().hex
         claimed = {}
 
         def claim(t):
             lp = (t["run"].get("loop") or {})
             if lp.get("ended") not in ENDINGS or "notice" in lp:
                 return False
-            lp["notice"] = {"claimed_at": time.time(), "sent": None}
-            claimed["task"] = t
-        runner._update(path, claim)
+            lp["notice"] = {"claimed_at": time.time(), "sent": None, "token": token}
+            claimed["loop"], claimed["task"] = lp, t
+        with runner._file_lock(path):  # `_update` is a thread lock; runners in other processes share the file
+            runner._update(path, claim)
         if not claimed:
             return
         result = {"sent": False, "error": "send_failed"}
@@ -87,22 +104,23 @@ def send_if_due(path):
                 address, _, link = contact
                 email_service.send_email(
                     to=address, subject="PyPSA Studio: a harness run needs you",
-                    body_text=_body(claimed["task"], claimed["task"]["run"]["loop"], link),
-                    metadata={"kind": "harness_loop_end", "task_id": task["task_id"],
-                              "ended": claimed["task"]["run"]["loop"]["ended"]})
+                    body_text=_body(claimed["task"], claimed["loop"], link),
+                    metadata={"kind": "harness_loop_end", "task_id": task["task_id"], "ended": claimed["loop"]["ended"]})
                 result = {"sent": True}
         except Exception:  # noqa: BLE001 — the run stays needs_user; the failure is on the run
             logger.warning("harness run %s: the loop-end notice could not be sent", task["task_id"], exc_info=True)
-        _settle(path, result)
+        _settle(path, token, result)
     except Exception:  # noqa: BLE001
         logger.exception("harness loop notice failed")
 
 
-def _settle(path, result, only_unsettled=False):
+def _settle(path, token, result):
+    """Write the result only onto the notice this call claimed (the loop may since have been replaced)."""
+    from harness import runner
+
     def change(t):
         notice = (t["run"].get("loop") or {}).get("notice")
-        if notice is None or (only_unsettled and notice.get("sent") is not None):
+        if notice is None or token is None or notice.get("token") != token or notice.get("sent") is not None:
             return False
         notice.update(result, at=time.time())
-    from harness import runner
     runner._update(path, change)
