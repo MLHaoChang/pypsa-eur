@@ -152,6 +152,16 @@ describe('a group', () => {
     expect(g.totals.map(t => t.value)).toEqual(['10.25 MW', '-1 MW', '1 t/h', '-4 MW'])
     expect(g.total).toBe('Unavailable: there is no single total because the carriers have different units.')
     expect(g.notes).toEqual(['Inside the group and not counted: h2'])
+    expect(g.totalLabel).toBe('All carriers')
+  })
+  it('Guided: the total says import or export like the per-carrier rows', () => {
+    const base = oracle().groups.plant
+    const word = (v: number) => groupView({ ...base, total: { ...base.total, value: v, unit: 'MW', available: true, reason: null } as typeof base.total }, 'guided')
+    expect(word(5).totalLabel).toBe('All carriers import')
+    expect(word(-5).totalLabel).toBe('All carriers export')
+    expect(word(-5).total).toBe(groupView({ ...base, total: { ...base.total, value: 5, unit: 'MW', available: true, reason: null } as typeof base.total }, 'guided').total)
+    expect(groupView(base, 'guided').totalLabel).toBe('All carriers net import')
+    expect(groupView(base, 'guided').totals[0].label).toMatch(/ (import|export|net import)$/)
   })
   // The server's shape (results._unavailable_group): no rows, the reason on `total`, the member's label.
   const unavailableGroup = (reason: string, member: string) =>

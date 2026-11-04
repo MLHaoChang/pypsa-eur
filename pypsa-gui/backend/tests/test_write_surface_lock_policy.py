@@ -365,6 +365,12 @@ TOOL_POLICY: dict[str, tuple[str, str]] = {
         "copy, see `_R_DURABLE_THREAD`); it never restores historical inputs "
         "onto the network and changes no project input."
     )),
+    "set_requirement": (CHAT_SESSION, (
+        "study harness issue 23: records a user-confirmed requirement on the chat's "
+        "durable thread (see `_R_DURABLE_THREAD`); it changes no project input. Its "
+        "only network write is minting the bound component's identity uid "
+        "(`component_identity.uid_for`, network lock held), which no edit reads as a value."
+    )),
     "start_experiment": (CHAT_SESSION, _R_EXPERIMENT_PLAN),
     "advance_experiment": (CHAT_SESSION, "arms one owned case ledger and offers an ordinary call; no case effect or execution approval"),
     "refresh_experiment": (CHAT_SESSION, "checkpoints authorized job/evidence reads in the owner's ledger; no live network writes"),
