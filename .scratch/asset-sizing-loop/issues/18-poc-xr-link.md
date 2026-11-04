@@ -3,7 +3,7 @@
 
 # AS-18 — Link the assumed-X/R readiness rows to the PoC X/R field
 
-Status: ready-for-agent
+Status: done (landed in #1050)
 Type: task
 Blocked by: AS-17b (it edits the same backend module)
 

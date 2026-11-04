@@ -3,7 +3,7 @@
 
 # LC-19 — run, re-run, queue and failure handling in chat
 
-Status: ready-for-agent inside LC-05, beside LC-12 (built on `claude/lc19-run-lifecycle`)
+Status: done (harness/run_lifecycle.py, OJ-32..34 on master)
 Type: task
 Baseline: master `ae95a94a866730c0fe67fad37e238dc281786bd6`
 Dependencies: LC-12

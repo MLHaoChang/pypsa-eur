@@ -3,7 +3,7 @@
 
 # AS-13 — Input fingerprint independent of the process's Link ports
 
-Status: ready-for-agent
+Status: done (landed in #984)
 Type: bug
 Reviewer: GK A
 
