@@ -1,0 +1,5 @@
+{"limitations": [
+  {"method": "GET", "path": "/api/durable-conversations/{thread_id}/speech", "reason": "conversation-transport"},
+  {"method": "POST", "path": "/api/durable-conversations/{thread_id}/speech/start", "reason": "conversation-transport"},
+  {"method": "POST", "path": "/api/durable-conversations/{thread_id}/speech/end", "reason": "conversation-transport"}
+]}

@@ -13,6 +13,7 @@ import CompanionOutcome from './CompanionOutcome'
 import { keyResultsWalkRequested, openProjectList, openProjectRequested, startKeyResultsWalk, type ResultsWalk } from './liveWalk'
 import { ErrorBoundary } from './ErrorBoundary'
 import { ensureLiveDurableThread } from '../api/durableConversations'
+import { useLiveSpeech } from '../hooks/useLiveSpeech'
 
 // Matches the companion-echo-fade animation in index.css.
 const LIVE_ECHO_MS = 1_600
@@ -85,8 +86,15 @@ export default function AssistantDock() {
   const walkCancel = useRef<ResultsWalk | null>(null)
   const echoTimer = useRef<number | null>(null)
   const liveGeneration = useRef(0)
+  // LC-07: continuous voice; every exit stops the microphone (see useLiveSpeech).
+  const speech = useLiveSpeech(liveOpen)
+  // The composer caption is the voice state line (UX (7)): listening, the last stop, or why it is off.
+  useEffect(() => {
+    if (speech.state === 'listening' || speech.caption) setLiveCaption(speech.caption)
+    else if (speech.blocked) setLiveCaption(speech.blocked)
+  }, [speech.state, speech.caption, speech.blocked])
   // Conversation/decision state is independent of in-page text and audio.
-  // No continuous capture/playback exists here yet, so media remains off.
+  // Continuous speech (LC-07) is the only media here; see useLiveSpeech.
   const workState: CompanionWorkState = pending ? 'waiting_for_approval'
     : choice ? 'waiting_for_input'
     : streaming || walking ? 'running'
@@ -332,6 +340,7 @@ export default function AssistantDock() {
           liveEcho={liveEcho}
           modelKeyMissing={ready === false}
           onLiveSubmit={onLiveSubmit}
+          speech={speech}
           onCompose={() => {
             stopWalk()
             useUIStore.getState().setAssistantEntry('compose')

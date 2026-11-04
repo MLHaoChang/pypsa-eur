@@ -30,6 +30,12 @@ type Props = {
   liveEcho?: string
   modelKeyMissing?: boolean
   onLiveSubmit?: (text: string) => void
+  /** LC-07: continuous voice. With the server flag on, "Start voice" sits beside Send (disabled while
+   *  `blocked`: no media link) and the voice note is hidden; flag off, the note is master's. */
+  speech?: {
+    available: boolean; blocked?: string; caption?: string
+    state: 'off' | 'starting' | 'listening'; start: () => void; stop: () => void
+  }
   children?: ReactNode
 }
 
@@ -79,7 +85,7 @@ function LiveNode({ lit }: { lit: boolean }) {
 
 export default function CompanionLauncher({
   workState = 'idle', navigating = false, profileLabel, onCompose, onSpeak, onLive, onProfiles,
-  liveOpen = false, liveCaption = '', liveEcho = '', modelKeyMissing = false, onLiveSubmit,
+  liveOpen = false, liveCaption = '', liveEcho = '', modelKeyMissing = false, onLiveSubmit, speech,
   children,
 }: Props) {
   const reduce = useReducedMotion()
@@ -87,6 +93,8 @@ export default function CompanionLauncher({
   const [draft, setDraft] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   const voiceReasonId = useId()
+  // LC-07: the server flag is on (voice available, or blocked by a missing media link).
+  const voiceOn = !!speech && (speech.available || !!speech.blocked || speech.state !== 'off')
   useEffect(() => {
     if (liveOpen) inputRef.current?.focus()
   }, [liveOpen])
@@ -101,10 +109,10 @@ export default function CompanionLauncher({
       data-no-panel-close
       data-presence={presence}
       data-work-state={workState}
-      data-media-state="off"
+      data-media-state={speech?.state === 'listening' ? 'live' : speech?.state === 'starting' ? 'starting' : 'off'}
       data-motion={reduce ? 'off' : 'on'}
       data-hovered={hovered ? 'true' : 'false'}
-      aria-describedby={voiceReasonId}
+      aria-describedby={voiceOn ? undefined : voiceReasonId}
       data-live={liveOpen ? 'open' : 'closed'}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -157,6 +165,20 @@ export default function CompanionLauncher({
               aria-label="Message the assistant"
               className="min-w-0 flex-1 rounded-full border border-border bg-bg px-3 py-1.5 text-[12px] text-text"
             />
+            {voiceOn && speech && (
+              <button
+                type="button"
+                data-testid="companion-voice-toggle"
+                aria-pressed={speech.state !== 'off'}
+                disabled={speech.state === 'starting' || (speech.state === 'off' && !speech.available)}
+                onClick={speech.state === 'off' ? speech.start : speech.stop}
+                className={`flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1.5 text-[11px] font-medium disabled:cursor-not-allowed disabled:opacity-60 ${
+                  speech.state === 'off' ? 'border-border text-text hover:text-accent' : 'border-accent text-accent'}`}
+              >
+                {speech.state === 'listening' && <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent" />}
+                {speech.state === 'off' ? 'Start voice' : speech.state === 'starting' ? 'Starting…' : 'Stop voice'}
+              </button>
+            )}
             <button
               type="submit"
               data-testid="companion-live-send"
@@ -238,6 +260,7 @@ export default function CompanionLauncher({
           Chat here
         </button>
       </div>
+      {!voiceOn && (
       <div className="companion-extras max-w-72 rounded-lg border border-border bg-bg-2 px-3 py-2 text-[10px] text-muted"
         data-testid="companion-voice-note">
         <button type="button" disabled aria-describedby={voiceReasonId}
@@ -246,6 +269,7 @@ export default function CompanionLauncher({
         </button>
         <p id={voiceReasonId}>Continuous voice is not connected. Use reviewed dictation for speech.</p>
       </div>
+      )}
     </div>
   )
 }
