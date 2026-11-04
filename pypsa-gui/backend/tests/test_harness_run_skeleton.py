@@ -363,6 +363,10 @@ def test_each_stage_tool_resolves_the_project_through_the_bound_context(session,
     run_ctx.network.generators.at['G1', 'bus'] = 'nowhere'  # only the run's project has this error
     tools = {a['tool'] for stage in run_profiles.resolve('eh_site@1')['stages'].values() for a in stage.get('actions', [])}
     assert tools <= run_profiles.BOUND_CONTEXT_TOOLS
+    from services import upload_service
+    demand = upload_service.add_upload(  # issue 21c: the planned write's upload, in the run's project
+        PyPSAService.get_loaded_project(), b"time,mw\n2026-01-01 00:00,7.5\n2026-01-01 01:00,9.0\n",
+        "demand.csv", "text/csv", project_dir=site[1]).file_id
     with foreground(two_buses()) as front:
         assert PyPSAService.get_network() is front.network
         assert chat_tools.diagnose_network()['bus_count'] == 2 and chat_tools.validate_network()['errors'] == 0
@@ -373,6 +377,10 @@ def test_each_stage_tool_resolves_the_project_through_the_bound_context(session,
                                  and _on_ctx(run_ctx, workflow_tools.project_readiness)['ready'] is False,
             'get_weather_choice': isinstance(_on_ctx(run_ctx, chat_tools.get_weather_choice, project_id), dict),
             'solve_queue_enqueue': enqueued_for(_on_ctx(run_ctx, chat_tools.solve_queue_enqueue, project_id), project_id),
+            'apply_demand_from_excel': _on_ctx(run_ctx, chat_tools.apply_demand_from_excel, demand, 'time', 'mw', 'L1')
+                                       ['applied'] and 'L1' not in front.network.loads_t.p_set.columns
+                                       and list(run_ctx.network.loads_t.p_set['L1']) == [7.5, 9.0]
+                                       and ('loads', 'p_set', 'L1') in run_ctx.user_ts,
         }
         assert PyPSAService.get_network() is front.network  # the foreground is untouched
     assert seen == {tool: True for tool in run_profiles.BOUND_CONTEXT_TOOLS}

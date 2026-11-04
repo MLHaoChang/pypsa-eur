@@ -555,6 +555,11 @@ def _start_run(session, title, request_id, run, profile, brief, *, origin=None, 
                 # before anything can wake it.
                 grant(path, task, RUN_CONTEXT.get() or PyPSAService.get_active_context())
         session.task_id = task_id
+    if grant is not None:
+        # Issue 21c: the created project exists; pin its planned writes on it
+        # (the run's own context) before the run can enter stage 2.
+        from services import run_envelope
+        run_envelope.pin_planned(path, RUN_CONTEXT.get() or PyPSAService.get_active_context())
     _advance_run(path)
     _wake(path)
     with _LOCK:
@@ -689,8 +694,15 @@ def _advance_run(path, ctx=None):
             name = run["stage"]
             stage = run["stages"][name]
             if stage["status"] == "pending":
-                steps = run_profiles.materialise(profile, name, task["project_id"], start=1 + sum(
-                    1 for s in task["steps"] if s["id"].split(".")[0] == name))
+                start = 1 + sum(1 for s in task["steps"] if s["id"].split(".")[0] == name)
+                planned = []
+                if name == "inputs" and start == 1:
+                    # Issue 21c: stage 2 runs the grant's planned writes first, in
+                    # intake order, with the envelope's args.
+                    from services import run_envelope
+                    planned = run_envelope.planned_steps(path, name)
+                steps = planned + run_profiles.materialise(profile, name, task["project_id"],
+                                                           start=start + len(planned))
                 stage.update(status="active", entered_at=_now())
                 task["steps"].extend(steps)
                 if any(_effectful(s["tool"]) for s in steps):

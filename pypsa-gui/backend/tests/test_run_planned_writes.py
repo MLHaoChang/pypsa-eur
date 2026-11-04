@@ -27,6 +27,7 @@ from services import (
     component_identity,
     dirty_state,
     run_envelope,
+    run_handover,
     run_profiles,
     upload_service,
 )
@@ -52,6 +53,7 @@ from tests.test_harness_envelope import (  # noqa: F401
 from tests.test_harness_envelope_atomic import gap, writer  # noqa: F401
 from tests.test_harness_run_skeleton import foreground, site, two_buses  # noqa: F401
 from tests.test_harness_runner import detached, task_path  # noqa: F401
+from tests.test_run_intake_grant import host  # noqa: F401
 
 TOOL = "apply_demand_from_excel"
 # The baseline network: two hourly snapshots from 2026-01-01, Load L1 at 5 MW.
@@ -70,11 +72,9 @@ def series(name="L1"):
 
 @pytest.fixture
 def upload(site):
-    ctx_ = ctx()
-
     def add(data=CSV, filename="demand.csv"):
         return upload_service.add_upload(
-            ctx_.name, data, filename, "text/csv", project_dir=site[1]
+            PyPSAService.get_loaded_project(), data, filename, "text/csv", project_dir=site[1]
         ).file_id
 
     return add
@@ -89,7 +89,7 @@ def args(file_id, load="L1"):
     }
 
 
-def write_step(file_id, n=1, load="L1"):
+def write_step(file_id, n=5, load="L1"):
     return {"id": f"inputs.{n}", "tool": TOOL, "args": args(file_id, load)}
 
 
@@ -103,10 +103,10 @@ def planned(granted, upload, site, monkeypatch):
         {**run_profiles.EH_SITE, "envelope": {**run_profiles.EH_SITE["envelope"], "edits": []}},
     )
 
-    def go(file_id=None, load="L1", steps=None, pin=True):
+    def go(file_id=None, load="L1", steps=None, pin=True, detach=True):
         file_id = file_id or upload()
         sha = hashlib.sha256(
-            upload_service.get_upload_bytes(ctx().name, file_id, project_dir=site[1])
+            upload_service.get_upload_bytes(PyPSAService.get_loaded_project(), file_id, project_dir=site[1])
         ).hexdigest()
         row = {
             "write": TOOL,
@@ -115,7 +115,7 @@ def planned(granted, upload, site, monkeypatch):
             "status": "confirmed",
         }
         task, path, _ = granted(
-            steps=steps if steps is not None else [write_step(file_id, load=load)]
+            steps=steps if steps is not None else [write_step(file_id, load=load)], detach=detach
         )
         run_envelope.plan_writes(path, [row])  # what the grant records
         if pin:
@@ -123,6 +123,25 @@ def planned(granted, upload, site, monkeypatch):
         return task, path, file_id
 
     return go
+
+
+def accept(path):
+    """The network's current inputs, accepted onto the run's chain and brief
+    (as a carded user edit would be), so a test reaches admission (C1) and
+    not the drift stop."""
+    fingerprint = run_envelope.identity(ctx())["fingerprint"]
+    record = json.loads(path.read_text())
+    record["fingerprint"] = fingerprint
+    path.write_text(json.dumps(record))
+    envelope = envelope_of(path)
+    envelope["chain"].append({"after_change": "user-card", "fingerprint": fingerprint})
+    run_envelope.path_for(path).write_text(json.dumps(envelope))
+
+
+def carded(record):
+    """The run waits for the user's card on the step: nothing admitted it."""
+    run = record["run"]
+    return run["status"] == "needs_user" and (run.get("waiting") or {}).get("kind") == "card"
 
 
 def written(path):
@@ -134,11 +153,12 @@ def written(path):
 
 def test_the_card_binds_the_load_uid_the_upload_and_the_aligned_series(site, upload):
     file_id = upload()
+    uid = component_identity.uid_for(ctx().network, "Load", "L1")  # minted by the pin, never a card
     card = edit_card.preview(TOOL, args(file_id))
     binding = card["binding"]
     assert card["complete"] and card["kind"] == "series_edit"
-    assert binding["load_uid"] == component_identity.uid_for(ctx().network, "Load", "L1")
-    assert binding["upload_id"] == file_id and binding["value_col"] == "demand_mw"
+    assert binding["load_uid"] == uid
+    assert binding["file_id"] == file_id and binding["value_col"] == "demand_mw"
     assert binding["upload_sha256"] == hashlib.sha256(CSV).hexdigest()
     assert card["digest"] == edit_card._digest({k: v for k, v in card.items() if k != "digest"})
     assert series() is None  # a card writes nothing
@@ -170,8 +190,9 @@ def test_c1_a_renamed_load_gets_a_card(planned):
     network.loads.rename(index={"L1": "L_old", "L2": "L1"}, inplace=True)
     assert component_identity.uid_for(network, "Load", "L1") != uid
     dirty_state.bump_revision(ctx())
+    accept(path)
     record = until(harness_runner.Runner("a"), path, task, stopped)
-    assert record["run"]["status"] == "paused" and not written(path)
+    assert carded(record) and not written(path) and refusals(path)[-1] == "uid_changed"
     assert "L1" not in ctx().network.loads_t.p_set.columns
 
 
@@ -183,7 +204,19 @@ def test_c1_a_load_deleted_and_made_again_under_the_granted_name_gets_a_card(pla
     network.add("Load", "L1", bus="B1", p_set=5)  # same name, same values, new uid
     dirty_state.bump_revision(ctx())
     record = until(harness_runner.Runner("a"), path, task, stopped)
-    assert record["run"]["status"] == "paused" and not written(path)
+    assert carded(record) and not written(path) and refusals(path)[-1] == "uid_changed"
+    assert series() is None
+
+
+def test_c1_a_card_that_differs_from_the_pin_gets_a_card(planned):
+    """Same args, same load, same upload: the card shows another series it
+    replaces (the load's demand moved since the pin), so not the pinned digest."""
+    task, path, _ = planned()
+    ctx().network.loads.at["L1", "p_set"] = 6.0
+    dirty_state.bump_revision(ctx())
+    accept(path)
+    record = until(harness_runner.Runner("a"), path, task, stopped)
+    assert carded(record) and not written(path) and refusals(path)[-1] == "plan_changed"
     assert series() is None
 
 
@@ -195,7 +228,7 @@ def test_c1_a_changed_upload_gets_a_card(planned, upload):
     record["steps"][-1]["args"] = args(other)
     path.write_text(json.dumps(record))
     record = until(harness_runner.Runner("a"), path, task, stopped)
-    assert record["run"]["status"] == "paused" and not written(path)
+    assert carded(record) and not written(path)
     assert series() is None
 
 
@@ -205,14 +238,14 @@ def test_c1_a_row_the_plan_leaves_out_gets_a_card(planned, upload):
     file_id = upload()
     task, path, _ = planned(file_id, steps=[write_step(file_id, load="L2")])
     record = until(harness_runner.Runner("a"), path, task, stopped)
-    assert record["run"]["status"] == "paused" and not written(path)
+    assert carded(record) and not written(path)
     assert series("L2") is None
 
 
 def test_c1_a_planned_write_is_admitted_once(planned):
     task, path, file_id = planned()
     record = json.loads(path.read_text())
-    record["steps"].append(dict(write_step(file_id, n=2), status="pending"))
+    record["steps"].append(dict(write_step(file_id, n=6), status="pending"))
     path.write_text(json.dumps(record))
     until(harness_runner.Runner("a"), path, task, stopped)
     assert len(written(path)) == 1
@@ -221,7 +254,7 @@ def test_c1_a_planned_write_is_admitted_once(planned):
 def test_c1_a_write_never_pinned_at_creation_gets_a_card(planned):
     task, path, _ = planned(pin=False)
     record = until(harness_runner.Runner("a"), path, task, stopped)
-    assert record["run"]["status"] == "paused" and not written(path) and series() is None
+    assert carded(record) and not written(path) and series() is None
 
 
 # ── C2: one network revision from plan check to write ─────────────────────
@@ -275,7 +308,7 @@ def test_load_shape_1_no_series_is_written_without_a_confirmed_intake_row(grante
     file_id = upload()
     task, path, _ = granted(steps=[write_step(file_id)])  # no planned row on the grant
     record = until(harness_runner.Runner("a"), path, task, stopped)
-    assert record["run"]["status"] == "paused" and series() is None
+    assert carded(record) and series() is None
 
 
 def test_load_shape_1_a_struck_or_proposed_row_is_never_planned(granted, upload):
@@ -292,7 +325,7 @@ def test_load_shape_1_a_struck_or_proposed_row_is_never_planned(granted, upload)
 def test_q2_the_shared_helper_writes_byte_identical_p_set(site, upload):
     """The refactor into one `_demand_series` changes no written byte."""
     file_id = upload()
-    expected = chat_tools._demand_series(ctx(), args(file_id))
+    expected = chat_tools._demand_series(ctx(), args(file_id))["series"]
     chat_tools.apply_demand_from_excel(**args(file_id))
     written_now = ctx().network.loads_t.p_set["L1"]
     assert written_now.to_numpy().tobytes() == expected.to_numpy().tobytes()
@@ -301,26 +334,85 @@ def test_q2_the_shared_helper_writes_byte_identical_p_set(site, upload):
 
 @pytest.mark.parametrize("loop_name", ["l1", "l2"])
 def test_g1_an_agent_call_with_the_planned_args_is_refused_and_cards(planned, loop_name):
-    task, path, file_id = planned(steps=[])
+    task, path, file_id = planned(steps=[], detach=False)
     with on_run(task, path) as run:
         run.loop_scope = {"loop": loop_name, "round": 1, "changes": 2, "tunable": frozenset()}
-        assert ask(run, TOOL, args(file_id)) is None  # the card path
+        got = ask(run, TOOL, args(file_id))
+        assert got is None  # the card path
     assert refusals(path)[-1] == "outside_entry"
     assert not written(path) and series() is None
 
 
-def test_g2_upload_bytes_swapped_after_admission_write_nothing_and_card(planned, monkeypatch):
+def test_g2_upload_bytes_swapped_after_admission_write_nothing_and_card(planned, site, monkeypatch):
     task, path, file_id = planned()
     real_series = chat_tools._demand_series
+    swaps = []
 
-    def swapped(context, call_args):  # the swap lands between admission and the write
-        upload_service.get_upload_path(context.name, file_id).write_bytes(OTHER_CSV)
+    def swapped(context, call_args):
+        if run_envelope.PLANNED_WRITE.get() is not None and not swaps:
+            # In the admitted handler, under the project's locks: after
+            # admission, before the write.
+            swaps.append(True)
+            upload_service.get_upload_path(
+                PyPSAService.get_loaded_project(), file_id, project_dir=site[1]
+            ).write_bytes(OTHER_CSV)
         return real_series(context, call_args)
 
     monkeypatch.setattr(chat_tools, "_demand_series", swapped)
     record = until(harness_runner.Runner("a"), path, task, stopped)
-    assert record["run"]["status"] == "paused" and not written(path)
+    assert swaps and carded(record)
+    assert refusals(path)[-1] == "plan_changed"
     assert series() is None
+
+
+def test_g2_at_the_write_itself_with_the_card_recheck_off(planned, site, monkeypatch):
+    """The tool's own check under the locks (`verify_planned_write`), alone:
+    the loop's card re-check is switched off, so only it can refuse."""
+    task, path, file_id = planned()
+    monkeypatch.setattr(edit_card, "require_current", lambda *a, **k: None)
+    real_bytes = upload_service.get_upload_bytes
+
+    def swapped(*a, **k):  # the bytes the write re-reads under the lock
+        return OTHER_CSV if run_envelope.PLANNED_WRITE.get() is not None else real_bytes(*a, **k)
+
+    monkeypatch.setattr(upload_service, "get_upload_bytes", swapped)
+    record = until(harness_runner.Runner("a"), path, task, stopped)
+    assert carded(record) and refusals(path)[-1] == "plan_changed"
+    assert series() is None
+
+
+def test_g2_a_series_other_than_the_pinned_one_is_not_written(planned, monkeypatch):
+    task, path, _ = planned()
+    monkeypatch.setattr(edit_card, "require_current", lambda *a, **k: None)
+    real_series = chat_tools._demand_series
+
+    def other(context, call_args):
+        out = real_series(context, call_args)
+        if run_envelope.PLANNED_WRITE.get() is not None:
+            out = dict(out, series=out["series"] * 2)
+        return out
+
+    monkeypatch.setattr(chat_tools, "_demand_series", other)
+    record = until(harness_runner.Runner("a"), path, task, stopped)
+    assert carded(record) and refusals(path)[-1] == "plan_changed"
+    assert series() is None
+
+
+def test_q1_a_card_whose_binding_is_not_the_granted_row_is_never_pinned(granted, upload, site, monkeypatch):
+    monkeypatch.setitem(
+        run_profiles.PROFILES, "eh_site@1",
+        {**run_profiles.EH_SITE, "envelope": {**run_profiles.EH_SITE["envelope"], "edits": []}},
+    )
+    file_id = upload()
+    task, path, _ = granted(steps=[write_step(file_id)])
+    row = {"write": TOOL, "args": args(file_id), "status": "confirmed",
+           "source": {"kind": "table", "upload_id": file_id, "sha256": "0" * 64}}  # not these bytes
+    run_envelope.plan_writes(path, [row])
+    run_envelope.pin_planned(path, ctx())
+    entry = envelope_of(path)["planned"][0]
+    assert entry["status"] == "carded" and "pinned" not in entry
+    record = until(harness_runner.Runner("a"), path, task, stopped)
+    assert carded(record) and series() is None
 
 
 def test_g3_a_parse_failure_at_the_pin_cards_and_never_pins(planned, upload):
@@ -328,7 +420,7 @@ def test_g3_a_parse_failure_at_the_pin_cards_and_never_pins(planned, upload):
     task, path, _ = planned(bad)
     assert all(p.get("pinned") is None and p.get("carded") for p in envelope_of(path)["planned"])
     record = until(harness_runner.Runner("a"), path, task, stopped)
-    assert record["run"]["status"] == "paused" and not written(path) and series() is None
+    assert carded(record) and not written(path) and series() is None
 
 
 def test_g3_a_parse_failure_at_admission_cards(planned, monkeypatch):
@@ -339,14 +431,14 @@ def test_g3_a_parse_failure_at_admission_cards(planned, monkeypatch):
 
     monkeypatch.setattr(chat_tools, "_demand_series", broken)
     record = until(harness_runner.Runner("a"), path, task, stopped)
-    assert record["run"]["status"] == "paused" and not written(path) and series() is None
+    assert carded(record) and not written(path) and series() is None
 
 
 def test_g3_a_uid_lookup_failure_at_admission_cards(planned, monkeypatch):
     task, path, _ = planned()
-    monkeypatch.setattr(component_identity, "uid_for", lambda *a: None)
+    monkeypatch.setattr(component_identity, "get", lambda *a: None)
     record = until(harness_runner.Runner("a"), path, task, stopped)
-    assert record["run"]["status"] == "paused" and not written(path) and series() is None
+    assert carded(record) and not written(path) and series() is None
 
 
 def test_g4_a_stale_process_neither_pins_nor_consumes(planned, monkeypatch):
@@ -360,24 +452,35 @@ def test_g4_a_stale_process_neither_pins_nor_consumes(planned, monkeypatch):
     assert not any(p.get("used_by") for p in envelope_of(path)["planned"])
 
 
+def test_g4_a_planned_write_is_consumed_once_under_the_lock(planned):
+    task, path, file_id = planned(steps=[])
+    assert run_envelope.consume_planned(path, call_id="call-1", args=args(file_id))
+    assert not run_envelope.consume_planned(path, call_id="call-2", args=args(file_id))
+    assert envelope_of(path)["planned"][0]["used_by"] == "call-1"
+
+
 def test_g4_after_a_takeover_the_old_runner_does_not_consume(planned):
     import time
 
-    task, path, _ = planned()
-    now = time.time()
-    a = harness_runner.Runner("a", clock=lambda: now)
-    b = harness_runner.Runner("b", clock=lambda: now + harness_runner.LEASE_SECONDS + 1)
-    assert b.tick(path) != "leased_elsewhere"
-    b._inflight[task["task_id"]][1].join(60)
-    assert a.tick(path) == "leased_elsewhere"
+    task, path, file_id = planned()
+    record = json.loads(path.read_text())
+    record["run"]["runner"] = {"lease_owner": "a", "lease_until": time.time() - 1, "restarts": 0,
+                               "restart_times": []}  # runner a's lease lapsed
+    path.write_text(json.dumps(record))
+    assert not run_envelope.consume_planned(path, call_id="call-a", args=args(file_id), holder="a")
+    record = until(harness_runner.Runner("b"), path, task, stopped)  # b takes over
+    assert record["run"]["runner"]["lease_owner"] == "b"
     assert len(written(path)) == 1 and series() == [7.5, 9.0]
+    assert envelope_of(path)["planned"][0]["used_by"].startswith("run-")
+    assert not run_envelope.consume_planned(path, call_id="call-a2", args=args(file_id), holder="a")
+    assert not run_envelope.consume_planned(path, call_id="call-b2", args=args(file_id), holder="b")  # once
 
 
 @pytest.mark.parametrize("kind", ["plan_changed", "uid_changed"])
 def test_g5_a_typed_mismatch_cards_at_the_catching_site(planned, kind, monkeypatch):
     """The typed refusal is caught as itself: a base-class catch that let it
     through (or turned it into an admission) fails here."""
-    task, path, file_id = planned(steps=[])
+    task, path, file_id = planned(steps=[], detach=False)
     error = run_envelope.PlannedMismatch.kinds[kind]
     monkeypatch.setattr(run_envelope, "_check_planned", lambda *a, **k: (_ for _ in ()).throw(error(kind)))
     with on_run(task, path) as run:
@@ -408,3 +511,59 @@ def test_g7_the_write_goes_to_the_bound_contexts_user_ts(site, upload):
     from services.user_timeseries import _user_ts
 
     assert list(_user_ts[("loads", "p_set", "L1")]) == [7.5, 9.0]
+
+
+# ── End to end: intake row → plan-review card → grant → pinned on the created project ──
+
+
+def _site_csv():
+    from project_templates import eh_site
+
+    lines = ["time,demand_mw"] + [f"{t},{1.0 + (i % 24) / 10}" for i, t in enumerate(eh_site.SNAPSHOTS)]
+    return ("\n".join(lines) + "\n").encode()
+
+
+def test_an_intake_load_series_is_carded_granted_and_pinned_on_the_created_project(host, session, site):
+    import uuid
+
+    from services import run_intake
+    from tests.test_run_intake_grant import _new_task, _start
+
+    owner_ctx = ctx()
+    file_id = upload_service.add_upload(
+        PyPSAService.get_loaded_project(), _site_csv(), "site-demand.csv", "text/csv", project_dir=host["dir"]
+    ).file_id
+    write = {"write": TOOL, "upload_id": file_id, "time_col": "time", "value_col": "demand_mw",
+             "load": "general_load"}
+    name = f"Intake {uuid.uuid4().hex[:6]}"
+    view = _start(host, name, host["citations"] + [write])
+    intake = view["run"]["intake"]
+    shown = [r for r in intake["card"]["rows"] if r.get("write")]
+    assert len(shown) == 1 and shown[0]["label"] == "Load general_load: demand series"
+    assert shown[0]["from_document"] and "site-demand.csv" in shown[0]["source"]
+    rows = json.loads(task_path(site[1], view).read_text())["run"]["intake"]["rows"]
+    struck = run_intake.strike(rows, next(i for i, r in enumerate(rows) if r.get("write")))
+    assert run_intake.digest(struck) != intake["digest"]  # the digest binds the write row
+    assert run_intake.params(rows) == run_intake.params([r for r in rows if not r.get("write")])
+    run_envelope.decide(session, view["task_id"], "unattended", intake_digest=intake["digest"])
+    intent = run_handover.read_intent(task_path(site[1], view))
+    new_path, _ = _new_task(intent)
+    planned = envelope_of(new_path)["planned"]
+    assert [(p["tool"], p["status"], p["args"]["load_name"]) for p in planned] == [(TOOL, "pinned", "general_load")]
+    assert planned[0]["upload_sha256"] == hashlib.sha256(_site_csv()).hexdigest()
+    assert run_envelope.planned_steps(new_path, "inputs")[0]["args"] == planned[0]["args"]
+    assert ctx() is owner_ctx  # the pin bound the created project, never the foreground (G6)
+
+
+def test_q3_a_profile_requiring_a_load_series_asks_for_it_until_an_intake_row_gives_it():
+    from services import run_intake
+
+    profile = {**run_profiles.EH_SITE, "inputs": {"required": [run_intake.WRITE_PARAM]}}
+    row = {"param": "load_series.L1", "write": TOOL, "args": args("u1"), "value": args("u1"), "unit": "",
+           "source": {"kind": "table", "upload_id": "u1", "sha256": "x"}, "status": "proposed"}
+    asked = [i["param"] for i in run_intake.missing(profile, [], [])]
+    assert run_intake.WRITE_PARAM in asked
+    assert run_intake.WRITE_PARAM not in [i["param"] for i in run_intake.missing(profile, [row], [])]
+    assert run_intake.WRITE_PARAM in [
+        i["param"] for i in run_intake.missing(profile, [dict(row, status="struck")], [])]
+    assert run_profiles.EH_SITE["inputs"]["required"] == []  # eh_site asks for none (Q3)
