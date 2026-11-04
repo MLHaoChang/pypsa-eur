@@ -201,6 +201,49 @@ def _await_confirmation(task_path, rows):
     return waiting
 
 
+def due(task) -> bool:
+    """The run's current stage has researchable gaps and no research step
+    yet (one per stage), and no input-loop round is due."""
+    from services import run_profiles
+    run = task.get("run") or {}
+    stage = run.get("stage")
+    if stage not in STAGES or run.get("status") != "running" or (run.get("loop") or {}).get("due"):
+        return False
+    if any(s.get("stage") == stage for s in (run.get("research") or {}).get("steps", [])):
+        return False
+    try:
+        return bool(gaps_for(run_profiles.resolve(run["profile"]), stage))
+    except (KeyError, ValueError):
+        return False
+
+
+def failed(task_path, stage):
+    """A research turn that errored: its gaps listed, never retried."""
+    from services import run_profiles
+
+    def change(task):
+        block = _research_block(task)
+        if not any(s.get("stage") == stage for s in block["steps"]):
+            gaps = gaps_for(run_profiles.resolve(task["run"]["profile"]), stage)
+            block["steps"].append({"stage": stage, "status": "error", "gaps": [g["key"] for g in gaps]})
+    _update(task_path, change)
+
+
+def run_for(task_path, session, *, stage, provider=None, reserving=None):
+    """The runner's entry: the run's profile and provider, then one turn.
+    `provider` is a test seam; the app uses the run session's own."""
+    from harness import runner
+    from harness.providers import wiring
+    from services import run_profiles
+    task = runner._read(task_path)
+    profile = run_profiles.resolve(task["run"]["profile"])
+    provider_profile = wiring._resolve_turn_profile(session)
+    if provider is None:
+        provider, _error = wiring._provider_for_profile(provider_profile)
+    return research_turn(task_path, session, stage=stage, profile=profile, provider_profile=provider_profile,
+                         base_provider=provider, reserving=reserving)
+
+
 # ── The ledger write (the `record_source` tool's handler) ────────────────────
 
 
@@ -244,7 +287,12 @@ def settle(task_path, row_id: str, verdict: str, *, by: str) -> dict[str, Any]:
         waiting = task["run"].get("waiting") or {}
         if waiting.get("kind") == "research_confirm" and waiting.get("ref") == row_id:
             nxt = next((r for r in block["rows"] if r["status"] == "proposed" and source_ledger.sourced(r)), None)
-            task["run"]["waiting"] = {"kind": "research_confirm", "ref": nxt["id"]} if nxt else None
+            if nxt is not None:
+                task["run"]["waiting"] = {"kind": "research_confirm", "ref": nxt["id"]}
+            else:  # every value decided: the run goes on
+                task["run"]["waiting"] = None
+                if task["run"].get("status") == "needs_user":
+                    task["run"]["status"] = "running"
     try:
         _update(task_path, change)
     except source_ledger.LedgerError as exc:

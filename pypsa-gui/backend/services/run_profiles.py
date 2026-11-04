@@ -251,8 +251,17 @@ EH_SITE = {
                   "source": {"kind": "library_tariff"}}],
         "runs": [{"tool": "solve_queue_enqueue"}],
         "budget": {"solves": 6, "rounds": 6, "wall_time_h": 8.0},
-        "research": {"allowed": False, "cost_cap_eur": 2.0},
+        "research": {"allowed": True, "cost_cap_eur": 2.0},  # SH-RESEARCH-CAP-1; the grant governs
     },
+    # Issue 09 (design §8): the gaps a research turn may look up, each in one
+    # unit and basis; a value is proposed with its source and written only
+    # through the gap tool's own card. Checked by `harness.research.check_block`.
+    "research": {"gaps": [
+        {"key": "import_tariff", "stage": "inputs", "tool": "attach_tariff",
+         "target": {"component": "Settings", "name": "Commercial", "attr": "import_tariff_ref"},
+         "unit": "EUR/MWh", "basis": "energy charge, excl. VAT",
+         "question": "What is the published import energy charge for this site's connection level?"},
+    ]},
     "kpis": [],
     "chapters": [],
     "missing_tools": [],

@@ -345,3 +345,18 @@ def test_settling_a_row_moves_the_research_card_on(granted, profile):
     assert [r["status"] for r in run["research"]["rows"]] == ["rejected", "proposed"]
     research.settle(path, b["id"], "confirmed", by="u1")
     assert json.loads(path.read_text())["run"]["waiting"] is None
+
+
+def test_the_shipped_profile_marks_the_tariff_researchable_and_allows_research():
+    profile = run_profiles.resolve("eh_site@1")
+    assert research.check_block(profile["research"])
+    assert [g["key"] for g in research.gaps_for(profile, "inputs")] == ["import_tariff"]
+    assert profile["envelope"]["research"] == {"allowed": True, "cost_cap_eur": 2.0}
+
+
+def test_research_is_due_once_per_stage_and_never_with_a_loop_round():
+    task = {"run": {"profile": "eh_site@1", "stage": "inputs", "status": "running"}}
+    assert research.due(task)
+    assert not research.due({"run": {**task["run"], "loop": {"due": True}}})
+    assert not research.due({"run": {**task["run"], "stage": "input_gate"}})
+    assert not research.due({"run": {**task["run"], "research": {"steps": [{"stage": "inputs"}], "rows": []}}})

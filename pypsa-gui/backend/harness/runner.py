@@ -312,13 +312,19 @@ class Runner:
     would otherwise wait on, used once. The application's runner has none.
     """
 
-    def __init__(self, instance=None, *, clock=time.time, decisions=None, agent_provider=None):
+    def __init__(self, instance=None, *, clock=time.time, decisions=None, agent_provider=None,
+                 research_provider=None, research_reserving=None):
         self.instance = instance or f"{os.getpid()}:{uuid.uuid4().hex[:8]}"
         self.clock = clock
         self._decisions = decisions
         # Issue 04: the provider an agent turn streams from; None builds the
         # session's own (production). Tests pass a scripted one.
         self._agent_provider = agent_provider
+        # Issue 09: the research turn's provider (a test seam; the app resolves
+        # the run's own) and the reservation wrapper every research send goes
+        # through (SH-24). Without one, research does not run.
+        self._research_provider = research_provider
+        self._research_reserving = research_reserving
         self._wakeup = threading.Event()
         self._stopping = threading.Event()
         self._due = set()
@@ -631,7 +637,7 @@ class Runner:
         _update(path, change)
 
     def _step(self, path, ctx, session):
-        from harness import run_loops
+        from harness import research, run_loops
         from services import run_envelope, run_profiles
         tasks = _tasks()
         taken = {}
@@ -654,6 +660,8 @@ class Runner:
             raise _Stop("needs_user", "locked")
         if run["status"] == "needs_user":
             waiting = run["waiting"]
+            if waiting.get("kind") == "research_confirm":
+                return "waiting"  # issue 09: only the research card's Confirm or Reject goes on
             step = tasks._next(task)
             args = tasks._resolve(step["args"], task["steps"]) if step and step["id"] == waiting["ref"] else None
             decision = decide(task, waiting["ref"], args)
@@ -674,6 +682,8 @@ class Runner:
             return run["status"]
         if run_loops.due(task):
             return self._agent_round(path, ctx, session, task)
+        if research.due(task):
+            return self._research_turn(path, ctx, session, task)
         if task["status"] == "paused_at_card":
             card = task["pause"]["card"]
             decision = decide(task, card, None)
@@ -740,6 +750,30 @@ class Runner:
         self._inflight[task_id] = (path, thread)
         thread.start()
         return "l1_round"
+
+    def _research_turn(self, path, ctx, session, task):
+        """The stage's research turn (issue 09) on a helper thread, as an
+        input-loop round: once per stage, never inside a loop round."""
+        from harness import research
+        from services import harness_locks
+        harness_locks.hold(task["project_id"], task["task_id"])
+        task_id = task["task_id"]
+        stage = task["run"]["stage"]
+
+        def turn():
+            try:
+                research.run_for(path, session, stage=stage, provider=self._research_provider,
+                                 reserving=self._research_reserving)
+            except Exception:  # noqa: BLE001 — a research turn that errors lists its gaps; never retried
+                logger.exception("harness runner: research turn of %s errored", task_id)
+                research.failed(path, stage)
+            finally:
+                self.wake(path)
+        context = contextvars.copy_context()
+        thread = threading.Thread(target=context.run, args=(turn,), name=f"harness-rs-{task_id[:8]}", daemon=True)
+        self._inflight[task_id] = (path, thread)
+        thread.start()
+        return "research"
 
     def _hold_if_effectful(self, task, step):
         from services import harness_locks
