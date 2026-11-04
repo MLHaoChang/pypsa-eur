@@ -4,19 +4,19 @@
    "method": "GET",
    "path": "/api/projects/{name}/intent-comparison",
    "reason": "held-by-spec",
-   "issue": ".scratch/asset-sizing-loop/issues/10-preference-comparison-ui.md"
+   "issue": ".scratch/asset-sizing-loop/issues/19-intent-comparison-chat-tool.md"
   },
   {
    "method": "POST",
    "path": "/api/projects/{name}/intent-comparison",
    "reason": "held-by-spec",
-   "issue": ".scratch/asset-sizing-loop/issues/10-preference-comparison-ui.md"
+   "issue": ".scratch/asset-sizing-loop/issues/19-intent-comparison-chat-tool.md"
   },
   {
    "method": "POST",
    "path": "/api/projects/{name}/intent-comparison/abort",
    "reason": "held-by-spec",
-   "issue": ".scratch/asset-sizing-loop/issues/10-preference-comparison-ui.md"
+   "issue": ".scratch/asset-sizing-loop/issues/19-intent-comparison-chat-tool.md"
   }
  ]
 }

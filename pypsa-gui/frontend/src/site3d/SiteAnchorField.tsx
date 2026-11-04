@@ -10,6 +10,7 @@ import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { evaluateMutation } from '../utils/mutationGuard'
 import NumberField from './NumberField'
+import { PRIMARY_DISABLED, SECONDARY_DISABLED } from './buttonStyles'
 
 export const SITE_ANCHOR_ROOT = 'site-anchor'
 const SAVE_FIRST = 'Unsaved project: save it to keep site coordinates'
@@ -122,13 +123,13 @@ export default function SiteAnchorField() {
       <div className="flex flex-wrap items-center gap-2 text-[11px]">
         <button type="button" data-testid="site-anchor-confirm" onClick={confirm}
           disabled={!!blocked || busy || !q.data || confirmedSame || !!confirmReason}
-          className="px-2.5 py-1 rounded bg-accent text-white font-semibold hover:bg-accent/90 disabled:opacity-50">
+          className={`px-2.5 py-1 rounded bg-accent text-white font-semibold hover:bg-accent/90 ${PRIMARY_DISABLED}`}>
           Confirm coordinates
         </button>
         {server && (
           <button type="button" data-testid="site-anchor-clear" onClick={() => void write(null)}
             disabled={!!blocked || busy}
-            className="px-2 py-1 rounded border border-border text-text hover:border-accent hover:text-accent disabled:opacity-50">
+            className={`px-2 py-1 rounded border border-border text-text hover:border-accent hover:text-accent ${SECONDARY_DISABLED}`}>
             Clear
           </button>
         )}

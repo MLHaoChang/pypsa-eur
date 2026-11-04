@@ -98,6 +98,10 @@ def _budgets(task, envelope):
     if envelope is not None and envelope["state"] == "granted":
         out["solves"] = {"used": run_envelope.solves_used(envelope), "of": envelope["budget"]["solves"]}
         out["expires_at"] = envelope["expires_at"]
+    from harness import send_reservation
+    reserved = send_reservation.summary(task["run"])
+    if reserved is not None:  # issue 24: the send ledger, bounds counted as spent
+        out["reserved"] = reserved
     return out
 
 
