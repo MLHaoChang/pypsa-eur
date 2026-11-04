@@ -56,6 +56,13 @@ function Budgets({ view }: { view: RunMonitorView }) {
   const parts = [b.cost_eur.unmetered ? 'Cost could not be counted'
     : b.cost_eur.limit > 0 ? `Cost ${fmtCurrency(b.cost_eur.used)} of ${fmtCurrency(b.cost_eur.limit)}`
     : `Cost ${fmtCurrency(b.cost_eur.used)} · no cost cap`]
+  // Issue 24: a call whose usage was lost counts toward the cap at its upper bound. The metered
+  // cost never contains it, so this is "Plus", and it stays when the cost could not be counted.
+  const n = b.reserved?.at_bound ?? 0
+  if (n > 0) {
+    parts.push(n === 1 ? 'Plus 1 model call with no usage report, counted at its upper bound'
+      : `Plus ${n} model calls with no usage report, counted at their upper bound`)
+  }
   if (b.solves) parts.push(`Solves ${b.solves.used} of ${b.solves.of}`)
   if (b.expires_at && !paused) parts.push(`Expires ${when(b.expires_at)}`)
   return <div data-testid="run-budgets">{parts.join(' · ')}</div>
