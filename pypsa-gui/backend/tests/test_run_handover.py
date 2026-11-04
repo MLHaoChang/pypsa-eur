@@ -184,3 +184,27 @@ def test_the_active_context_is_unchanged_across_the_hand_over(host):
     after = PyPSAService.get_active_context()
     assert after is before and after.project_uuid == uuid_before and after.network is network_before
     assert str(start.ctxs[0].project_uuid) == intent["project_id"] and start.ctxs[0] is not before
+
+
+def test_the_run_starts_on_the_new_project_and_the_host_ends_handed_over(host):
+    from services import assistant_tasks, run_profiles
+
+    host_task = {"task_id": "host-task", "project_id": "host-project", "owner_id": host["owner"],
+                 "title": "Site study", "status": "ready", "steps": [], "version": 3,
+                 "brief": {"objective": "Size the site", "cards": [], "cases": []},
+                 "run": {"profile": "eh_site@1", "mode": "stepwise", "status": "running", "stage": "intake",
+                         "intake": {"rows": [{"param": "connection_mw", "value": 12.0}]}}}
+    host["task"].write_text(json.dumps(host_task))
+    before = PyPSAService.get_active_context()
+    start = assistant_tasks.handover_starter(host_task, run_profiles.resolve("eh_site@1"), host["owner"])
+    intent = _grant(host, start, name="Started there")
+    assert PyPSAService.get_active_context() is before
+    with db_session.SessionLocal() as db:
+        new_dir = project_registry.project_dir(db.get(Project, uuid.UUID(intent["project_id"])))
+    task = json.loads((new_dir / "assistant_tasks" / (intent["task_id"] + ".json")).read_text())
+    assert task["project_id"] == intent["project_id"] and task["owner_id"] == host["owner"]
+    assert task["run"]["origin"] == {"project_id": "host-project", "task_id": "host-task"}
+    assert task["run"]["intake"] == [{"param": "connection_mw", "value": 12.0}]
+    ended = assistant_tasks.end_handed_over(host["task"], intent)
+    assert (ended["status"], ended["run"]["reason"]) == ("completed", "handed_over")
+    assert ended["run"]["handed_over"]["task_id"] == intent["task_id"]

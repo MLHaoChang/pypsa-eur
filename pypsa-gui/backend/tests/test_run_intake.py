@@ -380,3 +380,16 @@ def test_request_text_never_echoes_document_text_or_raw_errors(host_dir):
     text = I.request_text(I.missing(PROFILE, out["rows"], out["gaps"]))
     assert "IGNORE" not in text and "nope" not in text and "10-12" not in text
     assert "range" in text
+
+
+def test_only_the_persons_own_turns_are_marked_typed():
+    from types import SimpleNamespace
+
+    from harness import loop
+    assert loop.TURN_ORIGIN_KEY == I.ORIGIN_KEY
+    chat, run = SimpleNamespace(session_id="s-1"), SimpleNamespace(session_id="run:task-1")
+    assert loop._typed_by_user(chat, None, None, None)
+    assert not loop._typed_by_user(chat, "job-1", None, None)  # a continuation
+    assert not loop._typed_by_user(chat, None, "task-1", None)  # a plan continue
+    assert not loop._typed_by_user(chat, None, None, {"verdict": "unattended"})  # an envelope decision
+    assert not loop._typed_by_user(run, None, None, None)  # the runner's headless turn

@@ -503,7 +503,7 @@ def _next_stage(run, name):
     return next((s for s in STAGES[STAGES.index(name) + 1:] if run["stages"][s]["status"] != "skipped"), None)
 
 
-def _start_run(session, title, request_id, run, profile, brief):
+def _start_run(session, title, request_id, run, profile, brief, *, origin=None, intake=None):
     root, project, owner = _authority()
     task_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{project}:{owner}:{request_id}"))
     path = root / "assistant_tasks" / (task_id + ".json")
@@ -521,7 +521,11 @@ def _start_run(session, title, request_id, run, profile, brief):
                       {"status": "pending", "attempts": 0} for name, stage in profile["stages"].items()}
             task = {"version": 3, "task_id": task_id, "owner_id": owner, "project_id": project,
                     "title": title.strip(), "status": "ready", "steps": [], "brief": brief, "fingerprint": fingerprint,
-                    "run": {**run, "status": "running", "stage": "intake", "stages": stages}}
+                    "run": {**run, "status": "running", "stage": "intake", "stages": stages,
+                            # Issue 21: the host task a hand-over started this run from,
+                            # and the confirmed intake rows it was created with.
+                            **({"origin": dict(origin)} if origin else {}),
+                            **({"intake": intake} if intake is not None else {})}}
             record = _requirements_record(session)
             if record:
                 task["requirements"] = record  # issue 23: a run inherits the confirmed requirements
@@ -533,6 +537,48 @@ def _start_run(session, title, request_id, run, profile, brief):
     _wake(path)
     with _LOCK:
         return _with_envelope(path, _view(_read(task_id)[1]))
+
+
+def handover_starter(host_task: dict, profile: dict, owner_id: str):
+    """`start(row, ctx)` for `run_handover.hand_over` (issue 21 §2): the
+    host's run started on the created project, through that project's own
+    context (A3). The foreground session is not touched: no session's
+    `task_id` moves to the new task."""
+    from types import SimpleNamespace
+
+    from services import chat_tools
+
+    def start(row, ctx):
+        token = RUN_CONTEXT.set(ctx)
+        chat_tools.set_acting_user(owner_id)
+        try:
+            run = {k: host_task["run"][k] for k in ("profile", "mode")}
+            request_id = "handover:" + host_task["task_id"]
+            # The new task's own runner session (`_start_run`'s task id), so no
+            # chat session and no thread of the foreground is read or bound.
+            task_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{row.id}:{owner_id}:{request_id}"))
+            from services import run_envelope
+            view = _start_run(SimpleNamespace(task_id=None, session_id=run_envelope.SESSION_PREFIX + task_id),
+                              host_task["title"], request_id, run, profile, host_task.get("brief"),
+                              origin={"project_id": host_task["project_id"], "task_id": host_task["task_id"]},
+                              intake=(host_task["run"].get("intake") or {}).get("rows"))
+        finally:
+            RUN_CONTEXT.reset(token)
+        return view["task_id"]
+    return start
+
+
+def end_handed_over(path, intent: dict) -> dict:
+    """The host task ends `completed`, reason `handed_over`, linking the run
+    on the created project (issue 21 §2)."""
+    with _LOCK:
+        task = json.loads(Path(path).read_text())
+        run = task.get("run") or {}
+        run.update(status="completed", reason="handed_over",
+                   handed_over={k: intent.get(k) for k in ("project_id", "project_name", "task_id")})
+        task["run"], task["status"] = run, "completed"
+        _save(path, task)
+    return task
 
 
 def _with_envelope(path, view):
