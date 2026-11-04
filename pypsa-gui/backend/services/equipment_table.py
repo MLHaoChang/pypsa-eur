@@ -211,13 +211,13 @@ def _read_xlsx(blob: bytes, sheet: str | None) -> tuple[str, list[str], list[str
     return name, sheets, headers, grid[1:]
 
 
-def read_table(project: str, upload_id: str, sheet: str | None = None) -> dict:
+def read_table(project: str, upload_id: str, sheet: str | None = None, *, project_dir=None) -> dict:
     """The upload as `{source, headers, rows}`; each data row `{row, cells}` keyed by header.
     `source` = `{upload_id, filename, sha256, sheet, sheets}`; `sha256` is of the bytes read."""
     from services import upload_service
 
-    meta = upload_service.get_upload_meta(project, upload_id)
-    blob = upload_service.get_upload_bytes(project, upload_id)
+    meta = upload_service.get_upload_meta(project, upload_id, project_dir=project_dir)
+    blob = upload_service.get_upload_bytes(project, upload_id, project_dir=project_dir)
     sha = hashlib.sha256(blob).hexdigest()
     if meta.sha256 and meta.sha256 != sha:
         _refuse("source_changed", "The upload's bytes no longer match its recorded digest.")
