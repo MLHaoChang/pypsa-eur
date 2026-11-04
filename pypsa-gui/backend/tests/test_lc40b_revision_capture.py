@@ -142,6 +142,41 @@ def test_the_decision_study_record_holds_its_revision_before_the_thread_starts(
     assert wait_run(client, "lc40b-start", sid)["status"] == "done"
 
 
+def test_the_decision_study_record_holds_its_revision_when_it_enters_the_registry(
+        client, api_project, studies_on, fake, monkeypatch):
+    """A reader of the registry never sees `network_revision` None.
+
+    The capture must come before the registry insert, not just before the
+    thread starts: the insert makes the record visible to other readers.
+    """
+    from services.study import runner as R
+
+    seen = []
+
+    class Recording(dict):
+        def __setitem__(self, key, value):
+            if key == R.STUDY_KEY and isinstance(value, dict):
+                seen.append(value.get("network_revision"))
+            super().__setitem__(key, value)
+
+    real_base_context = R.base_context
+
+    def base_context(base_row):
+        ctx = real_base_context(base_row)
+        if not isinstance(ctx.solver_state, Recording):
+            ctx.solver_state = Recording(ctx.solver_state)
+        return ctx
+
+    monkeypatch.setattr(R, "base_context", base_context)
+    sid = _setup(client, api_project, "lc40b-insert")
+    r = client.post(f"/api/projects/lc40b-insert/studies/{sid}/run",
+                    json={"fidelity": "quick_screen"})
+    assert r.status_code == 202, r.text
+    assert wait_run(client, "lc40b-insert", sid)["status"] == "done"
+    assert seen and isinstance(seen[0], int), seen
+    assert all(isinstance(v, int) for v in seen), seen
+
+
 # ── the source guard ─────────────────────────────────────────────────────
 
 # A record capture outside the helper: a subscript write, a literal that reads

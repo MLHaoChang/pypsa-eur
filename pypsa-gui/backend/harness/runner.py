@@ -396,6 +396,7 @@ class Runner:
         return copy.deepcopy(card) if card and card["expires_at_epoch_ms"] > time.time() * 1000 else None
 
     def _loop(self):
+        self.boot_sweep()
         while not self._stopping.is_set():
             self._wakeup.wait(HEARTBEAT_SECONDS)
             self._wakeup.clear()
@@ -416,6 +417,10 @@ class Runner:
     def scan(self):
         """Every run the runner may drive: reads task files only, never a
         network, at most SCAN_LIMIT of them."""
+        return [path for path, task in self._runs() if task["run"].get("status") in _DRIVEN]
+
+    def _runs(self):
+        """Every run file with its record, at most SCAN_LIMIT task files read."""
         from db.models import Project
         from db.session import SessionLocal
         from services import project_registry
@@ -435,9 +440,16 @@ class Runner:
                 if read > SCAN_LIMIT:
                     return found
                 task = _read(path)
-                if task and task.get("version") == 3 and (task.get("run") or {}).get("status") in _DRIVEN:
-                    found.append(path)
+                if task and task.get("version") == 3 and task.get("run"):
+                    found.append((path, task))
         return found
+
+    def boot_sweep(self):
+        """Restart reconciliation at boot (issue 24, GK B): a model send
+        another boot left open settles `uncertain` at its hold's bound."""
+        from harness import send_reservation
+        paths = [path for path, task in self._runs() if send_reservation.has_open_holds(task["run"])]
+        return send_reservation.sweep(paths, boot=self.instance, now=self.clock())
 
     # one tick
 
@@ -737,20 +749,39 @@ class Runner:
         task_id = task["task_id"]
 
         def round_():
+            from harness import send_reservation
             session._undo_snapshotted = []  # the round is one undo step, as a chat turn is
             try:
-                run_loops.run_round(path, ctx, session, provider=self._agent_provider,
+                run_loops.run_round(path, ctx, session, provider=self._round_provider(path, session),
                                     recheck=lambda: self.recheck(task_id, path, ctx))
             except Exception:  # noqa: BLE001 — a round that errors ends the loop; never retried unattended
                 logger.exception("harness runner: input-loop round of %s errored", task_id)
                 run_loops.end(path, "error")
             finally:
+                try:
+                    send_reservation.close_open(path, boot=self.instance)
+                except Exception:  # noqa: BLE001 — a ledger fault never keeps the runner from waking
+                    logger.exception("harness runner: closing the sends of %s failed", task_id)
                 self.wake(path)
         context = contextvars.copy_context()
         thread = threading.Thread(target=context.run, args=(round_,), name=f"harness-l1-{task_id[:8]}", daemon=True)
         self._inflight[task_id] = (path, thread)
         thread.start()
         return "l1_round"
+
+    def _round_provider(self, path, session):
+        """The provider an agent round streams from, always behind the send
+        reservation (issue 24): with the durable budget mode on every send
+        reserves first; off, run sends pass straight through and only
+        research (`send_reservation.research()`) is reserved."""
+        from harness import send_reservation
+        inner = self._agent_provider
+        if inner is None:
+            from harness.providers import wiring
+            inner, _ = wiring._provider_for_profile(wiring._resolve_turn_profile(session))
+            if inner is None:
+                return None  # the loop reports the missing provider; nothing is sent
+        return send_reservation.ReservingProvider(inner, path, boot=self.instance, clock=self.clock)
 
     def _hold_if_effectful(self, task, step):
         from services import harness_locks
@@ -928,12 +959,14 @@ class Runner:
         with tasks._LOCK:
             task = _read(path)
             tasks._reconcile_lost(path, task)
+        from harness import send_reservation
+        lost_sends = send_reservation.reconcile(path, boot=self.instance, now=self.clock())
         task = _read(path)
         runner = task["run"].get("runner") or {}
         now = self.clock()
         if len([t for t in runner.get("restart_times", []) if now - t < RESTART_WINDOW_SECONDS]) >= MAX_RESTARTS:
             raise _Stop("paused", "restarts")
-        if any(s["status"] == "uncertain" for s in task["steps"]):
+        if lost_sends or any(s["status"] == "uncertain" for s in task["steps"]):
             raise _Stop("needs_user", "uncertain")
 
 

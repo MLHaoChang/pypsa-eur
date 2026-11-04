@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A harness run can reserve an upper bound before each model send and settle it after (`PYPSA_GUI_CHAT_DURABLE_BUDGET_MODE`, off by default). Two sends cannot together pass the cap. A send lost to a crash counts at its bound after restart, and the run then waits for the user. Research holds also count against the research cap (€2 by default, €10 at most).
