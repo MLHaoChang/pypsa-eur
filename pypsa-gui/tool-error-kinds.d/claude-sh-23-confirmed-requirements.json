@@ -23,6 +23,10 @@
   "requirement_violated": {
    "surface": "inline",
    "why": "An assistant edit would break a requirement the user confirmed (a bound or the kept model horizon), or could not show its effect on one. It was refused at dispatch before any card; nothing was written. The message names the requirement; the assistant asks the user whether to change the edit or the requirement. Manual edits are never refused."
+  },
+  "requirement_check_unavailable": {
+   "surface": "inline",
+   "why": "The confirmed requirements could not be read or evaluated when an assistant edit was dispatched, so the edit was refused (fail closed); nothing was written."
   }
  }
 }

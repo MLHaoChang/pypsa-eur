@@ -2659,8 +2659,8 @@ TOOLS: list[dict[str, Any]] = [
 
     _t(
         "set_requirement",
-        "Record a requirement the user stated, for the user to confirm on a card "
-        "(study harness issue 23). Use it only when the user asks to keep "
+        "Record a requirement the user stated, for the user to confirm on a card. "
+        "Use it only when the user asks to keep "
         "something fixed, e.g. 'keep the model horizon' or 'max_hours of Battery "
         "at most 6 h'. Kinds (v: 1, no other keys): preserve_horizon {kind, v}; "
         "scalar_bound {kind, v, component_class, name, field, op (eq|ge|le|within), "

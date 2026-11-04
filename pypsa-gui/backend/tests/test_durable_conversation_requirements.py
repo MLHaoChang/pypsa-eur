@@ -274,3 +274,64 @@ def test_checkpoint_thread_never_writes_requirements(thread):
         dc.checkpoint_thread(thread.id, generation=dc.get_thread(thread.id)['generation'],
                              requirements={'rev': 0, 'items': []})
     assert refused.value.detail['error_kind'] == 'invalid_thread_field'
+
+
+DIESEL_BOUND = {**BOUND, 'component_class': 'Generator', 'name': 'Diesel', 'field': 'p_nom_max',
+                'value': 40.0, 'unit': 'MW'}
+
+
+def test_a_writer_that_cannot_show_the_field_fails_closed(thread):
+    """GK B condition 1: set_vintage_bounds writes p_nom_max per period with no
+    row naming the field; naming the bounded instance refuses it."""
+    _confirm(thread.session, DIESEL_BOUND)
+    _, cards, errors = _dispatch(thread.session, 'set_vintage_bounds', {
+        'component_class': 'Generator', 'name': 'Diesel', 'period_bounds': {'2030': {'p_nom_max': 60.0}}})
+    assert errors == ['requirement_violated'] and cards == []
+
+
+def test_an_edit_without_a_card_on_a_bounded_target_fails_closed(thread):
+    """A checked (assurance) turn builds no edit card: an edit naming the
+    bounded instance is refused, one naming another instance passes."""
+    from fastapi import HTTPException
+
+    from harness import requirements
+
+    _confirm(thread.session, BOUND)
+    with pytest.raises(HTTPException) as refused:
+        requirements.annotate(thread.session, 'update_component', {
+            'component_class': 'StorageUnit', 'name': 'Battery', 'attrs': {'max_hours': 5.0}}, None)
+    assert refused.value.detail['error_kind'] == 'requirement_violated'
+    assert requirements.annotate(thread.session, 'update_component', {
+        'component_class': 'Generator', 'name': 'Diesel', 'attrs': {'p_nom': 12.0}}, None) is None
+
+
+def test_requirements_that_cannot_be_checked_refuse_the_edit(thread, monkeypatch):
+    from harness import requirements
+
+    _confirm(thread.session, BOUND)
+
+    def broken(*a, **k):
+        raise RuntimeError('unreadable')
+
+    monkeypatch.setattr(requirements, 'violations', broken)
+    _, cards, errors = _dispatch(thread.session, 'update_component', {
+        'component_class': 'StorageUnit', 'name': 'Battery', 'attrs': {'max_hours': 5.0}})
+    assert errors == ['requirement_check_unavailable'] and cards == []
+    assert _max_hours() == 4.0
+
+
+def test_an_unreadable_undo_target_is_not_shown_to_keep_the_horizon(monkeypatch):
+    from harness import requirements
+    from services import undo_service
+
+    monkeypatch.setattr(undo_service, 'peek', lambda: b'not a netcdf file')
+    assert requirements._undo_moves_horizon({'digest': 'x'}) is True
+    monkeypatch.setattr(undo_service, 'peek', lambda: None)
+    assert requirements._undo_moves_horizon({'digest': 'x'}) is False
+
+
+def test_card_words_name_no_raw_class_path(thread):
+    _, cards, _ = _confirm(thread.session, BOUND)
+    says = cards[0]['edit_card']['says']
+    assert 'StorageUnit' not in says and 'max_hours' not in says
+    assert 'Battery (storage unit): hours at full power ≤ 6 h' in says

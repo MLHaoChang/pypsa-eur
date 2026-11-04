@@ -312,7 +312,8 @@ def run_round(path, ctx, session, *, provider=None, recheck):
                if a.get("event") == "used" and a.get("source")}
     rows, unverified, refusals = [], [], 0
     for call in outcome["calls"]:
-        if call["carded"]:
+        # Issue 23: a refused edit that broke a confirmed requirement counts too.
+        if call["carded"] or call["error"] == "requirement_violated":
             refusals += 1
             continue
         if not call["ran"] or not edit_card.is_edit(call["tool"]):
