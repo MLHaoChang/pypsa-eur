@@ -3,7 +3,7 @@
 
 # 23 — Typed, user-confirmed requirements enforced on assistant edits
 
-Status: in-progress
+Status: done (landed in #1079)
 Type: task
 Blocked by: 04 (the agent loop whose edits it checks); LV-09's durable conversation (landed: #1034, #1049, #1051)
 Gated: yes (GK B)

@@ -1,6 +1,6 @@
 # Other model series (prices, inflow, COP, process schedules)
 
-Status: done (#554, #586; owner TSG-03 2026-10-28: "Mark done"; market prices pending on package C2)
+Status: done (#554, #586; owner TSG-03 2026-10-28: "Mark done"; market prices wait on package C2)
 Progress: series.py has tou price, inflow, COP; no process schedules, and market price bundles (C2) do not exist yet.
 Type: task
 Blocked by: profiles RP-06 hand-off; UI part blocked by the approved project workflow

@@ -3,7 +3,7 @@
 
 # AS-10 — Preference comparison UI
 
-Status: in-progress (PR 1 merged #1009; PR 2 UI in review)
+Status: done (landed in #1009, #1017, #1024, #1041)
 Type: task
 Blocked by: 01, 06
 Model: Sonnet

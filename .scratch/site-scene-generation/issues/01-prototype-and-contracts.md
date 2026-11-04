@@ -3,7 +3,7 @@
 
 # SC-00 — demonstrate the geometry and exchange contracts
 
-Status: ready-for-agent — N milestone (owner decision SITE3D-START-1); B and P stay pending until a supported Blender and photo engine are available
+Status: done (N milestone landed in #794; decisions accepted in #1042, #1044; B and P milestones deferred until a supported Blender and photo engine exist)
 Type: prototype
 Dependencies: none
 Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c

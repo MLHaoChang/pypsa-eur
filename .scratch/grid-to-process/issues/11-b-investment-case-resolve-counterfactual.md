@@ -1,6 +1,6 @@
 # B investment case: a re-solve counterfactual for a product Load
 
-Status: ready-for-agent (triage 2026-10-28: still blocked by 10; gated IC, plan to GK A first)
+Status: done (landed in #915)
 Type: task
 Blocked by: 10
 Gated: **yes** (IC)
