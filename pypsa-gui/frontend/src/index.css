@@ -418,6 +418,20 @@ html {
   margin: -1px;
 }
 
+/* LC-07b: while Live is open the composer owns the space (its caption carries
+   the voice reason); the note stays in the accessibility tree. */
+.companion-launcher[data-live='open'] .companion-voice-note {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+  padding: 0;
+  margin: -1px;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .companion-idle {
     animation: companion-bob 2.4s ease-in-out infinite;
