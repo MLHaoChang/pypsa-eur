@@ -991,6 +991,6 @@ Branch `claude/assurance-01-a04-contracts` (from master 30417e89).
 `tests/assurance_acceptance/test_p0_server_owned_contracts.py` (15 passed).
 The spoof cases passed on first run. They pin behaviour master already had, so
 no red phase came from them. The drift and compatibility cases were written with
-the module. Policy version: contracts v1, additive-only rule (owner call pending).
-Remaining blockers: owner calls Q1/Q2 and GK B review. Next runnable tracer:
+the module. Policy version: contracts v1, additive-only rule (AA-V1-CHANGE-1).
+Remaining blocker: GK B's OK, which is the contract review (AA-A04-REVIEW-1). Next runnable tracer:
 issue 02 adds evidence/receipt identity as an additive `pending` → frozen entry.

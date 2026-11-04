@@ -7,7 +7,7 @@ schema and the input-schema hash of each checked tool. `assurance_contracts.v1.j
 is the reviewed snapshot; `tests/test_assurance_contracts.py` fails CI when the
 live contracts drift from it.
 
-Changing a contract (owner call pending, recommended rule): additive changes stay
+Changing a contract (owner decision AA-V1-CHANGE-1): additive changes stay
 in version 1, so a new profile, metric, optional field, enum value or wider bound
 is allowed with a reviewed snapshot update. Removing or narrowing anything, or
 changing an existing profile, metric definition or checked-tool schema, needs a

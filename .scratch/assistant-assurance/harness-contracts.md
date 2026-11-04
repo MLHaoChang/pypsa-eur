@@ -449,5 +449,5 @@ removal, narrowing, a new required field, or a changed profile, metric definitio
 or checked-tool hash. Those need a new profile version beside the old one, or a
 protocol version bump. A new profile, metric, optional field, enum value, wider bound,
 checked tool or top-level contract is additive. `pending` lists contracts not yet
-frozen, with their owning tickets. The compatibility rule waits on the owner's call
-(sent 2026-11-04).
+frozen, with their owning tickets. The compatibility rule is owner decision
+AA-V1-CHANGE-1.

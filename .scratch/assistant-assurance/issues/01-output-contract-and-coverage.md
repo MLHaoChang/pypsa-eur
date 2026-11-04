@@ -3,7 +3,7 @@
 
 # P0: output contracts and complete coverage
 
-Status: in progress — A0.1–A0.3 done in #796; A0.4 built on `claude/assurance-01-a04-contracts`, blocked only on review (see 2026-11-04)
+Status: in progress — A0.1–A0.3 done in #796; A0.4 in #1113, blocked only on GK B's OK (AA-A04-REVIEW-1)
 Progress: A0.1–A0.4 executable and passing; every tool/tab/panel/output channel mapped to a v1 adapter (`harness/assurance_coverage.py`); v1 request/profile/metric/computed/guard contracts frozen in `harness/assurance_contracts.v1.json`
 Type: task
 Blocked by: None
@@ -68,10 +68,9 @@ version and forged effect guards (tool, confirmation flag, class, bool or unlist
 attribute, revision) all get a 422 before any model call. A metric outside the
 registry is never answered.
 
-Named blockers before Status done:
-- the owner's call on the compatibility rule (additive-only within v1 is built; sent to the coordinator 2026-11-04 as Q1);
-- the owner's call that GK B's OK on the frozen snapshot is the P0 contract review (Q2);
-- GK B's review of the PR.
+Owner decisions (2026-11-04): AA-V1-CHANGE-1 adopts the additive-only rule within v1 as built. A removal, a rename or a changed metric or profile needs a new profile version beside the old one, and only breaking draft or receipt changes bump the protocol version. AA-A04-REVIEW-1 makes GK B's OK on the frozen snapshot the P0 contract review. `independent_domain_approval` stays false.
+
+Named blocker before Status done: GK B's OK on #1113.
 
 The snapshot's `pending` list names what is not frozen and who owns it: arbitrary
 scope (09), action/proposal blocks (09–11), guards for other effectful tools (11),
