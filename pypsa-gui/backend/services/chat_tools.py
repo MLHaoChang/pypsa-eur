@@ -2184,10 +2184,12 @@ def _attach_tariff_plan(name: str, version: int | None, replace_inline: bool) ->
     return ref, commercial, replaced
 
 
-def attach_tariff(name: str, version: int | None = None, replace_inline: bool = False) -> dict:
+def attach_tariff(name: str, version: int | None = None, replace_inline: bool = False,
+                  research_ref: str | None = None) -> dict:
     """Set `commercial.import_tariff_ref` to a Library tariff through the
     solver-config route (which resolves and pins it). An inline tariff that is
-    not this item is never replaced silently (review M2)."""
+    not this item is never replaced silently (review M2). `research_ref` names
+    the confirmed source row (issue 09); a call carrying it is always carded."""
     from models.schemas import SolverConfigSchema
     from routers.simulation import update_solver_config as _put
 
@@ -2197,7 +2199,7 @@ def attach_tariff(name: str, version: int | None = None, replace_inline: bool = 
     return {"import_tariff_ref": ref,
             "import_tariff": {"id": bound.get("id"), "name": bound.get("name"),
                               "items": len(bound.get("items") or [])},
-            "replaced": replaced}
+            "replaced": replaced, **({"research_ref": research_ref} if research_ref else {})}
 
 
 # ── LV08 B2a (12) — live-voice 08 slice B2 ──────────────────────────────────
@@ -6477,6 +6479,14 @@ def set_requirement(requirement: dict | None = None, replaces: str | None = None
     return requirements.set_requirement(requirement, replaces, retire)
 
 
+def record_source(gap: str, value: float, unit: str, basis: str, url: str, quote: str,
+                  title: str = "", jurisdiction: str | None = None) -> dict:
+    """Study harness issue 09: propose a source row in a research turn."""
+    from harness import research
+
+    return research.record_source(gap, value, unit, basis, url, quote, title, jurisdiction)
+
+
 def set_goal(objective: str, max_rounds: int | None = None) -> dict:
     """Set the session's goal with a round budget (issue 17): after this
     turn, up to `max_rounds` rounds run on their own (`harness/goals.py`)."""
@@ -9614,6 +9624,7 @@ DISPATCHERS: dict[str, Any] = {
     "use_skill": use_skill,
     "start_workflow": start_workflow,
     "set_requirement": set_requirement,
+    "record_source": record_source,
     "set_goal": set_goal,
     "pause_goal": pause_goal,
     "complete_goal": complete_goal,

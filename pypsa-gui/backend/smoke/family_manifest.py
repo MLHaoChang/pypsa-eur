@@ -163,7 +163,7 @@ TOOLS_BY_FAMILY: dict[str, frozenset[str]] = {f: frozenset(names.split()) for f,
         advance_workflow ask_user cancel_task clear_chat_history complete_goal end_workflow
         export_chat_summary find_capabilities get_feature_guide get_task list_chat_history list_tasks
         pause_goal resolve_task_step resume_task set_goal start_task start_workflow use_skill use_toolset
-        set_active_profile set_requirement""",
+        set_active_profile set_requirement record_source""",
     'ui-monitoring': 'ui_open_asset_detail ui_open_panel ui_select_component ui_set_snapshot',
     'gridspine-campus': '',  # every campus_*/gridspine_* tool bar _CAMPUS_ECONOMICS, plus below
 }.items()}

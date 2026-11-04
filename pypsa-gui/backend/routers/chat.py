@@ -2199,6 +2199,20 @@ def run_resume(task_id: str, body: RunResumeRequest | None = None,
     return _run_act(actor, task_id, lambda: run_monitor.resume(task_id, session))
 
 
+class ResearchVerdictRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    verdict: Literal["confirmed", "rejected"]
+
+
+@router.post("/runs/{task_id}/research/{row_id}")
+def run_research_verdict(task_id: str, row_id: str, body: ResearchVerdictRequest,
+                         actor: User = Depends(require_user)) -> dict[str, Any]:
+    """Study harness issue 09: the research card's Confirm or Reject of one
+    source row. A confirmed value is then written only through its own cards."""
+    from harness import research
+    return _run_act(actor, task_id, lambda: research.decide(task_id, row_id, body.verdict, by=str(actor.id)))
+
+
 @router.post("/runs/{task_id}/stop")
 def run_stop(task_id: str, actor: User = Depends(require_user)) -> dict[str, Any]:
     """Revokes the envelope and cancels the run; nothing is reverted."""

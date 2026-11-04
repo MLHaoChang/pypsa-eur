@@ -45,7 +45,7 @@ def ledger_gap():
 
 def proposal(**over):
     return {"value": 142.5, "unit": "EUR/MWh", "basis": "energy charge, excl. VAT", "url": URL,
-            "quote": QUOTE, "title": "", **over}
+            "quote": QUOTE, "title": "", "jurisdiction": "DE", **over}
 
 
 def fetch_block(url=URL, text=PAGE):
@@ -380,3 +380,145 @@ def test_research_is_due_once_per_stage_and_never_with_a_loop_round():
     assert not research.due({"run": {**task["run"], "loop": {"due": True}}})
     assert not research.due({"run": {**task["run"], "stage": "input_gate"}})
     assert not research.due({"run": {**task["run"], "research": {"steps": [{"stage": "inputs"}], "rows": []}}})
+
+
+# ── After the card: the value's own carded writes (R4, #970 items 3–4) ──────
+
+
+@pytest.mark.parametrize("jurisdiction", [None, "", "germany", "de"])
+def test_a_tariff_row_names_its_jurisdiction(jurisdiction):
+    with pytest.raises(source_ledger.LedgerError) as exc:
+        source_ledger.propose(proposal(jurisdiction=jurisdiction), ledger_gap(), [page()], turn_id="t")
+    assert exc.value.kind == "invalid_source_row"
+    row = source_ledger.propose(proposal(jurisdiction="DE-BY"), ledger_gap(), [page()], turn_id="t")
+    assert row["jurisdiction"] == "DE-BY" and source_ledger.card_view(row)["jurisdiction"] == "DE-BY"
+
+
+def _rows(path, *rows):
+    record = json.loads(path.read_text())
+    record["run"]["research"] = {"steps": [], "rows": list(rows)}
+    path.write_text(json.dumps(record))
+    research._await_confirmation(path, list(rows))
+
+
+def test_confirming_a_row_adds_its_carded_writes_and_rejects_the_competing_rows(granted, profile):
+    from models.commercial import Tariff
+    task, path, _ = granted()
+    a = source_ledger.propose(proposal(), ledger_gap(), [page()], turn_id="t")
+    b = source_ledger.propose(proposal(value=150.0, quote="EUR 142.50 per MWh"), ledger_gap(), [page()],
+                              turn_id="t")
+    _rows(path, a, b)
+    research.settle(path, a["id"], "confirmed", by="u1")
+    record = json.loads(path.read_text())
+    assert [(r["status"], r.get("rejected_reason")) for r in record["run"]["research"]["rows"]] \
+        == [("confirmed", None), ("rejected", "other_source_picked")]
+    assert record["run"]["waiting"] is None
+    library, attach = record["steps"][-2:]
+    assert (library["id"], attach["id"]) == (f"inputs.research.{a['id']}.library", f"inputs.research.{a['id']}.attach")
+    assert (library["tool"], attach["tool"]) == ("put_library_item", "attach_tariff")
+    assert attach["args"] == {"name": library["args"]["name"], "research_ref": a["id"]}
+    # Every write carries the row, so no envelope admits it: each is the user's card (R4).
+    assert all(run_envelope._research(s["args"]) for s in (library, attach))
+    tariff = Tariff.model_validate(library["args"]["payload"])
+    assert tariff.jurisdiction == "DE" and tariff.items[0].unit == "per_kwh"
+    assert tariff.items[0].periods[0].rate == pytest.approx(0.1425)
+    assert library["args"]["meta"]["source"] == "research:" + URL
+
+
+def test_a_rejected_row_adds_no_write(granted, profile):
+    task, path, _ = granted()
+    a = source_ledger.propose(proposal(), ledger_gap(), [page()], turn_id="t")
+    _rows(path, a)
+    steps = len(json.loads(path.read_text())["steps"])
+    research.settle(path, a["id"], "rejected", by="u1")
+    record = json.loads(path.read_text())
+    assert len(record["steps"]) == steps and record["run"]["research"]["rows"][0]["status"] == "rejected"
+
+
+def test_record_source_is_offered_only_in_a_research_turn():
+    from harness.providers import wiring
+    from services import chat_tools
+    profile = types.SimpleNamespace(tools=True, wire="anthropic")
+    chat = harness_session.ChatSession(session_id="chat-1")
+    chat_tools.set_chat_session(chat)
+    try:
+        assert research.LEDGER_TOOL not in {t["name"] for t in wiring._tools_payload_for_profile(profile)}
+        chat.stage_tools = research.READ_TOOLS | {research.LEDGER_TOOL}
+        offered = {t["name"] for t in wiring._tools_payload_for_profile(profile)}
+        assert offered == research.READ_TOOLS | {research.LEDGER_TOOL}
+    finally:
+        chat_tools.set_chat_session(None)
+    with pytest.raises(research.ResearchError) as exc:  # called outside a research turn
+        research.record_source("import_tariff", 1.0, "EUR/MWh", "energy charge, excl. VAT", URL, QUOTE)
+    assert exc.value.kind == "invalid_source_row"
+
+
+def test_the_research_card_route_settles_the_row(granted, profile, client):
+    task, path, _ = granted(detach=False)
+    a = source_ledger.propose(proposal(), ledger_gap(), [page()], turn_id="t")
+    _rows(path, a)
+    url = f"/api/chat/runs/{task['task_id']}/research"
+    assert client.post(f"{url}/src_nope", json={"verdict": "confirmed"}).json()["detail"]["error_kind"] \
+        == "invalid_source_row"
+    assert client.post(f"{url}/{a['id']}", json={"verdict": "maybe"}).status_code == 422
+    response = client.post(f"{url}/{a['id']}", json={"verdict": "rejected"})
+    assert response.status_code == 200, response.text
+    assert json.loads(path.read_text())["run"]["research"]["rows"][0]["status"] == "rejected"
+    assert client.post(f"{url}/{a['id']}", json={"verdict": "confirmed"}).json()["detail"]["error_kind"] \
+        == "research_row_settled"
+    assert client.post(f"/api/chat/runs/task_nope/research/{a['id']}",
+                       json={"verdict": "rejected"}).status_code == 404
+
+
+# ── A whole research turn on a scripted provider (B3, R3) ────────────────────
+
+
+class Scripted:
+    """The provider answers from a script: first a fetched page that carries an
+    injected instruction, a write the turn does not offer and a ledger row;
+    then a closing text."""
+
+    name = "scripted"
+
+    def __init__(self, *turns):
+        self.turns, self.requests = list(turns), []
+
+    def stream(self, request):
+        self.requests.append(copy.deepcopy(request))
+        yield LLMEvent(type="message_done", blocks=copy.deepcopy(self.turns.pop(0)), usage={})
+
+
+def _tool_results(request):
+    return {b["tool_use_id"]: b for m in request.messages if m["role"] == "user" and isinstance(m["content"], list)
+            for b in m["content"] if isinstance(b, dict) and b.get("type") == "tool_result"}
+
+
+def test_an_injected_page_changes_nothing_and_a_write_is_refused_in_the_turn(granted, profile):
+    from services import chat_tools
+    from services.pypsa_service import PyPSAService
+    profile({**BLOCK, "research": {"allowed": True, "cost_cap_eur": 2.0}})
+    task, path, _ = granted(envelope={**BLOCK, "research": {"allowed": True, "cost_cap_eur": 2.0}})
+    network = PyPSAService.get_active_context().network
+    before = network.generators.at["G1", "p_nom"]
+    write = {"type": "tool_use", "id": "tu-write", "name": "update_component",
+             "input": {"component_class": "Generator", "name": "G1", "attrs": {"p_nom": 999.0}}}
+    row = {"type": "tool_use", "id": "tu-row", "name": "record_source",
+           "input": {k: v for k, v in proposal(gap="import_tariff").items() if k != "title"}}
+    provider = Scripted([fetch_block(), write, row], [{"type": "text", "text": "Done."}])
+    chat_tools.set_acting_user(json.loads(path.read_text())["owner_id"])  # the runner acts as the run's owner
+    try:
+        out = _turn(path, task, base_provider=provider)
+    finally:
+        chat_tools.set_acting_user(None)
+    first, second = provider.requests
+    assert [t.get("name") for t in first.tools] == [t.get("name") for t in second.tools]
+    offered = {t.get("name") for t in first.tools}
+    assert offered == research.READ_TOOLS | {research.LEDGER_TOOL, "web_search", "web_fetch"}
+    results = _tool_results(second)
+    assert results["tu-write"]["is_error"] and results["tu-write"]["content"].startswith("tool_not_offered")
+    assert network.generators.at["G1", "p_nom"] == before
+    assert not results["tu-row"].get("is_error"), results["tu-row"]
+    assert [r["verification"] for r in out["rows"]] == ["verified"]
+    assert out["waiting"] == {"kind": "research_confirm", "ref": out["rows"][0]["id"]}
+    record = json.loads(path.read_text())
+    assert record["run"]["status"] == "needs_user" and not any(s["tool"] == "attach_tariff" for s in record["steps"])

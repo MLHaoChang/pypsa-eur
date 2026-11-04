@@ -165,6 +165,13 @@ _R_RUN_CLICK = (
     "does not follow; each step the run then dispatches is checked again by "
     "`Runner.recheck`."
 )
+_R_RUN_RESEARCH = (
+    "the research card's Confirm or Reject of one source row on the caller's own "
+    "harness run (study harness issue 09). Writes the run record only; "
+    "lock-checked at the click (`research.decide` refuses `project_locked` "
+    "through `assistant_tasks._may_write`), and the value is then written only "
+    "by run steps, each on its own card and checked again by `Runner.recheck`."
+)
 _R_CHAT_HISTORY = (
     "chat history is per-project and DOES travel into snapshots "
     "(`routers/snapshots.py`) and moves on Save-As, but it is not edit-lock "
@@ -326,6 +333,7 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/chat/runs/{task_id}/stop"): (STOPS_WORK, _R_RUN_STOP),
     ("POST", "/api/chat/runs/{task_id}/present"): (CHAT_SESSION, _R_RUN_CLICK),
     ("POST", "/api/chat/runs/{task_id}/resume"): (CHAT_SESSION, _R_RUN_CLICK),
+    ("POST", "/api/chat/runs/{task_id}/research/{row_id}"): (CHAT_SESSION, _R_RUN_RESEARCH),
     ("POST", "/api/chat/import"): (CHAT_SESSION, _R_CHAT_HISTORY),
     ("POST", "/api/chat/skills/reload"): (NOT_PROJECT_DATA, _R_SKILL_REGISTRY),
     ("POST", "/api/durable-conversations"): (CHAT_SESSION, _R_DURABLE_THREAD),

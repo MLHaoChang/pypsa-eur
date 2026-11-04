@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 
 QUOTE_CHARS = 400
+_JURISDICTION = re.compile(r"[A-Z]{2}(-[A-Z0-9]{1,6})?")
 STATUSES = ("proposed", "confirmed", "rejected")
 _SPACE = re.compile(r"\s+")
 
@@ -79,12 +80,18 @@ def propose(proposal: dict[str, Any], gap: dict[str, Any], fetched: Iterable[Any
         raise LedgerError("invalid_source_row", "A source row names its url and a quote.")
     if len(quote) > QUOTE_CHARS:
         raise LedgerError("invalid_source_row", f"A quote is at most {QUOTE_CHARS} characters.")
+    extra = {}
+    if gap.get("tool") == "attach_tariff":  # a Library tariff names its jurisdiction
+        jurisdiction = proposal.get("jurisdiction")
+        if not isinstance(jurisdiction, str) or not _JURISDICTION.fullmatch(jurisdiction.strip()):
+            raise LedgerError("invalid_source_row", "A tariff row names its jurisdiction, e.g. DE or DE-BY.")
+        extra["jurisdiction"] = jurisdiction.strip()
     row = {
         "id": f"src_{uuid.uuid4().hex[:12]}",
         "for": dict(gap["target"]) | {"gap": gap["key"]},
         "value": float(value), "unit": want["unit"], "basis": want["basis"],
         "url": url, "title": str(proposal.get("title") or "")[:200], "quote": quote,
-        "turn_id": turn_id, "status": "proposed",
+        "turn_id": turn_id, "status": "proposed", **extra,
     }
     page = next((f for f in fetched if f.url == url), None)
     if page is None:
@@ -124,7 +131,7 @@ def card_view(row: dict[str, Any]) -> dict[str, Any]:
     """What a card shows beside the value: the source when verified, else
     the words "unverified source" and no link or quote presented as sourced."""
     base = {"row": row["id"], "value": row["value"], "unit": row["unit"], "basis": row["basis"],
-            "status": row["status"]}
+            "status": row["status"], **({"jurisdiction": row["jurisdiction"]} if "jurisdiction" in row else {})}
     if not sourced(row):
         return base | {"source": "unverified source", "reason": row.get("verification_reason")}
     return base | {"source": "sourced", "url": row["url"], "title": row.get("title", ""),

@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from services import source_ledger
+from services.run_envelope import RESEARCH_SOURCE
 
 STAGES = ("inputs", "explore")
 LEDGER_TOOL = "record_source"
@@ -249,7 +250,7 @@ def run_for(task_path, session, *, stage, provider=None, reserving=None):
 
 
 def record_source(gap: str, value: float, unit: str, basis: str, url: str, quote: str,
-                  title: str = "") -> dict[str, Any]:
+                  title: str = "", jurisdiction: str | None = None) -> dict[str, Any]:
     """Propose one source row for a gap of the running research turn. The
     server verifies it against the pages fetched in this turn."""
     from services import chat_tools
@@ -260,7 +261,7 @@ def record_source(gap: str, value: float, unit: str, basis: str, url: str, quote
         raise ResearchError("invalid_source_row", "record_source works only in a research turn, for its gaps.")
     try:
         row = source_ledger.propose({"value": value, "unit": unit, "basis": basis, "url": url,
-                                     "quote": quote, "title": title},
+                                     "quote": quote, "title": title, "jurisdiction": jurisdiction},
                                     turn.gaps[gap], list(turn.provider.fetched), turn_id=turn.turn_id)
     except source_ledger.LedgerError as exc:
         raise ResearchError(exc.kind, str(exc)) from exc
@@ -270,6 +271,55 @@ def record_source(gap: str, value: float, unit: str, basis: str, url: str, quote
 
 
 # ── The user's decision ──────────────────────────────────────────────────────
+
+
+def _tariff(row: dict[str, Any], name: str) -> dict[str, Any]:
+    """A Library tariff of one all-hours energy charge: the confirmed EUR/MWh
+    value as EUR/kWh, the tariff unit (a scale, not a reinterpretation)."""
+    from datetime import date
+    return {"id": name, "name": row.get("title") or name, "jurisdiction": row["jurisdiction"],
+            "valid_from": date.today().isoformat(),
+            "items": [{"id": "energy", "kind": "energy", "unit": "per_kwh",
+                       "periods": [{"name": "all hours", "rate": row["value"] / 1000.0}]}]}
+
+
+def write_steps(task: dict[str, Any], row: dict[str, Any]) -> list[dict[str, Any]]:
+    """The run steps that write a confirmed row, each through its own card:
+    every step carries the row's `research_ref`, so envelope admission
+    refuses it (R4) and the user approves it. Ids start with the gap's stage,
+    so its gate waits for them. Only `attach_tariff` gaps exist (#970 item 4)."""
+    from services import run_profiles
+    key = row["for"]["gap"]
+    gap = next(g for g in check_block(run_profiles.resolve(task["run"]["profile"]).get("research", {"gaps": []}))["gaps"]
+               if g["key"] == key)
+    name = f"research {key} {row['id']}"
+    prefix = f"{gap['stage']}.research.{row['id']}"
+    meta = {"source": RESEARCH_SOURCE + row["url"], "research_ref": row["id"], "quote": row["quote"],
+            "description": f"{row['value']:g} {row['unit']} ({row['basis']}), confirmed from {row['url']}"[:500]}
+    return [
+        {"id": f"{prefix}.library", "tool": "put_library_item", "status": "pending",
+         "args": {"kind": "tariff", "name": name, "payload": _tariff(row, name), "meta": meta}},
+        {"id": f"{prefix}.attach", "tool": "attach_tariff", "status": "pending",
+         "args": {"name": name, "research_ref": row["id"]}},
+    ]
+
+
+def decide(task_id: str, row_id: str, verdict: str, *, by: str) -> dict[str, Any]:
+    """The research card's click (the plan card's route): the caller's own run
+    in the active project only, else `task_not_found`; refused
+    `project_locked` while another user edits. Settles the row, then wakes the
+    runner. A refused settle is a 409 with its kind."""
+    from fastapi import HTTPException
+    from services import assistant_tasks, run_monitor
+    path, task = run_monitor._task(task_id)
+    if not assistant_tasks._may_write(task):
+        assistant_tasks._refuse("project_locked", "Another user is editing this project; the run waits.")
+    try:
+        row = settle(path, row_id, verdict, by=by)
+    except ResearchError as exc:
+        raise HTTPException(409, {"error_kind": exc.kind, "message": str(exc)}) from exc
+    assistant_tasks._wake(path)
+    return source_ledger.card_view(row)
 
 
 def settle(task_path, row_id: str, verdict: str, *, by: str) -> dict[str, Any]:
@@ -285,6 +335,13 @@ def settle(task_path, row_id: str, verdict: str, *, by: str) -> dict[str, Any]:
         settled = source_ledger.settle(row, verdict, by=by)
         block["rows"][block["rows"].index(row)] = settled
         out["row"] = settled
+        if settled["status"] == "confirmed":
+            # The user picks one source per gap (#970 item 3): the others are rejected.
+            for i, other in enumerate(block["rows"]):
+                if other["status"] == "proposed" and other["for"]["gap"] == settled["for"]["gap"]:
+                    block["rows"][i] = source_ledger.settle(other, "rejected", by=by) | {
+                        "rejected_reason": "other_source_picked"}
+            task["steps"].extend(write_steps(task, settled))
         waiting = task["run"].get("waiting") or {}
         if waiting.get("kind") == "research_confirm" and waiting.get("ref") == row_id:
             nxt = next((r for r in block["rows"] if r["status"] == "proposed" and source_ledger.sourced(r)), None)

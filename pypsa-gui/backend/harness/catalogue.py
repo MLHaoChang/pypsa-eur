@@ -2680,6 +2680,27 @@ TOOLS: list[dict[str, Any]] = [
     ),
 
     _t(
+        "record_source",
+        "Research turns only: propose a published value for one research gap. Give the "
+        "gap key, the value in the gap's unit and basis exactly (no conversion), the url "
+        "of a page you fetched in this turn and a verbatim quote (at most 400 characters) "
+        "from it that states the value. The server checks the quote against the fetched "
+        "page; the user confirms the value on a card before anything is written. Returns "
+        "the source row. Safety: read.",
+        {
+            "gap": {"type": "string", "description": "The research gap's key."},
+            "value": {"type": "number", "description": "The value, in the gap's unit."},
+            "unit": {"type": "string", "description": "The gap's unit, exactly."},
+            "basis": {"type": "string", "description": "The gap's basis, exactly."},
+            "url": {"type": "string", "description": "The fetched page's url."},
+            "quote": {"type": "string", "maxLength": 400, "description": "Verbatim text from that page."},
+            "title": {"type": "string", "description": "The page's title."},
+            "jurisdiction": {"type": "string", "description": "A tariff gap's country code, e.g. DE."},
+        },
+        ["gap", "value", "unit", "basis", "url", "quote"],
+    ),
+
+    _t(
         "set_goal",
         "Set a goal for this chat when the user asks you to keep working "
         "toward something over several steps without prompting each one. "
@@ -4011,7 +4032,8 @@ TOOLS: list[dict[str, Any]] = [
         "already set. Returns {import_tariff_ref, import_tariff: {id, name, "
         "items}, replaced}. Safety: write.",
         {"name": {"type": "string"}, "version": {"type": "integer"},
-         "replace_inline": {"type": "boolean"}},
+         "replace_inline": {"type": "boolean"},
+         "research_ref": {"type": "string", "description": "Only for a researched value: the confirmed source row; always carded."}},
         ["name"],
     ),
     # ── LV08 B2a (12) — Library series, meter data, finance, PoC, value-flow
@@ -5364,6 +5386,7 @@ TOOL_ROUTES: dict[str, list] = {
     "advance_workflow": _SERVICE_CALL,
     "end_workflow": _SERVICE_CALL,
     "set_requirement": _SERVICE_CALL,
+    "record_source": _SERVICE_CALL,
     "set_goal": _SERVICE_CALL,
     "pause_goal": _SERVICE_CALL,
     "complete_goal": _SERVICE_CALL,

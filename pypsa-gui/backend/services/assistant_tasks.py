@@ -603,7 +603,7 @@ def _advance_run(path, ctx=None):
     Gates read the network, so they are evaluated outside the task lock and
     written only if (stage, attempts, fingerprint) did not move meanwhile; a
     caller that may not edit the project writes nothing (`gate_due`)."""
-    from harness import run_loops
+    from harness import research, run_loops
     from services import flow_service, run_gates, run_profiles
     ctx = ctx or RUN_CONTEXT.get() or PyPSAService.get_active_context()
     for _ in range(2 * len(run_profiles.STAGES)):
@@ -636,6 +636,8 @@ def _advance_run(path, ctx=None):
                 return
             if run_loops.due(task):
                 return  # an input-loop round is due: the runner's agent turn first (issue 04)
+            if research.due(task):
+                return  # the stage's research step first (issue 09)
             attempts = stage["attempts"]
         gate = _gate_now(task, profile["stages"][name]["rules"], ctx)
         with _LOCK:
