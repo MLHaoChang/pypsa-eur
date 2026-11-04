@@ -176,7 +176,7 @@ def enqueue_solve(
     capture = None
     if request is not None:
         if str(request["ctx"].project_uuid) != str(project.id):
-            raise HTTPException(409, {"error_kind": solve_capture.MISMATCH,
+            raise HTTPException(409, {"error_kind": "capture_mismatch",
                                       "message": "The run's queued solve names another project."})
         capture = solve_capture.capture(request["ctx"], project_dir, snapshot)
     # `enqueued_by_user_id` stamps the ACTING user alongside the org-scoped
@@ -199,7 +199,7 @@ def enqueue_solve(
         # Another active job of this project solves other input: the run's
         # solve would not be its capture. Refused, never merged into it.
         solve_capture.remove(capture)
-        raise HTTPException(409, {"error_kind": solve_capture.ALREADY_QUEUED,
+        raise HTTPException(409, {"error_kind": "solve_already_queued",
                                   "message": f"'{project.name}' already has a queued or running solve; "
                                              "the run's solve waits until it settles."})
     return {**(solve_queue.get_job(job.id) or job.to_public(None)), "already_queued": not created}
