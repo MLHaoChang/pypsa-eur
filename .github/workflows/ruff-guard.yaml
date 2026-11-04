@@ -4,7 +4,7 @@ name: Ruff guard
 # unformatted Python reached master. This fails a PR whose new or already-clean
 # pypsa-gui/backend Python files fail ruff, at the version pinned in
 # .pre-commit-config.yaml. Files already unformatted on master are exempt
-# (see scripts/coord/ruff_guard.sh).
+# (see .github/scripts/ruff_guard.sh).
 
 on:
   pull_request:
@@ -32,4 +32,4 @@ jobs:
       run: pip install "ruff==$(sed -n '/ruff-pre-commit/,/hooks:/s/^ *rev: v\(.*\)$/\1/p' .pre-commit-config.yaml)"
 
     - name: Check new and already-clean backend files
-      run: scripts/coord/ruff_guard.sh "${{ github.event.pull_request.base.sha }}"
+      run: .github/scripts/ruff_guard.sh "${{ github.event.pull_request.base.sha }}"
