@@ -3,17 +3,19 @@ The research capability: a provider's own web search and fetch, for research
 turns only (study harness issue 09, design §8, owner decision SH-RESEARCH-1).
 
 This is the one place that names the server tools. Above the provider layer a
-research turn is the neutral `LLMRequest.research` spec plus the
-`FetchedSource` records this module reads out of the turn's blocks; no vendor
+research turn is this wrapper plus the `FetchedSource` records it reads out
+of the turn's blocks; no vendor
 word leaves `harness/providers`.
 
 - `web_research(profile)` says whether a profile's provider can search: only
   the Anthropic wire at its own endpoint. Any other wire, or a custom
   endpoint, is `None`, and the research step is `not_available`.
 - `ResearchProvider(inner, spec)` wraps the turn's provider (GK B: around the
-  reservation wrapper, `Research(Reserving(base))`, so a reservation sees the
-  server tools): it sets the spec on every request of the turn and keeps
-  every page fetched in this turn as a `FetchedSource`.
+  reservation wrapper, `Research(Reserving(base))`, so a reservation bounds
+  the final request): it appends the server tools to every request of the
+  turn, as provider-run tools (`type`, no input schema, a `max_uses`), and
+  keeps every page fetched in this turn as a `FetchedSource`. A send the
+  reservation refuses for the research cap sets `cap_reached`.
 - Search results carry no readable page text, so only a fetched page can
   verify a quote (`services.source_ledger.verify`).
 """
@@ -25,12 +27,13 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Any, Iterator
 
-from harness.protocol import LLMEvent, LLMRequest
+from harness.protocol import LLMEvent, LLMRequest, ProviderError
 
 # Per provider call: how many searches and fetches the server may run. Bounds
 # what one call can cost (search and fetch fees are per request).
 SPEC = {"search_max_uses": 3, "fetch_max_uses": 3, "max_content_tokens": 20000}
-RETAIN_CHARS = 200_000  # GK B R3: retained page text is size-capped
+RETAIN_CHARS = 200_000
+RESEARCH_BUDGET = "research_budget"  # the reservation's refusal reason (SH-24)  # GK B R3: retained page text is size-capped
 
 # Models with the dynamic-filtering variants; older ones keep the basic ones.
 _CURRENT = ("claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6",
@@ -123,14 +126,20 @@ class ResearchProvider:
         self.name = getattr(inner, "name", "research")
         self.fetched: list[FetchedSource] = []
         self.usage: list[dict[str, int]] = []
+        self.cap_reached = False
 
     def stream(self, request: LLMRequest) -> Iterator[LLMEvent]:
-        request = dataclasses.replace(request, research=dict(self._spec))
-        for event in self._inner.stream(request):
-            if event.type == "message_done":
-                self.fetched.extend(fetched_sources(event.blocks))
-                self.usage.append(dict(event.usage or {}))
-            yield event
+        request = dataclasses.replace(request, tools=list(request.tools) + server_tools(request.model, self._spec))
+        try:
+            for event in self._inner.stream(request):
+                if event.type == "message_done":
+                    self.fetched.extend(fetched_sources(event.blocks))
+                    self.usage.append(dict(event.usage or {}))
+                yield event
+        except ProviderError as exc:
+            if getattr(exc, "reason", None) == RESEARCH_BUDGET:
+                self.cap_reached = True  # refused before sending: research stops, the stage goes on
+            raise
 
     def __getattr__(self, name: str) -> Any:  # probe and the like reach the inner provider
         return getattr(self._inner, name)

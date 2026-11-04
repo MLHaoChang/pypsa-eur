@@ -51,11 +51,6 @@ class LLMRequest:
     # Index of the last completed message before this turn, or None on a
     # session's first turn. The stable-history marker.
     history_stable_anchor: int | None
-    # A research turn only (study harness issue 09, design §8): the provider's
-    # own web search and fetch, as {"search_max_uses", "fetch_max_uses",
-    # "max_content_tokens"}. None everywhere else; a provider without them
-    # never receives it (`harness.providers.research.web_research`).
-    research: dict[str, Any] | None = None
 
 
 @dataclass

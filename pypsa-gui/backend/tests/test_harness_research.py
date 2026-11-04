@@ -15,7 +15,7 @@ import types
 import pytest
 from fastapi import HTTPException
 from harness import research, session as harness_session
-from harness.protocol import LLMEvent, LLMRequest
+from harness.protocol import LLMEvent, LLMRequest, ProviderError
 from harness.providers import anthropic as anthropic_wire, research as capability
 from services import run_envelope, run_profiles, source_ledger
 from tests.test_assistant_tasks_study_brief import baseline, helpers_state, session  # noqa: F401
@@ -96,31 +96,51 @@ def _request(**over):
                       history_stable_anchor=None, **over)
 
 
+def _server(tools):
+    return [t for t in tools if "type" in t and "input_schema" not in t]
+
+
 def test_a_chat_request_never_carries_web_search_and_a_research_request_does():
     client = _Client()
     wire = anthropic_wire.AnthropicProvider(client)
     done = [e for e in wire.stream(_request()) if e.type == "message_done"][0]
     assert [t.get("name") for t in client.sent[0]["tools"]] == ["get_component"]
-    assert "search_requests" in done.usage  # usage reports server calls when the wire has them
+    assert (done.usage["search_requests"], done.usage["fetch_requests"]) == (2, 1)  # usage reports server calls
 
     researching = capability.ResearchProvider(wire, capability.web_research(_profile()))
     done = [e for e in researching.stream(_request()) if e.type == "message_done"][0]
-    names = [t.get("name") for t in client.sent[1]["tools"]]
-    assert names == ["get_component", "web_search", "web_fetch"]
-    assert client.sent[1]["tools"][0]["cache_control"] == {"type": "ephemeral"}  # the prefix breakpoint stays
-    assert (done.usage["search_requests"], done.usage["fetch_requests"]) == (2, 1)
+    sent = client.sent[1]["tools"]
+    assert [t.get("name") for t in sent] == ["get_component", "web_search", "web_fetch"]
+    assert all(t["max_uses"] > 0 for t in _server(sent))  # bounded, so the reservation can hold it
     assert researching.usage == [done.usage]
 
 
-def test_l1_and_chat_requests_never_set_research():
-    """R1: only the research provider sets `LLMRequest.research`; every other
-    request is built with its default None."""
-    assert _request().research is None
-    for path in sorted((BACKEND / "harness").rglob("*.py")) + sorted((BACKEND / "services").rglob("*.py")):
-        if path.name == "research.py" or "providers" in path.parts:
+class _Refusing:
+    name = "refusing"
+
+    def stream(self, request):
+        exc = ProviderError("invalid_request", "over the research cap")
+        exc.reason = "research_budget"
+        raise exc
+        yield  # pragma: no cover
+
+
+def test_a_send_the_reservation_refuses_marks_the_cap_reached():
+    researching = capability.ResearchProvider(_Refusing(), capability.SPEC)
+    with pytest.raises(ProviderError):
+        list(researching.stream(_request()))
+    assert researching.cap_reached
+
+
+def test_l1_and_chat_requests_never_carry_server_tools():
+    """R1: only the research provider adds provider-run tools; the catalogue
+    payload every other turn sends has none."""
+    from harness.providers import wiring
+    assert _server(wiring._tools_payload()) == []
+    for path in sorted((BACKEND / "harness").rglob("*.py")):
+        if "providers" in path.parts:
             continue
-        text = path.read_text(encoding="utf-8")
-        assert not re.search(r"\bresearch\s*=\s*(?!None)", text) or "LLMRequest" not in text, path
+        assert "server_tools(" not in path.read_text(encoding="utf-8"), path.name
 
 
 _SERVER_WORDS = re.compile(r"web_search_20|web_fetch_20|server_tool_use|web_fetch_tool_result|web_search_tool_result")

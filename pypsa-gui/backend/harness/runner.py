@@ -751,6 +751,18 @@ class Runner:
         thread.start()
         return "l1_round"
 
+    def _reserving(self, path):
+        """The research reservation (SH-24): `Research(Reserving(base))`,
+        scope "research". None (research does not run) until it exists."""
+        if self._research_reserving is not None:
+            return self._research_reserving
+        try:
+            from harness import send_reservation
+        except ImportError:
+            return None
+        instance = self.instance
+        return lambda inner: send_reservation.ReservingProvider(inner, path, boot=instance, scope="research")
+
     def _research_turn(self, path, ctx, session, task):
         """The stage's research turn (issue 09) on a helper thread, as an
         input-loop round: once per stage, never inside a loop round."""
@@ -763,7 +775,7 @@ class Runner:
         def turn():
             try:
                 research.run_for(path, session, stage=stage, provider=self._research_provider,
-                                 reserving=self._research_reserving)
+                                 reserving=self._reserving(path))
             except Exception:  # noqa: BLE001 — a research turn that errors lists its gaps; never retried
                 logger.exception("harness runner: research turn of %s errored", task_id)
                 research.failed(path, stage)

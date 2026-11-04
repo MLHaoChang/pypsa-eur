@@ -239,11 +239,6 @@ class AnthropicProvider:
         tools = list(request.tools)
         if tools and request.tools_stable:
             tools[-1] = {**tools[-1], "cache_control": {"type": "ephemeral"}}
-        if request.research:
-            # After the cached prefix: a research turn's server tools never
-            # move the catalogue's cache breakpoint (study harness issue 09).
-            from harness.providers import research as _research
-            tools = tools + _research.server_tools(request.model, request.research)
         messages = with_history_cache_breakpoint(
             request.messages, request.history_stable_anchor
         )

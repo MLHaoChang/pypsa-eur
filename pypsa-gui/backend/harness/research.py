@@ -4,7 +4,7 @@ owner decisions SH-RESEARCH-1, SH-RESEARCH-CAP-1, AI-567b; GK B B3, R1–R5).
 **When.** On entry to `inputs` (stage 2) for the gaps the profile's
 `research` block marks for it, and to `explore` (stage 6) for a case's
 sourced ranges. Never in a loop round, never in chat: only `research_turn`
-sets `LLMRequest.research`, through `ResearchProvider`. It runs only when the
+offers the server tools, through `ResearchProvider`. It runs only when the
 run's *granted* envelope has `research.allowed`; a run granted without it
 never researches.
 
@@ -17,8 +17,9 @@ nothing in them can widen `session.stage_tools`, which harness code sets.
 **Cost.** The research provider wraps the reservation wrapper (SH-24),
 `Research(Reserving(base))` with scope "research", so every call is held
 against `envelope.research.cost_cap_eur` before it is sent and never
-overshoots it. Without a reservation wrapper research does not run.
-`run.budget.used.research_eur` is the wrapper's to write.
+overshoots it; a refused send ends the turn `cap_reached`. Without a
+reservation wrapper research does not run. The spend is the wrapper's to
+record (`run.budgets`, read by `send_reservation._research_spent`).
 
 **Values.** `record_source` only proposes: `services.source_ledger.propose`
 verifies the row against the pages fetched in this turn. A verified row waits
@@ -172,12 +173,12 @@ def research_turn(task_path, session, *, stage: str, profile: dict[str, Any],
         for kind, payload in loop.run_turn(session, instruction(gaps), provider=provider,
                                            ui_context={"ui_mode": "guided"}):
             eventlog.record(session, "runner/frame", frame=kind, loop="research", turn=turn.turn_id)
-            if kind == "error" and isinstance(payload, dict) and payload.get("error_kind") == "research_cap_reached":
-                status = "cap_reached"
     finally:
         session.stage_tools = None
         with _TURNS_LOCK:
             _TURNS.pop(session.session_id, None)
+    if provider.cap_reached:
+        status = "cap_reached"
     found = {r["for"]["gap"] for r in turn.rows if source_ledger.sourced(r)}
     listed = [g for g in gaps if g["key"] not in found]
     _note(task_path, stage, status, listed, turn=turn.turn_id,
