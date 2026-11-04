@@ -233,15 +233,29 @@ def _message(task, profile_ref, due_now, envelope):
             + "\n\nData gaps you may fill, each only from this source:\n" + json.dumps(_gap_sources(envelope)))
 
 
-def _ledger_row(call, receipt, *, approval, round_no, source=None):
+def _driving_rule(target, failing, rules):
+    """The failing rule that drove a change to `target` ((component, attr)),
+    or None (§6.4 `rule_id | null`). The one failing rule whose `tunable`
+    names the target; else the only failing rule; else None: when several
+    rules fail and none names the target, the row never guesses (GK B (19)).
+    `failing` is the gate's set as of this round's admission."""
+    tuning = [r for r in failing if f"{target[0]}.{target[1]}" in rules.get(r, {}).get("tunable", [])]
+    if len(tuning) == 1:
+        return tuning[0]
+    return failing[0] if len(failing) == 1 else None
+
+
+def _ledger_row(call, receipt, *, approval, round_no, source=None, failing=(), rules=None):
     """One ChangeRow (§6.4) from a verified receipt: the call's target, its
-    old and new values (a dict per field when the card showed several)."""
+    old and new values (a dict per field when the card showed several), and
+    the failing rule that drove it (`_driving_rule`)."""
     typed = [r for r in receipt["rows"] if r.get("role") not in ("note", "at_solve")]
     first = typed[0]
     attr = str(first["field"]).split(".", 1)[0]
     one = len(typed) == 1
     reason = re.sub(r"\s+", " ", str(call.get("reason") or "")).strip()[:REASON_CHARS]
-    return {"id": f"chg-{uuid.uuid4().hex[:12]}", "stage": STAGE, "loop": LOOP, "round": round_no, "rule": None,
+    rule = _driving_rule((first["component_class"], attr), list(failing), rules or {})
+    return {"id": f"chg-{uuid.uuid4().hex[:12]}", "stage": STAGE, "loop": LOOP, "round": round_no, "rule": rule,
             "target": {"component": first["component_class"], "name": str(first["name"]), "attr": attr},
             "old": first["old"] if one else {r["field"]: r["old"] for r in typed},
             "new": first["new"] if one else {r["field"]: r["new"] for r in typed},
@@ -405,7 +419,7 @@ def run_round(path, ctx, session, *, provider=None, recheck):
             unverified.append(call["id"])
             continue
         rows.append(_ledger_row(call, receipt, approval="envelope:" + str(envelope.get("id")), round_no=round_no,
-                                source=sources.get(call["id"])))
+                                source=sources.get(call["id"]), failing=due_now["failing"], rules=rules))
     runner.charge(path, outcome["usage"], model)
 
     def change(t):

@@ -129,7 +129,7 @@ export default function SiteAnchorField() {
         {server && (
           <button type="button" data-testid="site-anchor-clear" onClick={() => void write(null)}
             disabled={!!blocked || busy}
-            className={`px-2 py-1 rounded border border-border text-text hover:border-accent hover:text-accent ${SECONDARY_DISABLED}`}>
+            className={`px-2 py-1 rounded border border-border text-text hover:border-accent hover:text-accent disabled:hover:text-text ${SECONDARY_DISABLED}`}>
             Clear
           </button>
         )}

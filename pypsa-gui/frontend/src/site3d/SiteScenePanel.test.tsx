@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { READ_ONLY_MUTATION_MESSAGE } from '../utils/mutationGuard'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BuildingInputs, Proposal, SceneBuilding, SiteScene } from '../api/siteScene'
 
@@ -119,7 +119,8 @@ describe('Site 3D scene panel', () => {
     await waitFor(() => expect(applyProposal).toHaveBeenCalledWith(expect.anything(), 'p', proposal))
     await waitFor(() => expect(useSceneProposal.getState().proposal).toBeNull())
     useSceneProposal.setState({ proposal })
-    fireEvent.click(await screen.findByTestId('scene-discard'))
+    expect((await screen.findByTestId('scene-discard')).className).toContain('disabled:hover:border-border')
+    fireEvent.click(screen.getByTestId('scene-discard'))
     await waitFor(() => expect(discardProposal).toHaveBeenCalled())
   })
 
@@ -235,5 +236,17 @@ describe('Site 3D scene panel', () => {
     useUIStore.setState({ readOnly: true, readOnlyReason: 'locked-by-user' })
     view()
     expect((screen.getByTestId('scene-add-building') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('a disabled Remove drops their hover and dim like the other buttons', () => {
+    view()
+    fireEvent.click(screen.getByTestId('scene-add-building'))
+    const remove = screen.getByTestId(/^greenfield-.*-remove$/)
+    expect((remove as HTMLButtonElement).disabled).toBe(false)
+    act(() => useUIStore.setState({ readOnly: true, readOnlyReason: 'locked-by-user' }))
+    expect((remove as HTMLButtonElement).disabled).toBe(true)
+    for (const c of ['disabled:hover:text-muted', 'disabled:opacity-50', 'disabled:cursor-not-allowed']) {
+      expect(remove.className).toContain(c)
+    }
   })
 })

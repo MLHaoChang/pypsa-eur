@@ -41,7 +41,7 @@ Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sh
 
 Probe tests that monkeypatch `_probe` can hide dispatcher-signature bugs: ask for a test against the real signature.
 
-When a PR changes a validation guard, confirm by mutation that its test fails for the guard, not for a downstream check (#807's decoy case).
+When a PR changes a validation guard, confirm by mutation that its test fails for the guard, not for a downstream check (#807's decoy case); the same for any test covering a guard: mutate that guard, not a neighbour (#807, #1091).
 
 `test_json_fragments`' real-file assertion must not depend on any declaration list being non-empty.
 
@@ -78,6 +78,18 @@ A `pytest.raises(Exception)` on a refusal is checked for what actually raises. A
 - A gate that infers deployment shape from argv or env fails closed behind a process-exclusive lock: `python -m uvicorn`, `gunicorn -c` and `GUNICORN_CMD_ARGS` are invisible to argv (#1051).
 - A deadline exit (timeout, grace period) settles with its own timer and a boot sweep, never only on the next touch, and the boot sweep honours the replica pin and lease (#1058).
 - A capture that reads a shared live slot (`_state[key]`) checks the identity of the record it publishes, under the slot's lock (#1038).
+- "Fail closed" names a cross-process mechanism (`durable.file_lock`), never an in-process `threading` lock (#1070).
+- A requirement or bound check counts "cannot read" and an incomplete or truncated card as a violation, never as no constraint (#1079).
+- A fill or admission whose value could come from the model is bound to a source fixed at the grant; a set of several candidates (tariffs) is the user's choice, on a card (#1072).
+- A callback under a process-global store lock never takes a project lock; the order is mutation, then solver_state, then store, with a two-thread timed test shown red (#1079).
+- A capture verifies that unlisted inputs are ABSENT, not only that listed ones match; a "not applied" flag counts only when it is exactly True (#1083).
+- A compare-then-write against files whose writers share no lock re-checks after the write and settles not-applied on change (#1083).
+- A cross-process ledger write also checks lease ownership; a file lock alone does not stop a stale process whose peer saves without it (#1088).
+- A `Thread.start` check does not pin "before the registry insert": pin the publish point itself, by wrapping `solver_state` and recording at the insert (#1077, #1085).
+- A unit-precedence rule (explicit unit vs catalogue) needs a case where the two disagree, e.g. a tonne-catalogue carrier with an explicit MW (#1057).
+- The frontend types a server field from the server's own return shape; a fixture of the wrong type can pin a defect (#1060 `unavailable_member`).
+- An engine loop's solve count is `solves_used` + `probe_solves` + any restore-final re-solve. The h/yr LOLE goal goes through `reliability_goal.loop_goal` with `metrics.horizon_years(n)`, never `eh_study`'s nyears (SH-05).
+- A combined pytest run of the tornado route suites takes ~630 s: run them per file.
 
 ## Engineering rules
 
