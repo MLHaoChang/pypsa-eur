@@ -1162,8 +1162,12 @@ def admitted_write(session, task_path, ctx, *, call_id, tool, expected, recheck,
                         logger.warning("run envelope: pickup check for %s failed", tool, exc_info=True)
                         reason = "fingerprint_unreadable"
                     if reason is None:
+                        from services import solve_capture
                         try:
-                            yield
+                            # HH-10 (issue 05): the queued solve captures what was compared.
+                            with (solve_capture.requested(ctx) if tool == "solve_queue_enqueue"
+                                  else contextlib.nullcontext()):
+                                yield
                         finally:
                             receipts.append({"call_id": call_id, **identity(ctx)})
                         return
