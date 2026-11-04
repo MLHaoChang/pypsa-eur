@@ -120,17 +120,23 @@ def test_an_own_tariff_sharing_a_shipped_id_still_counts(library, change):
 
 
 @pytest.mark.parametrize("missing", [{"id": None}, {"id": ""}])
-def test_a_held_ref_without_an_id_grants_no_tariff(library, monkeypatch, missing):
+def test_a_held_ref_without_an_id_grants_no_tariff(
+    library, monkeypatch, caplog, missing
+):
     """R2: fail closed; the grant records no tariff, the fill is refused, and no row reads "None"."""
     library({**own("nl", H1), **missing})
-    with pytest.raises(ValueError):
+    with pytest.raises(run_envelope.HeldTariffWithoutId):
         run_envelope._library_tariffs()
     gap = {k: v for k, v in entry({}).items() if k != "at_grant"}
-    assert run_envelope._gap_instances(None, gap) == {}
+    with caplog.at_level("WARNING", logger=run_envelope.logger.name):
+        assert run_envelope._gap_instances(None, gap) == {}
+    # the typed warning names the bad ref by hash and version, never "None"
+    (logged,) = [r.getMessage() for r in caplog.records if "no id" in r.getMessage()]
+    assert H1 in logged and "version 1" in logged and "None" not in logged
     assert "None" not in run_envelope._gap_row({**gap, "at_grant": {}})
     monkeypatch.setattr(run_envelope, "_tariff_hash", lambda args: H1)
     envelope = {"edits": [], "runs": [], "gaps": [{**gap, "at_grant": {}}]}
     refused = run_envelope._match_gap(
         envelope, "attach_tariff", {"name": "nl"}, card(), None, {}
     )
-    assert refused is not None, refused  # nothing granted: refused
+    assert refused == "new_instance", refused  # nothing granted: refused

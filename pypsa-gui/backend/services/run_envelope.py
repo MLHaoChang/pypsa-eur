@@ -459,6 +459,15 @@ def source_digest(record):
     return hashlib.sha256(json.dumps(record, sort_keys=True, default=str).encode()).hexdigest()
 
 
+class HeldTariffWithoutId(ValueError):
+    """A held Library tariff whose ref carries no id: it cannot be named, so
+    the grant records no tariff (GK B (21), issue 27)."""
+
+    def __init__(self, ref):
+        self.ref = {k: ref.get(k) for k in ("kind", "hash", "version")}
+        super().__init__(f"a held Library tariff has no id (hash {self.ref['hash']}, version {self.ref['version']})")
+
+
 def _library_tariffs():
     """{hash: [name, version]} of the Library tariffs the project's
     organisation holds now (read as `attach_tariff` reads them). Only the
@@ -481,7 +490,7 @@ def _library_tariffs():
         if not isinstance(ref.get("hash"), str) or not ref["hash"] or ref in shipped:
             continue
         if not isinstance(ref.get("id"), str) or not ref["id"]:
-            raise ValueError("a held Library tariff has no id")
+            raise HeldTariffWithoutId(ref)
         out[ref["hash"]] = [ref["id"], ref.get("version")]
     return out
 
@@ -505,6 +514,9 @@ def _gap_instances(ctx, gap):
             if source["kind"] == "weather_choices":
                 return {target["name"]: {"choices": copy.deepcopy(source["choices"])}}
             return {target["name"]: {"tariffs": _library_tariffs()}}
+        except HeldTariffWithoutId as err:  # a held tariff that cannot be named grants none
+            logger.warning("run envelope: no tariff is granted: %s", err)
+            return {}
         except Exception:  # noqa: BLE001 — an unreadable Library grants no tariff
             logger.warning("run envelope: the Library tariffs could not be listed at the grant", exc_info=True)
             return {}
