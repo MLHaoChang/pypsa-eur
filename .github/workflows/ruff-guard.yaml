@@ -1,0 +1,35 @@
+name: Ruff guard
+
+# pre-commit runs ruff and ruff-format locally but nothing enforced them, so
+# unformatted Python reached master. This fails a PR whose new or already-clean
+# pypsa-gui/backend Python files fail ruff, at the version pinned in
+# .pre-commit-config.yaml. Files already unformatted on master are exempt
+# (see scripts/coord/ruff_guard.sh).
+
+on:
+  pull_request:
+    branches:
+    - master
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ruff:
+    name: Ruff guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+
+    - name: Install ruff at the pre-commit pin
+      run: pip install "ruff==$(sed -n '/ruff-pre-commit/,/hooks:/s/^ *rev: v\(.*\)$/\1/p' .pre-commit-config.yaml)"
+
+    - name: Check new and already-clean backend files
+      run: scripts/coord/ruff_guard.sh "${{ github.event.pull_request.base.sha }}"
