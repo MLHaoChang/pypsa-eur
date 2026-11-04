@@ -1076,6 +1076,17 @@ _ADMISSION_ERRORS: dict[str, dict[str, str]] = {
 }
 
 
+TURN_ORIGIN_KEY = "origin"  # services.run_intake.ORIGIN_KEY
+
+
+def _typed_by_user(session, continuation_job_id, continue_task_id, envelope_decision) -> bool:
+    """Whether this turn's `user` text is the person's own typing: not a
+    continuation, a plan continue or an envelope decision (harness text), and
+    not the runner's headless session (issue 21, D1)."""
+    return (continuation_job_id is None and continue_task_id is None and envelope_decision is None
+            and not str(session.session_id or "").startswith("run:"))
+
+
 def _refuse_user_input(
     message, attachment_file_ids, strict_assurance, source_gap_ref, reason
 ):
@@ -1106,6 +1117,7 @@ def run_turn(
     continuation_job_id: str | None = None,
     continue_task_id: str | None = None,
     envelope_decision: dict | None = None,
+    typed_by_user: bool = True,
     _held_lease: str | None = None,
     _held_generation: int | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
@@ -1522,6 +1534,10 @@ def run_turn(
             message_history=message_history,
             attachment_file_ids=attachment_file_ids,
             ui_context=ui_context,
+            # `typed_by_user=False` marks harness text the flags above cannot
+            # see: a goal round, a replay (issue 21, D1).
+            typed_by_user=typed_by_user
+            and _typed_by_user(session, continuation_job_id, continue_task_id, envelope_decision),
         )
         try:
             for event, payload in body:
@@ -1677,6 +1693,7 @@ def run_turn(
             generation=session.goal["generation"],
             binding_generation=binding_generation,
             ui_ack=ui_ack,
+            typed_by_user=False,  # the goal's round text is the harness's (D1)
         )
         return
     if _held_done is not None:
@@ -1810,6 +1827,7 @@ def _run_turn_body(
     message_history: list[dict[str, Any]] | None = None,
     attachment_file_ids: list[str] | None = None,
     ui_context: dict[str, Any] | None = None,
+    typed_by_user: bool = False,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
     """
     The run_turn turn loop. Split out from `run_turn` so the in-flight-flag
@@ -2471,6 +2489,10 @@ def _run_turn_body(
                 # a legacy record. See `turn_is_callers`.
                 if session.owner_user_id is not None:
                     turn_record[TURN_AUTHOR_KEY] = session.owner_user_id
+                # Issue 21 (D1): the `user` text is what the person typed, not
+                # harness text, so the run's intake may cite it.
+                if typed_by_user:
+                    turn_record[TURN_ORIGIN_KEY] = "user"
                 # Phase C — persist which uploads were attached to this
                 # turn so the chat panel can render their chips on
                 # rehydration. Field omitted when empty so legacy turns
@@ -3531,7 +3553,13 @@ def _dispatch_real_tool_call(
                 with reviewed:
                     if edit_card is not None:
                         edit_cards.require_current(tool_name, args or {}, edit_card)
-                        with edit_cards.approved(edit_card["digest"]):
+                        from services import run_envelope
+
+                        # Study harness issue 21 §4: a card write that answers
+                        # the run's open data request goes on its freshness chain.
+                        with edit_cards.approved(edit_card["digest"]), run_envelope.answering(
+                            session, tool_use_id, edit_card
+                        ):
                             out = invoke(session, tool_name, args or {}, handler)
                         if isinstance(out, dict):
                             # First, so a result the chat spills or truncates keeps its receipt.

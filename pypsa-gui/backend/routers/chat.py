@@ -55,6 +55,8 @@ class EnvelopeDecision(BaseModel):
     verdict: Literal["unattended", "stepwise", "revoke"]
     envelope: dict | None = None  # the user's narrowing; never wider than the profile's
     notify_email: StrictBool = False
+    # Issue 21: the digest of the intake rows the card showed (a plan with a setup entry).
+    intake_digest: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 class StreamRequest(BaseModel):

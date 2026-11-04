@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Study runs read setup inputs from chat attachments and typed values. Each input keeps its source (sheet and cell, PDF page and quote, or the user's words) and needs the user's confirmation. A granted run creates its project from the template without moving the open project, and asks only for inputs that are missing.
