@@ -461,17 +461,28 @@ def source_digest(record):
 
 def _library_tariffs():
     """{hash: [name, version]} of the Library tariffs the project's
-    organisation holds now (read as `attach_tariff` reads them)."""
+    organisation holds now (read as `attach_tariff` reads them). Only the
+    organisation's own tariffs are held (GK B, issue 27): a shipped common
+    tariff, which every organisation sees, is left out when its ref equals
+    the shipped one exactly (kind, id, version and hash), so an own tariff
+    that shares a shipped id still counts. A held tariff is named by its
+    ref's `id`; one without an id raises, so the grant records no tariff and
+    the fill is refused (fail closed)."""
     from routers.library import ItemKind, list_items
     from services import chat_tools
+    from services.library import common
+    shipped = [common.ref("tariff", name).model_dump(mode="json") for name in common.names("tariff")]
     items = chat_tools._library_call(list_items, ItemKind.tariff)
     items = items.get("items", items) if isinstance(items, dict) else items
     out = {}
     for item in items or []:
         item = item if isinstance(item, dict) else item.model_dump(mode="json")
         ref = item.get("ref") if isinstance(item.get("ref"), dict) else item
-        if isinstance(ref.get("hash"), str) and ref["hash"]:
-            out[ref["hash"]] = [str(ref.get("name") or item.get("name")), ref.get("version")]
+        if not isinstance(ref.get("hash"), str) or not ref["hash"] or ref in shipped:
+            continue
+        if not isinstance(ref.get("id"), str) or not ref["id"]:
+            raise ValueError("a held Library tariff has no id")
+        out[ref["hash"]] = [ref["id"], ref.get("version")]
     return out
 
 
