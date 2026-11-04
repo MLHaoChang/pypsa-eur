@@ -14,17 +14,22 @@ import threading
 
 import pytest
 from harness import runner as harness_runner, run_loops
-from services import dirty_state, run_envelope
+from services import chat_tools, dirty_state, run_envelope
+from services.library import common as library_common
 from services.pypsa_service import PyPSAService
 from tests.test_assistant_tasks_study_brief import (  # noqa: F401
     baseline, dispatch, edit, helpers_state, session, wait_until,
 )
-from tests.test_harness_envelope import envelope_of, refusals, until  # noqa: F401
+from tests.test_chat_tools_library import _put
+from tests.test_harness_envelope import BLOCK, envelope_of, refusals, until  # noqa: F401
 from tests.test_harness_envelope_atomic import gap, writer  # noqa: F401
 from tests.test_harness_run_loops import (  # noqa: F401
     WITH_GAPS, Script, apply_from, call, energy_source, generate, go, granted, no_series, profile, rated, say, site,
     stopped)
 from tests.test_harness_runner import detached, task_path  # noqa: F401
+
+_names = library_common.names
+
 
 def ctx():
     return PyPSAService.get_active_context()
@@ -147,6 +152,44 @@ def test_a_tariff_fill_moves_the_exact_identity_and_links_from_its_own_receipt(g
     run_envelope.settle_own(path, "tariff-call", target, before, [receipt])
     [link] = envelope_of(path)["chain"]
     assert link == {"after_change": "tariff-call", "fingerprint": receipt["fingerprint"], "exact": receipt["exact"],
+                    "network_revision": receipt["network_revision"]}
+
+
+def test_stepwise_real_tariff_fill_runs_inside_the_write_and_links_at_plus_one(client, granted, profile, site,
+                                                                               own_settles, monkeypatch):
+    """GK B (20): the real attach_tariff (Library resolve, solver-config write
+    under the solver-state RLock) inside admitted_write: it completes under a
+    timed join, the pickup's +0 admits it, `exact` moves, and its own
+    receipt, the handler's +1 included, is the link."""
+    # Exactly one held tariff, so the fill is admitted: the shipped common
+    # tariffs would also be listed at the grant (then the user chooses).
+    monkeypatch.setattr(library_common, "names", lambda kind: [] if kind == "tariff" else _names(kind))
+    _put(client)  # a tariff the project's organisation holds, listed at the grant
+    network = ctx().network
+    network.add("Bus", "grid")
+    network.add("Link", "import", bus0="grid", bus1="B1", p_nom=100.0)  # the point of connection
+    chat_tools.DISPATCHERS["update_solver_config"](partial={"commercial": {
+        "poc_link": "import", "timezone": "Europe/Berlin"}})
+    profile({**BLOCK, "gaps": [{"tool": "attach_tariff", "source": {"kind": "library_tariff"},
+                                "target": {"component": "Settings", "name": "Commercial",
+                                           "attr": "import_tariff_ref"}}]})
+    task, path, _ = granted(steps=[{"id": "inputs.2", "tool": "attach_tariff", "args": {"name": "nl"}}])
+    start = run_envelope.identity(ctx())
+    out = {}
+    thread = threading.Thread(target=lambda: out.setdefault("record", until(
+        harness_runner.Runner("a"), path, task, lambda r: r["steps"][-1]["status"] != "pending")), daemon=True)
+    thread.start()
+    thread.join(timeout=120)
+    assert not thread.is_alive(), "the tariff fill did not finish: a lock held across its write"
+    step = out["record"]["steps"][-1]
+    assert step["status"] == "completed", (step, envelope_of(path)["audit"])
+    assert refusals(path) == []  # the pickup expected +0 and admitted it
+    assert ctx().solver_state["solver_config"].commercial["import_tariff_ref"]["id"] == "nl"
+    [(call_id, receipts)] = own_settles
+    [receipt] = [r for r in receipts if r["call_id"] == call_id]
+    [link] = envelope_of(path)["chain"]
+    assert receipt["exact"] != start["exact"] and receipt["network_revision"] == start["network_revision"] + 1
+    assert link == {"after_change": call_id, "fingerprint": receipt["fingerprint"], "exact": receipt["exact"],
                     "network_revision": receipt["network_revision"]}
 
 

@@ -1319,7 +1319,7 @@ else.
   chain's next fingerprint only when the step started on the last link.
   Links carry the edit counter (`network_revision`); a link that has one
   must match it too, so an edit then its undo is drift.
-- **Atomic write (issue 22).** Every envelope-admitted step
+- **Atomic write (issue 22).** An envelope-admitted step of a covered tool
   (`run_envelope.ATOMIC_TOOLS`, one row per tool: `update_component` on
   eh_site@1's size caps, any attrs; the run's `solve_queue_enqueue`; and the
   data-gap tools `apply_generated_profile`, `attach_tariff`,
@@ -1347,6 +1347,11 @@ else.
   not move (a weather choice, a profile-generator default the solve never
   reads) adds no link, and `generate_load_profile` (pending store only, not
   an edit) adds none either (FILL-10-6).
+  Remaining limit: the envelope-admitted runs `run_simulation` and
+  `run_ac_pf_stage` (`run_envelope.RUN_TOOLS`) are not in `ATOMIC_TOOLS`,
+  and a step the user approved on a card is not envelope-admitted; these
+  still settle from a fresh read after the step, so a user edit landing
+  during such a step is taken into the chain.
 - **Immutable queued solve (issue 05, HH-10).** Inside that admitted write,
   `solve_queue_enqueue` captures the input the identity compare just checked
   (`services/solve_capture.py`):
