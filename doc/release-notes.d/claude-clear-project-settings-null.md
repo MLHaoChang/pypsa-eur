@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The chat tool `update_project_settings` accepts null to reset the backup autonomy, the point-of-connection X/R or the derive-lengths setting to its default; the edit card shows "old → default".

@@ -312,3 +312,22 @@ def test_a_study_text_differing_only_past_the_cap_is_changed_and_fingerprinted()
     assert row["fingerprint"] == edit_card._value_fingerprint(head + "b")
     assert edit_card._settle(row, head + "a") != row["new"]
     assert edit_card._settle(row, head + "b") == row["new"]
+
+
+def test_project_settings_null_clears_each_field_to_default(client, api_project):
+    name = api_project("card-clear")
+    chat_tools.update_project_settings(name, backup_autonomy_h=48.0, poc_xr=7.5,
+                                       derive_lengths_from_geometry=True)
+    for key, old in (("backup_autonomy_h", 48.0), ("poc_xr", 7.5), ("derive_lengths_from_geometry", True)):
+        card = edit_card.preview("update_project_settings", {"name": name, key: None})
+        assert _cells(card) == [(key, old, None)]
+        assert card["says"].endswith("→ default"), card["says"]
+    chat_tools.update_project_settings(name, backup_autonomy_h=None, poc_xr=None)
+    stored = edit_card._stored_project_settings({"name": name})
+    assert "backup_autonomy_h" not in stored and "poc_xr" not in stored
+    assert stored["derive_lengths_from_geometry"] is True
+    # Already at the default: nothing to change.
+    for key in ("backup_autonomy_h", "poc_xr"):
+        with pytest.raises(HTTPException) as same:
+            edit_card.preview("update_project_settings", {"name": name, key: None})
+        assert same.value.detail["error_kind"] == "empty_edit"

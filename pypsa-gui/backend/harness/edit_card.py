@@ -1557,14 +1557,17 @@ def _project_settings_preview(args: dict) -> list[dict]:
     stored = _stored_project_settings(args)
     rows = []
     for key, new in checked.items():
-        if new is None:
-            _refuse("invalid_edit_value", f"{_SETTINGS_LABELS[key]} takes a value.")
         old = stored.get(key)
         if old == new and type(old) is type(new):
             continue
         label = _SETTINGS_LABELS[key]
         row = _settings_row("Project settings", key, label, old, new, _SETTINGS_UNITS.get(key, ""), says_name=label)
-        if isinstance(new, bool):
+        if new is None:  # null resets the key to its default
+            row["unit"] = ""  # "default", not "default h"
+            row["words"] = {"new": "default"}
+            if isinstance(old, bool):
+                row["words"]["old"] = "On" if old else "Off"
+        elif isinstance(new, bool):
             row["words"] = {"old": "not set" if old is None else "On" if old else "Off", "new": "On" if new else "Off"}
         rows.append(row)
     if not rows:
