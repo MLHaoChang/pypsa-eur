@@ -467,6 +467,14 @@ def reconcile_on_boot() -> tuple[int, int]:
     except Exception:  # noqa: BLE001 — R26: this must never fail the boot
         logger.exception("solve-queue boot reconciliation failed; continuing without it")
         return interrupted, resumed
+    try:
+        # HH-10 (study harness 05, C6g): captures no live job names.
+        from services import solve_capture
+        live = {str((row.get("capture") or {}).get("id")) for row in load_by_status(("queued", "running"))
+                if row.get("capture")}
+        solve_capture.sweep(live, min_age_s=solve_capture.SWEEP_MIN_AGE_S)
+    except Exception:  # noqa: BLE001 — never fail the boot over a cleanup
+        logger.exception("solve-queue boot reconciliation: capture sweep failed")
     logger.info(
         "solve-queue boot reconciliation: %d job(s) marked interrupted, %d resumed, "
         "%d failed (project directory gone), %d failed (unknown job kind)",

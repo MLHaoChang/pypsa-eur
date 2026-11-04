@@ -1341,8 +1341,43 @@ else.
   Remaining limit: every other envelope tool (the data-gap fills
   `set_weather_choice`, `attach_tariff`, `apply_generated_profile` and
   `generate_load_profile`) still settles from a fresh read after the step,
-  so a user edit landing during such a step is taken into the chain. The
-  queued solve's network is read from disk at pickup (issue 05).
+  so a user edit landing during such a step is taken into the chain.
+- **Immutable queued solve (issue 05, HH-10).** Inside that admitted write,
+  `solve_queue_enqueue` captures the input the identity compare just checked
+  (`services/solve_capture.py`):
+  - **What is captured.** Under `<project>/.harness/captures/<id>/`: the
+    in-memory network, its time series, the job's solver-config snapshot and
+    the edit counter. It also copies, byte for byte, every other file the
+    queued solve reads, plus the template sidecars (`solve_capture.sidecars()`:
+    the island config, cuts and campus input; `eh_template.json` and
+    `grid_readiness_limits.json`). The directory is written under a temporary
+    name, `manifest.json` (each file's sha256, the exact fingerprint, the
+    edit counter) last, then renamed. The manifest's sha256 is the identity on
+    the job row (`solve_jobs.capture`, migration 0011).
+  - **Pickup.** The job checks the manifest against the job row and each file
+    against the manifest; a difference or a missing directory fails it
+    `capture_mismatch`, solving nothing. Otherwise it hydrates a private
+    context from the capture, never registered or adopted, with `storage_dir`
+    set to the capture so the island reads are the capture's. It then solves
+    under `solving_context` through the ordinary `run_simulation` /
+    `build_lp_chain` path. The pre-solve steps (modelling transforms,
+    commercial PoC prices, energization, fixed sizes, island) are all
+    reproduced: they read the network, config and storage dir. One is not:
+    user code (`extra_functionality_code`, behind `PYPSA_GUI_ALLOW_USER_CODE`)
+    may read any file.
+  - **Write-back.** Under the project's locks, the result is saved to the
+    project only when the full identity (exact fingerprint, edit counter,
+    sidecar sha256) still equals the capture's. Otherwise nothing is written,
+    and the job records `capture.applied: false, reason: inputs_changed`. The
+    `solve.*` gate facts read it as no evidence, so the run stops for the
+    user, and the run evidence's summary names the capture.
+  - **Refusals and cleanup.** A run's enqueue is refused
+    `solve_already_queued` while another job of the project is active: it is
+    never merged into one. A settled job's capture is removed once its
+    evidence is recorded. Boot removes any capture that no queued or running
+    job row names and that is older than the runner lease. Bundle export and
+    Save-As copy named files and directories only, so `.harness/` never
+    travels.
 - **End.** `cancel_task` revokes; the plan card's revoke pauses the run.
 
 

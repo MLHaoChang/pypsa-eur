@@ -1579,6 +1579,8 @@ class SolveQueue:
             final_status = "failed"
             error = f"{type(exc).__name__}: {exc}"
             condition = "queue_error"
+            if job.capture is not None and type(exc).__name__ == "CaptureMismatch":
+                condition = "capture_mismatch"  # HH-10 (C6a): nothing was solved
             logger.exception("solve_queue: job %s (%r) failed", job.id, project_id)
             try:
                 if ctx is not None and ctx.solver_state.get("thread") is me:

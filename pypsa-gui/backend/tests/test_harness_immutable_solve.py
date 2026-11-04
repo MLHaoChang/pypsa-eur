@@ -9,12 +9,19 @@ can neither change the solve nor be mistaken for its result.
 Real project, real runner, real queue and a real HiGHS solve of the baseline
 (one generator at marginal cost 10, one 5 MW load, two hours: objective 100)."""
 # ruff: noqa: F811 -- imported pytest fixtures
+import io
 import json
+import os
+import pathlib
+import shutil
+import sys
+import threading
 import time
+import zipfile
 
 import pytest
 from harness import runner as harness_runner
-from services import solve_queue
+from services import solve_capture, solve_queue
 from services.pypsa_service import PyPSAService
 from tests.test_assistant_tasks_study_brief import (  # noqa: F401
     baseline, dispatch, edit, helpers_state, session, wait_until,
@@ -91,3 +98,205 @@ def test_with_no_edit_while_the_job_waits_the_captured_result_is_applied(eh, sit
     assert job["objective"] == pytest.approx(CAPTURED_OBJECTIVE)
     assert job["capture"]["applied"] is True
     assert EDITED_OBJECTIVE != CAPTURED_OBJECTIVE
+
+
+# ── C6a: the capture is the one the job recorded ────────────────────────────
+
+def _settled_after(eh, site, held_queue, change):
+    job_id, _ = _enqueued(eh, site)
+    record = solve_queue.solve_queue._jobs[job_id].capture
+    change(pathlib.Path(record["dir"]))
+    held_queue.resume()
+    return _terminal(job_id)
+
+
+@pytest.mark.parametrize("change", [
+    lambda d: (d / "network.nc").write_bytes((d / "network.nc").read_bytes() + b"\0"),  # a file
+    lambda d: (d / "manifest.json").write_text(json.dumps({**json.loads((d / "manifest.json").read_text()),
+                                                           "network_revision": 999})),  # the manifest
+    lambda d: shutil.rmtree(d),  # the directory
+], ids=["file", "manifest", "missing"])
+def test_a_capture_that_is_not_the_jobs_fails_with_nothing_solved(eh, site, held_queue, change):
+    job = _settled_after(eh, site, held_queue, change)
+    assert job["status"] == "failed" and job["condition"] == solve_capture.MISMATCH, job
+    assert job["objective"] is None
+
+
+# ── C6b, C6c: the private context is the capture, and only the capture ──────
+
+def test_the_queued_solve_opens_no_file_of_the_project(eh, site, held_queue, monkeypatch):
+    """Every file the solve reads comes from the capture: an audit hook on
+    `open`, on the dispatcher from pickup to the write-back, sees nothing
+    under the project but the capture."""
+    _, root = site
+    project, opened, solving = pathlib.Path(root).resolve(), [], []
+    queue_type = type(solve_queue.solve_queue)
+    run, apply = queue_type._run_solve_job, queue_type._apply_capture
+
+    def watched(self, job):  # from pickup (hydrate included) to the write-back
+        solving.append(True)
+        try:
+            return run(self, job)
+        finally:
+            solving.clear()
+
+    def applying(self, *args):
+        solving.clear()  # the write-back compares against the project: its own reads
+        return apply(self, *args)
+    monkeypatch.setattr(queue_type, "_run_solve_job", watched)
+    monkeypatch.setattr(queue_type, "_apply_capture", applying)
+
+    def hook(event, args):
+        if event == "open" and solving and isinstance(args[0], (str, os.PathLike)) \
+                and threading.current_thread().name.startswith("solve-queue-dispatcher"):
+            opened.append(pathlib.Path(os.fsdecode(args[0])))
+    sys.addaudithook(hook)
+    job_id, _ = _enqueued(eh, site)
+    held_queue.resume()
+    job = _terminal(job_id)
+    solving.clear()
+    assert job["status"] == "completed"
+    inside = [p for p in opened if p.is_absolute() and p.resolve().is_relative_to(project)]
+    captures = project / solve_capture.CAPTURES
+    assert inside and all(p.resolve().is_relative_to(captures) for p in inside), inside
+
+
+def test_the_island_reader_reads_the_captures_sidecar(eh, site, monkeypatch):
+    """`load_project_island` reads `<storage_dir>/island_config.json`: on the
+    private context that is the capture's copy (C6b)."""
+    from routers.projects import _hydrate_context_from_disk
+    from services.adequacy import island_config
+    from services.solver import island
+    _, root = site
+    (pathlib.Path(root) / island_config.SIDECAR_NAME).write_text("{}")
+    with ctx().mutation_lock, ctx().solver_state_lock:
+        record = solve_capture.capture(ctx(), root, None)
+    assert island_config.SIDECAR_NAME in record["files"]
+    read = []
+    monkeypatch.setattr(island_config, "load_island_config", lambda path: read.append(pathlib.Path(path)))
+    private = PyPSAService.build_context()
+    _hydrate_context_from_disk(private, pathlib.Path(record["dir"]), "Tool Baseline")
+    private.storage_dir = record["dir"]
+    with PyPSAService.solving_context(private):
+        island.load_project_island()
+    assert read == [pathlib.Path(record["dir"]) / island_config.SIDECAR_NAME]
+
+
+def test_the_hydrated_capture_has_the_projects_exact_fingerprint(eh, site):
+    """Custom LP columns survive the .nc round trip (C6c)."""
+    from routers.projects import _hydrate_context_from_disk
+    from services import run_envelope
+    _, root = site
+    ctx().network.generators["eh_custom_lp"] = 0.25
+    with ctx().mutation_lock, ctx().solver_state_lock:
+        before = run_envelope.identity(ctx())
+        record = solve_capture.capture(ctx(), root, None)
+    private = PyPSAService.build_context()
+    _hydrate_context_from_disk(private, pathlib.Path(record["dir"]), "Tool Baseline")
+    after = run_envelope.identity(private)
+    assert record["exact"] == before["exact"] == after["exact"]
+    assert record["network_revision"] == before["network_revision"] == after["network_revision"]
+
+
+# ── C6f: a result not applied is never the project's ────────────────────────
+
+def test_a_capture_not_applied_is_no_evidence_for_the_solve_rules(monkeypatch):
+    from services import run_gates
+    job = {"status": "completed", "condition": "optimal", "capture": {"applied": False, "reason": "inputs_changed"}}
+    monkeypatch.setattr(run_gates, "_solve_job", lambda env: job)
+    rules = [run_gates.check_rule({"id": r, "fact": f, "op": "eq", "value": v, "severity": "block", "basis": "05"})
+             for r, f, v in (("a", "solve.state", "completed"), ("b", "solve.status", "optimal"))]
+    results = run_gates.evaluate(rules, run_gates.Env(task={}, ctx=None, project=None, project_dir=None))
+    assert [r["verdict"] for r in results] == ["not_evaluated", "not_evaluated"]
+    assert all(r["reason"].startswith("inputs_changed") for r in results)
+    job["capture"]["applied"] = True
+    results = run_gates.evaluate(rules, run_gates.Env(task={}, ctx=None, project=None, project_dir=None))
+    assert [r["verdict"] for r in results] == ["pass", "pass"]
+
+
+def test_the_run_evidence_names_the_capture_and_whether_it_was_applied(eh, site, held_queue):
+    from services import run_evidence
+    _, root = site
+    job_id, _ = _enqueued(eh, site)
+    writer(lambda n: n.generators.__setitem__("marginal_cost", 50.0)).join()
+    held_queue.resume()
+    job = _terminal(job_id)
+    run = run_evidence.queue_run_id(str(job_id))
+    summary = json.loads((pathlib.Path(root) / "run_evidence" / run / "sections" / "summary.json").read_text())
+    assert summary["capture"]["identity"] == job["capture"]["identity"]
+    assert summary["capture"]["applied"] is False and summary["capture"]["reason"] == "inputs_changed"
+
+
+# ── Enqueue: never merged into another job ──────────────────────────────────
+
+def test_a_run_solve_is_refused_while_another_solve_of_the_project_is_active(eh, site, held_queue):
+    _, root = site
+    solve_queue.solve_queue.enqueue_unique(ctx().loaded_project, project_key=ctx().registry_key,
+                                           storage_dir=str(root))
+    project_id = str(ctx().project_uuid)
+    ctx().network.storage_units.at["S1", "capital_cost"] = 1.0
+    task, path = eh([{"id": "inputs.2", "tool": "solve_queue_enqueue", "args": {"project_id": project_id}}])
+    record = until(harness_runner.Runner("a"), path, task,
+                   lambda r: r["steps"][1]["status"] not in ("pending", "running"))
+    assert record["steps"][1]["status"] != "completed", record["steps"][1]
+    captures = pathlib.Path(root) / solve_capture.CAPTURES
+    assert not captures.is_dir() or not any(captures.iterdir())
+
+
+# ── C6g: retention and exclusions ───────────────────────────────────────────
+
+def test_the_capture_is_removed_once_the_job_settled(eh, site, held_queue):
+    job_id, _ = _enqueued(eh, site)
+    directory = pathlib.Path(solve_queue.solve_queue._jobs[job_id].capture["dir"])
+    assert (directory / solve_capture.MANIFEST).is_file()
+    held_queue.resume()
+    job = _terminal(job_id)
+    assert not directory.exists() and job["capture"]["identity"]
+
+
+def test_the_boot_sweep_keeps_live_and_young_captures_only(tmp_path):
+    base = tmp_path / "org" / "Project" / solve_capture.CAPTURES
+    for name in ("live", "orphan", ".young.tmp"):
+        (base / name).mkdir(parents=True)
+    old = time.time() - 3600
+    os.utime(base / "live", (old, old))
+    os.utime(base / "orphan", (old, old))
+    assert solve_capture.sweep({"live"}, min_age_s=90.0, roots=[tmp_path]) == 1
+    assert sorted(p.name for p in base.iterdir()) == [".young.tmp", "live"]
+
+
+def test_the_sweep_waits_out_the_runners_lease():
+    assert solve_capture.SWEEP_MIN_AGE_S == harness_runner.LEASE_SECONDS
+
+
+def test_a_capture_is_in_no_bundle_and_no_fingerprint(eh, site):
+    from routers.projects import _project_bundle_bytes
+    from services import run_gates
+    _, root = site
+    with ctx().mutation_lock, ctx().solver_state_lock:
+        before = run_gates.fingerprint(ctx())
+        solve_capture.capture(ctx(), root, None)
+        assert run_gates.fingerprint(ctx()) == before
+    names = zipfile.ZipFile(io.BytesIO(_project_bundle_bytes("Tool Baseline", pathlib.Path(root)))).namelist()
+    assert names and not [n for n in names if ".harness" in n]
+
+
+def _undo(root):
+    writer(lambda n: n.generators.__setitem__("marginal_cost", 50.0)).join()
+    writer(lambda n: n.generators.__setitem__("marginal_cost", 10.0)).join()
+
+
+@pytest.mark.parametrize("change", [
+    lambda root: (pathlib.Path(root) / "eh_template.json").write_text('{"id": "eh_site", "site_type": "x"}'),
+    _undo,  # the same inputs, a later edit counter
+], ids=["sidecar_only", "edit_then_undo"])
+def test_the_write_back_compares_the_full_identity_not_the_fingerprint_alone(eh, site, held_queue, change):
+    """C6e: a sidecar write or an edit and its undo while the job waits
+    leaves the fingerprint as it was, and still the result is not applied."""
+    _, root = site
+    job_id, _ = _enqueued(eh, site)
+    change(root)
+    held_queue.resume()
+    job = _terminal(job_id)
+    assert job["status"] == "completed" and job["objective"] == pytest.approx(CAPTURED_OBJECTIVE)
+    assert job["capture"]["applied"] is False and job["capture"]["reason"] == "inputs_changed"

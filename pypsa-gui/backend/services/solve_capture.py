@@ -35,6 +35,9 @@ MANIFEST = "manifest.json"
 VERSION = 1
 MISMATCH = "capture_mismatch"
 ALREADY_QUEUED = "solve_already_queued"
+# The boot sweep leaves a capture younger than this: the harness runner's
+# lease (`harness.runner.LEASE_SECONDS`, pinned equal by a test).
+SWEEP_MIN_AGE_S = 90.0
 
 # What `_hydrate_context_from_disk` reads to build the solving context.
 HYDRATE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.json")
@@ -178,14 +181,28 @@ def remove(record: dict | None) -> None:
         shutil.rmtree(record["dir"], ignore_errors=True)
 
 
-def sweep(project_dir, keep: set[str]) -> int:
-    """Remove captures of `project_dir` no live job names (boot, C6g)."""
-    base = root(project_dir)
-    if not base.is_dir():
-        return 0
-    removed = 0
-    for child in base.iterdir():
-        if child.name not in keep:
-            shutil.rmtree(child, ignore_errors=True)
-            removed += 1
+def sweep(live: set[str], *, min_age_s: float, roots=None) -> int:
+    """Boot (C6g): remove every capture no queued or running job names.
+    `live` comes from the shared job table, so a job another replica holds
+    keeps its capture; a directory younger than `min_age_s` (the runner's
+    lease) is left too, since another replica may be writing it before its
+    job row exists. Scans `<root>/<project>` and `<root>/<org>/<project>`."""
+    import time
+    if roots is None:
+        from settings import get_settings
+        settings = get_settings()
+        roots = {settings.projects_root, settings.flat_projects_root}
+    now, removed = time.time(), 0
+    for top in {pathlib.Path(r) for r in roots if r}:
+        for base in [*top.glob(f"*/{CAPTURES}"), *top.glob(f"*/*/{CAPTURES}")]:
+            for child in base.iterdir():
+                cid = child.name.strip(".").split(".", 1)[0]
+                try:
+                    young = now - child.stat().st_mtime < min_age_s
+                except OSError:
+                    continue
+                if cid in live or young:
+                    continue
+                shutil.rmtree(child, ignore_errors=True)
+                removed += 1
     return removed

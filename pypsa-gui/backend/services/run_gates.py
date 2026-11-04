@@ -96,14 +96,26 @@ def _solve_job(env):
     return job if job.get("project_key") == project_registry.registry_key(env.project) else None
 
 
+def _not_applied(job):
+    """HH-10 (issue 05, C6f): a captured solve whose result was not applied
+    (the inputs changed while it waited) is never read as the project's."""
+    capture = job.get("capture") or {}
+    if capture.get("applied") is False:
+        reason = capture.get("reason") or "not_applied"
+        return NoEvidence(reason, f"{reason}: the run's captured solve was not applied to the project")
+    return None
+
+
 def _solve_state(env):
     job = _solve_job(env)
-    return None if job is None else job["status"]
+    return None if job is None else (_not_applied(job) or job["status"])
 
 
 def _solve_status(env):
     job = _solve_job(env)
-    return None if job is None or job["status"] != "completed" else job["condition"]
+    if job is None or job["status"] != "completed":
+        return None
+    return _not_applied(job) or job["condition"]
 
 
 def _fresh(env):
