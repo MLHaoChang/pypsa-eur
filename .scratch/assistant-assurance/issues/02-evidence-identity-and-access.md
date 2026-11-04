@@ -332,3 +332,23 @@ Owner chose to build (AS02-WINDOW-1). GK B (15) plan GO conditions, and how each
 5. Guard mutants (bool, negative, start >= end, extra arg, half a window). Met: `test_guard_refuses_malformed_windows_before_the_handler` and `test_window_validity_is_exact`; the catalogue schema turns away bool before the guard, so `valid_series_window` is also pinned directly. Listed mutants (ignore start, end off by one, window not in the lookup args/digest) each fail named tests. An oversize window reaches the existing `series_too_long_to_check` path.
 6. No new error kind, so no `tool-error-kinds.d` fragment.
 
+
+### 2026-11-04 — A1.6/A1.7 partly converged AC power flow; A1.2 ACK access
+
+Audit against master `30417e89e` and the test matrix (sent to the coordinator before building). On master, A1.1 (project, org, same-org, entity, unit, run, section and window identity, plus path traversal in `test_assurance_records_paths.py`), A1.3, A1.4 and A1.5 are executable and passing.
+
+- **A1.6/A1.7: partly converged AC PF.** An AC power-flow run is sealed `completed` even when only some snapshots converged. `run_evidence._checked_manifest` is the one gate for `get_run_evidence`, run sections, `compare_project_runs` and evidence re-reads. It now refuses two kinds of run, and the guard's `run_not_checkable` message names which:
+  - `partly_converged`: fewer snapshots converged than ran ("this run is partly converged"; compare names the run or the baseline).
+  - `not_known_to_have_converged`: an `ac_pf` run without both counts as integers in `snapshots` with `0 < converged == total`, or any run that records only one count or a malformed pair.
+
+  A fully converged run still checks. Unchecked reads are unchanged. Tests: `tests/assurance_acceptance/test_p1_run_convergence.py`, 14 cases, red before the change except the converged control.
+- **A1.2: ACK CSRF and owner.** A wrong (not missing) CSRF token on `POST /api/chat/ui-ack` gets 403 `csrf_token_invalid` before the ACK is read. Another member of the same org gets 409 `ui_ack_mismatch` and reads the action as an unknown id. Neither changes the stored `submitted` outcome, and the owner's ACK still completes it. Tests: `tests/assurance_acceptance/test_p1_ack_access.py`, 2 cases. The behaviour already held, so these are coverage only.
+
+#### Remaining, each with its blocker
+
+- **A1.2 reviewer cache hit and A1.4 cache revision:** blocked by [03](03-answer-publication-gate.md). The reviewer is withheld, so there is no cache to revoke or revise.
+- **A1.1 asset identity:** blocked by [05](05-verified-artifacts.md) (P4 artifacts).
+- **Displayed-data revision proof:** not an A1 case. It is A5.2 ([06](06-evidence-ux-and-navigation.md)) and live-copilot LC-03. The v2 `/ui-ack` `source_binding` gives `browser_displayed_data` for load flow only, and other result families are LC-03's adapters.
+- **AC PF raw convergence (follow-up, A1.7):** `services/ac_pf_service.py` records every snapshot as converged when PyPSA returns no convergence frame or parsing it raises. The counts then read `n of n`, and this gate cannot see the gap. Fixing it changes the UI convergence bar, so it needs its own plan.
+- **Completion clause** "every affected public channel uses the same approved contract": blocked by [01](01-output-contract-and-coverage.md) A0.4 (reviewed schemas, tickets 09–11).
+- Live-voice issue 06 is `Status: done`, so it no longer blocks this issue.

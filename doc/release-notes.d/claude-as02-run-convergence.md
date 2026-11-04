@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The assistant no longer marks numbers from a partly converged AC power flow as checked. A run where some snapshots did not converge, or one that does not record how many converged, is refused for checked answers and named as such. It can still be shown as unchecked data.
