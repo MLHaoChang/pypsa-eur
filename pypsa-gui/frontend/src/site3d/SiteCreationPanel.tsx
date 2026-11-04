@@ -17,6 +17,7 @@ import { createSite, SitesNotSaved } from './sceneActions'
 import { defaultSiteName, newSite } from './siteModel'
 import { writeActiveSite } from './activeSite'
 import { BOUNDARY_DEFAULTS, OFFSET_MAX_M, SIDE_MAX_M, SIDE_MIN_M, boundaryAround, boundaryErrors, rectangleLocal, type BoundaryInputs } from './nativeSite'
+import { PRIMARY_BUTTON } from './buttonStyles'
 
 const REASON_NO_ANCHOR = 'Add site coordinates to create a 3D site'
 const REASON_NO_NAME = 'Name the site to save it'
@@ -138,7 +139,7 @@ export default function SiteCreationPanel() {
             <div className="flex gap-2">
               <button type="button" data-testid="site-create-save" onClick={() => void save()}
                 disabled={busy || !!blocked || !!saveReason}
-                className="px-3 py-1 rounded bg-accent text-white font-semibold hover:bg-accent/90 disabled:opacity-50">
+                className={PRIMARY_BUTTON}>
                 {busy ? 'Saving…' : 'Save site'}
               </button>
               <button type="button" onClick={close} disabled={busy}

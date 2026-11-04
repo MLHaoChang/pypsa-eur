@@ -27,6 +27,7 @@ import type { TargetClass } from '../api/siteScene'
 import { heightEvidenceWords, HEIGHT_MAX_M, greenfieldFromBuilding, osmSourcesInside } from './nativeSite'
 import { fromLocal } from './geo'
 import type { ContextBuilding, Site } from './types'
+import { PRIMARY_BUTTON, SECONDARY_DISABLED } from './buttonStyles'
 
 const PARTS: { id: SitePart; label: string }[] = [
   { id: 'map', label: 'Map' }, { id: 'generate', label: 'Generate' }, { id: 'model', label: 'Model' }, { id: 'results', label: 'Results' },
@@ -260,7 +261,7 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
               <span className="text-[11px] text-muted">Shown in red in the scene. Nothing is saved until Apply.</span>
               <div className="flex gap-2">
                 <button type="button" data-testid="scene-apply" onClick={() => void apply()} disabled={!canWrite}
-                  className="px-3 py-1 rounded bg-accent text-white font-semibold hover:bg-accent/90 disabled:opacity-50">Apply</button>
+                  className={PRIMARY_BUTTON}>Apply</button>
                 <button type="button" data-testid="scene-discard" onClick={() => void discard()} disabled={busy}
                   className="px-3 py-1 rounded border border-border text-text hover:border-accent">Discard</button>
               </div>
@@ -275,7 +276,7 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
                 <div className="flex gap-2 items-center">
                   <span className="text-muted">Height {n(selected.height_m)} m</span>
                   <button type="button" data-testid="scene-correct" onClick={() => startEdit(selected)} disabled={!canWrite}
-                    className="px-2 py-0.5 rounded border border-border text-text hover:border-accent disabled:opacity-50">Correct</button>
+                    className={`px-2 py-0.5 rounded border border-border text-text hover:border-accent ${SECONDARY_DISABLED}`}>Correct</button>
                   <button type="button" onClick={() => useUIStore.getState().setSitePartSelection(null)} className="text-[11px] text-muted hover:text-text">Deselect</button>
                 </div>
               ) : (
@@ -289,7 +290,7 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
                   )}
                   <div className="flex gap-2">
                     <button type="button" data-testid="scene-preview-change" onClick={() => void previewEdit()} disabled={!canWrite || !editOk}
-                      className="px-3 py-1 rounded bg-accent text-white font-semibold hover:bg-accent/90 disabled:cursor-not-allowed disabled:hover:bg-accent disabled:opacity-50">Preview change</button>
+                      className={PRIMARY_BUTTON}>Preview change</button>
                     <button type="button" onClick={() => setEdit(null)} className="px-3 py-1 rounded border border-border text-text hover:border-accent">Cancel</button>
                   </div>
                   {!editOk && <span className="text-[11px] text-muted" data-testid="scene-preview-reason">{FIX_FIELDS}</span>}
@@ -315,10 +316,10 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
               <div className="flex flex-wrap items-center gap-2">
                 <button type="button" data-testid="scene-add-building" disabled={!canWrite}
                   onClick={() => setDrafts(ds => [...ds, newGreenfield(Date.now() % 1_000_000 + ds.length)])}
-                  className="px-2 py-1 rounded border border-border text-text hover:border-accent disabled:opacity-50">Add building</button>
+                  className={`px-2 py-1 rounded border border-border text-text hover:border-accent ${SECONDARY_DISABLED}`}>Add building</button>
                 <button type="button" data-testid="scene-generate" onClick={() => void generate()}
                   disabled={!canWrite || !genAction?.available || !draftsOk || (sources.length + drafts.length === 0)}
-                  className="px-3 py-1 rounded bg-accent text-white font-semibold hover:bg-accent/90 disabled:opacity-50">
+                  className={PRIMARY_BUTTON}>
                   {accepted.length ? 'Generate again' : 'Generate buildings'}
                 </button>
               </div>
