@@ -32,7 +32,7 @@ import PlacedEquipment from './PlacedEquipment'
 import { detachRefusalCopy, detachTitle, moveGroup, undoTitle, UNDO_GONE, type GroupMove } from './groupEdit'
 import { useModelProposal } from './useSiteScene'
 import type { AssetFootprint, Site } from './types'
-import { PRIMARY_BUTTON, SECONDARY_BUTTON } from './buttonStyles'
+import { FIELD_DISABLED, PRIMARY_BUTTON, SECONDARY_BUTTON } from './buttonStyles'
 
 type Enabled = Extract<SiteScene, { state: 'enabled' }>
 
@@ -80,7 +80,7 @@ function openCreationForm(item: PaletteItemData): void {
   else open()
 }
 
-const link = 'whitespace-nowrap text-accent hover:underline disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50'
+const link = `whitespace-nowrap text-accent hover:underline disabled:no-underline ${FIELD_DISABLED}`
 const primary = PRIMARY_BUTTON
 const secondary = SECONDARY_BUTTON
 
@@ -388,7 +388,7 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason,
           </span>
           <select data-testid="place-rebind-picker" value={rebindPick ? candidateKey(rebindPick) : ''} disabled={!writable || rebindList.length === 0}
             onChange={e => setRebindPick(rebindList.find(c => candidateKey(c) === e.target.value) ?? null)}
-            className="rounded border border-border bg-bg px-2 py-1 text-[12px] text-text disabled:opacity-50">
+            className={`rounded border border-border bg-bg px-2 py-1 text-[12px] text-text ${FIELD_DISABLED}`}>
             <option value="" disabled>Choose an item</option>
             {rebindList.map(c => <option key={candidateKey(c)} value={candidateKey(c)}>{itemName(candidateKey(c))}{candidateKey(c) in placements ? ' · placed' : ''}</option>)}
           </select>
@@ -453,7 +453,7 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason,
                 <span className="text-muted">Attach to…</span>
                 <select data-testid="assoc-attach-picker" value={target ? candidateKey(target) : ''} disabled={!writable || pickList.length === 0}
                   onChange={e => choose(e.target.value)}
-                  className="rounded border border-border bg-bg px-2 py-1 text-[12px] text-text disabled:opacity-50">
+                  className={`rounded border border-border bg-bg px-2 py-1 text-[12px] text-text ${FIELD_DISABLED}`}>
                   <option value="" disabled>Choose an item</option>
                   {pickList.map(c => (
                     <option key={candidateKey(c)} value={candidateKey(c)}>{targetLabel(c.class, c.name, mode)}</option>
@@ -510,7 +510,7 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason,
               <span className="text-muted">Item</span>
               <select data-testid="place-item" value={place.key} disabled={!writable || placeable.length === 0}
                 onChange={e => setPlace(p => ({ ...p, key: e.target.value, on: 'ground', roofOf: null }))}
-                className="rounded border border-border bg-bg px-2 py-1 text-[12px] text-text disabled:opacity-50">
+                className={`rounded border border-border bg-bg px-2 py-1 text-[12px] text-text ${FIELD_DISABLED}`}>
                 <option value="" disabled>Choose an item</option>
                 {placeable.map(c => (
                   <option key={candidateKey(c)} value={candidateKey(c)}>
@@ -529,7 +529,7 @@ export default function AssociationPanel({ site, scene, canWrite, blockedReason,
                 <label className="flex flex-col gap-0.5 text-[11px]">
                   <span className="text-muted">Stands on</span>
                   <select data-testid="place-on" value={place.on} disabled={!writable} onChange={e => setOn(e.target.value)}
-                    className="rounded border border-border bg-bg px-2 py-1 text-[12px] text-text disabled:opacity-50">
+                    className={`rounded border border-border bg-bg px-2 py-1 text-[12px] text-text ${FIELD_DISABLED}`}>
                     <option value="ground">Ground</option>
                     {selected && roofOk && solar && <option value="roof">Roof of {bName(selected.id)}</option>}
                   </select>

@@ -2,6 +2,7 @@
 // correction): unit beside the label, an empty field is NaN, and the error is
 // visible text tied to the input (never a tooltip alone).
 import { useId } from 'react'
+import { FIELD_DISABLED } from './buttonStyles'
 
 interface Props {
   label: string
@@ -31,7 +32,7 @@ export default function NumberField({ label, unit, value, onChange, error, hint,
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? errId : undefined}
         onChange={e => onChange(e.target.value === '' ? NaN : Number(e.target.value))}
-        className={`${width} rounded border bg-bg px-2 py-1 text-[12px] text-text disabled:opacity-50 ${error ? 'border-danger' : 'border-border'}`}
+        className={`${width} rounded border bg-bg px-2 py-1 text-[12px] text-text ${FIELD_DISABLED} ${error ? 'border-danger' : 'border-border'}`}
       />
       {hint && !error && <span className="text-[10px] text-ink-400">{hint}</span>}
       {error && <span id={errId} role="alert" className="text-[10px] text-danger">{error}</span>}

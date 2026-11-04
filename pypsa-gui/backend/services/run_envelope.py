@@ -1064,8 +1064,9 @@ def settle(task_path, call_id, ctx, before, after=None):
     `after` is a covered step's receipt (`admitted_write`): the identity
     captured under the write's own locks, never a later read, so an edit
     landing after them is drift on the next step (issue 22). Without it
-    (a step the wrapper does not cover yet) the identity is read now: the
-    known limit the README names."""
+    (a step outside `ATOMIC_TOOLS`: `run_simulation`, `run_ac_pf_stage`, or a
+    card-approved step) the identity is read now: the README's remaining
+    limit."""
     from services import assistant_tasks
     after = after if after is not None else identity(ctx, exact=False)
     current = after.get("fingerprint")  # None: no link, so the next admission reads drift
@@ -1087,13 +1088,29 @@ def settle(task_path, call_id, ctx, before, after=None):
 
 # ── Issue 22: compare and write in one project lock ─────────────────────────
 
-# The envelope steps whose write runs inside `admitted_write`: eh_site@1's
-# edit shapes (`update_component` on its size caps, any attrs: the compare is
-# shape-independent, so a mixed call is guarded too, never refused for it)
-# and the run's queued solve (its solver-config snapshot is taken under the
-# held solver-state lock). Every other envelope tool keeps the step's
-# ambient settle (the README's remaining limit).
-ATOMIC_TOOLS = frozenset({"update_component", "solve_queue_enqueue"})
+# The envelope steps whose write runs inside `admitted_write`, each settling
+# from its own receipt (FILL-10-6 gives each data-gap tool its own row); the
+# step-wise runner and L1 branch on this set. Not covered (the README's
+# remaining limit): the envelope-admitted runs `run_simulation` and
+# `run_ac_pf_stage` (`RUN_TOOLS`), and any step the user approved on a card,
+# which settle from a read after the step.
+ATOMIC_TOOLS = frozenset({
+    # eh_site@1's edit shapes (its size caps, any attrs: the compare is
+    # shape-independent, so a mixed call is guarded too, never refused for it).
+    "update_component",
+    # The run's queued solve: its input is captured under the held locks.
+    "solve_queue_enqueue",
+    # Data-gap fills (issue 04). None edits the network, so the pickup expects
+    # +0 on the edit counter. A tariff ref is in the solver config the
+    # fingerprint hashes; a weather choice is a profile-generator default the
+    # solve never reads, so a clean fill of it adds no link.
+    "apply_generated_profile",
+    "attach_tariff",
+    "set_weather_choice",
+    # Prepares a load fill: writes the pending profile store only (not an edit,
+    # so no link), but its pickup compare refuses drift before that write.
+    "generate_load_profile",
+})
 PICKUP_KIND = "envelope_pickup_refused"  # the literal `admitted_write` refuses with
 
 
