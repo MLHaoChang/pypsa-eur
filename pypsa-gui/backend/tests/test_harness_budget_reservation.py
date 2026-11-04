@@ -10,7 +10,7 @@ import threading
 
 import pytest
 from harness import runner as harness_runner, send_reservation
-from harness.protocol import LLMRequest, ProviderError
+from harness.protocol import LLMEvent, LLMRequest, ProviderError
 from harness.providers.fake import FakeProvider
 from services import run_envelope
 from tests.test_assistant_tasks_study_brief import (  # noqa: F401
@@ -58,6 +58,11 @@ def set_limit(path, **limit):
     def change(task):
         harness_runner._budget(task)["limit"].update(limit)
     harness_runner._update(path, change)
+
+
+def grant(monkeypatch, cap=2.0, allowed=True, state="granted"):
+    envelope = {"state": state, "research": {"allowed": allowed, "cost_cap_eur": cap}}
+    monkeypatch.setattr(run_envelope, "read", lambda path: envelope)
 
 
 def drain(provider, req):
@@ -176,7 +181,7 @@ def test_a_send_that_errors_settles_uncertain_at_its_bound_at_turn_end(run, mode
 @pytest.mark.parametrize("raised, max_tokens", [(None, 100_000), (10, 500_000)])
 def test_a_research_send_that_fits_its_cap_is_admitted(run, mode, monkeypatch, raised, max_tokens):
     # EUR 1.4 under the EUR 2 default; EUR 7 under an envelope raised to EUR 10.
-    monkeypatch.setattr(run_envelope, "read", lambda path: {"research": {"allowed": True, "cost_cap_eur": raised}} if raised else {})
+    grant(monkeypatch, raised or 2.0)
     set_limit(run, cost_eur=20.0)
     req = request(max_tokens=max_tokens)
     provider = send_reservation.ReservingProvider(FakeProvider([{"usage": {"input_tokens": 9, "output_tokens": 9}}]),
@@ -188,7 +193,7 @@ def test_a_research_send_that_fits_its_cap_is_admitted(run, mode, monkeypatch, r
 
 
 def test_a_research_send_over_its_cap_stops_research_and_the_run_goes_on(run, mode, monkeypatch):
-    monkeypatch.setattr(run_envelope, "read", lambda path: {"research": {"allowed": True, "cost_cap_eur": 50}})
+    grant(monkeypatch, 50)
     assert send_reservation.research_cap(run) == run_envelope.RESEARCH_CAP_EUR == 10.0
     set_limit(run, cost_eur=40.0)
     with pytest.raises(send_reservation.SendRefused) as refused:
@@ -197,7 +202,8 @@ def test_a_research_send_over_its_cap_stops_research_and_the_run_goes_on(run, mo
     assert record(run)["run"]["status"] == "running" and not ledger(run)["reservations"]
 
 
-def test_a_research_hold_also_counts_toward_the_runs_total(run, mode):
+def test_a_research_hold_also_counts_toward_the_runs_total(run, mode, monkeypatch):
+    grant(monkeypatch)
     send_reservation.admit(run, request("r", max_tokens=100_000), boot="boot-a", scope="research")
     send_reservation.admit(run, request("m", max_tokens=200_000), boot="boot-a")
     with pytest.raises(send_reservation.SendRefused) as refused:
@@ -214,7 +220,9 @@ def test_a_missing_price_or_an_unbounded_input_refuses_money_admission(run, mode
     with pytest.raises(send_reservation.SendRefused) as refused:
         send_reservation.admit(run, image, boot="boot-a")
     assert refused.value.reason == "unbounded_input"
-    assert not ledger(run)["reservations"] and record(run)["run"]["status"] == "running"
+    # GK B ask 4: every run-scope refusal stops the run with its own reason.
+    after = record(run)["run"]
+    assert not ledger(run)["reservations"] and (after["status"], after["reason"]) == ("needs_user", "no_price")
 
 
 def test_token_modes_reserve_in_their_own_unit(run, mode):
@@ -235,10 +243,12 @@ def test_an_unknown_mode_refuses_every_send(run, mode):
     assert refused.value.reason == "invalid_mode"
 
 
-def test_mode_off_leaves_the_provider_as_it_is(run, monkeypatch):
+def test_mode_off_passes_run_sends_straight_through(run, monkeypatch):
     monkeypatch.delenv(send_reservation.MODE_ENV, raising=False)
-    provider = FakeProvider([])
-    assert harness_runner.Runner("a", agent_provider=provider)._round_provider(run, None) is provider
+    inner = FakeProvider([{"usage": {"output_tokens": 3}}])
+    provider = harness_runner.Runner("a", agent_provider=inner)._round_provider(run, None)
+    assert [e.type for e in drain(provider, request())] == ["message_done"]
+    assert len(inner.requests) == 1 and "budgets" not in record(run)["run"]
 
 
 def test_an_agent_round_reserves_and_settles_each_send(granted, profile, site, rated, monkeypatch):
@@ -308,6 +318,7 @@ def test_a_server_tool_adds_its_uses_fees_and_content_to_the_bound(monkeypatch, 
 
 
 def test_the_reservation_sees_the_final_request_inside_a_research_wrapper(run, mode, monkeypatch):
+    grant(monkeypatch)
     # R1 order: Research(Reserving(base)); SH-09's wrapper adds its server tools.
     monkeypatch.setenv(send_reservation.SERVER_TOOL_COSTS_ENV,
                        json.dumps({"web_search": {"fee_eur": 0.5, "content_tokens": 1000}}))
@@ -369,6 +380,7 @@ def test_two_identical_requests_in_flight_each_hold_their_own_bound(run, mode):
 def test_research_is_enforced_with_the_mode_off(run, monkeypatch):
     # GK B (b): the reservation is the research enforcement, whatever the mode.
     monkeypatch.delenv(send_reservation.MODE_ENV, raising=False)
+    grant(monkeypatch)
     send_reservation.admit(run, request(max_tokens=100_000), boot="boot-a", scope="research")
     assert ledger(run)["reservations"][0]["unit"] == "eur"
     with pytest.raises(send_reservation.SendRefused) as refused:
@@ -379,6 +391,7 @@ def test_research_is_enforced_with_the_mode_off(run, monkeypatch):
 
 
 def test_server_tool_fees_settle_at_max_uses_when_usage_is_reported(run, mode, monkeypatch):
+    grant(monkeypatch)
     # Token usage does not count tool uses: the fees settle at their allowance, never below.
     monkeypatch.setenv(send_reservation.SERVER_TOOL_COSTS_ENV,
                        json.dumps({"web_search": {"fee_eur": 0.25, "content_tokens": 100}}))
@@ -389,3 +402,140 @@ def test_server_tool_fees_settle_at_max_uses_when_usage_is_reported(run, mode, m
     charge = ledger(run)["final_charges"][0]
     tokens = (10 * RATE["input_tokens"] + 10 * RATE["output_tokens"]) / 1e6
     assert charge["amount"] == pytest.approx(tokens + 0.5) and charge["eur"] == pytest.approx(tokens + 0.5)
+
+
+# ── GK B review NOT OK @45d4f466 (asks 1–8) ──────────────────────────────────
+
+
+def test_the_real_tool_list_has_a_bound(mode):
+    # Ask 1: list-valued JSON-schema `type` in the catalogue's tool schemas.
+    from harness import catalogue
+    req = request()
+    req.tools = [dict(t) for t in catalogue.TOOLS]
+    req.messages.append({"role": "assistant", "content": [{"type": "tool_use", "id": "t", "name": "x",
+                                                          "input": {"type": ["string", "null"]}}]})
+    for current in ("output_tokens", "total_tokens", "money_eur"):
+        assert send_reservation.bound(req, current) > 0
+
+
+def _admit_many(path, n, out):
+    import os as _os
+    _os.environ[send_reservation.MODE_ENV] = "output_tokens"
+    keys = []
+    for i in range(n):
+        keys.append(send_reservation.admit(path, request(f"{_os.getpid()}-{i}", max_tokens=10), boot=f"p{_os.getpid()}"))
+    out.put(len(keys))
+
+
+def test_admission_is_atomic_across_processes(run, mode):
+    # Ask 2: two processes admitting at once lose no hold (the sidecar file lock).
+    import multiprocessing
+    ctx = multiprocessing.get_context("fork")
+    out = ctx.Queue()
+    procs = [ctx.Process(target=_admit_many, args=(run, 15, out)) for _ in range(2)]
+    for p in procs:
+        p.start()
+    for p in procs:
+        p.join(60)
+    assert [p.exitcode for p in procs] == [0, 0]
+    assert sorted(out.get(timeout=5) for _ in procs) == [15, 15]
+    assert len(ledger(run)["reservations"]) == 30
+
+
+def test_server_tool_fees_settle_from_the_reported_counts(run, mode, monkeypatch):
+    # Ask 3: counts x fee; a missing count settles at max_uses.
+    grant(monkeypatch)
+    monkeypatch.setenv(send_reservation.SERVER_TOOL_COSTS_ENV,
+                       json.dumps({"web_search_": {"fee_eur": 0.25, "content_tokens": 100},
+                                   "web_fetch_": {"fee_eur": 0.1, "content_tokens": 100}}))
+    req = request()
+    req.tools = [search_tool(max_uses=4), {"type": "web_fetch_20250910", "name": "web_fetch", "max_uses": 3}]
+    usage = {"input_tokens": 10, "output_tokens": 10, "search_requests": 1}
+    drain(send_reservation.ReservingProvider(FakeProvider([{"usage": usage}]), run, boot="boot-a", scope="research"),
+          req)
+    charge = ledger(run)["final_charges"][0]
+    tokens = (10 * RATE["input_tokens"] + 10 * RATE["output_tokens"]) / 1e6
+    assert charge["eur"] == pytest.approx(tokens + 1 * 0.25 + 3 * 0.1)
+
+
+def test_a_retry_after_the_provider_started_answering_takes_a_new_hold(run, mode):
+    # Ask 5
+    class Breaks:
+        name = "breaks"
+
+        def __init__(self):
+            self.calls = 0
+
+        def stream(self, req):
+            self.calls += 1
+            if self.calls == 1:
+                yield LLMEvent(type="text_delta", text="hi")
+                raise ProviderError("upstream_error", "cut")
+            yield LLMEvent(type="message_done", usage={"input_tokens": 5, "output_tokens": 5})
+
+    provider = send_reservation.ReservingProvider(Breaks(), run, boot="boot-a")
+    req = request()
+    with pytest.raises(ProviderError):
+        drain(provider, req)
+    drain(provider, req)
+    charges = ledger(run)["final_charges"]
+    assert [c.get("flags") for c in charges] == [["uncertain"], None]
+    assert charges[0]["key"] != charges[1]["key"] and charges[0]["amount"] == send_reservation.bound(req, "money_eur")
+
+
+def test_a_missing_usage_part_settles_at_its_bound(run, mode):
+    # Ask 6: no input count; the input part counts at its bound.
+    req = request()
+    drain(send_reservation.ReservingProvider(FakeProvider([{"usage": {"output_tokens": 5}}]), run, boot="boot-a"), req)
+    charge = ledger(run)["final_charges"][0]
+    worst_in = max(RATE["input_tokens"], RATE["cache_read_tokens"], RATE["cache_create_tokens"])
+    expected = (send_reservation.input_bound(req) * worst_in + 5 * RATE["output_tokens"]) / 1e6
+    assert charge["amount"] == pytest.approx(expected, abs=1e-6) and charge["flags"] == ["partial_usage"]
+
+
+@pytest.mark.parametrize("envelope, reason", [
+    (None, "research_unavailable"),
+    ({"state": "proposed", "research": {"allowed": True, "cost_cap_eur": 2}}, "research_unavailable"),
+    ({"state": "granted", "research": {"allowed": False, "cost_cap_eur": 2}}, "research_not_allowed"),
+])
+def test_research_refuses_without_a_granted_envelope_that_allows_it(run, mode, monkeypatch, envelope, reason):
+    # Ask 7
+    monkeypatch.setattr(run_envelope, "read", lambda path: envelope)
+    with pytest.raises(send_reservation.SendRefused) as refused:
+        send_reservation.admit(run, request(), boot="boot-a", scope="research")
+    assert refused.value.reason == reason and record(run)["run"]["status"] == "running"
+
+
+def test_a_malformed_ledger_or_no_output_limit_refuses(run, mode):
+    # Ask 7
+    unlimited = request()
+    unlimited.max_tokens = None
+    with pytest.raises(send_reservation.SendRefused) as refused:
+        send_reservation.admit(run, unlimited, boot="boot-a")
+    assert refused.value.reason == "unbounded_output"
+
+    def corrupt(task):
+        task["run"]["status"] = "running"
+        task["run"]["budgets"] = {"reservations": [], "cached_usage": {},
+                                  "final_charges": [{"key": "k", "kind": "model_send", "amount": None, "unit": "eur"}]}
+    harness_runner._update(run, corrupt)
+    with pytest.raises(send_reservation.SendRefused) as refused:
+        send_reservation.admit(run, request(), boot="boot-a")
+    assert refused.value.reason == "ledger_invalid"
+    assert record(run)["run"]["reason"] == "ledger_invalid"
+
+
+@pytest.mark.parametrize("current", ["off", "money_eur"])
+def test_a_research_send_through_the_runners_wrapper_is_one_hold_in_both_totals(run, mode, monkeypatch, current):
+    # Ask 8: SH-09 marks its sends research; the runner's wrapper takes them, one row each.
+    mode(current)
+    grant(monkeypatch)
+    inner = FakeProvider([{"usage": {"input_tokens": 9, "output_tokens": 9}}])
+    provider = harness_runner.Runner("boot-a", agent_provider=inner)._round_provider(run, None)
+    with send_reservation.research():
+        drain(provider, request())
+    budgets = ledger(run)
+    rows = budgets["final_charges"] + budgets["reservations"]
+    assert len(rows) == 1 and rows[0]["kind"] == "research_send" and rows[0]["unit"] == "eur"
+    run_ = record(run)["run"]
+    assert send_reservation._spent(run_, "eur") == send_reservation._research_spent(run_) == rows[0]["eur"] > 0

@@ -747,7 +747,10 @@ class Runner:
                 logger.exception("harness runner: input-loop round of %s errored", task_id)
                 run_loops.end(path, "error")
             finally:
-                send_reservation.close_open(path, boot=self.instance)
+                try:
+                    send_reservation.close_open(path, boot=self.instance)
+                except Exception:  # noqa: BLE001 — a ledger fault never keeps the runner from waking
+                    logger.exception("harness runner: closing the sends of %s failed", task_id)
                 self.wake(path)
         context = contextvars.copy_context()
         thread = threading.Thread(target=context.run, args=(round_,), name=f"harness-l1-{task_id[:8]}", daemon=True)
@@ -756,11 +759,11 @@ class Runner:
         return "l1_round"
 
     def _round_provider(self, path, session):
-        """The provider an agent round streams from. With the durable budget
-        mode on (issue 24), every send reserves first; off, it is unchanged."""
+        """The provider an agent round streams from, always behind the send
+        reservation (issue 24): with the durable budget mode on every send
+        reserves first; off, run sends pass straight through and only
+        research (`send_reservation.research()`) is reserved."""
         from harness import send_reservation
-        if not send_reservation.enabled():
-            return self._agent_provider
         inner = self._agent_provider
         if inner is None:
             from harness.providers import wiring

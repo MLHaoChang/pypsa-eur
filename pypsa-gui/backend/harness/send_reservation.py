@@ -37,6 +37,8 @@ hard EUR 10. A provider-run tool (web search or fetch) adds its `max_uses` ×
 from __future__ import annotations
 
 import hashlib
+import contextlib
+import contextvars
 import json
 import logging
 import math
@@ -45,8 +47,9 @@ import threading
 import time
 import uuid
 import weakref
-from typing import Any
 from collections.abc import Iterator
+from dataclasses import dataclass
+from typing import Any
 
 from fastapi import HTTPException
 
@@ -64,6 +67,11 @@ KINDS = {"run": "model_send", "research": "research_send"}
 FRAMING_TOKENS = 2048
 FRAMING_TOKENS_PER_MESSAGE = 16
 SERVER_TOOL_COSTS_ENV = "PYPSA_GUI_SERVER_TOOL_COSTS_EUR"
+# The usage count a provider reports for each server tool, by tool name.
+SERVER_TOOL_COUNT_KEYS = {"web_search": "search_requests", "web_fetch": "fetch_requests"}
+INPUT_KEYS = ("input_tokens", "cache_read_tokens", "cache_create_tokens")
+# The flags of a charge that counts at its hold's bound because the usage was lost.
+AT_BOUND_FLAGS = frozenset({"uncertain", "no_usage"})
 _UNBOUNDED_BLOCKS = frozenset({"image", "document", "input_image", "input_file"})
 
 
@@ -89,31 +97,20 @@ def enabled() -> bool:
 # ── Bounds ───────────────────────────────────────────────────────────────────
 
 
-def _walk_blocks(value: Any) -> Iterator[dict]:
+def _content_blocks(value: Any) -> Iterator[dict]:
+    """Every block dict in the system blocks and messages (tool schemas are
+    not content: their `type` is a JSON-schema type and may be a list)."""
     if isinstance(value, dict):
         yield value
         for item in value.values():
-            yield from _walk_blocks(item)
+            yield from _content_blocks(item)
     elif isinstance(value, (list, tuple)):
         for item in value:
-            yield from _walk_blocks(item)
+            yield from _content_blocks(item)
 
 
-def input_bound(request: LLMRequest) -> int | None:
-    """An upper bound on the request's input tokens. None when its size in
-    bytes cannot bound it: an image or document block, or content that does
-    not serialise."""
-    parts = [request.system_blocks, request.messages, request.tools]
-    if any(b.get("type") in _UNBOUNDED_BLOCKS for b in _walk_blocks(parts)):
-        return None
-    try:
-        size = len(json.dumps(parts, ensure_ascii=False).encode("utf-8"))
-    except (TypeError, ValueError):
-        return None
-    server = server_tool_allowance(request)
-    if server is None:
-        return None
-    return size + FRAMING_TOKENS + FRAMING_TOKENS_PER_MESSAGE * len(request.messages or ()) + server[0]
+def _number(value: Any) -> bool:
+    return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value) and value >= 0
 
 
 def _server_tools(request: LLMRequest) -> list[dict]:
@@ -134,36 +131,79 @@ def server_tool_costs() -> dict[str, dict[str, float]]:
         raise ValueError("the server tool cost table is not an object")
     for prefix, entry in table.items():
         if not isinstance(prefix, str) or not prefix or not isinstance(entry, dict) \
-                or set(entry) != {"fee_eur", "content_tokens"}:
-            raise ValueError("a server tool cost names fee_eur and content_tokens")
-        for value in entry.values():
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
-                raise ValueError("a server tool cost is a finite number of at least 0")
+                or set(entry) != {"fee_eur", "content_tokens"} or not all(_number(v) for v in entry.values()):
+            raise ValueError("a server tool cost is {fee_eur, content_tokens}, finite numbers of at least 0")
     return table
 
 
-def server_tool_allowance(request: LLMRequest) -> tuple[int, float] | None:
-    """(input tokens, EUR fees) the request's server tools may add at most;
-    None when a tool has no `max_uses` or no known cost."""
+@dataclass(frozen=True)
+class ServerTool:
+    count_key: str  # the usage count the provider reports for its uses
+    max_uses: int
+    fee_eur: float
+    content_tokens: int  # per use, at most
+
+
+@dataclass(frozen=True)
+class Shape:
+    """What bounds one send: input tokens (None: no bound), the output
+    limit, and its server tools (None: one has no known cost or no
+    `max_uses`)."""
+
+    inputs: int | None
+    output: int
+    tools: tuple[ServerTool, ...] | None
+
+    @property
+    def fees_eur(self) -> float:
+        return sum(t.max_uses * t.fee_eur for t in self.tools or ())
+
+
+def _tools_of(request: LLMRequest) -> tuple[ServerTool, ...] | None:
     tools = _server_tools(request)
     if not tools:
-        return 0, 0.0
+        return ()
     try:
         table = server_tool_costs()
     except ValueError:
         return None
-    tokens, fees = 0, 0.0
+    out = []
     for tool in tools:
-        uses = tool.get("max_uses")
-        match = max((p for p in table if str(tool["type"]).startswith(p)), key=len, default=None)
+        uses, kind = tool.get("max_uses"), tool.get("type")
+        match = max((p for p in table if isinstance(kind, str) and kind.startswith(p)), key=len, default=None)
         if isinstance(uses, bool) or not isinstance(uses, int) or uses <= 0 or match is None:
             return None
         content = tool.get("max_content_tokens", table[match]["content_tokens"])
-        if isinstance(content, bool) or not isinstance(content, (int, float)) or content < 0:
+        if not _number(content):
             return None
-        tokens += uses * int(math.ceil(content))
-        fees += uses * float(table[match]["fee_eur"])
-    return tokens, fees
+        name = str(tool.get("name") or "")
+        out.append(ServerTool(SERVER_TOOL_COUNT_KEYS.get(name, f"{name}_requests"), uses,
+                              float(table[match]["fee_eur"]), int(math.ceil(content))))
+    return tuple(out)
+
+
+def shape(request: LLMRequest) -> Shape:
+    """The bound's parts for one request; SendRefused for no output limit."""
+    out = request.max_tokens
+    if isinstance(out, bool) or not isinstance(out, int) or out < 0:
+        raise SendRefused("unbounded_output", "This request has no output limit; the send is refused.")
+    tools = _tools_of(request)
+    parts = [request.system_blocks, request.messages]
+    inputs = None
+    if not any(isinstance(b.get("type"), str) and b["type"] in _UNBOUNDED_BLOCKS for b in _content_blocks(parts)):
+        try:
+            size = len(json.dumps([*parts, request.tools], ensure_ascii=False).encode("utf-8"))
+        except (TypeError, ValueError):
+            size = None
+        if size is not None and tools is not None:
+            inputs = (size + FRAMING_TOKENS + FRAMING_TOKENS_PER_MESSAGE * len(request.messages or ())
+                      + sum(t.max_uses * t.content_tokens for t in tools))
+    return Shape(inputs, out, tools)
+
+
+def input_bound(request: LLMRequest) -> int | None:
+    """An upper bound on the request's input tokens; None when there is none."""
+    return shape(request).inputs
 
 
 def _rate(model: str) -> dict[str, float]:
@@ -174,65 +214,67 @@ def _rate(model: str) -> dict[str, float]:
         raise SendRefused("no_price", f"No price for this model; the send is refused ({exc}).") from None
 
 
-def _eur_bound(request: LLMRequest) -> float:
-    inputs = input_bound(request)
-    if inputs is None:
-        raise SendRefused("unbounded_input", "This request's input has no upper bound; a priced send is refused.")
-    rate = _rate(request.model)
-    worst_in = max(rate["input_tokens"], rate["cache_read_tokens"], rate["cache_create_tokens"])
-    fees = server_tool_allowance(request)[1]
-    return round((inputs * worst_in + int(request.max_tokens) * rate["output_tokens"]) / 1e6 + fees, 6)
+def _worst_input_rate(rate: dict[str, float]) -> float:
+    return max(rate[k] for k in INPUT_KEYS)
+
+
+def _bounded_inputs(s: Shape) -> int:
+    if s.inputs is None:
+        raise SendRefused("unbounded_input", "This request's input has no upper bound; the send is refused.")
+    return s.inputs
+
+
+def amount(s: Shape, unit: str, model: str) -> int | float:
+    """The hold for one send in `unit`."""
+    if unit == "output_tokens":
+        return s.output
+    inputs = _bounded_inputs(s)
+    if unit == "total_tokens":
+        return inputs + s.output
+    rate = _rate(model)
+    return round((inputs * _worst_input_rate(rate) + s.output * rate["output_tokens"]) / 1e6 + s.fees_eur, 6)
 
 
 def bound(request: LLMRequest, current: str) -> int | float:
     """The hold for one send in the mode's unit."""
-    out = int(request.max_tokens)
-    if out < 0:
-        raise SendRefused("unbounded_output", "This request has no output limit.")
-    if current == "output_tokens":
-        return out
-    if current == "total_tokens":
-        inputs = input_bound(request)
-        if inputs is None:
-            raise SendRefused("unbounded_input", "This request's input has no upper bound; the send is refused.")
-        return inputs + out
-    return _eur_bound(request)
+    return amount(shape(request), UNITS[current], request.model)
 
 
-def _counts(usage: Any) -> dict[str, int] | None:
-    """The provider's four usage counts, absent keys as 0 (protocol). None
-    for no usage at all or an invalid count."""
+def _count(value: Any) -> int | None:
+    return value if not isinstance(value, bool) and isinstance(value, int) and value >= 0 else None
+
+
+def actual(s: Shape, unit: str, model: str, usage: Any) -> tuple[int | float, list[str]]:
+    """The spend of one send from the provider's usage, and its flags. No
+    usage at all is the whole bound (`no_usage`). A part that is missing or
+    invalid, the input or the output count, settles at that part's bound
+    (`partial_usage`). Server-tool fees are the reported use counts × fee,
+    or `max_uses` × fee when a count is missing. Never below what was
+    reported, never zero for lost usage."""
+    usage = usage if isinstance(usage, dict) else {}
     from harness.runner import USAGE_KEYS
-    if not isinstance(usage, dict) or not any(usage.get(k) for k in USAGE_KEYS):
-        return None
-    counts = {}
-    for key in USAGE_KEYS:
-        value = usage.get(key, 0)
-        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-            return None
-        counts[key] = value
-    return counts
-
-
-def _actual(counts: dict[str, int], current: str, request: LLMRequest) -> int | float:
-    """The send's spend from the provider's usage. Token usage does not say
-    how many server-tool uses ran, so money counts their fees at `max_uses`."""
-    if current == "output_tokens":
-        return counts["output_tokens"]
-    if current == "total_tokens":
-        return sum(counts.values())
-    rate = _rate(request.model)
-    fees = (server_tool_allowance(request) or (0, 0.0))[1]
-    return round(sum(counts[k] * rate[k] for k in counts) / 1e6 + fees, 6)
-
-
-def _eur_actual(counts: dict[str, int] | None, request: LLMRequest) -> float | None:
-    if counts is None:
-        return None
-    try:
-        return _actual(counts, "money_eur", request)
-    except SendRefused:
-        return None
+    if not any(k in usage for k in USAGE_KEYS):
+        return amount(s, unit, model), ["no_usage"]
+    flags = []
+    output = _count(usage.get("output_tokens"))
+    if output is None:
+        output, flags = s.output, ["partial_usage"]
+    inputs = {k: _count(usage.get(k, 0)) for k in INPUT_KEYS}
+    input_ok = "input_tokens" in usage and all(v is not None for v in inputs.values())
+    if not input_ok and unit != "output_tokens":
+        flags = ["partial_usage"]
+    if unit == "output_tokens":
+        return output, flags
+    if unit == "total_tokens":
+        return (sum(inputs.values()) if input_ok else _bounded_inputs(s)) + output, flags
+    rate = _rate(model)
+    cost_in = (sum(inputs[k] * rate[k] for k in INPUT_KEYS) if input_ok
+               else _bounded_inputs(s) * _worst_input_rate(rate))
+    fees = 0.0
+    for tool in s.tools or ():
+        used = _count(usage.get(tool.count_key))
+        fees += (tool.max_uses if used is None else used) * tool.fee_eur
+    return round((cost_in + output * rate["output_tokens"]) / 1e6 + fees, 6), flags
 
 
 # ── The ledger ───────────────────────────────────────────────────────────────
@@ -248,37 +290,54 @@ def _rows(run: dict) -> list[dict]:
     return list(budgets.get("final_charges", [])) + list(budgets.get("reservations", []))
 
 
+def _sum(rows, field: str) -> float:
+    total = 0.0
+    for row in rows:
+        value = row.get(field)
+        if not _number(value):
+            raise SendRefused("ledger_invalid", "The run's spend ledger has an unreadable amount; sends are refused.")
+        total += float(value)
+    return total
+
+
 def _spent(run: dict, unit: str) -> float:
-    return sum(float(r.get("amount") or 0) for r in _rows(run) if r.get("unit") == unit)
+    return _sum([r for r in _rows(run) if r.get("unit") == unit], "amount")
 
 
 def _research_spent(run: dict) -> float:
-    return sum(float(r.get("eur") or 0) for r in _rows(run) if r.get("kind") == KINDS["research"])
+    return _sum([r for r in _rows(run) if r.get("kind") == KINDS["research"]], "eur")
 
 
-def cap(task: dict, current: str) -> float | None:
-    """The run's cap in the mode's unit; None when the run sets none."""
+def cap(task: dict, unit: str) -> float | None:
+    """The run's cap in `unit`; None when the run sets none."""
     from harness import budget, runner
     limit = runner._budget(task)["limit"]
-    if current == "money_eur":
+    if unit == "eur":
         return float(limit["cost_eur"])
-    if current == "output_tokens":
+    if unit == "output_tokens":
         return float(limit.get("output_tokens", budget.MAX_OUTPUT_TOKENS_PER_SESSION))
     value = limit.get("total_tokens")
-    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+    return float(value) if _number(value) else None
 
 
 def research_cap(path) -> float:
-    """SH-RESEARCH-CAP-1, the one research enforcement: the envelope's
-    `research.cost_cap_eur` (as `run_envelope._check_research` validates it),
-    EUR 2 when there is none, never above EUR 10."""
+    """SH-RESEARCH-CAP-1, the one research enforcement: the granted
+    envelope's `research.cost_cap_eur`, never above EUR 10. Refuses (fails
+    closed) when the envelope cannot be read, is not granted or does not
+    allow research."""
     from services import run_envelope
     try:
-        value = ((run_envelope.read(path) or {}).get("research") or {}).get("cost_cap_eur")
-    except Exception:  # noqa: BLE001 — an unreadable envelope keeps the default
-        value = None
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value:
-        return run_envelope.RESEARCH_DEFAULT_EUR
+        envelope = run_envelope.read(path)
+    except Exception:  # noqa: BLE001 — an unreadable envelope admits no research
+        envelope = None
+    if not isinstance(envelope, dict) or envelope.get("state") != "granted":
+        raise SendRefused("research_unavailable", "No granted envelope for this run; research is refused.")
+    research = envelope.get("research")
+    if not isinstance(research, dict) or research.get("allowed") is not True:
+        raise SendRefused("research_not_allowed", "The envelope does not allow research.")
+    value = research.get("cost_cap_eur")
+    if not _number(value):
+        raise SendRefused("research_unavailable", "The envelope's research cap is unreadable; research is refused.")
     return min(float(value), run_envelope.RESEARCH_CAP_EUR)
 
 
@@ -294,28 +353,57 @@ def new_key(task_id: str) -> str:
     return f"run:{task_id}:{uuid.uuid4().hex[:16]}"
 
 
+def _locked(path, change):
+    """`change` on the task under the cross-process sidecar lock (the
+    runner's lease lock) and the task lock: the ledger's read-modify-write
+    is atomic across processes and threads."""
+    from harness import runner
+    with runner._file_lock(path):
+        return runner._update(path, change)
+
+
+def _stop(path, reason: str) -> None:
+    from harness import runner
+
+    def change(task):
+        if task["run"]["status"] not in runner._DRIVEN or task["run"]["status"] == "needs_user":
+            return False  # an earlier stop keeps its reason
+        runner._stop_in(task, "needs_user", reason)
+    _locked(path, change)
+
+
 def admit(path, request: LLMRequest, *, boot: str, scope: str = "run", key: str | None = None) -> str:
     """Reserve one send's hold before it goes out, or raise SendRefused.
-    `key` is the hold of an earlier attempt of this same send (a retry): if
-    it is still open, nothing more is reserved. A refusal for the cap ends
-    the run `needs_user` with reason `budget`, the same stop as issue 02's
-    cost cap. Returns the hold's key.
+    `key` is the open hold of an earlier attempt of this same send that
+    failed before any response byte: it is reused, nothing more is
+    reserved. Returns the hold's key.
 
-    Research is enforced whatever the mode (GK B (b)): with the mode off, a
-    research hold is in EUR."""
-    from harness import runner
+    A run-scope refusal of any reason stops the run `needs_user` with that
+    reason (`budget` for the cap, issue 02's stop). A research refusal
+    stops research only; the stage goes on (§6.5). Research is enforced
+    whatever the mode (GK B (b)): with the mode off, its hold is in EUR. A
+    research hold is ONE row, counted in the run's total and in the
+    research cap."""
+    if scope not in KINDS:
+        raise ValueError(f"unknown reservation scope {scope!r}")
+    try:
+        return _admit(path, request, boot=boot, scope=scope, key=key)
+    except SendRefused as refused:
+        if scope == "run" and refused.reason != "not_a_run":
+            _stop(path, refused.reason)
+        raise
+
+
+def _admit(path, request, *, boot, scope, key):
     current = mode()
     if current == "invalid":
         raise SendRefused("invalid_mode", f"{MODE_ENV} is not one of {', '.join(MODES)}; sends are refused.")
-    if scope not in KINDS:
-        raise ValueError(f"unknown reservation scope {scope!r}")
-    if current == "off":
-        if scope != "research":
-            raise ValueError("no run-scope reservation while the mode is off")
-        current = "money_eur"
-    unit = UNITS[current]
-    amount = bound(request, current)
-    eur = _eur_bound(request) if scope == "research" else None
+    if current == "off" and scope != "research":
+        raise ValueError("no run-scope reservation while the mode is off")
+    unit = UNITS["money_eur" if current == "off" else current]
+    s = shape(request)
+    hold = amount(s, unit, request.model)
+    eur = hold if unit == "eur" else (amount(s, "eur", request.model) if scope == "research" else None)
     research_limit = research_cap(path) if scope == "research" else None
     out: dict[str, Any] = {}
 
@@ -323,70 +411,68 @@ def admit(path, request: LLMRequest, *, boot: str, scope: str = "run", key: str 
         run = task["run"]
         if key is not None and any(r.get("key") == key for r in _ledger(run).get("reservations", [])):
             out["key"] = key
-            return False  # a retry of the same send reserves once
-        out["key"] = new_key(task["task_id"])
-        limit = cap(task, current)
-        if limit is None:
-            out["refused"] = ("no_cap", f"The run sets no {unit} cap; the send is refused.")
-        elif _spent(run, unit) + amount > limit:
-            out["refused"] = ("budget", "The run's model budget is spent; the send is refused.")
-        elif eur is not None and _research_spent(run) + eur > research_limit:
-            out["refused"] = ("research_budget", "The research budget is spent; research stops.")
-        if out.get("refused"):
-            if out["refused"][0] == "research_budget":
-                return False  # research stops; the stage goes on without it (§6.5)
-            if run["status"] in runner._DRIVEN:
-                runner._stop_in(task, "needs_user", "budget")
-            return None
+            return False  # a retry before any response byte reserves once
+        try:
+            limit = cap(task, unit)
+            if limit is None:
+                raise SendRefused("no_cap", f"The run sets no {unit} cap; the send is refused.")
+            if _spent(run, unit) + hold > limit:
+                raise SendRefused("budget", "The run's model budget is spent; the send is refused.")
+            if research_limit is not None and _research_spent(run) + eur > research_limit:
+                raise SendRefused("research_budget", "The research budget is spent; research stops.")
+        except SendRefused as refused:
+            out["refused"] = refused
+            return False
         from services import durable_conversation
-        durable_conversation._reserve_in(run, key=out["key"], kind=KINDS[scope], amount=amount, unit=unit)
-        hold = next(r for r in _ledger(run)["reservations"] if r["key"] == out["key"])
-        hold["dispatch"] = {"boot": boot, "model": request.model, "at": time.time()}
-        if eur is not None:
-            hold["eur"] = eur
+        out["key"] = new_key(task["task_id"])
+        durable_conversation._reserve_in(run, key=out["key"], kind=KINDS[scope], amount=hold, unit=unit)
+        row = next(r for r in _ledger(run)["reservations"] if r["key"] == out["key"])
+        row["dispatch"] = {"boot": boot, "model": request.model, "at": time.time()}
+        if scope == "research":
+            row["eur"] = eur
         return None
 
-    if runner._update(path, change) is None:
+    if _locked(path, change) is None:
         raise SendRefused("not_a_run", "This task is not a harness run.")
     if out.get("refused"):
-        raise SendRefused(*out["refused"])
+        raise out["refused"]
     return out["key"]
 
 
-def _settle_row(run: dict, hold: dict, amount, flags: list[str] | None, eur=None) -> None:
+def _settle_row(run: dict, hold: dict, amount_, flags: list[str] | None, eur=None) -> None:
     from services import durable_conversation
-    durable_conversation._settle_in(run, key=hold["key"], amount=amount, unit=hold["unit"], flags=flags)
+    durable_conversation._settle_in(run, key=hold["key"], amount=amount_, unit=hold["unit"], flags=flags or None)
     charge = next(c for c in reversed(_ledger(run)["final_charges"]) if c["key"] == hold["key"])
     if "eur" in hold:
         charge["eur"] = hold["eur"] if eur is None else eur
 
 
 def settle(path, key: str, request: LLMRequest, usage: Any) -> None:
-    """Settle one send to the provider's usage; no usage settles at the
-    hold's bound (flag `no_usage`), never zero."""
-    from harness import runner
-    counts = _counts(usage)
+    """Settle one send to the provider's usage (see `actual`)."""
+    s = shape(request)
 
     def change(task):
         run = task["run"]
         hold = next((r for r in _ledger(run).get("reservations", []) if r.get("key") == key), None)
         if hold is None:
             return False  # already reconciled: it counted at its bound
-        unit = hold["unit"]
-        current = next((m for m, u in UNITS.items() if u == unit), None)
-        amount, flags = hold["amount"], ["no_usage"]
-        if counts is not None and current is not None:
+        try:
+            spent, flags = actual(s, hold["unit"], request.model, usage)
+        except SendRefused:
+            spent, flags = hold["amount"], ["no_usage"]
+        eur = None
+        if "eur" in hold:
             try:
-                amount, flags = _actual(counts, current, request), None
+                eur = actual(s, "eur", request.model, usage)[0]
             except SendRefused:
-                pass
-        _settle_row(run, hold, amount, flags, eur=_eur_actual(counts, request) if counts else None)
+                eur = hold["eur"]
+        _settle_row(run, hold, spent, flags, eur=eur)
         return None
 
     try:
-        runner._update(path, change)
-    except HTTPException:
-        logger.exception("send reservation: settling %s failed; the hold stays and counts", key)
+        _locked(path, change)
+    except (HTTPException, TimeoutError, OSError):
+        logger.exception("send reservation: settling %s failed; the hold stays open and counts", key)
 
 
 def _settle_uncertain(task: dict, which) -> int:
@@ -397,16 +483,27 @@ def _settle_uncertain(task: dict, which) -> int:
     return len(holds)
 
 
+def _boot_of(row: dict) -> str | None:
+    return (row.get("dispatch") or {}).get("boot")
+
+
+def settle_uncertain(path, key: str) -> None:
+    """One hold settles `uncertain` at its bound: an attempt that failed
+    after the provider started answering."""
+    def change(task):
+        return None if _settle_uncertain(task, lambda r: r.get("key") == key) else False
+    _locked(path, change)
+
+
 def close_open(path, *, boot: str) -> int:
     """Turn end: a hold this boot left open (a send that errored or was
     abandoned) settles `uncertain` at its bound."""
-    from harness import runner
     out = {"n": 0}
 
     def change(task):
-        out["n"] = _settle_uncertain(task, lambda r: (r.get("dispatch") or {}).get("boot") == boot)
+        out["n"] = _settle_uncertain(task, lambda r: _boot_of(r) == boot)
         return None if out["n"] else False
-    runner._update(path, change)
+    _locked(path, change)
     return out["n"]
 
 
@@ -425,13 +522,13 @@ def reconcile(path, *, boot: str, now: float | None = None) -> int:
         lease = run.get("runner") or {}
         if lease.get("lease_owner") not in (None, boot) and float(lease.get("lease_until") or 0) > now:
             return False
-        out["n"] = _settle_uncertain(task, lambda r: (r.get("dispatch") or {}).get("boot") != boot)
+        out["n"] = _settle_uncertain(task, lambda r: _boot_of(r) != boot)
         if not out["n"]:
             return False
         if run["status"] in runner._DRIVEN:
             runner._stop_in(task, "needs_user", "uncertain")
         return None
-    runner._update(path, change)
+    _locked(path, change)
     return out["n"]
 
 
@@ -446,10 +543,12 @@ def summary(run: dict) -> dict | None:
     unit = rows[-1].get("unit")
     held = [r for r in _ledger(run).get("reservations", []) if r.get("unit") == unit]
     bounds = [c for c in _ledger(run).get("final_charges", [])
-              if c.get("unit") == unit and set(c.get("flags") or ()) & {"uncertain", "no_usage"}]
-    return {"unit": unit, "spent": round(_spent(run, unit), 6),
-            "open": round(sum(float(r.get("amount") or 0) for r in held), 6),
-            "at_bound": len(bounds)}
+              if c.get("unit") == unit and set(c.get("flags") or ()) & AT_BOUND_FLAGS]
+    try:
+        spent, open_ = _spent(run, unit), _sum(held, "amount")
+    except SendRefused:
+        return None
+    return {"unit": unit, "spent": round(spent, 6), "open": round(open_, 6), "at_bound": len(bounds)}
 
 
 def has_open_holds(run: dict) -> bool:
@@ -467,15 +566,32 @@ def sweep(paths, *, boot: str, now: float | None = None) -> int:
     return total
 
 
+_SCOPE: contextvars.ContextVar[str | None] = contextvars.ContextVar("send_reservation_scope", default=None)
+
+
+@contextlib.contextmanager
+def research():
+    """Sends streamed inside this block are research (SH-09): the runner's
+    own wrapper reserves them under `scope="research"`, one hold each. A
+    research step never nests a second ReservingProvider."""
+    token = _SCOPE.set("research")
+    try:
+        yield
+    finally:
+        _SCOPE.reset(token)
+
+
 class ReservingProvider:
     """Wraps a provider: every `stream(request)` reserves first and settles
-    after. Only a harness run's own sends go through it."""
+    after. Only a harness run's own sends go through it. With the mode off,
+    run-scope sends pass straight through and only research is reserved."""
 
     def __init__(self, inner, path, *, boot: str, scope: str = "run") -> None:
         self._inner, self._path, self._boot, self._scope = inner, path, boot, scope
         self.name = getattr(inner, "name", "reserving")
         # The open send of each request object: the loop retries by streaming
-        # the same request again, and that attempt reuses the send's key.
+        # the same request again; an attempt that failed before any response
+        # byte leaves its key here for the retry to reuse.
         self._open: dict[int, tuple[Any, str, str]] = {}
         self._lock = threading.Lock()
 
@@ -495,12 +611,23 @@ class ReservingProvider:
         return getattr(self._inner, attr)
 
     def stream(self, request: LLMRequest) -> Iterator[LLMEvent]:
-        key = admit(self._path, request, boot=self._boot, scope=self._scope, key=self._retry_key(request))
+        scope = _SCOPE.get() or self._scope
+        if scope == "run" and mode() == "off":
+            yield from self._inner.stream(request)
+            return
+        key = admit(self._path, request, boot=self._boot, scope=scope, key=self._retry_key(request))
         self._remember(request, key)
-        usage = None
-        for event in self._inner.stream(request):
-            if event.type == "message_done":
-                usage = event.usage
-            yield event
-        settle(self._path, key, request, usage)
+        usage, answered = None, False
+        try:
+            for event in self._inner.stream(request):
+                answered = True
+                if event.type == "message_done":
+                    usage = event.usage
+                yield event
+        except Exception:
+            if answered:  # the provider started answering: it may have billed; a retry takes a new hold
+                self._remember(request, None)
+                settle_uncertain(self._path, key)
+            raise
         self._remember(request, None)
+        settle(self._path, key, request, usage)

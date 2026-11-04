@@ -57,3 +57,13 @@ GK B note (3 Nov): restart reconciliation also runs as a boot sweep, not only wh
   - R5: the boot sweep honours the lease: it never settles a hold on a run another live process drives.
   - R6: `money_eur` with a missing rate refuses. The label is "bound", never "estimate".
 - Build: `harness/send_reservation.py` (the mode, bounds, admit, settle, turn-end close, restart reconcile and boot sweep), wired in `harness/runner.py`. The ledger is `run.budgets`. Server-tool costs are owner values in `PYPSA_GUI_SERVER_TOOL_COSTS_EUR`, and none are set by default. Tests: `tests/test_harness_budget_reservation.py`.
+- 4 Nov, GK B NOT OK @45d4f466 (eight asks), all addressed:
+  1. A list-valued schema `type` crashed the bound. Only content blocks are walked now, and `type` is checked as a string. Tested with `catalogue.TOOLS`.
+  2. The ledger read-modify-write now runs under the runner's sidecar file lock in admit, settle, close, reconcile and the sweep. A two-process test shows 10 of 30 holds are lost without the lock.
+  3. Server-tool fees settle as reported counts × fee (`search_requests`, `fetch_requests`). A missing count settles at `max_uses`.
+  4. Every run-scope refusal stops the run `needs_user` with its own reason. A research refusal stops research only.
+  5. An attempt that fails after the first response event settles `uncertain` at its bound, and the retry takes a new hold.
+  6. A missing or invalid usage part settles at that part's bound, flagged `partial_usage`.
+  7. Research refuses without a granted envelope that allows it. A malformed ledger amount refuses with `ledger_invalid`, and `max_tokens=None` refuses with `unbounded_output`.
+  8. The runner always wraps its round provider. With the mode off, run sends pass through. `send_reservation.research()` marks SH-09's sends, so each research send is one hold counted in both totals. `close_open` is guarded in the runner's `finally`.
+
