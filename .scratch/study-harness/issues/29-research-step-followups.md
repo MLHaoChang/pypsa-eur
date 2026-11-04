@@ -62,3 +62,7 @@ GO WITH CHANGES: Q1 (a) rewrite re-sends behind a fence; Q2 (a) stub, read back,
 - **Read.** `source_ledger.ranges(rows, gap_key)` returns the verified, non-rejected range rows with their `status`. SH-06 filters `status == "confirmed"` after its own re-read under the lock.
 - **Case change (SH-06 Q2 (a)).** A case change holds `{component, name, attr, value, range: {low, high, unit}, source: "research:<row id>"}`. Admission checks that low, high and unit equal the row's. No central value or step count.
 - **UI.** The research card shows a range row as low–high with its unit (RunMonitor), which needs a UX review.
+
+### Reviewer
+
+GK B (22) `session_01G7qCujP4y18TdvSNJMmqfu` replaces GK B (21) (4 Nov). The plan stays GO WITH CHANGES (Q1–Q3 (a), F1–F10).
