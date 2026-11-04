@@ -331,7 +331,8 @@ def run_round(path, ctx, session, *, provider=None, recheck):
                if a.get("event") == "used" and a.get("source")}
     rows, unverified, refusals = [], [], 0
     for call in outcome["calls"]:
-        if call["carded"] or call["error"] == run_envelope.PICKUP_KIND:  # refused at pickup: no write (issue 22)
+        # Refused at pickup (issue 22) or for breaking a confirmed requirement (issue 23): no write.
+        if call["carded"] or call["error"] in (run_envelope.PICKUP_KIND, "requirement_violated"):
             refusals += 1
             continue
         if not call["ran"] or not edit_card.is_edit(call["tool"]):

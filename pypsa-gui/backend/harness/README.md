@@ -1326,7 +1326,10 @@ else.
   (the runner and the L1 round set `session.write_guard`; `loop.py` enters
   it). Lock order: the project's `mutation_lock`, then its
   `solver_state_lock` (per project RLocks the handler re-enters; never
-  process-global); `assistant_tasks._LOCK` is never taken under them (the
+  process-global); `durable_conversation._LOCK` is taken last, under both
+  (the brief re-check reads the confirmed requirements through
+  `assistant_tasks._stale`; activating a requirement takes the network lock
+  before it too); `assistant_tasks._LOCK` is never taken under them (the
   envelope and task files are read by atomic replace; the refusal's audit
   row is written after release). Under them it re-checks the run (ACL,
   owner, holds), the envelope (same grant, unexpired, budget, brief) and
@@ -1344,6 +1347,33 @@ else.
   so a user edit landing during such a step is taken into the chain. The
   queued solve's network is read from disk at pickup (issue 05).
 - **End.** `cancel_task` revokes; the plan card's revoke pauses the run.
+
+### Confirmed requirements (study harness issue 23)
+
+`harness/requirements.py`; the records live on the durable thread
+(`services/durable_conversation.py`, `requirements: {rev, items}`), written only
+by `activate_requirement`, `retire_requirement` (both move `rev`) and
+`mark_requirement_evaluation` (does not); `checkpoint_thread` refuses the block.
+Closed, versioned predicates: `preserve_horizon` (a server-captured digest of
+snapshots and weightings), `scalar_bound` (one instance by
+`component_identity` uid, one of `Generator.p_nom`, `Generator.p_nom_max`,
+`StorageUnit.p_nom_max`, `StorageUnit.max_hours`, in the native field unit) and
+`advisory_note` (never evaluated). `set_requirement` is a carded edit: its
+preview refuses unit-less, mis-united and contradictory proposals, and only the
+user's approval activates, replaces or retires one.
+
+At dispatch `requirements.annotate` runs right after the edit card is built:
+on an ordinary chat session a violating call is refused `requirement_violated`
+(no card, no write); on a run's session the card carries
+`requirement_violations`, `confirm.py` never lets the envelope or a policy
+admit it, and the headless turn withdraws the card as a refusal. Writers that
+cannot show the field (`REPLACERS`, `CAPACITY_WRITERS`, an arguments card naming
+the bounded instance) fail closed; `HORIZON_WRITERS` and an `undo_last` that
+restores another horizon break `preserve_horizon`. The per-turn addendum
+(`compose._requirements_addendum`, logged as `requirements`) shows them fenced
+as data and marks an evaluation stale after a manual edit, which it never
+blocks. A study brief records `{thread_id, rev, items}`; `assistant_tasks._stale`
+reads a moved `rev` as `brief_stale`.
 
 
 ## Recorded runs, load flow, and experiment plans
