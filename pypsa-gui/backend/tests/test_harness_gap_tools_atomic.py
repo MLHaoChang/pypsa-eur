@@ -8,6 +8,7 @@ SH-22: the data-gap tools (`set_weather_choice`, `attach_tariff`,
 before pickup refuses, and the chain settles only from the call's own
 receipt. SH-04: an L1 ledger row names the failing rule that drove it.
 """
+# ruff: noqa: F811 -- imported pytest fixtures
 
 import threading
 
@@ -21,13 +22,9 @@ from tests.test_assistant_tasks_study_brief import (  # noqa: F401
 from tests.test_harness_envelope import envelope_of, refusals, until  # noqa: F401
 from tests.test_harness_envelope_atomic import gap, writer  # noqa: F401
 from tests.test_harness_run_loops import (  # noqa: F401
-    WITH_GAPS, Script, apply_from, call, energy_source, generate, go, granted, no_series, profile, rated, say,
-    site, stopped,
-)
+    WITH_GAPS, Script, apply_from, call, energy_source, generate, go, granted, no_series, profile, rated, say, site,
+    stopped)
 from tests.test_harness_runner import detached, task_path  # noqa: F401
-
-FILLS = ("set_weather_choice", "attach_tariff", "apply_generated_profile")
-
 
 def ctx():
     return PyPSAService.get_active_context()
@@ -39,8 +36,6 @@ def weather_step(project_id, n=2):
 
 
 def test_each_data_gap_tool_has_its_own_atomic_row():
-    for tool in (*FILLS, "generate_load_profile"):
-        assert tool in run_envelope.ATOMIC_TOOLS, tool
     assert set(run_envelope.GAP_TARGETS) | set(run_envelope.GAP_PREPARE) <= run_envelope.ATOMIC_TOOLS
 
 
@@ -92,14 +87,7 @@ def test_stepwise_weather_fill_refuses_a_bare_plus_one_bump(granted, profile, si
     profile(WITH_GAPS)
     task, path, _ = granted(steps=[weather_step(project_id)])
 
-    def bump():
-        target = ctx()
-        thread = threading.Thread(target=lambda: (target.mutation_lock.acquire(),
-                                                  dirty_state.bump_revision(target),
-                                                  target.mutation_lock.release()))
-        thread.start()
-        thread.join()
-    fired = gap(bump, tool="set_weather_choice")
+    fired = gap(lambda: writer(lambda network: None).join(), tool="set_weather_choice")  # the bump alone
     record = until(harness_runner.Runner("a"), path, task, stopped)
     assert fired
     assert record["run"]["status"] == "paused" and record["run"]["reason"] == "envelope_drift", record["run"]
@@ -133,6 +121,35 @@ def test_l1_load_fill_settles_from_its_own_receipt_without_deadlock(granted, pro
     assert link["network_revision"] == receipt["network_revision"] == start["network_revision"]
 
 
+# ── Settings fills: a tariff ref is fingerprinted ───────────────────────────
+
+
+def test_a_tariff_fill_moves_the_exact_identity_and_links_from_its_own_receipt(granted, profile, site):
+    """attach_tariff writes `solver_config.commercial.import_tariff_ref`, which the
+    LP reads and `_network_input_fingerprint` hashes (via `goal_free_config`).
+    The pickup, before the handler, expects +0 (no dispatch-seam bump); the
+    handler's solver-config write bumps the counter itself
+    (`routers/simulation.update_solver_config`, LC40-COUNTER-1). A fill moves
+    `exact`, and its own receipt, +1 included, is the link."""
+    profile(WITH_GAPS)
+    _, path, _ = granted()
+    target = ctx()
+    with target.mutation_lock:
+        before, reason = run_envelope.chain_head(path, target)
+        assert reason is None
+        start = run_envelope.identity(target)
+        config = target.solver_state["solver_config"]
+        config.commercial = {**(config.commercial or {}),
+                             "import_tariff_ref": {"kind": "tariff", "id": "grid-import", "version": 1}}
+        dirty_state.bump_revision(target)  # as update_solver_config does at its sink
+        receipt = {"call_id": "tariff-call", **run_envelope.identity(target)}
+    assert receipt["exact"] != start["exact"] and receipt["network_revision"] == start["network_revision"] + 1
+    run_envelope.settle_own(path, "tariff-call", target, before, [receipt])
+    [link] = envelope_of(path)["chain"]
+    assert link == {"after_change": "tariff-call", "fingerprint": receipt["fingerprint"], "exact": receipt["exact"],
+                    "network_revision": receipt["network_revision"]}
+
+
 # ── SH-04: the ledger row names its rule ────────────────────────────────────
 
 
@@ -151,34 +168,10 @@ RULES = {"a": {"tunable": ["Generator.p_nom_max"]}, "b": {"tunable": ["StorageUn
 
 
 @pytest.mark.parametrize("failing,target,expected", [
-    (["c"], ("Load", "p_set"), "c"),  # (b) the only failing rule
-    (["a", "b"], ("StorageUnit", "max_hours"), "b"),  # (a) the one rule tuning the target
+    (["c"], ("Load", "p_set"), "c"),  # no rule tunes the target: the only failing rule
+    (["a", "b"], ("StorageUnit", "max_hours"), "b"),  # the one failing rule whose tunable names the target
     (["a", "c"], ("Load", "p_set"), None),  # ambiguous: never guessed
     ([], ("Load", "p_set"), None),
 ])
 def test_the_driving_rule(failing, target, expected):
     assert run_loops._driving_rule(target, failing, RULES) == expected
-
-
-
-
-def test_a_tariff_fill_moves_the_exact_identity_and_links_from_its_own_receipt(granted, profile, site):
-    """attach_tariff writes `solver_config.commercial.import_tariff_ref`, which the
-    LP reads and `_network_input_fingerprint` hashes (via `goal_free_config`): a
-    fill moves `exact` with +0 on the counter, and its own receipt is the link."""
-    profile(WITH_GAPS)
-    _, path, _ = granted()
-    target = ctx()
-    with target.mutation_lock:
-        before, reason = run_envelope.chain_head(path, target)
-        assert reason is None
-        start = run_envelope.identity(target)
-        config = target.solver_state["solver_config"]
-        config.commercial = {**(config.commercial or {}),
-                             "import_tariff_ref": {"kind": "tariff", "id": "grid-import", "version": 1}}
-        receipt = {"call_id": "tariff-call", **run_envelope.identity(target)}
-    assert receipt["exact"] != start["exact"] and receipt["network_revision"] == start["network_revision"]
-    run_envelope.settle_own(path, "tariff-call", target, before, [receipt])
-    [link] = envelope_of(path)["chain"]
-    assert link == {"after_change": "tariff-call", "fingerprint": receipt["fingerprint"], "exact": receipt["exact"],
-                    "network_revision": receipt["network_revision"]}
