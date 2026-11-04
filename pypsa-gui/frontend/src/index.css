@@ -406,7 +406,18 @@ html {
 
 /* L2 (LC-04): compact idle. The extras stay in the accessibility tree (an
    sr-only clip, not display:none) and show on hover, focus or live chat. */
-.companion-launcher:not([data-hovered='true']):not([data-live='open']):not(:focus-within) .companion-extras,
+.companion-launcher:not([data-hovered='true']):not([data-live='open']):not(:focus-within) .companion-extras {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+  padding: 0;
+  margin: -1px;
+}
+
 /* LC-07b: while Live is open the composer owns the space (its caption carries
    the voice reason); the note stays in the accessibility tree. */
 .companion-launcher[data-live='open'] .companion-voice-note {
