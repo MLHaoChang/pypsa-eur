@@ -450,3 +450,9 @@ section.
   falsy). Any other failed rule stays in the needs_user notice and is never a
   data item (tests: a gap L1 filled is not listed; a missing required item is;
   an unrelated failed rule is not). A rule->gap mapping is its own ticket.
+- 2026-11-04 (~09:10 CET), owner (SH21-SPLIT-1), via the coordinator: C1–C3
+  split to a follow-up. This issue's PR keeps `apply_demand_from_excel` carded
+  inside a run (today's behaviour); stage-2 planned writes and their admission
+  are [21c](21c-planned-write-admission.md). The acceptance line "a planned
+  write whose plan differs gets a card" holds here because every planned write
+  is carded.
