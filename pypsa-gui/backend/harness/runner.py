@@ -234,7 +234,8 @@ def _notify(path):
     """One notice per run state change into needs_user, completed, failed or
     paused: an attention record, and an email when the deployment sends
     them and the user opted in (≤ 1 per change, ≤ 10 per run). The text is
-    built here from fixed fields, never from model text or values."""
+    built here from fixed fields, never from model text or values. An ended
+    agent loop sends its own notice (`loop_notice`, issue 25), once per ending."""
     from harness import loop_notice
     loop_notice.send_if_due(path)  # an ended agent loop: one notice (issue 25)
     pending = {}
@@ -274,12 +275,8 @@ def _notify(path):
     return status
 
 
-def _email(path, task, status):
-    from services import email_service
-    sent = sum(1 for n in task["run"].get("notices") or [] if n["channel"] == "email")
-    if sent >= MAX_EMAILS or not email_service.get_status()["configured"] \
-            or not _email_opted_in(path, task["task_id"]):
-        return False
+def _owner_contact(task):
+    """The run owner's account address, the project name and the run's link; None when any is missing."""
     from db.models import Project, User
     from db.session import SessionLocal
     from settings import get_settings
@@ -287,9 +284,21 @@ def _email(path, task, status):
         user = db.get(User, uuid.UUID(task["owner_id"]))
         project = db.get(Project, uuid.UUID(task["project_id"]))
         if user is None or project is None or not getattr(user, "email", None):
-            return False
+            return None
         address, name = user.email, project.name
-    link = f"{get_settings().public_base_url.rstrip('/')}/?project={task['project_id']}&run={task['task_id']}"
+    return address, name, f"{get_settings().public_base_url.rstrip('/')}/?project={task['project_id']}&run={task['task_id']}"
+
+
+def _email(path, task, status):
+    from services import email_service
+    sent = sum(1 for n in task["run"].get("notices") or [] if n["channel"] == "email")
+    if sent >= MAX_EMAILS or not email_service.get_status()["configured"] \
+            or not _email_opted_in(path, task["task_id"]):
+        return False
+    contact = _owner_contact(task)
+    if contact is None:
+        return False
+    address, name, link = contact
     words = _STATE_WORDS[status]
     # No run title: the model wrote it (criterion 11, no researched value in a mail).
     body = (f"Your harness run {words}.\n\nProject: {_plain(name, 120)}\n"

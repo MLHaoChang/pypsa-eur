@@ -53,14 +53,6 @@ def _body(task, loop, link):
     return "\n".join(lines) + "\n"
 
 
-def _address(task):
-    from db.models import User
-    from db.session import SessionLocal
-    with SessionLocal() as db:
-        user = db.get(User, uuid.UUID(task["owner_id"]))
-        return getattr(user, "email", None) if user else None
-
-
 def send_if_due(path):
     """Claim and send the notice of an ended loop, once. Never raises."""
     from harness import runner
@@ -88,12 +80,11 @@ def send_if_due(path):
         result = {"sent": False, "error": "send_failed"}
         try:
             from services import email_service
-            from settings import get_settings
-            address = _address(task)
-            if not address:
+            contact = runner._owner_contact(task)
+            if contact is None:
                 result["error"] = "no_address"
             else:
-                link = f"{get_settings().public_base_url.rstrip('/')}/?project={task['project_id']}&run={task['task_id']}"
+                address, _, link = contact
                 email_service.send_email(
                     to=address, subject="PyPSA Studio: a harness run needs you",
                     body_text=_body(claimed["task"], claimed["task"]["run"]["loop"], link),

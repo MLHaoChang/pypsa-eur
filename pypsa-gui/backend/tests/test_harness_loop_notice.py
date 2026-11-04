@@ -30,7 +30,7 @@ def outbox():
 
 @pytest.fixture
 def owner(monkeypatch):
-    monkeypatch.setattr(loop_notice, "_address", lambda task: "owner@example.com")
+    monkeypatch.setattr(harness_runner, "_owner_contact", lambda task: ("owner@example.com", "P", "http://x/?run=1"))
 
 
 def exhaust(granted, profile, notify, monkeypatch):
@@ -109,3 +109,19 @@ def test_the_run_view_shows_the_notice_failure(granted, profile, site, rated, tu
     view = assistant_tasks._run_view(record)
     assert view["status"] == "needs_user"
     assert view["loop"]["notice"]["sent"] is False and view["loop"]["notice"]["error"] == "send_failed"
+
+
+@pytest.mark.parametrize("ending", ["no_progress", "unverified_write", "error"])
+def test_every_ending_sends_and_a_resumed_loops_ending_is_a_new_notice(
+        granted, profile, site, rated, tunable_rule, outbox, owner, monkeypatch, ending):
+    path, record = exhaust(granted, profile, True, monkeypatch)
+    outbox.clear()
+
+    def fresh_ending(t):
+        t["run"]["loop"] = {"kind": "L1", "stage": "input_gate", "rounds": 0, "history": [], "ended": ending}
+    harness_runner._update(path, fresh_ending)
+    harness_runner._notify(path)
+    mails = [m for m in outbox if m["metadata"].get("kind") == "harness_loop_end"]
+    assert len(mails) == 1 and mails[0]["metadata"]["ended"] == ending
+    harness_runner._notify(path)
+    assert len([m for m in outbox if m["metadata"].get("kind") == "harness_loop_end"]) == 1
