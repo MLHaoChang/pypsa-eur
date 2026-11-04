@@ -207,6 +207,8 @@ export interface GroupView {
   totals: GroupLine[]
   /** The single total as served ("Unavailable: no single total: …" when the units differ). */
   total: string
+  /** The total's label, worded like the per-carrier rows ("All carriers import" in Guided). */
+  totalLabel: string
   notes: string[]
 }
 
@@ -238,7 +240,8 @@ export function groupView(g: ResultGroup, mode: UiMode, stated: string | null = 
     const who = i > 0 ? (cls in KIND_WORDS ? targetLabel(cls as TargetClass, name, mode) : `${name} · ${cls}`) : m
     notes.push(`Unavailable: ${reasonWords(g.total.reason ?? 'member_unavailable')} (${who}).`)
   }
-  return { boundary, totals, total: quantityWords(g.total, stated), notes }
+  const all = flow('All carriers', g.total)
+  return { boundary, totals, total: all.value, totalLabel: all.label, notes }
 }
 
 /** The groups a feature sits in, directly or through a nested group (outermost last). */

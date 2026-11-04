@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Format `harness/storage_calculations.py`, wait out the queued solve in the harness hold tests (a request landing before the solver thread started got the solver gate's string 409), and read the frontend constants in the AS-10 pin test independent of formatting.

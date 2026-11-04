@@ -112,9 +112,15 @@ def source(ctx, entity, allow_cyclic=False, split=False):
             raise ValueError("misaligned_storage_spill")
         if any(_number(v) != 0 for v in spill[entity]):
             raise ValueError("unsupported_storage_spill")
-    return _raw(ctx, entity, inputs, _number(
-        row["p_nom_opt"] if row["p_nom_extendable"] else row["p_nom"]
-    ), _number(row["max_hours"]), cyclic, _number(row["state_of_charge_initial"]))
+    return _raw(
+        ctx,
+        entity,
+        inputs,
+        _number(row["p_nom_opt"] if row["p_nom_extendable"] else row["p_nom"]),
+        _number(row["max_hours"]),
+        cyclic,
+        _number(row["state_of_charge_initial"]),
+    )
 
 
 def _raw(ctx, entity, inputs, capacity, max_hours, cyclic, initial_state):
@@ -146,7 +152,11 @@ SPLIT_RTOL = 1e-6
 
 
 def _close(a, b):
-    return a is not None and b is not None and math.isclose(a, b, rel_tol=SPLIT_RTOL, abs_tol=SPLIT_RTOL)
+    return (
+        a is not None
+        and b is not None
+        and math.isclose(a, b, rel_tol=SPLIT_RTOL, abs_tol=SPLIT_RTOL)
+    )
 
 
 def split_view(n, entity):
@@ -169,25 +179,55 @@ def split_view(n, entity):
         raise ValueError("unsupported_split_storage_layout")
 
     charger_name, discharger_name = names
-    if (charger_name == discharger_name or not links.static.index.is_unique
-            or not {charger_name, discharger_name} <= set(links.static.index)):
+    if (
+        charger_name == discharger_name
+        or not links.static.index.is_unique
+        or not {charger_name, discharger_name} <= set(links.static.index)
+    ):
         refuse()
-    charger, discharger = links.static.loc[charger_name], links.static.loc[discharger_name]
+    charger, discharger = (
+        links.static.loc[charger_name],
+        links.static.loc[discharger_name],
+    )
     store_bus, ac_bus = store["bus"], charger["bus0"]
-    if not (charger["bus1"] == store_bus == discharger["bus0"] and discharger["bus1"] == ac_bus != store_bus):
+    if not (
+        charger["bus1"] == store_bus == discharger["bus0"]
+        and discharger["bus1"] == ac_bus != store_bus
+    ):
         refuse()
-    ports = [c for c in links.static.columns if c.startswith("bus") and c[3:].isdigit() and int(c[3:]) > 1]
-    if any(isinstance(row.get(c), str) and row.get(c) for row in (charger, discharger) for c in ports):
+    ports = [
+        c
+        for c in links.static.columns
+        if c.startswith("bus") and c[3:].isdigit() and int(c[3:]) > 1
+    ]
+    if any(
+        isinstance(row.get(c), str) and row.get(c)
+        for row in (charger, discharger)
+        for c in ports
+    ):
         refuse()
     # The store bus holds this Store and the two Links only; anything else there moves its energy.
     for component in n.components:
         static = component.static
         if component.name in ("Bus", "SubNetwork") or static.empty:
             continue
-        columns = [c for c in static.columns if c == "bus" or (c.startswith("bus") and c[3:].isdigit())]
-        on_bus = set(static.index[(static[columns] == store_bus).any(axis=1)]) if columns else set()
-        expected = {entity} if component.name == "Store" else {charger_name, discharger_name} \
-            if component.name == "Link" else set()
+        columns = [
+            c
+            for c in static.columns
+            if c == "bus" or (c.startswith("bus") and c[3:].isdigit())
+        ]
+        on_bus = (
+            set(static.index[(static[columns] == store_bus).any(axis=1)])
+            if columns
+            else set()
+        )
+        expected = (
+            {entity}
+            if component.name == "Store"
+            else {charger_name, discharger_name}
+            if component.name == "Link"
+            else set()
+        )
         if on_bus != expected:
             refuse()
     index = n.snapshots
@@ -200,10 +240,16 @@ def split_view(n, entity):
         for attribute in attributes:
             if any(v != 0 for v in _series(component, attribute, name, index)):
                 refuse()
-    if any(v != 1 for v in _series(stores, "e_max_pu", entity, index)) or _number(store["sign"]) != 1:
+    if (
+        any(v != 1 for v in _series(stores, "e_max_pu", entity, index))
+        or _number(store["sign"]) != 1
+    ):
         refuse()
-    extendable = {bool(store["e_nom_extendable"]), bool(charger["p_nom_extendable"]),
-                  bool(discharger["p_nom_extendable"])}
+    extendable = {
+        bool(store["e_nom_extendable"]),
+        bool(charger["p_nom_extendable"]),
+        bool(discharger["p_nom_extendable"]),
+    }
     if len(extendable) != 1:
         refuse()
     opt = extendable.pop()
@@ -212,9 +258,16 @@ def split_view(n, entity):
     energy = _number(store["e_nom_opt" if opt else "e_nom"])
     hours = tuple(_number(store.get(c)) for c in ("min_hours", "max_hours"))
     eta_d = _number(discharger["efficiency"])
-    if (not _close(*hours) or eta_d is None or eta_d <= 0 or drawn is None
-            or not _close(drawn * eta_d, power) or power is None or hours[1] is None
-            or not _close(energy, hours[1] * power)):
+    if (
+        not _close(*hours)
+        or eta_d is None
+        or eta_d <= 0
+        or drawn is None
+        or not _close(drawn * eta_d, power)
+        or power is None
+        or hours[1] is None
+        or not _close(energy, hours[1] * power)
+    ):
         refuse()
     return store, charger, discharger, power, hours[1]
 
@@ -236,32 +289,56 @@ def _split_source(ctx, entity, allow_cyclic):
 
     def output(component, attribute, name):
         table = component.dynamic.get(attribute)
-        if (table is None or not table.index.equals(index) or not table.index.is_unique
-                or not table.columns.is_unique or name not in table.columns):
+        if (
+            table is None
+            or not table.index.equals(index)
+            or not table.index.is_unique
+            or not table.columns.is_unique
+            or name not in table.columns
+        ):
             raise ValueError("misaligned_storage_output")
         return [_number(v) for v in table[name]]
 
     p_store = output(links, "p0", charger.name)
-    p_dispatch = [None if v is None else -v for v in output(links, "p1", discharger.name)]
+    p_dispatch = [
+        None if v is None else -v for v in output(links, "p1", discharger.name)
+    ]
     inputs = {
         "duration": [_number(v) for v in weights["stores"]],
         "p_store": p_store,
         "p_dispatch": p_dispatch,
-        "p": [None if d is None or s is None else d - s for d, s in zip(p_dispatch, p_store, strict=True)],
+        "p": [
+            None if d is None or s is None else d - s
+            for d, s in zip(p_dispatch, p_store, strict=True)
+        ],
         "state_of_charge": output(stores, "e", store.name),
-        "p_min_pu": [None if v is None else -v for v in _series(links, "p_max_pu", charger.name, index)],
+        "p_min_pu": [
+            None if v is None else -v
+            for v in _series(links, "p_max_pu", charger.name, index)
+        ],
         "p_max_pu": _series(links, "p_max_pu", discharger.name, index),
         "efficiency_store": _series(links, "efficiency", charger.name, index),
         "efficiency_dispatch": _series(links, "efficiency", discharger.name, index),
         "standing_loss": _series(stores, "standing_loss", store.name, index),
         "inflow": [0.0] * len(index),
     }
-    return _raw(ctx, entity, inputs, capacity, max_hours, cyclic, _number(store["e_initial"]))
+    return _raw(
+        ctx, entity, inputs, capacity, max_hours, cyclic, _number(store["e_initial"])
+    )
 
 
 SNAPSHOT_KEYS = (
-    "duration", "p_store", "p_dispatch", "p", "state_of_charge", "p_min_pu", "p_max_pu",
-    "efficiency_store", "efficiency_dispatch", "standing_loss", "inflow",
+    "duration",
+    "p_store",
+    "p_dispatch",
+    "p",
+    "state_of_charge",
+    "p_min_pu",
+    "p_max_pu",
+    "efficiency_store",
+    "efficiency_dispatch",
+    "standing_loss",
+    "inflow",
 )
 
 
@@ -335,7 +412,9 @@ def calculate(raw, scope):
             _number(inputs[k][i]) for k in keys
         )
         ok = prefix_valid and snapshot_within_bounds(
-            (dt, charge, discharge, net, state, lo, hi, eta_in, eta_out, loss, inflow), capacity, hours
+            (dt, charge, discharge, net, state, lo, hi, eta_in, eta_out, loss, inflow),
+            capacity,
+            hours,
         )
         if ok:
             try:
