@@ -16,6 +16,7 @@ behind this seam.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import stat
@@ -37,6 +38,12 @@ _TERMINAL = ("completed", "failed", "aborted", "interrupted")
 def _dt(epoch: float | None) -> datetime | None:
     """`SolveJob` timestamps are `time.time()` floats; the column is tz-aware."""
     return None if epoch is None else datetime.fromtimestamp(epoch, tz=timezone.utc)
+
+
+def _capture_json(job: Any) -> str | None:
+    """HH-10 (study harness 05): the job's captured-input record, as JSON."""
+    capture = getattr(job, "capture", None)
+    return json.dumps(capture, sort_keys=True) if capture is not None else None
 
 
 def record_enqueued(
@@ -93,6 +100,7 @@ def record_enqueued(
                 status=job.status,
                 enqueued_by_user_id=enqueued_by_user_id,
                 solver_config=solver_config_json,
+                capture=_capture_json(job),
                 enqueued_at=_dt(job.enqueued_at) or datetime.now(tz=timezone.utc),
             ))
             db.commit()
@@ -149,6 +157,7 @@ def record_status(job: Any) -> bool:
             row.solve_time = job.solve_time
             row.condition = job.condition
             row.error = job.error
+            row.capture = _capture_json(job)
             row.started_at = _dt(job.started_at)
             row.finished_at = _dt(job.finished_at)
             db.commit()
@@ -191,6 +200,7 @@ def load_job(job_id: uuid.UUID) -> dict | None:
                 "storage_dir": r.storage_dir,
                 "status": r.status,
                 "solver_config": r.solver_config,
+                "capture": json.loads(r.capture) if r.capture else None,
                 "objective": r.objective,
                 "solve_time": r.solve_time,
                 "condition": r.condition,
@@ -275,6 +285,7 @@ def load_by_status(
                     "kind": r.kind,
                     "status": r.status,
                     "solver_config": r.solver_config,
+                    "capture": json.loads(r.capture) if r.capture else None,
                     "objective": r.objective,
                     "solve_time": r.solve_time,
                     "condition": r.condition,
