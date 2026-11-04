@@ -51,7 +51,7 @@ function ruleWords(r: GateRule): string {
 
 /** The email about an ended agent loop (`loop.notice`, issue 25) in words; none until it was claimed. */
 function loopNoticeWords(view: RunMonitorView): { text: string; failed: boolean } | null {
-  const n = view.loop?.notice
+  const n = view.run?.loop?.notice
   if (!n || n.sent === null || n.sent === undefined) return null
   if (n.sent) return { text: 'An email told you the run needs you.', failed: false }
   if (n.error === 'uncertain') return { text: 'The email may not have been sent. The run waits for you here.', failed: true }
