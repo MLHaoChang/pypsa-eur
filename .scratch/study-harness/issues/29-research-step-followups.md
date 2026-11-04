@@ -37,3 +37,18 @@ The open items from #1104 ("Not in this PR" in its description, plus a risk no r
 `pypsa-gui/backend/harness/providers/research.py`, `pypsa-gui/backend/harness/research.py`, `pypsa-gui/backend/harness/eventlog.py`, `pypsa-gui/backend/harness/loop.py` (the turn record only), `pypsa-gui/backend/services/source_ledger.py`, `pypsa-gui/backend/tests/test_harness_research_followups.py` (new)
 
 ## Comments
+
+### GK B plan verdict (4 Nov, against #1104 head d992c26d)
+
+GO WITH CHANGES: Q1 (a) rewrite re-sends behind a fence; Q2 (a) stub, read back, rewrite or stop; Q3 (a) a research turn writes no chat.jsonl record. Code after #1104 merges.
+
+- F1. Rewrite only re-sends that follow a client tool result (`record_source` or a read tool). Builder's choice for `pause_turn`: the research turn ends there, as #1104 already does (no resume), so no server block is ever re-sent after a pause. Tests: a rewrite after a client tool result, and a `pause_turn` that ends the turn with no further send.
+- F2. The fence escape is case-insensitive and covers `</untrusted_web_content` with any whitespace or attributes. The search urls and titles are inside the fence. Test: a page that contains its own closing tag.
+- F3. A fake-provider test pins the rewritten request: no `server_tool_use`, no `web_*_tool_result` and no `citations` in any earlier assistant message. A live smoke runs only if a key is present; the PR does not depend on it.
+- F4. Stub where the `assistant/attempt` event is built, not at flush, so no flush path writes a raw page. Test: a flush forced mid-turn (an exception after the provider returns) leaves no page text on disk.
+- F5. The read-back check also covers a snapshot or copy bundle made after the turn, and the `list_chat_history` tool's output. One test each: no page text.
+- F6. A fork or replay at a seq inside a research turn is refused with a typed kind (fail-closed test plus the base-class mutant from the standing rules).
+- F7. `research_cleanup_failed` stops the run under the file lock with the lease check, and lists the gaps. It goes in the error-kind fragment.
+- F8. With no chat.jsonl record, `GET /history` and the chat panel still render; the turn is absent, not an error. Run the chat history tests.
+- F9. The attach/confirm card path refuses a range row (`value: null`) with a typed kind; it is never divided by 1000 or written. Verified needs both bounds read from the quote, low ≤ high, and the unit. A quote with one bound only is unverified. The shape is agreed with SH-06 and recorded in both issues.
+- F10. In the file-lock test, the mutant drops only `runner._file_lock` and keeps the lease check, and the test goes red.
