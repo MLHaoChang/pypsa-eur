@@ -122,6 +122,15 @@ try {
       if ((await page.getByTestId('companion-launcher').getAttribute('data-live')) === 'open') break
     }
     await page.getByTestId('companion-live-composer').waitFor()
+    // LC-07b: a launcher element lies inside the launcher box and the canvas anchor (not cut by either edge).
+    const inside = async (id) => {
+      const r = await page.evaluate((id) => {
+        const l = document.querySelector('[data-testid=companion-launcher]'), n = document.querySelector(`[data-testid=${id}]`)
+        const a = l.getBoundingClientRect(), b = n.getBoundingClientRect(), c = l.parentElement.getBoundingClientRect()
+        return { cut: b.bottom > a.bottom + 1 || b.top < a.top - 1 || b.bottom > c.bottom + 1 || b.top < c.top - 1, box: [b.top, b.bottom, a.top, a.bottom, c.top, c.bottom].map(Math.round).join(',') }
+      }, id)
+      if (r.cut) throw new Error(`${id} is cut off by the launcher or the canvas anchor (${r.box})`)
+    }
     const speak = page.getByTestId('companion-voice-toggle')
     const note = page.getByTestId('companion-voice-note')
     const caption = page.getByTestId('companion-live-caption')
@@ -130,16 +139,19 @@ try {
         await page.waitForTimeout(800)
         if (await speak.count()) throw new Error('Start voice is in the composer while the server flag is off')
         if (!/not connected/.test(await note.textContent())) throw new Error('the master voice note changed')
-        // LC-07b: the whole launcher, voice note included, sits inside the canvas anchor (no clipping).
-        await page.getByTestId('companion-launcher').hover()
-        await note.waitFor()
-        const clip = await page.evaluate(() => {
-          const l = document.querySelector('[data-testid=companion-launcher]'), n = document.querySelector('[data-testid=companion-voice-note]')
-          const a = l.getBoundingClientRect(), b = n.getBoundingClientRect(), c = l.parentElement.getBoundingClientRect()
-          return { dbg: [a.top,a.bottom,b.top,b.bottom,c.top,c.bottom,l.scrollTop,l.scrollHeight,l.clientHeight], cut: b.bottom > a.bottom + 1 || b.top < a.top - 1 || b.bottom > c.bottom + 1 || b.top < c.top - 1 }
-        })
-        if (clip.cut) throw new Error("the voice note is cut off by the launcher or the canvas anchor " + clip.dbg)
+        // LC-07b: Live open, the composer is whole inside the launcher and the canvas anchor.
+        await inside('companion-live-composer')
         await shot('4-unavailable')
+      })
+      await step('6-live-closed-note', async () => {
+        // LC-07b: Live closed, the launcher shows its last element, the voice note, uncut.
+        await page.getByTestId('companion-live').dispatchEvent('click')
+        await page.waitForFunction(() => document.querySelector('[data-testid=companion-launcher]')?.getAttribute('data-live') === 'closed')
+        await page.getByTestId('companion-launcher').hover()
+        await note.waitFor({ state: 'visible' })
+        await page.waitForTimeout(400)
+        await inside('companion-voice-note')
+        await shot('6-live-closed-note')
       })
       await ctx.close(); continue
     }
@@ -159,6 +171,8 @@ try {
       await speak.filter({ hasText: 'Stop voice' }).waitFor()
       const media = await page.getByTestId('companion-launcher').getAttribute('data-media-state')
       if (media !== 'live') throw new Error(`data-media-state is ${media}`)
+      await inside('companion-voice-toggle')
+      await inside('companion-live-composer')
       await shot('2-listening')
     })
     await step('3-stopped-hidden', async () => {

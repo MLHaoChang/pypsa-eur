@@ -97,19 +97,21 @@ export default function CompanionLauncher({
   // LC-07: the server flag is on (voice available, or blocked by a missing media link).
   const voiceOn = !!speech && (speech.available || !!speech.blocked || speech.state !== 'off')
   // LC-07b: the launcher is bottom-anchored but scrolls when the canvas is short
-  // (Expert, bottom panel up). Keep it scrolled to its end so the last element,
-  // the voice note, is never the part that is cut off.
+  // (Expert, bottom panel up). Keep the end (the voice note) in view, but only
+  // while the user has not scrolled up: a reader of the composer is not yanked.
+  const atBottom = useRef(true)
   useLayoutEffect(() => {
     const el = launcherRef.current
     if (!el) return
-    const pin = () => { el.scrollTop = el.scrollHeight }
+    const pin = () => { if (atBottom.current) el.scrollTop = el.scrollHeight }
+    const track = () => { atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 4 }
     pin()
-    // The extras expand on hover / focus after this commit, so re-pin when any child resizes.
-    if (typeof ResizeObserver === 'undefined') return
+    el.addEventListener('scroll', track)
+    if (typeof ResizeObserver === 'undefined') return () => el.removeEventListener('scroll', track)
     const ro = new ResizeObserver(pin)
     Array.from(el.children).forEach((c) => ro.observe(c))
-    return () => ro.disconnect()
-  }, [liveOpen, workState, hovered, voiceOn, liveCaption, liveEcho, children])
+    return () => { ro.disconnect(); el.removeEventListener('scroll', track) }
+  }, [liveOpen, voiceOn, children])
   useEffect(() => {
     if (liveOpen) inputRef.current?.focus()
   }, [liveOpen])
@@ -277,7 +279,7 @@ export default function CompanionLauncher({
         </button>
       </div>
       {!voiceOn && (
-      <div className="companion-extras max-w-72 rounded-lg border border-border bg-bg-2 px-3 py-2 text-[10px] text-muted"
+      <div className="companion-extras companion-voice-note max-w-72 rounded-lg border border-border bg-bg-2 px-3 py-2 text-[10px] text-muted"
         data-testid="companion-voice-note">
         <button type="button" disabled aria-describedby={voiceReasonId}
           className="font-medium text-muted disabled:cursor-not-allowed">
