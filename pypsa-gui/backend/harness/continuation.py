@@ -315,3 +315,109 @@ def follow_queue_job(task_path, ticket) -> threading.Event:
     context = contextvars.copy_context()
     threading.Thread(target=context.run, args=(run,), name=f"plan-queue-{ticket[1][:8]}", daemon=True).start()
     return settled
+
+
+# ── Engine loops (study harness issue 05, PR C) ──────────────────────────────
+# A result rule's `run_margin_loop` / `run_coupling_loop` step waits on the
+# loop's own record in the run context's solver state (`_state[study]`), not
+# on a queue job. One follower per step, settled once, from that record only.
+
+ENGINE_POLL_SECONDS = 0.5
+MAX_ENGINE_FOLLOW_SECONDS = 24 * 3600  # then the step settles `timed_out` on this timer (H2)
+
+
+def engine_record(ctx, study, job):
+    """(state, record) of the step's own loop: "running", "ended" or "lost".
+
+    The slot is read under the solver-state lock and is the step's only when
+    its `started_at` is the step's and, while the study handle is registered,
+    its origin is that handle's (C8, #1038). A stranger loop in the slot, an
+    empty slot (the process restarted) or a running record whose worker died
+    is "lost": its status is never this step's."""
+    from services.adequacy.coupling import LOOP_STATUSES
+    from services.run_gates import LOOP_FIELDS
+    lock = getattr(ctx, "solver_state_lock", None)
+    if lock is None:
+        return "lost", None
+    with lock:
+        record = ctx.solver_state.get(study)
+        if not isinstance(record, dict) or record.get("started_at") is None \
+                or record.get("started_at") != job.get("started_at"):
+            return "lost", None
+        binding = job_adapters._ACTIVITY_BINDINGS.get(job.get("job_id"))
+        if binding is not None and (binding[0] != id(ctx) or not job_adapters._same_origin(record, binding[2],
+                                                                                         binding[3])):
+            return "lost", None
+        status = record.get("status")
+        thread = record.get("thread")
+        copy = {k: record[k] for k in LOOP_FIELDS if k in record}
+    if status in LOOP_STATUSES:
+        return "ended", copy
+    if status == "running" and (not isinstance(thread, threading.Thread) or thread.is_alive()
+                                or thread.ident is None):
+        return "running", copy
+    return "lost", None  # a running record whose worker is gone, or a status no loop sets
+
+
+def settle_engine(task_path, ticket, *, instance, ctx):
+    """Settle a waiting engine step from its loop's record, once (C7): only
+    while the step still waits on this attempt, only by the process holding
+    the run's live lease (H1), under the lease's file lock. Returns the state
+    read, or None when nothing was written."""
+    from harness import runner
+    from services import assistant_tasks as tasks
+    with runner._file_lock(task_path):
+        task = runner._read(task_path)
+        if task is None:
+            return None
+        lease = (task.get("run") or {}).get("runner") or {}
+        if lease.get("lease_owner") != instance:
+            return None  # a stale process writes nothing
+        step = next((s for s in task["steps"] if s["id"] == ticket[1]), None)
+        if step is None or step.get("attempt_id") != ticket[2] or step["status"] != "waiting":
+            return None
+        state, record = engine_record(ctx, step["job"]["study"], step["job"])
+        if state == "running":
+            return state
+        return tasks.settle_engine(task_path, ticket, record if state == "ended" else None,
+                                   "ended" if state == "ended" else "lost")
+
+
+def follow_engine(task_path, ticket, ctx, *, instance) -> threading.Event:
+    """Follow a waiting engine step on its own thread until its loop ends,
+    then settle it (`settle_engine`). Its own deadline settles `timed_out`
+    (H2). A cancelled run is settled by the cancel path's abort; this thread
+    then finds the step no longer waiting and stops."""
+    import contextvars
+    settled = threading.Event()
+
+    def run():
+        from harness import runner
+        from services import assistant_tasks as tasks
+        try:
+            deadline = time.monotonic() + MAX_ENGINE_FOLLOW_SECONDS
+            while True:
+                task = runner._read(task_path)
+                step = next((s for s in (task or {}).get("steps", []) if s["id"] == ticket[1]), None)
+                if step is None or step.get("attempt_id") != ticket[2] or step["status"] != "waiting":
+                    return
+                if time.monotonic() >= deadline:
+                    with runner._file_lock(task_path):
+                        if ((runner._read(task_path) or {}).get("run") or {}).get("runner", {}).get(
+                                "lease_owner") == instance:
+                            tasks.settle_engine(task_path, ticket, None, "timed_out")
+                    return
+                state = settle_engine(task_path, ticket, instance=instance, ctx=ctx)
+                if state not in (None, "running"):
+                    return
+                if state is None and ((task.get("run") or {}).get("runner") or {}).get("lease_owner") != instance:
+                    return  # taken over: the new holder follows it
+                _WAKE.wait(min(ENGINE_POLL_SECONDS, max(0.0, deadline - time.monotonic())))
+        except Exception:  # noqa: BLE001 — a lost settlement leaves the step waiting for the recover path
+            logger.exception("engine step %s could not be settled", ticket[1])
+        finally:
+            settled.set()
+
+    context = contextvars.copy_context()
+    threading.Thread(target=context.run, args=(run,), name=f"engine-{ticket[1][:12]}", daemon=True).start()
+    return settled

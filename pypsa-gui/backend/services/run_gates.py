@@ -13,6 +13,12 @@ reader itself marks as no evidence (`NoEvidence`: its state and reason kept).
 Scorecard rows (issue 05, GK A) gate by verdict: `dc.readiness.<row>` names
 one row and `dc.readiness.<family>:` one family. Only `pass` satisfies a
 rule; a pass on an assumed row is a screening pass, reported as such.
+
+Engine loops (issue 05, PR C; GK A): a result rule with an `engine` block is
+driven by `run_margin_loop` or `run_coupling_loop`, never by an agent turn.
+Its fact `adequacy.loop.converged` reads the loop record the run's own engine
+step for that rule settled with (never the solver state's latest record):
+only `met` converges, and the record's goal sources are copied as served.
 """
 from __future__ import annotations
 
@@ -58,7 +64,8 @@ class Fact:
     reads: str  # "<module>.<function>" (or the task-file key) the value comes from
     key: str  # the key of that function's result the value is
     unit: str | None
-    read: Callable[[Env], Any]
+    read: Callable[..., Any]
+    per_rule: bool = False  # read as read(env, rule), once per rule (an engine rule's own step)
 
 
 @dataclass(frozen=True)
@@ -170,6 +177,75 @@ def _loads_without_series(env):
     return sorted(str(name) for name in electric_loads(network) if str(name) not in series)
 
 
+# ── Engine loops (issue 05, PR C) ───────────────────────────────────────────
+
+LOOP_FACT = "adequacy.loop.converged"
+ENGINE_TOOLS = {"run_margin_loop": "margin_loop", "run_coupling_loop": "coupling_loop"}
+RESTORES = ("base", "final")
+# The fields of a finished loop's record a settled engine step keeps, and the
+# gate shows: the verdict, what it cost, how the network was left, and the
+# goal it was judged against with where each part came from.
+LOOP_FIELDS = ("status", "solves_used", "probe_solves", "restore", "base_restored", "base_restore_status",
+               "target_lole_h", "draws", "basis", "goal_sources", "lever_star", "eps_star", "confident",
+               "started_at", "finished_at", "error")
+
+
+def converged(record) -> bool:
+    """A loop record meets its target only when it says `met`; every other
+    status, a known terminal one or not, does not (GK A (11)(a))."""
+    return isinstance(record, dict) and record.get("status") == "met"
+
+
+@dataclass(frozen=True)
+class Looped:
+    """An engine reading: whether the loop converged, and the record it rests on."""
+
+    value: bool
+    record: dict
+
+
+def engine_step(task, rule_id):
+    """The run's latest engine step for `rule_id` (a superseded one is history)."""
+    return next((s for s in reversed(task.get("steps") or [])
+                 if s.get("engine") == rule_id and not s.get("superseded")), None)
+
+
+def _loop_converged(env, rule):
+    step = engine_step(env.task, rule["id"])
+    if step is None:
+        return NoEvidence("not_started", "the engine loop for this rule has not run")
+    if step["status"] in ("pending", "running", "waiting"):
+        return NoEvidence(step["status"], "the engine loop has not finished")
+    loop = (step.get("result") or {}).get("loop")
+    if not isinstance(loop, dict):
+        reason = step.get("error") or "the engine loop left no record"
+        return NoEvidence((step.get("job") or {}).get("outcome") or step["status"], str(reason)[:240])
+    return Looped(converged(loop), {k: loop[k] for k in LOOP_FIELDS if k in loop})
+
+
+def check_engine(rule):
+    """An engine rule (§6.2, C9): the converged fact, `eq true`, `block`, and
+    an engine block naming a loop tool, its solve bound and its restore. The
+    goal (target, draws) is never the profile's: the project's goal sets it."""
+    from services.adequacy.coupling import MAX_LOOP_SOLVES
+    engine = rule.get("engine")
+    if (engine is None) != (rule["fact"] != LOOP_FACT):
+        raise RuleError(f"Rule {rule['id']}: {LOOP_FACT} is read by an engine rule only, and an engine rule "
+                        f"reads {LOOP_FACT}.")
+    if engine is None:
+        return rule
+    if (rule["op"], rule.get("value"), rule["severity"]) != ("eq", True, "block"):
+        raise RuleError(f"Rule {rule['id']}: an engine rule is `eq true` and `block`.")
+    max_solves = engine.get("max_solves") if isinstance(engine, dict) else None
+    if not isinstance(engine, dict) or not {"tool", "max_solves"} <= set(engine) <= {"tool", "max_solves", "restore"} \
+            or engine["tool"] not in ENGINE_TOOLS or isinstance(max_solves, bool) or not isinstance(max_solves, int) \
+            or not 1 <= max_solves <= MAX_LOOP_SOLVES or engine.get("restore", "base") not in RESTORES:
+        raise RuleError(f"Rule {rule['id']}: an engine block names tool ({', '.join(ENGINE_TOOLS)}), "
+                        f"max_solves 1-{MAX_LOOP_SOLVES} and optional restore ({', '.join(RESTORES)}).")
+    return {**rule, "engine": {"tool": engine["tool"], "max_solves": max_solves,
+                               "restore": engine.get("restore", "base")}}
+
+
 def _run(key):
     return lambda env: env.task.get("run", {}).get(key)
 
@@ -195,6 +271,7 @@ FACTS: dict[str, Fact] = {
     "ic.counterfactual": Fact("services.ic_counterfactual.read", "state", None, _ic_counterfactual),
     "ic.baseline_keeps": Fact("services.ic_counterfactual.read_baseline_keeps", "kept", None,
                               _ic_baseline_keeps),
+    LOOP_FACT: Fact("task.steps[engine].result.loop", "status", None, _loop_converged, per_rule=True),
 }
 
 
@@ -273,9 +350,10 @@ class RuleError(ValueError):
 
 def check_rule(rule: dict) -> dict:
     """The rule, with the reader it reads named from the registry."""
-    known = {"id", "fact", "op", "value", "severity", "basis", "explain", "tunable", "unit"}
+    known = {"id", "fact", "op", "value", "severity", "basis", "explain", "tunable", "unit", "engine"}
     if not isinstance(rule, dict) or not {"id", "fact", "op", "severity", "basis"} <= set(rule) <= known:
-        raise RuleError(f"A rule has id, fact, op, severity, basis and optional value, explain, tunable, unit: {rule!r}")
+        raise RuleError(f"A rule has id, fact, op, severity, basis and optional value, explain, tunable, unit, "
+                        f"engine: {rule!r}")
     fact = rule["fact"]
     if not isinstance(fact, str) or "*" in fact:
         raise RuleError(f"Rule {rule['id']}: name one fact, never a wildcard ({fact!r}).")
@@ -295,7 +373,7 @@ def check_rule(rule: dict) -> dict:
     if "unit" in rule and rule["unit"] != known_fact.unit:
         raise RuleError(f"Rule {rule['id']}: unit {rule['unit']!r} is not the fact's {known_fact.unit!r}; "
                         "units are checked, never converted.")
-    return {**rule, "reads": known_fact.reads + ":" + known_fact.key}
+    return {**check_engine(rule), "reads": known_fact.reads + ":" + known_fact.key}
 
 
 def _missing(value):
@@ -327,18 +405,21 @@ def evaluate(rules: list[dict], env: Env) -> list[dict]:
     out = []
     for rule in rules:
         fact = fact_for(rule["fact"])
-        if rule["fact"] not in values:
+        key = (rule["fact"], rule["id"]) if fact is not None and fact.per_rule else rule["fact"]
+        if key not in values:
             if fact is None:
-                values[rule["fact"]] = (None, "unknown fact")
+                values[key] = (None, "unknown fact")
             else:
                 try:
-                    values[rule["fact"]] = (fact.read(env), None)
+                    values[key] = (fact.read(env, rule) if fact.per_rule else fact.read(env), None)
                 except Exception as exc:  # noqa: BLE001 — an unreadable fact is no evidence (fail closed)
-                    values[rule["fact"]] = (None, f"the reader failed: {type(exc).__name__}")
-        value, problem = values[rule["fact"]]
-        shown, scored = None, None
+                    values[key] = (None, f"the reader failed: {type(exc).__name__}")
+        value, problem = values[key]
+        shown, scored, looped = None, None, None
         if isinstance(value, Scored):
             scored, value = value, value.value
+        if isinstance(value, Looped):
+            looped, value = value, value.value
         if isinstance(value, NoEvidence):
             shown, problem = value.value, value.reason
         elif problem is None and _missing(value):
@@ -348,6 +429,8 @@ def evaluate(rules: list[dict], env: Env) -> list[dict]:
                              "unit": fact.unit if fact else None, "source": rule.get("reads")}]}
         if scored is not None:
             result["facts"][0]["rows"] = scored.rows
+        if looped is not None:
+            result["facts"][0]["loop"] = looped.record
         if problem is None:
             try:
                 result["verdict"] = "pass" if _holds(rule["op"], value, rule.get("value")) else "fail"
