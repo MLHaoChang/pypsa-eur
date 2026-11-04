@@ -403,3 +403,8 @@ def test_g7_the_write_goes_to_the_bound_contexts_user_ts(site, upload):
     file_id = upload()
     chat_tools.apply_demand_from_excel(**args(file_id))
     assert list(ctx().user_ts[("loads", "p_set", "L1")]) == [7.5, 9.0]
+    # The ordinary chat path still writes where it did: the module-global
+    # store is the active project's, which save_project reads.
+    from services.user_timeseries import _user_ts
+
+    assert list(_user_ts[("loads", "p_set", "L1")]) == [7.5, 9.0]
