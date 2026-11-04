@@ -96,3 +96,16 @@ def test_a_claim_with_no_result_is_shown_uncertain_and_never_resent(
     harness_runner._notify(path)
     notice = harness_runner._read(path)["run"]["loop"]["notice"]
     assert notice["sent"] is False and notice["error"] == "uncertain" and not outbox
+
+
+def test_the_run_view_shows_the_notice_failure(granted, profile, site, rated, tunable_rule, outbox, owner,
+                                               monkeypatch):
+    from services import assistant_tasks
+
+    def boom(envelope):
+        raise RuntimeError("smtp down")
+    email_service.set_delivery_hook_for_tests(boom)
+    _, record = exhaust(granted, profile, True, monkeypatch)
+    view = assistant_tasks._run_view(record)
+    assert view["status"] == "needs_user"
+    assert view["loop"]["notice"]["sent"] is False and view["loop"]["notice"]["error"] == "send_failed"

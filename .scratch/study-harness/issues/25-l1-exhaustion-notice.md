@@ -23,9 +23,9 @@ Design §6.1 says that when L1 is exhausted, the user is notified with the faili
 
 ## Acceptance criteria
 
-- [ ] An exhausted L1 with `notify.email` sends one notice carrying the failing rules and the ledger (tested with a fake sender).
-- [ ] Without `notify.email`, nothing is sent.
-- [ ] A sender failure leaves the run `needs_user`, with the failure in the run view.
+- [x] An exhausted L1 with `notify.email` sends one notice carrying the failing rules and the ledger (tested with a fake sender).
+- [x] Without `notify.email`, nothing is sent.
+- [x] A sender failure leaves the run `needs_user`, with the failure in the run view.
 
 ## Comments
 
