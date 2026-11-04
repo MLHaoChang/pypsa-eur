@@ -8,12 +8,13 @@
 // reason once the server says the detach can no longer be undone.
 import { useEffect, useState } from 'react'
 import type { PlaceEntry } from '../api/siteScene'
+import { SECONDARY_BUTTON } from './buttonStyles'
 import NumberField from './NumberField'
 import { detachedCopy, editTitle, isNoMove, moveValid, NO_MOVE, type GroupMove } from './groupEdit'
 import { useModelProposal } from './useSiteScene'
 
 const primary = 'px-3 py-1 rounded bg-accent text-white font-semibold hover:bg-accent/90 disabled:cursor-not-allowed disabled:hover:bg-accent disabled:opacity-50'
-const secondary = 'px-3 py-1 rounded border border-border text-text hover:border-accent disabled:opacity-50'
+const secondary = SECONDARY_BUTTON
 const PICK_HINT = 'Shift+click placed equipment in the view, or tick it here, to move several at once or detach them'
 const NOTHING_TO_MOVE = 'Enter a distance or an angle first'
 const FIX_FIELDS = 'Fix the fields marked above first'
