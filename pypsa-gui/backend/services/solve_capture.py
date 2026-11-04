@@ -147,8 +147,20 @@ def capture(ctx, project_dir, solver_config_json: str | None) -> dict:
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)
         raise
-    return {"id": cid, "dir": str(final), "identity": hashlib.sha256(body).hexdigest(), "files": files,
-            "exact": manifest["exact"], "network_revision": manifest["network_revision"]}
+    record = {"id": cid, "dir": str(final), "identity": hashlib.sha256(body).hexdigest(), "files": files,
+              "exact": manifest["exact"], "network_revision": manifest["network_revision"]}
+    if _user_code(config):
+        # GK B rider 2: the code text travels in the captured config; what it
+        # reads while it runs is not captured, and the evidence says so.
+        record["not_captured"] = ["user_code_reads"]
+    return record
+
+
+def _user_code(config_json: str) -> bool:
+    try:
+        return bool(str(json.loads(config_json).get("extra_functionality_code") or "").strip())
+    except (ValueError, AttributeError):
+        return True  # unreadable: never claim it is fully captured
 
 
 def verify(record: dict) -> dict:

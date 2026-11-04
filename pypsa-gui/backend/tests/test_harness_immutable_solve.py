@@ -300,3 +300,24 @@ def test_the_write_back_compares_the_full_identity_not_the_fingerprint_alone(eh,
     job = _terminal(job_id)
     assert job["status"] == "completed" and job["objective"] == pytest.approx(CAPTURED_OBJECTIVE)
     assert job["capture"]["applied"] is False and job["capture"]["reason"] == "inputs_changed"
+
+
+def test_a_captured_sidecar_gone_from_the_capture_is_a_mismatch_never_the_projects(eh, site, held_queue):
+    """GK B rider 1: the loaders never fall back to the project's file."""
+    from services.adequacy import island_config
+    _, root = site
+    (pathlib.Path(root) / island_config.SIDECAR_NAME).write_text("{}")
+    job = _settled_after(eh, site, held_queue, lambda d: (d / island_config.SIDECAR_NAME).unlink())
+    assert job["status"] == "failed" and job["condition"] == solve_capture.MISMATCH, job
+
+
+@pytest.mark.parametrize("code,expected", [("", None), ("def extra_functionality(n, s):\n    pass\n",
+                                                        ["user_code_reads"])])
+def test_user_code_reads_are_named_as_not_captured(eh, site, code, expected):
+    """GK B rider 2: the code travels in the captured config; its reads do not."""
+    _, root = site
+    config = json.dumps({"extra_functionality_code": code})
+    with ctx().mutation_lock, ctx().solver_state_lock:
+        record = solve_capture.capture(ctx(), root, config)
+    assert record.get("not_captured") == expected
+    assert json.loads((pathlib.Path(record["dir"]) / "solver_config.json").read_text()) == json.loads(config)

@@ -1363,8 +1363,15 @@ else.
     `build_lp_chain` path. The pre-solve steps (modelling transforms,
     commercial PoC prices, energization, fixed sizes, island) are all
     reproduced: they read the network, config and storage dir. One is not:
-    user code (`extra_functionality_code`, behind `PYPSA_GUI_ALLOW_USER_CODE`)
-    may read any file.
+    user code (`extra_functionality_code`, behind `PYPSA_GUI_ALLOW_USER_CODE`).
+    Its text travels in the captured config, but what it reads while it runs
+    is not captured. When the config carries user code, the capture record
+    and the run evidence name `not_captured: ["user_code_reads"]`. The
+    audit-hook test (no file of the project opened during the captured solve)
+    runs with user code off. A file the manifest names that is missing from
+    the capture is `capture_mismatch`; the loaders never fall back to the
+    project's copy. `results_state.pkl` is not captured: the write-back saves
+    the new solve's own results, never an older state.
   - **Write-back.** Under the project's locks, the result is saved to the
     project only when the full identity (exact fingerprint, edit counter,
     sidecar sha256) still equals the capture's. Otherwise nothing is written,
