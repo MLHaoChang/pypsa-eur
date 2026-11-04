@@ -348,7 +348,7 @@ def close_in(thread: dict[str, Any], reason: str) -> bool:
             amount, flags = cap, ['over_reservation']
         else:
             amount = _number(used)
-        dc._settle_in(thread, key=key, amount=amount, unit=unit, flags=flags)
+        dc.settle_in(thread, key=key, amount=amount, unit=unit, flags=flags)
         settlement[kind] = {'amount': amount, 'unit': unit, 'flags': flags}
     session['state'] = 'closed'
     session['closed_reason'] = reason
@@ -387,7 +387,7 @@ def _reserve_session(thread: dict[str, Any], language: str) -> dict[str, Any]:
     keys = {kind: f'speech-{session_id}-{kind}' for kind in RESERVATIONS}
     for kind, key in keys.items():
         amount, unit = RESERVATIONS[kind]
-        dc._reserve_in(thread, key=key, kind=f'speech_{kind}', amount=amount, unit=unit)
+        dc.reserve_in(thread, key=key, kind=f'speech_{kind}', amount=amount, unit=unit)
     session = {
         'session_id': session_id,
         'state': 'starting',

@@ -647,7 +647,7 @@ def reserve_budget(
         _refuse('invalid_budget_amount', 'amount must be a non-negative number.', 422)
     with _LOCK:
         path, thread = _read(thread_id)
-        if _reserve_in(thread, key=key, kind=kind, amount=amount, unit=unit):
+        if reserve_in(thread, key=key, kind=kind, amount=amount, unit=unit):
             thread['checkpoint_rev'] = int(thread.get('checkpoint_rev', 0)) + 1
             thread['updated_at'] = datetime.now(timezone.utc).isoformat()
             _save(path, thread)
@@ -660,12 +660,15 @@ def _budgets(thread: dict[str, Any]) -> dict[str, Any]:
     })
 
 
-def _reserve_in(
+def reserve_in(
     thread: dict[str, Any], *, key: str, kind: str, amount: int | float, unit: str,
 ) -> bool:
-    """Reserve ``key`` on an in-memory thread; the caller saves.
+    """Reserve ``key`` on an in-memory record (a thread, or a harness run).
 
-    Returns False when the identical reservation is already open.
+    The caller holds the lock that guards the record and saves it afterwards:
+    ``_LOCK`` for a thread, ``send_reservation._locked`` (file lock and task
+    lock) for a run. Returns False when the identical reservation is already
+    open.
     """
     budgets = _budgets(thread)
     if any(c.get('key') == key for c in budgets.get('final_charges', [])):
@@ -688,7 +691,7 @@ def _reserve_in(
     return True
 
 
-def _settle_in(
+def settle_in(
     thread: dict[str, Any],
     *,
     key: str,
@@ -697,7 +700,12 @@ def _settle_in(
     cached: int | float = 0,
     flags: list[str] | None = None,
 ) -> None:
-    """Move a reservation into final_charges on an in-memory thread; caller saves."""
+    """Move a reservation into final_charges on an in-memory record.
+
+    The caller holds the lock that guards the record and saves it afterwards:
+    ``_LOCK`` for a thread, ``send_reservation._locked`` (file lock and task
+    lock) for a run.
+    """
     budgets = _budgets(thread)
     if any(c.get('key') == key for c in budgets.get('final_charges', [])):
         _refuse('budget_already_settled', 'This budget key is already settled.')
@@ -932,7 +940,7 @@ def settle_budget(
         _refuse('invalid_budget_amount', 'cached must be a non-negative number.', 422)
     with _LOCK:
         path, thread = _read(thread_id)
-        _settle_in(thread, key=key, amount=amount, unit=unit, cached=cached)
+        settle_in(thread, key=key, amount=amount, unit=unit, cached=cached)
         thread['checkpoint_rev'] = int(thread.get('checkpoint_rev', 0)) + 1
         thread['updated_at'] = datetime.now(timezone.utc).isoformat()
         _save(path, thread)

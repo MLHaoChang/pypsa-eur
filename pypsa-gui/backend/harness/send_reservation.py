@@ -13,7 +13,7 @@ end of the turn, or by the restart reconciliation (the runner's boot sweep
 and its lease takeover). It never settles at zero.
 
 The ledger rows are written by LV-09's in-memory cores
-(`durable_conversation._reserve_in` / `_settle_in`): idempotent by key, the
+(`durable_conversation.reserve_in` / `settle_in`): idempotent by key, the
 same schema, no second store. Each write happens under the task lock
 (`runner._update`), so two sends of one run cannot both pass admission.
 
@@ -39,6 +39,7 @@ from __future__ import annotations
 import hashlib
 import contextlib
 import contextvars
+import copy
 import json
 import logging
 import math
@@ -134,7 +135,7 @@ def server_tool_costs() -> dict[str, dict[str, float]]:
     table."""
     raw = os.environ.get(SERVER_TOOL_COSTS_ENV)
     if not raw:
-        return DEFAULT_SERVER_TOOL_COSTS_EUR
+        return copy.deepcopy(DEFAULT_SERVER_TOOL_COSTS_EUR)  # a caller's change never reaches the defaults
     table = json.loads(raw)
     if not isinstance(table, dict):
         raise ValueError("the server tool cost table is not an object")
@@ -446,7 +447,7 @@ def _admit(path, request, *, boot, scope, key, clock):
             return False
         from services import durable_conversation
         out["key"] = new_key(task["task_id"])
-        durable_conversation._reserve_in(run, key=out["key"], kind=KINDS[scope], amount=hold, unit=unit)
+        durable_conversation.reserve_in(run, key=out["key"], kind=KINDS[scope], amount=hold, unit=unit)
         row = next(r for r in _ledger(run)["reservations"] if r["key"] == out["key"])
         row["dispatch"] = {"boot": boot, "model": request.model, "at": time.time()}
         if scope == "research":
@@ -462,7 +463,7 @@ def _admit(path, request, *, boot, scope, key, clock):
 
 def _settle_row(run: dict, hold: dict, amount_, flags: list[str] | None, eur=None) -> None:
     from services import durable_conversation
-    durable_conversation._settle_in(run, key=hold["key"], amount=amount_, unit=hold["unit"], flags=flags or None)
+    durable_conversation.settle_in(run, key=hold["key"], amount=amount_, unit=hold["unit"], flags=flags or None)
     charge = next(c for c in reversed(_ledger(run)["final_charges"]) if c["key"] == hold["key"])
     if "eur" in hold:
         charge["eur"] = hold["eur"] if eur is None else eur

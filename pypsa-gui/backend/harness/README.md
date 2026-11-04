@@ -1426,6 +1426,80 @@ as data and marks an evaluation stale after a manual edit, which it never
 blocks. A study brief records `{thread_id, rev, items}`; `assistant_tasks._stale`
 reads a moved `rev` as `brief_stale`.
 
+### Send reservation (study harness issue 24)
+
+`harness/send_reservation.py` writes a durable hold before each model send of a
+harness run and settles it after the reply, so a crash between the reply and the
+charge never loses spend. Only a run's own sends go through it: the runner wraps
+its round provider in `ReservingProvider` (`Runner._round_provider`). Chat turns
+are not reserved here.
+
+Two environment variables:
+
+- `PYPSA_GUI_CHAT_DURABLE_BUDGET_MODE` (`mode()`) = `off` (default) |
+  `output_tokens` | `total_tokens` | `money_eur`. Any other value reads as
+  `invalid` and `admit()` refuses every send (`invalid_mode`). With `off`,
+  `ReservingProvider.stream()` passes run sends straight through and reserves
+  only research. A hold is an upper bound (`bound()`, `amount()`): input is
+  bounded by the request's UTF-8 bytes plus `FRAMING_TOKENS`, so an image or
+  document block refuses `total_tokens` and `money_eur` (`unbounded_input`), a
+  model with no price refuses `money_eur` (`no_price`), and a request with no
+  output limit refuses every mode (`unbounded_output`).
+  Known limit: `total_tokens` refuses every send (`no_cap`), because `cap()`
+  reads `run.budget.limit.total_tokens` and nothing sets it yet.
+- `PYPSA_GUI_SERVER_TOOL_COSTS_EUR` (`server_tool_costs()`): a JSON object
+  `{type prefix: {"fee_eur": per use, "content_tokens": per use}}` that replaces
+  the owner defaults (SH-TOOL-COSTS-1), `DEFAULT_SERVER_TOOL_COSTS_EUR`:
+  `web_search_` EUR 0.0093 and 10,000 content tokens per use, `web_fetch_` no
+  fee and 50,000 tokens (a tool's own `max_content_tokens` wins). A
+  provider-run tool adds `max_uses` × (fee + content) to the bound
+  (`_tools_of()`); a type no prefix matches, or a tool with no `max_uses`, has
+  no bound and is refused. `server_tool_costs()` returns a fresh copy each call.
+
+The ledger is `task["run"]["budgets"]`, LV-09's shape
+`{reservations, final_charges, cached_usage}`. Its rows are written by LV-09's
+cores `durable_conversation.reserve_in` / `settle_in` (idempotent by key),
+always inside `_locked()`: the runner's cross-process file lock and the task
+lock. `admit()` passes a send only when `settled + open holds + this hold <= cap`
+(`budget` otherwise), so two concurrent sends cannot together pass the cap.
+`settle()` charges the reported usage; a reply with no usage, or a missing usage
+part, settles at the hold's bound (`actual()`, flag `no_usage`). A hold left open
+settles `uncertain` at its bound (`_settle_uncertain()`), never at zero. The run
+view's `summary()` counts the charges that sit at a bound.
+
+A send that fails after the provider started answering settles `uncertain` at
+once (`ReservingProvider.stream()`). One that fails before any response byte
+keeps its hold open, so the loop's retry reuses the key; the hold then closes in
+one of three places:
+
+- turn end: the round's `finally` (`Runner._agent_round`) calls
+  `close_open(path, boot=...)` for this boot's holds, guarded so a ledger fault
+  never keeps the runner from waking;
+- the boot sweep: `Runner.boot_sweep()` runs `sweep()` over every run file with
+  open holds;
+- the takeover: when a runner takes over a run, `reconcile()` settles the holds
+  other boots left open, and the run, if driven, stops `needs_user`
+  (`uncertain`).
+
+`reconcile()` (and so the sweep) skips a run while another instance holds its
+live lease. Admission happens only under the live lease: `_admit()` refuses a
+process whose lease is not current (expired or taken over) with `lease_lost`
+and writes nothing. Run rounds are headless (`run_loops.run_round`): only a
+refusal's kind reaches the run's event log, so the `lease_lost` text reaches
+neither a card nor the model.
+
+Research (SH-09, SH-RESEARCH-CAP-1) is a second scope in the same ledger. Sends
+streamed inside `with send_reservation.research():` are reserved by the
+runner's own `ReservingProvider` under `scope="research"`, one hold each, and
+count toward both the run's cap and the research cap. `research_cap()` reads
+the granted envelope's `research.cost_cap_eur` (`run_envelope` defaults it to
+EUR 2) and never exceeds EUR 10; an envelope that is unreadable, not granted
+or does not allow research refuses (`research_unavailable`,
+`research_not_allowed`). Research is reserved with the mode off. A research
+step never nests a second `ReservingProvider`.
+
+Tests: `tests/test_harness_budget_reservation.py`.
+
 
 ## Recorded runs, load flow, and experiment plans
 

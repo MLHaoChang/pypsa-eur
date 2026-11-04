@@ -1,0 +1,1 @@
+* Docs(pypsa-gui): The harness README documents the send reservation (its two settings, the ledger, the boot sweep and takeover reconcile, the live-lease rule and the research scope); the server-tool cost table is a fresh copy on every read.
