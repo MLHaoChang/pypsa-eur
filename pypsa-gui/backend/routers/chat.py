@@ -2201,16 +2201,17 @@ def run_resume(task_id: str, body: RunResumeRequest | None = None,
 
 class ResearchVerdictRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    row_id: str = Field(min_length=1, max_length=64)
     verdict: Literal["confirmed", "rejected"]
 
 
-@router.post("/runs/{task_id}/research/{row_id}")
-def run_research_verdict(task_id: str, row_id: str, body: ResearchVerdictRequest,
+@router.post("/runs/{task_id}/research")
+def run_research_verdict(task_id: str, body: ResearchVerdictRequest,
                          actor: User = Depends(require_user)) -> dict[str, Any]:
-    """Study harness issue 09: the research card's Confirm or Reject of one
-    source row. A confirmed value is then written only through its own cards."""
+    """Study harness issue 09: the research card's Use this value or Reject of
+    one source row. A confirmed value is then written only through its own cards."""
     from harness import research
-    return _run_act(actor, task_id, lambda: research.decide(task_id, row_id, body.verdict, by=str(actor.id)))
+    return _run_act(actor, task_id, lambda: research.decide(task_id, body.row_id, body.verdict, by=str(actor.id)))
 
 
 @router.post("/runs/{task_id}/stop")

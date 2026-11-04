@@ -111,6 +111,21 @@ export const STATES: Record<string, RunMonitorView> = {
     envelope: { ...GRANTED, state: 'expired' } }),
   solver_error: view({ status: 'needs_review', run: run('solve', { status: 'needs_user', reason: 'step_failed', stages: stages('solve') }) }),
   uncertain: view({ status: 'needs_review', run: run('solve', { status: 'needs_user', reason: 'step_uncertain', stages: stages('solve') }) }),
+  research_confirm: view({ run: run('inputs', { status: 'needs_user', reason: 'waiting_research_confirm',
+    waiting: { kind: 'research_confirm', ref: 'src_a' }, stages: stages('inputs') }), envelope: GRANTED,
+    monitor: { ...MONITOR, budgets: GRANTED_BUDGETS, waiting: { kind: 'research_confirm', ref: 'src_a' }, research: {
+      steps: [{ stage: 'inputs', status: 'done', gaps: [] }],
+      rows: [
+        { row: 'src_a', gap: 'import_tariff', value: 142.5, unit: 'EUR/MWh', basis: 'energy charge, excl. VAT',
+          jurisdiction: 'DE', status: 'proposed', source: 'sourced', url: 'https://tariffs.example.org/industrial-2026',
+          title: 'Industrial tariff sheet 2026', quote: 'The energy charge for medium-voltage customers is EUR 142.50 per MWh',
+          fetched_at: '2026-11-04T06:00:00Z' },
+        { row: 'src_b', gap: 'import_tariff', value: 150, unit: 'EUR/MWh', basis: 'energy charge, excl. VAT',
+          jurisdiction: 'DE', status: 'proposed', source: 'unverified source', reason: 'url_not_fetched' },
+      ] } } }),
+  research_cap: view({ run: run('inputs', { stages: stages('inputs') }), envelope: GRANTED,
+    monitor: { ...MONITOR, budgets: GRANTED_BUDGETS, research: { rows: [],
+      steps: [{ stage: 'inputs', status: 'cap_reached', gaps: ['import_tariff'], kind: 'research_cap_reached' }] } } }),
   out_of_date: view({ status: 'needs_review', run: run('inputs', { status: 'needs_user', reason: 'brief_stale', stages: stages('inputs') }) }),
 }
 

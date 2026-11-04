@@ -17,14 +17,16 @@ Pure functions over plain dicts: the harness keeps the rows in the run block
   stays in the ledger and the report. Competing rows for one gap sit side by
   side (`for_gap`).
 """
+
 from __future__ import annotations
 
 import math
 import re
 import unicodedata
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Iterable
+from datetime import datetime, UTC
+from typing import Any
+from collections.abc import Iterable
 
 QUOTE_CHARS = 400
 _JURISDICTION = re.compile(r"[A-Z]{2}(-[A-Z0-9]{1,6})?")
@@ -46,7 +48,7 @@ def normalise(text: str) -> str:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def _locate(quote: str, text: str) -> dict[str, int] | None:
@@ -57,8 +59,13 @@ def _locate(quote: str, text: str) -> dict[str, int] | None:
     return None if start < 0 else {"start": start, "end": start + len(needle)}
 
 
-def propose(proposal: dict[str, Any], gap: dict[str, Any], fetched: Iterable[Any], *,
-            turn_id: str) -> dict[str, Any]:
+def propose(
+    proposal: dict[str, Any],
+    gap: dict[str, Any],
+    fetched: Iterable[Any],
+    *,
+    turn_id: str,
+) -> dict[str, Any]:
     """A `proposed` SourceRow for `gap` from the model's proposal, verified
     against this turn's fetched pages (each with url, fetched_at, title,
     sha256, text). Raises LedgerError for a malformed proposal or a unit or
@@ -66,43 +73,86 @@ def propose(proposal: dict[str, Any], gap: dict[str, Any], fetched: Iterable[Any
     if not isinstance(proposal, dict):
         raise LedgerError("invalid_source_row", "A source row is an object.")
     value = proposal.get("value")
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
-        raise LedgerError("invalid_source_row", "A source row's value is a finite number.")
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+    ):
+        raise LedgerError(
+            "invalid_source_row", "A source row's value is a finite number."
+        )
     unit, basis = proposal.get("unit"), proposal.get("basis")
     want = gap["research"]
-    if not isinstance(unit, str) or unit.strip() != want["unit"] \
-            or not isinstance(basis, str) or basis.strip() != want["basis"]:
-        raise LedgerError("research_unit_mismatch",
-                          f"This gap takes a value in {want['unit']} ({want['basis']}); "
-                          f"{unit!r} ({basis!r}) is refused, not converted.")
+    if (
+        not isinstance(unit, str)
+        or unit.strip() != want["unit"]
+        or not isinstance(basis, str)
+        or basis.strip() != want["basis"]
+    ):
+        raise LedgerError(
+            "research_unit_mismatch",
+            f"This gap takes a value in {want['unit']} ({want['basis']}); "
+            f"{unit!r} ({basis!r}) is refused, not converted.",
+        )
     url, quote = proposal.get("url"), proposal.get("quote")
-    if not isinstance(url, str) or not url or not isinstance(quote, str) or not quote.strip():
-        raise LedgerError("invalid_source_row", "A source row names its url and a quote.")
+    if (
+        not isinstance(url, str)
+        or not url
+        or not isinstance(quote, str)
+        or not quote.strip()
+    ):
+        raise LedgerError(
+            "invalid_source_row", "A source row names its url and a quote."
+        )
     if len(quote) > QUOTE_CHARS:
-        raise LedgerError("invalid_source_row", f"A quote is at most {QUOTE_CHARS} characters.")
+        raise LedgerError(
+            "invalid_source_row", f"A quote is at most {QUOTE_CHARS} characters."
+        )
     extra = {}
     if gap.get("tool") == "attach_tariff":  # a Library tariff names its jurisdiction
         jurisdiction = proposal.get("jurisdiction")
-        if not isinstance(jurisdiction, str) or not _JURISDICTION.fullmatch(jurisdiction.strip()):
-            raise LedgerError("invalid_source_row", "A tariff row names its jurisdiction, e.g. DE or DE-BY.")
+        if not isinstance(jurisdiction, str) or not _JURISDICTION.fullmatch(
+            jurisdiction.strip()
+        ):
+            raise LedgerError(
+                "invalid_source_row",
+                "A tariff row names its jurisdiction, e.g. DE or DE-BY.",
+            )
         extra["jurisdiction"] = jurisdiction.strip()
     row = {
         "id": f"src_{uuid.uuid4().hex[:12]}",
         "for": dict(gap["target"]) | {"gap": gap["key"]},
-        "value": float(value), "unit": want["unit"], "basis": want["basis"],
-        "url": url, "title": str(proposal.get("title") or "")[:200], "quote": quote,
-        "turn_id": turn_id, "status": "proposed", **extra,
+        "value": float(value),
+        "unit": want["unit"],
+        "basis": want["basis"],
+        "url": url,
+        "title": str(proposal.get("title") or "")[:200],
+        "quote": quote,
+        "turn_id": turn_id,
+        "status": "proposed",
+        **extra,
     }
     page = next((f for f in fetched if f.url == url), None)
     if page is None:
-        return row | {"verification": "unverified", "verification_reason": "url_not_fetched"}
+        return row | {
+            "verification": "unverified",
+            "verification_reason": "url_not_fetched",
+        }
     locator = _locate(quote, page.text)
     if locator is None:
-        return row | {"verification": "unverified", "verification_reason": "quote_not_in_page",
-                      "fetched_at": page.fetched_at, "content_sha256": page.sha256}
-    return row | {"verification": "verified", "fetched_at": page.fetched_at,
-                  "content_sha256": page.sha256, "locator": locator,
-                  **({"title": page.title[:200]} if page.title and not row["title"] else {})}
+        return row | {
+            "verification": "unverified",
+            "verification_reason": "quote_not_in_page",
+            "fetched_at": page.fetched_at,
+            "content_sha256": page.sha256,
+        }
+    return row | {
+        "verification": "verified",
+        "fetched_at": page.fetched_at,
+        "content_sha256": page.sha256,
+        "locator": locator,
+        **({"title": page.title[:200]} if page.title and not row["title"] else {}),
+    }
 
 
 def sourced(row: dict[str, Any]) -> bool:
@@ -121,18 +171,36 @@ def settle(row: dict[str, Any], status: str, *, by: str) -> dict[str, Any]:
     if status not in ("confirmed", "rejected"):
         raise LedgerError("invalid_source_row", "A row is confirmed or rejected.")
     if row.get("status") != "proposed":
-        raise LedgerError("research_row_settled", f"This row is already {row.get('status')}.")
+        raise LedgerError(
+            "research_row_settled", f"This row is already {row.get('status')}."
+        )
     if status == "confirmed" and not sourced(row):
-        raise LedgerError("research_unverified", "An unverified source cannot be confirmed.")
+        raise LedgerError(
+            "research_unverified", "An unverified source cannot be confirmed."
+        )
     return row | {"status": status, f"{status}_by": by, f"{status}_at": _now()}
 
 
 def card_view(row: dict[str, Any]) -> dict[str, Any]:
     """What a card shows beside the value: the source when verified, else
     the words "unverified source" and no link or quote presented as sourced."""
-    base = {"row": row["id"], "value": row["value"], "unit": row["unit"], "basis": row["basis"],
-            "status": row["status"], **({"jurisdiction": row["jurisdiction"]} if "jurisdiction" in row else {})}
+    base = {
+        "row": row["id"],
+        "value": row["value"],
+        "unit": row["unit"],
+        "basis": row["basis"],
+        "status": row["status"],
+        **({"jurisdiction": row["jurisdiction"]} if "jurisdiction" in row else {}),
+    }
     if not sourced(row):
-        return base | {"source": "unverified source", "reason": row.get("verification_reason")}
-    return base | {"source": "sourced", "url": row["url"], "title": row.get("title", ""),
-                   "quote": row["quote"], "fetched_at": row.get("fetched_at")}
+        return base | {
+            "source": "unverified source",
+            "reason": row.get("verification_reason"),
+        }
+    return base | {
+        "source": "sourced",
+        "url": row["url"],
+        "title": row.get("title", ""),
+        "quote": row["quote"],
+        "fetched_at": row.get("fetched_at"),
+    }

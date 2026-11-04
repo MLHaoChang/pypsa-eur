@@ -9,8 +9,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { isAxiosError } from 'axios'
 import {
-  getRun, pauseRun, presentRun, resumeRun, stopRun,
-  type GateRule, type RunMonitorView, type RunStage,
+  decideResearch, getRun, pauseRun, presentRun, resumeRun, stopRun,
+  type GateRule, type ResearchRow, type RunMonitorView, type RunStage,
 } from '../../api/runMonitor'
 import { useChatStore } from '../../store/chatStore'
 import { useUIStore, type SlidePanel } from '../../store/uiStore'
@@ -75,7 +75,51 @@ function CurrentStage({ stage, view }: { stage: RunStage; view: RunMonitorView }
         {r.verdict === 'pass' ? 'pass' : 'fail'}</span>
     </div>)}
     {stage.loop && <div data-testid="run-loop">Round {stage.loop.round} of {stage.loop.of}</div>}
+    {(view.monitor.research?.steps ?? []).filter(s => s.stage === stage.stage && RESEARCH_STOP[s.status] && s.gaps.length)
+      .map(s => <div key={s.status} data-testid="run-research-step" data-status={s.status}>
+        {RESEARCH_STOP[s.status]}: {s.gaps.map(gapWords).join(', ')} stays as the template has it.</div>)}
     <Budgets view={view} />
+  </div>
+}
+
+// A run that waits on the user, not one that stopped.
+const WAITS = new Set(['waiting_card', 'waiting_research_confirm'])
+
+// Study harness issue 09: what a research step that ended early says, and each gap's name.
+const RESEARCH_STOP: Record<string, string> = {
+  cap_reached: 'Research stopped at its cost cap',
+  not_available: 'This model has no web search',
+  error: 'Research did not finish',
+}
+const GAP_WORDS: Record<string, string> = { import_tariff: 'Import tariff' }
+const gapWords = (gap: string) => GAP_WORDS[gap] ?? 'A value'
+
+/** The research card: one researched value beside its source, for the user to
+ *  use or reject. A value is written only after this, each write on its own card. */
+function ResearchCard({ row, others, busy, onDecide }: {
+  row: ResearchRow; others: number; busy: boolean
+  onDecide: (verdict: 'confirmed' | 'rejected') => void
+}) {
+  const sourced = row.source === 'sourced' && row.url
+  return <div data-testid="run-research-card" className="mt-1 rounded border border-border p-2">
+    <div className="font-medium">{gapWords(row.gap)} found on the web</div>
+    <div data-testid="run-research-value">
+      {row.value} {row.unit} <span className="text-muted">({row.basis}{row.jurisdiction ? `, ${row.jurisdiction}` : ''})</span>
+    </div>
+    {sourced ? <>
+      <a href={row.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline break-all"
+        data-testid="run-research-source">{row.title || row.url}</a>
+      <blockquote data-testid="run-research-quote" className="my-1 border-l-2 border-border pl-2 italic">“{row.quote}”</blockquote>
+    </> : <div data-testid="run-research-unverified" className="text-amber-400">Unverified source: not used</div>}
+    {others > 0 && <div className="text-muted" data-testid="run-research-others">
+      {others} other {others === 1 ? 'source' : 'sources'} for this value: using this one rejects {others === 1 ? 'it' : 'them'}.</div>}
+    <div className="mt-1 flex gap-3">
+      {sourced && <button type="button" disabled={busy} data-testid="run-research-use"
+        className="text-accent hover:underline disabled:opacity-40" onClick={() => onDecide('confirmed')}>Use this value</button>}
+      <button type="button" disabled={busy} data-testid="run-research-reject"
+        className="text-muted hover:text-text disabled:opacity-40" onClick={() => onDecide('rejected')}>Reject</button>
+    </div>
+    {sourced && <p className="text-muted">Using it adds it to the Library and attaches it, each on its own card.</p>}
   </div>
 }
 
@@ -133,7 +177,7 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
 
   // The user has the plan card open: a card the run waits on is issued now,
   // its TTL starting at display (issue 08 AC).
-  const waitingRef = view?.monitor.waiting?.ref ?? null
+  const waitingRef = view?.monitor.waiting?.kind === 'research_confirm' ? null : view?.monitor.waiting?.ref ?? null
   const hasCard = Boolean(view?.monitor.card)
   useEffect(() => {
     if (!waitingRef || hasCard || document.visibilityState !== 'visible') return
@@ -215,10 +259,12 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
   const finished = run.status === 'completed'
   const gateFailed = run.status === 'needs_user' && current?.status === 'failed'
   const failedRules = (current?.gate ?? []).filter(r => r.verdict !== 'pass').length
-  const stop = !gateFailed && (run.status === 'paused' || (run.status === 'needs_user' && run.reason && run.reason !== 'waiting_card'))
+  const stop = !gateFailed && (run.status === 'paused' || (run.status === 'needs_user' && run.reason && !WAITS.has(run.reason)))
     ? stopWords(run.reason, run.stage) : null
   const going = !cancelled && !finished && ['running', 'waiting_job', 'needs_user'].includes(run.status)
   const pausedAt = view.paused_at_card
+  const research = view.monitor.waiting?.kind === 'research_confirm'
+    ? view.monitor.research?.rows.find(r => r.row === view.monitor.waiting!.ref) ?? null : null
   const state = cancelled ? `Stopped at ${stoppedAt}` : finished ? 'Finished'
     : gateFailed ? `${stoppedAt} failed` : stop ? stop.words
     : pausedAt ? 'Waiting for you' : run.status === 'needs_user' ? 'Waiting for you'
@@ -278,8 +324,11 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
             {continueReason}</div>}
         </li>}
         {card && <li data-testid="run-waiting-card">A step needs your approval: see the card below</li>}
-        {!card && view.monitor.waiting && !pausedAt && <li data-testid="run-waiting-step">A step waits for your decision; its card opens here</li>}
+        {!card && view.monitor.waiting && !research && !pausedAt && <li data-testid="run-waiting-step">A step waits for your decision; its card opens here</li>}
       </ul>
+      {research && <ResearchCard row={research} busy={busy}
+        others={(view.monitor.research?.rows ?? []).filter(r => r.gap === research.gap && r.row !== research.row && r.status === 'proposed').length}
+        onDecide={verdict => void act(() => decideResearch(taskId, research.row, verdict))} />}
     </div>}
 
     {view.brief_stale && !stop && <div data-testid="run-failure">

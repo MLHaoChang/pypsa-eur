@@ -11,7 +11,7 @@ import { STAGE_WORDS } from './runWords'
 import { runUnderReview } from './planReview'
 
 vi.mock('../../api/runMonitor', () => ({
-  getRun: vi.fn(), presentRun: vi.fn(), pauseRun: vi.fn(), resumeRun: vi.fn(), stopRun: vi.fn(),
+  getRun: vi.fn(), presentRun: vi.fn(), pauseRun: vi.fn(), resumeRun: vi.fn(), stopRun: vi.fn(), decideResearch: vi.fn(),
 }))
 
 const START = { task_id: TASK_ID, title: 'Own site study', status: 'ready', run: { stage: 'inputs' } }
@@ -196,6 +196,32 @@ describe('RunMonitor', () => {
     cleanup()
     show('finished_report')
     expect((await screen.findByTestId('run-report-link')).textContent).toBe('Open the report ›')
+  })
+
+  it('research: the value waits beside its page and verbatim quote; Use this value settles it (issue 09)', async () => {
+    vi.mocked(api.decideResearch).mockResolvedValue(STATES.research_cap)
+    show('research_confirm')
+    expect((await screen.findByTestId('run-research-value')).textContent).toBe('142.5 EUR/MWh (energy charge, excl. VAT, DE)')
+    const source = screen.getByTestId('run-research-source')
+    expect(source.getAttribute('href')).toBe('https://tariffs.example.org/industrial-2026')
+    expect(source.getAttribute('rel')).toBe('noopener noreferrer')
+    expect(screen.getByTestId('run-research-quote').textContent).toContain('EUR 142.50 per MWh')
+    expect(screen.getByTestId('run-research-others').textContent).toContain('1 other source')
+    expect(screen.getByTestId('run-state').textContent).toBe('Waiting for you')
+    expect(screen.queryByTestId('run-failure')).toBeNull()
+    expect(screen.queryByTestId('run-waiting-step')).toBeNull()
+    expect(card()).not.toMatch(INTERNAL)
+    expect(api.presentRun).not.toHaveBeenCalled()  // a research wait has no confirmation card to issue
+    fireEvent.click(screen.getByTestId('run-research-use'))
+    await waitFor(() => expect(api.decideResearch).toHaveBeenCalledWith(TASK_ID, 'src_a', 'confirmed'))
+    expect(await screen.findByTestId('run-research-step')).toBeTruthy()
+  })
+
+  it('research: a step stopped at its cost cap names the value left as the template has it', async () => {
+    show('research_cap')
+    expect((await screen.findByTestId('run-research-step')).textContent)
+      .toBe('Research stopped at its cost cap: Import tariff stays as the template has it.')
+    expect(screen.queryByTestId('run-research-card')).toBeNull()
   })
 
   it('links use ›, never >', async () => {

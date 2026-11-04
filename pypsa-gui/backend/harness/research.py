@@ -29,13 +29,15 @@ for the user (`run.waiting = {kind: research_confirm}`); the value is
 written only through the gap tool's own card (`research_ref` makes envelope
 admission refuse it). An unverified row is listed, never offered.
 """
+
 from __future__ import annotations
 
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from services import source_ledger
 from services.run_envelope import RESEARCH_SOURCE
@@ -44,12 +46,31 @@ STAGES = ("inputs", "explore")
 LEDGER_TOOL = "record_source"
 # Read-only tools a research turn may use beside the ledger write (each is
 # tier `read` in the catalogue; pinned by a test).
-READ_TOOLS = frozenset({
-    "get_component", "list_components", "get_weather_choice", "list_library_items",
-    "get_library_item", "get_finance_inputs",
-})
+READ_TOOLS = frozenset(
+    {
+        "get_component",
+        "list_components",
+        "get_weather_choice",
+        "list_library_items",
+        "get_library_item",
+        "get_finance_inputs",
+    }
+)
 _GAP_KEYS = {"key", "stage", "tool", "target", "unit", "basis", "question"}
 _TOOLS = {"attach_tariff"}  # proposal-first (#970 item 4): gaps with an edit adapter
+
+
+# The kinds this step reports, as `{"error_kind": ...}` literals for the
+# tool-error-kind manifest: record_source's and the research card's refusals,
+# and the step outcomes the run monitor lists (`run.research.steps[].kind`).
+ERROR_KINDS = (
+    {"error_kind": "invalid_source_row"},
+    {"error_kind": "research_unit_mismatch"},
+    {"error_kind": "research_unverified"},
+    {"error_kind": "research_row_settled"},
+    {"error_kind": "research_cap_reached"},
+    {"error_kind": "research_not_available"},
+)
 
 
 class ResearchError(ValueError):
@@ -61,15 +82,28 @@ class ResearchError(ValueError):
 def check_block(block: Any) -> dict[str, Any]:
     """A profile's `research` block: `{"gaps": [...]}`, each gap with its key,
     stage, gap tool, target, unit, basis and question. Raises ValueError."""
-    if not isinstance(block, dict) or set(block) != {"gaps"} or not isinstance(block["gaps"], list):
+    if (
+        not isinstance(block, dict)
+        or set(block) != {"gaps"}
+        or not isinstance(block["gaps"], list)
+    ):
         raise ValueError("A research block is {gaps: [...]}.")
     seen = set()
     for gap in block["gaps"]:
         if not isinstance(gap, dict) or set(gap) != _GAP_KEYS:
             raise ValueError(f"A research gap names {sorted(_GAP_KEYS)}.")
-        if gap["stage"] not in STAGES or gap["tool"] not in _TOOLS or gap["key"] in seen:
-            raise ValueError(f"Research gap {gap.get('key')!r}: stage, tool or key not allowed.")
-        if not all(isinstance(gap[k], str) and gap[k] for k in ("key", "unit", "basis", "question")):
+        if (
+            gap["stage"] not in STAGES
+            or gap["tool"] not in _TOOLS
+            or gap["key"] in seen
+        ):
+            raise ValueError(
+                f"Research gap {gap.get('key')!r}: stage, tool or key not allowed."
+            )
+        if not all(
+            isinstance(gap[k], str) and gap[k]
+            for k in ("key", "unit", "basis", "question")
+        ):
             raise ValueError("A research gap's key, unit, basis and question are text.")
         seen.add(gap["key"])
     return block
@@ -78,14 +112,23 @@ def check_block(block: Any) -> dict[str, Any]:
 def gaps_for(profile: dict[str, Any], stage: str) -> list[dict[str, Any]]:
     """The profile's researchable gaps of one stage, as ledger gaps."""
     block = check_block(profile.get("research", {"gaps": []}))
-    return [{"key": g["key"], "tool": g["tool"], "target": dict(g["target"]),
-             "question": g["question"], "research": {"unit": g["unit"], "basis": g["basis"]}}
-            for g in block["gaps"] if g["stage"] == stage]
+    return [
+        {
+            "key": g["key"],
+            "tool": g["tool"],
+            "target": dict(g["target"]),
+            "question": g["question"],
+            "research": {"unit": g["unit"], "basis": g["basis"]},
+        }
+        for g in block["gaps"]
+        if g["stage"] == stage
+    ]
 
 
 def granted(task_path) -> bool:
     """The run's granted, live envelope allows research (GK B Q1)."""
     from services import run_envelope
+
     if not run_envelope.live(task_path):
         return False
     envelope = run_envelope.read(task_path) or {}
@@ -98,6 +141,7 @@ def granted(task_path) -> bool:
 @dataclass
 class Turn:
     """What `record_source` needs while a research turn runs."""
+
     task_path: Any
     turn_id: str
     gaps: dict[str, dict[str, Any]]
@@ -123,13 +167,16 @@ def instruction(gaps: list[dict[str, Any]]) -> str:
         "",
     ]
     for gap in gaps:
-        lines.append(f"- {gap['key']}: {gap['question']} Unit {gap['research']['unit']}, "
-                     f"basis {gap['research']['basis']}.")
+        lines.append(
+            f"- {gap['key']}: {gap['question']} Unit {gap['research']['unit']}, "
+            f"basis {gap['research']['basis']}."
+        )
     return "\n".join(lines)
 
 
 def _update(task_path, change):
     from harness import runner
+
     return runner._update(task_path, change)
 
 
@@ -139,21 +186,37 @@ def _research_block(task):
 
 def _note(task_path, stage, status, gaps, **extra):
     """One research step's outcome in the run block; listed gaps go to the report."""
+
     def change(task):
         _research_block(task)["steps"].append(
-            {"stage": stage, "status": status, "gaps": [g["key"] for g in gaps], **extra})
+            {
+                "stage": stage,
+                "status": status,
+                "gaps": [g["key"] for g in gaps],
+                **extra,
+            }
+        )
+
     _update(task_path, change)
 
 
-def research_turn(task_path, session, *, stage: str, profile: dict[str, Any],
-                  provider_profile: Any, base_provider: Any,
-                  reserving: Callable[[Any], Any] | None) -> dict[str, Any]:
+def research_turn(
+    task_path,
+    session,
+    *,
+    stage: str,
+    profile: dict[str, Any],
+    provider_profile: Any,
+    base_provider: Any,
+    reserving: Callable[[Any], Any] | None,
+) -> dict[str, Any]:
     """Run one research turn for `stage`. Returns {status, rows, waiting}.
 
     `reserving` wraps a provider in the run's research reservation (SH-24);
     `base_provider` is the run's provider, `provider_profile` its profile."""
     from harness import eventlog, loop
     from harness.providers import research as capability
+
     gaps = gaps_for(profile, stage)
     if not gaps:
         return {"status": "no_gaps", "rows": [], "waiting": None}
@@ -168,15 +231,23 @@ def research_turn(task_path, session, *, stage: str, profile: dict[str, Any],
         _note(task_path, stage, "not_available", gaps, reason="no_reservation")
         return {"status": "not_available", "rows": [], "waiting": None}
     provider = capability.ResearchProvider(reserving(base_provider), spec)
-    turn = Turn(task_path, f"rt_{uuid.uuid4().hex[:12]}", {g["key"]: g for g in gaps}, provider)
+    turn = Turn(
+        task_path, f"rt_{uuid.uuid4().hex[:12]}", {g["key"]: g for g in gaps}, provider
+    )
     status = "done"
     with _TURNS_LOCK:
         _TURNS[session.session_id] = turn
     session.stage_tools = READ_TOOLS | {LEDGER_TOOL}
     try:
-        for kind, payload in loop.run_turn(session, instruction(gaps), provider=provider,
-                                           ui_context={"ui_mode": "guided"}):
-            eventlog.record(session, "runner/frame", frame=kind, loop="research", turn=turn.turn_id)
+        for kind, payload in loop.run_turn(
+            session,
+            instruction(gaps),
+            provider=provider,
+            ui_context={"ui_mode": "guided"},
+        ):
+            eventlog.record(
+                session, "runner/frame", frame=kind, loop="research", turn=turn.turn_id
+            )
     finally:
         session.stage_tools = None
         with _TURNS_LOCK:
@@ -189,25 +260,43 @@ def research_turn(task_path, session, *, stage: str, profile: dict[str, Any],
         status = "error"  # any other refusal (lease_lost, no_price, ...): the gaps are listed
     found = {r["for"]["gap"] for r in turn.rows if source_ledger.sourced(r)}
     listed = [g for g in gaps if g["key"] not in found]
-    _note(task_path, stage, status, listed, turn=turn.turn_id,
-          fetched=[f.public() for f in provider.fetched],
-          **({"kind": "research_cap_reached"} if status == "cap_reached" else
-             {"kind": "research_not_available"} if status == "not_available" else
-             {"reason": provider.refused} if status == "error" else {}))
+    _note(
+        task_path,
+        stage,
+        status,
+        listed,
+        turn=turn.turn_id,
+        fetched=[f.public() for f in provider.fetched],
+        **(
+            {"kind": "research_cap_reached"}
+            if status == "cap_reached"
+            else {"kind": "research_not_available"}
+            if status == "not_available"
+            else {"reason": provider.refused}
+            if status == "error"
+            else {}
+        ),
+    )
     waiting = _await_confirmation(task_path, turn.rows)
     return {"status": status, "rows": turn.rows, "waiting": waiting}
 
 
 def _await_confirmation(task_path, rows):
     """A verified proposed row puts the run `needs_user` on a research card."""
-    pending = [r for r in rows if r["status"] == "proposed" and source_ledger.sourced(r)]
+    pending = [
+        r for r in rows if r["status"] == "proposed" and source_ledger.sourced(r)
+    ]
     if not pending:
         return None
     waiting = {"kind": "research_confirm", "ref": pending[0]["id"]}
 
     def change(task):  # as the runner's own waits (`Runner._wait_for_user`)
         task["run"]["waiting"] = dict(waiting, since=time.time())
-        task["run"]["status"], task["run"]["reason"] = "needs_user", "waiting_research_confirm"
+        task["run"]["status"], task["run"]["reason"] = (
+            "needs_user",
+            "waiting_research_confirm",
+        )
+
     _update(task_path, change)
     return waiting
 
@@ -216,11 +305,18 @@ def due(task) -> bool:
     """The run's current stage has researchable gaps and no research step
     yet (one per stage), and no input-loop round is due."""
     from services import run_profiles
+
     run = task.get("run") or {}
     stage = run.get("stage")
-    if stage not in STAGES or run.get("status") != "running" or (run.get("loop") or {}).get("due"):
+    if (
+        stage not in STAGES
+        or run.get("status") != "running"
+        or (run.get("loop") or {}).get("due")
+    ):
         return False
-    if any(s.get("stage") == stage for s in (run.get("research") or {}).get("steps", [])):
+    if any(
+        s.get("stage") == stage for s in (run.get("research") or {}).get("steps", [])
+    ):
         return False
     try:
         return bool(gaps_for(run_profiles.resolve(run["profile"]), stage))
@@ -236,7 +332,10 @@ def failed(task_path, stage):
         block = _research_block(task)
         if not any(s.get("stage") == stage for s in block["steps"]):
             gaps = gaps_for(run_profiles.resolve(task["run"]["profile"]), stage)
-            block["steps"].append({"stage": stage, "status": "error", "gaps": [g["key"] for g in gaps]})
+            block["steps"].append(
+                {"stage": stage, "status": "error", "gaps": [g["key"] for g in gaps]}
+            )
+
     _update(task_path, change)
 
 
@@ -246,36 +345,69 @@ def run_for(task_path, session, *, stage, provider=None, reserving=None):
     from harness import runner
     from harness.providers import wiring
     from services import run_profiles
+
     task = runner._read(task_path)
     profile = run_profiles.resolve(task["run"]["profile"])
     provider_profile = wiring._resolve_turn_profile(session)
     if provider is None:
         provider, _error = wiring._provider_for_profile(provider_profile)
-    return research_turn(task_path, session, stage=stage, profile=profile, provider_profile=provider_profile,
-                         base_provider=provider, reserving=reserving)
+    return research_turn(
+        task_path,
+        session,
+        stage=stage,
+        profile=profile,
+        provider_profile=provider_profile,
+        base_provider=provider,
+        reserving=reserving,
+    )
 
 
 # ── The ledger write (the `record_source` tool's handler) ────────────────────
 
 
-def record_source(gap: str, value: float, unit: str, basis: str, url: str, quote: str,
-                  title: str = "", jurisdiction: str | None = None) -> dict[str, Any]:
+def record_source(
+    gap: str,
+    value: float,
+    unit: str,
+    basis: str,
+    url: str,
+    quote: str,
+    title: str = "",
+    jurisdiction: str | None = None,
+) -> dict[str, Any]:
     """Propose one source row for a gap of the running research turn. The
     server verifies it against the pages fetched in this turn."""
     from services import chat_tools
+
     session = chat_tools.chat_session()
     with _TURNS_LOCK:
         turn = _TURNS.get(getattr(session, "session_id", None))
     if turn is None or gap not in turn.gaps:
-        raise ResearchError("invalid_source_row", "record_source works only in a research turn, for its gaps.")
+        raise ResearchError(
+            "invalid_source_row",
+            "record_source works only in a research turn, for its gaps.",
+        )
     try:
-        row = source_ledger.propose({"value": value, "unit": unit, "basis": basis, "url": url,
-                                     "quote": quote, "title": title, "jurisdiction": jurisdiction},
-                                    turn.gaps[gap], list(turn.provider.fetched), turn_id=turn.turn_id)
+        row = source_ledger.propose(
+            {
+                "value": value,
+                "unit": unit,
+                "basis": basis,
+                "url": url,
+                "quote": quote,
+                "title": title,
+                "jurisdiction": jurisdiction,
+            },
+            turn.gaps[gap],
+            list(turn.provider.fetched),
+            turn_id=turn.turn_id,
+        )
     except source_ledger.LedgerError as exc:
         raise ResearchError(exc.kind, str(exc)) from exc
     turn.rows.append(row)
-    _update(turn.task_path, lambda task: _research_block(task)["rows"].append(dict(row)))
+    _update(
+        turn.task_path, lambda task: _research_block(task)["rows"].append(dict(row))
+    )
     return source_ledger.card_view(row)
 
 
@@ -286,10 +418,21 @@ def _tariff(row: dict[str, Any], name: str) -> dict[str, Any]:
     """A Library tariff of one all-hours energy charge: the confirmed EUR/MWh
     value as EUR/kWh, the tariff unit (a scale, not a reinterpretation)."""
     from datetime import date
-    return {"id": name, "name": row.get("title") or name, "jurisdiction": row["jurisdiction"],
-            "valid_from": date.today().isoformat(),
-            "items": [{"id": "energy", "kind": "energy", "unit": "per_kwh",
-                       "periods": [{"name": "all hours", "rate": row["value"] / 1000.0}]}]}
+
+    return {
+        "id": name,
+        "name": row.get("title") or name,
+        "jurisdiction": row["jurisdiction"],
+        "valid_from": date.today().isoformat(),
+        "items": [
+            {
+                "id": "energy",
+                "kind": "energy",
+                "unit": "per_kwh",
+                "periods": [{"name": "all hours", "rate": row["value"] / 1000.0}],
+            }
+        ],
+    }
 
 
 def write_steps(task: dict[str, Any], row: dict[str, Any]) -> list[dict[str, Any]]:
@@ -298,18 +441,43 @@ def write_steps(task: dict[str, Any], row: dict[str, Any]) -> list[dict[str, Any
     refuses it (R4) and the user approves it. Ids start with the gap's stage,
     so its gate waits for them. Only `attach_tariff` gaps exist (#970 item 4)."""
     from services import run_profiles
+
     key = row["for"]["gap"]
-    gap = next(g for g in check_block(run_profiles.resolve(task["run"]["profile"]).get("research", {"gaps": []}))["gaps"]
-               if g["key"] == key)
+    gap = next(
+        g
+        for g in check_block(
+            run_profiles.resolve(task["run"]["profile"]).get("research", {"gaps": []})
+        )["gaps"]
+        if g["key"] == key
+    )
     name = f"research {key} {row['id']}"
     prefix = f"{gap['stage']}.research.{row['id']}"
-    meta = {"source": RESEARCH_SOURCE + row["url"], "research_ref": row["id"], "quote": row["quote"],
-            "description": f"{row['value']:g} {row['unit']} ({row['basis']}), confirmed from {row['url']}"[:500]}
+    meta = {
+        "source": RESEARCH_SOURCE + row["url"],
+        "research_ref": row["id"],
+        "quote": row["quote"],
+        "description": f"{row['value']:g} {row['unit']} ({row['basis']}), confirmed from {row['url']}"[
+            :500
+        ],
+    }
     return [
-        {"id": f"{prefix}.library", "tool": "put_library_item", "status": "pending",
-         "args": {"kind": "tariff", "name": name, "payload": _tariff(row, name), "meta": meta}},
-        {"id": f"{prefix}.attach", "tool": "attach_tariff", "status": "pending",
-         "args": {"name": name, "research_ref": row["id"]}},
+        {
+            "id": f"{prefix}.library",
+            "tool": "put_library_item",
+            "status": "pending",
+            "args": {
+                "kind": "tariff",
+                "name": name,
+                "payload": _tariff(row, name),
+                "meta": meta,
+            },
+        },
+        {
+            "id": f"{prefix}.attach",
+            "tool": "attach_tariff",
+            "status": "pending",
+            "args": {"name": name, "research_ref": row["id"]},
+        },
     ]
 
 
@@ -320,9 +488,12 @@ def decide(task_id: str, row_id: str, verdict: str, *, by: str) -> dict[str, Any
     runner. A refused settle is a 409 with its kind."""
     from fastapi import HTTPException
     from services import assistant_tasks, run_monitor
+
     path, task = run_monitor._task(task_id)
     if not assistant_tasks._may_write(task):
-        assistant_tasks._refuse("project_locked", "Another user is editing this project; the run waits.")
+        assistant_tasks._refuse(
+            "project_locked", "Another user is editing this project; the run waits."
+        )
     try:
         row = settle(path, row_id, verdict, by=by)
     except ResearchError as exc:
@@ -347,20 +518,36 @@ def settle(task_path, row_id: str, verdict: str, *, by: str) -> dict[str, Any]:
         if settled["status"] == "confirmed":
             # The user picks one source per gap (#970 item 3): the others are rejected.
             for i, other in enumerate(block["rows"]):
-                if other["status"] == "proposed" and other["for"]["gap"] == settled["for"]["gap"]:
-                    block["rows"][i] = source_ledger.settle(other, "rejected", by=by) | {
-                        "rejected_reason": "other_source_picked"}
+                if (
+                    other["status"] == "proposed"
+                    and other["for"]["gap"] == settled["for"]["gap"]
+                ):
+                    block["rows"][i] = source_ledger.settle(
+                        other, "rejected", by=by
+                    ) | {"rejected_reason": "other_source_picked"}
             task["steps"].extend(write_steps(task, settled))
         waiting = task["run"].get("waiting") or {}
         if waiting.get("kind") == "research_confirm" and waiting.get("ref") == row_id:
-            nxt = next((r for r in block["rows"] if r["status"] == "proposed" and source_ledger.sourced(r)), None)
+            nxt = next(
+                (
+                    r
+                    for r in block["rows"]
+                    if r["status"] == "proposed" and source_ledger.sourced(r)
+                ),
+                None,
+            )
             if nxt is not None:
-                task["run"]["waiting"] = {"kind": "research_confirm", "ref": nxt["id"], "since": time.time()}
+                task["run"]["waiting"] = {
+                    "kind": "research_confirm",
+                    "ref": nxt["id"],
+                    "since": time.time(),
+                }
             else:  # every value decided: the run goes on (as `Runner._go_on`)
                 task["run"]["waiting"] = None
                 if task["run"].get("status") == "needs_user":
                     task["run"]["status"] = "running"
                     task["run"].pop("reason", None)
+
     try:
         _update(task_path, change)
     except source_ledger.LedgerError as exc:

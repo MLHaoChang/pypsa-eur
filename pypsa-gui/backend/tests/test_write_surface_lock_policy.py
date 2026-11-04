@@ -333,7 +333,7 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/chat/runs/{task_id}/stop"): (STOPS_WORK, _R_RUN_STOP),
     ("POST", "/api/chat/runs/{task_id}/present"): (CHAT_SESSION, _R_RUN_CLICK),
     ("POST", "/api/chat/runs/{task_id}/resume"): (CHAT_SESSION, _R_RUN_CLICK),
-    ("POST", "/api/chat/runs/{task_id}/research/{row_id}"): (CHAT_SESSION, _R_RUN_RESEARCH),
+    ("POST", "/api/chat/runs/{task_id}/research"): (CHAT_SESSION, _R_RUN_RESEARCH),
     ("POST", "/api/chat/import"): (CHAT_SESSION, _R_CHAT_HISTORY),
     ("POST", "/api/chat/skills/reload"): (NOT_PROJECT_DATA, _R_SKILL_REGISTRY),
     ("POST", "/api/durable-conversations"): (CHAT_SESSION, _R_DURABLE_THREAD),

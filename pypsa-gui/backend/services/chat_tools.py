@@ -6481,10 +6481,14 @@ def set_requirement(requirement: dict | None = None, replaces: str | None = None
 
 def record_source(gap: str, value: float, unit: str, basis: str, url: str, quote: str,
                   title: str = "", jurisdiction: str | None = None) -> dict:
-    """Study harness issue 09: propose a source row in a research turn."""
+    """Study harness issue 09: propose a source row in a research turn. A
+    refused row is a tool error of its kind (`research.ERROR_KINDS`)."""
     from harness import research
 
-    return research.record_source(gap, value, unit, basis, url, quote, title, jurisdiction)
+    try:
+        return research.record_source(gap, value, unit, basis, url, quote, title, jurisdiction)
+    except research.ResearchError as exc:
+        raise HTTPException(status_code=422, detail={"error_kind": exc.kind, "message": str(exc)}) from exc
 
 
 def set_goal(objective: str, max_rounds: int | None = None) -> dict:

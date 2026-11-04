@@ -1454,7 +1454,7 @@ the envelope covers; fetched pages are framed as untrusted data.
 basis and checks the url and quote against the pages fetched in that turn
 (whitespace-folded only); anything else is an `unverified source`, never shown
 as sourced and never confirmable. A verified row puts the run `needs_user`
-with `waiting = {kind: research_confirm}`; `POST /api/chat/runs/{task_id}/research/{row_id}`
+with `waiting = {kind: research_confirm}`; `POST /api/chat/runs/{task_id}/research`
 (`research.decide`) confirms or rejects it. Confirming rejects the gap's other
 rows and adds two run steps, `put_library_item` then `attach_tariff`, each
 carrying `research_ref`, which `run_envelope` never admits: each is the user's

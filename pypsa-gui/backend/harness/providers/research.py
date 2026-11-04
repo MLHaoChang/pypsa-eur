@@ -19,13 +19,15 @@ word leaves `harness/providers`.
 - Search results carry no readable page text, so only a fetched page can
   verify a quote (`services.source_ledger.verify`).
 """
+
 from __future__ import annotations
 
 import dataclasses
 import hashlib
 import unicodedata
 from dataclasses import dataclass
-from typing import Any, Iterator
+from typing import Any
+from collections.abc import Iterator
 
 from harness.protocol import LLMEvent, LLMRequest, ProviderError
 
@@ -39,8 +41,14 @@ RESEARCH_BUDGET = "research_budget"  # the research cap: the step reads cap_reac
 NOT_AVAILABLE = frozenset({"research_unavailable", "research_not_allowed"})
 
 # Models with the dynamic-filtering variants; older ones keep the basic ones.
-_CURRENT = ("claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6",
-            "claude-sonnet-5", "claude-sonnet-4-6")
+_CURRENT = (
+    "claude-opus-5",
+    "claude-opus-4-8",
+    "claude-opus-4-7",
+    "claude-opus-4-6",
+    "claude-sonnet-5",
+    "claude-sonnet-4-6",
+)
 _SEARCH = {"current": "web_search_20260209", "basic": "web_search_20250305"}
 _FETCH = {"current": "web_fetch_20260209", "basic": "web_fetch_20250910"}
 
@@ -50,18 +58,30 @@ def web_research(profile: Any) -> dict[str, Any] | None:
     web search (research then reads `not_available`)."""
     if profile is None or getattr(profile, "wire", None) != "anthropic":
         return None
-    if getattr(profile, "base_url", None):  # a compatible endpoint, not the vendor's own
+    if getattr(
+        profile, "base_url", None
+    ):  # a compatible endpoint, not the vendor's own
         return None
     return dict(SPEC)
 
 
 def server_tools(model: str, spec: dict[str, Any]) -> list[dict[str, Any]]:
     """The wire's server tool entries for one research request."""
-    tier = "current" if isinstance(model, str) and model.startswith(_CURRENT) else "basic"
+    tier = (
+        "current" if isinstance(model, str) and model.startswith(_CURRENT) else "basic"
+    )
     return [
-        {"type": _SEARCH[tier], "name": "web_search", "max_uses": int(spec["search_max_uses"])},
-        {"type": _FETCH[tier], "name": "web_fetch", "max_uses": int(spec["fetch_max_uses"]),
-         "max_content_tokens": int(spec["max_content_tokens"])},
+        {
+            "type": _SEARCH[tier],
+            "name": "web_search",
+            "max_uses": int(spec["search_max_uses"]),
+        },
+        {
+            "type": _FETCH[tier],
+            "name": "web_fetch",
+            "max_uses": int(spec["fetch_max_uses"]),
+            "max_content_tokens": int(spec["max_content_tokens"]),
+        },
     ]
 
 
@@ -69,6 +89,7 @@ def server_tools(model: str, spec: dict[str, Any]) -> list[dict[str, Any]]:
 class FetchedSource:
     """One page fetched in a research turn (#970 fold, item 1). `text` is the
     retained page text (NFC, capped); `sha256` is of the whole text read."""
+
     url: str
     fetched_at: str
     title: str
@@ -108,14 +129,16 @@ def fetched_sources(blocks: list[dict[str, Any]]) -> list[FetchedSource]:
         if not isinstance(url, str) or not url or text is None:
             continue
         text = unicodedata.normalize("NFC", text)
-        out.append(FetchedSource(
-            url=url,
-            fetched_at=str(result.get("retrieved_at") or ""),
-            title=str((document or {}).get("title") or ""),
-            sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
-            text=text[:RETAIN_CHARS],
-            truncated=len(text) > RETAIN_CHARS,
-        ))
+        out.append(
+            FetchedSource(
+                url=url,
+                fetched_at=str(result.get("retrieved_at") or ""),
+                title=str((document or {}).get("title") or ""),
+                sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                text=text[:RETAIN_CHARS],
+                truncated=len(text) > RETAIN_CHARS,
+            )
+        )
     return out
 
 
@@ -134,7 +157,10 @@ class ResearchProvider:
 
     def stream(self, request: LLMRequest) -> Iterator[LLMEvent]:
         from harness import send_reservation
-        request = dataclasses.replace(request, tools=list(request.tools) + server_tools(request.model, self._spec))
+
+        request = dataclasses.replace(
+            request, tools=list(request.tools) + server_tools(request.model, self._spec)
+        )
         try:
             # The reservation inside holds this send under scope "research" (SH-24).
             with send_reservation.research():
@@ -147,8 +173,12 @@ class ResearchProvider:
             reason = getattr(exc, "reason", None)
             if reason is not None:
                 self.refused = reason
-                self.cap_reached = reason == RESEARCH_BUDGET  # refused before sending: research stops
+                self.cap_reached = (
+                    reason == RESEARCH_BUDGET
+                )  # refused before sending: research stops
             raise
 
-    def __getattr__(self, name: str) -> Any:  # probe and the like reach the inner provider
+    def __getattr__(
+        self, name: str
+    ) -> Any:  # probe and the like reach the inner provider
         return getattr(self._inner, name)

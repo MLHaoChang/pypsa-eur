@@ -37,6 +37,16 @@ export interface RunCard {
   edit_card?: unknown; sweep_card?: unknown
 }
 export type UnattendedBlock = 'runner_off' | 'no_provider' | 'locked' | 'no_notice'
+/** A researched value as its card shows it (study harness issue 09): a
+ *  `sourced` row carries its page and verbatim quote; an `unverified source`
+ *  never does, and can only be rejected. */
+export interface ResearchRow {
+  row: string; gap: string; value: number; unit: string; basis: string
+  status: 'proposed' | 'confirmed' | 'rejected'; jurisdiction?: string
+  source: 'sourced' | 'unverified source'
+  url?: string; title?: string; quote?: string; fetched_at?: string; reason?: string
+}
+export interface ResearchStep { stage: string; status: string; gaps: string[]; kind?: string }
 /** A run button that can work now (`run_monitor._actions`), in this order. */
 export type RunAction = 'pause' | 'resume' | 'stop'
 export interface RunMonitorView {
@@ -63,6 +73,7 @@ export interface RunMonitorView {
     actions?: RunAction[]
     card?: RunCard
     waiting?: { kind: string; ref: string }
+    research?: { rows: ResearchRow[]; steps: ResearchStep[] }
   }
 }
 
@@ -84,6 +95,12 @@ export async function pauseRun(taskId: string): Promise<RunMonitorView> {
 export async function resumeRun(taskId: string, sessionId: string | null): Promise<RunMonitorView> {
   return (await client.post<RunMonitorView>(`${base(taskId)}/resume`,
     sessionId ? { session_id: sessionId } : {})).data
+}
+
+/** The research card's Use this value or Reject: settles one source row. */
+export async function decideResearch(taskId: string, rowId: string,
+  verdict: 'confirmed' | 'rejected'): Promise<RunMonitorView> {
+  return (await client.post<RunMonitorView>(`${base(taskId)}/research`, { row_id: rowId, verdict })).data
 }
 
 export async function stopRun(taskId: string): Promise<RunMonitorView> {

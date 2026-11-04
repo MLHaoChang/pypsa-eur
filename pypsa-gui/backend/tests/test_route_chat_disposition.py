@@ -123,7 +123,7 @@ UI_INTERNAL: dict[str, dict] = {
             ('POST', '/api/chat/operations/{operation_id}/reconcile'),
             ('POST', '/api/chat/runs/{task_id}/pause'),
             ('POST', '/api/chat/runs/{task_id}/present'),
-            ('POST', '/api/chat/runs/{task_id}/research/{row_id}'),
+            ('POST', '/api/chat/runs/{task_id}/research'),
             ('POST', '/api/chat/runs/{task_id}/resume'),
             ('POST', '/api/chat/runs/{task_id}/stop'),
             ('POST', '/api/chat/skills/reload'),
