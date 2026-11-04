@@ -187,6 +187,14 @@
   "title": "ProfileDraft",
   "type": "object"
  },
+ "directions": {
+  "checked_tools": "returns",
+  "computed_draft": "accepts",
+  "effect_guard": "accepts",
+  "observed_draft": "accepts",
+  "profiles": "returns",
+  "request_scope": "accepts"
+ },
  "effect_guard": {
   "$defs": {
    "UpdateComponentArguments": {
@@ -456,6 +464,7 @@
  "pending": {
   "action_and_proposal_blocks": "09-11: draft block kinds beyond observed/computed",
   "arbitrary_request_scope": "09: natural-language scope beyond the bounded profile grammar",
+  "checked_tool_result_shapes": "02: returned shapes of checked tool results (input schemas are frozen here)",
   "evidence_and_receipt_identity": "02: evidence and receipt identity fields",
   "general_effect_guards": "11: guard/postcondition schemas for effectful tools other than update_component",
   "independent_domain_approval": "10: per-metric domain review; formulas here are editing-agent reviewed only"

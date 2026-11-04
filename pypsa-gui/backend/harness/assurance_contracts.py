@@ -8,8 +8,9 @@ is the reviewed snapshot; `tests/test_assurance_contracts.py` fails CI when the
 live contracts drift from it.
 
 Changing a contract (owner decision AA-V1-CHANGE-1): additive changes stay
-in version 1, so a new profile, metric, optional field, enum value or wider bound
-is allowed with a reviewed snapshot update. Removing or narrowing anything, or
+in version 1. For a contract the server accepts, an optional field, enum value
+or wider bound is additive. For a contract the server returns, only a new entry
+(a new profile or checked tool) is additive. Each needs a reviewed snapshot update. Removing or narrowing anything, or
 changing an existing profile, metric definition or checked-tool schema, needs a
 new profile version (``x/2``) beside the old one, or a protocol version bump.
 ``--write`` refuses a non-additive snapshot update.
@@ -35,13 +36,28 @@ PENDING = {
     "action_and_proposal_blocks": "09-11: draft block kinds beyond observed/computed",
     "general_effect_guards": "11: guard/postcondition schemas for effectful tools other than update_component",
     "evidence_and_receipt_identity": "02: evidence and receipt identity fields",
+    "checked_tool_result_shapes": "02: returned shapes of checked tool results (input schemas are frozen here)",
     "independent_domain_approval": "10: per-metric domain review; formulas here are editing-agent reviewed only",
 }
+
+# Which way each contract flows. The server validates an `accepts` contract, so
+# accepting more is additive. A consumer reads a `returns` contract, so every
+# existing entry is frozen and only new entries (a new profile or checked tool)
+# are additive.
+DIRECTIONS = {
+    "request_scope": "accepts",
+    "observed_draft": "accepts",
+    "computed_draft": "accepts",
+    "effect_guard": "accepts",
+    "profiles": "returns",
+    "checked_tools": "returns",
+}
+_META = {"version", "pending", "directions"}
 
 # JSON-schema keywords whose value may only widen in an additive change.
 _GROW = {"maxLength", "maximum", "maxItems", "exclusiveMaximum"}
 _SHRINK = {"minLength", "minimum", "minItems", "exclusiveMinimum"}
-_OPEN_MAPS = {"properties", "$defs", "profiles", "checked_tools"}
+_OPEN_MAPS = {"properties", "$defs"}
 _NOTES = {"title", "description", "default"}
 
 
@@ -96,18 +112,49 @@ def build() -> dict:
             for name in sorted(CHECKED_TOOLS)
         },
         "pending": PENDING,
+        "directions": DIRECTIONS,
     }
+    undeclared = sorted(set(document) - _META - set(DIRECTIONS))
+    if undeclared:
+        raise ValueError("Contracts without a direction: " + ", ".join(undeclared))
     # Normalise tuples and key order to the JSON form the snapshot stores.
     return json.loads(json.dumps(document, sort_keys=True))
 
 
-def breaking_changes(old, new, path="$") -> list[str]:
-    """Every place `new` removes, narrows or changes what `old` promised."""
+def breaking_changes(old: dict, new: dict) -> list[str]:
+    """Every place `new` breaks what the frozen document `old` promised."""
+    found = []
+    directions = old.get("directions", {})
+    for key, value in old.items():
+        where = f"$.{key}"
+        if key in _META:
+            continue
+        if key not in new:
+            found.append(f"{where} removed")
+        elif directions.get(key) != new.get("directions", {}).get(key):
+            found.append(f"{where} direction changed")
+        elif directions.get(key) == "accepts":
+            found += _accepts_breaks(value, new[key], where)
+        else:
+            found += _returns_breaks(value, new[key], where)
+    return found
+
+
+def _returns_breaks(old: dict, new: dict, path: str) -> list[str]:
+    """A consumer reads every existing entry, so any change to one breaks it."""
+    found = [f"{path}.{key} removed" for key in old if key not in new]
+    return found + [
+        f"{path}.{key} changed" for key in old if key in new and old[key] != new[key]
+    ]
+
+
+def _accepts_breaks(old, new, path) -> list[str]:
+    """Every place `new` accepts less than `old` did."""
     if isinstance(old, dict) and isinstance(new, dict):
         found = []
         for key, value in old.items():
             where = f"{path}.{key}"
-            if key in _NOTES or where == "$.pending":
+            if key in _NOTES:
                 continue
             if key not in new:
                 found.append(f"{where} removed")
@@ -124,12 +171,12 @@ def breaking_changes(old, new, path="$") -> list[str]:
                 if not isinstance(new[key], (int, float)) or new[key] > value:
                     found.append(f"{where} narrowed")
             else:
-                found += breaking_changes(value, new[key], where)
+                found += _accepts_breaks(value, new[key], where)
         if "required" in new and "required" not in old:
             found += [
                 f"{path}.required adds required {name}" for name in new["required"]
             ]
-        if path != "$" and path.rsplit(".", 1)[-1] not in _OPEN_MAPS:
+        if path.rsplit(".", 1)[-1] not in _OPEN_MAPS:
             found += [
                 f"{path}.{key} added constraint"
                 for key in new

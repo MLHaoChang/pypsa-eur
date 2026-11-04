@@ -84,6 +84,7 @@ def _edit(document, path, value):
 
 
 SCOPE = ("request_scope", "properties")
+GEN_ENERGY = ("profiles", "generator-dispatch/1", "definitions", "dispatch_energy")
 
 
 @pytest.mark.parametrize(
@@ -111,6 +112,11 @@ SCOPE = ("request_scope", "properties")
         (("profiles", "generator-dispatch/1"), KeyError),
         (("checked_tools", "update_component"), "0" * 64),
         (("effect_guard", "properties", "operation_id", "maxLength"), 30),
+        ((*GEN_ENERGY, "sign"), "positive_is_output"),
+        ((*GEN_ENERGY, "label"), KeyError),
+        ((*GEN_ENERGY, "inputs"), ["p", "energy_weight", "extra"]),
+        (("directions", "profiles"), "accepts"),
+        (("directions", "request_scope"), KeyError),
     ],
 )
 def test_narrowing_or_changing_a_frozen_contract_is_breaking(frozen, path, value):
@@ -143,6 +149,31 @@ def test_additive_changes_stay_in_version_one(frozen, path, value):
     else:
         _edit(changed, path, value)
     assert breaking_changes(frozen, changed) == []
+
+
+def test_the_same_widening_is_additive_on_input_and_breaking_on_output(frozen):
+    """A reader of a returned contract breaks on a new field or enum value."""
+    accepts, returns = copy.deepcopy(frozen), copy.deepcopy(frozen)
+    accepts["request_scope"]["properties"]["profile"]["enum"].append("new/1")
+    accepts["request_scope"]["properties"]["note"] = {"type": "string"}
+    assert breaking_changes(frozen, accepts) == []
+    definition = returns["profiles"]["generator-dispatch/1"]["definitions"]
+    definition["dispatch_energy"]["unit_enum"] = ["MWh", "GWh"]
+    definition["new_metric"] = {"formula_id": "x/1"}
+    assert breaking_changes(frozen, returns) == [
+        "$.profiles.generator-dispatch/1 changed"
+    ]
+
+
+def test_every_contract_declares_a_direction(monkeypatch, live):
+    assert set(live["directions"]) == set(live) - {"version", "pending", "directions"}
+    monkeypatch.setattr(
+        contracts,
+        "DIRECTIONS",
+        {k: v for k, v in contracts.DIRECTIONS.items() if k != "profiles"},
+    )
+    with pytest.raises(ValueError, match="profiles"):
+        contracts.build()
 
 
 def test_write_refuses_a_non_additive_change(tmp_path, monkeypatch, frozen):
