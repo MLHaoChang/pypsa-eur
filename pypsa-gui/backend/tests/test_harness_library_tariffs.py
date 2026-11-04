@@ -16,7 +16,10 @@ H1, H2, H3 = "a" * 64, "b" * 64, "c" * 64
 
 
 def shipped():
-    return [common.ref("tariff", name).model_dump(mode="json") for name in common.names("tariff")]
+    return [
+        common.ref("tariff", name).model_dump(mode="json")
+        for name in common.names("tariff")
+    ]
 
 
 @pytest.fixture
@@ -25,7 +28,9 @@ def library(monkeypatch):
     every shipped one, as `items.list_items` returns them."""
 
     def use(*own):
-        monkeypatch.setattr(chat_tools, "_library_call", lambda fn, *a, **k: [*own, *shipped()])
+        monkeypatch.setattr(
+            chat_tools, "_library_call", lambda fn, *a, **k: [*own, *shipped()]
+        )
 
     return use
 
@@ -38,7 +43,11 @@ def entry(tariffs):
     return {
         "tool": "attach_tariff",
         "source": {"kind": "library_tariff"},
-        "target": {"component": "Settings", "name": "Commercial", "attr": "import_tariff_ref"},
+        "target": {
+            "component": "Settings",
+            "name": "Commercial",
+            "attr": "import_tariff_ref",
+        },
         "at_grant": {"Commercial": {"tariffs": tariffs}},
     }
 
@@ -46,25 +55,40 @@ def entry(tariffs):
 def card():
     return {
         "complete": True,
-        "rows": [{"component_class": "Settings", "name": "Commercial", "field": "import_tariff_ref",
-                  "old": None, "new": "nl v1", "role": "typed"}],
+        "rows": [
+            {
+                "component_class": "Settings",
+                "name": "Commercial",
+                "field": "import_tariff_ref",
+                "old": None,
+                "new": "nl v1",
+                "role": "typed",
+            }
+        ],
     }
 
 
 def match(tariffs, digest, monkeypatch):
     monkeypatch.setattr(run_envelope, "_tariff_hash", lambda args: digest)
     envelope = {"edits": [], "runs": [], "gaps": [entry(tariffs)]}
-    return run_envelope._match_gap(envelope, "attach_tariff", {"name": "nl"}, card(), None, {})
+    return run_envelope._match_gap(
+        envelope, "attach_tariff", {"name": "nl"}, card(), None, {}
+    )
 
 
 def test_shipped_tariffs_are_never_held(library):
     assert len(shipped()) >= 2  # the case that made the fill unreachable
     library()
     assert run_envelope._library_tariffs() == {}
-    assert run_envelope._gap_row(entry({})) == "- No tariff is filled: none is held in the Library when you approve."
+    assert (
+        run_envelope._gap_row(entry({}))
+        == "- No tariff is filled: none is held in the Library when you approve."
+    )
 
 
-def test_one_own_tariff_beside_the_shipped_ones_is_admitted_and_named(library, monkeypatch):
+def test_one_own_tariff_beside_the_shipped_ones_is_admitted_and_named(
+    library, monkeypatch
+):
     library(own("nl", H1))
     held = run_envelope._library_tariffs()
     assert held == {H1: ["nl", 1]}
@@ -78,7 +102,10 @@ def test_two_own_tariffs_are_the_users_choice_named_by_id(library, monkeypatch):
     assert held == {H1: ["nl", 1], H2: ["other", 1]}
     assert match(held, H1, monkeypatch) == "not_granted_source"
     row = run_envelope._gap_row(entry(held))
-    assert row == "- No tariff is filled: nl v1 and other v1 are both held, so you choose one yourself."
+    assert (
+        row
+        == "- No tariff is filled: nl v1 and other v1 are both held, so you choose one yourself."
+    )
     assert "None" not in row
 
 
@@ -87,7 +114,9 @@ def test_an_own_tariff_sharing_a_shipped_id_still_counts(library, change):
     """R1: shipped is told apart by the whole ref, not the id alone."""
     twin = {**shipped()[0], **change}
     library(twin)
-    assert run_envelope._library_tariffs() == {twin["hash"]: [twin["id"], twin["version"]]}
+    assert run_envelope._library_tariffs() == {
+        twin["hash"]: [twin["id"], twin["version"]]
+    }
 
 
 @pytest.mark.parametrize("missing", [{"id": None}, {"id": ""}])
@@ -101,5 +130,7 @@ def test_a_held_ref_without_an_id_grants_no_tariff(library, monkeypatch, missing
     assert "None" not in run_envelope._gap_row({**gap, "at_grant": {}})
     monkeypatch.setattr(run_envelope, "_tariff_hash", lambda args: H1)
     envelope = {"edits": [], "runs": [], "gaps": [{**gap, "at_grant": {}}]}
-    refused = run_envelope._match_gap(envelope, "attach_tariff", {"name": "nl"}, card(), None, {})
+    refused = run_envelope._match_gap(
+        envelope, "attach_tariff", {"name": "nl"}, card(), None, {}
+    )
     assert refused is not None, refused  # nothing granted: refused

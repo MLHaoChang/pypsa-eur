@@ -3,7 +3,7 @@
 
 # 27 — Library-tariff fill: held set counts shipped tariffs, and names read as "None"
 
-Status: ready-for-agent
+Status: done
 Type: bug
 Blocked by: 04
 Gated: yes (GK B)
