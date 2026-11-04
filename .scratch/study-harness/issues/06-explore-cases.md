@@ -71,7 +71,6 @@ Code waits on SH-05 PR C, #1100 and #1104.
 - Case gates skip rules with an `engine` key (`LOOP_FACT`).
 - `solves_used` sums the `reserved` / `solves` audit rows. SH-06 writes `{"event": "explore", "tool", "call_id", "case", "reserved"}`, plus `"solves"` at settle.
 - `run_sensitivity_sweep` is in `RUN_TOOLS`, so its admitted `used` row already counts one solve. The explore row must not count that sweep again: it carries the case jobs beyond the first, or the `used` row is excluded for an explore call (tested).
-- Open with GK B: `run_envelope.py:57` records GK B (8)'s ruling (issue 08) that no envelope lists a sweep or an EH study, which are always the user's own card. E1 and the plan assume an envelope may list `run_sensitivity_sweep`.
 
 ### Agreed with SH-29 (SH-09 follow-ups, session_01G7qCukyXRkELTh91Va9cgB)
 
@@ -79,3 +78,8 @@ Code waits on SH-05 PR C, #1100 and #1104.
 - **Row.** `{value: null, range: {low, high}, unit, basis, url, quote, status, verification, …}`. It is verified only when both bounds parse from a verbatim quote in the gap's unit, with low ≤ high. It is read through `source_ledger.ranges(rows, gap_key)`.
 - **Confirmation.** A range is confirmed on research's own `research_confirm` card. Only `confirmed` rows are admissible (E2).
 - **Change.** A change carries `range {low, high, unit}` and `source: "research:<row id>"`. Admission checks that low, high and unit equal the row's.
+
+### GK B (21) clarifications (4 Nov)
+
+- **E7 (a).** Only levers flagged `explore_only: true` (eh_site@1: `Link poc_link p_nom`) are refused as tunables. NEVER_TUNABLE applies to every lever. A lever that is also an L2 tunable stays both: a what-if on forks, an envelope-bounded fix on the base. eh_site@1's L2 tunables are unchanged.
+- **Sweep (a).** Issue 08's ruling stands (`run_envelope.py:57`). The explore sweep is always the user's own card, and no profile envelope lists it; a profile that does is refused at load. E1's checks (baseline, `*project*` args, args from `run.cases`) apply when that card is dispatched. E3 reduces to one test: a resumed pre-change run reaches the sweep card and never runs it unattended. The test that the sweep is not double-counted (the RUN_TOOLS `used` row against the explore audit row) stays.

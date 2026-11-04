@@ -31,7 +31,7 @@ from tests.test_harness_envelope_atomic import ATOMIC, eh, writer  # noqa: F401
 from tests.test_harness_immutable_solve import held_queue  # noqa: F401
 from tests.test_harness_run_loops import Script, call, go, rated, say  # noqa: F401
 from tests.test_harness_run_skeleton import site, start  # noqa: F401
-from tests.test_harness_runner import detached, frames_of, settle, task_path  # noqa: F401
+from tests.test_harness_runner import Clicks, detached, frames_of, settle, task_path  # noqa: F401
 
 # ── A profile with explore levers on the test network's shapes ──────────────
 
@@ -553,7 +553,7 @@ def explore_run(eh, monkeypatch):
     }
     prof["envelope"] = dict(
         ATOMIC,
-        runs=[{"tool": "solve_queue_enqueue"}, {"tool": "run_sensitivity_sweep"}],
+        runs=[{"tool": "solve_queue_enqueue"}],  # issue 08: never the sweep
         budget={"solves": 8, "rounds": 6, "wall_time_h": 8.0},
     )
     monkeypatch.setitem(run_profiles.PROFILES, "eh_site@1", prof)
@@ -571,7 +571,11 @@ def test_eh_site_connection_bess_genset_three_cases_each_with_its_gate_and_settl
     base_fp = workflow_tools._network_input_fingerprint(ctx(), exact=True)
     task, path, _ = granted()
     script = Script(propose(three()), say("Three options: connection, BESS, genset."))
-    record = go(harness_runner.Runner("a", agent_provider=script), path, task)
+    record = go(
+        harness_runner.Runner("a", agent_provider=script, decisions=Clicks()),
+        path,
+        task,
+    )
     run = record["run"]
     assert run["stages"]["explore"]["status"] == "passed", run["stages"]["explore"]
     cases = {c["name"]: c for c in run["cases"]}
@@ -617,7 +621,11 @@ def test_a_failing_case_does_not_fail_the_run(granted, explore_run, rated, monke
     script = Script(
         propose([case("genset_none", tiny), case("bess", *bess())]), say("Two cases.")
     )
-    record = go(harness_runner.Runner("a", agent_provider=script), path, task)
+    record = go(
+        harness_runner.Runner("a", agent_provider=script, decisions=Clicks()),
+        path,
+        task,
+    )
     run = record["run"]
     cases = {c["name"]: c for c in run["cases"]}
     assert cases["genset_none"]["status"] == "failed" and cases["genset_none"]["reason"]
@@ -649,7 +657,11 @@ def test_a_not_runnable_case_settles_with_its_reason_and_no_job(
     script = Script(
         propose([case("ppa", genset(), engine="commercial")]), say("A PPA case.")
     )
-    record = go(harness_runner.Runner("a", agent_provider=script), path, task)
+    record = go(
+        harness_runner.Runner("a", agent_provider=script, decisions=Clicks()),
+        path,
+        task,
+    )
     [c] = record["run"]["cases"]
     assert c["status"] == "not_runnable" and "commercial" in c["reason"]
     assert record["run"]["stages"]["explore"]["status"] == "passed"
@@ -659,12 +671,10 @@ def test_a_not_runnable_case_settles_with_its_reason_and_no_job(
     assert not any(s["tool"] == "run_sensitivity_sweep" for s in record["steps"])
 
 
-def test_an_envelope_without_the_sweep_waits_for_the_user(
-    granted, explore_run, rated, monkeypatch
+def test_the_sweep_is_always_the_users_card_even_under_a_granted_envelope(
+    granted, explore_run, rated
 ):
-    explore_run["envelope"] = dict(
-        explore_run["envelope"], runs=[{"tool": "solve_queue_enqueue"}]
-    )
+    """Issue 08 (GK B (8), confirmed by GK B (21)): no envelope covers a sweep."""
     task, path, _ = granted()
     record = go(
         harness_runner.Runner("a", agent_provider=Script(propose(three()), say("."))),
@@ -673,7 +683,65 @@ def test_an_envelope_without_the_sweep_waits_for_the_user(
     )
     run = record["run"]
     assert run["status"] == "needs_user" and run["stage"] == "explore"
-    assert (run["waiting"] or {}).get("kind") == "card"
+    assert run["waiting"]["kind"] == "card"
+    [sweep] = [s for s in record["steps"] if s["tool"] == "run_sensitivity_sweep"]
+    assert run["waiting"]["ref"] == sweep["id"] and sweep["status"] == "pending"
+    assert all(c["status"] == "admitted" for c in run["cases"])
+
+
+def test_a_profile_envelope_listing_the_sweep_is_refused_at_load():
+    p = copy.deepcopy(run_profiles.EH_SITE)
+    p["envelope"] = dict(
+        p["envelope"], runs=[*p["envelope"]["runs"], {"tool": "run_sensitivity_sweep"}]
+    )
+    with pytest.raises(run_profiles.ProfileError):
+        run_profiles.load(p)
+
+
+def test_e3_a_run_granted_before_explore_resumes_to_the_sweep_card_never_unattended(
+    granted, explore_run, rated, monkeypatch
+):
+    """E3: a run started with explore skipped, resumed after eh_site@1 turned
+    it on, reaches the sweep card and runs no sweep without the user."""
+    before = jobs()
+    old = copy.deepcopy(explore_run)
+    old["stages"] = {
+        **old.get("stages", {}),
+        "explore": {"skip": "Exploring cases is not part of a run yet."},
+    }
+    monkeypatch.setitem(run_profiles.PROFILES, "eh_site@1", old)
+    task, path, _ = granted()
+    monkeypatch.setitem(run_profiles.PROFILES, "eh_site@1", explore_run)
+    record = go(
+        harness_runner.Runner("b", agent_provider=Script(propose(three()), say("."))),
+        path,
+        task,
+    )
+    run = record["run"]
+    assert run["stages"]["explore"]["status"] in ("skipped", "active")
+    if run["stages"]["explore"]["status"] == "active":
+        assert run["status"] == "needs_user" and run["waiting"]["kind"] == "card"
+    assert not any(
+        s["tool"] == "run_sensitivity_sweep" and s["status"] != "pending"
+        for s in record["steps"]
+    )
+    assert len(jobs() - before) == 1  # the base solve only
+
+
+def test_a_sweep_is_counted_once_per_case_job_not_twice(granted, explore_run, rated):
+    """SH-05 PR C: the sweep's RUN_TOOLS `used` row and the explore audit row
+    never count the same solve twice."""
+    before = jobs()
+    task, path, _ = granted()
+    go(
+        harness_runner.Runner(
+            "a", agent_provider=Script(propose(three()), say(".")), decisions=Clicks()
+        ),
+        path,
+        task,
+    )
+    envelope = envelope_of(path)
+    assert run_envelope.solves_used(envelope) == len(jobs() - before) == 1 + 3
 
 
 def test_an_investment_case_runs_on_study_owned_forks_and_leaves_the_base_unchanged(
@@ -713,7 +781,11 @@ def test_an_investment_case_runs_on_study_owned_forks_and_leaves_the_base_unchan
     script = Script(
         propose([case("bess_invest", *bess(), engine="study")]), say("Investment case.")
     )
-    record = go(harness_runner.Runner("a", agent_provider=script), path, task)
+    record = go(
+        harness_runner.Runner("a", agent_provider=script, decisions=Clicks()),
+        path,
+        task,
+    )
     [c] = record["run"]["cases"]
     assert (
         c["engine"] == "study" and c["study_id"] == "st-1" and c["status"] == "passed"
@@ -735,7 +807,9 @@ def test_a_lost_case_job_after_a_restart_is_uncertain_and_needs_the_user(
 
     task, path, _ = granted()
     record = go(
-        harness_runner.Runner("a", agent_provider=Script(propose(three()), say("."))),
+        harness_runner.Runner(
+            "a", agent_provider=Script(propose(three()), say(".")), decisions=Clicks()
+        ),
         path,
         task,
     )
