@@ -1,0 +1,8 @@
+{"kinds": {
+  "research_unit_mismatch": {"surface": "inline", "why": "record_source refused a researched value whose unit or basis is not the gap's (for example EUR per litre of fuel for an EUR/MWh tariff). Nothing was recorded or converted; the assistant looks for a source in the gap's unit or leaves the gap listed."},
+  "research_not_available": {"surface": "inline", "why": "The run's model provider has no web search, so the research step did not run. The stage goes on with the Library and template defaults and lists the gap; the user may switch to a provider with search or enter the value themselves."},
+  "research_cap_reached": {"surface": "inline", "why": "The research step reached the run's research cost cap (envelope research.cost_cap_eur, EUR 2 by default, EUR 10 at most). Research stopped; the remaining gaps are listed and the stage goes on without them. The user may raise the cap on the envelope."},
+  "research_unverified": {"surface": "inline", "why": "A source row whose url was not fetched in its turn, or whose quote is not verbatim in the fetched page, was asked to be confirmed. It is shown as an unverified source and may only be rejected; the value stays a gap."},
+  "research_row_settled": {"surface": "inline", "why": "A source row that is already confirmed or rejected was asked to change. The ledger keeps the first decision; the assistant reports the row's status."},
+  "invalid_source_row": {"surface": "inline", "why": "record_source got a row without a finite value, a url and a quote of at most 400 characters, or for a gap the research turn does not hold. Nothing was recorded; the assistant fixes the row from the fetched page."}
+}}

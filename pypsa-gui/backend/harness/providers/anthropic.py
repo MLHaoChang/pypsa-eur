@@ -239,6 +239,11 @@ class AnthropicProvider:
         tools = list(request.tools)
         if tools and request.tools_stable:
             tools[-1] = {**tools[-1], "cache_control": {"type": "ephemeral"}}
+        if request.research:
+            # After the cached prefix: a research turn's server tools never
+            # move the catalogue's cache breakpoint (study harness issue 09).
+            from harness.providers import research as _research
+            tools = tools + _research.server_tools(request.model, request.research)
         messages = with_history_cache_breakpoint(
             request.messages, request.history_stable_anchor
         )
@@ -290,6 +295,11 @@ class AnthropicProvider:
                 "cache_create_tokens": int(
                     getattr(usage, "cache_creation_input_tokens", 0) or 0),
             }
+            server = getattr(usage, "server_tool_use", None)
+            if server is not None:
+                # Server search and fetch calls, billed per request (issue 09).
+                usage_out["search_requests"] = int(getattr(server, "web_search_requests", 0) or 0)
+                usage_out["fetch_requests"] = int(getattr(server, "web_fetch_requests", 0) or 0)
         yield LLMEvent(
             type="message_done",
             blocks=[serialise_block(b)
