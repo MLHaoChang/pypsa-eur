@@ -203,12 +203,15 @@ def _confirm_destructive_tool(
         yield from _deny(tool_use_id, tool_name, 'user_restriction',
                          'Your saved project rule blocks non-read tools.', tool_results_collector)
         return False
-    if policy == 'none':
+    # Study harness issue 23: an edit that breaks a confirmed requirement never
+    # runs without the user's card (only a run's session reaches here with one).
+    violated = edit_card is not None and bool(edit_card.get("requirement_violations"))
+    if policy == 'none' and not violated:
         return True
     from harness import approvals
 
     link = approvals.links(session, args)
-    if policy == 'policy':
+    if policy == 'policy' and not violated:
         # Issue 18: the log says why no card appeared, and an approval that
         # cannot be put on record does not run (fail closed).
         if approvals.decided(session, call_id=tool_use_id, tool=tool_name, tier=tier,
@@ -224,8 +227,12 @@ def _confirm_destructive_tool(
     # record as `by="envelope:<id>"`, fail closed). It returns None for every
     # other session and for a call it does not cover: the card below.
     from services import run_envelope
-    admitted = run_envelope.admit(session, call_id=tool_use_id, tool=tool_name, args=args, tier=tier,
-                                  external=external, edit_card=edit_card)
+    # Issue 23: nor may the envelope admit it; on a run's session it falls to the card.
+    if violated:
+        admitted = None
+    else:
+        admitted = run_envelope.admit(session, call_id=tool_use_id, tool=tool_name, args=args, tier=tier,
+                                      external=external, edit_card=edit_card)
     if admitted == "admitted":
         return True
     if admitted == "unavailable":
