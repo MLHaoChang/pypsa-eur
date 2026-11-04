@@ -1,0 +1,1381 @@
+{
+ "checked_tools": {
+  "compare_project_runs": "5ff81e9828bdd6ccb997ace8ad45a83d40efafd2ac4860887ca0f17247238a5f",
+  "get_aggregate_load": "49cd7d3066d8405553280d53afeea4b809936b2157ae9e0670f4bba89eeb66a2",
+  "get_component": "8fcf1af620907ec9eea2e325e5981fd665785455bab256b5ead3f13987acf2b3",
+  "get_run_evidence": "4abaac2419832365fa560a3c15252f7900510c90f2b42c052298b438a97032cb",
+  "get_timeseries": "379ddbdecfeb262575eee58c147e81cb6ffa59905d2c8738d12519f3303a5c88",
+  "list_components": "6e4521eb8f8ac1bc72ab54928c82adbab7b47bf4bb8f627ff00b10ceb2dfa353",
+  "ui_open_panel": "93e4ba6a83996226176f7ca0cf7798c8bb96bcd0c67da8819140f4b565f61cba",
+  "update_component": "620554ac6bc2ecc1d9abf2620676d5e050b7c0f5ad50d0c0d00c1de13f908734"
+ },
+ "computed_draft": {
+  "$defs": {
+   "Computed": {
+    "additionalProperties": false,
+    "properties": {
+     "entity_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Entity Id",
+      "type": "string"
+     },
+     "formula_id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Formula Id",
+      "type": "string"
+     },
+     "id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "title": "Id",
+      "type": "string"
+     },
+     "kind": {
+      "const": "computed",
+      "title": "Kind",
+      "type": "string"
+     },
+     "metric": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Metric",
+      "type": "string"
+     },
+     "source": {
+      "$ref": "#/$defs/Source"
+     },
+     "unit": {
+      "maxLength": 16,
+      "minLength": 1,
+      "title": "Unit",
+      "type": "string"
+     },
+     "value": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "number"
+       }
+      ],
+      "title": "Value"
+     }
+    },
+    "required": [
+     "id",
+     "kind",
+     "source",
+     "entity_id",
+     "metric",
+     "value",
+     "unit",
+     "formula_id"
+    ],
+    "title": "Computed",
+    "type": "object"
+   },
+   "Interpretation": {
+    "additionalProperties": false,
+    "properties": {
+     "block_ids": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 20,
+      "minItems": 1,
+      "title": "Block Ids",
+      "type": "array"
+     },
+     "id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "title": "Id",
+      "type": "string"
+     },
+     "text": {
+      "maxLength": 800,
+      "minLength": 1,
+      "title": "Text",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "text",
+     "block_ids"
+    ],
+    "title": "Interpretation",
+    "type": "object"
+   },
+   "Source": {
+    "additionalProperties": false,
+    "properties": {
+     "evidence_id": {
+      "anyOf": [
+       {
+        "maxLength": 128,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Evidence Id"
+     },
+     "path": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Path",
+      "type": "string"
+     },
+     "tool_use_id": {
+      "anyOf": [
+       {
+        "maxLength": 128,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Tool Use Id"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "title": "Source",
+    "type": "object"
+   }
+  },
+  "additionalProperties": false,
+  "properties": {
+   "blocks": {
+    "items": {
+     "$ref": "#/$defs/Computed"
+    },
+    "maxItems": 20,
+    "title": "Blocks",
+    "type": "array"
+   },
+   "interpretations": {
+    "items": {
+     "$ref": "#/$defs/Interpretation"
+    },
+    "maxItems": 2,
+    "title": "Interpretations",
+    "type": "array"
+   },
+   "schema_version": {
+    "title": "Schema Version",
+    "type": "integer"
+   }
+  },
+  "required": [
+   "schema_version",
+   "blocks"
+  ],
+  "title": "ProfileDraft",
+  "type": "object"
+ },
+ "effect_guard": {
+  "$defs": {
+   "UpdateComponentArguments": {
+    "additionalProperties": false,
+    "description": "Exact arguments of the one checked effect: static inputs from records.INPUT_METRICS.",
+    "properties": {
+     "attrs": {
+      "additionalProperties": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        }
+       ]
+      },
+      "minProperties": 1,
+      "title": "Attrs",
+      "type": "object"
+     },
+     "component_class": {
+      "enum": [
+       "Load",
+       "Generator",
+       "Line",
+       "Transformer",
+       "StorageUnit",
+       "Store"
+      ],
+      "title": "Component Class",
+      "type": "string"
+     },
+     "name": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+     }
+    },
+    "required": [
+     "component_class",
+     "name",
+     "attrs"
+    ],
+    "title": "UpdateComponentArguments",
+    "type": "object"
+   }
+  },
+  "additionalProperties": false,
+  "description": "Published guard schema (A0.4); `validate` adds the domain checks it cannot express.",
+  "properties": {
+   "arguments": {
+    "$ref": "#/$defs/UpdateComponentArguments"
+   },
+   "before_sha256": {
+    "pattern": "^[0-9a-f]{64}$",
+    "title": "Before Sha256",
+    "type": "string"
+   },
+   "operation_id": {
+    "maxLength": 36,
+    "minLength": 36,
+    "title": "Operation Id",
+    "type": "string"
+   },
+   "project_id": {
+    "maxLength": 128,
+    "minLength": 1,
+    "title": "Project Id",
+    "type": "string"
+   },
+   "tool_name": {
+    "const": "update_component",
+    "title": "Tool Name",
+    "type": "string"
+   },
+   "version": {
+    "const": 1,
+    "title": "Version",
+    "type": "integer"
+   }
+  },
+  "required": [
+   "version",
+   "operation_id",
+   "project_id",
+   "tool_name",
+   "arguments",
+   "before_sha256"
+  ],
+  "title": "EffectContract",
+  "type": "object"
+ },
+ "observed_draft": {
+  "$defs": {
+   "Interpretation": {
+    "additionalProperties": false,
+    "properties": {
+     "block_ids": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 20,
+      "minItems": 1,
+      "title": "Block Ids",
+      "type": "array"
+     },
+     "id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "title": "Id",
+      "type": "string"
+     },
+     "text": {
+      "maxLength": 800,
+      "minLength": 1,
+      "title": "Text",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "text",
+     "block_ids"
+    ],
+    "title": "Interpretation",
+    "type": "object"
+   },
+   "Observed": {
+    "additionalProperties": false,
+    "properties": {
+     "entity_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Entity Id",
+      "type": "string"
+     },
+     "id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "title": "Id",
+      "type": "string"
+     },
+     "kind": {
+      "const": "observed",
+      "title": "Kind",
+      "type": "string"
+     },
+     "metric": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Metric",
+      "type": "string"
+     },
+     "source": {
+      "$ref": "#/$defs/Source"
+     },
+     "unit": {
+      "maxLength": 16,
+      "minLength": 1,
+      "title": "Unit",
+      "type": "string"
+     },
+     "value": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "number"
+       }
+      ],
+      "title": "Value"
+     }
+    },
+    "required": [
+     "id",
+     "kind",
+     "source",
+     "entity_id",
+     "metric",
+     "value",
+     "unit"
+    ],
+    "title": "Observed",
+    "type": "object"
+   },
+   "Source": {
+    "additionalProperties": false,
+    "properties": {
+     "evidence_id": {
+      "anyOf": [
+       {
+        "maxLength": 128,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Evidence Id"
+     },
+     "path": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Path",
+      "type": "string"
+     },
+     "tool_use_id": {
+      "anyOf": [
+       {
+        "maxLength": 128,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Tool Use Id"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "title": "Source",
+    "type": "object"
+   }
+  },
+  "additionalProperties": false,
+  "properties": {
+   "blocks": {
+    "items": {
+     "$ref": "#/$defs/Observed"
+    },
+    "maxItems": 20,
+    "minItems": 1,
+    "title": "Blocks",
+    "type": "array"
+   },
+   "interpretations": {
+    "items": {
+     "$ref": "#/$defs/Interpretation"
+    },
+    "maxItems": 2,
+    "title": "Interpretations",
+    "type": "array"
+   },
+   "schema_version": {
+    "title": "Schema Version",
+    "type": "integer"
+   }
+  },
+  "required": [
+   "schema_version",
+   "blocks"
+  ],
+  "title": "Draft",
+  "type": "object"
+ },
+ "pending": {
+  "action_and_proposal_blocks": "09-11: draft block kinds beyond observed/computed",
+  "arbitrary_request_scope": "09: natural-language scope beyond the bounded profile grammar",
+  "evidence_and_receipt_identity": "02: evidence and receipt identity fields",
+  "general_effect_guards": "11: guard/postcondition schemas for effectful tools other than update_component",
+  "independent_domain_approval": "10: per-metric domain review; formulas here are editing-agent reviewed only"
+ },
+ "profiles": {
+  "branch-loading/1": {
+   "definitions": {
+    "branch_rating": {
+     "formula_id": "branch-rating/1",
+     "label": "Rating (s_nom_opt if extendable, else s_nom)",
+     "unit": "MVA"
+    },
+    "hours_above_rating": {
+     "formula_id": "branch-weighted-hours-above-rating/1",
+     "label": "Weighted hours above the rating",
+     "unit": "h"
+    },
+    "peak_branch_flow": {
+     "formula_id": "branch-peak-active-flow/1",
+     "label": "Peak active-power flow",
+     "unit": "MW"
+    },
+    "peak_branch_utilisation": {
+     "formula_id": "branch-peak-utilisation/1",
+     "label": "Peak loading against the rating",
+     "unit": "%"
+    }
+   },
+   "metrics": [
+    "peak_branch_utilisation",
+    "hours_above_rating",
+    "peak_branch_flow",
+    "branch_rating"
+   ]
+  },
+  "bus-price/1": {
+   "definitions": {
+    "hours_at_voll": {
+     "formula_id": "bus-price-weighted-hours-at-voll/1",
+     "label": "Weighted hours priced at the solve's VoLL",
+     "unit": "h"
+    },
+    "max_price": {
+     "formula_id": "bus-price-max/1",
+     "label": "Highest price",
+     "unit": "EUR/MWh"
+    },
+    "mean_price": {
+     "formula_id": "bus-price-time-weighted-mean/1",
+     "label": "Time-weighted mean price (generator snapshot weights)",
+     "unit": "EUR/MWh"
+    },
+    "min_price": {
+     "formula_id": "bus-price-min/1",
+     "label": "Lowest price",
+     "unit": "EUR/MWh"
+    }
+   },
+   "metrics": [
+    "mean_price",
+    "min_price",
+    "max_price",
+    "hours_at_voll"
+   ]
+  },
+  "capacity/1": {
+   "definitions": {
+    "capacity_change": {
+     "formula_id": "nominal-capacity-change/1",
+     "label": "Change from the input capacity",
+     "unit": "MW, MVA or MWh by class"
+    },
+    "optimal_capacity": {
+     "formula_id": "observed-nominal-capacity/1",
+     "label": "Capacity after the solve",
+     "unit": "MW, MVA or MWh by class"
+    }
+   },
+   "metrics": [
+    "optimal_capacity",
+    "capacity_change"
+   ]
+  },
+  "carrier-energy/1": {
+   "definitions": {
+    "carrier_generator_energy": {
+     "formula_id": "carrier-generator-energy/1",
+     "label": "Generator energy of the carrier",
+     "unit": "MWh"
+    },
+    "carrier_peak_generator_output": {
+     "formula_id": "carrier-generator-peak/1",
+     "label": "Peak combined generator output of the carrier",
+     "unit": "MW"
+    },
+    "carrier_storage_charged_energy": {
+     "formula_id": "carrier-storage-charge-energy/1",
+     "label": "StorageUnit charging energy of the carrier (grid side)",
+     "unit": "MWh"
+    },
+    "carrier_storage_discharged_energy": {
+     "formula_id": "carrier-storage-discharge-energy/1",
+     "label": "StorageUnit discharged energy of the carrier (grid side)",
+     "unit": "MWh"
+    }
+   },
+   "metrics": [
+    "carrier_generator_energy",
+    "carrier_peak_generator_output",
+    "carrier_storage_discharged_energy",
+    "carrier_storage_charged_energy"
+   ]
+  },
+  "copt-screening/1": {
+   "definitions": {
+    "screening_eue": {
+     "formula_id": "copt-screening-eue/1",
+     "label": "Screening EUE over the modelled horizon (COPT)",
+     "unit": "MWh"
+    },
+    "screening_lole": {
+     "formula_id": "copt-screening-lole/1",
+     "label": "Screening LOLE over the modelled horizon (COPT)",
+     "unit": "h"
+    },
+    "screening_lolp_max": {
+     "formula_id": "copt-screening-lolp-max/1",
+     "label": "Highest hourly loss-of-load probability (COPT)",
+     "unit": "probability"
+    }
+   },
+   "metrics": [
+    "screening_lole",
+    "screening_eue",
+    "screening_lolp_max"
+   ]
+  },
+  "curtailment/1": {
+   "definitions": {
+    "available_energy": {
+     "formula_id": "variable-available-energy/1",
+     "label": "Available variable energy",
+     "unit": "MWh"
+    },
+    "curtailed_energy": {
+     "formula_id": "variable-curtailed-energy/1",
+     "label": "Curtailed energy",
+     "unit": "MWh"
+    },
+    "curtailment_share": {
+     "formula_id": "curtailment-share-of-available/1",
+     "label": "Curtailed share of available energy",
+     "unit": "%"
+    }
+   },
+   "metrics": [
+    "available_energy",
+    "curtailed_energy",
+    "curtailment_share"
+   ]
+  },
+  "energy-balance/1": {
+   "definitions": {
+    "export_losses_and_conversion": {
+     "formula_id": "site-export-losses-conversion/1",
+     "label": "Export, branch and storage losses, and conversion to other carriers (not split)",
+     "unit": "MWh"
+    },
+    "generation_energy": {
+     "formula_id": "site-generation-energy/1",
+     "label": "Generation (excluding VoLL slacks and process shortfall)",
+     "unit": "MWh"
+    },
+    "served_energy": {
+     "formula_id": "site-served-energy/1",
+     "label": "Demand served",
+     "unit": "MWh"
+    },
+    "storage_change": {
+     "formula_id": "site-storage-change/1",
+     "label": "Change in stored energy",
+     "unit": "MWh"
+    },
+    "unserved_energy": {
+     "formula_id": "site-unserved-energy/1",
+     "label": "Demand not served (shed and process shortfall)",
+     "unit": "MWh"
+    }
+   },
+   "metrics": [
+    "generation_energy",
+    "served_energy",
+    "unserved_energy",
+    "storage_change",
+    "export_losses_and_conversion"
+   ]
+  },
+  "generator-cost/1": {
+   "definitions": {
+    "allocated_fixed_cost": {
+     "dependencies": [
+      "annual_fixed_cost"
+     ],
+     "formula_id": "allocated-capacity-cost/1",
+     "label": "Allocated fixed capacity cost",
+     "unit": "EUR"
+    },
+    "annual_fixed_cost": {
+     "dependencies": [],
+     "formula_id": "annual-capacity-cost/1",
+     "label": "Annual fixed capacity cost",
+     "unit": "EUR/year"
+    },
+    "dispatch_energy": {
+     "formula_id": "generator-energy/1",
+     "inputs": [
+      "p",
+      "energy_weight"
+     ],
+     "label": "Generator energy",
+     "unit": "MWh"
+    },
+    "marginal_expenditure": {
+     "formula_id": "generator-marginal-expenditure/1",
+     "inputs": [
+      "p",
+      "marginal_cost",
+      "objective_weight"
+     ],
+     "label": "Marginal dispatch expenditure",
+     "unit": "EUR"
+    },
+    "peak_dispatch": {
+     "formula_id": "generator-peak/1",
+     "inputs": [
+      "p"
+     ],
+     "label": "Peak generator output",
+     "unit": "MW"
+    },
+    "total_cost": {
+     "dependencies": [
+      "allocated_fixed_cost",
+      "marginal_expenditure"
+     ],
+     "formula_id": "linear-total-cost/1",
+     "label": "Total cost on the declared basis",
+     "unit": "EUR"
+    }
+   },
+   "metrics": [
+    "dispatch_energy",
+    "marginal_expenditure",
+    "peak_dispatch",
+    "annual_fixed_cost",
+    "allocated_fixed_cost",
+    "total_cost"
+   ]
+  },
+  "generator-dispatch/1": {
+   "definitions": {
+    "dispatch_energy": {
+     "formula_id": "generator-energy/1",
+     "inputs": [
+      "p",
+      "energy_weight"
+     ],
+     "label": "Generator energy",
+     "unit": "MWh"
+    },
+    "marginal_expenditure": {
+     "formula_id": "generator-marginal-expenditure/1",
+     "inputs": [
+      "p",
+      "marginal_cost",
+      "objective_weight"
+     ],
+     "label": "Marginal dispatch expenditure",
+     "unit": "EUR"
+    },
+    "peak_dispatch": {
+     "formula_id": "generator-peak/1",
+     "inputs": [
+      "p"
+     ],
+     "label": "Peak generator output",
+     "unit": "MW"
+    }
+   },
+   "metrics": [
+    "dispatch_energy",
+    "marginal_expenditure",
+    "peak_dispatch"
+   ]
+  },
+  "generator-emissions/1": {
+   "definitions": {
+    "generator_emissions": {
+     "formula_id": "generator-co2-emissions/1",
+     "label": "CO2 emissions of this generator",
+     "unit": "tCO2"
+    }
+   },
+   "metrics": [
+    "generator_emissions"
+   ]
+  },
+  "grid-readiness/1": {
+   "definitions": {
+    "checked_fail": {
+     "formula_id": "grid-readiness-checked-fail/1",
+     "label": "Scorecard rows checked as fail",
+     "unit": "rows"
+    },
+    "checked_pass": {
+     "formula_id": "grid-readiness-checked-pass/1",
+     "label": "Scorecard rows checked as pass",
+     "unit": "rows"
+    },
+    "checked_warn": {
+     "formula_id": "grid-readiness-checked-warn/1",
+     "label": "Scorecard rows checked as warn",
+     "unit": "rows"
+    },
+    "not_checked": {
+     "formula_id": "grid-readiness-not-checked/1",
+     "label": "Scorecard rows not checked",
+     "unit": "rows"
+    }
+   },
+   "metrics": [
+    "checked_pass",
+    "checked_warn",
+    "checked_fail",
+    "not_checked"
+   ]
+  },
+  "investment-case/1": {
+   "definitions": {
+    "equity_irr": {
+     "formula_id": "equity-post-tax-irr/1",
+     "label": "Equity IRR (post tax)",
+     "unit": "fraction/year"
+    },
+    "equity_npv": {
+     "formula_id": "equity-post-tax-npv/1",
+     "label": "Equity NPV (post tax, at the cost of equity)",
+     "unit": "report currency"
+    },
+    "project_irr": {
+     "formula_id": "project-post-tax-irr/1",
+     "label": "Project IRR (post tax)",
+     "unit": "fraction/year"
+    },
+    "project_npv": {
+     "formula_id": "project-post-tax-npv/1",
+     "label": "Project NPV (post tax, at the WACC)",
+     "unit": "report currency"
+    }
+   },
+   "metrics": [
+    "equity_npv",
+    "project_npv",
+    "equity_irr",
+    "project_irr"
+   ]
+  },
+  "investment-lcoe/1": {
+   "definitions": {
+    "lcoe_nominal": {
+     "formula_id": "investment-lcoe-nominal/1",
+     "label": "LCOE, nominal (engine definition)",
+     "unit": "currency/MWh"
+    },
+    "lcoe_real": {
+     "formula_id": "investment-lcoe-real/1",
+     "label": "LCOE, real (engine definition)",
+     "unit": "currency/MWh"
+    }
+   },
+   "metrics": [
+    "lcoe_nominal",
+    "lcoe_real"
+   ]
+  },
+  "lost-load/1": {
+   "definitions": {
+    "lost_load_cost": {
+     "formula_id": "lost-load-cost-at-voll/1",
+     "label": "Unserved energy at the solve's VoLL",
+     "unit": "EUR"
+    },
+    "lost_load_energy": {
+     "formula_id": "lost-load-energy/1",
+     "label": "Unserved energy",
+     "unit": "MWh"
+    },
+    "peak_shed": {
+     "formula_id": "lost-load-peak/1",
+     "label": "Peak shed power",
+     "unit": "MW"
+    },
+    "shed_hours": {
+     "formula_id": "lost-load-weighted-shed-hours/1",
+     "label": "Weighted hours with shed above 1e-3 MW",
+     "unit": "h"
+    }
+   },
+   "metrics": [
+    "lost_load_energy",
+    "peak_shed",
+    "shed_hours",
+    "lost_load_cost"
+   ]
+  },
+  "network-emissions/1": {
+   "definitions": {
+    "co2_cap_shadow_price": {
+     "formula_id": "co2-cap-shadow-price/1",
+     "label": "CO2 cap shadow price",
+     "unit": "EUR/tCO2"
+    },
+    "total_emissions": {
+     "formula_id": "network-generator-co2-emissions/1",
+     "label": "CO2 emissions of all generators",
+     "unit": "tCO2"
+    }
+   },
+   "metrics": [
+    "total_emissions",
+    "co2_cap_shadow_price"
+   ]
+  },
+  "network-linear-cost/1": {
+   "definitions": {
+    "allocated_fixed_cost": {
+     "dependencies": [
+      "annual_fixed_cost"
+     ],
+     "formula_id": "allocated-capacity-cost/1",
+     "label": "Allocated fixed capacity cost",
+     "unit": "EUR"
+    },
+    "annual_fixed_cost": {
+     "dependencies": [],
+     "formula_id": "annual-capacity-cost/1",
+     "label": "Annual fixed capacity cost",
+     "unit": "EUR/year"
+    },
+    "dispatch_energy": {
+     "formula_id": "generator-energy/1",
+     "inputs": [
+      "p",
+      "energy_weight"
+     ],
+     "label": "Generator energy",
+     "unit": "MWh"
+    },
+    "marginal_expenditure": {
+     "formula_id": "generator-marginal-expenditure/1",
+     "inputs": [
+      "p",
+      "marginal_cost",
+      "objective_weight"
+     ],
+     "label": "Marginal dispatch expenditure",
+     "unit": "EUR"
+    },
+    "peak_dispatch": {
+     "formula_id": "generator-peak/1",
+     "inputs": [
+      "p"
+     ],
+     "label": "Peak generator output",
+     "unit": "MW"
+    },
+    "total_cost": {
+     "dependencies": [
+      "allocated_fixed_cost",
+      "marginal_expenditure"
+     ],
+     "formula_id": "linear-total-cost/1",
+     "label": "Total cost on the declared basis",
+     "unit": "EUR"
+    }
+   },
+   "metrics": [
+    "dispatch_energy",
+    "marginal_expenditure",
+    "peak_dispatch",
+    "annual_fixed_cost",
+    "allocated_fixed_cost",
+    "total_cost"
+   ]
+  },
+  "network-loading/1": {
+   "definitions": {
+    "branches_above_rating": {
+     "formula_id": "network-branches-above-rating/1",
+     "label": "Branches above their rating at any snapshot",
+     "unit": "branches"
+    },
+    "max_branch_utilisation": {
+     "formula_id": "network-max-branch-utilisation/1",
+     "label": "Highest branch loading against its rating",
+     "unit": "%"
+    }
+   },
+   "metrics": [
+    "max_branch_utilisation",
+    "branches_above_rating"
+   ]
+  },
+  "site-import/1": {
+   "definitions": {
+    "export_energy": {
+     "formula_id": "site-export-energy/1",
+     "label": "Export to the grid",
+     "unit": "MWh"
+    },
+    "grid_import_energy": {
+     "formula_id": "site-grid-import-energy/1",
+     "label": "Grid import",
+     "unit": "MWh"
+    },
+    "hours_at_import_limit": {
+     "formula_id": "site-hours-at-import-limit/1",
+     "label": "Weighted hours at the import limit",
+     "unit": "h"
+    },
+    "peak_grid_import": {
+     "formula_id": "site-peak-grid-import/1",
+     "label": "Peak grid import",
+     "unit": "MW"
+    }
+   },
+   "metrics": [
+    "grid_import_energy",
+    "peak_grid_import",
+    "export_energy",
+    "hours_at_import_limit"
+   ]
+  },
+  "storage-cycles/1": {
+   "definitions": {
+    "energy_capacity": {
+     "formula_id": "storage-energy-capacity/1",
+     "label": "Energy capacity",
+     "unit": "MWh"
+    },
+    "equivalent_cycles": {
+     "formula_id": "storage-equivalent-cycles/1",
+     "label": "Equivalent full cycles over the window",
+     "unit": "cycles"
+    },
+    "window_discharged_energy": {
+     "formula_id": "storage-window-discharge/1",
+     "label": "Discharged energy over the window",
+     "unit": "MWh"
+    }
+   },
+   "metrics": [
+    "window_discharged_energy",
+    "energy_capacity",
+    "equivalent_cycles"
+   ]
+  },
+  "storage-unit-cost/1": {
+   "definitions": {
+    "allocated_fixed_cost": {
+     "dependencies": [
+      "annual_fixed_cost"
+     ],
+     "formula_id": "allocated-capacity-cost/1",
+     "label": "Allocated fixed capacity cost",
+     "unit": "EUR"
+    },
+    "annual_fixed_cost": {
+     "dependencies": [],
+     "formula_id": "annual-capacity-cost/1",
+     "label": "Annual fixed capacity cost",
+     "unit": "EUR/year"
+    },
+    "charged_energy": {
+     "formula_id": "storage-charge-energy/1",
+     "label": "Charging energy (grid side)",
+     "unit": "MWh"
+    },
+    "discharged_energy": {
+     "formula_id": "storage-discharge-energy/1",
+     "label": "Discharged energy (grid side)",
+     "unit": "MWh"
+    },
+    "final_state_of_charge": {
+     "formula_id": "storage-window-final-state/1",
+     "label": "Stored energy at window end",
+     "unit": "MWh"
+    },
+    "net_storage_energy": {
+     "formula_id": "storage-net-grid-energy/1",
+     "label": "Net discharged grid energy",
+     "unit": "MWh"
+    },
+    "peak_charging_power": {
+     "formula_id": "storage-charge-peak/1",
+     "label": "Peak charging power",
+     "unit": "MW"
+    },
+    "peak_discharging_power": {
+     "formula_id": "storage-discharge-peak/1",
+     "label": "Peak discharging power",
+     "unit": "MW"
+    },
+    "storage_discharge_expenditure": {
+     "formula_id": "storage-discharge-expenditure/1",
+     "label": "StorageUnit discharge expenditure",
+     "unit": "EUR"
+    },
+    "storage_holding_expenditure": {
+     "formula_id": "storage-state-holding-expenditure/1",
+     "label": "StorageUnit holding expenditure",
+     "unit": "EUR"
+    },
+    "storage_operating_expenditure": {
+     "dependencies": [
+      "storage_discharge_expenditure",
+      "storage_holding_expenditure"
+     ],
+     "formula_id": "storage-linear-operation-cost/1",
+     "label": "Direct StorageUnit operating expenditure",
+     "unit": "EUR"
+    },
+    "total_cost": {
+     "dependencies": [
+      "allocated_fixed_cost",
+      "storage_operating_expenditure"
+     ],
+     "formula_id": "storage-direct-total-cost/1",
+     "label": "Total direct StorageUnit cost on the declared basis",
+     "unit": "EUR"
+    }
+   },
+   "metrics": [
+    "charged_energy",
+    "discharged_energy",
+    "net_storage_energy",
+    "peak_charging_power",
+    "peak_discharging_power",
+    "final_state_of_charge",
+    "storage_discharge_expenditure",
+    "storage_holding_expenditure",
+    "storage_operating_expenditure",
+    "annual_fixed_cost",
+    "allocated_fixed_cost",
+    "total_cost"
+   ]
+  },
+  "storage-unit-dispatch/1": {
+   "definitions": {
+    "charged_energy": {
+     "formula_id": "storage-charge-energy/1",
+     "label": "Charging energy (grid side)",
+     "unit": "MWh"
+    },
+    "discharged_energy": {
+     "formula_id": "storage-discharge-energy/1",
+     "label": "Discharged energy (grid side)",
+     "unit": "MWh"
+    },
+    "final_state_of_charge": {
+     "formula_id": "storage-window-final-state/1",
+     "label": "Stored energy at window end",
+     "unit": "MWh"
+    },
+    "net_storage_energy": {
+     "formula_id": "storage-net-grid-energy/1",
+     "label": "Net discharged grid energy",
+     "unit": "MWh"
+    },
+    "peak_charging_power": {
+     "formula_id": "storage-charge-peak/1",
+     "label": "Peak charging power",
+     "unit": "MW"
+    },
+    "peak_discharging_power": {
+     "formula_id": "storage-discharge-peak/1",
+     "label": "Peak discharging power",
+     "unit": "MW"
+    }
+   },
+   "metrics": [
+    "charged_energy",
+    "discharged_energy",
+    "net_storage_energy",
+    "peak_charging_power",
+    "peak_discharging_power",
+    "final_state_of_charge"
+   ]
+  }
+ },
+ "request_scope": {
+  "$defs": {
+   "CostBasis": {
+    "additionalProperties": false,
+    "properties": {
+     "annual_fixed_cost_fraction": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "number"
+       }
+      ],
+      "ge": 0,
+      "le": 1,
+      "title": "Annual Fixed Cost Fraction"
+     },
+     "currency": {
+      "const": "EUR",
+      "title": "Currency",
+      "type": "string"
+     },
+     "price_year": {
+      "maximum": 2200,
+      "minimum": 1900,
+      "title": "Price Year",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "currency",
+     "price_year",
+     "annual_fixed_cost_fraction"
+    ],
+    "title": "CostBasis",
+    "type": "object"
+   }
+  },
+  "additionalProperties": false,
+  "properties": {
+   "chart": {
+    "anyOf": [
+     {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 8,
+      "minItems": 1,
+      "type": "array"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Chart"
+   },
+   "comparison_evidence_id": {
+    "anyOf": [
+     {
+      "maxLength": 36,
+      "minLength": 36,
+      "type": "string"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Comparison Evidence Id"
+   },
+   "component_class": {
+    "anyOf": [
+     {
+      "enum": [
+       "Line",
+       "Transformer",
+       "Generator",
+       "Link",
+       "StorageUnit",
+       "Store"
+      ],
+      "type": "string"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Component Class"
+   },
+   "cost_basis": {
+    "anyOf": [
+     {
+      "$ref": "#/$defs/CostBasis"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null
+   },
+   "end": {
+    "anyOf": [
+     {
+      "maxLength": 64,
+      "minLength": 1,
+      "type": "string"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "End"
+   },
+   "entity_id": {
+    "maxLength": 128,
+    "minLength": 1,
+    "title": "Entity Id",
+    "type": "string"
+   },
+   "evidence_id": {
+    "anyOf": [
+     {
+      "maxLength": 36,
+      "minLength": 36,
+      "type": "string"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Evidence Id"
+   },
+   "metrics": {
+    "anyOf": [
+     {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 20,
+      "minItems": 1,
+      "type": "array"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Metrics"
+   },
+   "profile": {
+    "enum": [
+     "generator-dispatch/1",
+     "generator-cost/1",
+     "network-linear-cost/1",
+     "storage-unit-dispatch/1",
+     "storage-unit-cost/1",
+     "carrier-energy/1",
+     "branch-loading/1",
+     "network-loading/1",
+     "lost-load/1",
+     "bus-price/1",
+     "generator-emissions/1",
+     "network-emissions/1",
+     "curtailment/1",
+     "capacity/1",
+     "storage-cycles/1",
+     "energy-balance/1",
+     "site-import/1",
+     "investment-case/1",
+     "investment-lcoe/1",
+     "copt-screening/1",
+     "grid-readiness/1"
+    ],
+    "title": "Profile",
+    "type": "string"
+   },
+   "project_id": {
+    "maxLength": 128,
+    "minLength": 1,
+    "title": "Project Id",
+    "type": "string"
+   },
+   "retain": {
+    "default": false,
+    "title": "Retain",
+    "type": "boolean"
+   },
+   "start": {
+    "anyOf": [
+     {
+      "maxLength": 64,
+      "minLength": 1,
+      "type": "string"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Start"
+   },
+   "version": {
+    "const": 1,
+    "title": "Version",
+    "type": "integer"
+   }
+  },
+  "required": [
+   "version",
+   "profile",
+   "project_id",
+   "entity_id"
+  ],
+  "title": "RequestScope",
+  "type": "object"
+ },
+ "version": 1
+}

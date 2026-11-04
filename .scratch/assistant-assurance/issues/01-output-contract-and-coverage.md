@@ -3,8 +3,8 @@
 
 # P0: output contracts and complete coverage
 
-Status: in progress — A0.1–A0.3 done in #796; A0.4 open
-Progress: A0.1–A0.3 executable and passing; every tool/tab/panel/output channel mapped to a v1 adapter (`harness/assurance_coverage.py`); A0.4 reviewed schemas pending tickets 09–11
+Status: in progress — A0.1–A0.3 done in #796; A0.4 built on `claude/assurance-01-a04-contracts`, blocked only on review (see 2026-11-04)
+Progress: A0.1–A0.4 executable and passing; every tool/tab/panel/output channel mapped to a v1 adapter (`harness/assurance_coverage.py`); v1 request/profile/metric/computed/guard contracts frozen in `harness/assurance_contracts.v1.json`
 Type: task
 Blocked by: None
 
@@ -48,3 +48,32 @@ does not cover these additions; review/freeze them before implementation.
 Version-1 compatible fields now define explicit scope, required-slot dispositions/request completeness, retained/comparison IDs and qualitative interpretations. Capability/schema endpoints and the documented API make the exact implemented bounds reviewable. The user explicitly authorized implementation; prior attached-plan review instructions were design context, not a new user approval gate. This extension has editing-agent review and deterministic regression coverage, but no inherited independent domain approval. Arbitrary request completeness and whole-phase coverage remain pending.
 
 See [implementation status](../implementation-status.md) and [contracts](../harness-contracts.md). Whole ticket remains open.
+
+
+### 2026-11-04 — A0.4 contract freeze
+
+What A0.4 needed from 09–11 was their contracts as shipped, not their completion.
+`harness/assurance_contracts.py` builds one document from the live code: the
+`RequestScope` schema, every profile with its metrics and definitions, the
+observed and computed draft schemas, the effect guard (`effects.EffectContract`,
+now enforced inside `effects.validate`) and the input-schema hash of each checked
+tool. `assurance_contracts.v1.json` is the snapshot. `tests/test_assurance_contracts.py`
+fails CI when the contracts drift from the snapshot. A changed checked-tool parameter,
+a changed metric definition, a profile missing from the scope enum, or a metric with
+no formula all fail. `--write` refuses a non-additive update.
+`tests/assurance_acceptance/test_p0_server_owned_contracts.py` covers spoofed
+intent and ownership. A scope for another project is limited (`wrong_project`).
+Forged owner/authorized/verified fields, an unregistered profile version, a bool
+version and forged effect guards (tool, confirmation flag, class, bool or unlisted
+attribute, revision) all get a 422 before any model call. A metric outside the
+registry is never answered.
+
+Named blockers before Status done:
+- the owner's call on the compatibility rule (additive-only within v1 is built; sent to the coordinator 2026-11-04 as Q1);
+- the owner's call that GK B's OK on the frozen snapshot is the P0 contract review (Q2);
+- GK B's review of the PR.
+
+The snapshot's `pending` list names what is not frozen and who owns it: arbitrary
+scope (09), action/proposal blocks (09–11), guards for other effectful tools (11),
+evidence/receipt identity (02) and independent domain approval (10). Under the
+rule built here, each can be added later without breaking v1.
