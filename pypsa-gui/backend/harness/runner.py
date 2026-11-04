@@ -313,7 +313,7 @@ class Runner:
     """
 
     def __init__(self, instance=None, *, clock=time.time, decisions=None, agent_provider=None,
-                 research_provider=None, research_reserving=None):
+                 research_provider=None):
         self.instance = instance or f"{os.getpid()}:{uuid.uuid4().hex[:8]}"
         self.clock = clock
         self._decisions = decisions
@@ -321,10 +321,8 @@ class Runner:
         # session's own (production). Tests pass a scripted one.
         self._agent_provider = agent_provider
         # Issue 09: the research turn's provider (a test seam; the app resolves
-        # the run's own) and the reservation wrapper every research send goes
-        # through (SH-24). Without one, research does not run.
+        # the run's own). Every research send goes through the reservation (SH-24).
         self._research_provider = research_provider
-        self._research_reserving = research_reserving
         self._wakeup = threading.Event()
         self._stopping = threading.Event()
         self._due = set()
@@ -391,6 +389,7 @@ class Runner:
         return copy.deepcopy(card) if card and card["expires_at_epoch_ms"] > time.time() * 1000 else None
 
     def _loop(self):
+        self.boot_sweep()
         while not self._stopping.is_set():
             self._wakeup.wait(HEARTBEAT_SECONDS)
             self._wakeup.clear()
@@ -411,6 +410,10 @@ class Runner:
     def scan(self):
         """Every run the runner may drive: reads task files only, never a
         network, at most SCAN_LIMIT of them."""
+        return [path for path, task in self._runs() if task["run"].get("status") in _DRIVEN]
+
+    def _runs(self):
+        """Every run file with its record, at most SCAN_LIMIT task files read."""
         from db.models import Project
         from db.session import SessionLocal
         from services import project_registry
@@ -430,9 +433,16 @@ class Runner:
                 if read > SCAN_LIMIT:
                     return found
                 task = _read(path)
-                if task and task.get("version") == 3 and (task.get("run") or {}).get("status") in _DRIVEN:
-                    found.append(path)
+                if task and task.get("version") == 3 and task.get("run"):
+                    found.append((path, task))
         return found
+
+    def boot_sweep(self):
+        """Restart reconciliation at boot (issue 24, GK B): a model send
+        another boot left open settles `uncertain` at its hold's bound."""
+        from harness import send_reservation
+        paths = [path for path, task in self._runs() if send_reservation.has_open_holds(task["run"])]
+        return send_reservation.sweep(paths, boot=self.instance, now=self.clock())
 
     # one tick
 
@@ -736,14 +746,19 @@ class Runner:
         task_id = task["task_id"]
 
         def round_():
+            from harness import send_reservation
             session._undo_snapshotted = []  # the round is one undo step, as a chat turn is
             try:
-                run_loops.run_round(path, ctx, session, provider=self._agent_provider,
+                run_loops.run_round(path, ctx, session, provider=self._round_provider(path, session),
                                     recheck=lambda: self.recheck(task_id, path, ctx))
             except Exception:  # noqa: BLE001 — a round that errors ends the loop; never retried unattended
                 logger.exception("harness runner: input-loop round of %s errored", task_id)
                 run_loops.end(path, "error")
             finally:
+                try:
+                    send_reservation.close_open(path, boot=self.instance)
+                except Exception:  # noqa: BLE001 — a ledger fault never keeps the runner from waking
+                    logger.exception("harness runner: closing the sends of %s failed", task_id)
                 self.wake(path)
         context = contextvars.copy_context()
         thread = threading.Thread(target=context.run, args=(round_,), name=f"harness-l1-{task_id[:8]}", daemon=True)
@@ -751,17 +766,28 @@ class Runner:
         thread.start()
         return "l1_round"
 
-    def _reserving(self, path):
-        """The research reservation (SH-24): `Research(Reserving(base))`,
-        scope "research". None (research does not run) until it exists."""
-        if self._research_reserving is not None:
-            return self._research_reserving
-        try:
-            from harness import send_reservation
-        except ImportError:
-            return None
-        instance = self.instance
-        return lambda inner: send_reservation.ReservingProvider(inner, path, boot=instance, scope="research")
+    def _round_provider(self, path, session):
+        """The provider an agent round streams from, always behind the send
+        reservation (issue 24): with the durable budget mode on every send
+        reserves first; off, run sends pass straight through and only
+        research (`send_reservation.research()`) is reserved."""
+        from harness import send_reservation
+        inner = self._agent_provider
+        if inner is None:
+            from harness.providers import wiring
+            inner, _ = wiring._provider_for_profile(wiring._resolve_turn_profile(session))
+            if inner is None:
+                return None  # the loop reports the missing provider; nothing is sent
+        return send_reservation.ReservingProvider(inner, path, boot=self.instance, clock=self.clock)
+
+    def _research_base(self, session):
+        """The research turn's provider before the reservation: the test seam,
+        else the run session's own (None: research reads not_available)."""
+        if self._research_provider is not None:
+            return self._research_provider
+        from harness.providers import wiring
+        inner, _ = wiring._provider_for_profile(wiring._resolve_turn_profile(session))
+        return inner
 
     def _research_turn(self, path, ctx, session, task):
         """The stage's research turn (issue 09) on a helper thread, as an
@@ -773,13 +799,22 @@ class Runner:
         stage = task["run"]["stage"]
 
         def turn():
+            from harness import send_reservation
             try:
-                research.run_for(path, session, stage=stage, provider=self._research_provider,
-                                 reserving=self._reserving(path))
+                # Research(Reserving(base)) (GK B Q3): every research send is held
+                # under scope "research" before it goes out; a refusal ends the turn.
+                instance, clock = self.instance, self.clock
+                research.run_for(path, session, stage=stage, provider=self._research_base(session),
+                                 reserving=lambda inner: send_reservation.ReservingProvider(
+                                     inner, path, boot=instance, clock=clock))
             except Exception:  # noqa: BLE001 — a research turn that errors lists its gaps; never retried
                 logger.exception("harness runner: research turn of %s errored", task_id)
                 research.failed(path, stage)
             finally:
+                try:
+                    send_reservation.close_open(path, boot=self.instance)
+                except Exception:  # noqa: BLE001 — a ledger fault never keeps the runner from waking
+                    logger.exception("harness runner: closing the research sends of %s failed", task_id)
                 self.wake(path)
         context = contextvars.copy_context()
         thread = threading.Thread(target=context.run, args=(turn,), name=f"harness-rs-{task_id[:8]}", daemon=True)
@@ -963,12 +998,14 @@ class Runner:
         with tasks._LOCK:
             task = _read(path)
             tasks._reconcile_lost(path, task)
+        from harness import send_reservation
+        lost_sends = send_reservation.reconcile(path, boot=self.instance, now=self.clock())
         task = _read(path)
         runner = task["run"].get("runner") or {}
         now = self.clock()
         if len([t for t in runner.get("restart_times", []) if now - t < RESTART_WINDOW_SECONDS]) >= MAX_RESTARTS:
             raise _Stop("paused", "restarts")
-        if any(s["status"] == "uncertain" for s in task["steps"]):
+        if lost_sends or any(s["status"] == "uncertain" for s in task["steps"]):
             raise _Stop("needs_user", "uncertain")
 
 

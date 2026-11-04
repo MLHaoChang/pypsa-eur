@@ -118,10 +118,12 @@ def test_a_chat_request_never_carries_web_search_and_a_research_request_does():
 class _Refusing:
     name = "refusing"
 
+    def __init__(self, reason="research_budget"):
+        self.reason = reason
+
     def stream(self, request):
-        exc = ProviderError("invalid_request", "over the research cap")
-        exc.reason = "research_budget"
-        raise exc
+        from harness import send_reservation
+        raise send_reservation.SendRefused(self.reason, "refused")
         yield  # pragma: no cover
 
 
@@ -129,7 +131,27 @@ def test_a_send_the_reservation_refuses_marks_the_cap_reached():
     researching = capability.ResearchProvider(_Refusing(), capability.SPEC)
     with pytest.raises(ProviderError):
         list(researching.stream(_request()))
-    assert researching.cap_reached
+    assert researching.cap_reached and researching.refused == "research_budget"
+
+
+class _Scoped:
+    name = "scoped"
+
+    def __init__(self):
+        self.scopes = []
+
+    def stream(self, request):
+        from harness import send_reservation
+        self.scopes.append(send_reservation._SCOPE.get())
+        yield LLMEvent(type="message_done", blocks=[], usage={})
+
+
+def test_a_research_send_is_reserved_under_the_research_scope():
+    """GK B Q3: the reservation inside sees the send as research."""
+    from harness import send_reservation
+    inner = _Scoped()
+    list(capability.ResearchProvider(inner, capability.SPEC).stream(_request()))
+    assert inner.scopes == ["research"] and send_reservation._SCOPE.get() is None
 
 
 def test_l1_and_chat_requests_never_carry_server_tools():
@@ -140,7 +162,8 @@ def test_l1_and_chat_requests_never_carry_server_tools():
     for path in sorted((BACKEND / "harness").rglob("*.py")):
         if "providers" in path.parts:
             continue
-        assert "server_tools(" not in path.read_text(encoding="utf-8"), path.name
+        # `send_reservation._server_tools` only reads a request's tools; it adds none.
+        assert not re.search(r"\bserver_tools\(", path.read_text(encoding="utf-8")), path.name
 
 
 _SERVER_WORDS = re.compile(r"web_search_20|web_fetch_20|server_tool_use|web_fetch_tool_result|web_search_tool_result")
@@ -361,7 +384,8 @@ def test_settling_a_row_moves_the_research_card_on(granted, profile):
     assert research._await_confirmation(path, [a, b]) == {"kind": "research_confirm", "ref": a["id"]}
     assert research.settle(path, a["id"], "rejected", by="u1")["status"] == "rejected"
     run = json.loads(path.read_text())["run"]
-    assert run["waiting"] == {"kind": "research_confirm", "ref": b["id"]}
+    assert {k: run["waiting"][k] for k in ("kind", "ref")} == {"kind": "research_confirm", "ref": b["id"]}
+    assert run["reason"] == "waiting_research_confirm"
     assert [r["status"] for r in run["research"]["rows"]] == ["rejected", "proposed"]
     research.settle(path, b["id"], "confirmed", by="u1")
     assert json.loads(path.read_text())["run"]["waiting"] is None
@@ -470,6 +494,18 @@ def test_the_research_card_route_settles_the_row(granted, profile, client):
                        json={"verdict": "rejected"}).status_code == 404
 
 
+def test_the_monitor_shows_each_row_as_its_card_does(granted, profile, client):
+    task, path, _ = granted(detach=False)
+    a = source_ledger.propose(proposal(), ledger_gap(), [page()], turn_id="t")
+    fake = source_ledger.propose(proposal(url="https://made.up/page"), ledger_gap(), [page()], turn_id="t")
+    _rows(path, a, fake)
+    monitor = client.get(f"/api/chat/runs/{task['task_id']}/view").json()["monitor"]
+    assert monitor["waiting"] == {"kind": "research_confirm", "ref": a["id"]}
+    shown, unverified = monitor["research"]["rows"]
+    assert (shown["source"], shown["url"], shown["quote"], shown["gap"]) == ("sourced", URL, QUOTE, "import_tariff")
+    assert unverified["source"] == "unverified source" and "url" not in unverified and "quote" not in unverified
+
+
 # ── A whole research turn on a scripted provider (B3, R3) ────────────────────
 
 
@@ -522,3 +558,22 @@ def test_an_injected_page_changes_nothing_and_a_write_is_refused_in_the_turn(gra
     assert out["waiting"] == {"kind": "research_confirm", "ref": out["rows"][0]["id"]}
     record = json.loads(path.read_text())
     assert record["run"]["status"] == "needs_user" and not any(s["tool"] == "attach_tariff" for s in record["steps"])
+
+
+
+@pytest.mark.parametrize("reason, status, extra", [
+    ("research_budget", "cap_reached", {"kind": "research_cap_reached"}),
+    ("research_unavailable", "not_available", {"kind": "research_not_available"}),
+    ("research_not_allowed", "not_available", {"kind": "research_not_available"}),
+    ("lease_lost", "error", {"reason": "lease_lost"}),
+])
+def test_a_refused_research_send_ends_the_turn_and_never_stops_the_run(granted, profile, reason, status, extra):
+    profile({**BLOCK, "research": {"allowed": True, "cost_cap_eur": 2.0}})
+    task, path, _ = granted(envelope={**BLOCK, "research": {"allowed": True, "cost_cap_eur": 2.0}})
+    out = _turn(path, task, base_provider=_Refusing(reason))
+    assert out["status"] == status and out["rows"] == []
+    record = json.loads(path.read_text())
+    step = record["run"]["research"]["steps"][-1]
+    assert step["status"] == status and step["gaps"] == ["import_tariff"]
+    assert {k: step[k] for k in extra} == extra
+    assert record["run"]["status"] == "running"

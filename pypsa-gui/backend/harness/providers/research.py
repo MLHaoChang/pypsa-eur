@@ -33,7 +33,10 @@ from harness.protocol import LLMEvent, LLMRequest, ProviderError
 # what one call can cost (search and fetch fees are per request).
 SPEC = {"search_max_uses": 3, "fetch_max_uses": 3, "max_content_tokens": 20000}
 RETAIN_CHARS = 200_000
-RESEARCH_BUDGET = "research_budget"  # the reservation's refusal reason (SH-24)  # GK B R3: retained page text is size-capped
+# The reservation's refusals (SH-24, `SendRefused.reason`) and what each makes
+# of the research step. Any other reason ends the turn as an error. None stops the run.
+RESEARCH_BUDGET = "research_budget"  # the research cap: the step reads cap_reached
+NOT_AVAILABLE = frozenset({"research_unavailable", "research_not_allowed"})
 
 # Models with the dynamic-filtering variants; older ones keep the basic ones.
 _CURRENT = ("claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6",
@@ -127,18 +130,24 @@ class ResearchProvider:
         self.fetched: list[FetchedSource] = []
         self.usage: list[dict[str, int]] = []
         self.cap_reached = False
+        self.refused: str | None = None  # the reservation's refusal reason, if any
 
     def stream(self, request: LLMRequest) -> Iterator[LLMEvent]:
+        from harness import send_reservation
         request = dataclasses.replace(request, tools=list(request.tools) + server_tools(request.model, self._spec))
         try:
-            for event in self._inner.stream(request):
-                if event.type == "message_done":
-                    self.fetched.extend(fetched_sources(event.blocks))
-                    self.usage.append(dict(event.usage or {}))
-                yield event
+            # The reservation inside holds this send under scope "research" (SH-24).
+            with send_reservation.research():
+                for event in self._inner.stream(request):
+                    if event.type == "message_done":
+                        self.fetched.extend(fetched_sources(event.blocks))
+                        self.usage.append(dict(event.usage or {}))
+                    yield event
         except ProviderError as exc:
-            if getattr(exc, "reason", None) == RESEARCH_BUDGET:
-                self.cap_reached = True  # refused before sending: research stops, the stage goes on
+            reason = getattr(exc, "reason", None)
+            if reason is not None:
+                self.refused = reason
+                self.cap_reached = reason == RESEARCH_BUDGET  # refused before sending: research stops
             raise
 
     def __getattr__(self, name: str) -> Any:  # probe and the like reach the inner provider

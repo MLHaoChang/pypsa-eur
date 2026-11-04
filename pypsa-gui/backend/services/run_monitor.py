@@ -100,6 +100,10 @@ def _budgets(task, envelope):
                                      and a.get("tool") in run_envelope.RUN_TOOLS),
                          "of": envelope["budget"]["solves"]}
         out["expires_at"] = envelope["expires_at"]
+    from harness import send_reservation
+    reserved = send_reservation.summary(task["run"])
+    if reserved is not None:  # issue 24: the send ledger, bounds counted as spent
+        out["reserved"] = reserved
     return out
 
 
@@ -154,8 +158,18 @@ def view(task_id, provider_ready):
         "actions": _actions(task),
         **({"card": card} if card else {}),
         **({"waiting": {k: waiting[k] for k in ("kind", "ref")}} if waiting else {}),
+        **({"research": _research(task["run"]["research"])} if task["run"].get("research") else {}),
     }
     return out
+
+
+def _research(block):
+    """Issue 09: each source row as its card shows it (an unverified row never
+    with its link or quote) and each stage's step: status and listed gaps."""
+    from services import source_ledger
+    return {"rows": [source_ledger.card_view(r) | {"gap": r["for"]["gap"]} for r in block.get("rows", [])],
+            "steps": [{k: s[k] for k in ("stage", "status", "gaps", "kind") if k in s}
+                      for s in block.get("steps", [])]}
 
 
 def present(task_id):

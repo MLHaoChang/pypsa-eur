@@ -32,7 +32,7 @@ import PlacedEquipment from './PlacedEquipment'
 import { detachRefusalCopy, detachTitle, moveGroup, undoTitle, UNDO_GONE, type GroupMove } from './groupEdit'
 import { useModelProposal } from './useSiteScene'
 import type { AssetFootprint, Site } from './types'
-import { SECONDARY_BUTTON } from './buttonStyles'
+import { PRIMARY_BUTTON, SECONDARY_BUTTON } from './buttonStyles'
 
 type Enabled = Extract<SiteScene, { state: 'enabled' }>
 
@@ -81,7 +81,7 @@ function openCreationForm(item: PaletteItemData): void {
 }
 
 const link = 'whitespace-nowrap text-accent hover:underline disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50'
-const primary = 'px-3 py-1 rounded bg-accent text-white font-semibold hover:bg-accent/90 disabled:cursor-not-allowed disabled:hover:bg-accent disabled:opacity-50'
+const primary = PRIMARY_BUTTON
 const secondary = SECONDARY_BUTTON
 
 function useNetworkRows(project: string | null) {
