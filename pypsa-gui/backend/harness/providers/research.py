@@ -170,12 +170,13 @@ class ResearchProvider:
                         self.usage.append(dict(event.usage or {}))
                     yield event
         except ProviderError as exc:
-            reason = getattr(exc, "reason", None)
-            if reason is not None:
-                self.refused = reason
-                self.cap_reached = (
-                    reason == RESEARCH_BUDGET
-                )  # refused before sending: research stops
+            # A provider fault with no reason (rate limited, overloaded) ends
+            # the turn as an error too, never as `done` (GK B, not blocking).
+            reason = getattr(exc, "reason", None) or "provider_error"
+            self.refused = reason
+            self.cap_reached = (
+                reason == RESEARCH_BUDGET
+            )  # refused before sending: research stops
             raise
 
     def __getattr__(

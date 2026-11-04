@@ -217,6 +217,30 @@ describe('RunMonitor', () => {
     expect(await screen.findByTestId('run-research-step')).toBeTruthy()
   })
 
+  it('research: the card names what Use this value attaches to, and only a gap it knows', async () => {
+    show('research_confirm')
+    expect((await screen.findByTestId('run-research-card')).textContent)
+      .toContain('Using it adds it to the Library and attaches it to the import tariff, each on its own card.')
+    cleanup()
+    const unknown = structuredClone(STATES.research_confirm)
+    unknown.monitor.research!.rows.forEach(r => { r.gap = 'grid_fee' })
+    vi.mocked(api.getRun).mockResolvedValue(unknown)
+    useUIStore.setState({ uiMode: 'guided' })
+    render(<AssistantResultCard result={START} disabled={false} onRequest={vi.fn()} />)
+    const text = (await screen.findByTestId('run-research-card')).textContent
+    expect(text).toContain('Using it adds it to the Library and attaches it, each on its own card.')
+    expect(text).not.toMatch(/to the a value/i)
+  })
+
+  it('research: an unverified waiting row shows no source and offers only Reject', async () => {
+    show('research_unverified')
+    expect((await screen.findByTestId('run-research-unverified')).textContent).toBe('Unverified source: not used')
+    expect(screen.queryByTestId('run-research-source')).toBeNull()
+    expect(screen.queryByTestId('run-research-quote')).toBeNull()
+    expect(screen.queryByTestId('run-research-use')).toBeNull()
+    expect(screen.getByTestId('run-research-reject')).toBeTruthy()
+  })
+
   it('research: two values left say "stay as the template has them"', async () => {
     const two = structuredClone(STATES.research_cap)
     two.monitor.research!.steps[0].gaps = ['import_tariff', 'import_tariff']

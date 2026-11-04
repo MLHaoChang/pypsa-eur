@@ -795,12 +795,13 @@ class Runner:
                 # Research(Reserving(base)) (GK B Q3): every research send is held
                 # under scope "research" before it goes out; a refusal ends the turn.
                 instance, clock = self.instance, self.clock
-                research.run_for(path, session, stage=stage, provider=self._research_provider,
+                research.run_for(path, session, stage=stage, boot=instance, clock=clock,
+                                 provider=self._research_provider,
                                  reserving=lambda inner: send_reservation.ReservingProvider(
                                      inner, path, boot=instance, clock=clock))
             except Exception:  # noqa: BLE001 — a research turn that errors lists its gaps; never retried
                 logger.exception("harness runner: research turn of %s errored", task_id)
-                research.failed(path, stage)
+                research.failed(path, stage, boot=self.instance, clock=self.clock)
             finally:
                 try:
                     send_reservation.close_open(path, boot=self.instance)

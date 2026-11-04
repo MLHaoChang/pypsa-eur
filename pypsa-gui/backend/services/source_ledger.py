@@ -9,8 +9,9 @@ Pure functions over plain dicts: the harness keeps the rows in the run block
   `locator` and `fetched_at`, from the pages fetched in the same turn.
 - A row is `verified` only when its url was fetched in that turn and its
   quote is verbatim in that page's retained text (whitespace-normalised, NFC,
-  no case folding; GK B R2). Anything else is `unverified`: never shown as
-  sourced, never offered as a value.
+  no case folding; GK B R2), and the quote states the row's value and unit
+  (`value_in_quote`; GK B ask 3). Anything else is `unverified`: never
+  shown as sourced, never offered as a value.
 - The value carries the gap's unit and basis; another unit or basis is
   refused, never converted (`research_unit_mismatch`).
 - `proposed` → `confirmed` (the card's click) or `rejected`; a rejected row
@@ -32,6 +33,14 @@ QUOTE_CHARS = 400
 _JURISDICTION = re.compile(r"[A-Z]{2}(-[A-Z0-9]{1,6})?")
 STATUSES = ("proposed", "confirmed", "rejected")
 _SPACE = re.compile(r"\s+")
+# A number as a source writes it: digits, optionally grouped in threes by a
+# space, comma, point or apostrophe, with a decimal point or comma.
+_NUMBER = re.compile(
+    r"(?<![\d.,])\d{1,3}(?:([ \u00a0\u202f,.'])\d{3})?(?:\1\d{3})*(?:[.,]\d+)?(?![\d])"
+    r"|(?<![\d.,])\d+(?:[.,]\d+)?(?![\d])"
+)
+_GROUP = re.compile(r"[ \u00a0\u202f']")
+_CURRENCY = {"EUR": ("EUR", "€", "euro", "Euro")}
 
 
 class LedgerError(ValueError):
@@ -57,6 +66,37 @@ def _locate(quote: str, text: str) -> dict[str, int] | None:
     needle = normalise(quote)
     start = page.find(needle) if needle else -1
     return None if start < 0 else {"start": start, "end": start + len(needle)}
+
+
+def _readings(token: str) -> set[float]:
+    """Every value a written number can mean: a point or a comma as the
+    decimal mark, the other (or a space or apostrophe) grouping thousands."""
+    plain = _GROUP.sub("", token)
+    out = set()
+    for decimal, group in ((".", ","), (",", ".")):
+        body = plain.replace(group, "")
+        if body.count(decimal) > 1:
+            continue
+        try:
+            out.add(float(body.replace(decimal, ".")))
+        except ValueError:
+            continue
+    return out
+
+
+def value_in_quote(value: float, unit: str, quote: str) -> bool:
+    """The quote states `value` (as written, either decimal mark) and each
+    part of `unit` (EUR also as € or euro). No conversion: 0.1425 EUR/kWh
+    does not state 142.5 EUR/MWh."""
+    text = normalise(quote)
+    for part in unit.split("/"):
+        if not any(word in text for word in _CURRENCY.get(part, (part,))):
+            return False
+    return any(
+        math.isclose(reading, value, rel_tol=1e-9, abs_tol=1e-12)
+        for match in _NUMBER.finditer(text)
+        for reading in _readings(match.group(0))
+    )
 
 
 def propose(
@@ -143,6 +183,13 @@ def propose(
         return row | {
             "verification": "unverified",
             "verification_reason": "quote_not_in_page",
+            "fetched_at": page.fetched_at,
+            "content_sha256": page.sha256,
+        }
+    if not value_in_quote(row["value"], row["unit"], quote):
+        return row | {
+            "verification": "unverified",
+            "verification_reason": "value_not_in_quote",
             "fetched_at": page.fetched_at,
             "content_sha256": page.sha256,
         }

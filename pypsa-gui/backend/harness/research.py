@@ -68,6 +68,7 @@ ERROR_KINDS = (
     {"error_kind": "research_unit_mismatch"},
     {"error_kind": "research_unverified"},
     {"error_kind": "research_row_settled"},
+    {"error_kind": "research_lease_lost"},
     {"error_kind": "research_cap_reached"},
     {"error_kind": "research_not_available"},
 )
@@ -146,6 +147,7 @@ class Turn:
     turn_id: str
     gaps: dict[str, dict[str, Any]]
     provider: Any
+    lease: tuple[str, Callable[[], float]]
     rows: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -174,17 +176,43 @@ def instruction(gaps: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _update(task_path, change):
+def _live(run: dict[str, Any], boot: str, clock: Callable[[], float]) -> bool:
+    """This process (`boot`) holds the run's live lease, as `send_reservation.admit` reads it."""
+    lease = run.get("runner") or {}
+    return (
+        lease.get("lease_owner") == boot
+        and float(lease.get("lease_until") or 0) > clock()
+    )
+
+
+def _update(
+    task_path, change, *, lease: tuple[str, Callable[[], float]] | None = None
+) -> bool:
+    """Every research ledger write (GK B ask 2): under the run's cross-process
+    file lock and the task lock. A runner-side write passes `lease` (boot,
+    clock) and writes nothing unless this process holds the run's live
+    lease; returns False then. The card's route (`settle`) is the user's act
+    and passes none."""
     from harness import runner
 
-    return runner._update(task_path, change)
+    held = {"ok": True}
+
+    def guarded(task):
+        if lease is not None and not _live(task["run"], *lease):
+            held["ok"] = False
+            return False
+        return change(task)
+
+    with runner._file_lock(task_path):
+        runner._update(task_path, guarded)
+    return held["ok"]
 
 
 def _research_block(task):
     return task["run"].setdefault("research", {"steps": [], "rows": []})
 
 
-def _note(task_path, stage, status, gaps, **extra):
+def _note(task_path, stage, status, gaps, *, lease, **extra):
     """One research step's outcome in the run block; listed gaps go to the report."""
 
     def change(task):
@@ -197,7 +225,7 @@ def _note(task_path, stage, status, gaps, **extra):
             }
         )
 
-    _update(task_path, change)
+    _update(task_path, change, lease=lease)
 
 
 def research_turn(
@@ -209,39 +237,63 @@ def research_turn(
     provider_profile: Any,
     base_provider: Any,
     reserving: Callable[[Any], Any] | None,
+    boot: str,
+    clock: Callable[[], float] = time.time,
 ) -> dict[str, Any]:
     """Run one research turn for `stage`. Returns {status, rows, waiting}.
 
     `reserving` wraps a provider in the run's research reservation (SH-24);
-    `base_provider` is the run's provider, `provider_profile` its profile."""
+    `base_provider` is the run's provider, `provider_profile` its profile.
+    `boot` is this runner process: every write of the turn checks it still
+    holds the run's live lease (GK B ask 2)."""
     from harness import eventlog, loop
     from harness.providers import research as capability
 
+    lease = (boot, clock)
     gaps = gaps_for(profile, stage)
     if not gaps:
         return {"status": "no_gaps", "rows": [], "waiting": None}
     if not granted(task_path):
-        _note(task_path, stage, "not_granted", gaps)
+        _note(task_path, stage, "not_granted", gaps, lease=lease)
         return {"status": "not_granted", "rows": [], "waiting": None}
     spec = capability.web_research(provider_profile)
     if spec is None or base_provider is None:
-        _note(task_path, stage, "not_available", gaps, kind="research_not_available")
+        _note(
+            task_path,
+            stage,
+            "not_available",
+            gaps,
+            lease=lease,
+            kind="research_not_available",
+        )
         return {"status": "not_available", "rows": [], "waiting": None}
     if reserving is None:  # never an unheld send (SH-RESEARCH-CAP-1, GK B Q3)
-        _note(task_path, stage, "not_available", gaps, reason="no_reservation")
+        _note(
+            task_path,
+            stage,
+            "not_available",
+            gaps,
+            lease=lease,
+            reason="no_reservation",
+        )
         return {"status": "not_available", "rows": [], "waiting": None}
     provider = capability.ResearchProvider(reserving(base_provider), spec)
     turn = Turn(
-        task_path, f"rt_{uuid.uuid4().hex[:12]}", {g["key"]: g for g in gaps}, provider
+        task_path,
+        f"rt_{uuid.uuid4().hex[:12]}",
+        {g["key"]: g for g in gaps},
+        provider,
+        lease,
     )
     status = "done"
     with _TURNS_LOCK:
         _TURNS[session.session_id] = turn
     session.stage_tools = READ_TOOLS | {LEDGER_TOOL}
+    asked = instruction(gaps)
     try:
         for kind, payload in loop.run_turn(
             session,
-            instruction(gaps),
+            asked,
             provider=provider,
             ui_context={"ui_mode": "guided"},
         ):
@@ -252,6 +304,7 @@ def research_turn(
         session.stage_tools = None
         with _TURNS_LOCK:
             _TURNS.pop(session.session_id, None)
+        _forget(session, asked)
     if provider.cap_reached:
         status = "cap_reached"
     elif provider.refused in capability.NOT_AVAILABLE:
@@ -265,6 +318,7 @@ def research_turn(
         stage,
         status,
         listed,
+        lease=lease,
         turn=turn.turn_id,
         fetched=[f.public() for f in provider.fetched],
         **(
@@ -277,11 +331,11 @@ def research_turn(
             else {}
         ),
     )
-    waiting = _await_confirmation(task_path, turn.rows)
+    waiting = _await_confirmation(task_path, turn.rows, lease=lease)
     return {"status": status, "rows": turn.rows, "waiting": waiting}
 
 
-def _await_confirmation(task_path, rows):
+def _await_confirmation(task_path, rows, *, lease):
     """A verified proposed row puts the run `needs_user` on a research card."""
     pending = [
         r for r in rows if r["status"] == "proposed" and source_ledger.sourced(r)
@@ -297,7 +351,8 @@ def _await_confirmation(task_path, rows):
             "waiting_research_confirm",
         )
 
-    _update(task_path, change)
+    if not _update(task_path, change, lease=lease):
+        return None
     return waiting
 
 
@@ -324,7 +379,7 @@ def due(task) -> bool:
         return False
 
 
-def failed(task_path, stage):
+def failed(task_path, stage, *, boot, clock=time.time):
     """A research turn that errored: its gaps listed, never retried."""
     from services import run_profiles
 
@@ -336,10 +391,36 @@ def failed(task_path, stage):
                 {"stage": stage, "status": "error", "gaps": [g["key"] for g in gaps]}
             )
 
-    _update(task_path, change)
+    _update(task_path, change, lease=(boot, clock))
 
 
-def run_for(task_path, session, *, stage, provider=None, reserving=None):
+def _text(message: dict[str, Any]) -> str:
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    return "".join(b.get("text", "") for b in content or () if isinstance(b, dict))
+
+
+def _forget(session, asked: str) -> None:
+    """R3 (GK B ask 1): the research turn leaves the run's provider history.
+    Its messages hold whole fetched pages, which the provider returned
+    unfenced; a later L1/L2 round seeds from `session.messages` and would
+    re-send them. The cut goes through the event log, so a resumed session
+    folds it in too. Only this turn is cut: its own instruction must start
+    the last turn, else nothing is touched."""
+    from harness import eventlog
+    from harness.history import _is_turn_start
+
+    first = asked.splitlines()[0]
+    with session._lock:
+        start = next((m for m in reversed(session.messages) if _is_turn_start(m)), None)
+        if start is not None and first in _text(start):
+            eventlog.apply(session, "history/rewind", turns=1)
+
+
+def run_for(
+    task_path, session, *, stage, boot, clock=time.time, provider=None, reserving=None
+):
     """The runner's entry: the run's profile and provider, then one turn.
     `provider` is a test seam; the app uses the run session's own."""
     from harness import runner
@@ -359,6 +440,8 @@ def run_for(task_path, session, *, stage, provider=None, reserving=None):
         provider_profile=provider_profile,
         base_provider=provider,
         reserving=reserving,
+        boot=boot,
+        clock=clock,
     )
 
 
@@ -404,14 +487,23 @@ def record_source(
         )
     except source_ledger.LedgerError as exc:
         raise ResearchError(exc.kind, str(exc)) from exc
+    if not _update(
+        turn.task_path,
+        lambda task: _research_block(task)["rows"].append(dict(row)),
+        lease=turn.lease,
+    ):
+        raise ResearchError(
+            "research_lease_lost",
+            "This process no longer holds the run; the row was not recorded.",
+        )
     turn.rows.append(row)
-    _update(
-        turn.task_path, lambda task: _research_block(task)["rows"].append(dict(row))
-    )
     return source_ledger.card_view(row)
 
 
 # ── The user's decision ──────────────────────────────────────────────────────
+
+
+TARIFF_UNIT = "EUR/MWh"
 
 
 def _tariff(row: dict[str, Any], name: str) -> dict[str, Any]:
@@ -419,6 +511,13 @@ def _tariff(row: dict[str, Any], name: str) -> dict[str, Any]:
     value as EUR/kWh, the tariff unit (a scale, not a reinterpretation)."""
     from datetime import date
 
+    if (
+        row.get("unit") != TARIFF_UNIT
+    ):  # fail closed: the scale below is EUR/MWh → EUR/kWh only
+        raise ResearchError(
+            "research_unit_mismatch",
+            f"A researched tariff takes {TARIFF_UNIT}; {row.get('unit')!r} is refused, not converted.",
+        )
     return {
         "id": name,
         "name": row.get("title") or name,

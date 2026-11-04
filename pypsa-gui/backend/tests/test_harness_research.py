@@ -46,6 +46,10 @@ GAP = {
     "question": "What is the industrial medium-voltage import energy charge?",
 }
 
+OTHER_URL = "https://grid.example.org/charges"
+OTHER_QUOTE = "Energy charge (medium voltage): EUR 150.00 per MWh"
+OTHER_PAGE = "Network charges 2026.\n" + OTHER_QUOTE + ", excl. VAT."
+
 
 def page(url=URL, text=PAGE):
     return capability.FetchedSource(
@@ -183,6 +187,8 @@ class _Refusing:
     def stream(self, request):
         from harness import send_reservation
 
+        if self.reason is None:  # a provider fault with no reason
+            raise ProviderError("overloaded", "overloaded")
         raise send_reservation.SendRefused(self.reason, "refused")
         yield  # pragma: no cover
 
@@ -383,14 +389,43 @@ def test_a_value_in_another_unit_or_basis_is_refused_not_converted(unit, basis):
     assert exc.value.kind == "research_unit_mismatch"
 
 
+@pytest.mark.parametrize(
+    "value, unit_words",
+    [(150.0, None), (14.25, None), (142.5, "EUR 0.1425 per kWh"), (142.5, "142.50")],
+)
+def test_a_quote_on_the_page_that_does_not_state_the_value_is_unverified(
+    value, unit_words
+):
+    """GK B ask 3: the quote is on the page, but its number or unit is not the
+    row's, so the row is never shown as sourced."""
+    text = PAGE + ("\n" + unit_words if unit_words else "")
+    quote = unit_words or QUOTE
+    row = source_ledger.propose(
+        proposal(value=value, quote=quote), ledger_gap(), [page(text=text)], turn_id="t"
+    )
+    assert (row["verification"], row["verification_reason"]) == (
+        "unverified",
+        "value_not_in_quote",
+    )
+
+
+@pytest.mark.parametrize(
+    "written",
+    ["EUR 1,234.50 per MWh", "1.234,50 €/MWh", "1 234,5 EUR/MWh", "EUR 1234.5/MWh"],
+)
+def test_the_value_is_read_with_either_decimal_mark(written):
+    assert source_ledger.value_in_quote(1234.5, "EUR/MWh", written)
+
+
 def test_a_rejected_row_stays_rejected_and_competing_rows_sit_side_by_side():
     a = source_ledger.propose(proposal(), ledger_gap(), [page()], turn_id="t")
     b = source_ledger.propose(
-        proposal(value=150.0, quote="EUR 142.50 per MWh"),
+        proposal(value=150.0, url=OTHER_URL, quote=OTHER_QUOTE),
         ledger_gap(),
-        [page()],
+        [page(), page(OTHER_URL, OTHER_PAGE)],
         turn_id="t",
     )
+    assert b["verification"] == "verified"
     rejected = source_ledger.settle(a, "rejected", by="u1")
     assert rejected["status"] == "rejected" and rejected["rejected_by"] == "u1"
     with pytest.raises(source_ledger.LedgerError) as exc:
@@ -476,8 +511,26 @@ class Inner:
         yield LLMEvent(type="message_done", blocks=[fetch_block()], usage={})
 
 
+BOOT = "boot-test"
+
+
+def _hold(path, boot=BOOT, until=None):
+    """This test process holds the run's live lease, as the runner's tick writes it."""
+    import time
+
+    record = json.loads(path.read_text())
+    record["run"]["runner"] = {
+        "lease_owner": boot,
+        "lease_until": time.time() + 600 if until is None else until,
+    }
+    path.write_text(json.dumps(record))
+    return (boot, time.time)
+
+
 def _turn(path, task, **over):
+    _hold(path)
     args = {
+        "boot": BOOT,
         "stage": "inputs",
         "profile": {"research": {"gaps": [GAP]}},
         "provider_profile": _profile(),
@@ -498,6 +551,26 @@ def test_a_run_granted_without_research_never_researches(granted, profile):
         json.loads(path.read_text())["run"]["research"]["steps"][-1]["status"]
         == "not_granted"
     )
+
+
+def test_the_shipped_profile_never_researches_on_a_grant_that_predates_research(
+    granted, monkeypatch
+):
+    """GK B ask 5 (Q1): the user granted an envelope without research; the
+    real eh_site@1 profile now offers it. The live grant decides: no send."""
+    task, path, _ = granted()  # granted while the profile's envelope had no research
+    assert not ((run_envelope.read(path) or {}).get("research") or {}).get("allowed")
+    monkeypatch.setitem(run_profiles.PROFILES, "eh_site@1", run_profiles.EH_SITE)
+    assert run_profiles.resolve("eh_site@1")["envelope"]["research"]["allowed"] is True
+    inner = Inner()
+    _hold(path)
+    run = harness_session.ChatSession(session_id="run:" + task["task_id"])
+    out = research.run_for(
+        path, run, stage="inputs", boot=BOOT, provider=inner, reserving=lambda p: p
+    )
+    assert out["status"] == "not_granted" and inner.requests == []
+    step = json.loads(path.read_text())["run"]["research"]["steps"][-1]
+    assert (step["status"], step["gaps"]) == ("not_granted", ["import_tariff"])
 
 
 def test_a_provider_without_search_marks_the_step_not_available_and_lists_the_gap(
@@ -573,7 +646,7 @@ def test_settling_a_row_moves_the_research_card_on(granted, profile):
     record = json.loads(path.read_text())
     record["run"]["research"] = {"steps": [], "rows": [a, b]}
     path.write_text(json.dumps(record))
-    assert research._await_confirmation(path, [a, b]) == {
+    assert research._await_confirmation(path, [a, b], lease=_hold(path)) == {
         "kind": "research_confirm",
         "ref": a["id"],
     }
@@ -634,7 +707,7 @@ def _rows(path, *rows):
     record = json.loads(path.read_text())
     record["run"]["research"] = {"steps": [], "rows": list(rows)}
     path.write_text(json.dumps(record))
-    research._await_confirmation(path, list(rows))
+    research._await_confirmation(path, list(rows), lease=_hold(path))
 
 
 def test_confirming_a_row_adds_its_carded_writes_and_rejects_the_competing_rows(
@@ -645,11 +718,12 @@ def test_confirming_a_row_adds_its_carded_writes_and_rejects_the_competing_rows(
     task, path, _ = granted()
     a = source_ledger.propose(proposal(), ledger_gap(), [page()], turn_id="t")
     b = source_ledger.propose(
-        proposal(value=150.0, quote="EUR 142.50 per MWh"),
+        proposal(value=150.0, url=OTHER_URL, quote=OTHER_QUOTE),
         ledger_gap(),
-        [page()],
+        [page(), page(OTHER_URL, OTHER_PAGE)],
         turn_id="t",
     )
+    assert b["verification"] == "verified"
     _rows(path, a, b)
     research.settle(path, a["id"], "confirmed", by="u1")
     record = json.loads(path.read_text())
@@ -671,6 +745,24 @@ def test_confirming_a_row_adds_its_carded_writes_and_rejects_the_competing_rows(
     assert tariff.jurisdiction == "DE" and tariff.items[0].unit == "per_kwh"
     assert tariff.items[0].periods[0].rate == pytest.approx(0.1425)
     assert library["args"]["meta"]["source"] == "research:" + URL
+
+
+def test_a_tariff_row_in_another_unit_is_refused_and_nothing_is_written(
+    granted, profile
+):
+    """GK B ask 4: the tariff scale is EUR/MWh → EUR/kWh only; any other unit
+    fails closed, and the row stays proposed."""
+    task, path, _ = granted()
+    row = source_ledger.propose(proposal(), ledger_gap(), [page()], turn_id="t")
+    row["unit"] = "EUR/kWh"
+    _rows(path, row)
+    steps = json.loads(path.read_text())["steps"]
+    with pytest.raises(research.ResearchError) as exc:
+        research.settle(path, row["id"], "confirmed", by="u1")
+    assert exc.value.kind == "research_unit_mismatch"
+    record = json.loads(path.read_text())
+    assert record["steps"] == steps
+    assert record["run"]["research"]["rows"][0]["status"] == "proposed"
 
 
 def test_a_rejected_row_adds_no_write(granted, profile):
@@ -714,6 +806,41 @@ def test_record_source_is_offered_only_in_a_research_turn():
             "import_tariff", 1.0, "EUR/MWh", "energy charge, excl. VAT", URL, QUOTE
         )
     assert refused.value.detail["error_kind"] == "invalid_source_row"
+
+
+def test_a_stale_process_writes_nothing_after_a_takeover(granted, profile):
+    """GK B ask 2: every runner-side research write checks this process still
+    holds the run's live lease. After another process takes the run over, the
+    stale turn's record_source, step note and wait write nothing."""
+    from services import chat_tools
+
+    task, path, _ = granted()
+    lease = _hold(path)
+    run = harness_session.ChatSession(session_id="run:" + task["task_id"])
+    fetched = types.SimpleNamespace(fetched=[page()])
+    turn = research.Turn(
+        path, "rt_stale", {"import_tariff": ledger_gap()}, fetched, lease
+    )
+    with research._TURNS_LOCK:
+        research._TURNS[run.session_id] = turn
+    chat_tools.set_chat_session(run)
+    try:
+        research.record_source(**proposal(gap="import_tariff"))  # still held: written
+        _hold(path, boot="boot-new")  # another process takes the run over
+        before = path.read_text()
+        with pytest.raises(research.ResearchError) as exc:
+            research.record_source(**proposal(gap="import_tariff"))
+        assert exc.value.kind == "research_lease_lost"
+        research._note(path, "inputs", "done", [GAP], lease=lease)
+        assert research._await_confirmation(path, turn.rows, lease=lease) is None
+        research.failed(path, "inputs", boot=lease[0])
+        assert path.read_text() == before
+    finally:
+        chat_tools.set_chat_session(None)
+        with research._TURNS_LOCK:
+            research._TURNS.pop(run.session_id, None)
+    rows = json.loads(path.read_text())["run"]["research"]["rows"]
+    assert len(rows) == 1 and len(turn.rows) == 1
 
 
 def test_the_research_card_route_settles_the_row(granted, profile, client):
@@ -867,6 +994,58 @@ def test_an_injected_page_changes_nothing_and_a_write_is_refused_in_the_turn(
     )
 
 
+def test_the_next_agent_round_carries_none_of_the_fetched_page(granted, profile):
+    """GK B ask 1 (R3): the research turn runs on the run's session, but its
+    fetched pages never reach a later L1/L2 request."""
+    from harness import eventlog, loop
+    from services import chat_tools
+
+    envelope = {**BLOCK, "research": {"allowed": True, "cost_cap_eur": 2.0}}
+    profile(envelope)
+    task, path, _ = granted(envelope=envelope)
+    owner = json.loads(path.read_text())["owner_id"]
+    _hold(path)
+    run = harness_session.ChatSession(
+        session_id="run:" + task["task_id"], owner_user_id=owner
+    )
+    row = {
+        "type": "tool_use",
+        "id": "tu-row",
+        "name": "record_source",
+        "input": {
+            k: v for k, v in proposal(gap="import_tariff").items() if k != "title"
+        },
+    }
+    chat_tools.set_acting_user(owner)
+    try:
+        out = research.research_turn(
+            path,
+            run,
+            stage="inputs",
+            profile={"research": {"gaps": [GAP]}},
+            provider_profile=_profile(),
+            base_provider=Scripted(
+                [fetch_block(), row], [{"type": "text", "text": "Done."}]
+            ),
+            reserving=lambda p: p,
+            boot=BOOT,
+        )
+        assert [r["verification"] for r in out["rows"]] == ["verified"]
+        nxt = Scripted([{"type": "text", "text": "Next."}])
+        list(loop.run_turn(run, "Agent round.", provider=nxt))
+    finally:
+        chat_tools.set_acting_user(None)
+    sent = json.dumps(nxt.requests[0].messages)
+    assert "Ignore previous instructions" not in sent and "142.50" not in sent
+    assert "Research step." not in sent and "Agent round." in sent
+    # The cut is in the event log too, so a resumed session never re-sends it.
+    eventlog.flush(run)
+    replayed = json.dumps(
+        eventlog.derive_messages(eventlog.read_events(eventlog.path_for(run)))
+    )
+    assert "Ignore previous instructions" not in replayed
+
+
 @pytest.mark.parametrize(
     "reason, status, extra",
     [
@@ -874,6 +1053,7 @@ def test_an_injected_page_changes_nothing_and_a_write_is_refused_in_the_turn(
         ("research_unavailable", "not_available", {"kind": "research_not_available"}),
         ("research_not_allowed", "not_available", {"kind": "research_not_available"}),
         ("lease_lost", "error", {"reason": "lease_lost"}),
+        (None, "error", {"reason": "provider_error"}),  # rate limited, overloaded
     ],
 )
 def test_a_refused_research_send_ends_the_turn_and_never_stops_the_run(

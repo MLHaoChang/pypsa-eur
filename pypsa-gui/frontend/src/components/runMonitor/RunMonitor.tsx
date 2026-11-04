@@ -122,8 +122,8 @@ function ResearchCard({ row, others, busy, onDecide }: {
       <button type="button" disabled={busy} data-testid="run-research-reject"
         className="text-muted hover:text-text disabled:opacity-40" onClick={() => onDecide('rejected')}>Reject</button>
     </div>
-    {usable && <p className="text-muted">Using it adds it to the Library and attaches it to the
-      {' '}{gapWords(row.gap).toLowerCase()}, each on its own card.</p>}
+    {usable && <p className="text-muted">Using it adds it to the Library and attaches it
+      {GAP_WORDS[row.gap] ? ` to the ${GAP_WORDS[row.gap].toLowerCase()}` : ''}, each on its own card.</p>}
   </div>
 }
 

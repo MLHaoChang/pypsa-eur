@@ -123,6 +123,15 @@ export const STATES: Record<string, RunMonitorView> = {
         { row: 'src_b', gap: 'import_tariff', value: 150, unit: 'EUR/MWh', basis: 'energy charge, excl. VAT',
           jurisdiction: 'DE', status: 'proposed', confirmable: false, source: 'unverified source', reason: 'url_not_fetched' },
       ] } } }),
+  // The card's unverified branch: a waiting row the server could not verify (it waits only on sourced rows).
+  research_unverified: view({ run: run('inputs', { status: 'needs_user', reason: 'waiting_research_confirm',
+    waiting: { kind: 'research_confirm', ref: 'src_b' }, stages: stages('inputs') }), envelope: GRANTED,
+    monitor: { ...MONITOR, budgets: GRANTED_BUDGETS, waiting: { kind: 'research_confirm', ref: 'src_b' }, research: {
+      steps: [{ stage: 'inputs', status: 'done', gaps: [] }],
+      rows: [
+        { row: 'src_b', gap: 'import_tariff', value: 150, unit: 'EUR/MWh', basis: 'energy charge, excl. VAT',
+          jurisdiction: 'DE', status: 'proposed', confirmable: false, source: 'unverified source', reason: 'value_not_in_quote' },
+      ] } } }),
   research_cap: view({ run: run('inputs', { stages: stages('inputs') }), envelope: GRANTED,
     monitor: { ...MONITOR, budgets: { ...GRANTED_BUDGETS, research_eur: { used: 2, limit: 2 } }, research: { rows: [],
       steps: [{ stage: 'inputs', status: 'cap_reached', gaps: ['import_tariff'], kind: 'research_cap_reached' }] } } }),
