@@ -215,17 +215,30 @@ def agent_turn(path, ctx, session, *, tools, message, provider=None, recheck, sc
         if not recheck():
             locks.close()
             return False
-        fingerprint, reason = run_envelope.chain_head(path, ctx)
+        read = {}
+        fingerprint, reason = run_envelope.chain_head(path, ctx, read=read)
         if reason:
             locks.close()
             return False
-        held["before"] = fingerprint
+        held["before"], held["read"] = fingerprint, read
         return True
+
+    receipts = []  # a covered write's after-identity, captured under its own locks (issue 22)
+
+    def write_guard(call_id, tool, args):
+        """Issue 22: a covered write compares and writes inside the project's
+        lock on the worker, against the identity its admission read."""
+        call = calls.get(call_id)
+        if call is None or tool not in run_envelope.ATOMIC_TOOLS or call.get("read") is None:
+            return None
+        return run_envelope.admitted_write(session, path, ctx, call_id=call_id, step_id=None, tool=tool,
+                                           expected=call["read"], receipts=receipts, recheck=recheck)
 
     usage_before = dict(session.usage_acc)
     session.stage_tools = frozenset(tools)
     session.loop_scope = scope
     session.decision_guard = guard
+    session.write_guard = write_guard
     offered = []
     said = []  # the model's words before a call: the ledger row's reason
     try:
@@ -241,7 +254,7 @@ def agent_turn(path, ctx, session, *, tools, message, provider=None, recheck, sc
                 offered = sorted(session.stage_tools)
             if tid and tid not in calls and kind in ("tool_request", "tool_error", "tool_pending_confirmation"):
                 calls[tid] = {"id": tid, "tool": payload.get("tool_name"), "args": payload.get("args"),
-                              "ran": False, "carded": False, "error": None, "receipt": None, "before": None,
+                              "ran": False, "carded": False, "error": None, "receipt": None, "before": None, "read": None,
                               "reason": "".join(said)[-REASON_CHARS:]}
                 order.append(tid)
                 said.clear()
@@ -252,7 +265,7 @@ def agent_turn(path, ctx, session, *, tools, message, provider=None, recheck, sc
                 locks.close()
             elif kind == "tool_running":
                 if call is not None:
-                    call["ran"], call["before"] = True, held.pop("before", None)
+                    call["ran"], call["before"], call["read"] = True, held.pop("before", None), held.pop("read", None)
                 locks.close()  # the handler takes its own locks on the tool executor
             elif kind == "tool_error" and call is not None:
                 call["error"] = payload.get("error_kind")
@@ -268,12 +281,18 @@ def agent_turn(path, ctx, session, *, tools, message, provider=None, recheck, sc
             if call is not None and call["ran"] and kind in ("tool_result", "tool_error") \
                     and edit_card.is_edit(call["tool"]):
                 # The freshness chain's next link (issue 03): only from the chain's last link.
-                run_envelope.settle(path, tid, ctx, call["before"])
+                if call["tool"] not in run_envelope.ATOMIC_TOOLS:
+                    run_envelope.settle(path, tid, ctx, call["before"])
+                else:  # issue 22: only this call's own receipt; none adds no link (fail closed)
+                    receipt = next((r for r in list(receipts) if r["call_id"] == tid), None)
+                    if receipt is not None:
+                        run_envelope.settle(path, tid, ctx, call["before"], after=receipt)
     finally:
         locks.close()
         session.stage_tools = None
         session.loop_scope = None
         session.decision_guard = None
+        session.write_guard = None
     usage = _spent(session, usage_before)
     return {"calls": [calls[t] for t in order], "usage": usage, "offered": offered}
 
@@ -312,7 +331,7 @@ def run_round(path, ctx, session, *, provider=None, recheck):
                if a.get("event") == "used" and a.get("source")}
     rows, unverified, refusals = [], [], 0
     for call in outcome["calls"]:
-        if call["carded"]:
+        if call["carded"] or call["error"] == run_envelope.PICKUP_KIND:  # refused at pickup: no write (issue 22)
             refusals += 1
             continue
         if not call["ran"] or not edit_card.is_edit(call["tool"]):

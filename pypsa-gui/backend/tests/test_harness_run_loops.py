@@ -646,3 +646,35 @@ def test_no_energy_source_ships_and_an_unregistered_one_is_refused(session, site
     with pytest.raises(HTTPException):  # nor can a grant name one
         run_envelope.narrow(run_envelope.check_block(BLOCK),
                             {**BLOCK, "gaps": [{**GAPS[0], "source": {**SHAPE, "energy": "static_p_set"}}]})
+
+
+# ── Issue 22: the round's write takes the same compare-and-write wrapper ────
+
+
+def test_a_round_write_with_an_edit_in_the_gap_is_refused_with_no_write(granted, profile, site, rated,
+                                                                        tunable_rule, monkeypatch):
+    """GK B (18) (1): an edit landing after `tool_running` and before the
+    worker's lock refuses the round's write; the chain is unchanged."""
+    from harness import loop
+    from tests.test_harness_envelope_atomic import writer
+    profile(BLOCK)
+    no_series()
+    task, path, _ = granted()
+    before = envelope_of(path)["chain"]
+    original, fired = loop._snapshot_for_turn_undo, []
+
+    def barrier(session, tool_name):
+        original(session, tool_name)
+        if tool_name == "update_component" and not fired:
+            fired.append(True)
+            writer(lambda n: n.loads.__setitem__("p_set", 6.0)).join()
+    monkeypatch.setattr(loop, "_snapshot_for_turn_undo", barrier)
+    turns = [call("update_component", {"component_class": "Generator", "name": "G1",
+                                       "attrs": {"marginal_cost": 11.0}}), say("Tried a cost.")]
+    record = go(harness_runner.Runner("a", agent_provider=Script(*turns)), path, task)
+    network = PyPSAService.get_active_context().network
+    assert fired
+    assert network.generators.at["G1", "marginal_cost"] == 10.0  # no write
+    assert float(network.loads.at["L1", "p_set"]) == 6.0  # the external edit stands
+    assert not record["run"].get("ledger") and envelope_of(path)["chain"] == before
+    assert ("update_component", "drift") in refused(path)

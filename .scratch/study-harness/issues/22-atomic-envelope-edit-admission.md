@@ -50,3 +50,13 @@ Phase B of #970's HH-01 (async snapshot admission) is issue 05's HH-10 section. 
 #970 is pinned at `60d8332d6` / #944 and predates LC-40 (#1001: a solver-config write bumps `network_revision`), LC-40b (the capture helper), AS-06/AS-10 and LV-09; do not copy its source map. Its "supported shape" table, its new `execute_mutation` descriptor and its `InputVersion` type are proposals, not code: reuse `workflow_tools._network_input_fingerprint(exact=True)` and LC-40b before adding a type.
 
 ## Comments
+
+**2026-11-04, GK B (18), plan verdict: GO WITH CHANGES.** Conditions, checked in the PR:
+1. `run_loops.py` stays in scope with the same wrapper (L1's gap).
+2. The receipt carries `call_id` (and step id); `Runner.dispatch` and `run_loops` settle only from the receipt of the step they dispatched. A late worker's receipt never settles a later step (test: worker done after the deadline, next step started, no link from it).
+3. Lock order `mutation_lock` → `solver_state_lock` → (for `_standing`) `assistant_tasks._LOCK`: show no path takes `_LOCK` then a ctx lock, or read `_standing` without `_LOCK`. Order in the README. Test: a grant or revoke from another thread during a held guard completes within a timeout.
+4. Test: under the run's context the handler's `PyPSAService.get_lock()` is the same RLock the guard holds.
+5. Read the expected revision after loop.py's own bump if possible; else keep +1, test that a missing bump (+0) refuses, and name the coupling in a comment at both sites.
+6. An `update_component` mixing covered and uncovered attrs may take the guard; never refused for it (SH-ENVELOPE-1). Builder says which.
+7. Fail closed under the guard: a lock timeout, an unreadable fingerprint or revision refuses before the handler, no write.
+8. Tests 1–8 of the plan plus these; test 1 shown failing on master in the PR body; run `test_harness_run_loops` too.

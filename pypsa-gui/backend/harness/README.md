@@ -1317,8 +1317,32 @@ else.
   (one the envelope never admits) that starts off the chain's last link
   pauses the run with `envelope_drift`. After the step, `settle` appends the
   chain's next fingerprint only when the step started on the last link.
-  Known limit: a user edit that lands *during* a step (its handler takes its
-  own locks after the runner's are released) is taken into the chain.
+  Links carry the edit counter (`network_revision`); a link that has one
+  must match it too, so an edit then its undo is drift.
+- **Atomic write (issue 22).** An envelope-admitted `update_component` or
+  `solve_queue_enqueue` (`run_envelope.ATOMIC_TOOLS`: eh_site@1's size-cap
+  edits, any attrs, and the run's queued solve) writes inside
+  `run_envelope.admitted_write`, on the worker thread that runs its handler
+  (the runner and the L1 round set `session.write_guard`; `loop.py` enters
+  it). Lock order: the project's `mutation_lock`, then its
+  `solver_state_lock` (per project RLocks the handler re-enters; never
+  process-global); `assistant_tasks._LOCK` is never taken under them (the
+  envelope and task files are read by atomic replace; the refusal's audit
+  row is written after release). Under them it re-checks the run (ACL,
+  owner, holds), the envelope (same grant, unexpired, budget, brief) and
+  compares the identity the runner read under its own locks (exact
+  fingerprint and edit counter, plus the dispatch seam's one own bump) with
+  the current one, runs the handler and captures the after-identity
+  receipt, all before releasing. A refusal (`envelope_pickup_refused`)
+  writes nothing; drift and an unreadable identity pause the run. The chain
+  settles only from that call's own receipt, so an edit landing after the
+  lock is drift on the next step; a worker past its deadline leaves no
+  receipt and the next step reads drift.
+  Remaining limit: every other envelope tool (the data-gap fills
+  `set_weather_choice`, `attach_tariff`, `apply_generated_profile` and
+  `generate_load_profile`) still settles from a fresh read after the step,
+  so a user edit landing during such a step is taken into the chain. The
+  queued solve's network is read from disk at pickup (issue 05).
 - **End.** `cancel_task` revokes; the plan card's revoke pauses the run.
 
 

@@ -768,6 +768,8 @@ class Runner:
         locks = contextlib.ExitStack()
         refused = []
         before = []  # the project's fingerprint under this step's locks, before it runs
+        read = {}  # its whole input identity, which a covered write compares at pickup (issue 22)
+        receipts = []  # a covered write's after-identity, captured under the write's own locks
 
         def take_locks(*_):
             if not ctx.mutation_lock.acquire(timeout=LOCK_TIMEOUT_SECONDS):
@@ -782,7 +784,8 @@ class Runner:
             self._hold_if_effectful(_read(path), step)  # decided: the project is the run's until the step ends
             if _tasks()._effectful(step["tool"]):
                 from services import run_envelope
-                fingerprint, reason = run_envelope.chain_head(path, ctx)
+                read.clear()
+                fingerprint, reason = run_envelope.chain_head(path, ctx, read=read)
                 before[:] = [fingerprint]
                 if reason and decision is None:
                     # Uncarded, so the envelope never admits it: a change the chain never saw stops it
@@ -793,6 +796,18 @@ class Runner:
                     return False
             return True
 
+        from services import run_envelope as envelopes
+        # Issue 22: an envelope-admitted write of a covered shape compares and writes inside the
+        # project's lock on the worker, and settles only from its own call's receipt.
+        covered = decision == "envelope" and step["tool"] in envelopes.ATOMIC_TOOLS
+
+        def write_guard(call_id, tool, call_args):
+            if call_id != tool_use_id or tool not in envelopes.ATOMIC_TOOLS:
+                return None
+            return envelopes.admitted_write(session, path, ctx, call_id=call_id, step_id=step["id"], tool=tool,
+                                            expected=dict(read), receipts=receipts,
+                                            recheck=lambda: self.recheck(task_id, path, ctx))
+
         results = []
         carded, ran, errors = [], [], []
         session._undo_snapshotted = []  # each runner step is its own undo step, as a chat turn is
@@ -801,6 +816,8 @@ class Runner:
             if decision is None and not take_locks():
                 return
             session.decision_guard = None if decision is None else take_locks
+            if covered:
+                session.write_guard = write_guard
             eventlog.message(session, {"role": "assistant", "content": [
                 {"type": "tool_use", "id": tool_use_id, "name": step["tool"], "input": args}]})
             frames = loop.dispatch_tool_call(session, {"id": tool_use_id, "name": step["tool"], "input": args},
@@ -826,6 +843,7 @@ class Runner:
             self._cards.pop(task_id, None)
             locks.close()
             session.decision_guard = None
+            session.write_guard = None
             session._turn_in_flight = False
             if results:
                 eventlog.message(session, {"role": "user", "content": [results[-1]]})
@@ -835,13 +853,22 @@ class Runner:
                 # the chain's last link; a read never does, so a change seen after one, or before
                 # an uncarded step, is someone else's (drift, issue 03).
                 from services import run_envelope
-                run_envelope.settle(path, tool_use_id, ctx, before[0] if before else None)
+                if not covered:
+                    run_envelope.settle(path, tool_use_id, ctx, before[0] if before else None)
+                else:
+                    # Only this call's receipt: none (a refusal, or a worker past its deadline)
+                    # adds no link, so the next step reads drift (fail closed).
+                    receipt = next((r for r in list(receipts) if r["call_id"] == tool_use_id), None)
+                    if receipt is not None:
+                        run_envelope.settle(path, tool_use_id, ctx, before[0] if before else None, after=receipt)
             if refused == ["envelope"]:
                 self._envelope_refused(path, step)
             elif refused:
                 _update(path, lambda t: _stop_in(t, "needs_user", "locked" if refused == ["busy"] else "recheck"))
             elif decision == "envelope" and carded:
                 self._envelope_refused(path, step)
+            elif covered and envelopes.PICKUP_KIND in errors:
+                self._envelope_refused(path, step)  # refused at pickup, before any write (issue 22)
             elif decision == "envelope" and errors and not ran:
                 # Refused before the gate (the plan's own admission): never retried unattended.
                 if "task_brief_stale" in errors:
