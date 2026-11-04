@@ -3,7 +3,7 @@
 
 # P0: output contracts and complete coverage
 
-Status: in progress — A0.1–A0.3 done in #796; A0.4 in #1113, blocked only on GK B's OK (AA-A04-REVIEW-1)
+Status: done — A0.1–A0.3 in #796; A0.4 in #1113 (GK B OK @d36109ae is the contract review, AA-A04-REVIEW-1)
 Progress: A0.1–A0.4 executable and passing; every tool/tab/panel/output channel mapped to a v1 adapter (`harness/assurance_coverage.py`); v1 request/profile/metric/computed/guard contracts frozen in `harness/assurance_contracts.v1.json`
 Type: task
 Blocked by: None
@@ -70,7 +70,7 @@ registry is never answered.
 
 Owner decisions (2026-11-04): AA-V1-CHANGE-1 adopts the additive-only rule within v1 as built. A removal, a rename or a changed metric or profile needs a new profile version beside the old one, and only breaking draft or receipt changes bump the protocol version. AA-A04-REVIEW-1 makes GK B's OK on the frozen snapshot the P0 contract review. `independent_domain_approval` stays false.
 
-Named blocker before Status done: GK B's OK on #1113.
+GK B (22) OK @d36109ae on #1113 after direction-aware compatibility: an `accepts` contract may widen, while every existing entry of a `returns` contract is frozen. Contracts not yet frozen stay in the snapshot's `pending` list, owned by 02 and 09–11.
 
 The snapshot's `pending` list names what is not frozen and who owns it: arbitrary
 scope (09), action/proposal blocks (09–11), guards for other effectful tools (11),

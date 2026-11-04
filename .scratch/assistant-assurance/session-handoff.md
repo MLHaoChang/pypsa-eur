@@ -992,5 +992,5 @@ Branch `claude/assurance-01-a04-contracts` (from master 30417e89).
 The spoof cases passed on first run. They pin behaviour master already had, so
 no red phase came from them. The drift and compatibility cases were written with
 the module. Policy version: contracts v1, additive-only rule (AA-V1-CHANGE-1).
-Remaining blocker: GK B's OK, which is the contract review (AA-A04-REVIEW-1). Next runnable tracer:
+GK B OK @d36109ae is the contract review (AA-A04-REVIEW-1); issue 01 done. Next runnable tracer:
 issue 02 adds evidence/receipt identity as an additive `pending` → frozen entry.
