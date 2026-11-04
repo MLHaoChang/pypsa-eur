@@ -665,11 +665,7 @@ def _grant_setup(session, path, task, current, chosen, *, intake_digest, notify_
     if prior is not None and prior.get("digest") == intake_digest:
         decision_id = prior["decision_id"]  # a retried grant goes on from its intent (A1)
     else:
-        decision_id = "envelope-" + str(uuid.uuid4())
-        if not approvals.decided(session, call_id=decision_id, tool="grant_envelope", tier="envelope",
-                                 outcome="approved", by="user",
-                                 link={"envelope_id": current["id"], "setup": setup["template"]}):
-            _refuse("approval_unavailable", "The grant could not be put on record, so nothing is granted.")
+        decision_id = "envelope-" + str(uuid.uuid4())  # put on record by the precheck, once it passes
     handover = {"decision_id": decision_id, "digest": intake_digest}
 
     def precheck():
@@ -687,6 +683,13 @@ def _grant_setup(session, path, task, current, chosen, *, intake_digest, notify_
             raise run_handover.HandoverError("task_brief_stale",
                                              "The inputs or requirements changed since the brief; review a new "
                                              "brief first.")
+        # Only a grant that passed the checks goes on record, once (GK B (20)): a
+        # retry that resumes an intent keeps the decision that intent names.
+        if run_handover.read_intent(path) is None and not approvals.decided(
+                session, call_id=decision_id, tool="grant_envelope", tier="envelope", outcome="approved",
+                by="user", link={"envelope_id": current["id"], "setup": setup["template"]}):
+            raise run_handover.HandoverError("approval_unavailable",
+                                             "The grant could not be put on record, so nothing is granted.")
 
     def grant(new_path, new_task, new_ctx):
         grant_handover(new_path, new_task, chosen, handover=handover, ctx=new_ctx, notify_email=notify_email)
@@ -721,6 +724,7 @@ _HANDOVER_REFUSALS = {
     "envelope_not_grantable": lambda m: _refuse("envelope_not_grantable", m),
     "brief_inputs_unreadable": lambda m: _refuse("brief_inputs_unreadable", m),
     "task_brief_stale": lambda m: _refuse("task_brief_stale", m),
+    "approval_unavailable": lambda m: _refuse("approval_unavailable", m),
 }
 
 
