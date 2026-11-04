@@ -433,3 +433,43 @@ def test_card_words_name_no_raw_class_path(thread):
     says = cards[0]['edit_card']['says']
     assert 'StorageUnit' not in says and 'max_hours' not in says
     assert 'Battery (storage unit): hours at full power ≤ 6 h' in says
+
+
+def test_activation_and_a_run_read_take_the_locks_in_one_order(thread, monkeypatch):
+    """GK B (19): a card approval in chat during a run step on the same project
+    must not deadlock. The run holds the network lock, then reads the thread
+    (dc._LOCK); activation must take them in the same order."""
+    import threading
+
+    from services import assistant_tasks
+
+    monkeypatch.setattr(assistant_tasks, '_authority', lambda: (thread.root, PROJECT, OWNER))
+    in_store = threading.Event()
+    real_validate_owner = dc.activate_requirement
+
+    def slow_activate(*a, **k):
+        validate = k.get('validate')
+
+        def wrapped(items):
+            in_store.set()
+            run.join(timeout=2)  # let the run thread try its locks while we hold ours
+            return validate(items)
+
+        return real_validate_owner(*a, **{**k, 'validate': wrapped})
+
+    monkeypatch.setattr(dc, 'activate_requirement', slow_activate)
+
+    def run_step():
+        in_store.wait(timeout=5)
+        with PyPSAService.get_lock():
+            dc.requirements_at(thread.root, PROJECT, OWNER, thread.id)
+
+    run = threading.Thread(target=run_step, daemon=True)
+    run.start()
+    done = []
+    chat = threading.Thread(target=lambda: done.append(_confirm(thread.session, BOUND)), daemon=True)
+    chat.start()
+    chat.join(timeout=20)
+    run.join(timeout=20)
+    assert not chat.is_alive() and not run.is_alive(), 'deadlock'
+    assert done and done[0][2] == [] and len(_active(thread.id)) == 1

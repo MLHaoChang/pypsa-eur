@@ -629,17 +629,18 @@ def set_requirement(requirement: Any = None, replaces: str | None = None, retire
         out = dc.retire_requirement(thread_id, episode_id=session.session_id, requirement_id=value)
         return {"ok": True, "retired": out["requirement"]["id"], "rev": out["rev"]}
     _find(active, replaces)
+    # Lock order: the network lock, then the store's `_LOCK` (the run path's
+    # order: mutation lock, then `_stale` -> `requirements_at`). Never the reverse.
     with PyPSAService.get_lock():
         network = PyPSAService.get_network()
         predicate = capture(check(value, network, active, replaces=replaces), network)
-    asked = {k: v for k, v in predicate.items() if k not in ("uid", "digest")}
+        asked = {k: v for k, v in predicate.items() if k not in ("uid", "digest")}
 
-    def still_consistent(active_now):  # re-run under the store lock (no race between two approvals)
-        with PyPSAService.get_lock():
-            check(asked, PyPSAService.get_network(), active_now, replaces=replaces)
+        def still_consistent(active_now):  # re-run under the store lock (no race between two approvals)
+            check(asked, network, active_now, replaces=replaces)
 
-    out = dc.activate_requirement(thread_id, episode_id=session.session_id, predicate=predicate,
-                                  replaces=replaces, validate=still_consistent)
+        out = dc.activate_requirement(thread_id, episode_id=session.session_id, predicate=predicate,
+                                      replaces=replaces, validate=still_consistent)
     record = out["requirement"]
     return {"ok": True, "requirement": {"id": record["id"], "says": describe(record["predicate"]),
                                         "predicate": record["predicate"]}, "rev": out["rev"]}
