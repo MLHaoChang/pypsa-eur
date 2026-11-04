@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): An unattended study-harness write admitted by the run's approval envelope now checks the project's input identity and writes inside one project lock, so a user edit that lands mid-step pauses the run with `envelope_drift` instead of joining the freshness chain.
