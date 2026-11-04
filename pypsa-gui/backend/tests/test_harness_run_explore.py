@@ -304,45 +304,51 @@ def test_a_never_tunable_lever_is_refused_at_profile_load(attr):
         )
 
 
+GAP_TARGET = {"component": "Generator", "name": "G1", "attr": "p_nom_max"}
+
+
 def research_row(
     row_id,
-    value,
+    low,
+    high,
     *,
     status="confirmed",
     verification="verified",
     unit="MW",
-    gap="explore:Generator.G1.p_nom_max",
+    target=GAP_TARGET,
 ):
+    """A SH-29 range row (issue 06 E11): `value` null, `range{low, high}`."""
     return {
         "id": row_id,
-        "for": {"gap": gap},
-        "value": value,
+        "for": {**target, "gap": "explore:G1.p_nom_max"},
+        "value": None,
+        "range": {"low": low, "high": high},
         "unit": unit,
         "basis": "nameplate",
         "status": status,
         "verification": verification,
         "url": "https://example.org/a",
-        "quote": f"{value} MW",
+        "quote": f"{low} to {high} MW",
     }
 
 
 def research_profile():
-    return explore_profile(
-        levers=[{**LEVERS[1], "research": {"gap": "explore:Generator.G1.p_nom_max"}}]
-    )
+    gap = {
+        "key": "explore:G1.p_nom_max",
+        "stage": "explore",
+        "target": GAP_TARGET,
+        "research": {"unit": "MW", "basis": "nameplate", "shape": "range"},
+    }
+    return explore_profile(research=[gap])
 
 
-def test_a_range_from_two_confirmed_verified_research_rows_is_admitted():
-    run = empty_run(
-        research={"rows": [research_row("r-lo", 60.0), research_row("r-hi", 120.0)]}
-    )
+def test_a_range_from_a_confirmed_verified_research_row_is_admitted():
+    run = empty_run(research={"rows": [research_row("r-1", 60.0, 120.0)]})
     admit(
-        run,
-        [case("genset", genset(source="research:r-lo,r-hi"))],
-        profile=research_profile(),
+        run, [case("genset", genset(source="research:r-1"))], profile=research_profile()
     )
     [row] = run["ledger"]
-    assert row["source"] == "research:r-lo,r-hi"
+    assert row["source"] == "research:r-1"
 
 
 @pytest.mark.parametrize(
@@ -352,33 +358,74 @@ def test_a_range_from_two_confirmed_verified_research_rows_is_admitted():
         {"status": "rejected"},
         {"verification": "unverified"},
         {"unit": "kW"},
-        {"gap": "explore:StorageUnit.S1.p_nom_max"},
+        {"target": {"component": "StorageUnit", "name": "S1", "attr": "p_nom_max"}},
     ],
 )
 def test_a_research_range_from_an_unsettled_unverified_or_foreign_row_is_refused(bad):
-    run = empty_run(
-        research={
-            "rows": [research_row("r-lo", 60.0, **bad), research_row("r-hi", 120.0)]
-        }
-    )
+    run = empty_run(research={"rows": [research_row("r-1", 60.0, 120.0, **bad)]})
     refused(
         "explore_range_unsourced",
         run,
-        [case("genset", genset(source="research:r-lo,r-hi"))],
+        [case("genset", genset(source="research:r-1"))],
         profile=research_profile(),
     )
 
 
-def test_research_ends_that_do_not_match_the_stated_range_are_refused():
-    run = empty_run(
-        research={"rows": [research_row("r-lo", 70.0), research_row("r-hi", 120.0)]}
-    )
+def test_a_change_whose_range_differs_from_its_research_row_is_refused():
+    run = empty_run(research={"rows": [research_row("r-1", 70.0, 120.0)]})
     refused(
         "explore_range_unsourced",
         run,
-        [case("genset", genset(source="research:r-lo,r-hi"))],
+        [case("genset", genset(source="research:r-1"))],
         profile=research_profile(),
     )
+
+
+def test_e2_a_row_rejected_between_proposal_and_admission_refuses(
+    tmp_path, monkeypatch
+):
+    """E2: the row is re-read under the lock at admission, never cached from
+    the proposal."""
+    run = empty_run(research={"rows": [research_row("r-1", 60.0, 120.0)]})
+    proposal = run_explore.check_proposal(
+        run, research_profile(), [case("genset", genset(source="research:r-1"))]
+    )
+    run["research"]["rows"][0]["status"] = "rejected"  # the user rejected it meanwhile
+    with pytest.raises(run_explore.ExploreError) as err:
+        run_explore.admit(
+            run, research_profile(), proposal, solves_left=10, base_value=base_value
+        )
+    assert err.value.kind == "explore_range_unsourced" and run["cases"] == []
+
+
+# ── E7: a lever is never a tunable, both ways ───────────────────────────────
+
+
+@pytest.mark.parametrize("tunable", [{"component": "Link", "attr": "p_nom"}])
+def test_e7_a_profile_listing_an_explore_only_lever_as_tunable_is_refused_at_load(
+    tunable,
+):
+    """E7: the connection (`poc_link p_nom`) changes forks only; it is never
+    an L1/L2 tunable. (Levers that eh_site@1 already tunes in L2, its size
+    caps, stay both: GK B ruling pending.)"""
+    p = copy.deepcopy(run_profiles.EH_SITE)
+    p["explore"] = {"levers": copy.deepcopy(LEVERS)}
+    p["tunable"] = [*p["tunable"], tunable]
+    with pytest.raises(run_profiles.ProfileError):
+        run_profiles.load(p)
+
+
+# ── E8: propose_cases only in explore turns ─────────────────────────────────
+
+
+def test_e8_propose_cases_outside_an_explore_turn_refuses():
+    from harness.catalogue import TOOLS
+    from services import chat_tools
+
+    assert "propose_cases" in {t["name"] for t in TOOLS}
+    with pytest.raises(Exception) as err:
+        chat_tools.DISPATCHERS["propose_cases"](cases=three())
+    assert "explore" in str(err.value)
 
 
 # ── Engines and the solve budget ────────────────────────────────────────────
