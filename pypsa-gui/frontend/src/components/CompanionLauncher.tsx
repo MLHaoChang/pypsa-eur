@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Mic, Pencil } from 'lucide-react'
 
 // Clears toasts beside the chip (max-w12rem) plus the24px right gutter.
@@ -92,9 +92,24 @@ export default function CompanionLauncher({
   const [hovered, setHovered] = useState(false)
   const [draft, setDraft] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const launcherRef = useRef<HTMLDivElement>(null)
   const voiceReasonId = useId()
   // LC-07: the server flag is on (voice available, or blocked by a missing media link).
   const voiceOn = !!speech && (speech.available || !!speech.blocked || speech.state !== 'off')
+  // LC-07b: the launcher is bottom-anchored but scrolls when the canvas is short
+  // (Expert, bottom panel up). Keep it scrolled to its end so the last element,
+  // the voice note, is never the part that is cut off.
+  useLayoutEffect(() => {
+    const el = launcherRef.current
+    if (!el) return
+    const pin = () => { el.scrollTop = el.scrollHeight }
+    pin()
+    // The extras expand on hover / focus after this commit, so re-pin when any child resizes.
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(pin)
+    Array.from(el.children).forEach((c) => ro.observe(c))
+    return () => ro.disconnect()
+  }, [liveOpen, workState, hovered, voiceOn, liveCaption, liveEcho, children])
   useEffect(() => {
     if (liveOpen) inputRef.current?.focus()
   }, [liveOpen])
@@ -104,6 +119,7 @@ export default function CompanionLauncher({
   const caption = liveCaption.trim()
   return (
     <div
+      ref={launcherRef}
       className="companion-launcher absolute bottom-0 right-6 z-40 flex max-w-[calc(100vw-3rem)] flex-col items-end gap-2"
       data-testid="companion-launcher"
       data-no-panel-close

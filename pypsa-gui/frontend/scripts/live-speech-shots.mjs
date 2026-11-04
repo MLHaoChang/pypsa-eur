@@ -130,6 +130,15 @@ try {
         await page.waitForTimeout(800)
         if (await speak.count()) throw new Error('Start voice is in the composer while the server flag is off')
         if (!/not connected/.test(await note.textContent())) throw new Error('the master voice note changed')
+        // LC-07b: the whole launcher, voice note included, sits inside the canvas anchor (no clipping).
+        await page.getByTestId('companion-launcher').hover()
+        await note.waitFor()
+        const clip = await page.evaluate(() => {
+          const l = document.querySelector('[data-testid=companion-launcher]'), n = document.querySelector('[data-testid=companion-voice-note]')
+          const a = l.getBoundingClientRect(), b = n.getBoundingClientRect(), c = l.parentElement.getBoundingClientRect()
+          return { dbg: [a.top,a.bottom,b.top,b.bottom,c.top,c.bottom,l.scrollTop,l.scrollHeight,l.clientHeight], cut: b.bottom > a.bottom + 1 || b.top < a.top - 1 || b.bottom > c.bottom + 1 || b.top < c.top - 1 }
+        })
+        if (clip.cut) throw new Error("the voice note is cut off by the launcher or the canvas anchor " + clip.dbg)
         await shot('4-unavailable')
       })
       await ctx.close(); continue
