@@ -90,10 +90,11 @@ def _unserved_islands(env):
 
 def _solve_job(env):
     """The job whose id the run's own solve step stored, never "the latest
-    job"; a job of another project is no evidence."""
+    job" (the run's latest solve step, once L2 re-solved); a job of another
+    project is no evidence."""
     from routers.solve_queue import _visible_job_or_404
     from services import chat_tools, project_registry
-    step = next((s for s in env.task["steps"] if s["id"].startswith("solve.") and s.get("job")), None)
+    step = next((s for s in reversed(env.task["steps"]) if s["id"].startswith("solve.") and s.get("job")), None)
     if step is None:
         return None
     with chat_tools._acting() as (db, user):

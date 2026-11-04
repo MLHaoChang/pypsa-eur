@@ -350,6 +350,44 @@ def _save(task_path, envelope):
     assistant_tasks._save(path_for(task_path), envelope)
 
 
+def _pickup_refused(envelope):
+    """The calls admitted but refused at pickup (issue 22): nothing ran."""
+    return {a.get("call_id") for a in envelope["audit"] if a["event"] == "refused" and a.get("call_id")}
+
+
+def solves_used(envelope):
+    """The run's solves (issue 05, C4): each admitted run tool that was not
+    refused at pickup. A failed or cancelled job still counts. The one count
+    both the envelope's budget check and `run.budget.used.solves` read."""
+    gone = _pickup_refused(envelope)
+    return sum(1 for a in envelope["audit"]
+               if a["event"] == "used" and a.get("tool") in RUN_TOOLS and a.get("call_id") not in gone)
+
+
+# Issue 05 (C2): an L2 round's third admitted change is refused with this kind.
+CHANGE_CAP_KIND = "round_change_cap"
+
+
+def _changes_in(envelope, loop, round_no):
+    """The edits admitted in one loop round and not refused at pickup."""
+    gone = _pickup_refused(envelope)
+    return sum(1 for a in envelope["audit"] if a["event"] == "used" and a.get("loop") == loop
+               and a.get("round") == round_no and a.get("tool") not in RUN_TOOLS and a.get("call_id") not in gone)
+
+
+def _count_solves(task_path, envelope):
+    """`run.budget.used.solves` from `solves_used` (under `assistant_tasks._LOCK`)."""
+    from harness.runner import _budget
+    from services import assistant_tasks
+    task = json.loads(Path(task_path).read_text())
+    if not task.get("run"):
+        return
+    used = _budget(task)["used"]
+    if used.get("solves") != solves_used(envelope):
+        used["solves"] = solves_used(envelope)
+        assistant_tasks._save(Path(task_path), task)
+
+
 def _audit(envelope, event, **fields):
     envelope["audit"].append({"at": _iso(_now()), "event": event, **{k: v for k, v in fields.items() if v is not None}})
 
@@ -873,8 +911,7 @@ def _standing(session, envelope, task, ctx, solve=False):
         return "wrong_project"
     if _now() >= _epoch(envelope["expires_at"]):
         return "expired"
-    solves = sum(1 for a in envelope["audit"] if a["event"] == "used" and a.get("tool") in RUN_TOOLS)
-    if budget_spent(task) or (solve and solves >= envelope["budget"]["solves"]):
+    if budget_spent(task) or (solve and solves_used(envelope) >= envelope["budget"]["solves"]):
         return "exhausted"
     current = _fingerprint(ctx)
     if not current:
@@ -888,7 +925,8 @@ def _standing(session, envelope, task, ctx, solve=False):
 
 def admit(session, *, call_id, tool, args, tier, external, edit_card):
     """Before a card on the runner's session: "admitted" (approved and on
-    record), "unavailable" (it matched but could not be recorded: deny), or
+    record), "unavailable" (it matched but could not be recorded: deny),
+    `CHANGE_CAP_KIND` (an L2 round's changes are spent: a typed refusal), or
     None (the card path; a `refused` row says why when an envelope exists)."""
     from harness import approvals
     from services import assistant_tasks
@@ -913,19 +951,30 @@ def admit(session, *, call_id, tool, args, tier, external, edit_card):
         # GK B condition 1: still a gap, read again under the step's locks.
         reason = _match_gap(envelope, tool, args, edit_card, ctx, note)
     link = {"envelope_id": envelope["id"]}
+    scope = note["scope"] or {}
+    loop_round = {"loop": scope.get("loop"), "round": scope.get("round")} if scope.get("changes") else {}
     with assistant_tasks._LOCK:
         envelope = _load(path)
         if reason is None and (envelope is None or envelope["state"] != "granted" or envelope["id"] != link["envelope_id"]):
             reason = "revoked"
+        if reason is None and tool in RUN_TOOLS and solves_used(envelope) >= envelope["budget"]["solves"]:
+            # C4: checked again where it is recorded, under the held locks: two solves
+            # admitted at budget - 1 never both pass.
+            reason = "exhausted"
+        if reason is None and loop_round and tool not in RUN_TOOLS \
+                and _changes_in(envelope, loop_round["loop"], loop_round["round"]) >= scope["changes"]:
+            reason = CHANGE_CAP_KIND  # C2: counted at admission, under the envelope's lock
         if reason is None:
             recorded = approvals.decided(session, call_id=call_id, tool=tool, tier=tier, outcome="approved",
                                          by="envelope:" + envelope["id"], link={**approvals.links(session, args), **link})
             _audit(envelope, "used" if recorded else "refused", call_id=call_id, tool=tool,
                    reason=None if recorded else "approval_unavailable",
                    **({"source": note["source"]} if "source" in note else {}),
-                   **({"prepare": note["prepare"]} if "prepare" in note else {}))
+                   **({"prepare": note["prepare"]} if "prepare" in note else {}), **loop_round)
             try:
                 _save(path, envelope)
+                if tool in RUN_TOOLS:
+                    _count_solves(path, envelope)
             except OSError:
                 logger.warning("run envelope: audit for %s could not be written", tool, exc_info=True)
                 return "unavailable"
@@ -940,7 +989,7 @@ def admit(session, *, call_id, tool, args, tier, external, edit_card):
             _save(path, envelope)
         except OSError:
             logger.warning("run envelope: refusal of %s could not be written", tool, exc_info=True)
-    return None
+    return CHANGE_CAP_KIND if reason == CHANGE_CAP_KIND else None
 
 
 def prepared(task_path, call_id, job_id, round_no):
@@ -972,6 +1021,8 @@ def refused_before_gate(task_path, call_id, tool, reason):
             return
         _audit(envelope, "refused", call_id=call_id, tool=tool, reason=reason)
         _save(task_path, envelope)
+        if tool in RUN_TOOLS:
+            _count_solves(task_path, envelope)  # a solve refused at pickup is no job
 
 
 def cross(session, task_path, card, ctx):

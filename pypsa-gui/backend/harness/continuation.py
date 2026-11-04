@@ -81,6 +81,19 @@ def follow_job(ctx, run_token, task_path, ticket, job_id, *, prior_worker=None, 
     return settled
 
 
+def _capture_of(job_id):
+    """A queue job's HH-10 capture record, or None (no capture, or no such job)."""
+    import uuid
+
+    from services import solve_queue
+    try:
+        job = solve_queue.solve_queue.get_job(uuid.UUID(str(job_id)))
+    except Exception:  # noqa: BLE001 — an unreadable job is read below from its run record
+        return None
+    capture = (job or {}).get("capture")
+    return capture if isinstance(capture, dict) else None
+
+
 def settle_from_record(ctx, run_token, task_path, ticket, job_id, status, *, solve_ctx=None):
     """Settle from the job's own terminal record, never from live state.
 
@@ -227,8 +240,14 @@ def queue_outcome(jobs) -> tuple[str, str, dict]:
         case = {k: job[k] for k in ("name", "project_id", "job_id") if job.get(k)}
         if native == "completed":
             run = _queue_run(job)
+            capture = None if run else _capture_of(job.get("job_id"))
+            if capture is not None and capture.get("applied") is not True:
+                # HH-10 (issue 05, C6f): a harness run's captured solve ran and its result is
+                # not the project's. The step is done; the run's solve gate reads why
+                # (`run_gates._not_applied`) and the run stops `inputs_changed`.
+                run = {"job_id": job.get("job_id"), "capture": {"applied": False, "reason": capture.get("reason")}}
             runs.append(run)
-            case["status"] = "completed" if run else "unverified"
+            case["status"] = ("not_applied" if run and "capture" in run else "completed") if run else "unverified"
         else:
             case["status"] = native
             if native == "failed":

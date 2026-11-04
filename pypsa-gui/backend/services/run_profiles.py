@@ -45,13 +45,26 @@ _NEVER_COMPONENTS = frozenset({"grid_code", "solver", "gate", "profile", "envelo
 # envelope still decides each write at dispatch, and anything it does not
 # admit is a card the headless turn never shows.
 L1_ROUNDS = 3  # §6.1: at most 3 rounds; a profile may lower it
-AGENT_STAGES = ("input_gate",)
+AGENT_STAGES = ("input_gate", "result_gate")
 L1_TOOLS = (
     "validate_network", "project_readiness", "diagnose_network", "get_weather_choice", "get_component",
     "list_components", "get_current_series", "list_all_timeseries", "list_load_profile_archetypes",
     "list_library_items", "get_library_item", "list_library_series", "get_library_series",
     "update_component", "attach_tariff", "set_weather_choice", "generate_load_profile", "apply_generated_profile",
 )
+# The fix-and-rerun loop L2 (issue 05, §6.2): a failed result rule or a
+# solve that did not finish optimal. Reads (the triage the harness ran is in
+# the message) and the size-cap edits; never a solve: each round's re-solve is
+# the run's own solve step. At most 2 rounds, each with at most 2 changes.
+L2_ROUNDS = 2
+L2_CHANGES = 2
+L2_TOOLS = (
+    "validate_network", "project_readiness", "diagnose_network", "get_component", "list_components",
+    "solve_queue_job_log", "update_component",
+)
+# What each agent stage's block names, and its bounds.
+_AGENTS = {"input_gate": {"tools": L1_TOOLS, "rounds": L1_ROUNDS, "changes": None},
+           "result_gate": {"tools": L2_TOOLS, "rounds": L2_ROUNDS, "changes": L2_CHANGES}}
 
 
 def _rule(id, fact, op, value=None, severity="block", basis=""):
@@ -98,7 +111,8 @@ GENERIC: dict[str, dict] = {
     "solve": {"actions": [_call("solve_queue_enqueue", project_id=PROJECT)], "rules": [
         _rule("sv.solve.state", "solve.state", "eq", "completed", basis="The run's own solve job finished."),
     ]},
-    "result_gate": {"actions": [], "rules": CORE_RESULT_RULES},
+    "result_gate": {"actions": [], "rules": CORE_RESULT_RULES,
+                    "agent": {"tools": list(L2_TOOLS), "rounds": L2_ROUNDS, "changes": L2_CHANGES}},
     "explore": {"skip": "Exploring cases is not part of a run yet."},
     "report": {"skip": "The run report is not part of a run yet."},
     "handoff": {"actions": [], "rules": []},
@@ -120,19 +134,27 @@ def _check_tunable(entries):
 
 
 def _check_agent(name, agent):
-    """A stage's agent turn (§6.3): its allowlist and round bound."""
+    """A stage's agent turn (§6.3): its allowlist, round bound and, for L2,
+    its per-round change cap."""
     from harness.catalogue import TOOLS, safety_tier_for
     if name not in AGENT_STAGES:
         raise ProfileError(f"Stage {name}: no agent turn runs there yet.")
-    if not isinstance(agent, dict) or set(agent) != {"tools", "rounds"} or not isinstance(agent["tools"], list) \
-            or not agent["tools"] or isinstance(agent["rounds"], bool) or not isinstance(agent["rounds"], int) \
-            or not 1 <= agent["rounds"] <= L1_ROUNDS:
-        raise ProfileError(f"Stage {name}: an agent turn names tools and 1-{L1_ROUNDS} rounds.")
+    spec = _AGENTS[name]
+    keys = {"tools", "rounds"} | ({"changes"} if spec["changes"] else set())
+
+    def bounded(value, top):
+        return not isinstance(value, bool) and isinstance(value, int) and 1 <= value <= top
+    if not isinstance(agent, dict) or set(agent) != keys or not isinstance(agent["tools"], list) \
+            or not agent["tools"] or not bounded(agent["rounds"], spec["rounds"]) \
+            or (spec["changes"] and not bounded(agent["changes"], spec["changes"])):
+        raise ProfileError(f"Stage {name}: an agent turn names tools and 1-{spec['rounds']} rounds"
+                           + (f" and 1-{spec['changes']} changes." if spec["changes"] else "."))
     known = {t["name"] for t in TOOLS}
     for tool in agent["tools"]:
-        if tool not in known or tool not in L1_TOOLS or safety_tier_for(tool) == "destructive":
-            raise ProfileError(f"Stage {name}: {tool!r} is not a tool the input loop may offer.")
-    return {"tools": list(dict.fromkeys(agent["tools"])), "rounds": agent["rounds"]}
+        if tool not in known or tool not in spec["tools"] or safety_tier_for(tool) == "destructive":
+            raise ProfileError(f"Stage {name}: {tool!r} is not a tool its loop may offer.")
+    return {"tools": list(dict.fromkeys(agent["tools"])), "rounds": agent["rounds"],
+            **({"changes": agent["changes"]} if spec["changes"] else {})}
 
 
 def load(profile: dict) -> dict:
@@ -269,8 +291,9 @@ def resolve(ref: str) -> dict:
     return load(PROFILES[ref])
 
 
-def materialise(profile: dict, stage: str, project_id: str) -> list[dict]:
-    """A stage's steps, `<stage>.<n>`, with the run's project filled in."""
+def materialise(profile: dict, stage: str, project_id: str, start: int = 1) -> list[dict]:
+    """A stage's steps, `<stage>.<n>` from `start` (a stage entered again,
+    as L2's re-solve, numbers on), with the run's project filled in."""
     def fill(value):
         if value == PROJECT:
             return project_id
@@ -280,4 +303,4 @@ def materialise(profile: dict, stage: str, project_id: str) -> list[dict]:
             return [fill(v) for v in value]
         return value
     return [{"id": f"{stage}.{n}", "tool": a["tool"], "args": fill(a["args"]), "status": "pending"}
-            for n, a in enumerate(profile["stages"][stage].get("actions", []), start=1)]
+            for n, a in enumerate(profile["stages"][stage].get("actions", []), start=start)]
