@@ -18,6 +18,8 @@ import json
 
 import pytest
 
+from fastapi import HTTPException
+
 from harness import edit_card
 from harness import runner as harness_runner
 from services import (
@@ -38,8 +40,10 @@ from tests.test_assistant_tasks_study_brief import (  # noqa: F401
     wait_until,
 )
 from tests.test_harness_envelope import (  # noqa: F401
+    ask,
     envelope_of,
     granted,
+    on_run,
     profile,
     refusals,
     stopped,
@@ -280,3 +284,122 @@ def test_load_shape_1_a_struck_or_proposed_row_is_never_planned(granted, upload)
     row = {"write": TOOL, "args": args(file_id), "source": {"kind": "table", "upload_id": file_id}}
     run_envelope.plan_writes(path, [dict(row, status="struck"), dict(row, status="proposed")])
     assert envelope_of(path).get("planned", []) == []
+
+
+# ── GK B (21) conditions ──────────────────────────────────────────────────
+
+
+def test_q2_the_shared_helper_writes_byte_identical_p_set(site, upload):
+    """The refactor into one `_demand_series` changes no written byte."""
+    file_id = upload()
+    expected = chat_tools._demand_series(ctx(), args(file_id))
+    chat_tools.apply_demand_from_excel(**args(file_id))
+    written_now = ctx().network.loads_t.p_set["L1"]
+    assert written_now.to_numpy().tobytes() == expected.to_numpy().tobytes()
+    assert list(written_now) == [7.5, 9.0]
+
+
+@pytest.mark.parametrize("loop_name", ["l1", "l2"])
+def test_g1_an_agent_call_with_the_planned_args_is_refused_and_cards(planned, loop_name):
+    task, path, file_id = planned(steps=[])
+    with on_run(task, path) as run:
+        run.loop_scope = {"loop": loop_name, "round": 1, "changes": 2, "tunable": frozenset()}
+        assert ask(run, TOOL, args(file_id)) is None  # the card path
+    assert refusals(path)[-1] == "outside_entry"
+    assert not written(path) and series() is None
+
+
+def test_g2_upload_bytes_swapped_after_admission_write_nothing_and_card(planned, monkeypatch):
+    task, path, file_id = planned()
+    real_series = chat_tools._demand_series
+
+    def swapped(context, call_args):  # the swap lands between admission and the write
+        upload_service.get_upload_path(context.name, file_id).write_bytes(OTHER_CSV)
+        return real_series(context, call_args)
+
+    monkeypatch.setattr(chat_tools, "_demand_series", swapped)
+    record = until(harness_runner.Runner("a"), path, task, stopped)
+    assert record["run"]["status"] == "paused" and not written(path)
+    assert series() is None
+
+
+def test_g3_a_parse_failure_at_the_pin_cards_and_never_pins(planned, upload):
+    bad = upload(b"time,demand_mw\nnot-a-time,x\n", "bad.csv")
+    task, path, _ = planned(bad)
+    assert all(p.get("pinned") is None and p.get("carded") for p in envelope_of(path)["planned"])
+    record = until(harness_runner.Runner("a"), path, task, stopped)
+    assert record["run"]["status"] == "paused" and not written(path) and series() is None
+
+
+def test_g3_a_parse_failure_at_admission_cards(planned, monkeypatch):
+    task, path, _ = planned()
+
+    def broken(context, call_args):
+        raise HTTPException(400, {"error_kind": "value_column_parse_error", "message": "x"})
+
+    monkeypatch.setattr(chat_tools, "_demand_series", broken)
+    record = until(harness_runner.Runner("a"), path, task, stopped)
+    assert record["run"]["status"] == "paused" and not written(path) and series() is None
+
+
+def test_g3_a_uid_lookup_failure_at_admission_cards(planned, monkeypatch):
+    task, path, _ = planned()
+    monkeypatch.setattr(component_identity, "uid_for", lambda *a: None)
+    record = until(harness_runner.Runner("a"), path, task, stopped)
+    assert record["run"]["status"] == "paused" and not written(path) and series() is None
+
+
+def test_g4_a_stale_process_neither_pins_nor_consumes(planned, monkeypatch):
+    """Pin and consume are envelope writes under the file lock with a live
+    lease: a process that lost its lease writes neither."""
+    task, path, file_id = planned(pin=False)
+    monkeypatch.setattr(run_envelope, "_lease_live", lambda *a, **k: False)
+    run_envelope.pin_planned(path, ctx())
+    assert all("pinned" not in p for p in envelope_of(path)["planned"])
+    assert run_envelope.consume_planned(path, call_id="call-stale", args=args(file_id)) is False
+    assert not any(p.get("used_by") for p in envelope_of(path)["planned"])
+
+
+def test_g4_after_a_takeover_the_old_runner_does_not_consume(planned):
+    import time
+
+    task, path, _ = planned()
+    now = time.time()
+    a = harness_runner.Runner("a", clock=lambda: now)
+    b = harness_runner.Runner("b", clock=lambda: now + harness_runner.LEASE_SECONDS + 1)
+    assert b.tick(path) != "leased_elsewhere"
+    b._inflight[task["task_id"]][1].join(60)
+    assert a.tick(path) == "leased_elsewhere"
+    assert len(written(path)) == 1 and series() == [7.5, 9.0]
+
+
+@pytest.mark.parametrize("kind", ["plan_changed", "uid_changed"])
+def test_g5_a_typed_mismatch_cards_at_the_catching_site(planned, kind, monkeypatch):
+    """The typed refusal is caught as itself: a base-class catch that let it
+    through (or turned it into an admission) fails here."""
+    task, path, file_id = planned(steps=[])
+    error = run_envelope.PlannedMismatch.kinds[kind]
+    monkeypatch.setattr(run_envelope, "_check_planned", lambda *a, **k: (_ for _ in ()).throw(error(kind)))
+    with on_run(task, path) as run:
+        assert ask(run, TOOL, args(file_id)) is None
+    assert refusals(path)[-1] == kind
+    assert error is not run_envelope.PlannedMismatch and issubclass(error, run_envelope.PlannedMismatch)
+    assert series() is None
+
+
+def test_g6_the_pin_reads_the_runs_project_not_the_foreground(planned):
+    task, path, _ = planned(pin=False)
+    run_ctx = ctx()
+    with foreground(two_buses()) as front:
+        assert PyPSAService.get_network() is front.network
+        run_envelope.pin_planned(path, run_ctx)
+    pinned = envelope_of(path)["planned"][0]["pinned"]
+    assert pinned["uid"] == component_identity.uid_for(run_ctx.network, "Load", "L1")
+
+
+def test_g7_the_write_goes_to_the_bound_contexts_user_ts(site, upload):
+    """`loads_t.p_set` is persisted through the store save reads; the
+    planned write uses the context's own store, as profile_gen/apply does."""
+    file_id = upload()
+    chat_tools.apply_demand_from_excel(**args(file_id))
+    assert list(ctx().user_ts[("loads", "p_set", "L1")]) == [7.5, 9.0]
