@@ -333,3 +333,48 @@ def test_importing_the_generator_does_not_import_the_app():
             "assert 'main' not in sys.modules and 'fastapi' not in sys.modules")
     proc = subprocess.run([sys.executable, '-c', code, str(SMOKE)], capture_output=True, text=True, check=False)
     assert proc.returncode == 0, proc.stderr
+
+
+def _pointer(tmp_path=None, monkeypatch=None, reason='ui-pointer', **extra):
+    if monkeypatch is not None:
+        monkeypatch.setattr(parity, 'ROOT', tmp_path)
+        (tmp_path / 'docs/agents').mkdir(parents=True)
+        (tmp_path / 'docs/agents/owner-decisions.md').write_text(
+            '| Date | Id | Question | Decision | Relayed by |\n|---|---|---|---|---|\n| d | KNOWN-1 | q | a | c |\n')
+    decl = _decl(limitations=[{'method': 'GET', 'path': '/api/things', 'reason': reason, **extra}])
+    return _build(_app(('GET', '/api/things')), decl, _scan(('GET', '/api/things')))
+
+
+def test_a_ui_pointer_route_naming_a_known_decision_is_a_limitation(tmp_path, monkeypatch):
+    rows, problems = _pointer(tmp_path, monkeypatch, decision='KNOWN-1')
+    assert not problems
+    assert rows[('GET', '/api/things')]['reason'] == 'ui-pointer'
+    assert rows[('GET', '/api/things')]['decision'] == 'KNOWN-1'
+
+
+@pytest.mark.parametrize('extra, expected', [
+    ({}, 'needs a non-empty "decision"'),
+    ({'decision': ''}, 'needs a non-empty "decision"'),
+    ({'decision': '  '}, 'needs a non-empty "decision"'),
+    ({'decision': 7}, 'needs a non-empty "decision"'),
+    ({'decision': 'NOPE-9'}, "is not an id in docs/agents/owner-decisions.md"),
+    ({'decision': 'Id'}, "is not an id in docs/agents/owner-decisions.md"),
+    ({'decision': '---'}, "is not an id in docs/agents/owner-decisions.md"),
+])
+def test_a_ui_pointer_route_needs_a_known_decision(tmp_path, monkeypatch, extra, expected):
+    _, problems = _pointer(tmp_path, monkeypatch, **extra)
+    assert any(expected in p for p in problems), problems
+
+
+def test_decision_is_only_allowed_on_ui_pointer(tmp_path, monkeypatch):
+    _, problems = _pointer(tmp_path, monkeypatch, reason='admin', decision='KNOWN-1')
+    assert any('only allowed on a ui-pointer' in p for p in problems), problems
+
+
+def test_the_real_as19_decision_id_is_in_the_owner_decisions_table():
+    assert 'AS19-POINTER-1' in parity._owner_decision_ids()
+
+
+def test_a_closed_issue_still_fails_held_by_spec_even_though_ui_pointer_exists(tmp_path, monkeypatch):
+    _, problems = _held(tmp_path, monkeypatch, 'Status: wontfix\n- GET /api/things\n')
+    assert any('is wontfix' in p for p in problems), problems
