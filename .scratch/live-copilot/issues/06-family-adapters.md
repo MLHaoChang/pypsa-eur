@@ -1,6 +1,6 @@
 # LC-06 — whole-application behavior coverage
 
-Status: in progress (LC-06 session; S0 manifest PR, then S1–S3 with GK B; S4–S9 reviewer named by the coordinator)
+Status: done (S0–S13 landed; last slice #892)
 Type: task
 Baseline: master `c75ca5584b873418f10f1bca42f868255d445b7b`
 Dependencies: LC-01–05 as applicable

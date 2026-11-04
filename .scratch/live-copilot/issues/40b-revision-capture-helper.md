@@ -3,7 +3,7 @@
 
 # LC-40b — One helper captures the network revision for every study runner
 
-Status: needs-triage
+Status: done (landed in #1071)
 Type: refactor (no behaviour change)
 
 Owner decision LC40-SPEC-1 ("Spec LC-40 now"). LC-40 (LC40-COUNTER-1, "same counter") made a

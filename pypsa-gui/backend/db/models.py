@@ -232,6 +232,9 @@ class SolveJobRow(Base):
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     solver_config: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # HH-10 (study harness 05): the captured input of an envelope-admitted
+    # solve, as JSON (`services/solve_capture.py`); NULL for every other job.
+    capture: Mapped[str | None] = mapped_column(Text, nullable=True)
     objective: Mapped[float | None] = mapped_column(Float, nullable=True)
     solve_time: Mapped[float | None] = mapped_column(Float, nullable=True)
     condition: Mapped[str | None] = mapped_column(String(64), nullable=True)
