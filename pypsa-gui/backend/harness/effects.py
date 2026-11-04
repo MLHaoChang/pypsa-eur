@@ -7,11 +7,35 @@ import socket
 import time
 import uuid
 
+from typing import Literal
+
 from fastapi import HTTPException
+from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt
 
 from harness.durable import network_guard, transaction
 from services import assurance_records as records, workflow_tools
 from services.pypsa_service import PyPSAService
+
+
+class UpdateComponentArguments(BaseModel):
+    """Exact arguments of the one checked effect: static inputs from records.INPUT_METRICS."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    component_class: Literal[tuple(records.INPUT_METRICS)]
+    name: str = Field(min_length=1, max_length=128)
+    attrs: dict[str, StrictInt | StrictFloat] = Field(min_length=1)
+
+
+class EffectContract(BaseModel):
+    """Published guard schema (A0.4); `validate` adds the domain checks it cannot express."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    version: Literal[1]
+    operation_id: str = Field(min_length=36, max_length=36)
+    project_id: str = Field(min_length=1, max_length=128)
+    tool_name: Literal["update_component"]
+    arguments: UpdateComponentArguments
+    before_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 def refuse():
@@ -78,6 +102,7 @@ def validate(value):
         for k, v in attrs.items()
     ):
         raise ValueError("invalid_domain_value")
+    EffectContract.model_validate(value)
     return json.loads(json.dumps(value, allow_nan=False))
 
 
