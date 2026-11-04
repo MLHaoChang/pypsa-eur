@@ -49,6 +49,16 @@ function ruleWords(r: GateRule): string {
   return `${FACT_WORDS[r.fact] ?? 'A check'}${value}`
 }
 
+/** The email about an ended agent loop (`loop.notice`, issue 25) in words; none until it was claimed. */
+function loopNoticeWords(view: RunMonitorView): { text: string; failed: boolean } | null {
+  const n = view.loop?.notice
+  if (!n || n.sent === null || n.sent === undefined) return null
+  if (n.sent) return { text: 'We emailed you that the run needs you.', failed: false }
+  const why = n.error === 'no_address' ? 'your account has no email address'
+    : n.error === 'uncertain' ? 'we could not confirm it was sent' : 'the email could not be sent'
+  return { text: `We could not tell you by email: ${why}. The run is waiting for you here.`, failed: true }
+}
+
 function Budgets({ view }: { view: RunMonitorView }) {
   // A paused run says its expiry once, as "Unattended approval expires …".
   const paused = view.run?.status === 'paused' && view.envelope?.state === 'granted'
@@ -213,6 +223,7 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
   const stoppedAt = stageWords(run.stage)
   const cancelled = view.status === 'cancelled'
   const finished = run.status === 'completed'
+  const noticeWords = run.status === 'needs_user' ? loopNoticeWords(view) : null
   const gateFailed = run.status === 'needs_user' && current?.status === 'failed'
   const failedRules = (current?.gate ?? []).filter(r => r.verdict !== 'pass').length
   const stop = !gateFailed && (run.status === 'paused' || (run.status === 'needs_user' && run.reason && run.reason !== 'waiting_card'))
@@ -253,6 +264,7 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
       {can.has('resume') && <><span className="text-muted">, then</span>{' '}
         <Action disabled={busy} onClick={() => fix('resume')}>Check again</Action></>}
     </div>}
+    {noticeWords && <p className={noticeWords.failed ? 'text-amber-400' : 'text-muted'} data-testid="run-loop-notice">{noticeWords.text}</p>}
     {stop && !cancelled && <div data-testid="run-failure">
       {stop.words}{stop.fix && (stop.fix !== 'resume' || can.has('resume')) && <>: {stop.fix === 'resume'
         ? <Action disabled={busy} onClick={() => fix('resume')}>{stop.fixWords}</Action>

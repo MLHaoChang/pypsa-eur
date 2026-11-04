@@ -72,6 +72,19 @@ describe('RunMonitor', () => {
     }
   })
 
+  it('says whether the email about an ended agent loop went out (issue 25)', async () => {
+    show('loop_notice_sent')
+    expect((await screen.findByTestId('run-loop-notice')).textContent).toBe('We emailed you that the run needs you.')
+    cleanup()
+    show('loop_notice_failed')
+    expect((await screen.findByTestId('run-loop-notice')).textContent).toBe(
+      'We could not tell you by email: the email could not be sent. The run is waiting for you here.')
+    cleanup()
+    show('gate_pass')
+    await screen.findByTestId('run-current-stage')
+    expect(screen.queryByTestId('run-loop-notice')).toBeNull()
+  })
+
   it('Guided and Expert show the same card; Expert only adds a closed Details', async () => {
     show('gate_fail', 'guided')
     await screen.findByTestId('run-failure')
