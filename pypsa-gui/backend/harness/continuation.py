@@ -239,13 +239,15 @@ def queue_outcome(jobs) -> tuple[str, str, dict]:
         natives.append(native)
         case = {k: job[k] for k in ("name", "project_id", "job_id") if job.get(k)}
         if native == "completed":
-            run = _queue_run(job)
-            capture = None if run else _capture_of(job.get("job_id"))
+            # HH-10 (issue 05, C6f): the capture is read first. A harness run's captured
+            # solve that was not applied ran, and its result is not the project's, whatever
+            # the evidence says. The step is done; the run's solve gate reads why
+            # (`run_gates._not_applied`) and the run stops `inputs_changed`.
+            capture = _capture_of(job.get("job_id"))
             if capture is not None and capture.get("applied") is not True:
-                # HH-10 (issue 05, C6f): a harness run's captured solve ran and its result is
-                # not the project's. The step is done; the run's solve gate reads why
-                # (`run_gates._not_applied`) and the run stops `inputs_changed`.
                 run = {"job_id": job.get("job_id"), "capture": {"applied": False, "reason": capture.get("reason")}}
+            else:
+                run = _queue_run(job)
             runs.append(run)
             case["status"] = ("not_applied" if run and "capture" in run else "completed") if run else "unverified"
         else:
