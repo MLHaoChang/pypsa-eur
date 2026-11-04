@@ -132,6 +132,8 @@ describe('Site 3D scene panel', () => {
     fireEvent.click(screen.getByTestId('scene-correct'))
     fireEvent.change(screen.getByTestId('scene-correct-height'), { target: { value: '0' } })
     expect((screen.getByTestId('scene-preview-change') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTestId('scene-preview-change').className).toContain('disabled:opacity-50')
+    expect(screen.getByTestId('scene-preview-change').className).toContain('disabled:hover:bg-accent')
     expect(screen.getByTestId('scene-preview-reason').textContent).toBe('Correct the field marked in red to continue')
     fireEvent.change(screen.getByTestId('scene-correct-height'), { target: { value: '14' } })
     fireEvent.click(screen.getByTestId('scene-preview-change'))

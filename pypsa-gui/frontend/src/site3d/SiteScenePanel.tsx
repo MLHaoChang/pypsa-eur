@@ -289,7 +289,7 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
                   )}
                   <div className="flex gap-2">
                     <button type="button" data-testid="scene-preview-change" onClick={() => void previewEdit()} disabled={!canWrite || !editOk}
-                      className="px-3 py-1 rounded bg-accent text-white font-semibold hover:bg-accent/90 disabled:opacity-50">Preview change</button>
+                      className="px-3 py-1 rounded bg-accent text-white font-semibold hover:bg-accent/90 disabled:cursor-not-allowed disabled:hover:bg-accent disabled:opacity-50">Preview change</button>
                     <button type="button" onClick={() => setEdit(null)} className="px-3 py-1 rounded border border-border text-text hover:border-accent">Cancel</button>
                   </div>
                   {!editOk && <span className="text-[11px] text-muted" data-testid="scene-preview-reason">{FIX_FIELDS}</span>}

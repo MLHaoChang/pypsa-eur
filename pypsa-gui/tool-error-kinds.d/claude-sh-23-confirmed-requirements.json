@@ -1,0 +1,32 @@
+{
+ "kinds": {
+  "invalid_requirement": {
+   "surface": "inline",
+   "why": "set_requirement refused a proposal that is not one closed, versioned predicate (unknown kind or key, a field no bound may cover, a missing component, a bad op or value). Nothing was recorded; the assistant asks the user again."
+  },
+  "requirement_unit_mismatch": {
+   "surface": "inline",
+   "why": "set_requirement refused a bound with no unit or a unit other than the field's stored unit, before any card. Nothing was recorded; the message names the stored unit so the assistant asks the user again."
+  },
+  "requirement_contradicts": {
+   "surface": "inline",
+   "why": "set_requirement refused a bound whose range does not meet an active requirement on the same component and field (or a second kept horizon). Nothing was recorded; the assistant asks which one holds."
+  },
+  "requirement_not_found": {
+   "surface": "inline",
+   "why": "set_requirement named a requirement id to replace or retire that is not active on this conversation. Nothing changed."
+  },
+  "requirement_thread_required": {
+   "surface": "inline",
+   "why": "set_requirement was called from a session with no durable conversation (a harness run's own session, or a chat with no saved project). Requirements live only on the user's conversation; nothing was recorded."
+  },
+  "requirement_violated": {
+   "surface": "inline",
+   "why": "An assistant edit would break a requirement the user confirmed (a bound or the kept model horizon), or could not show its effect on one. It was refused at dispatch before any card; nothing was written. The message names the requirement; the assistant asks the user whether to change the edit or the requirement. Manual edits are never refused."
+  },
+  "requirement_check_unavailable": {
+   "surface": "inline",
+   "why": "The confirmed requirements could not be read or evaluated when an assistant edit was dispatched, so the edit was refused (fail closed); nothing was written."
+  }
+ }
+}
