@@ -13,7 +13,8 @@ Every backend route the GUI reaches (axios ``client`` calls, ``fetch``,
 * ``needs-tool``: declared in the declarations file, a coverage gap that
   ``--check`` fails on (LV08 R2: none is left);
 * ``limitation``: declared with a reason from ``LIMITATION_REASONS``; a
-  ``held-by-spec`` one names the open issue that holds it (``issue``).
+  ``held-by-spec`` one names the open issue that holds it (``issue``), a
+  ``ui-pointer`` one the owner decision (``decision``) that keeps it out of chat.
 
 Declarations are ``assistant_route_parity_declarations.json`` plus the fragments in
 ``assistant_route_parity_declarations.d/`` (``smoke/json_fragments.py``).
@@ -66,6 +67,7 @@ LIMITATION_REASONS = (
     'ui-local-state',        # layout/view persistence with no domain effect
     'binary-transfer',       # raw file bytes the assistant reaches via typed upload/export tools
     'held-by-spec',          # a frozen spec owns this route's chat disposition; ``issue`` names it (HELD_ISSUE_RE)
+    'ui-pointer',            # an owner decision keeps this route out of chat control: chat points to the UI tab instead; ``decision`` names it
 )
 # A ``held-by-spec`` limitation's ``issue``: a repo-relative issue file that names
 # the route as ``METHOD path`` and is not closed (its ``Status:`` is not done or
@@ -391,6 +393,8 @@ def build(app=None, declarations: dict | None = None, frontend: tuple | None = N
             problems.append(f'limitation {key}: reason {d.get("reason")!r} not in {LIMITATION_REASONS}')
         elif d.get('reason') == 'held-by-spec':
             problems += _held_problems(key, d.get('issue'))
+        elif d.get('reason') == 'ui-pointer' and not (isinstance(d.get('decision'), str) and d['decision'].strip()):
+            problems.append(f'ui-pointer limitation {key}: needs a non-empty "decision" naming the owner decision')
     for key, d in needs.items():
         if d.get('family') not in FAMILIES:
             problems.append(f'needs-tool {key}: family {d.get("family")!r} not in {FAMILIES}')
@@ -427,6 +431,8 @@ def build(app=None, declarations: dict | None = None, frontend: tuple | None = N
             row |= {'class': 'limitation', 'reason': limitations[key]['reason']}
             if 'issue' in limitations[key]:
                 row['issue'] = limitations[key]['issue']
+            if 'decision' in limitations[key]:
+                row['decision'] = limitations[key]['decision']
         else:
             row |= {'class': 'unclassified'}
             problems.append(f'unclassified GUI route {key[0]} {key[1]}: add a tool or declare it')

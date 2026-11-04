@@ -333,3 +333,26 @@ def test_importing_the_generator_does_not_import_the_app():
             "assert 'main' not in sys.modules and 'fastapi' not in sys.modules")
     proc = subprocess.run([sys.executable, '-c', code, str(SMOKE)], capture_output=True, text=True, check=False)
     assert proc.returncode == 0, proc.stderr
+
+
+def _pointer(**extra):
+    decl = _decl(limitations=[{'method': 'GET', 'path': '/api/things', 'reason': 'ui-pointer', **extra}])
+    return _build(_app(('GET', '/api/things')), decl, _scan(('GET', '/api/things')))
+
+
+def test_a_ui_pointer_route_with_a_named_decision_is_a_limitation():
+    rows, problems = _pointer(decision='AS19-POINTER-1')
+    assert not problems
+    assert rows[('GET', '/api/things')]['reason'] == 'ui-pointer'
+    assert rows[('GET', '/api/things')]['decision'] == 'AS19-POINTER-1'
+
+
+@pytest.mark.parametrize('extra', [{}, {'decision': ''}, {'decision': '  '}, {'decision': 7}])
+def test_a_ui_pointer_route_needs_a_named_decision(extra):
+    _, problems = _pointer(**extra)
+    assert any('needs a non-empty "decision"' in p for p in problems), problems
+
+
+def test_a_closed_issue_still_fails_held_by_spec_even_though_ui_pointer_exists(tmp_path, monkeypatch):
+    _, problems = _held(tmp_path, monkeypatch, 'Status: wontfix\n- GET /api/things\n')
+    assert any('is wontfix' in p for p in problems), problems
