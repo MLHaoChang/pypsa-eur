@@ -321,6 +321,6 @@ def test_a_capture_not_applied_ends_the_run_inputs_changed_with_the_solve_spent(
     assert run["status"] == "needs_user" and run["stages"]["solve"].get("reason") == "inputs_changed"
     [job] = run_jobs(record)
     assert run["loop"]["ended"] == "inputs_changed"
-    assert run["loop"]["history"] == [{"round": 0, "job": job, "failing": ["sv.solve.state"],
-                                       "next_job": job, "outcome": "inputs_changed"}]
+    assert run["loop"]["history"] == [{"round": 0, "job": job, "failing": ["sv.solve.state"], "next_job": job,
+                                       "outcome": "inputs_changed", "capture_reason": "inputs_changed"}]
     assert run["budget"]["used"]["solves"] == 1 and run.get("ledger", []) == []
