@@ -148,6 +148,13 @@ def written(path):
     return [a for a in envelope_of(path)["audit"] if a["event"] == "used" and a["tool"] == TOOL]
 
 
+def missed(path, kind):
+    """G9: a call that misses its pin is refused under the destructive tier,
+    with the typed kind it missed on in the audit row's `planned_miss`."""
+    row = [a for a in envelope_of(path)["audit"] if a["event"] == "refused"][-1]
+    return row["reason"] == "destructive" and row.get("planned_miss") == kind
+
+
 # ── The card (P1) ─────────────────────────────────────────────────────────
 
 
@@ -192,7 +199,7 @@ def test_c1_a_renamed_load_gets_a_card(planned):
     dirty_state.bump_revision(ctx())
     accept(path)
     record = until(harness_runner.Runner("a"), path, task, stopped)
-    assert carded(record) and not written(path) and refusals(path)[-1] == "uid_changed"
+    assert carded(record) and not written(path) and missed(path, "uid_changed")
     assert "L1" not in ctx().network.loads_t.p_set.columns
 
 
@@ -204,7 +211,7 @@ def test_c1_a_load_deleted_and_made_again_under_the_granted_name_gets_a_card(pla
     network.add("Load", "L1", bus="B1", p_set=5)  # same name, same values, new uid
     dirty_state.bump_revision(ctx())
     record = until(harness_runner.Runner("a"), path, task, stopped)
-    assert carded(record) and not written(path) and refusals(path)[-1] == "uid_changed"
+    assert carded(record) and not written(path) and missed(path, "uid_changed")
     assert series() is None
 
 
@@ -216,7 +223,7 @@ def test_c1_a_card_that_differs_from_the_pin_gets_a_card(planned):
     dirty_state.bump_revision(ctx())
     accept(path)
     record = until(harness_runner.Runner("a"), path, task, stopped)
-    assert carded(record) and not written(path) and refusals(path)[-1] == "plan_changed"
+    assert carded(record) and not written(path) and missed(path, "plan_changed")
     assert series() is None
 
 
@@ -339,7 +346,7 @@ def test_g1_an_agent_call_with_the_planned_args_is_refused_and_cards(planned, lo
         run.loop_scope = {"loop": loop_name, "round": 1, "changes": 2, "tunable": frozenset()}
         got = ask(run, TOOL, args(file_id))
         assert got is None  # the card path
-    assert refusals(path)[-1] == "outside_entry"
+    assert missed(path, "outside_entry")
     assert not written(path) and series() is None
 
 
@@ -398,6 +405,72 @@ def test_g2_a_series_other_than_the_pinned_one_is_not_written(planned, monkeypat
     assert series() is None
 
 
+def test_g2_a_load_whose_uid_changed_after_admission_is_not_written(planned, monkeypatch):
+    task, path, _ = planned()
+    monkeypatch.setattr(edit_card, "require_current", lambda *a, **k: None)
+    real_get = component_identity.get
+
+    def moved(network, cls, name):
+        return "another-uid" if run_envelope.PLANNED_WRITE.get() is not None else real_get(network, cls, name)
+
+    monkeypatch.setattr(component_identity, "get", moved)
+    record = until(harness_runner.Runner("a"), path, task, stopped)
+    assert carded(record) and refusals(path)[-1] == "uid_changed"
+    assert series() is None
+
+
+def test_g10_a_replaced_series_that_moved_inside_the_handler_is_not_written(planned, monkeypatch):
+    """G10: the series the write replaces is re-read under the locks; one that
+    moved after admission (here inside the handler) is not the grant's card."""
+    task, path, _ = planned()
+    monkeypatch.setattr(edit_card, "require_current", lambda *a, **k: None)
+    real_series = chat_tools._demand_series
+
+    def moved(context, call_args):
+        if run_envelope.PLANNED_WRITE.get() is not None:
+            context.network.loads.at["L1", "p_set"] = 9.0
+        return real_series(context, call_args)
+
+    monkeypatch.setattr(chat_tools, "_demand_series", moved)
+    record = until(harness_runner.Runner("a"), path, task, stopped)
+    assert carded(record) and refusals(path)[-1] == "plan_changed"
+    assert series() is None
+
+
+# ── G9: the destructive tier is lifted only by the pinned-card match ──────
+
+
+@pytest.mark.parametrize("tool, call, tier", [
+    ("cluster_network", {"n_clusters": 1}, "destructive"),
+    ("delete_component", {"component_class": "Load", "name": "L1"}, "delete"),
+])
+def test_g9_another_destructive_tool_is_refused_under_a_planned_envelope(planned, tool, call, tier):
+    task, path, _ = planned(steps=[], detach=False)
+    with on_run(task, path) as run:
+        assert ask(run, tool, call) is None
+    row = [a for a in envelope_of(path)["audit"] if a["event"] == "refused"][-1]
+    assert row["reason"] == tier and "planned_miss" not in row
+    assert list(ctx().network.loads.index) == ["L1"]
+
+
+@pytest.mark.parametrize("miss", ["other_args", "used_pin", "digest"])
+def test_g9_a_call_that_misses_its_pin_is_refused_as_destructive(planned, miss):
+    task, path, file_id = planned(steps=[], detach=False)
+    call, kind = args(file_id), {"other_args": "outside_entry", "used_pin": "planned_used",
+                                 "digest": "plan_changed"}[miss]
+    if miss == "other_args":
+        call = dict(call, value_col="other")
+    elif miss == "used_pin":
+        assert run_envelope.consume_planned(path, call_id="call-0", args=call)
+    else:
+        ctx().network.loads.at["L1", "p_set"] = 6.0
+        dirty_state.bump_revision(ctx())
+        accept(path)
+    with on_run(task, path) as run:
+        assert ask(run, TOOL, call) is None
+    assert missed(path, kind) and not written(path) and series() is None
+
+
 def test_q1_a_card_whose_binding_is_not_the_granted_row_is_never_pinned(granted, upload, site, monkeypatch):
     monkeypatch.setitem(
         run_profiles.PROFILES, "eh_site@1",
@@ -439,6 +512,31 @@ def test_g3_a_uid_lookup_failure_at_admission_cards(planned, monkeypatch):
     monkeypatch.setattr(component_identity, "get", lambda *a: None)
     record = until(harness_runner.Runner("a"), path, task, stopped)
     assert carded(record) and not written(path) and series() is None
+
+
+def test_g3_a_check_that_raises_at_admission_is_refused_not_admitted(planned, monkeypatch):
+    """Admission alone (the write-time check is not reached): a check that
+    throws is a refusal, never an admission."""
+    task, path, file_id = planned(steps=[], detach=False)
+
+    def boom(*a, **k):
+        raise RuntimeError("identity store unreadable")
+
+    card = edit_card.preview(TOOL, args(file_id))  # the pinned card, computed before the break
+    with on_run(task, path) as run:
+        monkeypatch.setattr(component_identity, "get", boom)
+        assert run_envelope.admit(run, call_id="call-1", tool=TOOL, args=args(file_id),
+                                  tier="destructive", external=None, edit_card=card) is None
+    assert missed(path, "plan_changed") and not written(path)
+
+
+def test_g3_an_incomplete_card_with_the_pinned_digest_is_refused(planned, monkeypatch):
+    task, path, file_id = planned(steps=[], detach=False)
+    real = edit_card.preview
+    monkeypatch.setattr(edit_card, "preview", lambda tool, a: dict(real(tool, a), complete=False))
+    with on_run(task, path) as run:
+        assert ask(run, TOOL, args(file_id)) is None
+    assert missed(path, "plan_changed") and not written(path)
 
 
 def test_g4_a_stale_process_neither_pins_nor_consumes(planned, monkeypatch):
@@ -485,7 +583,7 @@ def test_g5_a_typed_mismatch_cards_at_the_catching_site(planned, kind, monkeypat
     monkeypatch.setattr(run_envelope, "_check_planned", lambda *a, **k: (_ for _ in ()).throw(error(kind)))
     with on_run(task, path) as run:
         assert ask(run, TOOL, args(file_id)) is None
-    assert refusals(path)[-1] == kind
+    assert missed(path, kind)
     assert error is not run_envelope.PlannedMismatch and issubclass(error, run_envelope.PlannedMismatch)
     assert series() is None
 
@@ -539,7 +637,7 @@ def test_an_intake_load_series_is_carded_granted_and_pinned_on_the_created_proje
     view = _start(host, name, host["citations"] + [write])
     intake = view["run"]["intake"]
     shown = [r for r in intake["card"]["rows"] if r.get("write")]
-    assert len(shown) == 1 and shown[0]["label"] == "Load general_load: demand series"
+    assert len(shown) == 1 and shown[0]["label"] == "Load general_load: demand series (replaces its current demand)"
     assert shown[0]["from_document"] and "site-demand.csv" in shown[0]["source"]
     rows = json.loads(task_path(site[1], view).read_text())["run"]["intake"]["rows"]
     struck = run_intake.strike(rows, next(i for i, r in enumerate(rows) if r.get("write")))
