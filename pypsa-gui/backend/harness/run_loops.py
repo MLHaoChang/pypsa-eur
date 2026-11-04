@@ -682,7 +682,6 @@ def run_round(path, ctx, session, *, provider=None, recheck):
 # `not_converged`; nothing nests.
 
 ENGINE = "engine"  # the run loop name engine steps and their envelope rows carry
-ENGINE_REFUSALS = ("engine_refused", "budget_spent", "restore_uncovered", "no_envelope", "engine_busy")
 
 
 def engine_rules(profile):
@@ -747,13 +746,6 @@ def _overhead(tool):
     return (1 if tool == "run_margin_loop" else 0) + 1
 
 
-def engine_max_solves(engine, solves_left):
-    """`max_solves` for a loop with `solves_left` (condition 2): the rule's
-    value, within the solves left after its overhead and `MAX_LOOP_SOLVES`."""
-    from services.adequacy.coupling import MAX_LOOP_SOLVES
-    return min(int(engine["max_solves"]), int(solves_left) - _overhead(engine["tool"]), MAX_LOOP_SOLVES)
-
-
 def start_engine(path, ctx, step, *, instance):
     """Start an engine step's loop (the runner, on the run's bound context).
     Returns "engine" when it started and is followed, or the refusal reason.
@@ -791,6 +783,8 @@ def start_engine(path, ctx, step, *, instance):
     runner._update(path, lambda t: runner._budget(t)["used"].update(
         rounds=runner._budget(t)["used"].get("rounds", 0) + 1))  # one engine call is one round
     before, _ = run_envelope.chain_head(path, ctx)  # what a `restore="final"` hold would link from (H3)
+    from services import dirty_state
+    revision = dirty_state.revision(ctx)  # H3: the counter the loop's own hold may move by one
     handler = getattr(chat_tools, engine["tool"])
     try:
         # Target and draws omitted: `active_loop_goal` puts the project's goal on this network's
@@ -818,7 +812,7 @@ def start_engine(path, ctx, step, *, instance):
         s["status"] = "waiting"
         s["job"] = {"kind": ENGINE, "study": study, "job_id": job_id, "started_at": started_at,
                     "max_solves": max_solves, "continuation": "withdrawn", "before": before,
-                    "held_before": held_before}
+                    "held_before": held_before, "revision": revision}
         if t["status"] != "cancelled":
             t["status"] = "waiting_job"
     runner._update(path, wait)
@@ -838,12 +832,18 @@ def engine_applied(path, ctx, step, loop):
     (H6), since the held setting is in the inputs the chain fingerprints."""
     from harness import runner
     from services import dirty_state, run_envelope, study_state
-    if study_state.edited_since(loop, revision=dirty_state.revision(ctx)) is not False:
+    now = dirty_state.revision(ctx)
+    if study_state.edited_since(loop, revision=now) is not False:
         return False
     tool = step["tool"]
     attr, star = _HELD[tool]
-    if not (loop.get("restore") == "final" and loop.get("status") == "met" and loop.get(star) is not None
-            and loop.get("base_restore_status") is not None):
+    held = loop.get("restore") == "final" and loop.get("status") == "met" and loop.get(star) is not None
+    # The loop's own hold re-captures its record's revision, which would hide an edit that landed
+    # before it: the counter may have moved only by that hold since the harness started the loop.
+    start = step["job"].get("revision")
+    if isinstance(start, int) and now != start + int(held):
+        return False
+    if not (held and loop.get("base_restore_status") is not None):
         return True
     run_envelope.settle(path, step["attempt_id"], ctx, step["job"].get("before"))
     envelope = run_envelope.read(path) or {}

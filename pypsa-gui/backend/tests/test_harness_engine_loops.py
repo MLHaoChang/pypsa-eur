@@ -22,7 +22,7 @@ import time
 
 import pytest
 from fastapi import HTTPException
-from harness import continuation, job_adapters, run_loops, runner as harness_runner
+from harness import continuation, job_adapters, runner as harness_runner
 from services import dirty_state, run_envelope, run_gates, run_profiles
 from services.adequacy import coupling, coupling_loop_runner, margin_loop_runner
 from services.pypsa_service import PyPSAService
@@ -148,9 +148,9 @@ class FakeLoop:
                 "stop_event": stop,
                 **({"probe_solves": 0} if study == "margin_loop" else {}),
             }
-            dirty_state.capture(
-                record
-            )  # the real loops capture their revision at start (LC-40b)
+            # The real loops capture their revision at start (LC-40b).
+            dirty_state.capture(record)
+            active = PyPSAService.get_active_context()
 
             def work():
                 while not (release.is_set() or stop.is_set()):
@@ -168,6 +168,12 @@ class FakeLoop:
                             **fields,
                         }
                     )
+                    if (
+                        record["restore"] == "final"
+                        and record["status"] == "met"
+                        and record.get("lever_star", record.get("eps_star")) is not None
+                    ):
+                        dirty_state.hold(record, active)  # the loop's own hold (LC-40)
 
             thread = threading.Thread(target=work, daemon=True, name=f"fake-{study}")
             record["thread"] = thread
@@ -415,14 +421,25 @@ def test_max_solves_is_the_rule_value_clamped_to_the_solves_left(
     assert body.max_solves == expected
 
 
-def test_the_clamp_never_exceeds_the_engine_cap(monkeypatch):
-    assert (
-        run_loops.engine_max_solves(
-            {"tool": "run_coupling_loop", "max_solves": coupling.MAX_LOOP_SOLVES},
-            solves_left=100,
-        )
-        == coupling.MAX_LOOP_SOLVES
+def test_the_clamp_never_exceeds_the_engine_cap(granted, ok, monkeypatch):
+    """The reservation the start runs through clamps to `MAX_LOOP_SOLVES`
+    even with solves to spare (kills the cap-dropped mutant)."""
+    with_rules(
+        monkeypatch,
+        engine_rule(tool="run_coupling_loop"),
+        solves=run_envelope.CAPS["solves"],
     )
+    _, path, _ = granted()
+    clamped, reason = run_envelope.reserve_engine(
+        path,
+        call_id="cap",
+        tool="run_coupling_loop",
+        rule="res.adequacy.margin",
+        max_solves=coupling.MAX_LOOP_SOLVES + 4,
+        overhead=1,
+        restore="base",
+    )
+    assert (clamped, reason) == (coupling.MAX_LOOP_SOLVES, None)
 
 
 def test_with_too_few_solves_left_the_loop_is_not_started_and_the_run_needs_the_user(
@@ -509,6 +526,59 @@ def test_restore_final_runs_when_the_grant_covers_it(granted, ok, loops, monkeyp
     record = go(harness_runner.Runner("a", agent_provider=Never()), path, task)
     [(_, body)] = loops.calls
     assert body.restore == "final" and record["run"]["status"] == "completed"
+
+
+def test_a_final_hold_joins_the_chain_with_a_ledger_row_naming_the_engine_rule(
+    granted, ok, loops, monkeypatch
+):
+    """H3, H6: a met loop's `restore="final"` hold is applied and its ledger
+    row names the engine rule, stage and loop (never `rule: null`)."""
+    with_rules(
+        monkeypatch,
+        engine_rule(restore="final"),
+        runs=[
+            {"tool": "solve_queue_enqueue"},
+            {"tool": "run_margin_loop", "restore": "final"},
+        ],
+    )
+    loops.finish_with(status="met", lever_star=0.2, solves_used=2, probe_solves=1)
+    task, path, _ = granted()
+    record = go(harness_runner.Runner("a", agent_provider=Never()), path, task)
+    assert record["run"]["status"] == "completed"
+    [row] = [r for r in record["run"].get("ledger", []) if r.get("loop") == "engine"]
+    assert (row["rule"], row["stage"], row["new"]) == (
+        "res.adequacy.margin",
+        "result_gate",
+        0.2,
+    )
+    assert row["target"]["attr"] == "reserve_margin"
+
+
+def test_a_user_edit_while_the_loop_runs_settles_not_applied(
+    granted, ok, loops, monkeypatch
+):
+    """H3: an edit landing mid-loop leaves the loop's result not the
+    project's: the run stops `inputs_changed`, nothing joins the ledger."""
+    with_rules(
+        monkeypatch,
+        engine_rule(restore="final"),
+        runs=[
+            {"tool": "solve_queue_enqueue"},
+            {"tool": "run_margin_loop", "restore": "final"},
+        ],
+    )
+    loops.hold()
+    task, path, _ = granted()
+    runner = harness_runner.Runner("a", agent_provider=Never())
+    _waiting(runner, path, task)
+    dirty_state.bump_revision(ctx())  # the user's edit while the loop runs
+    # The loop's own hold re-captures its record's revision after the edit.
+    loops.release_all(status="met", lever_star=0.2, solves_used=2, probe_solves=1)
+    record = go(runner, path, task)
+    assert record["run"]["status"] == "needs_user"
+    assert stage_of(record)["reason"] == "inputs_changed"
+    assert engine_steps(record)[0]["result"]["loop"]["applied"] is False
+    assert not [r for r in record["run"].get("ledger", []) if r.get("loop") == "engine"]
 
 
 def test_restore_defaults_to_base(granted, ok, loops, monkeypatch):
@@ -639,6 +709,12 @@ def test_a_goal_less_target_is_a_typed_refusal_and_the_run_needs_the_user(
     )
     [step] = [s for s in record["steps"] if s.get("engine")]
     assert step["status"] == "failed" and "target_lole_h" in step["error"]
+    # Condition 12: the gate fact reads no evidence, never a verdict.
+    env = run_gates.Env(task=record, ctx=ctx(), project=None, project_dir=None)
+    reading = run_gates._loop_converged(env, {"id": "res.adequacy.margin"})
+    assert (
+        isinstance(reading, run_gates.NoEvidence) and "target_lole_h" in reading.reason
+    )
 
 
 # ── Condition 6: the catch is the 422 set only (#1020) ──────────────────────
