@@ -1433,7 +1433,9 @@ capability in `harness/providers/research.py` (the only place that names the
 vendor's server tools). A profile's `research.gaps` mark what a run may look up
 (eh_site@1: the import tariff, stage `inputs`, EUR/MWh, energy charge excl.
 VAT). On entry to such a stage the runner runs one research turn
-(`research.due`; `_advance_run` holds the gate until it has run), and only when
+(`research.due`, checked on the tick after the stage's entry, before its
+steps run; a confirmed value's steps carry the stage's prefix, so its gate
+waits for them), and only when
 the run's granted envelope has `research.allowed`: a run granted without it
 never researches.
 
