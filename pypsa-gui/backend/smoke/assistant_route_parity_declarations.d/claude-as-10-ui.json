@@ -3,20 +3,20 @@
   {
    "method": "GET",
    "path": "/api/projects/{name}/intent-comparison",
-   "reason": "held-by-spec",
-   "issue": ".scratch/asset-sizing-loop/issues/19-intent-comparison-chat-tool.md"
+   "reason": "ui-pointer",
+   "decision": "AS19-POINTER-1"
   },
   {
    "method": "POST",
    "path": "/api/projects/{name}/intent-comparison",
-   "reason": "held-by-spec",
-   "issue": ".scratch/asset-sizing-loop/issues/19-intent-comparison-chat-tool.md"
+   "reason": "ui-pointer",
+   "decision": "AS19-POINTER-1"
   },
   {
    "method": "POST",
    "path": "/api/projects/{name}/intent-comparison/abort",
-   "reason": "held-by-spec",
-   "issue": ".scratch/asset-sizing-loop/issues/19-intent-comparison-chat-tool.md"
+   "reason": "ui-pointer",
+   "decision": "AS19-POINTER-1"
   }
  ]
 }
