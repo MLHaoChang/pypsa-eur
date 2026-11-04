@@ -210,9 +210,11 @@ def test_l1_ledger_row_carries_the_grant_fixed_source_and_the_round_is_told_its_
     [used] = [a for a in envelope["audit"] if a["event"] == "used" and a["tool"] == "apply_generated_profile"]
     assert row["source"] is not None
     assert row["source"] == run_envelope.source_digest(at_grant) == used["source"]
-    gaps = _gap_block(script.requests[0].messages[0]["content"]
-                      if isinstance(script.requests[0].messages[0]["content"], str)
-                      else json.dumps(script.requests[0].messages[0]["content"]))
+    texts = [m["content"] if isinstance(m["content"], str) else b.get("text", "")
+             for m in script.requests[0].messages
+             for b in ([{}] if isinstance(m["content"], str) else m["content"])]
+    [message] = [t for t in texts if "Data gaps you may fill" in t]
+    gaps = _gap_block(message)
     l1 = [g for g in gaps if g["name"] == "L1" and g["tool"] == "apply_generated_profile"]
     assert l1 == [{"tool": "apply_generated_profile", "component": "Load", "name": "L1", "attr": "p_set",
                    "source": {k: v for k, v in at_grant.items() if k != "identity"}}]
