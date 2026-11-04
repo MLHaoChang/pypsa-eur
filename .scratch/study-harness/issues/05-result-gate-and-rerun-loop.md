@@ -87,3 +87,7 @@ Q1: L2 goes into eh_site@1 in place (SH-04's L1 precedent, #1072), on condition 
 4. Not nested: an engine-driven rule is out of L2's failing set and starts no agent turn. A second engine rule in the same round waits for the first loop's terminal state; two loops never run at once on one ctx.
 5. `adequacy.loop.converged` reads the loop's own result record. A missing record, not-converged result or goal-less target (`loop_goal` → None) fails the rule, `needs_user`. `goal_sources` is copied as served.
 6. The native call goes through the chat_tools handler on the run's bound context, so the 422 set surfaces as a typed refusal; a fail-closed test at the catching site, with a mutant that catches the base class (#1020 rule).
+
+### C6f split (4 Nov, builder session_01G7qCuio3L298TQBsceFqor; GK B accepted)
+
+PR B (#1083) closes the gate side of C6f: a captured job is read as the project's only when `applied is True`, and `false`, missing or non-bool is no evidence. PR A carries the rest of C6f: on `applied: false` the run goes `needs_user` `inputs_changed`, the cycle record and evidence say so, and the solve counts as spent (tested there, with the HH-06 cycle records and the L2 budget).
