@@ -422,14 +422,19 @@ def test_a_missing_own_bump_refuses(eh, monkeypatch):
 def test_a_held_lock_at_pickup_refuses_with_no_write(eh, gap, monkeypatch):
     """(7) A lock timeout fails closed."""
     task, path = eh([edit_step(2)])
-    monkeypatch.setattr(run_envelope, "LOCK_TIMEOUT_SECONDS", 0.2)
-    target, release = ctx(), threading.Event()
+    monkeypatch.setattr(harness_runner, "LOCK_TIMEOUT_SECONDS", 0.2)
+    target, held, release = ctx(), threading.Event(), threading.Event()
 
     def hold():
         with target.mutation_lock:
+            held.set()
             release.wait(10)
     holder = threading.Thread(target=hold)
-    fired = gap(holder.start)
+
+    def start_holding():
+        holder.start()
+        assert held.wait(5)  # the other holder has the lock before the worker asks for it
+    fired = gap(start_holding)
     record = until(harness_runner.Runner("a"), path, task, stopped)
     release.set()
     holder.join(5)
@@ -445,3 +450,37 @@ def test_an_unreadable_identity_at_pickup_refuses_with_no_write(eh, gap, monkeyp
     assert fired and record["run"]["status"] == "paused", record["run"]
     assert record["run"]["reason"] == "envelope_fingerprint_unreadable"
     assert value("Generator", "G1", "p_nom_max") == 40.0 and envelope_of(path)["chain"] == []
+
+
+def test_a_receipt_settles_only_its_own_call(eh):
+    """(2) Another call's receipt (a late worker's) never settles this step."""
+    task, path = eh([])
+    target = ctx()
+    with target.mutation_lock:
+        before, reason = run_envelope.chain_head(path, target)
+        assert reason is None
+        target.network.generators.at["G1", "p_nom_max"] = 45.0
+        dirty_state.bump_revision(target)
+        late = {"call_id": "an-earlier-call", **run_envelope.identity(target)}
+    run_envelope.settle_own(path, "this-call", target, before, [late])
+    assert envelope_of(path)["chain"] == []
+    run_envelope.settle_own(path, "an-earlier-call", target, before, [late])
+    assert [link["after_change"] for link in envelope_of(path)["chain"]] == ["an-earlier-call"]
+
+
+def test_the_queued_solve_snapshots_its_config_under_the_held_locks(eh, monkeypatch):
+    """The enqueue's solver-config snapshot is taken inside the guarded write:
+    the identity compared is the one the job snapshots (issue 22 item 4)."""
+    from routers import solve_queue as solve_queue_router
+    original, seen = solve_queue_router._config_snapshot_for, []
+
+    def snapshot(*args, **kwargs):
+        seen.append((ctx().mutation_lock._is_owned(), ctx().solver_state_lock._is_owned()))
+        return original(*args, **kwargs)
+    monkeypatch.setattr(solve_queue_router, "_config_snapshot_for", snapshot)
+    project_id = PyPSAService.get_active_context().project_uuid
+    task, path = eh([{"id": "inputs.2", "tool": "solve_queue_enqueue", "args": {"project_id": str(project_id)}}])
+    until(harness_runner.Runner("a"), path, task, lambda r: bool(seen) or r["steps"][1]["status"] != "pending")
+    record = json.loads(path.read_text())
+    assert seen and seen[0] == (True, True), (seen, record["run"].get("status"), record["run"].get("reason"), [(s["tool"], s["status"]) for s in record["steps"]])
+

@@ -1011,14 +1011,11 @@ def _exact(ctx):
 def identity(ctx, exact=True):
     """The project's input identity, read under the caller's locks: the
     chain's fingerprint, the exact fingerprint (unless `exact=False`) and the
-    edit counter (`dirty_state.capture`, LC-40b). A part that cannot be read
-    is None."""
+    edit counter (`dirty_state.capture`, LC-40b). A fingerprint that cannot
+    be read is None."""
     from services import dirty_state
     found = {"fingerprint": _fingerprint(ctx), "exact": _exact(ctx) if exact else None}
-    try:
-        dirty_state.capture(found, ctx)  # no lock=: the caller holds the mutation lock
-    except Exception:  # noqa: BLE001
-        found["network_revision"] = None
+    dirty_state.capture(found, ctx)  # no lock=: the caller holds the mutation lock (one int read)
     return found
 
 
@@ -1098,7 +1095,15 @@ def settle(task_path, call_id, ctx, before, after=None):
 # ambient settle (the README's remaining limit).
 ATOMIC_TOOLS = frozenset({"update_component", "solve_queue_enqueue"})
 PICKUP_KIND = "envelope_pickup_refused"  # the literal `admitted_write` refuses with
-LOCK_TIMEOUT_SECONDS = 5.0
+
+
+def settle_own(task_path, call_id, ctx, before, receipts):
+    """A covered step's settle: from its own call's receipt only. None (a
+    refusal, or a worker past its deadline) adds no link, so the next step
+    reads drift (fail closed); another call's receipt never settles it."""
+    receipt = next((r for r in list(receipts) if r["call_id"] == call_id), None)
+    if receipt is not None:
+        settle(task_path, call_id, ctx, before, after=receipt)
 
 
 def _pickup(session, task_path, ctx, tool, expected, recheck):
@@ -1133,7 +1138,7 @@ def _pickup(session, task_path, ctx, tool, expected, recheck):
 
 
 @contextlib.contextmanager
-def admitted_write(session, task_path, ctx, *, call_id, step_id, tool, expected, recheck, receipts):
+def admitted_write(session, task_path, ctx, *, call_id, tool, expected, recheck, receipts):
     """An envelope-admitted step's write, on the worker thread that runs its
     handler (issue 22): take the project's `mutation_lock` then its
     `solver_state_lock` (today's order; per project, never process-global),
@@ -1143,17 +1148,22 @@ def admitted_write(session, task_path, ctx, *, call_id, step_id, tool, expected,
     raises before any write, and its audit row is written after the locks
     are released. The receipt names its call: a caller settles only from
     its own step's receipt."""
+    from harness.runner import LOCK_TIMEOUT_SECONDS
     reason = "locked"
     if ctx.mutation_lock.acquire(timeout=LOCK_TIMEOUT_SECONDS):
         try:
             if ctx.solver_state_lock.acquire(timeout=LOCK_TIMEOUT_SECONDS):
                 try:
-                    reason = _pickup(session, task_path, ctx, tool, expected, recheck)
+                    try:
+                        reason = _pickup(session, task_path, ctx, tool, expected, recheck)
+                    except Exception:  # noqa: BLE001 - an unreadable check refuses (fail closed)
+                        logger.warning("run envelope: pickup check for %s failed", tool, exc_info=True)
+                        reason = "fingerprint_unreadable"
                     if reason is None:
                         try:
                             yield
                         finally:
-                            receipts.append({"call_id": call_id, "step_id": step_id, **identity(ctx)})
+                            receipts.append({"call_id": call_id, **identity(ctx)})
                         return
                 finally:
                     ctx.solver_state_lock.release()

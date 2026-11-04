@@ -231,7 +231,7 @@ def agent_turn(path, ctx, session, *, tools, message, provider=None, recheck, sc
         call = calls.get(call_id)
         if call is None or tool not in run_envelope.ATOMIC_TOOLS or call.get("read") is None:
             return None
-        return run_envelope.admitted_write(session, path, ctx, call_id=call_id, step_id=None, tool=tool,
+        return run_envelope.admitted_write(session, path, ctx, call_id=call_id, tool=tool,
                                            expected=call["read"], receipts=receipts, recheck=recheck)
 
     usage_before = dict(session.usage_acc)
@@ -283,10 +283,8 @@ def agent_turn(path, ctx, session, *, tools, message, provider=None, recheck, sc
                 # The freshness chain's next link (issue 03): only from the chain's last link.
                 if call["tool"] not in run_envelope.ATOMIC_TOOLS:
                     run_envelope.settle(path, tid, ctx, call["before"])
-                else:  # issue 22: only this call's own receipt; none adds no link (fail closed)
-                    receipt = next((r for r in list(receipts) if r["call_id"] == tid), None)
-                    if receipt is not None:
-                        run_envelope.settle(path, tid, ctx, call["before"], after=receipt)
+                else:  # issue 22: only this call's own receipt
+                    run_envelope.settle_own(path, tid, ctx, call["before"], receipts)
     finally:
         locks.close()
         session.stage_tools = None
