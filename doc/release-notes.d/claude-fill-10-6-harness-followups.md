@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A study-harness run's data-gap fills (weather choice, Library tariff, generated load profile) now check the project is unchanged and write under one project lock, as size-cap edits already did; an edit landing just before such a fill stops the run instead of being taken in. Each change the run's input loop makes now names the failing gate rule that drove it.
