@@ -91,3 +91,31 @@ Q1: L2 goes into eh_site@1 in place (SH-04's L1 precedent, #1072), on condition 
 ### C6f split (4 Nov, builder session_01G7qCuio3L298TQBsceFqor; GK B accepted)
 
 PR B (#1083) closes the gate side of C6f: a captured job is read as the project's only when `applied is True`, and `false`, missing or non-bool is no evidence. PR A carries the rest of C6f: on `applied: false` the run goes `needs_user` `inputs_changed`, the cycle record and evidence say so, and the solve counts as spent (tested there, with the HH-06 cycle records and the L2 budget).
+
+## PR C plan verdicts (4 Nov, builder session_01G7qCunDhV74iECmHrF3cpp)
+
+### GK A (12): GO (GK B (21) agrees)
+
+Plan: an `engine` block on a result rule (fact `adequacy.loop.converged`); non-engine result rules first, engine rules out of L2's failing set and run one at a time by the harness (no agent turn); a follower settles the step from the loop's own record; the loop's solves charged to the run. eh_site@1 unchanged (option A).
+
+- Q1 (a). The closing re-solve runs on every path (`_restore_closing`); charge +1 whenever it ran, read from `base_restore_status` being set, not from `restore`. An aborted loop's closing re-solve is charged too.
+- Q2 (a). `restore: "final"` needs the granted envelope's `runs` to list the engine tool with `restore: "final"`; a profile block alone does not cover a solver-config write.
+- Q3 (a). One terminal-set constant in `services/adequacy/coupling.py` (on master: met, budget_exhausted, unreachable, aborted, failed). The AST scan covers values written to a record's "status" and the settled `status` variable, fails on any literal outside the set, and keeps the per-iterate statuses ("no_report", "infeasible") out by an explicit allow-list. Converged is `status == "met"` only. `_STUDY_TERMINAL` stays or includes the constant; never a fork.
+- Q4 (a). A failure in the final gate is needs_user with its failing rules; no L2 round, no engine rerun.
+- 7. Exactly one settle: follow, recover and cancel settle by compare-and-set on the step's state; solves charged once (two-settle test).
+- 8. Identity under `solver_state_lock` (#1038): follow and recover accept `_state[study]` only when its `started_at` and job handle equal the step's own; a stranger loop in the slot settles `lost`.
+- 9. Reservation: max_solves + overhead reserved under the envelope lock at start, replaced by the actual at settle; `lost` keeps the full reservation; reservations never exceed `run.budget.solves`.
+- 10. Cancel goes through the abort route's stop path; the test asserts the stop_event set and the step settled `aborted` with its closing solve charged.
+- 11. A start refused because the ctx is busy (409) is `engine_refused`, needs_user; never waits or retries.
+- 12. A loop_goal → None 422 at start is `engine_refused` with a detail naming the missing goal; the gate fact is NoEvidence.
+- Mutants at review: overhead dropped from the clamp; MAX_LOOP_SOLVES cap dropped; probe_solves dropped; closing re-solve charged only for "final"; restore-final coverage check removed; `except Exception` at the call site; converged = in terminal set; raising provider swapped for a no-op; settle CAS removed; started_at identity check removed. The PR body names the test that kills each.
+
+### GK B (21): harness conditions (part of the GO)
+
+- H1 (#1088, #1070). Every task or ledger write from `follow_engine` and `_recover` goes under `runner._file_lock` and checks this process holds the live lease; a stale process writes nothing (tested after a takeover).
+- H2 (#1058). The engine's deadline settles on its own timer; the boot sweep honours the replica pin and the lease.
+- H3 (#1083, #1001). Each engine hold or tuned-value write goes through envelope admission and the chain head (`admitted_write` / `settle_own`), re-captures the record's revision and bumps the network revision; a user edit landing mid-loop settles not-applied and is never folded into the chain.
+- H4 (#875). Admission refuses any `*project*` argument other than the run's own; the engine tool's args come only from the rule's `engine` block, never from model input (tested).
+- H5. The clamp and count tests show solves_used, probe_solves and the closing re-solve.
+- H6 (#1101 `_driving_rule`). Engine ledger rows name the engine rule as `rule`, with the engine's stage and loop; never `rule: null`.
+- H7 (#992). An engine on a private copy binds `PyPSAService.solving_context` around the transforms, the solve and the restore.
