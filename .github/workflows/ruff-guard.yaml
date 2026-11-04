@@ -29,7 +29,9 @@ jobs:
         fetch-depth: 0
 
     - name: Install ruff at the pre-commit pin
-      run: pip install "ruff==$(sed -n '/ruff-pre-commit/,/hooks:/s/^ *rev: v\(.*\)$/\1/p' .pre-commit-config.yaml)"
+      run: |
+        ver=$(sed -n '/ruff-pre-commit/,/hooks:/s/^ *rev: v\(.*\)$/\1/p' .pre-commit-config.yaml)
+        pip install "ruff==$ver"
 
     - name: Check new and already-clean backend files
       run: .github/scripts/ruff_guard.sh "${{ github.event.pull_request.base.sha }}"
