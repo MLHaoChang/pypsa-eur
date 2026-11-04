@@ -64,3 +64,26 @@ def test_b1_only_the_owner_on_its_project_by_a_card_while_waiting():
     assert _answer(running, req)[1] == "not_waiting_on_data"
     other = A.request([req], [TARIFF])
     assert _answer(task, other)[1] == "not_waiting_on_data"
+
+
+ENVELOPE = {"gaps": [{"tool": "set_weather_choice", "target": WEATHER["target"]},
+                     {"tool": "attach_tariff", "target": TARIFF["target"]}]}
+
+
+def test_a_gap_l1_filled_is_not_a_data_item():
+    items = A.data_items(ENVELOPE, {}, unset=lambda t: t["attr"] == "import_tariff_ref", present=lambda p: True)
+    assert [i["target"]["attr"] for i in items] == ["import_tariff_ref"]
+
+
+def test_a_missing_required_input_is_listed_absent_not_falsy():
+    profile = {"inputs": {"required": ["load_series", "zero_ok"]}}
+    held = {"zero_ok": 0}
+    items = A.data_items(None, profile, unset=lambda t: False, present=lambda p: p in held)
+    assert [i["param"] for i in items] == ["load_series"]
+
+
+def test_an_unrelated_failed_rule_is_never_a_data_item():
+    """Only gap targets and required inputs are items; a failed validation
+    rule (say `in.validate.errors`) stays in the needs_user notice."""
+    items = A.data_items(ENVELOPE, {"inputs": {"required": []}}, unset=lambda t: False, present=lambda p: True)
+    assert items == []

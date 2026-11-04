@@ -205,6 +205,16 @@ def test_the_run_starts_on_the_new_project_and_the_host_ends_handed_over(host):
     assert task["project_id"] == intent["project_id"] and task["owner_id"] == host["owner"]
     assert task["run"]["origin"] == {"project_id": "host-project", "task_id": "host-task"}
     assert task["run"]["intake"] == [{"param": "connection_mw", "value": 12.0}]
+    assert task.get("requirements") is None  # GK B (20) Q1: the new project has no thread
     ended = assistant_tasks.end_handed_over(host["task"], intent)
     assert (ended["status"], ended["run"]["reason"]) == ("completed", "handed_over")
     assert ended["run"]["handed_over"]["task_id"] == intent["task_id"]
+
+
+def test_requirements_moved_since_the_brief_refuse_the_grant_and_create_nothing(host):
+    def moved():
+        raise run_handover.HandoverError("task_requirements_moved", "The confirmed requirements changed.")
+    with pytest.raises(run_handover.HandoverError) as exc:
+        _grant(host, Start(), name="Moved", precheck=moved)
+    assert exc.value.kind == "task_requirements_moved"
+    assert _projects("Moved") == 0 and run_handover.read_intent(host["task"]) is None

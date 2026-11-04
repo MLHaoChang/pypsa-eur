@@ -438,3 +438,15 @@ section.
   - R7. Stage 2 (`run_envelope.py`, `assistant_tasks.py`, `run_loops.py`,
     `harness/README.md`) waits for #1079 and #1083 to merge, then master is
     merged in first.
+- 2026-11-04, GK B (20), builder questions: Q1 (a) GO: the run on the new
+  project carries no requirements record (the new project has no thread); the
+  host keeps its own, and the grant, under the hand-over lock, is refused when
+  the host's requirements moved since the brief, compared with the value the
+  brief recorded, not a live re-read (tests: moved -> refused, no project, no
+  ledger write; the new task has no requirements record). (b), reading another
+  project's thread, is refused (A3/A4). Q2 (a) GO: the data items of the one
+  notice are computed from the state when L1 ends: envelope `gaps` targets
+  still unset, plus profile `inputs.required` items still absent (absent, not
+  falsy). Any other failed rule stays in the needs_user notice and is never a
+  data item (tests: a gap L1 filled is not listed; a missing required item is;
+  an unrelated failed rule is not). A rule->gap mapping is its own ticket.

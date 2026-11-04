@@ -117,10 +117,12 @@ def _copy_uploads(host_name: str, host_dir: Path, row, upload_ids) -> list[dict]
 
 def hand_over(host_task_path: Path, *, owner_id: str, origin: dict, name: str | None, params: dict,
               digest: str, decision_id: str, host_name: str, host_dir: Path, uploads=(), start,
-              template: str = "eh_site", lock_timeout: float = LOCK_TIMEOUT) -> dict:
+              template: str = "eh_site", lock_timeout: float = LOCK_TIMEOUT, precheck=None) -> dict:
     """Create the project and start the run there, once. `start(row, ctx)`
     starts the run's task on the new project and returns its task id.
-    Returns the intent record (`state == "started"`)."""
+    `precheck()` runs under the lock before anything is written: it raises to
+    refuse the grant (the host's requirements moved since the brief, GK B (20)
+    Q1). Returns the intent record (`state == "started"`)."""
     from harness import durable
     try:
         lock = durable.file_lock(lock_path(host_task_path), timeout=lock_timeout,
@@ -132,19 +134,21 @@ def hand_over(host_task_path: Path, *, owner_id: str, origin: dict, name: str | 
     try:
         return _under_lock(host_task_path, owner_id=owner_id, origin=origin, name=name, params=params,
                            digest=digest, decision_id=decision_id, host_name=host_name, host_dir=host_dir,
-                           uploads=list(uploads), start=start, template=template)
+                           uploads=list(uploads), start=start, template=template, precheck=precheck)
     finally:
         lock.__exit__(None, None, None)
 
 
 def _under_lock(host_task_path, *, owner_id, origin, name, params, digest, decision_id, host_name, host_dir,
-                uploads, start, template):
+                uploads, start, template, precheck=None):
     from db.models import Project
     from db.session import SessionLocal
     from routers import projects as project_routes
     from services.study.runner import base_context
 
     intent = read_intent(host_task_path)
+    if precheck is not None and (intent is None or intent["state"] == "creating"):
+        precheck()  # refuses before any project or intent exists for a fresh grant
     if intent is not None and (intent["digest"], intent["decision_id"]) != (digest, decision_id):
         raise HandoverError("handover_conflict", "This plan already handed over with other inputs.",
                             project_id=intent.get("project_id"))

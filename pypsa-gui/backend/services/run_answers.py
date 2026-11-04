@@ -85,3 +85,22 @@ def record(req: dict, row: dict) -> bool:
     req["answered"] = sorted({tuple(a) for a in req.get("answered", [])} | {tuple(i) for i in row["items"]})
     req["answered"] = [list(a) for a in req["answered"]]
     return not open_items(req)
+
+
+def data_items(envelope: dict | None, profile: dict, *, unset, present) -> list[dict]:
+    """The items of the one data notice when L1 ends (GK B (20), Q2), read
+    from the state at that moment: each envelope `gaps` target `unset(target)`
+    still reports unset, and each profile `inputs.required` item `present(item)`
+    reports absent (absent, not falsy). Other failed rules are never items:
+    they stay in the needs_user notice."""
+    items, seen = [], set()
+    for gap in (envelope or {}).get("gaps", []):
+        t = gap["target"]
+        key = (t["component"], t["name"], t["attr"])
+        if key not in seen and unset(t):
+            seen.add(key)
+            items.append({"target": dict(t), "label": f"{t['name']} {t['attr']}", "tool": gap["tool"]})
+    for param in (profile.get("inputs") or {}).get("required", []):
+        if not present(param):
+            items.append({"param": param, "label": param})
+    return items
