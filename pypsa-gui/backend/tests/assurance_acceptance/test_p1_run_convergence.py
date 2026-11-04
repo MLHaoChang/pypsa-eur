@@ -179,3 +179,23 @@ def test_bool_counts_are_not_known_to_have_converged(pair):
     # the gate still must not read True as the integer 1.
     record = {"kind": "ac_pf", "metrics": counts(*pair)}
     assert run_evidence._convergence(record) == "not_known_to_have_converged"
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"ac_pf_converged_count": {"value": 8, "unit": "snapshots"}},
+        {"ac_pf_total_snapshots": {"value": 8, "unit": "snapshots"}},
+        counts(8, 8) | {"ac_pf_converged_count": {"value": 8, "unit": "MW"}},
+    ],
+    ids=["converged_only", "total_only", "wrong_unit"],
+)
+def test_another_kind_with_malformed_counts_is_not_known_to_have_converged(
+    baseline, harness, monkeypatch, extra
+):
+    publish_old(baseline, extra, kind="simulation")
+    assert run_evidence.checked_run_manifest("run-old")[1:] == (
+        None,
+        "not_known_to_have_converged",
+    )
+    refused_read(harness, monkeypatch, "this run is not known to have converged")
