@@ -3,7 +3,7 @@
 
 # 04 — Input gate loop L1: headless agent turns and the change ledger
 
-Status: in-progress
+Status: done (#1072, 07cc07a9b)
 Type: task
 Blocked by: 02, 03
 Gated: yes (GK B)
