@@ -480,26 +480,59 @@ def _write_row(c, host: Host):
     bytes' sha256 bound. The model names where the series is, never values."""
     load = c.get("load")
     param = f"{WRITE_PARAM}.{load}" if isinstance(load, str) and load else WRITE_PARAM
-    if c.get("write") not in WRITE_TOOLS or set(c) - _WRITE_KEYS or not all(
-        isinstance(c.get(k), str) and c[k] for k in ("upload_id", "time_col", "value_col", "load")
-    ) or (c.get("sheet") is not None and not isinstance(c["sheet"], str)):
-        return None, _gap(param, "source_not_accepted",
-                          "A load series names its upload, its time and value columns and the load.")
+    if (
+        c.get("write") not in WRITE_TOOLS
+        or set(c) - _WRITE_KEYS
+        or not all(
+            isinstance(c.get(k), str) and c[k]
+            for k in ("upload_id", "time_col", "value_col", "load")
+        )
+        or (c.get("sheet") is not None and not isinstance(c["sheet"], str))
+    ):
+        return None, _gap(
+            param,
+            "source_not_accepted",
+            "A load series names its upload, its time and value columns and the load.",
+        )
     try:
-        table = T.read_table(host.name, c["upload_id"], c.get("sheet"), project_dir=host.dir)
+        table = T.read_table(
+            host.name, c["upload_id"], c.get("sheet"), project_dir=host.dir
+        )
     except HTTPException as exc:
         return None, _reader_gap(param, exc)
-    missing_cols = [k for k in ("time_col", "value_col") if c[k] not in table["headers"]]
+    missing_cols = [
+        k for k in ("time_col", "value_col") if c[k] not in table["headers"]
+    ]
     if missing_cols:
-        return None, _gap(param, "column_not_found",
-                          f"The table has no column {', '.join(repr(c[k]) for k in missing_cols)}.")
+        return None, _gap(
+            param,
+            "column_not_found",
+            f"The table has no column {', '.join(repr(c[k]) for k in missing_cols)}.",
+        )
     src = table["source"]
-    args = {"file_id": src["upload_id"], "time_col": c["time_col"], "value_col": c["value_col"],
-            "load_name": c["load"], **({"sheet_name": c["sheet"]} if c.get("sheet") else {})}
-    source = {"kind": "table", "upload_id": src["upload_id"], "filename": src["filename"],
-              "sha256": src["sha256"], "sheet": src["sheet"], "cell": f"{c['time_col']}/{c['value_col']}"}
-    return {"param": param, "write": c["write"], "args": args, "value": dict(args), "unit": "",
-            "source": source}, None
+    args = {
+        "file_id": src["upload_id"],
+        "time_col": c["time_col"],
+        "value_col": c["value_col"],
+        "load_name": c["load"],
+        **({"sheet_name": c["sheet"]} if c.get("sheet") else {}),
+    }
+    source = {
+        "kind": "table",
+        "upload_id": src["upload_id"],
+        "filename": src["filename"],
+        "sha256": src["sha256"],
+        "sheet": src["sheet"],
+        "cell": f"{c['time_col']}/{c['value_col']}",
+    }
+    return {
+        "param": param,
+        "write": c["write"],
+        "args": args,
+        "value": dict(args),
+        "unit": "",
+        "source": source,
+    }, None
 
 
 def _source_kind(c) -> str | None:
@@ -779,9 +812,11 @@ def card_view(rows: list, profile: dict, template_check, entered=None) -> dict:
         {
             "index": i,
             "param": r["param"],
-            "label": (f"Load {r['args']['load_name']}: demand series (replaces its current demand)"
-                      if r.get("write")
-                      else (_field(fields, r["param"]) or {}).get("label", r["param"])),
+            "label": (
+                f"Load {r['args']['load_name']}: demand series (replaces its current demand)"
+                if r.get("write")
+                else (_field(fields, r["param"]) or {}).get("label", r["param"])
+            ),
             **({"write": r["write"]} if r.get("write") else {}),
             "value": r["value"],
             "unit": r["unit"],

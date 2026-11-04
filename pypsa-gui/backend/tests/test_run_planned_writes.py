@@ -74,7 +74,11 @@ def series(name="L1"):
 def upload(site):
     def add(data=CSV, filename="demand.csv"):
         return upload_service.add_upload(
-            PyPSAService.get_loaded_project(), data, filename, "text/csv", project_dir=site[1]
+            PyPSAService.get_loaded_project(),
+            data,
+            filename,
+            "text/csv",
+            project_dir=site[1],
         ).file_id
 
     return add
@@ -100,13 +104,18 @@ def planned(granted, upload, site, monkeypatch):
     monkeypatch.setitem(
         run_profiles.PROFILES,
         "eh_site@1",
-        {**run_profiles.EH_SITE, "envelope": {**run_profiles.EH_SITE["envelope"], "edits": []}},
+        {
+            **run_profiles.EH_SITE,
+            "envelope": {**run_profiles.EH_SITE["envelope"], "edits": []},
+        },
     )
 
     def go(file_id=None, load="L1", steps=None, pin=True, detach=True):
         file_id = file_id or upload()
         sha = hashlib.sha256(
-            upload_service.get_upload_bytes(PyPSAService.get_loaded_project(), file_id, project_dir=site[1])
+            upload_service.get_upload_bytes(
+                PyPSAService.get_loaded_project(), file_id, project_dir=site[1]
+            )
         ).hexdigest()
         row = {
             "write": TOOL,
@@ -115,7 +124,8 @@ def planned(granted, upload, site, monkeypatch):
             "status": "confirmed",
         }
         task, path, _ = granted(
-            steps=steps if steps is not None else [write_step(file_id, load=load)], detach=detach
+            steps=steps if steps is not None else [write_step(file_id, load=load)],
+            detach=detach,
         )
         run_envelope.plan_writes(path, [row])  # what the grant records
         if pin:
@@ -141,11 +151,18 @@ def accept(path):
 def carded(record):
     """The run waits for the user's card on the step: nothing admitted it."""
     run = record["run"]
-    return run["status"] == "needs_user" and (run.get("waiting") or {}).get("kind") == "card"
+    return (
+        run["status"] == "needs_user"
+        and (run.get("waiting") or {}).get("kind") == "card"
+    )
 
 
 def written(path):
-    return [a for a in envelope_of(path)["audit"] if a["event"] == "used" and a["tool"] == TOOL]
+    return [
+        a
+        for a in envelope_of(path)["audit"]
+        if a["event"] == "used" and a["tool"] == TOOL
+    ]
 
 
 def missed(path, kind):
@@ -160,14 +177,18 @@ def missed(path, kind):
 
 def test_the_card_binds_the_load_uid_the_upload_and_the_aligned_series(site, upload):
     file_id = upload()
-    uid = component_identity.uid_for(ctx().network, "Load", "L1")  # minted by the pin, never a card
+    uid = component_identity.uid_for(
+        ctx().network, "Load", "L1"
+    )  # minted by the pin, never a card
     card = edit_card.preview(TOOL, args(file_id))
     binding = card["binding"]
     assert card["complete"] and card["kind"] == "series_edit"
     assert binding["load_uid"] == uid
     assert binding["file_id"] == file_id and binding["value_col"] == "demand_mw"
     assert binding["upload_sha256"] == hashlib.sha256(CSV).hexdigest()
-    assert card["digest"] == edit_card._digest({k: v for k, v in card.items() if k != "digest"})
+    assert card["digest"] == edit_card._digest(
+        {k: v for k, v in card.items() if k != "digest"}
+    )
     assert series() is None  # a card writes nothing
 
 
@@ -267,14 +288,20 @@ def test_c1_a_write_never_pinned_at_creation_gets_a_card(planned):
 # ── C2: one network revision from plan check to write ─────────────────────
 
 
-def test_c2_a_revision_bump_between_the_plan_check_and_the_write_gets_a_card(planned, gap):
+def test_c2_a_revision_bump_between_the_plan_check_and_the_write_gets_a_card(
+    planned, gap
+):
     task, path, _ = planned()
     fired = gap(
-        lambda: writer(lambda n: n.generators.__setitem__("p_nom", 21.0)).join(), tool=TOOL
+        lambda: writer(lambda n: n.generators.__setitem__("p_nom", 21.0)).join(),
+        tool=TOOL,
     )
     record = until(harness_runner.Runner("a"), path, task, stopped)
     assert fired
-    assert record["run"]["status"] == "paused" and record["run"]["reason"] == "envelope_drift"
+    assert (
+        record["run"]["status"] == "paused"
+        and record["run"]["reason"] == "envelope_drift"
+    )
     assert series() is None  # nothing written under the lock
 
 
@@ -300,7 +327,9 @@ def test_c3_the_tool_writes_the_runs_project_not_the_foreground(site, upload):
 def test_c3_it_joins_the_bound_context_tools_and_no_sweep_or_study_tool_does():
     assert TOOL in run_profiles.BOUND_CONTEXT_TOOLS
     assert not run_profiles.BOUND_CONTEXT_TOOLS & run_envelope.NEVER_LISTED
-    assert not {t for t in run_profiles.BOUND_CONTEXT_TOOLS if "sweep" in t or "study" in t}
+    assert not {
+        t for t in run_profiles.BOUND_CONTEXT_TOOLS if "sweep" in t or "study" in t
+    }
     assert run_envelope.PLANNED_TOOLS == frozenset({TOOL})
 
 
@@ -311,7 +340,9 @@ def test_c3_an_agent_turn_never_gets_the_planned_write():
 # ── LOAD-SHAPE-1 ──────────────────────────────────────────────────────────
 
 
-def test_load_shape_1_no_series_is_written_without_a_confirmed_intake_row(granted, upload):
+def test_load_shape_1_no_series_is_written_without_a_confirmed_intake_row(
+    granted, upload
+):
     file_id = upload()
     task, path, _ = granted(steps=[write_step(file_id)])  # no planned row on the grant
     record = until(harness_runner.Runner("a"), path, task, stopped)
@@ -321,9 +352,17 @@ def test_load_shape_1_no_series_is_written_without_a_confirmed_intake_row(grante
 def test_load_shape_1_a_struck_or_proposed_row_is_never_planned(granted, upload):
     file_id = upload()
     task, path, _ = granted(steps=[write_step(file_id)])
-    sha = hashlib.sha256(CSV).hexdigest()  # a complete row: only its status keeps it out
-    row = {"write": TOOL, "args": args(file_id), "source": {"kind": "table", "upload_id": file_id, "sha256": sha}}
-    run_envelope.plan_writes(path, [dict(row, status="struck"), dict(row, status="proposed")])
+    sha = hashlib.sha256(
+        CSV
+    ).hexdigest()  # a complete row: only its status keeps it out
+    row = {
+        "write": TOOL,
+        "args": args(file_id),
+        "source": {"kind": "table", "upload_id": file_id, "sha256": sha},
+    }
+    run_envelope.plan_writes(
+        path, [dict(row, status="struck"), dict(row, status="proposed")]
+    )
     assert envelope_of(path).get("planned", []) == []
     run_envelope.plan_writes(path, [dict(row, status="confirmed")])
     assert [p["status"] for p in envelope_of(path)["planned"]] == ["granted"]
@@ -343,17 +382,26 @@ def test_q2_the_shared_helper_writes_byte_identical_p_set(site, upload):
 
 
 @pytest.mark.parametrize("loop_name", ["l1", "l2"])
-def test_g1_an_agent_call_with_the_planned_args_is_refused_and_cards(planned, loop_name):
+def test_g1_an_agent_call_with_the_planned_args_is_refused_and_cards(
+    planned, loop_name
+):
     task, path, file_id = planned(steps=[], detach=False)
     with on_run(task, path) as run:
-        run.loop_scope = {"loop": loop_name, "round": 1, "changes": 2, "tunable": frozenset()}
+        run.loop_scope = {
+            "loop": loop_name,
+            "round": 1,
+            "changes": 2,
+            "tunable": frozenset(),
+        }
         got = ask(run, TOOL, args(file_id))
         assert got is None  # the card path
     assert missed(path, "outside_entry")
     assert not written(path) and series() is None
 
 
-def test_g2_upload_bytes_swapped_after_admission_write_nothing_and_card(planned, site, monkeypatch):
+def test_g2_upload_bytes_swapped_after_admission_write_nothing_and_card(
+    planned, site, monkeypatch
+):
     task, path, file_id = planned()
     real_series = chat_tools._demand_series
     swaps = []
@@ -383,7 +431,11 @@ def test_g2_at_the_write_itself_with_the_card_recheck_off(planned, site, monkeyp
     real_bytes = upload_service.get_upload_bytes
 
     def swapped(*a, **k):  # the bytes the write re-reads under the lock
-        return OTHER_CSV if run_envelope.PLANNED_WRITE.get() is not None else real_bytes(*a, **k)
+        return (
+            OTHER_CSV
+            if run_envelope.PLANNED_WRITE.get() is not None
+            else real_bytes(*a, **k)
+        )
 
     monkeypatch.setattr(upload_service, "get_upload_bytes", swapped)
     record = until(harness_runner.Runner("a"), path, task, stopped)
@@ -408,13 +460,19 @@ def test_g2_a_series_other_than_the_pinned_one_is_not_written(planned, monkeypat
     assert series() is None
 
 
-def test_g2_a_load_whose_uid_changed_after_admission_is_not_written(planned, monkeypatch):
+def test_g2_a_load_whose_uid_changed_after_admission_is_not_written(
+    planned, monkeypatch
+):
     task, path, _ = planned()
     monkeypatch.setattr(edit_card, "require_current", lambda *a, **k: None)
     real_get = component_identity.get
 
     def moved(network, cls, name):
-        return "another-uid" if run_envelope.PLANNED_WRITE.get() is not None else real_get(network, cls, name)
+        return (
+            "another-uid"
+            if run_envelope.PLANNED_WRITE.get() is not None
+            else real_get(network, cls, name)
+        )
 
     monkeypatch.setattr(component_identity, "get", moved)
     record = until(harness_runner.Runner("a"), path, task, stopped)
@@ -422,7 +480,9 @@ def test_g2_a_load_whose_uid_changed_after_admission_is_not_written(planned, mon
     assert series() is None
 
 
-def test_g10_a_replaced_series_that_moved_inside_the_handler_is_not_written(planned, monkeypatch):
+def test_g10_a_replaced_series_that_moved_inside_the_handler_is_not_written(
+    planned, monkeypatch
+):
     """G10: the series the write replaces is re-read under the locks; one that
     moved after admission (here inside the handler) is not the grant's card."""
     task, path, _ = planned()
@@ -443,11 +503,16 @@ def test_g10_a_replaced_series_that_moved_inside_the_handler_is_not_written(plan
 # ── G9: the destructive tier is lifted only by the pinned-card match ──────
 
 
-@pytest.mark.parametrize("tool, call, tier", [
-    ("cluster_network", {"n_clusters": 1}, "destructive"),
-    ("delete_component", {"component_class": "Load", "name": "L1"}, "delete"),
-])
-def test_g9_another_destructive_tool_is_refused_under_a_planned_envelope(planned, tool, call, tier):
+@pytest.mark.parametrize(
+    "tool, call, tier",
+    [
+        ("cluster_network", {"n_clusters": 1}, "destructive"),
+        ("delete_component", {"component_class": "Load", "name": "L1"}, "delete"),
+    ],
+)
+def test_g9_another_destructive_tool_is_refused_under_a_planned_envelope(
+    planned, tool, call, tier
+):
     task, path, _ = planned(steps=[], detach=False)
     with on_run(task, path) as run:
         assert ask(run, tool, call) is None
@@ -459,8 +524,14 @@ def test_g9_another_destructive_tool_is_refused_under_a_planned_envelope(planned
 @pytest.mark.parametrize("miss", ["other_args", "used_pin", "digest"])
 def test_g9_a_call_that_misses_its_pin_is_refused_as_destructive(planned, miss):
     task, path, file_id = planned(steps=[], detach=False)
-    call, kind = args(file_id), {"other_args": "outside_entry", "used_pin": "planned_used",
-                                 "digest": "plan_changed"}[miss]
+    call, kind = (
+        args(file_id),
+        {
+            "other_args": "outside_entry",
+            "used_pin": "planned_used",
+            "digest": "plan_changed",
+        }[miss],
+    )
     if miss == "other_args":
         call = dict(call, value_col="other")
     elif miss == "used_pin":
@@ -474,15 +545,25 @@ def test_g9_a_call_that_misses_its_pin_is_refused_as_destructive(planned, miss):
     assert missed(path, kind) and not written(path) and series() is None
 
 
-def test_q1_a_card_whose_binding_is_not_the_granted_row_is_never_pinned(granted, upload, site, monkeypatch):
+def test_q1_a_card_whose_binding_is_not_the_granted_row_is_never_pinned(
+    granted, upload, site, monkeypatch
+):
     monkeypatch.setitem(
-        run_profiles.PROFILES, "eh_site@1",
-        {**run_profiles.EH_SITE, "envelope": {**run_profiles.EH_SITE["envelope"], "edits": []}},
+        run_profiles.PROFILES,
+        "eh_site@1",
+        {
+            **run_profiles.EH_SITE,
+            "envelope": {**run_profiles.EH_SITE["envelope"], "edits": []},
+        },
     )
     file_id = upload()
     task, path, _ = granted(steps=[write_step(file_id)])
-    row = {"write": TOOL, "args": args(file_id), "status": "confirmed",
-           "source": {"kind": "table", "upload_id": file_id, "sha256": "0" * 64}}  # not these bytes
+    row = {
+        "write": TOOL,
+        "args": args(file_id),
+        "status": "confirmed",
+        "source": {"kind": "table", "upload_id": file_id, "sha256": "0" * 64},
+    }  # not these bytes
     run_envelope.plan_writes(path, [row])
     run_envelope.pin_planned(path, ctx())
     entry = envelope_of(path)["planned"][0]
@@ -494,7 +575,10 @@ def test_q1_a_card_whose_binding_is_not_the_granted_row_is_never_pinned(granted,
 def test_g3_a_parse_failure_at_the_pin_cards_and_never_pins(planned, upload):
     bad = upload(b"time,demand_mw\nnot-a-time,x\n", "bad.csv")
     task, path, _ = planned(bad)
-    assert all(p.get("pinned") is None and p.get("carded") for p in envelope_of(path)["planned"])
+    assert all(
+        p.get("pinned") is None and p.get("carded")
+        for p in envelope_of(path)["planned"]
+    )
     record = until(harness_runner.Runner("a"), path, task, stopped)
     assert carded(record) and not written(path) and series() is None
 
@@ -503,7 +587,9 @@ def test_g3_a_parse_failure_at_admission_cards(planned, monkeypatch):
     task, path, _ = planned()
 
     def broken(context, call_args):
-        raise HTTPException(400, {"error_kind": "value_column_parse_error", "message": "x"})
+        raise HTTPException(
+            400, {"error_kind": "value_column_parse_error", "message": "x"}
+        )
 
     monkeypatch.setattr(chat_tools, "_demand_series", broken)
     record = until(harness_runner.Runner("a"), path, task, stopped)
@@ -517,7 +603,9 @@ def test_g3_a_uid_lookup_failure_at_admission_cards(planned, monkeypatch):
     assert carded(record) and not written(path) and series() is None
 
 
-def test_g3_a_check_that_raises_at_admission_is_refused_not_admitted(planned, monkeypatch):
+def test_g3_a_check_that_raises_at_admission_is_refused_not_admitted(
+    planned, monkeypatch
+):
     """Admission alone (the write-time check is not reached): a check that
     throws is a refusal, never an admission."""
     task, path, file_id = planned(steps=[], detach=False)
@@ -525,18 +613,32 @@ def test_g3_a_check_that_raises_at_admission_is_refused_not_admitted(planned, mo
     def boom(*a, **k):
         raise RuntimeError("identity store unreadable")
 
-    card = edit_card.preview(TOOL, args(file_id))  # the pinned card, computed before the break
+    card = edit_card.preview(
+        TOOL, args(file_id)
+    )  # the pinned card, computed before the break
     with on_run(task, path) as run:
         monkeypatch.setattr(component_identity, "get", boom)
-        assert run_envelope.admit(run, call_id="call-1", tool=TOOL, args=args(file_id),
-                                  tier="destructive", external=None, edit_card=card) is None
+        assert (
+            run_envelope.admit(
+                run,
+                call_id="call-1",
+                tool=TOOL,
+                args=args(file_id),
+                tier="destructive",
+                external=None,
+                edit_card=card,
+            )
+            is None
+        )
     assert missed(path, "plan_changed") and not written(path)
 
 
 def test_g3_an_incomplete_card_with_the_pinned_digest_is_refused(planned, monkeypatch):
     task, path, file_id = planned(steps=[], detach=False)
     real = edit_card.preview
-    monkeypatch.setattr(edit_card, "preview", lambda tool, a: dict(real(tool, a), complete=False))
+    monkeypatch.setattr(
+        edit_card, "preview", lambda tool, a: dict(real(tool, a), complete=False)
+    )
     with on_run(task, path) as run:
         assert ask(run, TOOL, args(file_id)) is None
     assert missed(path, "plan_changed") and not written(path)
@@ -549,7 +651,10 @@ def test_g4_a_stale_process_neither_pins_nor_consumes(planned, monkeypatch):
     monkeypatch.setattr(run_envelope, "_lease_live", lambda *a, **k: False)
     run_envelope.pin_planned(path, ctx())
     assert all("pinned" not in p for p in envelope_of(path)["planned"])
-    assert run_envelope.consume_planned(path, call_id="call-stale", args=args(file_id)) is False
+    assert (
+        run_envelope.consume_planned(path, call_id="call-stale", args=args(file_id))
+        is False
+    )
     assert not any(p.get("used_by") for p in envelope_of(path)["planned"])
 
 
@@ -565,16 +670,26 @@ def test_g4_after_a_takeover_the_old_runner_does_not_consume(planned):
 
     task, path, file_id = planned()
     record = json.loads(path.read_text())
-    record["run"]["runner"] = {"lease_owner": "a", "lease_until": time.time() - 1, "restarts": 0,
-                               "restart_times": []}  # runner a's lease lapsed
+    record["run"]["runner"] = {
+        "lease_owner": "a",
+        "lease_until": time.time() - 1,
+        "restarts": 0,
+        "restart_times": [],
+    }  # runner a's lease lapsed
     path.write_text(json.dumps(record))
-    assert not run_envelope.consume_planned(path, call_id="call-a", args=args(file_id), holder="a")
+    assert not run_envelope.consume_planned(
+        path, call_id="call-a", args=args(file_id), holder="a"
+    )
     record = until(harness_runner.Runner("b"), path, task, stopped)  # b takes over
     assert record["run"]["runner"]["lease_owner"] == "b"
     assert len(written(path)) == 1 and series() == [7.5, 9.0]
     assert envelope_of(path)["planned"][0]["used_by"].startswith("run-")
-    assert not run_envelope.consume_planned(path, call_id="call-a2", args=args(file_id), holder="a")
-    assert not run_envelope.consume_planned(path, call_id="call-b2", args=args(file_id), holder="b")  # once
+    assert not run_envelope.consume_planned(
+        path, call_id="call-a2", args=args(file_id), holder="a"
+    )
+    assert not run_envelope.consume_planned(
+        path, call_id="call-b2", args=args(file_id), holder="b"
+    )  # once
 
 
 @pytest.mark.parametrize("kind", ["plan_changed", "uid_changed"])
@@ -583,11 +698,17 @@ def test_g5_a_typed_mismatch_cards_at_the_catching_site(planned, kind, monkeypat
     through (or turned it into an admission) fails here."""
     task, path, file_id = planned(steps=[], detach=False)
     error = run_envelope.PlannedMismatch.kinds[kind]
-    monkeypatch.setattr(run_envelope, "_check_planned", lambda *a, **k: (_ for _ in ()).throw(error(kind)))
+    monkeypatch.setattr(
+        run_envelope,
+        "_check_planned",
+        lambda *a, **k: (_ for _ in ()).throw(error(kind)),
+    )
     with on_run(task, path) as run:
         assert ask(run, TOOL, args(file_id)) is None
     assert missed(path, kind)
-    assert error is not run_envelope.PlannedMismatch and issubclass(error, run_envelope.PlannedMismatch)
+    assert error is not run_envelope.PlannedMismatch and issubclass(
+        error, run_envelope.PlannedMismatch
+    )
     assert series() is None
 
 
@@ -601,11 +722,16 @@ def test_g6_the_pin_reads_the_runs_project_not_the_foreground(planned):
     assert pinned["uid"] == component_identity.uid_for(run_ctx.network, "Load", "L1")
 
 
-def test_g6_with_no_run_context_the_created_project_is_never_pinned_on_the_foreground(planned, monkeypatch):
+def test_g6_with_no_run_context_the_created_project_is_never_pinned_on_the_foreground(
+    planned, monkeypatch
+):
     from services import assistant_tasks
+
     task, path, _ = planned(pin=False)
     pinned = []
-    monkeypatch.setattr(run_envelope, "pin_planned", lambda p, c, holder=None: pinned.append(c))
+    monkeypatch.setattr(
+        run_envelope, "pin_planned", lambda p, c, holder=None: pinned.append(c)
+    )
     assert assistant_tasks.RUN_CONTEXT.get() is None
     assistant_tasks._pin_planned(path)
     assert pinned == []
@@ -636,11 +762,15 @@ def test_g7_the_write_goes_to_the_bound_contexts_user_ts(site, upload):
 def _site_csv():
     from project_templates import eh_site
 
-    lines = ["time,demand_mw"] + [f"{t},{1.0 + (i % 24) / 10}" for i, t in enumerate(eh_site.SNAPSHOTS)]
+    lines = ["time,demand_mw"] + [
+        f"{t},{1.0 + (i % 24) / 10}" for i, t in enumerate(eh_site.SNAPSHOTS)
+    ]
     return ("\n".join(lines) + "\n").encode()
 
 
-def test_an_intake_load_series_is_carded_granted_and_pinned_on_the_created_project(host, session, site):
+def test_an_intake_load_series_is_carded_granted_and_pinned_on_the_created_project(
+    host, session, site
+):
     import uuid
 
     from services import run_intake
@@ -648,39 +778,79 @@ def test_an_intake_load_series_is_carded_granted_and_pinned_on_the_created_proje
 
     owner_ctx = ctx()
     file_id = upload_service.add_upload(
-        PyPSAService.get_loaded_project(), _site_csv(), "site-demand.csv", "text/csv", project_dir=host["dir"]
+        PyPSAService.get_loaded_project(),
+        _site_csv(),
+        "site-demand.csv",
+        "text/csv",
+        project_dir=host["dir"],
     ).file_id
-    write = {"write": TOOL, "upload_id": file_id, "time_col": "time", "value_col": "demand_mw",
-             "load": "general_load"}
+    write = {
+        "write": TOOL,
+        "upload_id": file_id,
+        "time_col": "time",
+        "value_col": "demand_mw",
+        "load": "general_load",
+    }
     name = f"Intake {uuid.uuid4().hex[:6]}"
     view = _start(host, name, host["citations"] + [write])
     intake = view["run"]["intake"]
     shown = [r for r in intake["card"]["rows"] if r.get("write")]
-    assert len(shown) == 1 and shown[0]["label"] == "Load general_load: demand series (replaces its current demand)"
+    assert (
+        len(shown) == 1
+        and shown[0]["label"]
+        == "Load general_load: demand series (replaces its current demand)"
+    )
     assert shown[0]["from_document"] and "site-demand.csv" in shown[0]["source"]
     rows = json.loads(task_path(site[1], view).read_text())["run"]["intake"]["rows"]
-    struck = run_intake.strike(rows, next(i for i, r in enumerate(rows) if r.get("write")))
-    assert run_intake.digest(struck) != intake["digest"]  # the digest binds the write row
-    assert run_intake.params(rows) == run_intake.params([r for r in rows if not r.get("write")])
-    run_envelope.decide(session, view["task_id"], "unattended", intake_digest=intake["digest"])
+    struck = run_intake.strike(
+        rows, next(i for i, r in enumerate(rows) if r.get("write"))
+    )
+    assert (
+        run_intake.digest(struck) != intake["digest"]
+    )  # the digest binds the write row
+    assert run_intake.params(rows) == run_intake.params(
+        [r for r in rows if not r.get("write")]
+    )
+    run_envelope.decide(
+        session, view["task_id"], "unattended", intake_digest=intake["digest"]
+    )
     intent = run_handover.read_intent(task_path(site[1], view))
     new_path, _ = _new_task(intent)
     planned = envelope_of(new_path)["planned"]
-    assert [(p["tool"], p["status"], p["args"]["load_name"]) for p in planned] == [(TOOL, "pinned", "general_load")]
+    assert [(p["tool"], p["status"], p["args"]["load_name"]) for p in planned] == [
+        (TOOL, "pinned", "general_load")
+    ]
     assert planned[0]["upload_sha256"] == hashlib.sha256(_site_csv()).hexdigest()
-    assert run_envelope.planned_steps(new_path, "inputs")[0]["args"] == planned[0]["args"]
-    assert ctx() is owner_ctx  # the pin bound the created project, never the foreground (G6)
+    assert (
+        run_envelope.planned_steps(new_path, "inputs")[0]["args"] == planned[0]["args"]
+    )
+    assert (
+        ctx() is owner_ctx
+    )  # the pin bound the created project, never the foreground (G6)
 
 
 def test_q3_a_profile_requiring_a_load_series_asks_for_it_until_an_intake_row_gives_it():
     from services import run_intake
 
     profile = {**run_profiles.EH_SITE, "inputs": {"required": [run_intake.WRITE_PARAM]}}
-    row = {"param": "load_series.L1", "write": TOOL, "args": args("u1"), "value": args("u1"), "unit": "",
-           "source": {"kind": "table", "upload_id": "u1", "sha256": "x"}, "status": "proposed"}
+    row = {
+        "param": "load_series.L1",
+        "write": TOOL,
+        "args": args("u1"),
+        "value": args("u1"),
+        "unit": "",
+        "source": {"kind": "table", "upload_id": "u1", "sha256": "x"},
+        "status": "proposed",
+    }
     asked = [i["param"] for i in run_intake.missing(profile, [], [])]
     assert run_intake.WRITE_PARAM in asked
-    assert run_intake.WRITE_PARAM not in [i["param"] for i in run_intake.missing(profile, [row], [])]
+    assert run_intake.WRITE_PARAM not in [
+        i["param"] for i in run_intake.missing(profile, [row], [])
+    ]
     assert run_intake.WRITE_PARAM in [
-        i["param"] for i in run_intake.missing(profile, [dict(row, status="struck")], [])]
-    assert run_profiles.EH_SITE["inputs"]["required"] == []  # eh_site asks for none (Q3)
+        i["param"]
+        for i in run_intake.missing(profile, [dict(row, status="struck")], [])
+    ]
+    assert (
+        run_profiles.EH_SITE["inputs"]["required"] == []
+    )  # eh_site asks for none (Q3)
