@@ -16,6 +16,7 @@ import time
 import zipfile
 from dataclasses import asdict
 from datetime import datetime, timezone
+from typing import Any, NamedTuple
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
@@ -1744,6 +1745,56 @@ def create_from_template(
     # refusal advises then fails FOREVER, because the committed row makes
     # every attempt 409 with "already exists" instead.
     PyPSAService.refuse_if_study_running("create a project from a template")
+    made = _materialise_from_template(template_id, name, params, db, user)
+    _created_project, dest = made.project, made.dest
+    from services import project_registry
+
+    # Reset + load, mirroring import_bundle / load_project.
+    from services import dirty_state, undo_service
+    with PyPSAService.get_lock():
+        # A different project: a fresh context (own undo, counter 0, no result
+        # state of the project being left — P33b gate B-1). The clears apply
+        # to the new context, never to the resident one being left.
+        PyPSAService.reset_network()
+        undo_service.clear()
+        dirty_state.clear()  # memory and disk now agree
+        n = PyPSAService.get_network()
+        with PyPSAService.get_netcdf_io_lock():
+            PyPSAService.import_network_from_netcdf(n, dest / "network.nc")
+        # Bind identity atomically with the swap (see load_project rationale).
+        project_registry.bind_context(
+            PyPSAService.get_active_context(), _created_project
+        )
+    _register_created_context()
+
+    # Persist the pointer, mirroring activate_project. Written AFTER the swap
+    # succeeds so a failed create does not leave the session pointing at a
+    # project it never reached. Without this, `resolve_for_session` reads the
+    # stale pointer on the next request and silently reverts the switch.
+    if session is not None:
+        active_project.set_active_project(db, session, _created_project)
+
+    return _finish_created_project(made, db, user, session)
+
+
+class _Materialised(NamedTuple):
+    project: Any
+    target_name: str
+    dest: pathlib.Path
+    template_id: str
+    template_series: list
+
+
+def _materialise_from_template(template_id: str, name: str | None, params: dict | None,
+                               db: DBSession, user: User | None, *,
+                               project_id=None) -> _Materialised:
+    """The checked project row and its files for `create_from_template`, with
+    no context swap: every check the route makes for the user (template and
+    params, the workspace's create permission and name rules via
+    `project_registry.create_root`, the Library series) runs here. The route
+    then loads it into the live network; the study harness's hand-over
+    (`services.run_handover`, issue 21) opens it in its own context instead
+    and never moves the foreground project (GK B A3)."""
     # The KEY from the registry, not the string off the URL. `in` already
     # decided this is one of a fixed set, so the two are equal by construction
     # — but only one of them is a value this module owns, and it is the one
@@ -1845,7 +1896,7 @@ def create_from_template(
     # creating org's Library BEFORE the project row exists, so a bad series refuses the
     # create and leaves nothing behind (minting is idempotent on content).
     template_series, series_refs = _mint_template_series(db, user, template_key, planned)
-    _created_project = project_registry.create_root(db, user, requested)
+    _created_project = project_registry.create_root(db, user, requested, project_id=project_id)
     target_name = _created_project.name
     dest = project_registry.ensure_project_dir(_created_project)
     # `copy2` opens the destination for writing before it reads the source, so
@@ -1887,31 +1938,16 @@ def create_from_template(
         meta[META_KEY] = dc[1]
         atomic_write_text(meta_path, json.dumps(meta, indent=2, sort_keys=True) + "\n")
 
-    # Reset + load, mirroring import_bundle / load_project.
-    from services import dirty_state, undo_service
-    with PyPSAService.get_lock():
-        # A different project: a fresh context (own undo, counter 0, no result
-        # state of the project being left — P33b gate B-1). The clears apply
-        # to the new context, never to the resident one being left.
-        PyPSAService.reset_network()
-        undo_service.clear()
-        dirty_state.clear()  # memory and disk now agree
-        n = PyPSAService.get_network()
-        with PyPSAService.get_netcdf_io_lock():
-            PyPSAService.import_network_from_netcdf(n, dest / "network.nc")
-        # Bind identity atomically with the swap (see load_project rationale).
-        project_registry.bind_context(
-            PyPSAService.get_active_context(), _created_project
-        )
-    _register_created_context()
+    return _Materialised(_created_project, target_name, dest, template_id, template_series)
 
-    # Persist the pointer, mirroring activate_project. Written AFTER the swap
-    # succeeds so a failed create does not leave the session pointing at a
-    # project it never reached. Without this, `resolve_for_session` reads the
-    # stale pointer on the next request and silently reverts the switch.
-    if session is not None:
-        active_project.set_active_project(db, session, _created_project)
 
+def _finish_created_project(made: _Materialised, db: DBSession, user: User | None,
+                            session: SessionRow | None) -> dict:
+    """The created project's solver state, metadata and template bindings, on
+    the context the caller has made active (the route: the live one after its
+    swap; the hand-over: the new project's own, request-scoped). With no
+    `session` nothing moves a session's active-project pointer."""
+    _created_project, target_name, dest, template_id, template_series = made
     # Templates ship without user_ts — reset it; solver_config is the
     # template's own when it ships one (P19 EH templates set VOLL), else the
     # defaults, so no stale state from a previously-open project leaks in.
