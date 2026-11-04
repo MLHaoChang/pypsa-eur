@@ -9,6 +9,7 @@ import { useUIStore } from '../store/uiStore'
 import { openSiteAnchor, withReturnFrom } from '../layout/flowNavigation'
 import type { SceneEntry } from '../api/flow'
 import { useSiteCreation } from './siteCreation'
+import { PRIMARY_DISABLED } from './buttonStyles'
 
 export const LABEL_CREATE = 'Create 3D site'
 export const LABEL_SAVE_FIRST = 'Save project first'
@@ -63,7 +64,7 @@ export default function SiteEntryAction() {
         <span data-testid="site-entry-label" className="text-[12px] font-semibold text-text">{entry.label}</span>
       ) : (
         <button type="button" data-testid="site-entry-action" onClick={run} disabled={!entry.enabled}
-          className="self-start px-3 py-1 rounded bg-accent text-white text-[12px] font-semibold hover:bg-accent/90 disabled:opacity-50">
+          className={`self-start px-3 py-1 rounded bg-accent text-white text-[12px] font-semibold hover:bg-accent/90 ${PRIMARY_DISABLED}`}>
           {entry.label}
         </button>
       )}

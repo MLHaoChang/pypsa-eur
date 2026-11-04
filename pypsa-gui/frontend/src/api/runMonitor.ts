@@ -54,6 +54,8 @@ export interface RunMonitorView {
       cost_eur: { used: number; limit: number; unmetered: boolean }
       solves?: { used: number; of: number }
       expires_at?: string
+      /** The send ledger (issue 24): sends that count at their upper bound because their usage was lost. */
+      reserved?: { unit: 'eur' | 'output_tokens' | 'total_tokens'; spent: number; open: number; at_bound: number }
     }
     unattended: { available: boolean; reason?: UnattendedBlock }
     email: { available: boolean }
