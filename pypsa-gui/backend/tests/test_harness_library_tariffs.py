@@ -10,16 +10,12 @@ ref without one grants no tariff (fail closed).
 
 import pytest
 from services import chat_tools, run_envelope
-from services.library import common
 
 H1, H2, H3 = "a" * 64, "b" * 64, "c" * 64
 
 
 def shipped():
-    return [
-        common.ref("tariff", name).model_dump(mode="json")
-        for name in common.names("tariff")
-    ]
+    return run_envelope.shipped_ref_dumps("tariff")
 
 
 @pytest.fixture
