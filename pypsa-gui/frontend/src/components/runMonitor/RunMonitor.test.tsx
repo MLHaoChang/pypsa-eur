@@ -57,6 +57,15 @@ describe('RunMonitor', () => {
     expect((await screen.findByTestId('run-loop')).textContent).toBe('Round 2 of 6')
   })
 
+  it('says when the spend counts a model call at its upper bound (issue 24)', async () => {
+    show('lost_send')
+    expect((await screen.findByTestId('run-budgets')).textContent).toBe(
+      'Cost €0.42 of €5.00 · Includes the upper bound of 1 model call with no usage report')
+    cleanup()
+    show('gate_pass')
+    expect((await screen.findByTestId('run-budgets')).textContent).not.toMatch(/upper bound/)
+  })
+
   it('Guided and Expert show the same card; Expert only adds a closed Details', async () => {
     show('gate_fail', 'guided')
     await screen.findByTestId('run-failure')

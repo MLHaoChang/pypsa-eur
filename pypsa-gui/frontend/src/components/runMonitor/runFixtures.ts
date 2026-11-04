@@ -98,6 +98,8 @@ export const STATES: Record<string, RunMonitorView> = {
     envelope: GRANTED, monitor: { ...MONITOR, budgets: GRANTED_BUDGETS } }),
   over_budget: view({ status: 'needs_review', run: run('solve', { status: 'needs_user', reason: 'budget', stages: stages('solve') }),
     monitor: { ...MONITOR, budgets: { cost_eur: { used: 5.01, limit: 5, unmetered: false } } } }),
+  lost_send: view({ status: 'needs_review', run: run('input_gate', { status: 'needs_user', reason: 'uncertain', stages: stages('input_gate') }),
+    monitor: { ...MONITOR, budgets: { ...MONITOR.budgets, reserved: { unit: 'eur', spent: 2.81, open: 0, at_bound: 1 } } } }),
   solves_used_up: view({ status: 'needs_review', run: run('solve', { status: 'needs_user', reason: 'envelope_exhausted', stages: stages('solve') }),
     envelope: { ...GRANTED, state: 'exhausted', used: 6 }, monitor: { ...MONITOR, budgets: { ...GRANTED_BUDGETS, solves: { used: 6, of: 6 } } } }),
   expired: view({ status: 'needs_review', run: run('solve', { status: 'paused', reason: 'envelope_expired', stages: stages('solve') }),

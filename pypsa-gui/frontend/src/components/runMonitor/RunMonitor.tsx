@@ -56,6 +56,10 @@ function Budgets({ view }: { view: RunMonitorView }) {
   const parts = [b.cost_eur.unmetered ? 'Cost could not be counted'
     : b.cost_eur.limit > 0 ? `Cost ${fmtCurrency(b.cost_eur.used)} of ${fmtCurrency(b.cost_eur.limit)}`
     : `Cost ${fmtCurrency(b.cost_eur.used)} · no cost cap`]
+  if (b.reserved && b.reserved.at_bound > 0) {
+    const n = b.reserved.at_bound
+    parts.push(`Includes the upper bound of ${n} model call${n === 1 ? '' : 's'} with no usage report`)
+  }
   if (b.solves) parts.push(`Solves ${b.solves.used} of ${b.solves.of}`)
   if (b.expires_at && !paused) parts.push(`Expires ${when(b.expires_at)}`)
   return <div data-testid="run-budgets">{parts.join(' · ')}</div>
