@@ -208,8 +208,8 @@ def _update(
         return change(task)
 
     with runner._file_lock(task_path):
-        runner._update(task_path, guarded)
-    return held["ok"]
+        task = runner._update(task_path, guarded)
+    return task is not None and held["ok"]  # a task or run gone writes nothing
 
 
 def _research_block(task):

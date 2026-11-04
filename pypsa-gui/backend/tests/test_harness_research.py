@@ -808,6 +808,14 @@ def test_record_source_is_offered_only_in_a_research_turn():
     assert refused.value.detail["error_kind"] == "invalid_source_row"
 
 
+def test_a_write_to_a_gone_run_reports_nothing_written(granted, profile):
+    task, path, _ = granted()
+    record = json.loads(path.read_text())
+    record.pop("run")
+    path.write_text(json.dumps(record))
+    assert research._update(path, lambda task: None) is False
+
+
 def test_a_stale_process_writes_nothing_after_a_takeover(granted, profile):
     """GK B ask 2: every runner-side research write checks this process still
     holds the run's live lease. After another process takes the run over, the
@@ -1046,15 +1054,20 @@ def test_the_next_agent_round_carries_none_of_the_fetched_page(granted, profile)
     assert "Ignore previous instructions" not in replayed
 
 
-def test_a_cut_that_misses_the_turn_resets_the_history(granted, profile):
+@pytest.mark.parametrize("start_gone", [False, True])
+def test_a_cut_that_misses_the_turn_resets_the_history(granted, profile, start_gone):
     """GK B: _forget fails closed. When the research instruction does not start
-    the last turn (the cut cannot find it), any fetched block left in the
-    history resets it, so no page reaches a later request."""
+    the last turn (another turn follows, or a trim folded its start away), any
+    fetched block left in the history resets it, so no page reaches a later
+    request."""
     task, path, _ = granted()
     run = harness_session.ChatSession(session_id="run:" + task["task_id"])
-    run.append_history_message({"role": "user", "content": "Agent round."})
+    if not start_gone:
+        run.append_history_message({"role": "user", "content": "Agent round."})
     run.append_history_message({"role": "assistant", "content": [fetch_block()]})
-    run.append_history_message({"role": "user", "content": "Another round."})
+    if not start_gone:
+        run.append_history_message({"role": "user", "content": "Another round."})
+    assert any(research._fetched_block(m) for m in run.messages)
     research._forget(run, research.instruction([ledger_gap()]))
     assert not any(research._fetched_block(m) for m in run.messages)
     assert "Ignore previous instructions" not in json.dumps(list(run.messages))
