@@ -217,6 +217,15 @@ describe('RunMonitor', () => {
     expect(await screen.findByTestId('run-research-step')).toBeTruthy()
   })
 
+  it('research: two values left say "stay as the template has them"', async () => {
+    const two = structuredClone(STATES.research_cap)
+    two.monitor.research!.steps[0].gaps = ['import_tariff', 'import_tariff']
+    vi.mocked(api.getRun).mockResolvedValue(two)
+    useUIStore.setState({ uiMode: 'guided' })
+    render(<AssistantResultCard result={START} disabled={false} onRequest={vi.fn()} />)
+    expect((await screen.findByTestId('run-research-step')).textContent).toContain('stay as the template has them.')
+  })
+
   it('research: a step stopped at its cost cap names the value left as the template has it', async () => {
     show('research_cap')
     expect((await screen.findByTestId('run-research-step')).textContent)

@@ -78,7 +78,8 @@ function CurrentStage({ stage, view }: { stage: RunStage; view: RunMonitorView }
     {stage.loop && <div data-testid="run-loop">Round {stage.loop.round} of {stage.loop.of}</div>}
     {(view.monitor.research?.steps ?? []).filter(s => s.stage === stage.stage && RESEARCH_STOP[s.status] && s.gaps.length)
       .map(s => <div key={s.status} data-testid="run-research-step" data-status={s.status}>
-        {RESEARCH_STOP[s.status]}: {s.gaps.map(gapWords).join(', ')} stays as the template has it.</div>)}
+        {RESEARCH_STOP[s.status]}: {s.gaps.map(gapWords).join(', ')} {s.gaps.length === 1
+          ? 'stays as the template has it' : 'stay as the template has them'}.</div>)}
     <Budgets view={view} />
   </div>
 }
@@ -112,7 +113,7 @@ function ResearchCard({ row, others, busy, onDecide }: {
       <a href={row.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline break-all"
         data-testid="run-research-source">{row.title || row.url}</a>
       <blockquote data-testid="run-research-quote" className="my-1 border-l-2 border-border pl-2 italic">“{row.quote}”</blockquote>
-    </> : <div data-testid="run-research-unverified" className="text-amber-400">Unverified source: not used</div>}
+    </> : <div data-testid="run-research-unverified" className="text-warn">Unverified source: not used</div>}
     {others > 0 && <div className="text-muted" data-testid="run-research-others">
       {others} other {others === 1 ? 'source' : 'sources'} for this value: using this one rejects {others === 1 ? 'it' : 'them'}.</div>}
     <div className="mt-1 flex gap-3">
@@ -121,7 +122,8 @@ function ResearchCard({ row, others, busy, onDecide }: {
       <button type="button" disabled={busy} data-testid="run-research-reject"
         className="text-muted hover:text-text disabled:opacity-40" onClick={() => onDecide('rejected')}>Reject</button>
     </div>
-    {usable && <p className="text-muted">Using it adds it to the Library and attaches it, each on its own card.</p>}
+    {usable && <p className="text-muted">Using it adds it to the Library and attaches it to the
+      {' '}{gapWords(row.gap).toLowerCase()}, each on its own card.</p>}
   </div>
 }
 
