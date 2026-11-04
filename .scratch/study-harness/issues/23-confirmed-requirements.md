@@ -46,3 +46,14 @@ Predicates on solver outputs, finance or reliability (a requirement on `p_nom_op
 #970 builds a parent schema before LV-09 landed and does not mention the `budgets` block LV-09 added to the same thread (`reserve_budget` / `settle_budget`); share one write path and one `checkpoint_rev` with it. Its "HH-01 must come first" dependency is dropped: this issue needs only the agent loop (04), because the edit check runs at dispatch, before 22's lock-level check.
 
 ## Comments
+
+**GK B plan verdict (4 Nov): GO WITH CHANGES.** Interactive violation: refused with no card (`requirement_violated`); run violation: card path, counted as a refusal, never a silent write. Conditions, checked in the PR:
+
+1. Every writer of `p_nom` / `p_nom_max` / `max_hours` on Generator / StorageUnit is listed in the PR body (execution-tier, workflow, optimised-capacity, undo/restore included), each shown to emit card rows `evaluate` checks or to be refused while a bound covers its target. Fail closed: a `complete: False` card or a row-less write touching a bounded component is a violation. One non-`update_component` writer is tested.
+2. preserve_horizon's tool set is listed the same way (writers of snapshots, snapshot weightings, investment-period weightings, incl. aggregation/clustering, templates, restore); a writer left off is a bypass.
+3. A `scalar_bound` binds to the component's identity (`services/component_identity`): a rename keeps it, rename-then-edit is refused (tested), a deleted target marks it stale, never dropped.
+4. Retire/replace goes through the same confirmed card; the model never retires alone; an envelope never admits `set_requirement`; a denied retire is tested.
+5. Only activate/retire bump the rev `_stale` compares; `mark_evaluation` never pauses a run (tested).
+6. `harness/loop.py` overlaps SH-22's `run_in_worker` seam; tell that builder which functions this PR touches.
+7. The per-turn addendum frames requirements as data, never as instructions; logged, out of the cached system prompt.
+8. Test 1 written first and shown red on master in the PR body; run the durable-conversation, edit-card, run-loops, route-policy, route-parity and control-matrix checks.
