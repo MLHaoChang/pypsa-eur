@@ -521,6 +521,18 @@ def test_g9_another_destructive_tool_is_refused_under_a_planned_envelope(
     assert list(ctx().network.loads.index) == ["L1"]
 
 
+def test_g9_a_planned_tool_also_listed_as_a_run_is_still_matched_by_its_pin(planned):
+    """The tier pass-through for PLANNED_TOOLS reaches only `_match_planned`:
+    an envelope that also lists the tool as a run does not admit an unpinned call."""
+    task, path, file_id = planned(steps=[], detach=False, pin=False)
+    envelope = envelope_of(path)
+    envelope["runs"].append({"tool": TOOL})
+    run_envelope.path_for(path).write_text(json.dumps(envelope))
+    with on_run(task, path) as run:
+        assert ask(run, TOOL, args(file_id)) is None
+    assert missed(path, "plan_changed") and not written(path) and series() is None
+
+
 @pytest.mark.parametrize("miss", ["other_args", "used_pin", "digest"])
 def test_g9_a_call_that_misses_its_pin_is_refused_as_destructive(planned, miss):
     task, path, file_id = planned(steps=[], detach=False)
@@ -543,6 +555,31 @@ def test_g9_a_call_that_misses_its_pin_is_refused_as_destructive(planned, miss):
     with on_run(task, path) as run:
         assert ask(run, TOOL, call) is None
     assert missed(path, kind) and not written(path) and series() is None
+
+
+@pytest.mark.parametrize("broken", ["incomplete", "no_replaces_sha256"])
+def test_g3_a_card_at_the_pin_that_is_incomplete_or_lacks_a_hash_is_carded(
+    planned, monkeypatch, broken
+):
+    """The pin checks the card itself (`_binding_matches`): an incomplete card,
+    or one whose binding lacks the replaced series' hash, never pins."""
+    real = run_envelope._card
+
+    def card(context, tool, call_args):
+        out = real(context, tool, call_args)
+        if broken == "incomplete":
+            return dict(out, complete=False)
+        return dict(
+            out,
+            binding={k: v for k, v in out["binding"].items() if k != "replaces_sha256"},
+        )
+
+    monkeypatch.setattr(run_envelope, "_card", card)
+    task, path, _ = planned()
+    assert [(p["status"], p.get("carded")) for p in envelope_of(path)["planned"]] == [
+        ("carded", "plan_changed")
+    ]
+    assert all("pinned" not in p for p in envelope_of(path)["planned"])
 
 
 def test_q1_a_card_whose_binding_is_not_the_granted_row_is_never_pinned(

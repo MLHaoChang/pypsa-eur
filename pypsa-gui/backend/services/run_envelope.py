@@ -1049,19 +1049,20 @@ def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx
         return reason
     if _names_another_project(args, ctx):
         return "wrong_project"
+    if tool in PLANNED_TOOLS:
+        reason = _match_planned(envelope, tool, args, edit_card, ctx, note)
+        if reason is not None and tier == "destructive":
+            # G9: the tier exemption lives only in `_match_planned`'s success
+            # path, before any run or gap branch; a call that misses its pin is
+            # refused as destructive.
+            note["planned_miss"] = reason
+            return "destructive"
+        return reason
     if is_run:
         kinds = [r.get("kind") for r in envelope["runs"] if r["tool"] == tool]
         return None if None in kinds or (isinstance(args, dict) and args.get("kind") in kinds) else "outside_entry"
     if tool in GAP_PREPARE or (tool in GAP_TARGETS and not any(e["tool"] == tool for e in envelope["edits"])):
         return _match_gap(envelope, tool, args, edit_card, ctx, note)
-    if tool in PLANNED_TOOLS:
-        reason = _match_planned(envelope, tool, args, edit_card, ctx, note)
-        if reason is not None and tier == "destructive":
-            # G9: the tier exemption lives only in `_match_planned`'s success
-            # path; a call that misses its pin is refused as destructive.
-            note["planned_miss"] = reason
-            return "destructive"
-        return reason
     if not any(e["tool"] == tool for e in envelope["edits"]):
         return "unlisted_tool"
     reason = _match_edit(envelope, tool, edit_card)
