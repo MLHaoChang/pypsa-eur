@@ -52,6 +52,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import contextlib
 import pathlib
 import queue
 import threading
@@ -137,6 +138,11 @@ def check_kind(kind: str) -> None:
         raise ValueError(f"{UNKNOWN_KIND_CONDITION}: {kind!r} is not one of {KINDS}")
 
 
+def _capture_public(record: dict) -> dict:
+    from services import solve_capture
+    return solve_capture.public(record)
+
+
 @dataclass
 class SolveJob:
     """One queued solve of a single saved project."""
@@ -201,6 +207,10 @@ class SolveJob:
     # the same project. Deliberately NOT in `to_public` — it is an object, not
     # JSON, and the two log endpoints reach it through `get_log_queue`.
     log_queue: Any = None
+    # HH-10 (study harness 05): the captured input an envelope-admitted solve
+    # solves, `{id, dir, identity, files, exact, network_revision}`, and once
+    # settled `applied` (and `reason` when not). None for every other job.
+    capture: dict | None = None
 
     def to_public(self, position: int | None) -> dict:
         """
@@ -221,6 +231,7 @@ class SolveJob:
             "enqueued_at": self.enqueued_at,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
+            **({"capture": _capture_public(self.capture)} if self.capture is not None else {}),
         }
 
 
@@ -308,6 +319,7 @@ class SolveQueue:
         solver_config_json: str | None = None,
         enqueued_by_user_id: Any = None,
         kind: str = KIND_SOLVE,
+        capture: dict | None = None,
     ) -> tuple[SolveJob, bool]:
         """
         Enqueue `project_id` UNLESS it already has a queued or running job.
@@ -388,6 +400,7 @@ class SolveQueue:
                 kind=kind,
                 enqueued_at=time.time(),
                 enqueued_by_user_id=enqueued_by_user_id,
+                capture=capture,
             )
             self._jobs[jid] = job
             self._order.append(jid)
@@ -873,6 +886,7 @@ class SolveQueue:
                 solver_config_json=row.get("solver_config"),
                 kind=row.get("kind") or KIND_SOLVE,
                 enqueued_at=_row_epoch(row.get("enqueued_at")),
+                capture=row.get("capture"),
             )
             self._jobs[job.id] = job
             self._order.append(job.id)
@@ -1197,6 +1211,61 @@ class SolveQueue:
             log_queue.put(None)
             self._finish(job, status, error=error)
 
+    def _apply_capture(self, job: SolveJob, solved, config, manifest, final_status) -> None:
+        """HH-10 write-back (C6e, C6f): the captured solve's result becomes the
+        project's only when, under the project's locks, its full identity
+        (exact input fingerprint, edit counter, sidecar sha256) still equals
+        the capture's. Otherwise nothing is written: the user's edit stays and
+        the job records `applied: false`, so its result is never read as the
+        project's."""
+        from routers.projects import _hydrate_context_from_disk, _save_context
+        from services import solve_capture
+        from services.pypsa_service import PyPSAService
+
+        def settle(applied, reason=None):
+            with self._lock:
+                job.capture = {**job.capture, "applied": applied, **({"reason": reason} if reason else {})}
+
+        if final_status != "completed":
+            settle(False, "not_completed")
+            return
+        project_dir = pathlib.Path(job.storage_dir)
+        with contextlib.ExitStack() as stack:
+            key = job.project_key
+            resident = stack.enter_context(PyPSAService.hydrate_or_adopt(key)) if key else None
+            if resident is not None:
+                stack.enter_context(resident.mutation_lock)
+                stack.enter_context(resident.solver_state_lock)
+                probe = resident
+            else:
+                probe = PyPSAService.build_context()
+                _hydrate_context_from_disk(probe, project_dir, job.project_id)
+            now = solve_capture.current(probe, project_dir)
+            if not solve_capture.unchanged(manifest, now):
+                settle(False, "inputs_changed")
+                return
+            # The solved context was hydrated from the capture; it saves into
+            # the project's own directory, so `_save_context` keeps that
+            # directory's settings table and study-fork owner keys.
+            solved.storage_dir = str(project_dir)
+            try:
+                _save_context(solved, job.project_id, expect=job.project_id,
+                              solver_config_override=config,
+                              persist_user_ts=True, storage_dir=project_dir)
+            except BaseException:
+                settle(False, "write_back_failed")  # never read as the project's
+                raise
+            if resident is not None:
+                _hydrate_context_from_disk(resident, project_dir, job.project_id)
+            # Sidecar writers (campus and island routes, the island-cuts apply
+            # loop, grid limits) hold no context lock, so one may have landed
+            # between the compare and the save: the result is then not the
+            # project's (GK B, 4 Nov).
+            if solve_capture.sidecar_hashes(project_dir) != now["sidecars"]:
+                settle(False, "inputs_changed")
+                return
+            settle(True)
+
     def _run_solve_job(self, job: SolveJob) -> None:
         """
         Solve one queued project on ITS OWN ProjectContext and persist the
@@ -1310,6 +1379,7 @@ class SolveQueue:
             # build, exactly like the other three cold paths.
             # Lock order: hydrate -> _registry_lock -> solve_queue._lock.
             key = job.project_key
+            manifest = None
 
             def _hydrate_fresh():
                 fresh = PyPSAService.build_context()
@@ -1324,7 +1394,16 @@ class SolveQueue:
                 _hydrate_context_from_disk(fresh, src, project_id)
                 return fresh
 
-            if key is None:
+            if job.capture is not None:
+                # HH-10 (study harness 05): solve the captured input on a private
+                # context, never the resident one and never registered; its
+                # island and template files are the capture's (`storage_dir`).
+                from services import solve_capture
+                manifest = solve_capture.verify(job.capture)
+                ctx = PyPSAService.build_context()
+                _hydrate_context_from_disk(ctx, pathlib.Path(job.capture["dir"]), project_id)
+                ctx.storage_dir = job.capture["dir"]
+            elif key is None:
                 # A legacy or hand-made job carries no registry identity: there
                 # is nothing to adopt and no key to register under. Unchanged
                 # behaviour for those, which `_may_see` already treats as
@@ -1501,7 +1580,9 @@ class SolveQueue:
                 #    foreground). network.nc carries the LOPF dispatch;
                 #    results_state.pkl carries AC-PF + lost-load (built from
                 #    ctx.solver_state). expect=project_id arms the identity guard.
-                if final_status == "completed":
+                if manifest is not None:
+                    self._apply_capture(job, ctx, config, manifest, final_status)
+                elif final_status == "completed":
                     _save_context(
                         ctx, project_id, expect=project_id,
                         # THIS job's config — the snapshot it actually solved
@@ -1519,6 +1600,9 @@ class SolveQueue:
             final_status = "failed"
             error = f"{type(exc).__name__}: {exc}"
             condition = "queue_error"
+            from services import solve_capture as _capture
+            if isinstance(exc, _capture.CaptureMismatch):
+                condition = _capture.MISMATCH  # HH-10 (C6a): nothing was solved
             logger.exception("solve_queue: job %s (%r) failed", job.id, project_id)
             try:
                 if ctx is not None and ctx.solver_state.get("thread") is me:
@@ -1585,6 +1669,10 @@ class SolveQueue:
                     solve_job_store.record_status(job)
                 except Exception:  # noqa: BLE001 — bookkeeping must not fail a solve
                     logger.exception("solve_queue: could not persist job %s", job.id)
+                if job.capture is not None:
+                    # C6g: settled and recorded; the record stays on the job.
+                    from services import solve_capture
+                    solve_capture.remove(job.capture)
                 # Close the SSE log stream for this job so the foreground consumer's
                 # `done` event fires (run_simulation pushes None on its own success
                 # path, but the abort/error paths above may not have).
