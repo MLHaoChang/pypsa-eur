@@ -27,7 +27,7 @@ import type { TargetClass } from '../api/siteScene'
 import { heightEvidenceWords, HEIGHT_MAX_M, greenfieldFromBuilding, osmSourcesInside } from './nativeSite'
 import { fromLocal } from './geo'
 import type { ContextBuilding, Site } from './types'
-import { PRIMARY_BUTTON, SECONDARY_DISABLED } from './buttonStyles'
+import { FIELD_DISABLED, PRIMARY_BUTTON, SECONDARY_BUTTON, SECONDARY_DISABLED } from './buttonStyles'
 
 const PARTS: { id: SitePart; label: string }[] = [
   { id: 'map', label: 'Map' }, { id: 'generate', label: 'Generate' }, { id: 'model', label: 'Model' }, { id: 'results', label: 'Results' },
@@ -96,7 +96,8 @@ function GreenfieldRow({ g, onChange, onRemove, disabled }: {
       <NumberField label="Depth" unit="m" value={g.depth} onChange={f('depth')} error={sideErr(g.depth)} width="w-16" disabled={disabled} />
       <NumberField label="Height" unit="m" value={g.height} onChange={f('height')} error={heightErr} width="w-16" disabled={disabled} testId={`greenfield-${g.id}-height`} />
       <NumberField label="Heading" unit="°" value={g.heading} onChange={f('heading')} error={numErr(g.heading)} width="w-16" disabled={disabled} />
-      {onRemove && <button type="button" onClick={onRemove} disabled={disabled} className="mb-1 text-[11px] text-muted hover:text-accent">Remove</button>}
+      {onRemove && <button type="button" onClick={onRemove} disabled={disabled} data-testid={`greenfield-${g.id}-remove`}
+        className={`mb-1 text-[11px] text-muted hover:text-accent disabled:hover:text-muted ${FIELD_DISABLED}`}>Remove</button>}
     </div>
   )
 }
@@ -263,7 +264,7 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
                 <button type="button" data-testid="scene-apply" onClick={() => void apply()} disabled={!canWrite}
                   className={PRIMARY_BUTTON}>Apply</button>
                 <button type="button" data-testid="scene-discard" onClick={() => void discard()} disabled={busy}
-                  className="px-3 py-1 rounded border border-border text-text hover:border-accent">Discard</button>
+                  className={SECONDARY_BUTTON}>Discard</button>
               </div>
             </div>
           ) : selected && enabled ? (
