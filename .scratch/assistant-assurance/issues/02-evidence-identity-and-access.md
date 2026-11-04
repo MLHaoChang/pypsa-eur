@@ -341,7 +341,15 @@ Audit against master `30417e89e` and the test matrix (sent to the coordinator be
   - `partly_converged`: fewer snapshots converged than ran ("this run is partly converged (k of n snapshots converged)"; compare names the run or the baseline).
   - `not_known_to_have_converged`: an `ac_pf` run without both counts as integers in `snapshots` with `0 < converged == total`, or any run that records only one count or a malformed pair.
 
-  A fully converged run still checks. Unchecked reads are unchanged. Tests: `tests/assurance_acceptance/test_p1_run_convergence.py`, 14 cases, red before the change except the converged control.
+  The check runs after the MAC check, so the reason a user reads always comes from a sealed manifest. Tampered counts are refused as `unverified` (GK B (21) A1). A fully converged run still checks, and unchecked reads are unchanged.
+
+  Tests: `tests/assurance_acceptance/test_p1_run_convergence.py`, 24 cases, all red before the change except the converged control. Each of these mutants turns at least one test red (GK B (21) A2, GK B (22)):
+  - `<` → `>`;
+  - `type is int` → `isinstance`, which accepts bool;
+  - `0 <` → `0 <=` on the total;
+  - the ac_pf branch dropped;
+  - the other-kind count branch dropped;
+  - the unit not checked.
 - **A1.2: ACK CSRF and owner.** A wrong (not missing) CSRF token on `POST /api/chat/ui-ack` gets 403 `csrf_token_invalid` before the ACK is read. Another member of the same org gets 409 `ui_ack_mismatch` and reads the action as an unknown id. Neither changes the stored `submitted` outcome, and the owner's ACK still completes it. Tests: `tests/assurance_acceptance/test_p1_ack_access.py`, 2 cases. The behaviour already held, so these are coverage only.
 
 #### Remaining, each with its blocker
