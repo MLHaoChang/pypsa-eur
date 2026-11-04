@@ -3,10 +3,10 @@
 
 # P1: authorized evidence identity and validity
 
-Status: in progress — list_components page evidence (A1.1, current-input part of A1.3, A1.5 page capture) in #806; A1.2 revocation cases executable (#813), REVOKE-TOCTOU closed (#818); get_timeseries steps (#826); A1.4 integrity cases executable (#840); A1.4-RETAINED closed by a record MAC (#850); A1.3 run as-of cases executable (#856); A1.5 complete-source load aggregate (#864); A1.6/A1.7 aggregate handler validity (#868) and emissions/lost-load null-not-zero (#879); one aggregate gap helper and pilot POLICY_VERSION (2026-10-29 slice); run manifest MAC (run-evidence PR 1, #930); checked run sections and compare deltas (run-evidence PR 2, #941); REPLAY (#898), shared fact builder (#916), SERIES-WINDOW (#927), REVOKE-KIND (#929) and frontend assurance_state (#946) merged; every listed P1 slice is merged (see "Remaining P1 slices")
-Progress: Authorized retained evidence, ACL rechecks shipped; status says whole phase open, displayed-data revision proof pending
+Status: done-pending-blockers (owner decision AA02-SCOPE-1, 2026-11-04) — every A1.1–A1.7 case this issue owns is executable and passing; the remaining items each name their blocker under "2026-11-04" below. Earlier slices: list_components page evidence (A1.1, current-input part of A1.3, A1.5 page capture) in #806; A1.2 revocation (#813, #818); get_timeseries steps (#826); A1.4 integrity (#840, #850); A1.3 run as-of (#856); A1.5 load aggregate (#864); A1.6/A1.7 aggregate validity (#868, #879); run manifest MAC (#930); run sections and compare (#941); REPLAY (#898), fact builder (#916), SERIES-WINDOW (#927), REVOKE-KIND (#929), frontend assurance_state (#946); partly converged AC PF and ACK access (2026-11-04)
+Progress: Authorized retained evidence, ACL rechecks, run convergence gate shipped; displayed-data revision proof moved to [06](06-evidence-ux-and-navigation.md) (A5.2) and live-copilot LC-03 (AA02-SCOPE-1)
 Type: task
-Blocked by: 01; live-voice issue 06 for retained-run guarantees
+Blocked by: 01 (completion clause: one approved contract on every channel); 03 (reviewer cache hit, cache revision); 05 (asset identity). Live-voice issue 06 is done and no longer blocks.
 
 Read the [spec](../spec.md), [test matrix](../test-plan.md),
 [plan](../../../docs/superpowers/plans/2026-10-10-assistant-answer-assurance.md)
@@ -335,10 +335,10 @@ Owner chose to build (AS02-WINDOW-1). GK B (15) plan GO conditions, and how each
 
 ### 2026-11-04 — A1.6/A1.7 partly converged AC power flow; A1.2 ACK access
 
-Audit against master `30417e89e` and the test matrix (sent to the coordinator before building). On master, A1.1 (project, org, same-org, entity, unit, run, section and window identity, plus path traversal in `test_assurance_records_paths.py`), A1.3, A1.4 and A1.5 are executable and passing.
+Audit against master `30417e89e` and the test matrix (sent to the coordinator before building). Owner decision AA02-SCOPE-1: build these two items in one PR, mark this issue done-pending-blockers, and move the displayed-data revision proof to 06/LC-03. On master, A1.1 (project, org, same-org, entity, unit, run, section and window identity, plus path traversal in `test_assurance_records_paths.py`), A1.3, A1.4 and A1.5 are executable and passing.
 
 - **A1.6/A1.7: partly converged AC PF.** An AC power-flow run is sealed `completed` even when only some snapshots converged. `run_evidence._checked_manifest` is the one gate for `get_run_evidence`, run sections, `compare_project_runs` and evidence re-reads. It now refuses two kinds of run, and the guard's `run_not_checkable` message names which:
-  - `partly_converged`: fewer snapshots converged than ran ("this run is partly converged"; compare names the run or the baseline).
+  - `partly_converged`: fewer snapshots converged than ran ("this run is partly converged (k of n snapshots converged)"; compare names the run or the baseline).
   - `not_known_to_have_converged`: an `ac_pf` run without both counts as integers in `snapshots` with `0 < converged == total`, or any run that records only one count or a malformed pair.
 
   A fully converged run still checks. Unchecked reads are unchanged. Tests: `tests/assurance_acceptance/test_p1_run_convergence.py`, 14 cases, red before the change except the converged control.
@@ -348,7 +348,7 @@ Audit against master `30417e89e` and the test matrix (sent to the coordinator be
 
 - **A1.2 reviewer cache hit and A1.4 cache revision:** blocked by [03](03-answer-publication-gate.md). The reviewer is withheld, so there is no cache to revoke or revise.
 - **A1.1 asset identity:** blocked by [05](05-verified-artifacts.md) (P4 artifacts).
-- **Displayed-data revision proof:** not an A1 case. It is A5.2 ([06](06-evidence-ux-and-navigation.md)) and live-copilot LC-03. The v2 `/ui-ack` `source_binding` gives `browser_displayed_data` for load flow only, and other result families are LC-03's adapters.
-- **AC PF raw convergence (follow-up, A1.7):** `services/ac_pf_service.py` records every snapshot as converged when PyPSA returns no convergence frame or parsing it raises. The counts then read `n of n`, and this gate cannot see the gap. Fixing it changes the UI convergence bar, so it needs its own plan.
+- **Displayed-data revision proof:** moved to 06 by AA02-SCOPE-1; not an A1 case. It is A5.2 ([06](06-evidence-ux-and-navigation.md)) and live-copilot LC-03. The v2 `/ui-ack` `source_binding` gives `browser_displayed_data` for load flow only, and other result families are LC-03's adapters.
+- **AC PF raw convergence (A1.7):** filed as [12](12-acpf-raw-convergence.md) (GK B (21) A5). `services/ac_pf_service.py` records every snapshot as converged when PyPSA returns no convergence frame or parsing it raises. The counts then read `n of n`, so this gate cannot see the gap: a run checked as converged is not yet proven to be.
 - **Completion clause** "every affected public channel uses the same approved contract": blocked by [01](01-output-contract-and-coverage.md) A0.4 (reviewed schemas, tickets 09–11).
 - Live-voice issue 06 is `Status: done`, so it no longer blocks this issue.

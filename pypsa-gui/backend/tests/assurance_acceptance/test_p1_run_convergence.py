@@ -10,6 +10,8 @@ converged run still checks. Unchecked reads still show the run.
 
 # ruff: noqa: F811 -- imported shared fixtures.
 
+import json
+
 import pytest
 
 from services import run_evidence
@@ -72,13 +74,18 @@ def test_a_partly_converged_run_is_refused_before_the_handler(
     baseline, harness, monkeypatch, kind
 ):
     publish_old(baseline, counts(5, 8), kind=kind)
-    refused_read(harness, monkeypatch, "this run is partly converged")
+    refused_read(
+        harness, monkeypatch, "this run is partly converged (5 of 8 snapshots converged)"
+    )
 
 
 def test_a_section_of_a_partly_converged_run_is_refused(baseline, harness, monkeypatch):
     publish_old(baseline, counts(0, 8))
     args = {"run_id": "run-old", "section": "summary"}
-    sections.refused(harness, monkeypatch, args, "this run is partly converged")
+    sections.refused(
+        harness, monkeypatch, args,
+        "this run is partly converged (0 of 8 snapshots converged)",
+    )
 
 
 @pytest.mark.parametrize("role", ["run", "baseline"])
@@ -94,7 +101,7 @@ def test_a_comparison_with_a_partly_converged_side_is_refused(
         publish(root, project_id, run_id,
                 counts(7, 8) if run_id == partial else counts(8, 8), started)
     phrase = ("the run is" if role == "run" else "the baseline run is")
-    compare.refused(harness, monkeypatch, compare.ARGS, f"{phrase} partly converged")
+    compare.refused(harness, monkeypatch, compare.ARGS, f"{phrase} partly converged (7 of 8 snapshots converged)")
 
 
 @pytest.mark.parametrize(
@@ -121,4 +128,30 @@ def test_an_ac_pf_run_without_valid_counts_is_not_known_to_have_converged(
 
 def test_the_checked_manifest_names_the_outcome(baseline):
     publish_old(baseline, counts(5, 8))
-    assert run_evidence.checked_run_manifest("run-old")[1:] == (None, "partly_converged")
+    assert run_evidence.checked_run_manifest("run-old")[1:] == (
+        None, "partly_converged (5 of 8 snapshots converged)"
+    )
+
+
+@pytest.mark.parametrize("converged", [5, 8])
+def test_tampered_counts_refuse_as_the_mac_failure(
+    baseline, harness, monkeypatch, converged
+):
+    publish_old(baseline, counts(8 if converged == 5 else 5, 8))
+    path = compare.manifest_path(baseline[2], "run-old")
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["metrics"]["ac_pf_converged_count"]["value"] = converged
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert run_evidence.checked_run_manifest("run-old")[1:] == (None, "unverified")
+    refused_read(harness, monkeypatch, "this run is unverified.")
+
+
+@pytest.mark.parametrize(
+    "pair", [(True, True), (True, 8), (8, True), (False, True)],
+    ids=["both", "converged", "total", "false_of_true"],
+)
+def test_bool_counts_are_not_known_to_have_converged(pair):
+    # publish_run refuses a bool metric, so a sealed run cannot carry one;
+    # the gate still must not read True as the integer 1.
+    record = {"kind": "ac_pf", "metrics": counts(*pair)}
+    assert run_evidence._convergence(record) == "not_known_to_have_converged"

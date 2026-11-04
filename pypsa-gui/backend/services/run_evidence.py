@@ -605,10 +605,10 @@ def _convergence(record: dict) -> str | None:
 
     An AC power flow is sealed "completed" even when only some snapshots
     converged: a run recording fewer converged snapshots than it ran is
-    'partly_converged'. An AC power-flow run must record both counts as
-    integers in snapshots (total > 0, converged <= total); otherwise
-    'not_known_to_have_converged', as is any run recording one count or a
-    malformed pair. Missing validity is never read as converged.
+    'partly_converged (k of n snapshots converged)'. An AC power-flow run must
+    record both counts as integers in snapshots with 0 < converged == total;
+    otherwise it is 'not_known_to_have_converged', as is any run recording one
+    count or a malformed pair. Missing validity is never read as converged.
     """
     metrics = record['metrics']
     entries = [metrics.get(key) for key in _PF_COUNTS]
@@ -618,7 +618,7 @@ def _convergence(record: dict) -> str | None:
     ]
     known = all(type(v) is int for v in values)
     if known and 0 <= values[0] < values[1]:
-        return 'partly_converged'
+        return f'partly_converged ({values[0]} of {values[1]} snapshots converged)'
     if known and 0 < values[0] == values[1]:
         return None
     if record.get('kind') == 'ac_pf' or any(e is not None for e in entries):
@@ -640,15 +640,16 @@ def _checked_manifest(root: Path, project_id: str, run_id: Any) -> tuple[dict | 
             or not isinstance(record.get('sections') or {}, dict)
             or not isinstance(record.get('finished_at'), str)):
         return None, 'corrupt'
-    convergence = _convergence(record)
-    if convergence is not None:
-        return None, convergence
     if any(_section_state(root, record, name)[1] is not None
            for name in list(record.get('sections') or {})):
         return None, 'unverified'
     # Last, so a malformed or unfinished run keeps naming its status.
     if not _seal_verifies(record, mac):
         return None, 'unverified'
+    # After the MAC, so the reason a user reads comes only from a sealed run.
+    convergence = _convergence(record)
+    if convergence is not None:
+        return None, convergence
     return copy.deepcopy(record), 'completed'
 
 
