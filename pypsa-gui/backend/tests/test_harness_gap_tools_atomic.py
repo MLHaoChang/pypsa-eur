@@ -1,0 +1,161 @@
+# SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
+# SPDX-License-Identifier: MIT
+"""FILL-10-6 follow-ups to study-harness issues 04 and 22.
+
+SH-22: the data-gap tools (`set_weather_choice`, `attach_tariff`,
+`apply_generated_profile`, `generate_load_profile`) write inside
+`run_envelope.admitted_write`, as `update_component` does: an edit in the gap
+before pickup refuses, and the chain settles only from the call's own
+receipt. SH-04: an L1 ledger row names the failing rule that drove it.
+"""
+
+import threading
+
+import pytest
+from harness import runner as harness_runner, run_loops
+from services import dirty_state, run_envelope
+from services.pypsa_service import PyPSAService
+from tests.test_assistant_tasks_study_brief import (  # noqa: F401
+    baseline, dispatch, edit, helpers_state, session, wait_until,
+)
+from tests.test_harness_envelope import envelope_of, refusals, until  # noqa: F401
+from tests.test_harness_envelope_atomic import gap, writer  # noqa: F401
+from tests.test_harness_run_loops import (  # noqa: F401
+    WITH_GAPS, Script, apply_from, call, energy_source, generate, go, granted, no_series, profile, rated, say,
+    site, stopped,
+)
+from tests.test_harness_runner import detached, task_path  # noqa: F401
+
+FILLS = ("set_weather_choice", "attach_tariff", "apply_generated_profile")
+
+
+def ctx():
+    return PyPSAService.get_active_context()
+
+
+def weather_step(project_id, n=2):
+    return {"id": f"inputs.{n}", "tool": "set_weather_choice",
+            "args": {"project_id": project_id, "source": "synthetic", "year": 2023}}
+
+
+def test_each_data_gap_tool_has_its_own_atomic_row():
+    for tool in (*FILLS, "generate_load_profile"):
+        assert tool in run_envelope.ATOMIC_TOOLS, tool
+    assert set(run_envelope.GAP_TARGETS) | set(run_envelope.GAP_PREPARE) <= run_envelope.ATOMIC_TOOLS
+
+
+@pytest.fixture
+def own_settles(monkeypatch):
+    """The calls the L1 turn settled from their own receipt."""
+    seen = []
+    original = run_envelope.settle_own
+
+    def spy(task_path, call_id, ctx, before, receipts):
+        seen.append((call_id, [dict(r) for r in receipts]))
+        return original(task_path, call_id, ctx, before, receipts)
+    monkeypatch.setattr(run_envelope, "settle_own", spy)
+    return seen
+
+
+# ── Stepwise runner path (R3) ───────────────────────────────────────────────
+
+
+def test_stepwise_weather_fill_settles_from_its_own_receipt(granted, profile, site, gap, own_settles):
+    """A weather choice is a setting, outside the network's identity: its own
+    receipt settles it, and an unchanged identity adds no link."""
+    project_id, _ = site
+    profile(WITH_GAPS)
+    task, path, _ = granted(steps=[weather_step(project_id)])
+    fired = gap(lambda: None, tool="set_weather_choice")
+    record = until(harness_runner.Runner("a"), path, task, lambda r: r["steps"][-1]["status"] != "pending")
+    assert fired and record["steps"][-1]["status"] == "completed", record["steps"][-1]
+    [(call_id, receipts)] = own_settles
+    assert call_id.startswith("run-inputs.2-") and [r["call_id"] for r in receipts] == [call_id]
+    assert receipts[0]["exact"] == run_envelope.identity(ctx())["exact"]
+    assert envelope_of(path)["chain"] == [] and refusals(path) == []
+
+
+def test_stepwise_weather_fill_refuses_an_edit_in_the_gap(granted, profile, site, gap):
+    project_id, _ = site
+    profile(WITH_GAPS)
+    task, path, _ = granted(steps=[weather_step(project_id)])
+    fired = gap(lambda: writer(lambda n: n.loads.__setitem__("p_set", 6.0)).join(), tool="set_weather_choice")
+    record = until(harness_runner.Runner("a"), path, task, stopped)
+    assert fired
+    assert record["run"]["status"] == "paused" and record["run"]["reason"] == "envelope_drift", record["run"]
+    assert envelope_of(path)["chain"] == [] and refusals(path) == ["drift"]
+
+
+def test_stepwise_weather_fill_refuses_a_bare_plus_one_bump(granted, profile, site, gap):
+    """R2: a fill expects +0 on the edit counter; a +1 alone (no value change) is drift."""
+    project_id, _ = site
+    profile(WITH_GAPS)
+    task, path, _ = granted(steps=[weather_step(project_id)])
+
+    def bump():
+        target = ctx()
+        thread = threading.Thread(target=lambda: (target.mutation_lock.acquire(),
+                                                  dirty_state.bump_revision(target),
+                                                  target.mutation_lock.release()))
+        thread.start()
+        thread.join()
+    fired = gap(bump, tool="set_weather_choice")
+    record = until(harness_runner.Runner("a"), path, task, stopped)
+    assert fired
+    assert record["run"]["status"] == "paused" and record["run"]["reason"] == "envelope_drift", record["run"]
+    assert refusals(path) == ["drift"]
+
+
+# ── L1 path (R3) ────────────────────────────────────────────────────────────
+
+
+def test_l1_load_fill_settles_from_its_own_receipt_without_deadlock(granted, profile, site, rated, own_settles):
+    """R1: generate_load_profile runs under the held locks; a timed join shows no deadlock."""
+    project_id, _ = site
+    profile(WITH_GAPS)
+    no_series()
+    task, path, _ = granted()
+    script = Script(call(*generate(project_id)), apply_from(project_id), say("Attached."))
+    start = run_envelope.identity(ctx())
+    out = {}
+    thread = threading.Thread(target=lambda: out.setdefault(
+        "record", go(harness_runner.Runner("a", agent_provider=script), path, task)), daemon=True)
+    thread.start()
+    thread.join(timeout=120)
+    assert not thread.is_alive(), "the L1 round did not finish: a lock held across the fill"
+    run = out["record"]["run"]
+    assert run["status"] == "completed", (run.get("reason"), run.get("loop"))
+    call_id = "tu-apply_generated_profile-0"
+    [receipt] = [r for c, rs in own_settles if c == call_id for r in rs if r["call_id"] == call_id]
+    # R2: the fill moved the exact identity, and its link is its receipt, +0 on the counter.
+    [link] = [link for link in envelope_of(path)["chain"] if link["after_change"] == call_id]
+    assert link["exact"] == receipt["exact"] and link["exact"] != start["exact"]
+    assert link["network_revision"] == receipt["network_revision"] == start["network_revision"]
+
+
+# ── SH-04: the ledger row names its rule ────────────────────────────────────
+
+
+def test_l1_ledger_row_names_the_one_failing_rule(granted, profile, site, rated):
+    project_id, _ = site
+    profile(WITH_GAPS)
+    no_series()
+    task, path, _ = granted()
+    script = Script(call(*generate(project_id)), apply_from(project_id), say("Attached."))
+    record = go(harness_runner.Runner("a", agent_provider=script), path, task)
+    [row] = record["run"]["ledger"]
+    assert row["rule"] == "in.loads.series", row
+
+
+RULES = {"a": {"tunable": ["Generator.p_nom_max"]}, "b": {"tunable": ["StorageUnit.max_hours"]}, "c": {}}
+
+
+@pytest.mark.parametrize("failing,target,expected", [
+    (["c"], ("Load", "p_set"), "c"),  # (b) the only failing rule
+    (["a", "b"], ("StorageUnit", "max_hours"), "b"),  # (a) the one rule tuning the target
+    (["a", "c"], ("Load", "p_set"), None),  # ambiguous: never guessed
+    ([], ("Load", "p_set"), None),
+])
+def test_the_driving_rule(failing, target, expected):
+    assert run_loops._driving_rule(target, failing, RULES) == expected
+
