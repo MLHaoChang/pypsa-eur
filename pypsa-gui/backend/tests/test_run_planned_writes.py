@@ -321,9 +321,12 @@ def test_load_shape_1_no_series_is_written_without_a_confirmed_intake_row(grante
 def test_load_shape_1_a_struck_or_proposed_row_is_never_planned(granted, upload):
     file_id = upload()
     task, path, _ = granted(steps=[write_step(file_id)])
-    row = {"write": TOOL, "args": args(file_id), "source": {"kind": "table", "upload_id": file_id}}
+    sha = hashlib.sha256(CSV).hexdigest()  # a complete row: only its status keeps it out
+    row = {"write": TOOL, "args": args(file_id), "source": {"kind": "table", "upload_id": file_id, "sha256": sha}}
     run_envelope.plan_writes(path, [dict(row, status="struck"), dict(row, status="proposed")])
     assert envelope_of(path).get("planned", []) == []
+    run_envelope.plan_writes(path, [dict(row, status="confirmed")])
+    assert [p["status"] for p in envelope_of(path)["planned"]] == ["granted"]
 
 
 # ── GK B (21) conditions ──────────────────────────────────────────────────
@@ -596,6 +599,22 @@ def test_g6_the_pin_reads_the_runs_project_not_the_foreground(planned):
         run_envelope.pin_planned(path, run_ctx)
     pinned = envelope_of(path)["planned"][0]["pinned"]
     assert pinned["uid"] == component_identity.uid_for(run_ctx.network, "Load", "L1")
+
+
+def test_g6_with_no_run_context_the_created_project_is_never_pinned_on_the_foreground(planned, monkeypatch):
+    from services import assistant_tasks
+    task, path, _ = planned(pin=False)
+    pinned = []
+    monkeypatch.setattr(run_envelope, "pin_planned", lambda p, c, holder=None: pinned.append(c))
+    assert assistant_tasks.RUN_CONTEXT.get() is None
+    assistant_tasks._pin_planned(path)
+    assert pinned == []
+    token = assistant_tasks.RUN_CONTEXT.set(ctx())
+    try:
+        assistant_tasks._pin_planned(path)
+    finally:
+        assistant_tasks.RUN_CONTEXT.reset(token)
+    assert pinned == [ctx()]
 
 
 def test_g7_the_write_goes_to_the_bound_contexts_user_ts(site, upload):

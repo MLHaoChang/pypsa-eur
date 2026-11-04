@@ -556,10 +556,7 @@ def _start_run(session, title, request_id, run, profile, brief, *, origin=None, 
                 grant(path, task, RUN_CONTEXT.get() or PyPSAService.get_active_context())
         session.task_id = task_id
     if grant is not None:
-        # Issue 21c: the created project exists; pin its planned writes on it
-        # (the run's own context) before the run can enter stage 2.
-        from services import run_envelope
-        run_envelope.pin_planned(path, RUN_CONTEXT.get() or PyPSAService.get_active_context())
+        _pin_planned(path)
     _advance_run(path)
     _wake(path)
     with _LOCK:
@@ -671,6 +668,16 @@ def _back_to_input_gate(task):
     task.pop("pause", None)
     if task["status"] == "paused_at_card":
         task["status"] = "ready"
+
+
+def _pin_planned(path):
+    """Issue 21c: the created project exists; pin the run's planned writes on
+    it (the run's own context) before the run can enter stage 2. With no run
+    context nothing pins, never on the foreground (G6): the writes then card."""
+    from services import run_envelope
+    bound = RUN_CONTEXT.get()
+    if bound is not None:
+        run_envelope.pin_planned(path, bound)
 
 
 def _advance_run(path, ctx=None):
