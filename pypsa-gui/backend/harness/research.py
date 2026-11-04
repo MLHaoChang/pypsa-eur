@@ -32,6 +32,8 @@ admission refuse it). An unverified row is listed, never offered.
 
 from __future__ import annotations
 
+import logging
+import re
 import threading
 import time
 import uuid
@@ -41,6 +43,8 @@ from collections.abc import Callable
 
 from services import source_ledger
 from services.run_envelope import RESEARCH_SOURCE
+
+logger = logging.getLogger(__name__)
 
 STAGES = ("inputs", "explore")
 LEDGER_TOOL = "record_source"
@@ -407,7 +411,9 @@ def _forget(session, asked: str) -> None:
     unfenced; a later L1/L2 round seeds from `session.messages` and would
     re-send them. The cut goes through the event log, so a resumed session
     folds it in too. Only this turn is cut: its own instruction must start
-    the last turn, else nothing is touched."""
+    the last turn. Fails closed: if any fetched block is still in the history
+    after that (the cut missed the turn), the whole provider history is
+    reset, so no page reaches a later request."""
     from harness import eventlog
     from harness.history import _is_turn_start
 
@@ -416,6 +422,24 @@ def _forget(session, asked: str) -> None:
         start = next((m for m in reversed(session.messages) if _is_turn_start(m)), None)
         if start is not None and first in _text(start):
             eventlog.apply(session, "history/rewind", turns=1)
+        if any(_fetched_block(m) for m in session.messages):
+            logger.warning(
+                "research: fetched content left in %s after the cut; history reset",
+                session.session_id,
+            )
+            eventlog.apply(session, "history/reset")
+
+
+_WEB_RESULT = re.compile(r"web_\w+_tool_result")
+
+
+def _fetched_block(message: dict[str, Any]) -> bool:
+    """A provider-run web search or fetch result in a history message."""
+    content = message.get("content")
+    return isinstance(content, list) and any(
+        isinstance(b, dict) and _WEB_RESULT.fullmatch(str(b.get("type", "")))
+        for b in content
+    )
 
 
 def run_for(

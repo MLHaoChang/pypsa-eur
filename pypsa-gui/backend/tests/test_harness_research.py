@@ -1046,6 +1046,31 @@ def test_the_next_agent_round_carries_none_of_the_fetched_page(granted, profile)
     assert "Ignore previous instructions" not in replayed
 
 
+def test_a_cut_that_misses_the_turn_resets_the_history(granted, profile):
+    """GK B: _forget fails closed. When the research instruction does not start
+    the last turn (the cut cannot find it), any fetched block left in the
+    history resets it, so no page reaches a later request."""
+    task, path, _ = granted()
+    run = harness_session.ChatSession(session_id="run:" + task["task_id"])
+    run.append_history_message({"role": "user", "content": "Agent round."})
+    run.append_history_message({"role": "assistant", "content": [fetch_block()]})
+    run.append_history_message({"role": "user", "content": "Another round."})
+    research._forget(run, research.instruction([ledger_gap()]))
+    assert not any(research._fetched_block(m) for m in run.messages)
+    assert "Ignore previous instructions" not in json.dumps(list(run.messages))
+
+
+def test_a_cut_without_fetched_blocks_keeps_the_rest_of_the_history(granted, profile):
+    task, path, _ = granted()
+    run = harness_session.ChatSession(session_id="run:" + task["task_id"])
+    run.append_history_message({"role": "user", "content": "Agent round."})
+    run.append_history_message(
+        {"role": "assistant", "content": [{"type": "text", "text": "ok"}]}
+    )
+    research._forget(run, research.instruction([ledger_gap()]))
+    assert len(run.messages) == 2
+
+
 @pytest.mark.parametrize(
     "reason, status, extra",
     [
