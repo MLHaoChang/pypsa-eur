@@ -27,4 +27,4 @@ Found by the FILL-10-6 builder while building #1097; GK B (20) verified the reas
 
 - GK B (20) plan verdict GO WITH CHANGES, confirmed by GK B (21). Q1 A: only the organisation's own tariffs are held. A shipped common tariff is left out when its ref equals the shipped ref exactly (kind, id, version, hash), so shipped-only means nothing is held. Q2 A: issue 26 stays separate.
 - R1: an own tariff that shares a shipped id but has a different hash or version still counts. R2: a held ref with no id fails closed, and no row reads "None". R3: every new test is red on master and catches the mutation of its own guard (PR #1109). R4: the `common.names` monkeypatch is removed from #1097's stepwise test. R5: the change stays inside `_library_tariffs`.
-- R2 deviation, put to GK B (21): a ref with no id is refused as `new_instance` (the grant records no tariff), not as `not_granted_source`.
+- R2 deviation accepted by GK B (21): new_instance; the narrowing condition was withdrawn (issue 04's catch stays). The optional typed warning was added: `HeldTariffWithoutId` is logged by hash and version at the grant.
