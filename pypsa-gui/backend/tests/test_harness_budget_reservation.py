@@ -312,9 +312,11 @@ def test_a_server_tool_adds_its_uses_fees_and_content_to_the_bound(monkeypatch, 
     plain = request()
     tooled = request()
     tooled.tools = [search_tool(max_uses=3)]
-    # No known cost, or no max_uses: unbounded, refused.
+    # A tool type with no known cost, or no max_uses: unbounded, refused.
+    unknown = request()
+    unknown.tools = [{"type": "code_execution_20250522", "name": "code_execution", "max_uses": 3}]
     with pytest.raises(send_reservation.SendRefused) as refused:
-        send_reservation.bound(tooled, "money_eur")
+        send_reservation.bound(unknown, "money_eur")
     assert refused.value.reason == "unbounded_input"
     monkeypatch.setenv(send_reservation.SERVER_TOOL_COSTS_ENV,
                        json.dumps({"web_search": {"fee_eur": 0.01, "content_tokens": 5000}}))
@@ -326,6 +328,23 @@ def test_a_server_tool_adds_its_uses_fees_and_content_to_the_bound(monkeypatch, 
     unlimited.tools = [search_tool()]
     with pytest.raises(send_reservation.SendRefused):
         send_reservation.bound(unlimited, "total_tokens")
+
+
+def test_web_search_and_fetch_have_owner_default_costs(monkeypatch, mode):
+    # SH-TOOL-COSTS-1: in-code defaults, the env replaces them.
+    monkeypatch.delenv(send_reservation.SERVER_TOOL_COSTS_ENV, raising=False)
+    fetch = {"type": "web_fetch_20250910", "name": "web_fetch", "max_uses": 2}
+    req = request()
+    req.tools = [search_tool(max_uses=3), fetch, dict(fetch, max_content_tokens=7000)]
+    tools = send_reservation.shape(req).tools
+    assert [(t.max_uses, t.fee_eur, t.content_tokens) for t in tools] == [
+        (3, 0.0093, 10_000), (2, 0.0, 50_000), (2, 0.0, 7000)]
+    monkeypatch.setenv(send_reservation.SERVER_TOOL_COSTS_ENV,
+                       json.dumps({"web_search_": {"fee_eur": 0.02, "content_tokens": 100}}))
+    with pytest.raises(send_reservation.SendRefused):
+        send_reservation.bound(req, "money_eur")  # the override names no web_fetch cost
+    req.tools = [search_tool(max_uses=3)]
+    assert send_reservation.shape(req).tools[0].fee_eur == 0.02
 
 
 def test_the_reservation_sees_the_final_request_inside_a_research_wrapper(run, mode, monkeypatch):

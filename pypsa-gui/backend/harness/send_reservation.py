@@ -67,6 +67,14 @@ KINDS = {"run": "model_send", "research": "research_send"}
 FRAMING_TOKENS = 2048
 FRAMING_TOKENS_PER_MESSAGE = 16
 SERVER_TOOL_COSTS_ENV = "PYPSA_GUI_SERVER_TOOL_COSTS_EUR"
+# Owner defaults (SH-TOOL-COSTS-1); the env (JSON, the same shape) replaces
+# the table. Web search: USD 10 per 1,000 uses at the model rate table's
+# conversion, with 10,000 content tokens per use. Web fetch: no fee; a
+# tool's own `max_content_tokens` wins over the 50,000-token allowance.
+DEFAULT_SERVER_TOOL_COSTS_EUR = {
+    "web_search_": {"fee_eur": 0.0093, "content_tokens": 10_000},
+    "web_fetch_": {"fee_eur": 0.0, "content_tokens": 50_000},
+}
 # The usage count a provider reports for each server tool, by tool name.
 SERVER_TOOL_COUNT_KEYS = {"web_search": "search_requests", "web_fetch": "fetch_requests"}
 INPUT_KEYS = ("input_tokens", "cache_read_tokens", "cache_create_tokens")
@@ -121,11 +129,12 @@ def _server_tools(request: LLMRequest) -> list[dict]:
 
 def server_tool_costs() -> dict[str, dict[str, float]]:
     """`PYPSA_GUI_SERVER_TOOL_COSTS_EUR`: {type prefix: {"fee_eur": per use,
-    "content_tokens": per use}}, owner values. None set: none known. Raises
-    ValueError for an invalid table."""
+    "content_tokens": per use}}, replacing the owner defaults. A type no
+    prefix matches has no known cost. Raises ValueError for an invalid
+    table."""
     raw = os.environ.get(SERVER_TOOL_COSTS_ENV)
     if not raw:
-        return {}
+        return DEFAULT_SERVER_TOOL_COSTS_EUR
     table = json.loads(raw)
     if not isinstance(table, dict):
         raise ValueError("the server tool cost table is not an object")
