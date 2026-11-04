@@ -3548,7 +3548,13 @@ def _dispatch_real_tool_call(
                 with reviewed:
                     if edit_card is not None:
                         edit_cards.require_current(tool_name, args or {}, edit_card)
-                        with edit_cards.approved(edit_card["digest"]):
+                        from services import run_envelope
+
+                        # Study harness issue 21 §4: a card write that answers
+                        # the run's open data request goes on its freshness chain.
+                        with edit_cards.approved(edit_card["digest"]), run_envelope.answering(
+                            session, tool_use_id, edit_card
+                        ):
                             out = invoke(session, tool_name, args or {}, handler)
                         if isinstance(out, dict):
                             # First, so a result the chat spills or truncates keeps its receipt.

@@ -34,6 +34,7 @@ import re
 import time
 import uuid
 from importlib import resources
+from pathlib import Path
 
 LOOP = "L1"
 STAGE = "input_gate"
@@ -126,6 +127,68 @@ def end(path, reason):
             return False
         _fail(task, reason)
     runner._update(path, change)
+
+
+def _unset(path, ctx):
+    """`unset(target)` for `run_answers.data_items`: whether an envelope gap
+    target is still empty in the run's project now. A reading that fails
+    counts as unset (the item is asked, never assumed given)."""
+    from services import run_envelope
+
+    def unset(target):
+        try:
+            if target["component"] == "Load":
+                from fnmatch import fnmatchcase
+
+                from services.adequacy.site_peak import load_split
+                electric, _ = load_split(ctx.network)
+                return any(fnmatchcase(str(n), target["name"]) and not run_envelope._has_series(ctx, n)
+                           for n in electric)
+            if (target["name"], target["attr"]) == ("Commercial", "import_tariff_ref"):
+                from harness.edit_card_site import _solver_commercial
+                return not (_solver_commercial() or {}).get("import_tariff_ref")
+            if target["name"] == "Weather":
+                from services.profile_gen import weather_prefs
+                return (weather_prefs.saved_choice(Path(path).parent.parent) or {}).get(target["attr"]) is None
+        except Exception:  # noqa: BLE001 — unreadable: ask
+            return True
+        return True
+    return unset
+
+
+def data_gaps(path, task, profile, ctx):
+    """Issue 21 §3 (GK B (20) Q2): the data items of the one notice when L1
+    ends without a pass, read from the state now (outside the task lock):
+    envelope gap targets still unset and profile `inputs.required` items
+    still absent. Other failed rules are never items."""
+    from services import run_answers, run_envelope
+    envelope = run_envelope.read(path)
+    run = task["run"]
+    rows = run.get("intake") or []
+    rows = rows.get("rows", []) if isinstance(rows, dict) else rows
+    # Absent, not falsy: a param a usable intake row or an answer gave is present.
+    present = {r.get("param") for r in rows if isinstance(r, dict) and r.get("status") in ("proposed", "confirmed")}
+    present |= {i[1] for a in run.get("answers", []) for i in a.get("items", []) if i and i[0] == "param"}
+    return run_answers.data_items(envelope, profile, unset=_unset(path, ctx), present=present.__contains__)
+
+
+def data_request(task, items):
+    """The L1 exit's one data request (§3), under the task lock: the items
+    not asked before in this run, as `run.waiting = {kind: "data", ref,
+    items}` and the harness's notice text. Returns the request, or None."""
+    from services import run_answers, run_intake
+    run = task["run"]
+    req = run_answers.request(run.get("requests"), items or [])
+    if req is None:
+        return None
+    req["notice"] = ("The input loop could not fill these, so the run waits for you. Give each through a "
+                     "card in this chat:\n" + "\n".join(run_intake.request_lines(
+                         [{"param": i.get("param") or i["target"]["attr"], "kind": "missing", "label": i["label"]}
+                          for i in req["items"]])))
+    run.setdefault("requests", []).append(req)
+    run["waiting"] = {"kind": "data", "ref": req["id"], "items": req["items"],
+                      "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    return req
 
 
 def after_passed_gate(task):

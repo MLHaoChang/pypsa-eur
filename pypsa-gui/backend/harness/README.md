@@ -1345,6 +1345,41 @@ else.
   `set_weather_choice`, `attach_tariff`, `apply_generated_profile` and
   `generate_load_profile`) still settles from a fresh read after the step,
   so a user edit landing during such a step is taken into the chain.
+- **Create at grant (issue 21 §2, GK B A1-A3, R1-R3).** A plan whose
+  proposed envelope carries a `setup` entry (`run_envelope.set_setup`, from
+  `start_task`'s `run.intake`) hands over at the grant: `decide` checks the
+  card's intake digest and each source's sha256 (`run_intake.check_grant`),
+  records the user's decision (`approvals.decided(by="user")`), then
+  `run_handover.hand_over` creates the project through the route's own
+  first half (`_materialise_from_template`, no context swap) and starts the
+  run there (`assistant_tasks.handover_starter`); the host task ends
+  `completed`, reason `handed_over`. The new run's envelope is granted by
+  `run_envelope.grant_handover` before anything can wake it: it carries the
+  host decision id and grant digest, equal to its task's `run.origin`, or
+  `_standing` refuses every admission with `handover_unbound` (A2); its
+  chain's first link is the fingerprint after creation. Lock order (R3):
+  the hand-over's cross-process `durable.file_lock` (`<task>.handover.lock`)
+  first, then the new project's `mutation_lock` (held across setup, upload
+  copies and the task start); the host's `mutation_lock` is never taken
+  while the new one is held; `assistant_tasks._LOCK` and
+  `durable_conversation._LOCK` last (`_start_run` and the brief re-check
+  take them under the new project's lock). `decide` holds no lock when it
+  calls `hand_over`.
+- **Data request and answers (issue 21 §3-4, B1-B4).** When L1 ends without
+  a pass, `_advance_run` reads the data items outside the task lock
+  (`run_loops.data_gaps`: envelope gap targets still unset, profile
+  `inputs.required` items still absent) and, under it, opens one request
+  (`run_loops.data_request`): `run.waiting = {kind: "data", ref, items}`,
+  no item asked twice in a run. A card write the owner approves in ordinary
+  chat runs inside `run_envelope.answering`; `settle_answer` makes it an
+  answer row on the chain only when `run_answers.answer` admits it under the
+  task lock (open request, owner, own project, card decision, whole diff
+  inside the open items, chain head equal to the identity before the write).
+  Anything else stays drift. A complete request clears `waiting` and calls
+  `resume_task`, which checks the gate again from native facts. Known limit:
+  the before and after identities are read around the handler, not under
+  its own locks as `admitted_write` does, so a write landing in between is
+  taken as part of the answer.
 - **Immutable queued solve (issue 05, HH-10).** Inside that admitted write,
   `solve_queue_enqueue` captures the input the identity compare just checked
   (`services/solve_capture.py`):

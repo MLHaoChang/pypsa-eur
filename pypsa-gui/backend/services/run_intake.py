@@ -99,6 +99,20 @@ class Host:
     turns: tuple = ()
 
 
+def host_for(ctx, owner_id: str, project_id: str) -> Host:
+    """The open project as the intake's host, resolved through the acting
+    owner's project ACL (A4): its directory and its stored turns. A caller
+    that is not the owner, or cannot open the project, gets `not_found`."""
+    from harness.history import read_all_turns
+    from services import chat_tools, project_registry
+    with chat_tools._acting() as (db, user):
+        if str(user.id) != str(owner_id):
+            raise IntakeError("not_found", "This run's project is not open to you.")
+        row = project_registry.resolve_project(db, user, project_id)
+        return Host(name=row.name, dir=project_registry.project_dir(row), owner_id=str(owner_id),
+                    turns=tuple(read_all_turns(ctx)))
+
+
 # ── Fields ──────────────────────────────────────────────────────────────────
 
 
@@ -585,3 +599,26 @@ def strike(rows: list, index: int) -> list:
 def confirm(rows: list) -> list:
     """The grant confirms exactly the usable rows it showed."""
     return [dict(r, status="confirmed") if r["status"] == "proposed" else dict(r) for r in rows]
+
+
+def take(request, profile: dict, ctx, owner_id: str, project_id: str) -> dict:
+    """A run's intake (`start_task`'s `run.intake`): the model's citations
+    read on the open project (the host) into rows, gaps and the missing set,
+    with the digest the grant binds and the harness's one request text (§3).
+    Nothing is written to any project."""
+    if not isinstance(request, dict) or set(request) - {"project_name", "citations"} \
+            or not isinstance(request.get("project_name"), str) or not request["project_name"].strip():
+        raise IntakeError("invalid_intake", "An intake names the new project and lists citations.")
+    if profile["templates"] != ["eh_site"]:
+        raise IntakeError("invalid_intake", "This run's profile takes no chat intake yet.")
+    from project_templates import eh_site
+    host = host_for(ctx, owner_id, project_id)
+    out = read(request.get("citations") or [], profile["params"].get("fields", {}), host)
+    rows, gaps = out["rows"], list(out["gaps"])
+    refused = check(rows, eh_site.site_params)
+    if refused is not None:
+        gaps.append(refused)
+    items = missing(profile, rows, gaps)
+    return {"project_name": request["project_name"].strip()[:120], "rows": rows, "gaps": gaps,
+            "missing": items, "digest": digest(rows), "request": request_text(items) if items else None}
+
