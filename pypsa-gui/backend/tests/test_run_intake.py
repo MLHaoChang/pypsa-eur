@@ -662,3 +662,86 @@ def test_only_the_persons_own_turns_are_marked_typed():
         chat, None, None, {"verdict": "unattended"}
     )  # an envelope decision
     assert not loop._typed_by_user(run, None, None, None)  # the runner's headless turn
+
+
+# ── D1: only the person's own typing is marked (GK B (20) ask 2) ───────────
+
+
+@pytest.fixture
+def chat_project(tmp_projects_dir, install_network):
+    import pypsa
+
+    from services import chat_service
+    from services.pypsa_service import PyPSAService
+
+    n = pypsa.Network()
+    n.add("Bus", "B1")
+    install_network(n, name="Origin")
+    chat_service._reset_sessions_for_tests()
+    yield PyPSAService.get_active_context()
+    chat_service._reset_sessions_for_tests()
+
+
+def _fake_text(text):
+    return {
+        "blocks": [{"type": "text", "text": text}],
+        "usage": {"input_tokens": 3, "output_tokens": 2},
+    }
+
+
+def _fake_tool(name, args, tool_id):
+    return {
+        "blocks": [{"type": "tool_use", "id": tool_id, "name": name, "input": args}],
+        "usage": {"input_tokens": 10, "output_tokens": 5},
+    }
+
+
+def test_a_goal_rounds_turn_carries_no_origin(chat_project):
+    from harness import history
+    from harness.providers.fake import FakeProvider
+    from harness.session import ChatSession
+    from services import chat_service
+
+    session = ChatSession(model="claude-sonnet-5", owner_user_id=OWNER)
+    fake = FakeProvider(
+        [
+            _fake_tool("set_goal", {"objective": "tidy", "max_rounds": 2}, "tu_s"),
+            _fake_text("starting"),
+            _fake_tool("complete_goal", {"summary": "tidy"}, "tu_c"),
+            _fake_text("done"),
+        ]
+    )
+    list(chat_service.run_turn(session, "tidy the network", provider=fake))
+
+    first, goal_round = history.read_all_turns(chat_project)
+    assert first["user"] == "tidy the network" and first[I.ORIGIN_KEY] == "user"
+    assert "Continue toward the goal" in goal_round["user"]
+    assert I.ORIGIN_KEY not in goal_round
+
+
+def test_an_interrupted_turn_carries_no_origin(chat_project, monkeypatch):
+    from harness import history
+    from harness.providers.fake import FakeProvider
+    from harness.session import ChatSession
+    from services import chat_service, chat_tools
+
+    session = ChatSession(model="claude-sonnet-5", owner_user_id=OWNER)
+    real = chat_tools.DISPATCHERS["list_components"]
+
+    def _list_then_abort(**kwargs):
+        session.abort_event.set()  # the person pressed Stop while it ran
+        return real(**kwargs)
+
+    monkeypatch.setitem(chat_tools.DISPATCHERS, "list_components", _list_then_abort)
+    fake = FakeProvider(
+        [
+            _fake_tool("list_components", {"component_class": "Bus"}, "tu_l"),
+            _fake_text("never"),
+        ]
+    )
+    events = list(chat_service.run_turn(session, "typed then stopped", provider=fake))
+
+    assert ("session_done", {"reason": "aborted"}) in events
+    (rec,) = history.read_all_turns(chat_project)
+    assert rec["interrupted"] is True and rec["user"] == "typed then stopped"
+    assert I.ORIGIN_KEY not in rec

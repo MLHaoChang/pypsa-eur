@@ -1117,6 +1117,7 @@ def run_turn(
     continuation_job_id: str | None = None,
     continue_task_id: str | None = None,
     envelope_decision: dict | None = None,
+    typed_by_user: bool = True,
     _held_lease: str | None = None,
     _held_generation: int | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
@@ -1533,7 +1534,10 @@ def run_turn(
             message_history=message_history,
             attachment_file_ids=attachment_file_ids,
             ui_context=ui_context,
-            typed_by_user=_typed_by_user(session, continuation_job_id, continue_task_id, envelope_decision),
+            # `typed_by_user=False` marks harness text the flags above cannot
+            # see: a goal round, a replay (issue 21, D1).
+            typed_by_user=typed_by_user
+            and _typed_by_user(session, continuation_job_id, continue_task_id, envelope_decision),
         )
         try:
             for event, payload in body:
@@ -1689,6 +1693,7 @@ def run_turn(
             generation=session.goal["generation"],
             binding_generation=binding_generation,
             ui_ack=ui_ack,
+            typed_by_user=False,  # the goal's round text is the harness's (D1)
         )
         return
     if _held_done is not None:

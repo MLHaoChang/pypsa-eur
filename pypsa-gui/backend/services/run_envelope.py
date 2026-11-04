@@ -1425,12 +1425,65 @@ def _waiting_on_data(owner_id):
     return None
 
 
+def _inputs(ctx):
+    """A copy of what a write can change, for `_changed`: each class's static
+    and time-series frames, and the network-wide inputs (snapshots, their
+    weightings, the solver config). Read under the caller's locks."""
+    n = ctx.network
+    frames = {}
+    for component in n.components:
+        frames[(str(component.name), None)] = component.static.copy()
+        for attr in component.dynamic:
+            frames[(str(component.name), attr)] = component.dynamic[attr].copy()
+    network = json.dumps([n.snapshots.to_series().to_json(date_format="iso"), n.snapshot_weightings.to_json(),
+                          n.investment_period_weightings.to_json(),
+                          (getattr(ctx, "solver_state", None) or {}).get("solver_config")],
+                         sort_keys=True, default=str)
+    return network, frames
+
+
+def _changed(before, after):
+    """B2: every `(class, name, attr)` whose value differs between two
+    `_inputs` reads (a row or column added or removed counts as changed),
+    plus `("network", "", "inputs")` when a network-wide input moved."""
+    out = set()
+    if before[0] != after[0]:
+        out.add(("network", "", "inputs"))
+
+    def differ(old, new):  # aligned on both axes; NaN equals NaN; a missing cell differs
+        old, new = old.align(new)
+        return ~((old == new) | (old.isna() & new.isna()))
+
+    for key in before[1].keys() | after[1].keys():
+        cls, series = key
+        old, new = before[1].get(key), after[1].get(key)
+        if old is None or new is None:  # a frame that appeared or went: compare with its empty self
+            old, new = (new.iloc[0:0], new) if old is None else (old, old.iloc[0:0])
+        if series is None:  # static: a row per component, a column per attribute
+            # A component added or removed is a change no item names.
+            out.update((cls, str(name), "") for name in old.index.symmetric_difference(new.index))
+            cells = differ(old, new)
+            rows, cols = cells.to_numpy(dtype=bool).nonzero()
+            out.update((cls, str(cells.index[r]), str(cells.columns[c])) for r, c in zip(rows, cols))
+        elif not old.index.equals(new.index) and len(old) and len(new):
+            out.add(("network", "", "inputs"))  # the snapshots moved
+        else:  # time series: a column per component
+            moved = differ(old, new).any(axis=0)
+            out.update((cls, str(name), series) for name in moved.index[moved.to_numpy(dtype=bool)])
+    return sorted(out)
+
+
 @contextlib.contextmanager
 def answering(session, call_id, edit_card):
     """Around a card write the user approved in ordinary chat (COP-1): when
     the open project's run waits on a data request, the write's identity
-    before and after goes to `settle_answer`. A complete request resumes the
-    run (`resume_task` checks the gate again). Runner sessions never answer."""
+    before and after goes to `settle_answer`. Both are read, and the write
+    runs, under the project's `mutation_lock` then `solver_state_lock`, as in
+    `admitted_write` (B3), and the diff is what the write changed in the
+    network, never the card's rows (B2). Locks that cannot be had leave the
+    write an ordinary one: drift. A complete request resumes the run
+    (`resume_task` checks the gate again). Runner sessions never answer."""
+    from harness.runner import LOCK_TIMEOUT_SECONDS
     from services import assistant_tasks
     from services.pypsa_service import PyPSAService
     found = None
@@ -1443,15 +1496,36 @@ def answering(session, call_id, edit_card):
         yield
         return
     ctx = PyPSAService.get_active_context()
-    before = identity(ctx, exact=False).get("fingerprint")
-    yield
+    if not ctx.mutation_lock.acquire(timeout=LOCK_TIMEOUT_SECONDS):
+        yield
+        return
+    try:
+        if not ctx.solver_state_lock.acquire(timeout=LOCK_TIMEOUT_SECONDS):
+            yield
+            return
+        try:
+            try:
+                before, inputs = identity(ctx, exact=False), _inputs(ctx)
+            except Exception:  # noqa: BLE001 — unreadable: the write stands as drift
+                logger.warning("run envelope: the inputs before a card write could not be read", exc_info=True)
+                before = None
+            yield
+            if before is None:
+                return
+            try:
+                after, diff = identity(ctx, exact=False), _changed(inputs, _inputs(ctx))
+            except Exception:  # noqa: BLE001
+                logger.warning("run envelope: the inputs after a card write could not be read", exc_info=True)
+                return
+        finally:
+            ctx.solver_state_lock.release()
+    finally:
+        ctx.mutation_lock.release()
     path, task_id = found
-    diff = [(r.get("component_class"), str(r.get("name")), str(r.get("field")).split(".")[0])
-            for r in edit_card.get("rows") or [] if r.get("role") in ("typed", "follows")]
     try:
         row = settle_answer(path, actor_id=str(session.owner_user_id), project_id=str(ctx.project_uuid),
-                            decision={"id": call_id, "by": "user"}, diff=diff, before=before,
-                            after=identity(ctx, exact=False))
+                            decision={"id": call_id, "by": "user"}, diff=diff,
+                            before=before.get("fingerprint"), after=after)
         if row is not None and row["complete"]:
             assistant_tasks.resume_task(task_id)
     except Exception:  # noqa: BLE001 — the write stands; the run reads it as drift

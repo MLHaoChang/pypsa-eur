@@ -199,6 +199,7 @@ def test_grant_creates_one_project_hands_over_and_grants_the_run_there(
             session, view["task_id"], "unattended", intake_digest=digest
         )
     assert _count(name) == 1  # a repeated grant creates no second project
+    assert len(_grant_rows(session)) == 1  # ...and puts no second decision on record
 
 
 def test_a_stale_digest_is_refused_and_creates_nothing(host, session):
@@ -270,6 +271,62 @@ def test_inputs_moved_since_the_brief_refuse_the_grant_under_the_lock(
         )
     assert exc.value.detail["error_kind"] == "task_brief_stale"
     assert _count(name) == 0
+
+
+def _grant_rows(session):
+    from harness import approvals
+
+    return [
+        r
+        for r in approvals.read(session)
+        if r.get("type") == "approval/decided" and r.get("tool") == "grant_envelope"
+    ]
+
+
+def test_requirements_moved_since_the_brief_refuse_the_grant_and_record_nothing(
+    host, session, site
+):
+    """GK B (20) ask 1, unpatched: a requirement activated on the host's own
+    thread after the brief refuses the grant under the hand-over lock, and
+    neither the refusal nor its retry leaves a project, an intent or an
+    approval row."""
+    from services import durable_conversation as dc
+
+    name = f"Intake {uuid.uuid4().hex[:6]}"
+    view = _start(host, name)
+    tid = dc.create_thread()["thread_id"]
+    _, episode = dc.resume_episode(tid, generation=1)
+    host_path = task_path(site[1], view)
+    task = json.loads(host_path.read_text())
+    task["requirements"] = {
+        "thread_id": tid,
+        "rev": int(dc.get_thread(tid)["requirements"].get("rev", 0)),
+        "items": [],
+    }
+    tasks._save(host_path, task)
+    digest = view["run"]["intake"]["digest"]
+    dc.activate_requirement(
+        tid,
+        episode_id=episode.session_id,
+        predicate={
+            "kind": "component_attr",
+            "component_class": "Bus",
+            "selector": {"names": ["B1"]},
+            "field": "v_nom",
+            "op": "ge",
+            "value": 0.0,
+            "unit": "kV",
+        },
+    )
+    for _ in range(2):  # the refusal, then its retry
+        with pytest.raises(HTTPException) as exc:
+            run_envelope.decide(
+                session, view["task_id"], "unattended", intake_digest=digest
+            )
+        assert exc.value.detail["error_kind"] == "task_brief_stale"
+        assert _count(name) == 0
+        assert run_handover.read_intent(host_path) is None
+        assert _grant_rows(session) == []
 
 
 # ── A2: the new project's envelope is the host card's grant ────────────────
@@ -610,3 +667,109 @@ def test_a_runner_session_never_answers(waiting):
     ):
         pass
     assert "answers" not in json.loads(path.read_text())["run"]
+
+
+def _chat_answering(waiting, monkeypatch):
+    from harness import session as harness_session
+    from services import chat_tools
+
+    path, record, _ = waiting
+    chat_tools.set_acting_user(record["owner_id"])
+    resumed = []
+    monkeypatch.setattr(tasks, "resume_task", resumed.append)
+    chat = harness_session.ChatSession(
+        session_id="chat-1", owner_user_id=record["owner_id"]
+    )
+    return chat, resumed
+
+
+def _typed(field):
+    return {
+        "role": "typed",
+        "component_class": "Generator",
+        "name": "G1",
+        "field": field,
+    }
+
+
+def test_an_item_plus_a_field_the_card_does_not_list_is_drift(waiting, monkeypatch):
+    """GK B (20) ask 4 (B2): the diff is what the write changed in the
+    network, not the card's rows; a field the card never listed makes the
+    whole write drift."""
+    path, record, _ = waiting
+    chat, resumed = _chat_answering(waiting, monkeypatch)
+    ctx = PyPSAService.get_active_context()
+    with run_envelope.answering(chat, "call-card", {"rows": [_typed("p_nom")]}):
+        ctx.network.generators.loc["G1", ["p_nom", "p_min_pu"]] = [25.0, 0.1]
+    task = json.loads(path.read_text())
+    assert not task["run"].get("answers") and task["run"]["waiting"] is not None
+    assert resumed == []
+    envelope = json.loads(run_envelope.path_for(path).read_text())
+    assert (
+        envelope["chain"] == []
+        and envelope["audit"][-1]["reason"] == "outside_the_request"
+    )
+
+
+def test_a_write_from_elsewhere_during_the_card_write_is_never_its_answer(
+    waiting, monkeypatch
+):
+    """GK B (20) ask 3 (B3): the before and after identities are read under
+    the project's locks, so a write from another thread lands after the
+    answer's link and reads as drift, never folded into the answer."""
+    import threading
+
+    from services import dirty_state
+
+    path, record, _ = waiting
+    chat, resumed = _chat_answering(waiting, monkeypatch)
+    ctx = PyPSAService.get_active_context()
+
+    def elsewhere():  # another writer, under the project's lock as writers are
+        with ctx.mutation_lock:
+            ctx.network.buses.loc[ctx.network.buses.index[0], "v_nom"] = 77.0
+            dirty_state.bump_revision(ctx)
+
+    other = threading.Thread(target=elsewhere)
+    card = {"rows": [_typed("p_nom"), _typed("marginal_cost")]}
+    with run_envelope.answering(chat, "call-card", card):
+        other.start()
+        other.join(timeout=1.0)
+        ctx.network.generators.loc["G1", ["p_nom", "marginal_cost"]] = [25.0, 12.0]
+    other.join(timeout=10)
+    assert not other.is_alive()
+    task = json.loads(path.read_text())
+    assert task["run"]["answers"][0]["decision_id"] == "call-card"
+    envelope = json.loads(run_envelope.path_for(path).read_text())
+    with ctx.mutation_lock:
+        now = run_envelope.identity(ctx, exact=False)
+    assert envelope["chain"][-1]["fingerprint"] != now["fingerprint"]  # drift next
+
+
+def test_the_answer_diff_is_read_from_the_network():
+    """B2's diff, unit level: a static cell, a time series set, a component
+    added, and snapshots moved each show; an untouched network shows none."""
+    from types import SimpleNamespace
+
+    import pypsa
+
+    n = pypsa.Network()
+    n.set_snapshots(range(3))
+    n.add("Bus", "B")
+    n.add("Load", "L1", bus="B", p_set=1.0)
+    n.add("Generator", "G1", bus="B", p_nom=10)
+    ctx = SimpleNamespace(network=n, solver_state={"solver_config": {}})
+    base = run_envelope._inputs(ctx)
+    assert run_envelope._changed(base, run_envelope._inputs(ctx)) == []
+    n.generators.loc["G1", "p_nom"] = 20.0
+    n.loads_t.p_set.loc[:, "L1"] = [1.0, 2.0, 3.0]
+    n.add("Generator", "G2", bus="B")
+    changed = run_envelope._changed(base, run_envelope._inputs(ctx))
+    assert ("Generator", "G1", "p_nom") in changed
+    assert ("Load", "L1", "p_set") in changed
+    assert ("Generator", "G2", "") in changed
+    assert not [c for c in changed if c[:2] == ("Generator", "G1") and c[2] != "p_nom"]
+    n.set_snapshots(range(4))
+    assert ("network", "", "inputs") in run_envelope._changed(
+        base, run_envelope._inputs(ctx)
+    )
