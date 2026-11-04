@@ -186,7 +186,7 @@ def data_request(task, items):
                          [{"param": i.get("param") or i["target"]["attr"], "kind": "missing", "label": i["label"]}
                           for i in req["items"]])))
     run.setdefault("requests", []).append(req)
-    run["waiting"] = {"kind": "data", "ref": req["id"], "items": req["items"],
+    run["waiting"] = {"kind": "data", "ref": req["id"], "items": req["items"], "notice": req["notice"],
                       "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     return req
 

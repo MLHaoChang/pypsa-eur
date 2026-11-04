@@ -40,7 +40,6 @@ import json
 import uuid
 from pathlib import Path
 
-from fastapi import HTTPException
 
 VERSION = 1
 LOCK_TIMEOUT = 5.0
@@ -124,9 +123,9 @@ def hand_over(host_task_path: Path, *, owner_id: str, origin: dict, name: str | 
     refuse the grant (the host's requirements moved since the brief, GK B (20)
     Q1). Returns the intent record (`state == "started"`)."""
     from harness import durable
+    lock = durable.file_lock(lock_path(host_task_path), timeout=lock_timeout,
+                             busy="another grant of this plan is creating its project")
     try:
-        lock = durable.file_lock(lock_path(host_task_path), timeout=lock_timeout,
-                                 busy="another grant of this plan is creating its project")
         lock.__enter__()
     except TimeoutError as exc:
         raise HandoverError("handover_busy", "Another grant of this plan is creating its project; "
@@ -170,22 +169,20 @@ def _under_lock(host_task_path, *, owner_id, origin, name, params, digest, decis
                 raise HandoverError("handover_incomplete", "The project was created but its setup did not "
                                     "finish; open it, or start the run there.", project_id=str(row.id),
                                     project_name=row.name)
-            try:
-                made = project_routes._materialise_from_template(template, name, params, db, user,
-                                                                 project_id=planned)
-            except HTTPException:
-                raise  # the route's own refusal (R1): nothing was created
+            # The route's own refusal (R1) raises here, before anything exists.
+            made = project_routes._materialise_from_template(template, name, params, db, user,
+                                                             project_id=planned)
             row = made.project
-            ctx = base_context(row)
-            with ctx.mutation_lock, _bound(ctx, row, f"handover:{origin.get('task_id')}"):
-                project_routes._finish_created_project(made, db, user, None)
-            intent.update(state="created", project_id=str(row.id), project_name=row.name)
-            _write(host_task_path, intent)
         if row is None:
             raise HandoverError("handover_incomplete", "The created project is gone; nothing was started.",
                                 project_id=intent["project_id"])
         ctx = base_context(row)
+        # One hold of the new project's lock across setup, copies and start (A3, R3).
         with ctx.mutation_lock, _bound(ctx, row, f"handover:{origin.get('task_id')}"):
+            if intent["state"] == "creating":
+                project_routes._finish_created_project(made, db, user, None)
+                intent.update(state="created", project_id=str(row.id), project_name=row.name)
+                _write(host_task_path, intent)
             intent["uploads"] = _copy_uploads(host_name, Path(host_dir), row, uploads)
             intent["task_id"] = start(row, ctx)
         intent["state"] = "started"

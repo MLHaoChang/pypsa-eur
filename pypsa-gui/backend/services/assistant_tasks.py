@@ -773,7 +773,7 @@ def _run_view(task):
         s["status"] == "completed" for s in task["steps"] if s["id"].startswith(run["stage"] + "."))
     return {"profile": run["profile"], "mode": run["mode"], "status": run["status"], "stage": run["stage"],
             **({"gate_due": True} if due else {}),
-            **({"waiting": {k: run["waiting"][k] for k in ("kind", "ref", "since", "items")
+            **({"waiting": {k: run["waiting"][k] for k in ("kind", "ref", "since", "items", "notice")
                             if k in run["waiting"]}} if run.get("waiting") else {}),
             **({"intake": _intake_view(run)} if isinstance(run.get("intake"), dict) else {}),
             **({"handed_over": run["handed_over"]} if run.get("handed_over") else {}),

@@ -1016,8 +1016,10 @@ def _names_another_project(args, ctx):
 def _handover_unbound(envelope, task):
     """A2: a run a hand-over started is admitted only under an envelope that
     carries the host card's decision id and grant digest, both equal to what
-    its task's `run.origin` recorded; an envelope that carries one on any
-    other run is no grant either."""
+    its task's `run.origin` recorded, and the digest the digest of the intake
+    rows the run was created with (what the user's card showed); an envelope
+    that carries one on any other run is no grant either."""
+    from services import run_intake
     origin = (task.get("run") or {}).get("origin")
     bound = envelope.get("handover")
     if origin is None and bound is None:
@@ -1025,7 +1027,13 @@ def _handover_unbound(envelope, task):
     if not isinstance(origin, dict) or not isinstance(bound, dict):
         return True
     pair = (bound.get("decision_id"), bound.get("digest"))
-    return not all(pair) or pair != (origin.get("decision_id"), origin.get("digest"))
+    if not all(pair) or pair != (origin.get("decision_id"), origin.get("digest")):
+        return True
+    rows = task["run"].get("intake")
+    try:
+        return not isinstance(rows, list) or run_intake.digest(rows) != pair[1]
+    except (KeyError, TypeError, AttributeError):
+        return True  # rows that cannot be read bind nothing
 
 
 def _standing(session, envelope, task, ctx, solve=False):
@@ -1364,8 +1372,8 @@ def settle_answer(task_path, *, actor_id, project_id, decision, diff, before, af
     current = (after or {}).get("fingerprint")
     with assistant_tasks._LOCK:
         envelope = _load(task_path)
-        if envelope is None or envelope["state"] != "granted" or not current:
-            return None
+        if envelope is None or envelope["state"] != "granted" or not current or current == before:
+            return None  # a write that changed no input answers nothing
         task = json.loads(Path(task_path).read_text())
         run = task.get("run") or {}
         ref = (run.get("waiting") or {}).get("ref")

@@ -180,6 +180,31 @@ def test_a_handed_over_run_without_the_matching_decision_and_digest_is_refused(b
     assert "handover_unbound" in run_envelope.PAUSING
 
 
+def test_a_bound_pair_over_other_rows_than_the_run_was_created_with_is_refused():
+    rows = [{"param": "connection_mw", "value": 12.0, "unit": "MW", "status": "proposed",
+             "source": {"kind": "text", "turn_id": "t", "sha256": "s", "quote": "12 MW"}}]
+    pair = {"decision_id": "envelope-1", "digest": run_intake.digest(rows)}
+    task = {"run": {"origin": {"project_id": "h", "task_id": "t", **pair}, "intake": rows}}
+    assert not run_envelope._handover_unbound({"handover": pair}, task)
+    task["run"]["intake"] = [dict(rows[0], value=20.0)]
+    assert run_envelope._handover_unbound({"handover": pair}, task)
+
+
+@pytest.mark.parametrize("kind, expected, status", [
+    ("access", "not_authorized", 403), ("upload_copy_mismatch", "upload_copy_mismatch", 409),
+    ("handover_busy", "handover_busy", 409), ("something_else", "handover_incomplete", 409),
+])
+def test_each_hand_over_refusal_reaches_the_card_as_its_own_kind(host, session, monkeypatch, kind, expected, status):
+    def refuse(*a, **k):
+        raise run_handover.HandoverError(kind, "refused")
+    monkeypatch.setattr(run_handover, "hand_over", refuse)
+    view = _start(host, f"Intake {uuid.uuid4().hex[:6]}")
+    with pytest.raises(HTTPException) as exc:
+        run_envelope.decide(session, view["task_id"], "unattended", intake_digest=view["run"]["intake"]["digest"])
+    assert (exc.value.detail["error_kind"], exc.value.status_code) == (expected, status)
+    assert tasks.get_task(view["task_id"])["status"] != "completed"  # the host is not handed over
+
+
 def test_an_unbound_hand_over_envelope_refuses_every_admission(granted, session):
     task, path, _ = granted()
     record = json.loads(path.read_text())
@@ -276,3 +301,40 @@ def test_another_users_write_is_not_an_answer(waiting):
     assert run_envelope.settle_answer(path, actor_id=str(uuid.uuid4()), project_id=record["project_id"],
                                       decision={"id": "c", "by": "user"}, diff=[("Generator", "G1", "p_nom")],
                                       before=head, after={"fingerprint": "x"}) is None
+
+
+def test_a_write_that_changed_nothing_answers_nothing(waiting):
+    path, record, head = waiting
+    assert _answer(path, record, head, [("Generator", "G1", "p_nom")], after=head) is None
+
+
+def test_a_card_write_in_ordinary_chat_answers_through_the_wrapper(waiting, monkeypatch):
+    from harness import session as harness_session
+    from services import chat_tools
+    path, record, head = waiting
+    chat_tools.set_acting_user(record["owner_id"])
+    resumed = []
+    monkeypatch.setattr(tasks, "resume_task", resumed.append)
+    chat = harness_session.ChatSession(session_id="chat-1", owner_user_id=record["owner_id"])
+    card = {"rows": [{"role": "typed", "component_class": "Generator", "name": "G1", "field": "p_nom"},
+                     {"role": "typed", "component_class": "Generator", "name": "G1", "field": "marginal_cost"},
+                     {"role": "note", "component_class": "Generator", "name": "G1", "field": "p_min_pu"}]}
+    ctx = PyPSAService.get_active_context()
+    with run_envelope.answering(chat, "call-card", card):
+        ctx.network.generators.loc["G1", ["p_nom", "marginal_cost"]] = [25.0, 12.0]
+    task = json.loads(path.read_text())
+    assert task["run"]["answers"][0]["decision_id"] == "call-card" and task["run"]["waiting"] is None
+    assert resumed == [record["task_id"]]  # complete: the gate is checked again
+    envelope = json.loads(run_envelope.path_for(path).read_text())
+    assert envelope["chain"][-1]["answers"] == record["run"]["requests"][0]["id"]
+
+
+def test_a_runner_session_never_answers(waiting):
+    from harness import session as harness_session
+    path, record, _ = waiting
+    run = harness_session.ChatSession(session_id="run:" + record["task_id"], owner_user_id=record["owner_id"])
+    with run_envelope.answering(run, "call-run", {"rows": [{"role": "typed", "component_class": "Generator",
+                                                            "name": "G1", "field": "p_nom"}]}):
+        pass
+    assert "answers" not in json.loads(path.read_text())["run"]
+
