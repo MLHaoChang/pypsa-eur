@@ -72,3 +72,7 @@ See [validation](../checked-opt-in-validation.json), [coverage ledger](../covera
 and [activation/rollback](../checked-opt-in-runbook.md). No paid calls, full-backend
 fresh run, independent domain approval or full-device/calibration release claim.
 Global deployment remains disabled and this whole phase issue stays open.
+
+### 2026-11-04 — displayed-data revision proof moved here from 02
+
+Owner decision AA02-SCOPE-1 moves the "displayed-data revision proof" from [02](02-evidence-identity-and-access.md) to this issue (A5.2), with live-copilot LC-03 building the per-family adapters. Today the v2 `/ui-ack` `source_binding` re-reads the load-flow view and records `verification: browser_displayed_data`. Every other result family ACKs as `browser_mounted_view`, which is not numerical proof of what was shown.
