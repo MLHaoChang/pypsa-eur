@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A study run can now fill a missing tariff from the one Library tariff the organisation holds itself; the shipped common tariffs no longer count as held. The plan names each held tariff by its id, and a held tariff with no id fills nothing rather than showing "None".

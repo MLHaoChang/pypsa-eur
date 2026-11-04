@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): the harness emails the run owner once when an agent loop ends without a pass (no progress, rounds used, unverified write or error), naming the failing rules and the change ledger, when the run was granted with email notice on.

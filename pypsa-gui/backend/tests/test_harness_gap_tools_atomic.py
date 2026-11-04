@@ -15,7 +15,6 @@ import threading
 import pytest
 from harness import runner as harness_runner, run_loops
 from services import chat_tools, dirty_state, run_envelope
-from services.library import common as library_common
 from services.pypsa_service import PyPSAService
 from tests.test_assistant_tasks_study_brief import (  # noqa: F401
     baseline,
@@ -45,8 +44,6 @@ from tests.test_harness_run_loops import (  # noqa: F401
     stopped,
 )
 from tests.test_harness_runner import detached, task_path  # noqa: F401
-
-_names = library_common.names
 
 
 def ctx():
@@ -236,18 +233,15 @@ def test_a_tariff_fill_moves_the_exact_identity_and_links_from_its_own_receipt(
 
 
 def test_stepwise_real_tariff_fill_runs_inside_the_write_and_links_at_plus_one(
-    client, granted, profile, site, own_settles, monkeypatch
+    client, granted, profile, site, own_settles
 ):
     """GK B (20): the real attach_tariff (Library resolve, solver-config write
     under the solver-state RLock) inside admitted_write: it completes under a
     timed join, the pickup's +0 admits it, `exact` moves, and its own
     receipt, the handler's +1 included, is the link."""
-    # Exactly one held tariff, so the fill is admitted: the shipped common
-    # tariffs would also be listed at the grant (then the user chooses).
-    monkeypatch.setattr(
-        library_common, "names", lambda kind: [] if kind == "tariff" else _names(kind)
-    )
-    _put(client)  # a tariff the project's organisation holds, listed at the grant
+    # The one tariff the organisation holds (issue 27: the shipped common
+    # tariffs are not held), so the fill is admitted.
+    _put(client)
     network = ctx().network
     network.add("Bus", "grid")
     network.add(
