@@ -23,7 +23,7 @@ import time
 import pytest
 from fastapi import HTTPException
 from harness import continuation, job_adapters, run_loops, runner as harness_runner
-from services import run_envelope, run_gates, run_profiles
+from services import dirty_state, run_envelope, run_gates, run_profiles
 from services.adequacy import coupling, coupling_loop_runner, margin_loop_runner
 from services.pypsa_service import PyPSAService
 from tests.test_assistant_tasks_study_brief import (  # noqa: F401
@@ -148,6 +148,9 @@ class FakeLoop:
                 "stop_event": stop,
                 **({"probe_solves": 0} if study == "margin_loop" else {}),
             }
+            dirty_state.capture(
+                record
+            )  # the real loops capture their revision at start (LC-40b)
 
             def work():
                 while not (release.is_set() or stop.is_set()):
@@ -326,7 +329,7 @@ def test_a_native_margin_loop_rule_never_starts_an_agent_turn(
 
 
 @pytest.mark.parametrize(
-    "status", ["budget_exhausted", "unreachable", "aborted", "failed", "weird"]
+    "status", ["budget_exhausted", "unreachable", "aborted", "failed"]
 )
 def test_a_loop_that_did_not_meet_its_goal_ends_not_converged_with_no_l2_round(
     granted, ok, loops, monkeypatch, status
@@ -346,6 +349,21 @@ def test_a_loop_that_did_not_meet_its_goal_ends_not_converged_with_no_l2_round(
     assert fact["verdict"] != "pass"
     assert not (run.get("loop") or {}).get("rounds")  # never nested: no L2 round ran
     assert run["budget"]["used"].get("rounds", 0) == 1  # the engine call is one round
+
+
+def test_a_status_no_loop_sets_is_lost_never_read_as_the_steps(
+    granted, ok, loops, monkeypatch
+):
+    """A record ended with a status outside the terminal set is not the
+    step's verdict: the step settles `lost` and the run needs the user."""
+    with_rules(monkeypatch, engine_rule())
+    loops.finish_with(status="weird", solves_used=4, probe_solves=1)
+    task, path, _ = granted()
+    record = go(harness_runner.Runner("a", agent_provider=Never()), path, task)
+    step = engine_steps(record)[0]
+    assert step["status"] == "uncertain" and step["job"]["outcome"] == "lost"
+    assert record["run"]["status"] == "needs_user"
+    assert not (record["run"].get("loop") or {}).get("rounds")
 
 
 def test_a_non_engine_failure_goes_to_l2_first_without_the_engine_rule_or_its_start(
@@ -674,8 +692,10 @@ def test_a_second_engine_rule_starts_only_after_the_first_loop_ended(
 # ── Condition 1: a cancelled run stops the loop through its abort route ─────
 
 
-def test_cancelling_the_run_aborts_the_loop(granted, ok, loops, monkeypatch):
-    from services import assistant_tasks
+def test_cancelling_the_run_aborts_the_loop(
+    granted, ok, loops, monkeypatch, seeded_identity
+):
+    from services import assistant_tasks, chat_tools
 
     with_rules(monkeypatch, engine_rule())
     loops.hold()
@@ -687,6 +707,7 @@ def test_cancelling_the_run_aborts_the_loop(granted, ok, loops, monkeypatch):
         task["task_id"],
         lambda r: bool(engine_steps(r)) and engine_steps(r)[0]["status"] == "waiting",
     )
+    chat_tools.set_acting_user(seeded_identity["user_id"])  # the user cancels from chat
     assistant_tasks.cancel_task(task["task_id"])
     [record_] = loops.records
     assert wait_until(lambda: record_["status"] == "aborted")
@@ -702,11 +723,17 @@ def test_cancelling_the_run_aborts_the_loop(granted, ok, loops, monkeypatch):
 # ── GK A (11)(b): restart recovery ──────────────────────────────────────────
 
 
-def _lease_to(path, instance):
-    """Another runner instance takes the run's lease (a lapsed lease, taken over)."""
+def _hold_lease(path, owner, until):
     record = record_of(path)
-    record["run"].setdefault("runner", {}).update(lease_owner=instance, lease_until=0)
+    record["run"].setdefault("runner", {}).update(lease_owner=owner, lease_until=until)
     path.write_text(json.dumps(record))
+
+
+def _lease_to(path, instance):
+    """The holder's lease lapses: `instance` takes the run over on its next
+    tick (a takeover, so it recovers the run's waiting steps)."""
+    record = record_of(path)
+    _hold_lease(path, record["run"]["runner"]["lease_owner"], 0)
     return harness_runner.Runner(instance, agent_provider=Never())
 
 
@@ -744,7 +771,7 @@ def test_a_stale_follower_writes_nothing_and_the_new_holder_settles_from_the_rec
     loops.hold()
     task, path, _ = granted()
     _waiting(harness_runner.Runner("a", agent_provider=Never()), path, task)
-    second = _lease_to(path, "b")
+    _hold_lease(path, "c", time.time() + 3600)  # another process took the run over
     loops.release_all(status="unreachable", solves_used=4, probe_solves=1)
     [record_] = loops.records
     assert wait_until(lambda: record_["status"] == "unreachable")
@@ -754,6 +781,7 @@ def test_a_stale_follower_writes_nothing_and_the_new_holder_settles_from_the_rec
     assert (
         engine_steps(record_of(path))[0]["status"] == "waiting"
     )  # ... and wrote nothing
+    second = _lease_to(path, "b")
     record = go(second, path, task)
     assert len(loops.calls) == 1
     assert engine_steps(record)[0]["result"]["loop"]["status"] == "unreachable"

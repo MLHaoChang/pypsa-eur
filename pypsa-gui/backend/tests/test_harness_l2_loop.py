@@ -549,7 +549,7 @@ def test_a_capture_not_applied_ends_the_run_inputs_changed_with_the_solve_spent(
             "round": 0,
             "job": job,
             "failing": ["sv.solve.state"],
-            "next_job": job,
+            "next_job": None,  # the run stopped: no next solve
             "outcome": "inputs_changed",
             "capture_reason": "inputs_changed",
         }
