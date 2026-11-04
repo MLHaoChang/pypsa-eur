@@ -1243,8 +1243,13 @@ class SolveQueue:
             if not solve_capture.unchanged(manifest, solve_capture.current(probe, project_dir)):
                 settle(False, "inputs_changed")
                 return
+            # The solved context was hydrated from the capture; it saves into
+            # the project's own directory, so `_save_context` keeps that
+            # directory's settings table and study-fork owner keys.
+            solved.storage_dir = str(project_dir)
             try:
-                _save_context(solved, job.project_id, solver_config_override=config,
+                _save_context(solved, job.project_id, expect=job.project_id,
+                              solver_config_override=config,
                               persist_user_ts=True, storage_dir=project_dir)
             except BaseException:
                 settle(False, "write_back_failed")  # never read as the project's

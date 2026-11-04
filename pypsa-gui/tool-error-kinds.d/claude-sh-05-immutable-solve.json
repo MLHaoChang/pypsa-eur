@@ -4,7 +4,7 @@
       "surface": "inline",
       "why": "solve_queue_enqueue inside a harness run refuses while another solve of the project is queued or running: the run's solve must be its own captured input, never merged into that job. The run waits for the user; the assistant says the other solve must settle first."
     },
-    "capture_mismatch": {
+    "capture_project_mismatch": {
       "surface": "inline",
       "why": "solve_queue_enqueue inside a harness run names a project other than the run's: nothing is captured or queued. The assistant reports the refusal and does not retry."
     }

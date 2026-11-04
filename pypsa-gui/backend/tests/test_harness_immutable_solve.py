@@ -100,6 +100,23 @@ def test_with_no_edit_while_the_job_waits_the_captured_result_is_applied(eh, sit
     assert EDITED_OBJECTIVE != CAPTURED_OBJECTIVE
 
 
+def test_the_applied_write_back_keeps_the_projects_settings_and_study_ownership(eh, site, held_queue):
+    # The write-back saves the project's own directory, not the capture's: the
+    # per-project settings table and the study-fork owner keys survive it.
+    _, root = site
+    meta_path = pathlib.Path(root) / "metadata.json"
+    meta = json.loads(meta_path.read_text())
+    meta.update({"settings": {"kept": True}, "owner_study_id": "study-1"})
+    meta_path.write_text(json.dumps(meta))
+    job_id, _ = _enqueued(eh, site)
+    held_queue.resume()
+    job = _terminal(job_id)
+    assert job["capture"]["applied"] is True, job["capture"]
+    after = json.loads(meta_path.read_text())
+    assert after.get("settings") == {"kept": True}, after
+    assert after.get("owner_study_id") == "study-1", after
+
+
 # ── C6a: the capture is the one the job recorded ────────────────────────────
 
 def _settled_after(eh, site, held_queue, change):
@@ -120,6 +137,40 @@ def test_a_capture_that_is_not_the_jobs_fails_with_nothing_solved(eh, site, held
     job = _settled_after(eh, site, held_queue, change)
     assert job["status"] == "failed" and job["condition"] == solve_capture.MISMATCH, job
     assert job["objective"] is None
+
+
+def test_another_pickup_failure_is_a_queue_error_not_a_mismatch(eh, site, held_queue, monkeypatch):
+    # The catch names CaptureMismatch alone: a failure of its base class
+    # (RuntimeError) is no proof the capture differs, so it stays queue_error.
+    def broken(_record):
+        raise RuntimeError("disk gone")
+    job_id, _ = _enqueued(eh, site)
+    monkeypatch.setattr(solve_capture, "verify", broken)
+    held_queue.resume()
+    job = _terminal(job_id)
+    assert job["status"] == "failed" and job["condition"] == "queue_error", job
+    assert job["objective"] is None
+
+
+def test_a_run_solve_naming_another_project_is_refused_with_nothing_captured(eh, site, held_queue, monkeypatch):
+    _, root = site
+    real = solve_capture.request
+
+    def other_project():
+        request = real()
+        if request is None:
+            return None
+        return {**request, "ctx": type("Other", (), {"project_uuid": __import__("uuid").uuid4()})()}
+    monkeypatch.setattr(solve_capture, "request", other_project)
+    project_id = str(ctx().project_uuid)
+    ctx().network.storage_units.at["S1", "capital_cost"] = 1.0
+    task, path = eh([{"id": "inputs.2", "tool": "solve_queue_enqueue", "args": {"project_id": project_id}}])
+    record = until(harness_runner.Runner("a"), path, task,
+                   lambda r: r["steps"][1]["status"] not in ("pending", "running"))
+    assert record["steps"][1]["status"] != "completed", record["steps"][1]
+    assert not [j for j in solve_queue.solve_queue.list_jobs() if j["status"] == "queued"]
+    captures = pathlib.Path(root) / solve_capture.CAPTURES
+    assert not captures.is_dir() or not any(captures.iterdir())
 
 
 # ── C6b, C6c: the private context is the capture, and only the capture ──────
@@ -239,6 +290,24 @@ def test_a_run_solve_is_refused_while_another_solve_of_the_project_is_active(eh,
     record = until(harness_runner.Runner("a"), path, task,
                    lambda r: r["steps"][1]["status"] not in ("pending", "running"))
     assert record["steps"][1]["status"] != "completed", record["steps"][1]
+    # Refused, never merged: the earlier job is the only one, and solves its own input.
+    assert [j.get("capture") for j in solve_queue.solve_queue.list_jobs() if j["status"] == "queued"] == [None]
+    captures = pathlib.Path(root) / solve_capture.CAPTURES
+    assert not captures.is_dir() or not any(captures.iterdir())
+
+
+def test_a_capture_whose_enqueue_failed_is_removed_at_once(eh, site, held_queue, monkeypatch):
+    _, root = site
+
+    def failing(*_a, **_k):
+        raise RuntimeError("queue store down")
+    monkeypatch.setattr(solve_queue.solve_queue, "enqueue_unique", failing)
+    project_id = str(ctx().project_uuid)
+    ctx().network.storage_units.at["S1", "capital_cost"] = 1.0
+    task, path = eh([{"id": "inputs.2", "tool": "solve_queue_enqueue", "args": {"project_id": project_id}}])
+    record = until(harness_runner.Runner("a"), path, task,
+                   lambda r: r["steps"][1]["status"] not in ("pending", "running"))
+    assert record["steps"][1]["status"] != "completed", record["steps"][1]
     captures = pathlib.Path(root) / solve_capture.CAPTURES
     assert not captures.is_dir() or not any(captures.iterdir())
 
@@ -279,6 +348,23 @@ def test_a_capture_is_in_no_bundle_and_no_fingerprint(eh, site):
         assert run_gates.fingerprint(ctx()) == before
     names = zipfile.ZipFile(io.BytesIO(_project_bundle_bytes("Tool Baseline", pathlib.Path(root)))).namelist()
     assert names and not [n for n in names if ".harness" in n]
+
+
+def test_a_capture_leaves_every_project_and_template_file_byte_identical(eh, site):
+    """C6g: capturing writes under `.harness/captures` only; every other file of
+    the project, the template sidecars included, stays byte for byte."""
+    _, root = site
+    root = pathlib.Path(root)
+
+    def files():
+        return {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*")
+                if p.is_file() and ".harness" not in p.relative_to(root).parts}
+    before = files()
+    assert "eh_template.json" in before
+    with ctx().mutation_lock, ctx().solver_state_lock:
+        record = solve_capture.capture(ctx(), root, None)
+    assert pathlib.Path(record["dir"]).is_relative_to(root / solve_capture.CAPTURES)
+    assert files() == before
 
 
 def _undo(root):
