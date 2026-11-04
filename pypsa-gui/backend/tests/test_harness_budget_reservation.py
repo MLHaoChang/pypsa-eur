@@ -376,3 +376,16 @@ def test_research_is_enforced_with_the_mode_off(run, monkeypatch):
     assert refused.value.reason == "research_budget"
     with pytest.raises(ValueError):
         send_reservation.admit(run, request(), boot="boot-a")
+
+
+def test_server_tool_fees_settle_at_max_uses_when_usage_is_reported(run, mode, monkeypatch):
+    # Token usage does not count tool uses: the fees settle at their allowance, never below.
+    monkeypatch.setenv(send_reservation.SERVER_TOOL_COSTS_ENV,
+                       json.dumps({"web_search": {"fee_eur": 0.25, "content_tokens": 100}}))
+    req = request()
+    req.tools = [search_tool(max_uses=2)]
+    drain(send_reservation.ReservingProvider(FakeProvider([{"usage": {"input_tokens": 10, "output_tokens": 10}}]),
+                                             run, boot="boot-a", scope="research"), req)
+    charge = ledger(run)["final_charges"][0]
+    tokens = (10 * RATE["input_tokens"] + 10 * RATE["output_tokens"]) / 1e6
+    assert charge["amount"] == pytest.approx(tokens + 0.5) and charge["eur"] == pytest.approx(tokens + 0.5)

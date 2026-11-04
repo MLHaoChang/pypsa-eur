@@ -214,20 +214,23 @@ def _counts(usage: Any) -> dict[str, int] | None:
     return counts
 
 
-def _actual(counts: dict[str, int], current: str, model: str) -> int | float:
+def _actual(counts: dict[str, int], current: str, request: LLMRequest) -> int | float:
+    """The send's spend from the provider's usage. Token usage does not say
+    how many server-tool uses ran, so money counts their fees at `max_uses`."""
     if current == "output_tokens":
         return counts["output_tokens"]
     if current == "total_tokens":
         return sum(counts.values())
-    rate = _rate(model)
-    return round(sum(counts[k] * rate[k] for k in counts) / 1e6, 6)
+    rate = _rate(request.model)
+    fees = (server_tool_allowance(request) or (0, 0.0))[1]
+    return round(sum(counts[k] * rate[k] for k in counts) / 1e6 + fees, 6)
 
 
-def _eur_actual(counts: dict[str, int] | None, model: str) -> float | None:
+def _eur_actual(counts: dict[str, int] | None, request: LLMRequest) -> float | None:
     if counts is None:
         return None
     try:
-        return _actual(counts, "money_eur", model)
+        return _actual(counts, "money_eur", request)
     except SendRefused:
         return None
 
@@ -374,10 +377,10 @@ def settle(path, key: str, request: LLMRequest, usage: Any) -> None:
         amount, flags = hold["amount"], ["no_usage"]
         if counts is not None and current is not None:
             try:
-                amount, flags = _actual(counts, current, request.model), None
+                amount, flags = _actual(counts, current, request), None
             except SendRefused:
                 pass
-        _settle_row(run, hold, amount, flags, eur=_eur_actual(counts, request.model) if counts else None)
+        _settle_row(run, hold, amount, flags, eur=_eur_actual(counts, request) if counts else None)
         return None
 
     try:
