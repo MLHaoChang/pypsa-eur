@@ -275,8 +275,10 @@ def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
     #
     # 0009 adds personal restrictions. Existing Library rows must survive too.
     # 0010 adds the replay marks of mutable assurance records (no backfill).
-    NEW_TABLE_NAME = "assurance_record_seq"
-    NEW_COLUMN = None                           # (table, column) or None
+    # 0011 adds `solve_jobs.capture` (study harness 05, HH-10): NULL on every
+    # earlier row, which is an ordinary solve.
+    NEW_TABLE_NAME = None
+    NEW_COLUMN = ("solve_jobs", "capture")      # (table, column) or None
     # `solve_jobs` joined this list with 0007: the column under test is on it,
     # and a QUEUED job row surviving the migration is the thing that matters —
     # a restart restores those rows into the in-memory queue.
