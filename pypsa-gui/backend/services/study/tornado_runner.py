@@ -50,6 +50,7 @@ import time
 from dataclasses import asdict
 from typing import Any
 
+from services import dirty_state
 from services.pypsa_service import PyPSAService
 from services.study import findings as F
 from services.study import forks as study_forks
@@ -279,7 +280,11 @@ def start_tornado(study_id: str, *, base_row, db, user_id,
         "campaign": None, "own_campaign": False, "registered_base": registered,
         "error": None, "started_at": time.time(), "finished_at": None,
         "thread": None, "stop_event": stop_event,
+        "network_revision": None,
     }
+    # Same thread, before the Thread, the lock and the registry insert, so no
+    # reader sees this record's None (see `dirty_state.capture`).
+    dirty_state.capture(record, ctx)
     run_ctx = contextvars.copy_context()
     thread = threading.Thread(
         target=lambda: run_ctx.run(_worker, study_id=study_id, base_dir=base_dir,

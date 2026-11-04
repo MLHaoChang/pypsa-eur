@@ -3,7 +3,7 @@
 
 # AS-12 — Persist PCS oversize and STATCOM results
 
-Status: ready-for-agent
+Status: done (landed in #985)
 Type: task
 Blocked by: 05
 Reviewer: GK A

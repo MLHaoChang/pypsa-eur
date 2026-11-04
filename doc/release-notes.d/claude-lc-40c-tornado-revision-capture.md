@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A decision study's tornado now records the network revision it ran on, so its budget-campaign entries read "edited since the study" after a network edit, as the decision study's own entries do, instead of always reading unavailable.

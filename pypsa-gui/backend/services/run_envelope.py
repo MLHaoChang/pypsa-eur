@@ -26,6 +26,7 @@ cannot be read, matches nothing and pauses the run.
 """
 from __future__ import annotations
 
+import contextlib
 import copy
 import fnmatch
 import hashlib
@@ -997,41 +998,179 @@ def cross(session, task_path, card, ctx):
     return reason or "crossed"
 
 
-def chain_head(task_path, ctx):
+def _exact(ctx):
+    """The exact input fingerprint (`exact=True`: a sub-precision change
+    moves it), or None when it cannot be read."""
+    from services import workflow_tools
+    try:
+        return workflow_tools._network_input_fingerprint(ctx, exact=True) or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def identity(ctx, exact=True):
+    """The project's input identity, read under the caller's locks: the
+    chain's fingerprint, the exact fingerprint (unless `exact=False`) and the
+    edit counter (`dirty_state.capture`, LC-40b). A fingerprint that cannot
+    be read is None."""
+    from services import dirty_state
+    found = {"fingerprint": _fingerprint(ctx), "exact": _exact(ctx) if exact else None}
+    dirty_state.capture(found, ctx)  # no lock=: the caller holds the mutation lock (one int read)
+    return found
+
+
+def _last(envelope):
+    """The chain's last link: its fingerprint and, on a link that carries
+    one, its edit counter (the grant's own fingerprint carries none)."""
+    if envelope["chain"]:
+        link = envelope["chain"][-1]
+        return link["fingerprint"], link.get("network_revision")
+    return envelope["fingerprint"], None
+
+
+def chain_head(task_path, ctx, read=None):
     """What a runner step starts from while an envelope is live, read under
     the step's locks: (fingerprint, None) on the chain's last link, else
     (fingerprint, "drift" or "fingerprint_unreadable"). (None, None) with
-    no live envelope."""
+    no live envelope. A link that carries an edit counter must match it too:
+    an edit then its undo is the same input on a later revision (issue 22).
+    With `read` (a dict), the step's whole input identity and the envelope's
+    id are stored on it: what the step's write compares at pickup."""
     from services import assistant_tasks
     if not live(task_path):
         return None, None
-    current = _fingerprint(ctx)
+    found = identity(ctx, exact=read is not None)
+    current = found["fingerprint"]
     with assistant_tasks._LOCK:
         envelope = _load(task_path)
     if envelope is None or envelope["state"] != "granted":
         return None, None
-    last = envelope["chain"][-1]["fingerprint"] if envelope["chain"] else envelope["fingerprint"]
-    return current, None if current and current == last else "drift" if current else "fingerprint_unreadable"
+    if read is not None:
+        read.update(found, envelope_id=envelope["id"])
+    last, revision = _last(envelope)
+    if not current:
+        return current, "fingerprint_unreadable"
+    moved = current != last or (revision is not None and found["network_revision"] != revision)
+    return current, "drift" if moved else None
 
 
-def settle(task_path, call_id, ctx, before):
+def settle(task_path, call_id, ctx, before, after=None):
     """The freshness chain's next link after a runner change, only when the
     step started from the chain's last link (`before`, read under the step's
     locks): a change made before the step, even one the envelope never saw
     (an uncarded step), stays drift (GK B (8)). The brief's fingerprint
-    follows the chain while it was the chain's last link (SC-11)."""
+    follows the chain while it was the chain's last link (SC-11).
+
+    `after` is a covered step's receipt (`admitted_write`): the identity
+    captured under the write's own locks, never a later read, so an edit
+    landing after them is drift on the next step (issue 22). Without it
+    (a step the wrapper does not cover yet) the identity is read now: the
+    known limit the README names."""
     from services import assistant_tasks
-    current = _fingerprint(ctx)  # None: no link, so the next admission reads drift
+    after = after if after is not None else identity(ctx, exact=False)
+    current = after.get("fingerprint")  # None: no link, so the next admission reads drift
     with assistant_tasks._LOCK:
         envelope = _load(task_path)
         if envelope is None or envelope["state"] != "granted" or not current or not before:
             return
-        last = envelope["chain"][-1]["fingerprint"] if envelope["chain"] else envelope["fingerprint"]
-        if before != last or current == last:
+        last, revision = _last(envelope)
+        if before != last or (current == last and (revision is None or after.get("network_revision") == revision)):
             return
-        envelope["chain"].append({"after_change": call_id, "fingerprint": current})
+        envelope["chain"].append({"after_change": call_id, "fingerprint": current,
+                                  "exact": after.get("exact"), "network_revision": after.get("network_revision")})
         _save(task_path, envelope)
         task = json.loads(Path(task_path).read_text())
         if task.get("fingerprint") == last:
             task["fingerprint"] = current
             assistant_tasks._save(Path(task_path), task)
+
+
+# ── Issue 22: compare and write in one project lock ─────────────────────────
+
+# The envelope steps whose write runs inside `admitted_write`: eh_site@1's
+# edit shapes (`update_component` on its size caps, any attrs: the compare is
+# shape-independent, so a mixed call is guarded too, never refused for it)
+# and the run's queued solve (its solver-config snapshot is taken under the
+# held solver-state lock). Every other envelope tool keeps the step's
+# ambient settle (the README's remaining limit).
+ATOMIC_TOOLS = frozenset({"update_component", "solve_queue_enqueue"})
+PICKUP_KIND = "envelope_pickup_refused"  # the literal `admitted_write` refuses with
+
+
+def settle_own(task_path, call_id, ctx, before, receipts):
+    """A covered step's settle: from its own call's receipt only. None (a
+    refusal, or a worker past its deadline) adds no link, so the next step
+    reads drift (fail closed); another call's receipt never settles it."""
+    receipt = next((r for r in list(receipts) if r["call_id"] == call_id), None)
+    if receipt is not None:
+        settle(task_path, call_id, ctx, before, after=receipt)
+
+
+def _pickup(session, task_path, ctx, tool, expected, recheck):
+    """Under the project's locks, before the handler: None, or why the write
+    may not run. Reads the envelope and the task without
+    `assistant_tasks._LOCK` (both are written by atomic replace), so the
+    order stays mutation_lock -> solver_state_lock and nothing else."""
+    from services.chat_tools_schema import tool_edits_network
+    if not expected:
+        return "fingerprint_unreadable"  # nothing on record to compare: never an unchecked write
+    if not recheck():
+        return "recheck"
+    envelope = _load(task_path)
+    if envelope is None or envelope["state"] != "granted" or envelope["id"] != expected.get("envelope_id"):
+        return "revoked" if envelope is None or envelope["state"] == "granted" else envelope["state"]
+    try:
+        task = json.loads(Path(task_path).read_text())
+    except (OSError, ValueError):
+        return "recheck"
+    reason = _standing(session, envelope, task, ctx)
+    if reason:
+        return reason
+    now = identity(ctx)
+    if not now["fingerprint"] or not now["exact"] or now["network_revision"] is None \
+            or not expected.get("exact") or expected.get("network_revision") is None:
+        return "fingerprint_unreadable"
+    # Coupled with `harness.loop`'s dispatch seam: it bumps the edit counter
+    # once for a network-editing tool after `tool_running` and before this
+    # pickup, so the run's own edit is expected here; anything else is drift.
+    own = 1 if tool_edits_network(tool) else 0
+    if now["exact"] != expected["exact"] or now["network_revision"] != expected["network_revision"] + own:
+        return "drift"
+    return None
+
+
+@contextlib.contextmanager
+def admitted_write(session, task_path, ctx, *, call_id, tool, expected, recheck, receipts):
+    """An envelope-admitted step's write, on the worker thread that runs its
+    handler (issue 22): take the project's `mutation_lock` then its
+    `solver_state_lock` (today's order; per project, never process-global),
+    re-check the run and the envelope, compare the input identity the runner
+    read under its own locks (`expected`) with the current one, run the
+    handler and capture the after-identity, all before releasing. A refusal
+    raises before any write, and its audit row is written after the locks
+    are released. The receipt names its call: a caller settles only from
+    its own step's receipt."""
+    from harness.runner import LOCK_TIMEOUT_SECONDS
+    reason = "locked"
+    if ctx.mutation_lock.acquire(timeout=LOCK_TIMEOUT_SECONDS):
+        try:
+            if ctx.solver_state_lock.acquire(timeout=LOCK_TIMEOUT_SECONDS):
+                try:
+                    try:
+                        reason = _pickup(session, task_path, ctx, tool, expected, recheck)
+                    except Exception:  # noqa: BLE001 - an unreadable check refuses (fail closed)
+                        logger.warning("run envelope: pickup check for %s failed", tool, exc_info=True)
+                        reason = "fingerprint_unreadable"
+                    if reason is None:
+                        try:
+                            yield
+                        finally:
+                            receipts.append({"call_id": call_id, **identity(ctx)})
+                        return
+                finally:
+                    ctx.solver_state_lock.release()
+        finally:
+            ctx.mutation_lock.release()
+    refused_before_gate(task_path, call_id, tool, reason)
+    _refuse("envelope_pickup_refused", f"The run's envelope did not admit this write at pickup ({reason}); "
+                         "the step waits for the user.")

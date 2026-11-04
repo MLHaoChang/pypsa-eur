@@ -3,7 +3,7 @@
 
 # LC-17 — create and run sensitivities by conversation
 
-Status: ready-for-agent inside LC-05, after LC-12
+Status: done (sensitivity chat tests OJ-27/OJ-28 on master)
 Type: task
 Baseline: master `ae95a94a866730c0fe67fad37e238dc281786bd6`
 Dependencies: LC-12 (job completion into chat), LC-16 (multi-asset card)

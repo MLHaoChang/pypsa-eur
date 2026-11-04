@@ -171,12 +171,7 @@ OUT_OF_SCOPE = {
 }
 
 # Runners whose record captures no revision at all (path -> why, and what fixes it).
-NO_CAPTURE = {
-    "study/tornado_runner.py":
-        "start_tornado's record literal (~:275) has no network_revision and never "
-        "calls dirty_state.capture, so its campaign entries read null (Unavailable); "
-        "LC-40c (.scratch/live-copilot/issues/40c-tornado-revision-capture.md) adds the capture",
-}
+NO_CAPTURE: dict[str, str] = {}
 
 
 def bare_captures(root: Path) -> list[tuple[str, int, str]]:

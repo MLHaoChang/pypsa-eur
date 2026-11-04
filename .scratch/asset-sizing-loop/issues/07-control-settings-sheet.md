@@ -3,7 +3,7 @@
 
 # AS-07 — Control-settings sheet
 
-Status: ready-for-agent
+Status: done (landed in #981)
 Type: task
 Blocked by: 03
 Model: Sonnet

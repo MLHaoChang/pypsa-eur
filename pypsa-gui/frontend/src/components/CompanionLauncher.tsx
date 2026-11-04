@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Mic, Pencil } from 'lucide-react'
 
 // Clears toasts beside the chip (max-w12rem) plus the24px right gutter.
@@ -92,9 +92,26 @@ export default function CompanionLauncher({
   const [hovered, setHovered] = useState(false)
   const [draft, setDraft] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const launcherRef = useRef<HTMLDivElement>(null)
   const voiceReasonId = useId()
   // LC-07: the server flag is on (voice available, or blocked by a missing media link).
   const voiceOn = !!speech && (speech.available || !!speech.blocked || speech.state !== 'off')
+  // LC-07b: the launcher is bottom-anchored but scrolls when the canvas is short
+  // (Expert, bottom panel up). Keep the end (the voice note) in view, but only
+  // while the user has not scrolled up: a reader of the composer is not yanked.
+  const atBottom = useRef(true)
+  useLayoutEffect(() => {
+    const el = launcherRef.current
+    if (!el) return
+    const pin = () => { if (atBottom.current) el.scrollTop = el.scrollHeight }
+    const track = () => { atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 4 }
+    pin()
+    el.addEventListener('scroll', track)
+    if (typeof ResizeObserver === 'undefined') return () => el.removeEventListener('scroll', track)
+    const ro = new ResizeObserver(pin)
+    Array.from(el.children).forEach((c) => ro.observe(c))
+    return () => { ro.disconnect(); el.removeEventListener('scroll', track) }
+  }, [liveOpen, voiceOn, children])
   useEffect(() => {
     if (liveOpen) inputRef.current?.focus()
   }, [liveOpen])
@@ -104,6 +121,7 @@ export default function CompanionLauncher({
   const caption = liveCaption.trim()
   return (
     <div
+      ref={launcherRef}
       className="companion-launcher absolute bottom-0 right-6 z-40 flex max-w-[calc(100vw-3rem)] flex-col items-end gap-2"
       data-testid="companion-launcher"
       data-no-panel-close
@@ -261,7 +279,7 @@ export default function CompanionLauncher({
         </button>
       </div>
       {!voiceOn && (
-      <div className="companion-extras max-w-72 rounded-lg border border-border bg-bg-2 px-3 py-2 text-[10px] text-muted"
+      <div className="companion-extras companion-voice-note max-w-72 rounded-lg border border-border bg-bg-2 px-3 py-2 text-[10px] text-muted"
         data-testid="companion-voice-note">
         <button type="button" disabled aria-describedby={voiceReasonId}
           className="font-medium text-muted disabled:cursor-not-allowed">

@@ -34,6 +34,10 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - Activity (POLISH-PW-2): show the "Outcome: <word>" line only when the native state adds something to the plain status.
 - The FMEA criticality label is "Criticality (€ per year)" (POLISH-PW-2).
 - The turn check mark is muted, is cleared when the turn ends, and shares `ANSWER_NOT_CHECKED` (#946).
+- Unit tests never replace shots for a new placement; shots use the real API plus route mocks (#1048).
+- A component-level harness shot (no app chrome) is fine for copy-only states (#1053).
+- A read-only line at the top of a tab is the visible reason for every disabled control in that tab; don't repeat it per control (#1064).
+- Text the backend builds and a card renders follows the same wording rules (#1053 `not_kept`, #1072 plan-review rows).
 
 ## Master merges
 

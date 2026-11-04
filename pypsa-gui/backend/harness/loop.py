@@ -3451,6 +3451,8 @@ def _dispatch_real_tool_call(
             from services.chat_tools_schema import tool_edits_network
 
             if tool_edits_network(tool_name):
+                # Coupled with `run_envelope._pickup` (issue 22): a run's
+                # guarded write expects exactly this one bump before pickup.
                 dirty_state.bump_revision()
         # Same seam, same reason: the HTTP middleware's undo snapshot never runs
         # for an in-process call either. After the confirmation gate, so a refused
@@ -3556,9 +3558,22 @@ def _dispatch_real_tool_call(
             # waits twice the budget, and only when the pool is jammed.
             started = threading.Event()
 
+            # Study harness issue 22: a harness run's envelope-admitted write
+            # compares its input identity and writes inside one project lock,
+            # taken here on the worker (`run_envelope.admitted_write`). Only a
+            # runner sets `write_guard`; every other session runs as before.
+            write_guard = getattr(session, "write_guard", None)
+            guarded_write = (
+                write_guard(tool_use_id, tool_name, args or {}) if write_guard else None
+            )
+
+            def guarded_handler():
+                with guarded_write or contextlib.nullcontext():
+                    return invoke_handler()
+
             def run_in_worker():
                 started.set()
-                return _ctx_snapshot.run(invoke_handler)
+                return _ctx_snapshot.run(guarded_handler)
 
             future = _TOOL_EXECUTOR.submit(run_in_worker)
             if checked_turn is not None and tool_name == "update_component":
