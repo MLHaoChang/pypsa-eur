@@ -6469,6 +6469,14 @@ def end_workflow() -> dict:
     return {"ended": state["id"] if state else None}
 
 
+def set_requirement(requirement: dict | None = None, replaces: str | None = None,
+                    retire: str | None = None) -> dict:
+    """Study harness issue 23: a requirement, active once the user approved its card."""
+    from harness import requirements
+
+    return requirements.set_requirement(requirement, replaces, retire)
+
+
 def set_goal(objective: str, max_rounds: int | None = None) -> dict:
     """Set the session's goal with a round budget (issue 17): after this
     turn, up to `max_rounds` rounds run on their own (`harness/goals.py`)."""
@@ -9605,6 +9613,7 @@ DISPATCHERS: dict[str, Any] = {
     "ask_user": ask_user,
     "use_skill": use_skill,
     "start_workflow": start_workflow,
+    "set_requirement": set_requirement,
     "set_goal": set_goal,
     "pause_goal": pause_goal,
     "complete_goal": complete_goal,

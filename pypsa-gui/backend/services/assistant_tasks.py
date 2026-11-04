@@ -255,7 +255,27 @@ def _stale(task, current=None):
     if not task.get("brief") or task["status"] in ("completed", "cancelled"):
         return False
     current = current or _fingerprint()
-    return current is None or current != task.get("fingerprint")
+    if current is None or current != task.get("fingerprint"):
+        return True
+    return _requirements_moved(task)
+
+
+def _requirements_moved(task):
+    """Issue 23: a requirement activated or retired since the brief was
+    approved makes it stale; an evaluation mark does not. A recorded thread
+    that cannot be read counts as moved (fail closed)."""
+    if not task.get("requirements"):
+        return False
+    from harness import requirements
+    try:
+        return requirements.moved(task["requirements"], _authority())
+    except Exception:  # noqa: BLE001 — unreadable counts as moved
+        return True
+
+
+def _requirements_record(session):
+    from harness import requirements
+    return requirements.brief_record(session)
 
 
 def _card_of(task, step_id):
@@ -454,6 +474,9 @@ def start_task(title: str, steps: list[dict], request_id: str, brief: dict | Non
                 if fingerprint is None:
                     _refuse("brief_inputs_unreadable", "The project's inputs cannot be read, so the brief cannot be kept current.")
                 task.update(version=2, brief=brief, fingerprint=fingerprint)
+                record = _requirements_record(session)
+                if record:
+                    task["requirements"] = record  # issue 23: the revision approved with the brief
             _save(path, task)
         session.task_id = task_id
         return _view(task)
@@ -499,6 +522,9 @@ def _start_run(session, title, request_id, run, profile, brief):
             task = {"version": 3, "task_id": task_id, "owner_id": owner, "project_id": project,
                     "title": title.strip(), "status": "ready", "steps": [], "brief": brief, "fingerprint": fingerprint,
                     "run": {**run, "status": "running", "stage": "intake", "stages": stages}}
+            record = _requirements_record(session)
+            if record:
+                task["requirements"] = record  # issue 23: a run inherits the confirmed requirements
             _save(path, task)
             from services import run_envelope
             run_envelope.propose(path, task, profile)  # issue 03: the plan-review card's envelope
