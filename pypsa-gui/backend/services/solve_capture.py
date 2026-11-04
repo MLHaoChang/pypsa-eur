@@ -187,6 +187,11 @@ def unchanged(manifest: dict, now: dict) -> bool:
             and now["network_revision"] == manifest["network_revision"] and now["sidecars"] == captured)
 
 
+def public(record: dict) -> dict:
+    """The record as the job listing and the run evidence show it (no path)."""
+    return {k: v for k, v in record.items() if k != "dir"}
+
+
 def remove(record: dict | None) -> None:
     """Drop a settled job's capture (C6g); its record stays on the job."""
     if record and record.get("dir"):

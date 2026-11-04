@@ -321,3 +321,20 @@ def test_user_code_reads_are_named_as_not_captured(eh, site, code, expected):
         record = solve_capture.capture(ctx(), root, config)
     assert record.get("not_captured") == expected
     assert json.loads((pathlib.Path(record["dir"]) / "solver_config.json").read_text()) == json.loads(config)
+
+
+def test_no_project_copy_or_listing_names_the_capture_directory():
+    """C6g: bundle export, Save-As and the sidecar listings copy named files
+    and directories only; `.harness` is never one of them."""
+    from routers import projects
+    named = [*projects._BUNDLE_FILES, *projects._BUNDLE_DIRS, *projects._HISTORY_DIRS,
+             *getattr(projects, "_BUNDLE_CAMPUS_FILES", ())]
+    assert not [n for n in named if str(n).startswith(".harness")]
+    assert not [n for n in solve_capture.solve_inputs() if n.startswith(".harness")]
+
+
+def test_a_failed_captured_solve_reads_as_failed_not_as_not_applied(monkeypatch):
+    from services import run_gates
+    job = {"status": "failed", "condition": "infeasible", "capture": {"applied": False, "reason": "not_completed"}}
+    monkeypatch.setattr(run_gates, "_solve_job", lambda env: job)
+    assert run_gates._solve_state(None) == "failed"

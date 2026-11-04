@@ -100,7 +100,7 @@ def _not_applied(job):
     """HH-10 (issue 05, C6f): a captured solve whose result was not applied
     (the inputs changed while it waited) is never read as the project's."""
     capture = job.get("capture") or {}
-    if capture.get("applied") is False:
+    if job.get("status") == "completed" and capture.get("applied") is False:
         reason = capture.get("reason") or "not_applied"
         return NoEvidence(reason, f"{reason}: the run's captured solve was not applied to the project")
     return None

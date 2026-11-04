@@ -138,6 +138,11 @@ def check_kind(kind: str) -> None:
         raise ValueError(f"{UNKNOWN_KIND_CONDITION}: {kind!r} is not one of {KINDS}")
 
 
+def _capture_public(record: dict) -> dict:
+    from services import solve_capture
+    return solve_capture.public(record)
+
+
 @dataclass
 class SolveJob:
     """One queued solve of a single saved project."""
@@ -226,8 +231,7 @@ class SolveJob:
             "enqueued_at": self.enqueued_at,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
-            **({"capture": {k: v for k, v in self.capture.items() if k != "dir"}}
-               if self.capture is not None else {}),
+            **({"capture": _capture_public(self.capture)} if self.capture is not None else {}),
         }
 
 
@@ -1239,8 +1243,12 @@ class SolveQueue:
             if not solve_capture.unchanged(manifest, solve_capture.current(probe, project_dir)):
                 settle(False, "inputs_changed")
                 return
-            _save_context(solved, job.project_id, solver_config_override=config,
-                          persist_user_ts=True, storage_dir=project_dir)
+            try:
+                _save_context(solved, job.project_id, solver_config_override=config,
+                              persist_user_ts=True, storage_dir=project_dir)
+            except BaseException:
+                settle(False, "write_back_failed")  # never read as the project's
+                raise
             if resident is not None:
                 _hydrate_context_from_disk(resident, project_dir, job.project_id)
             settle(True)
@@ -1579,8 +1587,9 @@ class SolveQueue:
             final_status = "failed"
             error = f"{type(exc).__name__}: {exc}"
             condition = "queue_error"
-            if job.capture is not None and type(exc).__name__ == "CaptureMismatch":
-                condition = "capture_mismatch"  # HH-10 (C6a): nothing was solved
+            from services import solve_capture as _capture
+            if isinstance(exc, _capture.CaptureMismatch):
+                condition = _capture.MISMATCH  # HH-10 (C6a): nothing was solved
             logger.exception("solve_queue: job %s (%r) failed", job.id, project_id)
             try:
                 if ctx is not None and ctx.solver_state.get("thread") is me:

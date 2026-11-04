@@ -1078,7 +1078,8 @@ def publish_queue_run(job: Any, status: str | None = None, ctx: Any = None) -> d
         }
         capture = getattr(job, 'capture', None)
         if capture is not None:  # HH-10 (study harness 05): what was solved, and whether it was applied
-            summary['capture'] = {k: v for k, v in capture.items() if k != 'dir'}
+            from services import solve_capture
+            summary['capture'] = solve_capture.public(capture)
         error = None
         if status == 'completed':
             objective = getattr(job, 'objective', None)

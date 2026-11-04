@@ -1,4 +1,12 @@
-{"kinds": {
-  "solve_already_queued": {"surface": "inline", "why": "solve_queue_enqueue inside a harness run refuses while another solve of the project is queued or running: the run's solve must be its own captured input, never merged into that job. The run waits for the user; the assistant says the other solve must settle first."},
-  "capture_mismatch": {"surface": "inline", "why": "solve_queue_enqueue inside a harness run names a project other than the run's, or a queued capture is not the one the job recorded. Nothing is solved; the assistant reports the refusal and does not retry."}
-}}
+{
+  "kinds": {
+    "solve_already_queued": {
+      "surface": "inline",
+      "why": "solve_queue_enqueue inside a harness run refuses while another solve of the project is queued or running: the run's solve must be its own captured input, never merged into that job. The run waits for the user; the assistant says the other solve must settle first."
+    },
+    "capture_mismatch": {
+      "surface": "inline",
+      "why": "solve_queue_enqueue inside a harness run names a project other than the run's: nothing is captured or queued. The assistant reports the refusal and does not retry."
+    }
+  }
+}
