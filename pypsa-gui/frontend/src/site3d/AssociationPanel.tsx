@@ -80,7 +80,7 @@ function openCreationForm(item: PaletteItemData): void {
 }
 
 const link = 'whitespace-nowrap text-accent hover:underline disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50'
-const primary = 'px-3 py-1 rounded bg-accent text-white font-semibold hover:bg-accent/90 disabled:opacity-50'
+const primary = 'px-3 py-1 rounded bg-accent text-white font-semibold hover:bg-accent/90 disabled:cursor-not-allowed disabled:hover:bg-accent disabled:opacity-50'
 const secondary = 'px-3 py-1 rounded border border-border text-text hover:border-accent disabled:opacity-50'
 
 function useNetworkRows(project: string | null) {

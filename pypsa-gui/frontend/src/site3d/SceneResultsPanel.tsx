@@ -121,7 +121,7 @@ export default function SceneResultsPanel({ project, siteId, scene, current, fre
               <>
                 <Lines title="Across the boundary, per bus" rows={group.boundary} testId="scene-result-boundary" />
                 <Lines title="Per carrier" rows={group.totals} testId="scene-result-totals" />
-                <div className="mt-1"><span className="text-muted">All carriers: </span><span className={valueClass(!group.total.startsWith('Unavailable'))} data-testid="scene-result-total">{group.total}</span></div>
+                <div className="mt-1"><span className="text-muted" data-testid="scene-result-total-label">{group.totalLabel}: </span><span className={valueClass(!group.total.startsWith('Unavailable'))} data-testid="scene-result-total">{group.total}</span></div>
                 {group.notes.map(n => <p key={n} className="text-muted">{n}</p>)}
               </>
             ) : <p className="text-muted">No result for this group.</p>}
