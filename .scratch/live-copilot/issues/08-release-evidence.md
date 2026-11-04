@@ -1,6 +1,6 @@
 # LC-08 — source-pinned whole-family and live release evidence
 
-Status: ready-for-agent
+Status: done (landed in #914)
 Type: task
 Baseline: master `c75ca5584b873418f10f1bca42f868255d445b7b`
 Dependencies: Applicable LC-01–07 implementation

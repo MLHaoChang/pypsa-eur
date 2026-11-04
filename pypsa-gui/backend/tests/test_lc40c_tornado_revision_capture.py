@@ -63,3 +63,32 @@ def test_the_tornado_record_holds_its_revision_before_the_thread_starts(
     monkeypatch.setattr(threading.Thread, "start", start)
     _tornado(client, "lc40c-start", sid)
     assert len(seen) == 1 and isinstance(seen[0], int), seen
+
+
+def test_the_tornado_record_holds_its_revision_when_it_enters_the_registry(
+        client, api_project, studies_on, fake, monkeypatch):
+    """A reader of the registry never sees `network_revision` None.
+
+    The capture must come before the registry insert, not just before the
+    thread starts: the insert makes the record visible to other readers.
+    """
+    sid = _run(client, api_project, "lc40c-insert")
+    seen = []
+
+    class Recording(dict):
+        def __setitem__(self, key, value):
+            if key == R.STUDY_KEY and isinstance(value, dict) and value.get("kind") == "tornado":
+                seen.append(value.get("network_revision"))
+            super().__setitem__(key, value)
+
+    real_base_context = R.base_context
+
+    def base_context(base_row):
+        ctx = real_base_context(base_row)
+        if not isinstance(ctx.solver_state, Recording):
+            ctx.solver_state = Recording(ctx.solver_state)
+        return ctx
+
+    monkeypatch.setattr(R, "base_context", base_context)
+    _tornado(client, "lc40c-insert", sid)
+    assert len(seen) == 1 and isinstance(seen[0], int), seen

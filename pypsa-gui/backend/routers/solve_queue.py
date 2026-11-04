@@ -169,6 +169,16 @@ def enqueue_solve(
     # wrong: `enqueue_unique` discards it for an idempotent re-enqueue and the
     # existing job keeps the config IT was created with.
     snapshot = _config_snapshot_for(project_registry.registry_key(project), project_dir)
+    # HH-10 (study harness 05): an envelope-admitted solve captures the input
+    # its gate checked, under the locks its admission holds, and solves that.
+    from services import solve_capture
+    request = solve_capture.request()
+    capture = None
+    if request is not None:
+        if str(request["ctx"].project_uuid) != str(project.id):
+            raise HTTPException(409, {"error_kind": "capture_project_mismatch",
+                                      "message": "The run's queued solve names another project."})
+        capture = solve_capture.capture(request["ctx"], project_dir, snapshot)
     # `enqueued_by_user_id` stamps the ACTING user alongside the org-scoped
     # directory this route already resolved. Keying per-user dismiss on project
     # access instead would let two users sharing a project dismiss each other's
@@ -177,13 +187,26 @@ def enqueue_solve(
     # the dispatcher — inserting here, after it returned, left a window where a
     # fast-failing job went terminal against a missing row and boot
     # reconciliation re-ran it (see `enqueue_unique`'s docstring).
-    job, created = solve_queue.enqueue_unique(
-        project.name,
-        project_key=project_registry.registry_key(project),
-        storage_dir=str(project_dir),
-        solver_config_json=snapshot,
-        enqueued_by_user_id=user.id,
-    )
+    try:
+        job, created = solve_queue.enqueue_unique(
+            project.name,
+            project_key=project_registry.registry_key(project),
+            storage_dir=str(project_dir),
+            solver_config_json=snapshot,
+            enqueued_by_user_id=user.id,
+            capture=capture,
+        )
+    except BaseException:
+        if capture is not None:
+            solve_capture.remove(capture)  # no job names it: never left for the sweep
+        raise
+    if capture is not None and not created:
+        # Another active job of this project solves other input: the run's
+        # solve would not be its capture. Refused, never merged into it.
+        solve_capture.remove(capture)
+        raise HTTPException(409, {"error_kind": "solve_already_queued",
+                                  "message": f"'{project.name}' already has a queued or running solve; "
+                                             "the run's solve waits until it settles."})
     return {**(solve_queue.get_job(job.id) or job.to_public(None)), "already_queued": not created}
 
 
