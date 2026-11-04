@@ -289,20 +289,118 @@ def test_a_writer_that_cannot_show_the_field_fails_closed(thread):
     assert errors == ['requirement_violated'] and cards == []
 
 
-def test_an_edit_without_a_card_on_a_bounded_target_fails_closed(thread):
-    """A checked (assurance) turn builds no edit card: an edit naming the
-    bounded instance is refused, one naming another instance passes."""
+def test_an_edit_without_a_full_card_fails_closed_under_a_bound(thread):
+    """GK B ask 4: under an active bound, an edit whose card cannot show every
+    value it writes (no card, as on a checked turn) is a violation."""
     from fastapi import HTTPException
 
     from harness import requirements
 
     _confirm(thread.session, BOUND)
+    for name in ('Battery', 'Diesel'):
+        with pytest.raises(HTTPException) as refused:
+            requirements.annotate(thread.session, 'update_component', {
+                'component_class': 'Generator', 'name': name, 'attrs': {'p_nom': 12.0}}, None)
+        assert refused.value.detail['error_kind'] == 'requirement_violated'
+    # A read stays a read.
+    assert requirements.annotate(thread.session, 'get_component', {'name': 'Battery'}, None) is None
+
+
+def test_an_undo_past_the_row_limit_is_a_violation(thread):
+    """GK B ask 4: an undo that restores more than MAX_UNDO_ROWS values shows a
+    'more' note, not every value: under an active bound it is refused."""
+    import pathlib
+    import tempfile
+
+    from harness import edit_card
+    from services import undo_service
+
+    _confirm(thread.session, DIESEL_BOUND)
+    n = PyPSAService.get_network()
+    with PyPSAService.get_lock():
+        for i in range(edit_card.MAX_UNDO_ROWS + 5):
+            n.add('Generator', f'G{i}', bus='B', p_nom=1.0)
+        before = n.copy()
+        for i in range(edit_card.MAX_UNDO_ROWS + 5):
+            n.generators.loc[f'G{i}', 'p_nom'] = 2.0
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / 'u.nc'
+        before.export_to_netcdf(path)
+        undo_service.push(path.read_bytes(), {})
+    try:
+        _, cards, errors = _dispatch(thread.session, 'undo_last', {})
+        assert errors == ['requirement_violated'] and cards == []
+        assert float(PyPSAService.get_network().generators.at['G0', 'p_nom']) == 2.0
+    finally:
+        undo_service.clear()
+
+
+def test_profile_uploads_count_as_horizon_writers(thread):
+    """GK B ask 2: an upload extends the snapshots to cover its series."""
+    from fastapi import HTTPException
+
+    from harness import requirements
+
+    _confirm(thread.session, {'kind': 'preserve_horizon', 'v': 1})
+    for tool in ('upload_timeseries', 'upload_load_profile', 'upload_generator_profile', 'upload_link_profile'):
+        with pytest.raises(HTTPException) as refused:
+            requirements.annotate(thread.session, tool, {'file_id': 'f'}, None)
+        assert refused.value.detail['error_kind'] == 'requirement_violated', tool
+
+
+def test_requirement_reads_that_fail_refuse_the_edit(thread, monkeypatch):
+    """GK B ask 3: a thread that cannot be read refuses a bounded write; a
+    corrupt thread file is not skipped as if it were someone else's."""
+    _confirm(thread.session, BOUND)
+    (thread.root / 'durable_conversations' / (thread.id + '.json')).write_text('{not json')
+    _, cards, errors = _dispatch(thread.session, 'update_component', {
+        'component_class': 'StorageUnit', 'name': 'Battery', 'attrs': {'max_hours': 5.0}})
+    assert errors == ['thread_unreadable'] and cards == []
+    assert _max_hours() == 4.0
+
+
+def test_a_run_whose_task_cannot_be_read_refuses_the_edit(thread, monkeypatch):
+    from fastapi import HTTPException
+
+    from harness import requirements
+    from services import assistant_tasks
+
+    session, _ = _run_session(monkeypatch, thread)
+
+    def unreadable(task_id):
+        raise HTTPException(409, {'error_kind': 'task_unreadable', 'message': 'x'})
+
+    monkeypatch.setattr(assistant_tasks, '_read', unreadable)
     with pytest.raises(HTTPException) as refused:
-        requirements.annotate(thread.session, 'update_component', {
-            'component_class': 'StorageUnit', 'name': 'Battery', 'attrs': {'max_hours': 5.0}}, None)
-    assert refused.value.detail['error_kind'] == 'requirement_violated'
-    assert requirements.annotate(thread.session, 'update_component', {
-        'component_class': 'Generator', 'name': 'Diesel', 'attrs': {'p_nom': 12.0}}, None) is None
+        requirements.annotate(session, 'update_component', {'name': 'Battery'}, {'rows': [], 'complete': True})
+    assert refused.value.detail['error_kind'] == 'task_unreadable'
+
+
+def test_brief_reads_an_unreadable_thread_as_stale(thread, monkeypatch):
+    from harness import requirements
+    from services import assistant_tasks
+
+    monkeypatch.setattr(assistant_tasks, '_fingerprint', lambda: 'fp')
+    monkeypatch.setattr(assistant_tasks, '_authority', lambda: (thread.root, PROJECT, OWNER))
+    task = {'status': 'ready', 'brief': {'objective': 'x'}, 'fingerprint': 'fp',
+            'requirements': requirements.brief_record(thread.session) or {'thread_id': thread.id, 'rev': 0}}
+
+    def broken(*a, **k):
+        raise RuntimeError('disk')
+
+    monkeypatch.setattr(requirements, 'moved', broken)
+    assert assistant_tasks._stale(task)
+
+
+def test_the_envelope_never_admits_set_requirement(thread, monkeypatch):
+    """GK B ask 6: set_requirement is the user's own confirmation, never an
+    envelope's, even on a run's session that reached the gate."""
+    from harness import requirements
+
+    session, admitted = _run_session(monkeypatch, thread)
+    monkeypatch.setattr(requirements, 'thread_for', lambda s: thread.id)
+    _, cards, _ = _dispatch(session, 'set_requirement', {'requirement': BOUND}, decision='deny')
+    assert admitted == [] and len(cards) == 1
 
 
 def test_requirements_that_cannot_be_checked_refuse_the_edit(thread, monkeypatch):

@@ -206,12 +206,15 @@ def _confirm_destructive_tool(
     # Study harness issue 23: an edit that breaks a confirmed requirement never
     # runs without the user's card (only a run's session reaches here with one).
     violated = edit_card is not None and bool(edit_card.get("requirement_violations"))
-    if policy == 'none' and not violated:
+    from harness import requirements as _requirements
+    # A requirement is only ever the user's own confirmation: never admitted unattended.
+    confirm_only = violated or tool_name == _requirements.TOOL
+    if policy == 'none' and not confirm_only:
         return True
     from harness import approvals
 
     link = approvals.links(session, args)
-    if policy == 'policy' and not violated:
+    if policy == 'policy' and not confirm_only:
         # Issue 18: the log says why no card appeared, and an approval that
         # cannot be put on record does not run (fail closed).
         if approvals.decided(session, call_id=tool_use_id, tool=tool_name, tier=tier,
@@ -228,7 +231,7 @@ def _confirm_destructive_tool(
     # other session and for a call it does not cover: the card below.
     from services import run_envelope
     # Issue 23: nor may the envelope admit it; on a run's session it falls to the card.
-    if violated:
+    if confirm_only:
         admitted = None
     else:
         admitted = run_envelope.admit(session, call_id=tool_use_id, tool=tool_name, args=args, tier=tier,

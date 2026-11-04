@@ -762,12 +762,18 @@ def _write_requirements(thread_id: str, episode_id: str, change) -> dict[str, An
 
 def activate_requirement(
     thread_id: str, *, episode_id: str, predicate: dict[str, Any], replaces: str | None = None,
+    validate=None,
 ) -> dict[str, Any]:
-    """Make a confirmed predicate active; `replaces` retires an active one in the same write."""
+    """Make a confirmed predicate active; `replaces` retires an active one in the same write.
+
+    ``validate(active_items)`` runs under the store lock on the items as
+    they are now (the contradiction check), so two approvals cannot race."""
     now = datetime.now(timezone.utc).isoformat()
 
     def change(block):
         items = block.setdefault('items', [])
+        if validate is not None:
+            validate([r for r in items if r.get('status') == 'active'])
         if replaces is not None:
             old = next((r for r in items if r.get('id') == replaces and r.get('status') == 'active'), None)
             if old is None:
@@ -839,8 +845,12 @@ def requirements_at(root: Path, project_id: str, owner_id: str, thread_id: str) 
     return copy.deepcopy(_requirements(thread))
 
 
-def find_thread_for_episode(episode_id: str) -> str | None:
-    """Return the parent thread_id bound to ``episode_id`` in this project, if any."""
+def find_thread_for_episode(episode_id: str, *, strict: bool = False) -> str | None:
+    """Return the parent thread_id bound to ``episode_id`` in this project, if any.
+
+    ``strict`` (issue 23's requirement check) refuses ``thread_unreadable``
+    when a thread file cannot be read, instead of skipping it: the skipped
+    file could be the episode's own."""
     if not episode_id:
         return None
     root, project_id, owner = _authority()
@@ -851,6 +861,8 @@ def find_thread_for_episode(episode_id: str) -> str | None:
         try:
             thread = json.loads(path.read_text(encoding='utf-8'))
         except (OSError, ValueError):
+            if strict:
+                _refuse('thread_unreadable', 'The durable thread checkpoint needs repair.')
             continue
         if (
             thread.get('episode_id') == episode_id

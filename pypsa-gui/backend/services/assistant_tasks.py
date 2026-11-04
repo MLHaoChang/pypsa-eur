@@ -269,7 +269,7 @@ def _requirements_moved(task):
     from harness import requirements
     try:
         return requirements.moved(task["requirements"], _authority())
-    except HTTPException:
+    except Exception:  # noqa: BLE001 — unreadable counts as moved
         return True
 
 

@@ -77,6 +77,9 @@ HORIZON_WRITERS = frozenset({
     "set_snapshots", "set_snapshot_weightings", "upload_snapshot_weightings_csv",
     "sample_representative_weeks", "set_multi_period_snapshots", "set_investment_periods",
     "set_investment_period_weightings",
+    # A profile upload extends the snapshots to cover the series
+    # (`user_timeseries._ensure_snapshots_cover_user_ts`).
+    "upload_timeseries", "upload_load_profile", "upload_generator_profile", "upload_link_profile",
 }) | REPLACERS
 
 # Chat tools that can write a bounded field without a card row naming it.
@@ -272,9 +275,12 @@ def thread_for(session) -> str | None:
     if session is None or _is_run_session(session):
         return None
     try:
-        return dc.find_thread_for_episode(session.session_id)
-    except HTTPException:
-        return None  # no saved, active project: no durable thread can exist
+        return dc.find_thread_for_episode(session.session_id, strict=True)
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        if detail.get("error_kind") == "thread_project_required":
+            return None  # no saved, active project: no durable thread can exist
+        raise
 
 
 def _active(block: dict | None) -> list[dict]:
@@ -293,15 +299,14 @@ def active_for(session) -> tuple[str | None, list[dict]]:
     if _is_run_session(session):
         from services import assistant_tasks
 
-        try:
-            with assistant_tasks._LOCK:
-                _, task = assistant_tasks._read(session.task_id)
-            recorded = task.get("requirements")
-            if not recorded:
-                return None, []
-            live = dc.requirements_at(*assistant_tasks._authority(), recorded["thread_id"])
-        except HTTPException:
+        # A read that fails raises: the dispatch check refuses (fail closed).
+        with assistant_tasks._LOCK:
+            _, task = assistant_tasks._read(session.task_id)
+        recorded = task.get("requirements")
+        if not recorded:
             return None, []
+        live = dc.requirements_at(*assistant_tasks._authority(), recorded["thread_id"])
+        # An unreadable thread falls back to the records approved with the brief.
         return recorded["thread_id"], _active(live) if live is not None else list(recorded.get("items", []))
     thread_id = thread_for(session)
     if thread_id is None:
@@ -404,7 +409,10 @@ def violations(tool: str, args: dict, card: dict | None, active: list[dict], net
     """Each active requirement the call breaks, read from the card's native rows."""
     out = []
     rows = (card or {}).get("rows") or []
-    shown = card is not None and bool(card.get("complete")) and bool(rows)
+    # A card that cannot show every value it writes: an arguments card, no
+    # card, or an undo past MAX_UNDO_ROWS (its "more" note).
+    truncated = any(r.get("role") == "note" and r.get("field") == "more" for r in rows)
+    shown = card is not None and bool(card.get("complete")) and bool(rows) and not truncated
     for record in active:
         p = record["predicate"]
         broken = None
@@ -421,9 +429,10 @@ def violations(tool: str, args: dict, card: dict | None, active: list[dict], net
             hit = next((row for row in rows if _row_violates(p, row, network)), None)
             if hit is not None:
                 broken = f"sets {hit['name']!r} {p['field']} to {hit.get('new')!r}"
-            elif (tool in CAPACITY_WRITERS or card is not None or _is_edit(tool)) and not shown \
-                    and _names_target(p, args, network):
-                broken = "cannot show its effect on the bounded field"
+            elif tool in CAPACITY_WRITERS and _names_target(p, args, network):
+                broken = "writes the bounded field without showing it"
+            elif (card is not None or _is_edit(tool)) and not shown:
+                broken = "cannot show every value it writes, so the bound cannot be checked"
         if broken:
             out.append({"requirement_id": record["id"], "requirement": describe(p), "why": broken})
     return out
@@ -623,7 +632,14 @@ def set_requirement(requirement: Any = None, replaces: str | None = None, retire
     with PyPSAService.get_lock():
         network = PyPSAService.get_network()
         predicate = capture(check(value, network, active, replaces=replaces), network)
-    out = dc.activate_requirement(thread_id, episode_id=session.session_id, predicate=predicate, replaces=replaces)
+    asked = {k: v for k, v in predicate.items() if k not in ("uid", "digest")}
+
+    def still_consistent(active_now):  # re-run under the store lock (no race between two approvals)
+        with PyPSAService.get_lock():
+            check(asked, PyPSAService.get_network(), active_now, replaces=replaces)
+
+    out = dc.activate_requirement(thread_id, episode_id=session.session_id, predicate=predicate,
+                                  replaces=replaces, validate=still_consistent)
     record = out["requirement"]
     return {"ok": True, "requirement": {"id": record["id"], "says": describe(record["predicate"]),
                                         "predicate": record["predicate"]}, "rev": out["rev"]}
