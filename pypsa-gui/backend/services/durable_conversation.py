@@ -124,6 +124,10 @@ def _empty_thread(thread_id: str, *, owner_id: str, project_id: str) -> dict[str
         'episode_id': None,
         'goals': [],
         'constraints': [],
+        # Issue 23: typed, user-confirmed requirements (harness/requirements.py).
+        # Only `activate_requirement` / `retire_requirement` write items and bump
+        # `rev`; `checkpoint_thread` never accepts this block.
+        'requirements': {'rev': 0, 'items': []},
         'units': {},
         'refs': {'current': {}, 'discussed': {}},
         'task_ids': [],
@@ -722,8 +726,131 @@ def _settle_in(
         usage[unit] = int(usage[unit])
 
 
-def find_thread_for_episode(episode_id: str) -> str | None:
-    """Return the parent thread_id bound to ``episode_id`` in this project, if any."""
+# ── Requirements (study harness issue 23) ───────────────────────────────────
+# The records are typed and validated by harness/requirements.py before they
+# reach here; this file owns only where they live and how they change. Every
+# write holds _LOCK, the authoritative replica and the current episode (the
+# session the user confirmed the card on), and bumps the shared checkpoint_rev.
+# `rev` moves only on activate and retire: it is what a study brief records,
+# so an evaluation mark never makes a run's brief stale.
+
+REQUIREMENTS_MAX = 32
+
+
+def _requirements(thread: dict[str, Any]) -> dict[str, Any]:
+    return thread.setdefault('requirements', {'rev': 0, 'items': []})
+
+
+def _require_episode(thread: dict[str, Any], episode_id: str) -> None:
+    if not episode_id or thread.get('episode_id') != episode_id:
+        _refuse('stale_episode', 'This conversation episode is no longer the thread\'s current one.')
+
+
+def _write_requirements(thread_id: str, episode_id: str, change) -> dict[str, Any]:
+    with _LOCK:
+        path, thread = _read(thread_id)
+        _require_authoritative_replica(thread)
+        _require_episode(thread, episode_id)
+        block = _requirements(thread)
+        result = change(block)
+        block['rev'] = int(block.get('rev', 0)) + 1
+        thread['checkpoint_rev'] = int(thread.get('checkpoint_rev', 0)) + 1
+        thread['updated_at'] = datetime.now(timezone.utc).isoformat()
+        _save(path, thread)
+        return {'requirement': copy.deepcopy(result), 'rev': block['rev']}
+
+
+def activate_requirement(
+    thread_id: str, *, episode_id: str, predicate: dict[str, Any], replaces: str | None = None,
+    validate=None,
+) -> dict[str, Any]:
+    """Make a confirmed predicate active; `replaces` retires an active one in the same write.
+
+    ``validate(active_items)`` runs under the store lock on the items as
+    they are now (the contradiction check), so two approvals cannot race."""
+    now = datetime.now(timezone.utc).isoformat()
+
+    def change(block):
+        items = block.setdefault('items', [])
+        if validate is not None:
+            validate([r for r in items if r.get('status') == 'active'])
+        if replaces is not None:
+            old = next((r for r in items if r.get('id') == replaces and r.get('status') == 'active'), None)
+            if old is None:
+                _refuse('requirement_not_found', 'No active requirement has that id.', 404)
+            old.update(status='retired', retired_at=now)
+        if sum(r.get('status') == 'active' for r in items) >= REQUIREMENTS_MAX:
+            _refuse('requirement_limit', f'At most {REQUIREMENTS_MAX} requirements can be active.')
+        record = {'id': uuid.uuid4().hex[:12], 'status': 'active', 'predicate': copy.deepcopy(predicate),
+                  'confirmed_at': now, 'confirmed_by': 'card', 'last_evaluation': None}
+        if replaces is not None:
+            record['replaces'] = replaces
+            old['replaced_by'] = record['id']
+        items.append(record)
+        return record
+
+    return _write_requirements(thread_id, episode_id, change)
+
+
+def retire_requirement(thread_id: str, *, episode_id: str, requirement_id: str) -> dict[str, Any]:
+    now = datetime.now(timezone.utc).isoformat()
+
+    def change(block):
+        record = next((r for r in block.get('items', [])
+                       if r.get('id') == requirement_id and r.get('status') == 'active'), None)
+        if record is None:
+            _refuse('requirement_not_found', 'No active requirement has that id.', 404)
+        record.update(status='retired', retired_at=now)
+        return record
+
+    return _write_requirements(thread_id, episode_id, change)
+
+
+def mark_requirement_evaluation(thread_id: str, evaluations: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Record each active requirement's last evaluation. Does not move `rev`."""
+    with _LOCK:
+        path, thread = _read(thread_id)
+        _require_authoritative_replica(thread)
+        changed = False
+        for record in _requirements(thread).get('items', []):
+            evaluation = evaluations.get(record.get('id'))
+            if record.get('status') != 'active' or evaluation is None:
+                continue
+            previous = record.get('last_evaluation') or {}
+            if {k: previous.get(k) for k in evaluation} != evaluation:
+                record['last_evaluation'] = {**evaluation, 'at': datetime.now(timezone.utc).isoformat()}
+                changed = True
+        if changed:
+            thread['checkpoint_rev'] = int(thread.get('checkpoint_rev', 0)) + 1
+            thread['updated_at'] = datetime.now(timezone.utc).isoformat()
+            _save(path, thread)
+        return _view(thread)
+
+
+def requirements_at(root: Path, project_id: str, owner_id: str, thread_id: str) -> dict[str, Any] | None:
+    """The requirements block of a thread in an explicit project (a harness
+    run's own context), or None when it cannot be read there (ACL'd)."""
+    try:
+        canonical = str(uuid.UUID(thread_id))
+    except (ValueError, TypeError, AttributeError):
+        return None
+    path = root / 'durable_conversations' / (canonical + '.json')
+    with _LOCK:
+        try:
+            thread = _load(path)
+        except HTTPException:
+            return None
+    if thread.get('project_id') != project_id or thread.get('owner_id') != owner_id or not owner_id:
+        return None
+    return copy.deepcopy(_requirements(thread))
+
+
+def find_thread_for_episode(episode_id: str, *, strict: bool = False) -> str | None:
+    """Return the parent thread_id bound to ``episode_id`` in this project, if any.
+
+    ``strict`` (issue 23's requirement check) refuses ``thread_unreadable``
+    when a thread file cannot be read, instead of skipping it: the skipped
+    file could be the episode's own."""
     if not episode_id:
         return None
     root, project_id, owner = _authority()
@@ -734,6 +861,8 @@ def find_thread_for_episode(episode_id: str) -> str | None:
         try:
             thread = json.loads(path.read_text(encoding='utf-8'))
         except (OSError, ValueError):
+            if strict:
+                _refuse('thread_unreadable', 'The durable thread checkpoint needs repair.')
             continue
         if (
             thread.get('episode_id') == episode_id

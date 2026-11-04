@@ -71,6 +71,8 @@ SETTINGS_EDITS = frozenset({
     "campus_save_grid_code_draft",
     # LV08 R2: the site anchor (Site 3D coordinates), through anchor.write_anchor
     "set_site_anchor",
+    # Study harness issue 23: a user-confirmed requirement on the durable thread
+    "set_requirement",
 })
 
 # Destructive- and execution-tier tools that show a content card too (owner decision
@@ -1797,3 +1799,4 @@ register("update_decision_study", Adapter("settings_edit", _decision_study_previ
 # Q3-CARDS-1 slice 2: the adapters of the remaining settings edits, one module per area.
 from harness import (  # noqa: E402,F401
     edit_card_campus, edit_card_library, edit_card_records, edit_card_reports, edit_card_site)
+from harness import requirements  # noqa: E402,F401 — issue 23: set_requirement's card

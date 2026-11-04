@@ -2658,6 +2658,28 @@ TOOLS: list[dict[str, Any]] = [
     ),
 
     _t(
+        "set_requirement",
+        "Record a requirement the user stated, for the user to confirm on a card. "
+        "Use it only when the user asks to keep "
+        "something fixed, e.g. 'keep the model horizon' or 'max_hours of Battery "
+        "at most 6 h'. Kinds (v: 1, no other keys): preserve_horizon {kind, v}; "
+        "scalar_bound {kind, v, component_class, name, field, op (eq|ge|le|within), "
+        "value or lo+hi, unit} on Generator.p_nom, Generator.p_nom_max, "
+        "StorageUnit.p_nom_max or StorageUnit.max_hours, with the field's stored "
+        "unit (a missing or different unit is refused: ask the user); "
+        "advisory_note {kind, v, text}. It is active only after the user approves "
+        "the card. `replaces` swaps an active requirement; `retire` drops one, "
+        "also on a card. Assistant edits that break an active requirement are "
+        "refused. Safety: write.",
+        {
+            "requirement": {"type": "object", "description": "The predicate to confirm."},
+            "replaces": {"type": "string", "description": "The id of an active requirement this one replaces."},
+            "retire": {"type": "string", "description": "The id of an active requirement to drop (no requirement)."},
+        },
+        [],
+    ),
+
+    _t(
         "set_goal",
         "Set a goal for this chat when the user asks you to keep working "
         "toward something over several steps without prompting each one. "
@@ -5341,6 +5363,7 @@ TOOL_ROUTES: dict[str, list] = {
     "start_workflow": _SERVICE_CALL,
     "advance_workflow": _SERVICE_CALL,
     "end_workflow": _SERVICE_CALL,
+    "set_requirement": _SERVICE_CALL,
     "set_goal": _SERVICE_CALL,
     "pause_goal": _SERVICE_CALL,
     "complete_goal": _SERVICE_CALL,
@@ -5652,6 +5675,8 @@ _SERVICE_CALL_NON_NETWORK_WRITES = frozenset({
     "export_to_excel", "export_to_csv", "export_preview_png",
     "export_chat_summary", "export_eh_report_docx", "export_asset_results",
     "set_active_profile", "clear_uploads", "start_campaign", "end_campaign",
+    # study-harness 23: a confirmed requirement goes on the durable thread.
+    "set_requirement",
 })
 
 
