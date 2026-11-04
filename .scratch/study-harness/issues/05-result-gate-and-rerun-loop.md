@@ -24,13 +24,13 @@ Design: [design.md](../design.md) §5, §6.2
 ## Acceptance criteria
 
 - [ ] LC-20's done-when: `oj-grid` clean returns no warnings; `oj-grid-bad` with one seeded defect per rule returns each finding traced to a fact. LC-T19 extra-claim withholding for plausibility findings depends on the assurance follow-up "Checked plausibility findings" (`.scratch/assistant-assurance/issues/10-metric-calculation-and-validity.md`), not on Codex K (GK B amendment on #851).
-- [ ] An infeasible eh_site fixture: triage reads run, ≤2 changes are applied, one re-solve; ledger rows carry `rule` and `round`.
-- [ ] A third round is refused; the run is `needs_user` with the failing rules.
-- [ ] A profile with `native:run_margin_loop` never starts an agent turn for that rule.
-- [ ] The solve count in `run.budget.used` equals the solve-queue jobs of the run.
-- [ ] A scorecard row with `warn`, `unknown` or missing fails a `block` rule; an `assumed` pass shows "screening pass" in the gate record.
-- [ ] A family rule (`ride_through:*`, `motor_start:*`, …) passes only when every row of the family passes; zero rows → `not_evaluated`.
-- [ ] LOLE basis: on a multi-year horizon the h/yr goal is converted once to the engine loop's horizon-basis `target_lole_h`; one engine-loop call counts as one round.
+- [x] An infeasible eh_site fixture: triage reads run, ≤2 changes are applied, one re-solve; ledger rows carry `rule` and `round`.
+- [x] A third round is refused; the run is `needs_user` with the failing rules.
+- [x] A profile with `native:run_margin_loop` never starts an agent turn for that rule.
+- [x] The solve count in `run.budget.used` equals the solve-queue jobs of the run.
+- [x] A scorecard row with `warn`, `unknown` or missing fails a `block` rule; an `assumed` pass shows "screening pass" in the gate record.
+- [x] A family rule (`ride_through:*`, `motor_start:*`, …) passes only when every row of the family passes; zero rows → `not_evaluated`.
+- [x] LOLE basis: on a multi-year horizon the h/yr goal is converted once to the engine loop's horizon-basis `target_lole_h`; one engine-loop call counts as one round.
 
 ## Likely files
 
