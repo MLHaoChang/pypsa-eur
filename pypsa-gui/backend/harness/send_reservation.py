@@ -372,7 +372,8 @@ def _stop(path, reason: str) -> None:
     _locked(path, change)
 
 
-def admit(path, request: LLMRequest, *, boot: str, scope: str = "run", key: str | None = None) -> str:
+def admit(path, request: LLMRequest, *, boot: str, scope: str = "run", key: str | None = None,
+          clock=time.time) -> str:
     """Reserve one send's hold before it goes out, or raise SendRefused.
     `key` is the open hold of an earlier attempt of this same send that
     failed before any response byte: it is reused, nothing more is
@@ -383,18 +384,24 @@ def admit(path, request: LLMRequest, *, boot: str, scope: str = "run", key: str 
     stops research only; the stage goes on (§6.5). Research is enforced
     whatever the mode (GK B (b)): with the mode off, its hold is in EUR. A
     research hold is ONE row, counted in the run's total and in the
-    research cap."""
+    research cap.
+
+    Only the holder of the run's live lease admits (GK B): `boot` must be
+    `run.runner.lease_owner` with `lease_until` ahead of `clock()`.
+    Otherwise the send is refused `lease_lost` and nothing is written, not
+    even a stop: a lapsed process's write could be erased by the new
+    owner's save, and the run is the new owner's to stop."""
     if scope not in KINDS:
         raise ValueError(f"unknown reservation scope {scope!r}")
     try:
-        return _admit(path, request, boot=boot, scope=scope, key=key)
+        return _admit(path, request, boot=boot, scope=scope, key=key, clock=clock)
     except SendRefused as refused:
-        if scope == "run" and refused.reason != "not_a_run":
+        if scope == "run" and refused.reason not in ("not_a_run", "lease_lost"):
             _stop(path, refused.reason)
         raise
 
 
-def _admit(path, request, *, boot, scope, key):
+def _admit(path, request, *, boot, scope, key, clock):
     current = mode()
     if current == "invalid":
         raise SendRefused("invalid_mode", f"{MODE_ENV} is not one of {', '.join(MODES)}; sends are refused.")
@@ -409,6 +416,11 @@ def _admit(path, request, *, boot, scope, key):
 
     def change(task):
         run = task["run"]
+        lease = run.get("runner") or {}
+        if lease.get("lease_owner") != boot or not float(lease.get("lease_until") or 0) > clock():
+            out["refused"] = SendRefused("lease_lost", "This process does not hold the run's live lease; "
+                                                       "the send is refused.")
+            return False
         if key is not None and any(r.get("key") == key for r in _ledger(run).get("reservations", [])):
             out["key"] = key
             return False  # a retry before any response byte reserves once
@@ -586,8 +598,9 @@ class ReservingProvider:
     after. Only a harness run's own sends go through it. With the mode off,
     run-scope sends pass straight through and only research is reserved."""
 
-    def __init__(self, inner, path, *, boot: str, scope: str = "run") -> None:
+    def __init__(self, inner, path, *, boot: str, scope: str = "run", clock=time.time) -> None:
         self._inner, self._path, self._boot, self._scope = inner, path, boot, scope
+        self._clock = clock
         self.name = getattr(inner, "name", "reserving")
         # The open send of each request object: the loop retries by streaming
         # the same request again; an attempt that failed before any response
@@ -615,7 +628,8 @@ class ReservingProvider:
         if scope == "run" and mode() == "off":
             yield from self._inner.stream(request)
             return
-        key = admit(self._path, request, boot=self._boot, scope=scope, key=self._retry_key(request))
+        key = admit(self._path, request, boot=self._boot, scope=scope, key=self._retry_key(request),
+                    clock=self._clock)
         self._remember(request, key)
         usage, answered = None, False
         try:

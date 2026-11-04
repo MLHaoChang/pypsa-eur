@@ -770,7 +770,7 @@ class Runner:
             inner, _ = wiring._provider_for_profile(wiring._resolve_turn_profile(session))
             if inner is None:
                 return None  # the loop reports the missing provider; nothing is sent
-        return send_reservation.ReservingProvider(inner, path, boot=self.instance)
+        return send_reservation.ReservingProvider(inner, path, boot=self.instance, clock=self.clock)
 
     def _hold_if_effectful(self, task, step):
         from services import harness_locks

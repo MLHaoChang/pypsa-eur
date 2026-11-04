@@ -37,7 +37,15 @@ def mode(monkeypatch):
 def run(detached, site):
     _, root = site
     task = detached()
-    return task_path(root, task)
+    path = task_path(root, task)
+    lease(path, "boot-a")  # only the live lease's holder admits (GK B)
+    return path
+
+
+def lease(path, owner, until=2e12):
+    def change(task):
+        task["run"].setdefault("runner", {}).update(lease_owner=owner, lease_until=until)
+    harness_runner._update(path, change)
 
 
 def request(text="hello", max_tokens=1000, model=MODEL):
@@ -81,6 +89,7 @@ def test_a_send_killed_between_the_reply_and_the_charge_counts_at_its_bound_afte
             break  # the provider replied; the process dies before the charge
     del stream  # nothing settles: the hold stays open on disk
     assert [r["key"] for r in ledger(run)["reservations"]]
+    lease(run, "boot-a", until=0)  # the dead process's lease lapses
 
     swept = harness_runner.Runner("boot-b").boot_sweep()
 
@@ -91,6 +100,7 @@ def test_a_send_killed_between_the_reply_and_the_charge_counts_at_its_bound_afte
     assert [(c["amount"], c["flags"]) for c in charges] == [(hold, ["uncertain"])]
     assert not ledger(run)["reservations"]
     # The hold still counts: a second send of the same size no longer fits.
+    lease(run, "boot-b")
     with pytest.raises(send_reservation.SendRefused) as refused:
         send_reservation.admit(run, request("again", max_tokens=200_000), boot="boot-b")
     assert refused.value.reason == "budget"
@@ -108,6 +118,7 @@ def test_the_boot_sweep_leaves_a_hold_of_a_live_lease_elsewhere(run, mode):
 
 def test_a_takeover_reconciles_the_lost_send_and_stops_needs_user(run, mode):
     send_reservation.admit(run, request(), boot="boot-a")
+    lease(run, "boot-a", until=0)  # boot-a died; its lease lapsed
     runner = harness_runner.Runner("boot-b")
     with pytest.raises(harness_runner._Stop) as stop:
         runner._recover(run)
@@ -423,12 +434,13 @@ def _admit_many(path, n, out):
     _os.environ[send_reservation.MODE_ENV] = "output_tokens"
     keys = []
     for i in range(n):
-        keys.append(send_reservation.admit(path, request(f"{_os.getpid()}-{i}", max_tokens=10), boot=f"p{_os.getpid()}"))
+        keys.append(send_reservation.admit(path, request(f"{_os.getpid()}-{i}", max_tokens=10), boot="boot-a"))
     out.put(len(keys))
 
 
 def test_admission_is_atomic_across_processes(run, mode):
     # Ask 2: two processes admitting at once lose no hold (the sidecar file lock).
+    # Both act for the one instance holding the lease (two workers of boot-a).
     import multiprocessing
     ctx = multiprocessing.get_context("fork")
     out = ctx.Queue()
@@ -440,6 +452,24 @@ def test_admission_is_atomic_across_processes(run, mode):
     assert [p.exitcode for p in procs] == [0, 0]
     assert sorted(out.get(timeout=5) for _ in procs) == [15, 15]
     assert len(ledger(run)["reservations"]) == 30
+
+
+def test_a_stale_process_after_a_takeover_is_refused_and_writes_nothing(run, mode):
+    # GK B: another instance owns a live lease, so the lapsed process's
+    # admit is refused, writes no hold and does not stop the run.
+    lease(run, "boot-b")
+    before = record(run)
+    with pytest.raises(send_reservation.SendRefused) as refused:
+        send_reservation.admit(run, request(), boot="boot-a")
+    assert refused.value.reason == "lease_lost"
+    assert record(run) == before
+    # A lease of its own that has lapsed refuses too.
+    lease(run, "boot-a", until=1)
+    before = record(run)
+    with pytest.raises(send_reservation.SendRefused) as refused:
+        send_reservation.admit(run, request(), boot="boot-a")
+    assert refused.value.reason == "lease_lost"
+    assert record(run) == before
 
 
 def test_server_tool_fees_settle_from_the_reported_counts(run, mode, monkeypatch):
