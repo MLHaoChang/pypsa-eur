@@ -44,9 +44,12 @@ def test_another_member_cannot_acknowledge_or_read_the_action(
     assert response.json()["detail"] == {"error_kind": "ui_ack_mismatch"}
     unknown = same_org_client.get(f"/api/chat/navigation/{body['action_id']}")
     assert unknown.status_code == 404
-    assert unknown.json() == same_org_client.get(
-        "/api/chat/navigation/00000000-0000-0000-0000-000000000000"
-    ).json()
+    assert (
+        unknown.json()
+        == same_org_client.get(
+            "/api/chat/navigation/00000000-0000-0000-0000-000000000000"
+        ).json()
+    )
     assert outcome(client, body["action_id"]) == "submitted"
     ok = client.post("/api/chat/ui-ack", json=body)
     assert ok.status_code == 200, ok.text

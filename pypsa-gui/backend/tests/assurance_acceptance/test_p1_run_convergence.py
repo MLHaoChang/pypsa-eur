@@ -75,7 +75,9 @@ def test_a_partly_converged_run_is_refused_before_the_handler(
 ):
     publish_old(baseline, counts(5, 8), kind=kind)
     refused_read(
-        harness, monkeypatch, "this run is partly converged (5 of 8 snapshots converged)"
+        harness,
+        monkeypatch,
+        "this run is partly converged (5 of 8 snapshots converged)",
     )
 
 
@@ -83,7 +85,9 @@ def test_a_section_of_a_partly_converged_run_is_refused(baseline, harness, monke
     publish_old(baseline, counts(0, 8))
     args = {"run_id": "run-old", "section": "summary"}
     sections.refused(
-        harness, monkeypatch, args,
+        harness,
+        monkeypatch,
+        args,
         "this run is partly converged (0 of 8 snapshots converged)",
     )
 
@@ -98,10 +102,20 @@ def test_a_comparison_with_a_partly_converged_side_is_refused(
         ("run-base", "2026-10-01T10:00:00+00:00"),
         ("run-new", "2026-10-02T10:00:00+00:00"),
     ):
-        publish(root, project_id, run_id,
-                counts(7, 8) if run_id == partial else counts(8, 8), started)
-    phrase = ("the run is" if role == "run" else "the baseline run is")
-    compare.refused(harness, monkeypatch, compare.ARGS, f"{phrase} partly converged (7 of 8 snapshots converged)")
+        publish(
+            root,
+            project_id,
+            run_id,
+            counts(7, 8) if run_id == partial else counts(8, 8),
+            started,
+        )
+    phrase = "the run is" if role == "run" else "the baseline run is"
+    compare.refused(
+        harness,
+        monkeypatch,
+        compare.ARGS,
+        f"{phrase} partly converged (7 of 8 snapshots converged)",
+    )
 
 
 @pytest.mark.parametrize(
@@ -116,8 +130,16 @@ def test_a_comparison_with_a_partly_converged_side_is_refused(
         counts(9, 8),
         counts(8, 8) | {"ac_pf_total_snapshots": {"value": 8, "unit": "MW"}},
     ],
-    ids=["none", "no_converged", "no_total", "float", "negative",
-         "zero_total", "more_converged_than_total", "wrong_unit"],
+    ids=[
+        "none",
+        "no_converged",
+        "no_total",
+        "float",
+        "negative",
+        "zero_total",
+        "more_converged_than_total",
+        "wrong_unit",
+    ],
 )
 def test_an_ac_pf_run_without_valid_counts_is_not_known_to_have_converged(
     baseline, harness, monkeypatch, extra
@@ -129,7 +151,8 @@ def test_an_ac_pf_run_without_valid_counts_is_not_known_to_have_converged(
 def test_the_checked_manifest_names_the_outcome(baseline):
     publish_old(baseline, counts(5, 8))
     assert run_evidence.checked_run_manifest("run-old")[1:] == (
-        None, "partly_converged (5 of 8 snapshots converged)"
+        None,
+        "partly_converged (5 of 8 snapshots converged)",
     )
 
 
@@ -147,7 +170,8 @@ def test_tampered_counts_refuse_as_the_mac_failure(
 
 
 @pytest.mark.parametrize(
-    "pair", [(True, True), (True, 8), (8, True), (False, True)],
+    "pair",
+    [(True, True), (True, 8), (8, True), (False, True)],
     ids=["both", "converged", "total", "false_of_true"],
 )
 def test_bool_counts_are_not_known_to_have_converged(pair):
