@@ -3,7 +3,7 @@
 
 # AS-14 — PCS/STATCOM sizes over every rolling window or myopic period
 
-Status: ready-for-agent
+Status: done (landed in #1006)
 Type: task
 Blocked by: 12
 Reviewer: GK A
