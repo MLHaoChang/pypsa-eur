@@ -5675,6 +5675,8 @@ _SERVICE_CALL_NON_NETWORK_WRITES = frozenset({
     "export_to_excel", "export_to_csv", "export_preview_png",
     "export_chat_summary", "export_eh_report_docx", "export_asset_results",
     "set_active_profile", "clear_uploads", "start_campaign", "end_campaign",
+    # study-harness 23: a confirmed requirement goes on the durable thread.
+    "set_requirement",
 })
 
 
