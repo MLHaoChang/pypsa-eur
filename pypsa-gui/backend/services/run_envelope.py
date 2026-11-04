@@ -1055,7 +1055,13 @@ def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx
     if tool in GAP_PREPARE or (tool in GAP_TARGETS and not any(e["tool"] == tool for e in envelope["edits"])):
         return _match_gap(envelope, tool, args, edit_card, ctx, note)
     if tool in PLANNED_TOOLS:
-        return _match_planned(envelope, tool, args, edit_card, ctx, note)
+        reason = _match_planned(envelope, tool, args, edit_card, ctx, note)
+        if reason is not None and tier == "destructive":
+            # G9: the tier exemption lives only in `_match_planned`'s success
+            # path; a call that misses its pin is refused as destructive.
+            note["planned_miss"] = reason
+            return "destructive"
+        return reason
     if not any(e["tool"] == tool for e in envelope["edits"]):
         return "unlisted_tool"
     reason = _match_edit(envelope, tool, edit_card)
@@ -1203,7 +1209,8 @@ def admit(session, *, call_id, tool, args, tier, external, edit_card):
         if reason in ("expired", "exhausted") and envelope["state"] == "granted":
             envelope["state"] = reason
             _audit(envelope, reason, reason=reason)
-        _audit(envelope, "refused", call_id=call_id, tool=tool, reason=reason)
+        _audit(envelope, "refused", call_id=call_id, tool=tool, reason=reason,
+               **({"planned_miss": note["planned_miss"]} if "planned_miss" in note else {}))
         try:
             _save(path, envelope)
         except OSError:
@@ -1597,7 +1604,7 @@ def _binding_matches(entry, card):
     args = entry["args"]
     return bool(card and card.get("complete")) and binding.get("upload_sha256") == entry["upload_sha256"] \
         and all(binding.get(k) == args.get(k) for k in ("file_id", "time_col", "value_col", "load_name")) \
-        and isinstance(binding.get("load_uid"), str) and isinstance(binding.get("series_sha256"), str)
+        and all(isinstance(binding.get(k), str) for k in ("load_uid", "series_sha256", "replaces_sha256"))
 
 
 def pin_planned(task_path, ctx, holder=None):
@@ -1635,7 +1642,8 @@ def pin_planned(task_path, ctx, holder=None):
             card = computed[entry["index"]]
             if _binding_matches(entry, card):
                 entry.update(status="pinned", pinned={"uid": card["binding"]["load_uid"], "digest": card["digest"],
-                                                      "series_sha256": card["binding"]["series_sha256"]})
+                                                      "series_sha256": card["binding"]["series_sha256"],
+                                                      "replaces_sha256": card["binding"]["replaces_sha256"]})
             else:
                 entry.update(status="carded", carded="plan_changed")
         _audit(envelope, "pinned", planned=[[p["index"], p["status"]] for p in envelope.get("planned", [])])
@@ -1761,6 +1769,9 @@ def verify_planned_write(ctx, args, parsed, read_upload):
             or hashlib.sha256(read_upload()).hexdigest() != planned["upload_sha256"] \
             or chat_tools._series_sha256(parsed["series"]) != planned["series_sha256"]:
         mismatch = PlanChanged()
+    elif chat_tools._series_sha256(ctx.network.get_switchable_as_dense(
+            "Load", "p_set", inds=[args["load_name"]])[args["load_name"]]) != planned["replaces_sha256"]:
+        mismatch = PlanChanged()  # G10: the series it replaces is the one the grant's card showed
     if mismatch is not None:
         planned["state"]["mismatch"] = mismatch
         raise mismatch

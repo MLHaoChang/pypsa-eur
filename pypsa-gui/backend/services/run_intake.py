@@ -779,7 +779,8 @@ def card_view(rows: list, profile: dict, template_check, entered=None) -> dict:
         {
             "index": i,
             "param": r["param"],
-            "label": (f"Load {r['args']['load_name']}: demand series" if r.get("write")
+            "label": (f"Load {r['args']['load_name']}: demand series (replaces its current demand)"
+                      if r.get("write")
                       else (_field(fields, r["param"]) or {}).get("label", r["param"])),
             **({"write": r["write"]} if r.get("write") else {}),
             "value": r["value"],
