@@ -1112,6 +1112,8 @@ def _pickup(session, task_path, ctx, tool, expected, recheck):
     `assistant_tasks._LOCK` (both are written by atomic replace), so the
     order stays mutation_lock -> solver_state_lock and nothing else."""
     from services.chat_tools_schema import tool_edits_network
+    if not expected:
+        return "fingerprint_unreadable"  # nothing on record to compare: never an unchecked write
     if not recheck():
         return "recheck"
     envelope = _load(task_path)

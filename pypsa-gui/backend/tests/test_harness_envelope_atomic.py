@@ -484,3 +484,42 @@ def test_the_queued_solve_snapshots_its_config_under_the_held_locks(eh, monkeypa
     record = json.loads(path.read_text())
     assert seen and seen[0] == (True, True), (seen, record["run"].get("status"), record["run"].get("reason"), [(s["tool"], s["status"]) for s in record["steps"]])
 
+
+@pytest.fixture
+def mixed(eh, monkeypatch):
+    """eh_site's shapes plus one edit outside them (Generator.marginal_cost),
+    so one call can mix a size cap with another listed attr."""
+    block = {**ATOMIC, "edits": [*ATOMIC["edits"], {
+        "tool": "update_component", "target": {"component": "Generator", "name": "G*", "attr": "marginal_cost"},
+        "bounds": {"min": 0.0, "max": 100.0}}]}
+    entry = run_profiles.PROFILES["eh_site@1"]
+    monkeypatch.setitem(run_profiles.PROFILES, "eh_site@1", {
+        **entry, "envelope": block, "tunable": [*entry["tunable"], {"component": "Generator", "attr": "marginal_cost"}]})
+    return eh
+
+
+MIXED = {"id": "inputs.2", "tool": "update_component",
+         "args": {"component_class": "Generator", "name": "G1", "attrs": {"p_nom_max": 45.0, "marginal_cost": 12.0}}}
+
+
+def test_a_mixed_attrs_edit_takes_the_guard_and_writes_once(mixed, gap):
+    """GK B (18) 6: an edit mixing a covered and an uncovered attr is guarded, never refused for it."""
+    task, path = mixed([MIXED])
+    fired = gap(lambda: None)
+    record = until(harness_runner.Runner("a"), path, task, lambda r: r["steps"][1]["status"] != "pending")
+    assert fired and record["steps"][1]["status"] == "completed", record["steps"][1]
+    assert value("Generator", "G1", "p_nom_max") == 45.0
+    assert ctx().network.generators.at["G1", "marginal_cost"] == 12.0
+    chain = envelope_of(path)["chain"]
+    assert len(chain) == 1 and chain[0]["network_revision"] == dirty_state.revision(ctx())
+
+
+def test_a_mixed_attrs_edit_with_an_edit_in_the_gap_is_refused_with_no_write(mixed, gap):
+    task, path = mixed([MIXED])
+    fired = gap(lambda: writer(lambda n: n.storage_units.__setitem__("p_nom_max", 11.0)).join())
+    record = until(harness_runner.Runner("a"), path, task, stopped)
+    assert fired
+    assert record["run"]["status"] == "paused" and record["run"]["reason"] == "envelope_drift", record["run"]
+    assert value("Generator", "G1", "p_nom_max") == 40.0 and ctx().network.generators.at["G1", "marginal_cost"] == 10.0
+    assert envelope_of(path)["chain"] == []
+

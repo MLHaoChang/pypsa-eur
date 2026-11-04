@@ -228,11 +228,13 @@ def agent_turn(path, ctx, session, *, tools, message, provider=None, recheck, sc
     def write_guard(call_id, tool, args):
         """Issue 22: a covered write compares and writes inside the project's
         lock on the worker, against the identity its admission read."""
-        call = calls.get(call_id)
-        if call is None or tool not in run_envelope.ATOMIC_TOOLS or call.get("read") is None:
+        if tool not in run_envelope.ATOMIC_TOOLS:
             return None
+        # No record of what admission read (no call row, or no guarded admission): an empty
+        # expectation, which the pickup refuses as unreadable. Never an unguarded write.
+        call = calls.get(call_id) or {}
         return run_envelope.admitted_write(session, path, ctx, call_id=call_id, tool=tool,
-                                           expected=call["read"], receipts=receipts, recheck=recheck)
+                                           expected=call.get("read") or {}, receipts=receipts, recheck=recheck)
 
     usage_before = dict(session.usage_acc)
     session.stage_tools = frozenset(tools)

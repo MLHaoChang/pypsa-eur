@@ -678,3 +678,24 @@ def test_a_round_write_with_an_edit_in_the_gap_is_refused_with_no_write(granted,
     assert float(network.loads.at["L1", "p_set"]) == 6.0  # the external edit stands
     assert not record["run"].get("ledger") and envelope_of(path)["chain"] == before
     assert ("update_component", "drift") in refused(path)
+
+
+def test_a_round_write_with_no_admission_read_refuses_with_no_write(granted, profile, site, rated,
+                                                                     tunable_rule, monkeypatch):
+    """GK B (19) 1: a covered call whose admission left no identity is refused
+    at pickup (unreadable), never run unguarded."""
+    profile(BLOCK)
+    no_series()
+    task, path, _ = granted()
+    head = run_envelope.chain_head
+
+    def reads_nothing(task_path, ctx, read=None):
+        return head(task_path, ctx)  # the identity is never stored for the write to compare
+    monkeypatch.setattr(run_envelope, "chain_head", reads_nothing)
+    turns = [call("update_component", {"component_class": "Generator", "name": "G1",
+                                       "attrs": {"marginal_cost": 11.0}}), say("Tried a cost.")]
+    record = go(harness_runner.Runner("a", agent_provider=Script(*turns)), path, task)
+    assert PyPSAService.get_active_context().network.generators.at["G1", "marginal_cost"] == 10.0
+    assert not record["run"].get("ledger")
+    assert ("update_component", "fingerprint_unreadable") in refused(path)
+
