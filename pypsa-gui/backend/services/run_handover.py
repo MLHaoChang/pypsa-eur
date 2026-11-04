@@ -33,6 +33,7 @@ The model plays no part.
   and added to the new project. Uploads are content-addressed, so each keeps
   its id and sha256.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -70,11 +71,15 @@ def read_intent(host_task_path: Path) -> dict | None:
 
 def _write(host_task_path: Path, intent: dict) -> None:
     from services.atomic_io import atomic_write_text
-    atomic_write_text(intent_path(host_task_path), json.dumps(intent, indent=2, sort_keys=True) + "\n")
+
+    atomic_write_text(
+        intent_path(host_task_path), json.dumps(intent, indent=2, sort_keys=True) + "\n"
+    )
 
 
 def _owner(db, owner_id: str):
     from db.models import User
+
     user = db.get(User, uuid.UUID(owner_id))
     if user is None or user.status != "active":
         raise HandoverError("access", "The run's owner cannot create projects now.")
@@ -91,55 +96,109 @@ def _bound(ctx, row, scratch):
 
     @contextlib.contextmanager
     def scope():
-        tokens = PyPSAService.bind_request_scope(ctx, project_registry.registry_key(row), scratch)
+        tokens = PyPSAService.bind_request_scope(
+            ctx, project_registry.registry_key(row), scratch
+        )
         try:
             yield
         finally:
             PyPSAService.reset_request_scope(tokens)
+
     return scope()
 
 
 def _copy_uploads(host_name: str, host_dir: Path, row, upload_ids) -> list[dict]:
     from services import project_registry, upload_service
+
     new_dir = project_registry.project_dir(row)
     copied = []
     for file_id in upload_ids:
         meta = upload_service.get_upload_meta(host_name, file_id, project_dir=host_dir)
         blob = upload_service.get_upload_bytes(host_name, file_id, project_dir=host_dir)
-        added = upload_service.add_upload(row.name, blob, meta.filename, meta.mime, project_dir=new_dir)
+        added = upload_service.add_upload(
+            row.name, blob, meta.filename, meta.mime, project_dir=new_dir
+        )
         sha = hashlib.sha256(blob).hexdigest()
         if added.file_id != file_id or (added.sha256 and added.sha256 != sha):
-            raise HandoverError("upload_copy_mismatch", "A cited file did not copy byte for byte.")
+            raise HandoverError(
+                "upload_copy_mismatch", "A cited file did not copy byte for byte."
+            )
         copied.append({"upload_id": file_id, "sha256": sha})
     return copied
 
 
-def hand_over(host_task_path: Path, *, owner_id: str, origin: dict, name: str | None, params: dict,
-              digest: str, decision_id: str, host_name: str, host_dir: Path, uploads=(), start,
-              template: str = "eh_site", lock_timeout: float = LOCK_TIMEOUT, precheck=None) -> dict:
+def hand_over(
+    host_task_path: Path,
+    *,
+    owner_id: str,
+    origin: dict,
+    name: str | None,
+    params: dict,
+    digest: str,
+    decision_id: str,
+    host_name: str,
+    host_dir: Path,
+    uploads=(),
+    start,
+    template: str = "eh_site",
+    lock_timeout: float = LOCK_TIMEOUT,
+    precheck=None,
+) -> dict:
     """Create the project and start the run there, once. `start(row, ctx)`
     starts the run's task on the new project and returns its task id.
     `precheck()` runs under the lock before anything is written: it raises to
     refuse the grant (the host's requirements moved since the brief, GK B (20)
     Q1). Returns the intent record (`state == "started"`)."""
     from harness import durable
-    lock = durable.file_lock(lock_path(host_task_path), timeout=lock_timeout,
-                             busy="another grant of this plan is creating its project")
+
+    lock = durable.file_lock(
+        lock_path(host_task_path),
+        timeout=lock_timeout,
+        busy="another grant of this plan is creating its project",
+    )
     try:
         lock.__enter__()
     except TimeoutError as exc:
-        raise HandoverError("handover_busy", "Another grant of this plan is creating its project; "
-                            "nothing was granted.") from exc
+        raise HandoverError(
+            "handover_busy",
+            "Another grant of this plan is creating its project; nothing was granted.",
+        ) from exc
     try:
-        return _under_lock(host_task_path, owner_id=owner_id, origin=origin, name=name, params=params,
-                           digest=digest, decision_id=decision_id, host_name=host_name, host_dir=host_dir,
-                           uploads=list(uploads), start=start, template=template, precheck=precheck)
+        return _under_lock(
+            host_task_path,
+            owner_id=owner_id,
+            origin=origin,
+            name=name,
+            params=params,
+            digest=digest,
+            decision_id=decision_id,
+            host_name=host_name,
+            host_dir=host_dir,
+            uploads=list(uploads),
+            start=start,
+            template=template,
+            precheck=precheck,
+        )
     finally:
         lock.__exit__(None, None, None)
 
 
-def _under_lock(host_task_path, *, owner_id, origin, name, params, digest, decision_id, host_name, host_dir,
-                uploads, start, template, precheck=None):
+def _under_lock(
+    host_task_path,
+    *,
+    owner_id,
+    origin,
+    name,
+    params,
+    digest,
+    decision_id,
+    host_name,
+    host_dir,
+    uploads,
+    start,
+    template,
+    precheck=None,
+):
     from db.models import Project
     from db.session import SessionLocal
     from routers import projects as project_routes
@@ -148,16 +207,32 @@ def _under_lock(host_task_path, *, owner_id, origin, name, params, digest, decis
     intent = read_intent(host_task_path)
     if precheck is not None and (intent is None or intent["state"] == "creating"):
         precheck()  # refuses before any project or intent exists for a fresh grant
-    if intent is not None and (intent["digest"], intent["decision_id"]) != (digest, decision_id):
-        raise HandoverError("handover_conflict", "This plan already handed over with other inputs.",
-                            project_id=intent.get("project_id"))
+    if intent is not None and (intent["digest"], intent["decision_id"]) != (
+        digest,
+        decision_id,
+    ):
+        raise HandoverError(
+            "handover_conflict",
+            "This plan already handed over with other inputs.",
+            project_id=intent.get("project_id"),
+        )
     if intent is not None and intent["state"] == "started":
         return intent
     if intent is None:
-        intent = {"version": VERSION, "origin": dict(origin), "digest": digest, "decision_id": decision_id,
-                  "template": template, "name": name, "planned_project_id": str(uuid.uuid4()),
-                  "project_id": None, "project_name": None, "task_id": None, "uploads": [],
-                  "state": "creating"}
+        intent = {
+            "version": VERSION,
+            "origin": dict(origin),
+            "digest": digest,
+            "decision_id": decision_id,
+            "template": template,
+            "name": name,
+            "planned_project_id": str(uuid.uuid4()),
+            "project_id": None,
+            "project_name": None,
+            "task_id": None,
+            "uploads": [],
+            "state": "creating",
+        }
         _write(host_task_path, intent)
     planned = uuid.UUID(intent["planned_project_id"])
     with SessionLocal() as db:
@@ -166,22 +241,32 @@ def _under_lock(host_task_path, *, owner_id, origin, name, params, digest, decis
         if intent["state"] == "creating":
             if row is not None:
                 # Cut off mid-create: the project stays and the host names it.
-                raise HandoverError("handover_incomplete", "The project was created but its setup did not "
-                                    "finish; open it, or start the run there.", project_id=str(row.id),
-                                    project_name=row.name)
+                raise HandoverError(
+                    "handover_incomplete",
+                    "The project was created but its setup did not "
+                    "finish; open it, or start the run there.",
+                    project_id=str(row.id),
+                    project_name=row.name,
+                )
             # The route's own refusal (R1) raises here, before anything exists.
-            made = project_routes._materialise_from_template(template, name, params, db, user,
-                                                             project_id=planned)
+            made = project_routes._materialise_from_template(
+                template, name, params, db, user, project_id=planned
+            )
             row = made.project
         if row is None:
-            raise HandoverError("handover_incomplete", "The created project is gone; nothing was started.",
-                                project_id=intent["project_id"])
+            raise HandoverError(
+                "handover_incomplete",
+                "The created project is gone; nothing was started.",
+                project_id=intent["project_id"],
+            )
         ctx = base_context(row)
         # One hold of the new project's lock across setup, copies and start (A3, R3).
         with ctx.mutation_lock, _bound(ctx, row, f"handover:{origin.get('task_id')}"):
             if intent["state"] == "creating":
                 project_routes._finish_created_project(made, db, user, None)
-                intent.update(state="created", project_id=str(row.id), project_name=row.name)
+                intent.update(
+                    state="created", project_id=str(row.id), project_name=row.name
+                )
                 _write(host_task_path, intent)
             intent["uploads"] = _copy_uploads(host_name, Path(host_dir), row, uploads)
             intent["task_id"] = start(row, ctx)

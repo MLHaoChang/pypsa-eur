@@ -20,6 +20,7 @@ An answer row is admitted only when every condition holds:
 * B4: the row records the card decision id. `resume_task` still checks the
   gate again from native facts; the row is never taken as the fact.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -47,7 +48,9 @@ def request(asked: list, items: list) -> dict | None:
         new.append(item)
     if not new:
         return None
-    rid = hashlib.sha256(json.dumps([len(asked or []), [list(_key(i)) for i in new]]).encode()).hexdigest()[:16]
+    rid = hashlib.sha256(
+        json.dumps([len(asked or []), [list(_key(i)) for i in new]]).encode()
+    ).hexdigest()[:16]
     return {"id": f"req-{rid}", "items": new, "answered": []}
 
 
@@ -56,7 +59,17 @@ def open_items(req: dict) -> set:
     return {_key(i) for i in req["items"]} - answered
 
 
-def answer(task: dict, req: dict | None, *, actor_id, project_id, decision: dict | None, diff, before, head):
+def answer(
+    task: dict,
+    req: dict | None,
+    *,
+    actor_id,
+    project_id,
+    decision: dict | None,
+    diff,
+    before,
+    head,
+):
     """`(row, None)` when the carded write answers open items of the run's
     open request, else `(None, reason)` and the write is drift. `diff` is
     every `(component, name, attr)` the write changed; `before` the
@@ -74,15 +87,24 @@ def answer(task: dict, req: dict | None, *, actor_id, project_id, decision: dict
     if not changed:
         return None, "no_change"
     if not changed <= open_items(req):
-        return None, "outside_the_request"  # B2: an item plus anything else is all drift
+        return (
+            None,
+            "outside_the_request",
+        )  # B2: an item plus anything else is all drift
     if before is None or head != before:
         return None, "chain_moved"  # B3: a write came in between
-    return {"answers": req["id"], "decision_id": decision["id"], "items": sorted(list(k) for k in changed)}, None
+    return {
+        "answers": req["id"],
+        "decision_id": decision["id"],
+        "items": sorted(list(k) for k in changed),
+    }, None
 
 
 def record(req: dict, row: dict) -> bool:
     """Marks the row's items answered; True when the request is complete."""
-    req["answered"] = sorted({tuple(a) for a in req.get("answered", [])} | {tuple(i) for i in row["items"]})
+    req["answered"] = sorted(
+        {tuple(a) for a in req.get("answered", [])} | {tuple(i) for i in row["items"]}
+    )
     req["answered"] = [list(a) for a in req["answered"]]
     return not open_items(req)
 
@@ -99,7 +121,13 @@ def data_items(envelope: dict | None, profile: dict, *, unset, present) -> list[
         key = (t["component"], t["name"], t["attr"])
         if key not in seen and unset(t):
             seen.add(key)
-            items.append({"target": dict(t), "label": f"{t['name']} {t['attr']}", "tool": gap["tool"]})
+            items.append(
+                {
+                    "target": dict(t),
+                    "label": f"{t['name']} {t['attr']}",
+                    "tool": gap["tool"],
+                }
+            )
     for param in (profile.get("inputs") or {}).get("required", []):
         if not present(param):
             items.append({"param": param, "label": param})

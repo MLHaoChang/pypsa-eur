@@ -1,5 +1,6 @@
 """Study harness issue 21 §2: create at grant and hand over to the new
 project (`services.run_handover`). GK B A1-A3, R1, R2 and A4 (copies)."""
+
 from __future__ import annotations
 
 import hashlib
@@ -24,18 +25,36 @@ PARAMS = {"site_type": "hospital", "connection_mw": 12.0}
 def host(tmp_path, tmp_projects_dir, seeded_identity):
     host_dir = tmp_path / "hostproj"
     host_dir.mkdir()
-    uid = upload_service.add_upload("hostproj", b"year,peak (kW)\n2027,3000\n", "site.csv", "text/csv",
-                                    project_dir=host_dir).file_id
+    uid = upload_service.add_upload(
+        "hostproj",
+        b"year,peak (kW)\n2027,3000\n",
+        "site.csv",
+        "text/csv",
+        project_dir=host_dir,
+    ).file_id
     tasks = tmp_path / "assistant_tasks"
     tasks.mkdir()
-    return {"dir": host_dir, "upload": uid, "task": tasks / "host-task.json",
-            "owner": str(seeded_identity["user_id"])}
+    return {
+        "dir": host_dir,
+        "upload": uid,
+        "task": tasks / "host-task.json",
+        "owner": str(seeded_identity["user_id"]),
+    }
 
 
 def _grant(host, start, **kw):
-    args = dict(owner_id=host["owner"], origin={"project_id": "host-project", "task_id": "host-task"},
-                name=f"Intake {uuid.uuid4().hex[:6]}", params=PARAMS, digest="d" * 64, decision_id="decision-1",
-                host_name="hostproj", host_dir=host["dir"], uploads=[host["upload"]], start=start)
+    args = dict(
+        owner_id=host["owner"],
+        origin={"project_id": "host-project", "task_id": "host-task"},
+        name=f"Intake {uuid.uuid4().hex[:6]}",
+        params=PARAMS,
+        digest="d" * 64,
+        decision_id="decision-1",
+        host_name="hostproj",
+        host_dir=host["dir"],
+        uploads=[host["upload"]],
+        start=start,
+    )
     args.update(kw)
     return run_handover.hand_over(host["task"], **args)
 
@@ -67,13 +86,22 @@ def test_grant_creates_one_project_with_the_params_and_copies_uploads(host):
         row = db.get(Project, uuid.UUID(intent["project_id"]))
         new_dir = project_registry.project_dir(row)
     meta = json.loads((new_dir / "eh_template.json").read_text())
-    assert meta["params"]["connection_mw"] == 12.0 and meta["params"]["site_type"] == "hospital"
+    assert (
+        meta["params"]["connection_mw"] == 12.0
+        and meta["params"]["site_type"] == "hospital"
+    )
     assert sorted(meta["entered"]) == ["connection_mw", "site_type"]
     assert str(start.ctxs[0].project_uuid) == intent["project_id"]
-    blob = upload_service.get_upload_bytes(row.name, host["upload"], project_dir=new_dir)
-    original = upload_service.get_upload_bytes("hostproj", host["upload"], project_dir=host["dir"])
+    blob = upload_service.get_upload_bytes(
+        row.name, host["upload"], project_dir=new_dir
+    )
+    original = upload_service.get_upload_bytes(
+        "hostproj", host["upload"], project_dir=host["dir"]
+    )
     assert hashlib.sha256(blob).hexdigest() == hashlib.sha256(original).hexdigest()
-    assert intent["uploads"] == [{"upload_id": host["upload"], "sha256": hashlib.sha256(original).hexdigest()}]
+    assert intent["uploads"] == [
+        {"upload_id": host["upload"], "sha256": hashlib.sha256(original).hexdigest()}
+    ]
 
 
 def test_a_repeated_grant_creates_no_second_project(host):
@@ -100,6 +128,7 @@ def test_two_concurrent_grants_create_one_project(host):
             results.append(_grant(host, start, name="Raced", lock_timeout=30))
         except Exception as exc:  # noqa: BLE001
             errors.append(exc)
+
     threads = [threading.Thread(target=go) for _ in range(2)]
     for t in threads:
         t.start()
@@ -118,14 +147,19 @@ def _hold(path, ready, release):
 def test_a_lock_held_by_another_process_refuses_the_grant(host):
     spawn = multiprocessing.get_context("spawn")
     ready, release = spawn.Event(), spawn.Event()
-    proc = spawn.Process(target=_hold, args=(str(run_handover.lock_path(host["task"])), ready, release))
+    proc = spawn.Process(
+        target=_hold, args=(str(run_handover.lock_path(host["task"])), ready, release)
+    )
     proc.start()
     try:
         assert ready.wait(30)
         with pytest.raises(run_handover.HandoverError) as exc:
             _grant(host, Start(), name="Locked out", lock_timeout=0.2)
         assert exc.value.kind == "handover_busy"
-        assert _projects("Locked out") == 0 and run_handover.read_intent(host["task"]) is None
+        assert (
+            _projects("Locked out") == 0
+            and run_handover.read_intent(host["task"]) is None
+        )
     finally:
         release.set()
         proc.join(30)
@@ -137,7 +171,9 @@ def test_a_crash_after_creation_resumes_from_the_intent(host):
         _grant(host, start, name="Crashed")
     assert run_handover.read_intent(host["task"])["state"] == "created"
     intent = _grant(host, start, name="Crashed")
-    assert intent["state"] == "started" and start.calls == 2 and _projects("Crashed") == 1
+    assert (
+        intent["state"] == "started" and start.calls == 2 and _projects("Crashed") == 1
+    )
 
 
 def test_a_create_cut_off_midway_is_named_never_deleted_or_redone(host, monkeypatch):
@@ -145,6 +181,7 @@ def test_a_create_cut_off_midway_is_named_never_deleted_or_redone(host, monkeypa
 
     def broken(*a, **k):
         raise RuntimeError("cut off")
+
     real = projects._finish_created_project
     monkeypatch.setattr(projects, "_finish_created_project", broken)
     with pytest.raises(RuntimeError):
@@ -152,7 +189,10 @@ def test_a_create_cut_off_midway_is_named_never_deleted_or_redone(host, monkeypa
     monkeypatch.setattr(projects, "_finish_created_project", real)
     with pytest.raises(run_handover.HandoverError) as exc:
         _grant(host, Start(), name="Half made")
-    assert exc.value.kind == "handover_incomplete" and exc.value.extra["project_name"] == "Half made"
+    assert (
+        exc.value.kind == "handover_incomplete"
+        and exc.value.extra["project_name"] == "Half made"
+    )
     assert _projects("Half made") == 1
 
 
@@ -182,30 +222,62 @@ def test_the_active_context_is_unchanged_across_the_hand_over(host):
     start = Start()
     intent = _grant(host, start)
     after = PyPSAService.get_active_context()
-    assert after is before and after.project_uuid == uuid_before and after.network is network_before
-    assert str(start.ctxs[0].project_uuid) == intent["project_id"] and start.ctxs[0] is not before
+    assert (
+        after is before
+        and after.project_uuid == uuid_before
+        and after.network is network_before
+    )
+    assert (
+        str(start.ctxs[0].project_uuid) == intent["project_id"]
+        and start.ctxs[0] is not before
+    )
 
 
 def test_the_run_starts_on_the_new_project_and_the_host_ends_handed_over(host):
     from services import assistant_tasks, run_profiles
 
-    host_task = {"task_id": "host-task", "project_id": "host-project", "owner_id": host["owner"],
-                 "title": "Site study", "status": "ready", "steps": [], "version": 3,
-                 "brief": {"objective": "Size the site", "cards": [], "cases": []},
-                 "run": {"profile": "eh_site@1", "mode": "stepwise", "status": "running", "stage": "intake",
-                         "intake": {"rows": [{"param": "connection_mw", "value": 12.0}]}}}
+    host_task = {
+        "task_id": "host-task",
+        "project_id": "host-project",
+        "owner_id": host["owner"],
+        "title": "Site study",
+        "status": "ready",
+        "steps": [],
+        "version": 3,
+        "brief": {"objective": "Size the site", "cards": [], "cases": []},
+        "run": {
+            "profile": "eh_site@1",
+            "mode": "stepwise",
+            "status": "running",
+            "stage": "intake",
+            "intake": {"rows": [{"param": "connection_mw", "value": 12.0}]},
+        },
+    }
     host["task"].write_text(json.dumps(host_task))
     before = PyPSAService.get_active_context()
-    start = assistant_tasks.handover_starter(host_task, run_profiles.resolve("eh_site@1"), host["owner"])
+    start = assistant_tasks.handover_starter(
+        host_task, run_profiles.resolve("eh_site@1"), host["owner"]
+    )
     intent = _grant(host, start, name="Started there")
     assert PyPSAService.get_active_context() is before
     with db_session.SessionLocal() as db:
-        new_dir = project_registry.project_dir(db.get(Project, uuid.UUID(intent["project_id"])))
-    task = json.loads((new_dir / "assistant_tasks" / (intent["task_id"] + ".json")).read_text())
-    assert task["project_id"] == intent["project_id"] and task["owner_id"] == host["owner"]
-    assert task["run"]["origin"] == {"project_id": "host-project", "task_id": "host-task"}
+        new_dir = project_registry.project_dir(
+            db.get(Project, uuid.UUID(intent["project_id"]))
+        )
+    task = json.loads(
+        (new_dir / "assistant_tasks" / (intent["task_id"] + ".json")).read_text()
+    )
+    assert (
+        task["project_id"] == intent["project_id"] and task["owner_id"] == host["owner"]
+    )
+    assert task["run"]["origin"] == {
+        "project_id": "host-project",
+        "task_id": "host-task",
+    }
     assert task["run"]["intake"] == [{"param": "connection_mw", "value": 12.0}]
-    assert task.get("requirements") is None  # GK B (20) Q1: the new project has no thread
+    assert (
+        task.get("requirements") is None
+    )  # GK B (20) Q1: the new project has no thread
     ended = assistant_tasks.end_handed_over(host["task"], intent)
     assert (ended["status"], ended["run"]["reason"]) == ("completed", "handed_over")
     assert ended["run"]["handed_over"]["task_id"] == intent["task_id"]
@@ -213,7 +285,10 @@ def test_the_run_starts_on_the_new_project_and_the_host_ends_handed_over(host):
 
 def test_requirements_moved_since_the_brief_refuse_the_grant_and_create_nothing(host):
     def moved():
-        raise run_handover.HandoverError("task_requirements_moved", "The confirmed requirements changed.")
+        raise run_handover.HandoverError(
+            "task_requirements_moved", "The confirmed requirements changed."
+        )
+
     with pytest.raises(run_handover.HandoverError) as exc:
         _grant(host, Start(), name="Moved", precheck=moved)
     assert exc.value.kind == "task_requirements_moved"
