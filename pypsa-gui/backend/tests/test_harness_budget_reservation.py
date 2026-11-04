@@ -277,8 +277,7 @@ def test_an_agent_round_reserves_and_settles_each_send(granted, profile, site, r
     assert all(c["kind"] == "model_send" and "flags" not in c for c in budgets["final_charges"])
 
 
-
-def _fail(request):
+def _terminal_error(request):
     raise ProviderError("invalid_request", "boom")  # terminal: the loop never retries it
 
 
@@ -288,7 +287,7 @@ def test_a_round_whose_send_errors_leaves_no_open_hold(granted, profile, site, r
     profile(BLOCK)
     no_series()
     task, path, _ = granted()
-    record_ = go(harness_runner.Runner("a", agent_provider=Script(_fail)), path, task)
+    record_ = go(harness_runner.Runner("a", agent_provider=Script(_terminal_error)), path, task)
     budgets = record_["run"]["budgets"]
     assert not budgets["reservations"]
     assert [c["flags"] for c in budgets["final_charges"]] == [["uncertain"]]
@@ -313,7 +312,7 @@ def test_a_ledger_fault_at_round_end_still_wakes_the_runner(granted, profile, si
             woken.set()
         return wake(self, path)
     monkeypatch.setattr(harness_runner.Runner, "wake", spy)
-    record_ = go(harness_runner.Runner("a", agent_provider=Script(_fail)), path, task)
+    record_ = go(harness_runner.Runner("a", agent_provider=Script(_terminal_error)), path, task)
     assert stopped(record_)
     assert woken.wait(30)  # the round's `finally` woke the runner after the fault
     # The hold stays open for the boot sweep or a takeover to settle.
@@ -403,6 +402,7 @@ def test_the_server_tool_cost_table_is_a_fresh_copy_each_call(monkeypatch):
                        json.dumps({"web_search_": {"fee_eur": 0.5, "content_tokens": 10}}))
     send_reservation.server_tool_costs()["web_search_"]["fee_eur"] = 99.0
     assert send_reservation.server_tool_costs()["web_search_"]["fee_eur"] == 0.5
+
 
 def test_the_reservation_sees_the_final_request_inside_a_research_wrapper(run, mode, monkeypatch):
     grant(monkeypatch)

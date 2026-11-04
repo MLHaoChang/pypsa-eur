@@ -1453,8 +1453,9 @@ Two environment variables:
   `web_search_` EUR 0.0093 and 10,000 content tokens per use, `web_fetch_` no
   fee and 50,000 tokens (a tool's own `max_content_tokens` wins). A
   provider-run tool adds `max_uses` × (fee + content) to the bound
-  (`_tools_of()`); a type no prefix matches, or a tool with no `max_uses`, has
-  no bound and is refused. `server_tool_costs()` returns a fresh copy each call.
+  (`_tools_of()`); a type no prefix matches, or a tool with no `max_uses`,
+  leaves the input unbounded, so `total_tokens` and `money_eur` refuse it
+  (`unbounded_input`). `server_tool_costs()` returns a fresh copy each call.
 
 The ledger is `task["run"]["budgets"]`, LV-09's shape
 `{reservations, final_charges, cached_usage}`. Its rows are written by LV-09's
@@ -1462,10 +1463,11 @@ cores `durable_conversation.reserve_in` / `settle_in` (idempotent by key),
 always inside `_locked()`: the runner's cross-process file lock and the task
 lock. `admit()` passes a send only when `settled + open holds + this hold <= cap`
 (`budget` otherwise), so two concurrent sends cannot together pass the cap.
-`settle()` charges the reported usage; a reply with no usage, or a missing usage
-part, settles at the hold's bound (`actual()`, flag `no_usage`). A hold left open
-settles `uncertain` at its bound (`_settle_uncertain()`), never at zero. The run
-view's `summary()` counts the charges that sit at a bound.
+`settle()` charges the reported usage (`actual()`): a reply with no usage settles
+at the hold's whole bound (flag `no_usage`), and a missing or invalid usage part
+at that part's bound (flag `partial_usage`). A hold left open settles `uncertain`
+at its bound (`_settle_uncertain()`), never at zero. The run view's `summary()`
+counts the `uncertain` and `no_usage` charges (`AT_BOUND_FLAGS`).
 
 A send that fails after the provider started answering settles `uncertain` at
 once (`ReservingProvider.stream()`). One that fails before any response byte
@@ -1477,9 +1479,10 @@ one of three places:
   never keeps the runner from waking;
 - the boot sweep: `Runner.boot_sweep()` runs `sweep()` over every run file with
   open holds;
-- the takeover: when a runner takes over a run, `reconcile()` settles the holds
-  other boots left open, and the run, if driven, stops `needs_user`
-  (`uncertain`).
+- the takeover: when a runner takes over a run (`Runner`'s takeover path),
+  `reconcile()` settles the holds other boots left open and stops a driven run
+  `needs_user` (`uncertain`); the runner then stops the run `needs_user` too
+  when any send was lost.
 
 `reconcile()` (and so the sweep) skips a run while another instance holds its
 live lease. Admission happens only under the live lease: `_admit()` refuses a
