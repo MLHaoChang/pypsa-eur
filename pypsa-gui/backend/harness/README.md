@@ -1291,6 +1291,13 @@ lifespan after the solve queue and is off under pytest (tests build their own
     state and the app link. It leaves out the run title, which the model
     wrote, and never carries values.
   - `run.notices` keeps the log.
+  - **`loop.notice`** (issue 25) is the email about an ended agent loop
+    (`no_progress`, `exhausted`, `unverified_write`, `error`), in the run view
+    as `loop.notice`: `{sent, error?}`. `sent` is `null` while claimed, `true`
+    once sent, `false` with `error` `send_failed`, `no_address` or `uncertain`
+    (a claim with no result after 60 s; never re-sent). It is absent when
+    `notify.email` was not granted. The chat's run card (`RunMonitor`) shows it
+    on a `needs_user` run as one line: nothing while `null` or absent.
 
 ### The approval envelope (study harness issue 03)
 

@@ -49,6 +49,16 @@ function ruleWords(r: GateRule): string {
   return `${FACT_WORDS[r.fact] ?? 'A check'}${value}`
 }
 
+/** The email about an ended agent loop (`loop.notice`, issue 25) in words; none until it was claimed. */
+function loopNoticeWords(view: RunMonitorView): { text: string; failed: boolean } | null {
+  const n = view.run?.loop?.notice
+  if (!n || n.sent === null || n.sent === undefined) return null
+  if (n.sent) return { text: 'An email told you the run needs you.', failed: false }
+  if (n.error === 'uncertain') return { text: 'The email may not have been sent. The run waits for you here.', failed: true }
+  const why = n.error === 'no_address' ? 'your account has no email address' : 'sending failed'
+  return { text: `No email sent: ${why}. The run waits for you here.`, failed: true }
+}
+
 function Budgets({ view }: { view: RunMonitorView }) {
   // A paused run says its expiry once, as "Unattended approval expires …".
   const paused = view.run?.status === 'paused' && view.envelope?.state === 'granted'
@@ -213,6 +223,7 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
   const stoppedAt = stageWords(run.stage)
   const cancelled = view.status === 'cancelled'
   const finished = run.status === 'completed'
+  const noticeWords = run.status === 'needs_user' ? loopNoticeWords(view) : null
   const gateFailed = run.status === 'needs_user' && current?.status === 'failed'
   const failedRules = (current?.gate ?? []).filter(r => r.verdict !== 'pass').length
   const stop = !gateFailed && (run.status === 'paused' || (run.status === 'needs_user' && run.reason && run.reason !== 'waiting_card'))
@@ -262,6 +273,7 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
       {run.status === 'paused' && view.envelope?.state === 'granted' && <p className="text-muted" data-testid="run-paused-expiry">
         Unattended approval expires {when(view.envelope.expires_at ?? view.monitor.budgets.expires_at)}</p>}
     </div>}
+    {noticeWords && <p className={noticeWords.failed ? 'text-warn' : 'text-muted'} data-testid="run-loop-notice">{noticeWords.text}</p>}
 
     {going && (pausedAt || card || view.monitor.waiting) && <div data-testid="run-waiting">
       <div className="font-medium">Waiting for you</div>
