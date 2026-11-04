@@ -167,6 +167,17 @@ def until_solve_waits(detached, site, monkeypatch, follow=False):
     return task, path, record
 
 
+def solver_has_finished(record):
+    """Wait out the queued solve, not just an idle solver thread: right after the
+    dispatch the worker may not have started, and a request that lands then gets
+    the solver gate's plain-string 409 instead of the hold's `project_locked`."""
+    from harness import continuation
+    from routers.simulation import _solver_in_flight
+    job = record['steps'][-1]['job']['jobs'][0]
+    assert wait_until(lambda: continuation._queue_job_status(job) == 'completed', 120)
+    assert wait_until(lambda: not _solver_in_flight())
+
+
 def later(seconds=harness_runner.LEASE_SECONDS + 1):
     return lambda: time.time() + seconds
 
@@ -327,9 +338,8 @@ def test_each_dispatch_rechecks_under_the_lock_and_refuses_with_no_effect(detach
 
 def test_a_foreground_write_during_the_solve_is_refused_409_and_none_is_lost(detached, site, client, monkeypatch):
     _, root = site
-    from routers.simulation import _solver_in_flight
     task, path, record = until_solve_waits(detached, site, monkeypatch)  # its follower never settles it
-    wait_until(lambda: not _solver_in_flight())  # the solver's own gate would answer the PUTs
+    solver_has_finished(record)  # the solver's own gate would answer the PUTs
     assert json.loads(path.read_text())['steps'][-1]['status'] == 'waiting'
     assert harness_locks.holder(record['project_id']) == task['task_id']  # the runner's own hold
     body = {'name': 'G1', 'bus': 'B1', 'marginal_cost': 30}
@@ -352,9 +362,8 @@ def test_project_route_writes_to_the_held_project_are_refused_409_until_it_is_le
     """GK B: `_enforce_project_lock` checks the hold by the path's project."""
     name = 'Tool Baseline'
     sid = client.post(f'/api/projects/{name}/snapshots', json={'label': 'base'}).json()['id']
-    from routers.simulation import _solver_in_flight
     task, path, record = until_solve_waits(detached, site, monkeypatch)
-    wait_until(lambda: not _solver_in_flight())  # the solver's own gate would answer first
+    solver_has_finished(record)  # the solver's own gate would answer first
     assert harness_locks.holder(record['project_id']) == task['task_id']
     snapshots = len(client.get(f'/api/projects/{name}/snapshots').json())
     for refused in (client.post(f'/api/projects/{name}/snapshots/{sid}/restore'),
