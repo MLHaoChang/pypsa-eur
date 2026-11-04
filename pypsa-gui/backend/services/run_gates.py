@@ -187,7 +187,7 @@ RESTORES = ("base", "final")
 # goal it was judged against with where each part came from.
 LOOP_FIELDS = ("status", "solves_used", "probe_solves", "restore", "base_restored", "base_restore_status",
                "target_lole_h", "draws", "basis", "goal_sources", "lever_star", "eps_star", "confident",
-               "started_at", "finished_at", "error")
+               "started_at", "finished_at", "error", "network_revision")
 
 
 def converged(record) -> bool:
@@ -220,6 +220,8 @@ def _loop_converged(env, rule):
     if not isinstance(loop, dict):
         reason = step.get("error") or "the engine loop left no record"
         return NoEvidence((step.get("job") or {}).get("outcome") or step["status"], str(reason)[:240])
+    if loop.get("applied") is False:  # a user edit landed while the loop ran (H3): not this project's
+        return NoEvidence("inputs_changed", "the inputs changed while the engine loop ran")
     return Looped(converged(loop), {k: loop[k] for k in LOOP_FIELDS if k in loop})
 
 

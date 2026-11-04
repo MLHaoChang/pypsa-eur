@@ -54,6 +54,10 @@ RESEARCH_DEFAULT_EUR, RESEARCH_CAP_EUR = 2.0, 10.0  # SH-RESEARCH-CAP-1
 # The run tools an envelope may list (`runs`); each admitted one counts as a solve.
 RUN_TOOLS = frozenset({"run_simulation", "run_ac_pf_stage", "solve_queue_enqueue",
                        "run_sensitivity_sweep", "run_eh_study"})
+# Issue 05 PR C: the engine loops a result rule may drive. A grant lists one
+# only to cover `restore: "final"` (a solver-config write, LC-40); its solves
+# are its own audit row's (`reserve_engine`), never one admitted solve.
+ENGINE_TOOLS = frozenset({"run_margin_loop", "run_coupling_loop"})
 # Counted as solves when admitted, but no envelope lists them (issue 08, GK B (8)):
 # a sweep or an EH study is always the user's own card.
 NEVER_LISTED = frozenset({"run_sensitivity_sweep", "run_eh_study"})
@@ -186,9 +190,11 @@ def _check_edit(entry):
 
 
 def _check_run(entry):
-    if not isinstance(entry, dict) or "tool" not in entry or not set(entry) <= {"tool", "kind"} \
-            or entry["tool"] not in RUN_TOOLS or not isinstance(entry.get("kind", ""), str):
-        raise EnvelopeError(f"A run names one of {sorted(RUN_TOOLS)} and an optional kind: {entry!r}")
+    if not isinstance(entry, dict) or "tool" not in entry or not set(entry) <= {"tool", "kind", "restore"} \
+            or entry["tool"] not in RUN_TOOLS | ENGINE_TOOLS or not isinstance(entry.get("kind", ""), str) \
+            or ("restore" in entry and (entry["tool"] not in ENGINE_TOOLS or entry["restore"] != "final")):
+        raise EnvelopeError(f"A run names one of {sorted(RUN_TOOLS | ENGINE_TOOLS)} and an optional kind; an "
+                            f"engine loop may carry restore \"final\": {entry!r}")
     if entry["tool"] in NEVER_LISTED:
         raise EnvelopeError(f"{entry['tool']} is never in an envelope; it is always its own card.")
     return dict(entry)
@@ -358,11 +364,66 @@ def _pickup_refused(envelope):
 
 def solves_used(envelope):
     """The run's solves (issue 05, C4): each admitted run tool that was not
-    refused at pickup. A failed or cancelled job still counts. The one count
-    both the envelope's budget check and `run.budget.used.solves` read."""
+    refused at pickup, and each reserving row (an engine loop's, PR C; any
+    event that carries `reserved`): its settled `solves`, else its whole
+    reservation (a loop still running, or lost). A failed or cancelled job
+    still counts. The one count both the envelope's budget check and
+    `run.budget.used.solves` read."""
     gone = _pickup_refused(envelope)
     return sum(1 for a in envelope["audit"]
-               if a["event"] == "used" and a.get("tool") in RUN_TOOLS and a.get("call_id") not in gone)
+               if a["event"] == "used" and a.get("tool") in RUN_TOOLS and a.get("call_id") not in gone) \
+        + sum(int(a["solves"] if "solves" in a else a["reserved"]) for a in envelope["audit"]
+              if "reserved" in a and a.get("call_id") not in gone)
+
+
+def restore_covered(envelope, tool, restore):
+    """`restore: "final"` writes the solver config (LC-40): only a grant
+    whose runs list the engine tool with it covers that (GK A (12) Q2)."""
+    return restore == "base" or any(r.get("tool") == tool and r.get("restore") == "final"
+                                    for r in (envelope or {}).get("runs", []))
+
+
+def reserve_engine(task_path, *, call_id, tool, rule, max_solves, overhead, restore):
+    """An engine loop's start (issue 05 PR C, C4, conditions 2, 3, 9): under
+    the task lock, its `max_solves` is the rule's, clamped to the solves left
+    after its `overhead` (probe, closing re-solve) and to `MAX_LOOP_SOLVES`,
+    and that worst case is reserved on one audit row. (max_solves, None),
+    or (None, reason) with nothing reserved."""
+    from harness.runner import budget_spent
+    from services import assistant_tasks
+    from services.adequacy.coupling import MAX_LOOP_SOLVES
+    with assistant_tasks._LOCK:
+        envelope = _load(task_path)
+        task = json.loads(Path(task_path).read_text())
+        if envelope is None or not live(task_path):
+            return None, "no_envelope"
+        if not restore_covered(envelope, tool, restore):
+            return None, "restore_uncovered"
+        left = envelope["budget"]["solves"] - solves_used(envelope)
+        clamped = min(int(max_solves), left - int(overhead), MAX_LOOP_SOLVES)
+        if budget_spent(task) or clamped < 1:
+            return None, "budget_spent"
+        _audit(envelope, "engine", call_id=call_id, tool=tool, rule=rule, restore=restore,
+               reserved=clamped + int(overhead))
+        _save(task_path, envelope)
+        _count_solves(task_path, envelope)
+        return clamped, None
+
+
+def settle_engine_solves(task_path, call_id, solves):
+    """The loop ended: its reservation becomes what it spent, once (C7).
+    False when the row is gone or already settled."""
+    from services import assistant_tasks
+    with assistant_tasks._LOCK:
+        envelope = _load(task_path)
+        row = next((a for a in (envelope or {}).get("audit", [])
+                    if a["event"] == "engine" and a.get("call_id") == call_id), None)
+        if row is None or "solves" in row:
+            return False
+        row["solves"] = int(solves)
+        _save(task_path, envelope)
+        _count_solves(task_path, envelope)
+        return True
 
 
 # Issue 05 (C2): an L2 round's third admitted change is refused with this kind.

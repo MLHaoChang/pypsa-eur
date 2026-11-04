@@ -323,6 +323,7 @@ def follow_queue_job(task_path, ticket) -> threading.Event:
 # on a queue job. One follower per step, settled once, from that record only.
 
 ENGINE_POLL_SECONDS = 0.5
+ENGINE_LOCK_SECONDS = 5.0
 MAX_ENGINE_FOLLOW_SECONDS = 24 * 3600  # then the step settles `timed_out` on this timer (H2)
 
 
@@ -379,8 +380,20 @@ def settle_engine(task_path, ticket, *, instance, ctx):
         state, record = engine_record(ctx, step["job"]["study"], step["job"])
         if state == "running":
             return state
-        return tasks.settle_engine(task_path, ticket, record if state == "ended" else None,
-                                   "ended" if state == "ended" else "lost")
+        if state != "ended":
+            tasks.settle_engine(task_path, ticket, None, "lost")
+            return state
+        # H3: whether the loop's result is still the project's is decided under the project's
+        # mutation lock, and a held setting joins the chain there; busy now, the next poll retries.
+        if not ctx.mutation_lock.acquire(timeout=ENGINE_LOCK_SECONDS):
+            return "running"
+        try:
+            from harness import run_loops
+            record["applied"] = run_loops.engine_applied(task_path, ctx, step, record)
+            tasks.settle_engine(task_path, ticket, record, "ended")
+        finally:
+            ctx.mutation_lock.release()
+        return state
 
 
 def follow_engine(task_path, ticket, ctx, *, instance) -> threading.Event:
