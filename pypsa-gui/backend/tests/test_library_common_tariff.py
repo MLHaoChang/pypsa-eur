@@ -11,6 +11,7 @@ names it and has no total; it is never presented as complete.
 from __future__ import annotations
 
 import json
+import uuid
 
 import numpy as np
 import pandas as pd
@@ -203,3 +204,15 @@ def test_the_site_bill_charges_the_tennet_items_and_marks_the_bill_incomplete():
     assert res.per_item["vastrecht"] > 0
     assert res.total is None
     assert any(f.startswith("tariff_incomplete:kw_max_gewogen_per_maand") for f in bill.flags)
+
+
+def test_a_listed_ref_dumps_as_exactly_kind_id_version_hash(db):
+    """Held-tariff detection (`run_envelope._library_tariffs`) tells a shipped
+    tariff from an own one by whole-ref equality, which holds only while each
+    listed ref dumps as exactly these four fields. Adding a field to
+    `LibraryItemRef` must fail here, not break detection silently."""
+    refs = I.list_items(db, uuid.uuid4(), "tariff")
+    assert refs, "the shipped tariffs are listed for every organisation"
+    for ref in refs:
+        assert set(ref.model_dump(mode="json")) == {"kind", "id", "version", "hash"}
+    assert set(M.LibraryItemRef.model_fields) == {"kind", "id", "version", "hash"}
