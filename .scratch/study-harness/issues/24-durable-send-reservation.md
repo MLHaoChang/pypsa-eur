@@ -3,7 +3,7 @@
 
 # 24 — A durable reservation before each model send, settled across restarts
 
-Status: needs-triage (waits for 04 and for #1059 to merge)
+Status: ready-for-agent (04 and #1059 landed; built on `claude/sh-24-durable-send-reservation`)
 Type: task
 Blocked by: 04; PR #1059 (LC-07 PR2, in review; it changes files under `pypsa-gui/backend/harness/`, so build after it merges)
 Gated: yes (GK B: persistence and failure semantics)
@@ -24,12 +24,12 @@ Today a harness run's model cost is charged after the call (issue 02's total cos
 
 ## Acceptance criteria
 
-- [ ] **Failing test first:** kill the process between the provider call and the charge (fake provider); on restart the run is `needs_user` and the call's hold still counts toward the cap.
-- [ ] Two concurrent sends in one run cannot together exceed the cap: the second is refused, and the refusal is the existing cap error.
-- [ ] A retried send under the same key reserves once.
-- [ ] A research step that fits under €2 (and one raised to €10) is admitted with the mode on; one over the cap stops mid-stage as in issue 09.
-- [ ] With the mode `off`, behaviour and tests are unchanged.
-- [ ] A provider reply with no usage settles at the hold's bound, never zero.
+- [x] **Failing test first:** kill the process between the provider call and the charge (fake provider); on restart the run is `needs_user` and the call's hold still counts toward the cap.
+- [x] Two concurrent sends in one run cannot together exceed the cap: the second is refused, and the refusal is the existing cap error.
+- [x] A retried send under the same key reserves once.
+- [x] A research step that fits under €2 (and one raised to €10) is admitted with the mode on; one over the cap stops mid-stage as in issue 09.
+- [x] With the mode `off`, behaviour and tests are unchanged.
+- [x] A provider reply with no usage settles at the hold's bound, never zero.
 
 ## Likely files
 
@@ -46,3 +46,24 @@ GK B note (3 Nov): restart reconciliation also runs as a boot sweep, not only wh
 #970's "Proposed v2 parent budget schema" predates LV-09; the live schema is `budgets = {reservations, final_charges, cached_usage}`. Extend it only where a field is missing, and migrate nothing that exists. It also says runner cost gates are "unmetered"; issue 02's cost cap is built and its test stays green.
 
 ## Comments
+
+- 4 Nov, GK B plan verdict, GO WITH CHANGES:
+  - (a) Reusing the private LV-09 cores `durable_conversation._reserve_in` / `_settle_in` is fine for now. A test pins their key idempotency and their hold arithmetic. They become public in a follow-up once #1079 has merged.
+  - (b) There is one research cap: the envelope's `research.cost_cap_eur` (validated by `run_envelope._check_research`), €2 by default, €10 hard cap. This reservation is the research enforcement, and SH-09 calls `scope="research"` instead of metering on its own.
+  - R1: the bound covers server tools: `max_uses` × (the per-use fee + the fetched-content tokens). A tool with no `max_uses` or no known cost is refused. Wrappers nest as Research(Reserving(base)), so the reservation sees the final request, and a test pins that order.
+  - R2: a refusal is non-retryable all the way up. A test shows the loop's retry path does not re-send.
+  - R3: a hold settled `uncertain` or `no_usage` counts at its bound, and the run view says the spend includes bounds.
+  - R4: an invalid mode refuses every send. With the mode off no wrapper is installed, and the existing runner tests stay green.
+  - R5: the boot sweep honours the lease: it never settles a hold on a run another live process drives.
+  - R6: `money_eur` with a missing rate refuses. The label is "bound", never "estimate".
+- Build: `harness/send_reservation.py` (the mode, bounds, admit, settle, turn-end close, restart reconcile and boot sweep), wired in `harness/runner.py`. The ledger is `run.budgets`. Server-tool costs ship as owner defaults in code (SH-TOOL-COSTS-1: web search EUR 0.0093 per use plus 10,000 content tokens; web fetch no fee, the tool's `max_content_tokens` else 50,000), replaced by `PYPSA_GUI_SERVER_TOOL_COSTS_EUR`. Tests: `tests/test_harness_budget_reservation.py`.
+- 4 Nov, GK B NOT OK @45d4f466 (eight asks), all addressed:
+  1. A list-valued schema `type` crashed the bound. Only content blocks are walked now, and `type` is checked as a string. Tested with `catalogue.TOOLS`.
+  2. The ledger read-modify-write now runs under the runner's sidecar file lock in admit, settle, close, reconcile and the sweep. A two-process test shows 10 of 30 holds are lost without the lock.
+  3. Server-tool fees settle as reported counts × fee (`search_requests`, `fetch_requests`). A missing count settles at `max_uses`.
+  4. Every run-scope refusal stops the run `needs_user` with its own reason. A research refusal stops research only.
+  5. An attempt that fails after the first response event settles `uncertain` at its bound, and the retry takes a new hold.
+  6. A missing or invalid usage part settles at that part's bound, flagged `partial_usage`.
+  7. Research refuses without a granted envelope that allows it. A malformed ledger amount refuses with `ledger_invalid`, and `max_tokens=None` refuses with `unbounded_output`.
+  8. The runner always wraps its round provider. With the mode off, run sends pass through. `send_reservation.research()` marks SH-09's sends, so each research send is one hold counted in both totals. `close_open` is guarded in the runner's `finally`.
+
