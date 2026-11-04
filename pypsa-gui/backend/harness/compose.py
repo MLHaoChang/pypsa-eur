@@ -287,6 +287,18 @@ def _results_card_addendum(session: Any) -> str | None:
     return "\n".join(lines)
 
 
+def _requirements_addendum(session: Any) -> str | None:
+    """Study harness issue 23: the durable thread's active requirements,
+    fenced as data. A read that fails leaves the block out; the dispatch
+    check reads the thread again and refuses on its own."""
+    from harness import requirements
+
+    try:
+        return requirements.addendum(session)
+    except Exception:  # noqa: BLE001 — per-turn context never fails a turn
+        return None
+
+
 def _format_ui_context(ui_context: dict[str, Any] | None) -> str | None:
     """
     Render what the user is looking at, for the USER turn.

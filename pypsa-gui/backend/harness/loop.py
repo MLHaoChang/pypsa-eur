@@ -2064,6 +2064,14 @@ def _run_turn_body(
     _eventlog.context(session, "goal", goal_block)
     if goal_block:
         ui_block = f"{ui_block}\n\n{goal_block}" if ui_block else goal_block
+    # Issue 23: the user's confirmed requirements, as fenced data; logged, never
+    # in the cached system prompt.
+    from harness.compose import _requirements_addendum
+
+    requirements_block = _requirements_addendum(session)
+    _eventlog.context(session, "requirements", requirements_block)
+    if requirements_block:
+        ui_block = f"{ui_block}\n\n{requirements_block}" if ui_block else requirements_block
     if session.assurance_turn is not None:
         assurance_block = session.assurance_turn.request_content()
         _eventlog.context(session, "checked_request", assurance_block)
@@ -3260,6 +3268,37 @@ def _dispatch_real_tool_call(
                 }
             )
             return
+    # Study harness issue 23: the user's confirmed requirements, checked on the
+    # card's native rows before the gate and the envelope (harness/requirements.py).
+    try:
+        from harness import requirements as _requirements
+
+        edit_card = _requirements.annotate(session, tool_name, args or {}, edit_card)
+    except Exception as exc:
+        detail = getattr(exc, "detail", None)
+        kind = (
+            detail.get("error_kind", "requirement_check_unavailable")
+            if isinstance(detail, dict)
+            else "requirement_check_unavailable"
+        )
+        yield (
+            "tool_error",
+            {
+                "tool_use_id": tool_use_id,
+                "tool_name": tool_name,
+                "error_kind": kind,
+                "message": _redact_for_log(detail or exc),
+            },
+        )
+        tool_results_collector.append(
+            {
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "is_error": True,
+                "content": _error_result_content(detail, exc, kind),
+            }
+        )
+        return
     sweep_card = None
     if tool_name == "run_sensitivity_sweep" and session.assurance_turn is None:
         # LC-17: every case's base → case rows from the saved baseline; a
