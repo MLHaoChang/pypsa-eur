@@ -814,6 +814,26 @@ def test_a_write_to_a_gone_run_reports_nothing_written(granted, profile):
     record.pop("run")
     path.write_text(json.dumps(record))
     assert research._update(path, lambda task: None) is False
+    # record_source on that run raises and keeps no row it never wrote.
+    from services import chat_tools
+
+    run = harness_session.ChatSession(session_id="run:" + task["task_id"])
+    fetched = types.SimpleNamespace(fetched=[page()])
+    turn = research.Turn(
+        path, "rt_gone", {"import_tariff": ledger_gap()}, fetched, (BOOT, lambda: 0.0)
+    )
+    with research._TURNS_LOCK:
+        research._TURNS[run.session_id] = turn
+    chat_tools.set_chat_session(run)
+    try:
+        with pytest.raises(research.ResearchError) as exc:
+            research.record_source(**proposal(gap="import_tariff"))
+    finally:
+        chat_tools.set_chat_session(None)
+        with research._TURNS_LOCK:
+            research._TURNS.pop(run.session_id, None)
+    assert exc.value.kind == "research_lease_lost" and turn.rows == []
+    assert "run" not in json.loads(path.read_text())
 
 
 def test_a_stale_process_writes_nothing_after_a_takeover(granted, profile):
