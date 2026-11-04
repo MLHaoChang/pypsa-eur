@@ -780,7 +780,7 @@ def _run_view(task):
             **({"reason": run["reason"]} if run.get("reason") else {}),
             "next_stage": _next_stage(run, run["stage"]), "scope": (run.get("scope") or {}).get("preset"),
             "stages": stages,
-            **({"loop": {k: run["loop"][k] for k in ("kind", "stage", "rounds", "limit", "refusals", "ended")
+            **({"loop": {k: run["loop"][k] for k in ("kind", "stage", "rounds", "limit", "refusals", "ended", "notice")
                          if k in run["loop"]}} if run.get("loop") else {}),
             **({"ledger": copy.deepcopy(run["ledger"])} if run.get("ledger") else {})}
 

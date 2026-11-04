@@ -3,7 +3,7 @@
 
 # 25 — Notify the user when an agent loop ends without a pass
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Blocked by: 04
 Gated: yes (GK B)
@@ -23,8 +23,10 @@ Design §6.1 says that when L1 is exhausted, the user is notified with the faili
 
 ## Acceptance criteria
 
-- [ ] An exhausted L1 with `notify.email` sends one notice carrying the failing rules and the ledger (tested with a fake sender).
-- [ ] Without `notify.email`, nothing is sent.
-- [ ] A sender failure leaves the run `needs_user`, with the failure in the run view.
+- [x] An exhausted L1 with `notify.email` sends one notice carrying the failing rules and the ledger (tested with a fake sender).
+- [x] Without `notify.email`, nothing is sent.
+- [x] A sender failure leaves the run `needs_user`, with the failure in the run view.
 
 ## Comments
+
+- Coordinator triage (4 Nov): the channel exists (`notify.email` in the envelope, `services/email_service.py`); build on those, no new channel, provider or setting. Status set to ready-for-agent from this triage. Recipient is the owner account email; GK B plan verdict GO WITH CHANGES (claim before send, granted envelope only, native fields only, view key waits for #1079).
