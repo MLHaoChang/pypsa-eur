@@ -1,0 +1,40 @@
+{
+  "kinds": {
+    "handover_busy": {
+      "surface": "inline",
+      "why": "Study harness issue 21: another grant of the same plan holds the hand-over lock; nothing was created or granted, and the user grants again in a moment."
+    },
+    "handover_conflict": {
+      "surface": "inline",
+      "why": "Study harness issue 21: the plan already handed over with other inputs (another digest or decision); nothing new is created, and the card names the project made earlier."
+    },
+    "handover_incomplete": {
+      "surface": "inline",
+      "why": "Study harness issue 21: the project was created but its setup or the run's start did not finish; the project stays (never deleted automatically) and the user opens it or starts the run there."
+    },
+    "intake_missing": {
+      "surface": "inline",
+      "why": "Study harness issue 21 \u00a73: the plan-review grant is refused while a required setup input is missing, conflicting or refused by the template; the message lists each item with its unit and accepted sources."
+    },
+    "intake_stale": {
+      "surface": "inline",
+      "why": "Study harness issue 21 R6: the intake rows or a cited source changed since the card was shown; nothing is granted and the user reviews the inputs again."
+    },
+    "intake_value_supplied": {
+      "surface": "inline",
+      "why": "Study harness issue 21 D3: a start_task intake citation carried a value; the model points at where a value is, and the harness reads it."
+    },
+    "invalid_intake": {
+      "surface": "inline",
+      "why": "Study harness issue 21: start_task's run.intake is malformed (no project name, not a list, too many citations) or the profile takes no chat intake; the assistant fixes the call."
+    },
+    "not_found": {
+      "surface": "inline",
+      "why": "Study harness issue 21 A4: the run's project or a cited upload is not open to the acting owner; the same reply whether it exists elsewhere or nowhere."
+    },
+    "upload_copy_mismatch": {
+      "surface": "inline",
+      "why": "Study harness issue 21: a cited upload did not copy byte for byte into the created project; the run is not started and the user is told."
+    }
+  }
+}

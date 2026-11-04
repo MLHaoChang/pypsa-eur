@@ -55,7 +55,8 @@ def replay(events_path: Path, at_seq: int, provider: Any, *, model: str | None =
         raise ValueError(f"seq {at_seq} is not a turn/start in {events_path}")
     child = eventlog.fork(Path(events_path), at_seq, model=model or start.get("model"))
     child.profile_id = profile_id
-    for _ in chat_service.run_turn(child, start["user"], provider=provider):
+    # A re-run of recorded text, not the person typing now (issue 21, D1).
+    for _ in chat_service.run_turn(child, start["user"], provider=provider, typed_by_user=False):
         pass
     replayed = eventlog.read_events(eventlog.path_for(child))
     child_start = next(e for e in replayed if e["seq"] >= at_seq and e["type"] == "turn/start")
