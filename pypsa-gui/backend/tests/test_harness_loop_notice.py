@@ -184,3 +184,30 @@ def test_two_processes_send_the_notice_exactly_once(
     for p in procs:
         p.join(60)
     assert open(log).read().count("x") == 1
+
+
+def _other_claim():
+    return {"kind": "L1", "stage": "input_gate", "rounds": 0, "history": [], "ended": "exhausted",
+            "notice": {"claimed_at": time.time(), "sent": None, "token": "other"}}
+
+
+def test_a_settle_never_touches_a_replacement_loops_own_unsettled_claim(
+        granted, profile, site, rated, tunable_rule, outbox, owner, monkeypatch):
+    path, record = exhaust(granted, profile, True, monkeypatch)
+    outbox.clear()
+    harness_runner._update(path, lambda t: t["run"]["loop"].pop("notice"))
+    email_service.set_delivery_hook_for_tests(
+        lambda envelope: harness_runner._update(path, lambda t: t["run"].update(loop=_other_claim())))
+    loop_notice.send_if_due(path)
+    notice = harness_runner._read(path)["run"]["loop"]["notice"]
+    assert notice["sent"] is None and notice["token"] == "other" and "error" not in notice
+
+
+def test_the_uncertain_repair_never_touches_a_replacement_loops_own_claim(
+        granted, profile, site, rated, tunable_rule, outbox, owner, monkeypatch):
+    path, record = exhaust(granted, profile, True, monkeypatch)
+    harness_runner._update(path, lambda t: t["run"].update(loop=_other_claim()))
+    stale = {"notice": {"claimed_at": time.time() - 3600, "sent": None, "token": "old"}}
+    loop_notice._repair_stale(path, stale)  # the repair read the old claim; the loop has since been replaced
+    notice = harness_runner._read(path)["run"]["loop"]["notice"]
+    assert notice["sent"] is None and notice["token"] == "other"
