@@ -9,11 +9,15 @@ code calls `evaluate`, and only harness code writes its result.
 Fail closed: a fact that is unknown, cannot be read, or reads as None or NaN
 is `not_evaluated`, which a `block` rule counts as a fail; so is a reading the
 reader itself marks as no evidence (`NoEvidence`: its state and reason kept).
+
+Scorecard rows (issue 05, GK A) gate by verdict: `dc.readiness.<row>` names
+one row and `dc.readiness.<family>:` one family. Only `pass` satisfies a
+rule; a pass on an assumed row is a screening pass, reported as such.
 """
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, UTC
 from typing import Any
 from collections.abc import Callable
@@ -32,6 +36,7 @@ class Env:
     ctx: Any  # the run project's ProjectContext
     project: Any  # the project row (`project_registry.resolve_project`)
     project_dir: Any
+    cache: dict = field(default_factory=dict, compare=False, hash=False)  # one gate's shared reads
 
 
 def _on(ctx, fn, *args):
@@ -178,6 +183,75 @@ FACTS: dict[str, Fact] = {
 }
 
 
+# §5 (GK A): scorecard rows gate by verdict. A rule names one row id or one
+# family; a family rule evaluates every row with the prefix, and a reader
+# never picks one row of a family.
+SCORECARD = "dc.readiness."
+FAMILIES = ("energization_peak:", "dynamic:", "ride_through:", "motor_start:")
+SCREENING_PASS = "screening pass"
+
+
+@dataclass(frozen=True)
+class Scored:
+    """A scorecard reading: the verdict the rule compares, and the rows it
+    rests on (each with its `assumed` flag), carried into the gate record."""
+
+    value: str
+    rows: list
+
+
+def _scorecard(env):
+    """`grid_readiness_for` of the run's project, read once per gate."""
+    from services.adequacy import grid_readiness
+    if "scorecard" not in env.cache:
+        env.cache["scorecard"] = grid_readiness.grid_readiness_for(env.project)
+    return env.cache["scorecard"]
+
+
+def _scorecard_reader(name):
+    target = name[len(SCORECARD):]
+
+    def read(env):
+        from services.adequacy import grid_readiness
+        card = _scorecard(env)
+        if target.endswith(":"):
+            rows = [r for r in card.get("rows") or [] if str(r["id"]).startswith(target)]
+            if not rows:
+                return NoEvidence("no_rows", f"no scorecard row in family {target!r}")
+            verdict = "pass" if all(r["verdict"] == "pass" for r in rows) else "fail"
+        else:
+            verdict = grid_readiness.readiness_fact(card, target)
+            if isinstance(verdict, NoEvidence):
+                return verdict
+            rows = [r for r in card["rows"] if r["id"] == target]
+        return Scored(verdict, [{"id": r["id"], "verdict": r["verdict"], "assumed": bool(r.get("assumed"))}
+                                for r in rows])
+    return read
+
+
+def _check_scorecard(name):
+    target = name[len(SCORECARD):]
+    if not target:
+        return "name one row id or one family"
+    family = next((f for f in FAMILIES if target.startswith(f)), None)
+    if target.endswith(":") and family != target:
+        return f"unknown family {target!r}; known: {', '.join(FAMILIES)}"
+    if family is not None and family != target:
+        return f"{target!r} is one row of the family {family!r}: name the family"
+    return None
+
+
+def fact_for(name):
+    """The registry's fact for `name`, or None: a closed name, or one
+    scorecard row or family (`dc.readiness.<row>`, `dc.readiness.<family>:`)."""
+    if name in FACTS:
+        return FACTS[name]
+    if isinstance(name, str) and name.startswith(SCORECARD) and _check_scorecard(name) is None:
+        return Fact("services.adequacy.grid_readiness.grid_readiness_for", "rows[].verdict", None,
+                    _scorecard_reader(name))
+    return None
+
+
 class RuleError(ValueError):
     """A rule a profile may not carry (refused when the profile loads)."""
 
@@ -190,7 +264,10 @@ def check_rule(rule: dict) -> dict:
     fact = rule["fact"]
     if not isinstance(fact, str) or "*" in fact:
         raise RuleError(f"Rule {rule['id']}: name one fact, never a wildcard ({fact!r}).")
-    if fact not in FACTS:
+    if fact.startswith(SCORECARD) and (problem := _check_scorecard(fact)):
+        raise RuleError(f"Rule {rule['id']}: {fact!r}: {problem}.")
+    known_fact = fact_for(fact)
+    if known_fact is None:
         raise RuleError(f"Rule {rule['id']}: unknown fact {fact!r} (fact registry v{FACTS_VERSION}).")
     if rule["op"] not in OPS or rule["severity"] not in SEVERITIES:
         raise RuleError(f"Rule {rule['id']}: op is one of {OPS}, severity one of {SEVERITIES}.")
@@ -198,10 +275,12 @@ def check_rule(rule: dict) -> dict:
         raise RuleError(f"Rule {rule['id']}: {rule['op']} needs a value.")
     if rule["op"] == "within" and not (isinstance(rule["value"], list) and len(rule["value"]) == 2):
         raise RuleError(f"Rule {rule['id']}: within takes [lo, hi].")
-    if "unit" in rule and rule["unit"] != FACTS[fact].unit:
-        raise RuleError(f"Rule {rule['id']}: unit {rule['unit']!r} is not the fact's {FACTS[fact].unit!r}; "
+    if fact.startswith(SCORECARD) and (rule["op"], rule.get("value")) != ("eq", "pass"):
+        raise RuleError(f"Rule {rule['id']}: a scorecard rule is `eq pass`: only a pass satisfies it (§5).")
+    if "unit" in rule and rule["unit"] != known_fact.unit:
+        raise RuleError(f"Rule {rule['id']}: unit {rule['unit']!r} is not the fact's {known_fact.unit!r}; "
                         "units are checked, never converted.")
-    return {**rule, "reads": FACTS[fact].reads + ":" + FACTS[fact].key}
+    return {**rule, "reads": known_fact.reads + ":" + known_fact.key}
 
 
 def _missing(value):
@@ -232,7 +311,7 @@ def evaluate(rules: list[dict], env: Env) -> list[dict]:
     values: dict[str, tuple[Any, str | None]] = {}
     out = []
     for rule in rules:
-        fact = FACTS.get(rule["fact"])
+        fact = fact_for(rule["fact"])
         if rule["fact"] not in values:
             if fact is None:
                 values[rule["fact"]] = (None, "unknown fact")
@@ -242,7 +321,9 @@ def evaluate(rules: list[dict], env: Env) -> list[dict]:
                 except Exception as exc:  # noqa: BLE001 — an unreadable fact is no evidence (fail closed)
                     values[rule["fact"]] = (None, f"the reader failed: {type(exc).__name__}")
         value, problem = values[rule["fact"]]
-        shown = None
+        shown, scored = None, None
+        if isinstance(value, Scored):
+            scored, value = value, value.value
         if isinstance(value, NoEvidence):
             shown, problem = value.value, value.reason
         elif problem is None and _missing(value):
@@ -250,11 +331,16 @@ def evaluate(rules: list[dict], env: Env) -> list[dict]:
         result = {"rule": rule["id"], "severity": rule["severity"],
                   "facts": [{"fact": rule["fact"], "value": shown if problem else value,
                              "unit": fact.unit if fact else None, "source": rule.get("reads")}]}
+        if scored is not None:
+            result["facts"][0]["rows"] = scored.rows
         if problem is None:
             try:
                 result["verdict"] = "pass" if _holds(rule["op"], value, rule.get("value")) else "fail"
             except (TypeError, ValueError) as exc:
                 problem = f"the fact cannot be compared: {exc}"
+        if problem is None and scored is not None and result["verdict"] == "pass" \
+                and any(r["assumed"] for r in scored.rows):
+            result.update(screening=True, note=SCREENING_PASS)  # never "verified" (§5)
         if problem is not None:
             result.update(verdict="not_evaluated", reason=problem)
         out.append(result)
