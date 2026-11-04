@@ -159,3 +159,26 @@ RULES = {"a": {"tunable": ["Generator.p_nom_max"]}, "b": {"tunable": ["StorageUn
 def test_the_driving_rule(failing, target, expected):
     assert run_loops._driving_rule(target, failing, RULES) == expected
 
+
+
+
+def test_a_tariff_fill_moves_the_exact_identity_and_links_from_its_own_receipt(granted, profile, site):
+    """attach_tariff writes `solver_config.commercial.import_tariff_ref`, which the
+    LP reads and `_network_input_fingerprint` hashes (via `goal_free_config`): a
+    fill moves `exact` with +0 on the counter, and its own receipt is the link."""
+    profile(WITH_GAPS)
+    _, path, _ = granted()
+    target = ctx()
+    with target.mutation_lock:
+        before, reason = run_envelope.chain_head(path, target)
+        assert reason is None
+        start = run_envelope.identity(target)
+        config = target.solver_state["solver_config"]
+        config.commercial = {**(config.commercial or {}),
+                             "import_tariff_ref": {"kind": "tariff", "id": "grid-import", "version": 1}}
+        receipt = {"call_id": "tariff-call", **run_envelope.identity(target)}
+    assert receipt["exact"] != start["exact"] and receipt["network_revision"] == start["network_revision"]
+    run_envelope.settle_own(path, "tariff-call", target, before, [receipt])
+    [link] = envelope_of(path)["chain"]
+    assert link == {"after_change": "tariff-call", "fingerprint": receipt["fingerprint"], "exact": receipt["exact"],
+                    "network_revision": receipt["network_revision"]}
