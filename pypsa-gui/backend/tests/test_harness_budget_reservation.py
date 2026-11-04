@@ -280,7 +280,7 @@ def test_the_lv09_ledger_cores_reserve_once_per_key_and_settle_once():
     # Hold arithmetic: settled charges and open holds both count.
     dc._reserve_in(thread, key="j", kind="model_send", amount=2, unit="eur")
     assert send_reservation._spent(thread, "eur") == 5
-    assert send_reservation.summary(thread) == {"unit": "eur", "spent": 5.0, "open": 2.0, "at_bound": 2}
+    assert send_reservation.summary(thread) == {"unit": "eur", "spent": 5.0, "open": 2.0, "at_bound": 1}
 
 
 def search_tool(**extra):
@@ -352,3 +352,27 @@ def test_the_run_view_says_the_spend_includes_bounds(run, mode):
     reserved = run_monitor._budgets(record(run), None)["reserved"]
     assert reserved["unit"] == "eur" and reserved["at_bound"] == 1 and reserved["open"] == 0
     assert reserved["spent"] == pytest.approx(send_reservation.bound(request(), "money_eur"))
+
+
+def test_two_identical_requests_in_flight_each_hold_their_own_bound(run, mode):
+    req = request()
+    provider = send_reservation.ReservingProvider(
+        FakeProvider([{"usage": {"output_tokens": 1}}, {"usage": {"output_tokens": 1}}]), run, boot="boot-a")
+    first, second = provider.stream(req), provider.stream(request())
+    next(first), next(second)  # both admitted, neither settled
+    holds = ledger(run)["reservations"]
+    assert len(holds) == 2 and holds[0]["key"] != holds[1]["key"]
+    list(first), list(second)
+    assert len(ledger(run)["final_charges"]) == 2 and not ledger(run)["reservations"]
+
+
+def test_research_is_enforced_with_the_mode_off(run, monkeypatch):
+    # GK B (b): the reservation is the research enforcement, whatever the mode.
+    monkeypatch.delenv(send_reservation.MODE_ENV, raising=False)
+    send_reservation.admit(run, request(max_tokens=100_000), boot="boot-a", scope="research")
+    assert ledger(run)["reservations"][0]["unit"] == "eur"
+    with pytest.raises(send_reservation.SendRefused) as refused:
+        send_reservation.admit(run, request("more", max_tokens=100_000), boot="boot-a", scope="research")
+    assert refused.value.reason == "research_budget"
+    with pytest.raises(ValueError):
+        send_reservation.admit(run, request(), boot="boot-a")

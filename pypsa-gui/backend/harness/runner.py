@@ -437,7 +437,7 @@ class Runner:
         """Restart reconciliation at boot (issue 24, GK B): a model send
         another boot left open settles `uncertain` at its hold's bound."""
         from harness import send_reservation
-        paths = [path for path, task in self._runs() if (task["run"].get("budgets") or {}).get("reservations")]
+        paths = [path for path, task in self._runs() if send_reservation.has_open_holds(task["run"])]
         return send_reservation.sweep(paths, boot=self.instance, now=self.clock())
 
     # one tick

@@ -41,7 +41,10 @@ import json
 import logging
 import math
 import os
+import threading
 import time
+import uuid
+import weakref
 from typing import Any
 from collections.abc import Iterator
 
@@ -276,52 +279,49 @@ def research_cap(path) -> float:
     return min(float(value), run_envelope.RESEARCH_CAP_EUR)
 
 
-def _digest(request: LLMRequest) -> str:
+def digest(request: LLMRequest) -> str:
     body = json.dumps([request.model, request.max_tokens, request.system_blocks, request.messages, request.tools],
                       sort_keys=True, ensure_ascii=False, default=repr)
     return hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
 
 
-def _key(run: dict, task_id: str, digest: str) -> tuple[str, dict | None]:
-    """The send's key and its open hold, if any: a retry of the same request
-    finds its own open hold. A request already settled once takes the next
-    free suffix."""
-    budgets = _ledger(run)
-    settled = {c.get("key") for c in budgets.get("final_charges", [])}
-    holds = {r.get("key"): r for r in budgets.get("reservations", [])}
-    base = f"run:{task_id}:{digest}"
-    for n in range(100):
-        key = base if n == 0 else f"{base}:{n}"
-        if key in holds:
-            return key, holds[key]
-        if key not in settled:
-            return key, None
-    raise SendRefused("key_exhausted", "This request was sent too many times in one run.")
+def new_key(task_id: str) -> str:
+    """A fresh key for one send: two sends never share a hold, even with
+    identical requests."""
+    return f"run:{task_id}:{uuid.uuid4().hex[:16]}"
 
 
-def admit(path, request: LLMRequest, *, boot: str, scope: str = "run") -> str:
+def admit(path, request: LLMRequest, *, boot: str, scope: str = "run", key: str | None = None) -> str:
     """Reserve one send's hold before it goes out, or raise SendRefused.
-    A refusal for the cap ends the run `needs_user` with reason `budget`,
-    the same stop as issue 02's cost cap. Returns the hold's key."""
+    `key` is the hold of an earlier attempt of this same send (a retry): if
+    it is still open, nothing more is reserved. A refusal for the cap ends
+    the run `needs_user` with reason `budget`, the same stop as issue 02's
+    cost cap. Returns the hold's key.
+
+    Research is enforced whatever the mode (GK B (b)): with the mode off, a
+    research hold is in EUR."""
     from harness import runner
     current = mode()
     if current == "invalid":
         raise SendRefused("invalid_mode", f"{MODE_ENV} is not one of {', '.join(MODES)}; sends are refused.")
     if scope not in KINDS:
         raise ValueError(f"unknown reservation scope {scope!r}")
+    if current == "off":
+        if scope != "research":
+            raise ValueError("no run-scope reservation while the mode is off")
+        current = "money_eur"
     unit = UNITS[current]
     amount = bound(request, current)
     eur = _eur_bound(request) if scope == "research" else None
     research_limit = research_cap(path) if scope == "research" else None
-    digest = _digest(request)
     out: dict[str, Any] = {}
 
     def change(task):
         run = task["run"]
-        key, held = _key(run, task["task_id"], digest)
-        out["key"] = key
-        if held is not None:
-            return False  # a retry under the same key reserves once
+        if key is not None and any(r.get("key") == key for r in _ledger(run).get("reservations", [])):
+            out["key"] = key
+            return False  # a retry of the same send reserves once
+        out["key"] = new_key(task["task_id"])
         limit = cap(task, current)
         if limit is None:
             out["refused"] = ("no_cap", f"The run sets no {unit} cap; the send is refused.")
@@ -336,8 +336,8 @@ def admit(path, request: LLMRequest, *, boot: str, scope: str = "run") -> str:
                 runner._stop_in(task, "needs_user", "budget")
             return None
         from services import durable_conversation
-        durable_conversation._reserve_in(run, key=key, kind=KINDS[scope], amount=amount, unit=unit)
-        hold = next(r for r in _ledger(run)["reservations"] if r["key"] == key)
+        durable_conversation._reserve_in(run, key=out["key"], kind=KINDS[scope], amount=amount, unit=unit)
+        hold = next(r for r in _ledger(run)["reservations"] if r["key"] == out["key"])
         hold["dispatch"] = {"boot": boot, "model": request.model, "at": time.time()}
         if eur is not None:
             hold["eur"] = eur
@@ -417,7 +417,7 @@ def reconcile(path, *, boot: str, now: float | None = None) -> int:
 
     def change(task):
         run = task["run"]
-        if not _ledger_open(run):
+        if not has_open_holds(run):
             return False
         lease = run.get("runner") or {}
         if lease.get("lease_owner") not in (None, boot) and float(lease.get("lease_until") or 0) > now:
@@ -435,21 +435,21 @@ def reconcile(path, *, boot: str, now: float | None = None) -> int:
 def summary(run: dict) -> dict | None:
     """The run view's line (GK B R3): spend in the ledger's unit, open holds,
     and how many charges count at a bound because the usage was lost."""
-    budgets = run.get("budgets") or {}
-    rows = list(budgets.get("final_charges") or []) + list(budgets.get("reservations") or [])
+    if not run.get("budgets"):
+        return None
+    rows = _rows(run)
     if not rows:
         return None
     unit = rows[-1].get("unit")
-    mine = [r for r in rows if r.get("unit") == unit]
-    held = [r for r in budgets.get("reservations") or [] if r.get("unit") == unit]
-    bounds = [c for c in budgets.get("final_charges") or []
+    held = [r for r in _ledger(run).get("reservations", []) if r.get("unit") == unit]
+    bounds = [c for c in _ledger(run).get("final_charges", [])
               if c.get("unit") == unit and set(c.get("flags") or ()) & {"uncertain", "no_usage"}]
-    return {"unit": unit, "spent": round(sum(float(r.get("amount") or 0) for r in mine), 6),
+    return {"unit": unit, "spent": round(_spent(run, unit), 6),
             "open": round(sum(float(r.get("amount") or 0) for r in held), 6),
-            "at_bound": len(bounds) + len(held)}
+            "at_bound": len(bounds)}
 
 
-def _ledger_open(run: dict) -> bool:
+def has_open_holds(run: dict) -> bool:
     return bool((run.get("budgets") or {}).get("reservations"))
 
 
@@ -471,15 +471,33 @@ class ReservingProvider:
     def __init__(self, inner, path, *, boot: str, scope: str = "run") -> None:
         self._inner, self._path, self._boot, self._scope = inner, path, boot, scope
         self.name = getattr(inner, "name", "reserving")
+        # The open send of each request object: the loop retries by streaming
+        # the same request again, and that attempt reuses the send's key.
+        self._open: dict[int, tuple[Any, str, str]] = {}
+        self._lock = threading.Lock()
+
+    def _retry_key(self, request: LLMRequest) -> str | None:
+        with self._lock:
+            ref, body, key = self._open.get(id(request), (None, None, None))
+            return key if ref is not None and ref() is request and body == digest(request) else None
+
+    def _remember(self, request: LLMRequest, key: str | None) -> None:
+        with self._lock:
+            if key is None:
+                self._open.pop(id(request), None)
+            else:
+                self._open[id(request)] = (weakref.ref(request), digest(request), key)
 
     def __getattr__(self, attr):
         return getattr(self._inner, attr)
 
     def stream(self, request: LLMRequest) -> Iterator[LLMEvent]:
-        key = admit(self._path, request, boot=self._boot, scope=self._scope)
+        key = admit(self._path, request, boot=self._boot, scope=self._scope, key=self._retry_key(request))
+        self._remember(request, key)
         usage = None
         for event in self._inner.stream(request):
             if event.type == "message_done":
                 usage = event.usage
             yield event
         settle(self._path, key, request, usage)
+        self._remember(request, None)

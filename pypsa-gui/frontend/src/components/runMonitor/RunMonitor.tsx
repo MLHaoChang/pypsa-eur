@@ -57,8 +57,11 @@ function Budgets({ view }: { view: RunMonitorView }) {
     : b.cost_eur.limit > 0 ? `Cost ${fmtCurrency(b.cost_eur.used)} of ${fmtCurrency(b.cost_eur.limit)}`
     : `Cost ${fmtCurrency(b.cost_eur.used)} · no cost cap`]
   if (b.reserved && b.reserved.at_bound > 0) {
-    const n = b.reserved.at_bound
-    parts.push(`Includes the upper bound of ${n} model call${n === 1 ? '' : 's'} with no usage report`)
+    // The send ledger (issue 24) is its own figure: the cost above is metered usage only.
+    const r = b.reserved
+    const spent = r.unit === 'eur' ? fmtCurrency(r.spent)
+      : `${Math.round(r.spent).toLocaleString('en-GB')} ${r.unit === 'output_tokens' ? 'output tokens' : 'tokens'}`
+    parts.push(`Model calls ${spent}, counting ${r.at_bound} with no usage report at the upper bound`)
   }
   if (b.solves) parts.push(`Solves ${b.solves.used} of ${b.solves.of}`)
   if (b.expires_at && !paused) parts.push(`Expires ${when(b.expires_at)}`)
