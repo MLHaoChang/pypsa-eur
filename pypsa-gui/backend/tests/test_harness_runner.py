@@ -67,6 +67,19 @@ def detached(session):
     email_service.reset_outbox_for_tests()
 
 
+@pytest.fixture(autouse=True)
+def fake_report_provider(monkeypatch):
+    """Study harness 07: a run's report stage starts the report job; its
+    provider here fails every prose send, so the report is code-only."""
+    from routers import report_jobs
+    from services.llm_fake import FakeProvider
+    from services.llm_provider import ProviderError
+    from tests.test_report_job import _PROFILE
+    monkeypatch.setattr(report_jobs, '_resolve_profile', lambda: _PROFILE)
+    monkeypatch.setattr(report_jobs, '_provider_or_400',
+                        lambda profile: FakeProvider([ProviderError('rate_limited', 'no prose here')] * 60))
+
+
 def queue_rows():
     from db.models import SolveJobRow
     from db.session import SessionLocal

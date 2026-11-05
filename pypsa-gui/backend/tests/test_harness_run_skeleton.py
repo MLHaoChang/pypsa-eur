@@ -351,7 +351,8 @@ def test_solve_facts_read_the_queue_jobs_status_and_condition(session, site, mon
         project = project_registry.resolve_project(db, user, record['project_id'])
         job = run_gates._solve_job(run_gates.Env(task=record, ctx=None, project=project, project_dir=root))
         assert job['project_key'] == project_registry.registry_key(project)  # the run's project's job, by its stored id
-    assert {'status', 'condition'} <= set(job) and job['id'] == record['steps'][-1]['job']['job_id']
+    assert {'status', 'condition'} <= set(job) and job['id'] == next(
+        s for s in record['steps'] if s['id'] == 'solve.1')['job']['job_id']
 
 
 # ── §6.6 bound-context sweep ─────────────────────────────────────────────────
@@ -423,7 +424,9 @@ def test_each_stage_tool_resolves_the_project_through_the_bound_context(session,
     project_id, _ = site
     run_ctx = PyPSAService.get_active_context()
     run_ctx.network.generators.at['G1', 'bus'] = 'nowhere'  # only the run's project has this error
-    tools = {a['tool'] for stage in run_profiles.resolve('eh_site@1')['stages'].values() for a in stage.get('actions', [])}
+    # Issue 07: the hand-off's native read-back is the harness's own code on the run's context, not a tool.
+    tools = {a['tool'] for stage in run_profiles.resolve('eh_site@1')['stages'].values() for a in stage.get('actions', [])
+             if a.get('native') != 'handoff'}
     assert tools <= run_profiles.BOUND_CONTEXT_TOOLS
     from services import upload_service
     demand = upload_service.add_upload(  # issue 21c: the planned write's upload, in the run's project
@@ -584,7 +587,7 @@ def test_a_profile_version_is_frozen_at_start(session, site, monkeypatch):
     task = start('run-v1')
     view, _ = drive(session, monkeypatch, task, root)
     assert view['run']['profile'] == 'eh_site@1' and view['run']['status'] == 'completed'
-    assert stages(view)['handoff']['gate'] == []
+    assert [r['rule'] for r in stages(view)['handoff']['gate']] == ['ho.kpis_read']  # v1's hand-off, not v2's
     refused('invalid_task', start, 'run-v9', run={'profile': 'eh_site@9', 'mode': 'stepwise'})
 
 
