@@ -99,3 +99,60 @@ def test_a_solved_network_only_project_is_reportable(client, api_project, sessio
     by_id = {s["section_id"]: s for s in doc["sections"]}
     assert by_id[NC.HEADLINE]["status"] == "ok" and by_id[NC.CAPACITY]["category"] == "investment"
     assert by_id[NC.DISPATCH]["status"] == "ok"
+
+
+# ── strict narrative (a run's report): admitted facts only ─────────────────
+
+
+def _strict_job(tmp_path, provider, strict=True):
+    from tests.test_report_job import _PROFILE
+    from services.reports.report_job import prepare_report_job
+
+    ev = collect_evidence(study_report=None, eh_report=None, worksheet=None, network=_sources())
+    return prepare_report_job(project_name="demo", project_dir=tmp_path, evidence=ev, profile=_PROFILE,
+                              provider=provider, language="en", sections=[NC.HEADLINE], title="Run report",
+                              figure_pngs={}, strict=strict)
+
+
+def test_an_injected_extra_claim_is_withheld_and_every_kept_number_is_audited(tmp_path):
+    from services.llm_fake import FakeProvider
+    from services.reports.report_job import run_report_job
+    from tests.test_report_job import _draft
+
+    provider = FakeProvider([_draft(NC.HEADLINE, "The study's total cost is 120 EUR.",
+                                    "Emissions reach 3.5 tCO2 over the horizon.",
+                                    "The site will save 4,700 EUR a year.",  # injected: no such fact
+                                    bullets=["Capex is 20 EUR.", "Payback in 7 years."])])
+    doc = run_report_job(_strict_job(tmp_path, provider))
+    section = {s.section_id: s for s in doc.sections}[NC.HEADLINE]
+    text = [b.md for b in section.blocks if b.type == "paragraph"]
+    bullets = [i for b in section.blocks if b.type == "bullets" for i in b.items]
+    assert text == ["The study's total cost is 120 EUR.", "Emissions reach 3.5 tCO2 over the horizon."]
+    assert bullets == ["Capex is 20 EUR."]
+    assert "2 statement(s) withheld" in section.note
+    assert {"4,700 EUR", "7"} <= set(section.audit.unverified)
+    assert all(v.path.startswith(f"/sections/{NC.HEADLINE}/") for v in section.audit.verified)
+
+
+def test_a_number_from_another_section_is_not_admitted(tmp_path):
+    from services.llm_fake import FakeProvider
+    from services.reports.report_job import run_report_job
+    from tests.test_report_job import _draft
+
+    # 15.0 is a capacity row's number: true in the evidence, not this section's fact.
+    provider = FakeProvider([_draft(NC.HEADLINE, "The largest unit is 15 MW.")])
+    doc = run_report_job(_strict_job(tmp_path, provider))
+    section = {s.section_id: s for s in doc.sections}[NC.HEADLINE]
+    assert not [b for b in section.blocks if b.type == "paragraph"]
+
+
+def test_the_reports_panel_path_keeps_flag_only(tmp_path):
+    from services.llm_fake import FakeProvider
+    from services.reports.report_job import run_report_job
+    from tests.test_report_job import _draft
+
+    provider = FakeProvider([_draft(NC.HEADLINE, "The site will save 4,700 EUR a year.")])
+    doc = run_report_job(_strict_job(tmp_path, provider, strict=False))
+    section = {s.section_id: s for s in doc.sections}[NC.HEADLINE]
+    assert [b.md for b in section.blocks if b.type == "paragraph"] == ["The site will save 4,700 EUR a year."]
+    assert section.audit.unverified == ["4,700 EUR"]

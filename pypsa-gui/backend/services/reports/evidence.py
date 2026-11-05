@@ -108,6 +108,7 @@ SECTION_TITLES: dict[str, str] = {
     "prices_costs": "Prices and costs",
     "emissions": "Emissions",
     "load_flow": "Load flow",
+    "harness_run": "How this study was run",
 }
 
 # Why a surface can be empty — the sentences ``get_adequacy_results`` gives
@@ -779,6 +780,29 @@ def _network_sections(network: dict | None, sections: dict[str, EvidenceSection]
     return out
 
 
+def _harness_section(harness_run: dict | None,
+                     sections: dict[str, EvidenceSection]) -> dict[str, EvidenceTable]:
+    """Add a run's harness chapter to ``sections``; its tables by id. A
+    requested chapter that is missing or not established is a gap (SC-15)."""
+    from services.reports import harness_chapter as H
+
+    if not isinstance(harness_run, dict):
+        return {}
+    missing = []
+    for sid in harness_run.get("chapters") or []:
+        sec = sections.get(sid)
+        if sec is None or sec.status != "ok":
+            missing.append((sid, SECTION_TITLES.get(sid, sid), sec.note if sec is not None else "no source"))
+    payload, tables = H.build(harness_run.get("task") or {}, harness_run.get("envelope"), missing,
+                              harness_run.get("coverage"))
+    sections[H.SECTION_ID] = EvidenceSection(
+        section_id=H.SECTION_ID, title=H.TITLE, kind="harness_run", status="ok", source=H.SOURCE,
+        engine="study_harness", payload=payload)
+    return {tid: EvidenceTable(table_id=tid, columns=cols, rows=rows, caption=caption,
+                               source_path=f"/sections/{H.SECTION_ID}/payload/{tid}")
+            for tid, (cols, rows, caption) in tables.items()}
+
+
 def _chapter_tables(sections: dict[str, EvidenceSection]) -> dict[str, EvidenceTable]:
     from services.reports import chapters as C
 
@@ -820,7 +844,7 @@ def collect_evidence(*, study_report: dict | None, eh_report: dict | None,
                      worksheet: dict | None, ic_report: dict | None = None,
                      ic_stale: bool | None = None, island: dict | None = None,
                      grid_readiness: dict | None = None, template_ledger: dict | None = None,
-                     network: dict | None = None) -> Evidence:
+                     network: dict | None = None, harness_run: dict | None = None) -> Evidence:
     """
     Union the adequacy write-up, the EH reference design and the worksheet.
 
@@ -834,6 +858,8 @@ def collect_evidence(*, study_report: dict | None, eh_report: dict | None,
     scorecard, DC grid readiness 02) its chapter; None leaves them out.
     ``network`` (``network_chapters.read_sources``) adds the network-study
     chapters (LC-21); None, a network never solved, adds none.
+    ``harness_run`` (``{task, envelope, chapters, coverage}``, a harness
+    run's report stage) adds the harness chapter (study harness issue 07).
     """
     has_study = isinstance(study_report, dict)
     has_eh = isinstance(eh_report, dict)
@@ -844,6 +870,7 @@ def collect_evidence(*, study_report: dict | None, eh_report: dict | None,
     sections[WORKSHEET_SECTION] = _worksheet_section(worksheet)
     sections.update(_chapter_sections(ic_report, ic_stale, island, grid_readiness, template_ledger))
     network_payloads = _network_sections(network, sections)
+    harness_tables = _harness_section(harness_run, sections)
 
     headline = _headline(eh_report)
     pipeline = copy.deepcopy(eh_report.get("pipeline")) if has_eh else None
@@ -881,7 +908,7 @@ def collect_evidence(*, study_report: dict | None, eh_report: dict | None,
         not_established=not_established,
         evidence_gaps=[g for g in gaps if isinstance(g, dict)],
         tables={**_tables(sections, headline, pipeline, has_eh=has_eh,
-                          has_study=has_study), **_chapter_tables(sections)},
+                          has_study=has_study), **_chapter_tables(sections), **harness_tables},
     )
 
 

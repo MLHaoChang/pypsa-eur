@@ -100,6 +100,11 @@ class ReportJob:
     meta_updates: dict[str, Any] = field(default_factory=dict)
     stop_event: threading.Event = field(default_factory=threading.Event)
     lock: threading.Lock = field(default_factory=threading.Lock)
+    # Study harness issue 07: a run's report. Each section's prose may quote
+    # only the numbers of its own slice (its admitted facts, at most 12 for a
+    # network chapter), and a paragraph or bullet with a number the audit
+    # cannot verify against them is withheld, not flagged.
+    strict: bool = False
 
 
 # ── preparation ─────────────────────────────────────────────────────────────
@@ -132,7 +137,8 @@ def prepare_report_job(*, project_name: str, project_dir: pathlib.Path,
                        regenerate_section: str | None = None,
                        title: str | None = None,
                        template_file_id: str | None = None,
-                       meta_updates: dict[str, Any] | None = None) -> ReportJob:
+                       meta_updates: dict[str, Any] | None = None,
+                       strict: bool = False) -> ReportJob:
     """
     Everything `run_report_job` needs, validated, with the record it will
     publish. Raises `KeyError` for a section id the document does not have.
@@ -188,7 +194,7 @@ def prepare_report_job(*, project_name: str, project_dir: pathlib.Path,
         instruction=instruction, document=document,
         regenerate_section=regenerate_section, report_id=report_id,
         record=record, new_report=new_report,
-        meta_updates=dict(meta_updates or {}),
+        meta_updates=dict(meta_updates or {}), strict=strict,
     )
     record["stop_event"] = job.stop_event
     return job
@@ -261,6 +267,36 @@ def _with_prose(section: Section, draft: SectionDraft, facts) -> Section:
     })
 
 
+WITHHELD_NOTE = ("{n} statement(s) withheld: each quoted a number that is not among "
+                 "this section's admitted facts.")
+
+
+def admitted_facts(job: ReportJob, section: Section):
+    """The numbers one section's prose may quote in a strict job: those of
+    its own slice (payload and headline), nothing from another section."""
+    from services.reports.evidence import _walk
+
+    sl = _slice(job, section)
+    out: list = []
+    _walk(sl.get("payload") or {}, f"/sections/{section.section_id}/payload", "", out)
+    _walk(sl.get("headline") or {}, "/headline", "", out)
+    return out
+
+
+def withhold_unverified(draft: SectionDraft, facts) -> tuple[SectionDraft, list[str]]:
+    """The draft without each paragraph or bullet the number audit cannot
+    verify against `facts`, and the numbers that withheld them."""
+    tokens: list[str] = []
+
+    def keep(text: str) -> bool:
+        bad = audit([text], facts).unverified
+        tokens.extend(bad)
+        return not bad
+    kept = draft.model_copy(update={"paragraphs": [p for p in draft.paragraphs if keep(p)],
+                                    "bullets": [b for b in draft.bullets if keep(b)]})
+    return kept, tokens
+
+
 def _with_failure(section: Section, reason: str, job: ReportJob) -> Section:
     failure = (f"{_FAILURE_PREFIX}{reason} (profile {job.profile_id}, "
                f"model {job.model})")
@@ -328,7 +364,19 @@ def _generate_all(job: ReportJob) -> tuple[ReportDocument, bool]:
         repairs = int(getattr(result, "repairs", 0) or 0)
         with job.lock:
             job.record["repairs"] += repairs
-        if isinstance(result, SectionDraft):
+        if isinstance(result, SectionDraft) and job.strict:
+            own = admitted_facts(job, section)
+            kept, withheld = withhold_unverified(result, own)
+            written = _with_prose(section, kept, own)
+            if withheld:
+                n = len(result.paragraphs) + len(result.bullets) - len(kept.paragraphs) - len(kept.bullets)
+                note = WITHHELD_NOTE.format(n=n)
+                written = written.model_copy(update={
+                    "note": f"{written.note} {note}" if written.note else note,
+                    "audit": written.audit.model_copy(update={"unverified": withheld})})
+                with job.lock:
+                    job.record.setdefault("withheld", []).append({"section_id": sid, "statements": n})
+        elif isinstance(result, SectionDraft):
             written = _with_prose(section, result, facts)
         else:
             assert isinstance(result, SectionFailure)
@@ -601,6 +649,7 @@ def start_report_job(*, project_name: str, project_dir: pathlib.Path,
                      title: str | None = None,
                      template_file_id: str | None = None,
                      meta_updates: dict[str, Any] | None = None,
+                     strict: bool = False,
                      lock: threading.Lock, state: dict[str, Any]) -> str:
     """
     Publish the record under `state["report_job"]` and start the daemon
@@ -614,7 +663,7 @@ def start_report_job(*, project_name: str, project_dir: pathlib.Path,
             provider=provider, language=language, sections=sections,
             instruction=instruction, base_document=base_document,
             regenerate_section=regenerate_section, title=title,
-            template_file_id=template_file_id, meta_updates=meta_updates),
+            template_file_id=template_file_id, meta_updates=meta_updates, strict=strict),
         run=run_report_job, lock=lock, state=state)
 
 
