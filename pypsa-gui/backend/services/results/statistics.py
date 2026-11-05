@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 
 from services.serialization import df_to_json
-from services.solver_service import with_periodized_cost_defaults
+from services.solver.periodized_costs import periodized_cost_view
 
 # The SAME logger the router uses, not a child of it: `logger.exception(...)`
 # text inside the lifted bodies must produce byte-identical log records.
@@ -74,8 +74,8 @@ def compute_statistics(n, cfg):
     payload dict, or `None` where the handler returns 204.
     """
     try:
-        with with_periodized_cost_defaults(n, cfg):
-            stats = _with_fixed_om(n, n.statistics())
+        with periodized_cost_view(n, cfg) as view:
+            stats = _with_fixed_om(view, view.statistics())
             # `df_to_json` runs `reset_index` internally + applies `_clean`
             # to coerce NaN/Inf → None. The previous code called
             # `stats.reset_index()` BEFORE handing off, producing a DOUBLE

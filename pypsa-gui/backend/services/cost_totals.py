@@ -96,15 +96,15 @@ def horizon_system_cost(n, cfg) -> float | None:
     # Local import: services.solver_service imports plenty of this package, and
     # routers.results imports solver_service — keep this module leaf-ish.
     from services.economics import statistics_fom_lookup
-    from services.solver_service import with_periodized_cost_defaults
+    from services.solver.periodized_costs import periodized_cost_view
 
     try:
-        with with_periodized_cost_defaults(n, cfg):
-            stats = n.statistics()
+        with periodized_cost_view(n, cfg) as view:
+            stats = view.statistics()
             # "Capital Expenditure" is investment-only; the objective also paid
             # fixed O&M. Add it back per (component, carrier, period) so this
             # total reconciles with the LP — see `statistics_fom_lookup`.
-            fom_lookup = statistics_fom_lookup(n)
+            fom_lookup = statistics_fom_lookup(view)
     except Exception:
         return None
     if stats is None or stats.empty:

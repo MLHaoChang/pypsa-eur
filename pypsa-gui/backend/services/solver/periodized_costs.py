@@ -152,7 +152,8 @@ def fill_periodized_cost_defaults(
       • solver_service.run_simulation — before n.optimize() so the LP sees
         a valid annuitization. PyPSA's consistency check otherwise raises
         "overnight_cost set but missing discount_rate".
-      • routers/simulation.py — wrapped around `n.statistics()` calls.
+      • every report path — through `periodized_cost_view`, which runs this
+        fill on a private copy so the live network never carries it.
         PyPSA computes the periodized capital_cost via
         `periodized_cost(capital_cost, overnight_cost, discount_rate, ...)`;
         with discount_rate=NaN that returns NaN for assets carrying
@@ -368,6 +369,71 @@ def with_periodized_cost_defaults(
         revert()
 
 
+def _static_private_copy(n):
+    """
+    A copy of `n` whose static (per-asset) frames are its own and whose time
+    series and solver model are `n`'s, shared by reference.
+
+    `copy.deepcopy` with a memo that maps every dynamic frame and `n._model`
+    to itself: those are reused as they are, everything else is copied. A
+    full `n.copy()` also copies every time series, which costs a sizeable
+    fraction of a `n.statistics()` call on a year-long network; this costs
+    only the static frames. The copy must never write a shared frame.
+    """
+    import copy
+
+    memo: dict[int, object] = {}
+    for component in n.components:
+        for frame in component.dynamic.values():
+            memo[id(frame)] = frame
+    model = getattr(n, "_model", None)
+    if model is not None:
+        memo[id(model)] = model
+    return copy.deepcopy(n, memo)
+
+
+@contextmanager
+def periodized_cost_view(
+    n, cfg: "SolverConfig", *, for_back_calculation: bool = False,
+):
+    """
+    The periodized-cost fill on a private copy of `n`, for every reader that
+    is not the solve: yields the filled copy and leaves `n` untouched.
+
+    The in-place fill (`with_periodized_cost_defaults`) changes `capital_cost`,
+    `fom_cost`, `discount_rate` and `lifetime` on the network it is given for
+    the length of the block. On the live network that window is visible to
+    every reader that takes no lock — the input fingerprint behind
+    `run_envelope.settle` and the chat freshness checks among them — so a
+    report path must read through this view instead (study-harness issue 31).
+
+    The copy shares `n`'s time series and solver model (see
+    `_static_private_copy`); the fill and the block must write neither. A view
+    of a network whose costs are already on the per-horizon basis (taken
+    inside the solve's own fill, or of another view) inherits that state, so
+    the scaling is never applied twice.
+
+    See `fill_periodized_cost_defaults` for what the fill does and what
+    ``for_back_calculation`` widens.
+    """
+    view = _static_private_copy(n)
+    inherited = fom_is_scaled(n)
+    if inherited:
+        _mark_fom_scaled(view)
+    try:
+        revert = fill_periodized_cost_defaults(
+            view, cfg, for_back_calculation=for_back_calculation,
+        )
+        try:
+            yield view
+        finally:
+            # Drops the copy's scaling registration along with the fill.
+            revert()
+    finally:
+        if inherited:
+            _unmark_fom_scaled(view)
+
+
 def upfront_cost_series(n, comp_class: str) -> pd.Series:
     """
     Upfront (overnight) investment cost per unit of capacity, per asset.
@@ -554,11 +620,11 @@ def periodized_capital_costs(n, cfg: "SolverConfig") -> dict[str, dict[str, dict
     # the fill only ever supplies `discount_rate`, never `lifetime`, so it
     # cannot retire an asset out of a multi-period run — see
     # `fill_periodized_cost_defaults`'s docstring for why that split matters.
-    with with_periodized_cost_defaults(n, cfg, for_back_calculation=True):
-        reference_year = _reference_build_year(n)
+    with periodized_cost_view(n, cfg, for_back_calculation=True) as view:
+        reference_year = _reference_build_year(view)
         # `fom_cost` is scaled to the modelled horizon inside the fill; this
         # recovers the annual figure the user typed for `fom_cost_annual`.
-        fom_factor = fom_horizon_factor(n)
+        fom_factor = fom_horizon_factor(view)
         for comp_attr, comp_class in (
             ("generators", "Generator"),
             ("storage_units", "StorageUnit"),
@@ -567,11 +633,11 @@ def periodized_capital_costs(n, cfg: "SolverConfig") -> dict[str, dict[str, dict
             ("lines", "Line"),
             ("transformers", "Transformer"),
         ):
-            df = getattr(n, comp_attr, None)
+            df = getattr(view, comp_attr, None)
             if df is None or df.empty:
                 continue
             try:
-                ann_series = n.c[comp_class].capital_cost
+                ann_series = view.c[comp_class].capital_cost
             except Exception:
                 continue
             try:
@@ -582,7 +648,7 @@ def periodized_capital_costs(n, cfg: "SolverConfig") -> dict[str, dict[str, dict
                 # default — the fill above never touches lifetime). Per-asset
                 # fallback below covers the narrower case where the class
                 # resolves but one asset's own value is still non-finite.
-                upfront_series = upfront_cost_series(n, comp_class)
+                upfront_series = upfront_cost_series(view, comp_class)
             except Exception:
                 upfront_series = None
             # PV factor per asset based on (build_year − reference_year).
