@@ -45,6 +45,10 @@ DEMO_LEDGER: tuple[dict[str, Any], ...] = (
 )
 
 
+# The level columns of a Bus: a heat level wins when a bus states both.
+LEVEL_COLUMNS: tuple[str, str] = ("temperature_c", "pressure_bar")
+
+
 class HeatLevelError(ValueError):
     """A heat demand or supply input the builders refuse (a misaligned series, a missing level, a bad scale)."""
 
@@ -80,7 +84,7 @@ def bus_level(n, bus: str) -> tuple[str, float] | None:
     A heat level wins when a bus states both (a heat bus is checked by temperature)."""
     if bus not in n.buses.index:
         return None
-    for col in ("temperature_c", "pressure_bar"):
+    for col in LEVEL_COLUMNS:
         if col in n.buses.columns:
             v = _finite(n.buses.at[bus, col])
             if v is not None:
@@ -121,9 +125,17 @@ class HeatDemand:
     load: str | None = None
 
 
+def _times(index):
+    """The time level of a snapshot index (the last level of a multi-period one)."""
+    return index.get_level_values(-1) if isinstance(index, pd.MultiIndex) else index
+
+
+def _tz(index):
+    return getattr(_times(index), "tz", None)
+
+
 def _snapshot_times(n) -> pd.DatetimeIndex:
-    snaps = n.snapshots
-    times = snaps.get_level_values(-1) if isinstance(snaps, pd.MultiIndex) else snaps
+    times = _times(n.snapshots)
     if not isinstance(times, pd.DatetimeIndex):
         raise HeatLevelError("A flat heat demand needs snapshots that are timestamps.")
     if times.tz is not None:
@@ -161,14 +173,12 @@ def _given_series(n, row: HeatDemand) -> np.ndarray:
                              "annual empty.")
     s = row.shape
     if not isinstance(s, pd.Series):
-        raise HeatLevelError(f"Heat demand on {row.bus}: the shape is 'flat' or a pandas Series, got "
-                             f"{type(s).__name__}.")
+        raise HeatLevelError(f"Heat demand on {row.bus}: the shape is flat or a series of MW_th per snapshot.")
     idx = s.index
     snaps = n.snapshots
-    tz_of = lambda ix: getattr(ix.get_level_values(-1) if isinstance(ix, pd.MultiIndex) else ix, "tz", None)  # noqa: E731
-    if str(tz_of(idx)) != str(tz_of(snaps)):
-        raise HeatLevelError(f"Heat demand on {row.bus}: the series is in time zone {tz_of(idx)}, the snapshots "
-                             f"in {tz_of(snaps)}. Convert it; it is never shifted silently.")
+    if str(_tz(idx)) != str(_tz(snaps)):
+        raise HeatLevelError(f"Heat demand on {row.bus}: the series is in time zone {_tz(idx)}, the snapshots "
+                             f"in {_tz(snaps)}. Convert it; it is never shifted silently.")
     if len(idx) != len(snaps) or not idx.equals(snaps):
         raise HeatLevelError(f"Heat demand on {row.bus}: the series' index does not match the network's "
                              f"snapshots exactly ({len(idx)} vs {len(snaps)} entries). It is never reindexed "
@@ -210,8 +220,9 @@ def add_heat_demand(n, rows: list[HeatDemand]) -> list[str]:
 
 # ── Hybrid supply per level ───────────────────────────────────────────────────
 
-# The demo commitment of a fired gas device (issue 03 path: a committable Link). Values are demo.
-GAS_DEFAULTS: dict[str, Any] = {"efficiency": 0.9, "committable": True, "p_min_pu": 0.3, "min_up_time": 2,
+# The demo commitment of a fired gas device. `eh_process` puts it on the issue-03 path (`solver/process_uc.py`
+# reads a committable process unit: linearised plan, binary check, year-base relaxation). Values are demo.
+GAS_DEFAULTS: dict[str, Any] = {"efficiency": 0.9, "eh_process": True, "committable": True, "p_min_pu": 0.3, "min_up_time": 2,
                                 "start_up_cost": 0.0}
 ELECTRIC_DEFAULTS: dict[str, Any] = {"efficiency": 0.99}
 
@@ -230,21 +241,33 @@ def add_hybrid_supply(n, level_bus: str, *, gas_bus: str, elec_bus: str, gas: Ma
     """A gas Link and an electric Link in parallel onto `level_bus`; returns (gas link, electric link).
 
     `gas` and `electric` are Link attributes plus `name` and an optional reach (`max_supply_temp_c`,
-    `max_pressure_bar`). The gas Link is committable by default (issue 03: minimum load and start-up through
-    PyPSA's commitment on Links, no fork) and stays as backup. The electric Link is an e-boiler or heater
+    `max_pressure_bar`). The gas Link is a committable process unit by default (`eh_process`, so issue 03's
+    commitment path plans it: minimum load and start-up, no fork) and stays as backup. The electric Link is an e-boiler or heater
     (efficiency near 1) or a heat pump: give `bus2` (its low-grade source) with `efficiency2 = -(COP - 1)`."""
     if level_bus not in n.buses.index:
         raise HeatLevelError(f"Hybrid supply: no bus {level_bus}. Add the level's demand first.")
-    out = []
+    out: list[str] = []
+    process: list[str] = []
     for attrs, bus0, defaults in ((gas, gas_bus, GAS_DEFAULTS), (electric, elec_bus, ELECTRIC_DEFAULTS)):
         a = {**defaults, **{k: v for k, v in attrs.items() if k not in ("name", "max_supply_temp_c",
                                                                           "max_pressure_bar")}}
         name = attrs.get("name")
         if not name:
             raise HeatLevelError(f"Hybrid supply on {level_bus}: every device needs a name.")
+        if a.pop("eh_process", False):
+            process.append(name)
         n.add("Link", name, bus0=bus0, bus1=level_bus, **a)
-        _set_reach(n, name, attrs)
         out.append(name)
+    # The custom columns go on after both Links exist: a Link added while one is present gets NaN in it, and
+    # PyPSA does not fill a port column it adds for the later Link into the earlier rows.
+    from services.adequacy.eh_columns import ensure_eh_column, normalise_eh_columns
+
+    for name, attrs in zip(out, (gas, electric)):
+        _set_reach(n, name, attrs)
+    if process:
+        ensure_eh_column(n, "Link", "eh_process")
+        n.links.loc[process, "eh_process"] = True
+    normalise_eh_columns(n)  # a Link added after the column exists reads NaN, not False
     return out[0], out[1]
 
 
@@ -262,8 +285,10 @@ def build_two_level_heat_demo(hours: int = 24, *, electricity_price: Any = None,
 
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2030-01-07", periods=hours, freq="h"))
+    from services.carrier_catalog import ensure_carrier
+
     for c in ("AC", "gas", "heat"):
-        n.add("Carrier", c)
+        ensure_carrier(n, c)  # the catalogue's CO2 factors, so gas is not counted as zero-carbon
     n.add("Bus", "grid", carrier="AC")
     n.add("Bus", "gas", carrier="gas", unit="MWh")
     n.add("Bus", "ambient", carrier="heat", unit="MWh")

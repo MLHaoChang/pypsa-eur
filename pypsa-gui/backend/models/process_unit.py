@@ -8,7 +8,7 @@ the same lazy-column machinery (`services/adequacy/eh_columns.py`): a project th
 column. Kinds are those of `eh_columns`: "bool", "float_nonneg", "tier" (one of CRITICALITY_TIERS or ""),
 "process_role" (one of PROCESS_GENERATOR_ROLES or ""), "text", "harmonic_source" (one of HARMONIC_SOURCES or "")
 "harmonic_spectrum" (order:% pairs, checked by gridspine's harmonic screen), "fraction" (0..1), "start_method"
-(one of START_METHODS or "") and "float" (finite, any sign). Heat and steam levels (issue 15): a Bus's `temperature_c`
+(one of START_METHODS or "") and "float_signed" (finite, any sign). Heat and steam levels (issue 15): a Bus's `temperature_c`
 or `pressure_bar` (bar(g)) and a Link's reach, `max_supply_temp_c` or `max_pressure_bar`; validation and display
 only, the LP never reads them.
 """
@@ -36,7 +36,7 @@ START_METHODS: tuple[str, ...] = ("dol", "soft", "vfd")
 
 PROCESS_CUSTOM_COLUMNS: dict[str, dict[str, str]] = {
     "Bus": {"mwh_per_t": "float_nonneg", "product_value": "float_nonneg",
-            "lost_production_value": "float_nonneg", "temperature_c": "float", "pressure_bar": "float_nonneg"},
+            "lost_production_value": "float_nonneg", "temperature_c": "float_signed", "pressure_bar": "float_nonneg"},
     "Generator": {"process_role": "process_role"},
     "Store": {"delivery_interval_h": "float_nonneg"},
     "Link": {"eh_process": "bool", "criticality_tier": "tier", "throughput_unit": "text",
@@ -45,7 +45,7 @@ PROCESS_CUSTOM_COLUMNS: dict[str, dict[str, str]] = {
              "spectrum_post_filter": "bool", "flicker_step_mva": "float_nonneg",
              "flicker_changes_per_min": "float_nonneg",
              "single_phase_share": "fraction", "motor_kw": "float_nonneg", "start_method": "start_method",
-             "i_start_pu": "float_nonneg", "max_supply_temp_c": "float", "max_pressure_bar": "float_nonneg"},
+             "i_start_pu": "float_nonneg", "max_supply_temp_c": "float_signed", "max_pressure_bar": "float_nonneg"},
 }
 
 

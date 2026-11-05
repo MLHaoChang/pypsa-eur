@@ -21,7 +21,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import asdict, dataclass
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -1290,12 +1290,13 @@ def _positive_somewhere(n, list_name: str, attr: str, name: str) -> bool:
 
 
 def _link_outputs(n, name: str) -> list[str]:
-    """The buses a Link delivers to: bus1, and bus2..bus4 where efficiencyN is > 0 at any snapshot (a heat pump's
-    low-grade source has a negative efficiency2 and is an input)."""
+    """The buses a Link delivers to: bus1, and every further port (bus2 up to bus9) where efficiencyN is > 0 at
+    any snapshot (a heat pump's low-grade source has a negative efficiency2 and is an input). Not
+    `defaults_pack.pricing._link_outputs`: that one reads static efficiencies only and returns carriers."""
     links = n.links
     out = [str(links.at[name, "bus1"])]
-    for i in (2, 3, 4):
-        bus = str(links.at[name, f"bus{i}"]) if f"bus{i}" in links.columns else ""
+    for i in range(2, 10):
+        bus = str(links.at[name, f"bus{i}"]).strip() if f"bus{i}" in links.columns else ""
         if bus and bus != "nan" and _positive_somewhere(n, "links", f"efficiency{i}", name):
             out.append(bus)
     return out
@@ -1309,11 +1310,19 @@ def _can_deliver(n, list_name: str, name: str) -> bool:
     return sized and _positive_somewhere(n, list_name, "p_max_pu", name)
 
 
-# (bus level column, link reach column, issue code, bus label, link label, unit)
-_LEVEL_RULES = (("temperature_c", "max_supply_temp_c", "heat_level_above_reach", "supply temperature",
-                 "max supply temperature", "°C"),
-                ("pressure_bar", "max_pressure_bar", "steam_level_above_reach", "header pressure",
-                 "max steam pressure", "bar(g)"))
+class _LevelRule(NamedTuple):
+    level_col: str        # the Bus column stating the level
+    reach_col: str        # the Link column stating the device's reach
+    code: str
+    bus_label: str        # the card labels, in running text
+    reach_label: str
+    unit: str
+
+
+_LEVEL_RULES = (_LevelRule("temperature_c", "max_supply_temp_c", "heat_level_above_reach", "supply temperature",
+                           "max supply temperature", "°C"),
+                _LevelRule("pressure_bar", "max_pressure_bar", "steam_level_above_reach", "header pressure",
+                           "max steam pressure", "bar(g)"))
 
 
 def _check_heat_levels(n) -> list[Issue]:
@@ -1321,10 +1330,10 @@ def _check_heat_levels(n) -> list[Issue]:
     reach, and every level with demand has a supplier. The bus states its level (`temperature_c`, `pressure_bar`),
     the Link its reach (`max_supply_temp_c`, `max_pressure_bar`); a level or reach left empty skips the rule, so a
     network without levels is checked as before. Errors: the LP would deliver heat the device cannot make."""
-    from services.process_heat import level_label
+    from services.process_heat import LEVEL_COLUMNS, level_label
 
     buses = n.buses
-    if not any(c in buses.columns for c in ("temperature_c", "pressure_bar")):
+    if not any(c in buses.columns for c in LEVEL_COLUMNS):
         return []
     out: list[Issue] = []
     links = n.links
@@ -1345,7 +1354,7 @@ def _check_heat_levels(n) -> list[Issue]:
                                     "link to a level it can reach."))
 
     level_buses = [b for b in buses.index
-                   if any(c in buses.columns and _is_finite(buses.at[b, c]) for c in ("temperature_c", "pressure_bar"))]
+                   if any(c in buses.columns and _is_finite(buses.at[b, c]) for c in LEVEL_COLUMNS)]
     if not level_buses:
         return out
     loads = n.loads

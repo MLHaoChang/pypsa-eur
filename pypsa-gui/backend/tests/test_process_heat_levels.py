@@ -357,3 +357,37 @@ def test_each_new_code_has_a_title_and_a_section(code):
     from services.issue_titles import ISSUE_TITLES
 
     assert ISSUE_TITLES[code] and CODE_SECTION[code] == "assets"
+
+
+# ── Review follow-ups (mp-code-review) ───────────────────────────────────────
+
+def test_the_gas_links_are_on_the_issue_03_commitment_path():
+    from services.solver.process_uc import process_committable
+
+    n = build_two_level_heat_demo(4)
+    assert set(process_committable(n)) == {"gas boiler", "gas furnace"}
+    assert n.links["eh_process"].dtype == bool
+
+
+def test_the_low_band_hybrid_switches_too():
+    """Low band: the heat pump (60 / COP 3) beats the boiler (40 / 0.9); at 200 EUR/MWh the boiler serves."""
+    price = [200.0] * 24
+    price[NEGATIVE_HOUR] = -20.0
+    p0 = _solve(build_two_level_heat_demo(24, electricity_price=price)).links_t.p0
+    dear = [t for t in range(24) if t != NEGATIVE_HOUR]
+    assert (p0["gas boiler"].iloc[dear] > 1.0).all()
+    np.testing.assert_allclose(p0["heat pump"].iloc[dear], 0.0, atol=1e-6)
+    assert p0["heat pump"].iloc[NEGATIVE_HOUR] > 1.0
+    assert p0["gas boiler"].iloc[NEGATIVE_HOUR] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_a_reach_is_checked_on_a_high_port():
+    n = build_two_level_heat_demo(4)
+    for i in range(2, 6):
+        if f"bus{i}" not in n.links.columns:
+            n.links[f"bus{i}"] = ""
+        if f"efficiency{i}" not in n.links.columns:
+            n.links[f"efficiency{i}"] = 1.0
+    n.links.loc["electric heater", ["bus5", "efficiency5", "max_supply_temp_c"]] = ["heat high", 0.1, 300.0]
+    n.links.loc["electric heater", "bus1"] = "heat low"
+    assert _codes(n) == ["heat_level_above_reach"]
