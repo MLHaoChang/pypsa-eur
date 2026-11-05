@@ -75,6 +75,8 @@ def _question(payload):
 
 def _validate(record):
     fields = _FIELDS | {'source_gap'} if isinstance(record, dict) and record.get('family') == 'source_gap' else _FIELDS
+    if isinstance(record, dict) and record.get('family') == 'run' and 'data_items' in record:
+        fields = fields | {'data_items'}  # issue 21d: a data stop's item count, nothing else
     if isinstance(record, dict) and record.get('family') == 'source_gap' and 'followups' in record:
         fields = fields | {'followups'}
     if not isinstance(record, dict) or set(record) != fields:
@@ -120,6 +122,9 @@ def _validate(record):
     elif family == 'run':
         if record['question'] is not None or record['tool_name'] != 'harness_run' \
                 or record['session_id'] != 'run:' + _uuid(record['tool_use_id']):
+            raise ValueError('invalid run notice')
+        if 'data_items' in record and (type(record['data_items']) is not int or record['data_items'] < 1
+                                       or record['native_status'] != 'needs_user'):
             raise ValueError('invalid run notice')
     elif record['question'] is not None:
         raise ValueError('confirmation arguments prohibited')
@@ -425,10 +430,12 @@ def confirmation(session, pc, tool_use_id, state='waiting_for_approval'):
     _observe(session, getattr(pc, 'project_id', None), change)
 
 
-def run_notice(owner, project, task_id, state, seq):
+def run_notice(owner, project, task_id, state, seq, data_items=None):
     """One record per harness-run state change (`harness/runner.py`): the
     run's id and state only, never its values. `seq` makes each change its own
-    record, and the same change written twice one record."""
+    record, and the same change written twice one record. A data stop adds
+    only its item count, `data_items` (issue 21d, SH21D-NOTICE-1); every other
+    record has no such field."""
     def change(records):
         source = hashlib.sha256(f'run:{task_id}:{seq}'.encode()).hexdigest()
         if any(r['source_id'] == source for r in records):
@@ -436,7 +443,8 @@ def run_notice(owner, project, task_id, state, seq):
         now = time.time()
         records.append(_validate(dict(source_id=source, family='run', session_id='run:' + task_id,
             tool_use_id=task_id, tool_name='harness_run', native_status=state, revision=1,
-            created_at=now, observed_at=now, question=None)))
+            created_at=now, observed_at=now, question=None,
+            **({'data_items': data_items} if data_items is not None else {}))))
     try:
         _update(owner, str(project), change)
         return True
@@ -460,7 +468,11 @@ def project_records(owner, project, live):
         state = record['native_status']
         if record['family'] == 'run':
             status = 'needs_user' if state in ('needs_user', 'paused') else 'decision_recorded'
-            reason = ('The harness run stopped for you; open it to see why and what it waits on.'
+            reason = (f"The harness run waits for data ({record['data_items']} "
+                      f"item{'s' if record['data_items'] != 1 else ''}); open it to see "
+                      f"{'them' if record['data_items'] != 1 else 'it'}."
+                      if 'data_items' in record else
+                      'The harness run stopped for you; open it to see why and what it waits on.'
                       if status == 'needs_user' else 'The harness run ended; open it to read its stages.')
         elif record['family'] == 'question':
             status = 'waiting_for_input' if state == 'waiting_for_input' else 'decision_recorded'
