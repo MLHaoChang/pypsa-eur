@@ -71,7 +71,7 @@ def test_eh_site_run_reaches_handoff_step_by_step_with_every_run_carded(session,
     by = stages(view)
     for name in ('intake', 'setup', 'inputs', 'input_gate', 'solve', 'result_gate', 'handoff'):
         assert by[name]['status'] == 'passed', by[name]
-    assert {s for s in by if by[s]['status'] == 'skipped'} == {'explore', 'report'}
+    assert {s for s in by if by[s]['status'] == 'skipped'} == {'report'}  # issue 06: eh_site@1 explores
     gate = {r['rule']: r for r in by['input_gate']['gate']}
     assert gate['in.validate.errors'] == {'rule': 'in.validate.errors', 'verdict': 'pass', 'fact': 'validate.errors',
                                           'value': 0, 'unit': 'count'}

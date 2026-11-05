@@ -252,11 +252,19 @@ def _run(key):
     return lambda env: env.task.get("run", {}).get(key)
 
 
+def _explore_unsettled(env):
+    """Issue 06: the run's admitted cases not yet settled (passed, failed
+    with its rules, or not runnable with its reason)."""
+    from harness import run_explore
+    return run_explore.unsettled(env.task.get("run", {}))
+
+
 FACTS: dict[str, Fact] = {
     # Harness facts: the run block itself, written only by harness code.
     "brief.valid": Fact("task.brief", "brief", None, lambda env: bool(env.task.get("brief"))),
     "profile.resolved": Fact("task.run", "profile", None, lambda env: bool(_run("profile")(env))),
     "run.mode": Fact("task.run", "mode", None, _run("mode")),
+    "explore.unsettled": Fact("harness.run_explore.unsettled", "cases", "count", _explore_unsettled),
     "project.exists": Fact("services.project_registry.resolve_project", "id", None,
                            lambda env: env.project is not None),
     "project.template": Fact("services.flow_service.read_template", "id", None, _template),

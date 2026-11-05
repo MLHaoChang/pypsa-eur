@@ -46,7 +46,7 @@ _NEVER_COMPONENTS = frozenset({"grid_code", "solver", "gate", "profile", "envelo
 # envelope still decides each write at dispatch, and anything it does not
 # admit is a card the headless turn never shows.
 L1_ROUNDS = 3  # §6.1: at most 3 rounds; a profile may lower it
-AGENT_STAGES = ("input_gate", "result_gate")
+AGENT_STAGES = ("input_gate", "result_gate", "explore")
 L1_TOOLS = (
     "validate_network", "project_readiness", "diagnose_network", "get_weather_choice", "get_component",
     "list_components", "get_current_series", "list_all_timeseries", "list_load_profile_archetypes",
@@ -63,9 +63,18 @@ L2_TOOLS = (
     "validate_network", "project_readiness", "diagnose_network", "get_component", "list_components",
     "solve_queue_job_log", "update_component",
 )
+# The explore stage (issue 06, §6.7): one turn proposes at most 4 cases with
+# at most 2 changes each (AI-558) through `propose_cases`; harness code admits
+# them and runs them. Reads only besides the proposal.
+EXPLORE_CASES, EXPLORE_CHANGES = 4, 2
+EXPLORE_TOOLS = (
+    "validate_network", "project_readiness", "get_component", "list_components",
+    "list_library_items", "get_library_item", "propose_cases",
+)
 # What each agent stage's block names, and its bounds.
 _AGENTS = {"input_gate": {"tools": L1_TOOLS, "rounds": L1_ROUNDS, "changes": None},
-           "result_gate": {"tools": L2_TOOLS, "rounds": L2_ROUNDS, "changes": L2_CHANGES}}
+           "result_gate": {"tools": L2_TOOLS, "rounds": L2_ROUNDS, "changes": L2_CHANGES},
+           "explore": {"tools": EXPLORE_TOOLS, "rounds": 1, "changes": EXPLORE_CHANGES, "cases": EXPLORE_CASES}}
 
 
 def _rule(id, fact, op, value=None, severity="block", basis=""):
@@ -91,6 +100,12 @@ CORE_INPUT_RULES = [
 CORE_RESULT_RULES = [
     _rule("res.solve.status", "solve.status", "eq", "optimal", basis="Only an optimal solve has results to read."),
     _rule("res.fresh", "fresh", "eq", True, basis="Results must describe the current inputs (LC-12)."),
+]
+# Issue 06: the explore gate counts settled cases (passed, failed with its
+# rules, or not runnable with its reason), not passed ones; a failed case
+# does not fail the run (the base case's result gate does).
+EXPLORE_RULES = [
+    _rule("ex.cases.settled", "explore.unsettled", "eq", 0, basis="Every admitted case is settled (§3 stage 6)."),
 ]
 
 # §9.2. Setup binds the open project: tasks never rebind (start_task), so
@@ -141,21 +156,24 @@ def _check_agent(name, agent):
     if name not in AGENT_STAGES:
         raise ProfileError(f"Stage {name}: no agent turn runs there yet.")
     spec = _AGENTS[name]
-    keys = {"tools", "rounds"} | ({"changes"} if spec["changes"] else set())
+    keys = {"tools", "rounds"} | ({"changes"} if spec["changes"] else set()) | ({"cases"} if "cases" in spec else set())
 
     def bounded(value, top):
         return not isinstance(value, bool) and isinstance(value, int) and 1 <= value <= top
     if not isinstance(agent, dict) or set(agent) != keys or not isinstance(agent["tools"], list) \
             or not agent["tools"] or not bounded(agent["rounds"], spec["rounds"]) \
-            or (spec["changes"] and not bounded(agent["changes"], spec["changes"])):
+            or (spec["changes"] and not bounded(agent["changes"], spec["changes"])) \
+            or ("cases" in spec and not bounded(agent["cases"], spec["cases"])):
         raise ProfileError(f"Stage {name}: an agent turn names tools and 1-{spec['rounds']} rounds"
-                           + (f" and 1-{spec['changes']} changes." if spec["changes"] else "."))
+                           + (f" and 1-{spec['changes']} changes" if spec["changes"] else "")
+                           + (f" and 1-{spec['cases']} cases." if "cases" in spec else "."))
     known = {t["name"] for t in TOOLS}
     for tool in agent["tools"]:
         if tool not in known or tool not in spec["tools"] or safety_tier_for(tool) == "destructive":
             raise ProfileError(f"Stage {name}: {tool!r} is not a tool its loop may offer.")
     return {"tools": list(dict.fromkeys(agent["tools"])), "rounds": agent["rounds"],
-            **({"changes": agent["changes"]} if spec["changes"] else {})}
+            **({"changes": agent["changes"]} if spec["changes"] else {}),
+            **({"cases": agent["cases"]} if "cases" in spec else {})}
 
 
 def load(profile: dict) -> dict:
@@ -201,7 +219,21 @@ def load(profile: dict) -> dict:
         stages[name] = {"actions": actions, "rules": rules}
         if "agent" in stage:
             stages[name]["agent"] = _check_agent(name, stage["agent"])
+    if "skip" not in stages["explore"] or "explore" in profile:
+        # Issue 06: a run explores only with the profile's levers, its one
+        # proposal turn and the settled-cases rule.
+        from harness import run_explore
+        try:
+            explore = run_explore.check_block(profile.get("explore"), profile.get("tunable", []),
+                                              NEVER_TUNABLE, _NEVER_COMPONENTS)
+        except ValueError as exc:
+            raise ProfileError(f"Explore: {exc}") from exc
+        stage = stages["explore"]
+        if "skip" in stage or "agent" not in stage or EXPLORE_RULES[0]["id"] not in {r["id"] for r in stage["rules"]}:
+            raise ProfileError("Stage explore: an exploring profile names its proposal turn and ex.cases.settled.")
     loaded = {**copy.deepcopy(profile), "stages": stages}
+    if "explore" in profile:
+        loaded["explore"] = explore
     if "envelope" in profile:
         # Issue 03: what a run of this profile may propose; a grant narrows it, never widens it.
         from services import run_envelope
@@ -293,6 +325,27 @@ EH_SITE = {
         ]},
         # Issue 01: the result gate reads the solver status only; LC-20 (05)
         # and the eh_site KPI rules (07) join it later.
+        # Issue 06: connection against BESS against genset, at most 4 cases.
+        "explore": {"actions": [], "rules": EXPLORE_RULES,
+                    "agent": {"tools": list(EXPLORE_TOOLS), "rounds": 1, "changes": EXPLORE_CHANGES,
+                              "cases": EXPLORE_CASES}},
+    },
+    # Issue 06 (§9.3): what a case may change on its fork, each with its
+    # bounds and their basis (a `profile:` source). The connection is the
+    # user's on the base: explore only, never an L1/L2 tunable (E7).
+    "explore": {
+        "levers": [
+            {"component": "Link", "name": "poc_link", "attr": "p_nom", "unit": "MW", "explore_only": True,
+             "bounds": {"min": 0.0, "max": 500.0},
+             "basis": "Connection sizes a site may apply for; the network operator's offer decides."},
+            {"component": "Generator", "name": "genset_new_*", "attr": "p_nom_max", "unit": "MW",
+             "bounds": {"min": 0.0, "max": 200.0}, "basis": "Candidate genset sizes the eh_site template offers."},
+            {"component": "StorageUnit", "name": "bess_new_*", "attr": "p_nom_max", "unit": "MW",
+             "bounds": {"min": 0.0, "max": 200.0}, "basis": "Candidate BESS power the eh_site template offers."},
+            {"component": "StorageUnit", "name": "bess_new_*", "attr": "max_hours", "unit": "h",
+             "bounds": {"min": 1.0, "max": 8.0}, "basis": "BESS durations the eh_site template offers."},
+        ],
+        "study": {"question_id": "bess_at_site"},
     },
     "tunable": [{"component": "candidate:genset", "attr": "max_mw"},
                 {"component": "candidate:bess", "attr": "max_mw"},

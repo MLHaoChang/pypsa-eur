@@ -41,6 +41,7 @@ LEVERS = [
         "name": "poc_link",
         "attr": "p_nom",
         "unit": "MW",
+        "explore_only": True,
         "bounds": {"min": 0.0, "max": 200.0},
         "basis": "The site's grid connection, as built.",
     },
@@ -333,13 +334,9 @@ def research_row(
 
 
 def research_profile():
-    gap = {
-        "key": "explore:G1.p_nom_max",
-        "stage": "explore",
-        "target": GAP_TARGET,
-        "research": {"unit": "MW", "basis": "nameplate", "shape": "range"},
-    }
-    return explore_profile(research=[gap])
+    """A range row is matched to its lever by target (SH-29: the gap's target
+    is the lever's component, name and attr)."""
+    return explore_profile()
 
 
 def test_a_range_from_a_confirmed_verified_research_row_is_admitted():
@@ -381,15 +378,14 @@ def test_a_change_whose_range_differs_from_its_research_row_is_refused():
     )
 
 
-def test_e2_a_row_rejected_between_proposal_and_admission_refuses(
-    tmp_path, monkeypatch
-):
+def test_e2_a_row_rejected_between_proposal_and_admission_refuses():
     """E2: the row is re-read under the lock at admission, never cached from
     the proposal."""
     run = empty_run(research={"rows": [research_row("r-1", 60.0, 120.0)]})
-    proposal = run_explore.check_proposal(
-        run, research_profile(), [case("genset", genset(source="research:r-1"))]
-    )
+    proposal = [case("genset", genset(source="research:r-1"))]
+    run_explore.check_proposal(
+        run, research_profile(), proposal
+    )  # sourced when proposed
     run["research"]["rows"][0]["status"] = "rejected"  # the user rejected it meanwhile
     with pytest.raises(run_explore.ExploreError) as err:
         run_explore.admit(
@@ -447,20 +443,95 @@ def test_a_case_whose_domain_has_no_adapter_is_admitted_not_runnable_and_needs_n
     assert gen["status"] == "admitted"
 
 
-def test_an_investment_case_names_the_profiles_decision_study_question():
+class _Band:
+    def __init__(self, low, high, source):
+        self.low, self.high, self.source = low, high, source
+
+
+class _Row:
+    def __init__(self, key, value, unit, band):
+        self.key, self.value, self.unit, self.range = key, value, unit, band
+
+
+INTAKE = {"site": {"connection_mw": 10.0}}
+
+
+@pytest.fixture
+def ledger(monkeypatch):
+    """The study's seeded ledger: one sourced band, one assumed band."""
+    rows = {
+        "battery_capex": _Row(
+            "battery_capex", 300.0, "EUR/kWh", _Band(200.0, 400.0, "source")
+        ),
+        "pv_capex": _Row("pv_capex", 600.0, "EUR/kWp", _Band(420.0, 780.0, "assumed")),
+    }
+    monkeypatch.setattr(run_explore, "seeded_ledger", lambda question_id, intake: rows)
+    monkeypatch.setattr(run_explore, "study_solves", lambda question_id, intake: 3)
+    from services.study import packs
+
+    monkeypatch.setattr(packs, "missing_inputs", lambda intake: [])
+    return rows
+
+
+def capex(value=250.0, low=200.0, high=400.0, key="battery_capex", unit="EUR/kWh"):
+    return {
+        "key": key,
+        "value": value,
+        "range": {"low": low, "high": high, "unit": unit},
+        "source": f"ledger:{key}",
+    }
+
+
+def invest(*changes, intake=INTAKE):
+    return {
+        "name": "bess_invest",
+        "engine": "study",
+        "intake": intake,
+        "changes": list(changes),
+    }
+
+
+def test_an_investment_case_names_the_profiles_question_and_reserves_its_options(
+    ledger,
+):
     run = empty_run()
-    admit(run, [case("bess_invest", *bess(), engine="study")])
+    admit(run, [invest(capex())])
     [c] = run["cases"]
-    assert c["engine"] == "study" and c["question_id"] == "bess_at_site"
+    assert (
+        c["engine"] == "study"
+        and c["question_id"] == "bess_at_site"
+        and c["solves"]["reserved"] == 3
+    )
+    [row] = run["ledger"]
+    assert row["target"] == {"ledger_key": "battery_capex"} and (
+        row["old"],
+        row["new"],
+    ) == (300.0, 250.0)
+
+
+@pytest.mark.parametrize(
+    "bad,kind",
+    [
+        (
+            capex(key="pv_capex", value=600.0, low=420.0, high=780.0, unit="EUR/kWp"),
+            "explore_range_unsourced",
+        ),
+        (capex(low=100.0), "explore_range_unsourced"),
+        (capex(value=450.0), "explore_value_out_of_range"),
+        (capex(key="nope"), "explore_not_a_lever"),
+    ],
+)
+def test_an_investment_change_needs_the_ledgers_sourced_band(ledger, bad, kind):
+    refused(kind, empty_run(), [invest(bad)])
+
+
+def test_an_investment_case_with_more_option_solves_than_left_is_refused(ledger):
+    refused("explore_solve_budget", empty_run(), [invest(capex())], solves_left=2)
 
 
 def test_an_investment_case_is_not_runnable_without_a_study_question():
     run = empty_run()
-    admit(
-        run,
-        [case("bess_invest", *bess(), engine="study")],
-        profile=explore_profile(study=None),
-    )
+    admit(run, [invest(capex())], profile=explore_profile(study=None))
     assert run["cases"][0]["status"] == "not_runnable"
 
 
