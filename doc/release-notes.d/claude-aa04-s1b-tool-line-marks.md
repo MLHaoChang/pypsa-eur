@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant chat marks a solve, power-flow, wait or stop call by its checked job outcome (queued, running, stopping, done, failed, cancelled, partly done or outcome unknown) instead of a checkmark for every returned call. An in-flight mark follows a later check of the same job, or says the time it was seen.
