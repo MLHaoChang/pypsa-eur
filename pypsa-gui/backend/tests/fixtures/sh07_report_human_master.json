@@ -1,0 +1,81 @@
+[
+ {
+  "audit": {
+   "unverified": [
+    "4,700 EUR"
+   ],
+   "verified": [
+    {
+     "path": "/headline/mc_lole_h",
+     "text": "3.2 h/yr"
+    }
+   ]
+  },
+  "blocks": [
+   {
+    "md": "The plan meets 3.2 h/yr.",
+    "type": "paragraph"
+   },
+   {
+    "md": "It saves 4,700 EUR.",
+    "type": "paragraph"
+   },
+   {
+    "kind": "disclosure",
+    "text": "The cost at target (1,234,568 \u20ac) is on a single_period basis and excludes the cost of load shedding; do not add a VoLL term to it.",
+    "type": "callout"
+   },
+   {
+    "kind": "disclosure",
+    "text": "fmea_top \u2014 the engine's own standing note, which travels with this result: Link-primary residual risk",
+    "type": "callout"
+   },
+   {
+    "caption": null,
+    "table_id": "headline",
+    "type": "table_ref"
+   },
+   {
+    "caption": null,
+    "table_id": "completeness",
+    "type": "table_ref"
+   }
+  ],
+  "id": "executive_summary",
+  "note": null,
+  "source": "llm"
+ },
+ {
+  "audit": {
+   "unverified": [
+    "99"
+   ],
+   "verified": []
+  },
+  "blocks": [
+   {
+    "md": "Generator g dominates.",
+    "type": "paragraph"
+   },
+   {
+    "items": [
+     "Rank 99 mode."
+    ],
+    "type": "bullets"
+   },
+   {
+    "caption": null,
+    "table_id": "fmea_top",
+    "type": "table_ref"
+   },
+   {
+    "kind": "disclosure",
+    "text": "Link-primary residual risk",
+    "type": "callout"
+   }
+  ],
+  "id": "fmea_top",
+  "note": null,
+  "source": "llm"
+ }
+]

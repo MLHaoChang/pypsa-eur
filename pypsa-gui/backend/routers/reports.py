@@ -394,6 +394,15 @@ def _current_chapter_sources(project: AuthorizedProject) -> dict[str, Any]:
         except Exception as exc:                            # noqa: BLE001 - stated as not established
             logger.info("reports: grid readiness not read: %s", exc)
             out["grid_readiness"] = {}
+    from services.reports import network_chapters
+
+    try:
+        network = network_chapters.read_sources(d)
+    except Exception as exc:                                # noqa: BLE001 - stated as not established
+        logger.info("reports: network chapters not read: %s", exc)
+        network = None
+    if network is not None:
+        out["network"] = network
     return out
 
 

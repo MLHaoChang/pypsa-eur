@@ -94,6 +94,10 @@ _CATEGORY_OF_SECTION = {
     "target": "reliability", "certification": "reliability", "frontier": "reliability",
     "dtc": "reliability", "fmea_top": "reliability", "multi_energy": "reliability",
     "gates": "operation", "island": "operation", "grid_readiness": "grid_plan",
+    # The network-study chapters (LC-21, ``network_chapters``).
+    "headline_results": "investment", "capacity": "investment", "prices_costs": "investment",
+    "model_summary": "operation", "dispatch": "operation", "emissions": "operation",
+    "load_flow": "grid_plan",
 }
 
 
@@ -102,7 +106,7 @@ def section_category(section_id: str) -> str | None:
     sections and the expert FMEA worksheet are reliability."""
     if section_id in _CATEGORY_OF_SECTION:
         return _CATEGORY_OF_SECTION[section_id]
-    if section_id in (EXECUTIVE_SUMMARY_ID, PIPELINE_ID, "template_ledger"):
+    if section_id in (EXECUTIVE_SUMMARY_ID, PIPELINE_ID, "template_ledger", "harness_run"):
         return None
     return "reliability"
 
@@ -427,6 +431,10 @@ def evidence_only_document(evidence: Evidence, *, title: str, report_id: str,
     sections.append(ledger if ledger is not None else Section(
         section_id=C.TEMPLATE_LEDGER, heading=C.TITLES[C.TEMPLATE_LEDGER], source="code",
         status="not_established", blocks=[Callout(kind="not_established", text=C.NO_TEMPLATE_LEDGER)]))
+    # The network-study chapters (LC-21) and a run's harness chapter (study
+    # harness issue 07), each only when its source was passed.
+    sections.extend(_eh_section(evidence, sid, figure_pngs, figures, extra_tables)
+                    for sid, sec in evidence.sections.items() if sec.kind in ("network", "harness_run"))
     sections.append(_pipeline_section(evidence))
     sections = _grouped(sections)
 

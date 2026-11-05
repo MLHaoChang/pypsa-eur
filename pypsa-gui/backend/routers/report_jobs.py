@@ -151,15 +151,16 @@ def _evidence_for(project: AuthorizedProject):
     worksheet = load_worksheet(project.directory)
     evidence = collect_evidence(study_report=study_report, eh_report=eh_report,
                                 worksheet=worksheet, **_current_chapter_sources(project))
-    # Screening and template assumptions alone are not evidence to report on.
+    # Screening, template assumptions and the model summary alone are not
+    # evidence to report on; a current solve's network chapters are (LC-21).
     if not any(s.status == "ok" for s in evidence.sections.values()
-               if s.kind not in ("grid_readiness", "template_ledger")):
+               if s.kind not in ("grid_readiness", "template_ledger") and s.section_id != "model_summary"):
         raise HTTPException(400, {
             "error_kind": "no_evidence",
-            "message": "Nothing to report on: no Energy Hub reference design, no "
-                       "reliability surface and no expert worksheet rows exist in "
-                       "this session. Run a study first (run_eh_study or an "
-                       "adequacy study), or create an evidence-only report.",
+            "message": "Nothing to report on: no current solve, no Energy Hub reference "
+                       "design, no reliability surface and no expert worksheet rows exist "
+                       "in this session. Solve the network, run a study (run_eh_study or "
+                       "an adequacy study), or create an evidence-only report.",
         })
     return evidence, _render_figures(eh_report, project.directory)
 
