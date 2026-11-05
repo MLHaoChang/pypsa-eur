@@ -3,7 +3,7 @@
 
 # 21c — Stage-2 planned writes: admit `apply_demand_from_excel` under the envelope by its own card digest
 
-Status: ready-for-agent
+Status: done (#1119)
 Type: task
 Blocked by: 21
 Gated: yes (GK B)
@@ -46,18 +46,18 @@ sweep test.
 
 ## Acceptance criteria
 
-- [ ] C1: a planned write whose card on the created network equals the granted
+- [x] C1: a planned write whose card on the created network equals the granted
       rows and digest is admitted; a renamed load, a row the plan leaves out,
       or a changed upload gets a card, not an admission (tests).
-- [ ] C1: targets bind by uid: a load deleted and re-made under the granted
+- [x] C1: targets bind by uid: a load deleted and re-made under the granted
       name gets a card (test).
-- [ ] C2: a network revision bump between the plan check and the write sends
+- [x] C2: a network revision bump between the plan check and the write sends
       it to a card (test, under the project lock).
-- [ ] C3: `apply_demand_from_excel` joins `BOUND_CONTEXT_TOOLS` with its §6.6
+- [x] C3: `apply_demand_from_excel` joins `BOUND_CONTEXT_TOOLS` with its §6.6
       sweep test; no sweep or study tool joins (test).
-- [ ] LOAD-SHAPE-1: no shaped load profile is written without a card or a
+- [x] LOAD-SHAPE-1: no shaped load profile is written without a card or a
       user-confirmed intake row (test).
-- [ ] Issue 03's §7 refusal matrix still passes.
+- [x] Issue 03's §7 refusal matrix still passes.
 
 ## Comments
 
