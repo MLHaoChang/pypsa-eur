@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import inspect
 import json
+import logging
 import os
 import re
 import threading
@@ -16,6 +17,7 @@ from fastapi import HTTPException
 from services.pypsa_service import PyPSAService
 
 _LOCK = threading.RLock()
+logger = logging.getLogger(__name__)
 _WORKERS = {}
 TASK_STEP_RETRIES_MAX = 2
 
@@ -318,7 +320,7 @@ def _view(task, fresh=False, current=None):
     step = _next(task)
     state = task["status"]
     out = {"task_id": task["task_id"], "title": task["title"], "project_id": task["project_id"],
-           "status": state, "completed_steps": sum(s["status"] == "completed" for s in task["steps"]),
+           "status": state, "completed_steps": sum(s["status"] == "completed" and not s.get("superseded") for s in task["steps"]),
            "total_steps": len(task["steps"]),
            "steps": [{k: s[k] for k in ("id", "tool", "status")} for s in task["steps"]]}
     for entry, s in zip(out["steps"], task["steps"]):
@@ -729,7 +731,7 @@ def _advance_run(path, ctx=None):
             if run_loops.due(task):
                 return  # an input-loop round is due: the runner's agent turn first (issue 04)
             attempts = stage["attempts"]
-        gate = _gate_now(task, profile["stages"][name]["rules"], ctx)
+        gate = _gate_now(task, run_loops.gate_rules(task, profile, name), ctx)
         # Issue 21 §3: what a failed input gate would ask for, read outside the lock.
         gaps = run_loops.data_gaps(path, task, profile, ctx) \
             if name == run_loops.STAGE and not gate["passed"] and run.get("loop") is not None else None
@@ -754,6 +756,10 @@ def _advance_run(path, ctx=None):
                 if name == run_loops.STAGE and (run.get("loop") or {}).get("ended") and gaps:
                     run_loops.data_request(task, gaps)  # one notice listing every data gap
             else:
+                if name == run_loops.RESULT_STAGE and run_loops.engine_due(task, profile):
+                    _save(path, task)  # issue 05 PR C: the next engine rule's loop, then the whole gate
+                    _wake(path)
+                    return
                 if name in (run_loops.STAGE, run_loops.RESULT_STAGE):
                     run_loops.after_passed_gate(task, name)
                 stage.update(status="passed", exited_at=_now())
@@ -794,7 +800,8 @@ def _run_view(task):
                               **({"reason": r["reason"]} if r.get("reason") else {})} for r in stage["gate"]["rules"]]
         stages.append(entry)
     due = run["status"] == "running" and run["stages"][run["stage"]]["status"] == "active" and all(
-        s["status"] == "completed" for s in task["steps"] if s["id"].startswith(run["stage"] + "."))
+        s["status"] == "completed" for s in task["steps"]
+        if s["id"].startswith(run["stage"] + ".") and not s.get("superseded"))
     return {"profile": run["profile"], "mode": run["mode"], "status": run["status"], "stage": run["stage"],
             **({"gate_due": True} if due else {}),
             **({"waiting": {k: run["waiting"][k] for k in ("kind", "ref", "since", "items", "notice")
@@ -881,11 +888,82 @@ def cancel_task(task_id: str) -> dict:
             if task.get("run"):
                 from services import run_envelope
                 run_envelope.end(path, "revoked", "cancel_task")  # issue 03: nothing outlives the run
+                _abort_engines(task)
         session = chat_tools.chat_session()
         if session and getattr(session, "task_id", None) == task_id:
             session.task_id = None
         view = _view(task)
     _wake(path)  # the runner lets go of the project
+    return view
+
+
+def _abort_engines(task):
+    """Issue 05 PR C (condition 1, C10): a cancelled run stops its running
+    engine loop through the loop's own abort route, and only its own: the
+    slot's record must be the step's (`started_at`, under the solver-state
+    lock). The step settles from the loop's record once it ends."""
+    for step in task["steps"]:
+        if step["status"] == "waiting" and (step.get("job") or {}).get("kind") == "engine":
+            _abort_engine(task, step)
+
+
+def _abort_engine(task, step):
+    """Stop one engine step's loop through its abort route, on the active
+    context of the run's own project, only when the slot's record is the
+    step's (`started_at`, under the solver-state lock). Cancel, and a step
+    settled `timed_out` (issue 05 H2), use it."""
+    from routers import results
+    ctx = PyPSAService.get_active_context()
+    if str(getattr(ctx, "project_uuid", None)) != task["project_id"]:
+        return
+    job = step.get("job") or {}
+    with ctx.solver_state_lock:
+        record = ctx.solver_state.get(job["study"])
+        mine = isinstance(record, dict) and record.get("started_at") == job.get("started_at")
+    if mine:
+        try:
+            results._abort_study(job["study"], "no engine loop has been run")
+        except HTTPException:
+            logger.warning("the engine loop of %s was already gone", step["id"])
+
+
+def settle_engine(path, ticket, loop, state):
+    """Settle a waiting engine step once (issue 05 PR C, C7): only while it
+    still waits on this attempt. `state` "ended" settles from the loop's own
+    `loop` record (its solves charged: solves_used + probe_solves + the
+    closing re-solve when it ran, GK A (12) Q1); "lost" and "timed_out"
+    settle uncertain and keep the whole reservation (condition 9). Returns
+    the task view, or None when another path settled it first."""
+    from services import run_envelope
+    with _LOCK:
+        try:
+            task = json.loads(Path(path).read_text())
+        except (OSError, ValueError):
+            return None
+        step = next((s for s in task["steps"] if s["id"] == ticket[1]), None)
+        if (task.get("task_id") != ticket[0] or step is None or step.get("attempt_id") != ticket[2]
+                or step["status"] != "waiting" or (step.get("job") or {}).get("kind") != "engine"):
+            return None
+        if state == "ended":
+            spent = int(loop.get("solves_used") or 0) + int(loop.get("probe_solves") or 0) \
+                + (1 if loop.get("base_restore_status") is not None else 0)
+            run_envelope.settle_engine_solves(path, ticket[2], spent)
+            task = json.loads(Path(path).read_text())  # the solve count was written to it
+            step = next(s for s in task["steps"] if s["id"] == ticket[1])
+            step["status"], step["result"] = "completed", {"loop": loop}
+            step["job"]["outcome"] = loop.get("status")
+            step.pop("error", None)
+        else:
+            step["status"], step["job"]["outcome"] = "uncertain", state
+            step["error"] = ("The engine loop's own record is gone (lost with a restart, or another loop took its "
+                             "place); its solves stay spent." if state == "lost" else
+                             "The engine loop did not end in time; its solves stay spent.")
+        step["job"]["continuation"] = "withdrawn"  # the runner goes on; no chat continuation
+        if task["status"] != "cancelled":
+            task["status"] = "needs_review" if step["status"] == "uncertain" else "ready"
+        _save(Path(path), task)
+        view = _view(task)
+    _wake(path)
     return view
 
 
@@ -1146,8 +1224,8 @@ def _reconcile_lost(path, task):
     from harness import job_adapters
     changed = False
     for step in task["steps"]:
-        if step["status"] != "waiting":
-            continue
+        if step["status"] != "waiting" or step["job"].get("kind") == "engine":
+            continue  # an engine step: the runner's recover reads its loop's own record (issue 05 PR C)
         if step["job"].get("kind") == "queue":
             # Followed by a thread of this process, or lost with a restart (SC-09).
             # A cancelled plan's job runs on and is reported as it is (SC-13).

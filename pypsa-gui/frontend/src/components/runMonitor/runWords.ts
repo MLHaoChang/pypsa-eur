@@ -35,6 +35,7 @@ export const FACT_WORDS: Record<string, string> = {
   fresh: 'The results match the inputs',
   'ic.counterfactual': 'The comparison case exists',
   'ic.baseline_keeps': 'The comparison keeps the baseline',
+  'adequacy.loop.converged': 'The plan meets the reliability goal',
 }
 
 /** The unit a counted gate fact is read in, when the rule sends none,

@@ -103,6 +103,12 @@ logger = logging.getLogger(__name__)
 # worker thread.
 MAX_LOOP_SOLVES = 8
 
+# Every status a finished loop's record can carry: the verdicts
+# `run_coupling_loop` returns, and the runners' "failed" when the controller
+# returned nothing. A record still "running" is not finished. Only "met"
+# meets the target (study harness issue 05: the gate's converged fact).
+LOOP_STATUSES = frozenset({"met", "budget_exhausted", "unreachable", "aborted", "failed"})
+
 # A HARD BACKSTOP ONLY. `_wrap_with_ens_cap` reads `permyriad <= 0` as NO
 # TARGET and returns the loosest plan, so a step that reaches 0 would leave the
 # loop holding the UNCONSTRAINED plan while believing it produced the tightest

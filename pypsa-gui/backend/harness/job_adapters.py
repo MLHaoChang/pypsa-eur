@@ -18,18 +18,18 @@ from typing import Any, Literal
 
 from fastapi import HTTPException
 
+from services.adequacy.coupling import LOOP_STATUSES
+
 FOREGROUND_PREFIX = 'fg:'
 FOREGROUND_FAMILY = 'foreground_simulation'
 _FG_TERMINAL = frozenset({'completed', 'failed', 'aborted'})
 
 STUDY_PREFIX = 'ad:'
 STUDY_FAMILY = 'adequacy_study'
-_STUDY_TERMINAL = frozenset({
-    'done', 'failed', 'aborted', 'refused', 'met', 'budget_exhausted',
-    # Coupling and margin loops finish here when no plan meets the target.
-    # Leaving it non-terminal makes wait_for_job time out on a finished study.
-    'unreachable',
-})
+# The coupling and margin loops finish on one of `LOOP_STATUSES` (unreachable
+# when no plan meets the target); leaving one non-terminal makes wait_for_job
+# time out on a finished study.
+_STUDY_TERMINAL = frozenset({'done', 'failed', 'aborted', 'refused'}) | LOOP_STATUSES
 # `done` is the sweep/MC/frontier success label; `met` is the loop success label.
 _STUDY_SUCCESS = frozenset({'done', 'met'})
 

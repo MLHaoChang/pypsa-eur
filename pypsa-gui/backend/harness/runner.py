@@ -450,10 +450,20 @@ class Runner:
 
     def boot_sweep(self):
         """Restart reconciliation at boot (issue 24, GK B): a model send
-        another boot left open settles `uncertain` at its hold's bound."""
-        from harness import send_reservation
-        paths = [path for path, task in self._runs() if send_reservation.has_open_holds(task["run"])]
-        return send_reservation.sweep(paths, boot=self.instance, now=self.clock())
+        another boot left open settles `uncertain` at its hold's bound; an
+        engine step past its deadline settles `timed_out` (issue 05 H2), only
+        where this instance holds the lease or the lease has lapsed."""
+        from harness import continuation, send_reservation
+        runs = self._runs()
+        paths = [path for path, task in runs if send_reservation.has_open_holds(task["run"])]
+        swept = send_reservation.sweep(paths, boot=self.instance, now=self.clock())
+        for path, task in runs:
+            for step in task.get("steps", []):
+                if step.get("status") == "waiting" and (step.get("job") or {}).get("kind") == "engine":
+                    ticket = (task["task_id"], step["id"], step.get("attempt_id"))
+                    swept += continuation.expire_engine(path, ticket, instance=self.instance, now=self.clock(),
+                                                        lapsed_ok=True)
+        return swept
 
     # one tick
 
@@ -625,7 +635,10 @@ class Runner:
         def bound():
             with self._bound(task, ctx, slot) as session:
                 if takeover:
-                    self._recover(path)
+                    self._recover(path, ctx)
+                else:  # H2: a waiting engine step whose follower died is followed again, or expires
+                    from harness import run_loops
+                    run_loops.recover_engines(path, ctx, instance=self.instance, now=self.clock())
                 return self._step(path, ctx, session)
         return contextvars.copy_context().run(bound)
 
@@ -722,6 +735,8 @@ class Runner:
         step = tasks._next(task)
         if step is None:
             return "idle"
+        if step.get("engine") and step["status"] == "pending":
+            return run_loops.start_engine(path, ctx, step, instance=self.instance)
         if step["status"] == "waiting":
             self._hold_if_effectful(task, step)
             _update(path, lambda t: t["run"].update(status="waiting_job") if t["run"]["status"] == "running" else False)
@@ -980,7 +995,7 @@ class Runner:
 
     # restart
 
-    def _recover(self, path):
+    def _recover(self, path, ctx=None):
         """A run taken over from a lapsed lease (design §6.6 restart): settle
         waiting queue steps from their rows, follow live ones again, lost
         ones are uncertain (SC-09: nothing is requeued); any uncertain step
@@ -999,6 +1014,9 @@ class Runner:
                 continuation.follow_queue_job(path, ticket)
             elif states and all(s not in ("queued", "running", "unknown") for s in states):
                 continuation.settle_queue_from_record(path, ticket)
+        if ctx is not None:
+            from harness import run_loops
+            run_loops.recover_engines(path, ctx, instance=self.instance, now=self.clock())
         with tasks._LOCK:
             task = _read(path)
             tasks._reconcile_lost(path, task)
