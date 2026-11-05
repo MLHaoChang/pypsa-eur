@@ -41,8 +41,8 @@ describe('tool outcome marks', () => {
   })
 
   it.each([
-    ['adapter_pending', '– wait_for_job (outcome unknown — this kind of job cannot be checked yet)'],
-    ['no_submission', '– wait_for_job (outcome unknown — no job from this call was found)'],
+    ['adapter_pending', '– wait_for_job (outcome unknown: this kind of job cannot be checked yet)'],
+    ['no_submission', '– wait_for_job (outcome unknown: no job from this call was found)'],
     ['read_failed', '– wait_for_job (outcome unknown)'],
   ])('words an unknown outcome with reason %s', (reason, line) => {
     expect(toolOutcomeLine('wait_for_job', block('uncertain', 'ad:1', reason))).toBe(line)
@@ -99,8 +99,8 @@ describe('current tool outcome', () => {
   it('words an in-flight line as of its own time when nothing later read the job', () => {
     const now = currentToolOutcome([tool('a', 'running', 'fg:1', at(14, 2))], 0)!
     expect(now.mark.outcome).toBe('running')
-    expect(toolOutcomeWords(now, at(18, 0))).toBe('running at 14:02')
-    expect(toolOutcomeWords(now, at(18, 0) + 86400000)).toBe('running at 5 Nov 14:02')
+    expect(toolOutcomeWords(now, at(18, 0))).toBe('running as of 14:02')
+    expect(toolOutcomeWords(now, at(18, 0) + 86400000)).toBe('running as of 5 Nov 14:02')
   })
 
   it('dates a time from an earlier day only', () => {
@@ -127,7 +127,7 @@ describe('current tool outcome', () => {
       tool('b', 'completed', 'fg:2', at(14, 5)),
       tool('c', 'completed', null, at(14, 6)),
     ]
-    expect(toolOutcomeWords(currentToolOutcome(messages, 0)!, at(15, 0))).toBe('running at 14:02')
+    expect(toolOutcomeWords(currentToolOutcome(messages, 0)!, at(15, 0))).toBe('running as of 14:02')
   })
 
   it('keeps an in-flight line when a later read of the same job id is in another project', () => {
@@ -139,7 +139,7 @@ describe('current tool outcome', () => {
     const messages = [tool('a', 'completed', 'fg:1', at(14, 2)), tool('b', 'running', 'fg:1', at(14, 5))]
     const later = currentToolOutcome(messages, 1)!
     expect(later.mark.outcome).toBe('running')
-    expect(toolOutcomeWords(later, at(15, 0))).toBe('running at 14:05')
+    expect(toolOutcomeWords(later, at(15, 0))).toBe('running as of 14:05')
   })
 
   it('never lets a line without a job id take a later read', () => {

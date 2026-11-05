@@ -79,9 +79,9 @@ describe('chat tool-line outcome marks', () => {
   afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks() })
 
   it.each([
-    ['submitted', '…', 'run_simulation (queued at 14:02)', 'Queued: start a solve, as of 14:02'],
-    ['running', '…', 'run_simulation (running at 14:02)', 'Running: start a solve, as of 14:02'],
-    ['cancel_requested', '…', 'run_simulation (stopping at 14:02)', 'Stopping: start a solve, as of 14:02'],
+    ['submitted', '…', 'run_simulation (queued as of 14:02)', 'Queued: start a solve, as of 14:02'],
+    ['running', '…', 'run_simulation (running as of 14:02)', 'Running: start a solve, as of 14:02'],
+    ['cancel_requested', '…', 'run_simulation (stopping as of 14:02)', 'Stopping: start a solve, as of 14:02'],
     ['completed', '✓', 'run_simulation (done)', 'Done: start a solve'],
     ['failed', '✕', 'run_simulation (failed)', 'Failed: start a solve'],
     ['cancelled', '–', 'run_simulation (cancelled)', 'Cancelled: start a solve'],
@@ -117,7 +117,7 @@ describe('chat tool-line outcome marks', () => {
     await turn('expert')
     call('solve', 'run_simulation', 'running')
     call('other', 'wait_for_job', 'completed', 'fg:2')
-    expect(screen.getAllByTestId('chat-tool-outcome')[0].textContent).toBe('…run_simulation (running at 14:02)')
+    expect(screen.getAllByTestId('chat-tool-outcome')[0].textContent).toBe('…run_simulation (running as of 14:02)')
     vi.setSystemTime(new Date(2026, 10, 5, 14, 9))
     call('wait', 'wait_for_job', 'failed')
     expect(screen.getAllByTestId('chat-tool-outcome')[0].textContent).toBe('✕run_simulation (failed)')
@@ -132,17 +132,17 @@ describe('chat tool-line outcome marks', () => {
     emit('tool_request', { tool_use_id: 'j', tool_name: 'run_simulation', safety_tier: 'job' })
     emit('tool_result', { tool_use_id: 'j', tool_name: 'run_simulation', result })
     expect(screen.getByTestId('chat-tool-outcome').textContent)
-      .toBe('–run_simulation (outcome unknown — the result could not be read)')
+      .toBe('–run_simulation (outcome unknown: the result could not be read)')
   })
 
   it('says why a queue job cannot be checked yet, in both modes', async () => {
     await turn('expert')
     call('w', 'wait_for_job', 'uncertain', 'ad:7', 'adapter_pending')
     expect(screen.getByTestId('chat-tool-outcome').textContent)
-      .toBe('–wait_for_job (outcome unknown — this kind of job cannot be checked yet)')
+      .toBe('–wait_for_job (outcome unknown: this kind of job cannot be checked yet)')
     act(() => useUIStore.setState({ uiMode: 'guided' }))
     expect(screen.getByTestId('chat-tool-label').textContent)
-      .toBe('Outcome unknown: use wait for job — this kind of job cannot be checked yet')
+      .toBe('Outcome unknown: use wait for job (this kind of job cannot be checked yet)')
   })
 
   it('leaves a tool without an outcome on its plain ✓ line', async () => {

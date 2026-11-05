@@ -60,7 +60,7 @@ createRoot(document.getElementById('root')!).render(<QueryClientProvider client=
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] })
   for (const mode of ['guided', 'expert']) {
     {
-      const page = await browser.newPage({ viewport: { width: 420, height: 900 }, deviceScaleFactor: 2 })
+      const page = await browser.newPage({ viewport: { width: 420, height: 1200 }, deviceScaleFactor: 2 })
       await page.emulateMedia({ reducedMotion: 'reduce' })
       await page.route(url => url.protocol.startsWith('http') && url.hostname !== '127.0.0.1', route => route.abort())
       await page.route(url => url.pathname.startsWith('/api/'), route => {

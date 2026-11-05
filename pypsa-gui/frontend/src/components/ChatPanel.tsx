@@ -280,7 +280,7 @@ export function guidedSettledToolIds(
 /** Issue 04 (S1b): Guided words for a job tool line with an `_outcome`. */
 function guidedOutcomeLine(tool: string, now: CurrentToolOutcome): GuidedToolLine {
   const word = now.mark.word.charAt(0).toUpperCase() + now.mark.word.slice(1)
-  const asOf = now.mark.inFlight ? `, as of ${outcomeClock(now.ts)}` : now.why ? ` — ${now.why}` : ''
+  const asOf = now.mark.inFlight ? `, as of ${outcomeClock(now.ts)}` : now.why ? ` (${now.why})` : ''
   return { hidden: false, label: `${word}: ${guidedToolPhrase(tool)}${asOf}` }
 }
 

@@ -90,11 +90,11 @@ export function toolOutcomeReasonWord(outcome: string, reason: string | null): s
   return TOOL_OUTCOME_REASON_WORDS[reason] ?? null
 }
 
-/** The transcript line: `<glyph> <tool> (<word>[ — <reason>])`. */
+/** The transcript line: `<glyph> <tool> (<word>[: <reason>])`. */
 export function toolOutcomeLine(tool: string, block: ToolOutcomeBlock): string {
   const mark = toolOutcomeMark(block.outcome)
   const why = toolOutcomeReasonWord(block.outcome, block.reason)
-  return `${mark.glyph} ${tool} (${mark.word}${why ? ` — ${why}` : ''})`
+  return `${mark.glyph} ${tool} (${mark.word}${why ? `: ${why}` : ''})`
 }
 
 interface OutcomeMessage {
@@ -108,7 +108,7 @@ export interface CurrentToolOutcome { mark: ToolOutcomeMark; ts: number; why: st
  * later `_outcome` read of the SAME job id in the transcript (the backend's
  * identity-checked read; no guess from unrelated status) in the same project;
  * a line never takes an earlier read, and a null job id never matches. With no later read
- * it stays as it was at its own time, which the caller words "at HH:MM".
+ * it stays as it was at its own time, which the caller words "as of HH:MM".
  */
 export function currentToolOutcome(
   messages: ReadonlyArray<OutcomeMessage>, index: number,
@@ -134,7 +134,7 @@ export function currentToolOutcome(
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-/** "14:02" in the viewer's clock, or "4 Nov 14:02" for an earlier day. */
+/** "14:02" in the viewer's clock, or "4 Nov 14:02" for an earlier day ("as of 14:02"). */
 export function outcomeClock(ts: number, now: number = Date.now()): string {
   const d = new Date(ts)
   const n = new Date(now)
@@ -143,8 +143,8 @@ export function outcomeClock(ts: number, now: number = Date.now()): string {
   return sameDay ? time : `${d.getDate()} ${MONTHS[d.getMonth()]} ${time}`
 }
 
-/** The words after the glyph: the word, plus "at HH:MM" while in flight, or why it is unknown. */
+/** The words after the glyph: the word, plus "as of HH:MM" while in flight, or why it is unknown. */
 export function toolOutcomeWords(current: CurrentToolOutcome, now?: number): string {
-  if (current.mark.inFlight) return `${current.mark.word} at ${outcomeClock(current.ts, now)}`
-  return current.why ? `${current.mark.word} — ${current.why}` : current.mark.word
+  if (current.mark.inFlight) return `${current.mark.word} as of ${outcomeClock(current.ts, now)}`
+  return current.why ? `${current.mark.word}: ${current.why}` : current.mark.word
 }

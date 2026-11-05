@@ -145,7 +145,7 @@ renders the glyph aria-hidden in Guided and Expert; the checked-turn
 
 UX rule 3, both parts: an in-flight line takes the newest later `_outcome`
 of the same job id in the transcript (wait_for_job, abort_simulation); with
-no later read it reads "running at 14:02" (Guided: "Running: start a solve,
+no later read it reads "running as of 14:02" (Guided: "Running: start a solve,
 as of 14:02"). The global /simulation/status is not used: it carries no job
 identity. A reloaded transcript has no tool rows (history replays tool uses
 as `[tool: name]`), so no stale line comes back. Shots:
@@ -153,7 +153,7 @@ as `[tool: name]`), so no stale line comes back. Shots:
 
 GK B (25) plan conditions U1–U5 (no GK gate on the frontend-only PR) and UX (9)
 GO, applied: a job tool's returned result with a missing, malformed or
-non-version-1 `_outcome` reads "outcome unknown — the result could not be
+non-version-1 `_outcome` reads "outcome unknown: the result could not be
 read", and the handler's `completed`/`status` are never read (U1); a cut
 result's `_outcome` is read strictly from the start of its preview, else
 unknown (U2); supersede only forward, same non-null job id, same project
@@ -161,3 +161,6 @@ unknown (U2); supersede only forward, same non-null job id, same project
 (U4); the outcome table names all nine (U5). UX: the time gets a date
 ("4 Nov 14:02") when it is from an earlier day; Guided keeps the glyph.
 
+UX (9) NOT OK @1d2a57e6 fixed: the reason follows a colon (Expert) or sits in
+brackets (Guided), with no em dash; both modes say "as of 14:02"; shots in
+`.scratch/assistant-assurance/shots/aa04-s1b-tool-outcome-{guided,expert}.png`.
