@@ -3847,6 +3847,10 @@ def _dispatch_real_tool_call(
                     tool_name=tool_name,
                     kind=kind,
                 )
+                from harness import outcomes as _outcomes
+
+                # Issue 04: the call's own identity, read back for its outcome.
+                _outcomes.note_submission(job_id, active_ctx, run_token)
                 # LC-12: a plan's run step waits on its job durably and the
                 # turn is released; the job's end settles the step and arms
                 # one continuation of this conversation.
@@ -4228,6 +4232,19 @@ def _dispatch_real_tool_call(
                 session.navigation_turn, acknowledgement
             )
 
+    from harness import outcomes
+
+    if (
+        session.assurance_turn is None
+        and tool_name in outcomes.JOB_TOOLS
+        and isinstance(result_for_model, dict)
+    ):
+        # Issue 04 (A3.1/A3.3): the outcome from an independent read, never
+        # the handler's own status fields.
+        result_for_model = {
+            **result_for_model,
+            "_outcome": outcomes.project(tool_name, args or {}, tool_use_id),
+        }
     if session.assurance_turn is not None:
         projection = session.assurance_turn.result_projection(
             tool_name, result_for_model, tool_use_id
