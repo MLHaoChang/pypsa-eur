@@ -1124,6 +1124,16 @@ export default function TimeSeriesManager() {
   // Per-row Generate (RP-04b): generate with the weather bar's choice, wait, apply.
   const [generating, setGenerating] = useState<ReadonlySet<string>>(new Set())
   const [genNotice, setGenNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
+  // An Undo makes "…generated and applied. Undo reverts…" untrue: drop the notice
+  // when the undo stack gets shorter (the header's query, same cache entry).
+  const { data: undoInfo } = useQuery({ queryKey: nk(currentProject, 'undoInfo'), queryFn: networkApi.undoInfo })
+  const undoDepthSeen = useRef<number | null>(null)
+  useEffect(() => {
+    const depth = undoInfo?.depth
+    if (depth == null) return
+    if (undoDepthSeen.current != null && depth < undoDepthSeen.current) setGenNotice(null)
+    undoDepthSeen.current = depth
+  }, [undoInfo?.depth])
   const generateRow = async (name: string) => {
     const row = readinessOf(name)
     if (!row || !currentProject) return

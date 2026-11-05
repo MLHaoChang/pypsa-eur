@@ -1,6 +1,6 @@
 # LC-07 — continuous speech on the shared harness
 
-Status: ready-for-agent
+Status: done
 Type: task
 Baseline: master `c75ca5584b873418f10f1bca42f868255d445b7b`
 Dependencies: Stable typed paths and existing parent/utterance/usage primitives
@@ -221,3 +221,69 @@ stopped-hidden, flag off, flag on without a link).
 Remaining: a concrete media link (LiveKit client) arrives with the transport
 gate; `end` on `pagehide` is a normal request that may not finish, so the
 server deadline reaper settles that session.
+
+2026-11-05: Rebaselined on master `e98226bd1`. Merged: PR1 #1058 (`cbfd6cbc`),
+PR2 #1059 (`e9127fae`), PR3 #1063 (`45e06fe9`), 07b #1075 (`570e2398`).
+PR4 echo guard (LC-T13 "echo", branch `claude/lc07-echo-guard`), backend only.
+`claim_output` records the claimed answer's words, its claim time and its
+character count per session (`_RECENT_SPOKEN`, bound 4, process-local, kept
+after barge-in, dropped on every session exit). `submit_segment` returns
+`echo_ignored` (no ticket, segment marked seen) for a final of at least
+`ECHO_MIN_WORDS` (3) words that is a contiguous word run of such an answer
+within `ECHO_BASE_S + chars / ECHO_CHARS_PER_S` (5 s + 1 s per 12 characters)
+of its claim. Shorter finals are never echo; the bare-approval rule still
+guards "yes". No new error kind and no route change. Tests:
+`tests/test_live_speech_echo_lc07.py` (11; 28 after E1–E7, the code review and GK B's NOT OK). They cover an echo during
+playback, the same words after the window, user speech over playback, echo
+after barge-in, short overlaps such as "7.5 MW", reordered words, the session
+exit, and overlap: three finals during a running turn give one admitted turn
+plus one pending correction (the latest), and a replayed final is a
+duplicate. The no-guard, no-window and no-exit-cleanup mutants each fail a
+test. Neighbours (speech session/output, admission, drain, rebind,
+one-worker, error-kind manifest): 148 passed.
+Kept: a user who repeats three or more words of the answer verbatim while it
+is still playing is ignored once; the reply says to type it or say it again
+after playback. Word matching is exact; STT spelling drift (e.g. "7,5")
+leaves an echo unmatched, so it falls back to the admission rules
+(generation, single pending correction, no spoken approval).
+
+GK B (25) GO with changes E1–E7 on PR4 (recorded as given, with how each is met):
+E1 approval path: an answer that asks "Say yes apply it"; with a card
+pending, the echoed "yes" is refused by the bare-approval rule
+(`not_an_approval`, as `test_spoken_yes_never_approves_a_pending_card`), and
+the echoed "yes apply it" is `echo_ignored`; the card stays pending.
+E2 min words: a "yes" or "apply it" heard during that answer is an ordinary
+final; the 1- and 2-word threshold mutants fail.
+E3 bounded state: each claim keeps its words from the start, up to
+`ECHO_WORDS_MAX` = `MAX_TTS_TEXT_CHARS // 2` (1000), which never cuts a
+speakable answer (GK B (25) NOT OK @5029b0d7: the first cut kept the last 256
+words, so an echo of a long answer's opening was admitted; a test with a
+2000-character, 401-word answer echoing "w0 w1 w2 w3" failed first, then
+passed; a test with the bound at 8 shows the opening is kept); `_RECENT_SPOKEN` is read and written only under
+`_TICKETS_LOCK`; a rebind clears it (test).
+E4 (option 1 of three put to GK B): a final that gets no ticket
+(`echo_ignored`, `clarify`, `not_an_approval`) leaves a notice
+{status, fixed message, seq, generation} in a per-session list (at most
+`NOTICES_MAX` 4, oldest dropped, under `_TICKETS_LOCK`, cleared on every exit
+and on rebind). `GET /speech` returns `notices` for the current generation
+only. Tests: one per status with no transcript substring; the bound; rebind
+and exit clear the list; older generations are hidden; a foreign owner gets
+today's byte-equal `thread_not_found`. The echo reply carries no `text`
+field and nothing is logged. The Live caption rendering is
+[07c](07c-speech-notices-caption.md) (UX gate); until it lands the drop is
+silent in the browser (audio-worker gate).
+E5 window: `time.monotonic()`, `ECHO_BASE_S + chars / ECHO_CHARS_PER_S`,
+inclusive; tests 0.5 s inside and outside; the `>=` and no-chars/12 mutants
+fail.
+E6: after an ignored echo (card pending), the same words as a new segment
+after the window are `final_accepted`, not a duplicate.
+E7: risk listed in the PR body; speech neighbours, the three route policy
+suites, inventory, route-parity and control-matrix `--check` run at the
+trial merge (master `e98226bd1`): 189 passed, 1 skipped; checks ok.
+
+Acceptance (LC-T13/14/15) within this package: met offline and mocked.
+The remaining gates listed under PR1, PR2 and PR3 above need vendor,
+device or deployment evidence the issue keeps outside this package
+(vendor transport, STT/TTS models, pronunciation listening evidence,
+worker-side audio flush, real scoped credentials, paid calls). They are
+recorded, not built.

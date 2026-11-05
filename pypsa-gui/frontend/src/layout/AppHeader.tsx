@@ -349,7 +349,7 @@ export default function AppHeader() {
 
   const ALL_NETWORK_KEYS = ['buses', 'lines', 'links', 'generators', 'loads', 'storage_units',
     'stores', 'transformers', 'meta', 'load_profiles', 'generator_profiles', 'link_profiles',
-    'timeseries', 'carriers', 'snapshots', 'undoInfo']
+    'timeseries', 'carriers', 'snapshots', 'undoInfo', 'profile_readiness']
 
   const undoMut = useMutation({
     mutationFn: networkApi.undo,
