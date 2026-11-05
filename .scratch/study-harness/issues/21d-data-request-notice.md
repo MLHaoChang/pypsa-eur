@@ -3,12 +3,12 @@
 
 # 21d — Deliver the L1 data request's notice through `runner._wait_for_user`
 
-Status: needs-triage
+Status: needs-info
 Type: task
-Blocked by: 21
+Blocked by: #1127 (holds `harness/runner.py`); the owner's answer to the design question; GK B plan GO (issue 21 has merged, #1100)
 Gated: yes (GK B)
 Model tier: opus
-Owner decisions: SH21-SPLIT-1, SH21-ACCEPT-1, CHAT-DATA-SPEC-1
+Owner decisions: SH21-SPLIT-1, SH21-ACCEPT-1, CHAT-DATA-SPEC-1, FILL-11-6
 Design: issue 21 §3 ("the notice lists every gap at once ... through `_wait_for_user`") and its scope list (`harness/runner.py`)
 
 ## Why
@@ -52,5 +52,74 @@ with the text left to the task view?
 - [ ] The data stop's `run.waiting` is written through `_wait_for_user` (test).
 - [ ] The attention record and email carry only what GK B's ruling allows (test).
 - [ ] One notice per state change, at most 10 per run, unchanged (test).
+- [ ] `data_request`'s "nothing asked twice" rule holds: a repeated wake on
+      the same open request writes no second `run.waiting`, attention record
+      or email (test).
+- [ ] The lock order is unchanged: the data stop is written inside the
+      existing task-lock update in `_advance_run`, never by a nested
+      `_update` (test or code-review note).
+- [ ] "At most one email" counts `_notify`'s run email only; `loop_notice`'s
+      own email for the same L1 ending (issue 25) is unchanged and is
+      asserted separately (test).
 
 ## Comments
+
+- 2026-11-05, triage (owner decision FILL-11-6). Status needs-info: code
+  starts after the owner answers the design question (sent through the
+  coordinator) and GK B gives a plan GO.
+
+  **What is on master (6e1d5f963).** `run_loops.data_request`
+  (`harness/run_loops.py:210`) writes `run.waiting` itself, under the task
+  lock of `_advance_run`, with an ISO `since`; `Runner._wait_for_user`
+  (`harness/runner.py:654`) writes `{kind, ref, since}` with the runner's
+  float clock and sets `status, reason = needs_user, waiting_<kind>`.
+  `_notify` (`runner.py:233`) sends `attention.run_notice` (id and state
+  only; the attention record has no text field, `question=None`) and
+  `_email`, whose body is fixed words, project name, state and link.
+  `loop_notice.send_if_due` (issue 25) runs first in `_notify` and, for an
+  opted-in run, already emails the failing rules with their facts and the
+  ledger rows (component, name, attr, old -> new) for the same L1 ending.
+  The data items' labels are `"<component name> <attr>"` from the envelope's
+  gaps or the profile's param ids (`run_answers.data_items`), so a label can
+  carry a name that came from imported project data.
+
+  **Plan.**
+  1. Split `_wait_for_user` into a pure mutator, `_set_waiting(run, kind,
+     ref, since, **fields)` (status, reason, waiting dict, `items`/`notice`
+     for `data`), and the method that wraps it in `_update`. `data_request`
+     calls the mutator inside its existing locked update, so the lock order
+     stays (`assistant_tasks._LOCK` last) and nothing nests an `_update`.
+     The "same ref already waiting" check moves into the mutator, so a
+     repeated wake is a no-op for both callers. `since` keeps one format;
+     `assistant_tasks.py:807` passes it through to the view, so the builder
+     checks the frontend reader before choosing the float clock.
+  2. `_notify` reads `run.waiting` when the new status is `needs_user` and
+     `waiting.kind == "data"`, and delivers what the owner's ruling allows
+     (options below). Every string that leaves the app goes through
+     `runner._plain` with a length bound, and the item list is capped
+     (for example, 10 lines, then "and N more").
+  3. Tests in `tests/test_harness_run_loops.py` (or a new
+     `test_harness_data_notice.py` if #1127 still holds that file): L1
+     exhaustion with two gaps gives one `needs_user` change, one attention
+     record and at most one `_notify` email (fake sender) carrying exactly
+     the allowed content; a second wake writes nothing; a label holding
+     markup or a newline is flattened by `_plain`; the existing 10-per-run
+     cap still holds.
+
+  **Open design question (to the owner via the coordinator).** May the
+  attention record and the email carry the notice text, or only the run id,
+  state and item count?
+  - (a) Count only, both channels (recommended): "waits for data (N items)".
+    It keeps `run_notice`'s and `_email`'s "fixed fields only" contract, and
+    no attention-schema change. No imported name reaches a mail client from
+    this path. UX: the user opens the link to see what to give; for an
+    opted-in run, issue 25's loop email already names the failing rules.
+  - (b) Email carries the item lines (label, param, unit, accepted sources;
+    `_plain`-bounded, capped); the attention record stays count-only. The
+    user sees what to give without opening the app. Project component names
+    leave the app by mail, as issue 25's email already does for this ending,
+    and `_email`'s docstring and the 21 D4 note need rewording.
+  - (c) Both carry the text. The attention record grows a text field
+    (`attention._validate`, projection, frontend render), so the change is
+    bigger and needs UX review; it duplicates the task view.
+
