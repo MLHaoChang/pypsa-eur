@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): After Undo, the Time Series Renewables tab re-reads which wind and solar generators are ready and drops its "generated and applied" notice, so an undone profile no longer shows as generated.

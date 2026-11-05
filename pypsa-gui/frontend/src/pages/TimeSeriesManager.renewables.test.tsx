@@ -36,7 +36,7 @@ const ready = (o: object) => ({ generator: 'pv_ready', technology: 'solar', bus:
 
 function renderIt() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={client}><TimeSeriesManager /></QueryClientProvider>)
+  return { client, ...render(<QueryClientProvider client={client}><TimeSeriesManager /></QueryClientProvider>) }
 }
 
 beforeEach(() => {
@@ -51,9 +51,10 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 async function openRenewables() {
-  renderIt()
+  const view = renderIt()
   await userEvent.click(await screen.findByRole('button', { name: /Renewables/ }))
   await screen.findByTestId('readiness-pv_ready')
+  return view
 }
 
 describe('Renewables tab', () => {
@@ -98,6 +99,22 @@ describe('Renewables tab', () => {
     expect(updateBus).toHaveBeenCalledWith('b2', { name: 'b2', x: 8.5, y: 50.1 })
     await vi.waitFor(() => expect(screen.queryByTestId('missing-coordinates-banner')).toBeNull())
     expect(screen.getByTestId('generate-all-ready').textContent).toContain('2 ready')
+  })
+
+  it('drops the generated notice when the undo stack gets shorter', async () => {
+    let depth = 0
+    const undoInfo = vi.fn(async () => ({ depth }))
+    ;(networkApi as unknown as Record<string, unknown>).undoInfo = undoInfo
+    prof.generate.mockResolvedValue({ id: 'job1' })
+    prof.pending.mockResolvedValue({ pending: [{ job_id: 'job1' }], jobs: [] })
+    prof.applyBatch.mockResolvedValue({ count: 1 })
+    const view = await openRenewables()
+    depth = 1
+    await userEvent.click(screen.getByTestId('generate-all-ready'))
+    await screen.findByTestId('generate-notice')
+    depth = 0
+    await view.client.invalidateQueries({ queryKey: ['undoInfo', 'Site A'] }) // what the header's Undo does
+    await vi.waitFor(() => expect(screen.queryByTestId('generate-notice')).toBeNull(), { timeout: 4000 })
   })
 
   it('Upload instead focuses the upload zone', async () => {
