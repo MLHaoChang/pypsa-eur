@@ -138,6 +138,17 @@ route parity has 490 GUI routes, 0 needs-tool and 106 limitations, and `full_cov
 and 35 take LC-D03 and LC-D24. R4: both standing blockers (`ui-local-control-parity-unaudited` and
 `hosted-gates-pending`) are now owned by issue 05 and point at its file. The hosted blocker names
 spoken navigation acknowledgements as well. `_full_coverage_problem` fails if a standing blocker is
-missing from the matrix, or if its issue file is gone or done/wontfix. Tests:
+missing from the matrix, or if its issue file is gone, unreadable, has no `Status:` line, or has any status other than needs-triage, needs-info, ready-for-agent or ready-for-human. Tests:
 `test_r4_voice_only_gates_are_issue_05_blockers`, `test_a_standing_blocker_needs_an_open_issue_file`
 (fails when the pointer rule is removed) and `test_a_standing_blocker_dropped_from_the_matrix_fails_the_guard`.
+GK B (session_01G7qCuiXVCfPjF2hxQtfSzU) GO WITH CHANGES @d503c501:
+- G1. Fail closed on the issue file: no `Status:` line, an unreadable file or an unrecognised
+  status is a violation. Only needs-triage, needs-info, ready-for-agent and ready-for-human count
+  as open (the #1079 rule). Test for the no-Status-line case.
+- G2. Second mutant: remove the `_standing_blocker_problem` call from `_full_coverage_problem`, and
+  the dropped-from-matrix test fails. This adds to the pointer/status mutant.
+- G3. `assistant_control_matrix.py --check` and `assistant_route_parity.py --check` at the trial
+  merge, with no FAIL lines.
+- G4. Do not repoint the `r3-uncovered:LC-D20..D23` blockers here. They point at a done issue and
+  the new guard does not cover them; that is named in the PR's risks. Ticket:
+  [14-r3-leftover-blockers-open-owner.md](14-r3-leftover-blockers-open-owner.md).

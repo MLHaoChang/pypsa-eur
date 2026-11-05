@@ -98,7 +98,8 @@ FAMILY_JOURNEYS: list[dict] = family_journeys()
 # Blockers that stay until a human closes them with evidence; never derived away.
 # LV 08 R4: the voice-only gates stay with issue 05; each pointer must name an open issue file.
 ISSUE_05 = '.scratch/live-voice/issues/05-workflow-validation.md'
-CLOSED_STATUSES = ('done', 'wontfix')
+# Fail closed (GK B G1): only these triage states hold a blocker; anything else is a violation.
+OPEN_STATUSES = ('needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human')
 STANDING_BLOCKERS: list[dict[str, str]] = [
     {'id': 'ui-local-control-parity-unaudited', 'issue': '05', 'pointer': ISSUE_05,
      'summary': 'Client-only panel/subview/filter controls (no backend call) are not mapped to a navigation tool or a declared gap; controls that call the backend are audited in route_parity.'},
@@ -115,12 +116,16 @@ def _standing_blocker_problem(blockers) -> str | None:
         if blocker['id'] not in listed:
             return f'{where} is missing from full_coverage.blockers'
         path = ROOT / blocker['pointer']
-        if not path.is_file():
+        try:
+            text = path.read_text(encoding='utf-8')
+        except FileNotFoundError:
             return f'{where}: pointer {blocker["pointer"]} does not exist'
-        status = re.search(r'^Status:\s*([\w-]+)', path.read_text(encoding='utf-8'), re.M)
-        if status is None or status.group(1).lower() in CLOSED_STATUSES:
-            return (f'{where}: {blocker["pointer"]} is {status.group(1) if status else "without a Status: line"}; '
-                    'close the blocker with evidence or move it to an open issue')
+        except (OSError, UnicodeDecodeError) as exc:
+            return f'{where}: pointer {blocker["pointer"]} is unreadable ({exc.__class__.__name__})'
+        status = re.search(r'^Status:\s*([\w-]+)', text, re.M)
+        if status is None or status.group(1).lower() not in OPEN_STATUSES:
+            return (f'{where}: {blocker["pointer"]} is {status.group(1) if status else "without a Status: line"}, '
+                    f'not one of {", ".join(OPEN_STATUSES)}; close the blocker with evidence or move it to an open issue')
     return None
 
 

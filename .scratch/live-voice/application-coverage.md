@@ -194,7 +194,8 @@ fails if a claim appears while any of these hold:
 
 The last two are standing blockers owned by issue 05 (LV 08 R4); each points at
 `issues/05-workflow-validation.md`, and the guard fails if one leaves `full_coverage.blockers`
-or if its issue file is gone or closed (done/wontfix) while the blocker stands.
+or if its issue file is gone, unreadable or not in an open triage state (needs-triage,
+needs-info, ready-for-agent, ready-for-human) while the blocker stands.
 
 Permitted statement until issue 05 journeys pass: tested subsets only, labelled
 accordingly. Load flow (issue 07), run evidence (issue 06) and monitoring adapters

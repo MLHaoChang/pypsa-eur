@@ -323,6 +323,13 @@ def test_a_standing_blocker_needs_an_open_issue_file(matrix, monkeypatch, tmp_pa
     monkeypatch.setattr(gen, 'ROOT', tmp_path)
     monkeypatch.setattr(gen, 'STANDING_BLOCKERS', [dict(b, pointer=ISSUE_05) for b in missing])
     assert 'is done' in gen._full_coverage_problem(matrix)
+    # Fail closed (GK B G1): no Status: line, or a status outside the open triage states.
+    done.write_text('# x\n\nno status here\n', encoding='utf-8')
+    assert 'without a Status: line' in gen._full_coverage_problem(matrix)
+    done.write_text('# x\n\nStatus: claimed\n', encoding='utf-8')
+    assert 'is claimed' in gen._full_coverage_problem(matrix)
+    done.write_text('# x\n\nStatus: ready-for-agent\n', encoding='utf-8')
+    assert gen._full_coverage_problem(matrix) is None
 
 
 def test_a_standing_blocker_dropped_from_the_matrix_fails_the_guard(matrix):
