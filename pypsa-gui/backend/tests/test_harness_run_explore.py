@@ -1399,3 +1399,48 @@ def test_a_case_name_fits_its_child_project_name_whole():
     refused("explore_case_name", empty_run(), [case(longest + "z", genset())])
     [admitted] = admit(empty_run(), [case(longest, genset())])
     assert admitted["name"] == longest
+
+
+def test_a_sweep_refused_at_preflight_leaves_the_step_uncertain_and_the_run_needs_the_user(
+    granted, explore_run, rated, monkeypatch
+):
+    """SH-06 deviation 2: one case failing network validation refuses the whole
+    sweep before any project or job exists. The step is not known to have run,
+    so it settles `uncertain`, the run needs the user, and nothing is judged
+    from a partial sweep."""
+    from services import chat_tools
+
+    real = chat_tools.validate_network
+    calls = []
+
+    def second_case_fails(*a, **k):
+        import inspect
+
+        if not any(f.function == "run_sensitivity_sweep" for f in inspect.stack()):
+            return real(*a, **k)  # the run's own gates validate as usual
+        calls.append(1)
+        if len(calls) == 2:
+            return {"ok": False, "errors": ["case 2 breaks the network"]}
+        return real(*a, **k)
+
+    monkeypatch.setattr(chat_tools, "validate_network", second_case_fails)
+    task, path, _ = granted()
+    jobs_before = [j["id"] for j in solve_queue.solve_queue.list_jobs()]
+    record = go(
+        harness_runner.Runner(
+            "a",
+            agent_provider=Script(propose(three()), say(".")),
+            decisions=lambda t, ref, h: "approve",
+        ),
+        path,
+        task,
+    )
+    run = record["run"]
+    [sweep] = [s for s in record["steps"] if s["tool"] == "run_sensitivity_sweep"]
+    assert len(calls) >= 2  # the refusing case was reached
+    assert sweep["status"] == "uncertain" and "job" not in sweep
+    assert run["status"] == "needs_user" and run["reason"] == "uncertain"
+    # only the baseline's own solve (the earlier enqueue step) is queued; no case job
+    assert len(solve_queue.solve_queue.list_jobs()) - len(jobs_before) == 1
+    assert not any(c["status"] in ("running", "done", "judged") for c in run["cases"])
+    assert not any(s["tool"] == "judge" or "judged_by" in s for s in record["steps"])

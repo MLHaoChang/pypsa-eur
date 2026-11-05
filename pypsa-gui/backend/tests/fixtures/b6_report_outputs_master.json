@@ -1,0 +1,242 @@
+{
+ "cost_breakdown": {
+  "by_carrier": [
+   {
+    "capex": 91939.83988,
+    "carrier": "ac",
+    "component": "Generator",
+    "fom": 0.0,
+    "opex": 0.0,
+    "total": 91939.83988
+   },
+   {
+    "capex": 7857.14285,
+    "carrier": "h2",
+    "component": "Link",
+    "fom": 714.28571,
+    "opex": 0.0,
+    "total": 7857.14285
+   },
+   {
+    "capex": 0.0,
+    "carrier": "-",
+    "component": "Load",
+    "fom": 0.0,
+    "opex": 0.0,
+    "total": 0.0
+   }
+  ],
+  "by_component": [
+   {
+    "capex": 91939.83988,
+    "capex_expansion": 91939.83987928458,
+    "capex_expansion_lifetime": 2142857.142857143,
+    "capex_lifetime": 2142857.142857143,
+    "component": "Generator",
+    "fom": 0.0,
+    "opex": 0.0,
+    "total": 91939.83988
+   },
+   {
+    "capex": 7857.14285,
+    "capex_expansion": 7857.142857142858,
+    "capex_expansion_lifetime": 204081.6326530612,
+    "capex_lifetime": 204081.6326530612,
+    "component": "Link",
+    "fom": 714.28571,
+    "opex": 0.0,
+    "total": 7857.14285
+   },
+   {
+    "capex": 0.0,
+    "capex_expansion": 0.0,
+    "capex_expansion_lifetime": 0.0,
+    "capex_lifetime": 0.0,
+    "component": "Load",
+    "fom": 0.0,
+    "opex": 0.0,
+    "total": 0.0
+   }
+  ],
+  "by_period": [],
+  "capex": 99796.98273,
+  "capex_expansion": 99796.98273642744,
+  "capex_expansion_lifetime": 2346938.7755102045,
+  "capex_lifetime": 2346938.7755102045,
+  "capex_lifetime_available": true,
+  "commercial": null,
+  "curtailment_cost": 0.0,
+  "fom": 714.28571,
+  "opex": 0.0,
+  "pcs_statcom_notes": [],
+  "storage_capex_expansion": 0.0,
+  "storage_capex_expansion_lifetime": 0.0,
+  "total": 99796.98273
+ },
+ "horizon_system_cost": 99796.98273,
+ "lcoh": {
+  "currency": "EUR",
+  "rows": [
+   {
+    "by_period": [],
+    "capex_eur_per_year": 7857.142857142858,
+    "carrier": "H2",
+    "efficiency": 0.7,
+    "electricity_cost_eur": 0.0,
+    "fom_eur_per_year": 714.2857142857143,
+    "h2_produced_mwh": 87600.0,
+    "lcoh_eur_per_kg_h2": 0.0029894814090019573,
+    "lcoh_eur_per_mwh_h2": 0.08969341161121984,
+    "name": "electrolyser",
+    "p_nom_opt_mw": 28.571428571428573,
+    "vom_cost_eur": 0.0
+   }
+  ],
+  "total": {
+   "by_period": [],
+   "capex_eur_per_year": 7857.142857142858,
+   "electricity_cost_eur": 0.0,
+   "fom_eur_per_year": 714.2857142857143,
+   "h2_produced_mwh": 87600.0,
+   "lcoh_eur_per_kg_h2": 0.0029894814090019573,
+   "lcoh_eur_per_mwh_h2": 0.08969341161121984,
+   "vom_cost_eur": 0.0
+  }
+ },
+ "objective_decomposition": {
+  "baseline_objective_constant": 0.0,
+  "cost_breakdown_total": 99796.98273,
+  "gap_eur": 6.427435437217355e-06,
+  "gap_pct": 6.440510786389939e-09,
+  "lp_basis_total": 99796.98273642744,
+  "lp_total": 99796.98273642744,
+  "lp_total_scope": "horizon",
+  "myopic_lp_sum": null,
+  "myopic_period_objectives": null,
+  "n_objective": 99796.98273642744,
+  "n_objective_constant": 0.0,
+  "nonextendable_fixed_cost_eur": 0.0,
+  "period_weighting_adjustment_eur": 6.427435437217355e-06,
+  "pypsa_gui_objective_scale": 1.0,
+  "residual_gap_eur": 0.0,
+  "residual_gap_pct": 0.0
+ },
+ "periodized_capital_costs": {
+  "generators": {
+   "gas": {
+    "build_year": 0.0,
+    "capital_cost": 500.0,
+    "fixed_cost": 600.0,
+    "fom_cost": 100.0,
+    "fom_cost_annual": 200.0,
+    "lifetime": 25.0,
+    "overnight_cost": 14285.714285714284,
+    "overnight_cost_available": true,
+    "overnight_cost_pv": 14285.714285714284
+   },
+   "pv": {
+    "build_year": 0.0,
+    "capital_cost": 214.526293051664,
+    "fixed_cost": 214.526293051664,
+    "fom_cost": 0.0,
+    "fom_cost_annual": 0.0,
+    "lifetime": 25.0,
+    "overnight_cost": 5000.0,
+    "overnight_cost_available": true,
+    "overnight_cost_pv": 5000.0
+   }
+  },
+  "links": {
+   "electrolyser": {
+    "build_year": 0.0,
+    "capital_cost": 250.0,
+    "fixed_cost": 275.0,
+    "fom_cost": 25.0,
+    "fom_cost_annual": 50.0,
+    "lifetime": 25.0,
+    "overnight_cost": 7142.857142857142,
+    "overnight_cost_available": true,
+    "overnight_cost_pv": 7142.857142857142
+   }
+  }
+ },
+ "statistics": [
+  {
+   "Capacity Factor": 0.3000000023333333,
+   "Capital Expenditure": 91939.83988,
+   "Curtailment": 0.0,
+   "Energy Balance": 563142.85714,
+   "Fixed O&M": 0.0,
+   "Installed Capacity": 0.0,
+   "Market Value": 0.16326200929708878,
+   "Operational Expenditure": 0.0,
+   "Optimal Capacity": 428.57143,
+   "Revenue": 91939.83988,
+   "Supply": 563142.85714,
+   "Transmission": 0.0,
+   "Withdrawal": 0.0,
+   "level_0": "Generator",
+   "level_1": "AC"
+  },
+  {
+   "Capacity Factor": 1.0,
+   "Capital Expenditure": 7142.85714,
+   "Curtailment": 0.0,
+   "Energy Balance": -125142.85714,
+   "Fixed O&M": 714.28571,
+   "Installed Capacity": 0.0,
+   "Market Value": null,
+   "Operational Expenditure": 0.0,
+   "Optimal Capacity": 28.57143,
+   "Revenue": -20431.07553,
+   "Supply": 0.0,
+   "Transmission": 0.0,
+   "Withdrawal": 125142.85714,
+   "level_0": "Link",
+   "level_1": "H2"
+  },
+  {
+   "Capacity Factor": null,
+   "Capital Expenditure": 0.0,
+   "Curtailment": 0.0,
+   "Energy Balance": -525600.0,
+   "Fixed O&M": 0.0,
+   "Installed Capacity": 0.0,
+   "Market Value": null,
+   "Operational Expenditure": 0.0,
+   "Optimal Capacity": 0.0,
+   "Revenue": -99796.98274,
+   "Supply": 0.0,
+   "Transmission": 0.0,
+   "Withdrawal": 525600.0,
+   "level_0": "Load",
+   "level_1": "-"
+  }
+ ],
+ "value_flows_asset_costs": [
+  {
+   "capex": {
+    "_": 91939.83987928458
+   },
+   "component": "Generator",
+   "flags": [],
+   "fom": {},
+   "name": "pv",
+   "opex": {},
+   "side": "grid"
+  },
+  {
+   "capex": {
+    "_": 7142.857142857143
+   },
+   "component": "Link",
+   "flags": [],
+   "fom": {
+    "_": 714.2857142857143
+   },
+   "name": "electrolyser",
+   "opex": {},
+   "side": "grid"
+  }
+ ]
+}

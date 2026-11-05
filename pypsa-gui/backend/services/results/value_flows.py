@@ -19,7 +19,7 @@ period and unweighted (the `cost_rows` basis):
     `export_revenue_to="asset_owner"`, its per-interval split (and the tariff's
     export-revenue items') by site-side generation;
   * the assets — `n.statistics.capex / fom / opex(groupby=False)` inside the
-    same `with_periodized_cost_defaults(for_back_calculation=True)` fill
+    same `periodized_cost_view(for_back_calculation=True)` fill
     `cost_breakdown` uses, so the ledger re-adds to it exactly; each asset
     classed site / grid / unclassified by `participants.classify_buses`; a
     product slack (a `process_role` Generator) flagged `product_buy_in` /
@@ -131,15 +131,15 @@ def _shortfall_costs(n, sides, lost_load) -> tuple[list[P.AssetCost], dict[str, 
 
 
 def _asset_costs(n, cfg, parsed, sides, shortfall_costs=()) -> list[P.AssetCost]:
-    from services.solver_service import with_periodized_cost_defaults
+    from services.solver.periodized_costs import periodized_cost_view
 
     periods = [_key(p) for p in _periods(n)]
     # round=0: PyPSA rounds statistics to five decimals by default, and these
     # lines are money the finance case sums (IC engine ask 4).
-    with with_periodized_cost_defaults(n, cfg, for_back_calculation=True):
-        capex = _per_asset(n.statistics.capex(groupby=False, round=0), periods)
-        fom = _per_asset(n.statistics.fom(groupby=False, round=0), periods)
-        opex = _per_asset(n.statistics.opex(groupby=False, round=0), periods)
+    with periodized_cost_view(n, cfg, for_back_calculation=True) as view:
+        capex = _per_asset(view.statistics.capex(groupby=False, round=0), periods)
+        fom = _per_asset(view.statistics.fom(groupby=False, round=0), periods)
+        opex = _per_asset(view.statistics.opex(groupby=False, round=0), periods)
     roles = product_roles(n)
     shortfall = {a.name for a in shortfall_costs}
     out = list(shortfall_costs)

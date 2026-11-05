@@ -29,8 +29,8 @@ from services.solver_service import (
     upfront_cost_series as _upfront_cost_series,
     _pv_factor_series,
     _reference_build_year,
-    with_periodized_cost_defaults,
 )
+from services.solver.periodized_costs import periodized_cost_view
 from typing import Any
 
 # The SAME logger the router uses, not a child of it: `logger.exception(...)`
@@ -175,16 +175,16 @@ def compute_cost_breakdown(n, cfg):
         # `n.statistics()`: an asset with no `overnight_cost` keeps its raw
         # `capital_cost` whatever the discount rate says
         # (`pypsa.costs.periodized_cost`).
-        with with_periodized_cost_defaults(n, cfg, for_back_calculation=True):
-            stats = n.statistics()
+        with periodized_cost_view(n, cfg, for_back_calculation=True) as view:
+            stats = view.statistics()
             # Fixed O&M per (component, carrier, period) — added to every
             # "Capital Expenditure" cell below. See the docstring.
-            fom_lookup = statistics_fom_lookup(n)
+            fom_lookup = statistics_fom_lookup(view)
             # Per-asset lifetime-weighted CAPEX. Build inside the same block
             # so that lifetime fills (from solver config) are in place.
-            reference_year = _reference_build_year(n)
+            reference_year = _reference_build_year(view)
             for comp_attr, comp_class, nom in NOM_PAIRS:
-                df = getattr(n, comp_attr, None)
+                df = getattr(view, comp_attr, None)
                 if df is None or df.empty:
                     continue
                 # Upfront (overnight) cost per unit of capacity. PyPSA's
@@ -195,7 +195,7 @@ def compute_cost_breakdown(n, cfg):
                 # year investments are discounted back to year-0 (= min
                 # build_year). For single-instant runs the factor is 1.
                 try:
-                    upfront_series = _upfront_cost_series(n, comp_class)
+                    upfront_series = _upfront_cost_series(view, comp_class)
                 except Exception:
                     # PyPSA refuses the whole class when it cannot recover an
                     # upfront cost for even one asset. `continue` used to be
@@ -506,15 +506,15 @@ def compute_cost_breakdown(n, cfg):
     # as existing-fleet cost.
     capex_expansion_total = 0.0
     try:
-        with with_periodized_cost_defaults(n, cfg):
-            is_mp_exp = isinstance(n.snapshots, _pd.MultiIndex)
-            exp_periods = list(n.investment_periods) if is_mp_exp else [None]
+        with periodized_cost_view(n, cfg) as view:
+            is_mp_exp = isinstance(view.snapshots, _pd.MultiIndex)
+            exp_periods = list(view.investment_periods) if is_mp_exp else [None]
             for comp_attr, comp_class, nom in NOM_PAIRS:
-                df = getattr(n, comp_attr, None)
+                df = getattr(view, comp_attr, None)
                 if df is None or df.empty or f"{nom}_opt" not in df.columns or nom not in df.columns:
                     continue
                 try:
-                    rate = n.c[comp_class].capital_cost.reindex(df.index).fillna(0.0)
+                    rate = view.c[comp_class].capital_cost.reindex(df.index).fillna(0.0)
                 except Exception:
                     continue
                 if "fom_cost" in df.columns:
@@ -530,7 +530,7 @@ def compute_cost_breakdown(n, cfg):
                     if period is None:
                         comp_sum += float(per_unit.sum())
                         continue
-                    active = (n.get_active_assets(comp_class, period)
+                    active = (view.get_active_assets(comp_class, period)
                               .reindex(df.index).fillna(False).astype(bool))
                     comp_sum += float(per_unit[active].sum()) * _years_for_period(period)
                 if not _math.isfinite(comp_sum) or comp_sum <= 0:

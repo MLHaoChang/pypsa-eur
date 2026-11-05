@@ -124,9 +124,9 @@ def send_if_due(path):
         if not claimed:
             return
         result = {"sent": False, "error": "send_failed"}
-        try:
-            from services import email_service
+        from services import email_service
 
+        try:
             contact = runner._owner_contact(task)
             if contact is None:
                 result["error"] = "no_address"
@@ -143,6 +143,14 @@ def send_if_due(path):
                     },
                 )
                 result = {"sent": True}
+        except email_service.EmailConfigurationError:
+            result["error"] = (
+                "no_mailer"  # SMTP is not set up: recorded, not ambiguous (SH-25)
+            )
+            logger.warning(
+                "harness run %s: the loop-end notice was not sent, no mailer is configured",
+                task["task_id"],
+            )
         except Exception:  # noqa: BLE001 — the run stays needs_user; the failure is on the run
             logger.warning(
                 "harness run %s: the loop-end notice could not be sent",
