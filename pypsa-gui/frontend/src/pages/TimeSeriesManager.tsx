@@ -1150,12 +1150,19 @@ export default function TimeSeriesManager() {
     const applied = outcomes.reduce((n, o) => n + o.applied, 0)
     const failed = outcomes.filter(o => o.error)
     const steps = outcomes.filter(o => o.applied > 0).length
-    const done = `${applied} profile${applied === 1 ? '' : 's'} generated and applied`
-    const undoWords = steps > 1 ? `Undo (Ctrl+Z) reverts them in ${steps} steps, one per technology.` : 'Undo (Ctrl+Z) reverts them.'
+    const done = applied === 0 ? 'No profile was applied' : `${applied} profile${applied === 1 ? '' : 's'} generated and applied`
+    const undoWords = steps > 1 ? `Undo (Ctrl+Z) reverts them in ${steps} steps, one per technology.`
+      : applied === 1 ? 'Undo (Ctrl+Z) reverts it.' : 'Undo (Ctrl+Z) reverts them.'
     setGenNotice(failed.length
       ? { tone: 'error', text: `${done}. ${failed.map(o => `${o.generators.join(', ')}: ${o.error}`).join(' · ')}${applied > 0 ? ` ${undoWords}` : ''}` }
       : { tone: 'ok', text: `${done}. ${undoWords}` })
     void qc.invalidateQueries()
+  }
+  // Inline bus x/y through the normal bus edit (RP-04): the row turns ready
+  // once the readiness feed re-reads.
+  const setBusCoordinates = async (bus: string, x: number, y: number) => {
+    await networkApi.updateBus(bus, { name: bus, x, y })
+    await qc.invalidateQueries()
   }
   const focusUploadZone = () => {
     const el = document.querySelector<HTMLElement>('[data-testid="ts-upload-zone"]')
@@ -1993,7 +2000,7 @@ export default function TimeSeriesManager() {
                     {genNotice.text}
                   </p>
                 )}
-                {activeTab === 'renewable' && <MissingCoordinatesBanner rows={readinessRows} onUploadInstead={focusUploadZone} />}
+                {activeTab === 'renewable' && <MissingCoordinatesBanner rows={readinessRows} onUploadInstead={focusUploadZone} onSetCoordinates={setBusCoordinates} />}
                 {gensWithProfile.map(g => (
                   <GenItem key={g.name} gen={g} meta={gProfiles[g.name]}
                     readiness={activeTab === 'renewable' ? readinessOf(g.name) : undefined}
