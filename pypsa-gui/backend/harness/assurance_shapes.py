@@ -48,6 +48,21 @@ class Validity(_Closed):
     warnings: list[str]
 
 
+class CalculatedValidity(_Closed):
+    outcome: Literal["completed", "partial"]
+    as_of: Number
+    coverage: Literal["full_horizon"]
+    warnings: list[str]
+
+
+class ScopedValidity(_Closed):
+    """A scoped result states its slots' dispositions, not one outcome."""
+
+    as_of: Number
+    coverage: Literal["requested_population"]
+    warnings: list[str]
+
+
 class _Evidence(_Closed):
     version: Literal[1]
     evidence_id: str
@@ -172,6 +187,7 @@ class CalculatedEvidence(_Evidence):
     scope: CalculatedScope
     slots: list[Slot]
     raw: dict
+    validity: CalculatedValidity
 
 
 class ScopedEvidence(_Evidence):
@@ -181,6 +197,7 @@ class ScopedEvidence(_Evidence):
     scope: ScopedScope
     slots: list[Slot]
     raw: dict
+    validity: ScopedValidity
 
 
 # Keyed by `adapter_version`, as records.INPUT_ADAPTERS writes it; the two
