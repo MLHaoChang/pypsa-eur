@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant's solve, wait and abort results now carry a verified outcome (submitted, running, completed, partial, failed, cancel requested, cancelled or uncertain) read from the solve's own live state and run record, never from the tool's reply; an unreadable or other job's state reads uncertain.
