@@ -3,7 +3,7 @@
 
 # Heat as a modelled product: temperature bands and pressure levels
 
-Status: ready-for-agent (triage 2026-10-28: owner Q15 answered, wait for issue 10; gatekeeper triage of 2026-10-23 stands; gated, plan to GK A first)
+Status: done (#1142)
 Type: task
 Blocked by: 10 (owner Q15); 02 and 03 are done
 Gated: **yes** (schema and validator: send the gatekeeper the plan first)
