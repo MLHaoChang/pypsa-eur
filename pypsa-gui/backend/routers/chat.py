@@ -1482,10 +1482,13 @@ def checked_capabilities():
 
 @router.get("/reliability/contracts")
 def checked_contracts():
-    from harness.assurance_scope import RequestScope
-    from harness.assurance import Draft, ProfileDraft
-    return {"version": 1, "request_scope": RequestScope.model_json_schema(),
-            "observed_draft": Draft.model_json_schema(), "computed_draft": ProfileDraft.model_json_schema()}
+    # The reviewed version-1 snapshot CI freezes (tests/test_assurance_contracts.py):
+    # its request_scope, observed_draft and computed_draft equal the live schemas
+    # this route served before, and the rest are additive (AA-V1-CHANGE-1).
+    import json
+
+    from harness.assurance_contracts import SNAPSHOT
+    return json.loads(SNAPSHOT.read_text())
 
 
 @router.get("/operations/{operation_id}")

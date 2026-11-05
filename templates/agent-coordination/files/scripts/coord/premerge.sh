@@ -36,7 +36,10 @@ cd "$root"
 docs_only_re='^({{RELEASE_NOTES_DIR}}/.*|docs/.*\.md|(.*/)?(CONTEXT|GLOSSARY)\.md|GLOSSARY-MAP\.md)$'
 # A PR touching a path matching semantic_re must pass semantic_cmd on a trial
 # merge with the base branch. Leave semantic_re empty to skip this check.
-# semantic_cmd runs from the trial-merge worktree root.
+# semantic_cmd runs from the trial-merge worktree root. A test that pins a
+# committed snapshot (a frozen contract or schema) belongs in semantic_cmd, and
+# semantic_re must cover every module the snapshot is built from: otherwise a
+# PR that changes one passes alone and leaves the base branch's snapshot stale.
 semantic_re=''
 semantic_cmd=(python3 -m pytest -q -p no:cacheprovider)
 # Overlap only in paths matching waive_overlap_re does not block when the trial

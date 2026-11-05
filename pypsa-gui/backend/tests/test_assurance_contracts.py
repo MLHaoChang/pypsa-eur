@@ -218,3 +218,29 @@ def test_published_guard_schema_is_the_enforced_one():
             effects.validate(_contract(**forged))
         with pytest.raises(ValueError):
             effects.EffectContract.model_validate(_contract(**forged))
+
+
+def test_contracts_route_serves_the_frozen_snapshot(frozen):
+    """`/reliability/contracts` serves what CI freezes, and still carries the
+    fields it served before the snapshot existed (AA-V1-CHANGE-1: additive)."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from harness.assurance import Draft, ProfileDraft
+    from harness.assurance_scope import RequestScope
+    from routers import chat
+
+    app = FastAPI()
+    app.include_router(chat.router, prefix="/api/chat")
+    response = TestClient(app).get("/api/chat/reliability/contracts")
+    assert response.status_code == 200
+    body = response.json()
+    assert body == frozen
+    assert body["version"] == 1
+    for key, model in (
+        ("request_scope", RequestScope),
+        ("observed_draft", Draft),
+        ("computed_draft", ProfileDraft),
+    ):
+        assert body[key] == json.loads(json.dumps(model.model_json_schema()))
+    assert {"effect_guard", "profiles", "checked_tools", "pending"} <= set(body)

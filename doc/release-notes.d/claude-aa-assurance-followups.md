@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): `/api/chat/reliability/contracts` serves the frozen version-1 assurance contracts (profiles, metric definitions, effect guard, checked-tool schema hashes and the pending list) alongside its existing request-scope and draft schemas, and the pre-merge check runs the contract snapshot test on a trial merge for PRs touching the modules it is built from.
