@@ -1499,6 +1499,42 @@ as data and marks an evaluation stale after a manual edit, which it never
 blocks. A study brief records `{thread_id, rev, items}`; `assistant_tasks._stale`
 reads a moved `rev` as `brief_stale`.
 
+### The research step (study harness issue 09)
+
+`harness/research.py`, the ledger in `services/source_ledger.py`, the provider
+capability in `harness/providers/research.py` (the only place that names the
+vendor's server tools). A profile's `research.gaps` mark what a run may look up
+(eh_site@1: the import tariff, stage `inputs`, EUR/MWh, energy charge excl.
+VAT). On entry to such a stage the runner runs one research turn
+(`research.due`, checked on the tick after the stage's entry, before its
+steps run; a confirmed value's steps carry the stage's prefix, so its gate
+waits for them), and only when
+the run's granted envelope has `research.allowed`: a run granted without it
+never researches.
+
+The turn's provider is `ResearchProvider(ReservingProvider(base))`; each send
+runs inside `send_reservation.research()`, so the reservation holds it under
+scope "research":
+web search and fetch are added to its requests only (never to a chat, L1 or L2
+request), and every send is held against `envelope.research.cost_cap_eur`
+(SH-RESEARCH-CAP-1, €2 by default, €10 at most) and the run's total before it
+goes out, server-tool fees included, so research never overshoots. A refused
+send ends the turn `cap_reached`; the gaps are listed and the run goes on. A
+provider without web search marks the step `not_available`.
+
+The turn offers `READ_TOOLS` plus `record_source` (`STAGE_ONLY_TOOLS`: in no
+other payload) and installs no write guard, so no write is reachable whatever
+the envelope covers; fetched pages are framed as untrusted data.
+`record_source` only proposes: `source_ledger.propose` refuses another unit or
+basis and checks the url and quote against the pages fetched in that turn
+(whitespace-folded only); anything else is an `unverified source`, never shown
+as sourced and never confirmable. A verified row puts the run `needs_user`
+with `waiting = {kind: research_confirm}`; `POST /api/chat/runs/{task_id}/research`
+(`research.decide`) confirms or rejects it. Confirming rejects the gap's other
+rows and adds two run steps, `put_library_item` then `attach_tariff`, each
+carrying `research_ref`, which `run_envelope` never admits: each is the user's
+own card. Rows, verdicts and listed gaps stay in `run.research` for the report.
+
 ### Send reservation (study harness issue 24)
 
 `harness/send_reservation.py` writes a durable hold before each model send of a
