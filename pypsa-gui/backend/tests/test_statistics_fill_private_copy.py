@@ -13,6 +13,7 @@ network, it reads the live network's static cost columns, exactly as a
 concurrent unlocked reader landing in that window would, and records whether
 the live network itself was the fill's target.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -32,7 +33,9 @@ COMPONENTS = ("generators", "links")
 def _build() -> pypsa.Network:
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2030-01-01", periods=4, freq="h"))
-    n.snapshot_weightings.loc[:, :] = 1095.0  # nyears = 0.5: a scaled FOM is visibly different
+    n.snapshot_weightings.loc[:, :] = (
+        1095.0  # nyears = 0.5: a scaled FOM is visibly different
+    )
     for carrier in ("AC", "gas", "H2"):
         n.add("Carrier", carrier)
     n.add("Bus", "el", carrier="AC")
@@ -40,14 +43,40 @@ def _build() -> pypsa.Network:
     n.add("Load", "load", bus="el", p_set=100.0)
     n.add("Load", "h2load", bus="h2", p_set=20.0)
     # Typed annual capital_cost + FOM: scaled by the fill.
-    n.add("Generator", "gas", bus="el", carrier="gas", p_nom_extendable=True,
-          capital_cost=1000.0, fom_cost=200.0, marginal_cost=10.0)
+    n.add(
+        "Generator",
+        "gas",
+        bus="el",
+        carrier="gas",
+        p_nom_extendable=True,
+        capital_cost=1000.0,
+        fom_cost=200.0,
+        marginal_cost=10.0,
+    )
     # Overnight-priced with a blank discount rate and lifetime: filled by the fill.
-    n.add("Generator", "pv", bus="el", carrier="AC", p_nom_extendable=True,
-          overnight_cost=5000.0, discount_rate=np.nan, lifetime=np.inf,
-          p_max_pu=0.3, marginal_cost=0.0)
-    n.add("Link", "electrolyser", bus0="el", bus1="h2", carrier="H2", p_nom_extendable=True,
-          efficiency=0.7, capital_cost=500.0, fom_cost=50.0)
+    n.add(
+        "Generator",
+        "pv",
+        bus="el",
+        carrier="AC",
+        p_nom_extendable=True,
+        overnight_cost=5000.0,
+        discount_rate=np.nan,
+        lifetime=np.inf,
+        p_max_pu=0.3,
+        marginal_cost=0.0,
+    )
+    n.add(
+        "Link",
+        "electrolyser",
+        bus0="el",
+        bus1="h2",
+        carrier="H2",
+        p_nom_extendable=True,
+        efficiency=0.7,
+        capital_cost=500.0,
+        fom_cost=50.0,
+    )
     return n
 
 
@@ -64,7 +93,9 @@ def _static(n) -> dict:
 def _assert_static_equal(before: dict, after: dict) -> None:
     assert before.keys() == after.keys()
     for key, series in before.items():
-        pd.testing.assert_series_equal(series, after[key], check_names=False, obj=str(key))
+        pd.testing.assert_series_equal(
+            series, after[key], check_names=False, obj=str(key)
+        )
 
 
 @pytest.fixture(scope="module")
@@ -96,27 +127,34 @@ def probe(monkeypatch, solved):
 
 def _cost_breakdown(n, cfg):
     from services.results.cost_breakdown import compute_cost_breakdown
+
     return compute_cost_breakdown(n, cfg)
 
 
 def _statistics(n, cfg):
     from services.results.statistics import compute_statistics
+
     return compute_statistics(n, cfg)
 
 
 def _objective_decomposition(n, cfg):
     from services.results.objective_decomposition import compute_objective_decomposition
+
     return compute_objective_decomposition(n, _cost_breakdown(n, cfg), cfg)
 
 
 def _lcoh(n, cfg):
     from services.results.lcoh import compute_lcoh
-    result_df = pd.DataFrame({"electrolyser": [1.0] * len(n.snapshots)}, index=n.snapshots)
+
+    result_df = pd.DataFrame(
+        {"electrolyser": [1.0] * len(n.snapshots)}, index=n.snapshots
+    )
     return compute_lcoh(n, cfg, result_df=result_df)
 
 
 def _horizon_cost(n, cfg):
     from services.cost_totals import horizon_system_cost
+
     return horizon_system_cost(n, cfg)
 
 
@@ -127,8 +165,11 @@ def _asset_costs(n, cfg):
 def _value_flow_assets(n, cfg):
     from services.commercial.participants import MeterSides
     from services.results import value_flows as VF
+
     # Every bus on the grid side: the classification is not under test.
-    sides = MeterSides(site=set(), grid=set(n.buses.index), bypass=set(), meter_links=set())
+    sides = MeterSides(
+        site=set(), grid=set(n.buses.index), bypass=set(), meter_links=set()
+    )
     return VF._asset_costs(n, cfg, None, sides)
 
 
@@ -185,13 +226,21 @@ def test_view_inside_an_in_place_fill_does_not_scale_twice(solved):
 
 # ── V1: the frames a view shares with the live network stay untouched ────────
 
+
 def _frame_digest(frame) -> tuple:
     hashed = pd.util.hash_pandas_object(frame, index=True)
-    return tuple(map(str, frame.columns)), int(hashed.sum()) if len(hashed) else 0, frame.shape
+    return (
+        tuple(map(str, frame.columns)),
+        int(hashed.sum()) if len(hashed) else 0,
+        frame.shape,
+    )
 
 
 def _shared_state(n) -> dict:
-    out = {("snapshot_weightings",): _frame_digest(n.snapshot_weightings), ("model",): id(n._model)}
+    out = {
+        ("snapshot_weightings",): _frame_digest(n.snapshot_weightings),
+        ("model",): id(n._model),
+    }
     for component in n.components:
         for attr, frame in component.dynamic.items():
             out[(component.name, attr)] = (id(frame), _frame_digest(frame))
@@ -207,14 +256,20 @@ def sharing_probe(monkeypatch, solved):
 
     def spy(n, cfg, **kwargs):
         revert = real(n, cfg, **kwargs)
-        seen.append({
-            "static_private": all(
-                n.components[c.name].static is not c.static for c in solved.components),
-            "dynamic_shared": all(
-                n.components[c.name].dynamic[attr] is frame
-                for c in solved.components for attr, frame in c.dynamic.items()),
-            "model_shared": n._model is solved._model,
-        })
+        seen.append(
+            {
+                "static_private": all(
+                    n.components[c.name].static is not c.static
+                    for c in solved.components
+                ),
+                "dynamic_shared": all(
+                    n.components[c.name].dynamic[attr] is frame
+                    for c in solved.components
+                    for attr, frame in c.dynamic.items()
+                ),
+                "model_shared": n._model is solved._model,
+            }
+        )
         return revert
 
     monkeypatch.setattr(PC, "fill_periodized_cost_defaults", spy)
@@ -229,11 +284,16 @@ def test_report_path_writes_no_shared_frame(name, solved, sharing_probe):
 
     assert sharing_probe, f"{name} ran no periodized-cost fill"
     for event in sharing_probe:
-        assert event == {"static_private": True, "dynamic_shared": True, "model_shared": True}, name
+        assert event == {
+            "static_private": True,
+            "dynamic_shared": True,
+            "model_shared": True,
+        }, name
     assert _shared_state(solved) == before
 
 
 # ── V2: no production path brings the in-place fill back ─────────────────────
+
 
 def test_only_the_solve_fills_in_place():
     """Every production call of the in-place fill helpers, by file. The
@@ -254,7 +314,9 @@ def test_only_the_solve_fills_in_place():
             if not isinstance(node, ast.Call):
                 continue
             func = node.func
-            called = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+            called = (
+                func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+            )
             if called in names:
                 key = f"{rel}:{called}"
                 calls[key] = calls.get(key, 0) + 1
@@ -266,6 +328,7 @@ def test_only_the_solve_fills_in_place():
 
 # ── V3: the original failure — an unlocked fingerprint read mid-call ─────────
 
+
 def test_fingerprint_read_mid_call_matches_the_read_before(monkeypatch, solved):
     """`run_envelope.settle` and the chat freshness checks hash the network
     with no lock. A read landing while a report path's fill is in force must
@@ -275,8 +338,12 @@ def test_fingerprint_read_mid_call_matches_the_read_before(monkeypatch, solved):
     from services.results.statistics import compute_statistics
     from services.workflow_tools import _network_input_fingerprint
 
-    ctx = SimpleNamespace(network=solved, solver_state={"solver_config": SolverConfig()},
-                          user_ts={}, user_ts_unreadable=[])
+    ctx = SimpleNamespace(
+        network=solved,
+        solver_state={"solver_config": SolverConfig()},
+        user_ts={},
+        user_ts_unreadable=[],
+    )
     before = _network_input_fingerprint(ctx)
     mid: list[str] = []
     real = PC.fill_periodized_cost_defaults
@@ -298,6 +365,7 @@ def test_fingerprint_read_mid_call_matches_the_read_before(monkeypatch, solved):
 
 # ── V4: scaling flags ────────────────────────────────────────────────────────
 
+
 def _registered(n) -> bool:
     with PC._FOM_SCALED_LOCK:
         return any(v is n for v in PC._FOM_SCALED.values())
@@ -307,9 +375,13 @@ def test_view_inside_an_in_place_fill_keeps_the_single_scaling(solved):
     cfg = SolverConfig()
     with with_periodized_cost_defaults(solved, cfg):
         with PC.periodized_cost_view(solved, cfg) as view:
-            assert view.generators.at["gas", "capital_cost"] == pytest.approx(1000.0 * 0.5)
+            assert view.generators.at["gas", "capital_cost"] == pytest.approx(
+                1000.0 * 0.5
+            )
             assert view.generators.at["gas", "fom_cost"] == pytest.approx(200.0 * 0.5)
-            assert view.links.at["electrolyser", "fom_cost"] == pytest.approx(50.0 * 0.5)
+            assert view.links.at["electrolyser", "fom_cost"] == pytest.approx(
+                50.0 * 0.5
+            )
         assert not _registered(view)
         assert PC.fom_is_scaled(solved)
     assert not PC.fom_is_scaled(solved)
@@ -356,9 +428,12 @@ def report_outputs(n) -> dict:
             return value.item()
         return str(value)
 
-    return json.loads(json.dumps(
-        {name: fn(n, SolverConfig()) for name, fn in sorted(ENTRY_POINTS.items())},
-        default=plain))
+    return json.loads(
+        json.dumps(
+            {name: fn(n, SolverConfig()) for name, fn in sorted(ENTRY_POINTS.items())},
+            default=plain,
+        )
+    )
 
 
 def _assert_close(expected, actual, where="$"):
