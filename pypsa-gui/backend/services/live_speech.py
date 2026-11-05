@@ -131,6 +131,30 @@ SPOKEN_PER_EPISODE_MAX = 16
 # A newer turn (typed, spoken, a drained correction) supersedes every answer
 # an earlier turn queued or has yet to queue (LC-T10).
 _TURN_EPOCH: dict[str, int] = {}
+# LC-T13 echo guard, under _TICKETS_LOCK and process-local like the outputs.
+# session_id -> recently claimed answers (normalized words, claim time, chars):
+# a final that repeats one of them while it may still be audible is our own
+# voice heard back through the mic, not the user. Kept after barge-in (late
+# audio can still echo); dropped with the session.
+_RECENT_SPOKEN: dict[str, list[dict[str, Any]]] = {}
+RECENT_SPOKEN_MAX = 4
+# Words kept per claimed answer, from its start (the opening is heard first).
+# A word takes at least one character plus a separator, so this never cuts an
+# answer short enough to be spoken (GK B (25) NOT OK @5029b0d7).
+ECHO_WORDS_MAX = live_media.MAX_TTS_TEXT_CHARS // 2
+ECHO_MIN_WORDS = 3
+# Echo window on time.monotonic(), from the claim:
+#   ECHO_BASE_S + chars / ECHO_CHARS_PER_S  (5 s plus about 1 s per 12 characters
+# of playback), inclusive at the boundary.
+ECHO_BASE_S = 5.0
+ECHO_CHARS_PER_S = 12.0
+# GK B (25) E4: session_id -> the latest notices for finals that were not
+# admitted (echo_ignored, clarify, not_an_approval), for the owner's GET /speech.
+# Status, fixed message, seq and generation only: never transcript text.
+# Under _TICKETS_LOCK; dropped with the session (every exit, rebind included).
+_NOTICES: dict[str, list[dict[str, Any]]] = {}
+NOTICES_MAX = 4
+_WORD_RE = re.compile(r'[^\W_]+(?:[.,][0-9]+)*')
 
 
 def _refuse(kind: str, message: str, status: int = 409) -> None:
@@ -226,6 +250,49 @@ def _drop_tickets(episode_id: str | None, session_id: str | None = None) -> None
         if session_id:
             _OUTPUTS.pop(session_id, None)
             _OUTPUT_DROPS.pop(session_id, None)
+            _RECENT_SPOKEN.pop(session_id, None)
+            _NOTICES.pop(session_id, None)
+
+
+def _words(text: str) -> list[str]:
+    """Lower-case words, punctuation dropped; "7.5" stays one word."""
+    return _WORD_RE.findall(text.lower())
+
+
+def _contains_run(haystack: list[str], needle: list[str]) -> bool:
+    n = len(needle)
+    return any(haystack[i:i + n] == needle for i in range(len(haystack) - n + 1))
+
+
+def _is_echo(session_id: str, text: str, now: float) -> bool:
+    """Under ``_TICKETS_LOCK``: the final repeats, word for word, at least
+    ``ECHO_MIN_WORDS`` words of an answer claimed for this session that may
+    still be playing. Shorter finals are never echo (the bare-approval rule
+    guards "yes")."""
+    words = _words(text)
+    if len(words) < ECHO_MIN_WORDS:
+        return False
+    for spoken in _RECENT_SPOKEN.get(session_id) or []:
+        window = ECHO_BASE_S + spoken['chars'] / ECHO_CHARS_PER_S
+        if now - spoken['claimed_at'] <= window and _contains_run(spoken['words'], words):
+            return True
+    return False
+
+
+def _not_admitted(
+    session: dict[str, Any], segment_id: str, seq: int, status: str, message: str,
+    **extra: Any,
+) -> dict[str, Any]:
+    """Reply for a final that gets no ticket, and keep a transcript-free
+    notice of it for the owner's ``state()``."""
+    with _TICKETS_LOCK:
+        _bounded_append(_NOTICES.setdefault(session['session_id'], []), {
+            'status': status,
+            'message': message,
+            'seq': seq,
+            'generation': int(session.get('generation', 1)),
+        }, NOTICES_MAX)
+    return {'status': status, 'segment_id': segment_id, **extra, 'message': message}
 
 
 def ambiguous_quantity(text: str) -> bool:
@@ -540,20 +607,25 @@ def submit_segment(
         session['last_seq'] = seq
         _save_if(path, thread, True)
         episode_id = session['episode_id']
+        with _TICKETS_LOCK:
+            echo = _is_echo(session_id, text, time.monotonic())
+        if echo:
+            # No transcript in the reply or the log: only the fixed message.
+            return _not_admitted(
+                session, segment_id, seq, 'echo_ignored',
+                'That matched the answer being read out, so it was not used. '
+                'Type it, or say it again after playback.',
+            )
         if ambiguous_quantity(text):
-            return {
-                'status': 'clarify',
-                'segment_id': segment_id,
-                'text': text,
-                'message': 'I heard two different numbers. Which value did you mean?',
-            }
+            return _not_admitted(
+                session, segment_id, seq, 'clarify',
+                'I heard two different numbers. Which value did you mean?', text=text,
+            )
         if is_bare_approval(text) and _pending_card(episode_id):
-            return {
-                'status': 'not_an_approval',
-                'segment_id': segment_id,
-                'text': text,
-                'message': 'Speech does not approve changes. Use Confirm on the card.',
-            }
+            return _not_admitted(
+                session, segment_id, seq, 'not_an_approval',
+                'Speech does not approve changes. Use Confirm on the card.', text=text,
+            )
         from services import utterance_admission as ua
 
         utterance_id = f'{SPEECH_ID_PREFIX}{segment_id}'
@@ -888,6 +960,12 @@ def claim_output(thread_id: str, *, token: str, session_id: str) -> dict[str, An
                     'This answer exceeds the remaining speech budget; it is shown, not spoken.',
                 )
             output['state'] = 'claimed'
+            recent = _RECENT_SPOKEN.setdefault(session_id, [])
+            _bounded_append(recent, {
+                'words': _words(output['text'])[:ECHO_WORDS_MAX],
+                'claimed_at': time.monotonic(),
+                'chars': output['chars'],
+            }, RECENT_SPOKEN_MAX)
             # Keep the waiting answers and this one (barge-in may still need it).
             _OUTPUTS[session_id] = [
                 o for o in _OUTPUTS[session_id] if o['state'] == 'queued' or o is output
@@ -1099,9 +1177,19 @@ def state(thread_id: str) -> dict[str, Any]:
     _require_enabled()
     with dc._LOCK:
         _, thread = _owner_thread(thread_id, renew=False)
+        generation = int(thread.get('generation', 1))
+        session = thread.get('speech')
+        notices: list[dict[str, Any]] = []
+        if session is not None:
+            with _TICKETS_LOCK:
+                notices = [
+                    dict(n) for n in _NOTICES.get(session.get('session_id'), [])
+                    if n['generation'] == generation
+                ]
         return {
-            'generation': int(thread.get('generation', 1)),
-            'session': _session_view(thread.get('speech')),
+            'generation': generation,
+            'session': _session_view(session),
+            'notices': notices,
         }
 
 
@@ -1119,4 +1207,6 @@ def _reset_for_tests() -> None:
         _SPOKEN.clear()
         _OUTPUTS.clear()
         _OUTPUT_DROPS.clear()
+        _RECENT_SPOKEN.clear()
+        _NOTICES.clear()
         _TURN_EPOCH.clear()

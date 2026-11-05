@@ -4,7 +4,7 @@
 # P3: verified action outcomes and real progress
 
 Status: ready-for-agent
-Progress: S1 (blocking foreground-job outcomes, harness/outcomes.py) in review; S2–S5 planned; update_component static inputs done (effects.py)
+Progress: S1 (blocking foreground-job outcomes, harness/outcomes.py) merged ee141c66; S1b (chat tool-line marks) in review; S2–S5 planned; update_component static inputs done (effects.py)
 Type: task
 Blocked by: 01, 02; live-voice issue 11 for nonblocking jobs
 
@@ -132,3 +132,35 @@ UX (9) GO for S1b (chat tool-line marks), rules:
 3. A stale "(running)" must not stay: update the line from the job's live
    state (preferred) or word it as of that moment ("was running"); say which.
 4. Shots of every mark state in Guided and Expert (component-level harness OK, #1053).
+
+### 2026-11-05 — S1b build (branch `claude/aa04-s1b-tool-line-marks`)
+
+`components/toolOutcome.ts` (pure): `_outcome.outcome` → glyph, word, tone
+and in-flight flag; an unknown string reads as uncertain. Words come from
+ACTIVITY_STATUS_WORDS (submitted → Queued, cancel_requested → Stopping,
+uncertain → Outcome unknown, denied → Denied added). ChatPanel writes the
+transcript line `<glyph> <tool> (<word>)` for a result with `_outcome` and
+renders the glyph aria-hidden in Guided and Expert; the checked-turn
+`_assurance` line and every tool without `_outcome` are unchanged.
+
+UX rule 3, both parts: an in-flight line takes the newest later `_outcome`
+of the same job id in the transcript (wait_for_job, abort_simulation); with
+no later read it reads "running as of 14:02" (Guided: "Running: start a solve,
+as of 14:02"). The global /simulation/status is not used: it carries no job
+identity. A reloaded transcript has no tool rows (history replays tool uses
+as `[tool: name]`), so no stale line comes back. Shots:
+`frontend/scripts/tool-outcome-shots.mjs`.
+
+GK B (25) plan conditions U1–U5 (no GK gate on the frontend-only PR) and UX (9)
+GO, applied: a job tool's returned result with a missing, malformed or
+non-version-1 `_outcome` reads "outcome unknown: the result could not be
+read", and the handler's `completed`/`status` are never read (U1); a cut
+result's `_outcome` is read strictly from the start of its preview, else
+unknown (U2); supersede only forward, same non-null job id, same project
+(U3); `adapter_pending` and `no_submission` read unknown with their own words
+(U4); the outcome table names all nine (U5). UX: the time gets a date
+("4 Nov 14:02") when it is from an earlier day; Guided keeps the glyph.
+
+UX (9) NOT OK @1d2a57e6 fixed: the reason follows a colon (Expert) or sits in
+brackets (Guided), with no em dash; both modes say "as of 14:02"; shots in
+`.scratch/assistant-assurance/shots/aa04-s1b-tool-outcome-{guided,expert}.png`.

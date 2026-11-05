@@ -79,3 +79,33 @@ describe('runFileRefusal (Export picker, LC-03 slice 2)', () => {
       .toBe("This run's kept results could not be downloaded. Current results were not substituted.")
   })
 })
+
+// LC-T10: a newer solve finishing invalidates the project's queries; the
+// past run's view re-reads that run's kept section only, never live results.
+describe('RunBoundView while a newer solve finishes (LC-T10)', () => {
+  const binding = { version: 1, project_id: 'p-1', project_name: 'oj-grid', scope: 'historical',
+    run_id: 'fg-old', section: 'results_capacity', data_sha256: 'a'.repeat(64) }
+  beforeEach(() => {
+    useUIStore.setState({ currentProject: 'oj-grid' })
+    vi.mocked(resultsEvidenceApi.run).mockReset()
+    vi.mocked(resultsEvidenceApi.run).mockResolvedValue({ status: 'ok', binding,
+      data: { run_id: 'fg-old', status: 'completed', section: 'results_capacity', data: { gas_mw: 100 } } } as never)
+  })
+
+  it('keeps the past run bound through every invalidation', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { container } = render(<QueryClientProvider client={client}>
+      <RunBoundView run={{ runId: 'fg-old', resultsTab: 'capex', section: 'results_capacity' }} tab="capex" />
+    </QueryClientProvider>)
+    const bound = () => container.querySelector<HTMLElement>('[data-result-tab="capex"][data-result-binding]')
+    await vi.waitFor(() => expect(bound()).not.toBeNull())
+    // What a finished job invalidates (useJobTerminalInvalidation), then everything.
+    await client.invalidateQueries({ queryKey: ['oj-grid', 'results'] })
+    await client.invalidateQueries()
+    await vi.waitFor(() => expect(vi.mocked(resultsEvidenceApi.run).mock.calls.length).toBeGreaterThan(1))
+    await vi.waitFor(() => expect(bound()).not.toBeNull())
+    expect(JSON.parse(bound()!.dataset.resultBinding!)).toMatchObject({ scope: 'historical', run_id: 'fg-old' })
+    expect(vi.mocked(resultsEvidenceApi.run).mock.calls.every(([run]) => run === 'fg-old')).toBe(true)
+    expect(resultsEvidenceApi.loadflow).not.toHaveBeenCalled()
+  })
+})
