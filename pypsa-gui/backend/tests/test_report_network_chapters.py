@@ -92,3 +92,10 @@ def test_a_solved_network_only_project_is_reportable(client, api_project, sessio
     assert r.status_code == 200, r.text[:300]
     assert r.json()["status"] == "running"
     _poll(client, name)  # the fake provider has no prose to give: the job ends; the route took the evidence
+    # The evidence-only report (no model) carries the chapters in the document.
+    made = client.post(f"/api/projects/{name}/reports", json={})
+    assert made.status_code == 200, made.text[:300]
+    doc = client.get(f"/api/projects/{name}/reports/{made.json()['report_id']}").json()
+    by_id = {s["section_id"]: s for s in doc["sections"]}
+    assert by_id[NC.HEADLINE]["status"] == "ok" and by_id[NC.CAPACITY]["category"] == "investment"
+    assert by_id[NC.DISPATCH]["status"] == "ok"
