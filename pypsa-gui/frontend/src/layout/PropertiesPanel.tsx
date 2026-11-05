@@ -22,6 +22,7 @@ import { updateAsset } from '../utils/assetWrite'
 // the backend's sentence, not axios' "Request failed with status code 409".
 import { blockerMessage } from '../utils/blockerMessage'
 import { isRenewableCarrier } from '../utils/carriers'
+import { hiddenLevelFields } from '../utils/busCarriers'
 import { ingestRescale } from '../utils/rescaleActions'
 import type { RescalePreview } from '../utils/rescale'
 import { networkApi } from '../api/network'
@@ -1018,6 +1019,9 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
         <AssetFieldsEdit
           schema={schema} fs={form} set={setForm} current={asset} provenance={provenance} series={series}
           carriers={carriers as Carrier[]} buses={buses as Bus[]}
+          // Issue 15: a device's reach shows where one of its buses carries heat or steam (or it is set).
+          hidden={hiddenLevelFields(['bus0', 'bus1', 'bus2', 'bus3', 'bus4'].map(k =>
+            (buses as Bus[]).find(b => b.name === form[k])?.carrier ?? ''), form, 'max_supply_temp_c', 'max_pressure_bar')}
           onCheck={{ p_nom_extendable: autofillNomMin('p_nom', 'p_nom_min') }}
           after={{
             p_nom_max: (
@@ -1407,6 +1411,8 @@ function BusPanel({ name }: { name: string }) {
             <AssetFieldsEdit
               schema={schema} fs={form} set={setForm} current={bus as unknown as Record<string, unknown>}
               provenance={provenance} carriers={carriers as Carrier[]} buses={[]}
+              // Issue 15: the supply temperature shows on a heat bus, the header pressure on a steam bus (or when set).
+              hidden={hiddenLevelFields([form.carrier ?? ''], form, 'temperature_c', 'pressure_bar')}
               // A "lat, lng" pair fills both coordinates at once, before the two fields.
               after={{ sub_network: <CoordPairInput fs={form} set={setForm} tip={docTip('bus.coordinates')} /> }}
             />

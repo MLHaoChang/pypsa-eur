@@ -24,6 +24,10 @@ export const FIELD_LABELS: Record<string, string> = {
   start_method: 'Start method',
   i_start_pu: 'Start current multiple',
   single_phase_share: 'Single-phase share',
+  temperature_c: 'Supply temperature',
+  pressure_bar: 'Header pressure',
+  max_supply_temp_c: 'Max supply temperature',
+  max_pressure_bar: 'Max steam pressure',
 }
 
 /** The ledger's label for each field its rows point at (DC-02: the grid
