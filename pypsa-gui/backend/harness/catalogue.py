@@ -2682,14 +2682,17 @@ TOOLS: list[dict[str, Any]] = [
     _t(
         "record_source",
         "Research turns only: propose a published value for one research gap. Give the "
-        "gap key, the value in the gap's unit and basis exactly (no conversion), the url "
+        "gap key, the value (or, for a range gap, low and high) in the gap's unit and basis "
+        "exactly (no conversion), the url "
         "of a page you fetched in this turn and a verbatim quote (at most 400 characters) "
         "from it that states the value. The server checks the quote against the fetched "
         "page; the user confirms the value on a card before anything is written. Returns "
         "the source row. Safety: read.",
         {
             "gap": {"type": "string", "description": "The research gap's key."},
-            "value": {"type": "number", "description": "The value, in the gap's unit."},
+            "value": {"type": "number", "description": "The value, in the gap's unit (a point gap)."},
+            "low": {"type": "number", "description": "A range gap's low end, in the gap's unit."},
+            "high": {"type": "number", "description": "A range gap's high end, in the gap's unit."},
             "unit": {"type": "string", "description": "The gap's unit, exactly."},
             "basis": {"type": "string", "description": "The gap's basis, exactly."},
             "url": {"type": "string", "description": "The fetched page's url."},
@@ -2697,7 +2700,7 @@ TOOLS: list[dict[str, Any]] = [
             "title": {"type": "string", "description": "The page's title."},
             "jurisdiction": {"type": "string", "description": "A tariff gap's country code, e.g. DE."},
         },
-        ["gap", "value", "unit", "basis", "url", "quote"],
+        ["gap", "unit", "basis", "url", "quote"],
     ),
 
     _t(

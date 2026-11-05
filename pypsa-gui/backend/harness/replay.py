@@ -50,6 +50,7 @@ def replay(events_path: Path, at_seq: int, provider: Any, *, model: str | None =
     from services import chat_service
 
     events = eventlog.read_events(Path(events_path))
+    eventlog.refuse_research_turn(events, at_seq, replaying=True)
     start = next((e for e in events if e["seq"] == at_seq), None)
     if start is None or start["type"] != "turn/start":
         raise ValueError(f"seq {at_seq} is not a turn/start in {events_path}")

@@ -88,7 +88,7 @@ function CurrentStage({ stage, view }: { stage: RunStage; view: RunMonitorView }
     {stage.loop && <div data-testid="run-loop">Round {stage.loop.round} of {stage.loop.of}</div>}
     {(view.monitor.research?.steps ?? []).filter(s => s.stage === stage.stage && RESEARCH_STOP[s.status] && s.gaps.length)
       .map(s => <div key={s.status} data-testid="run-research-step" data-status={s.status}>
-        {RESEARCH_STOP[s.status]}: {s.gaps.map(gapWords).join(', ')} {s.gaps.length === 1
+        {RESEARCH_STOP[s.status]}: {s.gaps.map(g => gapWords(g)).join(', ')} {s.gaps.length === 1
           ? 'stays as the template has it' : 'stay as the template has them'}.</div>)}
     <Budgets view={view} />
   </div>
@@ -104,7 +104,8 @@ const RESEARCH_STOP: Record<string, string> = {
   error: 'Research did not finish',
 }
 const GAP_WORDS: Record<string, string> = { import_tariff: 'Import tariff' }
-const gapWords = (gap: string) => GAP_WORDS[gap] ?? 'A value'
+// No profile has an explore range gap yet (issue 29), so an unknown range says "A range".
+const gapWords = (gap: string, ranged = false) => GAP_WORDS[gap] ?? (ranged ? 'A range' : 'A value')
 
 /** The research card: one researched value beside its source, for the user to
  *  use or reject. A value is written only after this, each write on its own card. */
@@ -114,10 +115,12 @@ function ResearchCard({ row, others, busy, onDecide }: {
 }) {
   const sourced = row.source === 'sourced' && row.url
   const usable = row.confirmable && sourced
+  // Issue 29: an explore gap's sourced range is read by a case, never written.
+  const thing = row.range ? 'range' : 'value'
   return <div data-testid="run-research-card" className="mt-1 rounded border border-border p-2">
-    <div className="font-medium">{gapWords(row.gap)} found on the web</div>
+    <div className="font-medium">{gapWords(row.gap, !!row.range)} found on the web</div>
     <div data-testid="run-research-value">
-      {row.value} {row.unit} <span className="text-muted">({row.basis}{row.jurisdiction ? `, ${row.jurisdiction}` : ''})</span>
+      {row.range ? `${row.range.low}–${row.range.high}` : row.value} {row.unit} <span className="text-muted">({row.basis}{row.jurisdiction ? `, ${row.jurisdiction}` : ''})</span>
     </div>
     {sourced ? <>
       <a href={row.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline break-all"
@@ -125,15 +128,17 @@ function ResearchCard({ row, others, busy, onDecide }: {
       <blockquote data-testid="run-research-quote" className="my-1 border-l-2 border-border pl-2 italic">“{row.quote}”</blockquote>
     </> : <div data-testid="run-research-unverified" className="text-warn">Unverified source: not used</div>}
     {others > 0 && <div className="text-muted" data-testid="run-research-others">
-      {others} other {others === 1 ? 'source' : 'sources'} for this value: using this one rejects {others === 1 ? 'it' : 'them'}.</div>}
+      {others} other {others === 1 ? 'source' : 'sources'} for this {thing}: using this one rejects {others === 1 ? 'it' : 'them'}.</div>}
     <div className="mt-1 flex gap-3">
       {usable && <button type="button" disabled={busy} data-testid="run-research-use"
-        className="text-accent hover:underline disabled:opacity-40" onClick={() => onDecide('confirmed')}>Use this value</button>}
+        className="text-accent hover:underline disabled:opacity-40" onClick={() => onDecide('confirmed')}>Use this {thing}</button>}
       <button type="button" disabled={busy} data-testid="run-research-reject"
         className="text-muted hover:text-text disabled:opacity-40" onClick={() => onDecide('rejected')}>Reject</button>
     </div>
-    {usable && <p className="text-muted">Using it adds it to the Library and attaches it
-      {GAP_WORDS[row.gap] ? ` to the ${GAP_WORDS[row.gap].toLowerCase()}` : ''}, each on its own card.</p>}
+    {usable && (row.range
+      ? <p className="text-muted">Using it lets a case explore this range. Nothing is written to the model.</p>
+      : <p className="text-muted">Using it adds it to the Library and attaches it
+        {GAP_WORDS[row.gap] ? ` to the ${GAP_WORDS[row.gap].toLowerCase()}` : ''}, each on its own card.</p>)}
   </div>
 }
 

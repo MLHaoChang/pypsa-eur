@@ -6479,14 +6479,16 @@ def set_requirement(requirement: dict | None = None, replaces: str | None = None
     return requirements.set_requirement(requirement, replaces, retire)
 
 
-def record_source(gap: str, value: float, unit: str, basis: str, url: str, quote: str,
-                  title: str = "", jurisdiction: str | None = None) -> dict:
+def record_source(gap: str, unit: str, basis: str, url: str, quote: str,
+                  value: float | None = None, title: str = "", jurisdiction: str | None = None,
+                  low: float | None = None, high: float | None = None) -> dict:
     """Study harness issue 09: propose a source row in a research turn. A
     refused row is a tool error of its kind (`research.ERROR_KINDS`)."""
     from harness import research
 
     try:
-        return research.record_source(gap, value, unit, basis, url, quote, title, jurisdiction)
+        return research.record_source(gap, value, unit, basis, url, quote, title, jurisdiction,
+                                      low=low, high=high)
     except research.ResearchError as exc:
         raise HTTPException(status_code=422, detail={"error_kind": exc.kind, "message": str(exc)}) from exc
 

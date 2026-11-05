@@ -1586,6 +1586,7 @@ def run_turn(
             ended_by=_ended_by,
             usage_at_start=_usage_at_start,
             attachment_file_ids=attachment_file_ids,
+            display_record=getattr(type(provider), "display_record", True),
         )
         # Issue 13 (shadow): close the turn on the event log, one fsync.
         from harness import eventlog as _eventlog
@@ -1709,6 +1710,7 @@ def _persist_interrupted_turn(
     ended_by: str | None,
     usage_at_start: dict[str, Any],
     attachment_file_ids: list[str] | None,
+    display_record: bool = True,
 ) -> None:
     """
     Write the display-only record of a turn that produced model output and
@@ -1752,8 +1754,9 @@ def _persist_interrupted_turn(
         # Issue 13: logged first, then projected to chat.jsonl.
         from harness import eventlog
 
-        eventlog.turn_record(session, record)
-        append_turn(ctx, record)
+        if display_record:  # none for a research turn (issue 29, GK B Q3)
+            eventlog.turn_record(session, record)
+            append_turn(ctx, record)
     except Exception:  # noqa: BLE001 — persistence is best-effort
         logger.exception("chat: failed to persist an interrupted turn")
 
@@ -2437,6 +2440,10 @@ def _run_turn_body(
                             "answer_id"
                         ],
                     }
+                # What the history (and its event log) keeps: a provider may
+                # stub content it must not persist (issue 29, GK B F4).
+                if callable(getattr(type(provider), "persistable", None)):
+                    history_msg = provider.persistable(history_msg)
                 session.append_history_message(history_msg)
 
         tool_uses = [b for b in assistant_blocks if b.get("type") == "tool_use"]
@@ -2507,8 +2514,10 @@ def _run_turn_body(
                 # Issue 13: logged first, then projected to chat.jsonl.
                 from harness import eventlog as _eventlog
 
-                _eventlog.turn_record(session, turn_record)
-                append_turn(ctx, turn_record)
+                # A research turn writes no display record (issue 29, GK B Q3).
+                if getattr(type(provider), "display_record", True):
+                    _eventlog.turn_record(session, turn_record)
+                    append_turn(ctx, turn_record)
             except Exception:  # noqa: BLE001 — persistence is best-effort
                 logger.exception("chat: failed to persist turn to chat.jsonl")
                 if session.assurance_turn is not None:
