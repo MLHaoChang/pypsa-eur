@@ -251,6 +251,23 @@ describe('RunMonitor', () => {
     expect(text).not.toMatch(/to the a value/i)
   })
 
+  it('research: a sourced range shows low–high and writes nothing to the model (issue 29)', async () => {
+    const ranged = structuredClone(STATES.research_confirm)
+    ranged.monitor.research!.rows.forEach(r => {
+      r.gap = 'bess_capex'; r.value = null; r.range = { low: 180, high: 260 }; r.unit = 'EUR/kWh'
+      r.basis = 'installed, turnkey'; delete r.jurisdiction
+    })
+    vi.mocked(api.getRun).mockResolvedValue(ranged)
+    useUIStore.setState({ uiMode: 'guided' })
+    render(<AssistantResultCard result={START} disabled={false} onRequest={vi.fn()} />)
+    expect((await screen.findByTestId('run-research-value')).textContent).toBe('180–260 EUR/kWh (installed, turnkey)')
+    expect(screen.getByTestId('run-research-card').textContent).toMatch(/^A range found on the web/)
+    expect(screen.getByTestId('run-research-use').textContent).toBe('Use this range')
+    const text = screen.getByTestId('run-research-card').textContent
+    expect(text).toContain('Using it lets a case explore this range. Nothing is written to the model.')
+    expect(text).not.toContain('Library')
+  })
+
   it('research: an unverified waiting row shows no source and offers only Reject', async () => {
     show('research_unverified')
     expect((await screen.findByTestId('run-research-unverified')).textContent).toBe('Unverified source: not used')

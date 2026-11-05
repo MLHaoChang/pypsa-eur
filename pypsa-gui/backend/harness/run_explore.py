@@ -201,8 +201,16 @@ def _within(change, rng):
 
 
 def _research_row(run, row_id):
+    """The verified, non-rejected range row `row_id` of its explore gap, as
+    `source_ledger.ranges` (SH-29) lists them; None when it is not one."""
+    from services import source_ledger
+
     rows = ((run.get("research") or {}).get("rows")) or []
-    return next((r for r in rows if r.get("id") == row_id), None)
+    row = next((r for r in rows if r.get("id") == row_id), None)
+    gap = ((row or {}).get("for") or {}).get("gap")
+    if not gap:
+        return None
+    return next((r for r in source_ledger.ranges(rows, gap) if r.get("id") == row_id), None)
 
 
 def _check_network_change(run, levers, change):
@@ -250,7 +258,6 @@ def _check_network_change(run, levers, change):
         if (
             row is None
             or row.get("value") is not None
-            or row.get("verification") != "verified"
             or row.get("status") != "confirmed"
             or row.get("unit") != lever["unit"]
             or (target.get("component"), target.get("attr")) != (component, attr)
