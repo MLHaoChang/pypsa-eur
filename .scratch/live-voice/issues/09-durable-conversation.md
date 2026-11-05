@@ -201,6 +201,10 @@ lease and the generation CAS. The whole request is checked before any write:
 (A2/A3). These are durable-route refusals like `thread_not_found`, not tool
 errors, so they stay out of tool-error-kinds.json, whose manifest test rejects
 kinds no tool emits. The route has no GUI caller yet, so parity needs no
-declaration, the same as `/profile`. Tests:
-`tests/test_durable_conversation_reconcile.py` (18 passed); the mutants for
-A1 (owner check, ACL read) and A7 (kind) turn it red.
+declaration, the same as `/profile`. The route body leaves `resolutions`
+loose, so the HTTP path also gets the typed kinds. `_job_state` reads any failure as
+"not verifiable", so an unexpected error cannot become a 500 oracle. Tests:
+`tests/test_durable_conversation_reconcile.py` (19 passed). One of them runs
+`_job_state` on the real `_acting` / `_visible_job_or_404` / `owners` path:
+own, foreign, other-org, unknown and malformed jobs. Mutants for A1 (dropping
+the owner check, bypassing the ACL read) and A7 (the kind) each turn it red.

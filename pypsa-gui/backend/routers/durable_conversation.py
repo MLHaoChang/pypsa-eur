@@ -1,7 +1,7 @@
 """Thin HTTP surface for durable parent conversation threads (issue 09 / B-I1)."""
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -42,18 +42,13 @@ class RebindBody(BaseModel):
     generation: int = Field(..., ge=1)
 
 
-class ReconcileResolution(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-    key: str = Field(..., min_length=1, max_length=512)
-    resolution: Literal['done', 'not_done', 'dismissed']
-
-
 class ReconcileBody(BaseModel):
+    """Resolutions stay loose here: ``dc.reconcile_effects`` validates the
+    whole list itself, so every malformed request gets the same typed 422."""
+
     model_config = ConfigDict(extra='forbid')
     generation: int = Field(..., ge=1)
-    resolutions: list[ReconcileResolution] = Field(
-        default_factory=list, max_length=dc.RECONCILE_MAX,
-    )
+    resolutions: Any = Field(default_factory=list)
 
 
 class ProfileBody(BaseModel):
@@ -111,7 +106,7 @@ def reconcile_thread(
     return dc.reconcile_effects(
         thread_id,
         generation=body.generation,
-        resolutions=[item.model_dump() for item in body.resolutions],
+        resolutions=body.resolutions,
     )
 
 

@@ -554,12 +554,12 @@ def _job_state(job_id: str, owner_id: str) -> str | None:
             if str(user.id) != owner_id:
                 return None
             job = queue_router._visible_job_or_404(db, user, job_id)
-    except HTTPException:
+        canonical = uuid.UUID(str(job['id']))
+        queued_by = solve_queue.owners().get(str(canonical))
+        if queued_by is None:
+            queued_by = (solve_job_store.load_job(canonical) or {}).get('enqueued_by_user_id')
+    except Exception:  # noqa: BLE001 — any failure reads as "not verifiable", never a 500 oracle
         return None
-    queued_by = solve_queue.owners().get(job_id)
-    if queued_by is None:
-        row = solve_job_store.load_job(uuid.UUID(job_id)) or {}
-        queued_by = row.get('enqueued_by_user_id')
     status = job.get('status')
     if queued_by is None or str(queued_by) != owner_id or not status:
         return None
@@ -584,8 +584,8 @@ def _verify_jobs(thread: dict[str, Any]) -> None:
 RECONCILE_RESOLUTIONS = frozenset({'done', 'not_done', 'dismissed'})
 
 
-def _open_entries(thread: dict[str, Any], resolutions: Any) -> list[tuple[dict, str]]:
-    """Validate a whole resolution request before anything changes."""
+def _validated_resolutions(thread: dict[str, Any], resolutions: Any) -> list[tuple[dict, str]]:
+    """Check a whole resolution request; return each open entry with its answer."""
     def invalid(message: str) -> None:
         _refuse('reconcile_request_invalid', message, 422)
 
@@ -603,7 +603,9 @@ def _open_entries(thread: dict[str, Any], resolutions: Any) -> list[tuple[dict, 
         if not isinstance(item, dict) or set(item) != {'key', 'resolution'}:
             invalid('Each resolution has exactly a key and a resolution.')
         key, resolution = item['key'], item['resolution']
-        if not isinstance(key, str) or resolution not in RECONCILE_RESOLUTIONS:
+        if not isinstance(key, str) or not key:
+            invalid('key must be a non-empty string.')
+        if resolution not in RECONCILE_RESOLUTIONS:
             invalid('resolution must be one of done, not_done, dismissed.')
         if key in seen:
             invalid('Each key may be resolved once per request.')
@@ -632,7 +634,7 @@ def reconcile_effects(thread_id: str, *, generation: int, resolutions: Any) -> d
         _require_authoritative_replica(thread)
         _require_generation(thread, generation)
         _live_episode(thread)
-        picked = _open_entries(thread, resolutions)
+        picked = _validated_resolutions(thread, resolutions)
         now = datetime.now(timezone.utc).isoformat()
         for entry, resolution in picked:
             entry.update(status='resolved', resolution=resolution, resolved_at=now)

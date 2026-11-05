@@ -383,6 +383,19 @@ def test_reconcile_route(client, monkeypatch, queue, no_replay):
         },
     )
     assert bad.status_code == 422
+    assert bad.json()["detail"]["error_kind"] == "reconcile_request_invalid"
+    over_cap = client.post(
+        url,
+        json={
+            "generation": resumed["generation"],
+            "resolutions": [
+                {"key": f"turn:{i}", "resolution": "done"}
+                for i in range(dc.RECONCILE_MAX + 1)
+            ],
+        },
+    )
+    assert over_cap.status_code == 422
+    assert over_cap.json()["detail"]["error_kind"] == "reconcile_request_invalid"
 
     ok = client.post(
         url,
@@ -395,3 +408,55 @@ def test_reconcile_route(client, monkeypatch, queue, no_replay):
     assert _entries(ok.json(), "turn")[0]["resolution"] == "done"
     assert _entries(ok.json(), "job")[0]["status"] == "verified"
     assert no_replay == []
+
+
+# ── A1 against the real queue ACL (no fakes for the read path) ─────────────
+
+
+def test_job_state_reads_the_real_queue_acl(
+    api_project, project_row, registry_key_for, seeded_identity, second_identity
+):
+    """The real ``_acting`` / ``_visible_job_or_404`` / ``owners`` path."""
+    from services.solve_queue import SolveJob, solve_queue
+
+    name = api_project("lv09-reconcile")
+    row = project_row(name)
+    owner = str(seeded_identity["user_id"])
+    parked: list[uuid.UUID] = []
+
+    def park(project_id, project_key, queued_by):
+        jid = uuid.uuid4()
+        with solve_queue._lock:
+            solve_queue._jobs[jid] = SolveJob(
+                id=jid,
+                project_id=project_id,
+                project_key=project_key,
+                enqueued_at=time.time(),
+                enqueued_by_user_id=queued_by,
+            )
+            solve_queue._order.append(jid)
+        parked.append(jid)
+        return str(jid)
+
+    try:
+        own = park(str(row.id), registry_key_for(name), seeded_identity["user_id"])
+        foreign = park(str(row.id), registry_key_for(name), second_identity["user_id"])
+        other_org = park(
+            str(uuid.uuid4()),
+            f"{second_identity['org_id']}:{uuid.uuid4()}",
+            seeded_identity["user_id"],
+        )
+        assert (
+            dc._job_state(own, owner) == solve_queue.get_job(uuid.UUID(own))["status"]
+        )
+        assert dc._job_state(foreign, owner) is None
+        assert dc._job_state(other_org, owner) is None
+        assert dc._job_state(str(uuid.uuid4()), owner) is None
+        assert dc._job_state("not-a-uuid", owner) is None
+        assert dc._job_state(own, str(second_identity["user_id"])) is None
+    finally:
+        with solve_queue._lock:
+            for jid in parked:
+                solve_queue._jobs.pop(jid, None)
+                if jid in solve_queue._order:
+                    solve_queue._order.remove(jid)
