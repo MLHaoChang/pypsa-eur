@@ -856,9 +856,10 @@ def test_a_sweep_is_counted_once_per_case_job_not_twice(granted, explore_run, ra
     assert run_envelope.solves_used(envelope) == len(jobs() - before) == 1 + 3
 
 
-def test_an_investment_case_runs_on_study_owned_forks_and_leaves_the_base_unchanged(
-    granted, explore_run, rated, ledger, monkeypatch
-):
+@pytest.fixture
+def study(monkeypatch):
+    """The decision study's tools, faked: what the explore steps called, and
+    `record`, the study run `study_run` reads (status and solves charged)."""
     calls = []
     from services import chat_tools
 
@@ -912,11 +913,19 @@ def test_an_investment_case_runs_on_study_owned_forks_and_leaves_the_base_unchan
     monkeypatch.setattr(edit_card_records, "_ledger_edit", fake_edit)
     monkeypatch.setattr(edit_card_records, "_stored_ledger_row", lambda args: stored)
     monkeypatch.setitem(chat_tools.DISPATCHERS, "set_study_parameter", fake_set_stored)
-    monkeypatch.setattr(
-        run_explore,
-        "study_run",
-        lambda project, study_id: {"status": "completed", "solves_charged": 3},
+    state = types.SimpleNamespace(
+        calls=calls, record={"status": "completed", "solves_charged": 3}
     )
+    monkeypatch.setattr(
+        run_explore, "study_run", lambda project, study_id: dict(state.record)
+    )
+    return state
+
+
+def test_an_investment_case_runs_on_study_owned_forks_and_leaves_the_base_unchanged(
+    granted, explore_run, rated, ledger, study
+):
+    calls = study.calls
     base_fp = workflow_tools._network_input_fingerprint(ctx(), exact=True)
     task, path, _ = granted()
     script = Script(propose([invest(capex())]), say("Investment case."))
@@ -939,6 +948,75 @@ def test_an_investment_case_runs_on_study_owned_forks_and_leaves_the_base_unchan
         s[4] for s in calls if s[0] == "set"
     )  # each ledger change carries its source
     assert workflow_tools._network_input_fingerprint(ctx(), exact=True) == base_fp
+
+
+def test_e5_an_investment_case_that_spends_less_than_it_reserved_settles_what_it_spent(
+    granted, explore_run, rated, ledger, study
+):
+    """GK B (23) E5: the case reserves its upper bound (3 option solves) and
+    settles what the study charged (1): on the case, on its envelope audit
+    row and in the run's solve count."""
+    study.record = {"status": "completed", "solves_charged": 1}
+    task, path, _ = granted()
+    record = go(
+        harness_runner.Runner(
+            "a",
+            agent_provider=Script(propose([invest(capex())]), say(".")),
+            decisions=Clicks(),
+        ),
+        path,
+        task,
+    )
+    [c] = record["run"]["cases"]
+    assert c["status"] == "passed"
+    assert (c["solves"]["reserved"], c["solves"]["used"]) == (3, 1)
+    envelope = envelope_of(path)
+    [row] = [a for a in envelope["audit"] if a["event"] == "explore"]
+    assert (row["reserved"], row["solves"]) == (3, 1)
+    others = sum(
+        1
+        for a in envelope["audit"]
+        if a["event"] == "used" and a.get("tool") in run_envelope.RUN_TOOLS
+    )
+    assert run_envelope.solves_used(envelope) == others + 1
+    assert record["run"]["budget"]["used"]["solves"] == run_envelope.solves_used(
+        envelope
+    )
+
+
+def test_e10_a_late_study_case_settles_failed_on_a_runner_tick_not_only_at_boot(
+    granted, explore_run, rated, ledger, study
+):
+    """GK B (23) E10: a study that never finishes settles failed past its
+    deadline on the runner's own tick (`advance` in `_step`); no boot sweep runs."""
+    from tests.test_harness_runner import later
+
+    study.record = {"status": "running"}
+    task, path, _ = granted()
+    runner = harness_runner.Runner(
+        "a",
+        agent_provider=Script(propose([invest(capex())]), say(".")),
+        decisions=Clicks(),
+    )
+    record = settle(
+        runner,
+        path,
+        task["task_id"],
+        lambda r: any(
+            c.get("status") == "running" for c in r["run"].get("cases") or []
+        ),
+    )
+    [c] = record["run"]["cases"]
+    assert c["status"] == "running" and c["deadline_epoch"]
+    late = harness_runner.Runner(
+        "b",
+        clock=later(
+            run_explore.STUDY_DEADLINE_SECONDS + harness_runner.LEASE_SECONDS + 1
+        ),
+    )
+    late.tick(path)
+    [c] = json.loads(path.read_text())["run"]["cases"]
+    assert c["status"] == "failed" and "deadline" in c["reason"]
 
 
 def test_a_lost_case_job_after_a_restart_is_uncertain_and_needs_the_user(
@@ -1289,3 +1367,35 @@ def test_a_profile_that_lowers_the_caps_is_held_to_them():
     with pytest.raises(run_explore.ExploreError) as err:
         run_explore.check_proposal(empty_run(), prof, [case("two", *bess())])
     assert err.value.kind == "explore_change_cap"
+
+
+# ── GK B (23): a change that is not an object; names that fit their fork ────
+
+
+@pytest.mark.parametrize("bad", [5, None, "genset", [1]])
+@pytest.mark.parametrize("engine", ["network", "study", "commercial"])
+def test_a_change_that_is_not_an_object_is_an_invalid_case_on_every_engine(
+    ledger, engine, bad
+):
+    entry = (
+        invest(capex(), bad)
+        if engine == "study"
+        else {**case("odd", genset(), bad), "engine": engine}
+    )
+    refused("invalid_explore_case", empty_run(), [entry])
+
+
+def test_a_case_name_fits_its_child_project_name_whole():
+    """GK B (23): the child project is "Explore <task8> <name>" within a
+    project name's 64 characters, never cut: two names that differ only at
+    their end are two projects, and a longer name is refused at proposal."""
+    longest = "a" * run_explore.NAME_CHARS
+    task = {"task_id": "0123456789abcdef"}
+    one, two = (
+        run_explore.case_project_name(task, {"name": longest[:-1] + end})
+        for end in ("x", "y")
+    )
+    assert one != two and len(one) == len(two) == run_explore.PROJECT_NAME_CHARS
+    refused("explore_case_name", empty_run(), [case(longest + "z", genset())])
+    [admitted] = admit(empty_run(), [case(longest, genset())])
+    assert admitted["name"] == longest

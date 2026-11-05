@@ -44,7 +44,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-NAME_CHARS = 60
+# A case name fits its child project name, "Explore <task8> <name>", in a
+# project name's 64 characters (GK B (23)): never cut, so never two alike.
+PROJECT_NAME_CHARS = 64
+NAME_CHARS = PROJECT_NAME_CHARS - len("Explore 12345678 ")
 NETWORK, STUDY = "network", "study"
 # Domains whose experiment adapters are live-voice 10's (not built here).
 NOT_RUNNABLE = {
@@ -222,7 +225,7 @@ def _check_network_change(run, levers, change):
     ):
         raise ExploreError(
             "explore_range_unsourced"
-            if "source" not in change
+            if isinstance(change, dict) and "source" not in change
             else "invalid_explore_case",
             "A change is {component, name, attr, value, range, source}.",
         )
@@ -333,7 +336,7 @@ def _check_study_case(entry, study):
         ):
             raise ExploreError(
                 "explore_range_unsourced"
-                if "source" not in (change or {})
+                if isinstance(change, dict) and "source" not in change
                 else "invalid_explore_case",
                 "An investment change is {key, value, range, source}.",
             )
@@ -425,6 +428,8 @@ def check_proposal(run, profile, cases) -> list[dict]:
                 "explore_change_cap",
                 f"A case changes at most {max_changes} things.",
             )
+        if not all(isinstance(c, dict) for c in changes):
+            raise ExploreError("invalid_explore_case", "Each change is an object.")
         engine = entry.get("engine", NETWORK)
         case = {"name": name, "engine": engine}
         if engine == NETWORK:
@@ -849,7 +854,7 @@ def failed_turn(path, *, boot, clock) -> bool:
 
 def case_project_name(task, case) -> str:
     """A network case's child project name (unique per run and case)."""
-    return f"Explore {task['task_id'][:8]} {case['name']}"[:64]
+    return f"Explore {task['task_id'][:8]} {case['name']}"
 
 
 def _changes_of(run, case):
@@ -1333,39 +1338,40 @@ def advance(path, *, boot, clock) -> bool:
 
 def expire(path, *, boot, clock) -> int:
     """The boot sweep (E10): a study case past its deadline settles failed
-    where this instance holds the lease or the lease has lapsed."""
+    where this instance holds the lease or the lease has lapsed. The lease
+    and the deadlines are read under the run's file lock, where it writes."""
     from harness import runner
 
-    task = runner._read(path)
-    run = (task or {}).get("run") or {}
     now = clock()
-    late = [
-        c["name"]
-        for c in run.get("cases") or []
-        if c.get("engine") == STUDY
-        and c.get("status") == "running"
-        and now > float(c.get("deadline_epoch") or 0)
-    ]
-    if not late:
-        return 0
-    lease = run.get("runner") or {}
-    if (
-        lease.get("lease_owner") not in (None, boot)
-        and float(lease.get("lease_until") or 0) > now
-    ):
-        return 0
+    hits = []
 
     def change(t):
-        hit = 0
-        for case in t["run"].get("cases") or []:
-            if case["name"] in late and case["status"] == "running":
+        run = t.get("run") or {}
+        lease = run.get("runner") or {}
+        if (
+            lease.get("lease_owner") not in (None, boot)
+            and float(lease.get("lease_until") or 0) > now
+        ):
+            return False
+        for case in run.get("cases") or []:
+            if (
+                case.get("engine") == STUDY
+                and case.get("status") == "running"
+                and now > float(case.get("deadline_epoch") or 0)
+            ):
                 case.update(
                     status="failed",
                     reason="The decision study did not finish before its deadline.",
                 )
-                hit += 1
-        return None if hit else False
+                hits.append(case["name"])
+        return None if hits else False
 
+    task = runner._read(path)
+    if not any(
+        c.get("engine") == STUDY and c.get("status") == "running"
+        for c in ((task or {}).get("run") or {}).get("cases") or []
+    ):
+        return 0  # nothing to settle: no lock taken
     with runner._file_lock(path):
         runner._update(path, change)
-    return len(late)
+    return len(hits)
