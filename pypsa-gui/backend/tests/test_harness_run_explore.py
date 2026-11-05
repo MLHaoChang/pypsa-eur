@@ -24,12 +24,17 @@ from harness import run_explore, runner as harness_runner
 from services import run_envelope, run_gates, run_profiles, solve_queue, workflow_tools
 from services.pypsa_service import PyPSAService
 from tests.test_assistant_tasks_study_brief import (  # noqa: F401
+    baseline,
+    dispatch,
+    edit,
+    helpers_state,
     session,
+    wait_until,
 )
 from tests.test_harness_envelope import BLOCK, envelope_of, granted, on_run, profile  # noqa: F401
 from tests.test_harness_envelope_atomic import ATOMIC, eh, writer  # noqa: F401
 from tests.test_harness_immutable_solve import held_queue  # noqa: F401
-from tests.test_harness_run_loops import Script, call, go, rated, say  # noqa: F401
+from tests.test_harness_run_loops import Script, call, go, rated, say, stopped  # noqa: F401
 from tests.test_harness_run_skeleton import site, start  # noqa: F401
 from tests.test_harness_runner import Clicks, detached, frames_of, settle, task_path  # noqa: F401
 
@@ -414,14 +419,33 @@ def test_e7_a_profile_listing_an_explore_only_lever_as_tunable_is_refused_at_loa
 # ── E8: propose_cases only in explore turns ─────────────────────────────────
 
 
-def test_e8_propose_cases_outside_an_explore_turn_refuses():
-    from harness.catalogue import TOOLS
+def test_e8_propose_cases_is_offered_only_in_an_explore_turn_and_refuses_outside():
+    """E8's reachability row: a stage-only tool, offered when the turn's
+    `stage_tools` are the explore stage's, never in chat; called outside an
+    explore turn it is a typed refusal."""
+    import types
+
+    from fastapi import HTTPException
+    from harness import session as harness_session
+    from harness.providers import wiring
+    from harness.toolsets import STAGE_ONLY_TOOLS
     from services import chat_tools
 
-    assert "propose_cases" in {t["name"] for t in TOOLS}
-    with pytest.raises(Exception) as err:
-        chat_tools.DISPATCHERS["propose_cases"](cases=three())
-    assert "explore" in str(err.value)
+    assert "propose_cases" in STAGE_ONLY_TOOLS
+    wire = types.SimpleNamespace(tools=True, wire="anthropic")
+    chat = harness_session.ChatSession(session_id="chat-e8")
+    chat_tools.set_chat_session(chat)
+    try:
+        offered = {t["name"] for t in wiring._tools_payload_for_profile(wire)}
+        assert "propose_cases" not in offered
+        chat.stage_tools = frozenset(run_profiles.EXPLORE_TOOLS)
+        offered = {t["name"] for t in wiring._tools_payload_for_profile(wire)}
+        assert offered == set(run_profiles.EXPLORE_TOOLS)
+        with pytest.raises(HTTPException) as refused:  # no explore turn on this session
+            chat_tools.DISPATCHERS["propose_cases"](cases=three())
+        assert refused.value.detail["error_kind"] == "explore_not_in_turn"
+    finally:
+        chat_tools.set_chat_session(None)
 
 
 # ── Engines and the solve budget ────────────────────────────────────────────
@@ -609,14 +633,16 @@ def explore_run(eh, monkeypatch):
     import pypsa  # noqa: F401
 
     network = ctx().network
+    # One modelled year, so the solve's capital-cost annuity is 1 and leaves
+    # the inputs as they were. G1 is a genset candidate: a case that caps it
+    # at 0 leaves the load unserved (the grid bus has no supply).
+    network.snapshot_weightings.loc[:, :] = 8760.0 / len(network.snapshots)
+    network.generators.loc["G1", ["p_nom_extendable", "p_nom", "capital_cost"]] = [True, 0.0, 1.0]
+    network.storage_units.at["S1", "capital_cost"] = 1.0
     if "poc_link" not in network.links.index:
-        network.add(
-            "Link",
-            "poc_link",
-            bus0=network.generators.at["G1", "bus"],
-            bus1=network.generators.at["G1", "bus"],
-            p_nom=100.0,
-        )
+        # The site's grid connection: the site bus to a grid bus of its own.
+        network.add("Bus", "grid", v_nom=network.buses.at["B1", "v_nom"])
+        network.add("Link", "poc_link", bus0="grid", bus1="B1", p_nom=100.0, carrier="AC")
     prof = copy.deepcopy(run_profiles.PROFILES["eh_site@1"])
     prof["explore"] = {
         "levers": copy.deepcopy(LEVERS),
@@ -640,6 +666,7 @@ def test_eh_site_connection_bess_genset_three_cases_each_with_its_gate_and_settl
 ):
     before = jobs()
     base_fp = workflow_tools._network_input_fingerprint(ctx(), exact=True)
+    active, revision = str(ctx().project_uuid), ctx().network_revision
     task, path, _ = granted()
     script = Script(propose(three()), say("Three options: connection, BESS, genset."))
     record = go(
@@ -672,18 +699,20 @@ def test_eh_site_connection_bess_genset_three_cases_each_with_its_gate_and_settl
         == run_envelope.solves_used(envelope_of(path))
     )
     assert {c["job"]["job_id"] for c in cases.values()} <= new
-    # The base is unchanged by the cases.
+    # The base is unchanged by the cases, and the case gates read each child
+    # from disk without activating it (E6).
     assert workflow_tools._network_input_fingerprint(ctx(), exact=True) == base_fp
+    assert str(ctx().project_uuid) == active and ctx().network_revision == revision
 
 
 def test_a_failing_case_does_not_fail_the_run(granted, explore_run, rated, monkeypatch):
     task, path, _ = granted()
-    # The genset case's fork is infeasible: its cap is under the load.
+    # The genset case's fork is infeasible: its 1 MW cap is under the 5 MW load.
     tiny = change(
         "Generator",
         "G1",
         "p_nom_max",
-        0.0,
+        1.0,
         0.0,
         120.0,
         "MW",
@@ -745,7 +774,8 @@ def test_a_not_runnable_case_settles_with_its_reason_and_no_job(
 def test_the_sweep_is_always_the_users_card_even_under_a_granted_envelope(
     granted, explore_run, rated
 ):
-    """Issue 08 (GK B (8), confirmed by GK B (21)): no envelope covers a sweep."""
+    """Issue 08 (GK B (8), confirmed by GK B (21)): no envelope covers a sweep.
+    The base is saved first (a sweep branches the saved file), on its own card."""
     task, path, _ = granted()
     record = go(
         harness_runner.Runner("a", agent_provider=Script(propose(three()), say("."))),
@@ -753,9 +783,16 @@ def test_the_sweep_is_always_the_users_card_even_under_a_granted_envelope(
         task,
     )
     run = record["run"]
+    [save] = [s for s in record["steps"] if s["tool"] == "save_project"]
     assert run["status"] == "needs_user" and run["stage"] == "explore"
-    assert run["waiting"]["kind"] == "card"
+    assert run["waiting"] == {**run["waiting"], "kind": "card", "ref": save["id"]}
+    # The save approved, the sweep still waits for the user's own card.
+    record = go(
+        harness_runner.Runner("a", decisions=Clicks(refs={save["id"]})), path, task
+    )
+    run = record["run"]
     [sweep] = [s for s in record["steps"] if s["tool"] == "run_sensitivity_sweep"]
+    assert run["status"] == "needs_user" and run["waiting"]["kind"] == "card"
     assert run["waiting"]["ref"] == sweep["id"] and sweep["status"] == "pending"
     assert all(c["status"] == "admitted" for c in run["cases"])
 
@@ -776,6 +813,7 @@ def test_e3_a_run_granted_before_explore_resumes_to_the_sweep_card_never_unatten
     it on, reaches the sweep card and runs no sweep without the user."""
     before = jobs()
     old = copy.deepcopy(explore_run)
+    old.pop("explore")  # the profile before issue 06 named no levers
     old["stages"] = {
         **old.get("stages", {}),
         "explore": {"skip": "Exploring cases is not part of a run yet."},
@@ -816,7 +854,7 @@ def test_a_sweep_is_counted_once_per_case_job_not_twice(granted, explore_run, ra
 
 
 def test_an_investment_case_runs_on_study_owned_forks_and_leaves_the_base_unchanged(
-    granted, explore_run, rated, monkeypatch
+    granted, explore_run, rated, ledger, monkeypatch
 ):
     calls = []
     from services import chat_tools
@@ -831,27 +869,49 @@ def test_an_investment_case_runs_on_study_owned_forks_and_leaves_the_base_unchan
 
     def fake_run(project, study_id, stage="options", fidelity="quick_screen"):
         calls.append(("run", stage))
-        return {
-            "stage": stage,
-            "run": {"state": "completed", "options": [{"status": "completed"}]},
-        }
+        return {"stage": stage, "run": {"status": "running"}}
 
     monkeypatch.setattr(chat_tools, "start_decision_study", fake_start)
     monkeypatch.setattr(chat_tools, "set_study_parameter", fake_set)
     monkeypatch.setattr(chat_tools, "run_decision_study", fake_run)
+    for name, fake in (
+        ("start_decision_study", fake_start),
+        ("set_study_parameter", fake_set),
+        ("run_decision_study", fake_run),
+    ):
+        monkeypatch.setitem(chat_tools.DISPATCHERS, name, fake)
+    # The ledger card's own adapter, on the fake study's rows: its old row,
+    # the edited row, and what is stored after the write (the edit's receipt).
+    import types
+
+    from harness import edit_card_records
+
+    def row(value, source, status):
+        return types.SimpleNamespace(
+            key="battery_capex", label="Battery capex", unit="EUR/kWh", value=value,
+            source=source, status=status, provenance=status,
+        )
+
+    stored = row(300.0, "pack", "default")
+
+    def fake_edit(args):
+        return None, stored, row(args["value"], args["source"], "customised")
+
+    def fake_set_stored(project, study_id, key, value, unit, source=None):
+        stored.__dict__.update(vars(row(value, source, "customised")))
+        return fake_set(project, study_id, key, value, unit, source)
+
+    monkeypatch.setattr(edit_card_records, "_ledger_edit", fake_edit)
+    monkeypatch.setattr(edit_card_records, "_stored_ledger_row", lambda args: stored)
+    monkeypatch.setitem(chat_tools.DISPATCHERS, "set_study_parameter", fake_set_stored)
     monkeypatch.setattr(
         run_explore,
         "study_run",
-        lambda project, study_id: {
-            "state": "completed",
-            "options": [{"status": "completed", "solves": 1}],
-        },
+        lambda project, study_id: {"status": "completed", "solves_charged": 3},
     )
     base_fp = workflow_tools._network_input_fingerprint(ctx(), exact=True)
     task, path, _ = granted()
-    script = Script(
-        propose([case("bess_invest", *bess(), engine="study")]), say("Investment case.")
-    )
+    script = Script(propose([invest(capex())]), say("Investment case."))
     record = go(
         harness_runner.Runner("a", agent_provider=script, decisions=Clicks()),
         path,
@@ -861,6 +921,7 @@ def test_an_investment_case_runs_on_study_owned_forks_and_leaves_the_base_unchan
     assert (
         c["engine"] == "study" and c["study_id"] == "st-1" and c["status"] == "passed"
     )
+    assert c["solves"] == {**c["solves"], "reserved": 3, "used": 3}  # E5: reserved, then settled
     assert calls[0] == ("start", "bess_at_site") and calls[-1] == ("run", "options")
     assert all(
         s[4] for s in calls if s[0] == "set"
@@ -869,7 +930,7 @@ def test_an_investment_case_runs_on_study_owned_forks_and_leaves_the_base_unchan
 
 
 def test_a_lost_case_job_after_a_restart_is_uncertain_and_needs_the_user(
-    granted, explore_run, rated, held_queue
+    granted, explore_run, rated
 ):
     """The sweep's jobs wait in a held queue; one row is gone with the
     process. A fresh runner settles that sweep step `uncertain` from the queue
@@ -877,23 +938,169 @@ def test_a_lost_case_job_after_a_restart_is_uncertain_and_needs_the_user(
     from tests.test_harness_runner import later
 
     task, path, _ = granted()
-    record = go(
+    script = Script(propose(three()), say("."))
+    record = go(  # every card but the sweep's: the run waits at the sweep card
         harness_runner.Runner(
-            "a", agent_provider=Script(propose(three()), say(".")), decisions=Clicks()
+            "a",
+            agent_provider=script,
+            decisions=lambda t, ref, h: None if ref == "explore.2" else "approve",
         ),
         path,
         task,
     )
-    [sweep] = [s for s in record["steps"] if s["tool"] == "run_sensitivity_sweep"]
-    assert sweep["status"] == "waiting" and record["run"]["status"] == "waiting_job"
-    assert {c["status"] for c in record["run"]["cases"]} == {"running"}
-    sweep["job"]["jobs"][0]["job_id"] = (
-        "00000000-0000-4000-8000-000000000000"  # gone with the process
+    assert record["run"]["waiting"]["ref"] == "explore.2"
+    queue = solve_queue.solve_queue
+    queue.pause()  # the sweep's jobs are enqueued and never run
+    try:
+        a = harness_runner.Runner("a", decisions=Clicks())
+        for _ in range(40):
+            a.tick(path)
+            flight = a._inflight.get(task["task_id"])
+            if flight is not None:
+                flight[1].join(120)
+            record = json.loads(path.read_text())
+            if all(c["status"] == "running" for c in record["run"]["cases"]) or stopped(record):
+                break
+        [sweep] = [s for s in record["steps"] if s["tool"] == "run_sensitivity_sweep"]
+        assert sweep["status"] == "waiting" and record["run"]["status"] == "waiting_job"
+        assert {c["status"] for c in record["run"]["cases"]} == {"running"}
+        sweep["job"]["jobs"][0]["job_id"] = (
+            "00000000-0000-4000-8000-000000000000"  # gone with the process
+        )
+        path.write_text(json.dumps(record))
+        rows = [j["id"] for j in solve_queue.solve_queue.list_jobs()]
+        from services import assistant_tasks
+
+        assistant_tasks._QUEUE_FOLLOWERS.clear()  # the restart: no follower of this process
+        b = harness_runner.Runner("b", clock=later())
+        assert b.tick(path) == "uncertain"
+        run = json.loads(path.read_text())["run"]
+        assert run["status"] == "needs_user" and run["reason"] == "uncertain"
+        assert [j["id"] for j in solve_queue.solve_queue.list_jobs()] == rows
+    finally:
+        queue.resume()
+
+
+# ── E4, E9: the proposal's write path, on a run file ────────────────────────
+
+
+@pytest.fixture
+def turn(tmp_path):
+    """A run in its explore stage whose lease this process (`a`) holds, and
+    an explore turn registered on a chat session; no envelope (no solves)."""
+    import time
+
+    from harness import session as harness_session
+    from services import chat_tools
+
+    folder = tmp_path / "project" / "assistant_tasks"
+    folder.mkdir(parents=True)
+    path = folder / "t-1.json"
+    lease = {"lease_owner": "a", "lease_until": time.time() + 90}
+    path.write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "task_id": "t-1",
+                "steps": [],
+                "run": {**empty_run(), "stage": "explore", "runner": lease},
+            }
+        )
     )
+    chat = harness_session.ChatSession(session_id="run:t-1")
+    chat_tools.set_chat_session(chat)
+    state = run_explore.Turn(path, explore_profile(), ("a", time.time), base_value, [])
+    run_explore._TURNS[chat.session_id] = state
+    try:
+        yield path
+    finally:
+        run_explore._TURNS.pop(chat.session_id, None)
+        chat_tools.set_chat_session(None)
+
+
+def tool_refusal(path, cases):
+    """The tool as the model calls it: a typed refusal, and the run file as it was."""
+    from fastapi import HTTPException
+    from services import chat_tools
+
+    before = path.read_bytes()
+    with pytest.raises(HTTPException) as err:
+        chat_tools.DISPATCHERS["propose_cases"](cases=cases)
+    assert path.read_bytes() == before  # fail closed: nothing admitted, nothing written
+    return err.value.detail["error_kind"]
+
+
+def ppa():
+    return case("ppa", genset(), engine="commercial")
+
+
+def lapsed(path):
+    record = json.loads(path.read_text())
+    record["run"]["runner"] = {"lease_owner": "b", "lease_until": record["run"]["runner"]["lease_until"]}
     path.write_text(json.dumps(record))
-    rows = [j["id"] for j in solve_queue.solve_queue.list_jobs()]
-    b = harness_runner.Runner("b", clock=later())
-    assert b.tick(path) == "uncertain"
-    run = json.loads(path.read_text())["run"]
-    assert run["status"] == "needs_user" and run["reason"] == "uncertain"
-    assert [j["id"] for j in solve_queue.solve_queue.list_jobs()] == rows
+
+
+TRIGGERS = {
+    "invalid_explore_case": lambda: [],
+    "explore_case_cap": lambda: [case(f"c{i}", genset()) for i in range(5)],
+    "explore_change_cap": lambda: [case("three", genset(), *bess())],
+    "explore_case_name": lambda: [case("same", genset()), case("SAME", genset())],
+    "explore_not_a_lever": lambda: [
+        case("load", change("Load", "L1", "p_set", 5.0, 0.0, 10.0, "MW", "profile:Load.L1.p_set"))
+    ],
+    "explore_value_out_of_range": lambda: [case("big", genset(value=130.0))],
+    "explore_range_unsourced": lambda: [case("said", genset(source="model:it said so"))],
+    "explore_solve_budget": lambda: [case("genset", genset())],  # no envelope: no solve left
+}
+
+
+def test_e9_every_refusal_kind_is_triggered_by_a_test():
+    kinds = {k["error_kind"] for k in run_explore.ERROR_KINDS}
+    assert kinds == set(TRIGGERS) | {"explore_not_in_turn"}
+    manifest = json.loads(
+        (
+            __import__("pathlib").Path(__file__).parents[2]
+            / "tool-error-kinds.d"
+            / "claude-sh-06-explore-cases.json"
+        ).read_text()
+    )
+    assert kinds == set(manifest["kinds"])
+
+
+@pytest.mark.parametrize("kind", sorted(TRIGGERS))
+def test_e9_each_refusal_is_typed_and_fails_closed(turn, kind):
+    assert tool_refusal(turn, TRIGGERS[kind]()) == kind
+
+
+def test_e9_a_base_class_error_is_never_reported_as_a_typed_refusal(turn, monkeypatch):
+    """The mutant that raises the base class (ValueError) instead of
+    ExploreError is no `explore_*` refusal: the tool's wrapper types only
+    the stage's own errors."""
+    from services import chat_tools
+
+    def mutant(cases):
+        raise ValueError("A run explores at most 4 cases (AI-558).")
+
+    monkeypatch.setattr(run_explore, "propose_cases", mutant)
+    with pytest.raises(ValueError):
+        chat_tools.DISPATCHERS["propose_cases"](cases=[ppa()])
+    assert issubclass(run_explore.ExploreError, ValueError)  # so the wrapper's except is the narrow one
+
+
+def test_e4_admission_writes_only_while_this_process_holds_the_lease(turn):
+    from services import chat_tools
+
+    out = chat_tools.DISPATCHERS["propose_cases"](cases=[ppa()])
+    assert out["admitted"] == [
+        {"name": "ppa", "engine": "commercial", "status": "not_runnable", "reason": run_explore.NOT_RUNNABLE["commercial"]}
+    ]
+    assert [c["name"] for c in json.loads(turn.read_text())["run"]["cases"]] == ["ppa"]
+    lapsed(turn)  # another runner took the run over meanwhile
+    assert tool_refusal(turn, [case("ppa2", genset(), engine="commercial")]) == "explore_not_in_turn"
+
+
+def test_e4_a_turn_that_lost_its_stage_writes_nothing(turn):
+    record = json.loads(turn.read_text())
+    record["run"]["stage"] = "report"
+    turn.write_text(json.dumps(record))
+    assert tool_refusal(turn, [ppa()]) == "explore_not_in_turn"

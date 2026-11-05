@@ -186,8 +186,10 @@ def _resolve(value, steps):
 
 
 def _next(task):
-    """The first step not done; a step a re-solve superseded (L2, issue 05) is never next."""
-    return next((s for s in task["steps"] if s["status"] != "completed" and not s.get("superseded")), None)
+    """The first step not done; a step a re-solve superseded (L2, issue 05), or
+    an explore step its cases judged (issue 06), is never next."""
+    return next((s for s in task["steps"]
+                 if s["status"] != "completed" and not s.get("superseded") and not s.get("judged_by")), None)
 
 
 def _check_brief(brief, ids, phased=True):
@@ -688,7 +690,7 @@ def _advance_run(path, ctx=None):
     Gates read the network, so they are evaluated outside the task lock and
     written only if (stage, attempts, fingerprint) did not move meanwhile; a
     caller that may not edit the project writes nothing (`gate_due`)."""
-    from harness import run_loops
+    from harness import run_explore, run_loops
     from services import flow_service, run_gates, run_profiles
     ctx = ctx or RUN_CONTEXT.get() or PyPSAService.get_active_context()
     for _ in range(2 * len(run_profiles.STAGES)):
@@ -725,11 +727,14 @@ def _advance_run(path, ctx=None):
                 _save(path, task)
                 name, stage = "input_gate", run["stages"]["input_gate"]
             if stage["status"] != "active" or any(
-                    s["status"] != "completed" and not s.get("superseded") and not run_loops.judged(Path(path), profile, s)
+                    s["status"] != "completed" and not s.get("superseded") and not s.get("judged_by")
+                    and not run_loops.judged(Path(path), profile, s)
                     for s in task["steps"] if s["id"].startswith(name + ".")):
                 return
             if run_loops.due(task):
                 return  # an input-loop round is due: the runner's agent turn first (issue 04)
+            if name == "explore" and run_explore.holds(task):
+                return  # issue 06: the proposal turn, its research, or a case still running first
             attempts = stage["attempts"]
         gate = _gate_now(task, run_loops.gate_rules(task, profile, name), ctx)
         # Issue 21 §3: what a failed input gate would ask for, read outside the lock.

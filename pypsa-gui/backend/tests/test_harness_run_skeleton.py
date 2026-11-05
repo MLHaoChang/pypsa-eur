@@ -201,6 +201,7 @@ def test_version_1_and_2_files_read_unchanged(session, site):
 
 def big(stages):
     profile = copy.deepcopy(run_profiles.EH_SITE)
+    profile.pop('explore', None)  # issue 06: only a profile with an explore stage names levers
     profile['stages'] = {name: {'actions': [{'tool': 'validate_network', 'args': {}}] * count,
                                 'rules': run_profiles.GENERIC[name].get('rules', [])}
                          for name, count in stages.items()}

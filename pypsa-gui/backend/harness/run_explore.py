@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import copy
 import fnmatch
+import json
 import math
 import re
 import threading
@@ -592,3 +593,608 @@ def propose_cases(cases) -> dict:
         "cases_left": CASES - len(task["run"]["cases"]),
         "note": "The harness runs the admitted cases on forks after this turn; the base project is unchanged.",
     }
+
+
+# ── The stage on the runner (slice 2): the turn, the steps, the case gates ───
+#
+# `due` → the runner's explore turn (`run_turn`, once per stage; without a
+# live envelope it records `no_envelope`, so zero cases is visible). The turn
+# appends the stage's steps, built by harness code from `run.cases` (E1):
+# one `run_sensitivity_sweep` for the network cases (always the user's card,
+# issue 08) and, per investment case, `start_decision_study` and then, once
+# its study id is known, one `set_study_parameter` per change and one
+# `run_decision_study`. `advance`, at the top of every runner step, maps each
+# step's outcome to its cases, judges each case on its own gate and settles
+# its solves (E5). A case that fails never fails the run (its step is
+# `judged_by` the stage); one whose job is lost stays `uncertain`.
+
+STAGE = "explore"
+STUDY_DEADLINE_SECONDS = 6 * 3600.0  # E10: a study case settles failed past it
+JUDGED = "explore"  # a step its cases judged (`step.judged_by`): never next, never a run stop
+# A sweep job outcome a case is judged on (LC-17); `unknown` is not one.
+_TERMINAL = ("completed", "failed", "aborted", "not_applied", "unverified")
+STUDY_RULE = {
+    "id": "ex.study.completed",
+    "fact": "explore.study.status",
+    "op": "eq",
+    "value": "completed",
+    "severity": "block",
+    "basis": "Every option of the decision study solved on its study-owned fork.",
+}
+
+
+def _profile(task):
+    from services import run_profiles
+
+    try:
+        return run_profiles.resolve(task["run"]["profile"])
+    except (KeyError, ValueError):
+        return None
+
+
+def due(task) -> bool:
+    """The run is in its active explore stage, the profile explores, no
+    research turn or loop round comes first, and no turn ran yet."""
+    from harness import research
+
+    run = task.get("run") or {}
+    if (
+        run.get("stage") != STAGE
+        or run.get("status") != "running"
+        or (run.get("loop") or {}).get("due")
+        or ((run.get("stages") or {}).get(STAGE) or {}).get("status") != "active"
+        or (run.get("explore") or {}).get("turn") is not None
+        or research.due(task)
+    ):
+        return False
+    profile = _profile(task)
+    return bool(profile and "explore" in profile and profile["stages"][STAGE].get("agent"))
+
+
+def holds(task) -> bool:
+    """The explore gate waits: the turn or its research is due, or a case
+    is not settled yet (its steps run, or `advance` has still to map or
+    judge them: a step's own dispatch thread enters `_advance_run` first)."""
+    from harness import research
+
+    run = task.get("run") or {}
+    if run.get("stage") != STAGE:
+        return False
+    return (
+        due(task)
+        or research.due(task)
+        or any(c.get("status") in ("admitted", "running") for c in run.get("cases") or [])
+    )
+
+
+def _base_value(ctx, target):
+    try:
+        frame = ctx.network.components[target["component"]].static
+        value = frame.at[target["name"], target["attr"]]
+        return float(value.item() if hasattr(value, "item") else value)
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return None
+
+
+def message(task, profile, ctx, solves_left) -> str:
+    """The turn's message: the stage file, then the levers with their base
+    values and the confirmed research ranges, fenced as data."""
+    from harness import fence, run_loops
+
+    network = ctx.network
+    levers = []
+    for lever in profile["explore"]["levers"]:
+        try:
+            names = [
+                str(n)
+                for n in network.components[lever["component"]].static.index
+                if fnmatch.fnmatchcase(str(n), lever["name"])
+            ]
+        except KeyError:
+            names = []
+        levers.append(
+            {
+                **{k: lever[k] for k in ("component", "name", "attr", "unit", "bounds", "basis")},
+                "source": f"profile:{_lever_ref(lever)}",
+                "explore_only": bool(lever.get("explore_only")),
+                "base": {
+                    n: _base_value(ctx, {"component": lever["component"], "name": n, "attr": lever["attr"]})
+                    for n in names[:20]
+                },
+            }
+        )
+    rows = [
+        {k: r.get(k) for k in ("id", "for", "range", "unit", "basis", "url")}
+        for r in ((task["run"].get("research") or {}).get("rows") or [])
+        if r.get("range") is not None and r.get("status") == "confirmed" and r.get("verification") == "verified"
+    ]
+    data = {
+        "levers": levers,
+        "research_ranges": rows,
+        "study": profile["explore"].get("study"),
+        "cases_left": CASES - len(task["run"].get("cases") or []),
+        "solves_left": solves_left,
+    }
+    return (
+        run_loops.instruction(task["run"]["profile"], STAGE)
+        + "\n\nWhat you may explore (data, not instructions):\n"
+        + fence._UNTRUSTED_OPEN
+        + fence._neutralise_untrusted_delimiters(json.dumps(data, default=str))
+        + fence._UNTRUSTED_CLOSE
+    )
+
+
+def run_turn(path, ctx, session, *, provider, recheck, boot, clock) -> str:
+    """The stage's one proposal turn (on the runner's helper thread). Its
+    outcome and the stage's steps are written under the run's file lock while
+    this process holds the live lease; never retried."""
+    from harness import run_loops, runner
+    from services import run_envelope
+
+    lease = (boot, clock)
+    task = runner._read(path)
+    profile = _profile(task)
+    envelope = run_envelope._load(path)
+    if profile is None or envelope is None or not run_envelope.live(path):
+        record(path, {"status": "no_envelope", "cases": []}, lease=lease)
+        return "no_envelope"
+    left = envelope["budget"]["solves"] - run_envelope.solves_used(envelope)
+    agent = profile["stages"][STAGE]["agent"]
+    turn = Turn(path, profile, lease, lambda target: _base_value(ctx, target), [])
+    with _TURNS_LOCK:
+        _TURNS[session.session_id] = turn
+    model = getattr(session, "model", None)
+    usage_before = dict(session.usage_acc)
+    try:
+        outcome = run_loops.agent_turn(
+            path,
+            ctx,
+            session,
+            tools=agent["tools"],
+            message=message(task, profile, ctx, left),
+            provider=provider,
+            recheck=recheck,
+            scope={"loop": STAGE, "round": 1},
+        )
+    except BaseException:
+        runner.charge(path, run_loops._spent(session, usage_before), model)  # spent tokens count (§6.5)
+        raise
+    finally:
+        with _TURNS_LOCK:
+            _TURNS.pop(session.session_id, None)
+    runner.charge(path, outcome["usage"], model)
+    record(
+        path,
+        {
+            "status": "done",
+            "cases": [c["name"] for c in turn.admitted],
+            "offered": outcome["offered"],
+            "usage": outcome["usage"],
+        },
+        lease=lease,
+        steps=True,
+    )
+    return "done"
+
+
+def record(path, turn, *, lease, steps=False) -> bool:
+    """`run.explore.turn` (once), the round in the budget, and the stage's
+    steps, under the run's file lock with the live lease (E4)."""
+    from harness import research, runner
+
+    name = project_name(runner._read(path)) if steps else None
+
+    def change(task):
+        run = task["run"]
+        block = run.setdefault("explore", {})
+        if block.get("turn") is not None or run.get("stage") != STAGE:
+            return False
+        block["turn"] = turn
+        if turn["status"] == "done":
+            budget = runner._budget(task)
+            budget["used"]["rounds"] = budget["used"].get("rounds", 0) + 1
+        if steps:
+            task["steps"].extend(steps_for(task, name))
+        return None
+
+    return research._update(path, change, lease=lease)
+
+
+def failed_turn(path, *, boot, clock) -> bool:
+    """A turn that errored: recorded, never retried; admitted cases still run."""
+    return record(path, {"status": "error", "cases": []}, lease=(boot, clock), steps=True)
+
+
+def case_project_name(task, case) -> str:
+    """A network case's child project name (unique per run and case)."""
+    return f"Explore {task['task_id'][:8]} {case['name']}"[:64]
+
+
+def _changes_of(run, case):
+    rows = {r["id"]: r for r in run.get("ledger") or []}
+    return [rows[i] for i in case["changes"] if i in rows]
+
+
+def sweep_cases(task, names=None) -> list[dict]:
+    """The sweep's `cases` arg, from `run.cases` and their ledger rows only
+    (E1): never from the model."""
+    run = task["run"]
+    out = []
+    for case in run.get("cases") or []:
+        if case["engine"] != NETWORK or (names is None and case["status"] != "admitted"):
+            continue
+        if names is not None and case["name"] not in names:
+            continue
+        out.append(
+            {
+                "new_name": case_project_name(task, case),
+                "changes": [
+                    {
+                        "component_class": row["target"]["component"],
+                        "names": [row["target"]["name"]],
+                        "attribute": row["target"]["attr"],
+                        "value": row["new"],
+                    }
+                    for row in _changes_of(run, case)
+                ],
+            }
+        )
+    return out
+
+
+def _next_id(task):
+    return 1 + sum(1 for s in task["steps"] if s["id"].split(".")[0] == STAGE)
+
+
+def project_name(task) -> str | None:
+    """The run's project's current name (what `save_project` takes)."""
+    from fastapi import HTTPException
+
+    from services import chat_tools, project_registry
+
+    try:
+        with chat_tools._acting() as (db, user):
+            return project_registry.resolve_project(db, user, task["project_id"]).name
+    except HTTPException:
+        return None
+
+
+def steps_for(task, name=None) -> list[dict]:
+    """The stage's first steps: the base saved (a sweep branches the saved
+    file, and the run's solve and edits leave it unsaved), then one sweep for
+    the admitted network cases; one study start per admitted investment case."""
+    run, pid = task["run"], task["project_id"]
+    n = _next_id(task)
+    steps = []
+    network = [c["name"] for c in run.get("cases") or [] if c["engine"] == NETWORK and c["status"] == "admitted"]
+    if network:
+        steps.append(
+            {
+                "id": f"{STAGE}.{n}",
+                "tool": "save_project",
+                "args": {"name": name},
+                "status": "pending",
+                "explore": {"phase": "save", "cases": network},
+            }
+        )
+        n += 1
+        steps.append(
+            {
+                "id": f"{STAGE}.{n}",
+                "tool": "run_sensitivity_sweep",
+                "args": {"baseline_project_id": pid, "cases": sweep_cases(task, network)},
+                "status": "pending",
+                "explore": {"cases": network},
+            }
+        )
+        n += 1
+    for case in run.get("cases") or []:
+        if case["engine"] == STUDY and case["status"] == "admitted":
+            steps.append(
+                {
+                    "id": f"{STAGE}.{n}",
+                    "tool": "start_decision_study",
+                    "args": _study_start_args(task, case),
+                    "status": "pending",
+                    "explore": {"case": case["name"], "phase": "start"},
+                }
+            )
+            n += 1
+    return steps
+
+
+def _study_start_args(task, case):
+    return {
+        "project": task["project_id"],
+        "question_id": case["question_id"],
+        "name": case_project_name(task, case),
+        "intake": copy.deepcopy(case["intake"]),
+    }
+
+
+def _study_followups(task, case, start):
+    """Once the study id is known: each ledger change, then the options run."""
+    pid, study_id = task["project_id"], case["study_id"]
+    steps = [
+        {
+            "tool": "set_study_parameter",
+            "args": {
+                "project": pid,
+                "study_id": study_id,
+                "key": row["target"]["ledger_key"],
+                "value": row["new"],
+                "unit": row["unit"],
+                "source": row["source"],
+            },
+            "phase": "set",
+        }
+        for row in _changes_of(task["run"], case)
+    ]
+    steps.append(
+        {
+            "tool": "run_decision_study",
+            "args": {"project": pid, "study_id": study_id, "stage": "options", "fidelity": "quick_screen"},
+            "phase": "run",
+        }
+    )
+    return [
+        {
+            "id": f"{STAGE}.{start + i}",
+            "tool": s["tool"],
+            "args": s["args"],
+            "status": "pending",
+            "explore": {"case": case["name"], "phase": s["phase"]},
+        }
+        for i, s in enumerate(steps)
+    ]
+
+
+def check_step(task, step, args) -> str | None:
+    """E1 at dispatch: an explore step's args are exactly what harness code
+    builds from `run.cases` now (baseline and every project arg the run's
+    own). A reason when not, else None."""
+    if not step["id"].startswith(STAGE + "."):
+        return None
+    mark = step.get("explore") or {}
+    if any(k.endswith("project") or k.endswith("project_id") for k in args) and any(
+        args[k] != task["project_id"] for k in args if k.endswith("project") or k.endswith("project_id")
+    ):
+        return "explore_project"
+    if step["tool"] == "save_project":
+        return None if mark.get("phase") == "save" and args == {"name": project_name(task)} else "explore_args"
+    if step["tool"] == "run_sensitivity_sweep":
+        names = mark.get("cases") or []
+        expected = {"baseline_project_id": task["project_id"], "cases": sweep_cases(task, names)}
+        return None if names and args == expected else "explore_args"
+    case = next((c for c in task["run"].get("cases") or [] if c["name"] == mark.get("case")), None)
+    if case is None or case["engine"] != STUDY:
+        return "explore_args"
+    if step["tool"] == "start_decision_study":
+        return None if args == _study_start_args(task, case) else "explore_args"
+    if not case.get("study_id"):
+        return "explore_args"
+    expected = [s["args"] for s in _study_followups(task, case, 0) if s["tool"] == step["tool"]]
+    return None if args in expected else "explore_args"
+
+
+# ── Settling cases ────────────────────────────────────────────────────────────
+
+
+def case_gate(task, case, profile) -> dict:
+    """A network case's gate: the profile's result rules without engine
+    rules (SH-05 PR C), on the case's child read from disk, never activated
+    (E6), against the case's own job."""
+    from fastapi import HTTPException
+
+    from services import chat_tools, project_registry, run_gates, workflow_tools
+
+    rules = [r for r in profile["stages"]["result_gate"]["rules"] if not r.get("engine")]
+    try:
+        with chat_tools._acting() as (db, user):
+            row = project_registry.resolve_project(db, user, case["project_id"])
+            child = workflow_tools._load_context(row)
+            env = run_gates.Env(
+                task=task,
+                ctx=child,
+                project=row,
+                project_dir=project_registry.project_dir(row),
+                case={"project_id": case["project_id"], "job_id": (case.get("job") or {}).get("job_id")},
+            )
+    except (HTTPException, OSError, ValueError):  # the child cannot be read: no fact is evidence
+        env = run_gates.Env(task=task, ctx=None, project=None, project_dir=None, case={"project_id": case["project_id"]})
+    return run_gates.gate(rules, env)
+
+
+def study_gate(task, record) -> dict:
+    """An investment case's gate: its study run record's status."""
+    from datetime import UTC, datetime
+
+    from services import run_gates
+
+    results = run_gates.evaluate(
+        [STUDY_RULE],
+        run_gates.Env(task=task, ctx=None, project=None, project_dir=None, case={"study_run": record}),
+    )
+    return {
+        "rules": results,
+        "passed": run_gates.passed(results),
+        "fingerprint": None,
+        "evaluated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "facts_version": run_gates.FACTS_VERSION,
+    }
+
+
+def study_run(project, study_id):
+    """The study's run record (`GET .../studies/{id}/run`), or None."""
+    from fastapi import HTTPException
+
+    from routers import studies
+    from services import chat_tools
+
+    try:
+        return chat_tools._route(
+            studies.get_study_run, study_id, project=chat_tools._authorized_project(project)
+        )
+    except HTTPException:
+        return None
+
+
+def _why(gate) -> str:
+    failing = [r["rule"] for r in gate["rules"] if r["severity"] == "block" and r["verdict"] != "pass"]
+    return "Failed: " + ", ".join(failing) + "." if failing else ""
+
+
+def _judge(case, gate, solves):
+    case.update(status="passed" if gate["passed"] else "failed", gate=gate)
+    if not gate["passed"]:
+        case["reason"] = _why(gate)
+    case["solves"]["used"] = solves
+
+
+def _outcomes(step):
+    return {c.get("name"): c for c in (step.get("job") or {}).get("cases") or (step.get("result") or {}).get("cases") or []}
+
+
+def advance(path, *, boot, clock) -> bool:
+    """One pass over the run's explore steps and cases (each runner step,
+    before the run's own checks): map outcomes, judge cases, expand study
+    steps and settle what spent. Gates are read outside the locks; every
+    write is under the file lock with the live lease (E4). True if it wrote."""
+    from harness import research, runner
+    from services import run_envelope
+
+    task = runner._read(path)
+    run = (task or {}).get("run") or {}
+    if run.get("stage") != STAGE or not run.get("cases"):
+        return False
+    profile = _profile(task)
+    if profile is None:
+        return False
+    lease = (boot, clock)
+    now = clock()
+    judged, settle = {}, []  # case name → (gate, solves) read outside the lock
+    for step in task["steps"]:
+        if not step["id"].startswith(STAGE + ".") or step.get("judged_by"):
+            continue
+        mark = step.get("explore") or {}
+        if step["tool"] == "run_sensitivity_sweep" and step["status"] in ("completed", "failed", "uncertain"):
+            outcomes = _outcomes(step)
+            names = {case_project_name(task, c): c for c in run["cases"] if c["name"] in mark.get("cases", [])}
+            if not names or any((outcomes.get(n) or {}).get("status") not in _TERMINAL for n in names):
+                continue  # a lost or unread job stays uncertain: the run needs the user
+            for project_name, case in names.items():
+                out = outcomes[project_name]
+                case = {**case, "project_id": out.get("project_id"), "job": {"job_id": out.get("job_id")}}
+                gate = case_gate(task, case, profile) if case["project_id"] else study_gate(task, None)
+                judged[case["name"]] = (gate, 1 if out.get("job_id") else 0, out)
+    for case in run["cases"]:
+        if case["engine"] == STUDY and case["status"] == "running" and case.get("study_id"):
+            record_ = study_run(task["project_id"], case["study_id"])
+            if isinstance(record_, dict) and record_.get("status") not in (None, "running"):
+                judged[case["name"]] = (study_gate(task, record_), int(record_.get("solves_charged") or 0), None)
+
+    def change(t):
+        r, wrote = t["run"], False
+        cases = {c["name"]: c for c in r.get("cases") or []}
+        n = _next_id(t)
+        for step in t["steps"]:
+            if not step["id"].startswith(STAGE + ".") or step.get("judged_by"):
+                continue
+            mark = step.get("explore") or {}
+            if step["tool"] == "run_sensitivity_sweep":
+                mine = [cases[x] for x in mark.get("cases", []) if x in cases]
+                if step["status"] == "waiting":
+                    jobs = {j.get("name"): j for j in (step.get("job") or {}).get("jobs") or []}
+                    for case in mine:
+                        job = jobs.get(case_project_name(t, case))
+                        if case["status"] == "admitted":
+                            case["status"] = "running"
+                            if job:
+                                case.update(project_id=job.get("project_id"), job={"job_id": job["job_id"]})
+                            wrote = True
+                elif all(c["name"] in judged for c in mine) and mine:
+                    for case in mine:
+                        gate, solves, out = judged[case["name"]]
+                        case.update(project_id=out.get("project_id"))
+                        if out.get("job_id"):
+                            case["job"] = {"job_id": out["job_id"]}
+                        _judge(case, gate, solves)
+                        if out.get("status") != "completed" and not case.get("reason"):
+                            case["reason"] = f"The case's solve ended {out.get('status')}."
+                        settle.append((case, solves))
+                    step["judged_by"] = JUDGED
+                    wrote = True
+                continue
+            case = cases.get(mark.get("case"))
+            if case is None:
+                continue
+            if step["status"] in ("failed", "uncertain") and case["status"] in ("admitted", "running"):
+                # A study step that failed fails its case, never the run.
+                case.update(status="failed", reason=f"{step['tool']} {step['status']}: {step.get('error', '')}".strip())
+                for other in t["steps"]:
+                    if (other.get("explore") or {}).get("case") == case["name"] and other["status"] != "completed":
+                        other["judged_by"] = JUDGED
+                wrote = True
+            elif step["status"] == "completed" and mark.get("phase") == "start" and not case.get("study_id"):
+                case["study_id"] = (step.get("result") or {}).get("study_id")
+                if not case["study_id"]:
+                    case.update(status="failed", reason="The decision study returned no study id.")
+                else:
+                    t["steps"].extend(_study_followups(t, case, n))
+                wrote = True
+            elif step["status"] == "completed" and mark.get("phase") == "run" and case["status"] == "admitted":
+                case.update(status="running", deadline_epoch=now + STUDY_DEADLINE_SECONDS)
+                wrote = True
+        for case in r.get("cases") or []:
+            if case["engine"] != STUDY or case["status"] != "running":
+                continue
+            if case["name"] in judged:
+                gate, solves, _ = judged[case["name"]]
+                _judge(case, gate, solves)
+                settle.append((case, solves))
+                wrote = True
+            elif now > float(case.get("deadline_epoch") or 0):
+                # E10: past its deadline it settles failed; its reservation stays spent.
+                case.update(status="failed", reason="The decision study did not finish before its deadline.")
+                wrote = True
+        return None if wrote else False
+
+    if not research._update(path, change, lease=lease):
+        return False
+    for case, solves in settle:
+        call_id = (case.get("solves") or {}).get("call_id")
+        if call_id:
+            run_envelope.settle_engine_solves(path, call_id, solves, event="explore")
+    return True
+
+
+def expire(path, *, boot, clock) -> int:
+    """The boot sweep (E10): a study case past its deadline settles failed
+    where this instance holds the lease or the lease has lapsed."""
+    from harness import runner
+
+    task = runner._read(path)
+    run = (task or {}).get("run") or {}
+    now = clock()
+    late = [
+        c["name"]
+        for c in run.get("cases") or []
+        if c.get("engine") == STUDY and c.get("status") == "running" and now > float(c.get("deadline_epoch") or 0)
+    ]
+    if not late:
+        return 0
+    lease = run.get("runner") or {}
+    if lease.get("lease_owner") not in (None, boot) and float(lease.get("lease_until") or 0) > now:
+        return 0
+
+    def change(t):
+        hit = 0
+        for case in t["run"].get("cases") or []:
+            if case["name"] in late and case["status"] == "running":
+                case.update(status="failed", reason="The decision study did not finish before its deadline.")
+                hit += 1
+        return None if hit else False
+
+    with runner._file_lock(path):
+        runner._update(path, change)
+    return len(late)
