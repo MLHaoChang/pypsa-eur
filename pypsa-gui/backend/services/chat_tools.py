@@ -6750,7 +6750,7 @@ def read_excel_sheet(
     }
 
 
-def _series_sha256(series) -> str:
+def series_sha256(series) -> str:
     """The sha256 of a demand series as written: its float64 values in
     snapshot order (issue 21c: the card binds it, the planned write checks it)."""
     import hashlib as _hashlib
@@ -6760,7 +6760,12 @@ def _series_sha256(series) -> str:
     return _hashlib.sha256(_np.ascontiguousarray(series.to_numpy(dtype="float64")).tobytes()).hexdigest()
 
 
-def _demand_series(ctx, args: dict) -> dict:
+# Old name, kept only so services/run_envelope.py (held for BUG-1) needs no edit.
+# Remove after BUG-1 lands and that caller uses `series_sha256`.
+_series_sha256 = series_sha256
+
+
+def demand_series(ctx, args: dict) -> dict:
     """Pass 1 of `apply_demand_from_excel` on `ctx`'s network: the upload
     parsed and aligned to the snapshots, nothing written. The tool and its
     edit card both call it, so the card shows the series the tool writes.
@@ -6979,7 +6984,7 @@ def apply_demand_from_excel(
     name = _require_active_project()
     ctx = PyPSAService.get_active_context()
     n = ctx.network
-    parsed = _demand_series(ctx, {"file_id": file_id, "time_col": time_col, "value_col": value_col,
+    parsed = demand_series(ctx, {"file_id": file_id, "time_col": time_col, "value_col": value_col,
                                   "load_name": load_name, "sheet_name": sheet_name})
     auto_tiled, tile_factor = parsed["auto_tiled"], parsed["tile_factor"]
     import pandas as _pd
