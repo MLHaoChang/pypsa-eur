@@ -38,6 +38,7 @@ class Fact(_Closed):
     metric: str
     value: Value
     unit: str | None
+    formula_id: str | None = None  # computed facts name their formula
 
 
 class Validity(_Closed):
@@ -161,7 +162,8 @@ class Slot(_Closed):
     reason: str | None = None
     valid_snapshots: int | None = None
     requested_snapshots: int | None = None
-    excluded_indices: list[int] | None = None
+    excluded_indices: list[str] | None = None  # snapshot labels
+    partial_value: Value = None
 
 
 class CalculatedEvidence(_Evidence):
@@ -414,7 +416,24 @@ def schema(models) -> dict:
 
     models = models if isinstance(models, list) else [models]
     target = models[0] if len(models) == 1 else Union[tuple(models)]  # type: ignore[valid-type]
-    return TypeAdapter(target).json_schema(by_alias=True)
+    return _without_notes(TypeAdapter(target).json_schema(by_alias=True))
+
+
+# Map keywords whose keys are names (a property may be called "title").
+_NAMED = {"properties", "$defs", "patternProperties"}
+
+
+def _without_notes(node, named=False):
+    """Drop `title` and `description`: a docstring edit is not a contract change."""
+    if isinstance(node, list):
+        return [_without_notes(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+    return {
+        key: _without_notes(value, key in _NAMED and not named)
+        for key, value in node.items()
+        if named or key not in ("title", "description")
+    }
 
 
 def validate_tool_result(tool_name: str, result: dict) -> None:
