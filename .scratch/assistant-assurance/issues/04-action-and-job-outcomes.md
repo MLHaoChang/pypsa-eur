@@ -4,7 +4,7 @@
 # P3: verified action outcomes and real progress
 
 Status: ready-for-agent
-Progress: S1 (blocking foreground-job outcomes, harness/outcomes.py) in review; S2–S5 planned; update_component static inputs done (effects.py)
+Progress: S1 (blocking foreground-job outcomes, harness/outcomes.py) merged ee141c66; S1b (chat tool-line marks) in review; S2–S5 planned; update_component static inputs done (effects.py)
 Type: task
 Blocked by: 01, 02; live-voice issue 11 for nonblocking jobs
 
@@ -132,3 +132,22 @@ UX (9) GO for S1b (chat tool-line marks), rules:
 3. A stale "(running)" must not stay: update the line from the job's live
    state (preferred) or word it as of that moment ("was running"); say which.
 4. Shots of every mark state in Guided and Expert (component-level harness OK, #1053).
+
+### 2026-11-05 — S1b build (branch `claude/aa04-s1b-tool-line-marks`)
+
+`components/toolOutcome.ts` (pure): `_outcome.outcome` → glyph, word, tone
+and in-flight flag; an unknown string reads as uncertain. Words come from
+ACTIVITY_STATUS_WORDS (submitted → Queued, cancel_requested → Stopping,
+uncertain → Outcome unknown, denied → Denied added). ChatPanel writes the
+transcript line `<glyph> <tool> (<word>)` for a result with `_outcome` and
+renders the glyph aria-hidden in Guided and Expert; the checked-turn
+`_assurance` line and every tool without `_outcome` are unchanged.
+
+UX rule 3, both parts: an in-flight line takes the newest later `_outcome`
+of the same job id in the transcript (wait_for_job, abort_simulation); with
+no later read it reads "running at 14:02" (Guided: "Running: start a solve,
+as of 14:02"). The global /simulation/status is not used: it carries no job
+identity. A reloaded transcript has no tool rows (history replays tool uses
+as `[tool: name]`), so no stale line comes back. Shots:
+`frontend/scripts/tool-outcome-shots.mjs`.
+

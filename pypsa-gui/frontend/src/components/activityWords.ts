@@ -4,6 +4,8 @@ export const ACTIVITY_STATUS_WORDS: Record<string, string> = {
   cancelled: 'Cancelled', partial: 'Partly done', needs_review: 'Needs your review',
   waiting_for_approval: 'Waiting for your approval', waiting_for_input: 'Waiting for your answer',
   decision_recorded: 'Decision recorded', unavailable: 'Status unavailable',
+  // Chat tool-line outcomes (issue 04, `_outcome`): the backend's own states.
+  submitted: 'Queued', cancel_requested: 'Stopping', uncertain: 'Outcome unknown', denied: 'Denied',
 }
 
 export const ACTIVITY_FAMILY_WORDS: Record<string, string> = {

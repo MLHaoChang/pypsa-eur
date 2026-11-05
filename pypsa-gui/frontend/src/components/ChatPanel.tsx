@@ -86,6 +86,9 @@ import { ANSWER_NOT_CHECKED } from './CompanionOutcome'
 import { UploadProgressToast } from './UploadProgressToast'
 import { ConfirmationCard } from './ConfirmationCard'
 import ExternalAgentStrip from './ExternalAgentStrip'
+import {
+  type CurrentToolOutcome, type ToolOutcomeMark, currentToolOutcome, outcomeClock, toolOutcomeLine, toolOutcomeOf, toolOutcomeWords,
+} from './toolOutcome'
 export { guidedCardSummary } from './ConfirmationCard'
 
 // Phase D — extensions accepted by the file picker / drag-drop overlay.
@@ -261,16 +264,30 @@ const ERROR_LINE = /^✗ (\S+)(?: — [^:\s]+(?:: ([\s\S]*))?)?$/
 // call never keeps saying it is working. Cached per messages array.
 const _settledCache = new WeakMap<readonly unknown[], Set<string>>()
 export function guidedSettledToolIds(
-  messages: ReadonlyArray<{ role: string; content: string; tool_use_id?: string }>,
+  messages: ReadonlyArray<{ role: string; content: string; tool_use_id?: string; tool_result?: unknown }>,
 ): Set<string> {
   const hit = _settledCache.get(messages)
   if (hit) return hit
   const out = new Set<string>()
   for (const m of messages) {
-    if (m.role === 'tool' && m.tool_use_id && /^(✓ |✗ |denied: )/.test(m.content)) out.add(m.tool_use_id)
+    if (m.role === 'tool' && m.tool_use_id
+      && (/^(✓ |✗ |denied: )/.test(m.content) || toolOutcomeOf(m.tool_result))) out.add(m.tool_use_id)
   }
   _settledCache.set(messages, out)
   return out
+}
+
+/** Issue 04 (S1b): Guided words for a job tool line with an `_outcome`. */
+function guidedOutcomeLine(tool: string, now: CurrentToolOutcome): GuidedToolLine {
+  const word = now.mark.word.charAt(0).toUpperCase() + now.mark.word.slice(1)
+  const asOf = now.mark.inFlight ? `, as of ${outcomeClock(now.ts)}` : ''
+  return { hidden: false, label: `${word}: ${guidedToolPhrase(tool)}${asOf}` }
+}
+
+/** The outcome mark; the word beside it carries the meaning, so the glyph is hidden from readers. */
+function OutcomeGlyph({ mark }: { mark: ToolOutcomeMark }) {
+  const tone = mark.tone === 'warn' ? 'text-warn' : mark.tone === 'muted' ? 'text-muted' : 'text-text'
+  return <span aria-hidden="true" className={`${tone} mr-1`} data-testid="chat-tool-glyph" data-outcome={mark.outcome}>{mark.glyph}</span>
 }
 
 export type GuidedToolLine =
@@ -2299,7 +2316,9 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
               const outcome = assuranceRef.current.navigationCompleted?.has(d.tool_use_id) ? 'completed' : metadata?.outcome ?? 'uncertain'
               return `${outcome === 'completed' ? '✓' : '…'} ${d.tool_name} (${outcome})`
             }
-            return `✓ ${d.tool_name}`
+            // Issue 04 (S1b): the backend's identity-checked job outcome, not a blanket ✓.
+            const outcome = toolOutcomeOf(d.result)
+            return outcome ? toolOutcomeLine(d.tool_name, outcome.outcome) : `✓ ${d.tool_name}`
           })(),
           // Checked artifacts/task projections are not implemented in this pilot.
           tool_result: assuranceRef.current.strict ? undefined : d.result,
@@ -3531,9 +3550,12 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
             }}
           />
         )}
-        {messages.map((m) => {
+        {messages.map((m, index) => {
+          // Issue 04 (S1b): a job tool's mark follows its `_outcome`.
+          const outcomeNow = m.role === 'tool' ? currentToolOutcome(messages, index) : null
           // P26 item 6: Guided renders a declined card as one plain line.
-          const toolLine = m.role === 'tool' && uiMode === 'guided' ? guidedToolLine(m.content) : null
+          const toolLine = m.role === 'tool' && uiMode === 'guided'
+            ? (outcomeNow && m.tool_name ? guidedOutcomeLine(m.tool_name, outcomeNow) : guidedToolLine(m.content)) : null
           if (toolLine?.hidden) return null
           if (toolLine && m.tool_use_id && REQUEST_LINE.test(m.content)
             && guidedSettledToolIds(messages).has(m.tool_use_id)) return null
@@ -3574,6 +3596,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
               : m.role === 'user' ? <UserMessageText message={m} />
               : toolLabel ? (
                 <>
+                  {outcomeNow && <OutcomeGlyph mark={outcomeNow.mark} />}
                   <span className="font-sans text-[12px] text-text" data-testid="chat-tool-label">{toolLabel}</span>
                   {toolMessage && (
                     <span className="block font-sans text-[12px] text-text whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
@@ -3584,6 +3607,11 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
                     <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.content}</span>
                   </details>
                 </>
+              )
+              : outcomeNow && m.tool_name ? (
+                <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]" data-testid="chat-tool-outcome">
+                  <OutcomeGlyph mark={outcomeNow.mark} />{`${m.tool_name} (${toolOutcomeWords(outcomeNow)})`}
+                </span>
               )
               : <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.content}</span>}
             {m.role === 'assistant' && m.answer_id && m.receipt && <CheckedEvidenceCard answerId={m.answer_id} receipt={m.receipt} />}
