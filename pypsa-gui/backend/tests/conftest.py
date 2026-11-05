@@ -829,7 +829,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG0
 
 
 @pytest.fixture(autouse=True)
-def _returned_assurance_shapes(monkeypatch):
+def _returned_assurance_shapes():
     """
     Hold every returned assurance shape to its frozen v1 contract (issue 02).
 
@@ -890,10 +890,13 @@ def _returned_assurance_shapes(monkeypatch):
             )
         return shown
 
-    monkeypatch.setattr(records, "public", checked_public)
-    monkeypatch.setattr(records, "save", checked_save)
-    monkeypatch.setattr(assurance.Turn, "result_projection", checked_projection)
-    yield
+    # Its own MonkeyPatch: requesting the shared `monkeypatch` fixture here would
+    # change when a test's patches are undone relative to `_reset_backend_state`.
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(records, "public", checked_public)
+        patch.setattr(records, "save", checked_save)
+        patch.setattr(assurance.Turn, "result_projection", checked_projection)
+        yield
     assert not mismatches, "Returned assurance shape outside its frozen v1 contract:\n" + "\n".join(
         mismatches[:5]
     )
