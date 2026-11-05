@@ -4244,7 +4244,11 @@ def _dispatch_real_tool_call(
     if (
         session.assurance_turn is None
         and tool_name in outcomes.JOB_TOOLS | outcomes.WRITE_TOOLS
-        and isinstance(result_for_model, dict)
+        and (
+            isinstance(result_for_model, dict)
+            # delete_component returns nothing; its outcome still needs a home.
+            or (tool_name in outcomes.WRITE_TOOLS and result_for_model is None)
+        )
     ):
         # Issue 04 (A3.1/A3.3/A3.4): the outcome from an independent read, never
         # the handler's own fields. First, so a truncated preview keeps it.
@@ -4252,7 +4256,7 @@ def _dispatch_real_tool_call(
             "_outcome": outcomes.project_write(write_note)
             if tool_name in outcomes.WRITE_TOOLS
             else outcomes.project(tool_name, args or {}, tool_use_id),
-            **{k: v for k, v in result_for_model.items() if k != "_outcome"},
+            **{k: v for k, v in (result_for_model or {}).items() if k != "_outcome"},
         }
     if session.assurance_turn is not None:
         projection = session.assurance_turn.result_projection(
