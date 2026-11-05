@@ -412,7 +412,9 @@ EH_SITE = {
                  {"tool": "attach_tariff",
                   "target": {"component": "Settings", "name": "Commercial", "attr": "import_tariff_ref"},
                   "source": {"kind": "library_tariff"}}],
-        "runs": [{"tool": "solve_queue_enqueue"}],
+        # Issue 07 (B1-b): the run's report covers the stage-7 card only; its sends
+        # are reserved against the run's budget (C4), never a solve.
+        "runs": [{"tool": "solve_queue_enqueue"}, {"tool": "generate_report"}],
         "budget": {"solves": 6, "rounds": 6, "wall_time_h": 8.0},
         "research": {"allowed": True, "cost_cap_eur": 2.0},  # SH-RESEARCH-CAP-1; the grant governs
     },

@@ -48,12 +48,19 @@ def fake_report(monkeypatch):
     return calls
 
 
+def runner(decisions=None):
+    """The runner, its explore turn proposing no case (issue 06)."""
+    from tests.test_harness_run_loops import Script, say
+    return harness_runner.Runner("a", decisions=decisions,
+                                 agent_provider=Script(*[say("No case is worth a fork here.")] * 4))
+
+
 def completed_run(detached, site, **kwargs):
     """A step-by-step eh_site run, every card clicked, to completion."""
     _, root = site
     task = detached(**kwargs)
     path = task_path(root, task)
-    record = settle(harness_runner.Runner("a", decisions=Clicks()), path, task["task_id"],
+    record = settle(runner(Clicks()), path, task["task_id"],
                     lambda r: r["run"]["status"] in ("completed", "needs_user"))
     return path, record
 
@@ -323,8 +330,7 @@ def test_c13_the_completion_notice_carries_the_gap_count_and_one_email(detached,
     task = detached()
     path = task_path(root, task)
     opt_in(path, task["task_id"])
-    record = settle(harness_runner.Runner("a", decisions=Clicks()), path, task["task_id"],
-                    lambda r: r["run"]["status"] == "completed")
+    record = settle(runner(Clicks()), path, task["task_id"], lambda r: r["run"]["status"] == "completed")
     harness_runner._notify(path)
     harness_runner._notify(path)
     completed = [r for r in run_records(record) if r["native_status"] == "completed"]
@@ -398,3 +404,124 @@ def test_native_steps_are_never_claimed_by_a_chat_call():
                                                                        "native": "handoff"}], "rules": []}}}
     with pytest.raises(run_profiles.ProfileError, match="native"):
         run_profiles.load(bad)
+
+
+# ── GK B (25) B1-a: only a profile's own skip is reopened ───────────────────
+
+
+@pytest.mark.parametrize("stored, reopened", [
+    (None, True),
+    ({"status": "skipped", "reason": "The run report is not part of a run yet."}, True),  # before `by`
+    ({"status": "skipped", "reason": "anything", "by": "profile"}, True),
+    ({"status": "skipped", "reason": "The user left the report out.", "by": "user"}, False),
+    ({"status": "skipped", "reason": "A gate skipped it."}, False),
+])
+def test_b1a_a_stage_is_reopened_only_when_its_profile_skipped_it(stored, reopened):
+    profile = run_profiles.resolve("eh_site@1")
+    run = {"stage": "solve", "stages": {"handoff": {"status": "pending", "attempts": 0}}}
+    if stored is not None:
+        run["stages"]["report"] = dict(stored)
+    assert tasks._sync_stages(run, profile) is reopened
+    assert run["stages"]["report"] == ({"status": "pending", "attempts": 0} if reopened else stored)
+
+
+def test_b1a_a_new_run_records_who_skipped_a_stage(session, site, monkeypatch):
+    monkeypatch.setitem(run_profiles.PROFILES, "eh_site@1", {
+        **run_profiles.EH_SITE, "stages": {k: v for k, v in run_profiles.EH_SITE["stages"].items() if k != "report"}})
+    task = start("run-skip")
+    assert stored(site[1], task["task_id"])["run"]["stages"]["report"]["by"] == "profile"
+
+
+# ── GK B (25) B1-b: a grant from before stage 7 does not cover its card ─────
+
+
+@pytest.mark.parametrize("lists_report", [False, True])
+def test_b1b_the_report_card_is_crossed_only_on_a_grant_that_lists_it(
+        session, site, detached, fake_report, monkeypatch, lists_report):
+    from services import run_envelope
+    from tests.test_harness_envelope import BLOCK
+    runs = BLOCK["runs"] + ([{"tool": "generate_report"}] if lists_report else [])
+    tunable = [{"component": "Generator", "attr": a} for a in ("p_nom", "marginal_cost")]
+    monkeypatch.setitem(run_profiles.PROFILES, "eh_site@1",
+                        {**run_profiles.EH_SITE, "envelope": {**BLOCK, "runs": runs}, "tunable": tunable})
+    task = start("run-grant")
+    run_envelope.decide(session, task["task_id"], "unattended")
+    path = task_path(site[1], task)
+    from services import chat_tools
+    chat_tools.set_chat_session(None)
+    chat_tools.set_acting_user(None)
+    record = settle(runner(), path, task["task_id"],
+                    lambda r: r["run"]["status"] != "running" or r["run"]["stage"] == "handoff")
+    if lists_report:
+        assert record["run"]["status"] == "completed", record["run"]
+        assert fake_report == [{"strict": True, "run_binding": (path, "a")}]
+    else:
+        assert record["run"]["status"] == "needs_user" and record["run"]["waiting"]["ref"] == "report"
+        assert fake_report == [] and record["status"] == "paused_at_card"
+
+
+def test_b1b_a_grant_never_admits_a_chat_report(site, monkeypatch):
+    from services import run_envelope
+    assert "generate_report" in run_envelope.REPORT_TOOLS and "generate_report" not in run_envelope.RUN_TOOLS
+    with pytest.raises(run_envelope.EnvelopeError):
+        run_envelope._check_run({"tool": "generate_report", "kind": "x"})
+
+
+# ── GK B (25) B1-c: only a job that ended done completes the step ───────────
+
+
+def _provider(monkeypatch, provider):
+    from routers import report_jobs
+    monkeypatch.setattr(report_jobs, "_provider_or_400", lambda profile: provider)
+
+
+class Raises:
+    name = "raises"
+
+    def stream(self, request):
+        raise RuntimeError("the provider broke")
+        yield
+
+
+@pytest.mark.parametrize("case", ["raised", "refused", "lost"])
+def test_b1c_a_job_that_does_not_end_done_fails_the_step_and_holds_nothing(
+        detached, site, fake_report, monkeypatch, case):
+    from harness import send_reservation
+    from tests.test_harness_budget_reservation import set_limit
+    monkeypatch.setenv(send_reservation.MODE_ENV, "output_tokens")
+    _, root = site
+    task = detached()
+    path = task_path(root, task)
+    if case == "raised":
+        _provider(monkeypatch, Raises())
+    elif case == "refused":
+        set_limit(path, output_tokens=0)
+    elif case == "lost":
+        real = run_report.settle
+
+        def drop(path_, ctx):
+            with ctx.solver_state_lock:
+                if (ctx.solver_state.get("report_job") or {}).get("status") in ("done", "aborted", "failed"):
+                    ctx.solver_state["report_job"] = None  # another job took the slot, or a restart
+            return real(path_, ctx)
+        monkeypatch.setattr(run_report, "settle", drop)
+    record = settle(runner(Clicks()), path, task["task_id"],
+                    lambda r: r["run"]["status"] != "running" or r["run"]["stage"] == "handoff")
+    step = run_report.report_step(record)
+    assert step["status"] == "failed" and step["job"]["outcome"] != "done", step
+    assert record["run"]["status"] == "needs_user" and by_stage(record)["report"]["status"] == "failed"
+    assert by_stage(record)["handoff"]["status"] == "pending"
+    assert not send_reservation.has_open_holds(record["run"])  # C4 addendum: nothing left open
+
+
+# ── GK B (25) B1-d: neither stage ever applies a change ─────────────────────
+
+
+def test_b1d_no_apply_project_changes_in_the_report_or_the_hand_off(detached, site, fake_report, monkeypatch):
+    from services import assistant_tools, chat_tools
+    applied = []
+    monkeypatch.setattr(assistant_tools, "apply_project_changes", lambda *a, **k: applied.append(a))
+    monkeypatch.setattr(chat_tools, "apply_project_changes", lambda *a, **k: applied.append(a), raising=False)
+    path, record = completed_run(detached, site)
+    assert record["run"]["status"] == "completed" and applied == []
+    assert "revert" in record["run"]["handoff"]

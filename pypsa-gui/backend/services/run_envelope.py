@@ -59,6 +59,10 @@ RUN_TOOLS = frozenset({"run_simulation", "run_ac_pf_stage", "solve_queue_enqueue
 # only to cover `restore: "final"` (a solver-config write, LC-40); its solves
 # are its own audit row's (`reserve_engine`), never one admitted solve.
 ENGINE_TOOLS = frozenset({"run_margin_loop", "run_coupling_loop"})
+# Study harness 07 (GK B B1-b): a grant that lists the run's report covers only
+# the stage-7 card (`cross`); the runner starts that job itself, so a chat
+# `generate_report` is never admitted on it, and it never counts as a solve.
+REPORT_TOOLS = frozenset({"generate_report"})
 # Counted as solves when admitted, but no envelope lists them (issue 08, GK B (8)):
 # a sweep or an EH study is always the user's own card.
 NEVER_LISTED = frozenset({"run_sensitivity_sweep", "run_eh_study"})
@@ -192,9 +196,12 @@ def _check_edit(entry):
 
 def _check_run(entry):
     if not isinstance(entry, dict) or "tool" not in entry or not set(entry) <= {"tool", "kind", "restore"} \
-            or entry["tool"] not in RUN_TOOLS | ENGINE_TOOLS or not isinstance(entry.get("kind", ""), str) \
+            or entry["tool"] not in RUN_TOOLS | ENGINE_TOOLS | REPORT_TOOLS \
+            or not isinstance(entry.get("kind", ""), str) \
+            or ("kind" in entry and entry["tool"] in REPORT_TOOLS) \
             or ("restore" in entry and (entry["tool"] not in ENGINE_TOOLS or entry["restore"] != "final")):
-        raise EnvelopeError(f"A run names one of {sorted(RUN_TOOLS | ENGINE_TOOLS)} and an optional kind; a "
+        raise EnvelopeError(f"A run names one of {sorted(RUN_TOOLS | ENGINE_TOOLS | REPORT_TOOLS)} and an optional "
+                            "kind (none for the report); a "
                             f"loop-driving tool may carry restore \"final\": {entry!r}")
     if entry["tool"] in NEVER_LISTED:
         raise EnvelopeError(f"{entry['tool']} is never in an envelope; it is always its own card.")
@@ -920,7 +927,7 @@ def covers(task_path, tool):
     """A live envelope lists `tool` (the runner then dispatches without
     waiting; admission still decides, at dispatch)."""
     envelope = _load(task_path) if live(task_path) else None
-    return envelope is not None and tool not in ENGINE_TOOLS and (
+    return envelope is not None and tool not in ENGINE_TOOLS | REPORT_TOOLS and (
         any(e["tool"] == tool for e in envelope["edits"] + envelope["runs"]) or any(
         tool in (g["tool"], *[p for p, t in GAP_PREPARE.items() if t == g["tool"]]) for g in envelope.get("gaps", []))
         or any(p["tool"] == tool and p["status"] == "pinned" for p in envelope.get("planned", [])))
@@ -1102,6 +1109,8 @@ def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx
         return "external"
     if tool not in {t["name"] for t in TOOLS}:
         return "unknown_tool"
+    if tool in REPORT_TOOLS:
+        return "unlisted_tool"  # B1-b: the grant covers the stage-7 card only, never a chat report
     if tool in NEVER_ADMITTED:
         return "grid_code_publish"
     if tool in ENGINE_TOOLS:
@@ -1335,6 +1344,10 @@ def cross(session, task_path, card, ctx):
     from harness import approvals
     from services import assistant_tasks
     if not live(task_path):
+        return None
+    if card == "report" and not any(r["tool"] in REPORT_TOOLS for r in (_load(task_path) or {}).get("runs", [])):
+        # GK B B1-b: a grant made before stage 7 existed, or one that leaves the
+        # report out, does not cover its card: the stage pauses for the user.
         return None
     with assistant_tasks._LOCK:
         envelope = _load(task_path)

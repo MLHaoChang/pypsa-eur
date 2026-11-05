@@ -308,11 +308,23 @@ def _carded(step):
     return step.get("native") != "handoff" and _effectful(step["tool"])
 
 
+# The skip reasons the generic profile gave before issue 07 (§9.2): a record
+# stored before `by` existed was skipped by its profile when it carries one.
+_PROFILE_SKIPS = frozenset({"The run report is not part of a run yet.", "Exploring cases is not part of a run yet."})
+
+
+def _skipped_by_profile(stored):
+    return stored.get("status") == "skipped" and (
+        stored.get("by") == "profile" or ("by" not in stored and stored.get("reason") in _PROFILE_SKIPS))
+
+
 def _sync_stages(run, profile):
-    """Issue 07 (GK B C8): the profile is read by id, so a run started before
-    its profile gained a stage goes on to it. A later stage the stored record
-    skips, or lacks, that the profile now runs becomes pending; never one
-    the run already reached. True when the record changed."""
+    """Issue 07 (GK B C8, B1-a): the profile is read by id, so a run started
+    before its profile gained a stage goes on to it. A later stage the stored
+    record lacks, or skipped only because its profile did, becomes pending
+    when the profile now runs it; a stage skipped for any other reason stays
+    skipped, and a stage the run already reached is never reopened. True
+    when the record changed."""
     from services.run_profiles import STAGES
     changed = False
     for name in STAGES[STAGES.index(run["stage"]) + 1:]:
@@ -320,8 +332,8 @@ def _sync_stages(run, profile):
         stored = run["stages"].get(name)
         if "skip" in stage:
             if stored is None:
-                run["stages"][name], changed = {"status": "skipped", "reason": stage["skip"]}, True
-        elif stored is None or stored.get("status") == "skipped":
+                run["stages"][name], changed = {"status": "skipped", "reason": stage["skip"], "by": "profile"}, True
+        elif stored is None or _skipped_by_profile(stored):
             run["stages"][name], changed = {"status": "pending", "attempts": 0}, True
     return changed
 
@@ -564,7 +576,7 @@ def _start_run(session, title, request_id, run, profile, brief, *, origin=None, 
             fingerprint = _fingerprint()
             if fingerprint is None:
                 _refuse("brief_inputs_unreadable", "The project's inputs cannot be read, so the brief cannot be kept current.")
-            stages = {name: {"status": "skipped", "reason": stage["skip"]} if "skip" in stage else
+            stages = {name: {"status": "skipped", "reason": stage["skip"], "by": "profile"} if "skip" in stage else
                       {"status": "pending", "attempts": 0} for name, stage in profile["stages"].items()}
             task = {"version": 3, "task_id": task_id, "owner_id": owner, "project_id": project,
                     "title": title.strip(), "status": "ready", "steps": [], "brief": brief, "fingerprint": fingerprint,

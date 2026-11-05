@@ -9,8 +9,10 @@ request through them is never strict and never charged to a run, even while
 a run sits at this stage. A chat call of `generate_report` never claims the
 step either (`assistant_tasks.begin_step` leaves native steps alone).
 
-`settle` completes the waiting step from the job record on the run's
-context; `status` and `unsupported_listed` are the stage's gate facts, read
+`settle` settles the waiting step from the job record on the run's
+context: only a job that ended `done` completes it; a missing record, one
+another job replaced, or a job that ended refused, aborted or failed fails
+the step and stops the run for the user (GK B B1-c); `status` and `unsupported_listed` are the stage's gate facts, read
 from the saved report and failing closed on anything unreadable (GK B C3).
 """
 
@@ -113,9 +115,11 @@ def start(path, ctx, step, *, instance) -> str:
 
 
 def settle(path, ctx) -> str | None:
-    """Complete a waiting report step once its job ended, from the job record
-    on the run's context: `job.outcome` is the record's status. A record that
-    is no longer this job's (another job took the slot) settles `lost`."""
+    """Settle a waiting report step once its job ended, from the job record
+    on the run's context: `job.outcome` is the record's status. Only `done`
+    completes the step; anything else, or a record that is gone or is no
+    longer this job's (`lost`), fails it and the run needs the user (B1-c).
+    The job's own sends were settled or released by `RunSends.close` (C4)."""
     from harness import runner
     path = Path(path)
     task = json.loads(path.read_text())
@@ -130,21 +134,31 @@ def settle(path, ctx) -> str | None:
         if record.get("status") not in _TERMINAL:
             return None
         outcome, error = record["status"], record.get("error")
+        if record.get("refused"):
+            outcome = "refused"  # C4: a send the run's reservation refused; the report is incomplete
     else:
         outcome, error = "lost", "the job record is gone or another job took the slot"
+
+    refused = (record or {}).get("refused")
 
     def done(t):
         s = next(x for x in t["steps"] if x["id"] == step["id"])
         if s["status"] != "waiting":
             return False
         s["job"].update(outcome=outcome, version=(record or {}).get("version"), finished_at=time.time())
-        s["status"] = "completed"
-        if error:
-            s["error"] = str(error)[:480]
-        if t["status"] == "waiting_job":
-            t["status"] = "running"
-        if t["run"]["status"] == "waiting_job":
-            t["run"]["status"] = "running"
+        if outcome == "done":
+            s["status"] = "completed"
+            if t["status"] == "waiting_job":
+                t["status"] = "running"
+            if t["run"]["status"] == "waiting_job":
+                t["run"]["status"] = "running"
+            return
+        s["status"] = "failed"
+        s["error"] = str(f"refused: {refused}" if refused else error or outcome)[:480]
+        run = t["run"]
+        run["stages"]["report"].update(status="failed", reason="report_" + outcome)
+        if run["status"] in ("running", "waiting_job"):
+            run["status"], t["status"] = "needs_user", "needs_review"
     runner._update(path, done)
     return outcome
 
