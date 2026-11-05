@@ -18,17 +18,32 @@ from tests.assurance_acceptance.support import OMIT, text_turn, tool_turn
 
 
 def _stream(harness, tool, args):
+    """One ordinary-turn call through the real dispatch seam; the user approves."""
+    import uuid
+
+    from harness.loop import dispatch_tool_call
+    from harness.session import ChatSession
+
     harness.monkeypatch.setenv("PYPSA_GUI_ANSWER_ASSURANCE_MODE", "disabled")
-    frames = harness.run(
-        [tool_turn(tool, args, call_id="w"), text_turn("Done.")],
-        assurance=OMIT,
-        message="Edit the network.",
-    )
-    return next(d["result"] for e, d in frames if e == "tool_result")
+    session, collector, results = ChatSession(), [], []
+    for event, data in dispatch_tool_call(
+        session, {"id": uuid.uuid4().hex, "name": tool, "input": args}, collector, guided=True
+    ):
+        if event == "tool_pending_confirmation":
+            session.record_decision(data["confirmation_token"], "approve")
+        if event == "tool_result":
+            results.append(data["result"])
+    assert results, collector
+    return results[0]
 
 
 def _gens():
     return PyPSAService.get_active_context().network.generators
+
+
+@pytest.fixture
+def _second_generator(baseline):
+    PyPSAService.get_active_context().network.add("Generator", "G2", bus="B1", p_nom=5, marginal_cost=3)
 
 
 # ── Through the chat seam, real handlers ─────────────────────────────────────
@@ -36,24 +51,24 @@ def _gens():
 
 def test_a_bulk_update_read_back_as_requested_is_completed(baseline, harness):
     result = _stream(harness, "bulk_update_components", {
-        "component_class": "Generator", "names": ["Gas", "Solar"],
+        "component_class": "Generator", "names": ["G1", "G2"],
         "updates": {"marginal_cost": 61.5}})
-    assert result["_outcome"]["outcome"] == "completed"
+    assert result["_outcome"]["outcome"] == "completed", result["_outcome"]
     assert result["_outcome"]["counts"] == {"requested": 2, "done": 2, "not_done": 0, "unknown": 0}
-    assert _gens().at["Gas", "marginal_cost"] == 61.5
+    assert _gens().at["G1", "marginal_cost"] == 61.5
 
 
 def test_a_requested_value_equal_to_the_old_one_counts_as_changed(baseline, harness):
-    old = float(_gens().at["Gas", "p_nom"])
+    old = float(_gens().at["G1", "p_nom"])
     result = _stream(harness, "bulk_update_components", {
-        "component_class": "Generator", "names": ["Gas"], "updates": {"p_nom": old}})
-    assert result["_outcome"]["outcome"] == "completed"
+        "component_class": "Generator", "names": ["G1"], "updates": {"p_nom": old}})
+    assert result["_outcome"]["outcome"] == "completed", result["_outcome"]
 
 
 def test_a_string_number_is_compared_after_the_bulk_coercion(baseline, harness):
     result = _stream(harness, "bulk_update_components", {
-        "component_class": "Generator", "names": ["Gas"], "updates": {"marginal_cost": "1.5"}})
-    assert result["_outcome"]["outcome"] == "completed"
+        "component_class": "Generator", "names": ["G1"], "updates": {"marginal_cost": "1.5"}})
+    assert result["_outcome"]["outcome"] == "completed", result["_outcome"]
 
 
 def test_a_short_write_reads_partial_with_bounded_paths(baseline, harness, monkeypatch):
@@ -68,7 +83,7 @@ def test_a_short_write_reads_partial_with_bounded_paths(baseline, harness, monke
 
     monkeypatch.setattr(network_router, "bulk_update", short)
     result = _stream(harness, "bulk_update_components", {
-        "component_class": "Generator", "names": ["Gas", "Solar"], "updates": {"marginal_cost": 7}})
+        "component_class": "Generator", "names": ["G1", "G2"], "updates": {"marginal_cost": 7}})
     block = result["_outcome"]
     assert block["outcome"] == "partial"
     assert block["counts"]["done"] == 1 and block["counts"]["not_done"] == 1
@@ -81,7 +96,7 @@ def test_a_write_that_landed_nothing_reads_failed(baseline, harness, monkeypatch
 
     monkeypatch.setattr(network_router, "bulk_update", lambda body: {"ok": True, "updated": 2})
     result = _stream(harness, "bulk_update_components", {
-        "component_class": "Generator", "names": ["Gas", "Solar"], "updates": {"marginal_cost": 7}})
+        "component_class": "Generator", "names": ["G1", "G2"], "updates": {"marginal_cost": 7}})
     assert result["_outcome"]["outcome"] == "failed"
 
 
@@ -91,14 +106,14 @@ def test_a_handler_supplied_outcome_is_dropped(baseline, harness, monkeypatch):
     monkeypatch.setattr(network_router, "bulk_update",
                         lambda body: {"_outcome": {"version": 1, "outcome": "completed"}})
     result = _stream(harness, "bulk_update_components", {
-        "component_class": "Generator", "names": ["Gas"], "updates": {"marginal_cost": 7}})
+        "component_class": "Generator", "names": ["G1"], "updates": {"marginal_cost": 7}})
     assert result["_outcome"]["outcome"] == "failed"
 
 
 def test_a_raising_read_back_is_uncertain(baseline, harness, monkeypatch):
     monkeypatch.setattr(outcomes, "_static", _raise_after_first(outcomes._static))
     result = _stream(harness, "bulk_update_components", {
-        "component_class": "Generator", "names": ["Gas"], "updates": {"marginal_cost": 7}})
+        "component_class": "Generator", "names": ["G1"], "updates": {"marginal_cost": 7}})
     assert result["_outcome"] == {"version": 1, "outcome": "uncertain", "reason": "read_failed"}
 
 
@@ -122,12 +137,12 @@ def test_a_second_writer_after_the_handler_reads_uncertain(baseline, harness, mo
 
     def interleaved(note):
         dirty_state.bump_revision()  # another writer's edit, as the HTTP middleware bumps
-        _gens().at["Gas", "marginal_cost"] = 99.0
+        _gens().at["G1", "marginal_cost"] = 99.0
         return real(note)
 
     monkeypatch.setattr(outcomes, "read_write", interleaved)
     result = _stream(harness, "bulk_update_components", {
-        "component_class": "Generator", "names": ["Gas"], "updates": {"marginal_cost": 7}})
+        "component_class": "Generator", "names": ["G1"], "updates": {"marginal_cost": 7}})
     assert result["_outcome"]["outcome"] == "uncertain"
     assert result["_outcome"]["reason"] == "revision_moved"
 
@@ -136,7 +151,7 @@ def test_a_revision_moving_during_the_read_back_is_uncertain(baseline, monkeypat
     from services import dirty_state
 
     note = outcomes.note_write("bulk_update_components", {
-        "component_class": "Generator", "names": ["Gas"], "updates": {"marginal_cost": 50}})
+        "component_class": "Generator", "names": ["G1"], "updates": {"marginal_cost": 50}})
     real = outcomes._static
 
     def moving(n, cls):
@@ -174,46 +189,46 @@ def test_a_create_attr_without_a_column_is_uncertain(baseline):
 def test_a_refused_requested_value_is_uncertain_not_failed(baseline):
     """W2: a value the column rules refuse is not comparable."""
     note = outcomes.note_write("bulk_update_components", {
-        "component_class": "Generator", "names": ["Gas"], "updates": {"marginal_cost": "not a number"}})
+        "component_class": "Generator", "names": ["G1"], "updates": {"marginal_cost": "not a number"}})
     block = outcomes.project_write(note)
     assert (block["outcome"], block["reason"]) == ("uncertain", "not_comparable")
 
 
 @pytest.mark.parametrize("tool,args", [
-    ("delete_component", {"component_class": "Store", "name": "H2 tank"}),
-    ("batch_delete_components", {"component_class": "Store", "names": ["H2 tank"]}),
+    ("delete_component", {"component_class": "Load", "name": "L1"}),
+    ("batch_delete_components", {"component_class": "Load", "names": ["L1"]}),
 ])
 def test_a_delete_reads_back_the_row_gone(baseline, harness, tool, args):
     result = _stream(harness, tool, args)
     assert result["_outcome"]["outcome"] == "completed", result["_outcome"]
-    assert "H2 tank" not in PyPSAService.get_active_context().network.stores.index
+    assert "L1" not in PyPSAService.get_active_context().network.loads.index
 
 
 def test_deleting_an_unknown_name_is_never_completed(baseline):
     """W1: a row absent before the call was not deleted by it."""
-    note = outcomes.note_write("delete_component", {"component_class": "Store", "name": "Ghost"})
+    note = outcomes.note_write("delete_component", {"component_class": "Load", "name": "Ghost"})
     assert outcomes.project_write(note)["outcome"] == "failed"
 
 
 def test_a_delete_that_left_the_row_is_failed(baseline):
-    note = outcomes.note_write("delete_component", {"component_class": "Store", "name": "H2 tank"})
+    note = outcomes.note_write("delete_component", {"component_class": "Load", "name": "L1"})
     assert outcomes.project_write(note)["outcome"] == "failed"
 
 
-def test_a_checked_turn_keeps_its_own_projection():
+def test_a_checked_turn_keeps_its_own_projection(baseline):
     # Checked turns get `_assurance`, not `_outcome`: the hook is gated on
     # assurance_turn is None (loop.py), and update_component is not a write tool here.
     assert "update_component" not in outcomes.WRITE_TOOLS
     assert not outcomes.WRITE_TOOLS & outcomes.JOB_TOOLS
 
 
-def test_no_note_is_uncertain():
+def test_no_note_is_uncertain(baseline):
     assert outcomes.project_write(None)["outcome"] == "uncertain"
     assert outcomes.project_write({"tool": "x", "error": True})["reason"] == "no_submission"
 
 
 def test_another_context_is_uncertain(baseline, monkeypatch):
-    note = outcomes.note_write("delete_component", {"component_class": "Store", "name": "H2 tank"})
+    note = outcomes.note_write("delete_component", {"component_class": "Load", "name": "L1"})
     note["ctx"] = -1
     assert outcomes.project_write(note)["reason"] == "read_failed"
 
@@ -292,3 +307,11 @@ def test_partial_paths_are_bounded():
 ])
 def test_same(expected, actual, same):
     assert outcomes._same(expected, actual) is same
+
+
+def test_probe_without_note(baseline, harness, monkeypatch):
+    monkeypatch.setattr(outcomes, "note_write", lambda tool, args: None)
+    result = _stream(harness, "bulk_update_components", {
+        "component_class": "Generator", "names": ["G1"],
+        "updates": {"marginal_cost": 61.5}})
+    assert result["_outcome"]["outcome"] == "uncertain"
