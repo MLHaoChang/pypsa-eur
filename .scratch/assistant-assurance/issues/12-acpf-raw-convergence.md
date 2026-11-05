@@ -3,7 +3,7 @@
 
 # A1.7: AC power flow records unknown convergence as converged
 
-Status: ready-for-agent
+Status: done (#1125)
 Type: task
 Blocked by: none in code. Code starts after GK A (12) plan GO, UX (8) GO and the coordinator's go (FILL-11-5).
 

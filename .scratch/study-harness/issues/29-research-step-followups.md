@@ -3,7 +3,7 @@
 
 # 29 — Research step follow-ups: R3 fence, researched text on disk, stage-6 ranges
 
-Status: ready-for-agent
+Status: done (#1124)
 Type: task
 Blocked by: 09 (PR #1104 must merge first; it owns these files)
 Gated: yes (GK B)

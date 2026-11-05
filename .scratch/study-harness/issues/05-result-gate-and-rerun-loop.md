@@ -3,7 +3,7 @@
 
 # 05 — Result gate (LC-20 rules) and the bounded fix-and-rerun loop L2
 
-Status: ready-for-agent
+Status: done (#1123; plausibility box stays open, K #851)
 Type: task
 Blocked by: 04
 Gated: yes (GK B; GK A on the engine-fact readers)
