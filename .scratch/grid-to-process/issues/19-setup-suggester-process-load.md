@@ -3,7 +3,8 @@
 
 # The setup suggester ignores process-link draw and reads tonne loads as MW
 
-Status: needs-triage
+Status: ready-for-agent
+Model: Opus
 Type: task
 Blocked by: none
 Gated: **yes** (adequacy engine code)
@@ -40,3 +41,9 @@ from, and leaves non-electric (tonne) loads out of the MW totals.
 - `pypsa-gui/backend/services/adequacy/eh_setup.py` (`suggest_eh_setup`)
 - `pypsa-gui/backend/tests/test_eh_setup_suggest.py` (`TEMPLATES`)
 - `pypsa-gui/backend/project_templates/eh_concentrator.py` (`eh_critical`, `process_load`)
+
+## Comments
+
+### 2026-11-05: triage sweep (AA-FILL-2), role ready-for-agent
+
+Was: `needs-triage`. Files: `pypsa-gui/backend/services/adequacy/eh_setup.py`, `tests/test_eh_setup_suggest.py`, the `eh_concentrator_staged` template (drop `process_load: true` and its skip). Blockers: none (owner decision G2P-10-SUGGEST-1 made). Reviewer: GK A. Note open PR #1142 touches `services/adequacy/eh_columns.py`; rebase onto it if it lands first.

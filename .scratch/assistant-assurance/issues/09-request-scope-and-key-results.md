@@ -3,7 +3,8 @@
 
 # Request scope and complete key-results answers
 
-Status: needs-triage
+Status: ready-for-agent
+Model: Opus
 Progress: harness.assurance_scope with answered or unavailable slots shipped for bounded grammar; arbitrary-language scope pending
 Type: task
 Blocked by: reliability contract review; 01 for schema freeze; 02 for evidence
@@ -110,3 +111,7 @@ and selections are in [validation](../storage-economics-validation.json) and
 [coverage ledger](../coverage-ledger.md). No paid model calls or independent
 domain approval. This whole issue stays open for broader storage economics,
 other domain adapters, arbitrary-language completeness and calibration/release.
+
+### 2026-11-05: triage sweep (AA-FILL-2), role ready-for-agent
+
+Was: `needs-triage`. Files: `pypsa-gui/backend/harness/` (assurance scope, summary profiles), `harness/calculations.py` boundary, tests per test-plan A0.4/A2.8/A6.6/A7.7. Blockers: 01 and 02 are done; coordinate metric definitions with 10. Reviewer: GK B. GK B plan OK before coding (the original plan review does not cover this ticket); first step is to confirm with GK B that the contract review (AA-A04-REVIEW-1) covers section 1.

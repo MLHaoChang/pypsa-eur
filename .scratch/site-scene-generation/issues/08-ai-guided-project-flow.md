@@ -3,7 +3,8 @@
 
 # SC-07 — integrated AI guidance and project-flow continuity
 
-Status: needs-triage — owner-required specification; not implemented
+Status: ready-for-agent
+Model: Opus
 Type: task
 Dependencies: accepted SC-00 N contracts; develop native adapters with SC-01–SC-03, optional adapters only when their respective engine gates pass
 Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c
@@ -56,3 +57,9 @@ Follow optional-site-workflow.md through optional coordinate-gated creation, cam
 ## Interactive configuration acceptance
 
 Implement the example intent-to-effect contract in ai-guided-project-flow.md and V91–V98: guided creation, building/placement adjustments, exact multi-load/facility associations, PV/battery placement, supported native process/connection and parameter edits, and evidence-grounded channel mapping. Separate scene, model and display effects, ask about ambiguous output/connection wording, reuse normal native edit cards and exact scene proposals, and show truthful partial receipts. Unsupported tools/fields retain named refusal/editor fallback. This is a required guided adjustment path, not a read-only explainer.
+
+## Comments
+
+### 2026-11-05: triage sweep (AA-FILL-2), role ready-for-agent
+
+Was: `needs-triage — owner-required specification; not implemented`. The owner required this specification, so it needs no further owner call. Build the native path only; optional-engine adapters report unavailable. Files: the assistant tools and flow in `pypsa-gui/backend/harness/` and `services/chat_tools.py`, the Site flow in `pypsa-gui/frontend/src/`, tests V61-V98. Blockers: 02 and 03 (SC-01, SC-02; in progress; SC-00 N contracts are accepted). Reviewers: GK B and UX. Large: the implementer proposes slices in its plan.

@@ -3,7 +3,7 @@
 
 # SC-05 — optional integrated Blender generation and reviewed return
 
-Status: needs-triage — specification proposed; not implemented
+Status: needs-info
 Type: task
 Dependencies: SC-04; SC-00 worker/protocol/resource evidence
 Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c
@@ -33,3 +33,9 @@ One bounded implementation PR after applicable plan review; current master and o
 ## Cross-cutting AI guidance
 
 Deliver this slice's in-place explanation, typed proposed action or truthful UI fallback, native read-back and resume context under [ai-guided-project-flow.md](../ai-guided-project-flow.md), alongside SC-07. Server flow state and current approvals remain authoritative. Include the relevant V61–V72 assertions; optional engine absence cannot block the native/manual flow.
+
+## Comments
+
+### 2026-11-05: triage sweep (AA-FILL-2), role needs-info
+
+Was: `needs-triage — specification proposed; not implemented`. Owner question Q-SS-1 (see issue 05): the worker needs the SC-00 B worker, protocol and resource evidence, which waits for a supported Blender engine. Blockers when answered: 04 and 05. Opus, reviewers GK B (worker isolation, security) and UX.

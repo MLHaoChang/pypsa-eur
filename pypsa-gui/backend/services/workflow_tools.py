@@ -743,49 +743,75 @@ def _solve_snapshot(network):
         return entry[1] if entry is not None and entry[0]() is network else None
 
 
+class _SolveInputsHold:
+    """What `hold_solve_inputs` returns. Calling it releases the hold
+    (idempotent); `refresh()` retakes the snapshot (SP-1)."""
+
+    __slots__ = ("_network", "_key", "_entry", "_outermost", "_released")
+
+    def __init__(self, network=None, key=None, entry=None, outermost=False):
+        self._network = network
+        self._key = key
+        self._entry = entry
+        self._outermost = outermost
+        self._released = entry is None  # a no-op hold has nothing to release
+
+    def __call__(self) -> None:
+        with _SOLVE_INPUTS_LOCK:
+            if self._released:
+                return
+            self._released = True
+            entry = self._entry
+            entry[2] -= 1
+            if entry[2] <= 0 and _SOLVE_INPUTS.get(self._key) is entry:
+                del _SOLVE_INPUTS[self._key]
+
+    def refresh(self) -> None:
+        """SP-1 (GK B S2/S3/S5): retake the snapshot as the network's inputs
+        are now, after the solve's lasting normalisations, so a reader sees
+        the inputs the solve started from or the normalised ones, never a mix.
+        Only the outermost hold may, while it is still the registered one;
+        the copy is complete before one reference swap publishes it."""
+        if self._released or not self._outermost:
+            return
+        snapshot = _network_copy(self._network)  # complete before any reader can see it
+        with _SOLVE_INPUTS_LOCK:
+            if not self._released and _SOLVE_INPUTS.get(self._key) is self._entry:
+                self._entry[1] = snapshot
+
+
 def hold_solve_inputs(network, lock):
     """Register `network`'s inputs as they are now, before a solve changes
-    them; returns an idempotent release. Re-entrant: a nested solve on the same
-    network keeps the outermost snapshot, and only the last release drops it.
+    them; returns a hold: call it to release (idempotent), `.refresh()` to
+    retake the snapshot after the solve's lasting normalisations (SP-1).
+    Re-entrant: a nested solve on the same network keeps the outermost
+    snapshot (its refresh is a no-op), and only the last release drops it.
 
     Only while the calling thread holds `lock` and, for a project's network,
     `lock` is that project's mutation lock; otherwise nothing is registered
-    (a no-op release), since an edit could then land unseen behind the
+    (a no-op hold), since an edit could then land unseen behind the
     snapshot. A private copy no context owns needs only its own lock held."""
     import weakref
 
     owner = _owning_context(network)
     is_owned = getattr(lock, "_is_owned", None)
     if not (callable(is_owned) and is_owned()) or (owner is not None and owner.mutation_lock is not lock):
-        return lambda: None
+        return _SolveInputsHold()
     key = id(network)
     with _SOLVE_INPUTS_LOCK:
         entry = _SOLVE_INPUTS.get(key)
         if entry is not None and entry[0]() is network:
             entry[2] += 1
-            snapshot = None
-        else:
-            entry = None
-    if entry is None:
-        snapshot = _network_copy(network)  # complete before any reader can see it
-        with _SOLVE_INPUTS_LOCK:
-            entry = _SOLVE_INPUTS.get(key)
-            if entry is not None and entry[0]() is network:
-                entry[2] += 1
-            else:
-                entry = [weakref.ref(network), snapshot, 1]
-                _SOLVE_INPUTS[key] = entry
-    released = {"v": False}
-
-    def release() -> None:
-        with _SOLVE_INPUTS_LOCK:
-            if released["v"]:
-                return
-            released["v"] = True
-            entry[2] -= 1
-            if entry[2] <= 0 and _SOLVE_INPUTS.get(key) is entry:
-                del _SOLVE_INPUTS[key]
-    return release
+            return _SolveInputsHold(network, key, entry)
+    snapshot = _network_copy(network)  # complete before any reader can see it
+    with _SOLVE_INPUTS_LOCK:
+        entry = _SOLVE_INPUTS.get(key)
+        if entry is not None and entry[0]() is network:
+            entry[2] += 1
+            return _SolveInputsHold(network, key, entry)
+        entry = [weakref.ref(network), snapshot, 1]
+        _SOLVE_INPUTS[key] = entry
+    return _SolveInputsHold(network, key, entry, outermost=True)
 
 
 def _record_solve_inputs(network, config):

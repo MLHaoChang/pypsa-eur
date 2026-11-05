@@ -109,3 +109,13 @@ A `pytest.raises(Exception)` on a refusal is checked for what actually raises. A
 - A storage availability rule treats inflow-fed hydro separately: an inflow-fed StorageUnit keeps dispatch-only availability and is named in `storage_notes` (#1010).
 - A PR that rewords an exception message runs `git grep "<old text>"` for substring matches on it; a change to `adequacy/levers.py` also runs the EH suites (#1010).
 - A split-storage reader handles a split whose charger and discharger sit on different buses; `storage_inventory.results_splits` keeps such splits out (#1012).
+- A report job is tied to a harness run (strict mode, run_binding) only by the harness's own explicit launch. The route and the chat tool never infer a run from state, so a human request is never strict and never charged to a run's budget, even while a run sits at its report stage (SH-07).
+- Pin the publish point, not `Thread.start` (#1077, #1085).
+- A unit-precedence rule needs a case where the units disagree (#1057).
+- Frontend types follow the server's return shape (#1060).
+- An engine loop reports its solve count; LOLE goes through `loop_goal(horizon_years(n))`. Run the tornado suites per file.
+- An engine loop's solves = solves_used + probe_solves + the closing re-solve whenever it ran, on every path (`_restore_closing` runs on all of them, not only restore "final") (#1123 Q1).
+- A `runs` entry that lists a tool for the harness's own step must not admit the same tool on a model turn; probe `_refusal` with the grant (#1123: run_margin_loop admitted, its solves uncounted).
+- A record identity check (started_at) needs a test with the activity bindings cleared (after takeover); otherwise the binding's origin check masks the mutant (#1123).
+- A flag borrowed to reach an existing code path (eh_process on a gas boiler) also enrols the component in every other reader of that flag; list the readers before accepting it (#1142).
+- For a wording-only or ruff-only delta, compare ASTs with strings blanked rather than re-running mutants (#1142).

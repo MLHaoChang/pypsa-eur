@@ -49,16 +49,16 @@ with the text left to the task view?
 
 ## Acceptance criteria
 
-- [ ] The data stop's `run.waiting` is written through `_wait_for_user` (test).
-- [ ] The attention record and email carry only what GK B's ruling allows (test).
-- [ ] One notice per state change, at most 10 per run, unchanged (test).
-- [ ] `data_request`'s "nothing asked twice" rule holds: a repeated wake on
+- [x] The data stop's `run.waiting` is written through `_wait_for_user`'s writer, `runner.set_waiting` (GK B plan step 1; test).
+- [x] The attention record and email carry only what GK B's ruling allows (test).
+- [x] One notice per state change, at most 10 per run, unchanged (test).
+- [x] `data_request`'s "nothing asked twice" rule holds: a repeated wake on
       the same open request writes no second `run.waiting`, attention record
       or email (test).
-- [ ] The lock order is unchanged: the data stop is written inside the
+- [x] The lock order is unchanged: the data stop is written inside the
       existing task-lock update in `_advance_run`, never by a nested
       `_update` (test or code-review note).
-- [ ] "At most one email" counts `_notify`'s run email only; `loop_notice`'s
+- [x] "At most one email" counts `_notify`'s run email only; `loop_notice`'s
       own email for the same L1 ending (issue 25) is unchanged and is
       asserted separately (test).
 
@@ -153,4 +153,28 @@ with the text left to the task view?
     shows the data stop writes `run.waiting` through the mutator.
   - The 10-email cap and `loop_notice`'s separate assertion stay as planned.
     Send GK B the PR head when ready.
+- 2026-11-05, build (branch `claude/sh-21d-data-notice`, after #1127).
+  `runner.set_waiting` is the one `run.waiting` writer; `data_request` calls
+  it inside `_advance_run`'s locked update with `reason=False`, so the data
+  stop stays a failed stage with no `run.reason` and the run monitor reads it
+  as on master. `since` is epoch seconds for every kind (no frontend reader).
+  Run attention records gain `data_items` (needs_user only); `_notify` and
+  `_email` send the count only. Tests: `tests/test_harness_data_notice.py`;
+  mutants for D2 (drop the same-ref no-op) and D3 (notice in the email) fail
+  it. `loop_notice`'s own email is unchanged (`test_harness_loop_notice.py`).
+  Self-review (mp-code-review): the "at most one email" box stays open. No
+  test drives a real L1 ending where `loop_notice` and `_notify` both send.
+  `test_harness_loop_notice.py` is unchanged and still passes. D2's no-op is
+  killed at unit level only: the data path dedupes by item key in
+  `run_answers.request` before `set_waiting`, so a repeated data wake never
+  reaches the no-op. Old run files keep an ISO `since`; the view passes it
+  through, and nothing reads it.
+- 2026-11-05, GK B (23) NOT OK @1053607 asked for the combined-ending test.
+  It is now `test_harness_loop_notice.py::test_an_exhausted_l1_with_gaps_sends_one_count_email_and_the_loop_email_unchanged`:
+  a real L1 `exhausted` ending (issue 25's fixture) with two data gaps, one
+  with a hostile label, sends exactly one `_notify` email with the count line
+  and exactly one `loop_notice` email. Neither names a label, a param or a
+  notice line. The loop email equals the body `loop_notice` builds from the
+  same record without the request. A mutant that puts the notice in the
+  email fails it.
 

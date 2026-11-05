@@ -1,8 +1,9 @@
 // Readiness of the wind/solar generators in the Time Series list (RP-04a):
-// a badge per row and the missing-coordinates banner. Read-only; fixing goes
-// to the place the thing lives (the bus's own coordinates, the generator's
-// own editor), never to a field here.
-import type { ReadinessRow } from '../../api/profiles'
+// a badge per row and the missing-coordinates banner. The badge is read-only.
+// The banner sets a bus's longitude and latitude inline through the normal bus
+// edit (RP-04), or, without a save handler, opens the bus's own coordinates.
+import { useState } from 'react'
+import { errorText, type ReadinessRow } from '../../api/profiles'
 import { openFlowTarget, openFlowTargetInPlace } from '../../layout/flowNavigation'
 import { useUIStore } from '../../store/uiStore'
 
@@ -47,7 +48,47 @@ function openBusCoordinates(bus: string) {
   else openFlowTarget(target)
 }
 
-export function MissingCoordinatesBanner({ rows }: { rows: ReadinessRow[] }) {
+/** Inline longitude/latitude of one bus, saved through the normal bus edit. */
+function InlineCoordinates({ bus, onSave, onDone }: {
+  bus: string; onSave: (bus: string, x: number, y: number) => Promise<void>; onDone: () => void
+}) {
+  const [x, setX] = useState('')
+  const [y, setY] = useState('')
+  const [err, setErr] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const lon = Number(x), lat = Number(y)
+  const valid = x.trim() !== '' && y.trim() !== '' && Math.abs(lon) <= 180 && Math.abs(lat) <= 90
+    && !(lon === 0 && lat === 0)
+  const save = async () => {
+    setErr(null)
+    setSaving(true)
+    try { await onSave(bus, lon, lat); onDone() } catch (e) { setErr(errorText(e)); setSaving(false) }
+  }
+  const field = 'w-20 border border-border rounded px-1 py-0.5 bg-bg'
+  return (
+    <span className="flex flex-wrap items-center gap-1" data-testid={`coord-form-${bus}`}>
+      <label>Longitude (°E) <input type="number" step="any" value={x} onChange={e => setX(e.target.value)}
+        data-testid={`coord-x-${bus}`} className={field} /></label>
+      <label>Latitude (°N) <input type="number" step="any" value={y} onChange={e => setY(e.target.value)}
+        data-testid={`coord-y-${bus}`} className={field} /></label>
+      <button type="button" className="text-accent hover:underline disabled:opacity-40"
+        disabled={!valid || saving} data-testid={`coord-save-${bus}`} onClick={() => { void save() }}>
+        {saving ? 'Saving…' : 'Save'}
+      </button>
+      <button type="button" className="text-muted hover:underline" onClick={onDone}>Cancel</button>
+      {!valid && x.trim() !== '' && y.trim() !== '' && (
+        <span className="text-warn">Longitude runs from −180 to 180 and latitude from −90 to 90; 0, 0 is not a location.</span>
+      )}
+      {err && <span className="text-warn" data-testid={`coord-error-${bus}`}>{err}</span>}
+    </span>
+  )
+}
+
+export function MissingCoordinatesBanner({ rows, onUploadInstead, onSetCoordinates }: {
+  rows: ReadinessRow[]; onUploadInstead?: () => void
+  onSetCoordinates?: (bus: string, x: number, y: number) => Promise<void>
+}) {
+  const [editing, setEditing] = useState<string | null>(null)
   const missing = rows.filter(r => r.coord_source === 'missing')
   if (missing.length === 0) return null
   return (
@@ -61,14 +102,24 @@ export function MissingCoordinatesBanner({ rows }: { rows: ReadinessRow[] }) {
           <li key={r.generator} className="flex flex-wrap items-baseline gap-x-2">
             <span className="font-mono text-text">{r.generator}</span>
             <span className="text-muted">on bus {r.bus}</span>
-            <button type="button" className="text-accent hover:underline"
-              data-testid={`set-coordinates-${r.generator}`}
-              onClick={() => openBusCoordinates(r.bus)}>
-              Set the bus coordinates ›
-            </button>
+            {onSetCoordinates && editing === r.generator
+              ? <InlineCoordinates bus={r.bus} onSave={onSetCoordinates} onDone={() => setEditing(null)} />
+              : (
+                <button type="button" className="text-accent hover:underline"
+                  data-testid={`set-coordinates-${r.generator}`}
+                  onClick={() => onSetCoordinates ? setEditing(r.generator) : openBusCoordinates(r.bus)}>
+                  {onSetCoordinates ? 'Set coordinates' : 'Set the bus coordinates ›'}
+                </button>
+              )}
           </li>
         ))}
       </ul>
+      {onUploadInstead && (
+        <button type="button" className="mt-1 text-accent hover:underline"
+          data-testid="upload-instead" onClick={onUploadInstead}>
+          Upload a measured file instead ›
+        </button>
+      )}
     </div>
   )
 }

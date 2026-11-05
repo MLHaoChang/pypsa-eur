@@ -107,4 +107,6 @@ def test_the_docs_stay_compact():
     """They ride in the tool catalogue on every turn."""
     # 4300 (owner G2P-17A-DOCCAP): room for the Link's harmonic-screen fields, harmonic_source's list in full.
     # 4400 (owner G2P-14-DOCCAP): room for Bus lost_production_value and Generator process_role.
-    assert len(attrs_doc()) < 4400
+    # 4500 (owner G2P-15-DOCCAP): room for Bus temperature_c and pressure_bar, Link max_supply_temp_c and
+    # max_pressure_bar (grid-to-process issue 15, heat and steam levels).
+    assert len(attrs_doc()) < 4500

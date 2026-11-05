@@ -3,7 +3,8 @@
 
 # Metric semantics, deterministic calculations and raw validity
 
-Status: needs-triage
+Status: ready-for-agent
+Model: Opus
 Progress: harness/calculations.py with generator, network and storage profiles shipped; other domains, NPV and validity checks pending
 Type: task
 Blocked by: reliability contract review; 01 for computed schema; 02 for raw evidence
@@ -91,3 +92,7 @@ and selections are in [validation](../storage-economics-validation.json) and
 [coverage ledger](../coverage-ledger.md). No paid model calls or independent
 domain approval. This whole issue stays open for broader storage economics,
 other domain adapters, arbitrary-language completeness and calibration/release.
+
+### 2026-11-05: triage sweep (AA-FILL-2), role ready-for-agent
+
+Was: `needs-triage`. Files: `pypsa-gui/backend/harness/calculations.py` (extend beyond generator/network/storage profiles), result-service validity masks, hand-worked fixtures under `tests/`. Blockers: 01 and 02 are done. Reviewer: GK B (finance metrics such as NPV also GK B). Shares metric definitions with 09. Plan OK from GK B first.

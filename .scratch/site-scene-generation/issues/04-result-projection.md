@@ -3,7 +3,8 @@
 
 # SC-03 — hourly native results on buildings and process groups
 
-Status: needs-triage — specification proposed; not implemented
+Status: ready-for-agent
+Model: Opus
 Type: task
 Dependencies: SC-02
 Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c
@@ -58,3 +59,7 @@ Draft: [d07/plan.md](../d07/plan.md). Oracle re-derived by GK A at t3. Condition
 12. The oracle values go into the tests as hand values.
 
 GK A leanings on the owner choices: A backend route, B vintage rows unavailable in SC-03, C unavailable after an AC PF.
+
+### 2026-11-05: triage sweep (AA-FILL-2), role ready-for-agent
+
+Was: `needs-triage — specification proposed; not implemented`. The D07 plan has a GK A GO with six binding conditions (see Comments in the file); the owner choices A/B/C are GK A's leanings (backend route, vintage rows unavailable in SC-03, unavailable after an AC PF) and are taken as the default unless the owner objects. Files: a backend projection route in `pypsa-gui/backend/routers/`, `services/dispatch_status.dispatch_digest` use, `solve_matches_inputs` gate, tests with hand oracles. Blockers: 03 (SC-02; backend, UI and detach all merged, issue still marked in-progress). Reviewers: GK A and UX.

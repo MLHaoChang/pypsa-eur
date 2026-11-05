@@ -284,8 +284,11 @@ What follows:
   over a power envelope and an inventory plan, not a schedule.
 - **Part-load efficiency curves.** Efficiency is constant per unit. Piecewise-linear part load
   is "later" (§7).
-- **Heat and steam carriers** are later. Upstream's Haber-Bosch waste heat
-  (`use_haber_bosch_waste_heat: 0.25`, `config.default.yaml:900`) is not used in A.
+- **Heat and steam levels are planned** (issue 15). A heat bus states the supply temperature it
+  delivers at (`temperature_c`), and a steam bus states its header pressure (`pressure_bar`, bar(g)).
+  A device states its reach (`max_supply_temp_c`, `max_pressure_bar`), and the validator compares the
+  numbers. The bands are display labels from demo edges and are never stored. Upstream's Haber-Bosch
+  waste heat (`use_haber_bosch_waste_heat: 0.25`, `config.default.yaml:900`) is still not used in A.
 - **Process sizing** (D6), quality and grade blending, and mine planning.
 
 ## 3. The examples
@@ -688,7 +691,8 @@ Critical paths:
 - **P4, grid feedback.** Internal transformer and feeder limits into the LP through a
   campus-sizing loop (like I7), and DR and ancillary products inside the solve. This waits for
   #332 and D5.
-- Heat and steam carriers, HB waste heat, and CO2 as a product.
+- HB waste heat, CO2 as a product, and the steam and fuel-gas balance (headers, letdown, turbines;
+  research note §6a.3 gap 4). Heat and steam levels moved to planned (issue 15, §2.6).
 - Part-load efficiency (piecewise-linear) and binary UC in planning.
 - Chained representative periods (option c) for large or multi-site clients.
 - Process sizing as a decision (D6).

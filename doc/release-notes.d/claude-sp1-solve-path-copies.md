@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A run's identity read while a solve is starting, or while the AC power-flow stage runs, now hashes the inputs the solve started from (or its lasting normalised inputs), never a half-normalised network or the stage's temporary dispatch fix. Solve results are unchanged.

@@ -1,6 +1,6 @@
 # 01. A tariff has no currency, so an EUR tariff attaches to a non-EUR project unchecked
 
-Status: needs-triage
+Status: needs-info
 Type: task
 Raised by: the gatekeeper on #521 (P2d, EU-C09 TenneT 2026), 2026-10-21; recorded under the owner's usage pause as a ticket, not work.
 Gated: yes (money semantics; schema change on `models.commercial.Tariff`).
@@ -21,3 +21,7 @@ Gated: yes (money semantics; schema change on `models.commercial.Tariff`).
 - The apply-side currency gate for cost references: `services/library/reference_apply.py` (`currency_mismatch` on the recorded provenance currency).
 
 ## Comments
+
+### 2026-11-05: triage sweep (AA-FILL-2), role needs-info
+
+Was: `needs-triage`. Owner question Q-GS-1 (GK B, money semantics). Two choices are open in the ticket: the default currency for existing tariffs, and whether it enters the canonical hash. Proposed: (1, Recommended) `currency` is required on new tariffs, existing org tariffs and URDB imports get it from their jurisdiction on read, and it stays OUT of the canonical hash so shipped Library pins keep resolving; (2) required and IN the hash: cleaner identity, but every shipped tariff re-hashes and pins must migrate; (3) optional with default EUR: smallest change, but a USD tariff without the field silently reads as EUR (the bug itself). #499 (regional packs) is merged, so the gap is live. Once answered: ready-for-agent, Opus, files `models/commercial.py`, `services/commercial/preflight.py`, `services/chat_tools.py` (`attach_tariff`), `routers/library.py`; reviewer GK B.

@@ -1012,3 +1012,20 @@ python -m pytest -o addopts='' tests/assurance_acceptance/test_p2_failure_modes.
 
 Next runnable tracer: S3, ambiguous capacity ("what is G1's capacity") → choice
 card, no checked number. S2, S4 and S5 are frozen (AA03-FREEZE-1); each sends GK B a plan delta first.
+
+## 2026-11-05 — issue 04 S1: blocking foreground-job outcomes
+
+Audit against master ad12e8c79 and the slice plan S1–S5 are in issue 04's
+Comments (GK B (24) verdicts, UX (9) S1b rules). S1 adds `harness/outcomes.py`
+and an `_outcome` block on run_simulation, run_ac_pf_stage, wait_for_job and
+abort_simulation results in ordinary turns. Tests:
+`tests/assurance_acceptance/test_p3_job_outcomes.py` (59; GK B (25) NOT OK @23d07886: `_outcome` now leads the result so truncation keeps it, red-then-green test). First red: the
+module import, then `KeyError: '_outcome'` on wait_for_job over a failed job;
+green after the build. Mutation check: 20 mutants of `classify`/`project`, 20
+killed. Regression set (p3 outcomes, harness reliability effect/reconcile,
+chat restrictions, task outcomes, task solver outcome, nonblocking D-C1,
+completion observer): 199 passed, 0 failed. Policy version 1. Pending:
+wait_for_job on ad:/rpt:/queue jobs (adapter_pending), nonblocking jobs
+(live-voice 11), display (S1b), S2–S5; S4/S5 wait for the owner's A3.5–A3.6
+freeze. Next runnable tracer: S1b, a chat tool line for a failed
+run_simulation shows "✕ … (failed)", not "✓".

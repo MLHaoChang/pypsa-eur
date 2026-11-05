@@ -3,7 +3,8 @@
 
 # I2b: the islanding-step rows credit a genset's full headroom, the event rows its load step
 
-Status: needs-triage
+Status: ready-for-agent
+Model: Opus
 Type: inconsistency (documented, not fixed)
 Found by: session_01TP6mmWWALLE8q4y73ypwoq, building the seamless event rows (issue 02), 2026-10-16
 
@@ -30,3 +31,7 @@ the I2b toy pins and any site with spinning gensets, so it needs its own plan
 review.
 
 ## Comments
+
+### 2026-11-05: triage sweep (AA-FILL-2), role ready-for-agent
+
+Was: `needs-triage`. Credit an online genset in the E1 rows at min(headroom, load_step_max_pct x P_n), as the event rows and gridspine I6 already do. Files: `services/solver/island.py` (`_seamless_rows`), the I2b toy pins in the solver tests. Blockers: none; the ticket asks for its own plan review first, so the plan goes to GK A before code. Reviewer: GK A. No shipped template is affected.
