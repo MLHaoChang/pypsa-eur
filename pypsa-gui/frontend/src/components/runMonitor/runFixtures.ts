@@ -109,6 +109,8 @@ export const STATES: Record<string, RunMonitorView> = {
     monitor: MONITOR }),
   loop_notice_no_address: view({ status: 'needs_review', run: run('input_gate', { status: 'needs_user', reason: 'exhausted', stages: stages('input_gate'), loop: { ended: 'exhausted', notice: { sent: false, error: 'no_address' } } }),
     monitor: MONITOR }),
+  loop_notice_no_mailer: view({ status: 'needs_review', run: run('input_gate', { status: 'needs_user', reason: 'exhausted', stages: stages('input_gate'), loop: { ended: 'exhausted', notice: { sent: false, error: 'no_mailer' } } }),
+    monitor: MONITOR }),
   loop_notice_uncertain: view({ status: 'needs_review', run: run('input_gate', { status: 'needs_user', reason: 'exhausted', stages: stages('input_gate'), loop: { ended: 'exhausted', notice: { sent: false, error: 'uncertain' } } }),
     monitor: MONITOR }),
   no_lost_send: view({ run: run('input_gate', { stages: stages('input_gate') }),
