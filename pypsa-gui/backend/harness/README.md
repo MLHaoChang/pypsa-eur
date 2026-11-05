@@ -1545,6 +1545,9 @@ own card. Rows, verdicts and listed gaps stay in `run.research` for the report.
   page that could close the fence is escaped (any case, spacing or
   attributes). A paused response has no client tool call, so the turn ends
   there and nothing is re-sent.
+  Known limit: the escape matches the tag as written. A tag spelled with
+  homoglyphs or zero-width characters is not a fence tag to the harness, and
+  it is left as it is.
 - **Nothing fetched persists.** The loop asks the turn's provider what the
   history keeps (`persistable`). A research turn keeps a stub per web result
   (`{type, tool_use_id, scrubbed: true}`) and no citations, so the event log

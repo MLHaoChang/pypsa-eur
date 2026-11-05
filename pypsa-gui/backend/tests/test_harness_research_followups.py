@@ -514,3 +514,95 @@ def test_a_snapshot_after_a_research_turn_carries_no_page(granted, profile):
     for path in bundled:
         text = path.read_text(encoding="utf-8")
         assert INJECTED not in text and "Research prose." not in text
+
+
+# ── GK B (22) NOT OK @1a0db9eb: each fail-closed path stops the run ─────────
+
+LONG_PAGE = (
+    "Industrial import tariff 2026. "
+    + "The network operator publishes its charges for every voltage level. " * 8
+    + "The energy charge for medium-voltage customers is EUR 142.50 per MWh."
+)
+
+
+def _stops_when(granted, profile, monkeypatch, spoil, text=None):
+    """Run a research turn whose persisted files `spoil(run, pages)` damages
+    just before the read-back; the run must stop research_cleanup_failed."""
+    from harness import runner
+
+    real = research._persisted_page_text
+
+    def spoiled(run, pages):
+        spoil(run, pages)
+        return real(run, pages)
+
+    monkeypatch.setattr(research, "_persisted_page_text", spoiled)
+    pair = [_search_pair()[0], fetch_block(text=text)] if text else _search_pair()
+    base = Scripted([*pair, _row_call()], [{"type": "text", "text": "Done."}])
+    out, _, path = _run(granted, profile, base)
+    run = runner._read(path)["run"]
+    assert out["status"] == "cleanup_failed"
+    assert (run["status"], run["reason"]) == ("failed", "research_cleanup_failed")
+
+
+def test_a_corrupt_log_line_stops_the_run(granted, profile, monkeypatch):
+    from harness import eventlog
+
+    def spoil(run, pages):
+        eventlog.flush(run)
+        with eventlog.path_for(run).open("a", encoding="utf-8") as f:
+            f.write("{not json\n")
+
+    _stops_when(granted, profile, monkeypatch, spoil)
+
+
+def test_an_unreadable_log_stops_the_run(granted, profile, monkeypatch):
+    import pathlib
+
+    from harness import eventlog
+
+    real_read = pathlib.Path.read_text
+
+    def spoil(run, pages):
+        target = eventlog.path_for(run)
+
+        def read_text(self, *a, **k):
+            if self == target:
+                raise PermissionError("unreadable")
+            return real_read(self, *a, **k)
+
+        monkeypatch.setattr(pathlib.Path, "read_text", read_text)
+
+    _stops_when(granted, profile, monkeypatch, spoil)
+
+
+def test_a_persisted_page_window_stops_the_run(granted, profile, monkeypatch):
+    """A page longer than any quote, written to the log as plain text (no web
+    block to stub), is found by its window."""
+    from harness import eventlog
+
+    assert len(LONG_PAGE) > source_ledger.QUOTE_CHARS + 64
+
+    def spoil(run, pages):
+        assert pages and pages[0].text == LONG_PAGE
+        eventlog.record(run, "context/injected", kind="x", text=LONG_PAGE)
+
+    _stops_when(granted, profile, monkeypatch, spoil, text=LONG_PAGE)
+
+
+def test_replay_of_a_research_turn_is_refused(granted, profile):
+    """F6: harness.replay refuses to re-run a research turn's own turn/start."""
+    from harness import eventlog, replay
+
+    base = Scripted([*_search_pair(), _row_call()], [{"type": "text", "text": "Done."}])
+    _, run, _ = _run(granted, profile, base)
+    eventlog.flush(run)
+    path = eventlog.path_for(run)
+    start = next(
+        e["seq"] for e in eventlog.read_events(path) if e["type"] == "turn/start"
+    )
+    never = Scripted([{"type": "text", "text": "never sent"}])
+    with pytest.raises(eventlog.ReplayRefused) as err:
+        replay.replay(path, start, never)
+    assert err.value.kind == "research_turn_not_replayable"
+    assert never.requests == []
