@@ -144,7 +144,9 @@ def send_if_due(path):
                 )
                 result = {"sent": True}
         except email_service.EmailConfigurationError:
-            result["error"] = "no_mailer"  # SMTP is not set up: recorded, not ambiguous (SH-25)
+            result["error"] = (
+                "no_mailer"  # SMTP is not set up: recorded, not ambiguous (SH-25)
+            )
             logger.warning(
                 "harness run %s: the loop-end notice was not sent, no mailer is configured",
                 task["task_id"],

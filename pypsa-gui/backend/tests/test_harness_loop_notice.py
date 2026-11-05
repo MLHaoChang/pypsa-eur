@@ -191,7 +191,10 @@ def test_the_run_view_shows_the_notice_failure(
     # The run card reads it at `run.loop.notice` of the view the API serves (frontend RunMonitor).
     served = assistant_tasks._view(record, fresh=True)
     assert served["run"]["loop"]["notice"] == {"sent": False, "error": "send_failed"}
-    assert set(view["loop"]["notice"]) <= {"sent", "error"}  # never the claim's token or claimed_at
+    assert set(view["loop"]["notice"]) <= {
+        "sent",
+        "error",
+    }  # never the claim's token or claimed_at
     assert "token" in record["run"]["loop"]["notice"]  # the stored record keeps it
 
 
