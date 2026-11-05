@@ -1321,7 +1321,7 @@ lifespan after the solve queue and is off under pytest (tests build their own
   - **`loop.notice`** (issue 25) is the email about an ended agent loop
     (`no_progress`, `exhausted`, `unverified_write`, `error`), in the run view
     as `loop.notice`: `{sent, error?}`. `sent` is `null` while claimed, `true`
-    once sent, `false` with `error` `send_failed`, `no_address` or `uncertain`
+    once sent, `false` with `error` `send_failed`, `no_address`, `no_mailer` (SMTP not configured) or `uncertain`
     (a claim with no result after 60 s; never re-sent). It is absent when
     `notify.email` was not granted. The chat's run card (`RunMonitor`) shows it
     on a `needs_user` run as one line: nothing while `null` or absent.
@@ -1642,8 +1642,9 @@ Two environment variables:
   document block refuses `total_tokens` and `money_eur` (`unbounded_input`), a
   model with no price refuses `money_eur` (`no_price`), and a request with no
   output limit refuses every mode (`unbounded_output`).
-  Known limit: `total_tokens` refuses every send (`no_cap`), because `cap()`
-  reads `run.budget.limit.total_tokens` and nothing sets it yet.
+  Known limit: `total_tokens` refuses every send (`no_cap`, which stops the
+  run `needs_user` with reason `no_cap`), because `cap()` reads
+  `run.budget.limit.total_tokens` and nothing sets it yet.
 - `PYPSA_GUI_SERVER_TOOL_COSTS_EUR` (`server_tool_costs()`): a JSON object
   `{type prefix: {"fee_eur": per use, "content_tokens": per use}}` that replaces
   the owner defaults (SH-TOOL-COSTS-1), `DEFAULT_SERVER_TOOL_COSTS_EUR`:
@@ -1684,7 +1685,7 @@ one of three places:
 `reconcile()` (and so the sweep) skips a run while another instance holds its
 live lease. Admission happens only under the live lease: `_admit()` refuses a
 process whose lease is not current (expired or taken over) with `lease_lost`
-and writes nothing. Run rounds are headless (`run_loops.run_round`): only a
+("This process no longer holds the run") and writes nothing. Run rounds are headless (`run_loops.run_round`): only a
 refusal's kind reaches the run's event log, so the `lease_lost` text reaches
 neither a card nor the model.
 

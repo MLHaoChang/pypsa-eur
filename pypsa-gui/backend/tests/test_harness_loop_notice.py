@@ -120,6 +120,19 @@ def test_a_sender_failure_leaves_the_run_needs_user_with_the_failure_recorded(
     assert record["run"]["loop"]["notice"]["error"] == "send_failed"
 
 
+def test_no_mailer_is_recorded_as_not_sent_with_its_reason(
+    granted, profile, site, rated, tunable_rule, outbox, owner, monkeypatch
+):
+    def unconfigured(envelope):
+        raise email_service.EmailConfigurationError("SMTP is not configured")
+
+    email_service.set_delivery_hook_for_tests(unconfigured)
+    _, record = exhaust(granted, profile, True, monkeypatch)
+    assert record["run"]["status"] == "needs_user"
+    assert record["run"]["loop"]["notice"]["sent"] is False
+    assert record["run"]["loop"]["notice"]["error"] == "no_mailer"
+
+
 def test_model_text_in_the_loop_history_never_reaches_the_mail():
     task = {
         "task_id": "t1",
