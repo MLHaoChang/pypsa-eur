@@ -660,7 +660,16 @@ def get_ac_pf_status():
         # backward compatibility.
         "converged_per_snapshot": s.get("ac_pf_convergence") or {},
         "converged_list": s.get("ac_pf_convergence_list") or [],
-        "converged_count": s.get("ac_pf_converged_count") or 0,
+        # `converged_count` is null while any snapshot's convergence is
+        # unknown (AA-12): never `or 0`, which would read "0 of n converged".
+        # `known_converged_count` is for display only ("k / n · u unknown");
+        # it is never state, sealed into a run, or a gate fact. A state saved
+        # before AA-12 has no `ac_pf_unknown_count` and every row known.
+        "converged_count": s.get("ac_pf_converged_count"),
+        "known_converged_count": sum(
+            1 for row in (s.get("ac_pf_convergence_list") or [])
+            if isinstance(row, dict) and row.get("ok") is True),
+        "unknown_count": s.get("ac_pf_unknown_count") or 0,
         "total_snapshots": s.get("ac_pf_total_snapshots") or 0,
     }
 

@@ -156,6 +156,28 @@ def test_ac_pf_handoff_publishes_ac_pf_mode(
     assert 'objective' not in metrics
 
 
+def test_ac_pf_with_unknown_convergence_seals_its_total_alone(
+    tmp_projects_dir, install_network, monkeypatch, evidence_root,
+):
+    """AA-12: a mixed run (converged, failed, unknown) seals no converged count."""
+    rows = [{'snapshot': f'2030-01-01T0{i}:00:00', 'period': None, 'ok': ok}
+            for i, ok in enumerate((True, True, False, None))]
+    _ctx, _session, result = _start_solve(
+        install_network, monkeypatch, kind='ac_pf',
+        final={'status': 'completed', 'condition': 'ac_pf_ok', 'solve_time': 1.0,
+               'ac_pf_convergence_list': rows,
+               'ac_pf_convergence': {r['snapshot']: r['ok'] for r in rows},
+               'ac_pf_converged_count': None, 'ac_pf_unknown_count': 1,
+               'ac_pf_total_snapshots': 4},
+    )
+    _wait_for_status(evidence_root, 'completed')
+    record = re_.get_run_evidence(re_.foreground_run_id(result['job_id']))
+    metrics = record['metrics']
+    assert metrics['ac_pf_total_snapshots'] == {'value': 4, 'unit': 'snapshots'}
+    assert not [k for k in metrics if 'converged' in k or 'unknown' in k]
+    assert re_._convergence({'kind': 'ac_pf', 'metrics': metrics}) == 'not_known_to_have_converged'
+
+
 def test_duplicate_publication_is_idempotent(
     tmp_projects_dir, install_network, monkeypatch, evidence_root,
 ):

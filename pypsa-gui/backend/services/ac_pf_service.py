@@ -14,6 +14,7 @@ External callers (`routers.simulation`, `services.chat_tools`) import
 """
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from services.adequacy.slack import slack_generator_mask
@@ -301,6 +302,39 @@ def _fix_dispatch_for_ac_pf(n) -> None:
             pass
 
 
+def _convergence_rows(pf_result, snapshots) -> list[bool | None]:
+    """Per-snapshot AC PF convergence read from `n.pf()`'s result, in snapshot order.
+
+    PyPSA returns `Dict(n_iter, error, converged)`, where `converged` is a bool
+    frame of snapshots x sub-networks (older PyPSA returned the frame or a
+    Series directly). A snapshot is True only when every sub-network cell is a
+    real boolean True, and False when any cell is a real boolean False.
+    Otherwise it is None (unknown): no or unreadable result, a frame with no
+    columns, a NaN or non-bool cell, or a snapshot the frame does not cover.
+    Rows are keyed on `snapshots` (a MultiIndex on multi-period networks), and
+    frame rows outside it are ignored. Missing evidence is never converged.
+    """
+    unknown: list[bool | None] = [None] * len(snapshots)
+    try:
+        conv = pf_result.get("converged") if isinstance(pf_result, dict) else pf_result
+        if isinstance(conv, pd.Series):
+            conv = conv.to_frame()
+        if not isinstance(conv, pd.DataFrame) or conv.shape[1] == 0:
+            return unknown
+        rows: list[bool | None] = []
+        for cells in conv.reindex(snapshots).itertuples(index=False, name=None):
+            known = [bool(c) for c in cells if isinstance(c, (bool, np.bool_))]
+            if not all(known):
+                rows.append(False)
+            elif len(known) == len(cells):
+                rows.append(True)
+            else:
+                rows.append(None)
+        return rows if len(rows) == len(snapshots) else unknown
+    except Exception:  # noqa: BLE001 — an unreadable result is unknown, not converged
+        return unknown
+
+
 def run_ac_pf_stage(
     network,
     config: SolverConfig,
@@ -408,7 +442,6 @@ def run_ac_pf_stage(
     #    networks still yield a per-snapshot bool by AND-ing across subnets.
     phase(f"Stage 2: Running AC PF on {len(network.snapshots)} snapshot(s) "
           f"(x_tol={config.ac_pf_x_tol:g})...")
-    converged_map: dict[str, bool] = {}
     try:
         try:
             pf_result = network.pf(
@@ -431,8 +464,8 @@ def run_ac_pf_stage(
         _restore_dispatch_fix_state(network, dispatch_fix_snapshot)
 
     # PyPSA's pf() return value: a Dict with 'converged' (DataFrame:
-    # snapshots × sub_networks of bool). Older PyPSA returned a Series.
-    # Be resilient to both. Keys are emitted in ISO-T format
+    # snapshots × sub_networks of bool); `_convergence_rows` reads it strictly
+    # (missing evidence is unknown, AA-12). Keys are emitted in ISO-T format
     # (e.g. "2026-05-11T00:00:00") to match the format used by
     # `/results/lines.index` etc., so the frontend can correlate
     # convergence to result rows without timestamp normalisation.
@@ -461,41 +494,30 @@ def run_ac_pf_stage(
                 return str(ts[0])
         return None
 
-    # converged_map is the legacy `{iso: bool}` dict, kept for backward
+    # converged_map is the legacy `{iso: bool | None}` dict, kept for backward
     # compatibility with consumers that don't care about multi-period (the
     # convergence-bar KPI in the status section). We ALSO emit a parallel
-    # list `converged_per_snapshot_list` of {snapshot, period, ok} so the
+    # list `ac_pf_convergence_list` of {snapshot, period, ok} so the
     # multi-period UI can disambiguate same-iso entries from different
     # periods. Frontend should prefer the list and treat the dict as a
-    # convenience for sub-renders.
-    converged_list: list[dict] = []
+    # convenience for sub-renders. `ok` is True, False or None (unknown).
+    oks = _convergence_rows(pf_result, network.snapshots)
+    converged_list: list[dict] = [
+        {"snapshot": _iso(sn), "period": _period(sn), "ok": ok}
+        for sn, ok in zip(network.snapshots, oks)
+    ]
+    converged_map: dict[str, bool | None] = {row["snapshot"]: row["ok"] for row in converged_list}
 
-    try:
-        conv_df = pf_result.get("converged") if isinstance(pf_result, dict) else pf_result
-        if conv_df is None:
-            # No info — assume all converged (PyPSA would have raised otherwise).
-            for sn in network.snapshots:
-                converged_map[_iso(sn)] = True
-                converged_list.append({"snapshot": _iso(sn), "period": _period(sn), "ok": True})
-        elif hasattr(conv_df, "all") and hasattr(conv_df, "index"):
-            # DataFrame: AND across columns (sub_networks).
-            per_snap = conv_df.all(axis=1) if conv_df.ndim == 2 else conv_df
-            for sn, ok in per_snap.items():
-                ok_b = bool(ok)
-                converged_map[_iso(sn)] = ok_b
-                converged_list.append({"snapshot": _iso(sn), "period": _period(sn), "ok": ok_b})
-        else:
-            for sn in network.snapshots:
-                converged_map[_iso(sn)] = True
-                converged_list.append({"snapshot": _iso(sn), "period": _period(sn), "ok": True})
-    except Exception:
-        for sn in network.snapshots:
-            converged_map[_iso(sn)] = True
-            converged_list.append({"snapshot": _iso(sn), "period": _period(sn), "ok": True})
-
-    n_ok = sum(1 for v in converged_map.values() if v)
-    n_total = len(converged_map) or len(network.snapshots)
-    phase(f"Stage 2: AC PF complete — {n_ok}/{n_total} snapshot(s) converged.")
+    # While any snapshot is unknown the run has no converged count: a k of n
+    # beside unknown rows would claim convergence nobody proved, and the sealed
+    # run then carries its total alone (run_evidence: not known to have converged).
+    n_total = len(network.snapshots)
+    n_unknown = sum(1 for ok in oks if ok is None)
+    n_ok = None if n_unknown else sum(1 for ok in oks if ok is True)
+    if n_unknown:
+        phase(f"Stage 2: AC PF complete — convergence unknown for {n_unknown} of {n_total} snapshot(s).")
+    else:
+        phase(f"Stage 2: AC PF complete — {n_ok}/{n_total} snapshot(s) converged.")
 
     # 6. Snapshot AC PF result state.
     ac_pf_snapshot = _snapshot_result_state(network)
@@ -508,6 +530,7 @@ def run_ac_pf_stage(
         "ac_pf_slack_bus_used": slack_bus,
         "ac_pf_stripped_voll_slacks": stripped,
         "ac_pf_converged_count": n_ok,
+        "ac_pf_unknown_count": n_unknown,
         "ac_pf_total_snapshots": n_total,
         "ac_pf_network_revision": revision,
     }

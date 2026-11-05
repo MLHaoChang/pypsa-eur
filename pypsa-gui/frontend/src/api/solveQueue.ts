@@ -77,7 +77,7 @@ export interface ResultsBundle {
   objective: number | null
   condition: string | null
   solve_time: number | null
-  ac_pf_convergence_list: Array<{ snapshot: string; period?: number | string | null; ok: boolean }> | null
+  ac_pf_convergence_list: Array<{ snapshot: string; period?: number | string | null; ok: boolean | null }> | null
   carriers: Record<string, string>          // generator name → carrier
   generators: TSPayload | null              // generators_t.p
   storage_soc: TSPayload | null             // storage_units_t.state_of_charge
