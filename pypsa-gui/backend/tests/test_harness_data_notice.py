@@ -227,3 +227,19 @@ def test_an_old_run_record_without_the_count_reads_as_on_master(detached, site):
         run_records(record)[0]["reason"]
         == "The harness run stopped for you; open it to see why and what it waits on."
     )
+
+
+def test_one_item_reads_in_the_singular(detached, site, monkeypatch):
+    _, root = site
+    task = detached()
+    path = task_path(root, task)
+    sent = mail(monkeypatch)
+    opt_in(path, task["task_id"])
+    data_stop(path, [_gap("L1")])
+    harness_runner._notify(path)
+    record = json.loads(path.read_text())
+    assert (
+        run_records(record)[0]["reason"]
+        == "The harness run waits for data (1 item); open it to see it."
+    )
+    assert "It waits for data (1 item)." in sent[0]["body_text"]

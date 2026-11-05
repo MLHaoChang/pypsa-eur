@@ -468,7 +468,9 @@ def project_records(owner, project, live):
         state = record['native_status']
         if record['family'] == 'run':
             status = 'needs_user' if state in ('needs_user', 'paused') else 'decision_recorded'
-            reason = (f"The harness run waits for data ({record['data_items']} items); open it to see them."
+            reason = (f"The harness run waits for data ({record['data_items']} "
+                      f"item{'s' if record['data_items'] != 1 else ''}); open it to see "
+                      f"{'them' if record['data_items'] != 1 else 'it'}."
                       if 'data_items' in record else
                       'The harness run stopped for you; open it to see why and what it waits on.'
                       if status == 'needs_user' else 'The harness run ended; open it to read its stages.')

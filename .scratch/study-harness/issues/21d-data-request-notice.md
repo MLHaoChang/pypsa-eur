@@ -49,7 +49,7 @@ with the text left to the task view?
 
 ## Acceptance criteria
 
-- [x] The data stop's `run.waiting` is written through `_wait_for_user` (test).
+- [x] The data stop's `run.waiting` is written through `_wait_for_user`'s writer, `runner.set_waiting` (GK B plan step 1; test).
 - [x] The attention record and email carry only what GK B's ruling allows (test).
 - [x] One notice per state change, at most 10 per run, unchanged (test).
 - [x] `data_request`'s "nothing asked twice" rule holds: a repeated wake on
@@ -58,7 +58,7 @@ with the text left to the task view?
 - [x] The lock order is unchanged: the data stop is written inside the
       existing task-lock update in `_advance_run`, never by a nested
       `_update` (test or code-review note).
-- [x] "At most one email" counts `_notify`'s run email only; `loop_notice`'s
+- [ ] "At most one email" counts `_notify`'s run email only; `loop_notice`'s
       own email for the same L1 ending (issue 25) is unchanged and is
       asserted separately (test).
 
@@ -162,4 +162,11 @@ with the text left to the task view?
   `_email` send the count only. Tests: `tests/test_harness_data_notice.py`;
   mutants for D2 (drop the same-ref no-op) and D3 (notice in the email) fail
   it. `loop_notice`'s own email is unchanged (`test_harness_loop_notice.py`).
+  Self-review (mp-code-review): the "at most one email" box stays open. No
+  test drives a real L1 ending where `loop_notice` and `_notify` both send.
+  `test_harness_loop_notice.py` is unchanged and still passes. D2's no-op is
+  killed at unit level only: the data path dedupes by item key in
+  `run_answers.request` before `set_waiting`, so a repeated data wake never
+  reaches the no-op. Old run files keep an ISO `since`; the view passes it
+  through, and nothing reads it.
 
