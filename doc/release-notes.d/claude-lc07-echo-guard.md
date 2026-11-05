@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Continuous speech (LC-07, off by default) ignores a final transcript that repeats, word for word, at least three words of the answer being read out while it may still be audible, so the assistant's own voice heard through the microphone never becomes a new request; overlapping finals during a running turn queue one correction, never a second turn.

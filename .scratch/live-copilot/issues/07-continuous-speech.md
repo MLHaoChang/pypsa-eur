@@ -1,6 +1,6 @@
 # LC-07 — continuous speech on the shared harness
 
-Status: ready-for-agent
+Status: done
 Type: task
 Baseline: master `c75ca5584b873418f10f1bca42f868255d445b7b`
 Dependencies: Stable typed paths and existing parent/utterance/usage primitives
@@ -221,3 +221,35 @@ stopped-hidden, flag off, flag on without a link).
 Remaining: a concrete media link (LiveKit client) arrives with the transport
 gate; `end` on `pagehide` is a normal request that may not finish, so the
 server deadline reaper settles that session.
+
+2026-11-05: Rebaselined on master `e98226bd1`. Merged: PR1 #1058 (`cbfd6cbc`),
+PR2 #1059 (`e9127fae`), PR3 #1063 (`45e06fe9`), 07b #1075 (`570e2398`).
+PR4 echo guard (LC-T13 "echo", branch `claude/lc07-echo-guard`), backend only.
+`claim_output` records the claimed answer's words, its claim time and its
+character count per session (`_RECENT_SPOKEN`, bound 4, process-local, kept
+after barge-in, dropped on every session exit). `submit_segment` returns
+`echo_ignored` (no ticket, segment marked seen) for a final of at least
+`ECHO_MIN_WORDS` (3) words that is a contiguous word run of such an answer
+within `ECHO_BASE_S + chars / ECHO_CHARS_PER_S` (5 s + 1 s per 12 characters)
+of its claim. Shorter finals are never echo; the bare-approval rule still
+guards "yes". No new error kind and no route change. Tests:
+`tests/test_live_speech_echo_lc07.py` (11). They cover an echo during
+playback, the same words after the window, user speech over playback, echo
+after barge-in, short overlaps such as "7.5 MW", reordered words, the session
+exit, and overlap: three finals during a running turn give one admitted turn
+plus one pending correction (the latest), and a replayed final is a
+duplicate. The no-guard, no-window and no-exit-cleanup mutants each fail a
+test. Neighbours (speech session/output, admission, drain, rebind,
+one-worker, error-kind manifest): 148 passed.
+Kept: a user who repeats three or more words of the answer verbatim while it
+is still playing is ignored once; the reply says to type it or say it again
+after playback. Word matching is exact; STT spelling drift (e.g. "7,5")
+leaves an echo unmatched, so it falls back to the admission rules
+(generation, single pending correction, no spoken approval).
+
+Acceptance (LC-T13/14/15) within this package: met offline and mocked.
+The remaining gates listed under PR1, PR2 and PR3 above need vendor,
+device or deployment evidence the issue keeps outside this package
+(vendor transport, STT/TTS models, pronunciation listening evidence,
+worker-side audio flush, real scoped credentials, paid calls). They are
+recorded, not built.
