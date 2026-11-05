@@ -637,12 +637,18 @@ def explore_run(eh, monkeypatch):
     # the inputs as they were. G1 is a genset candidate: a case that caps it
     # at 0 leaves the load unserved (the grid bus has no supply).
     network.snapshot_weightings.loc[:, :] = 8760.0 / len(network.snapshots)
-    network.generators.loc["G1", ["p_nom_extendable", "p_nom", "capital_cost"]] = [True, 0.0, 1.0]
+    network.generators.loc["G1", ["p_nom_extendable", "p_nom", "capital_cost"]] = [
+        True,
+        0.0,
+        1.0,
+    ]
     network.storage_units.at["S1", "capital_cost"] = 1.0
     if "poc_link" not in network.links.index:
         # The site's grid connection: the site bus to a grid bus of its own.
         network.add("Bus", "grid", v_nom=network.buses.at["B1", "v_nom"])
-        network.add("Link", "poc_link", bus0="grid", bus1="B1", p_nom=100.0, carrier="AC")
+        network.add(
+            "Link", "poc_link", bus0="grid", bus1="B1", p_nom=100.0, carrier="AC"
+        )
     prof = copy.deepcopy(run_profiles.PROFILES["eh_site@1"])
     prof["explore"] = {
         "levers": copy.deepcopy(LEVERS),
@@ -885,8 +891,13 @@ def test_an_investment_case_runs_on_study_owned_forks_and_leaves_the_base_unchan
 
     def row(value, source, status):
         return types.SimpleNamespace(
-            key="battery_capex", label="Battery capex", unit="EUR/kWh", value=value,
-            source=source, status=status, provenance=status,
+            key="battery_capex",
+            label="Battery capex",
+            unit="EUR/kWh",
+            value=value,
+            source=source,
+            status=status,
+            provenance=status,
         )
 
     stored = row(300.0, "pack", "default")
@@ -918,7 +929,11 @@ def test_an_investment_case_runs_on_study_owned_forks_and_leaves_the_base_unchan
     assert (
         c["engine"] == "study" and c["study_id"] == "st-1" and c["status"] == "passed"
     )
-    assert c["solves"] == {**c["solves"], "reserved": 3, "used": 3}  # E5: reserved, then settled
+    assert c["solves"] == {
+        **c["solves"],
+        "reserved": 3,
+        "used": 3,
+    }  # E5: reserved, then settled
     assert calls[0] == ("start", "bess_at_site") and calls[-1] == ("run", "options")
     assert all(
         s[4] for s in calls if s[0] == "set"
@@ -956,7 +971,9 @@ def test_a_lost_case_job_after_a_restart_is_uncertain_and_needs_the_user(
             if flight is not None:
                 flight[1].join(120)
             record = json.loads(path.read_text())
-            if all(c["status"] == "running" for c in record["run"]["cases"]) or stopped(record):
+            if all(c["status"] == "running" for c in record["run"]["cases"]) or stopped(
+                record
+            ):
                 break
         [sweep] = [s for s in record["steps"] if s["tool"] == "run_sensitivity_sweep"]
         assert sweep["status"] == "waiting" and record["run"]["status"] == "waiting_job"
@@ -1033,7 +1050,10 @@ def ppa():
 
 def lapsed(path):
     record = json.loads(path.read_text())
-    record["run"]["runner"] = {"lease_owner": "b", "lease_until": record["run"]["runner"]["lease_until"]}
+    record["run"]["runner"] = {
+        "lease_owner": "b",
+        "lease_until": record["run"]["runner"]["lease_until"],
+    }
     path.write_text(json.dumps(record))
 
 
@@ -1043,11 +1063,20 @@ TRIGGERS = {
     "explore_change_cap": lambda: [case("three", genset(), *bess())],
     "explore_case_name": lambda: [case("same", genset()), case("SAME", genset())],
     "explore_not_a_lever": lambda: [
-        case("load", change("Load", "L1", "p_set", 5.0, 0.0, 10.0, "MW", "profile:Load.L1.p_set"))
+        case(
+            "load",
+            change(
+                "Load", "L1", "p_set", 5.0, 0.0, 10.0, "MW", "profile:Load.L1.p_set"
+            ),
+        )
     ],
     "explore_value_out_of_range": lambda: [case("big", genset(value=130.0))],
-    "explore_range_unsourced": lambda: [case("said", genset(source="model:it said so"))],
-    "explore_solve_budget": lambda: [case("genset", genset())],  # no envelope: no solve left
+    "explore_range_unsourced": lambda: [
+        case("said", genset(source="model:it said so"))
+    ],
+    "explore_solve_budget": lambda: [
+        case("genset", genset())
+    ],  # no envelope: no solve left
 }
 
 
@@ -1081,7 +1110,9 @@ def test_e9_a_base_class_error_is_never_reported_as_a_typed_refusal(turn, monkey
     monkeypatch.setattr(run_explore, "propose_cases", mutant)
     with pytest.raises(ValueError):
         chat_tools.DISPATCHERS["propose_cases"](cases=[ppa()])
-    assert issubclass(run_explore.ExploreError, ValueError)  # so the wrapper's except is the narrow one
+    assert issubclass(
+        run_explore.ExploreError, ValueError
+    )  # so the wrapper's except is the narrow one
 
 
 def test_e4_admission_writes_only_while_this_process_holds_the_lease(turn):
@@ -1089,11 +1120,19 @@ def test_e4_admission_writes_only_while_this_process_holds_the_lease(turn):
 
     out = chat_tools.DISPATCHERS["propose_cases"](cases=[ppa()])
     assert out["admitted"] == [
-        {"name": "ppa", "engine": "commercial", "status": "not_runnable", "reason": run_explore.NOT_RUNNABLE["commercial"]}
+        {
+            "name": "ppa",
+            "engine": "commercial",
+            "status": "not_runnable",
+            "reason": run_explore.NOT_RUNNABLE["commercial"],
+        }
     ]
     assert [c["name"] for c in json.loads(turn.read_text())["run"]["cases"]] == ["ppa"]
     lapsed(turn)  # another runner took the run over meanwhile
-    assert tool_refusal(turn, [case("ppa2", genset(), engine="commercial")]) == "explore_not_in_turn"
+    assert (
+        tool_refusal(turn, [case("ppa2", genset(), engine="commercial")])
+        == "explore_not_in_turn"
+    )
 
 
 def test_e4_a_turn_that_lost_its_stage_writes_nothing(turn):
@@ -1109,7 +1148,9 @@ def test_e4_a_turn_that_lost_its_stage_writes_nothing(turn):
 @pytest.mark.parametrize(
     "tamper",
     [
-        pytest.param(lambda a: a.update(baseline_project_id="someone-elses"), id="baseline"),
+        pytest.param(
+            lambda a: a.update(baseline_project_id="someone-elses"), id="baseline"
+        ),
         pytest.param(lambda a: a["cases"].pop(), id="cases"),
     ],
 )
@@ -1134,7 +1175,9 @@ def test_e1_a_sweep_whose_args_differ_from_the_admitted_cases_needs_the_user(
     tamper(sweep["args"])
     path.write_text(json.dumps(record))
     jobs_before = [j["id"] for j in solve_queue.solve_queue.list_jobs()]
-    record = go(harness_runner.Runner("a", decisions=Clicks(refs={"explore.2"})), path, task)
+    record = go(
+        harness_runner.Runner("a", decisions=Clicks(refs={"explore.2"})), path, task
+    )
     run = record["run"]
     [sweep] = [s for s in record["steps"] if s["tool"] == "run_sensitivity_sweep"]
     assert run["status"] == "needs_user" and run["reason"] == "explore_args"
@@ -1155,9 +1198,14 @@ def test_e1_a_save_under_another_name_needs_the_user(granted, explore_run, rated
     assert record["run"]["waiting"]["ref"] == save["id"]
     save["args"]["name"] = "Someone else's project"
     path.write_text(json.dumps(record))
-    record = go(harness_runner.Runner("a", decisions=Clicks(refs={save["id"]})), path, task)
+    record = go(
+        harness_runner.Runner("a", decisions=Clicks(refs={save["id"]})), path, task
+    )
     [save] = [s for s in record["steps"] if s["tool"] == "save_project"]
-    assert record["run"]["status"] == "needs_user" and record["run"]["reason"] == "explore_args"
+    assert (
+        record["run"]["status"] == "needs_user"
+        and record["run"]["reason"] == "explore_args"
+    )
     assert save["status"] == "pending"
 
 
@@ -1167,9 +1215,19 @@ def test_e1_check_step_refuses_a_foreign_project_arg_and_passes_the_built_args()
         "run": {**empty_run(), "stage": "explore", "cases": []},
         "steps": [],
     }
-    step = {"id": "explore.1", "tool": "run_sensitivity_sweep", "explore": {"cases": ["x"]}}
-    assert run_explore.check_step(task, step, {"baseline_project_id": "p-2", "cases": []}) == "explore_project"
-    assert run_explore.check_step(task, step, {"target_project": "p-2"}) == "explore_project"
+    step = {
+        "id": "explore.1",
+        "tool": "run_sensitivity_sweep",
+        "explore": {"cases": ["x"]},
+    }
+    assert (
+        run_explore.check_step(task, step, {"baseline_project_id": "p-2", "cases": []})
+        == "explore_project"
+    )
+    assert (
+        run_explore.check_step(task, step, {"target_project": "p-2"})
+        == "explore_project"
+    )
     # A step of another stage is not the explore stage's to check.
     other = {"id": "inputs.1", "tool": "run_sensitivity_sweep"}
     assert run_explore.check_step(task, other, {"baseline_project_id": "p-2"}) is None
@@ -1181,7 +1239,12 @@ def test_e1_check_step_refuses_a_foreign_project_arg_and_passes_the_built_args()
 def _running_study(path, deadline, lease=None):
     record = json.loads(path.read_text())
     record["run"]["cases"] = [
-        {"name": "bess", "engine": "study", "status": "running", "deadline_epoch": deadline},
+        {
+            "name": "bess",
+            "engine": "study",
+            "status": "running",
+            "deadline_epoch": deadline,
+        },
         {"name": "genset", "engine": "network", "status": "running"},
     ]
     if lease is not None:
@@ -1190,17 +1253,23 @@ def _running_study(path, deadline, lease=None):
 
 
 def test_e10_a_study_case_past_its_deadline_settles_failed_in_the_boot_sweep(turn):
-    _running_study(turn, deadline=1000.0, lease={"lease_owner": "a", "lease_until": 500.0})
+    _running_study(
+        turn, deadline=1000.0, lease={"lease_owner": "a", "lease_until": 500.0}
+    )
     assert run_explore.expire(turn, boot="b", clock=lambda: 2000.0) == 1
     cases = {c["name"]: c for c in json.loads(turn.read_text())["run"]["cases"]}
     assert cases["bess"]["status"] == "failed" and "deadline" in cases["bess"]["reason"]
-    assert cases["genset"]["status"] == "running"  # a network case's job settles from its queue
+    assert (
+        cases["genset"]["status"] == "running"
+    )  # a network case's job settles from its queue
 
 
 def test_e10_a_study_case_before_its_deadline_or_under_anothers_live_lease_stays(turn):
     _running_study(turn, deadline=3000.0)
     assert run_explore.expire(turn, boot="a", clock=lambda: 2000.0) == 0
-    _running_study(turn, deadline=1000.0, lease={"lease_owner": "a", "lease_until": 9000.0})
+    _running_study(
+        turn, deadline=1000.0, lease={"lease_owner": "a", "lease_until": 9000.0}
+    )
     before = turn.read_bytes()
     assert run_explore.expire(turn, boot="b", clock=lambda: 2000.0) == 0
     assert turn.read_bytes() == before
@@ -1208,9 +1277,14 @@ def test_e10_a_study_case_before_its_deadline_or_under_anothers_live_lease_stays
 
 def test_a_profile_that_lowers_the_caps_is_held_to_them():
     prof = explore_profile()
-    prof.setdefault("stages", {}).setdefault("explore", {})["agent"] = {"cases": 2, "changes": 1}
+    prof.setdefault("stages", {}).setdefault("explore", {})["agent"] = {
+        "cases": 2,
+        "changes": 1,
+    }
     with pytest.raises(run_explore.ExploreError) as err:
-        run_explore.check_proposal(empty_run(), prof, [case(f"c{i}", genset()) for i in range(3)])
+        run_explore.check_proposal(
+            empty_run(), prof, [case(f"c{i}", genset()) for i in range(3)]
+        )
     assert err.value.kind == "explore_case_cap"
     with pytest.raises(run_explore.ExploreError) as err:
         run_explore.check_proposal(empty_run(), prof, [case("two", *bess())])

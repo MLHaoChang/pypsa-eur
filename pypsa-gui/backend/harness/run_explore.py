@@ -208,7 +208,9 @@ def _research_row(run, row_id):
     gap = ((row or {}).get("for") or {}).get("gap")
     if not gap:
         return None
-    return next((r for r in source_ledger.ranges(rows, gap) if r.get("id") == row_id), None)
+    return next(
+        (r for r in source_ledger.ranges(rows, gap) if r.get("id") == row_id), None
+    )
 
 
 def _check_network_change(run, levers, change):
@@ -373,8 +375,10 @@ def caps(profile) -> tuple[int, int]:
     from services import run_profiles
 
     agent = ((profile.get("stages") or {}).get(STAGE) or {}).get("agent") or {}
-    return (agent.get("cases", run_profiles.EXPLORE_CASES),
-            agent.get("changes", run_profiles.EXPLORE_CHANGES))
+    return (
+        agent.get("cases", run_profiles.EXPLORE_CASES),
+        agent.get("changes", run_profiles.EXPLORE_CHANGES),
+    )
 
 
 def check_proposal(run, profile, cases) -> list[dict]:
@@ -413,7 +417,9 @@ def check_proposal(run, profile, cases) -> list[dict]:
         taken.add(name.casefold())
         changes = entry["changes"]
         if not isinstance(changes, list) or not changes:
-            raise ExploreError("invalid_explore_case", f"A case changes 1 to {max_changes} things.")
+            raise ExploreError(
+                "invalid_explore_case", f"A case changes 1 to {max_changes} things."
+            )
         if len(changes) > max_changes:
             raise ExploreError(
                 "explore_change_cap",
@@ -664,7 +670,9 @@ def due(task) -> bool:
     ):
         return False
     profile = _profile(task)
-    return bool(profile and "explore" in profile and profile["stages"][STAGE].get("agent"))
+    return bool(
+        profile and "explore" in profile and profile["stages"][STAGE].get("agent")
+    )
 
 
 def holds(task) -> bool:
@@ -679,7 +687,9 @@ def holds(task) -> bool:
     return (
         due(task)
         or research.due(task)
-        or any(c.get("status") in ("admitted", "running") for c in run.get("cases") or [])
+        or any(
+            c.get("status") in ("admitted", "running") for c in run.get("cases") or []
+        )
     )
 
 
@@ -710,11 +720,21 @@ def message(task, profile, ctx, solves_left) -> str:
             names = []
         levers.append(
             {
-                **{k: lever[k] for k in ("component", "name", "attr", "unit", "bounds", "basis")},
+                **{
+                    k: lever[k]
+                    for k in ("component", "name", "attr", "unit", "bounds", "basis")
+                },
                 "source": f"profile:{_lever_ref(lever)}",
                 "explore_only": bool(lever.get("explore_only")),
                 "base": {
-                    n: _base_value(ctx, {"component": lever["component"], "name": n, "attr": lever["attr"]})
+                    n: _base_value(
+                        ctx,
+                        {
+                            "component": lever["component"],
+                            "name": n,
+                            "attr": lever["attr"],
+                        },
+                    )
                     for n in names[:20]
                 },
             }
@@ -722,7 +742,9 @@ def message(task, profile, ctx, solves_left) -> str:
     rows = [
         {k: r.get(k) for k in ("id", "for", "range", "unit", "basis", "url")}
         for r in ((task["run"].get("research") or {}).get("rows") or [])
-        if r.get("range") is not None and r.get("status") == "confirmed" and r.get("verification") == "verified"
+        if r.get("range") is not None
+        and r.get("status") == "confirmed"
+        and r.get("verification") == "verified"
     ]
     data = {
         "levers": levers,
@@ -773,7 +795,9 @@ def run_turn(path, ctx, session, *, provider, recheck, boot, clock) -> str:
             scope={"loop": STAGE, "round": 1},
         )
     except BaseException:
-        runner.charge(path, run_loops._spent(session, usage_before), model)  # spent tokens count (§6.5)
+        runner.charge(
+            path, run_loops._spent(session, usage_before), model
+        )  # spent tokens count (§6.5)
         raise
     finally:
         with _TURNS_LOCK:
@@ -818,7 +842,9 @@ def record(path, turn, *, lease, steps=False) -> bool:
 
 def failed_turn(path, *, boot, clock) -> bool:
     """A turn that errored: recorded, never retried; admitted cases still run."""
-    return record(path, {"status": "error", "cases": []}, lease=(boot, clock), steps=True)
+    return record(
+        path, {"status": "error", "cases": []}, lease=(boot, clock), steps=True
+    )
 
 
 def case_project_name(task, case) -> str:
@@ -837,7 +863,9 @@ def sweep_cases(task, names=None) -> list[dict]:
     run = task["run"]
     out = []
     for case in run.get("cases") or []:
-        if case["engine"] != NETWORK or (names is None and case["status"] != "admitted"):
+        if case["engine"] != NETWORK or (
+            names is None and case["status"] != "admitted"
+        ):
             continue
         if names is not None and case["name"] not in names:
             continue
@@ -882,7 +910,11 @@ def steps_for(task, name=None) -> list[dict]:
     run, pid = task["run"], task["project_id"]
     n = _next_id(task)
     steps = []
-    network = [c["name"] for c in run.get("cases") or [] if c["engine"] == NETWORK and c["status"] == "admitted"]
+    network = [
+        c["name"]
+        for c in run.get("cases") or []
+        if c["engine"] == NETWORK and c["status"] == "admitted"
+    ]
     if network:
         steps.append(
             {
@@ -898,7 +930,10 @@ def steps_for(task, name=None) -> list[dict]:
             {
                 "id": f"{STAGE}.{n}",
                 "tool": "run_sensitivity_sweep",
-                "args": {"baseline_project_id": pid, "cases": sweep_cases(task, network)},
+                "args": {
+                    "baseline_project_id": pid,
+                    "cases": sweep_cases(task, network),
+                },
                 "status": "pending",
                 "explore": {"cases": network},
             }
@@ -949,7 +984,12 @@ def _study_followups(task, case, start):
     steps.append(
         {
             "tool": "run_decision_study",
-            "args": {"project": pid, "study_id": study_id, "stage": "options", "fidelity": "quick_screen"},
+            "args": {
+                "project": pid,
+                "study_id": study_id,
+                "stage": "options",
+                "fidelity": "quick_screen",
+            },
             "phase": "run",
         }
     )
@@ -973,23 +1013,37 @@ def check_step(task, step, args) -> str | None:
         return None
     mark = step.get("explore") or {}
     if any(k.endswith("project") or k.endswith("project_id") for k in args) and any(
-        args[k] != task["project_id"] for k in args if k.endswith("project") or k.endswith("project_id")
+        args[k] != task["project_id"]
+        for k in args
+        if k.endswith("project") or k.endswith("project_id")
     ):
         return "explore_project"
     if step["tool"] == "save_project":
-        return None if mark.get("phase") == "save" and args == {"name": project_name(task)} else "explore_args"
+        return (
+            None
+            if mark.get("phase") == "save" and args == {"name": project_name(task)}
+            else "explore_args"
+        )
     if step["tool"] == "run_sensitivity_sweep":
         names = mark.get("cases") or []
-        expected = {"baseline_project_id": task["project_id"], "cases": sweep_cases(task, names)}
+        expected = {
+            "baseline_project_id": task["project_id"],
+            "cases": sweep_cases(task, names),
+        }
         return None if names and args == expected else "explore_args"
-    case = next((c for c in task["run"].get("cases") or [] if c["name"] == mark.get("case")), None)
+    case = next(
+        (c for c in task["run"].get("cases") or [] if c["name"] == mark.get("case")),
+        None,
+    )
     if case is None or case["engine"] != STUDY:
         return "explore_args"
     if step["tool"] == "start_decision_study":
         return None if args == _study_start_args(task, case) else "explore_args"
     if not case.get("study_id"):
         return "explore_args"
-    expected = [s["args"] for s in _study_followups(task, case, 0) if s["tool"] == step["tool"]]
+    expected = [
+        s["args"] for s in _study_followups(task, case, 0) if s["tool"] == step["tool"]
+    ]
     return None if args in expected else "explore_args"
 
 
@@ -1004,7 +1058,9 @@ def case_gate(task, case, profile) -> dict:
 
     from services import chat_tools, project_registry, run_gates, workflow_tools
 
-    rules = [r for r in profile["stages"]["result_gate"]["rules"] if not r.get("engine")]
+    rules = [
+        r for r in profile["stages"]["result_gate"]["rules"] if not r.get("engine")
+    ]
     try:
         with chat_tools._acting() as (db, user):
             row = project_registry.resolve_project(db, user, case["project_id"])
@@ -1014,10 +1070,23 @@ def case_gate(task, case, profile) -> dict:
                 ctx=child,
                 project=row,
                 project_dir=project_registry.project_dir(row),
-                case={"project_id": case["project_id"], "job_id": (case.get("job") or {}).get("job_id")},
+                case={
+                    "project_id": case["project_id"],
+                    "job_id": (case.get("job") or {}).get("job_id"),
+                },
             )
-    except (HTTPException, OSError, ValueError):  # the child cannot be read: no fact is evidence
-        env = run_gates.Env(task=task, ctx=None, project=None, project_dir=None, case={"project_id": case["project_id"]})
+    except (
+        HTTPException,
+        OSError,
+        ValueError,
+    ):  # the child cannot be read: no fact is evidence
+        env = run_gates.Env(
+            task=task,
+            ctx=None,
+            project=None,
+            project_dir=None,
+            case={"project_id": case["project_id"]},
+        )
     return run_gates.gate(rules, env)
 
 
@@ -1029,7 +1098,13 @@ def study_gate(task, record) -> dict:
 
     results = run_gates.evaluate(
         [STUDY_RULE],
-        run_gates.Env(task=task, ctx=None, project=None, project_dir=None, case={"study_run": record}),
+        run_gates.Env(
+            task=task,
+            ctx=None,
+            project=None,
+            project_dir=None,
+            case={"study_run": record},
+        ),
     )
     return {
         "rules": results,
@@ -1049,14 +1124,20 @@ def study_run(project, study_id):
 
     try:
         return chat_tools._route(
-            studies.get_study_run, study_id, project=chat_tools._authorized_project(project)
+            studies.get_study_run,
+            study_id,
+            project=chat_tools._authorized_project(project),
         )
     except HTTPException:
         return None
 
 
 def _why(gate) -> str:
-    failing = [r["rule"] for r in gate["rules"] if r["severity"] == "block" and r["verdict"] != "pass"]
+    failing = [
+        r["rule"]
+        for r in gate["rules"]
+        if r["severity"] == "block" and r["verdict"] != "pass"
+    ]
     return "Failed: " + ", ".join(failing) + "." if failing else ""
 
 
@@ -1068,7 +1149,12 @@ def _judge(case, gate, solves):
 
 
 def _outcomes(step):
-    return {c.get("name"): c for c in (step.get("job") or {}).get("cases") or (step.get("result") or {}).get("cases") or []}
+    return {
+        c.get("name"): c
+        for c in (step.get("job") or {}).get("cases")
+        or (step.get("result") or {}).get("cases")
+        or []
+    }
 
 
 def advance(path, *, boot, clock) -> bool:
@@ -1093,21 +1179,50 @@ def advance(path, *, boot, clock) -> bool:
         if not step["id"].startswith(STAGE + ".") or step.get("judged_by"):
             continue
         mark = step.get("explore") or {}
-        if step["tool"] == "run_sensitivity_sweep" and step["status"] in ("completed", "failed", "uncertain"):
+        if step["tool"] == "run_sensitivity_sweep" and step["status"] in (
+            "completed",
+            "failed",
+            "uncertain",
+        ):
             outcomes = _outcomes(step)
-            names = {case_project_name(task, c): c for c in run["cases"] if c["name"] in mark.get("cases", [])}
-            if not names or any((outcomes.get(n) or {}).get("status") not in _TERMINAL for n in names):
+            names = {
+                case_project_name(task, c): c
+                for c in run["cases"]
+                if c["name"] in mark.get("cases", [])
+            }
+            if not names or any(
+                (outcomes.get(n) or {}).get("status") not in _TERMINAL for n in names
+            ):
                 continue  # a lost or unread job stays uncertain: the run needs the user
             for project_name, case in names.items():
                 out = outcomes[project_name]
-                case = {**case, "project_id": out.get("project_id"), "job": {"job_id": out.get("job_id")}}
-                gate = case_gate(task, case, profile) if case["project_id"] else study_gate(task, None)
+                case = {
+                    **case,
+                    "project_id": out.get("project_id"),
+                    "job": {"job_id": out.get("job_id")},
+                }
+                gate = (
+                    case_gate(task, case, profile)
+                    if case["project_id"]
+                    else study_gate(task, None)
+                )
                 judged[case["name"]] = (gate, 1 if out.get("job_id") else 0, out)
     for case in run["cases"]:
-        if case["engine"] == STUDY and case["status"] == "running" and case.get("study_id"):
+        if (
+            case["engine"] == STUDY
+            and case["status"] == "running"
+            and case.get("study_id")
+        ):
             record_ = study_run(task["project_id"], case["study_id"])
-            if isinstance(record_, dict) and record_.get("status") not in (None, "running"):
-                judged[case["name"]] = (study_gate(task, record_), int(record_.get("solves_charged") or 0), None)
+            if isinstance(record_, dict) and record_.get("status") not in (
+                None,
+                "running",
+            ):
+                judged[case["name"]] = (
+                    study_gate(task, record_),
+                    int(record_.get("solves_charged") or 0),
+                    None,
+                )
 
     def change(t):
         r, wrote = t["run"], False
@@ -1120,13 +1235,19 @@ def advance(path, *, boot, clock) -> bool:
             if step["tool"] == "run_sensitivity_sweep":
                 mine = [cases[x] for x in mark.get("cases", []) if x in cases]
                 if step["status"] == "waiting":
-                    jobs = {j.get("name"): j for j in (step.get("job") or {}).get("jobs") or []}
+                    jobs = {
+                        j.get("name"): j
+                        for j in (step.get("job") or {}).get("jobs") or []
+                    }
                     for case in mine:
                         job = jobs.get(case_project_name(t, case))
                         if case["status"] == "admitted":
                             case["status"] = "running"
                             if job:
-                                case.update(project_id=job.get("project_id"), job={"job_id": job["job_id"]})
+                                case.update(
+                                    project_id=job.get("project_id"),
+                                    job={"job_id": job["job_id"]},
+                                )
                             wrote = True
                 elif all(c["name"] in judged for c in mine) and mine:
                     for case in mine:
@@ -1136,7 +1257,9 @@ def advance(path, *, boot, clock) -> bool:
                             case["job"] = {"job_id": out["job_id"]}
                         _judge(case, gate, solves)
                         if out.get("status") != "completed" and not case.get("reason"):
-                            case["reason"] = f"The case's solve ended {out.get('status')}."
+                            case["reason"] = (
+                                f"The case's solve ended {out.get('status')}."
+                            )
                         settle.append((case, solves))
                     step["judged_by"] = JUDGED
                     wrote = True
@@ -1144,22 +1267,43 @@ def advance(path, *, boot, clock) -> bool:
             case = cases.get(mark.get("case"))
             if case is None:
                 continue
-            if step["status"] in ("failed", "uncertain") and case["status"] in ("admitted", "running"):
+            if step["status"] in ("failed", "uncertain") and case["status"] in (
+                "admitted",
+                "running",
+            ):
                 # A study step that failed fails its case, never the run.
-                case.update(status="failed", reason=f"{step['tool']} {step['status']}: {step.get('error', '')}".strip())
+                case.update(
+                    status="failed",
+                    reason=f"{step['tool']} {step['status']}: {step.get('error', '')}".strip(),
+                )
                 for other in t["steps"]:
-                    if (other.get("explore") or {}).get("case") == case["name"] and other["status"] != "completed":
+                    if (other.get("explore") or {}).get("case") == case[
+                        "name"
+                    ] and other["status"] != "completed":
                         other["judged_by"] = JUDGED
                 wrote = True
-            elif step["status"] == "completed" and mark.get("phase") == "start" and not case.get("study_id"):
+            elif (
+                step["status"] == "completed"
+                and mark.get("phase") == "start"
+                and not case.get("study_id")
+            ):
                 case["study_id"] = (step.get("result") or {}).get("study_id")
                 if not case["study_id"]:
-                    case.update(status="failed", reason="The decision study returned no study id.")
+                    case.update(
+                        status="failed",
+                        reason="The decision study returned no study id.",
+                    )
                 else:
                     t["steps"].extend(_study_followups(t, case, n))
                 wrote = True
-            elif step["status"] == "completed" and mark.get("phase") == "run" and case["status"] == "admitted":
-                case.update(status="running", deadline_epoch=now + STUDY_DEADLINE_SECONDS)
+            elif (
+                step["status"] == "completed"
+                and mark.get("phase") == "run"
+                and case["status"] == "admitted"
+            ):
+                case.update(
+                    status="running", deadline_epoch=now + STUDY_DEADLINE_SECONDS
+                )
                 wrote = True
         for case in r.get("cases") or []:
             if case["engine"] != STUDY or case["status"] != "running":
@@ -1171,7 +1315,10 @@ def advance(path, *, boot, clock) -> bool:
                 wrote = True
             elif now > float(case.get("deadline_epoch") or 0):
                 # E10: past its deadline it settles failed; its reservation stays spent.
-                case.update(status="failed", reason="The decision study did not finish before its deadline.")
+                case.update(
+                    status="failed",
+                    reason="The decision study did not finish before its deadline.",
+                )
                 wrote = True
         return None if wrote else False
 
@@ -1195,19 +1342,27 @@ def expire(path, *, boot, clock) -> int:
     late = [
         c["name"]
         for c in run.get("cases") or []
-        if c.get("engine") == STUDY and c.get("status") == "running" and now > float(c.get("deadline_epoch") or 0)
+        if c.get("engine") == STUDY
+        and c.get("status") == "running"
+        and now > float(c.get("deadline_epoch") or 0)
     ]
     if not late:
         return 0
     lease = run.get("runner") or {}
-    if lease.get("lease_owner") not in (None, boot) and float(lease.get("lease_until") or 0) > now:
+    if (
+        lease.get("lease_owner") not in (None, boot)
+        and float(lease.get("lease_until") or 0) > now
+    ):
         return 0
 
     def change(t):
         hit = 0
         for case in t["run"].get("cases") or []:
             if case["name"] in late and case["status"] == "running":
-                case.update(status="failed", reason="The decision study did not finish before its deadline.")
+                case.update(
+                    status="failed",
+                    reason="The decision study did not finish before its deadline.",
+                )
                 hit += 1
         return None if hit else False
 
