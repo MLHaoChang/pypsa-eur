@@ -542,7 +542,7 @@ def _settle_run_step(job: ReportJob) -> None:
     with job.lock:
         record = dict(job.record)
     try:
-        run_report.settle_record(job.run_binding[0], record)
+        run_report.settle_record(job.run_binding[0], record, owner=job.run_binding[1])
     except Exception:  # noqa: BLE001 -- the runner's tick settles it again
         logger.exception("report job %s could not settle its run step", job.report_id)
 

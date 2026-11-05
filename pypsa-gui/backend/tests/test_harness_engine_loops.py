@@ -1238,6 +1238,26 @@ def test_a_model_turn_never_starts_an_engine_loop_under_the_grant(
     assert not loops.calls
 
 
+def test_a_model_turn_never_starts_the_report_under_a_grant_that_lists_it(
+    granted, ok, monkeypatch, seeded_identity
+):
+    """Study harness 07 (B1-b): a grant whose `runs` lists the report covers
+    the stage-7 card only, never a chat `generate_report`.
+    Mutant: drop the REPORT_TOOLS refusal in `run_envelope._refusal`."""
+    with_rules(
+        monkeypatch,
+        runs=[{"tool": "solve_queue_enqueue"}, {"tool": "generate_report"}],
+    )
+    task, path, _ = granted()
+    assert not run_envelope.covers(path, "generate_report")
+    from services import chat_tools
+
+    chat_tools.set_acting_user(seeded_identity["user_id"])
+    with on_run(task, path) as run:
+        assert ask(run, "generate_report", {}) is None
+    assert run_envelope.last_refusal(path) == "unlisted_tool"
+
+
 # ── C8: identity after a restart ────────────────────────────────────────────
 
 

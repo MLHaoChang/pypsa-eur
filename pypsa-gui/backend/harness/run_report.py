@@ -93,8 +93,8 @@ def start(path, ctx, step, *, instance) -> str:
     runner._update(path, claim)
     if not claimed:
         return "claimed_elsewhere"
-    task = json.loads(path.read_text())
     try:
+        task = json.loads(path.read_text())
         project = chat_tools._report_project()
         if (
             str(project.uuid) != task["project_id"]
@@ -131,7 +131,7 @@ def start(path, ctx, step, *, instance) -> str:
         _stop(path, step["id"], reason, str(detail.get("message") or "")[:240])
         return reason
     except Exception as exc:  # noqa: BLE001 -- B1-c: a launch that did not start fails the step, never strands it running
-        logger.exception("report job launch failed for run %s", task.get("task_id"))
+        logger.exception("report job launch failed for run %s", path.stem)
         _stop(path, step["id"], "report_start_failed", type(exc).__name__)
         return "report_start_failed"
 
@@ -144,7 +144,19 @@ def start(path, ctx, step, *, instance) -> str:
         if t["status"] != "cancelled":
             t["status"] = "waiting_job"
 
-    runner._update(path, wait)
+    try:
+        runner._update(path, wait)
+    except Exception as exc:  # noqa: BLE001 -- B1-c: a started job's step is never left running
+        logger.exception(
+            "report job %s started but its step was not recorded", report_id
+        )
+        _stop(
+            path,
+            step["id"],
+            "report_start_failed",
+            f"{type(exc).__name__}; job {report_id}",
+        )
+        return "report_start_failed"
     return KIND
 
 
@@ -160,17 +172,34 @@ def settle(path, ctx) -> str | None:
     return settle_record(path, record)
 
 
-def settle_record(path, record: dict | None) -> str | None:
+def _foreign(task, step, record, owner) -> bool:
+    """From the job's own thread (`owner` set): a step that waits on another
+    job, or a run another runner instance holds, is not this job's to settle."""
+    if owner is None:
+        return False
+    lease = (task.get("run") or {}).get("runner") or {}
+    return (record or {}).get("report_id") != step["job"].get("report_id") or lease.get(
+        "lease_owner"
+    ) != owner
+
+
+def settle_record(path, record: dict | None, *, owner: str | None = None) -> str | None:
     """`settle` from a job record in hand. The job calls it itself as it
-    ends (`report_job.run_report_job`), so its outcome lands on the step even when
-    the run already stopped (the budget, a pause) and the runner no longer
-    ticks it; the runner's tick calls it too. Settling twice is a no-op."""
+    ends (`report_job.run_report_job`, `owner` its runner instance), so its
+    outcome lands on the step even when the run already stopped (the budget,
+    a pause) and the runner no longer ticks it; it then settles only its own
+    `report_id` under its own runner instance, else does nothing (GK B). The
+    runner's tick calls it too (no `owner`). Settling twice is a no-op."""
     from harness import runner
 
     path = Path(path)
     task = json.loads(path.read_text())
     step = report_step(task)
-    if step is None or step["status"] != "waiting":
+    if (
+        step is None
+        or step["status"] != "waiting"
+        or _foreign(task, step, record, owner)
+    ):
         return None
     job = step["job"]
     if record is not None and record.get("report_id") == job["report_id"]:
@@ -187,7 +216,7 @@ def settle_record(path, record: dict | None) -> str | None:
 
     def done(t):
         s = next(x for x in t["steps"] if x["id"] == step["id"])
-        if s["status"] != "waiting":
+        if s["status"] != "waiting" or _foreign(t, s, record, owner):
             return False
         s["job"].update(
             outcome=outcome,

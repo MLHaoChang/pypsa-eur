@@ -1087,6 +1087,12 @@ def resolve_task_step(task_id: str, outcome: str, result: dict | None = None) ->
     return _view(task, fresh=True)
 
 
+def _job_ref(job):
+    """The id a waiting step's job is known by: a queue or solve job's
+    `job_id`, a run's report job's `report_id` (issue 07)."""
+    return job.get("job_id") or job.get("report_id") or "?"
+
+
 def _native_evidence(path, task, step):
     """(found, result) for a failed or uncertain step, from native records only."""
     if "late_receipt" in step:
@@ -1099,6 +1105,19 @@ def _native_evidence(path, task, step):
             return False, None  # no verdict now; the user can reconcile again
         return (True, {"job_id": step["job"]["job_id"], "final_status": "completed", **result}) \
             if status == "completed" else (False, None)
+    if (step.get("job") or {}).get("kind") == "report":
+        # Issue 07 (GK B): only the run's own report job that ended `done` and
+        # whose document reads back; a failed, refused or lost one never.
+        from harness import run_report
+        job = step["job"]
+        if job.get("outcome") != "done":
+            return False, None
+        try:
+            from services.reports import store
+            store.load_report(path.parent.parent, job["report_id"], job.get("version"))
+        except Exception:  # noqa: BLE001 — an unreadable report is no evidence (C3)
+            return False, None
+        return True, {"kind": run_report.KIND, "report_id": job["report_id"], "version": job.get("version")}
     if step.get("job"):
         from services import run_evidence
         job_id = step["job"]["job_id"]
@@ -1147,7 +1166,7 @@ def admit(session, tool, args):
                 continue
             if later is step and step["status"] == "waiting":
                 raise HTTPException(409, {"error_kind": "task_step_waiting", "message":
-                                          f"Step {step['id']} is waiting on job {step['job']['job_id']}; "
+                                          f"Step {step['id']} is waiting on job {_job_ref(step['job'])}; "
                                           "the conversation continues when it ends."})
             if later is not step:
                 raise HTTPException(409, {"error_kind": "task_step_out_of_order", "message":
@@ -1216,7 +1235,7 @@ def settle_job(path, ticket, job_id, native_status, step_status, result=None):
             return None
         step = next((s for s in task["steps"] if s["id"] == ticket[1]), None)
         if (task.get("task_id") != ticket[0] or step is None or step.get("attempt_id") != ticket[2]
-                or step["status"] != "waiting" or step["job"]["job_id"] != job_id):
+                or step["status"] != "waiting" or step["job"].get("job_id") != job_id):
             return None
         _settle(task, step, native_status, step_status, result)
         _save(Path(path), task)

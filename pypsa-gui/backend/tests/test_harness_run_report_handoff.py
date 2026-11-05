@@ -25,6 +25,7 @@ from tests.test_assistant_tasks_study_brief import (  # noqa: F401
     dispatch,
     helpers_state,
     session,
+    refused,
     stored,
     wait_until,
 )
@@ -914,6 +915,171 @@ def test_b1c_a_launch_that_raises_fails_the_step_instead_of_stranding_it(
         and by_stage(record)["report"]["status"] == "failed"
     )
     assert by_stage(record)["handoff"]["status"] == "pending"
+
+
+# ── GK B (25) NOT OK @f2908dad: a report step's job has no `job_id` ───────
+
+
+def _at_report_step(root, request_id, **step):
+    """A stored run whose next step is its report step, as given."""
+    task = start(request_id)
+    path = root / "assistant_tasks" / (task["task_id"] + ".json")
+    record = json.loads(path.read_text())
+    record["steps"] = [
+        {"id": "report.1", "tool": "generate_report", "args": {}, "native": "report"}
+        | step
+    ]
+    path.write_text(json.dumps(record))
+    return task, path
+
+
+def test_gk_admit_names_a_waiting_report_step_as_waiting(session, site):
+    _, root = site
+    _at_report_step(
+        root,
+        "run-admit",
+        status="waiting",
+        job={"kind": "report", "report_id": "r1", "started_at": 0},
+    )
+    detail = refused("task_step_waiting", tasks.admit, session, "generate_report", {})
+    assert "r1" in detail["message"]
+
+
+@pytest.mark.parametrize("outcome", ["failed", "refused", "lost", "aborted"])
+def test_gk_a_failed_report_step_never_reconciles_to_completed(session, site, outcome):
+    _, root = site
+    task, _ = _at_report_step(
+        root,
+        "run-reconcile-" + outcome,
+        status="failed",
+        job={"kind": "report", "report_id": "r1", "outcome": outcome},
+    )
+    refused(
+        "task_resolution_unverifiable",
+        tasks.resolve_task_step,
+        task["task_id"],
+        "completed",
+    )
+
+
+def _pending_report(tmp_path):
+    path = tmp_path / "task.json"
+    path.write_text(
+        json.dumps(
+            {
+                "task_id": "t1",
+                "project_id": "p1",
+                "status": "running",
+                "run": {
+                    "profile": "eh_site@1",
+                    "status": "running",
+                    "stages": {"report": {"status": "running"}},
+                    "runner": {"lease_owner": "a"},
+                },
+                "steps": [
+                    {
+                        "id": "report.1",
+                        "tool": "generate_report",
+                        "args": {},
+                        "native": "report",
+                        "status": "pending",
+                    }
+                ],
+            }
+        )
+    )
+    return path
+
+
+class _Ctx:
+    project_uuid = "p1"
+
+
+def test_gk_a_start_whose_read_raises_fails_the_step(tmp_path, monkeypatch):
+    path = _pending_report(tmp_path)
+    real = run_report.json.loads
+    calls = []
+
+    class Json:
+        dumps = staticmethod(json.dumps)
+
+        @staticmethod
+        def loads(text):
+            calls.append(1)
+            if len(calls) == 1:
+                raise ValueError("torn read")
+            return real(text)
+
+    monkeypatch.setattr(run_report, "json", Json)
+    step = json.loads(path.read_text())["steps"][0]
+    run_report.start(path, _Ctx(), step, instance="a")
+    record = json.loads(path.read_text())
+    assert record["steps"][0]["status"] == "failed", record["steps"][0]
+    assert record["run"]["stages"]["report"]["status"] == "failed"
+
+
+def test_gk_a_start_whose_wait_update_raises_fails_the_step(tmp_path, monkeypatch):
+    from harness import runner as harness_runner
+    from routers import report_jobs
+    from services import chat_tools
+
+    path = _pending_report(tmp_path)
+
+    class Project:
+        uuid = "p1"
+
+    monkeypatch.setattr(chat_tools, "_report_project", lambda: Project())
+    monkeypatch.setattr(run_report, "harness_source", lambda *a: {})
+    monkeypatch.setattr(report_jobs, "_resolve_profile", lambda: {})
+    monkeypatch.setattr(report_jobs, "_provider_or_400", lambda profile: None)
+    monkeypatch.setattr(report_jobs, "_evidence_for", lambda *a, **k: ({}, {}))
+    monkeypatch.setattr(report_jobs, "_start", lambda *a, **k: "r1")
+    real = harness_runner._update
+
+    def update(path_, change):
+        if change.__name__ == "wait":
+            raise OSError("disk full")
+        return real(path_, change)
+
+    monkeypatch.setattr(harness_runner, "_update", update)
+    step = json.loads(path.read_text())["steps"][0]
+    run_report.start(path, _Ctx(), step, instance="a")
+    record = json.loads(path.read_text())
+    assert record["steps"][0]["status"] == "failed", record["steps"][0]
+    assert record["steps"][0]["error"].startswith("report_start_failed")
+
+
+def _waiting_report(tmp_path, report_id="r1", owner="a"):
+    path = _pending_report(tmp_path)
+    record = json.loads(path.read_text())
+    record["steps"][0].update(
+        status="waiting", job={"kind": "report", "report_id": report_id}
+    )
+    record["run"]["runner"]["lease_owner"] = owner
+    path.write_text(json.dumps(record))
+    return path
+
+
+@pytest.mark.parametrize(
+    "report_id, owner",
+    [("r2", "a"), ("r1", "b")],
+    ids=["another_job", "another_runner"],
+)
+def test_gk_a_job_thread_settles_only_its_own_job_under_its_own_runner(
+    tmp_path, report_id, owner
+):
+    path = _waiting_report(tmp_path, report_id=report_id, owner=owner)
+    before = path.read_text()
+    job_record = {"report_id": "r1", "status": "done", "version": 1}
+    assert run_report.settle_record(path, job_record, owner="a") is None
+    assert path.read_text() == before
+
+
+def test_gk_a_job_thread_settles_its_own_job(tmp_path):
+    path = _waiting_report(tmp_path)
+    job_record = {"report_id": "r1", "status": "done", "version": 1}
+    assert run_report.settle_record(path, job_record, owner="a") == "done"
+    assert json.loads(path.read_text())["steps"][0]["status"] == "completed"
 
 
 # ── GK B (25) B1-d: neither stage ever applies a change ─────────────────────
