@@ -3,7 +3,7 @@
 
 # 09 — Research step: provider web search, cost cap, source ledger
 
-Status: ready-for-agent
+Status: done (#1104; follow-ups #1124)
 Type: task
 Blocked by: 04
 Gated: yes (GK B)

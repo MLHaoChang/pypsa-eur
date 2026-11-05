@@ -3,6 +3,11 @@
 here=$(cd "$(dirname "$0")" && pwd)
 hook="$here/block-dangerous-git.sh"
 fail=0
+# A clean HOME: no coordinator marker unless a test writes one.
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+export HOME=$tmp/home
+mkdir -p "$HOME"
 
 expect() { # expect <allow|block> <command>
   local want=$1 cmd=$2 got
@@ -84,8 +89,47 @@ git rebase master'
 
 for c in "${allowed[@]}"; do expect allow "$c"; done
 for c in "${blocked[@]}"; do expect block "$c"; done
+
+# Coordinator push guard: ~/.claude-coordinator names the session's own branch;
+# creating any other remote branch blocks, an existing branch or a tag passes.
+git init -q --bare "$tmp/remote.git"
+git init -q -b main "$tmp/work"
+cd "$tmp/work" || exit 1
+git -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+git remote add origin "$tmp/remote.git"
+git push -q origin HEAD:refs/heads/claude/existing
+expect allow 'git push -u origin claude/other'   # no marker: guard off
+: >"$HOME/.claude-coordinator"
+expect allow 'git push -u origin claude/other'   # empty marker: guard off
+echo claude/own >"$HOME/.claude-coordinator"
+guard_allowed=(
+  'git push -u origin claude/own'
+  'git push origin HEAD:claude/own'
+  'git push origin claude/existing'
+  'git push origin HEAD:refs/heads/claude/existing'
+  'git push origin --tags'
+  'git push origin refs/tags/v1'
+  'git push'
+  'git push -u origin'
+  'git push -u origin claude/own 2>&1 | tail -1'
+  'git push origin claude/existing 2>/dev/null'
+  'git push origin claude/existing > /tmp/out'
+)
+guard_blocked=(
+  'git push -u origin claude/other'
+  'git push origin HEAD:claude/other'
+  'git push origin claude/own claude/other'
+  'git diff && git push -u origin claude/other'
+  'git push -u origin claude/other 2>&1 | tail -1'
+  'git push origin claude/other > /tmp/out'
+)
+for c in "${guard_allowed[@]}"; do expect allow "$c"; done
+for c in "${guard_blocked[@]}"; do expect block "$c"; done
+cd "$here" || exit 1
+rm "$HOME/.claude-coordinator"
+
 # Missing/empty command never blocks.
 echo '{}' | "$hook" >/dev/null 2>&1 || { echo "FAIL: empty input blocked"; fail=1; }
 
 if ((fail)); then exit 1; fi
-echo "ok: ${#allowed[@]} allowed, ${#blocked[@]} blocked"
+echo "ok: ${#allowed[@]} allowed, ${#blocked[@]} blocked, push guard ${#guard_allowed[@]} allowed, ${#guard_blocked[@]} blocked"
