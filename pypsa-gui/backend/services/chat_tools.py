@@ -8126,8 +8126,9 @@ def generate_report(
     from services import assistant_tasks
 
     run_ctx = assistant_tasks.RUN_CONTEXT.get()
-    if run_ctx is not None and str(getattr(run_ctx, "project_uuid", "") or "") != str(
-            getattr(PyPSAService.get_active_context(), "project_uuid", "") or ""):
+    run_project = str(getattr(run_ctx, "project_uuid", "") or "") if run_ctx is not None else ""
+    if run_ctx is not None and (not run_project or run_project != str(
+            getattr(PyPSAService.get_active_context(), "project_uuid", "") or "")):
         # Issue 07 (GK B C6): a harness run's report reads the run's project
         # only; with no request binding the active project is the foreground.
         raise HTTPException(status_code=409, detail={

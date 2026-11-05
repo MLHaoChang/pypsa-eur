@@ -635,3 +635,31 @@ def test_a_run_report_call_without_a_bound_context_never_reads_the_foreground(se
         assert seen == [{str(project_id)}]
     else:  # it was refused before any read, naming why
         assert refused.value.detail["error_kind"] == "project_changed"
+
+
+def test_a_run_report_call_whose_run_context_has_no_project_is_refused(session, site, monkeypatch):
+    """Issue 07 (GK B NOT OK @b5d23bb7, C6): a run context with no project id
+    is refused `project_changed`, even when the active context has none
+    either; nothing is read."""
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+    from routers import report_jobs
+    from services import assistant_tasks
+    from services.pypsa_service import PyPSAService
+
+    def evidence_for(project):
+        raise AssertionError("read evidence for a run with no project")
+
+    monkeypatch.setattr(report_jobs, "_evidence_for", evidence_for)
+    for active in ("", None):
+        monkeypatch.setattr(PyPSAService, "get_active_context",
+                            staticmethod(lambda a=active: SimpleNamespace(project_uuid=a)))
+        token = assistant_tasks.RUN_CONTEXT.set(SimpleNamespace(project_uuid=active))
+        try:
+            with pytest.raises(HTTPException) as refused:
+                chat_tools.generate_report()
+        finally:
+            assistant_tasks.RUN_CONTEXT.reset(token)
+        assert refused.value.status_code == 409
+        assert refused.value.detail["error_kind"] == "project_changed"

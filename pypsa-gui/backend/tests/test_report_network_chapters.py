@@ -299,6 +299,38 @@ def test_a_statement_the_audit_cannot_read_is_withheld(tmp_path, monkeypatch):
     assert "withheld" in (section.note or "")
 
 
+def test_an_audit_that_raises_on_one_statement_withholds_only_that_one(
+    tmp_path, monkeypatch
+):
+    """C5 (GK B NOT OK @b5d23bb7): the per-statement fail-closed path, not
+    the section-wide one. The audit raises for one statement only: it is
+    withheld, the other is kept, and the note counts one."""
+    from services.llm_fake import FakeProvider
+    from services.reports import report_job
+    from tests.test_report_job import _draft
+
+    real = report_job.audit
+
+    def raises_on_cost(paragraphs, facts):
+        if any("120" in p for p in paragraphs):
+            raise ValueError("cannot parse")
+        return real(paragraphs, facts)
+
+    monkeypatch.setattr(report_job, "audit", raises_on_cost)
+    kept = "Emissions are 3.5 tCO2."
+    provider = FakeProvider(
+        [_draft(NC.HEADLINE, "The study's total cost is 120 EUR.", kept)]
+    )
+    job = _strict_job(tmp_path, provider)
+    doc = report_job.run_report_job(job)
+    section = {s.section_id: s for s in doc.sections}[NC.HEADLINE]
+    paragraphs = [b.md for b in section.blocks if b.type == "paragraph"]
+    assert paragraphs == [kept]
+    assert report_job.WITHHELD_NOTE.format(n=1) in (section.note or "")
+    assert report_job.AUDIT_FAILED in section.audit.unverified
+    assert job.record["withheld"] == [{"section_id": NC.HEADLINE, "statements": 1}]
+
+
 # C5: the Reports panel's path is byte-identical to master's (fixture written
 # on master 3f39808c9 by this same function).
 
