@@ -36,6 +36,8 @@ export const FACT_WORDS: Record<string, string> = {
   'ic.counterfactual': 'The comparison case exists',
   'ic.baseline_keeps': 'The comparison keeps the baseline',
   'adequacy.loop.converged': 'The plan meets the reliability goal',
+  'explore.unsettled': 'Every what-if case has a result',
+  'explore.study.status': 'The decision study finished',
 }
 
 /** The unit a counted gate fact is read in, when the rule sends none,
@@ -43,6 +45,7 @@ export const FACT_WORDS: Record<string, string> = {
 export const FACT_UNITS: Record<string, { one: string; other: string }> = {
   'validate.errors': { one: 'error', other: 'errors' },
   'diagnose.unserved_islands': { one: 'unconnected load group', other: 'unconnected load groups' },
+  'explore.unsettled': { one: 'case still running', other: 'cases still running' },
 }
 
 /** A counted gate fact's unit for `n`: "1 error", "2 errors". */
