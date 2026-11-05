@@ -3,7 +3,8 @@
 
 # LC-24 — after Stop, a waiting turn leaves a stuck row and a false promise
 
-Status: needs-triage
+Status: ready-for-agent
+Model: Sonnet
 Type: task
 Baseline: master `06fa29b422c456e39b5e44c0312275fc4c51345e`
 Found by: live OJ-08 drive in the browser, 2026-10-22 00:48 CEST (hosted model, KEY-1)
@@ -41,3 +42,7 @@ Finding 3 of the same drive (the composer is locked while the model sits in
 handled in the study copilot slice 2 plan (issue 23).
 
 ## Comments
+
+### 2026-11-05: triage sweep (AA-FILL-2), role ready-for-agent
+
+Was: `needs-triage`. Files: chat transcript row settling in `pypsa-gui/frontend/src/` (the abandoned `wait_for_job` row) and the stop-turn reply wording in `pypsa-gui/backend/harness/` prompts. Blockers: none. Reviewers: GK B and UX (the row). Related: LC-12, #542.

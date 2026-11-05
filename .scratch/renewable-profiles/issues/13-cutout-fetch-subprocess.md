@@ -3,7 +3,8 @@
 
 # RP-13 — fetch ERA5 cutout months in a subprocess
 
-Status: needs-triage
+Status: ready-for-agent
+Model: Opus
 Type: task
 Baseline: branch `claude/cutout-netcdf-lock` (the cutout cache's month check and merge under the process netCDF lock)
 Raised by: the engine gatekeeper, reviewing the netCDF lock fixes (#468 and its cutout follow-up), 2026-10-20
@@ -31,3 +32,9 @@ another reader, which crashes the process.
 - A test runs a month fetch, faked to write through xarray in the child, beside network save/load threads
   and pending writers, with no crash. It crashes when the fetch runs in-process.
 - The CDS timeout and abort still end the job with their typed errors.
+
+## Comments
+
+### 2026-11-05: triage sweep (AA-FILL-2), role ready-for-agent
+
+Was: `needs-triage`. Files: `cutout_cache._download_month` and its queue worker in `pypsa-gui/backend/services/` (spawn-context subprocess, pipe for typed errors, timeout kill and stop_event terminate), tests with a fake fetch. Blockers: the branch `claude/cutout-netcdf-lock` fixes must be on master first (check `git log origin/master`). Reviewer: GK B. Opus because process and lock safety is easy to get wrong.

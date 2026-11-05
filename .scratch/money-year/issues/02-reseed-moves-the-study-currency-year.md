@@ -1,6 +1,7 @@
 # A re-seed onto a newer pack leaves the study's currency year behind
 
-Status: needs-triage
+Status: ready-for-agent
+Model: Opus
 Model tier: opus
 Size: S
 
@@ -23,3 +24,9 @@ The fix is in the `PUT` ledger handler in `routers/studies.py`. Test: a stored 1
 ## Where the current behaviour is tested
 
 `tests/test_study_runner.py::test_a_reset_row_on_an_older_ledger_comes_back_in_its_own_money_year` (its last block asserts the refusal and its hint).
+
+## Comments
+
+### 2026-11-05: triage sweep (AA-FILL-2), role ready-for-agent
+
+Was: `needs-triage`. Option (b) as written. Files: the ledger `PUT` handler in `pypsa-gui/backend/routers/studies.py`; test beside `tests/test_study_runner.py::test_a_reset_row_on_an_older_ledger_comes_back_in_its_own_money_year`. Blockers: none (issue 01 landed). Reviewer: GK B.

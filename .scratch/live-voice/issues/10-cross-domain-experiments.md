@@ -3,7 +3,8 @@
 
 # Typed cross-domain experimentation and resumable task advancement
 
-Status: needs-triage (owner decision SH-FOLD-1, 2026-10-28): the resumable task advancement (plan step 6) folds into the study-harness runner, `.scratch/study-harness/issues/02-server-runner.md`; the typed cross-domain adapters (plan step 4) are re-triaged here after that issue lands.
+Status: ready-for-agent
+Model: Opus
 Previous status: ready-for-agent
 Progress: Network experiment persistence, prepare, compare, two-case admission shipped; commercial, reliability, GridSpine execution adapters and resume absent
 Type: task
@@ -62,3 +63,7 @@ an ordinary case-project action. See [the contract](../experiment-case-advanceme
 Two/multiple cases, compatible comparisons, explicit uncertain-effect retry
 reconciliation and commercial/reliability/GridSpine adapters remain open. This
 slice does not close issue 10 or establish whole-application checked coverage.
+
+### 2026-11-05: triage sweep (AA-FILL-2), role ready-for-agent
+
+Was: `needs-triage (owner decision SH-FOLD-1, 2026-10-28): the resumable task advancement (plan step 6) folds into the study-harness runner, `.scratch/study-harness/i`. Scope after the fold (SH-FOLD-1): step 4 only, the typed cross-domain adapters (commercial, reliability, GridSpine). Resume is in the study-harness runner (02, done). Files: `pypsa-gui/backend/services/experiments.py`, `tests/test_experiments_persist.py`. Blockers: live-voice 02, 08, 09, 11 (all ready-for-agent, none done); start after they land. Reviewers: GK B, with GK A for the GridSpine adapter.

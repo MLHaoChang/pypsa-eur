@@ -3,7 +3,8 @@
 
 # 16 — Harness profile: eh_concentrator_staged (planned template)
 
-Status: needs-triage (waits for the template: grid-to-process issue 10)
+Status: ready-for-agent
+Model: Opus
 Type: task
 Blocked by: 07; g2p 10 (template), g2p 11 (counterfactual), g2p 12 and 18 (motor start)
 Gated: yes (GK A)
@@ -25,3 +26,7 @@ Profile `eh_concentrator_staged@1` once the template exists: mass balance to 1e-
 `pypsa-gui/backend/services/run_profiles.py`, `pypsa-gui/backend/services/run_gates.py`
 
 ## Comments
+
+### 2026-11-05: triage sweep (AA-FILL-2), role ready-for-agent
+
+Was: `needs-triage (waits for the template: grid-to-process issue 10)`. The template is shipped (grid-to-process 10, #869) and the counterfactual (11) and motor-start fields (18) are done. Files: `pypsa-gui/backend/services/run_profiles.py`, `services/run_gates.py`. Blockers: study-harness 07 (ready, a live session works on it) and grid-to-process 12 (12b, ready). Reviewer: GK A.
