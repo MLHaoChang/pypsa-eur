@@ -367,7 +367,31 @@ def enqueued_for(queued, project_id):
         return job['project_key'] == project_registry.registry_key(project_registry.resolve_project(db, user, project_id))
 
 
-def test_each_stage_tool_resolves_the_project_through_the_bound_context(session, site):
+def _report_reads_the_run_project(run_ctx, project_id, monkeypatch):
+    """Issue 07 (GK B C6): the report the run starts reads the run's project's
+    evidence, not the foreground's: the route's evidence read sees the run's
+    project. The read is stopped there (nothing is started)."""
+    from fastapi import HTTPException
+    from routers import report_jobs
+    from services.pypsa_service import PyPSAService
+    from services.study.runner import _on_ctx
+    seen = []
+
+    def evidence_for(project):  # the project the route resolved, and the network it would read
+        seen.append((str(project.uuid), str(PyPSAService.get_active_context().project_uuid)))
+        raise HTTPException(400, {"error_kind": "no_evidence", "message": "stopped by the test"})
+
+    monkeypatch.setattr(report_jobs, "_provider_or_400", lambda profile: object())
+    monkeypatch.setattr(report_jobs, "_resolve_profile", lambda: object())
+    monkeypatch.setattr(report_jobs, "_evidence_for", evidence_for)
+    try:
+        _on_ctx(run_ctx, chat_tools.generate_report)
+    except HTTPException:
+        pass
+    return seen == [(str(project_id), str(project_id))]
+
+
+def test_each_stage_tool_resolves_the_project_through_the_bound_context(session, site, monkeypatch):
     """With another network in the foreground, each tool of the eh_site stage
     subsets, run on the run's bound context, reads the run's project (§6.6)."""
     from services import workflow_tools
@@ -396,6 +420,7 @@ def test_each_stage_tool_resolves_the_project_through_the_bound_context(session,
                                        ['applied'] and 'L1' not in front.network.loads_t.p_set.columns
                                        and list(run_ctx.network.loads_t.p_set['L1']) == [7.5, 9.0]
                                        and ('loads', 'p_set', 'L1') in run_ctx.user_ts,
+            'generate_report': _report_reads_the_run_project(run_ctx, project_id, monkeypatch),
         }
         assert PyPSAService.get_network() is front.network  # the foreground is untouched
     assert seen == {tool: True for tool in run_profiles.BOUND_CONTEXT_TOOLS}
