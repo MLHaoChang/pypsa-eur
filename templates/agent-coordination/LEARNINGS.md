@@ -272,3 +272,15 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **A frozen-contract test ran only on each PR alone.** `test_assurance_contracts.py` compares the live assurance contracts with a committed snapshot, but premerge's semantic tests did not run it. A PR adding a profile or changing a checked tool's schema passed on its own head while another merged PR moved the inputs, leaving master's snapshot stale.
   - Fix: the snapshot test joins `semantic_tests`, and `semantic_re` covers every module the snapshot is built from (`harness/calculations`, `*_calculations`, `assurance_scope`, `assurance`, `effects`, `catalogue`), plus the contracts module and snapshot themselves.
   - Lives in: `scripts/coord/premerge.sh` `semantic_re` / `semantic_tests`; template premerge.sh comment above `semantic_re`.
+
+## 5 Nov 2026: coordinator startup retro (owner picked three)
+
+- **The coordinator opened its id PR on a self-named branch.** The session's own branch was unused, and agents cannot delete branches, so the stray one went to the owner.
+  - Fix: at start the coordinator writes its session branch into `~/.claude-coordinator`. The git hook blocks a coordinator push that would create any other remote branch, and still allows pushes to an existing PR branch or a tag. Own PRs go on that branch one at a time.
+  - Lives in: `.claude/hooks/block-dangerous-git.sh` and its test, coordinator (top, Rotation), live and template copies.
+- **A rotation brief misreported the board.** It said the board already showed six new sessions; the published file had none, and a merge landed after the brief's master SHA.
+  - Fix: `board.py --list` prints the open-PR and session rows without writing; the brief pastes that output and stamps `git rev-parse origin/master`.
+  - Lives in: `scripts/coord/board.py`, coordinator "Rotation" step 1, live and template copies; test `test/test_coord_board.py`.
+- **The done-Status format lived only in `frontier.py`.** Marking issues done meant reading the script to learn that "pending" in a done Status keeps it open.
+  - Fix: `docs/agents/issue-tracker.md` gives the format `Status: done (#<PR>[; note])` and the "pending" rule.
+  - Lives in: `docs/agents/issue-tracker.md`, live and template copies.

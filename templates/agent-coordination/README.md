@@ -29,7 +29,7 @@ The coordinator skill holds the steps, under "Bootstrap" and "Taking on tasks".
 | `.claude/skills/gatekeeper/SKILL.md` | Plan checks, repeated-failure help and head-exact reviews |
 | `.claude/settings.json`, `.claude/hooks/session-start.sh` | SessionStart hook skeleton for cloud sessions |
 | `.claude/hooks/context-guard.sh`, `test-context-guard.sh` | PostToolUse hook: tells the agent to write its hand-off note once context passes 200k (300k when `~/.claude-coordinator` exists), then every +20k |
-| `.claude/hooks/block-dangerous-git.sh`, `test-block-dangerous-git.sh` | PreToolUse hook on Bash: allows a normal `git push`, blocks force-push, `reset --hard`, `rebase`, `commit --amend`, `filter-branch`/`filter-repo`, `clean -f`, `branch -D`; with its matcher tests |
+| `.claude/hooks/block-dangerous-git.sh`, `test-block-dangerous-git.sh` | PreToolUse hook on Bash: allows a normal `git push`, blocks force-push, a coordinator push that creates a remote branch other than its own (`~/.claude-coordinator`), `reset --hard`, `rebase`, `commit --amend`, `filter-branch`/`filter-repo`, `clean -f`, `branch -D`; with its matcher tests |
 | `docs/agents/roles.md` | The one place for the gatekeeper's session id, the dashboard link, the routine id and the template home |
 | `docs/agents/coordinator.md` | The current coordinator session id, which changes when the coordinator rotates |
 | `docs/agents/owner-decisions.md` | The owner's decisions, one row each; the coordinator appends, briefs cite a row |
@@ -42,7 +42,7 @@ The coordinator skill holds the steps, under "Bootstrap" and "Taking on tasks".
 | `scripts/coord/events.py` | Time, assistant text and last tool call per event from a saved `list_events` result |
 | `scripts/coord/frontier.py` | The frontier from the issue headers: ready, unblocked, unclaimed issues no open PR or live session covers; `--stages` gives the dashboard stage per issue |
 | `scripts/coord/brief.py` | Fills `docs/agents/session-brief.md` from flags, adds Context budget, Process, any stream paragraph and a "Stay out of" built from open PRs and live sessions |
-| `scripts/coord/board.py` | Edits the dashboard's `board.json` from flags, logs the change and prints the upload path |
+| `scripts/coord/board.py` | Edits the dashboard's `board.json` from flags, logs the change and prints the upload path; `--list` prints the open-PR and session rows for a brief |
 | `scripts/coord/board.example.json` | The dashboard's row shape |
 | `{{RELEASE_NOTES_DIR}}/README.md`, `.github/workflows/release-notes-guard.yaml` | One release-note fragment per PR, so notes never conflict, plus a guard against editing the collated file |
 | `.github/pull_request_template.md` | PR body headings, including the fragment line |

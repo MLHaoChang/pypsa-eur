@@ -5,7 +5,9 @@ description: The coordinator session's own procedure (the other side of steward)
 
 The **coordinator** relays the owner's decisions to the work sessions, does every merge and keeps the owner's dashboard current. PR sessions follow `.claude/skills/steward/SKILL.md`. This skill is the coordinator's side of the same rules. Owner decisions that change a rule land here or in steward; the sweep routine's prompt only points at this file.
 
-At start, `touch ~/.claude-coordinator`: the context-guard hook warns the coordinator at 300k (owner decision COORD-CTX-1); every other session has warned at 300k too since USE-2.
+At start, `git branch --show-current > ~/.claude-coordinator`: the marker holds your session branch, and the context-guard hook warns the coordinator at 300k when it exists (owner decision COORD-CTX-1); every other session has warned at 300k too since USE-2.
+
+Your own PRs (coordinator id, decisions, retro fixes) go on that session branch, one PR at a time; once one merges, restart the branch from origin/master. The git hook reads the branch from the marker and blocks a push that would create any other remote branch; pushing an existing PR branch stays open.
 
 Work from a checkout of current master. Before a sweep, run `git switch master && git pull --ff-only`. A stale checkout loads stale `AGENTS.md`, steward and `scripts/coord/`.
 
@@ -42,13 +44,15 @@ Every wake re-reads the whole context, so fewer wakes cost less.
 A long context is this session's largest cost. Rotate to a fresh coordinator when `get_session` (no id) shows `context_usage.used_tokens` above 300k (owner decision COORD-CTX-1), or once a day, whichever comes first. The scratchpad is per session, so the new coordinator gets the state as content, not as files.
 
 1. **Brief.** Write a coordinator brief at the top of the state file (`## Coordinator brief`, with [Time](#time)'s stamp). It holds live state only; the standing rules are in this skill, which the new coordinator reads:
+   - the master SHA, from `git rev-parse origin/master` as you write;
+   - the board's open-PR and session rows, pasted from `python3 scripts/coord/board.py --list` rather than summarised;
    - pending PRs, each with its head SHA and the gatekeeper's OK for that SHA;
    - live sessions, each with its id and package;
    - owner decisions not yet in `docs/agents/owner-decisions.md`, in the owner's words;
    - open owner questions;
    - each dashboard's link and its datasets' last `ArtifactData` `if_version`, and the routine's trigger id.
-2. **Create.** `create_session` the new coordinator on this session's model, with a prompt that carries the brief's full text and says: "You are the coordinator for MLHaoChang/pypsa-eur. Read `.claude/skills/coordinator/SKILL.md`. First, save the brief below as the top of `coordinator-state.md` in your scratchpad, rebuild `board/board.json` from the dashboard's published file, put your own id (`get_session`) in `docs/agents/coordinator.md` through a tiny PR, and `send_message` me when the brief is saved."
-   The new coordinator runs `touch ~/.claude-coordinator` (see the top of this skill).
+2. **Create.** `create_session` the new coordinator on this session's model, with a prompt that carries the brief's full text and says: "You are the coordinator for MLHaoChang/pypsa-eur. Read `.claude/skills/coordinator/SKILL.md`. First, save the brief below as the top of `coordinator-state.md` in your scratchpad, rebuild `board/board.json` from the dashboard's published file, put your own id (`get_session`) in `docs/agents/coordinator.md` through a tiny PR on its session branch, and `send_message` me when the brief is saved."
+   The new coordinator writes its session branch to `~/.claude-coordinator` (see the top of this skill).
    The new coordinator also runs Artifact `open` on each dashboard in [Dashboard](#dashboard). The app lists only the artifacts a session has published or opened, so without it the owner's panel shows no dashboard after a rotation.
 3. **Hand over the routines.** `update_trigger` each routine (the sweep and the dashboard refresh) with `persistent_session_id` set to the new id. If `update_trigger` has no such field, `delete_trigger` and `create_trigger` again with the same cron and prompt.
 4. **Tell the sessions.** `send_message` the new id to every live session, builders and reviewers included, not only those that send you work. When a reviewer or builder rotates, send its new id to the sessions that send it work.

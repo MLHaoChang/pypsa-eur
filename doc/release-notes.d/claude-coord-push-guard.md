@@ -1,0 +1,1 @@
+* Chore(coordination): The git hook keeps the coordinator's own PRs on its session branch (the branch it writes to `~/.claude-coordinator`), `board.py --list` prints the board rows a rotation brief pastes, and the issue tracker documents the done-Status format.
