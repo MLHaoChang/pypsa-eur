@@ -3,7 +3,7 @@
 
 # 25 — Notify the user when an agent loop ends without a pass
 
-Status: ready-for-agent
+Status: done (#1091)
 Type: task
 Blocked by: 04
 Gated: yes (GK B)
