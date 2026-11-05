@@ -3,7 +3,7 @@
 
 # 06 — Explore stage: ≤4 cases through existing case engines
 
-Status: ready-for-agent
+Status: done (#1127; deviation-2 test with HF-1)
 Type: task
 Blocked by: 05
 Gated: yes (GK B)
