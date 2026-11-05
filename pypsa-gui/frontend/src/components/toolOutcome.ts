@@ -24,7 +24,24 @@ export interface ToolOutcomeMark {
   inFlight: boolean
 }
 
-export interface ToolOutcomeBlock { outcome: string; job_id: string | null; reason: string | null }
+export interface ToolOutcomeBlock {
+  outcome: string; job_id: string | null; reason: string | null
+  /** A write's read-back counts (issue 04 S2), when the result carries them. */
+  counts?: { requested: number; done: number } | null
+}
+
+/** What a write tool's read-back counts (issue 04 S2): "3 of 5 updated". */
+const WRITE_VERBS: Record<string, string> = {
+  bulk_update_components: 'updated', batch_create_components: 'added',
+  delete_component: 'deleted', batch_delete_components: 'deleted',
+}
+
+const count = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0
+
+function countsOf(raw: unknown): ToolOutcomeBlock['counts'] {
+  const { requested, done } = (raw ?? {}) as Record<string, unknown>
+  return count(requested) && count(done) && done <= requested ? { requested, done } : null
+}
 
 /** The tools whose ordinary-turn result always carries `_outcome` (backend harness/outcomes.py JOB_TOOLS). */
 export const JOB_TOOLS: ReadonlySet<string> = new Set(['run_simulation', 'run_ac_pf_stage', 'wait_for_job', 'abort_simulation'])
@@ -62,10 +79,10 @@ export function toolOutcomeOf(result: unknown, tool?: string): ToolOutcomeBlock 
   const r = result as { _outcome?: unknown; _truncated?: unknown; preview?: unknown } | null | undefined
   const raw = r?._outcome ?? (r?._truncated === true && typeof r.preview === 'string' ? outcomeFromPreview(r.preview) : null)
   if (raw && typeof raw === 'object') {
-    const { version, outcome, job_id: jobId, reason } = raw as Record<string, unknown>
+    const { version, outcome, job_id: jobId, reason, counts } = raw as Record<string, unknown>
     if (version === 1 && typeof outcome === 'string') {
       return { outcome, job_id: typeof jobId === 'string' && jobId ? jobId : null,
-        reason: typeof reason === 'string' ? reason : null }
+        reason: typeof reason === 'string' ? reason : null, counts: countsOf(counts) }
     }
   }
   if (raw != null || (result != null && tool !== undefined && JOB_TOOLS.has(tool))) {
@@ -90,18 +107,30 @@ export function toolOutcomeReasonWord(outcome: string, reason: string | null): s
   return TOOL_OUTCOME_REASON_WORDS[reason] ?? null
 }
 
-/** The transcript line: `<glyph> <tool> (<word>[: <reason>])`. */
+/** "3 of 5" for a partly done write that carries its counts, else null. */
+export function toolOutcomeCount(tool: string, block: ToolOutcomeBlock): string | null {
+  if (toolOutcomeMark(block.outcome).outcome !== 'partial' || !block.counts || !(tool in WRITE_VERBS)) return null
+  return `${block.counts.done} of ${block.counts.requested}`
+}
+
+/** The transcript line: `<glyph> <tool> (<word>[: <reason> | : <n> of <m> <verb>])`. */
 export function toolOutcomeLine(tool: string, block: ToolOutcomeBlock): string {
   const mark = toolOutcomeMark(block.outcome)
   const why = toolOutcomeReasonWord(block.outcome, block.reason)
-  return `${mark.glyph} ${tool} (${mark.word}${why ? `: ${why}` : ''})`
+  const n = toolOutcomeCount(tool, block)
+  const detail = why ?? (n ? `${n} ${WRITE_VERBS[tool]}` : null)
+  return `${mark.glyph} ${tool} (${mark.word}${detail ? `: ${detail}` : ''})`
 }
 
 interface OutcomeMessage {
   id: string; role: string; tool_name?: string; tool_result?: unknown; ts: number; origin_project?: string | null
 }
 
-export interface CurrentToolOutcome { mark: ToolOutcomeMark; ts: number; why: string | null }
+export interface CurrentToolOutcome {
+  mark: ToolOutcomeMark; ts: number; why: string | null
+  /** "3 of 5" and its verb for a partly done write; null otherwise. */
+  count?: { text: string; verb: string } | null
+}
 
 /**
  * What one tool line shows now. An in-flight outcome gives way to the newest
@@ -129,7 +158,9 @@ export function currentToolOutcome(
       }
     }
   }
-  return { mark: toolOutcomeMark(current.outcome), ts, why: toolOutcomeReasonWord(current.outcome, current.reason) }
+  const n = own.tool_name ? toolOutcomeCount(own.tool_name, current) : null
+  return { mark: toolOutcomeMark(current.outcome), ts, why: toolOutcomeReasonWord(current.outcome, current.reason),
+    count: n && own.tool_name ? { text: n, verb: WRITE_VERBS[own.tool_name] } : null }
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -146,5 +177,6 @@ export function outcomeClock(ts: number, now: number = Date.now()): string {
 /** The words after the glyph: the word, plus "as of HH:MM" while in flight, or why it is unknown. */
 export function toolOutcomeWords(current: CurrentToolOutcome, now?: number): string {
   if (current.mark.inFlight) return `${current.mark.word} as of ${outcomeClock(current.ts, now)}`
-  return current.why ? `${current.mark.word}: ${current.why}` : current.mark.word
+  if (current.why) return `${current.mark.word}: ${current.why}`
+  return current.count ? `${current.mark.word}: ${current.count.text} ${current.count.verb}` : current.mark.word
 }

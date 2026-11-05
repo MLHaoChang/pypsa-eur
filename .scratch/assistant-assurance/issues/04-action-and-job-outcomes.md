@@ -164,3 +164,30 @@ unknown (U2); supersede only forward, same non-null job id, same project
 UX (9) NOT OK @1d2a57e6 fixed: the reason follows a colon (Expert) or sits in
 brackets (Guided), with no em dash; both modes say "as of 14:02"; shots in
 `.scratch/assistant-assurance/shots/aa04-s1b-tool-outcome-{guided,expert}.png`.
+
+### 2026-11-05 — S2 plan verdicts and build (branch `claude/aa04-s2-write-outcomes`)
+
+GK B (25) S2 plan: GO WITH CHANGES, conditions W1–W7:
+- W1 pre-existence: created only if absent before and present after with its
+  requested static attrs; deleted only if present before and absent after.
+- W2 comparison basis: the bulk path's own coercion (`_coerce_bulk_value`); a
+  refused value, an unknown attr or a series gives uncertain, never completed.
+- W3 no unseen interleaving: the edit counter noted after the seam's own bump
+  must equal the counter at the start and the end of the read-back, else
+  uncertain (revision_moved).
+- W4/W5 undo: the hash covers what undo restores; the popped entry must be the
+  one peeked; otherwise uncertain.
+- W6 partial output bounded: counts plus at most 5 paths, no requested values.
+- W7 a mutant per classify_write branch; a handler-supplied `_outcome` is dropped.
+
+UX (9) S2 GO, asks: the count on a partly done line ("partly done: 3 of 5
+updated"; Guided "Partly done: update components (3 of 5)"); plain Guided
+phrases for the five write tools; shots with a partly done line.
+
+Build: `harness/outcomes.py` `note_write` / `read_write` / pure
+`classify_write` for bulk_update_components, batch_create_components,
+delete_component and batch_delete_components in ordinary turns; loop.py notes
+the request after the edit counter's bump and projects `_outcome` beside S1's
+job outcome (a `None` result from delete_component gets one too). undo_last
+moves to S3 with import/export: all three are snapshot read-backs that share
+W4/W5. Shots: `.scratch/assistant-assurance/shots/aa04-s2-tool-outcome-{guided,expert}.png`.

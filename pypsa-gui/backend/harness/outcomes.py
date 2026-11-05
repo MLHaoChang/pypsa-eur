@@ -312,9 +312,7 @@ def _requested(tool: str, args: dict) -> tuple[str, list[dict]]:
             }
             for e in entries
         ]
-    names = (
-        [args.get("name")] if tool == "delete_component" else args.get("names")
-    )
+    names = [args.get("name")] if tool == "delete_component" else args.get("names")
     if not isinstance(names, list) or not all(isinstance(x, str) for x in names):
         raise ValueError("delete_args")
     return cls, [{"kind": "delete", "name": name} for name in names]
@@ -339,7 +337,13 @@ def note_write(tool: str, args: dict) -> dict | None:
             revision = dirty_state.revision(ctx)
     except Exception:  # noqa: BLE001 - no note reads uncertain later
         return {"tool": tool, "error": True}
-    return {"tool": tool, "ctx": id(ctx), "cls": cls, "items": items, "revision": revision}
+    return {
+        "tool": tool,
+        "ctx": id(ctx),
+        "cls": cls,
+        "items": items,
+        "revision": revision,
+    }
 
 
 def read_write(note: dict | None) -> dict:
@@ -363,7 +367,9 @@ def read_write(note: dict | None) -> dict:
                 row = {"present": present}
                 if present and item["kind"] == "cell":
                     row["value"] = (
-                        df.at[name, item["attr"]] if item["attr"] in df.columns else UNCOMPARABLE
+                        df.at[name, item["attr"]]
+                        if item["attr"] in df.columns
+                        else UNCOMPARABLE
                     )
                 elif present and item["kind"] == "create":
                     row["attrs"] = {
@@ -376,7 +382,7 @@ def read_write(note: dict | None) -> dict:
                 rows[name if item["kind"] != "cell" else f"{name}/{item['attr']}"] = row
             end = dirty_state.revision(ctx)
     except Exception:  # noqa: BLE001 - an unreadable network reads uncertain
-        return {"error": "read_failed"}
+        return {"error": "readback_failed"}
     return {"revision_start": start, "revision_end": end, "rows": rows}
 
 
@@ -392,9 +398,11 @@ def _same(expected, actual) -> bool | None:
 
     if isinstance(expected, (bool, np.bool_)) or isinstance(actual, (bool, np.bool_)):
         try:
-            return isinstance(expected, (bool, np.bool_)) and isinstance(
-                actual, (bool, np.bool_)
-            ) and bool(expected) == bool(actual)
+            return (
+                isinstance(expected, (bool, np.bool_))
+                and isinstance(actual, (bool, np.bool_))
+                and bool(expected) == bool(actual)
+            )
         except Exception:  # noqa: BLE001
             return None
     if isinstance(expected, numbers.Real):
@@ -414,7 +422,9 @@ def _same(expected, actual) -> bool | None:
 
 
 def _path(cls: str, item: dict) -> str:
-    return f"/{cls}/{item['name']}" + (f"/{item['attr']}" if item["kind"] == "cell" else "")
+    return f"/{cls}/{item['name']}" + (
+        f"/{item['attr']}" if item["kind"] == "cell" else ""
+    )
 
 
 def classify_write(note: dict | None, read: dict | None) -> dict:
@@ -426,19 +436,26 @@ def classify_write(note: dict | None, read: dict | None) -> dict:
     if not note or note.get("error"):
         return out("uncertain", "no_submission")
     if not isinstance(read, dict) or "error" in read:
-        return out("uncertain", "read_failed")
-    if read.get("revision_start") != note["revision"] or read.get("revision_end") != note["revision"]:
+        return out("uncertain", "readback_failed")
+    if (
+        read.get("revision_start") != note["revision"]
+        or read.get("revision_end") != note["revision"]
+    ):
         return out("uncertain", "revision_moved")
     rows = read.get("rows") or {}
     done, not_done, unknown = [], [], []
     for item in note["items"]:
-        key = item["name"] if item["kind"] != "cell" else f"{item['name']}/{item['attr']}"
+        key = (
+            item["name"] if item["kind"] != "cell" else f"{item['name']}/{item['attr']}"
+        )
         row = rows.get(key)
         if row is None:
             unknown.append(item)
             continue
         if item["kind"] == "delete":
-            (done if item["before_present"] and not row["present"] else not_done).append(item)
+            (
+                done if item["before_present"] and not row["present"] else not_done
+            ).append(item)
             continue
         if item["kind"] == "create":
             if item["before_present"] or not row["present"]:
@@ -457,7 +474,9 @@ def classify_write(note: dict | None, read: dict | None) -> dict:
         if not item["before_present"] or not row["present"]:
             not_done.append(item)
             continue
-        verdict = _same(item.get("expected", UNCOMPARABLE), row.get("value", UNCOMPARABLE))
+        verdict = _same(
+            item.get("expected", UNCOMPARABLE), row.get("value", UNCOMPARABLE)
+        )
         (unknown if verdict is None else done if verdict else not_done).append(item)
     counts = {
         "requested": len(note["items"]),
