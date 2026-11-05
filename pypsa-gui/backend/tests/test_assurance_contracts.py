@@ -218,3 +218,44 @@ def test_published_guard_schema_is_the_enforced_one():
             effects.validate(_contract(**forged))
         with pytest.raises(ValueError):
             effects.EffectContract.model_validate(_contract(**forged))
+
+
+def test_contracts_route_serves_the_frozen_snapshot(frozen):
+    """`/reliability/contracts` serves what CI freezes, and still carries the
+    fields it served before the snapshot existed (AA-V1-CHANGE-1: additive)."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from harness.assurance import Draft, ProfileDraft
+    from harness.assurance_scope import RequestScope
+    from routers import chat
+
+    app = FastAPI()
+    app.include_router(chat.router, prefix="/api/chat")
+    response = TestClient(app).get("/api/chat/reliability/contracts")
+    assert response.status_code == 200
+    body = response.json()
+    assert body == frozen
+    assert body["version"] == 1
+    for key, model in (
+        ("request_scope", RequestScope),
+        ("observed_draft", Draft),
+        ("computed_draft", ProfileDraft),
+    ):
+        assert body[key] == json.loads(json.dumps(model.model_json_schema()))
+    assert {"effect_guard", "profiles", "checked_tools", "pending"} <= set(body)
+
+
+def test_the_build_ships_the_snapshot_where_the_route_reads_it():
+    """The packaged app's `/reliability/contracts` reads the snapshot from disk,
+    so the PyInstaller allowlist must ship it beside `assurance_contracts.py`."""
+    from pathlib import Path
+
+    backend = Path(__file__).resolve().parents[1]
+    spec = (backend.parent / "pypsa-gui.spec").read_text(encoding="utf-8")
+    assert (
+        '(str(BACKEND / "harness" / "assurance_contracts.v1.json"), "harness")' in spec
+    )
+    module = Path(contracts.__file__).resolve()
+    assert contracts.SNAPSHOT.resolve().parent == module.parent
+    assert module.parent.relative_to(backend).as_posix() == "harness"

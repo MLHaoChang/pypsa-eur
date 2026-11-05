@@ -266,3 +266,9 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **Every reviewer message passed through the coordinator.** DeepSeek's thread subscription (later events go straight to the subscribed worker) cut router tokens ~27%.
   - Fix: reviewers and builders message each other directly; the coordinator hears only `premerge ok`, hand-offs, owner questions, held disagreements and PERMISSION requests; verdicts stay PR comments.
   - Lives in: steward "Messages to the coordinator", review-gk, review-ux, coordinator "Merging".
+
+## 5 Nov 2026: frozen contract snapshot outside the trial merge
+
+- **A frozen-contract test ran only on each PR alone.** `test_assurance_contracts.py` compares the live assurance contracts with a committed snapshot, but premerge's semantic tests did not run it. A PR adding a profile or changing a checked tool's schema passed on its own head while another merged PR moved the inputs, leaving master's snapshot stale.
+  - Fix: the snapshot test joins `semantic_tests`, and `semantic_re` covers every module the snapshot is built from (`harness/calculations`, `*_calculations`, `assurance_scope`, `assurance`, `effects`, `catalogue`), plus the contracts module and snapshot themselves.
+  - Lives in: `scripts/coord/premerge.sh` `semantic_re` / `semantic_tests`; template premerge.sh comment above `semantic_re`.

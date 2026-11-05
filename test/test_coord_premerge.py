@@ -275,6 +275,38 @@ def test_acl_and_mcp_changes_run_all_six_semantic_tests(repos, tmp_path, path):
     assert "assistant inventory" not in res.stdout
 
 
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "pypsa-gui/backend/harness/calculations.py",
+        "pypsa-gui/backend/harness/storage_calculations.py",
+        "pypsa-gui/backend/harness/assurance_scope.py",
+        "pypsa-gui/backend/harness/assurance.py",
+        "pypsa-gui/backend/harness/effects.py",
+        "pypsa-gui/backend/harness/assurance_contracts.py",
+        "pypsa-gui/backend/harness/assurance_contracts.v1.json",
+    ],
+)
+def test_assurance_contract_inputs_run_the_contract_snapshot_test(
+    repos, tmp_path, path
+):
+    """A PR changing what the frozen assurance contracts are built from must
+    run their snapshot test on the trial merge, or master's snapshot goes stale."""
+    remote, clone = repos
+    publish_pr(remote, {path: "x\n"})
+    res = run(clone, PREMERGE_PYTHON=fake_python(tmp_path, 0))
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "test_assurance_contracts.py" in res.stdout
+
+
+def test_assurance_neighbours_skip_the_semantic_tests(repos, tmp_path):
+    remote, clone = repos
+    publish_pr(remote, {"pypsa-gui/backend/harness/assurance_coverage.py": "x\n"})
+    res = run(clone, PREMERGE_PYTHON=fake_python(tmp_path, 1))
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "test_assurance_contracts.py" not in res.stdout
+
 def fake_vitest(tmp_path, code):
     vitest = tmp_path / "fakevitest"
     vitest.write_text(f'#!/bin/sh\necho vitest "$@"\nexit {code}\n')
