@@ -3,9 +3,9 @@
 
 # 21d — Deliver the L1 data request's notice through `runner._wait_for_user`
 
-Status: needs-info
+Status: ready-for-agent
 Type: task
-Blocked by: #1127 (holds `harness/runner.py`); GK B plan GO (issue 21 has merged, #1100)
+Blocked by: #1127 (holds `harness/runner.py`; issue 21 has merged, #1100)
 Gated: yes (GK B)
 Model tier: opus
 Owner decisions: SH21-SPLIT-1, SH21-ACCEPT-1, CHAT-DATA-SPEC-1, FILL-11-6, SH21D-NOTICE-1
@@ -128,4 +128,29 @@ with the text left to the task view?
   `run_notice` and `_email` keep the fixed-fields-only contract. Plan step 2
   sends exactly that line and the item count; the acceptance test asserts
   that no label, param or notice line appears in the record or the email.
+- 2026-11-05, GK B (23), plan verdict: GO WITH CHANGES. Code starts after
+  #1127 merges.
+  - Count in the attention record too (SH21D-NOTICE-1 covers both).
+    `native_status` stays `needs_user`. One optional integer field on
+    `family: 'run'` records (for example `data_items`), set only when
+    `waiting.kind == "data"` and absent otherwise, so other records stay
+    byte-equal. `_validate` refuses a bool, a non-int, a value < 1, or the
+    field on another family. `project_records` shows the fixed line "The
+    harness run waits for data (N items); open it to see them." Test: an old
+    record without the field reads exactly as on master.
+  - D1. One `since` format: list every reader of `run.waiting.since` (the
+    view at `assistant_tasks.py:807`, the frontend, any TTL or age
+    arithmetic), pick the format they all handle, and test the served view
+    for both waiting kinds, typed from the served dict (standing rule 16).
+  - D2. One dedupe rule: the mutator's same-ref no-op and `data_request`'s
+    "nothing asked twice" use the same `ref`. A mutant that drops the no-op
+    is killed by the repeated-wake test.
+  - D3. Count only: the count is `len(items)` as the harness computed it. A
+    mutant that puts the notice or a label in the record or email is killed
+    by the no-label test.
+  - D4. Lock order: the mutator runs inside `_advance_run`'s existing update,
+    with no nested `_update`. The wrapper is its only other caller. A test
+    shows the data stop writes `run.waiting` through the mutator.
+  - The 10-email cap and `loop_notice`'s separate assertion stay as planned.
+    Send GK B the PR head when ready.
 
