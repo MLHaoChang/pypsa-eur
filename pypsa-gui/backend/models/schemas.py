@@ -92,6 +92,10 @@ class BusCreate(BaseModel):
     product_value: float | None = None
     # Price of one undelivered unit of the product, EUR per bus unit (ticket 08); written only when sent.
     lost_production_value: float | None = None
+    # Heat level: the supply temperature a heat bus delivers at, °C (issue 15); written only when sent.
+    temperature_c: float | None = None
+    # Steam level: the header pressure of a steam bus, bar(g) (issue 15); written only when sent.
+    pressure_bar: float | None = None
 
 
 class CarrierCreate(BaseModel):
@@ -191,8 +195,10 @@ class LengthsFromGeometryRequest(BaseModel):
 LINK_LAZY_COLUMNS = frozenset({"eh_process", "criticality_tier", "throughput_unit", "specific_energy_kwh_per_t",
                                "rated_mva", "harmonic_source", "harmonic_spectrum", "spectrum_post_filter",
                                "flicker_step_mva", "flicker_changes_per_min",
-                               "single_phase_share", "motor_kw", "start_method", "i_start_pu"})
-BUS_LAZY_COLUMNS = frozenset({"mwh_per_t", "product_value", "lost_production_value"})
+                               "single_phase_share", "motor_kw", "start_method", "i_start_pu",
+                               "max_supply_temp_c", "max_pressure_bar"})
+BUS_LAZY_COLUMNS = frozenset({"mwh_per_t", "product_value", "lost_production_value", "temperature_c",
+                              "pressure_bar"})
 GENERATOR_LAZY_COLUMNS = frozenset({"process_role"})
 
 
@@ -280,6 +286,9 @@ class LinkCreate(BaseModel):
     motor_kw: float | None = None
     start_method: str | None = None
     i_start_pu: float | None = None
+    # A heat or steam device's reach (issue 15), lazy the same way: °C and bar(g).
+    max_supply_temp_c: float | None = None
+    max_pressure_bar: float | None = None
 
     @model_validator(mode="after")
     def _process_unit_ports_state_their_efficiency(self):

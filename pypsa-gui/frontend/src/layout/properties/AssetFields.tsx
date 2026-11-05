@@ -149,6 +149,9 @@ function StartMultipleDefault({ fs }: { fs: FS }) {
   )
 }
 
+/** A heat or steam device's reach (grid-to-process issue 15): empty reads "No limit" as text, not a placeholder only. */
+const LIMIT_KEYS: ReadonlySet<string> = new Set(['max_supply_temp_c', 'max_pressure_bar'])
+
 const PART_COLUMNS: Array<{ suffix: string; head: string }> = [
   { suffix: '_overnight', head: 'Overnight' },
   { suffix: '_lifetime', head: 'Life (y)' },
@@ -321,6 +324,9 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
                 )}
                 {f.key === 'lifetime' && <LifetimeInherit fs={fs} set={set} />}
                 {f.key === 'i_start_pu' && <StartMultipleDefault fs={fs} />}
+                {LIMIT_KEYS.has(f.key) && (fs[f.key] ?? '').trim() === '' && (
+                  <div className="col-span-2 -mt-0.5 text-[9px] text-muted" data-testid={`asset-no-limit-${f.key}`}>No limit</div>
+                )}
                 {!f.derived && f.key !== firstPart && LABEL_ONLY_KINDS.has(f.kind) && chipRow(provenance, f.key)}
                 {f.key !== firstPart && after?.[f.key]}
               </Fragment>

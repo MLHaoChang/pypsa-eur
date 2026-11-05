@@ -30,7 +30,9 @@ CUSTOM_COLUMNS = {
 
 # M5: GUI columns one class's create model declares (models/schemas.py `BusCreate.country`, `CarrierCreate.unit`,
 # `GlobalConstraintCreate.carrier`), allowed for that class only.
-CUSTOM_BY_CLASS = {"Bus": {"country", "mwh_per_t", "product_value", "lost_production_value"}, "Carrier": {"unit"},
+CUSTOM_BY_CLASS = {"Bus": {"country", "mwh_per_t", "product_value", "lost_production_value",
+                           # Grid-to-process issue 15: the heat and steam level.
+                           "temperature_c", "pressure_bar"}, "Carrier": {"unit"},
                    "Generator": {"process_role"},
                    "GlobalConstraint": {"carrier"},
                    # Grid-to-process ticket 02: the process-unit columns (models/energy_hub.py EH_CUSTOM_COLUMNS).
@@ -41,6 +43,8 @@ CUSTOM_BY_CLASS = {"Bus": {"country", "mwh_per_t", "product_value", "lost_produc
                             "single_phase_share",
                             # Grid-to-process issue 18: the motor-start screen's columns.
                             "motor_kw", "start_method", "i_start_pu",
+                            # Grid-to-process issue 15: a heat or steam device's reach.
+                            "max_supply_temp_c", "max_pressure_bar",
                             # PyPSA registers extra ports on first use (`pypsa.constants.RE_PORTS_GE_2`).
                             "bus2", "bus3", "bus4", "efficiency2", "efficiency3", "efficiency4"}}
 

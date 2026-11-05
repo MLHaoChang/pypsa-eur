@@ -1279,6 +1279,96 @@ def _check_inventory_cadence(n) -> list[Issue]:
             for name, h in interval.items() if _is_finite(h) and float(h) > span + 1e-9]
 
 
+def _positive_somewhere(n, list_name: str, attr: str, name: str) -> bool:
+    """Whether a component's `attr` is > 0 at any snapshot: its series where it has one, else its static value."""
+    series = getattr(n, f"{list_name}_t", {}).get(attr) if hasattr(n, f"{list_name}_t") else None
+    if series is not None and name in getattr(series, "columns", ()):
+        v = pd.to_numeric(series[name], errors="coerce")
+        return bool((v > 0).any())
+    static = getattr(n, list_name)
+    return attr in static.columns and _is_finite(static.at[name, attr]) and float(static.at[name, attr]) > 0
+
+
+def _link_outputs(n, name: str) -> list[str]:
+    """The buses a Link delivers to: bus1, and bus2..bus4 where efficiencyN is > 0 at any snapshot (a heat pump's
+    low-grade source has a negative efficiency2 and is an input)."""
+    links = n.links
+    out = [str(links.at[name, "bus1"])]
+    for i in (2, 3, 4):
+        bus = str(links.at[name, f"bus{i}"]) if f"bus{i}" in links.columns else ""
+        if bus and bus != "nan" and _positive_somewhere(n, "links", f"efficiency{i}", name):
+            out.append(bus)
+    return out
+
+
+def _can_deliver(n, list_name: str, name: str) -> bool:
+    """A Generator or Link with capacity (p_nom > 0 or extendable) and p_max_pu > 0 at some snapshot."""
+    df = getattr(n, list_name)
+    sized = (_is_finite(df.at[name, "p_nom"]) and float(df.at[name, "p_nom"]) > 0) or bool(
+        df.at[name, "p_nom_extendable"])
+    return sized and _positive_somewhere(n, list_name, "p_max_pu", name)
+
+
+# (bus level column, link reach column, issue code, bus label, link label, unit)
+_LEVEL_RULES = (("temperature_c", "max_supply_temp_c", "heat_level_above_reach", "supply temperature",
+                 "max supply temperature", "°C"),
+                ("pressure_bar", "max_pressure_bar", "steam_level_above_reach", "header pressure",
+                 "max steam pressure", "bar(g)"))
+
+
+def _check_heat_levels(n) -> list[Issue]:
+    """Heat and steam levels (grid-to-process issue 15, design §2.6): a device may not feed a level above its
+    reach, and every level with demand has a supplier. The bus states its level (`temperature_c`, `pressure_bar`),
+    the Link its reach (`max_supply_temp_c`, `max_pressure_bar`); a level or reach left empty skips the rule, so a
+    network without levels is checked as before. Errors: the LP would deliver heat the device cannot make."""
+    from services.process_heat import level_label
+
+    buses = n.buses
+    if not any(c in buses.columns for c in ("temperature_c", "pressure_bar")):
+        return []
+    out: list[Issue] = []
+    links = n.links
+    for level_col, reach_col, code, bus_label, reach_label, unit in _LEVEL_RULES:
+        if level_col not in buses.columns or reach_col not in links.columns:
+            continue
+        for name in links.index:
+            reach = links.at[name, reach_col]
+            if not _is_finite(reach):
+                continue
+            for bus in _link_outputs(n, name):
+                level = buses.at[bus, level_col] if bus in buses.index else None
+                if _is_finite(level) and float(level) > float(reach):
+                    out.append(_err(code, "Link", str(name),
+                                    f"Link {name} feeds bus {bus}, {level_label(n, bus)}, but its {reach_label} "
+                                    f"is {float(reach):g} {unit}, below the {bus_label} of the bus: raise the "
+                                    f"{reach_label} if the device reaches {float(level):g} {unit}, or connect the "
+                                    "link to a level it can reach."))
+
+    level_buses = [b for b in buses.index
+                   if any(c in buses.columns and _is_finite(buses.at[b, c]) for c in ("temperature_c", "pressure_bar"))]
+    if not level_buses:
+        return out
+    loads = n.loads
+    demand = {str(b) for b in level_buses
+              if any(_positive_somewhere(n, "loads", "p_set", ld) for ld in loads.index[loads["bus"] == b])}
+    supplied: set[str] = set()
+    for g in n.generators.index:
+        if _can_deliver(n, "generators", g):
+            supplied.add(str(n.generators.at[g, "bus"]))
+    for name in links.index:
+        if not _can_deliver(n, "links", name):
+            continue
+        outs = _link_outputs(n, name)
+        if not _positive_somewhere(n, "links", "efficiency", name):
+            outs = outs[1:]  # bus1 receives nothing at efficiency 0
+        supplied.update(outs)
+    for bus in sorted(demand - supplied):
+        out.append(_err("level_without_supplier", "Bus", bus,
+                        f"Bus {bus}, {level_label(n, bus)}, has demand but nothing that can supply it: add a "
+                        "generator or a link that delivers to it, with capacity above 0."))
+    return out
+
+
 def _check_storage_cyclic_initial(n) -> list[Issue]:
     """
     When cyclic_state_of_charge=True, PyPSA ignores state_of_charge_initial
@@ -1857,6 +1947,7 @@ def _check_lopf(n, solver_config) -> list[Issue]:
     out += _check_loss_magnitude(n, solver_config)
     out += _check_storage_cyclic_initial(n)
     out += _check_inventory_cadence(n)
+    out += _check_heat_levels(n)
     out += _check_p_max_pu_bounds(n)
     out += _check_unweighted_start_costs(n)
     out += _check_safety_tier_off_critical_bus(n)

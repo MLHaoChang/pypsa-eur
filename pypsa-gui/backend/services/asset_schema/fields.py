@@ -422,6 +422,12 @@ LINK: tuple[FieldSpec, ...] = (
     FieldSpec("i_start_pu", "performance", "Start current multiple", "The starting current as a "
               "multiple of rated current, when the maker states it. Leave empty to use the start method's default "
               "(6, 3 or 1).", "× rated", "pu", reveal_when={"eh_process": True}),
+    FieldSpec("max_supply_temp_c", "performance", "Max supply temperature", "The highest temperature this heat "
+              "device can deliver (a heat pump's reach). It may not feed a heat bus whose supply temperature is "
+              "above it. Empty: no limit.", "°C", "°C"),
+    FieldSpec("max_pressure_bar", "performance", "Max steam pressure", "The highest header pressure this steam "
+              "device is rated for, gauge. It may not feed a steam bus whose header pressure is above it. Empty: "
+              "no limit.", "bar(g)", "bar(g)"),
     *_outages(with_cf_flag=False),
 )
 
@@ -535,6 +541,12 @@ BUS: tuple[FieldSpec, ...] = (
               "delivered costs, per the bus's unit (EUR/MWh or EUR/t). Prices the shortfall slack; it must exceed "
               "the buy-in price. Empty: no shortfall slack is added.", "EUR/unit", "EUR/unit",
               reveal_when={"unit": ("MWh", "t")}),
+    FieldSpec("temperature_c", "identity", "Supply temperature", "For a heat bus: the temperature it delivers heat "
+              "at. A device feeding it must reach it (its max supply temperature). Empty: no level, the bus is not "
+              "checked.", "°C", "°C"),
+    FieldSpec("pressure_bar", "identity", "Header pressure", "For a steam bus: the header pressure it delivers "
+              "steam at, gauge. A device feeding it must reach it (its max steam pressure). Empty: no level, the "
+              "bus is not checked.", "bar(g)", "bar(g)"),
     FieldSpec("sub_network", "identity", "Sub-network", "Manual region label for the 'region' clustering mode: buses "
               "sharing it collapse to one node. Empty: determined from the electrical topology.", kind="text"),
     FieldSpec("x", "identity", "Longitude", "Geographic longitude, east positive. Places the bus on the map and "
@@ -604,8 +616,9 @@ _EMPTY_BY_CLASS = {"Bus": {"country", "sub_network", "unit"}, "Carrier": {"nice_
                    "Link": {"bus2", "bus3", "bus4", "criticality_tier", "harmonic_source", "harmonic_spectrum",
                             "start_method"}}
 _CLEAR_BY_CLASS = {"GlobalConstraint": {"carrier_attribute", "carrier", "investment_period"},
-                   "Bus": {"mwh_per_t", "product_value", "lost_production_value"}, "Link": {"rated_mva", "flicker_step_mva", "flicker_changes_per_min",
-                            "single_phase_share", "motor_kw", "i_start_pu"}}
+                   "Bus": {"mwh_per_t", "product_value", "lost_production_value", "temperature_c", "pressure_bar"},
+                   "Link": {"rated_mva", "flicker_step_mva", "flicker_changes_per_min",
+                            "single_phase_share", "motor_kw", "i_start_pu", "max_supply_temp_c", "max_pressure_bar"}}
 
 
 def _with_blank(component: str, specs: tuple[FieldSpec, ...]) -> tuple[FieldSpec, ...]:

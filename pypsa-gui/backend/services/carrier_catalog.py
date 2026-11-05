@@ -47,6 +47,8 @@ CARRIER_CATALOG: dict[str, dict] = {
     # Heat. The creation form's heat-bus pickers match any bus carrier naming "heat"; without a catalogue entry
     # a user could not pick the carrier the filter looks for.
     "heat":           {"nice_name": "Heat",             "color": "#cc1e1e", "co2_emissions": 0.0},
+    # Steam (issue 15): a steam bus states its header pressure (`pressure_bar`), as a heat bus its `temperature_c`.
+    "steam":          {"nice_name": "Steam",            "color": "#b0a8a8", "co2_emissions": 0.0},
     # Process products (grid-to-process, design D2). `unit` is what a bus of this carrier counts in: MWh (LHV) for
     # an energy product, t for a material. Only these entries carry a unit; the rest read as MWh.
     "NH3":            {"nice_name": "Ammonia",          "color": "#1f9d8b", "co2_emissions": 0.0, "unit": "MWh"},
