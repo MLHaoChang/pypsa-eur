@@ -138,7 +138,7 @@ def test_a_chat_report_while_a_run_sits_at_stage_7_is_not_strict_and_not_the_run
         if view["status"] == "paused_at_card":
             tasks.continue_at_card(session, task["task_id"])
             continue
-        step = view["next_step"]
+        step = view.get("next_step")
         if view["run"]["stage"] == "explore" and step is None:
             from tests.test_harness_run_skeleton import explore_turn
             explore_turn(root, task)
@@ -462,8 +462,7 @@ def test_b1b_the_report_card_is_crossed_only_on_a_grant_that_lists_it(
     from services import chat_tools
     chat_tools.set_chat_session(None)
     chat_tools.set_acting_user(None)
-    record = settle(runner(), path, task["task_id"],
-                    lambda r: r["run"]["status"] != "running" or r["run"]["stage"] == "handoff")
+    record = settle(runner(), path, task["task_id"], lambda r: r["run"]["status"] != "running")
     if lists_report:
         assert record["run"]["status"] == "completed", record["run"]
         assert fake_report == [{"strict": True, "run_binding": (path, "a")}]
