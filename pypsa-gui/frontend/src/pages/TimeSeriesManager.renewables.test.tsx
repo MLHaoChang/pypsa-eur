@@ -89,4 +89,18 @@ describe('Renewables tab', () => {
     await userEvent.click(screen.getByTestId('upload-instead'))
     expect(document.activeElement).toBe(screen.getByTestId('ts-upload-zone'))
   })
+
+  it('a partial outcome says how many were applied and what failed', async () => {
+    prof.readiness.mockResolvedValue([ready({}), ready({ generator: 'wd', technology: 'wind' })])
+    prof.generate.mockImplementation(async (_p: string, body: { technology: string }) => {
+      if (body.technology === 'wind') throw new Error('no wind data')
+      return { id: 'job1' }
+    })
+    prof.pending.mockResolvedValue({ pending: [{ job_id: 'job1' }], jobs: [] })
+    prof.applyBatch.mockResolvedValue({ count: 1 })
+    await openRenewables()
+    await userEvent.click(screen.getByTestId('generate-all-ready'))
+    const note = await screen.findByTestId('generate-notice')
+    await vi.waitFor(() => expect(note.textContent).toMatch(/1 profile generated and applied\..*wd: .*no wind data/))
+  })
 })
