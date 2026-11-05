@@ -224,15 +224,20 @@ def test_a_flush_forced_mid_turn_writes_no_page(granted, profile):
             if len(self.requests) == 1:
                 raise RuntimeError("boom after the provider returned")
 
+    from harness import eventlog
+
+    # Only what this run writes counts: other tests in the same process may
+    # leave logs (and raw pages) under the same root.
+    before = {path: path.stat().st_size for path in eventlog._root().rglob("*.jsonl")}
     base = Failing([*_search_pair(), _row_call()])
     try:
         _, run, _ = _run(granted, profile, base)
     except RuntimeError:
         pass
-    from harness import eventlog
 
     for path in eventlog._root().rglob("*.jsonl"):
-        assert INJECTED not in path.read_text(encoding="utf-8")
+        written = path.read_bytes()[before.get(path, 0) :]
+        assert INJECTED not in written.decode("utf-8")
 
 
 def test_derived_history_still_equals_the_session(granted, profile):
