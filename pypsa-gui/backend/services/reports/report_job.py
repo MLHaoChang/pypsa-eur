@@ -105,6 +105,8 @@ class ReportJob:
     # network chapter), and a paragraph or bullet with a number the audit
     # cannot verify against them is withheld, not flagged.
     strict: bool = False
+    # (task path, boot): the run whose lease admits each send (C4, issue 24).
+    run_binding: tuple[pathlib.Path, str] | None = None
 
 
 # ── preparation ─────────────────────────────────────────────────────────────
@@ -138,7 +140,8 @@ def prepare_report_job(*, project_name: str, project_dir: pathlib.Path,
                        title: str | None = None,
                        template_file_id: str | None = None,
                        meta_updates: dict[str, Any] | None = None,
-                       strict: bool = False) -> ReportJob:
+                       strict: bool = False,
+                       run_binding: tuple[pathlib.Path, str] | None = None) -> ReportJob:
     """
     Everything `run_report_job` needs, validated, with the record it will
     publish. Raises `KeyError` for a section id the document does not have.
@@ -195,7 +198,10 @@ def prepare_report_job(*, project_name: str, project_dir: pathlib.Path,
         regenerate_section=regenerate_section, report_id=report_id,
         record=record, new_report=new_report,
         meta_updates=dict(meta_updates or {}), strict=strict,
+        run_binding=run_binding,
     )
+    if run_binding is not None:
+        job.provider = RunSends(provider, *run_binding)
     record["stop_event"] = job.stop_event
     return job
 
@@ -265,6 +271,32 @@ def _with_prose(section: Section, draft: SectionDraft, facts) -> Section:
         "note": _clean_note(section.note),
         "audit": audit(list(draft.paragraphs) + list(draft.bullets), facts),
     })
+
+
+class RunSends:
+    """A harness run's report sends (GK B C4): each one is reserved through
+    `send_reservation.admit` under the run's live lease before the provider
+    is called (`ReservingProvider`), and settled after. A refusal makes no
+    provider call; its reason is kept in `refused` and the job stops."""
+
+    def __init__(self, inner: Any, task_path: pathlib.Path, boot: str) -> None:
+        from harness.send_reservation import ReservingProvider
+
+        self._inner = ReservingProvider(inner, task_path, boot=boot)
+        self.name = getattr(inner, "name", "run_report")
+        self.refused: str | None = None
+
+    def __getattr__(self, attr: str) -> Any:
+        return getattr(self._inner, attr)
+
+    def stream(self, request: Any):
+        from harness.send_reservation import SendRefused
+
+        try:
+            yield from self._inner.stream(request)
+        except SendRefused as exc:
+            self.refused = exc.reason
+            raise
 
 
 AUDIT_FAILED = "(the number audit could not read this statement)"
@@ -396,6 +428,15 @@ def _generate_all(job: ReportJob) -> tuple[ReportDocument, bool]:
             if result.reason == "aborted":
                 aborted = True
                 break
+            refused = getattr(job.provider, "refused", None)
+            if refused is not None:
+                # C4: the run's reservation refused the send; nothing more goes out.
+                with job.lock:
+                    job.record["refused"] = refused
+                for rest in pending:
+                    doc.sections[by_id[rest]] = _with_failure(doc.sections[by_id[rest]], f"send refused ({refused})", job)
+                _progress(job, done, None)
+                return doc, False
             written = _with_failure(section, result.reason, job)
             with job.lock:
                 job.record["prose_failures"].append({
@@ -663,6 +704,7 @@ def start_report_job(*, project_name: str, project_dir: pathlib.Path,
                      template_file_id: str | None = None,
                      meta_updates: dict[str, Any] | None = None,
                      strict: bool = False,
+                     run_binding: tuple[pathlib.Path, str] | None = None,
                      lock: threading.Lock, state: dict[str, Any]) -> str:
     """
     Publish the record under `state["report_job"]` and start the daemon
@@ -676,7 +718,8 @@ def start_report_job(*, project_name: str, project_dir: pathlib.Path,
             provider=provider, language=language, sections=sections,
             instruction=instruction, base_document=base_document,
             regenerate_section=regenerate_section, title=title,
-            template_file_id=template_file_id, meta_updates=meta_updates, strict=strict),
+            template_file_id=template_file_id, meta_updates=meta_updates, strict=strict,
+            run_binding=run_binding),
         run=run_report_job, lock=lock, state=state)
 
 
