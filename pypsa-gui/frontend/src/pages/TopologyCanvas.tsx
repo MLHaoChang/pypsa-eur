@@ -3057,18 +3057,22 @@ export default function TopologyCanvas() {
           so this banner explains why the displayed numbers aren't the AC
           values the user asked for. */}
       {resultsOverlayEnabled && acPfAvailable && resultSource === 'ac_pf' && currentSnapConvergence === 'unknown' && (
-        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-[850] bg-panel/95 text-text border border-border text-[11px] rounded shadow-lg px-3 py-1.5 flex items-center gap-2 max-w-[640px]">
-          <span aria-hidden="true" className="text-base leading-none text-muted">?</span>
-          <span>AC Power Flow convergence was not reported for this snapshot: its values are not checked.</span>
+        <div className="absolute bottom-14 left-16 right-[232px] z-[850] flex justify-center pointer-events-none">
+          <div className="pointer-events-auto bg-panel/95 text-text border border-border text-[11px] rounded shadow-lg px-3 py-1.5 flex items-center gap-2 max-w-[640px]">
+            <span aria-hidden="true" className="text-base leading-none text-muted">?</span>
+            <span>AC Power Flow convergence was not reported for this snapshot: its values are not checked.</span>
+          </div>
         </div>
       )}
       {resultsOverlayEnabled && acPfAvailable && resultSource === 'ac_pf' && currentSnapConvergence === false && (
-        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-[850] bg-warn/95 text-white text-[11px] rounded shadow-lg px-3 py-1.5 flex items-center gap-2 max-w-[640px]">
-          <span className="text-base leading-none">⚠</span>
-          <span>
-            AC Power Flow did not converge for this snapshot ({currentSnapIso.slice(0, 16).replace('T', ' ')}).
-            Showing values from the LP fallback — switch to a converged snapshot or back to LOPF view.
-          </span>
+        <div className="absolute bottom-14 left-16 right-[232px] z-[850] flex justify-center pointer-events-none">
+          <div className="pointer-events-auto bg-warn/95 text-white text-[11px] rounded shadow-lg px-3 py-1.5 flex items-center gap-2 max-w-[640px]">
+            <span aria-hidden="true" className="text-base leading-none">⚠</span>
+            <span>
+              AC Power Flow did not converge for this snapshot ({currentSnapIso.slice(0, 16).replace('T', ' ')}).
+              Showing values from the LP fallback: switch to a converged snapshot or back to LOPF view.
+            </span>
+          </div>
         </div>
       )}
       <ReactFlow
