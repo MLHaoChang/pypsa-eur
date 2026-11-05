@@ -83,3 +83,12 @@ On the B template:
 **Likely files:** `pypsa-gui/backend/models/process_unit.py`, `pypsa-gui/backend/services/asset_schema/fields.py`, `pypsa-gui/backend/services/asset_schema/attrs_doc.py`, new `gridspine/static/restart_sequence.py`, `gridspine/static/motor_start.py` (from 12a), `pypsa-gui/backend/services/campus_island_report.py`, `pypsa-gui/frontend/src/pages/` (a results section), tests under `tests/gridspine/` and `pypsa-gui/backend/tests/`.
 **Blocked by:** 10 and 18 (12a).
 **Model:** Opus (gridspine, gated). The results section needs the UX reviewer's OK.
+
+## Comments
+
+**GK A (13), plan GO for 12b, 2026-11-05 (from master 83f8c966).** Slices: 12b-1 gridspine (`static/ride_through.py`, `static/restart_sequence.py`), 12b-2 backend fields, driver CSVs and the B template data, 12b-3 the results section (UX 9).
+- Q1: lost time = pickup offset + restart time, both shown; the acceptance Σ is checked exactly on the restart-time column.
+- Q2: a restart whose motor start fails is flagged `fail` and the timeline kept; `unknown` (no S_k, no motor data) counts the same, never a pass; any `fail`/`unknown` sets `lower_bound` on the total, with both counted.
+- Q3: tonnes are counted to full rate with the note "beyond the 4 h window"; no cap.
+- 12b-1 conditions: EN 50160 classes converted explicitly (depth = 100 − u; worst corner = lowest residual, longest duration; u < 5 % is depth 100); boundary, non-monotone and too-deep hand tests; the parser refuses depth outside (0, 100], duration ≤ 0 and malformed pairs; every row carries `dip_stats_source`, and a total from the demo statistics is labelled demo; a unit missing curve, restart time, rate or mass pull is unknown and the total `incomplete`; an island restart screens on the island source only (S_sc via `motor_start.short_circuit_power`), unknown without one; a unit bigger than every pickup block is `fail` ("no block fits"); no tier goes last with a note; blocks fill in tier order, then greedily.
+- 12b-2 conditions: rate from the existing `throughput_unit` / `mwh_per_t` path with its basis stated; mass pull through the persisted `shortfall` Generator, per-port factors, unknown on branching, cycles, time-varying efficiency or several product buses; both fields registered end to end, outside the LP fingerprint and the investment digest (tested); B's diff only the new data, ledgered, with byte identity for every other template; the heat-demo units read unknown; the CSV write via `_write_text_atomic` and `_screen_inputs`.
