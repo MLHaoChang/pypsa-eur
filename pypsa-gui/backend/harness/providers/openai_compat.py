@@ -330,6 +330,7 @@ class OpenAICompatProvider:
         seen_ids: set[str] = set()
         usage: dict[str, int] = {}
         completed = False
+        truncated = False
         client = self._client()
         try:
             endpoint = "responses" if responses else "chat/completions"
@@ -381,6 +382,8 @@ class OpenAICompatProvider:
                         finish_reason = choice.get("finish_reason")
                         if finish_reason is not None:
                             completed = True
+                        if finish_reason in ("length", "content_filter"):
+                            truncated = True
                         if (finish_reason in ("length", "content_filter")
                                 and (calls or (choice.get("delta") or {}).get("tool_calls"))):
                             raise ProviderError(
@@ -489,7 +492,8 @@ class OpenAICompatProvider:
                     "invalid_request", "tool-call arguments must be a JSON object")
             blocks.append({"type": "tool_use", "id": slot["id"],
                            "name": slot["name"], "input": args})
-        yield LLMEvent(type="message_done", blocks=blocks, usage=usage)
+        yield LLMEvent(type="message_done", blocks=blocks, usage=usage,
+                       truncated=truncated)
 
     def probe(self, model: str) -> tuple[str, float | None]:
         """

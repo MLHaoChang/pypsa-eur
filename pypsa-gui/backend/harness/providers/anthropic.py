@@ -217,6 +217,10 @@ def serialise_block(content_block: Any) -> dict[str, Any]:
     return out
 
 
+
+# Stop reasons that end a message before the model finished it.
+_TRUNCATED_STOPS = frozenset({"max_tokens", "model_context_window_exceeded", "refusal"})
+
 class AnthropicProvider:
     name = "anthropic"
 
@@ -300,6 +304,7 @@ class AnthropicProvider:
             blocks=[serialise_block(b)
                     for b in (getattr(final, "content", []) or [])],
             usage=usage_out,
+            truncated=getattr(final, "stop_reason", None) in _TRUNCATED_STOPS,
         )
 
     def probe(self, model: str) -> tuple[str, float | None]:

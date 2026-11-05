@@ -994,3 +994,21 @@ no red phase came from them. The drift and compatibility cases were written with
 the module. Policy version: contracts v1, additive-only rule (AA-V1-CHANGE-1).
 GK B OK @d36109ae is the contract review (AA-A04-REVIEW-1); issue 01 done. Next runnable tracer:
 issue 02 adds evidence/receipt identity as an additive `pending` → frozen entry.
+
+## 2026-11-05 — issue 03 audit and S1 failure modes
+
+Branch `claude/aa03-s1-failure-modes` (from master ad12e8c7). The audit table is
+in issue 03 under "Case state". Baseline on master: five p2 suites, 165 passed.
+S1 adds `tests/assurance_acceptance/test_p2_failure_modes.py`. Red on master:
+4 cases, the truncated-but-parsing draft certified `passed`. Fix: the
+`LLMEvent.truncated` flag, the loop skipping review, and `Turn.commit` refusing
+the draft. Policy version unchanged (no contract snapshot change). Repair policy pinned at zero
+repairs, pending the owner's freeze AA03-FREEZE-1. Command, from
+`pypsa-gui/backend`:
+
+```bash
+python -m pytest -o addopts='' tests/assurance_acceptance/test_p2_failure_modes.py -q
+```
+
+Next runnable tracer: S3, ambiguous capacity ("what is G1's capacity") → choice
+card, no checked number. S2, S4 and S5 wait on AA03-FREEZE-1.

@@ -445,6 +445,8 @@ class _StreamOutcome:
     # normalised `message_done` event instead and travel as plain data.
     final_blocks: list[dict[str, Any]] = field(default_factory=list)
     final_usage: dict[str, int] = field(default_factory=dict)
+    # The wire stopped before the model finished (token limit or filter).
+    final_truncated: bool = False
     stop_turn: bool = False
     # Threaded through rather than owned here: see the note in
     # `_stream_assistant_message`. One downgrade per TURN, and this helper is
@@ -517,6 +519,7 @@ def _stream_assistant_message(
         emitted_this_attempt = False
         final_blocks: list[dict[str, Any]] = []
         final_usage: dict[str, int] = {}
+        final_truncated = False
         # Drain the streamed events purely for their SSE side-effects (token /
         # thinking / tool_preparing frames). The blocks that get replayed to
         # the provider next turn are read from the `message_done` event below,
@@ -557,6 +560,7 @@ def _stream_assistant_message(
                 elif ev.type == "message_done":
                     final_blocks = ev.blocks
                     final_usage = ev.usage
+                    final_truncated = ev.truncated
                 # "ping": abort-check only, no frame — every other upstream
                 # event surfaces here so the per-event abort check above keeps
                 # its latency.
@@ -662,6 +666,7 @@ def _stream_assistant_message(
     return _StreamOutcome(
         final_blocks=final_blocks,
         final_usage=final_usage,
+        final_truncated=final_truncated,
         model_fallback_used=model_fallback_used,
     )
 
@@ -2313,6 +2318,7 @@ def _run_turn_body(
         # once per assistant STEP — see its docstring.
         if clarifying_scope:
             final_blocks, final_usage = [], {}
+            final_truncated = False
         else:
             stream_outcome = yield from _stream_assistant_message(
                 session,
@@ -2326,6 +2332,7 @@ def _run_turn_body(
                 return
             final_blocks = stream_outcome.final_blocks
             final_usage = stream_outcome.final_usage
+            final_truncated = stream_outcome.final_truncated
             task_rounds += 1
 
         if final_usage:
@@ -2373,11 +2380,12 @@ def _run_turn_body(
                 from services.assurance_records import AccessRevoked, ProjectDeleted
 
                 try:
-                    session.assurance_turn.review_interpretations(
-                        assistant_blocks, provider, session.model, turn_ctx
-                    )
+                    if not final_truncated:
+                        session.assurance_turn.review_interpretations(
+                            assistant_blocks, provider, session.model, turn_ctx
+                        )
                     assistant_blocks = session.assurance_turn.commit(
-                        assistant_blocks, turn_ctx
+                        assistant_blocks, turn_ctx, truncated=final_truncated
                     )
                 except ProjectDeleted:
                     logger.warning("checked answer withdrawn: the project was deleted")

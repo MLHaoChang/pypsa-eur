@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A checked assistant answer whose draft the provider cut off (token limit, content filter, Anthropic `max_tokens`) now ends as the honest limited answer even when the cut-off text still parses, and no review call is spent on it.
