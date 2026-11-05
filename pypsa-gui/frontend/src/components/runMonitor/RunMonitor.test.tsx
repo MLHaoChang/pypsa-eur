@@ -261,6 +261,7 @@ describe('RunMonitor', () => {
     useUIStore.setState({ uiMode: 'guided' })
     render(<AssistantResultCard result={START} disabled={false} onRequest={vi.fn()} />)
     expect((await screen.findByTestId('run-research-value')).textContent).toBe('180–260 EUR/kWh (installed, turnkey)')
+    expect(screen.getByTestId('run-research-card').textContent).toMatch(/^A range found on the web/)
     expect(screen.getByTestId('run-research-use').textContent).toBe('Use this range')
     const text = screen.getByTestId('run-research-card').textContent
     expect(text).toContain('Using it lets a case explore this range. Nothing is written to the model.')

@@ -88,7 +88,7 @@ function CurrentStage({ stage, view }: { stage: RunStage; view: RunMonitorView }
     {stage.loop && <div data-testid="run-loop">Round {stage.loop.round} of {stage.loop.of}</div>}
     {(view.monitor.research?.steps ?? []).filter(s => s.stage === stage.stage && RESEARCH_STOP[s.status] && s.gaps.length)
       .map(s => <div key={s.status} data-testid="run-research-step" data-status={s.status}>
-        {RESEARCH_STOP[s.status]}: {s.gaps.map(gapWords).join(', ')} {s.gaps.length === 1
+        {RESEARCH_STOP[s.status]}: {s.gaps.map(g => gapWords(g)).join(', ')} {s.gaps.length === 1
           ? 'stays as the template has it' : 'stay as the template has them'}.</div>)}
     <Budgets view={view} />
   </div>
@@ -104,7 +104,8 @@ const RESEARCH_STOP: Record<string, string> = {
   error: 'Research did not finish',
 }
 const GAP_WORDS: Record<string, string> = { import_tariff: 'Import tariff' }
-const gapWords = (gap: string) => GAP_WORDS[gap] ?? 'A value'
+// No profile has an explore range gap yet (issue 29), so an unknown range says "A range".
+const gapWords = (gap: string, ranged = false) => GAP_WORDS[gap] ?? (ranged ? 'A range' : 'A value')
 
 /** The research card: one researched value beside its source, for the user to
  *  use or reject. A value is written only after this, each write on its own card. */
@@ -117,7 +118,7 @@ function ResearchCard({ row, others, busy, onDecide }: {
   // Issue 29: an explore gap's sourced range is read by a case, never written.
   const thing = row.range ? 'range' : 'value'
   return <div data-testid="run-research-card" className="mt-1 rounded border border-border p-2">
-    <div className="font-medium">{gapWords(row.gap)} found on the web</div>
+    <div className="font-medium">{gapWords(row.gap, !!row.range)} found on the web</div>
     <div data-testid="run-research-value">
       {row.range ? `${row.range.low}–${row.range.high}` : row.value} {row.unit} <span className="text-muted">({row.basis}{row.jurisdiction ? `, ${row.jurisdiction}` : ''})</span>
     </div>
