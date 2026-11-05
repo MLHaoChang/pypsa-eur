@@ -826,3 +826,77 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG0
     if msg:
         terminalreporter.write_sep("=", "source changed mid-run", yellow=True)
         terminalreporter.write_line(msg)
+
+
+@pytest.fixture(autouse=True)
+def _returned_assurance_shapes():
+    """
+    Hold every returned assurance shape to its frozen v1 contract (issue 02).
+
+    Each public evidence record, built answer receipt and checked tool result
+    the suite produces must match `harness.assurance_shapes`, which
+    `assurance_contracts.v1.json` freezes. A field added in code then fails
+    here until the contract is reviewed and the snapshot rewritten. Mismatches
+    are collected and fail the test at teardown, since the checked turn turns a
+    ValueError into a withheld answer and would hide the cause.
+    """
+    import sys
+
+    from pydantic import ValidationError
+
+    from harness import assurance, assurance_shapes as shapes
+    from services import assurance_records as records
+
+    public, save = records.public, records.save
+    projection = assurance.Turn.result_projection
+    mismatches = []
+
+    def check(what, validate, value):
+        try:
+            validate(value)
+        except (ValidationError, ValueError, KeyError, TypeError) as exc:
+            mismatches.append(f"{what}: {exc}")
+
+    def checked_public(record):
+        shown = public(record)
+        if isinstance(record, dict) and record.get("record_kind") == "evidence":
+            model = shapes.evidence_model(shown)
+            if model is None:
+                mismatches.append(f"evidence {shown.get('adapter_version')!r} has no shape")
+            else:
+                check(f"evidence {shown.get('adapter_version')}", model.model_validate, shown)
+        return shown
+
+    def checked_save(record, record_id):
+        # Only the receipt the checked turn builds; tests also save deliberately
+        # corrupt records to prove the readers refuse them.
+        built = sys._getframe(1).f_globals.get("__name__") == "harness.assurance"
+        if built and isinstance(record, dict) and record.get("record_kind") == "answer":
+            receipt = record["receipt"]
+            check(
+                "answer receipt",
+                lambda r: shapes.RECEIPTS[r["policy_version"]].model_validate(r),
+                receipt,
+            )
+        return save(record, record_id)
+
+    def checked_projection(self, tool_name, result, tool_use_id):
+        shown = projection(self, tool_name, result, tool_use_id)
+        if tool_name in shapes.TOOL_RESULTS:
+            check(
+                f"{tool_name} result",
+                lambda r: shapes.validate_tool_result(tool_name, r),
+                shown,
+            )
+        return shown
+
+    # Its own MonkeyPatch: requesting the shared `monkeypatch` fixture here would
+    # change when a test's patches are undone relative to `_reset_backend_state`.
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(records, "public", checked_public)
+        patch.setattr(records, "save", checked_save)
+        patch.setattr(assurance.Turn, "result_projection", checked_projection)
+        yield
+    assert not mismatches, "Returned assurance shape outside its frozen v1 contract:\n" + "\n".join(
+        mismatches[:5]
+    )
