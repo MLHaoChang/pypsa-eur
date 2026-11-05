@@ -33,6 +33,7 @@ import pandas as pd
 from gridspine.schema.contracts import ContractError
 from gridspine.static import motor_start as ms
 from gridspine.static.flicker import _num
+from gridspine.static.ride_through import _blank
 
 TOLERANCE = 1e-9
 #: Equal to the GUI's ``models.process_unit.CRITICALITY_TIERS``: the order units come back in.
@@ -67,8 +68,7 @@ def _order(units: pd.DataFrame) -> tuple[list[dict], dict]:
     recs = units.to_dict("records")
     notes = {}
     for r in recs:
-        tier = r.get("tier")
-        tier = "" if tier is None or (isinstance(tier, float) and math.isnan(tier)) else str(tier).strip()
+        tier = "" if _blank(r.get("tier")) else str(r["tier"]).strip()
         if tier and tier not in TIER_ORDER:
             raise ContractError(f"{r['unit']}: tier {tier!r} is not one of {', '.join(TIER_ORDER)}.")
         r["tier"] = tier or None
@@ -98,10 +98,10 @@ def _blocks_of(ordered: list[dict], blocks) -> dict:
     return out
 
 
-def _start(rec: dict, source: ms.Source | None, q_gfm, limit_pct) -> tuple[float | None, str, str]:
-    """``(dU %, verdict, note)`` of the unit's motor start on ``source``."""
+def _start(rec: dict, source: ms.Source | None, src_name: str, q_gfm, limit_pct) -> tuple[float | None, str, str]:
+    """``(dU %, verdict, note)`` of the unit's motor start on ``source`` (``src_name``'s)."""
     if source is None:
-        return None, "unknown", "no source for the motor-start screen"
+        return None, "unknown", f"no short-circuit power for {src_name}: the motor start is unknown"
     row = pd.DataFrame([{"unit": rec["unit"], "poc": "source", "motor_kw": rec.get("motor_kw"),
                          "start_method": rec.get("start_method"), "i_start_pu": rec.get("i_start_pu")}])
     try:
@@ -157,9 +157,7 @@ def restart_sequence(units: pd.DataFrame, transition: str, *, poc_source: ms.Sou
                          "verdict": verdict, "note": "; ".join([why, *notes])})
             continue
         t_pick = T_FIRST_S + k * pickup_interval_s
-        du, sv, snote = _start(rec, source, q_gfm_mvar, limit_pct)
-        if source is None:
-            snote = f"no short-circuit power for {src_name}: the motor start is unknown"
+        du, sv, snote = _start(rec, source, src_name, q_gfm_mvar, limit_pct)
         events.append({"t_s": t_pick, "unit": name, "event": "pickup", "block": k + 1, "du_pct": du,
                        "verdict": sv, "note": f"motor start on {src_name}: {snote}"})
         notes.insert(0, f"motor start on {src_name} {sv}")
@@ -184,7 +182,8 @@ def restart_sequence(units: pd.DataFrame, transition: str, *, poc_source: ms.Sou
     table = pd.DataFrame(rows, columns=list(UNIT_COLUMNS))
     timeline = pd.DataFrame(events, columns=list(EVENT_COLUMNS)).sort_values("t_s", kind="stable")
     known = table[table["lost_t"].notna()]
-    fails = int((table["verdict"] == "fail").sum())
+    # A failed start counts as a fail even when the unit's tonnes are unknown for a missing input (both count).
+    fails = int((table["start_verdict"] == "fail").sum())
     unknowns = int((table["verdict"] == "unknown").sum())
     total = {"transition": transition, "lost_t": float(known["lost_t"].sum()),
              "lost_restart_t": float(known["lost_restart_t"].sum()),

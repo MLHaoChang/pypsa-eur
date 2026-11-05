@@ -153,7 +153,8 @@ def trip_table(units: pd.DataFrame, stats: pd.DataFrame | None = None) -> pd.Dat
     for rec in units.to_dict("records"):
         curve = _curve_of(rec["unit"], rec["ride_through_curve"])
         for c in classes.to_dict("records"):
-            base = {"unit": rec["unit"], **{k: c[k] for k in TRIP_COLUMNS[1:8]}, "dip_stats_source": source}
+            base = {"unit": rec["unit"], **{k: c[k] for k in (*STATS_COLUMNS, "depth_pct", "duration_s")},
+                    "dip_stats_source": source}
             if not curve:
                 rows.append({**base, "verdict": "unknown", "note": f"no input: {CURVE_LABEL} not set"})
                 continue

@@ -111,6 +111,7 @@ def test_tonnes_counted_past_the_window_with_a_note():
 def test_missing_restart_inputs_add_no_tonnes():
     table, _, total = _seq(_units(_vfd("A", rate=None), _vfd("B")))
     assert pd.isna(table.set_index("unit").at["A", "lost_t"]) and total["unknown_count"] == 1
+    assert total["lower_bound"] is True
     assert total["lost_restart_t"] == pytest.approx(4.0 * 550.0 * 0.0189)
 
 
@@ -128,3 +129,18 @@ def test_unknown_transition_and_tier_are_refused():
         _seq(_units(_vfd("A")), "brownout")
     with pytest.raises(ContractError, match="tier"):
         _seq(_units(_vfd("A", tier="vital")))
+
+
+def test_a_failed_start_on_a_unit_missing_inputs_counts_as_both():
+    unit = _units(("Mill", "process_critical", 5.0, None, 550.0, 0.02, 2000.0, "dol"))
+    table, _, total = _seq(unit)
+    assert table.iloc[0]["start_verdict"] == "fail" and table.iloc[0]["verdict"] == "unknown"
+    assert total["fail_count"] == 1 and total["unknown_count"] == 1 and total["lower_bound"] is True
+
+
+def test_full_rate_exactly_at_four_hours_is_inside_the_window():
+    # Picked up at 1 s, full rate 4 h - 1 s later: exactly 14 400 s.
+    table, _, _ = _seq(_units(_vfd("A", restart=(rs.HORIZON_S - rs.T_FIRST_S) / 3600.0)))
+    assert table.iloc[0]["full_rate_s"] == pytest.approx(rs.HORIZON_S) and rs.BEYOND not in table.iloc[0]["note"]
+    later, _, _ = _seq(_units(_vfd("A", restart=rs.HORIZON_S / 3600.0)))
+    assert rs.BEYOND in later.iloc[0]["note"]
