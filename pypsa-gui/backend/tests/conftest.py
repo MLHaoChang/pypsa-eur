@@ -852,10 +852,6 @@ def _returned_assurance_shapes(monkeypatch):
     mismatches = []
 
     def check(what, validate, value):
-        import os, json as _j
-        if os.environ.get("SHAPE_PROBE"):
-            with open(os.environ["SHAPE_PROBE"], "a") as fh:
-                fh.write(_j.dumps({"what": what, "value": value}, default=str)[:200000] + "\n")
         try:
             validate(value)
         except (ValidationError, ValueError, KeyError, TypeError) as exc:

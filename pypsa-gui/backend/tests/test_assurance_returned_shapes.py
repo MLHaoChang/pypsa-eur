@@ -64,10 +64,14 @@ def test_every_frozen_receipt_version_is_accepted_by_both_readers(served):
     owner = assurance_records.actor_id()
     stored = assurance_records.load(owner, record["answer_id"], "answer")
     for version in contracts.build()["answer_receipt"]:
-        rewritten = {**stored, "receipt": {**stored["receipt"], "policy_version": version}}
+        rewritten = {
+            **stored,
+            "receipt": {**stored["receipt"], "policy_version": version},
+        }
         assurance_records.save(rewritten, record["answer_id"])
-        assert assurance_records.answer(owner, record["answer_id"])["receipt"] == (
-            rewritten["receipt"]
+        assert (
+            assurance_records.answer(owner, record["answer_id"])["receipt"]
+            == (rewritten["receipt"])
         )
         # harness/pilot_evaluation.py accepts exactly records.POLICY_VERSION.
         assert version == assurance_records.POLICY_VERSION
@@ -99,7 +103,9 @@ def test_returned_schemas_carry_no_notes():
 def test_a_missing_returned_model_fails_the_build(monkeypatch, table, dropped):
     """F4: an adapter or checked tool without a model cannot be frozen silently."""
     original = getattr(shapes, table)
-    monkeypatch.setattr(shapes, table, {k: v for k, v in original.items() if k != dropped})
+    monkeypatch.setattr(
+        shapes, table, {k: v for k, v in original.items() if k != dropped}
+    )
     with pytest.raises(ValueError, match=dropped.replace("/", ".")):
         contracts.build()
 
@@ -109,12 +115,20 @@ def test_the_change_is_additive_against_master():
     path = Path(contracts.SNAPSHOT).resolve()
     root = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
-        cwd=path.parent, capture_output=True, text=True,
+        cwd=path.parent,
+        capture_output=True,
+        text=True,
     )
-    shown = subprocess.run(
-        ["git", "show", f"{BASE}:{path.relative_to(root.stdout.strip())}"],
-        cwd=path.parent, capture_output=True, text=True,
-    ) if root.returncode == 0 else None
+    shown = (
+        subprocess.run(
+            ["git", "show", f"{BASE}:{path.relative_to(root.stdout.strip())}"],
+            cwd=path.parent,
+            capture_output=True,
+            text=True,
+        )
+        if root.returncode == 0
+        else None
+    )
     if shown is None or shown.returncode != 0:
         pytest.skip(f"{BASE} is not in this checkout (shallow clone)")
     master = json.loads(shown.stdout)

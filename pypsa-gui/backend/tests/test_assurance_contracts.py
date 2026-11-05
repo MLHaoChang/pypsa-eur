@@ -283,7 +283,11 @@ def test_a_checked_tool_without_a_returned_shape_fails_closed(monkeypatch):
     monkeypatch.setattr(
         assurance_shapes,
         "TOOL_RESULTS",
-        {k: v for k, v in assurance_shapes.TOOL_RESULTS.items() if k != "get_component"},
+        {
+            k: v
+            for k, v in assurance_shapes.TOOL_RESULTS.items()
+            if k != "get_component"
+        },
     )
     with pytest.raises(ValueError, match="get_component"):
         contracts.build()

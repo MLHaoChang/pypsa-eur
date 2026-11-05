@@ -14,7 +14,9 @@ version or checked tool beside the old one instead.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Union
+import functools
+import operator
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
@@ -25,8 +27,8 @@ class _Closed(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-Number = Union[int, float]
-Value = Union[int, float, str, bool, None]
+Number = int | float
+Value = int | float | str | bool | None
 
 
 # --- Evidence identity: one public evidence record per adapter version. ---
@@ -106,7 +108,7 @@ class SeriesScope(_Closed):
 
 class AggregateLoadScope(_Closed):
     kind: Literal["aggregate_load"]
-    selector: dict
+    selector: Literal["all", "section", "names"]
     entity_id: str
     component_class: Literal["Load"]
     attribute: Literal["p_set"]
@@ -208,8 +210,8 @@ EVIDENCE = {
     "series-input/2": _input("series-input/2", SeriesScope),
     "aggregate-load/1": _input("aggregate-load/1", AggregateLoadScope),
     "run-metrics/1": _input("run-metrics/1", RunScope, "run_manifest"),
-    "run-section/1": _input("run-section/1", RunSectionScope, "run_manifest"),
-    "run-compare/1": _input("run-compare/1", RunComparisonScope, "run_manifest"),
+    "run-section/1": _input("run-section/1", RunSectionScope, "run_section"),
+    "run-compare/1": _input("run-compare/1", RunComparisonScope, "run_comparison"),
     "calculated_result": CalculatedEvidence,
     "scoped_result": ScopedEvidence,
 }
@@ -432,7 +434,7 @@ def schema(models) -> dict:
     from pydantic import TypeAdapter
 
     models = models if isinstance(models, list) else [models]
-    target = models[0] if len(models) == 1 else Union[tuple(models)]  # type: ignore[valid-type]
+    target = functools.reduce(operator.or_, models)
     return _without_notes(TypeAdapter(target).json_schema(by_alias=True))
 
 

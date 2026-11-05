@@ -1574,8 +1574,12 @@
        "type": "integer"
       },
       "selector": {
-       "additionalProperties": true,
-       "type": "object"
+       "enum": [
+        "all",
+        "section",
+        "names"
+       ],
+       "type": "string"
       },
       "steps": {
        "type": "integer"
@@ -1767,6 +1771,45 @@
      ],
      "type": "object"
     },
+    "CalculatedValidity": {
+     "additionalProperties": false,
+     "properties": {
+      "as_of": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        }
+       ]
+      },
+      "coverage": {
+       "const": "full_horizon",
+       "type": "string"
+      },
+      "outcome": {
+       "enum": [
+        "completed",
+        "partial"
+       ],
+       "type": "string"
+      },
+      "warnings": {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      }
+     },
+     "required": [
+      "outcome",
+      "as_of",
+      "coverage",
+      "warnings"
+     ],
+     "type": "object"
+    },
     "Fact": {
      "additionalProperties": false,
      "properties": {
@@ -1916,41 +1959,6 @@
       "disposition"
      ],
      "type": "object"
-    },
-    "Validity": {
-     "additionalProperties": false,
-     "properties": {
-      "as_of": {
-       "anyOf": [
-        {
-         "type": "integer"
-        },
-        {
-         "type": "number"
-        }
-       ]
-      },
-      "coverage": {
-       "type": "string"
-      },
-      "outcome": {
-       "const": "completed",
-       "type": "string"
-      },
-      "warnings": {
-       "items": {
-        "type": "string"
-       },
-       "type": "array"
-      }
-     },
-     "required": [
-      "outcome",
-      "as_of",
-      "coverage",
-      "warnings"
-     ],
-     "type": "object"
     }
    },
    "additionalProperties": false,
@@ -1988,7 +1996,7 @@
      "type": "string"
     },
     "validity": {
-     "$ref": "#/$defs/Validity"
+     "$ref": "#/$defs/CalculatedValidity"
     },
     "version": {
      "const": 1,
@@ -2189,7 +2197,7 @@
      "$ref": "#/$defs/RunComparisonScope"
     },
     "source_kind": {
-     "const": "run_manifest",
+     "const": "run_comparison",
      "type": "string"
     },
     "validity": {
@@ -2581,7 +2589,7 @@
      "$ref": "#/$defs/RunSectionScope"
     },
     "source_kind": {
-     "const": "run_manifest",
+     "const": "run_section",
      "type": "string"
     },
     "validity": {
@@ -2898,6 +2906,37 @@
      ],
      "type": "object"
     },
+    "ScopedValidity": {
+     "additionalProperties": false,
+     "properties": {
+      "as_of": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        }
+       ]
+      },
+      "coverage": {
+       "const": "requested_population",
+       "type": "string"
+      },
+      "warnings": {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      }
+     },
+     "required": [
+      "as_of",
+      "coverage",
+      "warnings"
+     ],
+     "type": "object"
+    },
     "Slot": {
      "additionalProperties": false,
      "properties": {
@@ -2985,41 +3024,6 @@
       "disposition"
      ],
      "type": "object"
-    },
-    "Validity": {
-     "additionalProperties": false,
-     "properties": {
-      "as_of": {
-       "anyOf": [
-        {
-         "type": "integer"
-        },
-        {
-         "type": "number"
-        }
-       ]
-      },
-      "coverage": {
-       "type": "string"
-      },
-      "outcome": {
-       "const": "completed",
-       "type": "string"
-      },
-      "warnings": {
-       "items": {
-        "type": "string"
-       },
-       "type": "array"
-      }
-     },
-     "required": [
-      "outcome",
-      "as_of",
-      "coverage",
-      "warnings"
-     ],
-     "type": "object"
     }
    },
    "additionalProperties": false,
@@ -3060,7 +3064,7 @@
      "type": "string"
     },
     "validity": {
-     "$ref": "#/$defs/Validity"
+     "$ref": "#/$defs/ScopedValidity"
     },
     "version": {
      "const": 1,

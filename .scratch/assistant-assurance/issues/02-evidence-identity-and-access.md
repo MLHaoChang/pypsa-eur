@@ -364,3 +364,11 @@ Audit against master `30417e89e` and the test matrix (sent to the coordinator be
 ### 2026-11-05 — FILL-11-6: identity and result shapes frozen in the v1 contract
 
 `evidence_and_receipt_identity` and `checked_tool_result_shapes` left the v1 snapshot's `pending` list. `harness/assurance_shapes.py` models the public evidence record per adapter version (`static-input/1`, `static-input-page/1`, `series-input/2`, `aggregate-load/1`, `run-metrics/1`, `run-section/1`, `run-compare/1`, `scoped_result`, `calculated_result`), the answer receipt per policy version and each checked tool's result; `assurance_contracts.v1.json` freezes them as `returns` contracts. The `tests/conftest.py` fixture `_returned_assurance_shapes` holds the suite to them. Still pending: `artifact_evidence_identity` (05) and `checked_chart_shape` (05).
+
+#### GK B (23) plan GO conditions (2026-11-05)
+
+1. **F1, receipt versions:** option (b). `answer_receipt` stays keyed by `POLICY_VERSION`; `test_every_frozen_receipt_version_is_accepted_by_both_readers` saves a real answer under each listed version and requires `assurance_records.answer()` to accept it and the version to equal what `pilot_evaluation.py` accepts. A bump without reader support fails CI. Met.
+2. **F2, pinned from what is served:** `tests/test_assurance_returned_shapes.py` reads the answer route, the evidence route and the checked stream's tool result on a real checked turn. The conftest fixture checks every public evidence record, built receipt and checked tool result across the suite. Met.
+3. **F3, notes are not contract:** `title` and `description` are stripped from the three `returns` schemas (`default` kept); `test_returned_schemas_carry_no_notes`. Met.
+4. **F4, additive in fact:** `test_the_change_is_additive_against_master` diffs against `6e1d5f963`'s snapshot (skips in a shallow CI checkout; passes locally). Kill-tests drop one adapter model and one checked-tool model; both raise. Met.
+5. **F5, no runtime change:** `assurance.py`, `assurance_records.py`, `pilot_evaluation.py` and the routes are untouched. Met.
