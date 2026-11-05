@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import TimeSeriesManager from './TimeSeriesManager'
+import { networkApi } from '../api/network'
 
 vi.mock('../api/network', () => ({
   networkApi: new Proxy({
@@ -82,6 +83,21 @@ describe('Renewables tab', () => {
     expect(prof.generate).toHaveBeenCalledTimes(1)
     expect(prof.generate.mock.calls[0][1]).toMatchObject({ from_generators: ['pv_ready'], technology: 'solar' })
     expect(prof.applyBatch).toHaveBeenCalledWith('Site A', 'job1')
+  })
+
+  it('Set coordinates edits the bus inline and re-reads readiness so the row turns ready', async () => {
+    const updateBus = vi.fn().mockResolvedValue({ name: 'b2', rescale: [] })
+    ;(networkApi as unknown as Record<string, unknown>).updateBus = updateBus
+    await openRenewables()
+    prof.readiness.mockResolvedValue([ready({}), ready({ generator: 'pv_noloc', bus: 'b2' }),
+      ready({ generator: 'pv_file', profile: 'uploaded' })])
+    await userEvent.click(screen.getByTestId('set-coordinates-pv_noloc'))
+    await userEvent.type(screen.getByTestId('coord-x-b2'), '8.5')
+    await userEvent.type(screen.getByTestId('coord-y-b2'), '50.1')
+    await userEvent.click(screen.getByTestId('coord-save-b2'))
+    expect(updateBus).toHaveBeenCalledWith('b2', { name: 'b2', x: 8.5, y: 50.1 })
+    await vi.waitFor(() => expect(screen.queryByTestId('missing-coordinates-banner')).toBeNull())
+    expect(screen.getByTestId('generate-all-ready').textContent).toContain('2 ready')
   })
 
   it('Upload instead focuses the upload zone', async () => {
