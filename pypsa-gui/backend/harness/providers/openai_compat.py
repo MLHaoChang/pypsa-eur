@@ -182,8 +182,12 @@ def _to_openai_messages(request: LLMRequest) -> list[dict[str, Any]]:
     return out
 
 
-# Finish reasons that cut a completion short.
+# Finish reasons that cut a completion short. A tool-call stream that ends
+# with one of these is refused outright.
 _TRUNCATED_FINISH = ("length", "content_filter")
+# The only finish reasons that mean the model finished its message. Anything
+# else, a missing reason included, marks the message truncated (fails closed).
+_COMPLETE_FINISH = frozenset({"stop", "tool_calls", "function_call"})
 
 
 class _TokenParamRefused(Exception):
@@ -334,7 +338,7 @@ class OpenAICompatProvider:
         seen_ids: set[str] = set()
         usage: dict[str, int] = {}
         completed = False
-        truncated = False
+        last_finish = None
         client = self._client()
         try:
             endpoint = "responses" if responses else "chat/completions"
@@ -386,8 +390,8 @@ class OpenAICompatProvider:
                         finish_reason = choice.get("finish_reason")
                         if finish_reason is not None:
                             completed = True
-                        if finish_reason in _TRUNCATED_FINISH:
-                            truncated = True
+                        if finish_reason is not None:
+                            last_finish = finish_reason
                         if (finish_reason in _TRUNCATED_FINISH
                                 and (calls or (choice.get("delta") or {}).get("tool_calls"))):
                             raise ProviderError(
@@ -497,7 +501,7 @@ class OpenAICompatProvider:
             blocks.append({"type": "tool_use", "id": slot["id"],
                            "name": slot["name"], "input": args})
         yield LLMEvent(type="message_done", blocks=blocks, usage=usage,
-                       truncated=truncated)
+                       truncated=last_finish not in _COMPLETE_FINISH)
 
     def probe(self, model: str) -> tuple[str, float | None]:
         """

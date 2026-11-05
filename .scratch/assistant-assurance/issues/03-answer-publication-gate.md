@@ -107,17 +107,22 @@ The freeze belongs to the owner, as asked in AA03-FREEZE-1. Conditions:
 
 ### S1 result
 
-`tests/assurance_acceptance/test_p2_failure_modes.py`, 21 cases. The truncation
+`tests/assurance_acceptance/test_p2_failure_modes.py`, 32 cases. The truncation
 cases were red on master: a cut-off draft that parsed was certified `passed`.
-`LLMEvent.truncated` (message_done) is now set by the OpenAI-compatible wire on
-`length`/`content_filter` and by the Anthropic wire on
-`max_tokens`/`model_context_window_exceeded`/`refusal`. The Responses wire raises
-on `response.incomplete`, and a test now pins that refusal. The loop then skips
-review, and `Turn.commit` refuses the draft. A provider error after a fragment
-ends as a typed error with no retry; before any text, it retries within the
-transport budget. Each of these 7 mutants is killed by its own test: the commit
-refusal, the loop hand-off, the review skip, the OpenAI-compatible flag, the
-Anthropic stop set, the event read, and the Responses incomplete branch.
+`LLMEvent.truncated` (message_done) is an allow-list. The OpenAI-compatible wire
+counts only `stop`, `tool_calls` and `function_call` as complete. The Anthropic
+wire counts only `end_turn`, `stop_sequence` and `tool_use` as complete.
+Anything else is truncated and fails closed: `length`, `content_filter`,
+`max_tokens`, the context window, `refusal`, `pause_turn`, a missing reason or
+an unknown one (GK B NOT OK @88cb8083, #1079). The Responses wire raises on
+`response.incomplete`, and a test pins that. The loop skips review, and
+`Turn.commit` refuses the draft. A provider error after a fragment ends as a
+typed error with no retry. Before any text, it retries within the transport
+budget. Each of these 7 mutants is killed by its own test: the commit refusal,
+the loop hand-off, the review skip, a deny-list revert for each provider, the
+event read, and the Responses incomplete branch. Normal completions still pass:
+the wire case `stop`, the fake untouched draft, and the `stop`/`tool_calls`/
+`end_turn`/`stop_sequence`/`tool_use` flag cases.
 
 ### Owner freeze AA03-FREEZE-1 (2026-11-05, ~14:45 CET)
 

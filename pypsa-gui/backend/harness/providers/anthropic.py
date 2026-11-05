@@ -216,9 +216,10 @@ def serialise_block(content_block: Any) -> dict[str, Any]:
         out[name] = value
     return out
 
-# Stop reasons that end a message before the model finished it. A refusal is
-# incomplete text too, so it fails closed for a checked answer.
-_TRUNCATED_STOPS = frozenset({"max_tokens", "model_context_window_exceeded", "refusal"})
+# The only stop reasons that mean the model finished its message. Anything else
+# (max_tokens, context window, refusal, pause_turn, a missing or new reason)
+# marks it truncated, so a checked answer fails closed.
+_COMPLETE_STOPS = frozenset({"end_turn", "stop_sequence", "tool_use"})
 
 
 class AnthropicProvider:
@@ -304,7 +305,7 @@ class AnthropicProvider:
             blocks=[serialise_block(b)
                     for b in (getattr(final, "content", []) or [])],
             usage=usage_out,
-            truncated=getattr(final, "stop_reason", None) in _TRUNCATED_STOPS,
+            truncated=getattr(final, "stop_reason", None) not in _COMPLETE_STOPS,
         )
 
     def probe(self, model: str) -> tuple[str, float | None]:

@@ -76,7 +76,11 @@ def _sse(*chunks):
     return "".join(lines).encode()
 
 
-@pytest.mark.parametrize("finish_reason", ["length", "content_filter"])
+# None: the stream ends with no finish reason; "error": an unknown gateway reason.
+# "stop" is the positive companion: a finished draft is still certified.
+@pytest.mark.parametrize(
+    "finish_reason", ["length", "content_filter", None, "error", "stop"]
+)
 def test_truncated_draft_that_parses_still_ends_limited_on_the_wire(
     baseline, harness, monkeypatch, dispatched, finish_reason
 ):
@@ -129,7 +133,7 @@ def test_truncated_draft_that_parses_still_ends_limited_on_the_wire(
                 token_param="max_tokens",
             )
         )
-        sid = "assurance-trunc-" + finish_reason
+        sid = f"assurance-trunc-{finish_reason}"
         harness.session_ids.append(sid)
         response = harness.client.post(
             "/api/chat/stream",
@@ -145,6 +149,10 @@ def test_truncated_draft_that_parses_still_ends_limited_on_the_wire(
     assert len(calls) == 2, "A truncated draft was repaired with another provider call"
     assert dispatched == ["get_component"]
     approved = approval(frames)
+    if finish_reason == "stop":
+        assert approved["verdict"] == "passed"
+        assert approved["receipt"]["checked_block_ids"] == ["load-input"]
+        return
     assert approved["verdict"] == "limited", "A truncated draft was certified"
     assert approved["receipt"]["checked_block_ids"] == []
     assert_nowhere(public_surfaces(harness, frames, monkeypatch), draft, "load-input")
@@ -152,7 +160,15 @@ def test_truncated_draft_that_parses_still_ends_limited_on_the_wire(
 
 @pytest.mark.parametrize(
     "finish_reason,truncated",
-    [("length", True), ("content_filter", True), ("stop", False)],
+    [
+        ("length", True),
+        ("content_filter", True),
+        (None, True),
+        ("error", True),
+        ("stop", False),
+        ("tool_calls", False),
+        ("function_call", False),
+    ],
 )
 def test_message_done_carries_the_wire_stop_reason(finish_reason, truncated):
     """The neutral flag the gate reads, set by each text wire."""
@@ -326,9 +342,19 @@ def test_invalid_draft_after_a_read_runs_only_that_read(baseline, harness, dispa
 
 
 @pytest.mark.parametrize(
-    "stop", ["max_tokens", "model_context_window_exceeded", "refusal", "end_turn"]
+    "stop,truncated",
+    [
+        ("max_tokens", True),
+        ("model_context_window_exceeded", True),
+        ("refusal", True),
+        ("pause_turn", True),
+        (None, True),
+        ("end_turn", False),
+        ("stop_sequence", False),
+        ("tool_use", False),
+    ],
 )
-def test_anthropic_wire_reports_a_max_tokens_stop(stop):
+def test_anthropic_wire_reports_an_incomplete_stop(stop, truncated):
     import anthropic as sdk
 
     from harness.protocol import LLMRequest
@@ -342,7 +368,7 @@ def test_anthropic_wire_reports_a_max_tokens_stop(stop):
     )
     http_module = __import__(module)
     body = _anthropic_stream("m", "none", None, {}).replace(
-        b'"stop_reason": "end_turn"', f'"stop_reason": "{stop}"'.encode()
+        b'"stop_reason": "end_turn"', f'"stop_reason": {json.dumps(stop)}'.encode()
     )
     transport = http_module.MockTransport(
         lambda r: http_module.Response(
@@ -372,7 +398,7 @@ def test_anthropic_wire_reports_a_max_tokens_stop(stop):
             )
         )
     done = [e for e in events if e.type == "message_done"]
-    assert done and done[0].truncated is (stop != "end_turn")
+    assert done and done[0].truncated is truncated
 
 
 def test_truncated_draft_with_interpretations_spends_no_review_call(
