@@ -27,6 +27,7 @@ PROJECT = "$project"  # an action argument the harness fills with the run's proj
 # after it joins this set with its test.
 BOUND_CONTEXT_TOOLS = frozenset({
     "get_weather_choice", "validate_network", "project_readiness", "diagnose_network", "solve_queue_enqueue",
+    "apply_demand_from_excel",  # issue 21c: stage 2's planned write
 })
 
 # §6.0: the agent changes design levers, never the question. A profile that

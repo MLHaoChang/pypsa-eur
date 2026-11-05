@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): An unattended study run can now apply a load's demand series from an upload that the user confirmed on the plan-review card. The write runs only when its edit card on the created project matches what was granted, the target load is the same one, the upload's bytes are unchanged and nothing changed in between; otherwise it waits for the user's card.

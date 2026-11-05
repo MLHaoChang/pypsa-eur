@@ -583,6 +583,7 @@ class Runner:
         if created:
             eventlog.resume(session)  # the run's conversation, rebuilt from its log
         session.task_id = task["task_id"]
+        session.lease_holder = self.instance  # issue 21c (G4): a planned write is used under this lease
         scope = PyPSAService.bind_request_scope(ctx, slot, f"run-scratch:{task['task_id']}")
         chat_tools.set_acting_user(task["owner_id"])
         chat_tools.set_acting_session(None)
