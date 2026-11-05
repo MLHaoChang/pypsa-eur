@@ -349,6 +349,28 @@ def test_the_capture_is_removed_once_the_job_settled(eh, site, held_queue):
     assert not directory.exists() and job["capture"]["identity"]
 
 
+def test_the_capture_is_gone_the_moment_the_terminal_status_shows(eh, site, held_queue, monkeypatch):
+    # The job store write sits between the status flip and the old removal;
+    # slow it so a reader that sees the terminal status would still find the
+    # directory if the removal came after it.
+    from services import solve_job_store
+    real = solve_job_store.record_status
+
+    def slow(job):
+        time.sleep(0.5)
+        return real(job)
+
+    monkeypatch.setattr(solve_job_store, "record_status", slow)
+    job_id, _ = _enqueued(eh, site)
+    directory = pathlib.Path(solve_queue.solve_queue._jobs[job_id].capture["dir"])
+    held_queue.resume()
+    deadline = time.monotonic() + 120
+    while solve_queue.solve_queue.get_job(job_id)["status"] not in ("completed", "failed", "aborted"):
+        assert time.monotonic() < deadline
+        time.sleep(0.005)
+    assert not directory.exists()
+
+
 def test_the_boot_sweep_keeps_live_and_young_captures_only(tmp_path):
     base = tmp_path / "org" / "Project" / solve_capture.CAPTURES
     for name in ("live", "orphan", ".young.tmp"):

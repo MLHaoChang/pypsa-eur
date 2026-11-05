@@ -1657,6 +1657,12 @@ class SolveQueue:
                     logger.exception(
                         "solve_queue: run evidence publish failed for %s", job.id,
                     )
+                if job.capture is not None:
+                    # C6g: settled; the record stays on the job. Removed BEFORE
+                    # the status flip so a caller that sees the terminal status
+                    # never finds the directory still there.
+                    from services import solve_capture
+                    solve_capture.remove(job.capture)
                 with self._lock:
                     job.status = final_status
                     job.finished_at = time.time()
@@ -1669,10 +1675,6 @@ class SolveQueue:
                     solve_job_store.record_status(job)
                 except Exception:  # noqa: BLE001 — bookkeeping must not fail a solve
                     logger.exception("solve_queue: could not persist job %s", job.id)
-                if job.capture is not None:
-                    # C6g: settled and recorded; the record stays on the job.
-                    from services import solve_capture
-                    solve_capture.remove(job.capture)
                 # Close the SSE log stream for this job so the foreground consumer's
                 # `done` event fires (run_simulation pushes None on its own success
                 # path, but the abort/error paths above may not have).
