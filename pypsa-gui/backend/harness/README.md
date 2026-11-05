@@ -1645,8 +1645,10 @@ re-read then through `source_ledger.ranges()` and must be `confirmed`.
   maps the sweep's jobs to cases `running`, and judges each case on its
   terminal job outcome with `case_gate` (`Env.case`: the case's own project,
   read from disk, never activated). An investment case is judged on
-  `explore.study.status` (rule `ex.study.completed`). A case's deadline
-  settles on its timer and in the boot sweep (`run_explore.expire`). Solves
+  `explore.study.status` (rule `ex.study.completed`). A study case's
+  deadline settles on the runner's own tick (`advance`, with no user touch)
+  and in the boot sweep (`run_explore.expire`); a network case settles from
+  its queue job. Solves
   settle through `run_envelope.settle_engine_solves(event="explore")`.
 - **Holds.** The stage gate waits while the turn or research is due or any
   case is `admitted` or `running`. `assistant_tasks._next` skips steps that

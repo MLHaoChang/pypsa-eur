@@ -806,11 +806,12 @@ def test_a_profile_envelope_listing_the_sweep_is_refused_at_load():
         run_profiles.load(p)
 
 
-def test_e3_a_run_granted_before_explore_resumes_to_the_sweep_card_never_unattended(
+def test_e3_a_run_granted_before_explore_keeps_its_stages_and_never_sweeps(
     granted, explore_run, rated, monkeypatch
 ):
     """E3: a run started with explore skipped, resumed after eh_site@1 turned
-    it on, reaches the sweep card and runs no sweep without the user."""
+    it on, keeps the stages it started with (frozen at start): explore stays
+    skipped, no case is proposed and no sweep runs, carded or not."""
     before = jobs()
     old = copy.deepcopy(explore_run)
     old.pop("explore")  # the profile before issue 06 named no levers
@@ -827,13 +828,9 @@ def test_e3_a_run_granted_before_explore_resumes_to_the_sweep_card_never_unatten
         task,
     )
     run = record["run"]
-    assert run["stages"]["explore"]["status"] in ("skipped", "active")
-    if run["stages"]["explore"]["status"] == "active":
-        assert run["status"] == "needs_user" and run["waiting"]["kind"] == "card"
-    assert not any(
-        s["tool"] == "run_sensitivity_sweep" and s["status"] != "pending"
-        for s in record["steps"]
-    )
+    assert run["stages"]["explore"]["status"] == "skipped"
+    assert run["status"] == "completed" and not run.get("cases")
+    assert not [s for s in record["steps"] if s["id"].startswith("explore.")]
     assert len(jobs() - before) == 1  # the base solve only
 
 
@@ -1104,3 +1101,117 @@ def test_e4_a_turn_that_lost_its_stage_writes_nothing(turn):
     record["run"]["stage"] = "report"
     turn.write_text(json.dumps(record))
     assert tool_refusal(turn, [ppa()]) == "explore_not_in_turn"
+
+
+# ── E1: a step's args are exactly what harness code builds ──────────────────
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        pytest.param(lambda a: a.update(baseline_project_id="someone-elses"), id="baseline"),
+        pytest.param(lambda a: a["cases"].pop(), id="cases"),
+    ],
+)
+def test_e1_a_sweep_whose_args_differ_from_the_admitted_cases_needs_the_user(
+    granted, explore_run, rated, tamper
+):
+    """GK B E1 (ruling #875): the sweep's baseline is the run's own project and
+    its cases are exactly the admitted ones. A step whose args were changed on
+    disk is refused before its card, and nothing is enqueued."""
+    task, path, _ = granted()
+    record = go(
+        harness_runner.Runner(
+            "a",
+            agent_provider=Script(propose(three()), say(".")),
+            decisions=lambda t, ref, h: None if ref == "explore.2" else "approve",
+        ),
+        path,
+        task,
+    )
+    assert record["run"]["waiting"]["ref"] == "explore.2"
+    [sweep] = [s for s in record["steps"] if s["tool"] == "run_sensitivity_sweep"]
+    tamper(sweep["args"])
+    path.write_text(json.dumps(record))
+    jobs_before = [j["id"] for j in solve_queue.solve_queue.list_jobs()]
+    record = go(harness_runner.Runner("a", decisions=Clicks(refs={"explore.2"})), path, task)
+    run = record["run"]
+    [sweep] = [s for s in record["steps"] if s["tool"] == "run_sensitivity_sweep"]
+    assert run["status"] == "needs_user" and run["reason"] == "explore_args"
+    assert sweep["status"] == "pending" and "job" not in sweep
+    assert [j["id"] for j in solve_queue.solve_queue.list_jobs()] == jobs_before
+    assert all(c["status"] == "admitted" for c in run["cases"])
+
+
+def test_e1_a_save_under_another_name_needs_the_user(granted, explore_run, rated):
+    """The save step saves the run's own project under its own name only."""
+    task, path, _ = granted()
+    record = go(
+        harness_runner.Runner("a", agent_provider=Script(propose(three()), say("."))),
+        path,
+        task,
+    )
+    [save] = [s for s in record["steps"] if s["tool"] == "save_project"]
+    assert record["run"]["waiting"]["ref"] == save["id"]
+    save["args"]["name"] = "Someone else's project"
+    path.write_text(json.dumps(record))
+    record = go(harness_runner.Runner("a", decisions=Clicks(refs={save["id"]})), path, task)
+    [save] = [s for s in record["steps"] if s["tool"] == "save_project"]
+    assert record["run"]["status"] == "needs_user" and record["run"]["reason"] == "explore_args"
+    assert save["status"] == "pending"
+
+
+def test_e1_check_step_refuses_a_foreign_project_arg_and_passes_the_built_args():
+    task = {
+        "project_id": "p-1",
+        "run": {**empty_run(), "stage": "explore", "cases": []},
+        "steps": [],
+    }
+    step = {"id": "explore.1", "tool": "run_sensitivity_sweep", "explore": {"cases": ["x"]}}
+    assert run_explore.check_step(task, step, {"baseline_project_id": "p-2", "cases": []}) == "explore_project"
+    assert run_explore.check_step(task, step, {"target_project": "p-2"}) == "explore_project"
+    # A step of another stage is not the explore stage's to check.
+    other = {"id": "inputs.1", "tool": "run_sensitivity_sweep"}
+    assert run_explore.check_step(task, other, {"baseline_project_id": "p-2"}) is None
+
+
+# ── E10: a study case's deadline settles in the boot sweep ──────────────────
+
+
+def _running_study(path, deadline, lease=None):
+    record = json.loads(path.read_text())
+    record["run"]["cases"] = [
+        {"name": "bess", "engine": "study", "status": "running", "deadline_epoch": deadline},
+        {"name": "genset", "engine": "network", "status": "running"},
+    ]
+    if lease is not None:
+        record["run"]["runner"] = lease
+    path.write_text(json.dumps(record))
+
+
+def test_e10_a_study_case_past_its_deadline_settles_failed_in_the_boot_sweep(turn):
+    _running_study(turn, deadline=1000.0, lease={"lease_owner": "a", "lease_until": 500.0})
+    assert run_explore.expire(turn, boot="b", clock=lambda: 2000.0) == 1
+    cases = {c["name"]: c for c in json.loads(turn.read_text())["run"]["cases"]}
+    assert cases["bess"]["status"] == "failed" and "deadline" in cases["bess"]["reason"]
+    assert cases["genset"]["status"] == "running"  # a network case's job settles from its queue
+
+
+def test_e10_a_study_case_before_its_deadline_or_under_anothers_live_lease_stays(turn):
+    _running_study(turn, deadline=3000.0)
+    assert run_explore.expire(turn, boot="a", clock=lambda: 2000.0) == 0
+    _running_study(turn, deadline=1000.0, lease={"lease_owner": "a", "lease_until": 9000.0})
+    before = turn.read_bytes()
+    assert run_explore.expire(turn, boot="b", clock=lambda: 2000.0) == 0
+    assert turn.read_bytes() == before
+
+
+def test_a_profile_that_lowers_the_caps_is_held_to_them():
+    prof = explore_profile()
+    prof.setdefault("stages", {}).setdefault("explore", {})["agent"] = {"cases": 2, "changes": 1}
+    with pytest.raises(run_explore.ExploreError) as err:
+        run_explore.check_proposal(empty_run(), prof, [case(f"c{i}", genset()) for i in range(3)])
+    assert err.value.kind == "explore_case_cap"
+    with pytest.raises(run_explore.ExploreError) as err:
+        run_explore.check_proposal(empty_run(), prof, [case("two", *bess())])
+    assert err.value.kind == "explore_change_cap"

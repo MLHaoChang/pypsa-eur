@@ -44,15 +44,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-CASES = 4  # AI-558
-CHANGES = 2  # AI-558
 NAME_CHARS = 60
 NETWORK, STUDY = "network", "study"
 # Domains whose experiment adapters are live-voice 10's (not built here).
 NOT_RUNNABLE = {
-    "commercial": "Commercial cases need the commercial experiment adapter (live-voice 10), not built yet.",
-    "reliability": "Reliability cases need the reliability experiment adapter (live-voice 10), not built yet.",
-    "gridspine": "Grid-study cases need the gridspine experiment adapter (live-voice 10), not built yet.",
+    "commercial": "Commercial cases need the commercial experiment adapter, which is not built yet.",
+    "reliability": "Reliability cases need the reliability experiment adapter, which is not built yet.",
+    "gridspine": "Grid-study cases need the gridspine experiment adapter, which is not built yet.",
 }
 SETTLED = ("passed", "failed", "not_runnable")
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]*$")
@@ -131,7 +129,7 @@ def check_block(block, tunable, never_tunable, never_components) -> dict:
             )
         if lever.get("explore_only") and (component, attr) in tuned:
             raise ValueError(
-                f"{component}.{attr} changes forks only; it is never an L1/L2 tunable (E7)."
+                f"{component}.{attr} changes forks only; it is never an L1/L2 tunable."
             )
         key = (component, lever["name"], attr)
         if key in seen:
@@ -369,16 +367,27 @@ def _check_study_case(entry, study):
     return out
 
 
+def caps(profile) -> tuple[int, int]:
+    """The explore agent's case and change caps (AI-558), as its profile's
+    `stages.explore.agent` sets them (a profile may lower them)."""
+    from services import run_profiles
+
+    agent = ((profile.get("stages") or {}).get(STAGE) or {}).get("agent") or {}
+    return (agent.get("cases", run_profiles.EXPLORE_CASES),
+            agent.get("changes", run_profiles.EXPLORE_CHANGES))
+
+
 def check_proposal(run, profile, cases) -> list[dict]:
     """The proposal, checked and normalised; raises ExploreError. Changes
     nothing. `admit` checks it again."""
     block = profile.get("explore") or {}
     levers = block.get("levers") or []
+    max_cases, max_changes = caps(profile)
     if not isinstance(cases, list) or not cases:
-        raise ExploreError("invalid_explore_case", "Propose 1 to 4 cases.")
-    if len(run.get("cases") or []) + len(cases) > CASES:
+        raise ExploreError("invalid_explore_case", f"Propose 1 to {max_cases} cases.")
+    if len(run.get("cases") or []) + len(cases) > max_cases:
         raise ExploreError(
-            "explore_case_cap", f"A run explores at most {CASES} cases (AI-558)."
+            "explore_case_cap", f"A run explores at most {max_cases} cases."
         )
     taken = {c["name"].casefold() for c in run.get("cases") or []}
     out = []
@@ -404,11 +413,11 @@ def check_proposal(run, profile, cases) -> list[dict]:
         taken.add(name.casefold())
         changes = entry["changes"]
         if not isinstance(changes, list) or not changes:
-            raise ExploreError("invalid_explore_case", "A case changes 1 or 2 things.")
-        if len(changes) > CHANGES:
+            raise ExploreError("invalid_explore_case", f"A case changes 1 to {max_changes} things.")
+        if len(changes) > max_changes:
             raise ExploreError(
                 "explore_change_cap",
-                f"A case changes at most {CHANGES} things (AI-558).",
+                f"A case changes at most {max_changes} things.",
             )
         engine = entry.get("engine", NETWORK)
         case = {"name": name, "engine": engine}
@@ -597,7 +606,7 @@ def propose_cases(cases) -> dict:
             | ({"reason": c["reason"]} if "reason" in c else {})
             for c in admitted
         ],
-        "cases_left": CASES - len(task["run"]["cases"]),
+        "cases_left": caps(turn.profile)[0] - len(task["run"]["cases"]),
         "note": "The harness runs the admitted cases on forks after this turn; the base project is unchanged.",
     }
 
@@ -719,7 +728,7 @@ def message(task, profile, ctx, solves_left) -> str:
         "levers": levers,
         "research_ranges": rows,
         "study": profile["explore"].get("study"),
-        "cases_left": CASES - len(task["run"].get("cases") or []),
+        "cases_left": caps(profile)[0] - len(task["run"].get("cases") or []),
         "solves_left": solves_left,
     }
     return (

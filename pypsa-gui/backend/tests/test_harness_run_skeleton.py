@@ -33,6 +33,17 @@ def start(request_id='run-1', **kwargs):
                                  brief=kwargs.pop('brief', BRIEF), run=kwargs.pop('run', RUN), **kwargs)
 
 
+def explore_turn(root, task):
+    """The runner's explore turn (issue 06), its model proposing no case."""
+    from harness import runner as harness_runner
+    from tests.test_harness_run_loops import Script, say
+    from tests.test_harness_runner import settle, task_path
+
+    settle(harness_runner.Runner('a', agent_provider=Script(say('No case is worth a fork here.'))),
+           task_path(root, task), task['task_id'],
+           lambda r: ((r['run'].get('explore') or {}).get('turn') is not None) or r['run']['stage'] != 'explore')
+
+
 def drive(session, monkeypatch, task, root, limit=20):
     """Run the plan as the chat turn does: each next_step as an ordinary
     offered call, the user's Continue at each card pause, waits on jobs."""
@@ -43,6 +54,9 @@ def drive(session, monkeypatch, task, root, limit=20):
             tasks.continue_at_card(session, task['task_id'])
             continue
         step = view.get('next_step')
+        if step is None and (view.get('run') or {}).get('stage') == 'explore' and view['status'] not in ('completed', 'needs_review'):
+            explore_turn(root, task)  # issue 06: the stage's one agent turn is the runner's
+            continue
         if view['status'] in ('completed', 'needs_review') or step is None:
             return view, carded
         frames, _ = dispatch(session, monkeypatch, step['tool'], step['args'])

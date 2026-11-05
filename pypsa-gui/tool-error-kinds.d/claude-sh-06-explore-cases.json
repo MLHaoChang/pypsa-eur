@@ -1,7 +1,7 @@
 {"kinds": {
   "invalid_explore_case": {"surface": "inline", "why": "propose_cases got a case without a name and one or two changes, an unknown engine, a change that is not a finite value with its range and source, or an investment case without a complete study intake. Nothing was admitted; the assistant fixes the proposal."},
-  "explore_case_cap": {"surface": "inline", "why": "A run explores at most four cases (AI-558): a fifth, in this proposal or with the cases already admitted, was refused. Nothing was admitted."},
-  "explore_change_cap": {"surface": "inline", "why": "A case changes at most two things (AI-558); a third change was refused. Nothing was admitted."},
+  "explore_case_cap": {"surface": "inline", "why": "A run explores at most four cases (AI-558), or fewer where its profile lowers the cap: one more, in this proposal or with the cases already admitted, was refused. Nothing was admitted."},
+  "explore_change_cap": {"surface": "inline", "why": "A case changes at most two things (AI-558), or fewer where its profile lowers the cap; one more change was refused. Nothing was admitted."},
   "explore_case_name": {"surface": "inline", "why": "A case name was empty, too long, not plain text, or already used in this run. Nothing was admitted."},
   "explore_not_a_lever": {"surface": "inline", "why": "A case changed something that is not one of the profile's explore levers (or, for an investment case, not a row of the decision study's ledger). The question is never changed; nothing was admitted."},
   "explore_value_out_of_range": {"surface": "inline", "why": "A case value lies outside its range, or its range lies outside the lever's bounds or is in another unit (refused, not converted). Nothing was admitted."},

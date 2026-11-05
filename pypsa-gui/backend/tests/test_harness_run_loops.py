@@ -683,11 +683,14 @@ def test_a_static_load_passes_the_eh_site_input_gate_as_before(granted, profile,
     monkeypatch.setitem(run_profiles.PROFILES, "eh_site@1", run_profiles.EH_SITE)  # as shipped
     no_series()  # the baseline's L1 is a constant p_set
     task, path, _ = granted()
-    script = Script()  # any model call fails the test
+    script = Script(say("No case is worth a fork here."))  # the explore turn's only (issue 06)
     record = go(harness_runner.Runner("a", agent_provider=script), path, task)
     run = record["run"]
     assert run["stages"]["input_gate"]["status"] == "passed", run["stages"]["input_gate"]
-    assert run["status"] != "needs_user" and "loop" not in run and script.requests == []
+    assert run["status"] != "needs_user" and "loop" not in run
+    # No L1 round: the one model call is the explore stage's proposal turn.
+    [request] = script.requests
+    assert "propose_cases" in {t["name"] for t in request.tools}
     assert not any(g["tool"] == "apply_generated_profile"
                    for g in run_profiles.EH_SITE["envelope"]["gaps"])
 
