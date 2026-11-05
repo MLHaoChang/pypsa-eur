@@ -77,6 +77,8 @@ def _validate(record):
     fields = _FIELDS | {'source_gap'} if isinstance(record, dict) and record.get('family') == 'source_gap' else _FIELDS
     if isinstance(record, dict) and record.get('family') == 'run' and 'data_items' in record:
         fields = fields | {'data_items'}  # issue 21d: a data stop's item count, nothing else
+    if isinstance(record, dict) and record.get('family') == 'run' and 'gaps' in record:
+        fields = fields | {'gaps'}  # study harness 07 (HH-09A): a completed run's uncovered-part count
     if isinstance(record, dict) and record.get('family') == 'source_gap' and 'followups' in record:
         fields = fields | {'followups'}
     if not isinstance(record, dict) or set(record) != fields:
@@ -125,6 +127,9 @@ def _validate(record):
             raise ValueError('invalid run notice')
         if 'data_items' in record and (type(record['data_items']) is not int or record['data_items'] < 1
                                        or record['native_status'] != 'needs_user'):
+            raise ValueError('invalid run notice')
+        if 'gaps' in record and (type(record['gaps']) is not int or record['gaps'] < 1
+                                 or record['native_status'] != 'completed'):
             raise ValueError('invalid run notice')
     elif record['question'] is not None:
         raise ValueError('confirmation arguments prohibited')
@@ -430,12 +435,13 @@ def confirmation(session, pc, tool_use_id, state='waiting_for_approval'):
     _observe(session, getattr(pc, 'project_id', None), change)
 
 
-def run_notice(owner, project, task_id, state, seq, data_items=None):
+def run_notice(owner, project, task_id, state, seq, data_items=None, gaps=None):
     """One record per harness-run state change (`harness/runner.py`): the
     run's id and state only, never its values. `seq` makes each change its own
     record, and the same change written twice one record. A data stop adds
     only its item count, `data_items` (issue 21d, SH21D-NOTICE-1); every other
-    record has no such field."""
+    record has no such field. A completed run whose hand-off found parts of
+    the request not covered adds only their count, `gaps` (issue 07, HH-09A)."""
     def change(records):
         source = hashlib.sha256(f'run:{task_id}:{seq}'.encode()).hexdigest()
         if any(r['source_id'] == source for r in records):
@@ -444,7 +450,8 @@ def run_notice(owner, project, task_id, state, seq, data_items=None):
         records.append(_validate(dict(source_id=source, family='run', session_id='run:' + task_id,
             tool_use_id=task_id, tool_name='harness_run', native_status=state, revision=1,
             created_at=now, observed_at=now, question=None,
-            **({'data_items': data_items} if data_items is not None else {}))))
+            **({'data_items': data_items} if data_items is not None else {}),
+            **({'gaps': gaps} if gaps is not None else {}))))
     try:
         _update(owner, str(project), change)
         return True
@@ -472,6 +479,11 @@ def project_records(owner, project, live):
                       f"item{'s' if record['data_items'] != 1 else ''}); open it to see "
                       f"{'them' if record['data_items'] != 1 else 'it'}."
                       if 'data_items' in record else
+                      (f"The harness run completed; {record['gaps']} part{'s' if record['gaps'] != 1 else ''} "
+                       "of the request "
+                       f"{'are' if record['gaps'] != 1 else 'is'} not covered, and its report names "
+                       f"{'them' if record['gaps'] != 1 else 'it'}.")
+                      if 'gaps' in record else
                       'The harness run stopped for you; open it to see why and what it waits on.'
                       if status == 'needs_user' else 'The harness run ended; open it to read its stages.')
         elif record['family'] == 'question':

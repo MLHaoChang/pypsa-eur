@@ -44,6 +44,26 @@ def explore_turn(root, task):
            lambda r: ((r['run'].get('explore') or {}).get('turn') is not None) or r['run']['stage'] != 'explore')
 
 
+def native_steps(monkeypatch, root, task):
+    """Issue 07: the report job and the hand-off are the runner's own steps,
+    never a chat call: tick the runner (a fake report provider) until each
+    native step settled."""
+    from harness import runner as harness_runner
+    from routers import report_jobs
+    from services.llm_fake import FakeProvider
+    from tests.test_harness_runner import settle, task_path
+    from tests.test_report_job import _PROFILE
+
+    monkeypatch.setattr(report_jobs, '_resolve_profile', lambda: _PROFILE)
+    from services.llm_provider import ProviderError
+    # Every section's prose send fails: the report stays code-only, and is saved.
+    monkeypatch.setattr(report_jobs, '_provider_or_400',
+                        lambda profile: FakeProvider([ProviderError('rate_limited', 'not in this test')] * 60))
+    settle(harness_runner.Runner('a'), task_path(root, task), task['task_id'],
+           lambda r: r['run']['status'] != 'running' or not any(
+               s.get('native') and s['status'] != 'completed' for s in r['steps']))
+
+
 def drive(session, monkeypatch, task, root, limit=20):
     """Run the plan as the chat turn does: each next_step as an ordinary
     offered call, the user's Continue at each card pause, waits on jobs."""
@@ -59,6 +79,9 @@ def drive(session, monkeypatch, task, root, limit=20):
             continue
         if view['status'] in ('completed', 'needs_review') or step is None:
             return view, carded
+        if step.get('native'):
+            native_steps(monkeypatch, root, task)
+            continue
         frames, _ = dispatch(session, monkeypatch, step['tool'], step['args'])
         assert not [p for e, p in frames if e == 'tool_error'], frames
         if [p for e, p in frames if e == 'tool_pending_confirmation']:
@@ -83,9 +106,9 @@ def test_eh_site_run_reaches_handoff_step_by_step_with_every_run_carded(session,
     assert view['status'] == 'completed' and view['run']['status'] == 'completed', view
     assert carded == ['solve_queue_enqueue']  # COP-1: the run step has its card; reads run without one
     by = stages(view)
-    for name in ('intake', 'setup', 'inputs', 'input_gate', 'solve', 'result_gate', 'handoff'):
+    for name in ('intake', 'setup', 'inputs', 'input_gate', 'solve', 'result_gate', 'explore', 'report', 'handoff'):
         assert by[name]['status'] == 'passed', by[name]
-    assert {s for s in by if by[s]['status'] == 'skipped'} == {'report'}  # issue 06: eh_site@1 explores
+    assert {s for s in by if by[s]['status'] == 'skipped'} == set()  # issue 06 explores; issue 07 reports
     gate = {r['rule']: r for r in by['input_gate']['gate']}
     assert gate['in.validate.errors'] == {'rule': 'in.validate.errors', 'verdict': 'pass', 'fact': 'validate.errors',
                                           'value': 0, 'unit': 'count'}
@@ -93,7 +116,7 @@ def test_eh_site_run_reaches_handoff_step_by_step_with_every_run_carded(session,
     assert view['run']['scope'] == 'eh_site:industrial'
     record = stored(root, task['task_id'])
     assert record['version'] == 3 and [s['id'] for s in record['steps']] == \
-        ['inputs.1', 'input_gate.1', 'input_gate.2', 'input_gate.3', 'solve.1']
+        ['inputs.1', 'input_gate.1', 'input_gate.2', 'input_gate.3', 'solve.1', 'report.1', 'handoff.1']
     assert record['run']['stages']['input_gate']['gate']['rules'][0]['facts'][0]['source'] == \
         'services.chat_tools.validate_network:errors'
 

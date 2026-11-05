@@ -275,6 +275,32 @@ def _explore_study_status(env):
     return None if not isinstance(record, dict) else record.get("status")
 
 
+def _profile(env):
+    from services import run_profiles
+    return run_profiles.resolve(env.task["run"]["profile"])
+
+
+def _report_status(env):
+    """Issue 07: the run's own report job's outcome, `ready` only when its
+    saved document reads back (C3: no job, no record: not evaluated)."""
+    from harness import run_report
+    return run_report.status(env.task, env.project_dir)
+
+
+def _report_unsupported_listed(env):
+    """Issue 07 (SC-15): every profile chapter established or named a gap."""
+    from harness import run_report
+    return run_report.unsupported_listed(env.task, env.project_dir, _profile(env))
+
+
+def _handoff_kpis_read(env):
+    """Issue 07 (C14): every headline KPI read back natively, on the run's context."""
+    from harness import run_handoff
+    if env.ctx is None:
+        return None
+    return _on(env.ctx, run_handoff.kpis_read, env.task, _profile(env))
+
+
 FACTS: dict[str, Fact] = {
     # Harness facts: the run block itself, written only by harness code.
     "brief.valid": Fact("task.brief", "brief", None, lambda env: bool(env.task.get("brief"))),
@@ -299,6 +325,11 @@ FACTS: dict[str, Fact] = {
     "ic.baseline_keeps": Fact("services.ic_counterfactual.read_baseline_keeps", "kept", None,
                               _ic_baseline_keeps),
     LOOP_FACT: Fact("task.steps[engine].result.loop", "status", None, _loop_converged, per_rule=True),
+    # Issue 07: the report and hand-off stages.
+    "report.status": Fact("harness.run_report.status", "status", None, _report_status),
+    "report.unsupported_listed": Fact("harness.run_report.unsupported_listed", "listed", None,
+                                      _report_unsupported_listed),
+    "handoff.kpis_read": Fact("harness.run_handoff.kpis_read", "read", None, _handoff_kpis_read),
 }
 
 

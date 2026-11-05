@@ -279,9 +279,11 @@ def _notify(path):
         return status  # the owner no longer reaches the project: nothing names it to them
     from harness import attention
     items = _data_items(task["run"], status)
+    from harness import run_handoff
+    gaps = (run_handoff.gaps(task) or None) if status == "completed" else None  # HH-09A: the count only
     delivered = attention.run_notice(task["owner_id"], task["project_id"], task["task_id"], status, seq,
-                                     data_items=items)
-    emailed = _email(path, task, status, data_items=items)
+                                     data_items=items, gaps=gaps)
+    emailed = _email(path, task, status, data_items=items, gaps=gaps)
 
     def mark(task):
         notices = task["run"].get("notices") or []
@@ -318,7 +320,7 @@ def _owner_contact(task):
     return address, name, f"{get_settings().public_base_url.rstrip('/')}/?project={task['project_id']}&run={task['task_id']}"
 
 
-def _email(path, task, status, data_items=None):
+def _email(path, task, status, data_items=None, gaps=None):
     from services import email_service
     sent = sum(1 for n in task["run"].get("notices") or [] if n["channel"] == "email")
     if sent >= MAX_EMAILS or not email_service.get_status()["configured"] \
@@ -331,6 +333,8 @@ def _email(path, task, status, data_items=None):
     words = _STATE_WORDS[status]
     # No run title: the model wrote it (criterion 11, no researched value in a mail).
     waits = f"It waits for data ({data_items} item{'s' if data_items != 1 else ''}).\n" if data_items else ""
+    if gaps:
+        waits += f"{gaps} part{'s' if gaps != 1 else ''} of the request not covered; the report names them.\n"
     body = (f"Your harness run {words}.\n\nProject: {_plain(name, 120)}\n"
             f"State: {status}\n{waits}\nOpen it: {link}\n")
     try:
@@ -671,6 +675,8 @@ class Runner:
                 else:  # H2: a waiting engine step whose follower died is followed again, or expires
                     from harness import run_loops
                     run_loops.recover_engines(path, ctx, instance=self.instance, now=self.clock())
+                from harness import run_report
+                run_report.settle(path, ctx)  # issue 07: the run's report job, once it ended
                 return self._step(path, ctx, session)
         return contextvars.copy_context().run(bound)
 
@@ -770,6 +776,13 @@ class Runner:
             return "idle"
         if step.get("engine") and step["status"] == "pending":
             return run_loops.start_engine(path, ctx, step, instance=self.instance)
+        if step.get("native") and step["status"] == "pending":
+            # Issue 07: the report job (strict, charged to the run under this lease)
+            # and the hand-off read-back are the runner's own, never a chat call.
+            from harness import run_handoff, run_report
+            if step["native"] == "report":
+                return run_report.start(path, ctx, step, instance=self.instance)
+            return run_handoff.run_step(path, ctx, step)
         if step["status"] == "waiting":
             self._hold_if_effectful(task, step)
             _update(path, lambda t: t["run"].update(status="waiting_job") if t["run"]["status"] == "running" else False)

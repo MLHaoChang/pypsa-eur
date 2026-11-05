@@ -304,13 +304,7 @@ class RunSends:
         retry that will not come) settles `uncertain` at its bound, the
         runner's turn-end rule (`send_reservation.close_open`), limited to this
         job's own sends."""
-        from harness.send_reservation import settle_uncertain
-
-        with self._inner._lock:
-            keys = [key for _ref, _body, key in self._inner._open.values()]
-            self._inner._open.clear()
-        for key in keys:
-            settle_uncertain(self._inner._path, key)
+        self._inner.settle_open()
 
 
 AUDIT_FAILED = "(the number audit could not read this statement)"
