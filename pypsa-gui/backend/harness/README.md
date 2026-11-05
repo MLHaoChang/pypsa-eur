@@ -1374,7 +1374,8 @@ else.
   (`run_envelope.ATOMIC_TOOLS`, one row per tool: `update_component` on
   eh_site@1's size caps, any attrs; the run's `solve_queue_enqueue`; and the
   data-gap tools `apply_generated_profile`, `attach_tariff`,
-  `set_weather_choice` and `generate_load_profile`) writes inside
+  `set_weather_choice` and `generate_load_profile`; and the planned write
+  `apply_demand_from_excel`, issue 21c) writes inside
   `run_envelope.admitted_write`, on the worker thread that runs its handler
   (the runner and the L1 round set `session.write_guard`; `loop.py` enters
   it). Lock order: the project's `mutation_lock`, then its
@@ -1426,6 +1427,29 @@ else.
   `durable_conversation._LOCK` last (`_start_run` and the brief re-check
   take them under the new project's lock). `decide` holds no lock when it
   calls `hand_over`.
+- **Planned writes (issue 21c, GK B (21)/(22) G1-G8).** An intake row
+  `{write: "apply_demand_from_excel", args, source}` (`run_intake`, param
+  `load_series.<load>`) is on the plan-review card and in the grant digest.
+  `grant_handover` lists the confirmed ones as `envelope["planned"]`
+  (LOAD-SHAPE-1). Once the project exists, `_start_run` calls
+  `run_envelope.pin_planned` on the run's own context (`run_gates._on`, G6):
+  it mints the load's uid under the new project's `mutation_lock`, computes
+  the tool's own edit card (`series_edit`, binding the load uid, upload,
+  sheet, columns, the aligned series' and the replaced series' sha256) and
+  pins `{uid, digest, series_sha256}` only when the binding is the granted
+  row's; anything else (a card that cannot be computed included, G3) is
+  `carded`. Stage 2 (`inputs`) runs the planned steps first, with the
+  envelope's args (G1). `_match_planned` admits a pinned, unused entry only
+  from a runner step (never an L1/L2 turn), when the live card's digest and
+  the load's uid are the pinned ones (typed `plan_changed` / `uid_changed`,
+  G5); it is used once, under the lease file lock with a live-lease check
+  (`session.lease_holder`, G4). The tool is in `ATOMIC_TOOLS`; under the held
+  locks `verify_planned_write` re-checks the series it writes and the
+  upload's bytes (G2), and a handler that stops before that check passed
+  wrote nothing and is refused as `plan_changed`. It is the one destructive
+  tool an envelope admits, and only this way. Lock order: the project's
+  `mutation_lock`, then the run's `<task>.lease` file lock, then
+  `assistant_tasks._LOCK`.
 - **Data request and answers (issue 21 §3-4, B1-B4).** When L1 ends without
   a pass, `_advance_run` reads the data items outside the task lock
   (`run_loops.data_gaps`: envelope gap targets still unset, profile

@@ -60,3 +60,27 @@ sweep test.
 - [ ] Issue 03's §7 refusal matrix still passes.
 
 ## Comments
+
+- 2026-11-04, GK B (21) plan verdict: GO WITH CHANGES (carried on by GK B (22)).
+  Q1 (a): the grant binds the confirmed intake row (args and the upload's
+  sha256); when the run's project is created, the harness pins the target
+  load's uid and the tool's own card digest only when the card's binding is
+  the granted row's; stage 2 admits only that digest. Q2 (a): one shared
+  `chat_tools._demand_series` for the tool and its card; the written bytes
+  stay identical. Q3 (a): eh_site keeps `inputs.required: []`; a test-only
+  profile exercises `load_series`. Conditions:
+  - G1. Stage 2's args come from `envelope["planned"]`; an agent (L1/L2) call
+    with the same args is refused (`outside_entry`) and carded.
+  - G2. Under `mutation_lock` + `solver_state_lock` the written series hashes
+    to the pinned `series_sha256` and the upload's bytes to `upload_sha256`;
+    otherwise nothing is written and it cards.
+  - G3. A card that cannot be computed, at the pin or at admission, is a
+    mismatch: carded, never admitted or skipped.
+  - G4. Pin and consume are envelope writes under the lease file lock with a
+    live-lease check; a stale process neither pins nor consumes.
+  - G5. Typed `plan_changed` / `uid_changed` refusals, caught as themselves.
+  - G6. The pin binds the created project's context, never the foreground.
+  - G7. The write goes to the bound context's `ctx.user_ts` /
+    `ctx.user_ts_meta` under `_user_ts_lock`; the chat path still persists.
+  - G8. Each mismatch case red before its fix; each guard mutation-checked
+    against its own test.

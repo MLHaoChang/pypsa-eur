@@ -465,6 +465,76 @@ def _table_rows(param, fields, c, host: Host):
     ]
 
 
+# Issue 21c: an intake row that is a planned write on the created network.
+# One tool today (GK B (19) Q2); its row's param is `load_series.<load>`, so a
+# profile's `inputs.required` may name `load_series`, and two uploads for one
+# load are a conflict.
+WRITE_TOOLS = ("apply_demand_from_excel",)
+WRITE_PARAM = "load_series"
+_WRITE_KEYS = {"write", "upload_id", "sheet", "time_col", "value_col", "load"}
+
+
+def _write_row(c, host: Host):
+    """`({row}, None)` or `(None, gap)` for a planned-write citation: the
+    upload's table read through the owner's ACL, its columns checked, its
+    bytes' sha256 bound. The model names where the series is, never values."""
+    load = c.get("load")
+    param = f"{WRITE_PARAM}.{load}" if isinstance(load, str) and load else WRITE_PARAM
+    if (
+        c.get("write") not in WRITE_TOOLS
+        or set(c) - _WRITE_KEYS
+        or not all(
+            isinstance(c.get(k), str) and c[k]
+            for k in ("upload_id", "time_col", "value_col", "load")
+        )
+        or (c.get("sheet") is not None and not isinstance(c["sheet"], str))
+    ):
+        return None, _gap(
+            param,
+            "source_not_accepted",
+            "A load series names its upload, its time and value columns and the load.",
+        )
+    try:
+        table = T.read_table(
+            host.name, c["upload_id"], c.get("sheet"), project_dir=host.dir
+        )
+    except HTTPException as exc:
+        return None, _reader_gap(param, exc)
+    missing_cols = [
+        k for k in ("time_col", "value_col") if c[k] not in table["headers"]
+    ]
+    if missing_cols:
+        return None, _gap(
+            param,
+            "column_not_found",
+            f"The table has no column {', '.join(repr(c[k]) for k in missing_cols)}.",
+        )
+    src = table["source"]
+    args = {
+        "file_id": src["upload_id"],
+        "time_col": c["time_col"],
+        "value_col": c["value_col"],
+        "load_name": c["load"],
+        **({"sheet_name": c["sheet"]} if c.get("sheet") else {}),
+    }
+    source = {
+        "kind": "table",
+        "upload_id": src["upload_id"],
+        "filename": src["filename"],
+        "sha256": src["sha256"],
+        "sheet": src["sheet"],
+        "cell": f"{c['time_col']}/{c['value_col']}",
+    }
+    return {
+        "param": param,
+        "write": c["write"],
+        "args": args,
+        "value": dict(args),
+        "unit": "",
+        "source": source,
+    }, None
+
+
 def _source_kind(c) -> str | None:
     if "turn_id" in c:
         return "text"
@@ -496,6 +566,13 @@ def read(citations: list, fields: dict, host: Host) -> dict:
                 "intake_value_supplied",
                 "A citation names where a value is, never the value.",
             )
+        if "write" in c:
+            row, gap = _write_row(c, host)
+            if gap:
+                gaps.append(gap)
+            else:
+                rows.append(row)
+            continue
         param = c.get("param")
         field = (
             _field(fields, param)
@@ -589,6 +666,8 @@ def params(rows: list) -> dict:
     rows of one param agree, or they are a conflict and not usable)."""
     out, seen = {}, set()
     for r in rows:
+        if r.get("write"):
+            continue  # a planned write runs on the created network, never a creation param
         if r["status"] in USABLE and r["param"] not in seen:
             seen.add(r["param"])
             _put(out, r["param"], r["value"])
@@ -617,7 +696,7 @@ def missing(profile: dict, rows: list, gaps: list) -> list[dict]:
         for name, value in params(rows).items()
         if name not in _LIST_COLUMNS
         or all(set(_LIST_COLUMNS[name]) <= set(item) for item in value)
-    }
+    } | {top(r["param"]) for r in rows if r.get("write") and r["status"] in USABLE}
     fields = profile["params"].get("fields", {})
     items, seen = [], set()
 
@@ -733,7 +812,12 @@ def card_view(rows: list, profile: dict, template_check, entered=None) -> dict:
         {
             "index": i,
             "param": r["param"],
-            "label": (_field(fields, r["param"]) or {}).get("label", r["param"]),
+            "label": (
+                f"Load {r['args']['load_name']}: demand series (replaces its current demand)"
+                if r.get("write")
+                else (_field(fields, r["param"]) or {}).get("label", r["param"])
+            ),
+            **({"write": r["write"]} if r.get("write") else {}),
             "value": r["value"],
             "unit": r["unit"],
             "status": r["status"],
@@ -777,6 +861,8 @@ def digest(rows: list) -> str:
             "value": r["value"],
             "unit": r["unit"],
             "status": r["status"],
+            # Issue 21c: a planned write binds its tool and args as well.
+            **({"write": r["write"], "args": r["args"]} if r.get("write") else {}),
             "source": {
                 k: r["source"].get(k)
                 for k in (
