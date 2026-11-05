@@ -194,7 +194,7 @@ def _check_run(entry):
     if not isinstance(entry, dict) or "tool" not in entry or not set(entry) <= {"tool", "kind", "restore"} \
             or entry["tool"] not in RUN_TOOLS | ENGINE_TOOLS or not isinstance(entry.get("kind", ""), str) \
             or ("restore" in entry and (entry["tool"] not in ENGINE_TOOLS or entry["restore"] != "final")):
-        raise EnvelopeError(f"A run names one of {sorted(RUN_TOOLS | ENGINE_TOOLS)} and an optional kind; an "
+        raise EnvelopeError(f"A run names one of {sorted(RUN_TOOLS | ENGINE_TOOLS)} and an optional kind; a "
                             f"loop-driving tool may carry restore \"final\": {entry!r}")
     if entry["tool"] in NEVER_LISTED:
         raise EnvelopeError(f"{entry['tool']} is never in an envelope; it is always its own card.")
