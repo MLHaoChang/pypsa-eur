@@ -31,7 +31,7 @@ export function notReadyReason(rows: ReadinessRow[]): string {
   const parts: string[] = []
   if (missing) parts.push(`${missing} without a location (set the bus coordinates)`)
   if (kept) parts.push(`${kept} with a measured file or the network’s own series, which a default never replaces`)
-  if (generated) parts.push(`${generated} already generated (tick “replace series generated earlier” to redo them)`)
+  if (generated) parts.push(`${generated} already generated (use the row’s Generate to redo one)`)
   return `No wind or solar generator is ready: ${parts.join(', ')}.`
 }
 

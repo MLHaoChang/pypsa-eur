@@ -296,7 +296,7 @@ function UploadZone({ onFile, label }: { onFile: (f: File) => void; label?: stri
       onDragLeave={() => setDragging(false)}
       onClick={() => inputRef.current?.click()}
       data-testid="ts-upload-zone" tabIndex={-1}
-      className={`border-2 border-dashed rounded-lg p-6 flex flex-col items-center gap-2 cursor-pointer transition-colors
+      className={`focus:outline-none focus:ring-2 focus:ring-accent border-2 border-dashed rounded-lg p-6 flex flex-col items-center gap-2 cursor-pointer transition-colors
         ${dragging ? 'border-accent bg-accent/5' : 'border-border hover:border-accent/50 hover:bg-accent/3'}`}
     >
       <Upload size={24} className={dragging ? 'text-accent' : 'text-muted'} />
@@ -1149,9 +1149,12 @@ export default function TimeSeriesManager() {
     setGeneratingAll(false)
     const applied = outcomes.reduce((n, o) => n + o.applied, 0)
     const failed = outcomes.filter(o => o.error)
+    const steps = outcomes.filter(o => o.applied > 0).length
+    const done = `${applied} profile${applied === 1 ? '' : 's'} generated and applied`
+    const undoWords = steps > 1 ? `Undo (Ctrl+Z) reverts them in ${steps} steps, one per technology.` : 'Undo (Ctrl+Z) reverts them.'
     setGenNotice(failed.length
-      ? { tone: 'error', text: failed.map(o => `${o.generators.join(', ')}: ${o.error}`).join(' ') }
-      : { tone: 'ok', text: `${applied} profile${applied === 1 ? '' : 's'} generated and applied. Undo (Ctrl+Z) reverts them.` })
+      ? { tone: 'error', text: `${done}. ${failed.map(o => `${o.generators.join(', ')}: ${o.error}`).join(' · ')}${applied > 0 ? ` ${undoWords}` : ''}` }
+      : { tone: 'ok', text: `${done}. ${undoWords}` })
     void qc.invalidateQueries()
   }
   const focusUploadZone = () => {
@@ -1977,7 +1980,7 @@ export default function TimeSeriesManager() {
                     <Btn onClick={() => { void generateAll() }}
                       disabled={generatingAll || readyRows(readinessRows).length === 0}
                       data-testid="generate-all-ready">
-                      {generatingAll ? 'Generating…' : `Generate for all ready (${readyRows(readinessRows).length})`}
+                      {generatingAll ? 'Generating…' : `Generate wind and solar (${readyRows(readinessRows).length} ready)`}
                     </Btn>
                     {readyRows(readinessRows).length === 0 && (
                       <span className="text-muted" data-testid="generate-all-why">{notReadyReason(readinessRows)}</span>

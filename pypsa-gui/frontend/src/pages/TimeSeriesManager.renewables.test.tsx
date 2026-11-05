@@ -72,7 +72,7 @@ describe('Renewables tab', () => {
     expect(screen.getByTestId('missing-coordinates-banner').textContent).toContain('pv_noloc')
   })
 
-  it('Generate for all ready posts one generate with the ready set only, then applies it', async () => {
+  it('Generate wind and solar posts one generate with the ready set only, then applies it', async () => {
     prof.generate.mockResolvedValue({ id: 'job1' })
     prof.pending.mockResolvedValue({ pending: [{ job_id: 'job1' }], jobs: [] })
     prof.applyBatch.mockResolvedValue({ count: 1 })
