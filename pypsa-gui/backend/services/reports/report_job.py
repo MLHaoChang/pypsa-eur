@@ -267,6 +267,7 @@ def _with_prose(section: Section, draft: SectionDraft, facts) -> Section:
     })
 
 
+AUDIT_FAILED = "(the number audit could not read this statement)"
 WITHHELD_NOTE = ("{n} statement(s) withheld: each quoted a number that is not among "
                  "this section's admitted facts.")
 
@@ -289,7 +290,11 @@ def withhold_unverified(draft: SectionDraft, facts) -> tuple[SectionDraft, list[
     tokens: list[str] = []
 
     def keep(text: str) -> bool:
-        bad = audit([text], facts).unverified
+        try:
+            bad = list(audit([text], facts).unverified)
+        except Exception:  # noqa: BLE001 -- fail closed (GK B C5): an audit that cannot run admits nothing
+            logger.warning("report audit failed on a statement; it is withheld")
+            bad = [AUDIT_FAILED]
         tokens.extend(bad)
         return not bad
     kept = draft.model_copy(update={"paragraphs": [p for p in draft.paragraphs if keep(p)],
@@ -367,7 +372,15 @@ def _generate_all(job: ReportJob) -> tuple[ReportDocument, bool]:
         if isinstance(result, SectionDraft) and job.strict:
             own = admitted_facts(job, section)
             kept, withheld = withhold_unverified(result, own)
-            written = _with_prose(section, kept, own)
+            try:
+                written = _with_prose(section, kept, own)
+            except Exception:  # noqa: BLE001 -- fail closed (C5): no prose rather than an unaudited one
+                logger.warning("report audit failed on section %s; its prose is withheld", sid)
+                kept = kept.model_copy(update={"paragraphs": [], "bullets": []})
+                withheld = withheld or [AUDIT_FAILED]
+                written = section.model_copy(update={
+                    "source": "code", "note": _clean_note(section.note),
+                    "blocks": [b for b in section.blocks if b.type not in _PROSE_TYPES]})
             if withheld:
                 n = len(result.paragraphs) + len(result.bullets) - len(kept.paragraphs) - len(kept.bullets)
                 note = WITHHELD_NOTE.format(n=n)

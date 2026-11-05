@@ -7,6 +7,9 @@ quotes at most `MAX_FACTS` numbers (AI-558).
 """
 from __future__ import annotations
 
+import pathlib
+import tempfile
+
 import pytest
 
 from services.reports import evidence as E
@@ -156,3 +159,52 @@ def test_the_reports_panel_path_keeps_flag_only(tmp_path):
     section = {s.section_id: s for s in doc.sections}[NC.HEADLINE]
     assert [b.md for b in section.blocks if b.type == "paragraph"] == ["The site will save 4,700 EUR a year."]
     assert section.audit.unverified == ["4,700 EUR"]
+
+
+def test_a_statement_the_audit_cannot_read_is_withheld(tmp_path, monkeypatch):
+    """C5: fail closed. A mutant that keeps the statement when the audit
+    raises goes red here."""
+    from services.llm_fake import FakeProvider
+    from services.reports import report_job
+    from tests.test_report_job import _draft
+
+    def broken(paragraphs, facts):
+        raise ValueError("cannot parse")
+
+    monkeypatch.setattr(report_job, "audit", broken)
+    provider = FakeProvider([_draft(NC.HEADLINE, "The study's total cost is 120 EUR.")])
+    doc = report_job.run_report_job(_strict_job(tmp_path, provider))
+    section = {s.section_id: s for s in doc.sections}[NC.HEADLINE]
+    assert not [b for b in section.blocks if b.type in ("paragraph", "bullets")]
+    assert "withheld" in (section.note or "")
+
+
+# C5: the Reports panel's path is byte-identical to master's (fixture written
+# on master 3f39808c9 by this same function).
+
+def human_doc():
+    from services.llm_fake import FakeProvider
+    from services.reports.evidence import collect_evidence
+    from services.reports.report_job import prepare_report_job, run_report_job
+    from tests.test_report_job import _PROFILE, _draft, _eh_report
+
+    ev = collect_evidence(study_report=None, eh_report=_eh_report(), worksheet=None)
+    provider = FakeProvider([_draft("executive_summary", "The plan meets 3.2 h/yr.", "It saves 4,700 EUR."),
+                             _draft("fmea_top", "Generator g dominates.", bullets=["Rank 99 mode."])])
+    with tempfile.TemporaryDirectory() as d:
+        job = prepare_report_job(project_name="demo", project_dir=pathlib.Path(d), evidence=ev, profile=_PROFILE,
+                                 provider=provider, language="en", sections=["executive_summary", "fmea_top"],
+                                 title="Client report", figure_pngs={})
+        doc = run_report_job(job)
+    return [{"id": s.section_id, "blocks": [b.model_dump(mode="json") for b in s.blocks],
+             "audit": s.audit.model_dump(mode="json"), "note": s.note, "source": s.source} for s in doc.sections
+            if s.section_id in ("executive_summary", "fmea_top")]
+
+
+
+def test_the_reports_panel_document_equals_master():
+    import json
+    from pathlib import Path
+
+    expected = json.loads((Path(__file__).parent / "fixtures" / "sh07_report_human_master.json").read_text())
+    assert json.loads(json.dumps(human_doc(), sort_keys=True)) == expected
