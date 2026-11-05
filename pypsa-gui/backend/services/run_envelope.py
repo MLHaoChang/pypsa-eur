@@ -195,7 +195,7 @@ def _check_run(entry):
             or entry["tool"] not in RUN_TOOLS | ENGINE_TOOLS or not isinstance(entry.get("kind", ""), str) \
             or ("restore" in entry and (entry["tool"] not in ENGINE_TOOLS or entry["restore"] != "final")):
         raise EnvelopeError(f"A run names one of {sorted(RUN_TOOLS | ENGINE_TOOLS)} and an optional kind; an "
-                            f"engine loop may carry restore \"final\": {entry!r}")
+                            f"loop-driving tool may carry restore \"final\": {entry!r}")
     if entry["tool"] in NEVER_LISTED:
         raise EnvelopeError(f"{entry['tool']} is never in an envelope; it is always its own card.")
     return dict(entry)
@@ -1417,8 +1417,8 @@ def settle(task_path, call_id, ctx, before, after=None):
     captured under the write's own locks, never a later read, so an edit
     landing after them is drift on the next step (issue 22). Without it
     (a step outside `ATOMIC_TOOLS`: `run_simulation`, `run_ac_pf_stage`, or a
-    card-approved step) the identity is read now: the README's remaining
-    limit."""
+    card-approved step) the identity is read now: the README's note on
+    non-atomic steps."""
     from services import assistant_tasks
     after = after if after is not None else identity(ctx, exact=False)
     current = after.get("fingerprint")  # None: no link, so the next admission reads drift
@@ -1842,9 +1842,9 @@ def verify_planned_write(ctx, args, parsed, read_upload):
         mismatch = UidChanged()
     elif parsed["upload_sha256"] != planned["upload_sha256"] \
             or hashlib.sha256(read_upload()).hexdigest() != planned["upload_sha256"] \
-            or chat_tools._series_sha256(parsed["series"]) != planned["series_sha256"]:
+            or chat_tools.series_sha256(parsed["series"]) != planned["series_sha256"]:
         mismatch = PlanChanged()
-    elif chat_tools._series_sha256(ctx.network.get_switchable_as_dense(
+    elif chat_tools.series_sha256(ctx.network.get_switchable_as_dense(
             "Load", "p_set", inds=[args["load_name"]])[args["load_name"]]) != planned["replaces_sha256"]:
         mismatch = PlanChanged()  # G10: the series it replaces is the one the grant's card showed
     if mismatch is not None:
