@@ -3,7 +3,7 @@
 
 # 31 — B6: the statistics cost fill runs on a private copy, not the live network
 
-Status: in progress
+Status: done (#1139)
 Type: bug
 Blocked by: none
 Gated: yes (GK B)
