@@ -1,0 +1,1 @@
+Shots for PR #1129 and the nowrap follow-up (narrow: `W=1250`, wide: `W=2600`). Run fake.mjs (fake /api/health, auth off) with Vite on :5173, then `node shoot.mjs <expert|guided> <false|unknown>` (`W=2600` for the wide canvas). API routes are Playwright mocks (placement check, #990).

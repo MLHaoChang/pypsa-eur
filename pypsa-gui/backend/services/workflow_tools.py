@@ -500,7 +500,10 @@ def _network_input_fingerprint(ctx, *, exact=False):
     # PyPSA assigns a slack control while solving. Canonicalise controls on a
     # private copy, retaining user PV/slack choices, rather than mistaking the
     # deterministic PQ→Slack assignment for a parameter edit.
-    n = _network_copy(ctx.network)
+    # Issue 30: while a solve holds this network, hash the inputs it started
+    # from, never its own transient changes (the reader's config still counts).
+    snapshot = _solve_snapshot(ctx.network)
+    n = _network_copy(ctx.network if snapshot is None else snapshot)
     n.determine_network_topology()
     for subnet in n.sub_networks.obj:
         subnet.find_bus_controls()
@@ -710,14 +713,87 @@ def _network_copy(network):
     return copy.deepcopy(network, {id(model): None})
 
 
+def _owning_context(network):
+    """The context whose network this is: the active one, or the one a queued
+    solve of another project runs in (`solving_context(ctx)`). None for a
+    private copy."""
+    active = PyPSAService.get_active_context()
+    solving = PyPSAService._transient_target(ensure=False)
+    return next((c for c in (active, solving) if c is not None and c.network is network), None)
+
+
+# Issue 30 (SH-06 (b)): a solve changes its network's inputs in place while it
+# runs (horizon-scaled capital_cost and fom_cost, the discount_rate/lifetime
+# fill, the CO2 adder, VOLL slack, capacity freezes, ...) and reverts them
+# before it releases the mutation lock. A reader that does not hold that lock
+# (the envelope's settle right after a solve starts) hashed the transients.
+# While a solve holds a network, `_network_input_fingerprint` hashes the
+# snapshot taken before its first change instead. Sound because every edit
+# waits on the mutation lock the solve holds: the only input changes in that
+# window are the solve's own. Kept off `network.meta` (it is exported to
+# netCDF); keyed by id with a weak reference checked for identity, as
+# `periodized_costs._FOM_SCALED` is. Entry: [weakref, snapshot, holders].
+_SOLVE_INPUTS: dict[int, list] = {}
+_SOLVE_INPUTS_LOCK = threading.Lock()
+
+
+def _solve_snapshot(network):
+    with _SOLVE_INPUTS_LOCK:
+        entry = _SOLVE_INPUTS.get(id(network))
+        return entry[1] if entry is not None and entry[0]() is network else None
+
+
+def hold_solve_inputs(network, lock):
+    """Register `network`'s inputs as they are now, before a solve changes
+    them; returns an idempotent release. Re-entrant: a nested solve on the same
+    network keeps the outermost snapshot, and only the last release drops it.
+
+    Only while the calling thread holds `lock` and, for a project's network,
+    `lock` is that project's mutation lock; otherwise nothing is registered
+    (a no-op release), since an edit could then land unseen behind the
+    snapshot. A private copy no context owns needs only its own lock held."""
+    import weakref
+
+    owner = _owning_context(network)
+    is_owned = getattr(lock, "_is_owned", None)
+    if not (callable(is_owned) and is_owned()) or (owner is not None and owner.mutation_lock is not lock):
+        return lambda: None
+    key = id(network)
+    with _SOLVE_INPUTS_LOCK:
+        entry = _SOLVE_INPUTS.get(key)
+        if entry is not None and entry[0]() is network:
+            entry[2] += 1
+            snapshot = None
+        else:
+            entry = None
+    if entry is None:
+        snapshot = _network_copy(network)  # complete before any reader can see it
+        with _SOLVE_INPUTS_LOCK:
+            entry = _SOLVE_INPUTS.get(key)
+            if entry is not None and entry[0]() is network:
+                entry[2] += 1
+            else:
+                entry = [weakref.ref(network), snapshot, 1]
+                _SOLVE_INPUTS[key] = entry
+    released = {"v": False}
+
+    def release() -> None:
+        with _SOLVE_INPUTS_LOCK:
+            if released["v"]:
+                return
+            released["v"] = True
+            entry[2] -= 1
+            if entry[2] <= 0 and _SOLVE_INPUTS.get(key) is entry:
+                del _SOLVE_INPUTS[key]
+    return release
+
+
 def _record_solve_inputs(network, config):
     """Called under the existing solve lock, after modelling inputs restore."""
-    active = PyPSAService.get_active_context()
     # A queued solve of another project runs in `solving_context(ctx)`: its
     # own uploaded series (user_ts) belong in the fingerprint, as every later
     # read hydrates them from disk (LC-18).
-    solving = PyPSAService._transient_target(ensure=False)
-    owner = next((c for c in (active, solving) if c is not None and c.network is network), None)
+    owner = _owning_context(network)
     if owner is not None:
         ctx = copy.copy(owner)
         ctx.solver_state = {**owner.solver_state, "solver_config": config}

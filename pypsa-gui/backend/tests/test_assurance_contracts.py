@@ -259,3 +259,74 @@ def test_the_build_ships_the_snapshot_where_the_route_reads_it():
     module = Path(contracts.__file__).resolve()
     assert contracts.SNAPSHOT.resolve().parent == module.parent
     assert module.parent.relative_to(backend).as_posix() == "harness"
+
+
+def test_every_adapter_receipt_and_checked_tool_has_a_returned_shape(live):
+    """Issue 02: evidence identity, the receipt and tool results are frozen."""
+    from harness.assurance import CHECKED_TOOLS
+    from services.assurance_records import INPUT_ADAPTERS, POLICY_VERSION
+
+    assert set(INPUT_ADAPTERS.values()) <= set(live["evidence_identity"])
+    assert {"scoped_result", "calculated_result"} <= set(live["evidence_identity"])
+    assert set(live["answer_receipt"]) == {POLICY_VERSION}
+    assert set(live["checked_tool_results"]) == CHECKED_TOOLS
+    for key in ("evidence_identity", "answer_receipt", "checked_tool_results"):
+        assert live["directions"][key] == "returns"
+    assert not {"evidence_and_receipt_identity", "checked_tool_result_shapes"} & set(
+        live["pending"]
+    )
+
+
+def test_a_checked_tool_without_a_returned_shape_fails_closed(monkeypatch):
+    from harness import assurance_shapes
+
+    monkeypatch.setattr(
+        assurance_shapes,
+        "TOOL_RESULTS",
+        {
+            k: v
+            for k, v in assurance_shapes.TOOL_RESULTS.items()
+            if k != "get_component"
+        },
+    )
+    with pytest.raises(ValueError, match="get_component"):
+        contracts.build()
+
+
+def test_a_new_returned_field_breaks_and_a_new_version_is_additive(frozen):
+    changed = copy.deepcopy(frozen)
+    changed["answer_receipt"]["1"]["properties"]["confidence"] = {"type": "number"}
+    changed["evidence_identity"]["static-input/1"]["required"].append("note")
+    changed["checked_tool_results"]["get_component"]["title"] = "Renamed"
+    assert sorted(breaking_changes(frozen, changed)) == [
+        "$.answer_receipt.1 changed",
+        "$.checked_tool_results.get_component changed",
+        "$.evidence_identity.static-input/1 changed",
+    ]
+    added = copy.deepcopy(frozen)
+    added["answer_receipt"]["2"] = {"type": "object"}
+    added["evidence_identity"]["static-input/2"] = {"type": "object"}
+    added["checked_tool_results"]["new_tool"] = {"type": "object"}
+    assert breaking_changes(frozen, added) == []
+
+
+def test_a_result_outside_its_shape_is_refused():
+    from harness import assurance_shapes
+
+    meta = {"version": 1, "outcome": "completed", "evidence_ids": ["e"]}
+    run = {
+        "run_id": "r",
+        "status": "completed",
+        "finished_at": "2026-01-01T00:00:00Z",
+        "mode": "lopf",
+        "unsaved_inputs": False,
+        "metrics": {"objective": {"value": 1.0, "unit": "EUR"}},
+        "_assurance": meta,
+    }
+    assurance_shapes.validate_tool_result("get_run_evidence", run)
+    with pytest.raises(ValueError, match="get_run_evidence"):
+        assurance_shapes.validate_tool_result("get_run_evidence", {**run, "note": "x"})
+    with pytest.raises(ValueError):
+        assurance_shapes.validate_tool_result(
+            "ui_open_panel", {"_assurance": {**meta, "outcome": "maybe"}}
+        )

@@ -1329,7 +1329,7 @@ register("apply_generated_profile", Adapter("series_edit", _profile_preview, _pr
 
 
 # ── A load's demand series from an upload: apply_demand_from_excel (21c) ────
-# The tool's own parse and alignment (`chat_tools._demand_series`), so the
+# The tool's own parse and alignment (`chat_tools.demand_series`), so the
 # card shows the series the tool writes: peak, energy and load factor old
 # against new, and a binding of the load's uid, the upload's bytes, its sheet
 # and columns, and the aligned series' sha256 (in the digest).
@@ -1340,7 +1340,14 @@ def _demand_parsed(args: dict) -> tuple[Any, dict]:
     from services.pypsa_service import PyPSAService
 
     ctx = PyPSAService.get_active_context()
-    return ctx, chat_tools._demand_series(ctx, args)
+    return ctx, chat_tools.demand_series(ctx, args)
+
+
+def _demand_stats(n, values) -> dict[str, float]:
+    """The one stats computation the preview and the readback share."""
+    from services.profile_gen import card
+
+    return card._stats(n, values, True, "generators")
 
 
 def _demand_preview(args: dict) -> list[dict]:
@@ -1352,7 +1359,7 @@ def _demand_preview(args: dict) -> list[dict]:
     n, name = ctx.network, str(args.get("load_name"))
     old_v = card._current(n, "loads", "p_set", name)
     new_v = parsed["series"].to_numpy(dtype=float)
-    old, new = card._stats(n, old_v, True, "generators"), card._stats(n, new_v, True, "generators")
+    old, new = _demand_stats(n, old_v), _demand_stats(n, new_v)
     units = {"peak": "MW", "energy_mwh": "MWh", "load_factor": ""}
     rows = [{"component_class": "Load", "name": name, "field": f"p_set.{k}",
              "label": (f"Load factor ({card.LOAD_FACTOR_BASIS})" if k == "load_factor"
@@ -1375,9 +1382,9 @@ def _demand_binding(args: dict) -> dict:
     return {"load_uid": component_identity.get(ctx.network, "Load", name), "load_name": name,
             "file_id": args.get("file_id"), "upload_sha256": parsed["upload_sha256"], "sheet": parsed["sheet"],
             "time_col": args.get("time_col"), "value_col": args.get("value_col"),
-            "series_sha256": chat_tools._series_sha256(parsed["series"]),
+            "series_sha256": chat_tools.series_sha256(parsed["series"]),
             # What the write overwrites, as the solver reads it now.
-            "replaces_sha256": chat_tools._series_sha256(
+            "replaces_sha256": chat_tools.series_sha256(
                 ctx.network.get_switchable_as_dense("Load", "p_set", inds=[name])[name])}
 
 
@@ -1386,7 +1393,7 @@ def _demand_readback(args: dict, rows: list[dict]) -> list[Any]:
     from services.pypsa_service import PyPSAService
 
     n = PyPSAService.get_network()
-    stats = card._stats(n, card._current(n, "loads", "p_set", str(args.get("load_name"))), True, "generators")
+    stats = _demand_stats(n, card._current(n, "loads", "p_set", str(args.get("load_name"))))
     return [round(stats[row["field"].split(".", 1)[1]], 6) if row["role"] == "typed" else None for row in rows]
 
 

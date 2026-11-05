@@ -372,9 +372,9 @@ def test_load_shape_1_a_struck_or_proposed_row_is_never_planned(granted, upload)
 
 
 def test_q2_the_shared_helper_writes_byte_identical_p_set(site, upload):
-    """The refactor into one `_demand_series` changes no written byte."""
+    """The refactor into one `demand_series` changes no written byte."""
     file_id = upload()
-    expected = chat_tools._demand_series(ctx(), args(file_id))["series"]
+    expected = chat_tools.demand_series(ctx(), args(file_id))["series"]
     chat_tools.apply_demand_from_excel(**args(file_id))
     written_now = ctx().network.loads_t.p_set["L1"]
     assert written_now.to_numpy().tobytes() == expected.to_numpy().tobytes()
@@ -403,7 +403,7 @@ def test_g2_upload_bytes_swapped_after_admission_write_nothing_and_card(
     planned, site, monkeypatch
 ):
     task, path, file_id = planned()
-    real_series = chat_tools._demand_series
+    real_series = chat_tools.demand_series
     swaps = []
 
     def swapped(context, call_args):
@@ -416,7 +416,7 @@ def test_g2_upload_bytes_swapped_after_admission_write_nothing_and_card(
             ).write_bytes(OTHER_CSV)
         return real_series(context, call_args)
 
-    monkeypatch.setattr(chat_tools, "_demand_series", swapped)
+    monkeypatch.setattr(chat_tools, "demand_series", swapped)
     record = until(harness_runner.Runner("a"), path, task, stopped)
     assert swaps and carded(record)
     assert refusals(path)[-1] == "plan_changed"
@@ -446,7 +446,7 @@ def test_g2_at_the_write_itself_with_the_card_recheck_off(planned, site, monkeyp
 def test_g2_a_series_other_than_the_pinned_one_is_not_written(planned, monkeypatch):
     task, path, _ = planned()
     monkeypatch.setattr(edit_card, "require_current", lambda *a, **k: None)
-    real_series = chat_tools._demand_series
+    real_series = chat_tools.demand_series
 
     def other(context, call_args):
         out = real_series(context, call_args)
@@ -454,7 +454,7 @@ def test_g2_a_series_other_than_the_pinned_one_is_not_written(planned, monkeypat
             out = dict(out, series=out["series"] * 2)
         return out
 
-    monkeypatch.setattr(chat_tools, "_demand_series", other)
+    monkeypatch.setattr(chat_tools, "demand_series", other)
     record = until(harness_runner.Runner("a"), path, task, stopped)
     assert carded(record) and refusals(path)[-1] == "plan_changed"
     assert series() is None
@@ -487,14 +487,14 @@ def test_g10_a_replaced_series_that_moved_inside_the_handler_is_not_written(
     moved after admission (here inside the handler) is not the grant's card."""
     task, path, _ = planned()
     monkeypatch.setattr(edit_card, "require_current", lambda *a, **k: None)
-    real_series = chat_tools._demand_series
+    real_series = chat_tools.demand_series
 
     def moved(context, call_args):
         if run_envelope.PLANNED_WRITE.get() is not None:
             context.network.loads.at["L1", "p_set"] = 9.0
         return real_series(context, call_args)
 
-    monkeypatch.setattr(chat_tools, "_demand_series", moved)
+    monkeypatch.setattr(chat_tools, "demand_series", moved)
     record = until(harness_runner.Runner("a"), path, task, stopped)
     assert carded(record) and refusals(path)[-1] == "plan_changed"
     assert series() is None
@@ -628,7 +628,7 @@ def test_g3_a_parse_failure_at_admission_cards(planned, monkeypatch):
             400, {"error_kind": "value_column_parse_error", "message": "x"}
         )
 
-    monkeypatch.setattr(chat_tools, "_demand_series", broken)
+    monkeypatch.setattr(chat_tools, "demand_series", broken)
     record = until(harness_runner.Runner("a"), path, task, stopped)
     assert carded(record) and not written(path) and series() is None
 
@@ -891,3 +891,40 @@ def test_q3_a_profile_requiring_a_load_series_asks_for_it_until_an_intake_row_gi
     assert (
         run_profiles.EH_SITE["inputs"]["required"] == []
     )  # eh_site asks for none (Q3)
+
+
+# ── FILL-11-7 (21c cleanup) ───────────────────────────────────────────────
+
+
+def test_series_sha256_alias_is_the_public_function():
+    assert chat_tools._series_sha256 is chat_tools.series_sha256
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+def test_demand_stats_shared_by_preview_and_readback_match_master(site, upload, bad):
+    """Preview `old` and readback agree with master's inline `card._stats`
+    computation, non-finite `p_set` included."""
+    from harness import edit_card
+    from services.profile_gen import card
+
+    file_id = upload()
+    n = ctx().network
+    n.loads_t.p_set["L1"] = [bad, 3.0]
+    current = card._current(n, "loads", "p_set", "L1")
+    try:
+        master = card._stats(n, current, True, "generators")
+    except Exception as exc:  # noqa: BLE001 — the shared helper must raise the same
+        with pytest.raises(type(exc)):
+            edit_card._demand_preview(args(file_id))
+        return
+    rows = edit_card._demand_preview(args(file_id))
+    typed = [r for r in rows if r["role"] == "typed"]
+    got = edit_card._demand_readback(args(file_id), typed)
+    import math
+
+    for row, value in zip(typed, got):
+        k = row["field"].split(".", 1)[1]
+        want = round(master[k], 6)
+        assert (math.isnan(want) and math.isnan(row["old"]) and math.isnan(value)) or (
+            row["old"] == value == want
+        )

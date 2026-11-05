@@ -24,6 +24,8 @@ Run it from the coordinator's scratchpad (or pass ``--dir``), with any mix of::
 - ``--pr N`` adds or updates the prs row; give any of ``--title``, ``--stream``,
   ``--state``, ``--eta``, ``--head``, ``--unblocks`` and ``--note``.
 - ``--remove-pr N`` drops it.
+- ``--list`` prints one line per open-PR and session row and changes nothing:
+  paste its output into a coordinator brief rather than summarising the board.
 
 Every call appends one ``- HH:MMZ ...`` line to ``coordinator-state.md``
 (your ``--log`` text, else a summary of the edits) and prints the board's path,
@@ -118,12 +120,32 @@ def apply(rows, args, now):
     return notes
 
 
+def listing(rows):
+    """One line per open-PR row, then one per session row."""
+    lines = [
+        f"pr #{r.get('pr')} @{r.get('head', '-')} [{r.get('stream', '')}] "
+        f"{r.get('title', '')}: {r.get('state', '')}"
+        for r in rows
+        if r.get("board") == "prs"
+    ]
+    lines += [
+        f"session {r.get('session')}: {r.get('doing', '')} "
+        f"| waiting on {r.get('waiting_on', '-')} | needs you {r.get('needs_you', 'no')}"
+        for r in rows
+        if r.get("board") == "sessions"
+    ]
+    return lines
+
+
 def parser():
     p = argparse.ArgumentParser(
         description=__doc__.split("\n\n")[0],
         epilog="See the module docstring for the full flag list.",
     )
     p.add_argument("--dir", type=Path, default=Path(os.environ.get("COORD_DIR", ".")))
+    p.add_argument(
+        "--list", action="store_true", help="print the open-PR and session rows"
+    )
     p.add_argument("--log", help="state-log text (default: a summary of the edits)")
     p.add_argument("--session")
     p.add_argument("--remove-session")
@@ -147,6 +169,10 @@ def main(argv=None):
     state = args.dir / "coordinator-state.md"
     data = json.loads(board.read_text()) if board.exists() else {"rows": []}
     now = datetime.now(UTC)
+
+    if args.list:
+        print("\n".join(listing(data["rows"])))
+        return 0
 
     notes = apply(data["rows"], args, now)
     if not notes and not args.log:

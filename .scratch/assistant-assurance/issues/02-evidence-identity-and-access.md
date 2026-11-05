@@ -3,7 +3,7 @@
 
 # P1: authorized evidence identity and validity
 
-Status: done-pending-blockers (owner decision AA02-SCOPE-1, 2026-11-04) — every A1.1–A1.7 case this issue owns is executable and passing; the remaining items each name their blocker under "2026-11-04" below. Earlier slices: list_components page evidence (A1.1, current-input part of A1.3, A1.5 page capture) in #806; A1.2 revocation (#813, #818); get_timeseries steps (#826); A1.4 integrity (#840, #850); A1.3 run as-of (#856); A1.5 load aggregate (#864); A1.6/A1.7 aggregate validity (#868, #879); run manifest MAC (#930); run sections and compare (#941); REPLAY (#898), fact builder (#916), SERIES-WINDOW (#927), REVOKE-KIND (#929), frontend assurance_state (#946); partly converged AC PF and ACK access (2026-11-04)
+Status: done (#1132; the items left under "Remaining" live in their blocking issues 01, 03, 05, 06 and 12; owner decision AA02-SCOPE-1, 2026-11-04) — every A1.1–A1.7 case this issue owns is executable and passing; the remaining items each name their blocker under "2026-11-04" below. Earlier slices: list_components page evidence (A1.1, current-input part of A1.3, A1.5 page capture) in #806; A1.2 revocation (#813, #818); get_timeseries steps (#826); A1.4 integrity (#840, #850); A1.3 run as-of (#856); A1.5 load aggregate (#864); A1.6/A1.7 aggregate validity (#868, #879); run manifest MAC (#930); run sections and compare (#941); REPLAY (#898), fact builder (#916), SERIES-WINDOW (#927), REVOKE-KIND (#929), frontend assurance_state (#946); partly converged AC PF and ACK access (2026-11-04)
 Progress: Authorized retained evidence, ACL rechecks, run convergence gate shipped; displayed-data revision proof moved to [06](06-evidence-ux-and-navigation.md) (A5.2) and live-copilot LC-03 (AA02-SCOPE-1)
 Type: task
 Blocked by: 01 (completion clause: one approved contract on every channel); 03 (reviewer cache hit, cache revision); 05 (asset identity). Live-voice issue 06 is done and no longer blocks.
@@ -360,3 +360,15 @@ Audit against master `30417e89e` and the test matrix (sent to the coordinator be
 - **AC PF raw convergence (A1.7):** filed as [12](12-acpf-raw-convergence.md) (GK B (21) A5). `services/ac_pf_service.py` records every snapshot as converged when PyPSA returns no convergence frame or parsing it raises. The counts then read `n of n`, so this gate cannot see the gap: a run checked as converged is not yet proven to be.
 - **Completion clause** "every affected public channel uses the same approved contract": blocked by [01](01-output-contract-and-coverage.md) A0.4 (reviewed schemas, tickets 09–11).
 - Live-voice issue 06 is `Status: done`, so it no longer blocks this issue.
+
+### 2026-11-05 — FILL-11-6: identity and result shapes frozen in the v1 contract
+
+`evidence_and_receipt_identity` and `checked_tool_result_shapes` left the v1 snapshot's `pending` list. `harness/assurance_shapes.py` models the public evidence record per adapter version (`static-input/1`, `static-input-page/1`, `series-input/2`, `aggregate-load/1`, `run-metrics/1`, `run-section/1`, `run-compare/1`, `scoped_result`, `calculated_result`), the answer receipt per policy version and each checked tool's result; `assurance_contracts.v1.json` freezes them as `returns` contracts. The `tests/conftest.py` fixture `_returned_assurance_shapes` holds the suite to them. Still pending: `artifact_evidence_identity` (05) and `checked_chart_shape` (05).
+
+#### GK B (23) plan GO conditions (2026-11-05)
+
+1. **F1, receipt versions:** option (b). `answer_receipt` stays keyed by `POLICY_VERSION`; `test_every_frozen_receipt_version_is_accepted_by_both_readers` saves a real answer under each listed version and requires `assurance_records.answer()` to accept it and the version to equal what `pilot_evaluation.py` accepts. A bump without reader support fails CI. Met.
+2. **F2, pinned from what is served:** `tests/test_assurance_returned_shapes.py` reads the answer route, the evidence route and the checked stream's tool result on a real checked turn. The conftest fixture checks every public evidence record, built receipt and checked tool result across the suite. Met.
+3. **F3, notes are not contract:** `title` and `description` are stripped from the three `returns` schemas (`default` kept); `test_returned_schemas_carry_no_notes`. Met.
+4. **F4, additive in fact:** `test_the_change_is_additive_against_master` diffs against `6e1d5f963`'s snapshot (skips in a shallow CI checkout; passes locally). Kill-tests drop one adapter model and one checked-tool model; both raise. Met.
+5. **F5, no runtime change:** `assurance.py`, `assurance_records.py`, `pilot_evaluation.py` and the routes are untouched. Met.

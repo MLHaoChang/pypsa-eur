@@ -628,6 +628,7 @@ def run_simulation(
     # pre-LP checkpoint, or presolve/MIP option resolution). Reassigned to a
     # once-guarded wrapper after the apply; stays None on the PF path / pre-apply.
     restore_modelling = None
+    release_inputs = lambda: None  # noqa: E731 — issue 30; bound under the lock below
     try:
         # Compile user code + curtailment wrapper INSIDE the try so a
         # ValueError (e.g. user-code disabled gate) or SyntaxError gets
@@ -802,6 +803,12 @@ def run_simulation(
             # presolve. Cleared in both modes so PF also sees a clean state
             # whenever the user wants to resolve from scratch.
             _clear_dispatch_fix(network, phase)
+            # Issue 30: from here to the restore, readers outside the lock hash
+            # these inputs, never the transient transforms below. Held after
+            # the lasting normalisations above (transformer types, user series,
+            # dynamic indexes, a stale dispatch fix), which the network keeps.
+            from services.workflow_tools import hold_solve_inputs
+            release_inputs = hold_solve_inputs(network, lock)
 
             if config.mode == "lopf":
                 # SCLOPF dispatches to PyPSA's
@@ -1329,6 +1336,7 @@ def run_simulation(
                         except Exception as exc:
                             phase(f"Myopic restore: skipped one entry ({exc})")
                     restore_modelling()
+                    release_inputs()  # restored: the live inputs are the solve's inputs again
                 # Persist the commercial price frame only for a solve that
                 # produced a dispatch (re-review #5: no rows mixing one run's
                 # prices with another run's dispatch).
@@ -1711,6 +1719,7 @@ def run_simulation(
         # boundary; shutdown joins the watcher thread).
         _abort_watcher.shutdown()
         _heartbeat.shutdown()
+        release_inputs()  # issue 30: after every handler's restore; idempotent
         root_logger.removeHandler(queue_handler)
         tail_stop.set()
         # tail_thread may be None if compile/wrap raised before we spawned it.

@@ -1,0 +1,1 @@
+* Refactor(pypsa-gui): One `fence.fenced` helper builds every single-body untrusted-data fence in the chat harness; the demand card preview and readback share one stats helper, and `demand_series`/`series_sha256` are public. No behaviour change.

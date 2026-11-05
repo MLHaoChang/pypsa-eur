@@ -71,9 +71,7 @@ def review(turn, provider, model, packet, ctx):
         messages=[
             {
                 "role": "user",
-                "content": "<untrusted_data>"
-                + fence._neutralise_untrusted_delimiters(encoded_packet)
-                + "</untrusted_data>",
+                "content": fence.fenced(encoded_packet),
             }
         ],
         tools=[],
