@@ -21,6 +21,7 @@ from fastapi import HTTPException
 
 from db.models import Project, User
 from services import chat_service, chat_tools
+from harness.toolsets import STAGE_ONLY_TOOLS
 from services import gridspine_service as gs
 from services.chat_tools_schema import TOOL_ROUTES, TOOLS, safety_tier_for
 
@@ -217,8 +218,9 @@ def test_an_unbound_session_sees_only_the_create_tool():
     names = _names(chat_service._tools_payload(None))
     assert "gridspine_create_study" in names
     assert not (names & set(PROJECT_SCOPED))
-    # and every ordinary tool is still there
-    assert len(names) == len(TOOLS) - len(PROJECT_SCOPED)
+    # and every ordinary tool is still there (stage-only tools are offered
+    # only inside a harness run's own turns)
+    assert len(names) == len(TOOLS) - len(PROJECT_SCOPED) - len(STAGE_ONLY_TOOLS)
 
 
 def test_a_capacity_expansion_project_sees_only_the_create_tool(_auth_db, seeded_identity):
@@ -235,7 +237,7 @@ def test_a_capacity_expansion_project_sees_only_the_create_tool(_auth_db, seeded
 def test_a_planning_project_sees_every_gridspine_tool(study):
     names = _names(chat_service._tools_payload(_Ctx(str(study.id))))
     assert set(GRIDSPINE_TOOLS) <= names
-    assert len(names) == len(TOOLS)
+    assert len(names) == len(TOOLS) - len(STAGE_ONLY_TOOLS)
 
 
 def test_a_bad_binding_degrades_to_the_unbound_toolset_rather_than_failing():

@@ -152,6 +152,9 @@ export function stopWords(reason: string | undefined, stage: string): { words: s
     case 'uncertain':
     case 'step_uncertain':
       return { words: 'A step may or may not have run', fix: 'review', fixWords: 'Review the step' }
+    case 'exhausted': return { words: 'The assistant used all its rounds: the run waits for you', fix: 'resume', fixWords: 'Resume' }
+    case 'no_progress': return { words: 'The assistant stopped making progress: the run waits for you', fix: 'resume', fixWords: 'Resume' }
+    case 'unverified_write': return { words: 'The assistant made a change that could not be verified: the run waits for you', fix: 'review', fixWords: 'Review the step' }
     case 'locked': return { words: 'Another user is editing this project', fix: 'resume', fixWords: 'Try again' }
     case 'access': return { words: 'You can no longer edit this project', fix: null, fixWords: '' }
     case 'restarts':

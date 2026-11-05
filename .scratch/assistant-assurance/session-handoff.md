@@ -981,3 +981,16 @@ Open, not started:
   `test_p1_revocation.py`; a deleted project's 404 reads "You no longer have access
   to this project" in commit; `services/assurance_records.py` is not
   ruff-formatted (131 changed lines, layout only).
+
+## 2026-11-04 — issue 01 A0.4 contract freeze
+
+Branch `claude/assurance-01-a04-contracts` (from master 30417e89).
+`harness/assurance_contracts.py` with its snapshot `assurance_contracts.v1.json`,
+`effects.EffectContract` (enforced at the end of `effects.validate`),
+`tests/test_assurance_contracts.py` (25 passed) and
+`tests/assurance_acceptance/test_p0_server_owned_contracts.py` (15 passed).
+The spoof cases passed on first run. They pin behaviour master already had, so
+no red phase came from them. The drift and compatibility cases were written with
+the module. Policy version: contracts v1, additive-only rule (AA-V1-CHANGE-1).
+GK B OK @d36109ae is the contract review (AA-A04-REVIEW-1); issue 01 done. Next runnable tracer:
+issue 02 adds evidence/receipt identity as an additive `pending` → frozen entry.

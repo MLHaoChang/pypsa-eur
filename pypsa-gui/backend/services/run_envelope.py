@@ -595,6 +595,14 @@ class HeldTariffWithoutId(ValueError):
         super().__init__(f"a held Library tariff has no id (hash {self.ref['hash']}, version {self.ref['version']})")
 
 
+def shipped_ref_dumps(kind):
+    """Every shipped common Library item of `kind`, each ref dumped as
+    `list_items` lists it ({kind, id, version, hash}). Held-tariff detection
+    compares whole refs against this list (see `_library_tariffs`)."""
+    from services.library import common
+    return [common.ref(kind, name).model_dump(mode="json") for name in common.names(kind)]
+
+
 def _library_tariffs():
     """{hash: [name, version]} of the Library tariffs the project's
     organisation holds now (read as `attach_tariff` reads them). Only the
@@ -606,8 +614,7 @@ def _library_tariffs():
     the fill is refused (fail closed)."""
     from routers.library import ItemKind, list_items
     from services import chat_tools
-    from services.library import common
-    shipped = [common.ref("tariff", name).model_dump(mode="json") for name in common.names("tariff")]
+    shipped = shipped_ref_dumps("tariff")
     items = chat_tools._library_call(list_items, ItemKind.tariff)
     items = items.get("items", items) if isinstance(items, dict) else items
     out = {}

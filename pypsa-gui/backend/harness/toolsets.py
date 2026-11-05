@@ -19,6 +19,10 @@ CONTROL_TOOLS = frozenset({
     "list_result_views",
     "use_toolset", "project_readiness", "wait_for_job", "get_study_evidence",
 })
+# Tools offered only in a harness run's own turns (`session.stage_tools`),
+# never in chat: issue 09's ledger write works only inside a research turn.
+STAGE_ONLY_TOOLS = frozenset({"record_source"})
+
 DOMAINS = ("all", "project", "network", "simulation", "results", "gridspine")
 _PROJECT = frozenset({
     "list_projects", "list_scenarios", "create_scenario", "create_project_from_template",
