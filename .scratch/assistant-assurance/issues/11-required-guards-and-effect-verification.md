@@ -3,7 +3,8 @@
 
 # Required effect guards and independent completion verification
 
-Status: needs-triage
+Status: ready-for-agent
+Model: Opus
 Progress: Effect read-back for exact update_component only; general guards, untasked idempotency and task-resolution evidence pending
 Type: task
 Blocked by: reliability contract review; 01 for guard/receipt schemas; 04 for outcomes
@@ -46,3 +47,7 @@ and outcome verification without promoting a courtesy check into the authority.
 The strict allowlist now admits only an exact enabled static-input update contract, with argument snapshot, confirmation, project/input revision checks, pre-handler durable reservation and independently prepared/read-back postconditions. Late-worker tests prohibit hidden replay and publication while an effect is pending; completed-ID retries avoid extra dirty/undo work. All other unmapped strict mutations are refused. General per-tool guard maps, durable jobs/outboxes and distributed runtime remain pending.
 
 See [implementation status](../implementation-status.md), [contracts](../harness-contracts.md) and [coverage ledger](../coverage-ledger.md). The whole ticket remains open; no independent review verdict is inherited by this extension.
+
+### 2026-11-05: triage sweep (AA-FILL-2), role ready-for-agent
+
+Was: `needs-triage`. Files: `pypsa-gui/backend/harness/` guard/receipt code, `services/chat_tools.py` dispatch, task/job idempotency stores. Blockers: 04 (action and job outcomes; ready, a live session touches it, so start after it lands); 01 is done. Reviewer: GK B.

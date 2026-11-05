@@ -3,7 +3,8 @@
 
 # 26 — Plan card names the held tariffs a run may attach
 
-Status: needs-triage
+Status: ready-for-agent
+Model: Sonnet
 Type: task
 Blocked by: none
 Gated: yes (GK B reviews the plan; the UX reviewer reviews the card)
@@ -33,3 +34,9 @@ frontend change with its own UX review.
 
 - A frontend test renders a plan card with two held tariffs and with none.
 - The UX reviewer has passed the card.
+
+## Comments
+
+### 2026-11-05: triage sweep (AA-FILL-2), role ready-for-agent
+
+Was: `needs-triage`. Frontend change, read from the envelope the card already renders. Files: the plan card in `pypsa-gui/frontend/src/` (Study run plan card) and its test; the envelope field is `run_envelope._library_tariffs`. Blockers: none. Reviewers: GK B (plan) and UX (card).
