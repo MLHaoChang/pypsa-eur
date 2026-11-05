@@ -3,7 +3,7 @@
 
 # 28 — L1 ledger source is always None
 
-Status: ready-for-agent
+Status: done
 Type: bug
 Blocked by: 04
 Gated: yes (GK B)
