@@ -3,10 +3,10 @@
 Status: ready-for-agent
 Progress: Result-view registry #407, walk #410, retained load flow #416, common adapter + Summary,
 capacity, dispatch, prices and emissions families (#848, #861 and earlier) merged; LC-T08 ACL
-recheck and LC-T09/T10 browser cases (PR-I) merged; UI/export parity for past runs (PR-J, below)
-open. Slice 2: queue capture (PR-L, #1036) and study/report sections (PR-M, #1038) merged;
-undigestable prices and sections over 16 KB as typed not_kept stubs (PR-N, #1053) open.
-Remaining: the remaining LC-T09/T10 browser cases (PR-I list). LC-14 reach fixes outsourced.
+recheck and LC-T09/T10 browser cases (PR-I, PR-K) merged; UI/export parity for past runs (PR-J),
+queue capture (PR-L), study/report sections (PR-M) and typed not_kept stubs (PR-N) merged.
+Slice 3 (AA-FILL-2): LC-T07 branch oracle (PR-O) open; next PR-P, the LC-T10 run/generation
+race and the acceptance map. LC-14 reach fixes outsourced.
 Type: task
 Baseline: master `c75ca5584b873418f10f1bca42f868255d445b7b`
 Dependencies: LC-01/02 and current native evidence stores
@@ -544,6 +544,41 @@ Owner decision FILL-10-2, GK B (16) Q2 option 1 (values never trimmed). Branch
   statistics and cost_breakdown; listing, run view, both exports, checked read,
   compare; the pin.
 
+### PR-O, LC-T07 branch oracle (2026-11-05)
+
+Owner decision AA-FILL-2; GK B (25) plan GO with changes (O1–O6, Comments).
+Branch `claude/lc03-t07-branch-oracle`, from master `e98226bd`. Test only.
+
+- `tests/test_lc03_t07_branch_oracle.py`. Fixture: one line, 100 MVA, two
+  snapshots (one per investment period, one year each, weights 1 and 3). p0 is
+  45 then 64 and p1 is -45 then -65, so the larger magnitude at snapshot 2 sits on
+  p1 (O2, flipped from the GK example so a p0-only reader also goes RED).
+  `lines_t.s_max_pu` is 1 then 0.5, and the static column is 0.8 (O3). Hand
+  oracle: 130 % peak utilisation, 65 % nameplate, 3 h over the limit, 3 h at the
+  limit, 4 weighted hours, mean 108.75 %, basis `active_power_proxy`, source
+  lopf, window 0..1. Over the first snapshot alone (O4): 45 %, 45 %, 0 h, 1 h.
+- Readers, each asserted against those literal numbers (O1):
+  `get_loadflow_summary` whole and sub-window; `/api/results/loadflow-view`
+  whole and sub-window, including the chart series; the results workbook's Load
+  Flow sheet, horizon and per period (period 2030 is the sub-window); the kept
+  `loadflow` section through `get_loadflow_summary(run_id=)`;
+  `/api/results/run-view`; `export_run_evidence`. The past run is published
+  through the real `start_foreground_run`/`publish_foreground_run` capture. The
+  line is then re-rated and solved again, so a fallback to current results fails.
+  A past run does not take a sub-window; it refuses `historical_scope_mismatch`
+  and names the captured window.
+- O5: `claims.full_ac_thermal_compliance is False` on every payload that has
+  claims (the workbook has none and carries the disclaimer text). The wording
+  check takes out the literal disclaimer, then finds no "thermal" or "complian"
+  in the chat, route, workbook, section, run view or export text.
+- RED/mutants (none of the readers disagreed on master, so no fix was needed):
+  p0-only flow, signed flow, static s_max_pu, the claim set to None, and a
+  reworded disclaimer each fail 6 or 7 of the 7 cases.
+- Finding, not fixed (display only): on a multi-period network `peak_at` reads
+  as a raw tuple repr, `(np.int64(2040), Timestamp('2030-01-01 00:00:00'))`, in
+  the chat tool, the tab and the workbook. The test pins only the snapshot it
+  names.
+
 ## Comments
 
 - GK B (15) plan GO, conditions: (1) at the trial merge run
@@ -578,6 +613,22 @@ Owner decision FILL-10-2, GK B (16) Q2 option 1 (values never trimmed). Branch
   compare, discuss_project_run, workbook Scenarios, the chooser) treats
   status=not_kept as absent-with-reason, never data; (j) live digest failure and
   past-run read name the same reason from one constant.
+- GK B (25) slice 3 plan GO WITH CHANGES (AA-FILL-2, 2026-11-05). PR-O (LC-T07
+  branch oracle): (O1) every reader asserted against the literal hand oracle (130 %,
+  65 %, 3 weighted hours, units, window bounds, source), not reader against reader;
+  (O2) p0 and p1 differ (snapshot 2: p0=-65, p1=64) so a p0-only or signed reader
+  goes RED; (O3) time-varying `lines_t.s_max_pu` with a different static column, so
+  a static reader goes RED; (O4) a sub-window excluding snapshot 2 gives 45 % / 0 h /
+  the narrowed window on every reader; (O5) `claims.full_ac_thermal_compliance` is
+  exactly False on every surface carrying claims, and the wording check covers the
+  workbook and retained/export payloads; (O6) a fix shows RED on master, a killed
+  mutant, the reader's own test file, a release-note fragment, and the three route
+  policy tests at the trial merge if a route changes. PR-P (LC-T10 run/generation
+  race): (P1) claim-specific locators for the retained view and pending ACK (#998);
+  (P2) dropping the generation check in the ACK cancel goes RED; (P3) the
+  useLiveSpeech rebind case counts only if it asserts this answer's speech is
+  dropped, else add one; (P4) any UI change needs UX review; (P5) the acceptance map
+  names file::test per case, gaps as `_pending` rows with a ticket.
 
 ### LC-03 follow-ups (2026-11-03)
 
