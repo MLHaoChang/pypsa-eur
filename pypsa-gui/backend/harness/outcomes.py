@@ -279,10 +279,9 @@ def _coerce(df, component_class, attr, value):
     if attr not in df.columns:
         return UNCOMPARABLE
     try:
-        coerced = _coerce_bulk_value(df, attr, value, component_class)
+        return _coerce_bulk_value(df, attr, value, component_class)
     except Exception:  # noqa: BLE001 - a refused value is not comparable
         return UNCOMPARABLE
-    return coerced.get(attr, UNCOMPARABLE) if isinstance(coerced, dict) else UNCOMPARABLE
 
 
 def _requested(tool: str, args: dict) -> tuple[str, list[dict]]:

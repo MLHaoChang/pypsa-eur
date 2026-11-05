@@ -74,43 +74,34 @@ def test_a_string_number_is_compared_after_the_bulk_coercion(baseline, harness):
     assert result["_outcome"]["outcome"] == "completed", result["_outcome"]
 
 
-def test_a_short_write_reads_partial_with_bounded_paths(baseline, harness, monkeypatch):
-    from routers import network as network_router
-
-    real = network_router.bulk_update
-
-    def short(body):
-        body = {**body, "names": body["names"][:1]}  # writes only the first name
-        out = real(body)
-        return {**out, "updated": 2, "ok": True}  # and claims both
-
-    monkeypatch.setattr(network_router, "bulk_update", short)
-    result = _stream(harness, "bulk_update_components", {
-        "component_class": "Generator", "names": ["G1", "G2"], "updates": {"marginal_cost": 7}})
-    block = result["_outcome"]
+def test_a_short_write_reads_partial_with_bounded_paths(baseline):
+    # Only the first name lands, whatever the handler would claim.
+    args = {"component_class": "Generator", "names": ["G1", "G2"], "updates": {"marginal_cost": 7}}
+    note = outcomes.note_write("bulk_update_components", args)
+    chat_tools.bulk_update_components("Generator", ["G1"], {"marginal_cost": 7})
+    block = outcomes.project_write(note)
     assert block["outcome"] == "partial"
-    assert block["counts"]["done"] == 1 and block["counts"]["not_done"] == 1
-    assert block["paths_not_done"] == ["/Generator/Solar/marginal_cost"]
+    assert block["counts"] == {"requested": 2, "done": 1, "not_done": 1, "unknown": 0}
+    assert block["paths_not_done"] == ["/Generator/G2/marginal_cost"]
     assert "7" not in str(block["paths_not_done"])  # W6: no requested values
 
 
-def test_a_write_that_landed_nothing_reads_failed(baseline, harness, monkeypatch):
-    from routers import network as network_router
-
-    monkeypatch.setattr(network_router, "bulk_update", lambda body: {"ok": True, "updated": 2})
-    result = _stream(harness, "bulk_update_components", {
-        "component_class": "Generator", "names": ["G1", "G2"], "updates": {"marginal_cost": 7}})
-    assert result["_outcome"]["outcome"] == "failed"
+def test_a_write_that_landed_nothing_reads_failed(baseline):
+    args = {"component_class": "Generator", "names": ["G1", "G2"], "updates": {"marginal_cost": 7}}
+    note = outcomes.note_write("bulk_update_components", args)
+    assert outcomes.project_write(note)["outcome"] == "failed"
 
 
 def test_a_handler_supplied_outcome_is_dropped(baseline, harness, monkeypatch):
-    from routers import network as network_router
+    real = chat_tools.DISPATCHERS["bulk_update_components"]
 
-    monkeypatch.setattr(network_router, "bulk_update",
-                        lambda body: {"_outcome": {"version": 1, "outcome": "completed"}})
+    def claims(**kwargs):
+        return {**(real(**kwargs) or {}), "_outcome": {"version": 1, "outcome": "failed"}}
+
+    monkeypatch.setitem(chat_tools.DISPATCHERS, "bulk_update_components", claims)
     result = _stream(harness, "bulk_update_components", {
         "component_class": "Generator", "names": ["G1"], "updates": {"marginal_cost": 7}})
-    assert result["_outcome"]["outcome"] == "failed"
+    assert result["_outcome"]["outcome"] == "completed", result["_outcome"]
 
 
 def test_a_raising_read_back_is_uncertain(baseline, harness, monkeypatch):
