@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+from harness.providers import live_media
 from services import durable_conversation as dc
 from services import live_speech as ls
 from services import utterance_admission as ua
@@ -184,20 +185,19 @@ def test_a_one_word_final_is_never_echo(transport, monkeypatch):
     assert _final(tid, token, sid, "s3", 3, "apply it")["status"] == "final_accepted"
 
 
-def test_only_the_last_words_of_a_long_answer_are_kept(transport, monkeypatch):
-    # E3: bounded per claim.
+def test_words_are_kept_from_the_start_up_to_the_bound(transport, monkeypatch):
+    # E3: bounded per claim, opening kept (the bound never cuts a speakable answer).
+    assert ls.ECHO_WORDS_MAX >= live_media.MAX_TTS_TEXT_CHARS // 2
     monkeypatch.setattr(ls, "ECHO_WORDS_MAX", 8)
     answer = "one two three four five six seven eight nine ten eleven twelve"
     tid, sid, token, _ = _speaking(monkeypatch, answer)
     kept = ls._RECENT_SPOKEN[sid][-1]["words"]
-    assert kept == answer.split()[-8:]
+    assert kept == answer.split()[:8]
     assert (
-        _final(tid, token, sid, "s2", 2, "one two three")["status"] == "final_accepted"
+        _final(tid, token, sid, "s2", 2, "ten eleven twelve")["status"]
+        == "final_accepted"
     )
-    assert (
-        _final(tid, token, sid, "s3", 3, "ten eleven twelve")["status"]
-        == "echo_ignored"
-    )
+    assert _final(tid, token, sid, "s3", 3, "one two three")["status"] == "echo_ignored"
 
 
 def test_rebind_forgets_what_was_spoken(transport, monkeypatch):
@@ -344,3 +344,16 @@ def test_owner_reads_notices_over_http_without_transcript(client, transport):
     assert got.status_code == 200
     assert [(n["status"], n["seq"]) for n in got.json()["notices"]] == [("clarify", 1)]
     assert text not in got.text and "no 400" not in got.text
+
+
+def test_echo_of_a_long_answers_opening_is_ignored(transport, monkeypatch):
+    # GK B (25) NOT OK @5029b0d7: the opening of a long answer is heard first.
+    words = [f"w{i}" for i in range(400)]
+    answer = " ".join(words)
+    answer += " " + "z" * (live_media.MAX_TTS_TEXT_CHARS - len(answer) - 1)
+    assert len(answer) == live_media.MAX_TTS_TEXT_CHARS and len(words) > 256
+    tid, sid, token, _ = _speaking(monkeypatch, answer)
+    echo = _final(tid, token, sid, "s2", 2, "w0 w1 w2 w3")
+    assert echo["status"] == "echo_ignored"
+    tail = _final(tid, token, sid, "s3", 3, "w397 w398 w399")
+    assert tail["status"] == "echo_ignored"

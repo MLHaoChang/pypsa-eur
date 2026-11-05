@@ -138,8 +138,10 @@ _TURN_EPOCH: dict[str, int] = {}
 # audio can still echo); dropped with the session.
 _RECENT_SPOKEN: dict[str, list[dict[str, Any]]] = {}
 RECENT_SPOKEN_MAX = 4
-# Words kept per claimed answer: the last ones, the audio most recently heard.
-ECHO_WORDS_MAX = 256
+# Words kept per claimed answer, from its start (the opening is heard first).
+# A word takes at least one character plus a separator, so this never cuts an
+# answer short enough to be spoken (GK B (25) NOT OK @5029b0d7).
+ECHO_WORDS_MAX = live_media.MAX_TTS_TEXT_CHARS // 2
 ECHO_MIN_WORDS = 3
 # Echo window on time.monotonic(), from the claim:
 #   ECHO_BASE_S + chars / ECHO_CHARS_PER_S  (5 s plus about 1 s per 12 characters
@@ -960,7 +962,7 @@ def claim_output(thread_id: str, *, token: str, session_id: str) -> dict[str, An
             output['state'] = 'claimed'
             recent = _RECENT_SPOKEN.setdefault(session_id, [])
             _bounded_append(recent, {
-                'words': _words(output['text'])[-ECHO_WORDS_MAX:],
+                'words': _words(output['text'])[:ECHO_WORDS_MAX],
                 'claimed_at': time.monotonic(),
                 'chars': output['chars'],
             }, RECENT_SPOKEN_MAX)

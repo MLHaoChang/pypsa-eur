@@ -233,7 +233,7 @@ after barge-in, dropped on every session exit). `submit_segment` returns
 within `ECHO_BASE_S + chars / ECHO_CHARS_PER_S` (5 s + 1 s per 12 characters)
 of its claim. Shorter finals are never echo; the bare-approval rule still
 guards "yes". No new error kind and no route change. Tests:
-`tests/test_live_speech_echo_lc07.py` (11; 27 after E1–E7 and the code review). They cover an echo during
+`tests/test_live_speech_echo_lc07.py` (11; 28 after E1–E7, the code review and GK B's NOT OK). They cover an echo during
 playback, the same words after the window, user speech over playback, echo
 after barge-in, short overlaps such as "7.5 MW", reordered words, the session
 exit, and overlap: three finals during a running turn give one admitted turn
@@ -254,8 +254,12 @@ pending, the echoed "yes" is refused by the bare-approval rule
 the echoed "yes apply it" is `echo_ignored`; the card stays pending.
 E2 min words: a "yes" or "apply it" heard during that answer is an ordinary
 final; the 1- and 2-word threshold mutants fail.
-E3 bounded state: the last `ECHO_WORDS_MAX` (256) words of each claim are kept
-(test with the bound at 8); `_RECENT_SPOKEN` is read and written only under
+E3 bounded state: each claim keeps its words from the start, up to
+`ECHO_WORDS_MAX` = `MAX_TTS_TEXT_CHARS // 2` (1000), which never cuts a
+speakable answer (GK B (25) NOT OK @5029b0d7: the first cut kept the last 256
+words, so an echo of a long answer's opening was admitted; a test with a
+2000-character, 401-word answer echoing "w0 w1 w2 w3" failed first, then
+passed; a test with the bound at 8 shows the opening is kept); `_RECENT_SPOKEN` is read and written only under
 `_TICKETS_LOCK`; a rebind clears it (test).
 E4 (option 1 of three put to GK B): a final that gets no ticket
 (`echo_ignored`, `clarify`, `not_an_approval`) leaves a notice
