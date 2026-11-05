@@ -4240,10 +4240,10 @@ def _dispatch_real_tool_call(
         and isinstance(result_for_model, dict)
     ):
         # Issue 04 (A3.1/A3.3): the outcome from an independent read, never
-        # the handler's own status fields.
+        # the handler's own status fields. First, so a truncated preview keeps it.
         result_for_model = {
-            **result_for_model,
             "_outcome": outcomes.project(tool_name, args or {}, tool_use_id),
+            **{k: v for k, v in result_for_model.items() if k != "_outcome"},
         }
     if session.assurance_turn is not None:
         projection = session.assurance_turn.result_projection(

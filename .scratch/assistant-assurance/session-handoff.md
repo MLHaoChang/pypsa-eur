@@ -1001,7 +1001,7 @@ Audit against master ad12e8c79 and the slice plan S1–S5 are in issue 04's
 Comments (GK B (24) verdicts, UX (9) S1b rules). S1 adds `harness/outcomes.py`
 and an `_outcome` block on run_simulation, run_ac_pf_stage, wait_for_job and
 abort_simulation results in ordinary turns. Tests:
-`tests/assurance_acceptance/test_p3_job_outcomes.py` (58). First red: the
+`tests/assurance_acceptance/test_p3_job_outcomes.py` (59; GK B (25) NOT OK @23d07886: `_outcome` now leads the result so truncation keeps it, red-then-green test). First red: the
 module import, then `KeyError: '_outcome'` on wait_for_job over a failed job;
 green after the build. Mutation check: 20 mutants of `classify`/`project`, 20
 killed. Regression set (p3 outcomes, harness reliability effect/reconcile,

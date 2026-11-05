@@ -374,3 +374,22 @@ def test_classify_refuses_a_submission_missing_an_identity_field(field):
 def test_classify_without_a_submission_or_read_is_uncertain():
     assert outcomes.classify("wait_for_job", None, _READ)["outcome"] == "uncertain"
     assert outcomes.classify("wait_for_job", _EXP, None)["outcome"] == "uncertain"
+
+
+def test_the_outcome_survives_truncation_of_a_long_result(fg_job, harness, monkeypatch):
+    # GK B (25) #1150: a result over 4000 chars becomes a preview; the outcome leads it.
+    monkeypatch.setattr(
+        ja,
+        "wait_foreground_job",
+        lambda job_id, *a, **k: {
+            "job": {"id": job_id, "status": "completed"},
+            "completed": True,
+            "note": "x" * 5000,
+        },
+    )
+    fg_job["settle"](status="failed")
+    result = _stream_wait(harness, fg_job["job_id"])
+    assert result["_truncated"] is True
+    assert result["preview"].startswith(
+        '{"_outcome": {"version": 1, "outcome": "failed"'
+    )
