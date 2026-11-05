@@ -19,6 +19,7 @@ import { resultsApi } from '../api/simulation'
 import { projectsApi } from '../api/projects'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
+import { acPfConvergenceText } from '../utils/acPfConvergence'
 import { updateAsset } from '../utils/assetWrite'
 import type { RescalePreview } from '../utils/rescale'
 import { isRenewableCarrier } from '../utils/carriers'
@@ -1939,9 +1940,21 @@ export default function TopologyCanvas() {
   // snapshot so we can correlate it to the convergence map.
   const { data: snap } = useQuery({ queryKey: nk(currentProject, 'snapshots'), queryFn: networkApi.getSnapshots })
   const currentSnapIso = snap?.snapshots?.[Math.min(resultsSnapshotIdx, (snap?.count ?? 1) - 1)] ?? ''
-  const currentSnapConverged = !acPfAvailable || resultSource !== 'ac_pf'
-    ? true
-    : (acPfStatus?.converged_per_snapshot?.[currentSnapIso] ?? true)
+  // true | false | 'unknown' (AA-12: PyPSA did not report it). A snapshot
+  // with no entry keeps the old "no banner"; a recorded null is never true.
+  // The period-aware `converged_list` is parallel to n.snapshots, so the
+  // selected index finds its row even when an ISO repeats across periods; the
+  // legacy ISO-keyed map is the fallback only when the list doesn't line up.
+  const currentSnapConvergence: boolean | 'unknown' = (() => {
+    if (!acPfAvailable || resultSource !== 'ac_pf') return true
+    const snapIdx = Math.min(resultsSnapshotIdx, (snap?.count ?? 1) - 1)
+    const list = acPfStatus?.converged_list
+    const row = list && list.length === snap?.count ? list[snapIdx] : undefined
+    if (row && row.snapshot === currentSnapIso) return row.ok ?? 'unknown'
+    const map = acPfStatus?.converged_per_snapshot
+    if (!map || !(currentSnapIso in map)) return true
+    return map[currentSnapIso] ?? 'unknown'
+  })()
 
   const { data: buses = [] }      = useQuery({ queryKey: nk(currentProject, 'buses'),         queryFn: networkApi.getBuses })
   const { data: lines = [], isPending: linesPending }      = useQuery({ queryKey: nk(currentProject, 'lines'),         queryFn: networkApi.getLines })
@@ -3043,7 +3056,13 @@ export default function TopologyCanvas() {
           CanvasResultsContext when ac_pf snapshot is missing for that hour),
           so this banner explains why the displayed numbers aren't the AC
           values the user asked for. */}
-      {resultsOverlayEnabled && acPfAvailable && resultSource === 'ac_pf' && !currentSnapConverged && (
+      {resultsOverlayEnabled && acPfAvailable && resultSource === 'ac_pf' && currentSnapConvergence === 'unknown' && (
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[850] bg-panel/95 text-text border border-border text-[11px] rounded shadow-lg px-3 py-1.5 flex items-center gap-2 max-w-[640px]">
+          <span className="text-base leading-none text-muted">?</span>
+          <span>AC Power Flow convergence was not reported for this snapshot: its values are not checked.</span>
+        </div>
+      )}
+      {resultsOverlayEnabled && acPfAvailable && resultSource === 'ac_pf' && currentSnapConvergence === false && (
         <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[850] bg-warn/95 text-white text-[11px] rounded shadow-lg px-3 py-1.5 flex items-center gap-2 max-w-[640px]">
           <span className="text-base leading-none">⚠</span>
           <span>
@@ -3227,7 +3246,7 @@ export default function TopologyCanvas() {
                     drives both so the choice stays consistent across views. */}
                 {resultsOverlayEnabled && acPfAvailable && (
                   <div className="flex flex-col border border-border rounded-md overflow-hidden text-[9.5px]"
-                    title={`AC PF: ${acPfStatus?.converged_count ?? 0}/${acPfStatus?.total_snapshots ?? 0} snapshots converged`}>
+                    title={`AC PF: ${acPfConvergenceText(acPfStatus).short}`}>
                     <button
                       type="button"
                       onClick={() => setResultSource('lopf')}

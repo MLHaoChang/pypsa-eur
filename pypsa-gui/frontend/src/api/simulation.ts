@@ -1280,6 +1280,10 @@ export type CurtailmentByCausePayload =
   | { status: 'not_established'; reason: CurtailmentNotEstablishedReason | (string & {})
       plants: Record<string, CurtailmentByCausePlant> }
 
+// One AC PF convergence row: `ok: null` means PyPSA did not report convergence
+// for that snapshot (unknown: neither converged nor failed).
+export type AcPfConvergenceRow = { snapshot: string; period?: number | string | null; ok: boolean | null }
+
 export const resultsApi = {
   getCostBreakdown: () => client.get<CostBreakdown>('/results/cost_breakdown').then(r => r.status === 204 ? null : r.data),
   getStatistics: () => client.get('/results/statistics').then(r => r.status === 204 ? null : r.data),
@@ -1739,11 +1743,17 @@ export const resultsApi = {
     stripped_voll_slacks?: string[]
     // Legacy `{iso: bool}` dict — ambiguous on multi-period (same iso under
     // different periods collapses). Kept for backward compatibility.
-    converged_per_snapshot?: Record<string, boolean>
+    // `null` = PyPSA did not report convergence for that snapshot (AA-12).
+    converged_per_snapshot?: Record<string, boolean | null>
     // Period-aware list — preferred. Each entry carries the original tuple
     // info so the frontend can match snapshot+period unambiguously.
-    converged_list?: Array<{ snapshot: string; period?: number | string | null; ok: boolean }>
-    converged_count?: number
+    // `ok: null` is unknown: neither converged nor failed.
+    converged_list?: AcPfConvergenceRow[]
+    // null while any snapshot's convergence is unknown.
+    converged_count?: number | null
+    // Display only: snapshots known to have converged ("k / n · u unknown").
+    known_converged_count?: number
+    unknown_count?: number
     total_snapshots?: number
   }>('/results/ac_pf/status').then(r => r.status === 204 ? null : r.data),
   // Per-asset economics: revenue, fixed/variable cost, net profit, LCOE/LCOS.

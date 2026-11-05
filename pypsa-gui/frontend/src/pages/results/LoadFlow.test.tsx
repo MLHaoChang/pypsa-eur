@@ -246,3 +246,22 @@ it('Guided shows Branch loading with the assistant branch highlighted, as Expert
   expect(useUIStore.getState().uiMode).toBe('guided')
   useUIStore.setState({ uiMode: 'expert', resultsHighlight: null })
 })
+
+it.each([
+  ['all unknown', { known_converged_count: 0, unknown_count: 4 }, 'Unknown / 4', 'PyPSA did not report convergence for 4 of 4 snapshots: their AC values are not checked. Re-run Stage 2, or use the LOPF results.'],
+  ['mixed', { known_converged_count: 2, unknown_count: 1 }, '2 / 4 · 1 unknown', 'PyPSA did not report convergence for 1 of 4 snapshots: their AC values are not checked. Re-run Stage 2, or use the LOPF results.'],
+] as const)('AA-12: AC PF status shows unknown convergence (%s) as unknown, never as converged', async (_case, counts, kpi, note) => {
+  const oks = counts.unknown_count === 4 ? [null, null, null, null] : [true, true, false, null]
+  const list = oks.map((ok, i) => ({ snapshot: `2026-01-01T0${i}:00:00`, period: null, ok }))
+  vi.mocked(resultsApi.getAcPfStatus).mockResolvedValue({
+    available: true, slack_bus_used: 'B1', stripped_voll_slacks: [],
+    converged_list: list, converged_per_snapshot: Object.fromEntries(list.map(r => [r.snapshot, r.ok])),
+    converged_count: null, total_snapshots: 4, ...counts,
+  })
+  const { findByText, queryByText } = renderPage()
+  expect(await findKpiValue(kpi)).toBeTruthy()
+  expect(await findByText(note)).toBeTruthy()
+  expect(queryByText('All snapshots converged.')).toBeNull()
+  if (counts.unknown_count === 4) expect(queryByText(/non-converged snapshot/)).toBeNull()
+  else expect(await findByText('1 non-converged snapshot')).toBeTruthy()
+})

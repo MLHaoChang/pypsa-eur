@@ -214,9 +214,13 @@ def _ac_convergence(n: Any, win_index: pd.Index, start: int, end: int,
             or any(not isinstance(e, dict) for e in entries)):
         info["per_snapshot"] = "unaligned"
         return None, info
-    ok = np.array([e.get("ok") is True for e in entries[start:end + 1]])
+    window = entries[start:end + 1]
+    ok = np.array([e.get("ok") is True for e in window])
     info["per_snapshot"] = "aligned"
-    info["unconverged_in_window"] = int((~ok).sum())
+    # Only a reported False is unconverged; a null `ok` (AA-12) is unknown.
+    # Both are excluded from the loading.
+    info["unconverged_in_window"] = sum(1 for e in window if e.get("ok") is False)
+    info["unknown_in_window"] = sum(1 for e in window if e.get("ok") is None)
     return ok, info
 
 

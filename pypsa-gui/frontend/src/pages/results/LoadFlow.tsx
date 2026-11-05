@@ -7,7 +7,7 @@ import {
 } from 'recharts'
 import { Download } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { resultsApi } from '../../api/simulation'
+import { resultsApi, type AcPfConvergenceRow } from '../../api/simulation'
 import { networkApi } from '../../api/network'
 import type { Bus } from '../../api/types'
 import { type TSPayload, fmtPower, shortStamp, downloadCSV, KPI, ChartActions, Seg,
@@ -20,6 +20,7 @@ import { useResultsWindow } from '../../hooks/useResultsWindow'
 import { useUIStore } from '../../store/uiStore'
 import ResultState, { StatePill } from '../../components/ResultState'
 import { nk } from '../../utils/queryKeys'
+import { acPfConvergenceText } from '../../utils/acPfConvergence'
 import { openPanel } from './openPanel'
 
 // Branch loading is the native, source-attested server projection used by
@@ -72,6 +73,7 @@ export default function LoadFlow() {
   // per-snapshot queries below can be windowed before any payload exists.
   const { win, winValid, fetchRange } = useResultsWindow(currentProject)
   const { data: acPfStatus } = useQuery({ queryKey: nk(currentProject, 'results', 'ac_pf', 'status'), queryFn: resultsApi.getAcPfStatus })
+  const acPfText = acPfConvergenceText(acPfStatus)
   const acPfAvailable = !!acPfStatus?.available
 
   const { data: linesTS } = useQuery({
@@ -448,7 +450,7 @@ export default function LoadFlow() {
                 className={`px-2.5 py-1 transition-colors ${
                   resultSource === 'ac_pf' ? 'bg-accent text-white' : 'bg-bg text-muted hover:text-text'
                 }`}
-                title={`AC Power Flow results (${acPfStatus?.converged_count ?? 0}/${acPfStatus?.total_snapshots ?? 0} converged)`}
+                title={`AC Power Flow results (${acPfText.short})`}
               >AC PF</button>
             </div>
           )}
@@ -940,12 +942,14 @@ export default function LoadFlow() {
         <section>
           <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2">AC Power Flow status</h3>
           <div className="grid grid-cols-3 gap-2">
-            <KPI label="Snapshots converged"
-              value={`${acPfStatus.converged_count} / ${acPfStatus.total_snapshots}`} />
+            <KPI label="Snapshots converged" value={acPfText.kpi} />
             <KPI label="Slack bus" value={acPfStatus.slack_bus_used ?? '—'} />
             <KPI label="VOLL slacks stripped"
               value={`${(acPfStatus.stripped_voll_slacks ?? []).length}`} />
           </div>
+          {acPfText.note && (
+            <p className="text-[11px] text-muted mt-2">{acPfText.note}</p>
+          )}
           {/* List of non-converged snapshots — clickable to jump the canvas's
               snapshot picker there so the user can inspect the LP fallback. */}
           {(() => {
@@ -953,14 +957,16 @@ export default function LoadFlow() {
             // legacy `converged_per_snapshot` dict can't disambiguate same-iso
             // entries from different periods — indexOf would always pick
             // period 0's row. The list carries `period` so we can match both.
-            type ConvRow = { snapshot: string; period?: number | string | null; ok: boolean }
-            const list = (acPfStatus.converged_list ?? []) as ConvRow[]
-            const failedList: ConvRow[] = list.length > 0
-              ? list.filter(r => !r.ok)
+            // Only a reported failure (`ok === false`) is listed; unknown
+            // (`ok: null`, AA-12) is neither failed nor converged.
+            const list = acPfStatus.converged_list ?? []
+            const failedList: AcPfConvergenceRow[] = list.length > 0
+              ? list.filter(r => r.ok === false)
               : Object.entries(acPfStatus.converged_per_snapshot ?? {})
-                  .filter(([, ok]) => !ok)
+                  .filter(([, ok]) => ok === false)
                   .map(([iso]) => ({ snapshot: iso, ok: false }))
             if (failedList.length === 0) {
+              if ((acPfStatus.unknown_count ?? 0) > 0) return null
               return <p className="text-[11px] text-muted mt-2">All snapshots converged.</p>
             }
             // Build a lookup keyed by `period|iso` (or just iso for flat) so
