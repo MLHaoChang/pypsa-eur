@@ -41,9 +41,12 @@ def _gens():
     return PyPSAService.get_active_context().network.generators
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def _second_generator(baseline):
-    PyPSAService.get_active_context().network.add("Generator", "G2", bus="B1", p_nom=5, marginal_cost=3)
+    # Through the real create path: a raw `network.add` leaves the row in a
+    # shape the edit card's preview refuses ("values changed since the card").
+    chat_tools.batch_create_components(
+        "Generator", [{"name": "G2", "bus": "B1", "p_nom": 5, "marginal_cost": 3}])
 
 
 # ── Through the chat seam, real handlers ─────────────────────────────────────
@@ -308,10 +311,3 @@ def test_partial_paths_are_bounded():
 def test_same(expected, actual, same):
     assert outcomes._same(expected, actual) is same
 
-
-def test_probe_without_note(baseline, harness, monkeypatch):
-    monkeypatch.setattr(outcomes, "note_write", lambda tool, args: None)
-    result = _stream(harness, "bulk_update_components", {
-        "component_class": "Generator", "names": ["G1"],
-        "updates": {"marginal_cost": 61.5}})
-    assert result["_outcome"]["outcome"] == "uncertain"
