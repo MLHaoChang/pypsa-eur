@@ -48,9 +48,9 @@ NAME_CHARS = 60
 NETWORK, STUDY = "network", "study"
 # Domains whose experiment adapters are live-voice 10's (not built here).
 NOT_RUNNABLE = {
-    "commercial": "Commercial cases need the commercial experiment adapter, which is not built yet.",
-    "reliability": "Reliability cases need the reliability experiment adapter, which is not built yet.",
-    "gridspine": "Grid-study cases need the gridspine experiment adapter, which is not built yet.",
+    "commercial": "Commercial cases cannot run yet: the app has no commercial experiment.",
+    "reliability": "Reliability cases cannot run yet: the app has no reliability experiment.",
+    "gridspine": "Grid-study cases cannot run yet: the app has no grid-study experiment.",
 }
 SETTLED = ("passed", "failed", "not_runnable")
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]*$")
@@ -342,7 +342,7 @@ def _check_study_case(entry, study):
         if row is None:
             raise ExploreError(
                 "explore_not_a_lever",
-                f"{change['key']!r} is not a row of the study's ledger.",
+                f"“{change['key']}” is not a row of the study's ledger.",
             )
         band = row.range
         if (
@@ -412,7 +412,7 @@ def check_proposal(run, profile, cases) -> list[dict]:
             )
         if name.casefold() in taken:
             raise ExploreError(
-                "explore_case_name", f"A case named {name!r} is already proposed."
+                "explore_case_name", f"A case named “{name}” is already proposed."
             )
         taken.add(name.casefold())
         changes = entry["changes"]
@@ -1258,7 +1258,7 @@ def advance(path, *, boot, clock) -> bool:
                         _judge(case, gate, solves)
                         if out.get("status") != "completed" and not case.get("reason"):
                             case["reason"] = (
-                                f"The case's solve ended {out.get('status')}."
+                                f"The case's solve ended {out.get('status') or 'without a result'}."
                             )
                         settle.append((case, solves))
                     step["judged_by"] = JUDGED
