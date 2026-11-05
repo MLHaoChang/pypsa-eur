@@ -624,7 +624,7 @@ class Runner:
         def bound():
             with self._bound(task, ctx, slot) as session:
                 if takeover:
-                    self._recover(path)
+                    self._recover(path, ctx)
                 return self._step(path, ctx, session)
         return contextvars.copy_context().run(bound)
 
@@ -721,6 +721,8 @@ class Runner:
         step = tasks._next(task)
         if step is None:
             return "idle"
+        if step.get("engine") and step["status"] == "pending":
+            return run_loops.start_engine(path, ctx, step, instance=self.instance)
         if step["status"] == "waiting":
             self._hold_if_effectful(task, step)
             _update(path, lambda t: t["run"].update(status="waiting_job") if t["run"]["status"] == "running" else False)
@@ -979,7 +981,7 @@ class Runner:
 
     # restart
 
-    def _recover(self, path):
+    def _recover(self, path, ctx=None):
         """A run taken over from a lapsed lease (design §6.6 restart): settle
         waiting queue steps from their rows, follow live ones again, lost
         ones are uncertain (SC-09: nothing is requeued); any uncertain step
@@ -998,6 +1000,9 @@ class Runner:
                 continuation.follow_queue_job(path, ticket)
             elif states and all(s not in ("queued", "running", "unknown") for s in states):
                 continuation.settle_queue_from_record(path, ticket)
+        if ctx is not None:
+            from harness import run_loops
+            run_loops.recover_engines(path, ctx, instance=self.instance)
         with tasks._LOCK:
             task = _read(path)
             tasks._reconcile_lost(path, task)

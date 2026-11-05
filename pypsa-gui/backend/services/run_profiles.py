@@ -189,6 +189,8 @@ def load(profile: dict) -> dict:
             rules = [run_gates.check_rule(r) for r in stage.get("rules", [])]
         except run_gates.RuleError as exc:
             raise ProfileError(f"Stage {name}: {exc}") from exc
+        if name != "result_gate" and any("engine" in r for r in rules):
+            raise ProfileError(f"Stage {name}: an engine rule runs only in the result gate.")
         # §9.2, §5: a stage inherits its generic rules; a profile adds rules
         # (a tighter threshold is one more rule), never drops or loosens one.
         own = {r["id"]: r for r in stage.get("rules", [])}

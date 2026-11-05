@@ -1184,6 +1184,28 @@ only: no runner, no envelope, no loops.
   changes, next job, outcome). `run_envelope.solves_used` is the one solve
   count: `_standing`, the re-check where `admit` records a solve, and
   `run.budget.used.solves` read it; a solve refused at pickup is not counted.
+- **Engine loops (issue 05, PR C).** A result rule with an `engine` block
+  (`run_margin_loop` or `run_coupling_loop`, `max_solves`, `restore`; only in
+  the result gate) has fact `adequacy.loop.converged` and is out of L2's
+  failing set: the harness starts the loop itself, one rule at a time, after
+  the other result rules pass, and no agent turn runs. `run_loops.start_engine`
+  calls the chat tool on the run's bound context; an `HTTPException` (422 goal,
+  409 busy) is `engine_refused`, anything else leaves the step `uncertain`.
+  `run_envelope.reserve_engine` clamps `max_solves` to the solves left after
+  the probe and closing re-solve and to `MAX_LOOP_SOLVES`, and reserves the
+  worst case; `restore: "final"` needs the granted envelope's `runs` to list
+  the tool with it. `continuation.follow_engine` settles the step from the
+  loop's own record (identity: `started_at` and the study handle, under
+  `solver_state_lock`), once (CAS), as the lease holder, under
+  `runner._file_lock`; the charge is `solves_used + probe_solves` + 1 when the
+  closing re-solve ran. At settle, under the mutation lock, an edit since the
+  harness started the loop (beyond the loop's own hold) settles it not
+  applied (`inputs_changed`); a met `final` hold joins the chain with a ledger
+  row naming the engine rule. A taken-over run follows or settles its waiting
+  engine steps (`recover_engines`) and never starts one again; cancel stops the
+  loop through the abort route. A loop that did not converge ends the run
+  `needs_user` `not_converged`, never an L2 round. Terminal statuses are
+  `coupling.LOOP_STATUSES`; any other status is `lost`.
 - **The input gate holds until the solve.** Before a later stage's write or
   run step, the input gate's fingerprint is compared with the current inputs
   (on stage entry and after the user's Continue). An edit since then checks
