@@ -55,7 +55,9 @@ function loopNoticeWords(view: RunMonitorView): { text: string; failed: boolean 
   if (!n || n.sent === null || n.sent === undefined) return null
   if (n.sent) return { text: 'An email told you the run needs you.', failed: false }
   if (n.error === 'uncertain') return { text: 'The email may not have been sent. The run waits for you here.', failed: true }
-  const why = n.error === 'no_address' ? 'your account has no email address' : 'sending failed'
+  const why = n.error === 'no_address' ? 'your account has no email address'
+    : n.error === 'no_mailer' ? 'no mail sender is configured on this server'
+    : 'sending failed'
   return { text: `No email sent: ${why}. The run waits for you here.`, failed: true }
 }
 

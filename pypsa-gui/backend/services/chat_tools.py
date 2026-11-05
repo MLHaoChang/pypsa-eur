@@ -6760,11 +6760,6 @@ def series_sha256(series) -> str:
     return _hashlib.sha256(_np.ascontiguousarray(series.to_numpy(dtype="float64")).tobytes()).hexdigest()
 
 
-# Old name, kept only so services/run_envelope.py (held for BUG-1) needs no edit.
-# Remove after BUG-1 lands and that caller uses `series_sha256`.
-_series_sha256 = series_sha256
-
-
 def demand_series(ctx, args: dict) -> dict:
     """Pass 1 of `apply_demand_from_excel` on `ctx`'s network: the upload
     parsed and aligned to the snapshots, nothing written. The tool and its

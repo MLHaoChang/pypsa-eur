@@ -1399,7 +1399,7 @@ else.
   not move (a weather choice, a profile-generator default the solve never
   reads) adds no link, and `generate_load_profile` (pending store only, not
   an edit) adds none either (FILL-10-6).
-  Remaining limit: the envelope-admitted runs `run_simulation` and
+  Note (the transient-solve identity read was closed by #1133): the envelope-admitted runs `run_simulation` and
   `run_ac_pf_stage` (`run_envelope.RUN_TOOLS`) are not in `ATOMIC_TOOLS`,
   and a step the user approved on a card is not envelope-admitted; these
   still settle from a fresh read after the step, so a user edit landing

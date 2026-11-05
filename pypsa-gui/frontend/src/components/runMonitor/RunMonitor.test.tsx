@@ -77,6 +77,7 @@ describe('RunMonitor', () => {
       loop_notice_sent: 'An email told you the run needs you.',
       loop_notice_failed: 'No email sent: sending failed. The run waits for you here.',
       loop_notice_no_address: 'No email sent: your account has no email address. The run waits for you here.',
+      loop_notice_no_mailer: 'No email sent: no mail sender is configured on this server. The run waits for you here.',
       loop_notice_uncertain: 'The email may not have been sent. The run waits for you here.',
     } as const
     for (const [state, text] of Object.entries(texts)) {

@@ -896,10 +896,6 @@ def test_q3_a_profile_requiring_a_load_series_asks_for_it_until_an_intake_row_gi
 # ── FILL-11-7 (21c cleanup) ───────────────────────────────────────────────
 
 
-def test_series_sha256_alias_is_the_public_function():
-    assert chat_tools._series_sha256 is chat_tools.series_sha256
-
-
 @pytest.mark.parametrize("bad", [float("nan"), float("inf")])
 def test_demand_stats_shared_by_preview_and_readback_match_master(site, upload, bad):
     """Preview `old` and readback agree with master's inline `card._stats`

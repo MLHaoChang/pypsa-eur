@@ -931,7 +931,7 @@ def _abort_engine(task, step):
         mine = isinstance(record, dict) and record.get("started_at") == job.get("started_at")
     if mine:
         try:
-            results._abort_study(job["study"], "no engine loop has been run")
+            results._abort_study(job["study"], "no loop has been run")
         except HTTPException:
             logger.warning("the engine loop of %s was already gone", step["id"])
 
@@ -964,9 +964,9 @@ def settle_engine(path, ticket, loop, state):
             step.pop("error", None)
         else:
             step["status"], step["job"]["outcome"] = "uncertain", state
-            step["error"] = ("The engine loop's own record is gone (lost with a restart, or another loop took its "
+            step["error"] = ("The loop's own record is gone (lost with a restart, or another loop took its "
                              "place); its solves stay spent." if state == "lost" else
-                             "The engine loop did not end in time; its solves stay spent.")
+                             "The loop did not end in time; its solves stay spent.")
         step["job"]["continuation"] = "withdrawn"  # the runner goes on; no chat continuation
         if task["status"] != "cancelled":
             task["status"] = "needs_review" if step["status"] == "uncertain" else "ready"
