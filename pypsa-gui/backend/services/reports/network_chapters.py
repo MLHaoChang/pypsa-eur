@@ -15,6 +15,7 @@ model. The read is `read_sources` (impure, the route's); the chapters are
 * The load flow chapter on an LOPF solve is an active-power proxy: its
   disclosure says so (`LOADFLOW_PROXY`).
 """
+
 from __future__ import annotations
 
 import copy
@@ -54,8 +55,10 @@ _READS = {
     LOAD_FLOW: ("loadflow",),
 }
 
-NOT_CURRENT = ("the results do not describe the current inputs: the network changed since "
-               "its last solve, so solve again before reporting them")
+NOT_CURRENT = (
+    "the results do not describe the current inputs: the network changed since "
+    "its last solve, so solve again before reporting them"
+)
 NO_READ = {
     MODEL_SUMMARY: "the model summary could not be read",
     HEADLINE: "no cost or emissions results were read from the current solve",
@@ -66,8 +69,10 @@ NO_READ = {
     LOAD_FLOW: "no load flow summary: the network has no lines or transformers, or none was ranked",
 }
 READ_FAILED = " (its read failed: {why}; open the Results tab to check it, then generate the report again)"
-LOADFLOW_PROXY = ("Load flow: the branch loadings come from the linear (LOPF) active-power "
-                  "solve, a proxy; AC apparent power, reactive flows and voltage were not assessed.")
+LOADFLOW_PROXY = (
+    "Load flow: the branch loadings come from the linear (LOPF) active-power "
+    "solve, a proxy; AC apparent power, reactive flows and voltage were not assessed."
+)
 
 
 # ── the read (impure) ────────────────────────────────────────────────────────
@@ -94,10 +99,18 @@ def read_sources(project_root: Any = None) -> dict | None:
     summary = None
     failed: dict[str, str] = {}
     try:
-        summary = project_summary.summarise(
-            ctx.network, solver_config=(ctx.solver_state or {}).get("solver_config"),
-            project_id=str(getattr(ctx, "project_uuid", "") or ""), project_name="",
-            root=project_root, live_ctx=ctx) if project_root is not None else None
+        summary = (
+            project_summary.summarise(
+                ctx.network,
+                solver_config=(ctx.solver_state or {}).get("solver_config"),
+                project_id=str(getattr(ctx, "project_uuid", "") or ""),
+                project_name="",
+                root=project_root,
+                live_ctx=ctx,
+            )
+            if project_root is not None
+            else None
+        )
     except Exception as exc:  # noqa: BLE001 - stated as not established
         logger.info("reports: model summary not read: %s", exc)
         failed[MODEL_SUMMARY] = _why(exc)
@@ -110,7 +123,11 @@ def read_sources(project_root: Any = None) -> dict | None:
                 logger.info("reports: %s not read: %s", a.section, exc)
                 failed[a.section] = _why(exc)
                 out = None
-            reads[a.section] = out if isinstance(out, dict) and out.get("status") != "not_kept" else None
+            reads[a.section] = (
+                out
+                if isinstance(out, dict) and out.get("status") != "not_kept"
+                else None
+            )
     return {"current": current, "summary": summary, "reads": reads, "failed": failed}
 
 
@@ -179,7 +196,9 @@ def limit_facts(payload: dict, cap: int = MAX_FACTS) -> dict:
 
     out = keep(payload)
     if dropped:
-        out["omitted"] = f"{dropped} more value(s) or row(s) are in the Results tabs, not in this chapter"
+        out["omitted"] = (
+            f"{dropped} more value(s) or row(s) are in the Results tabs, not in this chapter"
+        )
     return out
 
 
@@ -187,25 +206,42 @@ def _model_summary(summary: dict) -> dict:
     counts = {k: v for k, v in (summary.get("counts") or {}).items() if v}
     time = summary.get("time") or {}
     cap = summary.get("capacity") or {}
-    return {"counts": counts,
-            "time": {k: v for k, v in time.items() if k in ("snapshots", "resolution", "start", "end",
-                                                              "weighted_hours", "years")},
-            "capacity": {k: cap.get(k) for k in ("storage_power_mw", "storage_energy_mwh", "link_mw")
-                         if _num(cap.get(k))},
-            "solver_mode": summary.get("solver_mode")}
+    return {
+        "counts": counts,
+        "time": {
+            k: v
+            for k, v in time.items()
+            if k
+            in ("snapshots", "resolution", "start", "end", "weighted_hours", "years")
+        },
+        "capacity": {
+            k: cap.get(k)
+            for k in ("storage_power_mw", "storage_energy_mwh", "link_mw")
+            if _num(cap.get(k))
+        },
+        "solver_mode": summary.get("solver_mode"),
+    }
 
 
 def _headline(results: dict | None, emissions: dict | None) -> dict | None:
     cost = (results or {}).get("cost_breakdown") or {}
-    out = {k: cost[k] for k in ("total", "capex", "opex", "fom") if _num(cost.get(k)) is not None}
+    out = {
+        k: cost[k]
+        for k in ("total", "capex", "opex", "fom")
+        if _num(cost.get(k)) is not None
+    }
     total = ((emissions or {}).get("emissions") or {}).get("total_tCO2")
     if _num(total) is not None:
         out["emissions_tCO2"] = total
     if not out:
         return None
-    return {"cost_eur": {k: v for k, v in out.items() if k != "emissions_tCO2"},
-            **({"emissions_tCO2": out["emissions_tCO2"]} if "emissions_tCO2" in out else {}),
-            "basis": "the objective's cost basis over the modelled horizon (cost_breakdown)"}
+    return {
+        "cost_eur": {k: v for k, v in out.items() if k != "emissions_tCO2"},
+        **(
+            {"emissions_tCO2": out["emissions_tCO2"]} if "emissions_tCO2" in out else {}
+        ),
+        "basis": "the objective's cost basis over the modelled horizon (cost_breakdown)",
+    }
 
 
 def _capacity(results: dict | None) -> dict | None:
@@ -216,8 +252,14 @@ def _capacity(results: dict | None) -> dict | None:
         opt, inst = _num(r.get("Optimal Capacity")), _num(r.get("Installed Capacity"))
         if opt is None and inst is None:
             continue
-        rows.append({"component": r.get("level_0"), "carrier": r.get("level_1"),
-                     "optimal_mw": opt, "installed_mw": inst})
+        rows.append(
+            {
+                "component": r.get("level_0"),
+                "carrier": r.get("level_1"),
+                "optimal_mw": opt,
+                "installed_mw": inst,
+            }
+        )
     rows.sort(key=lambda r: -(r["optimal_mw"] or 0.0))
     return {"rows": rows, "unit": "MW (MWh for stores)"} if rows else None
 
@@ -225,49 +267,89 @@ def _capacity(results: dict | None) -> dict | None:
 def _dispatch(digest: dict | None) -> dict | None:
     if not isinstance(digest, dict) or digest.get("status") != "ok":
         return None
-    gens = [{"carrier": r.get("name") or "(none)", "energy_mwh": r.get("energy_mwh"), "peak_mw": r.get("peak_mw")}
-            for r in (digest.get("generators") or {}).get("by_carrier") or []]
-    store = [{"carrier": r.get("name") or "(none)", "discharge_mwh": r.get("energy_mwh"),
-              "charge_mwh": r.get("absorbed_mwh")}
-             for r in (digest.get("storage_dispatch") or {}).get("by_carrier") or []]
+    gens = [
+        {
+            "carrier": r.get("name") or "(none)",
+            "energy_mwh": r.get("energy_mwh"),
+            "peak_mw": r.get("peak_mw"),
+        }
+        for r in (digest.get("generators") or {}).get("by_carrier") or []
+    ]
+    store = [
+        {
+            "carrier": r.get("name") or "(none)",
+            "discharge_mwh": r.get("energy_mwh"),
+            "charge_mwh": r.get("absorbed_mwh"),
+        }
+        for r in (digest.get("storage_dispatch") or {}).get("by_carrier") or []
+    ]
     if not gens and not store:
         return None
-    return {"generation_by_carrier": gens, "storage_by_carrier": store,
-            "weighting": digest.get("weighting")}
+    return {
+        "generation_by_carrier": gens,
+        "storage_by_carrier": store,
+        "weighting": digest.get("weighting"),
+    }
 
 
 def _prices(digest: dict | None, results: dict | None) -> dict | None:
-    overall = (((digest or {}).get("prices") or {}).get("overall") or {}) if isinstance(digest, dict) else {}
-    prices = {k: overall[k] for k in ("load_weighted_mean", "mean_price", "p90_price", "max_price")
-              if _num(overall.get(k)) is not None}
-    by_component = [{"component": r.get("component"), "total_eur": r.get("total")}
-                    for r in ((results or {}).get("cost_breakdown") or {}).get("by_component") or []
-                    if isinstance(r, dict) and _num(r.get("total"))]
+    overall = (
+        (((digest or {}).get("prices") or {}).get("overall") or {})
+        if isinstance(digest, dict)
+        else {}
+    )
+    prices = {
+        k: overall[k]
+        for k in ("load_weighted_mean", "mean_price", "p90_price", "max_price")
+        if _num(overall.get(k)) is not None
+    }
+    by_component = [
+        {"component": r.get("component"), "total_eur": r.get("total")}
+        for r in ((results or {}).get("cost_breakdown") or {}).get("by_component") or []
+        if isinstance(r, dict) and _num(r.get("total"))
+    ]
     if not prices and not by_component:
         return None
-    return {"price_eur_per_mwh": prices, "cost_by_component": by_component,
-            "price_basis": ((digest or {}).get("prices") or {}).get("basis")}
+    return {
+        "price_eur_per_mwh": prices,
+        "cost_by_component": by_component,
+        "price_basis": ((digest or {}).get("prices") or {}).get("basis"),
+    }
 
 
 def _emissions(read: dict | None) -> dict | None:
     em = (read or {}).get("emissions") or {}
     if _num(em.get("total_tCO2")) is None:
         return None
-    return {"total_tCO2": em["total_tCO2"],
-            "by_carrier": [{"carrier": r.get("carrier") or r.get("name"), "tCO2": r.get("tCO2")}
-                           for r in em.get("by_carrier") or [] if isinstance(r, dict)],
-            "cap_active": bool((em.get("cap") or {}).get("active"))}
+    return {
+        "total_tCO2": em["total_tCO2"],
+        "by_carrier": [
+            {"carrier": r.get("carrier") or r.get("name"), "tCO2": r.get("tCO2")}
+            for r in em.get("by_carrier") or []
+            if isinstance(r, dict)
+        ],
+        "cap_active": bool((em.get("cap") or {}).get("active")),
+    }
 
 
 def _load_flow(read: dict | None) -> dict | None:
     if not isinstance(read, dict) or read.get("status") != "ok":
         return None
     counts = read.get("counts") or {}
-    return {"source": read.get("source"), "counts": {k: counts.get(k) for k in ("ranked", "over_limit", "at_limit")
-                                                       if _num(counts.get(k)) is not None},
-            "top": [{k: r.get(k) for k in ("name", "max_loading_pct", "h_over_limit") if k in r}
-                    for r in read.get("top") or [] if isinstance(r, dict)],
-            "missing_evidence": list(read.get("missing_evidence") or [])}
+    return {
+        "source": read.get("source"),
+        "counts": {
+            k: counts.get(k)
+            for k in ("ranked", "over_limit", "at_limit")
+            if _num(counts.get(k)) is not None
+        },
+        "top": [
+            {k: r.get(k) for k in ("name", "max_loading_pct", "h_over_limit") if k in r}
+            for r in read.get("top") or []
+            if isinstance(r, dict)
+        ],
+        "missing_evidence": list(read.get("missing_evidence") or []),
+    }
 
 
 def payloads(sources: dict) -> dict[str, tuple[dict | None, str | None]]:
@@ -276,10 +358,14 @@ def payloads(sources: dict) -> dict[str, tuple[dict | None, str | None]]:
     reads = sources.get("reads") or {}
     current = sources.get("current") is True
     built = {
-        HEADLINE: lambda: _headline(reads.get("results_summary"), reads.get("results_emissions")),
+        HEADLINE: lambda: _headline(
+            reads.get("results_summary"), reads.get("results_emissions")
+        ),
         CAPACITY: lambda: _capacity(reads.get("results_summary")),
         DISPATCH: lambda: _dispatch(reads.get("results_dispatch")),
-        PRICES: lambda: _prices(reads.get("results_prices"), reads.get("results_summary")),
+        PRICES: lambda: _prices(
+            reads.get("results_prices"), reads.get("results_summary")
+        ),
         EMISSIONS: lambda: _emissions(reads.get("results_emissions")),
         LOAD_FLOW: lambda: _load_flow(reads.get("loadflow")),
     }
@@ -289,9 +375,13 @@ def payloads(sources: dict) -> dict[str, tuple[dict | None, str | None]]:
     def no_read(sid: str, keys) -> str:
         why = "; ".join(failed[k] for k in keys if k in failed)
         return NO_READ[sid] + (READ_FAILED.format(why=why) if why else "")
+
     summary = sources.get("summary")
-    out[MODEL_SUMMARY] = (limit_facts(_model_summary(summary)), None) if isinstance(summary, dict) \
+    out[MODEL_SUMMARY] = (
+        (limit_facts(_model_summary(summary)), None)
+        if isinstance(summary, dict)
         else (None, no_read(MODEL_SUMMARY, (MODEL_SUMMARY,)))
+    )
     for sid, build in built.items():
         if not current:
             out[sid] = (None, NOT_CURRENT)
@@ -302,12 +392,17 @@ def payloads(sources: dict) -> dict[str, tuple[dict | None, str | None]]:
             continue
         why = "; ".join(failed[k] for k in _READS[sid] if k in failed)
         if why:  # a partial chapter says which of its reads failed
-            payload = {**payload, "not_read": "part of this chapter" + READ_FAILED.format(why=why).rstrip(")")
-                       .replace(" (its", ": its", 1)}
+            payload = {
+                **payload,
+                "not_read": "part of this chapter"
+                + READ_FAILED.format(why=why).rstrip(")").replace(" (its", ": its", 1),
+            }
         out[sid] = (limit_facts(payload), None)
     return out
 
 
 def disclosures(payload_by_id: dict[str, dict | None]) -> list[str]:
     lf = payload_by_id.get(LOAD_FLOW)
-    return [LOADFLOW_PROXY] if isinstance(lf, dict) and lf.get("source") != "ac_pf" else []
+    return (
+        [LOADFLOW_PROXY] if isinstance(lf, dict) and lf.get("source") != "ac_pf" else []
+    )
