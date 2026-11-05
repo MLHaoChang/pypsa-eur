@@ -788,6 +788,8 @@ def start_engine(path, ctx, step, *, instance):
     before, _ = run_envelope.chain_head(path, ctx)  # what a `restore="final"` hold would link from (H3)
     from services import dirty_state
     revision = dirty_state.revision(ctx)  # H3: the counter the loop's own hold may move by one
+    with ctx.solver_state_lock:  # the held setting's value before the loop (H6 `old`), read before it starts
+        held_before = getattr(ctx.solver_state.get("solver_config"), _HELD[engine["tool"]][0], None)
     handler = getattr(chat_tools, engine["tool"])
     try:
         # Target and draws omitted: `active_loop_goal` puts the project's goal on this network's
@@ -803,7 +805,6 @@ def start_engine(path, ctx, step, *, instance):
     with ctx.solver_state_lock:
         record = ctx.solver_state.get(study)
         started_at = record.get("started_at") if isinstance(record, dict) else None
-        held_before = getattr(ctx.solver_state.get("solver_config"), _HELD[engine["tool"]][0], None)
     job_id = job_adapters.register_study_job(
         study_key=study, tool_name=engine["tool"], tool_use_id=f"run-{step['id']}-{attempt[:8]}",
         owner_user_id=task.get("owner_id"), project_uuid=task["project_id"], ctx=ctx)
@@ -815,7 +816,8 @@ def start_engine(path, ctx, step, *, instance):
         s["status"] = "waiting"
         s["job"] = {"kind": ENGINE, "study": study, "job_id": job_id, "started_at": started_at,
                     "max_solves": max_solves, "continuation": "withdrawn", "before": before,
-                    "held_before": held_before, "revision": revision}
+                    "held_before": held_before, "revision": revision,
+                    "deadline_at": time.time() + continuation.MAX_ENGINE_FOLLOW_SECONDS}
         if t["status"] != "cancelled":
             t["status"] = "waiting_job"
     runner._update(path, wait)
@@ -860,15 +862,21 @@ def engine_applied(path, ctx, step, loop):
     return True
 
 
-def recover_engines(path, ctx, *, instance):
-    """A taken-over run (restart, §6.6): each waiting engine step is settled
-    from its loop's own record, followed again while it still runs on this
-    context, or settled `lost`. Never started again (GK A (11)(b))."""
+def recover_engines(path, ctx, *, instance, now=None):
+    """Each tick and on a taken-over run (restart, §6.6), each waiting engine
+    step with no live follower in this process (a takeover, or a follower
+    that died, H2) is settled `timed_out` past its deadline, else from its
+    loop's own record, followed again while it still runs on this context,
+    or settled `lost`. Never started again (GK A (11)(b))."""
     from harness import continuation
     task = json.loads(path.read_text())
     for step in task["steps"]:
         if step["status"] != "waiting" or (step.get("job") or {}).get("kind") != ENGINE:
             continue
         ticket = (task["task_id"], step["id"], step.get("attempt_id"))
+        if continuation.following(ticket):
+            continue
+        if continuation.expire_engine(path, ticket, instance=instance, now=time.time() if now is None else now):
+            continue
         if continuation.settle_engine(path, ticket, instance=instance, ctx=ctx) == "running":
             continuation.follow_engine(path, ticket, ctx, instance=instance)

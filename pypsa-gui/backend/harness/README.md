@@ -1194,15 +1194,20 @@ only: no runner, no envelope, no loops.
   `run_envelope.reserve_engine` clamps `max_solves` to the solves left after
   the probe and closing re-solve and to `MAX_LOOP_SOLVES`, and reserves the
   worst case; `restore: "final"` needs the granted envelope's `runs` to list
-  the tool with it. `continuation.follow_engine` settles the step from the
+  the tool with it. That entry covers the harness's own engine step only: a
+  model turn's call of an engine tool is refused `engine_only`. `continuation.follow_engine` settles the step from the
   loop's own record (identity: `started_at` and the study handle, under
   `solver_state_lock`), once (CAS), as the lease holder, under
   `runner._file_lock`; the charge is `solves_used + probe_solves` + 1 when the
   closing re-solve ran. At settle, under the mutation lock, an edit since the
   harness started the loop (beyond the loop's own hold) settles it not
   applied (`inputs_changed`); a met `final` hold joins the chain with a ledger
-  row naming the engine rule. A taken-over run follows or settles its waiting
-  engine steps (`recover_engines`) and never starts one again; cancel stops the
+  row naming the engine rule. A step past its wall-clock `deadline_at` (set at
+  start, `MAX_ENGINE_FOLLOW_SECONDS`) settles `timed_out` and its loop is
+  stopped (`expire_engine`: the lease holder only; the boot sweep also on a
+  lapsed lease). Each tick, and on a
+  takeover, a waiting engine step with no live follower here is expired,
+  settled or followed again (`recover_engines`); none is started again. Cancel stops the
   loop through the abort route. A loop that did not converge ends the run
   `needs_user` `not_converged`, never an L2 round. Terminal statuses are
   `coupling.LOOP_STATUSES`; any other status is `lost`.

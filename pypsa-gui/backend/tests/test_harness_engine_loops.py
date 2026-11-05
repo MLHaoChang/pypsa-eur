@@ -15,6 +15,7 @@ context's solver state the way the runners do, and finishes it when the test
 says so. The LOLE test keeps the runner's own goal resolution."""
 
 import ast
+import dataclasses
 import inspect
 import json
 import threading
@@ -31,10 +32,23 @@ from tests.test_assistant_tasks_study_brief import (  # noqa: F401
     helpers_state,
     session,
 )
-from tests.test_harness_envelope import envelope_of, granted, profile  # noqa: F401
+from tests.test_harness_envelope import (  # noqa: F401
+    ask,
+    envelope_of,
+    granted,
+    on_run,
+    profile,
+)
 from tests.test_harness_envelope_atomic import ATOMIC, eh  # noqa: F401
 from tests.test_harness_l2_loop import Never, cap, infeasible  # noqa: F401
-from tests.test_harness_run_loops import Script, go, rated, record_of, say  # noqa: F401
+from tests.test_harness_run_loops import (  # noqa: F401
+    Script,
+    go,
+    rated,
+    record_of,
+    say,
+    stopped,
+)
 from tests.test_harness_run_skeleton import site, start  # noqa: F401
 from tests.test_harness_runner import detached, settle, task_path  # noqa: F401
 
@@ -116,6 +130,9 @@ class FakeLoop:
         self.records = []
         self.outcomes = []  # queued finishes, consumed in start order
         self.raise_on_start = None
+        self.held_at_start = (
+            None  # a reserve_margin the loop holds before its start returns
+        )
         self._release = []
         monkeypatch.setattr(
             margin_loop_runner, "start_margin_loop", self._starter("margin_loop")
@@ -133,6 +150,11 @@ class FakeLoop:
             if self.raise_on_start is not None:
                 raise self.raise_on_start
             self.calls.append((study, body))
+            if self.held_at_start is not None:
+                with PyPSAService.get_solver_state_lock():
+                    solver_state["solver_config"] = dataclasses.replace(
+                        solver_state["solver_config"], reserve_margin=self.held_at_start
+                    )
             release, stop = threading.Event(), threading.Event()
             index = len(self.records)
             record = {
@@ -208,6 +230,21 @@ class FakeLoop:
 @pytest.fixture
 def loops(monkeypatch):
     return FakeLoop(monkeypatch)
+
+
+def go_quickly(runner, path, task, timeout=30.0):
+    """`go` with a bounded wait: a mutant that stalls the run fails fast."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        runner.tick(path)
+        flight = runner._inflight.get(task["task_id"])
+        if flight is not None:
+            flight[1].join(max(0.0, deadline - time.monotonic()))
+        record = record_of(path)
+        if stopped(record):
+            return record
+        time.sleep(0.05)
+    raise AssertionError(record_of(path)["run"])
 
 
 def engine_steps(record):
@@ -728,7 +765,7 @@ def test_a_non_http_error_at_the_start_is_not_read_as_a_refusal(
     with_rules(monkeypatch, engine_rule())
     loops.raise_on_start = RuntimeError("the engine is broken")
     task, path, _ = granted()
-    record = go(harness_runner.Runner("a", agent_provider=Never()), path, task)
+    record = go_quickly(harness_runner.Runner("a", agent_provider=Never()), path, task)
     assert stage_of(record).get("reason") != "engine_refused"
     [step] = [s for s in record["steps"] if s.get("engine")]
     assert step["status"] in (
@@ -1021,3 +1058,232 @@ def test_a_multi_year_goal_reaches_the_loop_once_on_the_horizon_basis(
     [(years, (target, _draws, sources))] = seen
     assert years == pytest.approx(3.0)
     assert target == pytest.approx(9.0) and sources["target_lole_h"] == "stored"
+
+
+# ── H2 (#1058): the engine's own wall-clock deadline ────────────────────────
+
+
+def _ticket(path):
+    record = record_of(path)
+    step = engine_steps(record)[0]
+    return (record["task_id"], step["id"], step["attempt_id"])
+
+
+def _past_deadline(path):
+    record = record_of(path)
+    engine_steps(record)[0]["job"]["deadline_at"] = time.time() - 1
+    path.write_text(json.dumps(record))
+
+
+def test_the_follower_settles_timed_out_at_the_steps_deadline(
+    granted, ok, loops, monkeypatch
+):
+    monkeypatch.setattr(continuation, "MAX_ENGINE_FOLLOW_SECONDS", 0.5)
+    with_rules(monkeypatch, engine_rule())
+    loops.hold()
+    task, path, _ = granted()
+    step = _waiting(harness_runner.Runner("a", agent_provider=Never()), path, task)
+    assert step["job"]["deadline_at"] <= time.time() + 0.5  # wall clock, on the step
+    assert wait_until(lambda: engine_steps(record_of(path))[0]["status"] != "waiting")
+    step = engine_steps(record_of(path))[0]
+    assert step["status"] == "uncertain" and step["job"]["outcome"] == "timed_out"
+    [record_] = loops.records
+    assert record_[
+        "stop_event"
+    ].is_set()  # the timed-out loop is stopped, never left to hold
+    loops.release_all()
+
+
+def test_a_restart_past_the_deadline_is_settled_by_the_boot_sweep(
+    granted, ok, loops, monkeypatch
+):
+    with_rules(monkeypatch, engine_rule())
+    loops.hold()
+    task, path, _ = granted()
+    _waiting(harness_runner.Runner("a", agent_provider=Never()), path, task)
+    ticket = _ticket(path)
+    _hold_lease(path, "gone", 0)  # the process died; its lease lapsed
+    assert wait_until(lambda: not continuation.following(ticket))
+    _past_deadline(path)
+    assert harness_runner.Runner("boot", agent_provider=Never()).boot_sweep() >= 1
+    step = engine_steps(record_of(path))[0]
+    assert step["status"] == "uncertain" and step["job"]["outcome"] == "timed_out"
+    loops.release_all()
+
+
+def test_a_non_owner_never_settles_timed_out(granted, ok, loops, monkeypatch):
+    with_rules(monkeypatch, engine_rule())
+    loops.hold()
+    task, path, _ = granted()
+    _waiting(harness_runner.Runner("a", agent_provider=Never()), path, task)
+    ticket = _ticket(path)
+    _hold_lease(path, "c", time.time() + 3600)  # another process holds a live lease
+    assert wait_until(lambda: not continuation.following(ticket))
+    _past_deadline(path)
+    assert not continuation.expire_engine(path, ticket, instance="a", now=time.time())
+    assert harness_runner.Runner("boot", agent_provider=Never()).boot_sweep() == 0
+    assert engine_steps(record_of(path))[0]["status"] == "waiting"
+    loops.release_all()
+
+
+def test_a_dead_follower_is_followed_again_on_the_next_tick(
+    granted, ok, loops, monkeypatch
+):
+    with_rules(monkeypatch, engine_rule())
+    loops.hold()
+    real, calls = continuation.settle_engine, []
+
+    def dies_once(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("the follower dies")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(continuation, "settle_engine", dies_once)
+    task, path, _ = granted()
+    runner = harness_runner.Runner("a", agent_provider=Never())
+    _waiting(runner, path, task)
+    assert wait_until(lambda: calls and not continuation.following(_ticket(path)))
+    loops.release_all(status="met", solves_used=1, probe_solves=1)
+    runner.tick(path)  # the next tick follows it again
+    assert wait_until(
+        lambda: engine_steps(record_of(path))[0]["status"] != "waiting", timeout=10
+    )
+    record = go(runner, path, task)
+    assert len(loops.calls) == 1 and record["run"]["status"] == "completed"
+
+
+# ── H3: an edit after the loop's own hold ───────────────────────────────────
+
+
+@pytest.mark.parametrize("start_revision", [True, False])
+def test_a_user_edit_after_the_loops_own_hold_settles_not_applied(
+    granted, ok, loops, monkeypatch, start_revision
+):
+    """Without the start revision only `edited_since` sees the edit (kills
+    its removal); with it, both checks do."""
+    with_rules(
+        monkeypatch,
+        engine_rule(restore="final"),
+        runs=[
+            {"tool": "solve_queue_enqueue"},
+            {"tool": "run_margin_loop", "restore": "final"},
+        ],
+    )
+    loops.hold()
+    task, path, _ = granted()
+    runner = harness_runner.Runner("a", agent_provider=Never())
+    _waiting(runner, path, task)
+    if not start_revision:
+        record = record_of(path)
+        engine_steps(record)[0]["job"].pop("revision")
+        path.write_text(json.dumps(record))
+    lock = ctx().mutation_lock
+    lock.acquire()  # the settle waits for the project's mutation lock
+    try:
+        loops.release_all(status="met", lever_star=0.2, solves_used=2, probe_solves=1)
+        [record_] = loops.records
+        assert wait_until(lambda: record_["status"] == "met")  # held and re-captured
+        dirty_state.bump_revision(ctx())  # the user's edit after the hold
+    finally:
+        lock.release()
+    record = go(runner, path, task)
+    assert stage_of(record)["reason"] == "inputs_changed"
+    assert engine_steps(record)[0]["result"]["loop"]["applied"] is False
+
+
+# ── H5: the coupling loop's charge (no probe) ───────────────────────────────
+
+
+def test_the_coupling_loop_charges_its_solves_and_its_closing_re_solve(
+    granted, ok, loops, monkeypatch
+):
+    with_rules(monkeypatch, engine_rule(tool="run_coupling_loop"))
+    loops.finish_with(status="met", solves_used=3)
+    task, path, _ = granted()
+    record = go(harness_runner.Runner("a", agent_provider=Never()), path, task)
+    used = record["run"]["budget"]["used"]["solves"]
+    assert used == 1 + 3 + 1  # the run's solve, the loop's, the closing re-solve
+    assert run_envelope.solves_used(envelope_of(path)) == used
+
+
+# ── C9 (#875): a model turn never starts an engine loop ─────────────────────
+
+
+@pytest.mark.parametrize("tool", ["run_margin_loop", "run_coupling_loop"])
+def test_a_model_turn_never_starts_an_engine_loop_under_the_grant(
+    granted, ok, loops, monkeypatch, tool, seeded_identity
+):
+    """The grant's `runs` entry covers the harness's own engine step only.
+    Mutant: drop the `engine_only` refusal in `run_envelope._refusal`."""
+    with_rules(
+        monkeypatch,
+        engine_rule(restore="final"),
+        runs=[
+            {"tool": "solve_queue_enqueue"},
+            {"tool": "run_margin_loop", "restore": "final"},
+            {"tool": "run_coupling_loop", "restore": "final"},
+        ],
+    )
+    task, path, _ = granted()
+    assert not run_envelope.covers(path, tool)
+    from services import chat_tools
+
+    chat_tools.set_acting_user(
+        seeded_identity["user_id"]
+    )  # the run's owner, as the runner binds it
+    with on_run(task, path) as run:
+        assert ask(run, tool, {"max_solves": 8, "restore": "final"}) is None
+    assert run_envelope.last_refusal(path) == "engine_only"
+    assert not loops.calls
+
+
+# ── C8: identity after a restart ────────────────────────────────────────────
+
+
+def test_a_stranger_loop_after_a_restart_is_never_read_as_the_steps(
+    granted, ok, loops, monkeypatch
+):
+    """With the study handles gone (a restart), `started_at` is the only
+    guard. Mutant: drop the started_at comparison in `engine_record`."""
+    with_rules(monkeypatch, engine_rule())
+    loops.hold()
+    task, path, _ = granted()
+    _waiting(harness_runner.Runner("a", agent_provider=Never()), path, task)
+    ticket = _ticket(path)
+    _hold_lease(path, "gone", 0)
+    assert wait_until(lambda: not continuation.following(ticket))
+    job_adapters._ACTIVITY_BINDINGS.clear()
+    with PyPSAService.get_solver_state_lock():
+        ctx().solver_state["margin_loop"] = {
+            "status": "met",
+            "started_at": time.time() + 1,
+            "goal_sources": {},
+        }
+    record = go_quickly(harness_runner.Runner("b", agent_provider=Never()), path, task)
+    step = engine_steps(record)[0]
+    assert step["job"]["outcome"] == "lost" and "loop" not in (step.get("result") or {})
+    loops.release_all()
+
+
+# ── H6: the ledger's `old` is the value before the loop ─────────────────────
+
+
+def test_the_held_settings_old_value_is_read_before_the_loop_starts(
+    granted, ok, loops, monkeypatch
+):
+    with_rules(
+        monkeypatch,
+        engine_rule(restore="final"),
+        runs=[
+            {"tool": "solve_queue_enqueue"},
+            {"tool": "run_margin_loop", "restore": "final"},
+        ],
+    )
+    before = ctx().solver_state["solver_config"].reserve_margin
+    loops.held_at_start = 0.2  # the loop reached its hold before its start returned
+    loops.finish_with(status="met", lever_star=0.2, solves_used=2, probe_solves=1)
+    task, path, _ = granted()
+    record = go(harness_runner.Runner("a", agent_provider=Never()), path, task)
+    [row] = [r for r in record["run"].get("ledger", []) if r.get("loop") == "engine"]
+    assert row["old"] == before and before != 0.2

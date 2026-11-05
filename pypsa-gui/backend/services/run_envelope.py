@@ -916,7 +916,8 @@ def covers(task_path, tool):
     """A live envelope lists `tool` (the runner then dispatches without
     waiting; admission still decides, at dispatch)."""
     envelope = _load(task_path) if live(task_path) else None
-    return envelope is not None and (any(e["tool"] == tool for e in envelope["edits"] + envelope["runs"]) or any(
+    return envelope is not None and tool not in ENGINE_TOOLS and (
+        any(e["tool"] == tool for e in envelope["edits"] + envelope["runs"]) or any(
         tool in (g["tool"], *[p for p, t in GAP_PREPARE.items() if t == g["tool"]]) for g in envelope.get("gaps", [])))
 
 
@@ -1098,6 +1099,10 @@ def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx
         return "unknown_tool"
     if tool in NEVER_ADMITTED:
         return "grid_code_publish"
+    if tool in ENGINE_TOOLS:
+        # A `runs` entry covers the harness's own engine step only (C9, #875): a model turn
+        # never starts a loop, its solves and target its own.
+        return "engine_only"
     if _deletes(tool, edit_card):
         return "delete"
     if tier == "destructive":

@@ -324,7 +324,40 @@ def follow_queue_job(task_path, ticket) -> threading.Event:
 
 ENGINE_POLL_SECONDS = 0.5
 ENGINE_LOCK_SECONDS = 5.0
-MAX_ENGINE_FOLLOW_SECONDS = 24 * 3600  # then the step settles `timed_out` on this timer (H2)
+MAX_ENGINE_FOLLOW_SECONDS = 24 * 3600  # then the step settles `timed_out` (H2): `deadline_at` on the step
+_ENGINE_FOLLOWERS: dict = {}  # ticket -> this process's live follower thread
+
+
+def following(ticket) -> bool:
+    """Whether this process has a live follower for the engine step `ticket`."""
+    thread = _ENGINE_FOLLOWERS.get(tuple(ticket))
+    return thread is not None and thread.is_alive()
+
+
+def expire_engine(task_path, ticket, *, instance, now, lapsed_ok=False) -> bool:
+    """H2: settle a waiting engine step `timed_out` once its wall-clock
+    `deadline_at` (recorded at start) has passed. Under `runner._file_lock`,
+    by the run's lease holder only; the boot sweep (`lapsed_ok`) may also act
+    on a lapsed lease, never on another instance's live one. True when it
+    settled the step."""
+    from harness import runner
+    from services import assistant_tasks as tasks
+    with runner._file_lock(task_path):
+        task = runner._read(task_path) or {}
+        lease = (task.get("run") or {}).get("runner") or {}
+        if lease.get("lease_owner") != instance and not (lapsed_ok and lease.get("lease_until", 0) <= now):
+            return False
+        step = next((s for s in task.get("steps", []) if s["id"] == ticket[1]), None)
+        if step is None or step.get("attempt_id") != ticket[2] or step["status"] != "waiting":
+            return False
+        deadline = (step.get("job") or {}).get("deadline_at")
+        if not isinstance(deadline, (int, float)) or now < deadline:
+            return False
+        if tasks.settle_engine(task_path, ticket, None, "timed_out") is None:
+            return False
+    # The loop must not hold `restore="final"` after its step settled: stop it (GK A (12)).
+    tasks._abort_engine(task, step)
+    return True
 
 
 def engine_record(ctx, study, job):
@@ -398,39 +431,42 @@ def settle_engine(task_path, ticket, *, instance, ctx):
 
 def follow_engine(task_path, ticket, ctx, *, instance) -> threading.Event:
     """Follow a waiting engine step on its own thread until its loop ends,
-    then settle it (`settle_engine`). Its own deadline settles `timed_out`
-    (H2). A cancelled run is settled by the cancel path's abort; this thread
-    then finds the step no longer waiting and stops."""
+    then settle it (`settle_engine`). The step's wall-clock `deadline_at`
+    settles it `timed_out` (H2, `expire_engine`); a restart does not reset it.
+    A cancelled run is settled by the cancel path's abort; this thread then
+    finds the step no longer waiting and stops. A follower that dies leaves
+    the step to the next tick (`run_loops.recover_engines`)."""
     import contextvars
     settled = threading.Event()
 
     def run():
         from harness import runner
-        from services import assistant_tasks as tasks
         try:
-            deadline = time.monotonic() + MAX_ENGINE_FOLLOW_SECONDS
             while True:
                 task = runner._read(task_path)
                 step = next((s for s in (task or {}).get("steps", []) if s["id"] == ticket[1]), None)
                 if step is None or step.get("attempt_id") != ticket[2] or step["status"] != "waiting":
                     return
-                if time.monotonic() >= deadline:
-                    with runner._file_lock(task_path):
-                        if ((runner._read(task_path) or {}).get("run") or {}).get("runner", {}).get(
-                                "lease_owner") == instance:
-                            tasks.settle_engine(task_path, ticket, None, "timed_out")
+                deadline = (step.get("job") or {}).get("deadline_at")
+                deadline = deadline if isinstance(deadline, (int, float)) else time.time() + MAX_ENGINE_FOLLOW_SECONDS
+                if time.time() >= deadline:
+                    expire_engine(task_path, ticket, instance=instance, now=time.time())
                     return
                 state = settle_engine(task_path, ticket, instance=instance, ctx=ctx)
                 if state not in (None, "running"):
                     return
                 if state is None and ((task.get("run") or {}).get("runner") or {}).get("lease_owner") != instance:
                     return  # taken over: the new holder follows it
-                _WAKE.wait(min(ENGINE_POLL_SECONDS, max(0.0, deadline - time.monotonic())))
-        except Exception:  # noqa: BLE001 — a lost settlement leaves the step waiting for the recover path
+                _WAKE.wait(min(ENGINE_POLL_SECONDS, max(0.0, deadline - time.time())))
+        except Exception:  # noqa: BLE001 — a lost settlement leaves the step to the next tick's re-follow
             logger.exception("engine step %s could not be settled", ticket[1])
         finally:
             settled.set()
 
     context = contextvars.copy_context()
-    threading.Thread(target=context.run, args=(run,), name=f"engine-{ticket[1][:12]}", daemon=True).start()
+    thread = threading.Thread(target=context.run, args=(run,), name=f"engine-{ticket[1][:12]}", daemon=True)
+    for key in [k for k, t in _ENGINE_FOLLOWERS.items() if not t.is_alive()]:
+        _ENGINE_FOLLOWERS.pop(key, None)
+    _ENGINE_FOLLOWERS[tuple(ticket)] = thread
+    thread.start()
     return settled

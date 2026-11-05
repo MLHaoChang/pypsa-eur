@@ -883,22 +883,29 @@ def _abort_engines(task):
     engine loop through the loop's own abort route, and only its own: the
     slot's record must be the step's (`started_at`, under the solver-state
     lock). The step settles from the loop's record once it ends."""
+    for step in task["steps"]:
+        if step["status"] == "waiting" and (step.get("job") or {}).get("kind") == "engine":
+            _abort_engine(task, step)
+
+
+def _abort_engine(task, step):
+    """Stop one engine step's loop through its abort route, on the active
+    context of the run's own project, only when the slot's record is the
+    step's (`started_at`, under the solver-state lock). Cancel, and a step
+    settled `timed_out` (issue 05 H2), use it."""
     from routers import results
     ctx = PyPSAService.get_active_context()
     if str(getattr(ctx, "project_uuid", None)) != task["project_id"]:
         return
-    for step in task["steps"]:
-        job = step.get("job") or {}
-        if step["status"] != "waiting" or job.get("kind") != "engine":
-            continue
-        with ctx.solver_state_lock:
-            record = ctx.solver_state.get(job["study"])
-            mine = isinstance(record, dict) and record.get("started_at") == job.get("started_at")
-        if mine:
-            try:
-                results._abort_study(job["study"], "no engine loop has been run")
-            except HTTPException:
-                logger.warning("cancel: the engine loop of %s was already gone", step["id"])
+    job = step.get("job") or {}
+    with ctx.solver_state_lock:
+        record = ctx.solver_state.get(job["study"])
+        mine = isinstance(record, dict) and record.get("started_at") == job.get("started_at")
+    if mine:
+        try:
+            results._abort_study(job["study"], "no engine loop has been run")
+        except HTTPException:
+            logger.warning("the engine loop of %s was already gone", step["id"])
 
 
 def settle_engine(path, ticket, loop, state):
