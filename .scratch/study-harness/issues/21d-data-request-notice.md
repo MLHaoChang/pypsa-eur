@@ -5,10 +5,10 @@
 
 Status: needs-info
 Type: task
-Blocked by: #1127 (holds `harness/runner.py`); the owner's answer to the design question; GK B plan GO (issue 21 has merged, #1100)
+Blocked by: #1127 (holds `harness/runner.py`); GK B plan GO (issue 21 has merged, #1100)
 Gated: yes (GK B)
 Model tier: opus
-Owner decisions: SH21-SPLIT-1, SH21-ACCEPT-1, CHAT-DATA-SPEC-1, FILL-11-6
+Owner decisions: SH21-SPLIT-1, SH21-ACCEPT-1, CHAT-DATA-SPEC-1, FILL-11-6, SH21D-NOTICE-1
 Design: issue 21 §3 ("the notice lists every gap at once ... through `_wait_for_user`") and its scope list (`harness/runner.py`)
 
 ## Why
@@ -122,4 +122,10 @@ with the text left to the task view?
   - (c) Both carry the text. The attention record grows a text field
     (`attention._validate`, projection, frontend render), so the change is
     bigger and needs UX review; it duplicates the task view.
+- 2026-11-05 (~07:35 CET), owner (SH21D-NOTICE-1), via the coordinator:
+  "Count only (Recommended)". Both the attention record and the opt-in email
+  say "waits for data (N items)"; the notice text stays in the task view;
+  `run_notice` and `_email` keep the fixed-fields-only contract. Plan step 2
+  sends exactly that line and the item count; the acceptance test asserts
+  that no label, param or notice line appears in the record or the email.
 
