@@ -360,3 +360,7 @@ Audit against master `30417e89e` and the test matrix (sent to the coordinator be
 - **AC PF raw convergence (A1.7):** filed as [12](12-acpf-raw-convergence.md) (GK B (21) A5). `services/ac_pf_service.py` records every snapshot as converged when PyPSA returns no convergence frame or parsing it raises. The counts then read `n of n`, so this gate cannot see the gap: a run checked as converged is not yet proven to be.
 - **Completion clause** "every affected public channel uses the same approved contract": blocked by [01](01-output-contract-and-coverage.md) A0.4 (reviewed schemas, tickets 09–11).
 - Live-voice issue 06 is `Status: done`, so it no longer blocks this issue.
+
+### 2026-11-05 — FILL-11-6: identity and result shapes frozen in the v1 contract
+
+`evidence_and_receipt_identity` and `checked_tool_result_shapes` left the v1 snapshot's `pending` list. `harness/assurance_shapes.py` models the public evidence record per adapter version (`static-input/1`, `static-input-page/1`, `series-input/2`, `aggregate-load/1`, `run-metrics/1`, `run-section/1`, `run-compare/1`, `scoped_result`, `calculated_result`), the answer receipt per policy version and each checked tool's result; `assurance_contracts.v1.json` freezes them as `returns` contracts. The `tests/conftest.py` fixture `_returned_assurance_shapes` holds the suite to them. Still pending: `artifact_evidence_identity` (05) and `checked_chart_shape` (05).

@@ -1,4 +1,1597 @@
 {
+ "answer_receipt": {
+  "1": {
+   "$defs": {
+    "CostBasis": {
+     "additionalProperties": false,
+     "properties": {
+      "annual_fixed_cost_fraction": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        }
+       ],
+       "ge": 0,
+       "le": 1,
+       "title": "Annual Fixed Cost Fraction"
+      },
+      "currency": {
+       "const": "EUR",
+       "title": "Currency",
+       "type": "string"
+      },
+      "price_year": {
+       "maximum": 2200,
+       "minimum": 1900,
+       "title": "Price Year",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "currency",
+      "price_year",
+      "annual_fixed_cost_fraction"
+     ],
+     "title": "CostBasis",
+     "type": "object"
+    },
+    "Navigation": {
+     "additionalProperties": false,
+     "properties": {
+      "action_id": {
+       "title": "Action Id",
+       "type": "string"
+      },
+      "outcome": {
+       "title": "Outcome",
+       "type": "string"
+      },
+      "reason": {
+       "anyOf": [
+        {
+         "enum": [
+          "window_differs",
+          "source_not_lopf",
+          "inputs_changed",
+          "fingerprint_basis_unknown",
+          "project_differs"
+         ],
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Reason"
+      },
+      "shows": {
+       "anyOf": [
+        {
+         "enum": [
+          "checked_evidence",
+          "different_view",
+          "not_confirmed"
+         ],
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Shows"
+      },
+      "window": {
+       "anyOf": [
+        {
+         "$ref": "#/$defs/ViewWindow"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      }
+     },
+     "required": [
+      "action_id",
+      "outcome"
+     ],
+     "title": "Navigation",
+     "type": "object"
+    },
+    "RequestScope": {
+     "additionalProperties": false,
+     "properties": {
+      "chart": {
+       "anyOf": [
+        {
+         "items": {
+          "type": "string"
+         },
+         "maxItems": 8,
+         "minItems": 1,
+         "type": "array"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Chart"
+      },
+      "comparison_evidence_id": {
+       "anyOf": [
+        {
+         "maxLength": 36,
+         "minLength": 36,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Comparison Evidence Id"
+      },
+      "component_class": {
+       "anyOf": [
+        {
+         "enum": [
+          "Line",
+          "Transformer",
+          "Generator",
+          "Link",
+          "StorageUnit",
+          "Store"
+         ],
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Component Class"
+      },
+      "cost_basis": {
+       "anyOf": [
+        {
+         "$ref": "#/$defs/CostBasis"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "end": {
+       "anyOf": [
+        {
+         "maxLength": 64,
+         "minLength": 1,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "End"
+      },
+      "entity_id": {
+       "maxLength": 128,
+       "minLength": 1,
+       "title": "Entity Id",
+       "type": "string"
+      },
+      "evidence_id": {
+       "anyOf": [
+        {
+         "maxLength": 36,
+         "minLength": 36,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Evidence Id"
+      },
+      "metrics": {
+       "anyOf": [
+        {
+         "items": {
+          "type": "string"
+         },
+         "maxItems": 20,
+         "minItems": 1,
+         "type": "array"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Metrics"
+      },
+      "profile": {
+       "enum": [
+        "generator-dispatch/1",
+        "generator-cost/1",
+        "network-linear-cost/1",
+        "storage-unit-dispatch/1",
+        "storage-unit-cost/1",
+        "carrier-energy/1",
+        "branch-loading/1",
+        "network-loading/1",
+        "lost-load/1",
+        "bus-price/1",
+        "generator-emissions/1",
+        "network-emissions/1",
+        "curtailment/1",
+        "capacity/1",
+        "storage-cycles/1",
+        "energy-balance/1",
+        "site-import/1",
+        "investment-case/1",
+        "investment-lcoe/1",
+        "copt-screening/1",
+        "grid-readiness/1"
+       ],
+       "title": "Profile",
+       "type": "string"
+      },
+      "project_id": {
+       "maxLength": 128,
+       "minLength": 1,
+       "title": "Project Id",
+       "type": "string"
+      },
+      "retain": {
+       "default": false,
+       "title": "Retain",
+       "type": "boolean"
+      },
+      "start": {
+       "anyOf": [
+        {
+         "maxLength": 64,
+         "minLength": 1,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Start"
+      },
+      "version": {
+       "const": 1,
+       "title": "Version",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "version",
+      "profile",
+      "project_id",
+      "entity_id"
+     ],
+     "title": "RequestScope",
+     "type": "object"
+    },
+    "Slot": {
+     "additionalProperties": false,
+     "properties": {
+      "disposition": {
+       "enum": [
+        "answered",
+        "unavailable",
+        "needs_clarification"
+       ],
+       "title": "Disposition",
+       "type": "string"
+      },
+      "excluded_indices": {
+       "anyOf": [
+        {
+         "items": {
+          "type": "integer"
+         },
+         "type": "array"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Excluded Indices"
+      },
+      "metric": {
+       "title": "Metric",
+       "type": "string"
+      },
+      "reason": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Reason"
+      },
+      "requested_snapshots": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Requested Snapshots"
+      },
+      "valid_snapshots": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Valid Snapshots"
+      }
+     },
+     "required": [
+      "metric",
+      "disposition"
+     ],
+     "title": "Slot",
+     "type": "object"
+    },
+    "ViewWindow": {
+     "additionalProperties": false,
+     "properties": {
+      "end": {
+       "title": "End",
+       "type": "string"
+      },
+      "start": {
+       "title": "Start",
+       "type": "string"
+      }
+     },
+     "required": [
+      "start",
+      "end"
+     ],
+     "title": "ViewWindow",
+     "type": "object"
+    }
+   },
+   "additionalProperties": false,
+   "properties": {
+    "chart": {
+     "anyOf": [
+      {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Chart"
+    },
+    "checked_block_ids": {
+     "items": {
+      "type": "string"
+     },
+     "maxItems": 20,
+     "title": "Checked Block Ids",
+     "type": "array"
+    },
+    "content_sha256": {
+     "pattern": "^[0-9a-f]{64}$",
+     "title": "Content Sha256",
+     "type": "string"
+    },
+    "evidence_ids": {
+     "items": {
+      "type": "string"
+     },
+     "maxItems": 20,
+     "title": "Evidence Ids",
+     "type": "array"
+    },
+    "limitations": {
+     "items": {
+      "type": "string"
+     },
+     "maxItems": 20,
+     "title": "Limitations",
+     "type": "array"
+    },
+    "navigation": {
+     "anyOf": [
+      {
+       "items": {
+        "$ref": "#/$defs/Navigation"
+       },
+       "maxItems": 20,
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Navigation"
+    },
+    "operation_ids": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Operation Ids"
+    },
+    "policy_version": {
+     "const": "1",
+     "title": "Policy Version",
+     "type": "string"
+    },
+    "request_complete": {
+     "anyOf": [
+      {
+       "type": "boolean"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Request Complete"
+    },
+    "request_scope": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/RequestScope"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "result_slots": {
+     "anyOf": [
+      {
+       "items": {
+        "$ref": "#/$defs/Slot"
+       },
+       "maxItems": 20,
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Result Slots"
+    },
+    "reviewed_claim_ids": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Reviewed Claim Ids",
+     "type": "array"
+    },
+    "reviewer_status": {
+     "enum": [
+      "not_required",
+      "passed",
+      "failed",
+      "unavailable",
+      "withheld",
+      "withheld_budget",
+      "withheld_disabled",
+      "withheld_invalid_draft",
+      "withheld_limit",
+      "withheld_tool_attempt",
+      "withheld_usage",
+      "withheld_schema",
+      "withheld_incomplete",
+      "withheld_failure",
+      "withheld_timeout"
+     ],
+     "title": "Reviewer Status",
+     "type": "string"
+    }
+   },
+   "required": [
+    "policy_version",
+    "content_sha256",
+    "evidence_ids",
+    "checked_block_ids",
+    "limitations",
+    "reviewer_status",
+    "reviewed_claim_ids"
+   ],
+   "title": "Receipt",
+   "type": "object"
+  }
+ },
+ "checked_tool_results": {
+  "compare_project_runs": {
+   "$defs": {
+    "CompareResult": {
+     "additionalProperties": false,
+     "properties": {
+      "_assurance": {
+       "$ref": "#/$defs/ToolAssurance"
+      },
+      "baseline": {
+       "$ref": "#/$defs/RunRef"
+      },
+      "comparable": {
+       "const": true,
+       "title": "Comparable",
+       "type": "boolean"
+      },
+      "deltas": {
+       "additionalProperties": {
+        "$ref": "#/$defs/Delta"
+       },
+       "title": "Deltas",
+       "type": "object"
+      },
+      "mode": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Mode"
+      },
+      "run": {
+       "$ref": "#/$defs/RunRef"
+      },
+      "unsaved_inputs": {
+       "title": "Unsaved Inputs",
+       "type": "boolean"
+      }
+     },
+     "required": [
+      "run",
+      "baseline",
+      "comparable",
+      "mode",
+      "unsaved_inputs",
+      "deltas",
+      "_assurance"
+     ],
+     "title": "CompareResult",
+     "type": "object"
+    },
+    "Delta": {
+     "additionalProperties": false,
+     "properties": {
+      "delta": {
+       "anyOf": [
+        {
+         "$ref": "#/$defs/MetricValue"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "delta_pct": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Delta Pct"
+      }
+     },
+     "title": "Delta",
+     "type": "object"
+    },
+    "MetricValue": {
+     "additionalProperties": false,
+     "properties": {
+      "unit": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Unit"
+      },
+      "value": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Value"
+      }
+     },
+     "required": [
+      "value",
+      "unit"
+     ],
+     "title": "MetricValue",
+     "type": "object"
+    },
+    "RunRef": {
+     "additionalProperties": false,
+     "properties": {
+      "finished_at": {
+       "title": "Finished At",
+       "type": "string"
+      },
+      "run_id": {
+       "title": "Run Id",
+       "type": "string"
+      }
+     },
+     "required": [
+      "run_id",
+      "finished_at"
+     ],
+     "title": "RunRef",
+     "type": "object"
+    },
+    "ToolAssurance": {
+     "additionalProperties": false,
+     "properties": {
+      "evidence_ids": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Evidence Ids",
+       "type": "array"
+      },
+      "outcome": {
+       "enum": [
+        "completed",
+        "submitted",
+        "uncertain"
+       ],
+       "title": "Outcome",
+       "type": "string"
+      },
+      "version": {
+       "const": 1,
+       "title": "Version",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "version",
+      "outcome",
+      "evidence_ids"
+     ],
+     "title": "ToolAssurance",
+     "type": "object"
+    },
+    "Uncertain": {
+     "additionalProperties": false,
+     "description": "No evidence was captured: the result is withheld but for its metadata.",
+     "properties": {
+      "_assurance": {
+       "$ref": "#/$defs/ToolAssurance"
+      }
+     },
+     "required": [
+      "_assurance"
+     ],
+     "title": "Uncertain",
+     "type": "object"
+    }
+   },
+   "anyOf": [
+    {
+     "$ref": "#/$defs/CompareResult"
+    },
+    {
+     "$ref": "#/$defs/Uncertain"
+    }
+   ]
+  },
+  "get_aggregate_load": {
+   "$defs": {
+    "AggregateResult": {
+     "additionalProperties": true,
+     "description": "get_aggregate_load: each certified statistic at the top level.",
+     "properties": {
+      "_assurance": {
+       "$ref": "#/$defs/ToolAssurance"
+      },
+      "attribute": {
+       "title": "Attribute",
+       "type": "string"
+      },
+      "loads": {
+       "title": "Loads",
+       "type": "integer"
+      },
+      "selection": {
+       "title": "Selection",
+       "type": "string"
+      },
+      "steps": {
+       "title": "Steps",
+       "type": "integer"
+      },
+      "unit": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Unit"
+      }
+     },
+     "required": [
+      "selection",
+      "attribute",
+      "unit",
+      "loads",
+      "steps",
+      "_assurance"
+     ],
+     "title": "AggregateResult",
+     "type": "object"
+    },
+    "ToolAssurance": {
+     "additionalProperties": false,
+     "properties": {
+      "evidence_ids": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Evidence Ids",
+       "type": "array"
+      },
+      "outcome": {
+       "enum": [
+        "completed",
+        "submitted",
+        "uncertain"
+       ],
+       "title": "Outcome",
+       "type": "string"
+      },
+      "version": {
+       "const": 1,
+       "title": "Version",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "version",
+      "outcome",
+      "evidence_ids"
+     ],
+     "title": "ToolAssurance",
+     "type": "object"
+    },
+    "Uncertain": {
+     "additionalProperties": false,
+     "description": "No evidence was captured: the result is withheld but for its metadata.",
+     "properties": {
+      "_assurance": {
+       "$ref": "#/$defs/ToolAssurance"
+      }
+     },
+     "required": [
+      "_assurance"
+     ],
+     "title": "Uncertain",
+     "type": "object"
+    }
+   },
+   "anyOf": [
+    {
+     "$ref": "#/$defs/AggregateResult"
+    },
+    {
+     "$ref": "#/$defs/Uncertain"
+    }
+   ]
+  },
+  "get_component": {
+   "$defs": {
+    "ToolAssurance": {
+     "additionalProperties": false,
+     "properties": {
+      "evidence_ids": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Evidence Ids",
+       "type": "array"
+      },
+      "outcome": {
+       "enum": [
+        "completed",
+        "submitted",
+        "uncertain"
+       ],
+       "title": "Outcome",
+       "type": "string"
+      },
+      "version": {
+       "const": 1,
+       "title": "Version",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "version",
+      "outcome",
+      "evidence_ids"
+     ],
+     "title": "ToolAssurance",
+     "type": "object"
+    }
+   },
+   "additionalProperties": true,
+   "description": "get_component: each certified attribute at the top level.",
+   "properties": {
+    "_assurance": {
+     "$ref": "#/$defs/ToolAssurance"
+    }
+   },
+   "required": [
+    "_assurance"
+   ],
+   "title": "ComponentResult",
+   "type": "object"
+  },
+  "get_run_evidence": {
+   "$defs": {
+    "MetricValue": {
+     "additionalProperties": false,
+     "properties": {
+      "unit": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Unit"
+      },
+      "value": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Value"
+      }
+     },
+     "required": [
+      "value",
+      "unit"
+     ],
+     "title": "MetricValue",
+     "type": "object"
+    },
+    "RunResult": {
+     "additionalProperties": false,
+     "properties": {
+      "_assurance": {
+       "$ref": "#/$defs/ToolAssurance"
+      },
+      "finished_at": {
+       "title": "Finished At",
+       "type": "string"
+      },
+      "metrics": {
+       "additionalProperties": {
+        "$ref": "#/$defs/MetricValue"
+       },
+       "title": "Metrics",
+       "type": "object"
+      },
+      "mode": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Mode"
+      },
+      "run_id": {
+       "title": "Run Id",
+       "type": "string"
+      },
+      "status": {
+       "const": "completed",
+       "title": "Status",
+       "type": "string"
+      },
+      "unsaved_inputs": {
+       "title": "Unsaved Inputs",
+       "type": "boolean"
+      }
+     },
+     "required": [
+      "run_id",
+      "status",
+      "finished_at",
+      "mode",
+      "unsaved_inputs",
+      "metrics",
+      "_assurance"
+     ],
+     "title": "RunResult",
+     "type": "object"
+    },
+    "RunSectionResult": {
+     "additionalProperties": false,
+     "properties": {
+      "_assurance": {
+       "$ref": "#/$defs/ToolAssurance"
+      },
+      "finished_at": {
+       "title": "Finished At",
+       "type": "string"
+      },
+      "mode": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Mode"
+      },
+      "run_id": {
+       "title": "Run Id",
+       "type": "string"
+      },
+      "section": {
+       "title": "Section",
+       "type": "string"
+      },
+      "status": {
+       "const": "completed",
+       "title": "Status",
+       "type": "string"
+      },
+      "unsaved_inputs": {
+       "title": "Unsaved Inputs",
+       "type": "boolean"
+      },
+      "values": {
+       "items": {
+        "$ref": "#/$defs/SectionValue"
+       },
+       "title": "Values",
+       "type": "array"
+      }
+     },
+     "required": [
+      "run_id",
+      "status",
+      "finished_at",
+      "mode",
+      "unsaved_inputs",
+      "section",
+      "values",
+      "_assurance"
+     ],
+     "title": "RunSectionResult",
+     "type": "object"
+    },
+    "SectionValue": {
+     "additionalProperties": false,
+     "properties": {
+      "metric": {
+       "title": "Metric",
+       "type": "string"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      },
+      "unit": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Unit"
+      },
+      "value": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Value"
+      }
+     },
+     "required": [
+      "path",
+      "metric",
+      "value",
+      "unit"
+     ],
+     "title": "SectionValue",
+     "type": "object"
+    },
+    "ToolAssurance": {
+     "additionalProperties": false,
+     "properties": {
+      "evidence_ids": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Evidence Ids",
+       "type": "array"
+      },
+      "outcome": {
+       "enum": [
+        "completed",
+        "submitted",
+        "uncertain"
+       ],
+       "title": "Outcome",
+       "type": "string"
+      },
+      "version": {
+       "const": 1,
+       "title": "Version",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "version",
+      "outcome",
+      "evidence_ids"
+     ],
+     "title": "ToolAssurance",
+     "type": "object"
+    },
+    "Uncertain": {
+     "additionalProperties": false,
+     "description": "No evidence was captured: the result is withheld but for its metadata.",
+     "properties": {
+      "_assurance": {
+       "$ref": "#/$defs/ToolAssurance"
+      }
+     },
+     "required": [
+      "_assurance"
+     ],
+     "title": "Uncertain",
+     "type": "object"
+    }
+   },
+   "anyOf": [
+    {
+     "$ref": "#/$defs/RunResult"
+    },
+    {
+     "$ref": "#/$defs/RunSectionResult"
+    },
+    {
+     "$ref": "#/$defs/Uncertain"
+    }
+   ]
+  },
+  "get_timeseries": {
+   "$defs": {
+    "SeriesResult": {
+     "additionalProperties": false,
+     "properties": {
+      "_assurance": {
+       "$ref": "#/$defs/ToolAssurance"
+      },
+      "attribute": {
+       "title": "Attribute",
+       "type": "string"
+      },
+      "certified_steps": {
+       "title": "Certified Steps",
+       "type": "integer"
+      },
+      "name": {
+       "title": "Name",
+       "type": "string"
+      },
+      "points": {
+       "items": {
+        "items": {
+         "anyOf": [
+          {
+           "type": "integer"
+          },
+          {
+           "type": "number"
+          },
+          {
+           "type": "string"
+          },
+          {
+           "type": "boolean"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "type": "array"
+       },
+       "title": "Points",
+       "type": "array"
+      },
+      "steps": {
+       "title": "Steps",
+       "type": "integer"
+      },
+      "unit": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Unit"
+      },
+      "window": {
+       "anyOf": [
+        {
+         "$ref": "#/$defs/SeriesWindow"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      }
+     },
+     "required": [
+      "name",
+      "attribute",
+      "unit",
+      "points",
+      "steps",
+      "certified_steps",
+      "_assurance"
+     ],
+     "title": "SeriesResult",
+     "type": "object"
+    },
+    "SeriesWindow": {
+     "additionalProperties": false,
+     "properties": {
+      "end": {
+       "title": "End",
+       "type": "integer"
+      },
+      "first": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "First"
+      },
+      "last": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Last"
+      },
+      "start": {
+       "title": "Start",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "start",
+      "end",
+      "first",
+      "last"
+     ],
+     "title": "SeriesWindow",
+     "type": "object"
+    },
+    "ToolAssurance": {
+     "additionalProperties": false,
+     "properties": {
+      "evidence_ids": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Evidence Ids",
+       "type": "array"
+      },
+      "outcome": {
+       "enum": [
+        "completed",
+        "submitted",
+        "uncertain"
+       ],
+       "title": "Outcome",
+       "type": "string"
+      },
+      "version": {
+       "const": 1,
+       "title": "Version",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "version",
+      "outcome",
+      "evidence_ids"
+     ],
+     "title": "ToolAssurance",
+     "type": "object"
+    },
+    "Uncertain": {
+     "additionalProperties": false,
+     "description": "No evidence was captured: the result is withheld but for its metadata.",
+     "properties": {
+      "_assurance": {
+       "$ref": "#/$defs/ToolAssurance"
+      }
+     },
+     "required": [
+      "_assurance"
+     ],
+     "title": "Uncertain",
+     "type": "object"
+    }
+   },
+   "anyOf": [
+    {
+     "$ref": "#/$defs/SeriesResult"
+    },
+    {
+     "$ref": "#/$defs/Uncertain"
+    }
+   ]
+  },
+  "list_components": {
+   "$defs": {
+    "PageResult": {
+     "additionalProperties": false,
+     "properties": {
+      "_assurance": {
+       "$ref": "#/$defs/ToolAssurance"
+      },
+      "has_more": {
+       "title": "Has More",
+       "type": "boolean"
+      },
+      "items": {
+       "items": {
+        "$ref": "#/$defs/Row"
+       },
+       "title": "Items",
+       "type": "array"
+      },
+      "offset": {
+       "title": "Offset",
+       "type": "integer"
+      },
+      "returned": {
+       "title": "Returned",
+       "type": "integer"
+      },
+      "total_count": {
+       "title": "Total Count",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "items",
+      "offset",
+      "returned",
+      "total_count",
+      "has_more",
+      "_assurance"
+     ],
+     "title": "PageResult",
+     "type": "object"
+    },
+    "Row": {
+     "additionalProperties": true,
+     "description": "One list_components row: its name and each certified attribute.",
+     "properties": {
+      "name": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     "required": [
+      "name"
+     ],
+     "title": "Row",
+     "type": "object"
+    },
+    "ToolAssurance": {
+     "additionalProperties": false,
+     "properties": {
+      "evidence_ids": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Evidence Ids",
+       "type": "array"
+      },
+      "outcome": {
+       "enum": [
+        "completed",
+        "submitted",
+        "uncertain"
+       ],
+       "title": "Outcome",
+       "type": "string"
+      },
+      "version": {
+       "const": 1,
+       "title": "Version",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "version",
+      "outcome",
+      "evidence_ids"
+     ],
+     "title": "ToolAssurance",
+     "type": "object"
+    },
+    "Uncertain": {
+     "additionalProperties": false,
+     "description": "No evidence was captured: the result is withheld but for its metadata.",
+     "properties": {
+      "_assurance": {
+       "$ref": "#/$defs/ToolAssurance"
+      }
+     },
+     "required": [
+      "_assurance"
+     ],
+     "title": "Uncertain",
+     "type": "object"
+    }
+   },
+   "anyOf": [
+    {
+     "$ref": "#/$defs/PageResult"
+    },
+    {
+     "$ref": "#/$defs/Uncertain"
+    }
+   ]
+  },
+  "ui_open_panel": {
+   "$defs": {
+    "ToolAssurance": {
+     "additionalProperties": false,
+     "properties": {
+      "evidence_ids": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Evidence Ids",
+       "type": "array"
+      },
+      "outcome": {
+       "enum": [
+        "completed",
+        "submitted",
+        "uncertain"
+       ],
+       "title": "Outcome",
+       "type": "string"
+      },
+      "version": {
+       "const": 1,
+       "title": "Version",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "version",
+      "outcome",
+      "evidence_ids"
+     ],
+     "title": "ToolAssurance",
+     "type": "object"
+    }
+   },
+   "additionalProperties": false,
+   "properties": {
+    "_assurance": {
+     "$ref": "#/$defs/ToolAssurance"
+    }
+   },
+   "required": [
+    "_assurance"
+   ],
+   "title": "Submitted",
+   "type": "object"
+  },
+  "update_component": {
+   "$defs": {
+    "EffectAssurance": {
+     "additionalProperties": false,
+     "properties": {
+      "operation_id": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Operation Id"
+      },
+      "outcome": {
+       "title": "Outcome",
+       "type": "string"
+      },
+      "version": {
+       "const": 1,
+       "title": "Version",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "version",
+      "outcome",
+      "operation_id"
+     ],
+     "title": "EffectAssurance",
+     "type": "object"
+    }
+   },
+   "additionalProperties": false,
+   "properties": {
+    "_assurance": {
+     "$ref": "#/$defs/EffectAssurance"
+    }
+   },
+   "required": [
+    "_assurance"
+   ],
+   "title": "EffectResult",
+   "type": "object"
+  }
+ },
  "checked_tools": {
   "compare_project_runs": "5ff81e9828bdd6ccb997ace8ad45a83d40efafd2ac4860887ca0f17247238a5f",
   "get_aggregate_load": "49cd7d3066d8405553280d53afeea4b809936b2157ae9e0670f4bba89eeb66a2",
@@ -188,9 +1781,12 @@
   "type": "object"
  },
  "directions": {
+  "answer_receipt": "returns",
+  "checked_tool_results": "returns",
   "checked_tools": "returns",
   "computed_draft": "accepts",
   "effect_guard": "accepts",
+  "evidence_identity": "returns",
   "observed_draft": "accepts",
   "profiles": "returns",
   "request_scope": "accepts"
@@ -288,6 +1884,2259 @@
   ],
   "title": "EffectContract",
   "type": "object"
+ },
+ "evidence_identity": {
+  "aggregate-load/1": {
+   "$defs": {
+    "AggregateLoadScope": {
+     "additionalProperties": false,
+     "properties": {
+      "attribute": {
+       "const": "p_set",
+       "title": "Attribute",
+       "type": "string"
+      },
+      "component_class": {
+       "const": "Load",
+       "title": "Component Class",
+       "type": "string"
+      },
+      "entity_id": {
+       "title": "Entity Id",
+       "type": "string"
+      },
+      "kind": {
+       "const": "aggregate_load",
+       "title": "Kind",
+       "type": "string"
+      },
+      "loads": {
+       "title": "Loads",
+       "type": "integer"
+      },
+      "selector": {
+       "additionalProperties": true,
+       "title": "Selector",
+       "type": "object"
+      },
+      "steps": {
+       "title": "Steps",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "kind",
+      "selector",
+      "entity_id",
+      "component_class",
+      "attribute",
+      "loads",
+      "steps"
+     ],
+     "title": "AggregateLoadScope",
+     "type": "object"
+    },
+    "Fact": {
+     "additionalProperties": false,
+     "properties": {
+      "entity_id": {
+       "title": "Entity Id",
+       "type": "string"
+      },
+      "metric": {
+       "title": "Metric",
+       "type": "string"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      },
+      "unit": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Unit"
+      },
+      "value": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Value"
+      }
+     },
+     "required": [
+      "path",
+      "entity_id",
+      "metric",
+      "value",
+      "unit"
+     ],
+     "title": "Fact",
+     "type": "object"
+    },
+    "Validity": {
+     "additionalProperties": false,
+     "properties": {
+      "as_of": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        }
+       ],
+       "title": "As Of"
+      },
+      "coverage": {
+       "title": "Coverage",
+       "type": "string"
+      },
+      "outcome": {
+       "const": "completed",
+       "title": "Outcome",
+       "type": "string"
+      },
+      "warnings": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Warnings",
+       "type": "array"
+      }
+     },
+     "required": [
+      "outcome",
+      "as_of",
+      "coverage",
+      "warnings"
+     ],
+     "title": "Validity",
+     "type": "object"
+    }
+   },
+   "additionalProperties": false,
+   "properties": {
+    "adapter_version": {
+     "const": "aggregate-load/1",
+     "title": "Adapter Version",
+     "type": "string"
+    },
+    "evidence_id": {
+     "title": "Evidence Id",
+     "type": "string"
+    },
+    "facts": {
+     "items": {
+      "$ref": "#/$defs/Fact"
+     },
+     "title": "Facts",
+     "type": "array"
+    },
+    "project_id": {
+     "title": "Project Id",
+     "type": "string"
+    },
+    "scope": {
+     "$ref": "#/$defs/AggregateLoadScope"
+    },
+    "source_kind": {
+     "const": "configured_input",
+     "title": "Source Kind",
+     "type": "string"
+    },
+    "validity": {
+     "$ref": "#/$defs/Validity"
+    },
+    "version": {
+     "const": 1,
+     "title": "Version",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "version",
+    "evidence_id",
+    "project_id",
+    "facts",
+    "validity",
+    "source_kind",
+    "adapter_version",
+    "scope"
+   ],
+   "title": "Evidence_aggregate_load_v1",
+   "type": "object"
+  },
+  "calculated_result": {
+   "$defs": {
+    "CalculatedScope": {
+     "additionalProperties": false,
+     "properties": {
+      "component_class": {
+       "const": "Generator",
+       "title": "Component Class",
+       "type": "string"
+      },
+      "end": {
+       "title": "End",
+       "type": "string"
+      },
+      "entity_id": {
+       "title": "Entity Id",
+       "type": "string"
+      },
+      "kind": {
+       "const": "full_horizon",
+       "title": "Kind",
+       "type": "string"
+      },
+      "start": {
+       "title": "Start",
+       "type": "string"
+      }
+     },
+     "required": [
+      "kind",
+      "component_class",
+      "entity_id",
+      "start",
+      "end"
+     ],
+     "title": "CalculatedScope",
+     "type": "object"
+    },
+    "Fact": {
+     "additionalProperties": false,
+     "properties": {
+      "entity_id": {
+       "title": "Entity Id",
+       "type": "string"
+      },
+      "metric": {
+       "title": "Metric",
+       "type": "string"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      },
+      "unit": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Unit"
+      },
+      "value": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Value"
+      }
+     },
+     "required": [
+      "path",
+      "entity_id",
+      "metric",
+      "value",
+      "unit"
+     ],
+     "title": "Fact",
+     "type": "object"
+    },
+    "Slot": {
+     "additionalProperties": false,
+     "properties": {
+      "disposition": {
+       "enum": [
+        "answered",
+        "unavailable",
+        "needs_clarification"
+       ],
+       "title": "Disposition",
+       "type": "string"
+      },
+      "excluded_indices": {
+       "anyOf": [
+        {
+         "items": {
+          "type": "integer"
+         },
+         "type": "array"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Excluded Indices"
+      },
+      "metric": {
+       "title": "Metric",
+       "type": "string"
+      },
+      "reason": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Reason"
+      },
+      "requested_snapshots": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Requested Snapshots"
+      },
+      "valid_snapshots": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Valid Snapshots"
+      }
+     },
+     "required": [
+      "metric",
+      "disposition"
+     ],
+     "title": "Slot",
+     "type": "object"
+    },
+    "Validity": {
+     "additionalProperties": false,
+     "properties": {
+      "as_of": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        }
+       ],
+       "title": "As Of"
+      },
+      "coverage": {
+       "title": "Coverage",
+       "type": "string"
+      },
+      "outcome": {
+       "const": "completed",
+       "title": "Outcome",
+       "type": "string"
+      },
+      "warnings": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Warnings",
+       "type": "array"
+      }
+     },
+     "required": [
+      "outcome",
+      "as_of",
+      "coverage",
+      "warnings"
+     ],
+     "title": "Validity",
+     "type": "object"
+    }
+   },
+   "additionalProperties": false,
+   "properties": {
+    "adapter_version": {
+     "title": "Adapter Version",
+     "type": "string"
+    },
+    "evidence_id": {
+     "title": "Evidence Id",
+     "type": "string"
+    },
+    "facts": {
+     "items": {
+      "$ref": "#/$defs/Fact"
+     },
+     "title": "Facts",
+     "type": "array"
+    },
+    "project_id": {
+     "title": "Project Id",
+     "type": "string"
+    },
+    "raw": {
+     "additionalProperties": true,
+     "title": "Raw",
+     "type": "object"
+    },
+    "scope": {
+     "$ref": "#/$defs/CalculatedScope"
+    },
+    "slots": {
+     "items": {
+      "$ref": "#/$defs/Slot"
+     },
+     "title": "Slots",
+     "type": "array"
+    },
+    "source_kind": {
+     "const": "calculated_result",
+     "title": "Source Kind",
+     "type": "string"
+    },
+    "validity": {
+     "$ref": "#/$defs/Validity"
+    },
+    "version": {
+     "const": 1,
+     "title": "Version",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "version",
+    "evidence_id",
+    "project_id",
+    "facts",
+    "validity",
+    "source_kind",
+    "adapter_version",
+    "scope",
+    "slots",
+    "raw"
+   ],
+   "title": "CalculatedEvidence",
+   "type": "object"
+  },
+  "run-compare/1": {
+   "$defs": {
+    "Fact": {
+     "additionalProperties": false,
+     "properties": {
+      "entity_id": {
+       "title": "Entity Id",
+       "type": "string"
+      },
+      "metric": {
+       "title": "Metric",
+       "type": "string"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      },
+      "unit": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Unit"
+      },
+      "value": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Value"
+      }
+     },
+     "required": [
+      "path",
+      "entity_id",
+      "metric",
+      "value",
+      "unit"
+     ],
+     "title": "Fact",
+     "type": "object"
+    },
+    "RunComparisonScope": {
+     "additionalProperties": false,
+     "properties": {
+      "baseline_finished_at": {
+       "title": "Baseline Finished At",
+       "type": "string"
+      },
+      "baseline_run_id": {
+       "title": "Baseline Run Id",
+       "type": "string"
+      },
+      "entity_id": {
+       "title": "Entity Id",
+       "type": "string"
+      },
+      "finished_at": {
+       "title": "Finished At",
+       "type": "string"
+      },
+      "kind": {
+       "const": "run_comparison",
+       "title": "Kind",
+       "type": "string"
+      },
+      "metrics": {
+       "anyOf": [
+        {
+         "items": {
+          "type": "string"
+         },
+         "type": "array"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Metrics"
+      },
+      "mode": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Mode"
+      },
+      "unsaved_inputs": {
+       "title": "Unsaved Inputs",
+       "type": "boolean"
+      }
+     },
+     "required": [
+      "kind",
+      "entity_id",
+      "baseline_run_id",
+      "mode",
+      "finished_at",
+      "baseline_finished_at",
+      "metrics",
+      "unsaved_inputs"
+     ],
+     "title": "RunComparisonScope",
+     "type": "object"
+    },
+    "Validity": {
+     "additionalProperties": false,
+     "properties": {
+      "as_of": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        }
+       ],
+       "title": "As Of"
+      },
+      "coverage": {
+       "title": "Coverage",
+       "type": "string"
+      },
+      "outcome": {
+       "const": "completed",
+       "title": "Outcome",
+       "type": "string"
+      },
+      "warnings": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Warnings",
+       "type": "array"
+      }
+     },
+     "required": [
+      "outcome",
+      "as_of",
+      "coverage",
+      "warnings"
+     ],
+     "title": "Validity",
+     "type": "object"
+    }
+   },
+   "additionalProperties": false,
+   "properties": {
+    "adapter_version": {
+     "const": "run-compare/1",
+     "title": "Adapter Version",
+     "type": "string"
+    },
+    "evidence_id": {
+     "title": "Evidence Id",
+     "type": "string"
+    },
+    "facts": {
+     "items": {
+      "$ref": "#/$defs/Fact"
+     },
+     "title": "Facts",
+     "type": "array"
+    },
+    "project_id": {
+     "title": "Project Id",
+     "type": "string"
+    },
+    "scope": {
+     "$ref": "#/$defs/RunComparisonScope"
+    },
+    "source_kind": {
+     "const": "run_manifest",
+     "title": "Source Kind",
+     "type": "string"
+    },
+    "validity": {
+     "$ref": "#/$defs/Validity"
+    },
+    "version": {
+     "const": 1,
+     "title": "Version",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "version",
+    "evidence_id",
+    "project_id",
+    "facts",
+    "validity",
+    "source_kind",
+    "adapter_version",
+    "scope"
+   ],
+   "title": "Evidence_run_compare_v1",
+   "type": "object"
+  },
+  "run-metrics/1": {
+   "$defs": {
+    "Fact": {
+     "additionalProperties": false,
+     "properties": {
+      "entity_id": {
+       "title": "Entity Id",
+       "type": "string"
+      },
+      "metric": {
+       "title": "Metric",
+       "type": "string"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      },
+      "unit": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Unit"
+      },
+      "value": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Value"
+      }
+     },
+     "required": [
+      "path",
+      "entity_id",
+      "metric",
+      "value",
+      "unit"
+     ],
+     "title": "Fact",
+     "type": "object"
+    },
+    "RunScope": {
+     "additionalProperties": false,
+     "properties": {
+      "entity_id": {
+       "title": "Entity Id",
+       "type": "string"
+      },
+      "finished_at": {
+       "title": "Finished At",
+       "type": "string"
+      },
+      "kind": {
+       "const": "run",
+       "title": "Kind",
+       "type": "string"
+      },
+      "mode": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Mode"
+      },
+      "run_kind": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Run Kind"
+      },
+      "unsaved_inputs": {
+       "title": "Unsaved Inputs",
+       "type": "boolean"
+      }
+     },
+     "required": [
+      "kind",
+      "entity_id",
+      "run_kind",
+      "mode",
+      "finished_at",
+      "unsaved_inputs"
+     ],
+     "title": "RunScope",
+     "type": "object"
+    },
+    "Validity": {
+     "additionalProperties": false,
+     "properties": {
+      "as_of": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        }
+       ],
+       "title": "As Of"
+      },
+      "coverage": {
+       "title": "Coverage",
+       "type": "string"
+      },
+      "outcome": {
+       "const": "completed",
+       "title": "Outcome",
+       "type": "string"
+      },
+      "warnings": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Warnings",
+       "type": "array"
+      }
+     },
+     "required": [
+      "outcome",
+      "as_of",
+      "coverage",
+      "warnings"
+     ],
+     "title": "Validity",
+     "type": "object"
+    }
+   },
+   "additionalProperties": false,
+   "properties": {
+    "adapter_version": {
+     "const": "run-metrics/1",
+     "title": "Adapter Version",
+     "type": "string"
+    },
+    "evidence_id": {
+     "title": "Evidence Id",
+     "type": "string"
+    },
+    "facts": {
+     "items": {
+      "$ref": "#/$defs/Fact"
+     },
+     "title": "Facts",
+     "type": "array"
+    },
+    "project_id": {
+     "title": "Project Id",
+     "type": "string"
+    },
+    "scope": {
+     "$ref": "#/$defs/RunScope"
+    },
+    "source_kind": {
+     "const": "run_manifest",
+     "title": "Source Kind",
+     "type": "string"
+    },
+    "validity": {
+     "$ref": "#/$defs/Validity"
+    },
+    "version": {
+     "const": 1,
+     "title": "Version",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "version",
+    "evidence_id",
+    "project_id",
+    "facts",
+    "validity",
+    "source_kind",
+    "adapter_version",
+    "scope"
+   ],
+   "title": "Evidence_run_metrics_v1",
+   "type": "object"
+  },
+  "run-section/1": {
+   "$defs": {
+    "Fact": {
+     "additionalProperties": false,
+     "properties": {
+      "entity_id": {
+       "title": "Entity Id",
+       "type": "string"
+      },
+      "metric": {
+       "title": "Metric",
+       "type": "string"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      },
+      "unit": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Unit"
+      },
+      "value": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Value"
+      }
+     },
+     "required": [
+      "path",
+      "entity_id",
+      "metric",
+      "value",
+      "unit"
+     ],
+     "title": "Fact",
+     "type": "object"
+    },
+    "RunSectionScope": {
+     "additionalProperties": false,
+     "properties": {
+      "entity_id": {
+       "title": "Entity Id",
+       "type": "string"
+      },
+      "finished_at": {
+       "title": "Finished At",
+       "type": "string"
+      },
+      "kind": {
+       "const": "run_section",
+       "title": "Kind",
+       "type": "string"
+      },
+      "mode": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Mode"
+      },
+      "run_kind": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Run Kind"
+      },
+      "section": {
+       "title": "Section",
+       "type": "string"
+      },
+      "section_sha256": {
+       "title": "Section Sha256",
+       "type": "string"
+      },
+      "unsaved_inputs": {
+       "title": "Unsaved Inputs",
+       "type": "boolean"
+      }
+     },
+     "required": [
+      "kind",
+      "entity_id",
+      "run_kind",
+      "mode",
+      "finished_at",
+      "unsaved_inputs",
+      "section",
+      "section_sha256"
+     ],
+     "title": "RunSectionScope",
+     "type": "object"
+    },
+    "Validity": {
+     "additionalProperties": false,
+     "properties": {
+      "as_of": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        }
+       ],
+       "title": "As Of"
+      },
+      "coverage": {
+       "title": "Coverage",
+       "type": "string"
+      },
+      "outcome": {
+       "const": "completed",
+       "title": "Outcome",
+       "type": "string"
+      },
+      "warnings": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Warnings",
+       "type": "array"
+      }
+     },
+     "required": [
+      "outcome",
+      "as_of",
+      "coverage",
+      "warnings"
+     ],
+     "title": "Validity",
+     "type": "object"
+    }
+   },
+   "additionalProperties": false,
+   "properties": {
+    "adapter_version": {
+     "const": "run-section/1",
+     "title": "Adapter Version",
+     "type": "string"
+    },
+    "evidence_id": {
+     "title": "Evidence Id",
+     "type": "string"
+    },
+    "facts": {
+     "items": {
+      "$ref": "#/$defs/Fact"
+     },
+     "title": "Facts",
+     "type": "array"
+    },
+    "project_id": {
+     "title": "Project Id",
+     "type": "string"
+    },
+    "scope": {
+     "$ref": "#/$defs/RunSectionScope"
+    },
+    "source_kind": {
+     "const": "run_manifest",
+     "title": "Source Kind",
+     "type": "string"
+    },
+    "validity": {
+     "$ref": "#/$defs/Validity"
+    },
+    "version": {
+     "const": 1,
+     "title": "Version",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "version",
+    "evidence_id",
+    "project_id",
+    "facts",
+    "validity",
+    "source_kind",
+    "adapter_version",
+    "scope"
+   ],
+   "title": "Evidence_run_section_v1",
+   "type": "object"
+  },
+  "scoped_result": {
+   "$defs": {
+    "CostBasis": {
+     "additionalProperties": false,
+     "properties": {
+      "annual_fixed_cost_fraction": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        }
+       ],
+       "ge": 0,
+       "le": 1,
+       "title": "Annual Fixed Cost Fraction"
+      },
+      "currency": {
+       "const": "EUR",
+       "title": "Currency",
+       "type": "string"
+      },
+      "price_year": {
+       "maximum": 2200,
+       "minimum": 1900,
+       "title": "Price Year",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "currency",
+      "price_year",
+      "annual_fixed_cost_fraction"
+     ],
+     "title": "CostBasis",
+     "type": "object"
+    },
+    "Fact": {
+     "additionalProperties": false,
+     "properties": {
+      "entity_id": {
+       "title": "Entity Id",
+       "type": "string"
+      },
+      "metric": {
+       "title": "Metric",
+       "type": "string"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      },
+      "unit": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Unit"
+      },
+      "value": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Value"
+      }
+     },
+     "required": [
+      "path",
+      "entity_id",
+      "metric",
+      "value",
+      "unit"
+     ],
+     "title": "Fact",
+     "type": "object"
+    },
+    "RequestScope": {
+     "additionalProperties": false,
+     "properties": {
+      "chart": {
+       "anyOf": [
+        {
+         "items": {
+          "type": "string"
+         },
+         "maxItems": 8,
+         "minItems": 1,
+         "type": "array"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Chart"
+      },
+      "comparison_evidence_id": {
+       "anyOf": [
+        {
+         "maxLength": 36,
+         "minLength": 36,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Comparison Evidence Id"
+      },
+      "component_class": {
+       "anyOf": [
+        {
+         "enum": [
+          "Line",
+          "Transformer",
+          "Generator",
+          "Link",
+          "StorageUnit",
+          "Store"
+         ],
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Component Class"
+      },
+      "cost_basis": {
+       "anyOf": [
+        {
+         "$ref": "#/$defs/CostBasis"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "end": {
+       "anyOf": [
+        {
+         "maxLength": 64,
+         "minLength": 1,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "End"
+      },
+      "entity_id": {
+       "maxLength": 128,
+       "minLength": 1,
+       "title": "Entity Id",
+       "type": "string"
+      },
+      "evidence_id": {
+       "anyOf": [
+        {
+         "maxLength": 36,
+         "minLength": 36,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Evidence Id"
+      },
+      "metrics": {
+       "anyOf": [
+        {
+         "items": {
+          "type": "string"
+         },
+         "maxItems": 20,
+         "minItems": 1,
+         "type": "array"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Metrics"
+      },
+      "profile": {
+       "enum": [
+        "generator-dispatch/1",
+        "generator-cost/1",
+        "network-linear-cost/1",
+        "storage-unit-dispatch/1",
+        "storage-unit-cost/1",
+        "carrier-energy/1",
+        "branch-loading/1",
+        "network-loading/1",
+        "lost-load/1",
+        "bus-price/1",
+        "generator-emissions/1",
+        "network-emissions/1",
+        "curtailment/1",
+        "capacity/1",
+        "storage-cycles/1",
+        "energy-balance/1",
+        "site-import/1",
+        "investment-case/1",
+        "investment-lcoe/1",
+        "copt-screening/1",
+        "grid-readiness/1"
+       ],
+       "title": "Profile",
+       "type": "string"
+      },
+      "project_id": {
+       "maxLength": 128,
+       "minLength": 1,
+       "title": "Project Id",
+       "type": "string"
+      },
+      "retain": {
+       "default": false,
+       "title": "Retain",
+       "type": "boolean"
+      },
+      "start": {
+       "anyOf": [
+        {
+         "maxLength": 64,
+         "minLength": 1,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Start"
+      },
+      "version": {
+       "const": 1,
+       "title": "Version",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "version",
+      "profile",
+      "project_id",
+      "entity_id"
+     ],
+     "title": "RequestScope",
+     "type": "object"
+    },
+    "ScopedScope": {
+     "additionalProperties": false,
+     "properties": {
+      "end": {
+       "title": "End",
+       "type": "string"
+      },
+      "entity_id": {
+       "title": "Entity Id",
+       "type": "string"
+      },
+      "kind": {
+       "enum": [
+        "current_run",
+        "retained_run"
+       ],
+       "title": "Kind",
+       "type": "string"
+      },
+      "start": {
+       "title": "Start",
+       "type": "string"
+      }
+     },
+     "required": [
+      "kind",
+      "entity_id",
+      "start",
+      "end"
+     ],
+     "title": "ScopedScope",
+     "type": "object"
+    },
+    "Slot": {
+     "additionalProperties": false,
+     "properties": {
+      "disposition": {
+       "enum": [
+        "answered",
+        "unavailable",
+        "needs_clarification"
+       ],
+       "title": "Disposition",
+       "type": "string"
+      },
+      "excluded_indices": {
+       "anyOf": [
+        {
+         "items": {
+          "type": "integer"
+         },
+         "type": "array"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Excluded Indices"
+      },
+      "metric": {
+       "title": "Metric",
+       "type": "string"
+      },
+      "reason": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Reason"
+      },
+      "requested_snapshots": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Requested Snapshots"
+      },
+      "valid_snapshots": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Valid Snapshots"
+      }
+     },
+     "required": [
+      "metric",
+      "disposition"
+     ],
+     "title": "Slot",
+     "type": "object"
+    },
+    "Validity": {
+     "additionalProperties": false,
+     "properties": {
+      "as_of": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        }
+       ],
+       "title": "As Of"
+      },
+      "coverage": {
+       "title": "Coverage",
+       "type": "string"
+      },
+      "outcome": {
+       "const": "completed",
+       "title": "Outcome",
+       "type": "string"
+      },
+      "warnings": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Warnings",
+       "type": "array"
+      }
+     },
+     "required": [
+      "outcome",
+      "as_of",
+      "coverage",
+      "warnings"
+     ],
+     "title": "Validity",
+     "type": "object"
+    }
+   },
+   "additionalProperties": false,
+   "properties": {
+    "adapter_version": {
+     "title": "Adapter Version",
+     "type": "string"
+    },
+    "evidence_id": {
+     "title": "Evidence Id",
+     "type": "string"
+    },
+    "facts": {
+     "items": {
+      "$ref": "#/$defs/Fact"
+     },
+     "title": "Facts",
+     "type": "array"
+    },
+    "project_id": {
+     "title": "Project Id",
+     "type": "string"
+    },
+    "raw": {
+     "additionalProperties": true,
+     "title": "Raw",
+     "type": "object"
+    },
+    "request_scope": {
+     "$ref": "#/$defs/RequestScope"
+    },
+    "scope": {
+     "$ref": "#/$defs/ScopedScope"
+    },
+    "slots": {
+     "items": {
+      "$ref": "#/$defs/Slot"
+     },
+     "title": "Slots",
+     "type": "array"
+    },
+    "source_kind": {
+     "const": "scoped_result",
+     "title": "Source Kind",
+     "type": "string"
+    },
+    "validity": {
+     "$ref": "#/$defs/Validity"
+    },
+    "version": {
+     "const": 1,
+     "title": "Version",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "version",
+    "evidence_id",
+    "project_id",
+    "facts",
+    "validity",
+    "source_kind",
+    "adapter_version",
+    "request_scope",
+    "scope",
+    "slots",
+    "raw"
+   ],
+   "title": "ScopedEvidence",
+   "type": "object"
+  },
+  "series-input/2": {
+   "$defs": {
+    "Fact": {
+     "additionalProperties": false,
+     "properties": {
+      "entity_id": {
+       "title": "Entity Id",
+       "type": "string"
+      },
+      "metric": {
+       "title": "Metric",
+       "type": "string"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      },
+      "unit": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Unit"
+      },
+      "value": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Value"
+      }
+     },
+     "required": [
+      "path",
+      "entity_id",
+      "metric",
+      "value",
+      "unit"
+     ],
+     "title": "Fact",
+     "type": "object"
+    },
+    "SeriesScope": {
+     "additionalProperties": false,
+     "properties": {
+      "attribute": {
+       "title": "Attribute",
+       "type": "string"
+      },
+      "certified": {
+       "title": "Certified",
+       "type": "integer"
+      },
+      "component": {
+       "title": "Component",
+       "type": "string"
+      },
+      "component_class": {
+       "title": "Component Class",
+       "type": "string"
+      },
+      "entity_id": {
+       "title": "Entity Id",
+       "type": "string"
+      },
+      "kind": {
+       "const": "series",
+       "title": "Kind",
+       "type": "string"
+      },
+      "points": {
+       "title": "Points",
+       "type": "integer"
+      },
+      "window": {
+       "anyOf": [
+        {
+         "$ref": "#/$defs/SeriesWindow"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      }
+     },
+     "required": [
+      "kind",
+      "component_class",
+      "component",
+      "entity_id",
+      "attribute",
+      "points",
+      "certified"
+     ],
+     "title": "SeriesScope",
+     "type": "object"
+    },
+    "SeriesWindow": {
+     "additionalProperties": false,
+     "properties": {
+      "end": {
+       "title": "End",
+       "type": "integer"
+      },
+      "first": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "First"
+      },
+      "last": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Last"
+      },
+      "start": {
+       "title": "Start",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "start",
+      "end",
+      "first",
+      "last"
+     ],
+     "title": "SeriesWindow",
+     "type": "object"
+    },
+    "Validity": {
+     "additionalProperties": false,
+     "properties": {
+      "as_of": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        }
+       ],
+       "title": "As Of"
+      },
+      "coverage": {
+       "title": "Coverage",
+       "type": "string"
+      },
+      "outcome": {
+       "const": "completed",
+       "title": "Outcome",
+       "type": "string"
+      },
+      "warnings": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Warnings",
+       "type": "array"
+      }
+     },
+     "required": [
+      "outcome",
+      "as_of",
+      "coverage",
+      "warnings"
+     ],
+     "title": "Validity",
+     "type": "object"
+    }
+   },
+   "additionalProperties": false,
+   "properties": {
+    "adapter_version": {
+     "const": "series-input/2",
+     "title": "Adapter Version",
+     "type": "string"
+    },
+    "evidence_id": {
+     "title": "Evidence Id",
+     "type": "string"
+    },
+    "facts": {
+     "items": {
+      "$ref": "#/$defs/Fact"
+     },
+     "title": "Facts",
+     "type": "array"
+    },
+    "project_id": {
+     "title": "Project Id",
+     "type": "string"
+    },
+    "scope": {
+     "$ref": "#/$defs/SeriesScope"
+    },
+    "source_kind": {
+     "const": "configured_input",
+     "title": "Source Kind",
+     "type": "string"
+    },
+    "validity": {
+     "$ref": "#/$defs/Validity"
+    },
+    "version": {
+     "const": 1,
+     "title": "Version",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "version",
+    "evidence_id",
+    "project_id",
+    "facts",
+    "validity",
+    "source_kind",
+    "adapter_version",
+    "scope"
+   ],
+   "title": "Evidence_series_input_v2",
+   "type": "object"
+  },
+  "static-input-page/1": {
+   "$defs": {
+    "Fact": {
+     "additionalProperties": false,
+     "properties": {
+      "entity_id": {
+       "title": "Entity Id",
+       "type": "string"
+      },
+      "metric": {
+       "title": "Metric",
+       "type": "string"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      },
+      "unit": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Unit"
+      },
+      "value": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Value"
+      }
+     },
+     "required": [
+      "path",
+      "entity_id",
+      "metric",
+      "value",
+      "unit"
+     ],
+     "title": "Fact",
+     "type": "object"
+    },
+    "StaticPageScope": {
+     "additionalProperties": false,
+     "properties": {
+      "component_class": {
+       "title": "Component Class",
+       "type": "string"
+      },
+      "has_more": {
+       "title": "Has More",
+       "type": "boolean"
+      },
+      "kind": {
+       "const": "static_page",
+       "title": "Kind",
+       "type": "string"
+      },
+      "offset": {
+       "title": "Offset",
+       "type": "integer"
+      },
+      "returned": {
+       "title": "Returned",
+       "type": "integer"
+      },
+      "total_count": {
+       "title": "Total Count",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "kind",
+      "component_class",
+      "offset",
+      "returned",
+      "total_count",
+      "has_more"
+     ],
+     "title": "StaticPageScope",
+     "type": "object"
+    },
+    "Validity": {
+     "additionalProperties": false,
+     "properties": {
+      "as_of": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        }
+       ],
+       "title": "As Of"
+      },
+      "coverage": {
+       "title": "Coverage",
+       "type": "string"
+      },
+      "outcome": {
+       "const": "completed",
+       "title": "Outcome",
+       "type": "string"
+      },
+      "warnings": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Warnings",
+       "type": "array"
+      }
+     },
+     "required": [
+      "outcome",
+      "as_of",
+      "coverage",
+      "warnings"
+     ],
+     "title": "Validity",
+     "type": "object"
+    }
+   },
+   "additionalProperties": false,
+   "properties": {
+    "adapter_version": {
+     "const": "static-input-page/1",
+     "title": "Adapter Version",
+     "type": "string"
+    },
+    "evidence_id": {
+     "title": "Evidence Id",
+     "type": "string"
+    },
+    "facts": {
+     "items": {
+      "$ref": "#/$defs/Fact"
+     },
+     "title": "Facts",
+     "type": "array"
+    },
+    "project_id": {
+     "title": "Project Id",
+     "type": "string"
+    },
+    "scope": {
+     "$ref": "#/$defs/StaticPageScope"
+    },
+    "source_kind": {
+     "const": "configured_input",
+     "title": "Source Kind",
+     "type": "string"
+    },
+    "validity": {
+     "$ref": "#/$defs/Validity"
+    },
+    "version": {
+     "const": 1,
+     "title": "Version",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "version",
+    "evidence_id",
+    "project_id",
+    "facts",
+    "validity",
+    "source_kind",
+    "adapter_version",
+    "scope"
+   ],
+   "title": "Evidence_static_input_page_v1",
+   "type": "object"
+  },
+  "static-input/1": {
+   "$defs": {
+    "Fact": {
+     "additionalProperties": false,
+     "properties": {
+      "entity_id": {
+       "title": "Entity Id",
+       "type": "string"
+      },
+      "metric": {
+       "title": "Metric",
+       "type": "string"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      },
+      "unit": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Unit"
+      },
+      "value": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Value"
+      }
+     },
+     "required": [
+      "path",
+      "entity_id",
+      "metric",
+      "value",
+      "unit"
+     ],
+     "title": "Fact",
+     "type": "object"
+    },
+    "StaticScope": {
+     "additionalProperties": false,
+     "properties": {
+      "component_class": {
+       "title": "Component Class",
+       "type": "string"
+      },
+      "entity_id": {
+       "title": "Entity Id",
+       "type": "string"
+      },
+      "kind": {
+       "const": "static",
+       "title": "Kind",
+       "type": "string"
+      }
+     },
+     "required": [
+      "kind",
+      "component_class",
+      "entity_id"
+     ],
+     "title": "StaticScope",
+     "type": "object"
+    },
+    "Validity": {
+     "additionalProperties": false,
+     "properties": {
+      "as_of": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        }
+       ],
+       "title": "As Of"
+      },
+      "coverage": {
+       "title": "Coverage",
+       "type": "string"
+      },
+      "outcome": {
+       "const": "completed",
+       "title": "Outcome",
+       "type": "string"
+      },
+      "warnings": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Warnings",
+       "type": "array"
+      }
+     },
+     "required": [
+      "outcome",
+      "as_of",
+      "coverage",
+      "warnings"
+     ],
+     "title": "Validity",
+     "type": "object"
+    }
+   },
+   "additionalProperties": false,
+   "properties": {
+    "adapter_version": {
+     "const": "static-input/1",
+     "title": "Adapter Version",
+     "type": "string"
+    },
+    "evidence_id": {
+     "title": "Evidence Id",
+     "type": "string"
+    },
+    "facts": {
+     "items": {
+      "$ref": "#/$defs/Fact"
+     },
+     "title": "Facts",
+     "type": "array"
+    },
+    "project_id": {
+     "title": "Project Id",
+     "type": "string"
+    },
+    "scope": {
+     "$ref": "#/$defs/StaticScope"
+    },
+    "source_kind": {
+     "const": "configured_input",
+     "title": "Source Kind",
+     "type": "string"
+    },
+    "validity": {
+     "$ref": "#/$defs/Validity"
+    },
+    "version": {
+     "const": 1,
+     "title": "Version",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "version",
+    "evidence_id",
+    "project_id",
+    "facts",
+    "validity",
+    "source_kind",
+    "adapter_version",
+    "scope"
+   ],
+   "title": "Evidence_static_input_v1",
+   "type": "object"
+  }
  },
  "observed_draft": {
   "$defs": {
@@ -464,8 +4313,8 @@
  "pending": {
   "action_and_proposal_blocks": "09-11: draft block kinds beyond observed/computed",
   "arbitrary_request_scope": "09: natural-language scope beyond the bounded profile grammar",
-  "checked_tool_result_shapes": "02: returned shapes of checked tool results (input schemas are frozen here)",
-  "evidence_and_receipt_identity": "02: evidence and receipt identity fields",
+  "artifact_evidence_identity": "05: identity of asset and artifact evidence (issue 02 A1.1 blocker)",
+  "checked_chart_shape": "05: the receipt's chart object; answer_receipt freezes only its presence",
   "general_effect_guards": "11: guard/postcondition schemas for effectful tools other than update_component",
   "independent_domain_approval": "10: per-metric domain review; formulas here are editing-agent reviewed only"
  },

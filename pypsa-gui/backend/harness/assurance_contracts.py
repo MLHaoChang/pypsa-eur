@@ -3,14 +3,17 @@
 One canonical document holds every server-owned contract a checked answer or
 effect depends on: the request-scope schema, the profile-to-metric registry and
 metric definitions, the observed and computed draft schemas, the effect-guard
-schema and the input-schema hash of each checked tool. `assurance_contracts.v1.json`
+schema and the input-schema hash of each checked tool, plus the returned shapes
+in `harness.assurance_shapes`: public evidence identity per adapter version, the
+answer receipt per policy version and each checked tool's result. `assurance_contracts.v1.json`
 is the reviewed snapshot; `tests/test_assurance_contracts.py` fails CI when the
 live contracts drift from it.
 
 Changing a contract (owner decision AA-V1-CHANGE-1): additive changes stay
 in version 1. For a contract the server accepts, an optional field, enum value
 or wider bound is additive. For a contract the server returns, only a new entry
-(a new profile or checked tool) is additive. Each needs a reviewed snapshot update. Removing or narrowing anything, or
+(a new profile, checked tool, evidence adapter version or receipt policy
+version) is additive. Each needs a reviewed snapshot update. Removing or narrowing anything, or
 changing an existing profile, metric definition or checked-tool schema, needs a
 new profile version (``x/2``) beside the old one, or a protocol version bump.
 ``--write`` refuses a non-additive snapshot update.
@@ -35,8 +38,8 @@ PENDING = {
     "arbitrary_request_scope": "09: natural-language scope beyond the bounded profile grammar",
     "action_and_proposal_blocks": "09-11: draft block kinds beyond observed/computed",
     "general_effect_guards": "11: guard/postcondition schemas for effectful tools other than update_component",
-    "evidence_and_receipt_identity": "02: evidence and receipt identity fields",
-    "checked_tool_result_shapes": "02: returned shapes of checked tool results (input schemas are frozen here)",
+    "artifact_evidence_identity": "05: identity of asset and artifact evidence (issue 02 A1.1 blocker)",
+    "checked_chart_shape": "05: the receipt's chart object; answer_receipt freezes only its presence",
     "independent_domain_approval": "10: per-metric domain review; formulas here are editing-agent reviewed only",
 }
 
@@ -51,6 +54,9 @@ DIRECTIONS = {
     "effect_guard": "accepts",
     "profiles": "returns",
     "checked_tools": "returns",
+    "evidence_identity": "returns",
+    "answer_receipt": "returns",
+    "checked_tool_results": "returns",
 }
 _META = {"version", "pending", "directions"}
 
@@ -70,10 +76,12 @@ def build() -> dict:
     from typing import get_args
 
     from harness import calculations
+    from harness import assurance_shapes as shapes
     from harness.assurance import CHECKED_TOOLS, Draft, ProfileDraft
     from harness.assurance_scope import RequestScope
     from harness.catalogue import TOOLS
     from harness.effects import EffectContract
+    from services.assurance_records import INPUT_ADAPTERS, POLICY_VERSION
 
     scope_profiles = set(get_args(RequestScope.model_fields["profile"].annotation))
     if scope_profiles != set(calculations.PROFILES):
@@ -100,6 +108,13 @@ def build() -> dict:
         raise ValueError(
             "Checked tools absent from the catalogue: " + ", ".join(missing)
         )
+    unshaped = sorted(
+        (set(INPUT_ADAPTERS.values()) - set(shapes.EVIDENCE))
+        | (CHECKED_TOOLS ^ set(shapes.TOOL_RESULTS))
+        | ({POLICY_VERSION} - set(shapes.RECEIPTS))
+    )
+    if unshaped:
+        raise ValueError("Returned shapes missing or stale: " + ", ".join(unshaped))
     document = {
         "version": VERSION,
         "request_scope": RequestScope.model_json_schema(),
@@ -110,6 +125,15 @@ def build() -> dict:
         "checked_tools": {
             name: _schema_sha256(tools[name]["input_schema"])
             for name in sorted(CHECKED_TOOLS)
+        },
+        "evidence_identity": {
+            key: shapes.schema(model) for key, model in shapes.EVIDENCE.items()
+        },
+        "answer_receipt": {
+            key: shapes.schema(model) for key, model in shapes.RECEIPTS.items()
+        },
+        "checked_tool_results": {
+            name: shapes.schema(models) for name, models in shapes.TOOL_RESULTS.items()
         },
         "pending": PENDING,
         "directions": DIRECTIONS,

@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The frozen version-1 assurance contracts now include the shapes the assistant returns: the public evidence record for each adapter version, the checked-answer receipt and each checked tool's result. `/api/chat/reliability/contracts` serves them, and the backend test suite fails when code returns a field the reviewed contract does not list.
