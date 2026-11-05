@@ -257,7 +257,8 @@ def _install_ac(n, converged=(True, True, True, True)):
         ac_pf_results=snapshot,
         ac_pf_convergence={str(s): ok for s, ok in zip(SNAPSHOTS, converged)},
         ac_pf_convergence_list=[{'snapshot': str(s), 'ok': ok} for s, ok in zip(SNAPSHOTS, converged)],
-        ac_pf_converged_count=sum(converged), ac_pf_total_snapshots=4)
+        ac_pf_converged_count=None if None in converged else sum(converged),
+        ac_pf_unknown_count=sum(ok is None for ok in converged), ac_pf_total_snapshots=4)
 
 
 def test_ac_pf_uses_apparent_power_where_reactive_flows_exist(solved):
@@ -323,6 +324,15 @@ def test_string_false_is_not_a_converged_snapshot(solved):
     for entry in PyPSAService.get_solver_state()['ac_pf_convergence_list']:
         entry['ok'] = 'false'
     assert lf.get_loadflow_summary(source='ac_pf')['unavailable_kind'] == 'ac_pf_not_converged'
+
+
+def test_unknown_convergence_is_excluded_but_not_counted_as_unconverged(solved):
+    """AA-12: a null `ok` is unknown: excluded from the loading, never called failed."""
+    _install_ac(solved['network'], converged=(None, False, True, True))
+    out = lf.get_loadflow_summary(source='ac_pf', limit=25)
+    assert out['ac_pf']['unconverged_snapshots_excluded'] == 2
+    assert out['ac_pf']['unconverged_in_window'] == 1
+    assert out['ac_pf']['unknown_in_window'] == 1
 
 
 def test_invalid_weights_refuse_instead_of_inventing_weighted_means(solved):

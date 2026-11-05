@@ -2184,10 +2184,12 @@ def _attach_tariff_plan(name: str, version: int | None, replace_inline: bool) ->
     return ref, commercial, replaced
 
 
-def attach_tariff(name: str, version: int | None = None, replace_inline: bool = False) -> dict:
+def attach_tariff(name: str, version: int | None = None, replace_inline: bool = False,
+                  research_ref: str | None = None) -> dict:
     """Set `commercial.import_tariff_ref` to a Library tariff through the
     solver-config route (which resolves and pins it). An inline tariff that is
-    not this item is never replaced silently (review M2)."""
+    not this item is never replaced silently (review M2). `research_ref` names
+    the confirmed source row (issue 09); a call carrying it is always carded."""
     from models.schemas import SolverConfigSchema
     from routers.simulation import update_solver_config as _put
 
@@ -2197,7 +2199,7 @@ def attach_tariff(name: str, version: int | None = None, replace_inline: bool = 
     return {"import_tariff_ref": ref,
             "import_tariff": {"id": bound.get("id"), "name": bound.get("name"),
                               "items": len(bound.get("items") or [])},
-            "replaced": replaced}
+            "replaced": replaced, **({"research_ref": research_ref} if research_ref else {})}
 
 
 # ── LV08 B2a (12) — live-voice 08 slice B2 ──────────────────────────────────
@@ -6477,6 +6479,18 @@ def set_requirement(requirement: dict | None = None, replaces: str | None = None
     return requirements.set_requirement(requirement, replaces, retire)
 
 
+def record_source(gap: str, value: float, unit: str, basis: str, url: str, quote: str,
+                  title: str = "", jurisdiction: str | None = None) -> dict:
+    """Study harness issue 09: propose a source row in a research turn. A
+    refused row is a tool error of its kind (`research.ERROR_KINDS`)."""
+    from harness import research
+
+    try:
+        return research.record_source(gap, value, unit, basis, url, quote, title, jurisdiction)
+    except research.ResearchError as exc:
+        raise HTTPException(status_code=422, detail={"error_kind": exc.kind, "message": str(exc)}) from exc
+
+
 def set_goal(objective: str, max_rounds: int | None = None) -> dict:
     """Set the session's goal with a round budget (issue 17): after this
     turn, up to `max_rounds` rounds run on their own (`harness/goals.py`)."""
@@ -6722,37 +6736,33 @@ def read_excel_sheet(
     }
 
 
-def apply_demand_from_excel(
-    file_id: str,
-    time_col: str,
-    value_col: str,
-    load_name: str,
-    sheet_name: str | None = None,
-) -> dict:
-    """
-    Parse an Excel/CSV upload's `time_col` + `value_col` into a per-snapshot
-    Load demand profile, replacing any profile the Load already has. Two-pass:
+def _series_sha256(series) -> str:
+    """The sha256 of a demand series as written: its float64 values in
+    snapshot order (issue 21c: the card binds it, the planned write checks it)."""
+    import hashlib as _hashlib
 
-      Pass 1 (NO mutation): parse the time + value columns, align to
-        n.snapshots, return structured `error_kind` on mismatch.
-      Pass 2 (LOCKED): write the aligned series into _user_ts so it's
-        persisted alongside the project on next save.
+    import numpy as _np
 
-    The load must already exist in the network (this tool doesn't create
-    components — that's a separate `create_component` call).
+    return _hashlib.sha256(_np.ascontiguousarray(series.to_numpy(dtype="float64")).tobytes()).hexdigest()
 
-    Errors (HTTPException 400 with structured detail):
-      * `load_not_found`            — `load_name` missing from n.loads
-      * `time_column_parse_error`   — time column can't be parsed as dt
-      * `value_column_parse_error`  — value column has non-numeric data
-      * `snapshot_count_mismatch`   — row count != len(n.snapshots)
-      * `snapshot_range_mismatch`   — time range doesn't cover snapshots
-    """
+
+def _demand_series(ctx, args: dict) -> dict:
+    """Pass 1 of `apply_demand_from_excel` on `ctx`'s network: the upload
+    parsed and aligned to the snapshots, nothing written. The tool and its
+    edit card both call it, so the card shows the series the tool writes.
+    Returns `{series, sheet, auto_tiled, tile_factor, upload_sha256}`."""
+    import hashlib as _hashlib
+    import io as _io
+    import pathlib as _pathlib
+
     import pandas as pd
 
     from services import upload_service
+    file_id, time_col, value_col = args["file_id"], args["time_col"], args["value_col"]
+    load_name, sheet_name = args["load_name"], args.get("sheet_name")
     name = _require_active_project()
-    n = PyPSAService.get_network()
+    n = ctx.network
+    project_dir = _pathlib.Path(ctx.storage_dir) if getattr(ctx, "storage_dir", None) else None
 
     if load_name not in n.loads.index:
         raise HTTPException(
@@ -6769,8 +6779,10 @@ def apply_demand_from_excel(
     # Pass 1 — parse + align outside the lock. The upload blob is
     # content-addressed so mid-call mutation isn't a concern, but the
     # network mutation in Pass 2 IS guarded by the PyPSA lock.
-    meta = upload_service.get_upload_meta(name, file_id)
-    blob = upload_service.get_upload_path(name, file_id)
+    meta = upload_service.get_upload_meta(name, file_id, project_dir=project_dir)
+    # One read: the bytes parsed are the bytes hashed (issue 21c, G2).
+    data = upload_service.get_upload_path(name, file_id, project_dir=project_dir).read_bytes()
+    blob = _io.BytesIO(data)
     is_csv = meta.mime in {"text/csv", "text/plain"} or meta.filename.lower().endswith(".csv")
     try:
         if is_csv:
@@ -6914,12 +6926,56 @@ def apply_demand_from_excel(
             },
         )
 
+    return {
+        "series": _pd.Series(values_array, index=snaps),
+        "sheet": sheet_name,
+        "auto_tiled": auto_tiled,
+        "tile_factor": tile_factor,
+        "upload_sha256": _hashlib.sha256(data).hexdigest(),
+    }
+
+def apply_demand_from_excel(
+    file_id: str,
+    time_col: str,
+    value_col: str,
+    load_name: str,
+    sheet_name: str | None = None,
+) -> dict:
+    """
+    Parse an Excel/CSV upload's `time_col` + `value_col` into a per-snapshot
+    Load demand profile, replacing any profile the Load already has. Two-pass:
+
+      Pass 1 (NO mutation): parse the time + value columns, align to
+        n.snapshots, return structured `error_kind` on mismatch.
+      Pass 2 (LOCKED): write the aligned series into _user_ts so it's
+        persisted alongside the project on next save.
+
+    The load must already exist in the network (this tool doesn't create
+    components — that's a separate `create_component` call).
+
+    Errors (HTTPException 400 with structured detail):
+      * `load_not_found`            — `load_name` missing from n.loads
+      * `time_column_parse_error`   — time column can't be parsed as dt
+      * `value_column_parse_error`  — value column has non-numeric data
+      * `snapshot_count_mismatch`   — row count != len(n.snapshots)
+      * `snapshot_range_mismatch`   — time range doesn't cover snapshots
+    """
+    import pathlib as _pathlib
+
+    name = _require_active_project()
+    ctx = PyPSAService.get_active_context()
+    n = ctx.network
+    parsed = _demand_series(ctx, {"file_id": file_id, "time_col": time_col, "value_col": value_col,
+                                  "load_name": load_name, "sheet_name": sheet_name})
+    auto_tiled, tile_factor = parsed["auto_tiled"], parsed["tile_factor"]
+    import pandas as _pd
+
     # Pass 2 — write under the PyPSA lock so a concurrent solve can't see
     # half-applied state. We write the series directly into n.loads_t.p_set;
     # also call into `_user_ts` so save_project persists it. The values
     # array is reindexed positionally against n.snapshots — works for both
     # flat DatetimeIndex AND MultiIndex(period, timestep) targets.
-    aligned = _pd.Series(values_array, index=snaps)
+    aligned = parsed["series"]
     # Phase 12f: this tool writes `loads_t.p_set` and `_user_ts` DIRECTLY,
     # bypassing every HTTP handler and therefore every guard on them. Its only
     # numeric gate is `pd.to_numeric(..., errors="raise")`, which passes NaN
@@ -6934,11 +6990,15 @@ def apply_demand_from_excel(
         pass
 
     with PyPSAService.get_lock():
-        try:
-            from routers.network import _user_ts, _user_ts_lock
-        except ImportError:  # pragma: no cover — only fails if routers/network refactor breaks paths
-            _user_ts = None
-            _user_ts_lock = None
+        # Issue 21c (G2): an admitted planned write checks, under the lock and
+        # before any write, that it writes the series and upload it was pinned to.
+        from services import run_envelope, upload_service
+        run_envelope.verify_planned_write(
+            ctx, {"file_id": file_id, "time_col": time_col, "value_col": value_col,
+                  "load_name": load_name, "sheet_name": sheet_name},
+            parsed, lambda: upload_service.get_upload_bytes(
+                name, file_id, project_dir=_pathlib.Path(ctx.storage_dir) if ctx.storage_dir else None))
+        from services.user_timeseries import _user_ts_lock
         from services import growth_placeholders
         prior = growth_placeholders.before(n, "loads", "p_set", [load_name])
         # Direct dataframe write so the LP sees the new demand on next solve.
@@ -6947,14 +7007,13 @@ def apply_demand_from_excel(
         else:
             # Add a fresh column for the load.
             n.loads_t.p_set[load_name] = aligned
-        # Persist to _user_ts so save_project writes user_ts.json.
-        if _user_ts is not None and _user_ts_lock is not None:
-            with _user_ts_lock:
-                _user_ts[("loads", "p_set", load_name)] = aligned
-                # The upload replaces the series, so the meta recorded for the
-                # old one (generator, refinements) no longer describes it.
-                from services.user_timeseries import _user_ts_meta
-                _user_ts_meta.pop(("loads", "p_set", load_name), None)
+        # Persist to the project's own store so save_project writes user_ts.json
+        # (issue 21c, G7: the bound context's, as profile_gen/apply.py writes).
+        with _user_ts_lock:
+            ctx.user_ts[("loads", "p_set", load_name)] = aligned
+            # The upload replaces the series, so the meta recorded for the
+            # old one (generator, refinements) no longer describes it.
+            ctx.user_ts_meta.pop(("loads", "p_set", load_name), None)
         # A user's load profile sets the growth placeholders it covers (E1 follow-up).
         growth_placeholders.mark_set(n, "loads", "p_set", {load_name: aligned}, prior)
 
@@ -9614,6 +9673,7 @@ DISPATCHERS: dict[str, Any] = {
     "use_skill": use_skill,
     "start_workflow": start_workflow,
     "set_requirement": set_requirement,
+    "record_source": record_source,
     "set_goal": set_goal,
     "pause_goal": pause_goal,
     "complete_goal": complete_goal,

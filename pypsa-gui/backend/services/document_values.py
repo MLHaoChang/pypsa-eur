@@ -106,13 +106,13 @@ def _parse(blob: bytes, max_pages: int) -> dict:
     return out
 
 
-def read_pages(project: str, upload_id: str) -> dict:
+def read_pages(project: str, upload_id: str, *, project_dir=None) -> dict:
     """The upload's text layer: `{source: {upload_id, filename, sha256, pages, truncated},
     pages: [text, ...]}`, page 1 first. `sha256` is of the bytes read."""
     from services import upload_service
 
-    meta = upload_service.get_upload_meta(project, upload_id)
-    blob = upload_service.get_upload_bytes(project, upload_id)
+    meta = upload_service.get_upload_meta(project, upload_id, project_dir=project_dir)
+    blob = upload_service.get_upload_bytes(project, upload_id, project_dir=project_dir)
     sha = hashlib.sha256(blob).hexdigest()
     if meta.sha256 and meta.sha256 != sha:
         _refuse("source_changed", "The upload's bytes no longer match its recorded digest.")

@@ -309,7 +309,7 @@ RESULT_STATE_KEYS = (
     "last_commercial_terms",
     "ac_pf_convergence", "ac_pf_convergence_list",
     "ac_pf_slack_bus_used", "ac_pf_stripped_voll_slacks",
-    "ac_pf_converged_count", "ac_pf_total_snapshots",
+    "ac_pf_converged_count", "ac_pf_total_snapshots", "ac_pf_unknown_count",
     # W4b: the edit counter the load flow ran at (its freshness, like the EH
     # study's `network_revision`). Persisted beside the counter in metadata.json.
     "ac_pf_network_revision",
@@ -593,6 +593,7 @@ class ProjectSolverState:
     ac_pf_stripped_voll_slacks: Any = None
     ac_pf_converged_count: Any = None
     ac_pf_total_snapshots: Any = None
+    ac_pf_unknown_count: Any = None      # int: snapshots with unknown convergence (AA-12)
     ac_pf_network_revision: Any = None   # int: `network_revision` at the PF's start
     # P33b D-1: the on-disk mirror of a FINISHED `eh_study` record (no thread,
     # no stop event). Result state so it rides `results_state.pkl`, but it is

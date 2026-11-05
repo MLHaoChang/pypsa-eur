@@ -340,7 +340,7 @@ def test_toolsets_keep_controls_catalogue_order_and_navigation(domain):
 def test_toolset_refresh_and_new_study_tools_are_available_within_same_turn(monkeypatch):
     session = setup_profile(monkeypatch, {t["name"] for t in TOOLS})
     # setup_profile's double is intentionally restored to the project-kind filter.
-    monkeypatch.setattr(wiring, "_tools_payload", lambda *a: [t for t in TOOLS if not t["name"].startswith("gridspine_") or t["name"] == "gridspine_create_study"])
+    monkeypatch.setattr(wiring, "_tools_payload", lambda *a, **kw: [t for t in TOOLS if not t["name"].startswith("gridspine_") or t["name"] == "gridspine_create_study"])
     fake = FakeProvider([
         {"blocks": [{"type": "tool_use", "id": "switch", "name": "use_toolset", "input": {"domain": "simulation"}}]},
         {"blocks": [{"type": "tool_use", "id": "read", "name": "get_solver_config", "input": {}}]},

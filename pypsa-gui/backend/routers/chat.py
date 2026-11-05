@@ -55,6 +55,8 @@ class EnvelopeDecision(BaseModel):
     verdict: Literal["unattended", "stepwise", "revoke"]
     envelope: dict | None = None  # the user's narrowing; never wider than the profile's
     notify_email: StrictBool = False
+    # Issue 21: the digest of the intake rows the card showed (a plan with a setup entry).
+    intake_digest: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 class StreamRequest(BaseModel):
@@ -1480,10 +1482,13 @@ def checked_capabilities():
 
 @router.get("/reliability/contracts")
 def checked_contracts():
-    from harness.assurance_scope import RequestScope
-    from harness.assurance import Draft, ProfileDraft
-    return {"version": 1, "request_scope": RequestScope.model_json_schema(),
-            "observed_draft": Draft.model_json_schema(), "computed_draft": ProfileDraft.model_json_schema()}
+    # The reviewed version-1 snapshot CI freezes (tests/test_assurance_contracts.py):
+    # its request_scope, observed_draft and computed_draft equal the live schemas
+    # this route served before, and the rest are additive (AA-V1-CHANGE-1).
+    import json
+
+    from harness.assurance_contracts import SNAPSHOT
+    return json.loads(SNAPSHOT.read_text())
 
 
 @router.get("/operations/{operation_id}")
@@ -2197,6 +2202,21 @@ def run_resume(task_id: str, body: RunResumeRequest | None = None,
     from services import run_monitor
     session = _resolve_owned_session(body.session_id, actor) if body and body.session_id else None
     return _run_act(actor, task_id, lambda: run_monitor.resume(task_id, session))
+
+
+class ResearchVerdictRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    row_id: str = Field(min_length=1, max_length=64)
+    verdict: Literal["confirmed", "rejected"]
+
+
+@router.post("/runs/{task_id}/research")
+def run_research_verdict(task_id: str, body: ResearchVerdictRequest,
+                         actor: User = Depends(require_user)) -> dict[str, Any]:
+    """Study harness issue 09: the research card's Use this value or Reject of
+    one source row. A confirmed value is then written only through its own cards."""
+    from harness import research
+    return _run_act(actor, task_id, lambda: research.decide(task_id, body.row_id, body.verdict, by=str(actor.id)))
 
 
 @router.post("/runs/{task_id}/stop")

@@ -27,6 +27,7 @@ cannot be read, matches nothing and pauses the run.
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import copy
 import fnmatch
 import hashlib
@@ -54,6 +55,10 @@ RESEARCH_DEFAULT_EUR, RESEARCH_CAP_EUR = 2.0, 10.0  # SH-RESEARCH-CAP-1
 # The run tools an envelope may list (`runs`); each admitted one counts as a solve.
 RUN_TOOLS = frozenset({"run_simulation", "run_ac_pf_stage", "solve_queue_enqueue",
                        "run_sensitivity_sweep", "run_eh_study"})
+# Issue 05 PR C: the engine loops a result rule may drive. A grant lists one
+# only to cover `restore: "final"` (a solver-config write, LC-40); its solves
+# are its own audit row's (`reserve_engine`), never one admitted solve.
+ENGINE_TOOLS = frozenset({"run_margin_loop", "run_coupling_loop"})
 # Counted as solves when admitted, but no envelope lists them (issue 08, GK B (8)):
 # a sweep or an EH study is always the user's own card.
 NEVER_LISTED = frozenset({"run_sensitivity_sweep", "run_eh_study"})
@@ -67,7 +72,8 @@ RESEARCH_SOURCE = "research:"
 
 # Refusals that end the envelope's use for this run: the runner pauses and
 # notifies (§7 "Scope and audit", the freshness chain).
-PAUSING = frozenset({"expired", "revoked", "exhausted", "drift", "fingerprint_unreadable", "brief_stale"})
+PAUSING = frozenset({"expired", "revoked", "exhausted", "drift", "fingerprint_unreadable", "brief_stale",
+                     "handover_unbound"})
 
 # Data-gap tools (§7, GK B; issue 04): admitted only from a `gaps` entry that
 # names the target, and only to fill a gap: the instance had no series (or the
@@ -185,9 +191,11 @@ def _check_edit(entry):
 
 
 def _check_run(entry):
-    if not isinstance(entry, dict) or "tool" not in entry or not set(entry) <= {"tool", "kind"} \
-            or entry["tool"] not in RUN_TOOLS or not isinstance(entry.get("kind", ""), str):
-        raise EnvelopeError(f"A run names one of {sorted(RUN_TOOLS)} and an optional kind: {entry!r}")
+    if not isinstance(entry, dict) or "tool" not in entry or not set(entry) <= {"tool", "kind", "restore"} \
+            or entry["tool"] not in RUN_TOOLS | ENGINE_TOOLS or not isinstance(entry.get("kind", ""), str) \
+            or ("restore" in entry and (entry["tool"] not in ENGINE_TOOLS or entry["restore"] != "final")):
+        raise EnvelopeError(f"A run names one of {sorted(RUN_TOOLS | ENGINE_TOOLS)} and an optional kind; an "
+                            f"engine loop may carry restore \"final\": {entry!r}")
     if entry["tool"] in NEVER_LISTED:
         raise EnvelopeError(f"{entry['tool']} is never in an envelope; it is always its own card.")
     return dict(entry)
@@ -357,11 +365,66 @@ def _pickup_refused(envelope):
 
 def solves_used(envelope):
     """The run's solves (issue 05, C4): each admitted run tool that was not
-    refused at pickup. A failed or cancelled job still counts. The one count
-    both the envelope's budget check and `run.budget.used.solves` read."""
+    refused at pickup, and each reserving row (an engine loop's, PR C; any
+    event that carries `reserved`): its settled `solves`, else its whole
+    reservation (a loop still running, or lost). A failed or cancelled job
+    still counts. The one count both the envelope's budget check and
+    `run.budget.used.solves` read."""
     gone = _pickup_refused(envelope)
     return sum(1 for a in envelope["audit"]
-               if a["event"] == "used" and a.get("tool") in RUN_TOOLS and a.get("call_id") not in gone)
+               if a["event"] == "used" and a.get("tool") in RUN_TOOLS and a.get("call_id") not in gone) \
+        + sum(int(a["solves"] if "solves" in a else a["reserved"]) for a in envelope["audit"]
+              if "reserved" in a and a.get("call_id") not in gone)
+
+
+def restore_covered(envelope, tool, restore):
+    """`restore: "final"` writes the solver config (LC-40): only a grant
+    whose runs list the engine tool with it covers that (GK A (12) Q2)."""
+    return restore == "base" or any(r.get("tool") == tool and r.get("restore") == "final"
+                                    for r in (envelope or {}).get("runs", []))
+
+
+def reserve_engine(task_path, *, call_id, tool, rule, max_solves, overhead, restore):
+    """An engine loop's start (issue 05 PR C, C4, conditions 2, 3, 9): under
+    the task lock, its `max_solves` is the rule's, clamped to the solves left
+    after its `overhead` (probe, closing re-solve) and to `MAX_LOOP_SOLVES`,
+    and that worst case is reserved on one audit row. (max_solves, None),
+    or (None, reason) with nothing reserved."""
+    from harness.runner import budget_spent
+    from services import assistant_tasks
+    from services.adequacy.coupling import MAX_LOOP_SOLVES
+    with assistant_tasks._LOCK:
+        envelope = _load(task_path)
+        task = json.loads(Path(task_path).read_text())
+        if envelope is None or not live(task_path):
+            return None, "no_envelope"
+        if not restore_covered(envelope, tool, restore):
+            return None, "restore_uncovered"
+        left = envelope["budget"]["solves"] - solves_used(envelope)
+        clamped = min(int(max_solves), left - int(overhead), MAX_LOOP_SOLVES)
+        if budget_spent(task) or clamped < 1:
+            return None, "budget_spent"
+        _audit(envelope, "engine", call_id=call_id, tool=tool, rule=rule, restore=restore,
+               reserved=clamped + int(overhead))
+        _save(task_path, envelope)
+        _count_solves(task_path, envelope)
+        return clamped, None
+
+
+def settle_engine_solves(task_path, call_id, solves):
+    """The loop ended: its reservation becomes what it spent, once (C7).
+    False when the row is gone or already settled."""
+    from services import assistant_tasks
+    with assistant_tasks._LOCK:
+        envelope = _load(task_path)
+        row = next((a for a in (envelope or {}).get("audit", [])
+                    if a["event"] == "engine" and a.get("call_id") == call_id), None)
+        if row is None or "solves" in row:
+            return False
+        row["solves"] = int(solves)
+        _save(task_path, envelope)
+        _count_solves(task_path, envelope)
+        return True
 
 
 # Issue 05 (C2): an L2 round's third admitted change is refused with this kind.
@@ -404,13 +467,40 @@ def propose(task_path, task, profile):
                 "runs": copy.deepcopy(block["runs"]), "budget": dict(block["budget"]),
                 "gaps": [dict(g, at_grant={}) for g in copy.deepcopy(block.get("gaps", []))],
                 "research": dict(block["research"]), "notify": {"email": False},
+                # Issue 21 §2: the run's own setup (create the project from the
+                # template with the confirmed intake inputs), set by `set_setup`.
+                "setup": None,
                 "state": "proposed", "audit": []}
     _save(task_path, envelope)
     return envelope
 
 
+SETUP_TOOL = "create_project_from_template"
+
+
+def set_setup(task_path, template, name, params_digest):
+    """Issue 21 §2: the proposed envelope's `setup` entry, the card's first
+    row ("Create project <name> from the template with the inputs above"),
+    bound to the intake rows' digest. Only a proposed envelope takes it."""
+    from services import assistant_tasks
+    if not isinstance(name, str) or not name.strip() or len(name) > 120:
+        _invalid("The new project needs a name of at most 120 characters.")
+    with assistant_tasks._LOCK:
+        envelope = _load(task_path)
+        if envelope is None or envelope["state"] != "proposed":
+            _refuse("envelope_not_grantable", "Only a proposed plan takes a setup entry.")
+        envelope["setup"] = {"tool": SETUP_TOOL, "template": template, "name": name.strip(),
+                             "params_digest": params_digest}
+        _save(task_path, envelope)
+        return envelope
+
+
 def _rows(envelope):
     lines = []
+    setup = envelope.get("setup")
+    if setup:
+        lines.append(f"- Create project `{setup['name']}` from the {setup['template']} template "
+                     "with the inputs above")
     for e in envelope["edits"]:
         t = e["target"]
         allowed = ", ".join(map(str, e["enum"])) if "enum" in e else ", ".join(
@@ -456,7 +546,7 @@ def describe(envelope):
             "edits": [{k: v for k, v in e.items() if k != "at_grant"} for e in envelope["edits"]],
             "gaps": [{k: v for k, v in g.items() if k != "at_grant"} for g in envelope.get("gaps", [])],
             "runs": envelope["runs"], "budget": envelope["budget"], "research": envelope["research"],
-            "notify": envelope["notify"],
+            "notify": envelope["notify"], "setup": envelope.get("setup"),
             "used": sum(1 for a in audit if a["event"] == "used"),
             "refused": sum(1 for a in audit if a["event"] == "refused"),
             "detail": _rows(envelope)}
@@ -506,6 +596,14 @@ class HeldTariffWithoutId(ValueError):
         super().__init__(f"a held Library tariff has no id (hash {self.ref['hash']}, version {self.ref['version']})")
 
 
+def shipped_ref_dumps(kind):
+    """Every shipped common Library item of `kind`, each ref dumped as
+    `list_items` lists it ({kind, id, version, hash}). Held-tariff detection
+    compares whole refs against this list (see `_library_tariffs`)."""
+    from services.library import common
+    return [common.ref(kind, name).model_dump(mode="json") for name in common.names(kind)]
+
+
 def _library_tariffs():
     """{hash: [name, version]} of the Library tariffs the project's
     organisation holds now (read as `attach_tariff` reads them). Only the
@@ -517,8 +615,7 @@ def _library_tariffs():
     the fill is refused (fail closed)."""
     from routers.library import ItemKind, list_items
     from services import chat_tools
-    from services.library import common
-    shipped = [common.ref("tariff", name).model_dump(mode="json") for name in common.names("tariff")]
+    shipped = shipped_ref_dumps("tariff")
     items = chat_tools._library_call(list_items, ItemKind.tariff)
     items = items.get("items", items) if isinstance(items, dict) else items
     out = {}
@@ -593,15 +690,18 @@ def _same_load(ctx, name, record):
         return False
 
 
-def decide(session, task_id, verdict, envelope=None, notify_email=False):
+def decide(session, task_id, verdict, envelope=None, notify_email=False, intake_digest=None):
     """The user's verdict on the plan-review card; returns the message the
     harness writes into the conversation. Reached only from the `/stream`
-    request's `envelope_decision`, never from a tool call."""
+    request's `envelope_decision`, never from a tool call. A plan with a
+    `setup` entry hands over at the grant (`_grant_setup`, issue 21 §2):
+    `intake_digest` is the digest of the intake rows the card showed."""
     from harness import approvals
     from services import assistant_tasks, run_profiles
     from services.pypsa_service import PyPSAService
     if verdict not in ("unattended", "stepwise", "revoke"):
         _invalid("Choose unattended, stepwise or revoke.")
+    setup = None
     with assistant_tasks._LOCK:
         path, task = assistant_tasks._read(task_id)
         current = _load(path)
@@ -625,6 +725,9 @@ def decide(session, task_id, verdict, envelope=None, notify_email=False):
                 _refuse("envelope_not_grantable", "This run is over or already runs inside a granted envelope.")
             block = check_block(run_profiles.resolve(task["run"]["profile"])["envelope"])
             chosen = narrow(block, envelope if envelope is not None else block)
+            if current.get("setup"):
+                setup = (path, task, current, chosen)
+        if setup is None and verdict == "unattended":
             ctx = PyPSAService.get_active_context()
             fingerprint = assistant_tasks._fingerprint()
             if fingerprint is None or str(ctx.project_uuid) != task["project_id"]:
@@ -648,8 +751,134 @@ def decide(session, task_id, verdict, envelope=None, notify_email=False):
             _save(path, granted)
             message = (f"Approve and run unattended (plan: {task['title']}), inside this envelope until "
                        f"{granted['expires_at']}:\n{_rows(granted)}")
+    if setup is not None:
+        return _grant_setup(session, *setup, intake_digest=intake_digest, notify_email=notify_email)
     assistant_tasks._wake(path)
     return message
+
+
+def _cited_uploads(rows):
+    return sorted({r["source"]["upload_id"] for r in rows
+                   if r["status"] == "confirmed" and r["source"].get("upload_id")})
+
+
+def _grant_setup(session, path, task, current, chosen, *, intake_digest, notify_email):
+    """Issue 21 §2, create at grant: the intake digest is checked against the
+    rows and their sources (R6), the user's decision goes on record, then
+    `run_handover.hand_over` creates the project and starts the run there,
+    and the host task ends `handed_over`. No lock is held here: the
+    hand-over's file lock comes first, `assistant_tasks._LOCK` last (R3)."""
+    from harness import approvals
+    from services import assistant_tasks, run_handover, run_intake, run_profiles
+    from services.pypsa_service import PyPSAService
+    setup = current["setup"]
+    intake = task["run"].get("intake") or {}
+    rows = intake.get("rows") or []
+    profile = run_profiles.resolve(task["run"]["profile"])
+    ctx = PyPSAService.get_active_context()
+    if str(ctx.project_uuid) != task["project_id"]:
+        _refuse("brief_inputs_unreadable", "The project's inputs cannot be read, so nothing can be granted.")
+    if not isinstance(intake_digest, str) or setup.get("params_digest") != intake_digest:
+        _refuse("intake_stale", "The inputs changed since the card was shown; review them again.")
+    items = run_intake.missing(profile, rows, intake.get("gaps") or [])
+    if items:
+        _refuse("intake_missing", run_intake.request_text(items))
+    try:
+        host = run_intake.host_for(ctx, task["owner_id"], task["project_id"])
+        run_intake.check_grant(rows, intake_digest, host)
+    except run_intake.IntakeError as exc:
+        if exc.kind == "not_found":
+            _refuse("not_found", str(exc), 404)
+        _refuse("intake_stale", str(exc))
+    confirmed = run_intake.confirm(rows)
+    prior = run_handover.read_intent(path)
+    if prior is not None and prior.get("digest") == intake_digest:
+        decision_id = prior["decision_id"]  # a retried grant goes on from its intent (A1)
+    else:
+        decision_id = "envelope-" + str(uuid.uuid4())  # put on record by the precheck, once it passes
+    handover = {"decision_id": decision_id, "digest": intake_digest}
+
+    def precheck():
+        # GK B (20) Q1: under the hand-over lock, the host's inputs and the
+        # requirements the brief recorded, never a live re-read as the baseline.
+        with assistant_tasks._LOCK:
+            _, fresh = assistant_tasks._read(task["task_id"])
+        if fresh["status"] in ("cancelled", "completed"):
+            raise run_handover.HandoverError("envelope_not_grantable", "This run is over.")
+        fingerprint = assistant_tasks._fingerprint()
+        if fingerprint is None:
+            raise run_handover.HandoverError("brief_inputs_unreadable",
+                                             "The project's inputs cannot be read, so nothing can be granted.")
+        if assistant_tasks._stale(fresh, fingerprint):
+            raise run_handover.HandoverError("task_brief_stale",
+                                             "The inputs or requirements changed since the brief; review a new "
+                                             "brief first.")
+        # Only a grant that passed the checks goes on record, once (GK B (20)): a
+        # retry that resumes an intent keeps the decision that intent names.
+        if run_handover.read_intent(path) is None and not approvals.decided(
+                session, call_id=decision_id, tool="grant_envelope", tier="envelope", outcome="approved",
+                by="user", link={"envelope_id": current["id"], "setup": setup["template"]}):
+            raise run_handover.HandoverError("approval_unavailable",
+                                             "The grant could not be put on record, so nothing is granted.")
+
+    def grant(new_path, new_task, new_ctx):
+        grant_handover(new_path, new_task, chosen, handover=handover, ctx=new_ctx, notify_email=notify_email,
+                       rows=confirmed)
+
+    start = assistant_tasks.handover_starter(task, profile, task["owner_id"], grant=grant, handover=handover)
+    try:
+        intent = run_handover.hand_over(
+            path, owner_id=task["owner_id"], origin={"project_id": task["project_id"], "task_id": task["task_id"]},
+            name=setup["name"], params=run_intake.params(confirmed), digest=intake_digest, decision_id=decision_id,
+            host_name=host.name, host_dir=host.dir, uploads=_cited_uploads(confirmed), start=start,
+            template=setup["template"], precheck=precheck)
+    except run_handover.HandoverError as exc:
+        _HANDOVER_REFUSALS.get(exc.kind, _HANDOVER_REFUSALS["handover_incomplete"])(str(exc))
+    assistant_tasks.end_handed_over(path, intent)
+    with assistant_tasks._LOCK:
+        envelope = _load(path)
+        if envelope is not None:
+            _audit(envelope, "handed_over", project_id=intent["project_id"], task_id=intent["task_id"],
+                   decision_id=decision_id)
+            _save(path, envelope)
+    return (f"Approve and run unattended (plan: {task['title']}): project `{intent['project_name']}` was created "
+            f"from the {setup['template']} template with the inputs shown, and the run goes on there.")
+
+
+# A hand-over's refusal, as its own literal kind (the error-kind manifest).
+_HANDOVER_REFUSALS = {
+    "handover_busy": lambda m: _refuse("handover_busy", m),
+    "handover_conflict": lambda m: _refuse("handover_conflict", m),
+    "handover_incomplete": lambda m: _refuse("handover_incomplete", m),
+    "upload_copy_mismatch": lambda m: _refuse("upload_copy_mismatch", m),
+    "access": lambda m: _refuse("not_authorized", m, 403),
+    "envelope_not_grantable": lambda m: _refuse("envelope_not_grantable", m),
+    "brief_inputs_unreadable": lambda m: _refuse("brief_inputs_unreadable", m),
+    "task_brief_stale": lambda m: _refuse("task_brief_stale", m),
+    "approval_unavailable": lambda m: _refuse("approval_unavailable", m),
+}
+
+
+def grant_handover(task_path, task, chosen, *, handover, ctx, notify_email=False, rows=()):
+    """The created project's envelope, granted as the host card's decision
+    (A2): it carries that decision id and the grant digest, the narrowing the
+    user chose, and the fingerprint after creation as its chain's first link.
+    Called once, by the hand-over's `start`, before the run is woken."""
+    envelope = _load(task_path)
+    if envelope is None or envelope["state"] != "proposed":
+        raise ValueError("The created project's run has no proposed envelope.")
+    fingerprint, now = task["fingerprint"], _now()
+    granted = dict(envelope, id=str(uuid.uuid4()), granted_at=_iso(now),
+                   expires_at=_iso(now + chosen["budget"]["wall_time_h"] * 3600),
+                   fingerprint=fingerprint, chain=[{"after_change": "handover", "fingerprint": fingerprint}],
+                   edits=[dict(e, at_grant=_instances(ctx, e)) for e in chosen["edits"]],
+                   gaps=[dict(g, at_grant=_gap_instances(ctx, g)) for g in chosen["gaps"]], prepared=[],
+                   runs=chosen["runs"], budget=chosen["budget"], research=chosen["research"],
+                   notify={"email": bool(notify_email)}, handover=dict(handover), state="granted",
+                   planned=_planned_rows(rows))
+    _audit(granted, "granted", reason="user", decision_id=handover["decision_id"])
+    _save(task_path, granted)
+    return granted
 
 
 def end(task_path, state, reason):
@@ -690,8 +919,10 @@ def covers(task_path, tool):
     """A live envelope lists `tool` (the runner then dispatches without
     waiting; admission still decides, at dispatch)."""
     envelope = _load(task_path) if live(task_path) else None
-    return envelope is not None and (any(e["tool"] == tool for e in envelope["edits"] + envelope["runs"]) or any(
-        tool in (g["tool"], *[p for p, t in GAP_PREPARE.items() if t == g["tool"]]) for g in envelope.get("gaps", [])))
+    return envelope is not None and tool not in ENGINE_TOOLS and (
+        any(e["tool"] == tool for e in envelope["edits"] + envelope["runs"]) or any(
+        tool in (g["tool"], *[p for p, t in GAP_PREPARE.items() if t == g["tool"]]) for g in envelope.get("gaps", []))
+        or any(p["tool"] == tool and p["status"] == "pinned" for p in envelope.get("planned", [])))
 
 
 def last_refusal(task_path):
@@ -872,9 +1103,16 @@ def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx
         return "unknown_tool"
     if tool in NEVER_ADMITTED:
         return "grid_code_publish"
+    if tool in ENGINE_TOOLS:
+        # A `runs` entry covers the harness's own engine step only (C9, #875): a model turn
+        # never starts a loop, its solves and target its own.
+        return "engine_only"
     if _deletes(tool, edit_card):
         return "delete"
-    if tier == "destructive":
+    if tier == "destructive" and tool not in PLANNED_TOOLS:
+        # Issue 21c (GK B (22) Q4): a planned write replaces a load's series; it
+        # is admitted only by `_match_planned`, whose pinned digest binds the
+        # series it replaces (`replaces_sha256`). Every other destructive call is refused.
         return "destructive"
     if _research(args):
         return "research_value"
@@ -884,6 +1122,15 @@ def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx
         return reason
     if _names_another_project(args, ctx):
         return "wrong_project"
+    if tool in PLANNED_TOOLS:
+        reason = _match_planned(envelope, tool, args, edit_card, ctx, note)
+        if reason is not None and tier == "destructive":
+            # G9: the tier exemption lives only in `_match_planned`'s success
+            # path, before any run or gap branch; a call that misses its pin is
+            # refused as destructive.
+            note["planned_miss"] = reason
+            return "destructive"
+        return reason
     if is_run:
         kinds = [r.get("kind") for r in envelope["runs"] if r["tool"] == tool]
         return None if None in kinds or (isinstance(args, dict) and args.get("kind") in kinds) else "outside_entry"
@@ -920,6 +1167,29 @@ def _names_another_project(args, ctx):
     return False
 
 
+def _handover_unbound(envelope, task):
+    """A2: a run a hand-over started is admitted only under an envelope that
+    carries the host card's decision id and grant digest, both equal to what
+    its task's `run.origin` recorded, and the digest the digest of the intake
+    rows the run was created with (what the user's card showed); an envelope
+    that carries one on any other run is no grant either."""
+    from services import run_intake
+    origin = (task.get("run") or {}).get("origin")
+    bound = envelope.get("handover")
+    if origin is None and bound is None:
+        return False
+    if not isinstance(origin, dict) or not isinstance(bound, dict):
+        return True
+    pair = (bound.get("decision_id"), bound.get("digest"))
+    if not all(pair) or pair != (origin.get("decision_id"), origin.get("digest")):
+        return True
+    rows = task["run"].get("intake")
+    try:
+        return not isinstance(rows, list) or run_intake.digest(rows) != pair[1]
+    except (KeyError, TypeError, AttributeError):
+        return True  # rows that cannot be read bind nothing
+
+
 def _standing(session, envelope, task, ctx, solve=False):
     """What a granted envelope must still be at a dispatch or a card
     boundary: granted, this run's, unexpired, budget left, the freshness
@@ -932,6 +1202,8 @@ def _standing(session, envelope, task, ctx, solve=False):
             and envelope["owner_id"] == task["owner_id"] == str(session.owner_user_id)
             and ctx is not None and str(ctx.project_uuid) == envelope["project_id"]):
         return "wrong_project"
+    if _handover_unbound(envelope, task):
+        return "handover_unbound"
     if _now() >= _epoch(envelope["expires_at"]):
         return "expired"
     if budget_spent(task) or (solve and solves_used(envelope) >= envelope["budget"]["solves"]):
@@ -976,10 +1248,14 @@ def admit(session, *, call_id, tool, args, tier, external, edit_card):
     link = {"envelope_id": envelope["id"]}
     scope = note["scope"] or {}
     loop_round = {"loop": scope.get("loop"), "round": scope.get("round")} if scope.get("changes") else {}
-    with assistant_tasks._LOCK:
+    # Issue 21c (G4): a planned write is used once, under the run's lease file
+    # lock (taken before the task lock, as the runner's lease does).
+    with (_lease_file_lock(path) if "planned" in note else contextlib.nullcontext()), assistant_tasks._LOCK:
         envelope = _load(path)
         if reason is None and (envelope is None or envelope["state"] != "granted" or envelope["id"] != link["envelope_id"]):
             reason = "revoked"
+        if reason is None and "planned" in note:
+            reason = _consume(path, envelope, note["planned"], call_id, getattr(session, "lease_holder", None))
         if reason is None and tool in RUN_TOOLS and solves_used(envelope) >= envelope["budget"]["solves"]:
             # C4: checked again where it is recorded, under the held locks: two solves
             # admitted at budget - 1 never both pass.
@@ -1007,7 +1283,8 @@ def admit(session, *, call_id, tool, args, tier, external, edit_card):
         if reason in ("expired", "exhausted") and envelope["state"] == "granted":
             envelope["state"] = reason
             _audit(envelope, reason, reason=reason)
-        _audit(envelope, "refused", call_id=call_id, tool=tool, reason=reason)
+        _audit(envelope, "refused", call_id=call_id, tool=tool, reason=reason,
+               **({"planned_miss": note["planned_miss"]} if "planned_miss" in note else {}))
         try:
             _save(path, envelope)
         except OSError:
@@ -1184,6 +1461,9 @@ ATOMIC_TOOLS = frozenset({
     # Prepares a load fill: writes the pending profile store only (not an edit,
     # so no link), but its pickup compare refuses drift before that write.
     "generate_load_profile",
+    # Issue 21c: a planned write from the grant; under the held locks it also
+    # checks the series and upload it writes against its pin (G2).
+    "apply_demand_from_excel",
 })
 PICKUP_KIND = "envelope_pickup_refused"  # the literal `admitted_write` refuses with
 
@@ -1254,14 +1534,28 @@ def admitted_write(session, task_path, ctx, *, call_id, tool, expected, recheck,
                         reason = "fingerprint_unreadable"
                     if reason is None:
                         from services import solve_capture
+                        mismatch, planned = None, {}
                         try:
                             # HH-10 (issue 05): the queued solve captures what was compared.
                             with (solve_capture.requested(ctx) if tool == "solve_queue_enqueue"
-                                  else contextlib.nullcontext()):
+                                  else contextlib.nullcontext()), _planned_scope(task_path, call_id, tool, planned):
                                 yield
+                        except PlannedMismatch as exc:
+                            mismatch = exc  # issue 21c (G2): refused before any write
+                        except Exception:
+                            # The handler's wrapper may re-raise the tool's mismatch as
+                            # another error; the scope recorded it (G2, typed: G5).
+                            mismatch = _planned_outcome(planned)
+                            if mismatch is None:
+                                raise
                         finally:
-                            receipts.append({"call_id": call_id, **identity(ctx)})
-                        return
+                            # ...or turn it into an error result: the scope's record counts.
+                            mismatch = mismatch or _planned_outcome(planned)
+                            if mismatch is None:
+                                receipts.append({"call_id": call_id, **identity(ctx)})
+                        if mismatch is None:
+                            return
+                        reason = mismatch.kind
                 finally:
                     ctx.solver_state_lock.release()
         finally:
@@ -1269,3 +1563,460 @@ def admitted_write(session, task_path, ctx, *, call_id, tool, expected, recheck,
     refused_before_gate(task_path, call_id, tool, reason)
     _refuse("envelope_pickup_refused", f"The run's envelope did not admit this write at pickup ({reason}); "
                          "the step waits for the user.")
+
+
+# ── Issue 21c: stage-2 planned writes, admitted by their own card digest ────
+#
+# A confirmed intake `write` row is listed on the grant (`planned`). The grant
+# comes before the network exists, so when the run's project is created the
+# harness pins, per planned write, the target load's uid and the digest of
+# the tool's own edit card on that network, only when the card's binding is
+# the granted row's (Q1). Stage 2 runs each through its tool with the args on
+# the envelope (G1); admission takes only that digest and uid (C1), once,
+# under the run's lease (G4); the write checks, under the project's locks,
+# that the series and upload it writes are the pinned ones (G2). Any card
+# that cannot be computed is a mismatch: a card, never an admission (G3).
+
+PLANNED_TOOLS = frozenset({"apply_demand_from_excel"})
+PLANNED_STATES = ("granted", "pinned", "carded", "used")
+_PLANNED_ARGS = ("file_id", "time_col", "value_col", "load_name", "sheet_name")
+# The handler's view of its admitted planned write (G2): set by `admitted_write`.
+PLANNED_WRITE = contextvars.ContextVar("planned_write", default=None)
+
+
+class PlannedMismatch(Exception):
+    """A planned write whose live card, target or bytes are not the pinned
+    ones. Each subclass is its own refusal kind (G5)."""
+
+    kind = "plan_changed"
+    kinds: dict = {}
+
+
+class PlanChanged(PlannedMismatch):
+    kind = "plan_changed"
+
+
+class UidChanged(PlannedMismatch):
+    kind = "uid_changed"
+
+
+PlannedMismatch.kinds = {"plan_changed": PlanChanged, "uid_changed": UidChanged}
+
+
+def _planned_args(args):
+    """The tool's own arguments, nothing else (G1): None when malformed."""
+    if not isinstance(args, dict) or set(args) - set(_PLANNED_ARGS):
+        return None
+    if any(not isinstance(args.get(k), str) or not args[k] for k in _PLANNED_ARGS[:4]):
+        return None
+    if args.get("sheet_name") is not None and not isinstance(args["sheet_name"], str):
+        return None
+    return {k: args[k] for k in _PLANNED_ARGS if args.get(k) is not None}
+
+
+def _planned_rows(rows):
+    """The grant's planned writes: confirmed intake `write` rows only
+    (LOAD-SHAPE-1), in intake order."""
+    out = []
+    for i, row in enumerate(rows or ()):
+        if not isinstance(row, dict) or row.get("status") != "confirmed" or row.get("write") not in PLANNED_TOOLS:
+            continue
+        args = _planned_args(row.get("args"))
+        sha = (row.get("source") or {}).get("sha256")
+        if args is None or not isinstance(sha, str):
+            continue
+        out.append({"index": i, "tool": row["write"], "args": args, "upload_sha256": sha, "status": "granted"})
+    return out
+
+
+def plan_writes(task_path, rows):
+    """List `rows`' confirmed writes on a granted envelope (the grant's step)."""
+    from services import assistant_tasks
+    with assistant_tasks._LOCK:
+        envelope = _load(task_path)
+        if envelope is None or envelope["state"] != "granted":
+            return False
+        envelope["planned"] = _planned_rows(rows)
+        _save(task_path, envelope)
+    return True
+
+
+def planned_steps(task_path, stage, start=1):
+    """Stage 2's planned-write steps, in intake order, with the envelope's
+    args: never a model's (G1)."""
+    envelope = _load(task_path)
+    entries = [p for p in (envelope or {}).get("planned", []) if p["status"] in ("granted", "pinned", "carded")]
+    return [{"id": f"{stage}.{n}", "tool": p["tool"], "args": copy.deepcopy(p["args"]), "status": "pending"}
+            for n, p in enumerate(entries, start=start)]
+
+
+def _lease_file_lock(task_path):
+    from harness import runner
+    return runner._file_lock(task_path)
+
+
+def _lease_live(task, holder):
+    """True when `holder` may write for the run: it holds a live lease, or
+    (`holder` None, the grant) nobody does. A stale process never may (G4)."""
+    lease = ((task or {}).get("run") or {}).get("runner") or {}
+    owner, live = lease.get("lease_owner"), lease.get("lease_until", 0) > time.time()
+    return (owner is None or not live) if holder is None else (owner == holder and live)
+
+
+def _card(ctx, tool, args):
+    """The tool's own edit card on `ctx` (G6: bound, whatever the calling
+    request or turn has bound, never the foreground)."""
+    from functools import partial
+
+    from harness import edit_card
+    from services.run_gates import _on
+    return _on(ctx, partial(edit_card.preview, with_state=False), tool, args)
+
+
+def _binding_matches(entry, card):
+    binding = (card or {}).get("binding") or {}
+    args = entry["args"]
+    return bool(card and card.get("complete")) and binding.get("upload_sha256") == entry["upload_sha256"] \
+        and all(binding.get(k) == args.get(k) for k in ("file_id", "time_col", "value_col", "load_name")) \
+        and all(isinstance(binding.get(k), str) for k in ("load_uid", "series_sha256", "replaces_sha256"))
+
+
+def pin_planned(task_path, ctx, holder=None):
+    """When the run's project exists: pin each granted planned write's load
+    uid and card digest on `ctx`'s network, or mark it carded (G3). Under
+    the run's lease file lock and the task lock, with a live-lease check."""
+    from services import assistant_tasks
+    envelope = _load(task_path)
+    if envelope is None:
+        return False
+    from services import component_identity
+    computed = {}
+    for entry in envelope.get("planned", []):
+        if entry["status"] != "granted":
+            continue
+        try:
+            with ctx.mutation_lock:  # the target binds by uid, minted under the write lock
+                component_identity.uid_for(ctx.network, "Load", entry["args"]["load_name"])
+            card = _card(ctx, entry["tool"], entry["args"])
+        except Exception:  # noqa: BLE001 — a card that cannot be computed is a mismatch (G3)
+            logger.info("run envelope: planned %s has no card at the pin", entry["tool"], exc_info=True)
+            card = None
+        computed[entry["index"]] = card
+    with _lease_file_lock(task_path), assistant_tasks._LOCK:
+        envelope = _load(task_path)
+        try:
+            task = json.loads(Path(task_path).read_text())
+        except (OSError, ValueError):
+            return False
+        if envelope is None or envelope["state"] != "granted" or not _lease_live(task, holder):
+            return False
+        for entry in envelope.get("planned", []):
+            if entry["status"] != "granted" or entry["index"] not in computed:
+                continue
+            card = computed[entry["index"]]
+            if _binding_matches(entry, card):
+                entry.update(status="pinned", pinned={"uid": card["binding"]["load_uid"], "digest": card["digest"],
+                                                      "series_sha256": card["binding"]["series_sha256"],
+                                                      "replaces_sha256": card["binding"]["replaces_sha256"]})
+            else:
+                entry.update(status="carded", carded="plan_changed")
+        _audit(envelope, "pinned", planned=[[p["index"], p["status"]] for p in envelope.get("planned", [])])
+        _save(task_path, envelope)
+    return True
+
+
+def _check_planned(entry, tool, args, edit_card, ctx):
+    """Raises the mismatch kind, or returns: the live card is the pinned one
+    and its load is the pinned uid (C1)."""
+    from services import component_identity
+    pinned = entry.get("pinned") or {}
+    if not edit_card or not edit_card.get("complete") or not pinned:
+        raise PlanChanged()
+    binding = edit_card.get("binding") or {}
+    live_uid = component_identity.get(ctx.network, "Load", entry["args"]["load_name"])
+    if not live_uid or binding.get("load_uid") != pinned["uid"] or live_uid != pinned["uid"]:
+        raise UidChanged()
+    if edit_card.get("digest") != pinned["digest"] or binding.get("series_sha256") != pinned["series_sha256"]:
+        raise PlanChanged()
+
+
+def _match_planned(envelope, tool, args, edit_card, ctx, note):
+    """None when the call is a pinned, unused planned write whose live card
+    is the pinned one; else the reason (a card)."""
+    if note.get("scope") is not None:
+        return "outside_entry"  # G1: an agent turn never makes a planned write
+    wanted = _planned_args(args)
+    entry = next((p for p in envelope.get("planned", []) if p["tool"] == tool and p["args"] == wanted), None)
+    if wanted is None or entry is None:
+        return "outside_entry"
+    if entry["status"] == "used":
+        return "planned_used"
+    if entry["status"] != "pinned":
+        return entry.get("carded") or "plan_changed"
+    try:
+        _check_planned(entry, tool, args, edit_card, ctx)
+    except PlannedMismatch as exc:
+        return exc.kind
+    except Exception:  # noqa: BLE001 — an unreadable check refuses (G3, fail closed)
+        logger.warning("run envelope: planned check for %s failed", tool, exc_info=True)
+        return "plan_changed"
+    note["planned"] = entry["index"]
+    return None
+
+
+def _consume(task_path, envelope, index, call_id, holder):
+    """Mark the planned write used by `call_id` (in `envelope`, saved by the
+    caller): None, or why it may not be."""
+    try:
+        task = json.loads(Path(task_path).read_text())
+    except (OSError, ValueError):
+        return "recheck"
+    if not _lease_live(task, holder):
+        return "lease_lost"
+    entry = next((p for p in envelope.get("planned", []) if p["index"] == index), None)
+    if entry is None or entry["status"] != "pinned":
+        return "planned_used"
+    entry.update(status="used", used_by=call_id)
+    return None
+
+
+def consume_planned(task_path, *, call_id, args, holder=None):
+    """Use the pinned planned write with `args` for `call_id`, under the
+    lease file lock and the task lock (G4). True when used."""
+    from services import assistant_tasks
+    wanted = _planned_args(args)
+    with _lease_file_lock(task_path), assistant_tasks._LOCK:
+        envelope = _load(task_path)
+        if envelope is None or envelope["state"] != "granted" or wanted is None:
+            return False
+        entry = next((p for p in envelope.get("planned", []) if p["args"] == wanted), None)
+        if entry is None or _consume(task_path, envelope, entry["index"], call_id, holder) is not None:
+            return False
+        _save(task_path, envelope)
+    return True
+
+
+def _planned_outcome(state):
+    """After an admitted planned write's handler: its mismatch, or PlanChanged
+    when it stopped before `verify_planned_write` passed (anything that fails
+    first, a stale card included, wrote nothing: the tool writes only after
+    it), or None (it wrote, or no planned write ran)."""
+    if not state.get("active"):
+        return None
+    return state.get("mismatch") or (None if state.get("verified") else PlanChanged())
+
+
+@contextlib.contextmanager
+def _planned_scope(task_path, call_id, tool, state):
+    """Around an admitted planned write's handler: what it must write (G2).
+    `state["mismatch"]` is the mismatch the handler refused with, if any."""
+    if tool not in PLANNED_TOOLS:
+        yield
+        return
+    envelope = _load(task_path)
+    entry = next((p for p in (envelope or {}).get("planned", []) if p.get("used_by") == call_id), None)
+    if entry is None or not entry.get("pinned"):
+        raise PlanChanged()
+    state["active"] = True
+    token = PLANNED_WRITE.set({"args": entry["args"], "upload_sha256": entry["upload_sha256"], **entry["pinned"],
+                               "state": state})
+    try:
+        yield
+    finally:
+        PLANNED_WRITE.reset(token)
+
+
+def verify_planned_write(ctx, args, parsed, read_upload):
+    """Called by the planned tool under the project's locks, before it writes
+    (G2): the series it writes and the upload's bytes now are the pinned
+    ones, and so is the load. Outside an admitted planned write, nothing."""
+    from services import chat_tools, component_identity
+    planned = PLANNED_WRITE.get()
+    if planned is None:
+        return
+    mismatch = None
+    if {k: args.get(k) for k in planned["args"]} != planned["args"]:
+        mismatch = PlanChanged()
+    elif component_identity.get(ctx.network, "Load", args["load_name"]) != planned["uid"]:
+        mismatch = UidChanged()
+    elif parsed["upload_sha256"] != planned["upload_sha256"] \
+            or hashlib.sha256(read_upload()).hexdigest() != planned["upload_sha256"] \
+            or chat_tools._series_sha256(parsed["series"]) != planned["series_sha256"]:
+        mismatch = PlanChanged()
+    elif chat_tools._series_sha256(ctx.network.get_switchable_as_dense(
+            "Load", "p_set", inds=[args["load_name"]])[args["load_name"]]) != planned["replaces_sha256"]:
+        mismatch = PlanChanged()  # G10: the series it replaces is the one the grant's card showed
+    if mismatch is not None:
+        planned["state"]["mismatch"] = mismatch
+        raise mismatch
+    planned["state"]["verified"] = True
+
+
+# ── Issue 21 §4: a carded write that answers the run's data request ─────────
+
+
+def settle_answer(task_path, *, actor_id, project_id, decision, diff, before, after):
+    """B1-B4: the write is an answer row of the run's open data request, its
+    link appended to the freshness chain, only when `run_answers.answer`
+    admits it under the task lock (the chain head, read here, must equal
+    `before`). Returns the row (with `complete`), or None: the write stays
+    drift and the next step pauses the run as today."""
+    from services import assistant_tasks, run_answers
+    current = (after or {}).get("fingerprint")
+    with assistant_tasks._LOCK:
+        envelope = _load(task_path)
+        if envelope is None or envelope["state"] != "granted" or not current or current == before:
+            return None  # a write that changed no input answers nothing
+        task = json.loads(Path(task_path).read_text())
+        run = task.get("run") or {}
+        ref = (run.get("waiting") or {}).get("ref")
+        req = next((r for r in run.get("requests", []) if r["id"] == ref), None)
+        head, _ = _last(envelope)
+        row, reason = run_answers.answer(task, req, actor_id=actor_id, project_id=project_id, decision=decision,
+                                         diff=diff, before=before, head=head)
+        if row is None:
+            _audit(envelope, "answer_refused", call_id=decision.get("id") if decision else None, reason=reason)
+            _save(task_path, envelope)
+            return None
+        envelope["chain"].append({"after_change": "answer:" + decision["id"], "fingerprint": current,
+                                  "exact": after.get("exact"), "network_revision": after.get("network_revision"),
+                                  "answers": req["id"]})
+        _audit(envelope, "answer", call_id=decision["id"], request=req["id"])
+        _save(task_path, envelope)
+        complete = run_answers.record(req, row)
+        run.setdefault("answers", []).append(row)
+        if task.get("fingerprint") == head:
+            task["fingerprint"] = current
+        if complete:
+            run["waiting"] = None  # every item answered: the gate is checked again (resume_task)
+        assistant_tasks._save(Path(task_path), task)
+    return dict(row, complete=complete)
+
+
+def _waiting_on_data(owner_id):
+    """The run of the open project that waits on a data request from this
+    owner: (task path, task id), or None."""
+    from services import assistant_tasks
+    root, project, owner = assistant_tasks._authority()
+    if str(owner) != str(owner_id):
+        return None
+    for path in sorted((Path(root) / "assistant_tasks").glob("*.json")):
+        if path.name.endswith(".envelope.json") or path.name.endswith(".handover.json"):
+            continue
+        try:
+            task = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        run = task.get("run") if isinstance(task, dict) else None
+        if isinstance(run, dict) and (run.get("waiting") or {}).get("kind") == "data" \
+                and task.get("owner_id") == str(owner_id) and task.get("project_id") == str(project):
+            return path, task["task_id"]
+    return None
+
+
+def _inputs(ctx):
+    """A copy of what a write can change, for `_changed`: each class's static
+    and time-series frames, and the network-wide inputs (snapshots, their
+    weightings, the solver config). Read under the caller's locks."""
+    n = ctx.network
+    frames = {}
+    for component in n.components:
+        frames[(str(component.name), None)] = component.static.copy()
+        for attr in component.dynamic:
+            frames[(str(component.name), attr)] = component.dynamic[attr].copy()
+    network = json.dumps([n.snapshots.to_series().to_json(date_format="iso"), n.snapshot_weightings.to_json(),
+                          n.investment_period_weightings.to_json(),
+                          (getattr(ctx, "solver_state", None) or {}).get("solver_config")],
+                         sort_keys=True, default=str)
+    return network, frames
+
+
+def _changed(before, after):
+    """B2: every `(class, name, attr)` whose value differs between two
+    `_inputs` reads (a row or column added or removed counts as changed),
+    plus `("network", "", "inputs")` when a network-wide input moved."""
+    out = set()
+    if before[0] != after[0]:
+        out.add(("network", "", "inputs"))
+
+    def differ(old, new):  # aligned on both axes; NaN equals NaN; a missing cell differs
+        old, new = old.align(new)
+        return ~((old == new) | (old.isna() & new.isna()))
+
+    for key in before[1].keys() | after[1].keys():
+        cls, series = key
+        old, new = before[1].get(key), after[1].get(key)
+        if old is None or new is None:  # a frame that appeared or went: compare with its empty self
+            old, new = (new.iloc[0:0], new) if old is None else (old, old.iloc[0:0])
+        if series is None:  # static: a row per component, a column per attribute
+            # A component added or removed is a change no item names.
+            out.update((cls, str(name), "") for name in old.index.symmetric_difference(new.index))
+            cells = differ(old, new)
+            rows, cols = cells.to_numpy(dtype=bool).nonzero()
+            out.update((cls, str(cells.index[r]), str(cells.columns[c])) for r, c in zip(rows, cols))
+        elif not old.index.equals(new.index) and len(old) and len(new):
+            out.add(("network", "", "inputs"))  # the snapshots moved
+        else:  # time series: a column per component
+            moved = differ(old, new).any(axis=0)
+            out.update((cls, str(name), series) for name in moved.index[moved.to_numpy(dtype=bool)])
+    return sorted(out)
+
+
+@contextlib.contextmanager
+def answering(session, call_id, edit_card):
+    """Around a card write the user approved in ordinary chat (COP-1): when
+    the open project's run waits on a data request, the write's identity
+    before and after goes to `settle_answer`. Both are read, and the write
+    runs, under the project's `mutation_lock` then `solver_state_lock`, as in
+    `admitted_write` (B3), and the diff is what the write changed in the
+    network, never the card's rows (B2). Locks that cannot be had leave the
+    write an ordinary one: drift. A complete request resumes the run
+    (`resume_task` checks the gate again). Runner sessions never answer."""
+    from harness.runner import LOCK_TIMEOUT_SECONDS
+    from services import assistant_tasks
+    from services.pypsa_service import PyPSAService
+    found = None
+    try:
+        if edit_card and not str(getattr(session, "session_id", "") or "").startswith(SESSION_PREFIX):
+            found = _waiting_on_data(getattr(session, "owner_user_id", None))
+    except Exception:  # noqa: BLE001 — no run to answer: an ordinary write
+        found = None
+    if found is None:
+        yield
+        return
+    ctx = PyPSAService.get_active_context()
+    if not ctx.mutation_lock.acquire(timeout=LOCK_TIMEOUT_SECONDS):
+        yield
+        return
+    try:
+        if not ctx.solver_state_lock.acquire(timeout=LOCK_TIMEOUT_SECONDS):
+            yield
+            return
+        try:
+            try:
+                before, inputs = identity(ctx, exact=False), _inputs(ctx)
+            except Exception:  # noqa: BLE001 — unreadable: the write stands as drift
+                logger.warning("run envelope: the inputs before a card write could not be read", exc_info=True)
+                before = None
+            yield
+            if before is None:
+                return
+            try:
+                after, diff = identity(ctx, exact=False), _changed(inputs, _inputs(ctx))
+            except Exception:  # noqa: BLE001
+                logger.warning("run envelope: the inputs after a card write could not be read", exc_info=True)
+                return
+        finally:
+            ctx.solver_state_lock.release()
+    finally:
+        ctx.mutation_lock.release()
+    path, task_id = found
+    try:
+        row = settle_answer(path, actor_id=str(session.owner_user_id), project_id=str(ctx.project_uuid),
+                            decision={"id": call_id, "by": "user"}, diff=diff,
+                            before=before.get("fingerprint"), after=after)
+        if row is not None and row["complete"]:
+            assistant_tasks.resume_task(task_id)
+    except Exception:  # noqa: BLE001 — the write stands; the run reads it as drift
+        logger.warning("run envelope: the answer to the data request could not be settled", exc_info=True)
+

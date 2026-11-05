@@ -11,7 +11,7 @@ import { STAGE_WORDS } from './runWords'
 import { runUnderReview } from './planReview'
 
 vi.mock('../../api/runMonitor', () => ({
-  getRun: vi.fn(), presentRun: vi.fn(), pauseRun: vi.fn(), resumeRun: vi.fn(), stopRun: vi.fn(),
+  getRun: vi.fn(), presentRun: vi.fn(), pauseRun: vi.fn(), resumeRun: vi.fn(), stopRun: vi.fn(), decideResearch: vi.fn(),
 }))
 
 const START = { task_id: TASK_ID, title: 'Own site study', status: 'ready', run: { stage: 'inputs' } }
@@ -70,6 +70,25 @@ describe('RunMonitor', () => {
       show(state)
       expect((await screen.findByTestId('run-budgets')).textContent).not.toMatch(/upper bound/)
     }
+  })
+
+  it('says whether the email about an ended agent loop went out, under why the run stopped (issue 25)', async () => {
+    const texts = {
+      loop_notice_sent: 'An email told you the run needs you.',
+      loop_notice_failed: 'No email sent: sending failed. The run waits for you here.',
+      loop_notice_no_address: 'No email sent: your account has no email address. The run waits for you here.',
+      loop_notice_uncertain: 'The email may not have been sent. The run waits for you here.',
+    } as const
+    for (const [state, text] of Object.entries(texts)) {
+      show(state as keyof typeof texts)
+      const notice = await screen.findByTestId('run-loop-notice')
+      expect(notice.textContent).toBe(text)
+      expect(screen.getByTestId('run-failure').textContent).toMatch(/^The assistant used all its rounds: the run waits for you: Resume/)
+      cleanup()
+    }
+    show('gate_pass')
+    await screen.findByTestId('run-current-stage')
+    expect(screen.queryByTestId('run-loop-notice')).toBeNull()
   })
 
   it('Guided and Expert show the same card; Expert only adds a closed Details', async () => {
@@ -196,6 +215,66 @@ describe('RunMonitor', () => {
     cleanup()
     show('finished_report')
     expect((await screen.findByTestId('run-report-link')).textContent).toBe('Open the report ›')
+  })
+
+  it('research: the value waits beside its page and verbatim quote; Use this value settles it (issue 09)', async () => {
+    vi.mocked(api.decideResearch).mockResolvedValue(STATES.research_cap)
+    show('research_confirm')
+    expect((await screen.findByTestId('run-research-value')).textContent).toBe('142.5 EUR/MWh (energy charge, excl. VAT, DE)')
+    const source = screen.getByTestId('run-research-source')
+    expect(source.getAttribute('href')).toBe('https://tariffs.example.org/industrial-2026')
+    expect(source.getAttribute('rel')).toBe('noopener noreferrer')
+    expect(screen.getByTestId('run-research-quote').textContent).toContain('EUR 142.50 per MWh')
+    expect(screen.getByTestId('run-research-others').textContent).toContain('1 other source')
+    expect(screen.getByTestId('run-state').textContent).toBe('Waiting for you')
+    expect(screen.queryByTestId('run-failure')).toBeNull()
+    expect(screen.queryByTestId('run-waiting-step')).toBeNull()
+    expect(card()).not.toMatch(INTERNAL)
+    expect(api.presentRun).not.toHaveBeenCalled()  // a research wait has no confirmation card to issue
+    fireEvent.click(screen.getByTestId('run-research-use'))
+    await waitFor(() => expect(api.decideResearch).toHaveBeenCalledWith(TASK_ID, 'src_a', 'confirmed'))
+    expect(await screen.findByTestId('run-research-step')).toBeTruthy()
+  })
+
+  it('research: the card names what Use this value attaches to, and only a gap it knows', async () => {
+    show('research_confirm')
+    expect((await screen.findByTestId('run-research-card')).textContent)
+      .toContain('Using it adds it to the Library and attaches it to the import tariff, each on its own card.')
+    cleanup()
+    const unknown = structuredClone(STATES.research_confirm)
+    unknown.monitor.research!.rows.forEach(r => { r.gap = 'grid_fee' })
+    vi.mocked(api.getRun).mockResolvedValue(unknown)
+    useUIStore.setState({ uiMode: 'guided' })
+    render(<AssistantResultCard result={START} disabled={false} onRequest={vi.fn()} />)
+    const text = (await screen.findByTestId('run-research-card')).textContent
+    expect(text).toContain('Using it adds it to the Library and attaches it, each on its own card.')
+    expect(text).not.toMatch(/to the a value/i)
+  })
+
+  it('research: an unverified waiting row shows no source and offers only Reject', async () => {
+    show('research_unverified')
+    expect((await screen.findByTestId('run-research-unverified')).textContent).toBe('Unverified source: not used')
+    expect(screen.queryByTestId('run-research-source')).toBeNull()
+    expect(screen.queryByTestId('run-research-quote')).toBeNull()
+    expect(screen.queryByTestId('run-research-use')).toBeNull()
+    expect(screen.getByTestId('run-research-reject')).toBeTruthy()
+  })
+
+  it('research: two values left say "stay as the template has them"', async () => {
+    const two = structuredClone(STATES.research_cap)
+    two.monitor.research!.steps[0].gaps = ['import_tariff', 'import_tariff']
+    vi.mocked(api.getRun).mockResolvedValue(two)
+    useUIStore.setState({ uiMode: 'guided' })
+    render(<AssistantResultCard result={START} disabled={false} onRequest={vi.fn()} />)
+    expect((await screen.findByTestId('run-research-step')).textContent).toContain('stay as the template has them.')
+  })
+
+  it('research: a step stopped at its cost cap names the value left as the template has it', async () => {
+    show('research_cap')
+    expect((await screen.findByTestId('run-research-step')).textContent)
+      .toBe('Research stopped at its cost cap: Import tariff stays as the template has it.')
+    expect(screen.getByTestId('run-budgets').textContent).toContain('Web research €2.00 of €2.00')
+    expect(screen.queryByTestId('run-research-card')).toBeNull()
   })
 
   it('links use ›, never >', async () => {

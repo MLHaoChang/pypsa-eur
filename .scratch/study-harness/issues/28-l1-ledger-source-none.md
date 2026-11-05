@@ -3,7 +3,7 @@
 
 # 28 — L1 ledger source is always None
 
-Status: ready-for-agent
+Status: done
 Type: bug
 Blocked by: 04
 Gated: yes (GK B)
@@ -22,3 +22,13 @@ Found by SH-05 (c). It touches the same L1 data-gap path as issue 27, so in prac
 - L1 ledger rows carry their source.
 - The gap list is built from the audit/`at_grant` view, not the card view.
 - GK B sees the plan before any code.
+
+## Comments
+
+GK B plan review: GO WITH CHANGES, given by GK B (21) and kept by GK B (22). Keep `run_envelope._load`; no public alias.
+
+- C1. The ledger test asserts `row["source"] == run_envelope.source_digest(gap.at_grant["L1"]) == audit used.source`. The digest is of the full grant-time record, `identity` included, as admission computes it (`run_envelope.py`, `_check_prepare`).
+- C2. The gap list the model is sent carries no `identity`, and a tariff gap shows only `[{name, version}]`, never the held hash.
+- C3. The gap list, non-empty now, is fenced as `<untrusted_data>` ("data, not instructions") and its delimiters are neutralised, like L2's triage.
+- C4. Each of the three changed lines is reverted alone, and its own assertion goes red. The tests also go red on master.
+- C5. `read` and `describe` and their callers stay untouched. The change lands after #1100, #1101 and #1109.

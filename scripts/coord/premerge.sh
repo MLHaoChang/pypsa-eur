@@ -64,8 +64,9 @@ link_node_modules() {
 docs_only_re='^(docs/superpowers/OPEN-ITEMS\.md|docs/superpowers/plans/.*|doc/release-notes\.d/.*|doc/release_notes\.md|(.*/)?(CONTEXT|GLOSSARY)\.md|GLOSSARY-MAP\.md|pypsa-gui/backend/harness/README\.md)$'
 # A PR touching these must pass the semantic tests on the trial merge: backend
 # routes (project routes and routers/mcp among them), chat tools, the project
-# ACL services and the harness MCP server.
-semantic_re='^pypsa-gui/backend/routers/|(^|/)harness/catalogue|(^|/)harness/toolsets|(^|/)harness/mcp_server|(^|/)services/chat_tools|(^|/)chat_tools|(^|/)services/project_(acl|registry)\.py$'
+# ACL services, the harness MCP server, and every module the frozen assurance
+# contracts (harness/assurance_contracts.v1.json) are built from.
+semantic_re='^pypsa-gui/backend/routers/|(^|/)harness/(calculations|[^/]*_calculations|assurance_scope|assurance|assurance_contracts|effects)\.py$|(^|/)harness/assurance_contracts\.v1\.json$|(^|/)harness/catalogue|(^|/)harness/toolsets|(^|/)harness/mcp_server|(^|/)services/chat_tools|(^|/)chat_tools|(^|/)services/project_(acl|registry)\.py$'
 # The one list of semantic tests; .claude/skills/steward/SKILL.md points here.
 semantic_tests=(
   tests/test_write_surface_lock_policy.py
@@ -74,6 +75,7 @@ semantic_tests=(
   tests/test_project_acl.py
   tests/test_project_route_acl_policy.py
   tests/test_harness_mcp_server.py
+  tests/test_assurance_contracts.py
 )
 # A PR touching these must also pass the assistant inventory check, which builds
 # the inventory in memory (nothing generated is committed; RETRO-COST-1).

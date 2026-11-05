@@ -50,3 +50,42 @@ def test_restore_skips_unknown_future_schema(tmp_path):
     _restore_results_state(proj, "future")
     # Unknown version → skipped (NOT misread); the key stays at its reset None.
     assert sim_router._state.get("ac_pf_converged_count") is None
+
+
+# ── AA-12: unknown AC PF convergence on /ac_pf/status ───────────────────────
+
+
+def _rows(*oks):
+    return [{"snapshot": f"2030-01-01T0{i}:00:00", "period": None, "ok": ok}
+            for i, ok in enumerate(oks)]
+
+
+def test_ac_pf_status_reports_unknown_convergence_as_null(client, install_network):
+    install_network(build_network(), name="P")
+    rows = _rows(True, False, None, None)
+    sim_router._state_update(
+        ac_pf_results={}, ac_pf_convergence={r["snapshot"]: r["ok"] for r in rows},
+        ac_pf_convergence_list=rows, ac_pf_converged_count=None,
+        ac_pf_unknown_count=2, ac_pf_total_snapshots=4)
+    body = client.get("/api/results/ac_pf/status").json()
+    assert body["converged_count"] is None
+    assert body["known_converged_count"] == 1
+    assert body["unknown_count"] == 2
+    assert body["total_snapshots"] == 4
+    assert [r["ok"] for r in body["converged_list"]] == [True, False, None, None]
+
+
+def test_a_pre_aa12_state_without_unknown_count_reads_as_before(tmp_path, client):
+    # A bundle saved before AA-12: every row known, no `ac_pf_unknown_count`.
+    proj = tmp_path / "pre_aa12"
+    proj.mkdir()
+    rows = _rows(True, True, False)
+    (proj / "results_state.pkl").write_bytes(pickle.dumps({
+        "ac_pf_results": {}, "ac_pf_convergence": {r["snapshot"]: r["ok"] for r in rows},
+        "ac_pf_convergence_list": rows, "ac_pf_converged_count": 2,
+        "ac_pf_total_snapshots": 3}))
+    _restore_results_state(proj, "pre_aa12")
+    assert sim_router._state.get("ac_pf_unknown_count") is None
+    body = client.get("/api/results/ac_pf/status").json()
+    assert (body["converged_count"], body["known_converged_count"],
+            body["unknown_count"], body["total_snapshots"]) == (2, 2, 0, 3)

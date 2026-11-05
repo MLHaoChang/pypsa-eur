@@ -47,3 +47,30 @@ it('moves the period selector to an externally selected snapshot without clampin
   await waitFor(() => expect(selector.value).toBe('2030'))
   expect(useUIStore.getState().resultsSnapshotIdx).toBe(0)
 })
+
+describe('SnapshotPicker AC PF convergence badge (AA-12)', () => {
+  const rows = (ok: boolean | null) => ['2030-01-01T00:00:00', '2030-01-01T01:00:00', '2030-01-01T02:00:00', '2030-01-01T03:00:00']
+    .map((snapshot, i) => ({ snapshot, period: null, ok: i === 2 ? ok : true }))
+
+  it.each([
+    [null, '?', 'AC PF convergence not reported for this snapshot', 'text-muted'],
+    [false, '✗', 'AC PF did not converge for this snapshot', 'text-danger'],
+    [true, '✓', 'AC PF converged for this snapshot', 'text-success'],
+  ] as const)('ok=%s renders %s', async (ok, glyph, title, tone) => {
+    useUIStore.setState({ resultSource: 'ac_pf' })
+    const list = rows(ok)
+    vi.mocked(resultsApi.getAcPfStatus).mockResolvedValue({
+      available: true, converged_list: list,
+      converged_per_snapshot: Object.fromEntries(list.map(r => [r.snapshot, r.ok])),
+    } as never)
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={qc}><SnapshotPicker /></QueryClientProvider>)
+    const badge = await screen.findByTitle(title)
+    expect(badge.textContent).toBe(glyph)
+    expect(badge.className).toContain(tone)
+    if (ok === null) {
+      expect(badge.getAttribute('aria-label')).toBe(title)
+      expect(badge.className).not.toMatch(/text-(success|danger)/)
+    }
+  })
+})

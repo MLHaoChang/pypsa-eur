@@ -103,6 +103,14 @@ export const STATES: Record<string, RunMonitorView> = {
   lost_sends: view({ status: 'needs_review', run: run('input_gate', { status: 'needs_user', reason: 'uncertain', stages: stages('input_gate') }),
     envelope: GRANTED, monitor: { ...MONITOR, budgets: { ...GRANTED_BUDGETS, cost_eur: { used: 0, limit: 5, unmetered: true },
       reserved: { unit: 'eur', spent: 5.6, open: 0, at_bound: 2 } } } }),
+  loop_notice_sent: view({ status: 'needs_review', run: run('input_gate', { status: 'needs_user', reason: 'exhausted', stages: stages('input_gate'), loop: { ended: 'exhausted', notice: { sent: true } } }),
+    monitor: MONITOR }),
+  loop_notice_failed: view({ status: 'needs_review', run: run('input_gate', { status: 'needs_user', reason: 'exhausted', stages: stages('input_gate'), loop: { ended: 'exhausted', notice: { sent: false, error: 'send_failed' } } }),
+    monitor: MONITOR }),
+  loop_notice_no_address: view({ status: 'needs_review', run: run('input_gate', { status: 'needs_user', reason: 'exhausted', stages: stages('input_gate'), loop: { ended: 'exhausted', notice: { sent: false, error: 'no_address' } } }),
+    monitor: MONITOR }),
+  loop_notice_uncertain: view({ status: 'needs_review', run: run('input_gate', { status: 'needs_user', reason: 'exhausted', stages: stages('input_gate'), loop: { ended: 'exhausted', notice: { sent: false, error: 'uncertain' } } }),
+    monitor: MONITOR }),
   no_lost_send: view({ run: run('input_gate', { stages: stages('input_gate') }),
     monitor: { ...MONITOR, budgets: { ...MONITOR.budgets, reserved: { unit: 'eur', spent: 0.3, open: 0.2, at_bound: 0 } } } }),
   solves_used_up: view({ status: 'needs_review', run: run('solve', { status: 'needs_user', reason: 'envelope_exhausted', stages: stages('solve') }),
@@ -111,6 +119,30 @@ export const STATES: Record<string, RunMonitorView> = {
     envelope: { ...GRANTED, state: 'expired' } }),
   solver_error: view({ status: 'needs_review', run: run('solve', { status: 'needs_user', reason: 'step_failed', stages: stages('solve') }) }),
   uncertain: view({ status: 'needs_review', run: run('solve', { status: 'needs_user', reason: 'step_uncertain', stages: stages('solve') }) }),
+  research_confirm: view({ run: run('inputs', { status: 'needs_user', reason: 'waiting_research_confirm',
+    waiting: { kind: 'research_confirm', ref: 'src_a' }, stages: stages('inputs') }), envelope: GRANTED,
+    monitor: { ...MONITOR, budgets: GRANTED_BUDGETS, waiting: { kind: 'research_confirm', ref: 'src_a' }, research: {
+      steps: [{ stage: 'inputs', status: 'done', gaps: [] }],
+      rows: [
+        { row: 'src_a', gap: 'import_tariff', value: 142.5, unit: 'EUR/MWh', basis: 'energy charge, excl. VAT',
+          jurisdiction: 'DE', status: 'proposed', confirmable: true, source: 'sourced', url: 'https://tariffs.example.org/industrial-2026',
+          title: 'Industrial tariff sheet 2026', quote: 'The energy charge for medium-voltage customers is EUR 142.50 per MWh',
+          fetched_at: '2026-11-04T06:00:00Z' },
+        { row: 'src_b', gap: 'import_tariff', value: 150, unit: 'EUR/MWh', basis: 'energy charge, excl. VAT',
+          jurisdiction: 'DE', status: 'proposed', confirmable: false, source: 'unverified source', reason: 'url_not_fetched' },
+      ] } } }),
+  // The card's unverified branch: a waiting row the server could not verify (it waits only on sourced rows).
+  research_unverified: view({ run: run('inputs', { status: 'needs_user', reason: 'waiting_research_confirm',
+    waiting: { kind: 'research_confirm', ref: 'src_b' }, stages: stages('inputs') }), envelope: GRANTED,
+    monitor: { ...MONITOR, budgets: GRANTED_BUDGETS, waiting: { kind: 'research_confirm', ref: 'src_b' }, research: {
+      steps: [{ stage: 'inputs', status: 'done', gaps: [] }],
+      rows: [
+        { row: 'src_b', gap: 'import_tariff', value: 150, unit: 'EUR/MWh', basis: 'energy charge, excl. VAT',
+          jurisdiction: 'DE', status: 'proposed', confirmable: false, source: 'unverified source', reason: 'value_not_in_quote' },
+      ] } } }),
+  research_cap: view({ run: run('inputs', { stages: stages('inputs') }), envelope: GRANTED,
+    monitor: { ...MONITOR, budgets: { ...GRANTED_BUDGETS, research_eur: { used: 2, limit: 2 } }, research: { rows: [],
+      steps: [{ stage: 'inputs', status: 'cap_reached', gaps: ['import_tariff'], kind: 'research_cap_reached' }] } } }),
   out_of_date: view({ status: 'needs_review', run: run('inputs', { status: 'needs_user', reason: 'brief_stale', stages: stages('inputs') }) }),
 }
 

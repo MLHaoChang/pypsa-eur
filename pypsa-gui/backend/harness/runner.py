@@ -323,13 +323,17 @@ class Runner:
     would otherwise wait on, used once. The application's runner has none.
     """
 
-    def __init__(self, instance=None, *, clock=time.time, decisions=None, agent_provider=None):
+    def __init__(self, instance=None, *, clock=time.time, decisions=None, agent_provider=None,
+                 research_provider=None):
         self.instance = instance or f"{os.getpid()}:{uuid.uuid4().hex[:8]}"
         self.clock = clock
         self._decisions = decisions
         # Issue 04: the provider an agent turn streams from; None builds the
         # session's own (production). Tests pass a scripted one.
         self._agent_provider = agent_provider
+        # Issue 09: the research turn's provider (a test seam; the app resolves
+        # the run's own). Every research send goes through the reservation (SH-24).
+        self._research_provider = research_provider
         self._wakeup = threading.Event()
         self._stopping = threading.Event()
         self._due = set()
@@ -446,10 +450,20 @@ class Runner:
 
     def boot_sweep(self):
         """Restart reconciliation at boot (issue 24, GK B): a model send
-        another boot left open settles `uncertain` at its hold's bound."""
-        from harness import send_reservation
-        paths = [path for path, task in self._runs() if send_reservation.has_open_holds(task["run"])]
-        return send_reservation.sweep(paths, boot=self.instance, now=self.clock())
+        another boot left open settles `uncertain` at its hold's bound; an
+        engine step past its deadline settles `timed_out` (issue 05 H2), only
+        where this instance holds the lease or the lease has lapsed."""
+        from harness import continuation, send_reservation
+        runs = self._runs()
+        paths = [path for path, task in runs if send_reservation.has_open_holds(task["run"])]
+        swept = send_reservation.sweep(paths, boot=self.instance, now=self.clock())
+        for path, task in runs:
+            for step in task.get("steps", []):
+                if step.get("status") == "waiting" and (step.get("job") or {}).get("kind") == "engine":
+                    ticket = (task["task_id"], step["id"], step.get("attempt_id"))
+                    swept += continuation.expire_engine(path, ticket, instance=self.instance, now=self.clock(),
+                                                        lapsed_ok=True)
+        return swept
 
     # one tick
 
@@ -579,6 +593,7 @@ class Runner:
         if created:
             eventlog.resume(session)  # the run's conversation, rebuilt from its log
         session.task_id = task["task_id"]
+        session.lease_holder = self.instance  # issue 21c (G4): a planned write is used under this lease
         scope = PyPSAService.bind_request_scope(ctx, slot, f"run-scratch:{task['task_id']}")
         chat_tools.set_acting_user(task["owner_id"])
         chat_tools.set_acting_session(None)
@@ -620,7 +635,10 @@ class Runner:
         def bound():
             with self._bound(task, ctx, slot) as session:
                 if takeover:
-                    self._recover(path)
+                    self._recover(path, ctx)
+                else:  # H2: a waiting engine step whose follower died is followed again, or expires
+                    from harness import run_loops
+                    run_loops.recover_engines(path, ctx, instance=self.instance, now=self.clock())
                 return self._step(path, ctx, session)
         return contextvars.copy_context().run(bound)
 
@@ -654,7 +672,7 @@ class Runner:
         _update(path, change)
 
     def _step(self, path, ctx, session):
-        from harness import run_loops
+        from harness import research, run_loops
         from services import run_envelope, run_profiles
         tasks = _tasks()
         taken = {}
@@ -677,6 +695,8 @@ class Runner:
             raise _Stop("needs_user", "locked")
         if run["status"] == "needs_user":
             waiting = run["waiting"]
+            if waiting.get("kind") == "research_confirm":
+                return "waiting"  # issue 09: only the research card's Confirm or Reject goes on
             step = tasks._next(task)
             args = tasks._resolve(step["args"], task["steps"]) if step and step["id"] == waiting["ref"] else None
             decision = decide(task, waiting["ref"], args)
@@ -697,6 +717,8 @@ class Runner:
             return run["status"]
         if run_loops.due(task):
             return self._agent_round(path, ctx, session, task)
+        if research.due(task):
+            return self._research_turn(path, ctx, session, task)
         if task["status"] == "paused_at_card":
             card = task["pause"]["card"]
             decision = decide(task, card, None)
@@ -713,6 +735,8 @@ class Runner:
         step = tasks._next(task)
         if step is None:
             return "idle"
+        if step.get("engine") and step["status"] == "pending":
+            return run_loops.start_engine(path, ctx, step, instance=self.instance)
         if step["status"] == "waiting":
             self._hold_if_effectful(task, step)
             _update(path, lambda t: t["run"].update(status="waiting_job") if t["run"]["status"] == "running" else False)
@@ -782,6 +806,40 @@ class Runner:
             if inner is None:
                 return None  # the loop reports the missing provider; nothing is sent
         return send_reservation.ReservingProvider(inner, path, boot=self.instance, clock=self.clock)
+
+    def _research_turn(self, path, ctx, session, task):
+        """The stage's research turn (issue 09) on a helper thread, as an
+        input-loop round: once per stage, never inside a loop round."""
+        from harness import research
+        from services import harness_locks
+        harness_locks.hold(task["project_id"], task["task_id"])
+        task_id = task["task_id"]
+        stage = task["run"]["stage"]
+
+        def turn():
+            from harness import send_reservation
+            try:
+                # Research(Reserving(base)) (GK B Q3): every research send is held
+                # under scope "research" before it goes out; a refusal ends the turn.
+                instance, clock = self.instance, self.clock
+                research.run_for(path, session, stage=stage, boot=instance, clock=clock,
+                                 provider=self._research_provider,
+                                 reserving=lambda inner: send_reservation.ReservingProvider(
+                                     inner, path, boot=instance, clock=clock))
+            except Exception:  # noqa: BLE001 — a research turn that errors lists its gaps; never retried
+                logger.exception("harness runner: research turn of %s errored", task_id)
+                research.failed(path, stage, boot=self.instance, clock=self.clock)
+            finally:
+                try:
+                    send_reservation.close_open(path, boot=self.instance)
+                except Exception:  # noqa: BLE001 — a ledger fault never keeps the runner from waking
+                    logger.exception("harness runner: closing the research sends of %s failed", task_id)
+                self.wake(path)
+        context = contextvars.copy_context()
+        thread = threading.Thread(target=context.run, args=(turn,), name=f"harness-rs-{task_id[:8]}", daemon=True)
+        self._inflight[task_id] = (path, thread)
+        thread.start()
+        return "research"
 
     def _hold_if_effectful(self, task, step):
         from services import harness_locks
@@ -937,7 +995,7 @@ class Runner:
 
     # restart
 
-    def _recover(self, path):
+    def _recover(self, path, ctx=None):
         """A run taken over from a lapsed lease (design §6.6 restart): settle
         waiting queue steps from their rows, follow live ones again, lost
         ones are uncertain (SC-09: nothing is requeued); any uncertain step
@@ -956,6 +1014,9 @@ class Runner:
                 continuation.follow_queue_job(path, ticket)
             elif states and all(s not in ("queued", "running", "unknown") for s in states):
                 continuation.settle_queue_from_record(path, ticket)
+        if ctx is not None:
+            from harness import run_loops
+            run_loops.recover_engines(path, ctx, instance=self.instance, now=self.clock())
         with tasks._LOCK:
             task = _read(path)
             tasks._reconcile_lost(path, task)

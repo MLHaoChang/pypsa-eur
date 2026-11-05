@@ -27,6 +27,7 @@ PROJECT = "$project"  # an action argument the harness fills with the run's proj
 # after it joins this set with its test.
 BOUND_CONTEXT_TOOLS = frozenset({
     "get_weather_choice", "validate_network", "project_readiness", "diagnose_network", "solve_queue_enqueue",
+    "apply_demand_from_excel",  # issue 21c: stage 2's planned write
 })
 
 # §6.0: the agent changes design levers, never the question. A profile that
@@ -189,6 +190,8 @@ def load(profile: dict) -> dict:
             rules = [run_gates.check_rule(r) for r in stage.get("rules", [])]
         except run_gates.RuleError as exc:
             raise ProfileError(f"Stage {name}: {exc}") from exc
+        if name != "result_gate" and any("engine" in r for r in rules):
+            raise ProfileError(f"Stage {name}: an engine rule runs only in the result gate.")
         # §9.2, §5: a stage inherits its generic rules; a profile adds rules
         # (a tighter threshold is one more rule), never drops or loosens one.
         own = {r["id"]: r for r in stage.get("rules", [])}
@@ -224,13 +227,64 @@ def scope_for(template: dict | None) -> dict:
 # The completed weather year eh_site fills a weather gap from.
 EH_SITE_YEAR = 2023
 
+# Issue 21 (§1): each eh_site creation param as a field-schema entry, so the
+# intake's unit checks are `equipment_table._column_verdict`'s, unchanged. A
+# display unit converts by `display_scale` (display = stored × scale). Enums
+# equal `project_templates.eh_site`'s (a test pins them; importing the
+# template here would load PyPSA). `sources`: where a value may come from.
+_NUMERIC = ("table", "pdf", "text")
+_MW = {"native_type": "float", "unit_storage": "MW", "unit_display": "kW", "display_scale": 1000.0}
+
+
+def _num(label, unit_fields, kind="number"):
+    return {"label": label, "kind": kind, "sources": list(_NUMERIC), "editable": True, **unit_fields}
+
+
+def _enum(label, ids):
+    return {"label": label, "kind": "enum", "enum": list(ids), "sources": ["text"]}
+
+
+def _bool(label):
+    return {"label": label, "kind": "bool", "sources": ["text"]}
+
+
+EH_SITE_FIELDS = {
+    "site_type": _enum("Site type", ("industrial", "commercial", "hospital", "campus", "other")),
+    "stages[].year": _num("Growth stage year", {}, kind="year"),
+    "stages[].peak_mw": _num("Growth stage peak load", _MW),
+    "connection_mw": _num("Grid connection", _MW),
+    "energization[].mw": _num("Connection energized in the stage year", _MW),
+    "critical_share": _num("Critical load share", {"native_type": "float", "unit_storage": "fraction",
+                                                   "unit_display": "%", "display_scale": 100.0}),
+    "load_profile": _enum("Load shape", ("industrial", "commercial", "hospital", "campus", "flat")),
+    "existing.gensets.count": _num("Existing gensets", {}, kind="count"),
+    "existing.gensets.unit_mw": _num("Existing genset size", _MW),
+    "existing.gensets.fuel": _enum("Existing genset fuel", ("gas", "diesel")),
+    "existing.pv_mw": _num("Existing PV", _MW),
+    "existing.battery.mw": _num("Existing battery power", _MW),
+    "existing.battery.mwh": _num("Existing battery energy", {"native_type": "float", "unit_storage": "MWh",
+                                                             "unit_display": "kWh", "display_scale": 1000.0}),
+    "existing.ups.mw": _num("Existing UPS power", _MW),
+    "existing.ups.minutes": _num("Existing UPS autonomy", {"native_type": "float", "unit_storage": "min"}),
+    **{f"candidates.{k}.enabled": _bool(f"Consider new {label}") for k, label in
+       (("genset", "gensets"), ("bess", "batteries"), ("pv", "PV"))},
+    **{f"candidates.{k}.max_mw": _num(f"New {label} size cap", _MW) for k, label in
+       (("genset", "genset"), ("bess", "battery"), ("pv", "PV"))},
+    "ride_through": _bool("Ride-through required"),
+    "fault_level_mva": _num("Grid fault level", {"native_type": "float", "unit_storage": "MVA"}),
+    "horizon_end": _num("Study horizon end", {}, kind="year"),
+}
+
 EH_SITE = {
     "id": "eh_site", "version": 1,
     "templates": ["eh_site"],
     "scope": "flow_scope.preset_for",
     "params": {"required": ["site_type", "stages", "connection_mw"],
                "ask": ["energization", "critical_share", "load_profile", "existing", "candidates",
-                       "ride_through", "fault_level_mva", "horizon_end"]},
+                       "ride_through", "fault_level_mva", "horizon_end"],
+               "fields": EH_SITE_FIELDS},
+    # Issue 21: the stage-2 inputs a run asks for when missing (none yet for eh_site).
+    "inputs": {"required": []},
     "stages": {
         "setup": {"actions": [], "rules": [
             *GENERIC["setup"]["rules"],
@@ -273,8 +327,17 @@ EH_SITE = {
                   "source": {"kind": "library_tariff"}}],
         "runs": [{"tool": "solve_queue_enqueue"}],
         "budget": {"solves": 6, "rounds": 6, "wall_time_h": 8.0},
-        "research": {"allowed": False, "cost_cap_eur": 2.0},
+        "research": {"allowed": True, "cost_cap_eur": 2.0},  # SH-RESEARCH-CAP-1; the grant governs
     },
+    # Issue 09 (design §8): the gaps a research turn may look up, each in one
+    # unit and basis; a value is proposed with its source and written only
+    # through the gap tool's own card. Checked by `harness.research.check_block`.
+    "research": {"gaps": [
+        {"key": "import_tariff", "stage": "inputs", "tool": "attach_tariff",
+         "target": {"component": "Settings", "name": "Commercial", "attr": "import_tariff_ref"},
+         "unit": "EUR/MWh", "basis": "energy charge, excl. VAT",
+         "question": "What is the published import energy charge for this site's connection level?"},
+    ]},
     "kpis": [],
     "chapters": [],
     "missing_tools": [],

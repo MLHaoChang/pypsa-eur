@@ -161,8 +161,9 @@ export default function SnapshotPicker() {
   // (CLAUDE.md flags this as a known footgun). The newer `converged_list`
   // carries `{snapshot, period, ok}` and disambiguates by matching against
   // the currently-selected period. Fall back to the legacy map only on
-  // flat single-period networks where keys are unique.
-  const isSnapshotConverged = (() => {
+  // flat single-period networks where keys are unique. A recorded `ok: null`
+  // (AA-12) is 'unknown': PyPSA did not report convergence for that snapshot.
+  const snapshotConvergence = ((): boolean | 'unknown' | null => {
     if (!acPfStatus?.available || !stamp) return null
     const selectedPeriod = activeRange.period
     if (selectedPeriod != null && acPfStatus.converged_list?.length) {
@@ -170,14 +171,14 @@ export default function SnapshotPicker() {
       const entry = acPfStatus.converged_list.find(e =>
         e.snapshot === stamp && String(e.period ?? '') === periodStr
       )
-      if (entry) return entry.ok
+      if (entry) return entry.ok ?? 'unknown'
       // Period+snapshot pair missing from list → treat as "no record",
       // hide the badge rather than fall through to ambiguous legacy map.
       return null
     }
     // Flat network or list unavailable — legacy map is safe to consult.
     if (acPfStatus.converged_per_snapshot && stamp in acPfStatus.converged_per_snapshot) {
-      return acPfStatus.converged_per_snapshot[stamp]
+      return acPfStatus.converged_per_snapshot[stamp] ?? 'unknown'
     }
     return null
   })()
@@ -295,13 +296,20 @@ export default function SnapshotPicker() {
             {/* AC PF convergence glyph for the current snapshot+period.
                 Only meaningful when the user is viewing the AC PF result
                 source — under LOPF the LP always "converges" (a different
-                concept). `isSnapshotConverged` consults the period-aware
-                `converged_list` first; null means "no record" (hide badge). */}
-            {resultSource === 'ac_pf' && isSnapshotConverged !== null && (
-              isSnapshotConverged === false ? (
-                <span className="ml-1.5 text-danger font-bold" title="AC PF did not converge for this snapshot">✗</span>
+                concept). `snapshotConvergence` consults the period-aware
+                `converged_list` first; null means "no record" (hide badge),
+                'unknown' means PyPSA did not report it (neutral "?"). */}
+            {resultSource === 'ac_pf' && snapshotConvergence !== null && (
+              snapshotConvergence === 'unknown' ? (
+                <span className="ml-1.5 text-muted font-bold"
+                  title="AC PF convergence not reported for this snapshot"
+                  aria-label="AC PF convergence not reported for this snapshot">?</span>
+              ) : snapshotConvergence === false ? (
+                <span className="ml-1.5 text-danger font-bold" title="AC PF did not converge for this snapshot"
+                  aria-label="AC PF did not converge for this snapshot">✗</span>
               ) : (
-                <span className="ml-1.5 text-success font-bold" title="AC PF converged for this snapshot">✓</span>
+                <span className="ml-1.5 text-success font-bold" title="AC PF converged for this snapshot"
+                  aria-label="AC PF converged for this snapshot">✓</span>
               )
             )}
           </span>

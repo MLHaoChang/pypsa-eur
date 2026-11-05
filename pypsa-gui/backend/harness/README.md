@@ -1184,6 +1184,33 @@ only: no runner, no envelope, no loops.
   changes, next job, outcome). `run_envelope.solves_used` is the one solve
   count: `_standing`, the re-check where `admit` records a solve, and
   `run.budget.used.solves` read it; a solve refused at pickup is not counted.
+- **Engine loops (issue 05, PR C).** A result rule with an `engine` block
+  (`run_margin_loop` or `run_coupling_loop`, `max_solves`, `restore`; only in
+  the result gate) has fact `adequacy.loop.converged` and is out of L2's
+  failing set: the harness starts the loop itself, one rule at a time, after
+  the other result rules pass, and no agent turn runs. `run_loops.start_engine`
+  calls the chat tool on the run's bound context; an `HTTPException` (422 goal,
+  409 busy) is `engine_refused`, anything else leaves the step `uncertain`.
+  `run_envelope.reserve_engine` clamps `max_solves` to the solves left after
+  the probe and closing re-solve and to `MAX_LOOP_SOLVES`, and reserves the
+  worst case; `restore: "final"` needs the granted envelope's `runs` to list
+  the tool with it. That entry covers the harness's own engine step only: a
+  model turn's call of an engine tool is refused `engine_only`. `continuation.follow_engine` settles the step from the
+  loop's own record (identity: `started_at` and the study handle, under
+  `solver_state_lock`), once (CAS), as the lease holder, under
+  `runner._file_lock`; the charge is `solves_used + probe_solves` + 1 when the
+  closing re-solve ran. At settle, under the mutation lock, an edit since the
+  harness started the loop (beyond the loop's own hold) settles it not
+  applied (`inputs_changed`); a met `final` hold joins the chain with a ledger
+  row naming the engine rule. A step past its wall-clock `deadline_at` (set at
+  start, `MAX_ENGINE_FOLLOW_SECONDS`) settles `timed_out` and its loop is
+  stopped (`expire_engine`: the lease holder only; the boot sweep also on a
+  lapsed lease). Each tick, and on a
+  takeover, a waiting engine step with no live follower here is expired,
+  settled or followed again (`recover_engines`); none is started again. Cancel stops the
+  loop through the abort route. A loop that did not converge ends the run
+  `needs_user` `not_converged`, never an L2 round. Terminal statuses are
+  `coupling.LOOP_STATUSES`; any other status is `lost`.
 - **The input gate holds until the solve.** Before a later stage's write or
   run step, the input gate's fingerprint is compared with the current inputs
   (on stage entry and after the user's Continue). An edit since then checks
@@ -1291,6 +1318,13 @@ lifespan after the solve queue and is off under pytest (tests build their own
     state and the app link. It leaves out the run title, which the model
     wrote, and never carries values.
   - `run.notices` keeps the log.
+  - **`loop.notice`** (issue 25) is the email about an ended agent loop
+    (`no_progress`, `exhausted`, `unverified_write`, `error`), in the run view
+    as `loop.notice`: `{sent, error?}`. `sent` is `null` while claimed, `true`
+    once sent, `false` with `error` `send_failed`, `no_address` or `uncertain`
+    (a claim with no result after 60 s; never re-sent). It is absent when
+    `notify.email` was not granted. The chat's run card (`RunMonitor`) shows it
+    on a `needs_user` run as one line: nothing while `null` or absent.
 
 ### The approval envelope (study harness issue 03)
 
@@ -1340,7 +1374,8 @@ else.
   (`run_envelope.ATOMIC_TOOLS`, one row per tool: `update_component` on
   eh_site@1's size caps, any attrs; the run's `solve_queue_enqueue`; and the
   data-gap tools `apply_generated_profile`, `attach_tariff`,
-  `set_weather_choice` and `generate_load_profile`) writes inside
+  `set_weather_choice` and `generate_load_profile`; and the planned write
+  `apply_demand_from_excel`, issue 21c) writes inside
   `run_envelope.admitted_write`, on the worker thread that runs its handler
   (the runner and the L1 round set `session.write_guard`; `loop.py` enters
   it). Lock order: the project's `mutation_lock`, then its
@@ -1369,6 +1404,71 @@ else.
   and a step the user approved on a card is not envelope-admitted; these
   still settle from a fresh read after the step, so a user edit landing
   during such a step is taken into the chain.
+- **Create at grant (issue 21 §2, GK B A1-A3, R1-R3).** A plan whose
+  proposed envelope carries a `setup` entry (`run_envelope.set_setup`, from
+  `start_task`'s `run.intake`) hands over at the grant: `decide` checks the
+  card's intake digest and each source's sha256 (`run_intake.check_grant`),
+  then `run_handover.hand_over` runs its precheck under the hand-over lock
+  (the run not over, the brief's inputs and requirements unmoved) and only
+  then records the user's decision (`approvals.decided(by="user")`), once:
+  a refused grant and its retry record nothing. It creates the project
+  through the route's own first half (`_materialise_from_template`, no
+  context swap) and starts the run there
+  (`assistant_tasks.handover_starter`); the host task ends `completed`,
+  reason `handed_over`. The new run's envelope is granted by
+  `run_envelope.grant_handover` before anything can wake it: it carries the
+  host decision id and grant digest, equal to its task's `run.origin`, or
+  `_standing` refuses every admission with `handover_unbound` (A2); its
+  chain's first link is the fingerprint after creation. Lock order (R3):
+  the hand-over's cross-process `durable.file_lock` (`<task>.handover.lock`)
+  first, then the new project's `mutation_lock` (held across setup, upload
+  copies and the task start); the host's `mutation_lock` is never taken
+  while the new one is held; `assistant_tasks._LOCK` and
+  `durable_conversation._LOCK` last (`_start_run` and the brief re-check
+  take them under the new project's lock). `decide` holds no lock when it
+  calls `hand_over`.
+- **Planned writes (issue 21c, GK B (21)/(22) G1-G8).** An intake row
+  `{write: "apply_demand_from_excel", args, source}` (`run_intake`, param
+  `load_series.<load>`) is on the plan-review card and in the grant digest.
+  `grant_handover` lists the confirmed ones as `envelope["planned"]`
+  (LOAD-SHAPE-1). Once the project exists, `_start_run` calls
+  `run_envelope.pin_planned` on the run's own context (`run_gates._on`, G6):
+  it mints the load's uid under the new project's `mutation_lock`, computes
+  the tool's own edit card (`series_edit`, binding the load uid, upload,
+  sheet, columns, the aligned series' and the replaced series' sha256) and
+  pins `{uid, digest, series_sha256}` only when the binding is the granted
+  row's; anything else (a card that cannot be computed included, G3) is
+  `carded`. Stage 2 (`inputs`) runs the planned steps first, with the
+  envelope's args (G1). `_match_planned` admits a pinned, unused entry only
+  from a runner step (never an L1/L2 turn), when the live card's digest and
+  the load's uid are the pinned ones (typed `plan_changed` / `uid_changed`,
+  G5); it is used once, under the lease file lock with a live-lease check
+  (`session.lease_holder`, G4). The tool is in `ATOMIC_TOOLS`; under the held
+  locks `verify_planned_write` re-checks the series it writes and the
+  upload's bytes (G2), and a handler that stops before that check passed
+  wrote nothing and is refused as `plan_changed`. It is the one destructive
+  tool an envelope admits, and only this way. Lock order: the project's
+  `mutation_lock`, then the run's `<task>.lease` file lock, then
+  `assistant_tasks._LOCK`.
+- **Data request and answers (issue 21 §3-4, B1-B4).** When L1 ends without
+  a pass, `_advance_run` reads the data items outside the task lock
+  (`run_loops.data_gaps`: envelope gap targets still unset, profile
+  `inputs.required` items still absent) and, under it, opens one request
+  (`run_loops.data_request`): `run.waiting = {kind: "data", ref, items}`,
+  no item asked twice in a run. A card write the owner approves in ordinary
+  chat runs inside `run_envelope.answering`, which reads the identity before
+  and after and runs the write under the project's `mutation_lock` then
+  `solver_state_lock`, as `admitted_write` does, so no other write lands in
+  between (B3). The diff is what the write changed in the network
+  (`_inputs`/`_changed`: every static cell and time series, a component added
+  or removed, the network-wide inputs), never the card's rows (B2).
+  `settle_answer` makes it an answer row on the chain only when
+  `run_answers.answer` admits it under the task lock (open request, owner,
+  own project, card decision, whole diff inside the open items, chain head
+  equal to the identity before the write). Anything else stays drift, as
+  does a write whose locks or inputs cannot be had. A complete request
+  clears `waiting` and calls `resume_task`, which checks the gate again from
+  native facts.
 - **Immutable queued solve (issue 05, HH-10).** Inside that admitted write,
   `solve_queue_enqueue` captures the input the identity compare just checked
   (`services/solve_capture.py`):
@@ -1449,6 +1549,42 @@ restores another horizon break `preserve_horizon`. The per-turn addendum
 as data and marks an evaluation stale after a manual edit, which it never
 blocks. A study brief records `{thread_id, rev, items}`; `assistant_tasks._stale`
 reads a moved `rev` as `brief_stale`.
+
+### The research step (study harness issue 09)
+
+`harness/research.py`, the ledger in `services/source_ledger.py`, the provider
+capability in `harness/providers/research.py` (the only place that names the
+vendor's server tools). A profile's `research.gaps` mark what a run may look up
+(eh_site@1: the import tariff, stage `inputs`, EUR/MWh, energy charge excl.
+VAT). On entry to such a stage the runner runs one research turn
+(`research.due`, checked on the tick after the stage's entry, before its
+steps run; a confirmed value's steps carry the stage's prefix, so its gate
+waits for them), and only when
+the run's granted envelope has `research.allowed`: a run granted without it
+never researches.
+
+The turn's provider is `ResearchProvider(ReservingProvider(base))`; each send
+runs inside `send_reservation.research()`, so the reservation holds it under
+scope "research":
+web search and fetch are added to its requests only (never to a chat, L1 or L2
+request), and every send is held against `envelope.research.cost_cap_eur`
+(SH-RESEARCH-CAP-1, €2 by default, €10 at most) and the run's total before it
+goes out, server-tool fees included, so research never overshoots. A refused
+send ends the turn `cap_reached`; the gaps are listed and the run goes on. A
+provider without web search marks the step `not_available`.
+
+The turn offers `READ_TOOLS` plus `record_source` (`STAGE_ONLY_TOOLS`: in no
+other payload) and installs no write guard, so no write is reachable whatever
+the envelope covers; fetched pages are framed as untrusted data.
+`record_source` only proposes: `source_ledger.propose` refuses another unit or
+basis and checks the url and quote against the pages fetched in that turn
+(whitespace-folded only); anything else is an `unverified source`, never shown
+as sourced and never confirmable. A verified row puts the run `needs_user`
+with `waiting = {kind: research_confirm}`; `POST /api/chat/runs/{task_id}/research`
+(`research.decide`) confirms or rejects it. Confirming rejects the gap's other
+rows and adds two run steps, `put_library_item` then `attach_tariff`, each
+carrying `research_ref`, which `run_envelope` never admits: each is the user's
+own card. Rows, verdicts and listed gaps stay in `run.research` for the report.
 
 ### Send reservation (study harness issue 24)
 
