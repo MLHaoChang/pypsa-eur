@@ -224,6 +224,15 @@ def test_each_unadmitted_final_leaves_a_notice_without_transcript(
     assert [(n['status'], n['seq']) for n in notices] == [(status, 2)]
     assert set(notices[0]) == {'status', 'message', 'seq', 'generation'}
     assert notices[0]['generation'] == _thread_json(tid)['generation']
+    # Nothing but the status, the server's fixed sentence and two integers.
+    fixed = {
+        'echo_ignored': 'That matched the answer being read out, so it was not used. '
+                        'Type it, or say it again after playback.',
+        'clarify': 'I heard two different numbers. Which value did you mean?',
+        'not_an_approval': 'Speech does not approve changes. Use Confirm on the card.',
+    }
+    assert notices[0]['message'] == fixed[status]
+    assert all(type(notices[0][k]) is int for k in ('seq', 'generation'))
     blob = repr(notices).lower()
     assert text.lower() not in blob
     for word in _words_of(text):
@@ -242,10 +251,20 @@ def test_notices_are_bounded_oldest_first(transport, monkeypatch):
     assert seqs == list(range(4, 4 + ls.NOTICES_MAX))
 
 
-def test_rebind_and_exit_clear_the_notices(transport, monkeypatch):
+def test_rebind_clears_the_notices(transport, monkeypatch):
     tid, sid, _ = _notice_for(monkeypatch, 'echo_ignored')
     assert ls.state(tid)['notices']
     dc.rebind_scope(tid, generation=_thread_json(tid)['generation'])
+    assert sid not in ls._NOTICES
+    assert ls.state(tid)['notices'] == []
+
+
+def test_session_exit_clears_the_notices(transport, monkeypatch):
+    tid, sid, _ = _notice_for(monkeypatch, 'echo_ignored')
+    monkeypatch.setattr(ls, 'USAGE_GRACE_S', 0.05)
+    ls.end(tid, generation=_thread_json(tid)['generation'], session_id=sid)
+    ls.wait_for_reaps(timeout=5)
+    assert _thread_json(tid)['speech']['state'] == 'closed'
     assert sid not in ls._NOTICES
     assert ls.state(tid)['notices'] == []
 
@@ -265,3 +284,22 @@ def test_a_foreign_owner_gets_todays_refusal_and_no_notice(transport, monkeypatc
     other_owner = _refusal(ls.state, tid)
     assert unknown == other_owner
     assert other_owner[0] == 404 and other_owner[1]['error_kind'] == 'thread_not_found'
+
+
+def test_owner_reads_notices_over_http_without_transcript(client, transport):
+    tid, gen = _thread()
+    started = client.post(f'/api/durable-conversations/{tid}/speech/start',
+                          json={'generation': gen, 'language': 'en'})
+    assert started.status_code == 200, started.text
+    sid = started.json()['session']['session_id']
+    token = transport.opened[-1]['bridge_token']
+    text = 'set the line to 300, no 400 MW'
+    seg = client.post(f'/api/durable-conversations/{tid}/speech/segment',
+                      headers={'X-Bridge-Token': token},
+                      json={'session_id': sid, 'segment_id': 's1', 'seq': 1,
+                            'text': text, 'final': True})
+    assert seg.json()['status'] == 'clarify'
+    got = client.get(f'/api/durable-conversations/{tid}/speech')
+    assert got.status_code == 200
+    assert [(n['status'], n['seq']) for n in got.json()['notices']] == [('clarify', 1)]
+    assert text not in got.text and 'no 400' not in got.text

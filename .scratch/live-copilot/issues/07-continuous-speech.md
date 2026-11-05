@@ -233,7 +233,7 @@ after barge-in, dropped on every session exit). `submit_segment` returns
 within `ECHO_BASE_S + chars / ECHO_CHARS_PER_S` (5 s + 1 s per 12 characters)
 of its claim. Shorter finals are never echo; the bare-approval rule still
 guards "yes". No new error kind and no route change. Tests:
-`tests/test_live_speech_echo_lc07.py` (11, 25 after E1–E7). They cover an echo during
+`tests/test_live_speech_echo_lc07.py` (11; 27 after E1–E7 and the code review). They cover an echo during
 playback, the same words after the window, user speech over playback, echo
 after barge-in, short overlaps such as "7.5 MW", reordered words, the session
 exit, and overlap: three finals during a running turn give one admitted turn
