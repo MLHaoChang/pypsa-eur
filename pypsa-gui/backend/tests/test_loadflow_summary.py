@@ -335,6 +335,27 @@ def test_unknown_convergence_is_excluded_but_not_counted_as_unconverged(solved):
     assert out['ac_pf']['unknown_in_window'] == 1
 
 
+def test_window_of_only_unknown_convergence_refuses_as_convergence_unknown(solved):
+    """FILL-11-6: unreported convergence is its own refusal kind, not 'not converged'."""
+    _install_ac(solved['network'], converged=(None, False, True, True))
+    out = lf.get_loadflow_summary(source='ac_pf', window_from=0, window_to=0)
+    assert out['status'] == 'unavailable'
+    assert out['unavailable_kind'] == 'ac_pf_convergence_unknown'
+    assert out['ac_pf']['unknown_in_window'] == 1
+
+
+def test_unknown_wins_over_false_when_nothing_in_window_is_proven(solved):
+    _install_ac(solved['network'], converged=(None, False, True, True))
+    out = lf.get_loadflow_summary(source='ac_pf', window_from=0, window_to=1)
+    assert out['unavailable_kind'] == 'ac_pf_convergence_unknown'
+
+
+def test_reported_false_window_stays_not_converged(solved):
+    _install_ac(solved['network'], converged=(False, False, True, True))
+    out = lf.get_loadflow_summary(source='ac_pf', window_from=0, window_to=1)
+    assert out['unavailable_kind'] == 'ac_pf_not_converged'
+
+
 def test_invalid_weights_refuse_instead_of_inventing_weighted_means(solved):
     solved['network'].snapshot_weightings.loc[SNAPSHOTS[0], 'generators'] = -1
     out = lf.get_loadflow_summary()

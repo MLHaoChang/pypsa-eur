@@ -496,6 +496,12 @@ def _loadflow(source: str, limit: int, window_from: int | None,
         else:
             excluded = int((~valid_mask).sum())
             if not valid_mask.any():
+                # Unknown wins over a reported failure (AA-12 precedence): with
+                # any snapshot unreported, nothing proves the window failed.
+                if (ac_info or {}).get("unknown_in_window"):
+                    return _unavailable("ac_pf_convergence_unknown",
+                                        "AC power flow did not report convergence for the requested window; no loading can be certified.",
+                                        solve=solve, ac_pf=ac_info)
                 return _unavailable("ac_pf_not_converged",
                                     "No AC power flow converged inside the requested window.",
                                     solve=solve, ac_pf=ac_info)
