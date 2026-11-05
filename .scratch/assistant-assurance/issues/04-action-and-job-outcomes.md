@@ -83,7 +83,9 @@ GK B (24) verdicts:
 - Q3 (a): build the A3.5 guards in S4 and record progress in issue 11.
 - Q4: the A3.5–A3.6 freeze is the owner's (the original approval was the
   owner's); GK B finds the wording sound and testable, plus reliability-contract
-  §4. Asked of the coordinator 2026-11-05. S4/S5 wait for it.
+  §4. Owner answer AA04-FREEZE-1 (2026-11-05, ~14:4x CET): "Freeze as worded
+  (Recommended)"; A3.5–A3.6 are frozen as worded in test-plan.md rows A3.5/A3.6
+  and reliability-contract.md §4. S4/S5 build after S1–S3, each with a plan first.
 - S1 GO WITH CHANGES, conditions J1–J8: inputs are the independent read only;
   fail closed per input; identity (id, project, run id, started_at) per
   mismatch; abort cancel_requested→cancelled; failed/partial for run_simulation
