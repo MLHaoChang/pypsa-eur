@@ -29,7 +29,7 @@ import { fieldLabel, fmt, sentence } from '../components/series/SeriesKit'
 import { errorText } from '../api/profiles'
 import DefaultsReview from '../components/series/DefaultsReview'
 import { WeatherBar } from '../components/series/WeatherBar'
-import { generateAndApply, readyRows } from '../components/series/renewableGeneration'
+import { generateAndApply, notReadyReason, readyRows } from '../components/series/renewableGeneration'
 import { MissingCoordinatesBanner, ReadinessBadge } from '../components/series/RenewableReadiness'
 import { profilesApi, type ReadinessRow } from '../api/profiles'
 
@@ -295,6 +295,7 @@ function UploadZone({ onFile, label }: { onFile: (f: File) => void; label?: stri
       onDragOver={e => { e.preventDefault(); setDragging(true) }}
       onDragLeave={() => setDragging(false)}
       onClick={() => inputRef.current?.click()}
+      data-testid="ts-upload-zone" tabIndex={-1}
       className={`border-2 border-dashed rounded-lg p-6 flex flex-col items-center gap-2 cursor-pointer transition-colors
         ${dragging ? 'border-accent bg-accent/5' : 'border-border hover:border-accent/50 hover:bg-accent/3'}`}
     >
@@ -1135,6 +1136,29 @@ export default function TimeSeriesManager() {
       : { tone: 'ok', text: `${name}: profile generated and applied. Undo (Ctrl+Z) reverts it.` })
     void qc.invalidateQueries()
   }
+  // One click for every ready generator (RP-Q2 = A): a missing location, a
+  // measured file or the network's own series are never written over.
+  const [generatingAll, setGeneratingAll] = useState(false)
+  const generateAll = async () => {
+    if (!currentProject) return
+    const ready = readyRows(readinessRows)
+    if (ready.length === 0) return
+    setGenNotice(null)
+    setGeneratingAll(true)
+    const outcomes = await generateAndApply(currentProject, ready)
+    setGeneratingAll(false)
+    const applied = outcomes.reduce((n, o) => n + o.applied, 0)
+    const failed = outcomes.filter(o => o.error)
+    setGenNotice(failed.length
+      ? { tone: 'error', text: failed.map(o => `${o.generators.join(', ')}: ${o.error}`).join(' ') }
+      : { tone: 'ok', text: `${applied} profile${applied === 1 ? '' : 's'} generated and applied. Undo (Ctrl+Z) reverts them.` })
+    void qc.invalidateQueries()
+  }
+  const focusUploadZone = () => {
+    const el = document.querySelector<HTMLElement>('[data-testid="ts-upload-zone"]')
+    el?.scrollIntoView?.({ block: 'center' })
+    el?.focus()
+  }
   const canGenerateRow = (name: string) => {
     const row = readinessOf(name)
     return row ? readyRows([row], true).length > 0 : false
@@ -1948,13 +1972,25 @@ export default function TimeSeriesManager() {
             ) : (
               <>
                 {activeTab === 'renewable' && currentProject && <WeatherBar project={currentProject} />}
+                {activeTab === 'renewable' && readinessRows.length > 0 && (
+                  <div className="px-3 py-2 border-b border-border/40 flex flex-wrap items-center gap-2 text-[11px]">
+                    <Btn onClick={() => { void generateAll() }}
+                      disabled={generatingAll || readyRows(readinessRows).length === 0}
+                      data-testid="generate-all-ready">
+                      {generatingAll ? 'Generating…' : `Generate for all ready (${readyRows(readinessRows).length})`}
+                    </Btn>
+                    {readyRows(readinessRows).length === 0 && (
+                      <span className="text-muted" data-testid="generate-all-why">{notReadyReason(readinessRows)}</span>
+                    )}
+                  </div>
+                )}
                 {activeTab === 'renewable' && genNotice && (
                   <p data-testid="generate-notice"
                     className={`px-3 py-1.5 text-[11px] border-b border-border/40 ${genNotice.tone === 'error' ? 'text-warn' : 'text-success'}`}>
                     {genNotice.text}
                   </p>
                 )}
-                {activeTab === 'renewable' && <MissingCoordinatesBanner rows={readinessRows} />}
+                {activeTab === 'renewable' && <MissingCoordinatesBanner rows={readinessRows} onUploadInstead={focusUploadZone} />}
                 {gensWithProfile.map(g => (
                   <GenItem key={g.name} gen={g} meta={gProfiles[g.name]}
                     readiness={activeTab === 'renewable' ? readinessOf(g.name) : undefined}

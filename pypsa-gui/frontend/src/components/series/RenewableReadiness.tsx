@@ -47,7 +47,7 @@ function openBusCoordinates(bus: string) {
   else openFlowTarget(target)
 }
 
-export function MissingCoordinatesBanner({ rows }: { rows: ReadinessRow[] }) {
+export function MissingCoordinatesBanner({ rows, onUploadInstead }: { rows: ReadinessRow[]; onUploadInstead?: () => void }) {
   const missing = rows.filter(r => r.coord_source === 'missing')
   if (missing.length === 0) return null
   return (
@@ -69,6 +69,12 @@ export function MissingCoordinatesBanner({ rows }: { rows: ReadinessRow[] }) {
           </li>
         ))}
       </ul>
+      {onUploadInstead && (
+        <button type="button" className="mt-1 text-accent hover:underline"
+          data-testid="upload-instead" onClick={onUploadInstead}>
+          Upload a measured file instead ›
+        </button>
+      )}
     </div>
   )
 }

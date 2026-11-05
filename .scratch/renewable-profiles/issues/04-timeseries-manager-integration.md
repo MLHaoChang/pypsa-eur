@@ -4,7 +4,7 @@
 # RP-04 — generate inside the Time Series Manager's Renewables tab
 
 Status: ready-for-agent
-Progress: Readiness badges, banner (RP-04a) and Profile Studio Expert-only (#624) merged; no weather bar, Set coordinates, per-row Generate or Tune.
+Progress: Badges, banner, weather bar, per-row Generate, Expert Profile Studio link, one-click "Generate for all ready" and "Upload instead" merged (RP-04 slice 1). Left: inline Set coordinates, Playwright evidence.
 Type: task
 Baseline: master `5d5bf26b83aa18c9a2a0a3418d3beeecccc8d086`
 Blocked by: RP-01, RP-02 (RP-Q2 = A: one click; RP-Q4 = A: Profile Studio becomes an Expert link from this tab, removed from the sidebar)
