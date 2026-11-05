@@ -2,51 +2,13 @@
  "answer_receipt": {
   "1": {
    "$defs": {
-    "CostBasis": {
-     "additionalProperties": false,
-     "properties": {
-      "annual_fixed_cost_fraction": {
-       "anyOf": [
-        {
-         "type": "integer"
-        },
-        {
-         "type": "number"
-        }
-       ],
-       "ge": 0,
-       "le": 1,
-       "title": "Annual Fixed Cost Fraction"
-      },
-      "currency": {
-       "const": "EUR",
-       "title": "Currency",
-       "type": "string"
-      },
-      "price_year": {
-       "maximum": 2200,
-       "minimum": 1900,
-       "title": "Price Year",
-       "type": "integer"
-      }
-     },
-     "required": [
-      "currency",
-      "price_year",
-      "annual_fixed_cost_fraction"
-     ],
-     "title": "CostBasis",
-     "type": "object"
-    },
     "Navigation": {
      "additionalProperties": false,
      "properties": {
       "action_id": {
-       "title": "Action Id",
        "type": "string"
       },
       "outcome": {
-       "title": "Outcome",
        "type": "string"
       },
       "reason": {
@@ -65,8 +27,7 @@
          "type": "null"
         }
        ],
-       "default": null,
-       "title": "Reason"
+       "default": null
       },
       "shows": {
        "anyOf": [
@@ -82,8 +43,7 @@
          "type": "null"
         }
        ],
-       "default": null,
-       "title": "Shows"
+       "default": null
       },
       "window": {
        "anyOf": [
@@ -101,190 +61,6 @@
       "action_id",
       "outcome"
      ],
-     "title": "Navigation",
-     "type": "object"
-    },
-    "RequestScope": {
-     "additionalProperties": false,
-     "properties": {
-      "chart": {
-       "anyOf": [
-        {
-         "items": {
-          "type": "string"
-         },
-         "maxItems": 8,
-         "minItems": 1,
-         "type": "array"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "default": null,
-       "title": "Chart"
-      },
-      "comparison_evidence_id": {
-       "anyOf": [
-        {
-         "maxLength": 36,
-         "minLength": 36,
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "default": null,
-       "title": "Comparison Evidence Id"
-      },
-      "component_class": {
-       "anyOf": [
-        {
-         "enum": [
-          "Line",
-          "Transformer",
-          "Generator",
-          "Link",
-          "StorageUnit",
-          "Store"
-         ],
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "default": null,
-       "title": "Component Class"
-      },
-      "cost_basis": {
-       "anyOf": [
-        {
-         "$ref": "#/$defs/CostBasis"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "default": null
-      },
-      "end": {
-       "anyOf": [
-        {
-         "maxLength": 64,
-         "minLength": 1,
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "default": null,
-       "title": "End"
-      },
-      "entity_id": {
-       "maxLength": 128,
-       "minLength": 1,
-       "title": "Entity Id",
-       "type": "string"
-      },
-      "evidence_id": {
-       "anyOf": [
-        {
-         "maxLength": 36,
-         "minLength": 36,
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "default": null,
-       "title": "Evidence Id"
-      },
-      "metrics": {
-       "anyOf": [
-        {
-         "items": {
-          "type": "string"
-         },
-         "maxItems": 20,
-         "minItems": 1,
-         "type": "array"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "default": null,
-       "title": "Metrics"
-      },
-      "profile": {
-       "enum": [
-        "generator-dispatch/1",
-        "generator-cost/1",
-        "network-linear-cost/1",
-        "storage-unit-dispatch/1",
-        "storage-unit-cost/1",
-        "carrier-energy/1",
-        "branch-loading/1",
-        "network-loading/1",
-        "lost-load/1",
-        "bus-price/1",
-        "generator-emissions/1",
-        "network-emissions/1",
-        "curtailment/1",
-        "capacity/1",
-        "storage-cycles/1",
-        "energy-balance/1",
-        "site-import/1",
-        "investment-case/1",
-        "investment-lcoe/1",
-        "copt-screening/1",
-        "grid-readiness/1"
-       ],
-       "title": "Profile",
-       "type": "string"
-      },
-      "project_id": {
-       "maxLength": 128,
-       "minLength": 1,
-       "title": "Project Id",
-       "type": "string"
-      },
-      "retain": {
-       "default": false,
-       "title": "Retain",
-       "type": "boolean"
-      },
-      "start": {
-       "anyOf": [
-        {
-         "maxLength": 64,
-         "minLength": 1,
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "default": null,
-       "title": "Start"
-      },
-      "version": {
-       "const": 1,
-       "title": "Version",
-       "type": "integer"
-      }
-     },
-     "required": [
-      "version",
-      "profile",
-      "project_id",
-      "entity_id"
-     ],
-     "title": "RequestScope",
      "type": "object"
     },
     "Slot": {
@@ -296,14 +72,13 @@
         "unavailable",
         "needs_clarification"
        ],
-       "title": "Disposition",
        "type": "string"
       },
       "excluded_indices": {
        "anyOf": [
         {
          "items": {
-          "type": "integer"
+          "type": "string"
          },
          "type": "array"
         },
@@ -311,12 +86,30 @@
          "type": "null"
         }
        ],
-       "default": null,
-       "title": "Excluded Indices"
+       "default": null
       },
       "metric": {
-       "title": "Metric",
        "type": "string"
+      },
+      "partial_value": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
       },
       "reason": {
        "anyOf": [
@@ -327,8 +120,7 @@
          "type": "null"
         }
        ],
-       "default": null,
-       "title": "Reason"
+       "default": null
       },
       "requested_snapshots": {
        "anyOf": [
@@ -339,8 +131,7 @@
          "type": "null"
         }
        ],
-       "default": null,
-       "title": "Requested Snapshots"
+       "default": null
       },
       "valid_snapshots": {
        "anyOf": [
@@ -351,26 +142,22 @@
          "type": "null"
         }
        ],
-       "default": null,
-       "title": "Valid Snapshots"
+       "default": null
       }
      },
      "required": [
       "metric",
       "disposition"
      ],
-     "title": "Slot",
      "type": "object"
     },
     "ViewWindow": {
      "additionalProperties": false,
      "properties": {
       "end": {
-       "title": "End",
        "type": "string"
       },
       "start": {
-       "title": "Start",
        "type": "string"
       }
      },
@@ -378,7 +165,6 @@
       "start",
       "end"
      ],
-     "title": "ViewWindow",
      "type": "object"
     }
    },
@@ -394,20 +180,17 @@
        "type": "null"
       }
      ],
-     "default": null,
-     "title": "Chart"
+     "default": null
     },
     "checked_block_ids": {
      "items": {
       "type": "string"
      },
      "maxItems": 20,
-     "title": "Checked Block Ids",
      "type": "array"
     },
     "content_sha256": {
      "pattern": "^[0-9a-f]{64}$",
-     "title": "Content Sha256",
      "type": "string"
     },
     "evidence_ids": {
@@ -415,7 +198,6 @@
       "type": "string"
      },
      "maxItems": 20,
-     "title": "Evidence Ids",
      "type": "array"
     },
     "limitations": {
@@ -423,7 +205,6 @@
       "type": "string"
      },
      "maxItems": 20,
-     "title": "Limitations",
      "type": "array"
     },
     "navigation": {
@@ -439,8 +220,7 @@
        "type": "null"
       }
      ],
-     "default": null,
-     "title": "Navigation"
+     "default": null
     },
     "operation_ids": {
      "anyOf": [
@@ -454,12 +234,10 @@
        "type": "null"
       }
      ],
-     "default": null,
-     "title": "Operation Ids"
+     "default": null
     },
     "policy_version": {
      "const": "1",
-     "title": "Policy Version",
      "type": "string"
     },
     "request_complete": {
@@ -471,13 +249,13 @@
        "type": "null"
       }
      ],
-     "default": null,
-     "title": "Request Complete"
+     "default": null
     },
     "request_scope": {
      "anyOf": [
       {
-       "$ref": "#/$defs/RequestScope"
+       "additionalProperties": true,
+       "type": "object"
       },
       {
        "type": "null"
@@ -498,14 +276,12 @@
        "type": "null"
       }
      ],
-     "default": null,
-     "title": "Result Slots"
+     "default": null
     },
     "reviewed_claim_ids": {
      "items": {
       "type": "string"
      },
-     "title": "Reviewed Claim Ids",
      "type": "array"
     },
     "reviewer_status": {
@@ -526,7 +302,6 @@
       "withheld_failure",
       "withheld_timeout"
      ],
-     "title": "Reviewer Status",
      "type": "string"
     }
    },
@@ -539,7 +314,6 @@
     "reviewer_status",
     "reviewed_claim_ids"
    ],
-   "title": "Receipt",
    "type": "object"
   }
  },
@@ -557,14 +331,12 @@
       },
       "comparable": {
        "const": true,
-       "title": "Comparable",
        "type": "boolean"
       },
       "deltas": {
        "additionalProperties": {
         "$ref": "#/$defs/Delta"
        },
-       "title": "Deltas",
        "type": "object"
       },
       "mode": {
@@ -575,14 +347,12 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Mode"
+       ]
       },
       "run": {
        "$ref": "#/$defs/RunRef"
       },
       "unsaved_inputs": {
-       "title": "Unsaved Inputs",
        "type": "boolean"
       }
      },
@@ -595,7 +365,6 @@
       "deltas",
       "_assurance"
      ],
-     "title": "CompareResult",
      "type": "object"
     },
     "Delta": {
@@ -630,11 +399,9 @@
          "type": "null"
         }
        ],
-       "default": null,
-       "title": "Delta Pct"
+       "default": null
       }
      },
-     "title": "Delta",
      "type": "object"
     },
     "MetricValue": {
@@ -648,8 +415,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Unit"
+       ]
       },
       "value": {
        "anyOf": [
@@ -668,26 +434,22 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Value"
+       ]
       }
      },
      "required": [
       "value",
       "unit"
      ],
-     "title": "MetricValue",
      "type": "object"
     },
     "RunRef": {
      "additionalProperties": false,
      "properties": {
       "finished_at": {
-       "title": "Finished At",
        "type": "string"
       },
       "run_id": {
-       "title": "Run Id",
        "type": "string"
       }
      },
@@ -695,7 +457,6 @@
       "run_id",
       "finished_at"
      ],
-     "title": "RunRef",
      "type": "object"
     },
     "ToolAssurance": {
@@ -705,7 +466,6 @@
        "items": {
         "type": "string"
        },
-       "title": "Evidence Ids",
        "type": "array"
       },
       "outcome": {
@@ -714,12 +474,10 @@
         "submitted",
         "uncertain"
        ],
-       "title": "Outcome",
        "type": "string"
       },
       "version": {
        "const": 1,
-       "title": "Version",
        "type": "integer"
       }
      },
@@ -728,12 +486,10 @@
       "outcome",
       "evidence_ids"
      ],
-     "title": "ToolAssurance",
      "type": "object"
     },
     "Uncertain": {
      "additionalProperties": false,
-     "description": "No evidence was captured: the result is withheld but for its metadata.",
      "properties": {
       "_assurance": {
        "$ref": "#/$defs/ToolAssurance"
@@ -742,7 +498,6 @@
      "required": [
       "_assurance"
      ],
-     "title": "Uncertain",
      "type": "object"
     }
    },
@@ -759,25 +514,20 @@
    "$defs": {
     "AggregateResult": {
      "additionalProperties": true,
-     "description": "get_aggregate_load: each certified statistic at the top level.",
      "properties": {
       "_assurance": {
        "$ref": "#/$defs/ToolAssurance"
       },
       "attribute": {
-       "title": "Attribute",
        "type": "string"
       },
       "loads": {
-       "title": "Loads",
        "type": "integer"
       },
       "selection": {
-       "title": "Selection",
        "type": "string"
       },
       "steps": {
-       "title": "Steps",
        "type": "integer"
       },
       "unit": {
@@ -788,8 +538,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Unit"
+       ]
       }
      },
      "required": [
@@ -800,7 +549,6 @@
       "steps",
       "_assurance"
      ],
-     "title": "AggregateResult",
      "type": "object"
     },
     "ToolAssurance": {
@@ -810,7 +558,6 @@
        "items": {
         "type": "string"
        },
-       "title": "Evidence Ids",
        "type": "array"
       },
       "outcome": {
@@ -819,12 +566,10 @@
         "submitted",
         "uncertain"
        ],
-       "title": "Outcome",
        "type": "string"
       },
       "version": {
        "const": 1,
-       "title": "Version",
        "type": "integer"
       }
      },
@@ -833,12 +578,10 @@
       "outcome",
       "evidence_ids"
      ],
-     "title": "ToolAssurance",
      "type": "object"
     },
     "Uncertain": {
      "additionalProperties": false,
-     "description": "No evidence was captured: the result is withheld but for its metadata.",
      "properties": {
       "_assurance": {
        "$ref": "#/$defs/ToolAssurance"
@@ -847,7 +590,6 @@
      "required": [
       "_assurance"
      ],
-     "title": "Uncertain",
      "type": "object"
     }
    },
@@ -869,7 +611,6 @@
        "items": {
         "type": "string"
        },
-       "title": "Evidence Ids",
        "type": "array"
       },
       "outcome": {
@@ -878,12 +619,10 @@
         "submitted",
         "uncertain"
        ],
-       "title": "Outcome",
        "type": "string"
       },
       "version": {
        "const": 1,
-       "title": "Version",
        "type": "integer"
       }
      },
@@ -892,12 +631,10 @@
       "outcome",
       "evidence_ids"
      ],
-     "title": "ToolAssurance",
      "type": "object"
     }
    },
    "additionalProperties": true,
-   "description": "get_component: each certified attribute at the top level.",
    "properties": {
     "_assurance": {
      "$ref": "#/$defs/ToolAssurance"
@@ -906,7 +643,6 @@
    "required": [
     "_assurance"
    ],
-   "title": "ComponentResult",
    "type": "object"
   },
   "get_run_evidence": {
@@ -922,8 +658,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Unit"
+       ]
       },
       "value": {
        "anyOf": [
@@ -942,15 +677,13 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Value"
+       ]
       }
      },
      "required": [
       "value",
       "unit"
      ],
-     "title": "MetricValue",
      "type": "object"
     },
     "RunResult": {
@@ -960,14 +693,12 @@
        "$ref": "#/$defs/ToolAssurance"
       },
       "finished_at": {
-       "title": "Finished At",
        "type": "string"
       },
       "metrics": {
        "additionalProperties": {
         "$ref": "#/$defs/MetricValue"
        },
-       "title": "Metrics",
        "type": "object"
       },
       "mode": {
@@ -978,20 +709,16 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Mode"
+       ]
       },
       "run_id": {
-       "title": "Run Id",
        "type": "string"
       },
       "status": {
        "const": "completed",
-       "title": "Status",
        "type": "string"
       },
       "unsaved_inputs": {
-       "title": "Unsaved Inputs",
        "type": "boolean"
       }
      },
@@ -1004,7 +731,6 @@
       "metrics",
       "_assurance"
      ],
-     "title": "RunResult",
      "type": "object"
     },
     "RunSectionResult": {
@@ -1014,7 +740,6 @@
        "$ref": "#/$defs/ToolAssurance"
       },
       "finished_at": {
-       "title": "Finished At",
        "type": "string"
       },
       "mode": {
@@ -1025,31 +750,25 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Mode"
+       ]
       },
       "run_id": {
-       "title": "Run Id",
        "type": "string"
       },
       "section": {
-       "title": "Section",
        "type": "string"
       },
       "status": {
        "const": "completed",
-       "title": "Status",
        "type": "string"
       },
       "unsaved_inputs": {
-       "title": "Unsaved Inputs",
        "type": "boolean"
       },
       "values": {
        "items": {
         "$ref": "#/$defs/SectionValue"
        },
-       "title": "Values",
        "type": "array"
       }
      },
@@ -1063,18 +782,15 @@
       "values",
       "_assurance"
      ],
-     "title": "RunSectionResult",
      "type": "object"
     },
     "SectionValue": {
      "additionalProperties": false,
      "properties": {
       "metric": {
-       "title": "Metric",
        "type": "string"
       },
       "path": {
-       "title": "Path",
        "type": "string"
       },
       "unit": {
@@ -1085,8 +801,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Unit"
+       ]
       },
       "value": {
        "anyOf": [
@@ -1105,8 +820,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Value"
+       ]
       }
      },
      "required": [
@@ -1115,7 +829,6 @@
       "value",
       "unit"
      ],
-     "title": "SectionValue",
      "type": "object"
     },
     "ToolAssurance": {
@@ -1125,7 +838,6 @@
        "items": {
         "type": "string"
        },
-       "title": "Evidence Ids",
        "type": "array"
       },
       "outcome": {
@@ -1134,12 +846,10 @@
         "submitted",
         "uncertain"
        ],
-       "title": "Outcome",
        "type": "string"
       },
       "version": {
        "const": 1,
-       "title": "Version",
        "type": "integer"
       }
      },
@@ -1148,12 +858,10 @@
       "outcome",
       "evidence_ids"
      ],
-     "title": "ToolAssurance",
      "type": "object"
     },
     "Uncertain": {
      "additionalProperties": false,
-     "description": "No evidence was captured: the result is withheld but for its metadata.",
      "properties": {
       "_assurance": {
        "$ref": "#/$defs/ToolAssurance"
@@ -1162,7 +870,6 @@
      "required": [
       "_assurance"
      ],
-     "title": "Uncertain",
      "type": "object"
     }
    },
@@ -1187,15 +894,12 @@
        "$ref": "#/$defs/ToolAssurance"
       },
       "attribute": {
-       "title": "Attribute",
        "type": "string"
       },
       "certified_steps": {
-       "title": "Certified Steps",
        "type": "integer"
       },
       "name": {
-       "title": "Name",
        "type": "string"
       },
       "points": {
@@ -1221,11 +925,9 @@
         },
         "type": "array"
        },
-       "title": "Points",
        "type": "array"
       },
       "steps": {
-       "title": "Steps",
        "type": "integer"
       },
       "unit": {
@@ -1236,8 +938,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Unit"
+       ]
       },
       "window": {
        "anyOf": [
@@ -1260,14 +961,12 @@
       "certified_steps",
       "_assurance"
      ],
-     "title": "SeriesResult",
      "type": "object"
     },
     "SeriesWindow": {
      "additionalProperties": false,
      "properties": {
       "end": {
-       "title": "End",
        "type": "integer"
       },
       "first": {
@@ -1287,8 +986,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "First"
+       ]
       },
       "last": {
        "anyOf": [
@@ -1307,11 +1005,9 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Last"
+       ]
       },
       "start": {
-       "title": "Start",
        "type": "integer"
       }
      },
@@ -1321,7 +1017,6 @@
       "first",
       "last"
      ],
-     "title": "SeriesWindow",
      "type": "object"
     },
     "ToolAssurance": {
@@ -1331,7 +1026,6 @@
        "items": {
         "type": "string"
        },
-       "title": "Evidence Ids",
        "type": "array"
       },
       "outcome": {
@@ -1340,12 +1034,10 @@
         "submitted",
         "uncertain"
        ],
-       "title": "Outcome",
        "type": "string"
       },
       "version": {
        "const": 1,
-       "title": "Version",
        "type": "integer"
       }
      },
@@ -1354,12 +1046,10 @@
       "outcome",
       "evidence_ids"
      ],
-     "title": "ToolAssurance",
      "type": "object"
     },
     "Uncertain": {
      "additionalProperties": false,
-     "description": "No evidence was captured: the result is withheld but for its metadata.",
      "properties": {
       "_assurance": {
        "$ref": "#/$defs/ToolAssurance"
@@ -1368,7 +1058,6 @@
      "required": [
       "_assurance"
      ],
-     "title": "Uncertain",
      "type": "object"
     }
    },
@@ -1390,26 +1079,21 @@
        "$ref": "#/$defs/ToolAssurance"
       },
       "has_more": {
-       "title": "Has More",
        "type": "boolean"
       },
       "items": {
        "items": {
         "$ref": "#/$defs/Row"
        },
-       "title": "Items",
        "type": "array"
       },
       "offset": {
-       "title": "Offset",
        "type": "integer"
       },
       "returned": {
-       "title": "Returned",
        "type": "integer"
       },
       "total_count": {
-       "title": "Total Count",
        "type": "integer"
       }
      },
@@ -1421,22 +1105,18 @@
       "has_more",
       "_assurance"
      ],
-     "title": "PageResult",
      "type": "object"
     },
     "Row": {
      "additionalProperties": true,
-     "description": "One list_components row: its name and each certified attribute.",
      "properties": {
       "name": {
-       "title": "Name",
        "type": "string"
       }
      },
      "required": [
       "name"
      ],
-     "title": "Row",
      "type": "object"
     },
     "ToolAssurance": {
@@ -1446,7 +1126,6 @@
        "items": {
         "type": "string"
        },
-       "title": "Evidence Ids",
        "type": "array"
       },
       "outcome": {
@@ -1455,12 +1134,10 @@
         "submitted",
         "uncertain"
        ],
-       "title": "Outcome",
        "type": "string"
       },
       "version": {
        "const": 1,
-       "title": "Version",
        "type": "integer"
       }
      },
@@ -1469,12 +1146,10 @@
       "outcome",
       "evidence_ids"
      ],
-     "title": "ToolAssurance",
      "type": "object"
     },
     "Uncertain": {
      "additionalProperties": false,
-     "description": "No evidence was captured: the result is withheld but for its metadata.",
      "properties": {
       "_assurance": {
        "$ref": "#/$defs/ToolAssurance"
@@ -1483,7 +1158,6 @@
      "required": [
       "_assurance"
      ],
-     "title": "Uncertain",
      "type": "object"
     }
    },
@@ -1505,7 +1179,6 @@
        "items": {
         "type": "string"
        },
-       "title": "Evidence Ids",
        "type": "array"
       },
       "outcome": {
@@ -1514,12 +1187,10 @@
         "submitted",
         "uncertain"
        ],
-       "title": "Outcome",
        "type": "string"
       },
       "version": {
        "const": 1,
-       "title": "Version",
        "type": "integer"
       }
      },
@@ -1528,7 +1199,6 @@
       "outcome",
       "evidence_ids"
      ],
-     "title": "ToolAssurance",
      "type": "object"
     }
    },
@@ -1541,7 +1211,6 @@
    "required": [
     "_assurance"
    ],
-   "title": "Submitted",
    "type": "object"
   },
   "update_component": {
@@ -1557,16 +1226,13 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Operation Id"
+       ]
       },
       "outcome": {
-       "title": "Outcome",
        "type": "string"
       },
       "version": {
        "const": 1,
-       "title": "Version",
        "type": "integer"
       }
      },
@@ -1575,7 +1241,6 @@
       "outcome",
       "operation_id"
      ],
-     "title": "EffectAssurance",
      "type": "object"
     }
    },
@@ -1588,7 +1253,6 @@
    "required": [
     "_assurance"
    ],
-   "title": "EffectResult",
    "type": "object"
   }
  },
@@ -1893,34 +1557,27 @@
      "properties": {
       "attribute": {
        "const": "p_set",
-       "title": "Attribute",
        "type": "string"
       },
       "component_class": {
        "const": "Load",
-       "title": "Component Class",
        "type": "string"
       },
       "entity_id": {
-       "title": "Entity Id",
        "type": "string"
       },
       "kind": {
        "const": "aggregate_load",
-       "title": "Kind",
        "type": "string"
       },
       "loads": {
-       "title": "Loads",
        "type": "integer"
       },
       "selector": {
        "additionalProperties": true,
-       "title": "Selector",
        "type": "object"
       },
       "steps": {
-       "title": "Steps",
        "type": "integer"
       }
      },
@@ -1933,22 +1590,29 @@
       "loads",
       "steps"
      ],
-     "title": "AggregateLoadScope",
      "type": "object"
     },
     "Fact": {
      "additionalProperties": false,
      "properties": {
       "entity_id": {
-       "title": "Entity Id",
        "type": "string"
       },
+      "formula_id": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
       "metric": {
-       "title": "Metric",
        "type": "string"
       },
       "path": {
-       "title": "Path",
        "type": "string"
       },
       "unit": {
@@ -1959,8 +1623,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Unit"
+       ]
       },
       "value": {
        "anyOf": [
@@ -1979,8 +1642,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Value"
+       ]
       }
      },
      "required": [
@@ -1990,7 +1652,6 @@
       "value",
       "unit"
      ],
-     "title": "Fact",
      "type": "object"
     },
     "Validity": {
@@ -2004,23 +1665,19 @@
         {
          "type": "number"
         }
-       ],
-       "title": "As Of"
+       ]
       },
       "coverage": {
-       "title": "Coverage",
        "type": "string"
       },
       "outcome": {
        "const": "completed",
-       "title": "Outcome",
        "type": "string"
       },
       "warnings": {
        "items": {
         "type": "string"
        },
-       "title": "Warnings",
        "type": "array"
       }
      },
@@ -2030,7 +1687,6 @@
       "coverage",
       "warnings"
      ],
-     "title": "Validity",
      "type": "object"
     }
    },
@@ -2038,22 +1694,18 @@
    "properties": {
     "adapter_version": {
      "const": "aggregate-load/1",
-     "title": "Adapter Version",
      "type": "string"
     },
     "evidence_id": {
-     "title": "Evidence Id",
      "type": "string"
     },
     "facts": {
      "items": {
       "$ref": "#/$defs/Fact"
      },
-     "title": "Facts",
      "type": "array"
     },
     "project_id": {
-     "title": "Project Id",
      "type": "string"
     },
     "scope": {
@@ -2061,7 +1713,6 @@
     },
     "source_kind": {
      "const": "configured_input",
-     "title": "Source Kind",
      "type": "string"
     },
     "validity": {
@@ -2069,7 +1720,6 @@
     },
     "version": {
      "const": 1,
-     "title": "Version",
      "type": "integer"
     }
    },
@@ -2083,7 +1733,6 @@
     "adapter_version",
     "scope"
    ],
-   "title": "Evidence_aggregate_load_v1",
    "type": "object"
   },
   "calculated_result": {
@@ -2093,24 +1742,19 @@
      "properties": {
       "component_class": {
        "const": "Generator",
-       "title": "Component Class",
        "type": "string"
       },
       "end": {
-       "title": "End",
        "type": "string"
       },
       "entity_id": {
-       "title": "Entity Id",
        "type": "string"
       },
       "kind": {
        "const": "full_horizon",
-       "title": "Kind",
        "type": "string"
       },
       "start": {
-       "title": "Start",
        "type": "string"
       }
      },
@@ -2121,22 +1765,29 @@
       "start",
       "end"
      ],
-     "title": "CalculatedScope",
      "type": "object"
     },
     "Fact": {
      "additionalProperties": false,
      "properties": {
       "entity_id": {
-       "title": "Entity Id",
        "type": "string"
       },
+      "formula_id": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
       "metric": {
-       "title": "Metric",
        "type": "string"
       },
       "path": {
-       "title": "Path",
        "type": "string"
       },
       "unit": {
@@ -2147,8 +1798,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Unit"
+       ]
       },
       "value": {
        "anyOf": [
@@ -2167,8 +1817,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Value"
+       ]
       }
      },
      "required": [
@@ -2178,7 +1827,6 @@
       "value",
       "unit"
      ],
-     "title": "Fact",
      "type": "object"
     },
     "Slot": {
@@ -2190,14 +1838,13 @@
         "unavailable",
         "needs_clarification"
        ],
-       "title": "Disposition",
        "type": "string"
       },
       "excluded_indices": {
        "anyOf": [
         {
          "items": {
-          "type": "integer"
+          "type": "string"
          },
          "type": "array"
         },
@@ -2205,12 +1852,30 @@
          "type": "null"
         }
        ],
-       "default": null,
-       "title": "Excluded Indices"
+       "default": null
       },
       "metric": {
-       "title": "Metric",
        "type": "string"
+      },
+      "partial_value": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
       },
       "reason": {
        "anyOf": [
@@ -2221,8 +1886,7 @@
          "type": "null"
         }
        ],
-       "default": null,
-       "title": "Reason"
+       "default": null
       },
       "requested_snapshots": {
        "anyOf": [
@@ -2233,8 +1897,7 @@
          "type": "null"
         }
        ],
-       "default": null,
-       "title": "Requested Snapshots"
+       "default": null
       },
       "valid_snapshots": {
        "anyOf": [
@@ -2245,15 +1908,13 @@
          "type": "null"
         }
        ],
-       "default": null,
-       "title": "Valid Snapshots"
+       "default": null
       }
      },
      "required": [
       "metric",
       "disposition"
      ],
-     "title": "Slot",
      "type": "object"
     },
     "Validity": {
@@ -2267,23 +1928,19 @@
         {
          "type": "number"
         }
-       ],
-       "title": "As Of"
+       ]
       },
       "coverage": {
-       "title": "Coverage",
        "type": "string"
       },
       "outcome": {
        "const": "completed",
-       "title": "Outcome",
        "type": "string"
       },
       "warnings": {
        "items": {
         "type": "string"
        },
-       "title": "Warnings",
        "type": "array"
       }
      },
@@ -2293,34 +1950,28 @@
       "coverage",
       "warnings"
      ],
-     "title": "Validity",
      "type": "object"
     }
    },
    "additionalProperties": false,
    "properties": {
     "adapter_version": {
-     "title": "Adapter Version",
      "type": "string"
     },
     "evidence_id": {
-     "title": "Evidence Id",
      "type": "string"
     },
     "facts": {
      "items": {
       "$ref": "#/$defs/Fact"
      },
-     "title": "Facts",
      "type": "array"
     },
     "project_id": {
-     "title": "Project Id",
      "type": "string"
     },
     "raw": {
      "additionalProperties": true,
-     "title": "Raw",
      "type": "object"
     },
     "scope": {
@@ -2330,12 +1981,10 @@
      "items": {
       "$ref": "#/$defs/Slot"
      },
-     "title": "Slots",
      "type": "array"
     },
     "source_kind": {
      "const": "calculated_result",
-     "title": "Source Kind",
      "type": "string"
     },
     "validity": {
@@ -2343,7 +1992,6 @@
     },
     "version": {
      "const": 1,
-     "title": "Version",
      "type": "integer"
     }
    },
@@ -2359,7 +2007,6 @@
     "slots",
     "raw"
    ],
-   "title": "CalculatedEvidence",
    "type": "object"
   },
   "run-compare/1": {
@@ -2368,15 +2015,23 @@
      "additionalProperties": false,
      "properties": {
       "entity_id": {
-       "title": "Entity Id",
        "type": "string"
       },
+      "formula_id": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
       "metric": {
-       "title": "Metric",
        "type": "string"
       },
       "path": {
-       "title": "Path",
        "type": "string"
       },
       "unit": {
@@ -2387,8 +2042,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Unit"
+       ]
       },
       "value": {
        "anyOf": [
@@ -2407,8 +2061,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Value"
+       ]
       }
      },
      "required": [
@@ -2418,31 +2071,25 @@
       "value",
       "unit"
      ],
-     "title": "Fact",
      "type": "object"
     },
     "RunComparisonScope": {
      "additionalProperties": false,
      "properties": {
       "baseline_finished_at": {
-       "title": "Baseline Finished At",
        "type": "string"
       },
       "baseline_run_id": {
-       "title": "Baseline Run Id",
        "type": "string"
       },
       "entity_id": {
-       "title": "Entity Id",
        "type": "string"
       },
       "finished_at": {
-       "title": "Finished At",
        "type": "string"
       },
       "kind": {
        "const": "run_comparison",
-       "title": "Kind",
        "type": "string"
       },
       "metrics": {
@@ -2456,8 +2103,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Metrics"
+       ]
       },
       "mode": {
        "anyOf": [
@@ -2467,11 +2113,9 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Mode"
+       ]
       },
       "unsaved_inputs": {
-       "title": "Unsaved Inputs",
        "type": "boolean"
       }
      },
@@ -2485,7 +2129,6 @@
       "metrics",
       "unsaved_inputs"
      ],
-     "title": "RunComparisonScope",
      "type": "object"
     },
     "Validity": {
@@ -2499,23 +2142,19 @@
         {
          "type": "number"
         }
-       ],
-       "title": "As Of"
+       ]
       },
       "coverage": {
-       "title": "Coverage",
        "type": "string"
       },
       "outcome": {
        "const": "completed",
-       "title": "Outcome",
        "type": "string"
       },
       "warnings": {
        "items": {
         "type": "string"
        },
-       "title": "Warnings",
        "type": "array"
       }
      },
@@ -2525,7 +2164,6 @@
       "coverage",
       "warnings"
      ],
-     "title": "Validity",
      "type": "object"
     }
    },
@@ -2533,22 +2171,18 @@
    "properties": {
     "adapter_version": {
      "const": "run-compare/1",
-     "title": "Adapter Version",
      "type": "string"
     },
     "evidence_id": {
-     "title": "Evidence Id",
      "type": "string"
     },
     "facts": {
      "items": {
       "$ref": "#/$defs/Fact"
      },
-     "title": "Facts",
      "type": "array"
     },
     "project_id": {
-     "title": "Project Id",
      "type": "string"
     },
     "scope": {
@@ -2556,7 +2190,6 @@
     },
     "source_kind": {
      "const": "run_manifest",
-     "title": "Source Kind",
      "type": "string"
     },
     "validity": {
@@ -2564,7 +2197,6 @@
     },
     "version": {
      "const": 1,
-     "title": "Version",
      "type": "integer"
     }
    },
@@ -2578,7 +2210,6 @@
     "adapter_version",
     "scope"
    ],
-   "title": "Evidence_run_compare_v1",
    "type": "object"
   },
   "run-metrics/1": {
@@ -2587,15 +2218,23 @@
      "additionalProperties": false,
      "properties": {
       "entity_id": {
-       "title": "Entity Id",
        "type": "string"
       },
+      "formula_id": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
       "metric": {
-       "title": "Metric",
        "type": "string"
       },
       "path": {
-       "title": "Path",
        "type": "string"
       },
       "unit": {
@@ -2606,8 +2245,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Unit"
+       ]
       },
       "value": {
        "anyOf": [
@@ -2626,8 +2264,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Value"
+       ]
       }
      },
      "required": [
@@ -2637,23 +2274,19 @@
       "value",
       "unit"
      ],
-     "title": "Fact",
      "type": "object"
     },
     "RunScope": {
      "additionalProperties": false,
      "properties": {
       "entity_id": {
-       "title": "Entity Id",
        "type": "string"
       },
       "finished_at": {
-       "title": "Finished At",
        "type": "string"
       },
       "kind": {
        "const": "run",
-       "title": "Kind",
        "type": "string"
       },
       "mode": {
@@ -2664,8 +2297,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Mode"
+       ]
       },
       "run_kind": {
        "anyOf": [
@@ -2675,11 +2307,9 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Run Kind"
+       ]
       },
       "unsaved_inputs": {
-       "title": "Unsaved Inputs",
        "type": "boolean"
       }
      },
@@ -2691,7 +2321,6 @@
       "finished_at",
       "unsaved_inputs"
      ],
-     "title": "RunScope",
      "type": "object"
     },
     "Validity": {
@@ -2705,23 +2334,19 @@
         {
          "type": "number"
         }
-       ],
-       "title": "As Of"
+       ]
       },
       "coverage": {
-       "title": "Coverage",
        "type": "string"
       },
       "outcome": {
        "const": "completed",
-       "title": "Outcome",
        "type": "string"
       },
       "warnings": {
        "items": {
         "type": "string"
        },
-       "title": "Warnings",
        "type": "array"
       }
      },
@@ -2731,7 +2356,6 @@
       "coverage",
       "warnings"
      ],
-     "title": "Validity",
      "type": "object"
     }
    },
@@ -2739,22 +2363,18 @@
    "properties": {
     "adapter_version": {
      "const": "run-metrics/1",
-     "title": "Adapter Version",
      "type": "string"
     },
     "evidence_id": {
-     "title": "Evidence Id",
      "type": "string"
     },
     "facts": {
      "items": {
       "$ref": "#/$defs/Fact"
      },
-     "title": "Facts",
      "type": "array"
     },
     "project_id": {
-     "title": "Project Id",
      "type": "string"
     },
     "scope": {
@@ -2762,7 +2382,6 @@
     },
     "source_kind": {
      "const": "run_manifest",
-     "title": "Source Kind",
      "type": "string"
     },
     "validity": {
@@ -2770,7 +2389,6 @@
     },
     "version": {
      "const": 1,
-     "title": "Version",
      "type": "integer"
     }
    },
@@ -2784,7 +2402,6 @@
     "adapter_version",
     "scope"
    ],
-   "title": "Evidence_run_metrics_v1",
    "type": "object"
   },
   "run-section/1": {
@@ -2793,15 +2410,23 @@
      "additionalProperties": false,
      "properties": {
       "entity_id": {
-       "title": "Entity Id",
        "type": "string"
       },
+      "formula_id": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
       "metric": {
-       "title": "Metric",
        "type": "string"
       },
       "path": {
-       "title": "Path",
        "type": "string"
       },
       "unit": {
@@ -2812,8 +2437,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Unit"
+       ]
       },
       "value": {
        "anyOf": [
@@ -2832,8 +2456,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Value"
+       ]
       }
      },
      "required": [
@@ -2843,23 +2466,19 @@
       "value",
       "unit"
      ],
-     "title": "Fact",
      "type": "object"
     },
     "RunSectionScope": {
      "additionalProperties": false,
      "properties": {
       "entity_id": {
-       "title": "Entity Id",
        "type": "string"
       },
       "finished_at": {
-       "title": "Finished At",
        "type": "string"
       },
       "kind": {
        "const": "run_section",
-       "title": "Kind",
        "type": "string"
       },
       "mode": {
@@ -2870,8 +2489,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Mode"
+       ]
       },
       "run_kind": {
        "anyOf": [
@@ -2881,19 +2499,15 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Run Kind"
+       ]
       },
       "section": {
-       "title": "Section",
        "type": "string"
       },
       "section_sha256": {
-       "title": "Section Sha256",
        "type": "string"
       },
       "unsaved_inputs": {
-       "title": "Unsaved Inputs",
        "type": "boolean"
       }
      },
@@ -2907,7 +2521,6 @@
       "section",
       "section_sha256"
      ],
-     "title": "RunSectionScope",
      "type": "object"
     },
     "Validity": {
@@ -2921,23 +2534,19 @@
         {
          "type": "number"
         }
-       ],
-       "title": "As Of"
+       ]
       },
       "coverage": {
-       "title": "Coverage",
        "type": "string"
       },
       "outcome": {
        "const": "completed",
-       "title": "Outcome",
        "type": "string"
       },
       "warnings": {
        "items": {
         "type": "string"
        },
-       "title": "Warnings",
        "type": "array"
       }
      },
@@ -2947,7 +2556,6 @@
       "coverage",
       "warnings"
      ],
-     "title": "Validity",
      "type": "object"
     }
    },
@@ -2955,22 +2563,18 @@
    "properties": {
     "adapter_version": {
      "const": "run-section/1",
-     "title": "Adapter Version",
      "type": "string"
     },
     "evidence_id": {
-     "title": "Evidence Id",
      "type": "string"
     },
     "facts": {
      "items": {
       "$ref": "#/$defs/Fact"
      },
-     "title": "Facts",
      "type": "array"
     },
     "project_id": {
-     "title": "Project Id",
      "type": "string"
     },
     "scope": {
@@ -2978,7 +2582,6 @@
     },
     "source_kind": {
      "const": "run_manifest",
-     "title": "Source Kind",
      "type": "string"
     },
     "validity": {
@@ -2986,7 +2589,6 @@
     },
     "version": {
      "const": 1,
-     "title": "Version",
      "type": "integer"
     }
    },
@@ -3000,7 +2602,6 @@
     "adapter_version",
     "scope"
    ],
-   "title": "Evidence_run_section_v1",
    "type": "object"
   },
   "scoped_result": {
@@ -3018,18 +2619,15 @@
         }
        ],
        "ge": 0,
-       "le": 1,
-       "title": "Annual Fixed Cost Fraction"
+       "le": 1
       },
       "currency": {
        "const": "EUR",
-       "title": "Currency",
        "type": "string"
       },
       "price_year": {
        "maximum": 2200,
        "minimum": 1900,
-       "title": "Price Year",
        "type": "integer"
       }
      },
@@ -3038,22 +2636,29 @@
       "price_year",
       "annual_fixed_cost_fraction"
      ],
-     "title": "CostBasis",
      "type": "object"
     },
     "Fact": {
      "additionalProperties": false,
      "properties": {
       "entity_id": {
-       "title": "Entity Id",
        "type": "string"
       },
+      "formula_id": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
       "metric": {
-       "title": "Metric",
        "type": "string"
       },
       "path": {
-       "title": "Path",
        "type": "string"
       },
       "unit": {
@@ -3064,8 +2669,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Unit"
+       ]
       },
       "value": {
        "anyOf": [
@@ -3084,8 +2688,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Value"
+       ]
       }
      },
      "required": [
@@ -3095,7 +2698,6 @@
       "value",
       "unit"
      ],
-     "title": "Fact",
      "type": "object"
     },
     "RequestScope": {
@@ -3115,8 +2717,7 @@
          "type": "null"
         }
        ],
-       "default": null,
-       "title": "Chart"
+       "default": null
       },
       "comparison_evidence_id": {
        "anyOf": [
@@ -3129,8 +2730,7 @@
          "type": "null"
         }
        ],
-       "default": null,
-       "title": "Comparison Evidence Id"
+       "default": null
       },
       "component_class": {
        "anyOf": [
@@ -3149,8 +2749,7 @@
          "type": "null"
         }
        ],
-       "default": null,
-       "title": "Component Class"
+       "default": null
       },
       "cost_basis": {
        "anyOf": [
@@ -3174,13 +2773,11 @@
          "type": "null"
         }
        ],
-       "default": null,
-       "title": "End"
+       "default": null
       },
       "entity_id": {
        "maxLength": 128,
        "minLength": 1,
-       "title": "Entity Id",
        "type": "string"
       },
       "evidence_id": {
@@ -3194,8 +2791,7 @@
          "type": "null"
         }
        ],
-       "default": null,
-       "title": "Evidence Id"
+       "default": null
       },
       "metrics": {
        "anyOf": [
@@ -3211,8 +2807,7 @@
          "type": "null"
         }
        ],
-       "default": null,
-       "title": "Metrics"
+       "default": null
       },
       "profile": {
        "enum": [
@@ -3238,18 +2833,15 @@
         "copt-screening/1",
         "grid-readiness/1"
        ],
-       "title": "Profile",
        "type": "string"
       },
       "project_id": {
        "maxLength": 128,
        "minLength": 1,
-       "title": "Project Id",
        "type": "string"
       },
       "retain": {
        "default": false,
-       "title": "Retain",
        "type": "boolean"
       },
       "start": {
@@ -3263,12 +2855,10 @@
          "type": "null"
         }
        ],
-       "default": null,
-       "title": "Start"
+       "default": null
       },
       "version": {
        "const": 1,
-       "title": "Version",
        "type": "integer"
       }
      },
@@ -3278,18 +2868,15 @@
       "project_id",
       "entity_id"
      ],
-     "title": "RequestScope",
      "type": "object"
     },
     "ScopedScope": {
      "additionalProperties": false,
      "properties": {
       "end": {
-       "title": "End",
        "type": "string"
       },
       "entity_id": {
-       "title": "Entity Id",
        "type": "string"
       },
       "kind": {
@@ -3297,11 +2884,9 @@
         "current_run",
         "retained_run"
        ],
-       "title": "Kind",
        "type": "string"
       },
       "start": {
-       "title": "Start",
        "type": "string"
       }
      },
@@ -3311,7 +2896,6 @@
       "start",
       "end"
      ],
-     "title": "ScopedScope",
      "type": "object"
     },
     "Slot": {
@@ -3323,14 +2907,13 @@
         "unavailable",
         "needs_clarification"
        ],
-       "title": "Disposition",
        "type": "string"
       },
       "excluded_indices": {
        "anyOf": [
         {
          "items": {
-          "type": "integer"
+          "type": "string"
          },
          "type": "array"
         },
@@ -3338,12 +2921,30 @@
          "type": "null"
         }
        ],
-       "default": null,
-       "title": "Excluded Indices"
+       "default": null
       },
       "metric": {
-       "title": "Metric",
        "type": "string"
+      },
+      "partial_value": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
       },
       "reason": {
        "anyOf": [
@@ -3354,8 +2955,7 @@
          "type": "null"
         }
        ],
-       "default": null,
-       "title": "Reason"
+       "default": null
       },
       "requested_snapshots": {
        "anyOf": [
@@ -3366,8 +2966,7 @@
          "type": "null"
         }
        ],
-       "default": null,
-       "title": "Requested Snapshots"
+       "default": null
       },
       "valid_snapshots": {
        "anyOf": [
@@ -3378,15 +2977,13 @@
          "type": "null"
         }
        ],
-       "default": null,
-       "title": "Valid Snapshots"
+       "default": null
       }
      },
      "required": [
       "metric",
       "disposition"
      ],
-     "title": "Slot",
      "type": "object"
     },
     "Validity": {
@@ -3400,23 +2997,19 @@
         {
          "type": "number"
         }
-       ],
-       "title": "As Of"
+       ]
       },
       "coverage": {
-       "title": "Coverage",
        "type": "string"
       },
       "outcome": {
        "const": "completed",
-       "title": "Outcome",
        "type": "string"
       },
       "warnings": {
        "items": {
         "type": "string"
        },
-       "title": "Warnings",
        "type": "array"
       }
      },
@@ -3426,34 +3019,28 @@
       "coverage",
       "warnings"
      ],
-     "title": "Validity",
      "type": "object"
     }
    },
    "additionalProperties": false,
    "properties": {
     "adapter_version": {
-     "title": "Adapter Version",
      "type": "string"
     },
     "evidence_id": {
-     "title": "Evidence Id",
      "type": "string"
     },
     "facts": {
      "items": {
       "$ref": "#/$defs/Fact"
      },
-     "title": "Facts",
      "type": "array"
     },
     "project_id": {
-     "title": "Project Id",
      "type": "string"
     },
     "raw": {
      "additionalProperties": true,
-     "title": "Raw",
      "type": "object"
     },
     "request_scope": {
@@ -3466,12 +3053,10 @@
      "items": {
       "$ref": "#/$defs/Slot"
      },
-     "title": "Slots",
      "type": "array"
     },
     "source_kind": {
      "const": "scoped_result",
-     "title": "Source Kind",
      "type": "string"
     },
     "validity": {
@@ -3479,7 +3064,6 @@
     },
     "version": {
      "const": 1,
-     "title": "Version",
      "type": "integer"
     }
    },
@@ -3496,7 +3080,6 @@
     "slots",
     "raw"
    ],
-   "title": "ScopedEvidence",
    "type": "object"
   },
   "series-input/2": {
@@ -3505,15 +3088,23 @@
      "additionalProperties": false,
      "properties": {
       "entity_id": {
-       "title": "Entity Id",
        "type": "string"
       },
+      "formula_id": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
       "metric": {
-       "title": "Metric",
        "type": "string"
       },
       "path": {
-       "title": "Path",
        "type": "string"
       },
       "unit": {
@@ -3524,8 +3115,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Unit"
+       ]
       },
       "value": {
        "anyOf": [
@@ -3544,8 +3134,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Value"
+       ]
       }
      },
      "required": [
@@ -3555,39 +3144,31 @@
       "value",
       "unit"
      ],
-     "title": "Fact",
      "type": "object"
     },
     "SeriesScope": {
      "additionalProperties": false,
      "properties": {
       "attribute": {
-       "title": "Attribute",
        "type": "string"
       },
       "certified": {
-       "title": "Certified",
        "type": "integer"
       },
       "component": {
-       "title": "Component",
        "type": "string"
       },
       "component_class": {
-       "title": "Component Class",
        "type": "string"
       },
       "entity_id": {
-       "title": "Entity Id",
        "type": "string"
       },
       "kind": {
        "const": "series",
-       "title": "Kind",
        "type": "string"
       },
       "points": {
-       "title": "Points",
        "type": "integer"
       },
       "window": {
@@ -3611,14 +3192,12 @@
       "points",
       "certified"
      ],
-     "title": "SeriesScope",
      "type": "object"
     },
     "SeriesWindow": {
      "additionalProperties": false,
      "properties": {
       "end": {
-       "title": "End",
        "type": "integer"
       },
       "first": {
@@ -3638,8 +3217,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "First"
+       ]
       },
       "last": {
        "anyOf": [
@@ -3658,11 +3236,9 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Last"
+       ]
       },
       "start": {
-       "title": "Start",
        "type": "integer"
       }
      },
@@ -3672,7 +3248,6 @@
       "first",
       "last"
      ],
-     "title": "SeriesWindow",
      "type": "object"
     },
     "Validity": {
@@ -3686,23 +3261,19 @@
         {
          "type": "number"
         }
-       ],
-       "title": "As Of"
+       ]
       },
       "coverage": {
-       "title": "Coverage",
        "type": "string"
       },
       "outcome": {
        "const": "completed",
-       "title": "Outcome",
        "type": "string"
       },
       "warnings": {
        "items": {
         "type": "string"
        },
-       "title": "Warnings",
        "type": "array"
       }
      },
@@ -3712,7 +3283,6 @@
       "coverage",
       "warnings"
      ],
-     "title": "Validity",
      "type": "object"
     }
    },
@@ -3720,22 +3290,18 @@
    "properties": {
     "adapter_version": {
      "const": "series-input/2",
-     "title": "Adapter Version",
      "type": "string"
     },
     "evidence_id": {
-     "title": "Evidence Id",
      "type": "string"
     },
     "facts": {
      "items": {
       "$ref": "#/$defs/Fact"
      },
-     "title": "Facts",
      "type": "array"
     },
     "project_id": {
-     "title": "Project Id",
      "type": "string"
     },
     "scope": {
@@ -3743,7 +3309,6 @@
     },
     "source_kind": {
      "const": "configured_input",
-     "title": "Source Kind",
      "type": "string"
     },
     "validity": {
@@ -3751,7 +3316,6 @@
     },
     "version": {
      "const": 1,
-     "title": "Version",
      "type": "integer"
     }
    },
@@ -3765,7 +3329,6 @@
     "adapter_version",
     "scope"
    ],
-   "title": "Evidence_series_input_v2",
    "type": "object"
   },
   "static-input-page/1": {
@@ -3774,15 +3337,23 @@
      "additionalProperties": false,
      "properties": {
       "entity_id": {
-       "title": "Entity Id",
        "type": "string"
       },
+      "formula_id": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
       "metric": {
-       "title": "Metric",
        "type": "string"
       },
       "path": {
-       "title": "Path",
        "type": "string"
       },
       "unit": {
@@ -3793,8 +3364,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Unit"
+       ]
       },
       "value": {
        "anyOf": [
@@ -3813,8 +3383,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Value"
+       ]
       }
      },
      "required": [
@@ -3824,35 +3393,28 @@
       "value",
       "unit"
      ],
-     "title": "Fact",
      "type": "object"
     },
     "StaticPageScope": {
      "additionalProperties": false,
      "properties": {
       "component_class": {
-       "title": "Component Class",
        "type": "string"
       },
       "has_more": {
-       "title": "Has More",
        "type": "boolean"
       },
       "kind": {
        "const": "static_page",
-       "title": "Kind",
        "type": "string"
       },
       "offset": {
-       "title": "Offset",
        "type": "integer"
       },
       "returned": {
-       "title": "Returned",
        "type": "integer"
       },
       "total_count": {
-       "title": "Total Count",
        "type": "integer"
       }
      },
@@ -3864,7 +3426,6 @@
       "total_count",
       "has_more"
      ],
-     "title": "StaticPageScope",
      "type": "object"
     },
     "Validity": {
@@ -3878,23 +3439,19 @@
         {
          "type": "number"
         }
-       ],
-       "title": "As Of"
+       ]
       },
       "coverage": {
-       "title": "Coverage",
        "type": "string"
       },
       "outcome": {
        "const": "completed",
-       "title": "Outcome",
        "type": "string"
       },
       "warnings": {
        "items": {
         "type": "string"
        },
-       "title": "Warnings",
        "type": "array"
       }
      },
@@ -3904,7 +3461,6 @@
       "coverage",
       "warnings"
      ],
-     "title": "Validity",
      "type": "object"
     }
    },
@@ -3912,22 +3468,18 @@
    "properties": {
     "adapter_version": {
      "const": "static-input-page/1",
-     "title": "Adapter Version",
      "type": "string"
     },
     "evidence_id": {
-     "title": "Evidence Id",
      "type": "string"
     },
     "facts": {
      "items": {
       "$ref": "#/$defs/Fact"
      },
-     "title": "Facts",
      "type": "array"
     },
     "project_id": {
-     "title": "Project Id",
      "type": "string"
     },
     "scope": {
@@ -3935,7 +3487,6 @@
     },
     "source_kind": {
      "const": "configured_input",
-     "title": "Source Kind",
      "type": "string"
     },
     "validity": {
@@ -3943,7 +3494,6 @@
     },
     "version": {
      "const": 1,
-     "title": "Version",
      "type": "integer"
     }
    },
@@ -3957,7 +3507,6 @@
     "adapter_version",
     "scope"
    ],
-   "title": "Evidence_static_input_page_v1",
    "type": "object"
   },
   "static-input/1": {
@@ -3966,15 +3515,23 @@
      "additionalProperties": false,
      "properties": {
       "entity_id": {
-       "title": "Entity Id",
        "type": "string"
       },
+      "formula_id": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
       "metric": {
-       "title": "Metric",
        "type": "string"
       },
       "path": {
-       "title": "Path",
        "type": "string"
       },
       "unit": {
@@ -3985,8 +3542,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Unit"
+       ]
       },
       "value": {
        "anyOf": [
@@ -4005,8 +3561,7 @@
         {
          "type": "null"
         }
-       ],
-       "title": "Value"
+       ]
       }
      },
      "required": [
@@ -4016,23 +3571,19 @@
       "value",
       "unit"
      ],
-     "title": "Fact",
      "type": "object"
     },
     "StaticScope": {
      "additionalProperties": false,
      "properties": {
       "component_class": {
-       "title": "Component Class",
        "type": "string"
       },
       "entity_id": {
-       "title": "Entity Id",
        "type": "string"
       },
       "kind": {
        "const": "static",
-       "title": "Kind",
        "type": "string"
       }
      },
@@ -4041,7 +3592,6 @@
       "component_class",
       "entity_id"
      ],
-     "title": "StaticScope",
      "type": "object"
     },
     "Validity": {
@@ -4055,23 +3605,19 @@
         {
          "type": "number"
         }
-       ],
-       "title": "As Of"
+       ]
       },
       "coverage": {
-       "title": "Coverage",
        "type": "string"
       },
       "outcome": {
        "const": "completed",
-       "title": "Outcome",
        "type": "string"
       },
       "warnings": {
        "items": {
         "type": "string"
        },
-       "title": "Warnings",
        "type": "array"
       }
      },
@@ -4081,7 +3627,6 @@
       "coverage",
       "warnings"
      ],
-     "title": "Validity",
      "type": "object"
     }
    },
@@ -4089,22 +3634,18 @@
    "properties": {
     "adapter_version": {
      "const": "static-input/1",
-     "title": "Adapter Version",
      "type": "string"
     },
     "evidence_id": {
-     "title": "Evidence Id",
      "type": "string"
     },
     "facts": {
      "items": {
       "$ref": "#/$defs/Fact"
      },
-     "title": "Facts",
      "type": "array"
     },
     "project_id": {
-     "title": "Project Id",
      "type": "string"
     },
     "scope": {
@@ -4112,7 +3653,6 @@
     },
     "source_kind": {
      "const": "configured_input",
-     "title": "Source Kind",
      "type": "string"
     },
     "validity": {
@@ -4120,7 +3660,6 @@
     },
     "version": {
      "const": 1,
-     "title": "Version",
      "type": "integer"
     }
    },
@@ -4134,7 +3673,6 @@
     "adapter_version",
     "scope"
    ],
-   "title": "Evidence_static_input_v1",
    "type": "object"
   }
  },
