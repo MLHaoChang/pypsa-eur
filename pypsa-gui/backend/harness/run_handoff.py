@@ -35,7 +35,9 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 KIND = "handoff"
-PREVIEW_CLASSES = frozenset({"Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer"})
+PREVIEW_CLASSES = frozenset(
+    {"Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer"}
+)
 COVERED, PARTLY, GAP = "covered", "partly", "gap"
 
 
@@ -43,7 +45,11 @@ COVERED, PARTLY, GAP = "covered", "partly", "gap"
 
 
 def _number(value):
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+    ):
         return None
     return float(value)
 
@@ -54,6 +60,7 @@ def read_kpis(profile: dict) -> list[dict]:
     why it is not (`not_current`, `unreadable`)."""
     from services import retained_results
     from services.workflow_tools import solve_freshness
+
     try:
         current = solve_freshness().get("results_current") is True
     except Exception:  # noqa: BLE001 -- unreadable freshness: nothing is read
@@ -61,22 +68,35 @@ def read_kpis(profile: dict) -> list[dict]:
     sections: dict = {}
     rows = []
     for kpi in profile.get("kpis") or []:
-        row = {"id": kpi["id"], "label": kpi["label"], "unit": kpi["unit"], "value": None,
-               "source": f"services.retained_results.{kpi['section']}:{'.'.join(kpi['path'])}"}
+        row = {
+            "id": kpi["id"],
+            "label": kpi["label"],
+            "unit": kpi["unit"],
+            "value": None,
+            "source": f"services.retained_results.{kpi['section']}:{'.'.join(kpi['path'])}",
+        }
         if not current:
             rows.append({**row, "status": "not_current"})
             continue
         value = None
         try:
             if kpi["section"] not in sections:
-                sections[kpi["section"]] = retained_results.adapter(kpi["section"]).capture({})
+                sections[kpi["section"]] = retained_results.adapter(
+                    kpi["section"]
+                ).capture({})
             value = sections[kpi["section"]]
             for key in kpi["path"]:
                 value = value[key]
         except Exception:  # noqa: BLE001 -- an unreadable KPI is stated, never guessed
             value = None
         value = _number(value)
-        rows.append({**row, "value": value, "status": "read" if value is not None else "unreadable"})
+        rows.append(
+            {
+                **row,
+                "value": value,
+                "status": "read" if value is not None else "unreadable",
+            }
+        )
     return rows
 
 
@@ -90,8 +110,11 @@ def kpis_read(task: dict, profile: dict) -> bool | None:
     if any(r["status"] != "read" for r in fresh):
         return False
     by_id = {r.get("id"): r for r in stored if isinstance(r, dict)}
-    return all(by_id.get(r["id"], {}).get("value") == r["value"] and by_id[r["id"]].get("status") == "read"
-               for r in fresh)
+    return all(
+        by_id.get(r["id"], {}).get("value") == r["value"]
+        and by_id[r["id"]].get("status") == "read"
+        for r in fresh
+    )
 
 
 # ── Coverage (HH-09A, C13) ───────────────────────────────────────────────────
@@ -133,6 +156,7 @@ def coverage(task: dict, profile: dict, project_dir) -> list[dict]:
     report's launch) the report and its chapters are not yet parts: the
     report's harness chapter names the missing chapters itself."""
     from harness import run_report
+
     run = task.get("run") or {}
     brief = task.get("brief") or {}
     parts = []
@@ -145,13 +169,30 @@ def coverage(task: dict, profile: dict, project_dir) -> list[dict]:
             if state != "ready":
                 return GAP, f"the report is {state or 'not read'}"
             doc = run_report.saved(task, project_dir)
-            return (COVERED, "the run's report was saved") if doc is not None else (GAP, "the report is not read")
+            return (
+                (COVERED, "the run's report was saved")
+                if doc is not None
+                else (GAP, "the report is not read")
+            )
+
         parts.append(_part("Report", "deliverable", report))
         for sid in profile.get("chapters") or []:
+
             def chapter(sid=sid):
-                sec = next((s for s in (doc.sections if doc is not None else []) if s.section_id == sid), None)
-                return (COVERED, "established in the report") if sec is not None and sec.status == "ok" \
+                sec = next(
+                    (
+                        s
+                        for s in (doc.sections if doc is not None else [])
+                        if s.section_id == sid
+                    ),
+                    None,
+                )
+                return (
+                    (COVERED, "established in the report")
+                    if sec is not None and sec.status == "ok"
                     else (GAP, "not established in the report")
+                )
+
             parts.append(_part(f"Chapter {sid}", "deliverable", chapter))
     for case in brief.get("cases") or []:
         name = case.get("name") if isinstance(case, dict) else case
@@ -166,12 +207,21 @@ def coverage(task: dict, profile: dict, project_dir) -> list[dict]:
 def revert_rows(run: dict) -> tuple[list[dict], list[dict]]:
     """(previewable, by_hand) among the ledger's non-reverted rows on the
     run's own project; explore-fork rows (with a `case`) are excluded."""
-    rows = [r for r in run.get("ledger") or [] if not r.get("reverted") and not r.get("case")]
+    rows = [
+        r
+        for r in run.get("ledger") or []
+        if not r.get("reverted") and not r.get("case")
+    ]
     previewable, by_hand = [], []
     for r in rows:
         target = r.get("target") or {}
-        ok = target.get("component") in PREVIEW_CLASSES and target.get("name") and target.get("attr") \
-            and not isinstance(r.get("old"), bool) and _number(r.get("old")) is not None
+        ok = (
+            target.get("component") in PREVIEW_CLASSES
+            and target.get("name")
+            and target.get("attr")
+            and not isinstance(r.get("old"), bool)
+            and _number(r.get("old")) is not None
+        )
         (previewable if ok else by_hand).append(r)
     return previewable, by_hand
 
@@ -182,23 +232,34 @@ def revert_preview(run: dict) -> dict:
     from fastapi import HTTPException
 
     from services import assistant_tools
+
     previewable, by_hand = revert_rows(run)
-    out = {"rows": [r["id"] for r in previewable], "by_hand": [r["id"] for r in by_hand], "preview_id": None}
+    out = {
+        "rows": [r["id"] for r in previewable],
+        "by_hand": [r["id"] for r in by_hand],
+        "preview_id": None,
+    }
     first: dict = {}
     for r in previewable:
         t = r["target"]
         first.setdefault((t["component"], t["name"], t["attr"]), r["old"])
     if not first:
         return out
-    changes = [{"component_class": c, "names": [n], "attribute": a, "value": old}
-               for (c, n, a), old in first.items()]
+    changes = [
+        {"component_class": c, "names": [n], "attribute": a, "value": old}
+        for (c, n, a), old in first.items()
+    ]
     try:
         preview = assistant_tools.preview_project_changes(changes)
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, dict) else {}
         # The preview could not be made: every row is then the user's by hand.
-        return {"rows": [], "by_hand": out["rows"] + out["by_hand"], "preview_id": None,
-                "error": str(detail.get("error_kind") or exc.status_code)}
+        return {
+            "rows": [],
+            "by_hand": out["rows"] + out["by_hand"],
+            "preview_id": None,
+            "error": str(detail.get("error_kind") or exc.status_code),
+        }
     return {**out, "preview_id": preview["preview_id"]}
 
 
@@ -210,19 +271,27 @@ def run_step(path, ctx, step) -> str:
     back, cover, preview, then complete the step with `run.handoff`."""
     from harness import run_report, runner
     from services import run_profiles
+
     path = Path(path)
     task = json.loads(path.read_text())
     if str(getattr(ctx, "project_uuid", "")) != task["project_id"]:
-        raise runner._Stop("needs_user", "project_changed")  # never another project's read-back
+        raise runner._Stop(
+            "needs_user", "project_changed"
+        )  # never another project's read-back
     profile = run_profiles.resolve(task["run"]["profile"])
-    project_dir = path.parent.parent  # the task file's project (as `_advance_run` reads its template)
+    project_dir = (
+        path.parent.parent
+    )  # the task file's project (as `_advance_run` reads its template)
     report = run_report.report_step(task)
     handoff = {
         "kpis": read_kpis(profile),
         "coverage": coverage(task, profile, project_dir),
         "revert": revert_preview(task["run"]),
-        "resume": {"task_id": task["task_id"], "stage": "handoff",
-                   "report_id": ((report or {}).get("job") or {}).get("report_id")},
+        "resume": {
+            "task_id": task["task_id"],
+            "stage": "handoff",
+            "report_id": ((report or {}).get("job") or {}).get("report_id"),
+        },
     }
     handoff["resume"]["revert_preview_id"] = handoff["revert"].get("preview_id")
 
@@ -232,6 +301,7 @@ def run_step(path, ctx, step) -> str:
             return False
         t["run"]["handoff"] = handoff
         s["status"] = "completed"
+
     runner._update(path, done)
     return KIND
 
@@ -240,4 +310,6 @@ def gaps(task: dict) -> int:
     """The count of request parts the hand-off found not covered (the
     completion notice carries the count only)."""
     rows = ((task.get("run") or {}).get("handoff") or {}).get("coverage") or []
-    return sum(1 for r in rows if isinstance(r, dict) and r.get("status") in (GAP, PARTLY))
+    return sum(
+        1 for r in rows if isinstance(r, dict) and r.get("status") in (GAP, PARTLY)
+    )

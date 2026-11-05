@@ -34,7 +34,9 @@ CHAPTER_GAP = "Chapter not established: "
 
 def report_step(task: dict) -> dict | None:
     """The run's latest report step (a stage entered again numbers on)."""
-    return next((s for s in reversed(task.get("steps") or []) if s.get("native") == KIND), None)
+    return next(
+        (s for s in reversed(task.get("steps") or []) if s.get("native") == KIND), None
+    )
 
 
 def _stop(path, step_id, reason, detail=None):
@@ -50,6 +52,7 @@ def _stop(path, step_id, reason, detail=None):
         run["stages"]["report"].update(status="failed", reason=reason)
         if run["status"] in ("running", "waiting_job"):
             run["status"], task["status"] = "needs_user", "needs_review"
+
     runner._update(path, change)
 
 
@@ -58,8 +61,13 @@ def harness_source(path, task: dict, profile: dict) -> dict:
     chapters the profile asks for and the request coverage so far (HH-09A)."""
     from harness import run_handoff
     from services import run_envelope
-    return {"task": task, "envelope": run_envelope.read(path), "chapters": list(profile.get("chapters") or []),
-            "coverage": run_handoff.coverage(task, profile, None)}
+
+    return {
+        "task": task,
+        "envelope": run_envelope.read(path),
+        "chapters": list(profile.get("chapters") or []),
+        "coverage": run_handoff.coverage(task, profile, None),
+    }
 
 
 def start(path, ctx, step, *, instance) -> str:
@@ -70,6 +78,7 @@ def start(path, ctx, step, *, instance) -> str:
     from harness import runner
     from routers import report_jobs
     from services import chat_tools, run_profiles
+
     path = Path(path)
     attempt = uuid.uuid4().hex
     claimed = {}
@@ -80,24 +89,44 @@ def start(path, ctx, step, *, instance) -> str:
             return False
         s.update(status="running", attempt_id=attempt)
         claimed["ok"] = True
+
     runner._update(path, claim)
     if not claimed:
         return "claimed_elsewhere"
     task = json.loads(path.read_text())
     try:
         project = chat_tools._report_project()
-        if str(project.uuid) != task["project_id"] or str(getattr(ctx, "project_uuid", "")) != task["project_id"]:
-            _stop(path, step["id"], "project_changed", "the bound project is not the run's")
+        if (
+            str(project.uuid) != task["project_id"]
+            or str(getattr(ctx, "project_uuid", "")) != task["project_id"]
+        ):
+            _stop(
+                path,
+                step["id"],
+                "project_changed",
+                "the bound project is not the run's",
+            )
             return "project_changed"
         profile = run_profiles.resolve(task["run"]["profile"])
         llm = report_jobs._resolve_profile()
         provider = report_jobs._provider_or_400(llm)
-        evidence, figures = report_jobs._evidence_for(project, harness_run=harness_source(path, task, profile))
-        report_id = report_jobs._start(project, evidence=evidence, figure_pngs=figures, profile=llm,
-                                       provider=provider, language=LANGUAGE, strict=True,
-                                       run_binding=(path, instance))
+        evidence, figures = report_jobs._evidence_for(
+            project, harness_run=harness_source(path, task, profile)
+        )
+        report_id = report_jobs._start(
+            project,
+            evidence=evidence,
+            figure_pngs=figures,
+            profile=llm,
+            provider=provider,
+            language=LANGUAGE,
+            strict=True,
+            run_binding=(path, instance),
+        )
     except HTTPException as exc:
-        detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+        detail = (
+            exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+        )
         reason = str(detail.get("error_kind") or "report_refused")
         _stop(path, step["id"], reason, str(detail.get("message") or "")[:240])
         return reason
@@ -110,6 +139,7 @@ def start(path, ctx, step, *, instance) -> str:
         s["job"] = {"kind": KIND, "report_id": report_id, "started_at": time.time()}
         if t["status"] != "cancelled":
             t["status"] = "waiting_job"
+
     runner._update(path, wait)
     return KIND
 
@@ -121,6 +151,7 @@ def settle(path, ctx) -> str | None:
     longer this job's (`lost`), fails it and the run needs the user (B1-c).
     The job's own sends were settled or released by `RunSends.close` (C4)."""
     from harness import runner
+
     path = Path(path)
     task = json.loads(path.read_text())
     step = report_step(task)
@@ -145,7 +176,11 @@ def settle(path, ctx) -> str | None:
         s = next(x for x in t["steps"] if x["id"] == step["id"])
         if s["status"] != "waiting":
             return False
-        s["job"].update(outcome=outcome, version=(record or {}).get("version"), finished_at=time.time())
+        s["job"].update(
+            outcome=outcome,
+            version=(record or {}).get("version"),
+            finished_at=time.time(),
+        )
         if outcome == "done":
             s["status"] = "completed"
             if t["status"] == "waiting_job":
@@ -159,6 +194,7 @@ def settle(path, ctx) -> str | None:
         run["stages"]["report"].update(status="failed", reason="report_" + outcome)
         if run["status"] in ("running", "waiting_job"):
             run["status"], t["status"] = "needs_user", "needs_review"
+
     runner._update(path, done)
     return outcome
 
@@ -167,14 +203,24 @@ def saved(task: dict, project_dir):
     """The run's saved report document, or None (no completed job, or the
     document cannot be read)."""
     from services.reports import store
+
     step = report_step(task)
     job = (step or {}).get("job") or {}
-    if step is None or step["status"] != "completed" or job.get("outcome") != "done" or project_dir is None:
+    if (
+        step is None
+        or step["status"] != "completed"
+        or job.get("outcome") != "done"
+        or project_dir is None
+    ):
         return None
     try:
-        return store.load_report(Path(project_dir), job["report_id"], job.get("version"))
+        return store.load_report(
+            Path(project_dir), job["report_id"], job.get("version")
+        )
     except Exception:  # noqa: BLE001 -- an unreadable report is no evidence (C3)
-        logger.info("run report %s could not be read", job.get("report_id"), exc_info=True)
+        logger.info(
+            "run report %s could not be read", job.get("report_id"), exc_info=True
+        )
         return None
 
 
@@ -198,6 +244,7 @@ def unsupported_listed(task: dict, project_dir, profile: dict) -> bool | None:
     cannot be read."""
     from services.reports import harness_chapter as H
     from services.reports.evidence import SECTION_TITLES
+
     doc = saved(task, project_dir)
     if doc is None:
         return None
