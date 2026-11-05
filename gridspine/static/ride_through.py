@@ -13,7 +13,7 @@ declared voltage) against columns of duration. A ride-through curve is given in 
 is converted explicitly: its worst corner, the lowest residual (deepest) and the longest duration, is the dip the
 unit must ride through. The u < 5 % row is depth 100.
 
-**Curve.** ``"depth%:duration_s"`` pairs, e.g. ``"20:0.5, 50:0.15, 100:0.02"``: the unit rides through a dip of
+**Curve.** ``"depth%:duration_s"`` pairs, e.g. ``"20:0.5, 40:0.15, 100:0.02"``: the unit rides through a dip of
 depth d lasting t when some point has depth >= d and duration >= t. A dip deeper than every point trips the unit.
 The points need not be monotone; a point dominated by another simply adds nothing.
 
@@ -77,7 +77,7 @@ def _blank(v) -> bool:
 
 
 def parse_curve(text) -> tuple[tuple[float, float], ...]:
-    """The ride-through curve ``((depth %, duration s), ...)`` of ``"20:0.5, 50:0.15"``; ``()`` when not given.
+    """The ride-through curve ``((depth %, duration s), ...)`` of ``"20:0.5, 40:0.15"``; ``()`` when not given.
     Depth must be in (0, 100], duration above 0, each depth once."""
     if _blank(text):
         return ()
@@ -85,7 +85,7 @@ def parse_curve(text) -> tuple[tuple[float, float], ...]:
     for part in str(text).split(","):
         part = part.strip()
         if part.count(":") != 1:
-            raise ContractError(f"{CURVE_LABEL}: expected depth%:duration_s pairs such as 50:0.15, got {part!r}.")
+            raise ContractError(f"{CURVE_LABEL}: expected depth%:duration_s pairs such as 40:0.15, got {part!r}.")
         d, t = (s.strip() for s in part.split(":"))
         try:
             depth, dur = float(d), float(t)
