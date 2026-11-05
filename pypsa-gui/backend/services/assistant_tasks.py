@@ -816,8 +816,12 @@ def _run_view(task):
             **({"reason": run["reason"]} if run.get("reason") else {}),
             "next_stage": _next_stage(run, run["stage"]), "scope": (run.get("scope") or {}).get("preset"),
             "stages": stages,
-            **({"loop": {k: run["loop"][k] for k in ("kind", "stage", "rounds", "limit", "refusals", "ended", "notice")
-                         if k in run["loop"]}} if run.get("loop") else {}),
+            **({"loop": {**{k: run["loop"][k] for k in ("kind", "stage", "rounds", "limit", "refusals", "ended")
+                            if k in run["loop"]},
+                         # the browser gets the outcome only; `token` and `claimed_at` are the claim's own
+                         **({"notice": {k: run["loop"]["notice"][k] for k in ("sent", "error")
+                                        if k in run["loop"]["notice"]}} if "notice" in run["loop"] else {})}}
+               if run.get("loop") else {}),
             **({"ledger": copy.deepcopy(run["ledger"])} if run.get("ledger") else {})}
 
 
