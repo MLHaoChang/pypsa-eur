@@ -848,6 +848,8 @@ def test_b1c_a_job_that_does_not_end_done_fails_the_step_and_holds_nothing(
     elif case == "refused":
         set_limit(path, output_tokens=0)
     elif case == "lost":
+        # A restart: the job's thread is gone, so it never settles its own step.
+        monkeypatch.setattr(report_job, "_settle_run_step", lambda job: None)
         real = run_report.settle
 
         def drop(path_, ctx):
@@ -867,7 +869,11 @@ def test_b1c_a_job_that_does_not_end_done_fails_the_step_and_holds_nothing(
         runner(Clicks()),
         path,
         task["task_id"],
-        lambda r: r["run"]["status"] != "running" or r["run"]["stage"] == "handoff",
+        lambda r: (
+            (r["run"]["status"] != "running" or r["run"]["stage"] == "handoff")
+            # the budget can stop the run while the job still runs: wait for its end
+            and run_report.report_step(r)["status"] not in ("waiting", "running")
+        ),
     )
     step = run_report.report_step(record)
     assert step["status"] == "failed" and step["job"]["outcome"] != "done", step

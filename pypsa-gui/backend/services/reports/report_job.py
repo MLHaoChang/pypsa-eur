@@ -529,6 +529,22 @@ def run_report_job(job: ReportJob) -> ReportDocument:
     finally:
         if isinstance(job.provider, RunSends):
             job.provider.close()
+        if job.run_binding is not None:
+            _settle_run_step(job)
+
+
+def _settle_run_step(job: ReportJob) -> None:
+    """Study harness 07 (B1-c): the job's outcome settles its run's report
+    step as the job ends, not only on the runner's next tick, which a run
+    stopped meanwhile (the budget) never gets."""
+    from harness import run_report
+
+    with job.lock:
+        record = dict(job.record)
+    try:
+        run_report.settle_record(job.run_binding[0], record)
+    except Exception:  # noqa: BLE001 -- the runner's tick settles it again
+        logger.exception("report job %s could not settle its run step", job.report_id)
 
 
 # ── the mapping job (WP11) ──────────────────────────────────────────────────

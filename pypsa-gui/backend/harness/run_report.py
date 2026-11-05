@@ -154,6 +154,17 @@ def settle(path, ctx) -> str | None:
     completes the step; anything else, or a record that is gone or is no
     longer this job's (`lost`), fails it and the run needs the user (B1-c).
     The job's own sends were settled or released by `RunSends.close` (C4)."""
+    with ctx.solver_state_lock:
+        record = ctx.solver_state.get("report_job")
+        record = dict(record) if isinstance(record, dict) else None
+    return settle_record(path, record)
+
+
+def settle_record(path, record: dict | None) -> str | None:
+    """`settle` from a job record in hand. The job calls it itself as it
+    ends (`report_job.run_report_job`), so its outcome lands on the step even when
+    the run already stopped (the budget, a pause) and the runner no longer
+    ticks it; the runner's tick calls it too. Settling twice is a no-op."""
     from harness import runner
 
     path = Path(path)
@@ -161,9 +172,6 @@ def settle(path, ctx) -> str | None:
     step = report_step(task)
     if step is None or step["status"] != "waiting":
         return None
-    with ctx.solver_state_lock:
-        record = ctx.solver_state.get("report_job")
-        record = dict(record) if isinstance(record, dict) else None
     job = step["job"]
     if record is not None and record.get("report_id") == job["report_id"]:
         if record.get("status") not in _TERMINAL:
