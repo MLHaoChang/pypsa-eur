@@ -66,4 +66,41 @@ describe('Renewables tab', () => {
     await openRenewables()
     expect(screen.queryByTestId('ts-open-profile-studio')).toBeNull()
   })
+
+  it('names the generator without a location in the banner', async () => {
+    await openRenewables()
+    expect(screen.getByTestId('missing-coordinates-banner').textContent).toContain('pv_noloc')
+  })
+
+  it('Generate wind and solar posts one generate with the ready set only, then applies it', async () => {
+    prof.generate.mockResolvedValue({ id: 'job1' })
+    prof.pending.mockResolvedValue({ pending: [{ job_id: 'job1' }], jobs: [] })
+    prof.applyBatch.mockResolvedValue({ count: 1 })
+    await openRenewables()
+    await userEvent.click(screen.getByTestId('generate-all-ready'))
+    await screen.findByText(/1 profile generated and applied/)
+    expect(prof.generate).toHaveBeenCalledTimes(1)
+    expect(prof.generate.mock.calls[0][1]).toMatchObject({ from_generators: ['pv_ready'], technology: 'solar' })
+    expect(prof.applyBatch).toHaveBeenCalledWith('Site A', 'job1')
+  })
+
+  it('Upload instead focuses the upload zone', async () => {
+    await openRenewables()
+    await userEvent.click(screen.getByTestId('upload-instead'))
+    expect(document.activeElement).toBe(screen.getByTestId('ts-upload-zone'))
+  })
+
+  it('a partial outcome says how many were applied and what failed', async () => {
+    prof.readiness.mockResolvedValue([ready({}), ready({ generator: 'wd', technology: 'wind' })])
+    prof.generate.mockImplementation(async (_p: string, body: { technology: string }) => {
+      if (body.technology === 'wind') throw new Error('no wind data')
+      return { id: 'job1' }
+    })
+    prof.pending.mockResolvedValue({ pending: [{ job_id: 'job1' }], jobs: [] })
+    prof.applyBatch.mockResolvedValue({ count: 1 })
+    await openRenewables()
+    await userEvent.click(screen.getByTestId('generate-all-ready'))
+    const note = await screen.findByTestId('generate-notice')
+    await vi.waitFor(() => expect(note.textContent).toMatch(/1 profile generated and applied\..*wd: .*no wind data/))
+  })
 })
