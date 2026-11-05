@@ -139,3 +139,26 @@ Owner answer: "All (a) as listed (Recommended)".
    feasible incumbent reads "feasible, not proven optimal".
 5. S5 marker lists are English only, as listed. Other languages stay pending
    under ticket 09.
+
+### GK B S3 verdict (2026-11-05): S3-CAP = (a)
+
+GO with (a). A new bare form, "what is the capacity of <class> <name>?", gets the
+existing choice card {configured, optimized, available}. The existing labelled
+"capacity for" form keeps its behaviour. GK B's conditions, verbatim:
+
+- C1. `configured_capacity` reads the input nominal per class with its own unit: Generator, StorageUnit and Link use p_nom in MW; Line and Transformer use s_nom in MVA; Store uses e_nom in MWh. Add a test per class. Never use p_nom_opt, and never sum mixed units. For an extendable asset, the label says it is the input value before the solve, and a test shows it differs from optimal_capacity.
+- C2. The capacity/1 change is additive: every pre-existing metric's snapshot rows are byte-equal (AA-V1-CHANGE-1), shown by running master's capacity/1 test file unchanged in the PR worktree.
+- C3. `available` stays unavailable (`available_capacity_not_checked`, request_complete false) and is never filled from p_max_pu or any derate. Add a test where p_max_pu < 1 still gives no number.
+- C4. Unknown class or name, an ambiguous name, or an unsolved network for the optimized choice each give clarification or unavailable. Never a number, and never a 500.
+- C5. The choice card reuses the `_needs`/pending_scope path, with a test that a card answered with a value outside {configured, optimized, available} is refused.
+- C6. The rest of S3 as planned: the warning-slot, request_complete, 20-block receipt and mutant-per-branch items.
+
+S3 plan (from the delta sent to GK B):
+- First failing test: the bare form → choice card, no checked number, request_complete false, result slots needs_clarification. Then each choice → its slot.
+- Configured → a new additive capacity/1 metric `configured_capacity`. Optimized → `optimal_capacity`. Available → an explicit unavailable slot.
+- A required warning slot (a non-converged interval) cannot be dropped by extra metrics.
+- request_complete is false while any required slot is unmapped.
+- 20 valid blocks keep project/run/window in the receipt.
+- Fail-closed: an ambiguous or unmapped slot becomes clarification or unavailable, never a number.
+
+Code pointers: harness/assurance_conversation.py (`_needs`, `QUESTIONS`, `cost_choices`, the `resolve` pending branch), harness/assurance_scope.py (the `sized` capacity grammar, about line 225), harness/capacity_calculations.py (`METRICS`), harness/assurance.py (result_slots/request_complete, about lines 1270–1295), tests/test_capacity_cycles_assurance.py, tests/test_conversation_scope.py.
