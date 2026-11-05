@@ -254,8 +254,7 @@ def test_the_build_ships_the_snapshot_where_the_route_reads_it():
     backend = Path(__file__).resolve().parents[1]
     spec = (backend.parent / "pypsa-gui.spec").read_text(encoding="utf-8")
     assert (
-        '(str(BACKEND / "harness" / "assurance_contracts.v1.json"), "harness")'
-        in spec
+        '(str(BACKEND / "harness" / "assurance_contracts.v1.json"), "harness")' in spec
     )
     module = Path(contracts.__file__).resolve()
     assert contracts.SNAPSHOT.resolve().parent == module.parent
