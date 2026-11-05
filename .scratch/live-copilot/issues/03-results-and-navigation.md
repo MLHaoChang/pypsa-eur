@@ -1,12 +1,12 @@
 # LC-03 — generic native evidence and navigation adapters
 
-Status: ready-for-agent
-Progress: Result-view registry #407, walk #410, retained load flow #416, common adapter + Summary,
-capacity, dispatch, prices and emissions families (#848, #861 and earlier) merged; LC-T08 ACL
-recheck and LC-T09/T10 browser cases (PR-I, PR-K) merged; UI/export parity for past runs (PR-J),
-queue capture (PR-L), study/report sections (PR-M) and typed not_kept stubs (PR-N) merged.
-Slice 3 (AA-FILL-2): LC-T07 branch oracle (PR-O) open; next PR-P, the LC-T10 run/generation
-race and the acceptance map. LC-14 reach fixes outsourced.
+Status: done
+Progress: Done (AA-FILL-2 close-out, PR-P). Result-view registry #407, walk #410, retained load
+flow #416, the five retained families (#848, #861 and earlier), ACL recheck and browser cases
+(PR-I, PR-K), past-run UI/export parity (PR-J), queue capture (PR-L), study/report sections (PR-M),
+not_kept stubs (PR-N), the LC-T07 branch oracle (PR-O, #1153) and the LC-T10 run/generation races
+(PR-P) merged. Acceptance map below; the one `_pending` row is ticketed as LC-03c. LC-14 reach
+fixes outsourced.
 Type: task
 Baseline: master `c75ca5584b873418f10f1bca42f868255d445b7b`
 Dependencies: LC-01/02 and current native evidence stores
@@ -578,6 +578,56 @@ Branch `claude/lc03-t07-branch-oracle`, from master `e98226bd`. Test only.
   as a raw tuple repr, `(np.int64(2040), Timestamp('2030-01-01 00:00:00'))`, in
   the chat tool, the tab and the workbook. The test pins only the snapshot it
   names.
+
+### PR-P, LC-T10 run/generation races and close-out (2026-11-05)
+
+GK B (25) plan GO (P1–P5, Comments). Branch `claude/lc03-t10-generation-race`, from master
+`83f8c966`. Tests only.
+
+- `frontend/src/components/ChatPanel.pastRunRace.test.tsx` runs the real
+  `acknowledgeMountedView` under ChatPanel; only the network is stubbed. A model turn's
+  `open_run_result` opens run-1, and its v2 ACK waits. The locators are claim-specific
+  (P1): the retained view's `data-result-tab` and `data-result-binding` carry run-1's
+  exact source. Cases:
+  - control: the view appears, the ACK posts with that source, and the caption reads
+    `(completed)`;
+  - (b) a new chat started mid-turn: the view then appears, but nothing posts and there
+    is no `(completed)` caption;
+  - (a) the latest run's view (current scope, run-2) on screen never certifies the
+    ACK;
+  - (c) an approved voice answer about the past run is spoken once its check passes
+    (control), and it is not spoken or shown when a new chat starts during the check.
+- P2: with `streamGenerationRef.current === expected.binding_generation` dropped from
+  the ACK's `isCurrent`, the new-chat case fails (1 of 5). Finding: on every other
+  user-reachable path that advances the generation, another guard also trips. A stream
+  error, `session_done` and a strict mismatch replace the assurance state; a send moves
+  the navigation epoch; a project switch changes the project. So the generation is the
+  only guard for a new chat started while a turn is still streaming (the 🆕 button is
+  disabled then; `startNewChat` is called from the store).
+- P3: the existing useLiveSpeech rebind case stops the microphone; it does not cover an
+  answer's speech, so the case above was added.
+- (a), view side: `RunBoundView.test.tsx` "keeps the past run bound through every
+  invalidation". What a finished job invalidates, and then every query, re-reads only
+  `run-view` for fg-old. The binding stays historical fg-old, and no live read is made.
+- Kept: a new chat does not clear `discussedRun`, so the past-run view stays on Results
+  after the conversation is reset. The ACK and speech are dropped as tested. Whether the
+  view itself should go is a UX call and was not changed (no UI change in this PR).
+- Ran: vitest on both files (11 passed), `tsc --noEmit` (clean).
+
+### Acceptance map (close-out, P5)
+
+| Case | What | Test(s) |
+| --- | --- | --- |
+| LC-C3 | typed adapter registry, retained sections, one native source | `backend/tests/test_result_views.py::test_every_results_tab_has_exactly_one_view`, `::test_only_captured_sections_are_claimed`; `test_retained_loadflow.py::test_the_section_is_in_the_immutable_manifest`; `test_lc03_t07_branch_oracle.py` (hand oracle on every reader) |
+| LC-C4 | source-bound ACKs, newer actions supersede | `frontend/src/utils/verifiedNavigation.test.ts` ("a past run on screen (LC-03)"); `src/store/runResultRequest.test.ts::a model turn's Results navigation shows the current results, not the past run`; `src/components/ChatPanel.applicationNavigation.test.tsx::rejects a late assistant action after newer manual navigation without changing Guided policy`; `ChatPanel.pastRunRace.test.tsx` |
+| LC-C7 | answer names the run, unavailable stays unavailable | `src/pages/results/RunBoundView.test.tsx` (refusals, not_kept words); `src/pages/results/pastRunParity.test.tsx::names the past run, never the latest`; smoke `frontend/scripts/smoke-copilot-lc03-historical.mjs` (answer says `(historical)`). General answer UX (composer, keyboard/touch, reduced motion) is LC-02's (`02-companion-interaction.md`) |
+| LC-T06 | exact project/run selection, never current for another run | `backend/tests/test_oj01_latest_loadflow_journey.py::test_an_older_run_never_gets_the_current_values`, `::test_latest_resolved_through_the_reference_ladder`; `test_oj09_named_project_loadflow.py::test_the_named_projects_load_flow_is_read_and_shown`; `test_qa_step0a.py::test_s0_3_same_named_projects_in_two_orgs_do_not_share_a_context`; `test_oj06_ambiguous_storage_cost_journey.py` |
+| LC-T07 | native adapter oracle on every surface | `backend/tests/test_lc03_t07_branch_oracle.py` (7 cases) |
+| LC-T08 | retained proof, ACL at read/navigation/answer/download, corrupt/missing refuse | `backend/tests/test_retained_acl.py::test_navigation_is_refused_once_access_is_lost`, `::test_download_is_refused_once_access_is_lost`, `::test_no_existence_oracle`, `::test_nothing_held_outlives_revocation`; `test_retained_loadflow.py::test_corrupt_or_unfinished_sections_refuse_with_the_run_id`, `::test_a_legacy_run_without_the_section_refuses_with_its_id`; `test_retained_not_kept.py` |
+| LC-T09 | every adapter's current and historical case, rendered-source ACK, Guided | smoke `smoke-copilot-lc03-historical.mjs` (six families, Guided and Expert); `verifiedNavigation.test.ts` (filter/entity/time, legacy and unrelated markers); `backend/tests/test_vs2_results_walk_journey.py::test_guided_lists_guided_tabs_first_with_their_labels` |
+| LC-T10 | navigation/turn/project/run/generation supersede ACK, answer, highlight, speech | `ChatPanel.pastRunRace.test.tsx` (5); `RunBoundView.test.tsx::keeps the past run bound through every invalidation`; `runResultRequest.test.ts::drops the discussed run on project switch`; `verifiedNavigation.test.ts::stopping the ACK (project switch, new turn) cancels a pending wait`; `src/hooks/useLiveSpeech.test.tsx::rebind (the thread generation advanced)` |
+| LC-T19 | injected numbers withheld | `backend/tests/test_assurance_metrics.py::test_unsupported_or_wrong_scope_cannot_publish_a_number`; `test_vs2_results_walk_journey.py::test_each_walk_step_quotes_only_its_own_read`; `test_retained_not_kept.py::test_a_checked_read_of_a_stub_is_not_data` |
+| LC-T19 (past run) | injection matrix on a past run's checked read, per family | `_pending`: [LC-03c](03c-lc-t19-past-run-injection.md) |
 
 ## Comments
 
