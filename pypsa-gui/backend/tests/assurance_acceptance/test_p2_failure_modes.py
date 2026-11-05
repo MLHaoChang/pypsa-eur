@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from harness import loop
+from harness import budget, loop
 from harness.protocol import LLMEvent, ProviderError
 from harness.providers.openai_compat import OpenAICompatProvider
 from services import live_speech
@@ -78,7 +78,7 @@ def _sse(*chunks):
 
 @pytest.mark.parametrize("finish_reason", ["length", "content_filter"])
 def test_truncated_draft_that_parses_still_ends_limited_on_the_wire(
-    baseline, harness, monkeypatch, finish_reason
+    baseline, harness, monkeypatch, dispatched, finish_reason
 ):
     draft = observed_draft()
     json.loads(draft)  # the fragment is complete, valid JSON
@@ -141,18 +141,24 @@ def test_truncated_draft_that_parses_still_ends_limited_on_the_wire(
         )
     assert response.status_code == 200
     frames = parse_sse(response.text)
+    # One read and one draft: the truncated draft is never repaired.
     assert len(calls) == 2, "A truncated draft was repaired with another provider call"
+    assert dispatched == ["get_component"]
     approved = approval(frames)
     assert approved["verdict"] == "limited", "A truncated draft was certified"
     assert approved["receipt"]["checked_block_ids"] == []
     assert_nowhere(public_surfaces(harness, frames, monkeypatch), draft, "load-input")
 
 
-def test_message_done_carries_the_wire_stop_reason():
+@pytest.mark.parametrize(
+    "finish_reason,truncated",
+    [("length", True), ("content_filter", True), ("stop", False)],
+)
+def test_message_done_carries_the_wire_stop_reason(finish_reason, truncated):
     """The neutral flag the gate reads, set by each text wire."""
     body = _sse(
         {"choices": [{"delta": {"content": "{}"}, "finish_reason": None}]},
-        {"choices": [{"delta": {}, "finish_reason": "length"}]},
+        {"choices": [{"delta": {}, "finish_reason": finish_reason}]},
     )
     with httpx.Client(
         transport=httpx.MockTransport(
@@ -183,7 +189,7 @@ def test_message_done_carries_the_wire_stop_reason():
             )
         )
     done = [e for e in events if e.type == "message_done"]
-    assert done and done[0].truncated is True
+    assert done and done[0].truncated is truncated
 
 
 def test_fake_truncated_draft_is_limited_and_untouched_draft_passes(
@@ -222,7 +228,7 @@ class ScriptedProvider:
     "before", [False, True], ids=["after-fragment", "before-fragment"]
 )
 def test_provider_error_around_a_fragment_publishes_nothing(
-    baseline, harness, monkeypatch, before
+    baseline, harness, monkeypatch, dispatched, before
 ):
     read = tool_turn("get_component", READ)
     fragment = [] if before else [LLMEvent(type="text_delta", text=UNSAFE)]
@@ -232,17 +238,27 @@ def test_provider_error_around_a_fragment_publishes_nothing(
         [(read["events"], read["blocks"], None)] + [failing] * 4
     )
     frames = harness.run(provider)
-    assert not any(
-        e == "answer_approved" and d.get("verdict") == "passed" for e, d in frames
-    )
-    assert UNSAFE not in public_text(frames)
+    # The turn ends as a typed error: no approval, no tokens, no retry.
+    events = [e for e, _ in frames]
+    assert "answer_approved" not in events and "token" not in events
+    assert [d["error_kind"] for e, d in frames if e == "error"] == ["upstream_error"]
+    assert events[-1] == "session_done"
+    # A failure before any text may retry within the transport budget; once a
+    # fragment has streamed, the turn never retries.
+    attempts = budget.MAX_STREAM_RETRIES + 1 if before else 1
+    assert len(provider.requests) == 1 + attempts
+    assert dispatched == ["get_component"]
     assert_nowhere(public_surfaces(harness, frames, monkeypatch), UNSAFE)
 
 
 # ── F3: an unsafe token split at every offset never assembles publicly ─────
 
 
-def test_unsafe_text_split_at_every_offset_never_assembles(baseline, harness):
+def test_unsafe_text_split_at_every_offset_never_assembles(
+    baseline, harness, monkeypatch
+):
+    """UNSAFE is ASCII, so each character offset is also a byte offset."""
+    assert UNSAFE.isascii()
     for offset in range(1, len(UNSAFE)):
         turn = {
             "events": [
@@ -252,9 +268,9 @@ def test_unsafe_text_split_at_every_offset_never_assembles(baseline, harness):
             "blocks": [{"type": "text", "text": UNSAFE}],
         }
         frames = harness.run([turn])
-        assembled = public_text(frames)
-        assert UNSAFE not in assembled, f"split at {offset} reassembled publicly"
+        assert UNSAFE not in public_text(frames), f"split at {offset} reassembled"
         assert approval(frames)["verdict"] == "limited"
+        assert_nowhere(public_surfaces(harness, frames, monkeypatch), UNSAFE)
 
 
 # ── A2.2: the right value under the wrong metric does not verify ────────────
@@ -282,7 +298,8 @@ def dispatched(monkeypatch):
     real = loop.dispatch_tool_call
 
     def spy(*args, **kwargs):
-        calls.append(args[1].get("name") if len(args) > 1 else kwargs)
+        block = args[1] if len(args) > 1 else kwargs["tu"]
+        calls.append(block["name"])
         return (yield from real(*args, **kwargs))
 
     monkeypatch.setattr(loop, "dispatch_tool_call", spy)
@@ -308,7 +325,9 @@ def test_invalid_draft_after_a_read_runs_only_that_read(baseline, harness, dispa
     assert dispatched == ["get_component"]
 
 
-@pytest.mark.parametrize("stop", ["max_tokens", "end_turn"])
+@pytest.mark.parametrize(
+    "stop", ["max_tokens", "model_context_window_exceeded", "refusal", "end_turn"]
+)
 def test_anthropic_wire_reports_a_max_tokens_stop(stop):
     import anthropic as sdk
 
@@ -353,7 +372,7 @@ def test_anthropic_wire_reports_a_max_tokens_stop(stop):
             )
         )
     done = [e for e in events if e.type == "message_done"]
-    assert done and done[0].truncated is (stop == "max_tokens")
+    assert done and done[0].truncated is (stop != "end_turn")
 
 
 def test_truncated_draft_with_interpretations_spends_no_review_call(
@@ -381,3 +400,22 @@ def test_truncated_draft_with_interpretations_spends_no_review_call(
     assert approved["receipt"]["reviewed_claim_ids"] == []
     assert len(harness.provider.requests) == 2, "a truncated draft was sent for review"
     assert "configured load is positive" not in public_text(frames)
+
+
+def test_responses_wire_incomplete_never_reaches_message_done():
+    """The Responses wire raises on response.incomplete instead of a flag."""
+    from harness.providers import openai_responses
+
+    events = [
+        {"type": "response.output_text.delta", "delta": observed_draft()},
+        {"type": "response.incomplete", "response": {}},
+    ]
+    body = "".join(f"data: {json.dumps(e)}\n\n" for e in events).encode()
+    response = httpx.Response(
+        200, headers={"content-type": "text/event-stream"}, content=body
+    )
+    seen = []
+    with pytest.raises(ProviderError, match="response.incomplete"):
+        for event in openai_responses.stream_response(response, None, {}):
+            seen.append(event.type)
+    assert "text_delta" in seen and "message_done" not in seen

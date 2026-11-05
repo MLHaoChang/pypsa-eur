@@ -107,14 +107,17 @@ The freeze belongs to the owner, as asked in AA03-FREEZE-1. Conditions:
 
 ### S1 result
 
-`tests/assurance_acceptance/test_p2_failure_modes.py`, 16 cases. The truncation
+`tests/assurance_acceptance/test_p2_failure_modes.py`, 21 cases. The truncation
 cases were red on master: a cut-off draft that parsed was certified `passed`.
 `LLMEvent.truncated` (message_done) is now set by the OpenAI-compatible wire on
 `length`/`content_filter` and by the Anthropic wire on
-`max_tokens`/`model_context_window_exceeded`/`refusal`; the Responses wire already
-raises on `response.incomplete`. The loop then skips review, and `Turn.commit`
-refuses the draft. Mutants killed: commit refusal, loop hand-off, review skip,
-the OpenAI-compatible flag, the Anthropic stop set, the event read.
+`max_tokens`/`model_context_window_exceeded`/`refusal`. The Responses wire raises
+on `response.incomplete`, and a test now pins that refusal. The loop then skips
+review, and `Turn.commit` refuses the draft. A provider error after a fragment
+ends as a typed error with no retry; before any text, it retries within the
+transport budget. Each of these 7 mutants is killed by its own test: the commit
+refusal, the loop hand-off, the review skip, the OpenAI-compatible flag, the
+Anthropic stop set, the event read, and the Responses incomplete branch.
 
 ### Owner freeze AA03-FREEZE-1 (2026-11-05, ~14:45 CET)
 

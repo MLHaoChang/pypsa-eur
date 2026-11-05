@@ -182,6 +182,10 @@ def _to_openai_messages(request: LLMRequest) -> list[dict[str, Any]]:
     return out
 
 
+# Finish reasons that cut a completion short.
+_TRUNCATED_FINISH = ("length", "content_filter")
+
+
 class _TokenParamRefused(Exception):
     """
     Internal: the endpoint refused the completion-length parameter BY NAME.
@@ -382,9 +386,9 @@ class OpenAICompatProvider:
                         finish_reason = choice.get("finish_reason")
                         if finish_reason is not None:
                             completed = True
-                        if finish_reason in ("length", "content_filter"):
+                        if finish_reason in _TRUNCATED_FINISH:
                             truncated = True
-                        if (finish_reason in ("length", "content_filter")
+                        if (finish_reason in _TRUNCATED_FINISH
                                 and (calls or (choice.get("delta") or {}).get("tool_calls"))):
                             raise ProviderError(
                                 "invalid_request",

@@ -216,10 +216,10 @@ def serialise_block(content_block: Any) -> dict[str, Any]:
         out[name] = value
     return out
 
-
-
-# Stop reasons that end a message before the model finished it.
+# Stop reasons that end a message before the model finished it. A refusal is
+# incomplete text too, so it fails closed for a checked answer.
 _TRUNCATED_STOPS = frozenset({"max_tokens", "model_context_window_exceeded", "refusal"})
+
 
 class AnthropicProvider:
     name = "anthropic"
