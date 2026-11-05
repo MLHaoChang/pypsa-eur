@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A study run's explore stage proposes up to four what-if cases (two changes each, every value inside a sourced range) and runs them on forks: network cases through one sensitivity sweep the user approves, investment cases through the decision study. Each case gets its own result gate; a failing case never fails the run, and the base project is unchanged.

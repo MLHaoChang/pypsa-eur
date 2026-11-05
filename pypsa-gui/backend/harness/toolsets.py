@@ -21,7 +21,7 @@ CONTROL_TOOLS = frozenset({
 })
 # Tools offered only in a harness run's own turns (`session.stage_tools`),
 # never in chat: issue 09's ledger write works only inside a research turn.
-STAGE_ONLY_TOOLS = frozenset({"record_source"})
+STAGE_ONLY_TOOLS = frozenset({"record_source", "propose_cases"})
 
 DOMAINS = ("all", "project", "network", "simulation", "results", "gridspine")
 _PROJECT = frozenset({

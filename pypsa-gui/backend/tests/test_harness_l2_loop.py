@@ -100,6 +100,7 @@ def test_an_infeasible_solve_is_triaged_fixed_in_one_round_and_solved_once_more(
     script = Script(
         cap(55.0),
         say("The log says infeasible: L1 needs 50 MW, G1 is capped at 40. Raised it."),
+        say("No case is worth a fork here."),  # issue 06: the explore turn
     )
     record = go(harness_runner.Runner("a", agent_provider=script), path, task)
     run = record["run"]
@@ -145,7 +146,7 @@ def test_an_infeasible_solve_is_triaged_fixed_in_one_round_and_solved_once_more(
     assert run["budget"]["used"]["solves"] == 2 == len(jobs() - before)
     assert (
         run_envelope.solves_used(envelope_of(path)) == 2
-        and run["budget"]["used"]["rounds"] == 1
+        and run["budget"]["used"]["rounds"] == 2  # the L2 round and the explore turn's
     )
     assert float(ctx().network.generators.at["G1", "p_nom_max"]) == 55.0
 

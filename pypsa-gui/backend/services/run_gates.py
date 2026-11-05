@@ -43,6 +43,11 @@ class Env:
     project: Any  # the project row (`project_registry.resolve_project`)
     project_dir: Any
     cache: dict = field(default_factory=dict, compare=False, hash=False)  # one gate's shared reads
+    # Issue 06: an explore case's own gate. `ctx`, `project` and
+    # `project_dir` are then the case's child, read from disk and never
+    # activated (E6); `case` holds its `project_id` and its own `job_id`
+    # (none for a decision-study case, whose `study_run` record it holds).
+    case: dict | None = None
 
 
 def _on(ctx, fn, *args):
@@ -101,11 +106,15 @@ def _solve_job(env):
     project is no evidence."""
     from routers.solve_queue import _visible_job_or_404
     from services import chat_tools, project_registry
-    step = next((s for s in reversed(env.task["steps"]) if s["id"].startswith("solve.") and s.get("job")), None)
-    if step is None:
+    if env.case is not None:
+        job_id = env.case.get("job_id")  # issue 06: the case's own job, never the run's solve
+    else:
+        step = next((s for s in reversed(env.task["steps"]) if s["id"].startswith("solve.") and s.get("job")), None)
+        job_id = None if step is None else step["job"]["job_id"]
+    if job_id is None:
         return None
     with chat_tools._acting() as (db, user):
-        job = _visible_job_or_404(db, user, step["job"]["job_id"])
+        job = _visible_job_or_404(db, user, job_id)
     return job if job.get("project_key") == project_registry.registry_key(env.project) else None
 
 
@@ -252,11 +261,27 @@ def _run(key):
     return lambda env: env.task.get("run", {}).get(key)
 
 
+def _explore_unsettled(env):
+    """Issue 06: the run's admitted cases not yet settled (passed, failed
+    with its rules, or not runnable with its reason)."""
+    from harness import run_explore
+    return run_explore.unsettled(env.task.get("run", {}))
+
+
+def _explore_study_status(env):
+    """Issue 06: a decision-study case's run record status, as the study
+    runner stored it (`completed` when every option solved)."""
+    record = (env.case or {}).get("study_run")
+    return None if not isinstance(record, dict) else record.get("status")
+
+
 FACTS: dict[str, Fact] = {
     # Harness facts: the run block itself, written only by harness code.
     "brief.valid": Fact("task.brief", "brief", None, lambda env: bool(env.task.get("brief"))),
     "profile.resolved": Fact("task.run", "profile", None, lambda env: bool(_run("profile")(env))),
     "run.mode": Fact("task.run", "mode", None, _run("mode")),
+    "explore.study.status": Fact("services.study.runner.get_study_run", "status", None, _explore_study_status),
+    "explore.unsettled": Fact("harness.run_explore.unsettled", "cases", "count", _explore_unsettled),
     "project.exists": Fact("services.project_registry.resolve_project", "id", None,
                            lambda env: env.project is not None),
     "project.template": Fact("services.flow_service.read_template", "id", None, _template),
@@ -469,7 +494,8 @@ def _unevaluated(rules, reason):
 def gate(rules: list[dict], env: Env) -> dict:
     """The gate, pinned to the inputs it judged: the fingerprint read before
     and after the readers must agree, on the run's own project's context."""
-    if env.ctx is None or env.project is None or str(env.ctx.project_uuid) != str(env.task.get("project_id")):
+    own = (env.case or {}).get("project_id") if env.case is not None else env.task.get("project_id")
+    if env.ctx is None or env.project is None or str(env.ctx.project_uuid) != str(own):
         before, results = None, _unevaluated(rules, "the context is not the run's project")
     else:
         before = fingerprint(env.ctx)

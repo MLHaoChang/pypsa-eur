@@ -411,14 +411,15 @@ def reserve_engine(task_path, *, call_id, tool, rule, max_solves, overhead, rest
         return clamped, None
 
 
-def settle_engine_solves(task_path, call_id, solves):
+def settle_engine_solves(task_path, call_id, solves, event="engine"):
     """The loop ended: its reservation becomes what it spent, once (C7).
-    False when the row is gone or already settled."""
+    An explore case's row (issue 06, E5) settles the same way with
+    `event="explore"`. False when the row is gone or already settled."""
     from services import assistant_tasks
     with assistant_tasks._LOCK:
         envelope = _load(task_path)
         row = next((a for a in (envelope or {}).get("audit", [])
-                    if a["event"] == "engine" and a.get("call_id") == call_id), None)
+                    if a["event"] == event and a.get("call_id") == call_id), None)
         if row is None or "solves" in row:
             return False
         row["solves"] = int(solves)

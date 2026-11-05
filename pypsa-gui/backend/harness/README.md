@@ -1623,6 +1623,40 @@ own card. Rows, verdicts and listed gaps stay in `run.research` for the report.
   range rows with their status, for issue 06's case admission, which keeps
   only `confirmed` ones.
 
+### The explore stage (study harness issue 06)
+
+`harness/run_explore.py` (the module docstring holds levers, sources and
+engines). On entry to `explore` (stage 6) of a profile with an `explore`
+block, the runner runs one agent turn (`run_explore.due`, after any
+`research.due` turn). It offers `run_profiles.EXPLORE_TOOLS`: reads plus
+`propose_cases`, which is in `STAGE_ONLY_TOOLS` (in no other payload; a call
+outside the turn refuses). The proposal is admitted into `run.cases` all or nothing, under
+`runner._file_lock` with the live-lease check. A `research:` source is
+re-read then through `source_ledger.ranges()` and must be `confirmed`.
+
+- **Steps.** Network cases: `save_project` (the run project's own name),
+  then one `run_sensitivity_sweep` whose cases come from `run.cases`, never
+  from the model. Investment cases: one `start_decision_study` each, with
+  set/run follow-ups. `check_step` (E1) refuses a step whose project args
+  are not the run's own project; such a step puts the run `needs_user`
+  (`explore_args`). Steps that run_envelope does not cover are the user's
+  own cards, so a run granted before explore never sweeps unattended.
+- **Advance.** `run_explore.advance` runs at the top of each runner step. It
+  maps the sweep's jobs to cases `running`, and judges each case on its
+  terminal job outcome with `case_gate` (`Env.case`: the case's own project,
+  read from disk, never activated). An investment case is judged on
+  `explore.study.status` (rule `ex.study.completed`). A study case's
+  deadline settles on the runner's own tick (`advance`, with no user touch)
+  and in the boot sweep (`run_explore.expire`); a network case settles from
+  its queue job. Solves
+  settle through `run_envelope.settle_engine_solves(event="explore")`.
+- **Holds.** The stage gate waits while the turn or research is due or any
+  case is `admitted` or `running`. `assistant_tasks._next` skips steps that
+  carry `judged_by`.
+- **Refusals.** A sweep refused at preflight leaves its step uncertain, and
+  the run goes `needs_user`; no case is judged on a partial sweep. The kinds
+  are `run_explore.ERROR_KINDS`.
+
 ### Send reservation (study harness issue 24)
 
 `harness/send_reservation.py` writes a durable hold before each model send of a

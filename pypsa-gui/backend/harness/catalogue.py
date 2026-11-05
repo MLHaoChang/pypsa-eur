@@ -2704,6 +2704,37 @@ TOOLS: list[dict[str, Any]] = [
     ),
 
     _t(
+        "propose_cases",
+        "Explore turns of a harness run only: propose at most 4 cases, each changing at most 2 "
+        "things, for the harness to run on forks (the base project is never changed). Each "
+        "network change names one of the profile's levers (component, name, attr), its value "
+        "and its range {low, high, unit} with a source: profile:<component>.<name>.<attr> (the "
+        "lever's bounds) or research:<row id> (a confirmed research range row). An investment "
+        "case (engine study) carries the decision study's intake and changes ledger keys, each "
+        "citing ledger:<key>. A fifth case, a third change, a value outside its range or a "
+        "range without a source is refused and nothing is admitted. Returns the admitted "
+        "cases. Safety: read.",
+        {
+            "cases": {"type": "array", "maxItems": 4, "items": {"type": "object", "properties": {
+                "name": {"type": "string", "description": "A short case name."},
+                "engine": {"type": "string", "enum": ["network", "study"],
+                           "description": "network (sweep on forks, default) or study (decision study)."},
+                "intake": {"type": "object", "description": "Investment cases only: the study intake."},
+                "changes": {"type": "array", "maxItems": 2, "items": {"type": "object", "properties": {
+                    "component": {"type": "string"}, "name": {"type": "string"}, "attr": {"type": "string"},
+                    "key": {"type": "string", "description": "Investment cases: the ledger key."},
+                    "value": {"type": "number"},
+                    "range": {"type": "object", "properties": {
+                        "low": {"type": "number"}, "high": {"type": "number"}, "unit": {"type": "string"}},
+                        "required": ["low", "high", "unit"]},
+                    "source": {"type": "string"}},
+                    "required": ["value", "range", "source"]}}},
+                "required": ["name", "changes"]}},
+        },
+        ["cases"],
+    ),
+
+    _t(
         "set_goal",
         "Set a goal for this chat when the user asks you to keep working "
         "toward something over several steps without prompting each one. "
@@ -5390,6 +5421,7 @@ TOOL_ROUTES: dict[str, list] = {
     "end_workflow": _SERVICE_CALL,
     "set_requirement": _SERVICE_CALL,
     "record_source": _SERVICE_CALL,
+    "propose_cases": _SERVICE_CALL,
     "set_goal": _SERVICE_CALL,
     "pause_goal": _SERVICE_CALL,
     "complete_goal": _SERVICE_CALL,

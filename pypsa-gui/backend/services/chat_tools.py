@@ -6479,6 +6479,18 @@ def set_requirement(requirement: dict | None = None, replaces: str | None = None
     return requirements.set_requirement(requirement, replaces, retire)
 
 
+def propose_cases(cases: list) -> dict:
+    """Study harness issue 06: an explore turn's case proposal, admitted by
+    harness code into the run's cases. A refusal is a tool error of its kind
+    (`run_explore.ERROR_KINDS`)."""
+    from harness import run_explore
+
+    try:
+        return run_explore.propose_cases(cases)
+    except run_explore.ExploreError as exc:
+        raise HTTPException(status_code=422, detail={"error_kind": exc.kind, "message": str(exc)}) from exc
+
+
 def record_source(gap: str, unit: str, basis: str, url: str, quote: str,
                   value: float | None = None, title: str = "", jurisdiction: str | None = None,
                   low: float | None = None, high: float | None = None) -> dict:
@@ -9676,6 +9688,7 @@ DISPATCHERS: dict[str, Any] = {
     "start_workflow": start_workflow,
     "set_requirement": set_requirement,
     "record_source": record_source,
+    "propose_cases": propose_cases,
     "set_goal": set_goal,
     "pause_goal": pause_goal,
     "complete_goal": complete_goal,

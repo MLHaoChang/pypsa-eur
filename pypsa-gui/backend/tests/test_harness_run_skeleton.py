@@ -33,6 +33,17 @@ def start(request_id='run-1', **kwargs):
                                  brief=kwargs.pop('brief', BRIEF), run=kwargs.pop('run', RUN), **kwargs)
 
 
+def explore_turn(root, task):
+    """The runner's explore turn (issue 06), its model proposing no case."""
+    from harness import runner as harness_runner
+    from tests.test_harness_run_loops import Script, say
+    from tests.test_harness_runner import settle, task_path
+
+    settle(harness_runner.Runner('a', agent_provider=Script(say('No case is worth a fork here.'))),
+           task_path(root, task), task['task_id'],
+           lambda r: ((r['run'].get('explore') or {}).get('turn') is not None) or r['run']['stage'] != 'explore')
+
+
 def drive(session, monkeypatch, task, root, limit=20):
     """Run the plan as the chat turn does: each next_step as an ordinary
     offered call, the user's Continue at each card pause, waits on jobs."""
@@ -43,6 +54,9 @@ def drive(session, monkeypatch, task, root, limit=20):
             tasks.continue_at_card(session, task['task_id'])
             continue
         step = view.get('next_step')
+        if step is None and (view.get('run') or {}).get('stage') == 'explore' and view['status'] not in ('completed', 'needs_review'):
+            explore_turn(root, task)  # issue 06: the stage's one agent turn is the runner's
+            continue
         if view['status'] in ('completed', 'needs_review') or step is None:
             return view, carded
         frames, _ = dispatch(session, monkeypatch, step['tool'], step['args'])
@@ -71,7 +85,7 @@ def test_eh_site_run_reaches_handoff_step_by_step_with_every_run_carded(session,
     by = stages(view)
     for name in ('intake', 'setup', 'inputs', 'input_gate', 'solve', 'result_gate', 'handoff'):
         assert by[name]['status'] == 'passed', by[name]
-    assert {s for s in by if by[s]['status'] == 'skipped'} == {'explore', 'report'}
+    assert {s for s in by if by[s]['status'] == 'skipped'} == {'report'}  # issue 06: eh_site@1 explores
     gate = {r['rule']: r for r in by['input_gate']['gate']}
     assert gate['in.validate.errors'] == {'rule': 'in.validate.errors', 'verdict': 'pass', 'fact': 'validate.errors',
                                           'value': 0, 'unit': 'count'}
@@ -201,6 +215,7 @@ def test_version_1_and_2_files_read_unchanged(session, site):
 
 def big(stages):
     profile = copy.deepcopy(run_profiles.EH_SITE)
+    profile.pop('explore', None)  # issue 06: only a profile with an explore stage names levers
     profile['stages'] = {name: {'actions': [{'tool': 'validate_network', 'args': {}}] * count,
                                 'rules': run_profiles.GENERIC[name].get('rules', [])}
                          for name, count in stages.items()}
