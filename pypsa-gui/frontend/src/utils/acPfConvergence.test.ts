@@ -20,6 +20,10 @@ describe('acPfConvergenceText (AA-12)', () => {
     expect(t.note).toContain('8 of 8 snapshots')
   })
 
+  it('never shows the known count alone when no converged count is recorded', () => {
+    expect(acPfConvergenceText({ converged_count: null, known_converged_count: 3, total_snapshots: 4 }).kpi).toBe('Unknown / 4')
+  })
+
   it('reads a pre-fix status without unknown_count as before', () => {
     expect(acPfConvergenceText({ converged_count: 7, total_snapshots: 8 }).kpi).toBe('7 / 8')
   })

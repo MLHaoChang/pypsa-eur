@@ -24,7 +24,10 @@ export function acPfConvergenceText(s: AcPfConvergenceCounts | null | undefined)
   const n = s?.total_snapshots ?? 0
   const u = s?.unknown_count ?? 0
   if (u <= 0) {
-    const k = s?.converged_count ?? s?.known_converged_count ?? 0
+    // No converged count recorded: unknown, and the display-only known count
+    // is never shown alone as "k / n".
+    if (s?.converged_count == null) return { kpi: `Unknown / ${n}`, short: `convergence unknown for ${n}/${n}`, note: null }
+    const k = s.converged_count
     return { kpi: `${k} / ${n}`, short: `${k}/${n} converged`, note: null }
   }
   const k = s?.known_converged_count ?? 0

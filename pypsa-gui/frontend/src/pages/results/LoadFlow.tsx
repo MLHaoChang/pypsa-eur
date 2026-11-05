@@ -7,7 +7,7 @@ import {
 } from 'recharts'
 import { Download } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { resultsApi } from '../../api/simulation'
+import { resultsApi, type AcPfConvergenceRow } from '../../api/simulation'
 import { networkApi } from '../../api/network'
 import type { Bus } from '../../api/types'
 import { type TSPayload, fmtPower, shortStamp, downloadCSV, KPI, ChartActions, Seg,
@@ -959,9 +959,8 @@ export default function LoadFlow() {
             // period 0's row. The list carries `period` so we can match both.
             // Only a reported failure (`ok === false`) is listed; unknown
             // (`ok: null`, AA-12) is neither failed nor converged.
-            type ConvRow = { snapshot: string; period?: number | string | null; ok: boolean | null }
-            const list = (acPfStatus.converged_list ?? []) as ConvRow[]
-            const failedList: ConvRow[] = list.length > 0
+            const list = acPfStatus.converged_list ?? []
+            const failedList: AcPfConvergenceRow[] = list.length > 0
               ? list.filter(r => r.ok === false)
               : Object.entries(acPfStatus.converged_per_snapshot ?? {})
                   .filter(([, ok]) => ok === false)

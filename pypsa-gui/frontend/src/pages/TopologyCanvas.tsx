@@ -1942,10 +1942,19 @@ export default function TopologyCanvas() {
   const currentSnapIso = snap?.snapshots?.[Math.min(resultsSnapshotIdx, (snap?.count ?? 1) - 1)] ?? ''
   // true | false | 'unknown' (AA-12: PyPSA did not report it). A snapshot
   // with no entry keeps the old "no banner"; a recorded null is never true.
-  const currentSnapConvergence: boolean | 'unknown' = !acPfAvailable || resultSource !== 'ac_pf'
-    || !acPfStatus?.converged_per_snapshot || !(currentSnapIso in acPfStatus.converged_per_snapshot)
-    ? true
-    : (acPfStatus.converged_per_snapshot[currentSnapIso] ?? 'unknown')
+  // The period-aware `converged_list` is parallel to n.snapshots, so the
+  // selected index finds its row even when an ISO repeats across periods; the
+  // legacy ISO-keyed map is the fallback only when the list doesn't line up.
+  const currentSnapConvergence: boolean | 'unknown' = (() => {
+    if (!acPfAvailable || resultSource !== 'ac_pf') return true
+    const snapIdx = Math.min(resultsSnapshotIdx, (snap?.count ?? 1) - 1)
+    const list = acPfStatus?.converged_list
+    const row = list && list.length === snap?.count ? list[snapIdx] : undefined
+    if (row && row.snapshot === currentSnapIso) return row.ok ?? 'unknown'
+    const map = acPfStatus?.converged_per_snapshot
+    if (!map || !(currentSnapIso in map)) return true
+    return map[currentSnapIso] ?? 'unknown'
+  })()
 
   const { data: buses = [] }      = useQuery({ queryKey: nk(currentProject, 'buses'),         queryFn: networkApi.getBuses })
   const { data: lines = [], isPending: linesPending }      = useQuery({ queryKey: nk(currentProject, 'lines'),         queryFn: networkApi.getLines })

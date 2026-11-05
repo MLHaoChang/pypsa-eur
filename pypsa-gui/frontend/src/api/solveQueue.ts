@@ -1,4 +1,5 @@
 import client from './client'
+import type { AcPfConvergenceRow } from './simulation'
 
 // One queued solve of a saved project. Mirrors the backend SolveJob.to_public
 // (services/solve_queue.py). `position` is the 1-based place in the queue for a
@@ -77,7 +78,7 @@ export interface ResultsBundle {
   objective: number | null
   condition: string | null
   solve_time: number | null
-  ac_pf_convergence_list: Array<{ snapshot: string; period?: number | string | null; ok: boolean | null }> | null
+  ac_pf_convergence_list: AcPfConvergenceRow[] | null
   carriers: Record<string, string>          // generator name → carrier
   generators: TSPayload | null              // generators_t.p
   storage_soc: TSPayload | null             // storage_units_t.state_of_charge

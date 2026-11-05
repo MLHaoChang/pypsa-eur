@@ -1280,6 +1280,10 @@ export type CurtailmentByCausePayload =
   | { status: 'not_established'; reason: CurtailmentNotEstablishedReason | (string & {})
       plants: Record<string, CurtailmentByCausePlant> }
 
+// One AC PF convergence row: `ok: null` means PyPSA did not report convergence
+// for that snapshot (unknown: neither converged nor failed).
+export type AcPfConvergenceRow = { snapshot: string; period?: number | string | null; ok: boolean | null }
+
 export const resultsApi = {
   getCostBreakdown: () => client.get<CostBreakdown>('/results/cost_breakdown').then(r => r.status === 204 ? null : r.data),
   getStatistics: () => client.get('/results/statistics').then(r => r.status === 204 ? null : r.data),
@@ -1744,7 +1748,7 @@ export const resultsApi = {
     // Period-aware list — preferred. Each entry carries the original tuple
     // info so the frontend can match snapshot+period unambiguously.
     // `ok: null` is unknown: neither converged nor failed.
-    converged_list?: Array<{ snapshot: string; period?: number | string | null; ok: boolean | null }>
+    converged_list?: AcPfConvergenceRow[]
     // null while any snapshot's convergence is unknown.
     converged_count?: number | null
     // Display only: snapshots known to have converged ("k / n · u unknown").

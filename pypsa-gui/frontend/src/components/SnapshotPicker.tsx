@@ -163,7 +163,7 @@ export default function SnapshotPicker() {
   // the currently-selected period. Fall back to the legacy map only on
   // flat single-period networks where keys are unique. A recorded `ok: null`
   // (AA-12) is 'unknown': PyPSA did not report convergence for that snapshot.
-  const isSnapshotConverged = ((): boolean | 'unknown' | null => {
+  const snapshotConvergence = ((): boolean | 'unknown' | null => {
     if (!acPfStatus?.available || !stamp) return null
     const selectedPeriod = activeRange.period
     if (selectedPeriod != null && acPfStatus.converged_list?.length) {
@@ -296,18 +296,20 @@ export default function SnapshotPicker() {
             {/* AC PF convergence glyph for the current snapshot+period.
                 Only meaningful when the user is viewing the AC PF result
                 source — under LOPF the LP always "converges" (a different
-                concept). `isSnapshotConverged` consults the period-aware
+                concept). `snapshotConvergence` consults the period-aware
                 `converged_list` first; null means "no record" (hide badge),
                 'unknown' means PyPSA did not report it (neutral "?"). */}
-            {resultSource === 'ac_pf' && isSnapshotConverged !== null && (
-              isSnapshotConverged === 'unknown' ? (
+            {resultSource === 'ac_pf' && snapshotConvergence !== null && (
+              snapshotConvergence === 'unknown' ? (
                 <span className="ml-1.5 text-muted font-bold"
                   title="AC PF convergence not reported for this snapshot"
                   aria-label="AC PF convergence not reported for this snapshot">?</span>
-              ) : isSnapshotConverged === false ? (
-                <span className="ml-1.5 text-danger font-bold" title="AC PF did not converge for this snapshot">✗</span>
+              ) : snapshotConvergence === false ? (
+                <span className="ml-1.5 text-danger font-bold" title="AC PF did not converge for this snapshot"
+                  aria-label="AC PF did not converge for this snapshot">✗</span>
               ) : (
-                <span className="ml-1.5 text-success font-bold" title="AC PF converged for this snapshot">✓</span>
+                <span className="ml-1.5 text-success font-bold" title="AC PF converged for this snapshot"
+                  aria-label="AC PF converged for this snapshot">✓</span>
               )
             )}
           </span>
