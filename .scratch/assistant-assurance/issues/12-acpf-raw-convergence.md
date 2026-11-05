@@ -95,3 +95,11 @@ The phase line reads `Stage 2: AC PF complete — convergence unknown for u of n
 - `tests/test_ac_pf_link_dispatch.py:78` asserts `converged_count == total` on a real PyPSA solve; that is a real frame, so it stays and still passes.
 
 **Out of scope.** PyPSA's pre-filled `dtype=bool` frame (above); the LOPF "converged" notion; any change to `_convergence`'s precedence for runs sealed before this fix (they keep their recorded counts; a run sealed with the old all-True fallback cannot be told apart, so it stays "converged").
+
+### 2026-11-05 — UX (8) plan GO @a58145eb, asks folded in
+
+1. KPI: `k / n · u unknown` when 0 < u < n; `Unknown / n` only when u = n. `ac_pf_converged_count` stays `None` for the gate, so `/ac_pf/status` adds `known_converged_count` (rows with `ok is True`), which feeds this KPI. The vitest pins both strings.
+2. Muted line: "PyPSA did not report convergence for u of n snapshots: their AC values are not checked. Re-run Stage 2, or use the LOPF results." (`1 of n snapshots` when u = 1.) "Re-run Stage 2" links to the Stage 2 control only if one sits on this page; otherwise it stays plain words.
+3. Canvas banner: "AC PF convergence was not reported for this snapshot: its values are not checked." Keep "AC PF" only if the existing banner already uses it.
+4. Picker `?` badge: `aria-label` equal to its title.
+5. Screenshots, in Guided and Expert wherever Load flow renders: KPI at u = n, the mixed case with the muted line, the picker with ✓/✗/?, and the canvas banner on an unknown snapshot.
