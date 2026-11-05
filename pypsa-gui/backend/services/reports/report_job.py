@@ -298,6 +298,20 @@ class RunSends:
             self.refused = exc.reason
             raise
 
+    def close(self) -> None:
+        """Job end (GK B C4): a hold one of this job's sends left open (the
+        provider raised before answering, so `ReservingProvider` kept it for a
+        retry that will not come) settles `uncertain` at its bound, the
+        runner's turn-end rule (`send_reservation.close_open`), limited to this
+        job's own sends."""
+        from harness.send_reservation import settle_uncertain
+
+        with self._inner._lock:
+            keys = [key for _ref, _body, key in self._inner._open.values()]
+            self._inner._open.clear()
+        for key in keys:
+            settle_uncertain(self._inner._path, key)
+
 
 AUDIT_FAILED = "(the number audit could not read this statement)"
 WITHHELD_NOTE = ("{n} statement(s) withheld: each quoted a number that is not among "
@@ -518,6 +532,9 @@ def run_report_job(job: ReportJob) -> ReportDocument:
     except Exception as exc:
         _set(job, status="failed", error=str(exc), finished_at=time.time())
         raise
+    finally:
+        if isinstance(job.provider, RunSends):
+            job.provider.close()
 
 
 # ── the mapping job (WP11) ──────────────────────────────────────────────────

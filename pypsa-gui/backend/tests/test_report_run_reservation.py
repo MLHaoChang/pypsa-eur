@@ -86,3 +86,45 @@ def test_without_a_run_binding_the_provider_is_called_as_before(tmp_path, mode):
                              title="Panel report", figure_pngs={})
     run_report_job(job)
     assert provider.calls == 2 and job.provider is provider
+
+
+class LeaseLostAfterFirst(Counting):
+    """The first send answers; then another instance takes the run's lease."""
+
+    def __init__(self, turns, run):
+        super().__init__(turns)
+        self.run = run
+
+    def stream(self, request):
+        yield from super().stream(request)
+        lease(self.run, "boot-b")
+
+
+class Raising(Counting):
+    def stream(self, request):
+        self.calls += 1
+        raise RuntimeError("provider down")
+        yield  # pragma: no cover
+
+
+def test_a_job_refused_mid_way_leaves_no_open_hold(tmp_path, run, mode):
+    mode("output_tokens")
+    provider = LeaseLostAfterFirst(_drafts(), run)
+    job = _job(tmp_path, provider, run)
+    run_report_job(job)
+    assert provider.calls == 1 and job.record["refused"] == "lease_lost"
+    rows = ledger(run)
+    assert len(rows["final_charges"]) == 1 and not send_reservation.has_open_holds({"budgets": rows})
+
+
+def test_a_provider_that_raises_leaves_no_open_hold(tmp_path, run, mode):
+    mode("output_tokens")
+    provider = Raising([])
+    job = _job(tmp_path, provider, run)
+    with pytest.raises(RuntimeError, match="provider down"):
+        run_report_job(job)
+    assert provider.calls >= 1 and job.record["status"] == "failed"
+    rows = ledger(run)
+    assert not send_reservation.has_open_holds({"budgets": rows})
+    # the hold settled at its bound, flagged uncertain (the runner's turn-end rule)
+    assert rows["final_charges"] and all("uncertain" in (c.get("flags") or []) for c in rows["final_charges"])

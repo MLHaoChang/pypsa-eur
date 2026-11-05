@@ -8123,7 +8123,16 @@ def generate_report(
     `template_file_id` names one (WP11), else "en" — the route's own rule.
     """
     from routers.report_jobs import GenerateReportBody, generate_report as _h
+    from services import assistant_tasks
 
+    run_ctx = assistant_tasks.RUN_CONTEXT.get()
+    if run_ctx is not None and str(getattr(run_ctx, "project_uuid", "") or "") != str(
+            getattr(PyPSAService.get_active_context(), "project_uuid", "") or ""):
+        # Issue 07 (GK B C6): a harness run's report reads the run's project
+        # only; with no request binding the active project is the foreground.
+        raise HTTPException(status_code=409, detail={
+            "error_kind": "project_changed",
+            "message": "The active project is not this run's project; the run's report reads only its own project."})
     project = _report_project()
     body = GenerateReportBody(
         title=title, language=language or None,

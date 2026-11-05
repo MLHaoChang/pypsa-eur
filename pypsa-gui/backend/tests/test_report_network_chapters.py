@@ -12,7 +12,6 @@ import tempfile
 
 import pytest
 
-from services.reports import evidence as E
 from services.reports import network_chapters as NC
 from services.reports.evidence import collect_evidence, flatten_numbers
 
@@ -103,6 +102,36 @@ def test_a_solved_network_only_project_is_reportable(client, api_project, sessio
     assert by_id[NC.HEADLINE]["status"] == "ok" and by_id[NC.CAPACITY]["category"] == "investment"
     assert by_id[NC.DISPATCH]["status"] == "ok"
 
+
+def test_a_project_edited_since_its_solve_is_refused_as_no_evidence(client, api_project, session_ctx,
+                                                                    monkeypatch, _no_study):
+    """GK B C10: solved, then edited. The old results are not current, and the
+    model summary alone is not evidence, so the route answers the existing
+    `no_evidence` (no new kind) naming the remedy; it never reports the old
+    numbers as current. Solving again makes it reportable."""
+    from services import workflow_tools
+    from services.llm_fake import FakeProvider
+    from tests.test_report_job_http import _install_provider, _poll
+
+    name = api_project("edited-network")
+    _install_provider(monkeypatch, FakeProvider([]))
+    ctx = session_ctx(client)
+    n = ctx.network
+
+    def solve():
+        assert n.optimize(solver_name="highs")[1] == "optimal"
+        ctx.solver_state.update(status="completed", condition="optimal")
+        workflow_tools._record_solve_inputs(n, ctx.solver_state["solver_config"])
+    solve()
+    gen = n.generators.index[0]
+    n.generators.at[gen, "marginal_cost"] = float(n.generators.at[gen, "marginal_cost"]) + 7.0
+    assert workflow_tools.solve_freshness().get("results_current") is not True
+    r = client.post(f"/api/projects/{name}/reports/generate", json={})
+    assert r.status_code == 400 and r.json()["detail"]["error_kind"] == "no_evidence"
+    assert "Solve the network" in r.json()["detail"]["message"]
+    solve()
+    assert client.post(f"/api/projects/{name}/reports/generate", json={}).status_code == 200
+    _poll(client, name)  # the job ends before the test does
 
 # ── strict narrative (a run's report): admitted facts only ─────────────────
 
@@ -208,3 +237,64 @@ def test_the_reports_panel_document_equals_master():
 
     expected = json.loads((Path(__file__).parent / "fixtures" / "sh07_report_human_master.json").read_text())
     assert json.loads(json.dumps(human_doc(), sort_keys=True)) == expected
+
+
+# GK B C9: a reader that raises (an error, a 404 or a 409) leaves its chapter
+# not established, naming the failed read and what to do; every other chapter
+# keeps its own read.
+_RAISES = {"error": RuntimeError("boom"),
+           "404": __import__("fastapi").HTTPException(404, {"error_kind": "project_not_found"}),
+           "409": __import__("fastapi").HTTPException(409, {"error_kind": "project_busy"})}
+_WHY = {"error": "RuntimeError", "404": "404 project_not_found", "409": "409 project_busy"}
+
+
+def _read_with(monkeypatch, failing: str | None, how: str):
+    from types import SimpleNamespace
+
+    from services import project_summary, retained_results, workflow_tools
+    from services.pypsa_service import PyPSAService
+    good = _sources()
+    ctx = SimpleNamespace(network=SimpleNamespace(meta={"assistant_solve_input_fingerprint": "f"}),
+                          solver_state={}, project_uuid="p")
+    monkeypatch.setattr(PyPSAService, "get_active_context", staticmethod(lambda: ctx))
+    monkeypatch.setattr(workflow_tools, "solve_freshness", lambda: {"results_current": True})
+
+    def summarise(*a, **k):
+        if failing == NC.MODEL_SUMMARY:
+            raise _RAISES[how]
+        return good["summary"]
+    monkeypatch.setattr(project_summary, "summarise", summarise)
+
+    def adapter(section):
+        def capture(token):
+            if section == failing:
+                raise _RAISES[how]
+            return good["reads"].get(section)
+        return SimpleNamespace(section=section, capture=capture)
+    monkeypatch.setattr(retained_results, "ADAPTERS",
+                        tuple(adapter(s) for s in ("loadflow", "results_summary", "results_dispatch",
+                                                   "results_prices", "results_emissions")))
+    return NC.read_sources(project_root="root")
+
+
+@pytest.mark.parametrize("how", sorted(_RAISES))
+@pytest.mark.parametrize("chapter, read", [(NC.MODEL_SUMMARY, NC.MODEL_SUMMARY), (NC.HEADLINE, "results_summary"),
+                                           (NC.CAPACITY, "results_summary"), (NC.EMISSIONS, "results_emissions"),
+                                           (NC.LOAD_FLOW, "loadflow"), (NC.DISPATCH, "results_dispatch"),
+                                           (NC.PRICES, "results_prices")])
+def test_an_unreadable_reader_leaves_its_chapter_not_established_with_a_hint(monkeypatch, chapter, read, how):
+    sources = _read_with(monkeypatch, read, how)
+    assert sources["failed"] == {read: _WHY[how]}
+    ev = collect_evidence(study_report=None, eh_report=None, worksheet=None, network=sources)
+    section = ev.sections[chapter]
+    if chapter == NC.HEADLINE:  # its emissions read still stands: a partial chapter names the failed read
+        assert section.status == "ok" and _WHY[how] in section.payload["not_read"]
+        assert "generate the report again" in section.payload["not_read"]
+        assert "cost_eur" not in section.payload or not section.payload["cost_eur"]
+    else:
+        assert section.status == "not_established" and not section.payload
+        assert section.note == NC.NO_READ[chapter] + NC.READ_FAILED.format(why=_WHY[how])
+        assert "generate the report again" in section.note
+    untouched = _read_with(monkeypatch, None, how)
+    assert untouched["failed"] == {} and ev.sections[NC.MODEL_SUMMARY if chapter != NC.MODEL_SUMMARY
+                                                  else NC.CAPACITY].status == "ok"

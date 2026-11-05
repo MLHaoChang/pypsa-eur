@@ -65,6 +65,7 @@ NO_READ = {
     EMISSIONS: "no emissions results were read from the current solve",
     LOAD_FLOW: "no load flow summary: the network has no lines or transformers, or none was ranked",
 }
+READ_FAILED = " (its read failed: {why}; open the Results tab to check it, then generate the report again)"
 LOADFLOW_PROXY = ("Load flow: the branch loadings come from the linear (LOPF) active-power "
                   "solve, a proxy; AC apparent power, reactive flows and voltage were not assessed.")
 
@@ -78,7 +79,9 @@ def read_sources(project_root: Any = None) -> dict | None:
 
     `{"current": bool, "summary": dict | None, "reads": {section: dict | None}}`:
     `reads` holds `retained_results`' captures, empty when the results are
-    not current (every results chapter is then stated not established)."""
+    not current (every results chapter is then stated not established).
+    `failed` names each read that raised (`"404 kind"` for an HTTP error,
+    else the exception's type), so its chapter says why with a hint."""
     from services import project_summary, retained_results
     from services.pypsa_service import PyPSAService
     from services.workflow_tools import solve_freshness
@@ -89,6 +92,7 @@ def read_sources(project_root: Any = None) -> dict | None:
         return None
     current = solve_freshness().get("results_current") is True
     summary = None
+    failed: dict[str, str] = {}
     try:
         summary = project_summary.summarise(
             ctx.network, solver_config=(ctx.solver_state or {}).get("solver_config"),
@@ -96,6 +100,7 @@ def read_sources(project_root: Any = None) -> dict | None:
             root=project_root, live_ctx=ctx) if project_root is not None else None
     except Exception as exc:  # noqa: BLE001 - stated as not established
         logger.info("reports: model summary not read: %s", exc)
+        failed[MODEL_SUMMARY] = _why(exc)
     reads: dict[str, dict | None] = {}
     if current:
         for a in retained_results.ADAPTERS:
@@ -103,9 +108,20 @@ def read_sources(project_root: Any = None) -> dict | None:
                 out = a.capture({})
             except Exception as exc:  # noqa: BLE001 - stated as not established
                 logger.info("reports: %s not read: %s", a.section, exc)
+                failed[a.section] = _why(exc)
                 out = None
             reads[a.section] = out if isinstance(out, dict) and out.get("status") != "not_kept" else None
-    return {"current": current, "summary": summary, "reads": reads}
+    return {"current": current, "summary": summary, "reads": reads, "failed": failed}
+
+
+def _why(exc: Exception) -> str:
+    """A failed read, short: `"409 project_busy"` for an HTTP error."""
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        return type(exc).__name__
+    detail = getattr(exc, "detail", None)
+    kind = detail.get("error_kind") if isinstance(detail, dict) else None
+    return f"{status} {kind}" if kind else str(status)
 
 
 # ── the chapters (pure) ──────────────────────────────────────────────────────
@@ -268,15 +284,27 @@ def payloads(sources: dict) -> dict[str, tuple[dict | None, str | None]]:
         LOAD_FLOW: lambda: _load_flow(reads.get("loadflow")),
     }
     out: dict[str, tuple[dict | None, str | None]] = {}
+    failed = sources.get("failed") or {}
+
+    def no_read(sid: str, keys) -> str:
+        why = "; ".join(failed[k] for k in keys if k in failed)
+        return NO_READ[sid] + (READ_FAILED.format(why=why) if why else "")
     summary = sources.get("summary")
     out[MODEL_SUMMARY] = (limit_facts(_model_summary(summary)), None) if isinstance(summary, dict) \
-        else (None, NO_READ[MODEL_SUMMARY])
+        else (None, no_read(MODEL_SUMMARY, (MODEL_SUMMARY,)))
     for sid, build in built.items():
         if not current:
             out[sid] = (None, NOT_CURRENT)
             continue
         payload = build()
-        out[sid] = (limit_facts(payload), None) if payload else (None, NO_READ[sid])
+        if not payload:
+            out[sid] = (None, no_read(sid, _READS[sid]))
+            continue
+        why = "; ".join(failed[k] for k in _READS[sid] if k in failed)
+        if why:  # a partial chapter says which of its reads failed
+            payload = {**payload, "not_read": "part of this chapter" + READ_FAILED.format(why=why).rstrip(")")
+                       .replace(" (its", ": its", 1)}
+        out[sid] = (limit_facts(payload), None)
     return out
 
 

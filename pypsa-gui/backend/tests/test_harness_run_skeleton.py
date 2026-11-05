@@ -595,3 +595,43 @@ def test_another_projects_context_never_spends_a_gate(session, site):
     with foreground(two_buses()) as front:
         tasks._advance_run(path, front)
     assert stored(root, task['task_id']) == before
+
+
+def test_a_run_report_call_without_a_bound_context_never_reads_the_foreground(session, site, monkeypatch, client,
+                                                                             session_ctx, api_project):
+    """Issue 07 (GK B C6): a run's generate_report reached with the run's
+    context set (`RUN_CONTEXT`) but no request binding, while another project
+    is in the foreground, reads the run's project or is refused; it never
+    reads the foreground project's evidence."""
+    from fastapi import HTTPException
+    from routers import report_jobs
+    from services import assistant_tasks
+    from services.pypsa_service import PyPSAService
+    project_id, _ = site
+    run_ctx = PyPSAService.get_active_context()
+    api_project("Front Site")  # a real project the owner can read, now the session's foreground
+    front_ctx = session_ctx(client)
+    assert str(front_ctx.project_uuid) != str(project_id) and str(run_ctx.project_uuid) == str(project_id)
+    seen = []
+
+    def evidence_for(project):
+        seen.append({str(project.uuid), str(PyPSAService.get_active_context().project_uuid)})
+        raise HTTPException(400, {"error_kind": "no_evidence", "message": "stopped by the test"})
+
+    monkeypatch.setattr(report_jobs, "_provider_or_400", lambda profile: object())
+    monkeypatch.setattr(report_jobs, "_resolve_profile", lambda: object())
+    monkeypatch.setattr(report_jobs, "_evidence_for", evidence_for)
+    front_id = str(front_ctx.project_uuid)
+    binding = PyPSAService.bind_request_context(front_ctx)  # the foreground, as the request scope sees it
+    token = assistant_tasks.RUN_CONTEXT.set(run_ctx)
+    try:
+        with pytest.raises(HTTPException) as refused:
+            chat_tools.generate_report()
+    finally:
+        assistant_tasks.RUN_CONTEXT.reset(token)
+        PyPSAService.reset_request_context(binding)
+    assert all(front_id not in s for s in seen), (seen, front_id)
+    if seen:  # it read: the run's project and only it
+        assert seen == [{str(project_id)}]
+    else:  # it was refused before any read, naming why
+        assert refused.value.detail["error_kind"] == "project_changed"
