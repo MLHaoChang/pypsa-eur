@@ -9,6 +9,7 @@ snapshot. While any snapshot is unknown the run records no converged count, so
 the sealed run carries its total alone and is refused as not known to have
 converged.
 """
+
 import queue
 
 import numpy as np
@@ -29,8 +30,11 @@ def _frame(rows, index=HOURS, columns=("sn0",)):
 # ── the pure reader ─────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("pf_result", [None, {}, {"converged": None}, {"converged": "yes"}],
-                         ids=["none", "no_key", "none_value", "not_a_frame"])
+@pytest.mark.parametrize(
+    "pf_result",
+    [None, {}, {"converged": None}, {"converged": "yes"}],
+    ids=["none", "no_key", "none_value", "not_a_frame"],
+)
 def test_a_result_without_a_frame_is_unknown(pf_result):
     assert _convergence_rows(pf_result, HOURS) == [None, None, None]
 
@@ -51,16 +55,22 @@ class _RaisingFrame(pd.DataFrame):
         raise RuntimeError("reindex raised")
 
 
-@pytest.mark.parametrize("pf_result", [
-    _Raising(),
-    {"converged": _RaisingFrame({"sn0": [True, True, True]}, index=HOURS)},
-], ids=["converged_access_raises", "frame_read_raises"])
+@pytest.mark.parametrize(
+    "pf_result",
+    [
+        _Raising(),
+        {"converged": _RaisingFrame({"sn0": [True, True, True]}, index=HOURS)},
+    ],
+    ids=["converged_access_raises", "frame_read_raises"],
+)
 def test_a_result_whose_read_raises_is_unknown(pf_result):
     assert _convergence_rows(pf_result, HOURS) == [None, None, None]
 
 
 def test_a_frame_with_no_sub_network_columns_is_unknown():
-    assert _convergence_rows({"converged": pd.DataFrame(index=HOURS)}, HOURS) == [None] * 3
+    assert (
+        _convergence_rows({"converged": pd.DataFrame(index=HOURS)}, HOURS) == [None] * 3
+    )
 
 
 def test_a_nan_cell_is_unknown_not_converged():
@@ -81,7 +91,9 @@ def test_a_snapshot_missing_from_the_frame_is_unknown_and_extra_rows_are_ignored
 
 
 def test_a_known_false_wins_over_unknown_for_its_snapshot():
-    conv = _frame({"a": [True, False, True], "b": [True, np.nan, np.nan]}, columns=("a", "b"))
+    conv = _frame(
+        {"a": [True, False, True], "b": [True, np.nan, np.nan]}, columns=("a", "b")
+    )
     assert _convergence_rows({"converged": conv}, HOURS) == [True, False, None]
 
 
@@ -113,8 +125,11 @@ def _oks(out):
     return [row["ok"] for row in out["ac_pf_convergence_list"]]
 
 
-@pytest.mark.parametrize("pf_result", [None, {}, _Raising()],
-                         ids=["none", "no_key", "converged_access_raises"])
+@pytest.mark.parametrize(
+    "pf_result",
+    [None, {}, _Raising()],
+    ids=["none", "no_key", "converged_access_raises"],
+)
 def test_stage_2_without_convergence_evidence_records_unknown(monkeypatch, pf_result):
     n, out = _stage(monkeypatch, pf_result)
     assert _oks(out) == [None] * len(LOAD)
@@ -142,11 +157,15 @@ def test_stage_2_with_one_unknown_snapshot_records_no_converged_count(monkeypatc
 
 def test_stage_2_multi_period_counts_every_snapshot(monkeypatch):
     n = _hub(multi_period=True)
-    conv = pd.DataFrame({"sn0": [True] * (len(n.snapshots) - 1)}, index=n.snapshots[:-1])
+    conv = pd.DataFrame(
+        {"sn0": [True] * (len(n.snapshots) - 1)}, index=n.snapshots[:-1]
+    )
     monkeypatch.setattr(n, "pf", lambda *a, **k: {"converged": conv})
     out = run_ac_pf_stage(n, SolverConfig(), queue.Queue())
     assert _oks(out) == [True] * (len(n.snapshots) - 1) + [None]
-    assert [row["period"] for row in out["ac_pf_convergence_list"]] == [2030] * 3 + [2040] * 3
+    assert [row["period"] for row in out["ac_pf_convergence_list"]] == [2030] * 3 + [
+        2040
+    ] * 3
     assert out["ac_pf_unknown_count"] == 1 and out["ac_pf_converged_count"] is None
     assert out["ac_pf_total_snapshots"] == len(n.snapshots) == 6
 
