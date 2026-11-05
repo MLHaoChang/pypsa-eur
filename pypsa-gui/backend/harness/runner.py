@@ -463,6 +463,8 @@ class Runner:
                     ticket = (task["task_id"], step["id"], step.get("attempt_id"))
                     swept += continuation.expire_engine(path, ticket, instance=self.instance, now=self.clock(),
                                                         lapsed_ok=True)
+            from harness import run_explore
+            swept += run_explore.expire(path, boot=self.instance, clock=self.clock)  # E10
         return swept
 
     # one tick
@@ -672,7 +674,7 @@ class Runner:
         _update(path, change)
 
     def _step(self, path, ctx, session):
-        from harness import research, run_loops
+        from harness import research, run_explore, run_loops
         from services import run_envelope, run_profiles
         tasks = _tasks()
         taken = {}
@@ -689,7 +691,10 @@ class Runner:
             raise _Stop("needs_user", "budget")
         if run_envelope.lapsed(path) and run_envelope.end(path, "expired", "expires_at"):
             raise _Stop("paused", "envelope_expired")  # issue 03: nothing re-grants itself
-        if any(s["status"] == "uncertain" for s in task["steps"]):
+        if run_explore.advance(path, boot=self.instance, clock=self.clock):
+            task = _read(path)  # issue 06: each case judged on its own gate; a failed case never stops the run
+            run = task["run"]
+        if any(s["status"] == "uncertain" and not s.get("judged_by") for s in task["steps"]):
             raise _Stop("needs_user", "uncertain")
         if not tasks._may_write(task):
             raise _Stop("needs_user", "locked")
@@ -719,6 +724,8 @@ class Runner:
             return self._agent_round(path, ctx, session, task)
         if research.due(task):
             return self._research_turn(path, ctx, session, task)
+        if run_explore.due(task):
+            return self._explore_turn(path, ctx, session, task)
         if task["status"] == "paused_at_card":
             card = task["pause"]["card"]
             decision = decide(task, card, None)
@@ -746,6 +753,8 @@ class Runner:
         if step["status"] != "pending":
             raise _Stop("needs_user", "step_" + step["status"])
         args = tasks._resolve(step["args"], task["steps"])
+        if run_explore.check_step(task, step, args) is not None:
+            raise _Stop("needs_user", "explore_args")  # E1: only the args harness code built from run.cases
         decision = None
         if self._policy(session, step["tool"]) != "none":
             decision = decide(task, step["id"], args)
@@ -840,6 +849,36 @@ class Runner:
         self._inflight[task_id] = (path, thread)
         thread.start()
         return "research"
+
+    def _explore_turn(self, path, ctx, session, task):
+        """The explore stage's one proposal turn (issue 06) on a helper
+        thread, as a research turn: once per stage, never retried."""
+        from harness import run_explore
+        from services import harness_locks
+        harness_locks.hold(task["project_id"], task["task_id"])
+        task_id = task["task_id"]
+
+        def turn():
+            from harness import send_reservation
+            session._undo_snapshotted = []
+            try:
+                run_explore.run_turn(path, ctx, session, provider=self._round_provider(path, session),
+                                     recheck=lambda: self.recheck(task_id, path, ctx),
+                                     boot=self.instance, clock=self.clock)
+            except Exception:  # noqa: BLE001 — a turn that errors is recorded; its admitted cases still run
+                logger.exception("harness runner: explore turn of %s errored", task_id)
+                run_explore.failed_turn(path, boot=self.instance, clock=self.clock)
+            finally:
+                try:
+                    send_reservation.close_open(path, boot=self.instance)
+                except Exception:  # noqa: BLE001 — a ledger fault never keeps the runner from waking
+                    logger.exception("harness runner: closing the explore sends of %s failed", task_id)
+                self.wake(path)
+        context = contextvars.copy_context()
+        thread = threading.Thread(target=context.run, args=(turn,), name=f"harness-ex-{task_id[:8]}", daemon=True)
+        self._inflight[task_id] = (path, thread)
+        thread.start()
+        return "explore"
 
     def _hold_if_effectful(self, task, step):
         from services import harness_locks
