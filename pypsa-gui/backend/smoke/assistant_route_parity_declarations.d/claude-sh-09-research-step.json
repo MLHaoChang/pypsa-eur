@@ -1,0 +1,9 @@
+{
+ "limitations": [
+  {
+   "method": "POST",
+   "path": "/api/chat/runs/{task_id}/research",
+   "reason": "conversation-transport"
+  }
+ ]
+}

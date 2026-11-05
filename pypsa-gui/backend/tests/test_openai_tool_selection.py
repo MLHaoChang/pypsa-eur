@@ -38,7 +38,7 @@ def test_controls_survive_more_explicit_requests_than_the_provider_limit():
 
 
 def test_profile_limits_only_official_endpoint_and_never_mutates_catalogue(monkeypatch):
-    monkeypatch.setattr(wiring, "_tools_payload", lambda: list(TOOLS))
+    monkeypatch.setattr(wiring, "_tools_payload", lambda *a, **kw: list(TOOLS))
     original = list(TOOLS)
     official = profile()
     assert len(wiring._tools_payload_for_profile(official)) == 128

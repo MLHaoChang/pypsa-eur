@@ -346,8 +346,11 @@ def test_an_acl_loss_between_preflight_and_pickup_refuses_with_no_write(eh, gap,
 
 def test_eh_site_envelope_and_tunables_are_unchanged():
     """The envelope SH-ENVELOPE-1 granted, pinned: this issue narrows nothing."""
-    block = json.dumps({"envelope": run_profiles.EH_SITE["envelope"], "tunable": run_profiles.EH_SITE["tunable"]},
-                       sort_keys=True)
+    envelope = dict(run_profiles.EH_SITE["envelope"])
+    # Issue 09 (GK B Q1, in place): eh_site@1 now allows research under the €2 cap. The rest is pinned.
+    assert envelope["research"] == {"allowed": True, "cost_cap_eur": 2.0}
+    envelope["research"] = {"allowed": False, "cost_cap_eur": 2.0}
+    block = json.dumps({"envelope": envelope, "tunable": run_profiles.EH_SITE["tunable"]}, sort_keys=True)
     assert hashlib.sha256(block.encode()).hexdigest() == PINNED_EH_SITE
 
 

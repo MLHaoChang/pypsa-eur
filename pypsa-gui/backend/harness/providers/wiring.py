@@ -275,7 +275,7 @@ def _bound_project_kind(turn_ctx) -> str | None:
         return None
 
 
-def _tools_payload(turn_ctx=None) -> list[dict[str, Any]]:
+def _tools_payload(turn_ctx=None, *, stage_only: bool = False) -> list[dict[str, Any]]:
     """The `tools` field of the neutral `LLMRequest`: chat_tools_schema.TOOLS,
     minus the project-scoped gridspine tools unless the bound project is a
     planning → dynamics one.
@@ -287,8 +287,11 @@ def _tools_payload(turn_ctx=None) -> list[dict[str, Any]]:
     capacity-expansion tools simply find no network to act on, which they
     already report. Only the gridspine tools are gated, because on any other
     project every one of them would 409 before doing anything.
+
+    Tools offered only in a harness run's own turns (`STAGE_ONLY_TOOLS`) are
+    left out unless `stage_only`, which a run's stage allowlist passes.
     """
-    tools = list(TOOLS)
+    tools = [t for t in TOOLS if stage_only or t["name"] not in STAGE_ONLY_TOOLS]
     if _bound_project_kind(turn_ctx) != "planning_dynamics":
         tools = [
             t for t in tools
@@ -298,7 +301,7 @@ def _tools_payload(turn_ctx=None) -> list[dict[str, Any]]:
 
 
 _OPENAI_TOOL_LIMIT = 128
-from harness.toolsets import CONTROL_TOOLS as _HARNESS_TOOL_NAMES, filter_tools
+from harness.toolsets import CONTROL_TOOLS as _HARNESS_TOOL_NAMES, STAGE_ONLY_TOOLS, filter_tools
 _SELECTION_STOP_WORDS = frozenset({"the", "and", "for", "with", "this", "that", "from", "then", "once", "using", "call", "please", "tool", "tools"})
 # Curated (trigger words, read tools) pairs. A query word in the triggers offers
 # the tools ahead of description matches, so words other tools' descriptions
@@ -377,10 +380,10 @@ def _tools_payload_for_profile(profile: Any, query: str = "", history=None) -> l
     """
     if not profile.tools:
         return []
-    tools = _tools_payload()
     from services import chat_tools
     session = chat_tools.chat_session()
     stage_tools = getattr(session, "stage_tools", None)
+    tools = _tools_payload(stage_only=stage_tools is not None)
     if stage_tools is not None:
         # A harness run's agent turn (study harness issue 04, §6.3): its stage's
         # allowlist only, in catalogue order; no toolset, no external tools.

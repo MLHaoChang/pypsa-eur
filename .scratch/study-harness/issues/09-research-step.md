@@ -50,3 +50,16 @@ Owner decision HARNESS-970-1 (3 Nov). HH-07 (sourced research, values the user c
 5. **Cap.** The research step's cost cap stays €2 by default and €10 at most (SH-RESEARCH-CAP-1). Issue 24's durable reservation counts research sends against this cap and the run's total; it must not lower or block it.
 
 HH-07 also lists HH-10 (immutable solves, issue 05's folded section) as a prerequisite before any automatic solve follows a researched value; here every researched value is carded anyway, so nothing automatic follows until 05's section is built.
+
+## GK B plan re-confirm (4 Nov, against master 2501ae2c)
+
+GO WITH CHANGES; the 28 Oct B3 GO still holds.
+
+- Q1: eh_site@1 is changed in place (no @2; the pilot has no shipped runs, and L2 lands in @1 too). Research runs only when the run's granted envelope has `research.allowed`; a run granted before research existed never researches (tested).
+- Q2: the source-ledger write is a `record_source` catalogue tool, built after #1079 merges.
+- Q3: never overshoot (SH-RESEARCH-CAP-1 is a hard cap). No own metering stop: the research provider wraps SH-24's reservation wrapper, `Research(Reserving(base))` with `scope="research"` reading `envelope.research.cost_cap_eur`, so the reservation sees the server tools; SH-24 bounds search/fetch fees by max_uses × fee. `run.budget.used.research_eur` comes from SH-24's settled holds, not a second meter.
+- R1: server tools are offered only on research turns; a test shows L1, L2 and chat requests never carry them.
+- R2: the verification text is this turn's retained fetched text; the quote match is whitespace-normalised only (NFC, no case or other Unicode folding).
+- R3: retained page text is size-capped; fetched content offered back to the model is fenced as untrusted data.
+- R4: a confirmed research value is written only through the gap tool's own card; an envelope covering attach_tariff still cards a `research_ref` call (tested).
+- R5: `research_unit_mismatch`, `research_not_available` and `research_cap_reached` go in this branch's tool-error-kinds.d fragment.

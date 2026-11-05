@@ -290,6 +290,11 @@ class AnthropicProvider:
                 "cache_create_tokens": int(
                     getattr(usage, "cache_creation_input_tokens", 0) or 0),
             }
+            server = getattr(usage, "server_tool_use", None)
+            if server is not None:
+                # Server search and fetch calls, billed per request (issue 09).
+                usage_out["search_requests"] = int(getattr(server, "web_search_requests", 0) or 0)
+                usage_out["fetch_requests"] = int(getattr(server, "web_fetch_requests", 0) or 0)
         yield LLMEvent(
             type="message_done",
             blocks=[serialise_block(b)
