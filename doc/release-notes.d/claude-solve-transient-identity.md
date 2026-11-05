@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A study run no longer refuses its next step as `brief_stale` after a short-horizon solve. While a solve runs, the run's input fingerprint now reads the inputs the solve started from, not the values the solve scales or fills in place and later restores (for example a horizon-scaled `capital_cost`).
