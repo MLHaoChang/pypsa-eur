@@ -16,7 +16,6 @@ from services.redaction import (  # moved 2026-08-13 (provider seam, Task 1)
 from pathlib import Path
 from typing import Any
 from harness import fence as harness_fence
-from harness.fence import _UNTRUSTED_CLOSE, _UNTRUSTED_OPEN
 
 
 # Cap on a single tool result's serialized size handed to the model. Oversized
@@ -192,8 +191,7 @@ def _error_result_content(detail: Any, exc: BaseException | None, error_kind: st
 
     free_text = _redact_secrets_in_str(free_text[:_ERROR_DETAIL_CAP])
     free_text = _redact_storage_roots(free_text)
-    free_text = harness_fence._neutralise_untrusted_delimiters(free_text)
-    return f"{error_kind}\n{_UNTRUSTED_OPEN}\n{free_text}\n{_UNTRUSTED_CLOSE}"
+    return error_kind + "\n" + harness_fence.fenced(free_text, sep="\n")
 
 
 _STORAGE_PLACEHOLDER = "<project storage>"
@@ -340,5 +338,4 @@ def _result_to_anthropic_content(result: Any, marker_hint: str | None = None) ->
     # relative to the truncation cut is not load-bearing for safety -- a cut
     # only removes characters, so it cannot form a delimiter out of text that
     # no longer contains one.
-    body = harness_fence._neutralise_untrusted_delimiters(body)
-    return f"{_UNTRUSTED_OPEN}\n{body}\n{_UNTRUSTED_CLOSE}"
+    return harness_fence.fenced(body, sep="\n")

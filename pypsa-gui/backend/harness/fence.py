@@ -92,3 +92,10 @@ def _neutralise_untrusted_delimiters(text: str) -> str:
                 del out[-n:]
                 break
     return "".join(out)
+
+
+def fenced(text: str, *, sep: str = "") -> str:
+    """`text` as one untrusted-data fence: open + sep + neutralised text + sep + close.
+
+    The one builder for a single-body fence (SH-28). `sep` is "" or "\n"."""
+    return _UNTRUSTED_OPEN + sep + _neutralise_untrusted_delimiters(text) + sep + _UNTRUSTED_CLOSE
