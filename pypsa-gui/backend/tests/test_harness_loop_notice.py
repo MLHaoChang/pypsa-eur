@@ -175,6 +175,9 @@ def test_the_run_view_shows_the_notice_failure(
         view["loop"]["notice"]["sent"] is False
         and view["loop"]["notice"]["error"] == "send_failed"
     )
+    # The run card reads it at `run.loop.notice` of the view the API serves (frontend RunMonitor).
+    served = assistant_tasks._view(record, fresh=True)
+    assert served["run"]["loop"]["notice"]["error"] == "send_failed"
 
 
 @pytest.mark.parametrize("ending", ["no_progress", "unverified_write", "error"])

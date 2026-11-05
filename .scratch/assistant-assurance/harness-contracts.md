@@ -436,3 +436,21 @@ remain unavailable. Same-basis retained comparisons, bounded follow-ups,
 native restart recovery, JSON/ZIP exports and profile rollback use shared guards.
 The [bounded plan and independent arithmetic](storage-economics-plan.md) define
 the acceptance boundary; full-domain review and release calibration remain open.
+
+## Frozen version-1 contracts (A0.4, 2026-11-04)
+
+`pypsa-gui/backend/harness/assurance_contracts.v1.json` is the reviewed snapshot
+of every server-owned v1 contract: `request_scope`, `observed_draft`,
+`computed_draft`, `effect_guard`, `profiles` (metrics and definitions per
+profile) and `checked_tools` (input-schema SHA-256). `tests/test_assurance_contracts.py`
+fails when the live contracts differ. To change a contract, review it, then run
+`python -m harness.assurance_contracts --write` from `pypsa-gui/backend`. Each
+contract declares a direction in `directions`. The server validates an `accepts`
+contract (`request_scope`, the drafts, `effect_guard`). There, an optional field,
+enum value or wider bound is additive. Removal, narrowing or a new required field
+breaks. A consumer reads a `returns` contract (`profiles`, `checked_tools`). There,
+every existing entry is frozen and only a new entry is additive. A break needs a
+new profile version beside the old one, or a protocol version bump. A contract with
+no direction fails the build. `pending` lists contracts not yet
+frozen, with their owning tickets. The compatibility rule is owner decision
+AA-V1-CHANGE-1.

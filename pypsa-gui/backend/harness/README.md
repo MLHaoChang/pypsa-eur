@@ -1291,6 +1291,13 @@ lifespan after the solve queue and is off under pytest (tests build their own
     state and the app link. It leaves out the run title, which the model
     wrote, and never carries values.
   - `run.notices` keeps the log.
+  - **`loop.notice`** (issue 25) is the email about an ended agent loop
+    (`no_progress`, `exhausted`, `unverified_write`, `error`), in the run view
+    as `loop.notice`: `{sent, error?}`. `sent` is `null` while claimed, `true`
+    once sent, `false` with `error` `send_failed`, `no_address` or `uncertain`
+    (a claim with no result after 60 s; never re-sent). It is absent when
+    `notify.email` was not granted. The chat's run card (`RunMonitor`) shows it
+    on a `needs_user` run as one line: nothing while `null` or absent.
 
 ### The approval envelope (study harness issue 03)
 
@@ -1369,6 +1376,48 @@ else.
   and a step the user approved on a card is not envelope-admitted; these
   still settle from a fresh read after the step, so a user edit landing
   during such a step is taken into the chain.
+- **Create at grant (issue 21 §2, GK B A1-A3, R1-R3).** A plan whose
+  proposed envelope carries a `setup` entry (`run_envelope.set_setup`, from
+  `start_task`'s `run.intake`) hands over at the grant: `decide` checks the
+  card's intake digest and each source's sha256 (`run_intake.check_grant`),
+  then `run_handover.hand_over` runs its precheck under the hand-over lock
+  (the run not over, the brief's inputs and requirements unmoved) and only
+  then records the user's decision (`approvals.decided(by="user")`), once:
+  a refused grant and its retry record nothing. It creates the project
+  through the route's own first half (`_materialise_from_template`, no
+  context swap) and starts the run there
+  (`assistant_tasks.handover_starter`); the host task ends `completed`,
+  reason `handed_over`. The new run's envelope is granted by
+  `run_envelope.grant_handover` before anything can wake it: it carries the
+  host decision id and grant digest, equal to its task's `run.origin`, or
+  `_standing` refuses every admission with `handover_unbound` (A2); its
+  chain's first link is the fingerprint after creation. Lock order (R3):
+  the hand-over's cross-process `durable.file_lock` (`<task>.handover.lock`)
+  first, then the new project's `mutation_lock` (held across setup, upload
+  copies and the task start); the host's `mutation_lock` is never taken
+  while the new one is held; `assistant_tasks._LOCK` and
+  `durable_conversation._LOCK` last (`_start_run` and the brief re-check
+  take them under the new project's lock). `decide` holds no lock when it
+  calls `hand_over`.
+- **Data request and answers (issue 21 §3-4, B1-B4).** When L1 ends without
+  a pass, `_advance_run` reads the data items outside the task lock
+  (`run_loops.data_gaps`: envelope gap targets still unset, profile
+  `inputs.required` items still absent) and, under it, opens one request
+  (`run_loops.data_request`): `run.waiting = {kind: "data", ref, items}`,
+  no item asked twice in a run. A card write the owner approves in ordinary
+  chat runs inside `run_envelope.answering`, which reads the identity before
+  and after and runs the write under the project's `mutation_lock` then
+  `solver_state_lock`, as `admitted_write` does, so no other write lands in
+  between (B3). The diff is what the write changed in the network
+  (`_inputs`/`_changed`: every static cell and time series, a component added
+  or removed, the network-wide inputs), never the card's rows (B2).
+  `settle_answer` makes it an answer row on the chain only when
+  `run_answers.answer` admits it under the task lock (open request, owner,
+  own project, card decision, whole diff inside the open items, chain head
+  equal to the identity before the write). Anything else stays drift, as
+  does a write whose locks or inputs cannot be had. A complete request
+  clears `waiting` and calls `resume_task`, which checks the gate again from
+  native facts.
 - **Immutable queued solve (issue 05, HH-10).** Inside that admitted write,
   `solve_queue_enqueue` captures the input the identity compare just checked
   (`services/solve_capture.py`):
@@ -1449,6 +1498,42 @@ restores another horizon break `preserve_horizon`. The per-turn addendum
 as data and marks an evaluation stale after a manual edit, which it never
 blocks. A study brief records `{thread_id, rev, items}`; `assistant_tasks._stale`
 reads a moved `rev` as `brief_stale`.
+
+### The research step (study harness issue 09)
+
+`harness/research.py`, the ledger in `services/source_ledger.py`, the provider
+capability in `harness/providers/research.py` (the only place that names the
+vendor's server tools). A profile's `research.gaps` mark what a run may look up
+(eh_site@1: the import tariff, stage `inputs`, EUR/MWh, energy charge excl.
+VAT). On entry to such a stage the runner runs one research turn
+(`research.due`, checked on the tick after the stage's entry, before its
+steps run; a confirmed value's steps carry the stage's prefix, so its gate
+waits for them), and only when
+the run's granted envelope has `research.allowed`: a run granted without it
+never researches.
+
+The turn's provider is `ResearchProvider(ReservingProvider(base))`; each send
+runs inside `send_reservation.research()`, so the reservation holds it under
+scope "research":
+web search and fetch are added to its requests only (never to a chat, L1 or L2
+request), and every send is held against `envelope.research.cost_cap_eur`
+(SH-RESEARCH-CAP-1, €2 by default, €10 at most) and the run's total before it
+goes out, server-tool fees included, so research never overshoots. A refused
+send ends the turn `cap_reached`; the gaps are listed and the run goes on. A
+provider without web search marks the step `not_available`.
+
+The turn offers `READ_TOOLS` plus `record_source` (`STAGE_ONLY_TOOLS`: in no
+other payload) and installs no write guard, so no write is reachable whatever
+the envelope covers; fetched pages are framed as untrusted data.
+`record_source` only proposes: `source_ledger.propose` refuses another unit or
+basis and checks the url and quote against the pages fetched in that turn
+(whitespace-folded only); anything else is an `unverified source`, never shown
+as sourced and never confirmable. A verified row puts the run `needs_user`
+with `waiting = {kind: research_confirm}`; `POST /api/chat/runs/{task_id}/research`
+(`research.decide`) confirms or rejects it. Confirming rejects the gap's other
+rows and adds two run steps, `put_library_item` then `attach_tariff`, each
+carrying `research_ref`, which `run_envelope` never admits: each is the user's
+own card. Rows, verdicts and listed gaps stay in `run.research` for the report.
 
 ### Send reservation (study harness issue 24)
 

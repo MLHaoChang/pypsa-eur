@@ -3,7 +3,7 @@ import pytest
 
 from harness.catalogue import TOOLS, safety_tier_for
 from harness.providers.fake import FakeProvider
-from harness.toolsets import CONTROL_TOOLS
+from harness.toolsets import CONTROL_TOOLS, STAGE_ONLY_TOOLS
 from services import chat_service, chat_tools, llm_config
 from tests.test_workflow_tools import baseline, helpers_state  # noqa: F401
 
@@ -39,8 +39,10 @@ def test_every_discovered_eligible_tool_can_be_offered_on_the_next_model_request
         assert item['name'] == tool['name']
         assert item['required'] == tool['input_schema']['required']
         assert item['safety_tier'] == safety_tier_for(tool['name'])
-        eligible = (kind == 'planning_dynamics' or not tool['name'].startswith('gridspine_')
-                    or tool['name'] == 'gridspine_create_study')
+        # Stage-only tools are offered only inside a harness run's own turns.
+        eligible = tool['name'] not in STAGE_ONLY_TOOLS and (
+            kind == 'planning_dynamics' or not tool['name'].startswith('gridspine_')
+            or tool['name'] == 'gridspine_create_study')
         assert item['eligible_for_project'] is eligible, tool['name']
         chat_tools.use_toolset('all')
         provider = FakeProvider([{

@@ -419,7 +419,11 @@ def start_task(title: str, steps: list[dict], request_id: str, brief: dict | Non
     if not isinstance(title, str) or not 1 <= len(title.strip()) <= 120 or not isinstance(request_id, str) or not 1 <= len(request_id) <= 64:
         _refuse("invalid_task", "Provide a title and a stable request_id (maximum 64 characters).", 422)
     if run is not None:
-        return _start_run(session, title, request_id, run, *_check_run(run, steps, brief))
+        # Issue 21: the model's intake citations, read on the open project.
+        intake_request = run.get("intake") if isinstance(run, dict) else None
+        run = {k: v for k, v in run.items() if k != "intake"} if isinstance(run, dict) else run
+        return _start_run(session, title, request_id, run, *_check_run(run, steps, brief),
+                          intake_request=intake_request)
     most, chars = _LIMITS[brief is not None]
     if not isinstance(steps, list) or not 1 <= len(steps) <= most:
         _refuse("invalid_task", f"A {'study brief' if brief is not None else 'task'} needs 1–{most} ordered steps; "
@@ -504,8 +508,19 @@ def _next_stage(run, name):
     return next((s for s in STAGES[STAGES.index(name) + 1:] if run["stages"][s]["status"] != "skipped"), None)
 
 
-def _start_run(session, title, request_id, run, profile, brief):
+def _start_run(session, title, request_id, run, profile, brief, *, origin=None, intake=None, grant=None,
+               intake_request=None):
     root, project, owner = _authority()
+    if intake_request is not None:
+        from services import run_intake
+        try:  # read before the lock: files and turns, nothing written (R3)
+            intake = run_intake.take(intake_request, profile, PyPSAService.get_active_context(), owner, project)
+        except run_intake.IntakeError as exc:
+            if exc.kind == "not_found":
+                _refuse("not_found", str(exc), 404)
+            if exc.kind == "intake_value_supplied":
+                _refuse("intake_value_supplied", str(exc), 422)
+            _refuse("invalid_intake", str(exc), 422)
     task_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{project}:{owner}:{request_id}"))
     path = root / "assistant_tasks" / (task_id + ".json")
     with _LOCK:
@@ -522,18 +537,73 @@ def _start_run(session, title, request_id, run, profile, brief):
                       {"status": "pending", "attempts": 0} for name, stage in profile["stages"].items()}
             task = {"version": 3, "task_id": task_id, "owner_id": owner, "project_id": project,
                     "title": title.strip(), "status": "ready", "steps": [], "brief": brief, "fingerprint": fingerprint,
-                    "run": {**run, "status": "running", "stage": "intake", "stages": stages}}
+                    "run": {**run, "status": "running", "stage": "intake", "stages": stages,
+                            # Issue 21: the host task a hand-over started this run from,
+                            # and the confirmed intake rows it was created with.
+                            **({"origin": dict(origin)} if origin else {}),
+                            **({"intake": intake} if intake is not None else {})}}
             record = _requirements_record(session)
             if record:
                 task["requirements"] = record  # issue 23: a run inherits the confirmed requirements
             _save(path, task)
             from services import run_envelope
             run_envelope.propose(path, task, profile)  # issue 03: the plan-review card's envelope
+            if intake_request is not None:
+                run_envelope.set_setup(path, profile["templates"][0], intake["project_name"], intake["digest"])
+            if grant is not None:
+                # Issue 21 A2: a hand-over's run starts inside the host card's grant,
+                # before anything can wake it.
+                grant(path, task, RUN_CONTEXT.get() or PyPSAService.get_active_context())
         session.task_id = task_id
     _advance_run(path)
     _wake(path)
     with _LOCK:
         return _with_envelope(path, _view(_read(task_id)[1]))
+
+
+def handover_starter(host_task: dict, profile: dict, owner_id: str, *, grant=None, handover=None):
+    """`start(row, ctx)` for `run_handover.hand_over` (issue 21 §2): the
+    host's run started on the created project, through that project's own
+    context (A3). The foreground session is not touched: no session's
+    `task_id` moves to the new task. `grant(path, task, ctx)` grants the new
+    run's envelope as the host card's decision; `handover` (its decision id
+    and digest) goes on `run.origin`, which the envelope must match (A2)."""
+    from types import SimpleNamespace
+
+    from services import chat_tools
+
+    def start(row, ctx):
+        token = RUN_CONTEXT.set(ctx)
+        chat_tools.set_acting_user(owner_id)
+        try:
+            run = {k: host_task["run"][k] for k in ("profile", "mode")}
+            request_id = "handover:" + host_task["task_id"]
+            # The new task's own runner session (`_start_run`'s task id), so no
+            # chat session and no thread of the foreground is read or bound.
+            task_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{row.id}:{owner_id}:{request_id}"))
+            from services import run_envelope
+            view = _start_run(SimpleNamespace(task_id=None, session_id=run_envelope.SESSION_PREFIX + task_id),
+                              host_task["title"], request_id, run, profile, host_task.get("brief"),
+                              origin={"project_id": host_task["project_id"], "task_id": host_task["task_id"],
+                                      **(handover or {})},
+                              intake=(host_task["run"].get("intake") or {}).get("rows"), grant=grant)
+        finally:
+            RUN_CONTEXT.reset(token)
+        return view["task_id"]
+    return start
+
+
+def end_handed_over(path, intent: dict) -> dict:
+    """The host task ends `completed`, reason `handed_over`, linking the run
+    on the created project (issue 21 §2)."""
+    with _LOCK:
+        task = json.loads(Path(path).read_text())
+        run = task.get("run") or {}
+        run.update(status="completed", reason="handed_over",
+                   handed_over={k: intent.get(k) for k in ("project_id", "project_name", "task_id")})
+        task["run"], task["status"] = run, "completed"
+        _save(path, task)
+    return task
 
 
 def _with_envelope(path, view):
@@ -641,6 +711,9 @@ def _advance_run(path, ctx=None):
                 return  # an input-loop round is due: the runner's agent turn first (issue 04)
             attempts = stage["attempts"]
         gate = _gate_now(task, profile["stages"][name]["rules"], ctx)
+        # Issue 21 §3: what a failed input gate would ask for, read outside the lock.
+        gaps = run_loops.data_gaps(path, task, profile, ctx) \
+            if name == run_loops.STAGE and not gate["passed"] and run.get("loop") is not None else None
         with _LOCK:
             task = json.loads(Path(path).read_text())
             run = task["run"]
@@ -659,6 +732,8 @@ def _advance_run(path, ctx=None):
                     _wake(path)
                     return
                 stage["status"], run["status"], task["status"] = "failed", "needs_user", "needs_review"
+                if name == run_loops.STAGE and (run.get("loop") or {}).get("ended") and gaps:
+                    run_loops.data_request(task, gaps)  # one notice listing every data gap
             else:
                 if name in (run_loops.STAGE, run_loops.RESULT_STAGE):
                     run_loops.after_passed_gate(task, name)
@@ -672,6 +747,18 @@ def _advance_run(path, ctx=None):
             _save(path, task)
             if run["status"] != "running":
                 return
+
+
+def _intake_view(run):
+    """Issue 21: the plan-review card's "Inputs from the chat" section (issue
+    08 renders it), the digest a grant sends back, and what is missing."""
+    from project_templates import eh_site
+    from services import run_intake, run_profiles
+    intake = run["intake"]
+    card = run_intake.card_view(intake["rows"], run_profiles.resolve(run["profile"]), eh_site.site_params,
+                                eh_site.entered_fields)
+    return {"card": card, "digest": intake["digest"], "missing": intake.get("missing") or [],
+            **({"request": intake["request"]} if intake.get("request") else {})}
 
 
 def _run_view(task):
@@ -691,7 +778,10 @@ def _run_view(task):
         s["status"] == "completed" for s in task["steps"] if s["id"].startswith(run["stage"] + "."))
     return {"profile": run["profile"], "mode": run["mode"], "status": run["status"], "stage": run["stage"],
             **({"gate_due": True} if due else {}),
-            **({"waiting": {k: run["waiting"][k] for k in ("kind", "ref", "since")}} if run.get("waiting") else {}),
+            **({"waiting": {k: run["waiting"][k] for k in ("kind", "ref", "since", "items", "notice")
+                            if k in run["waiting"]}} if run.get("waiting") else {}),
+            **({"intake": _intake_view(run)} if isinstance(run.get("intake"), dict) else {}),
+            **({"handed_over": run["handed_over"]} if run.get("handed_over") else {}),
             **({"reason": run["reason"]} if run.get("reason") else {}),
             "next_stage": _next_stage(run, run["stage"]), "scope": (run.get("scope") or {}).get("preset"),
             "stages": stages,

@@ -411,3 +411,48 @@ section.
   plan first, plus route-policy, route-parity and control-matrix runs.
   Related: LOAD-SHAPE-1 (a shaped load profile needs a card or a
   user-confirmed intake value, never an unattended reshape).
+- 2026-11-04, GK B (19), code-plan verdict: GO WITH CHANGES. Q1 (a): split
+  `routers/projects.create_from_template` into `_materialise_from_template`
+  (files, params, meta; no context swap). The route calls it and then activates
+  as today, byte-unchanged; the harness calls only the materialise half (the
+  handler swaps the process-wide active context even with `session=None`, which
+  A3 forbids). Q2 (a): only `apply_demand_from_excel` is admitted under the
+  envelope in this issue; the other planned writes stay carded until each has
+  its §6.6 sweep test. Conditions:
+  - R1. The materialise half keeps every check the route makes for the user
+    (workspace ACL, quota, name rules, template validation); a test shows the
+    harness path refuses where the route would.
+  - R2. A3 proof: the process-wide active context (identity of
+    `PyPSAService.get_active_context()`, its `project_uuid`, its network
+    object) is unchanged across a hand-over grant (test).
+  - R3. Lock order: the hand-over `durable.file_lock` first, then the new
+    project's ctx locks; the host's `mutation_lock` is never held while the new
+    one is taken; `assistant_tasks._LOCK` and `durable_conversation._LOCK` last
+    (README order). Stated in `harness/README.md`.
+  - R4. D1's owner check uses the turn's stored author id, never a display
+    name; a turn edited or replaced after the citation (rev moved) is refused.
+  - R5. A4: the `not_found` body is byte-equal for an unknown and a foreign id,
+    and nothing reads the foreign project (no timing branch on a DB hit).
+  - R6. The digest binds each source's sha256; a source changed between the
+    card and the grant is stale and refused (test).
+  - R7. Stage 2 (`run_envelope.py`, `assistant_tasks.py`, `run_loops.py`,
+    `harness/README.md`) waits for #1079 and #1083 to merge, then master is
+    merged in first.
+- 2026-11-04, GK B (20), builder questions: Q1 (a) GO: the run on the new
+  project carries no requirements record (the new project has no thread); the
+  host keeps its own, and the grant, under the hand-over lock, is refused when
+  the host's requirements moved since the brief, compared with the value the
+  brief recorded, not a live re-read (tests: moved -> refused, no project, no
+  ledger write; the new task has no requirements record). (b), reading another
+  project's thread, is refused (A3/A4). Q2 (a) GO: the data items of the one
+  notice are computed from the state when L1 ends: envelope `gaps` targets
+  still unset, plus profile `inputs.required` items still absent (absent, not
+  falsy). Any other failed rule stays in the needs_user notice and is never a
+  data item (tests: a gap L1 filled is not listed; a missing required item is;
+  an unrelated failed rule is not). A rule->gap mapping is its own ticket.
+- 2026-11-04 (~09:10 CET), owner (SH21-SPLIT-1), via the coordinator: C1–C3
+  split to a follow-up. This issue's PR keeps `apply_demand_from_excel` carded
+  inside a run (today's behaviour); stage-2 planned writes and their admission
+  are [21c](21c-planned-write-admission.md). The acceptance line "a planned
+  write whose plan differs gets a card" holds here because every planned write
+  is carded.
