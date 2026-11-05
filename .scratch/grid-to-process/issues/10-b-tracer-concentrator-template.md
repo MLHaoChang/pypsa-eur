@@ -1,6 +1,6 @@
 # B tracer: `eh_concentrator_staged`
 
-Status: ready-for-agent (triage 2026-10-28: still blocked by 09, and by 09's measurement being within budget)
+Status: done (#869)
 Type: task
 Blocked by: 08, 09
 Gated: no (template data)

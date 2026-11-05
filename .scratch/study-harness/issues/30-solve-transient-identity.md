@@ -3,7 +3,7 @@
 
 # 30 — A solve's transient input changes leak into the run identity
 
-Status: ready-for-agent
+Status: done (#1133)
 Type: bug
 Gated: yes (GK B)
 Model tier: opus
