@@ -244,3 +244,19 @@ def test_contracts_route_serves_the_frozen_snapshot(frozen):
     ):
         assert body[key] == json.loads(json.dumps(model.model_json_schema()))
     assert {"effect_guard", "profiles", "checked_tools", "pending"} <= set(body)
+
+
+def test_the_build_ships_the_snapshot_where_the_route_reads_it():
+    """The packaged app's `/reliability/contracts` reads the snapshot from disk,
+    so the PyInstaller allowlist must ship it beside `assurance_contracts.py`."""
+    from pathlib import Path
+
+    backend = Path(__file__).resolve().parents[1]
+    spec = (backend.parent / "pypsa-gui.spec").read_text(encoding="utf-8")
+    assert (
+        '(str(BACKEND / "harness" / "assurance_contracts.v1.json"), "harness")'
+        in spec
+    )
+    module = Path(contracts.__file__).resolve()
+    assert contracts.SNAPSHOT.resolve().parent == module.parent
+    assert module.parent.relative_to(backend).as_posix() == "harness"

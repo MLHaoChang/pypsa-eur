@@ -101,6 +101,9 @@ datas = [
     (str(BACKEND / "harness" / "prompts"), "harness/prompts"),
     (str(BACKEND / "harness" / "workflows"), "harness/workflows"),
     (str(BACKEND / "harness" / "skills"), "harness/skills"),
+    # The frozen assurance contracts `GET /api/chat/reliability/contracts`
+    # serves; `harness/assurance_contracts.py` reads it beside itself.
+    (str(BACKEND / "harness" / "assurance_contracts.v1.json"), "harness"),
     # The generic defaults pack (IC U1 a): `services/library/defaults_pack/
     # loader.py` resolves `Path(__file__).parent / "versions"`; the loader is a
     # module (collected by import), its data files are not.
