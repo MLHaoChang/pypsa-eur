@@ -1543,7 +1543,14 @@ def run_ac_pf():
         lock = PyPSAService.get_lock()
         try:
             with lock:
-                ac_pf_out = run_ac_pf_stage(n, config, log_queue)
+                # SP-1: the stage's dispatch fix and controls are transient;
+                # unlocked readers hash the inputs from before it.
+                from services.workflow_tools import hold_solve_inputs
+                release_inputs = hold_solve_inputs(n, lock)
+                try:
+                    ac_pf_out = run_ac_pf_stage(n, config, log_queue)
+                finally:
+                    release_inputs()
             # Single atomic write: AC-PF result payload + lifecycle fields go
             # in together so /status can't observe a half-applied update.
             _state_update(

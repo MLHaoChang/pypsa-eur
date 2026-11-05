@@ -643,6 +643,12 @@ def run_simulation(
         )
         tail_thread.start()
         with lock:
+            # SP-1: held before the first lasting normalisation, so a reader
+            # outside the lock hashes the inputs the solve started from until
+            # `refresh()` below publishes the normalised ones: never a mix.
+            # A raise before the restore is released by the outer `finally`.
+            from services.workflow_tools import hold_solve_inputs
+            release_inputs = hold_solve_inputs(network, lock)
             phase(
                 f"Loading network state — {len(network.buses)} buses, "
                 f"{len(network.snapshots)} snapshots, mode={config.mode}, solver={config.solver_name}"
@@ -803,12 +809,12 @@ def run_simulation(
             # presolve. Cleared in both modes so PF also sees a clean state
             # whenever the user wants to resolve from scratch.
             _clear_dispatch_fix(network, phase)
-            # Issue 30: from here to the restore, readers outside the lock hash
-            # these inputs, never the transient transforms below. Held after
-            # the lasting normalisations above (transformer types, user series,
-            # dynamic indexes, a stale dispatch fix), which the network keeps.
-            from services.workflow_tools import hold_solve_inputs
-            release_inputs = hold_solve_inputs(network, lock)
+            # Issue 30 / SP-1: the lasting normalisations above (transformer
+            # types, user series, dynamic indexes, a stale dispatch fix) are
+            # done: retake the snapshot as these inputs, which the network
+            # keeps. From here to the restore, readers outside the lock hash
+            # them, never the transient transforms below.
+            release_inputs.refresh()
 
             if config.mode == "lopf":
                 # SCLOPF dispatches to PyPSA's
@@ -1589,7 +1595,15 @@ def run_simulation(
                     # from this module at module level, so importing it here (not
                     # at top level) is what keeps the dependency acyclic.
                     from services.ac_pf_service import run_ac_pf_stage
-                    ac_pf_out = run_ac_pf_stage(network, config, log_queue)
+                    # SP-1: the stage fixes dispatch into `p_set` and sets
+                    # controls in place, after the LOPF's hold was released;
+                    # unlocked readers hash the inputs from before it.
+                    from services.workflow_tools import hold_solve_inputs
+                    release_ac_pf = hold_solve_inputs(network, lock)
+                    try:
+                        ac_pf_out = run_ac_pf_stage(network, config, log_queue)
+                    finally:
+                        release_ac_pf()
                     try:
                         # Atomic update — the status-poll endpoint reads
                         # `ac_pf_results` + `ac_pf_convergence` together and
