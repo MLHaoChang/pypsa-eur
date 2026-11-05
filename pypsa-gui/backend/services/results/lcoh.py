@@ -33,7 +33,8 @@ def compute_lcoh(n, cfg, *, result_df):
     import math
 
     import pandas as _pd
-    from services.solver_service import fom_per_horizon, with_periodized_cost_defaults
+    from services.solver_service import fom_per_horizon
+    from services.solver.periodized_costs import periodized_cost_view
 
 
     links_df = n.links
@@ -73,12 +74,12 @@ def compute_lcoh(n, cfg, *, result_df):
     energy_weights = snapshot_weights(n, "generators")
 
     try:
-        with with_periodized_cost_defaults(n, cfg):
+        with periodized_cost_view(n, cfg) as view:
             # `.copy()` is load-bearing: for an asset without overnight_cost
             # PyPSA returns the `capital_cost` COLUMN itself, and the fill's
             # revert restores the typed values into that same object on exit,
             # so an uncopied read here would lose the horizon scaling.
-            cap_costs = n.c["Link"].capital_cost
+            cap_costs = view.c["Link"].capital_cost
             if not isinstance(cap_costs, _pd.Series):
                 cap_costs = _pd.Series(cap_costs, index=links_df.index)
             cap_costs = cap_costs.copy()
