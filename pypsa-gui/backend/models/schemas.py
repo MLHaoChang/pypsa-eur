@@ -94,7 +94,7 @@ class BusCreate(BaseModel):
     lost_production_value: float | None = None
     # Heat level: the supply temperature a heat bus delivers at, °C (issue 15); written only when sent.
     temperature_c: float | None = None
-    # Steam level: the header pressure of a steam bus, bar(g) (issue 15); written only when sent.
+    # Steam level: the header pressure of a steam bus, barg (issue 15); written only when sent.
     pressure_bar: float | None = None
 
 
@@ -286,7 +286,7 @@ class LinkCreate(BaseModel):
     motor_kw: float | None = None
     start_method: str | None = None
     i_start_pu: float | None = None
-    # A heat or steam device's reach (issue 15), lazy the same way: °C and bar(g).
+    # A heat or steam device's reach (issue 15), lazy the same way: °C and barg.
     max_supply_temp_c: float | None = None
     max_pressure_bar: float | None = None
 

@@ -48,12 +48,12 @@ describe('the Bus level rows', () => {
   it('show the supply temperature on a heat bus, not the pressure', () => {
     busCard({ name: 'b', carrier: 'heat' })
     expect(screen.getByText('Supply temperature (°C)')).toBeTruthy()
-    expect(screen.queryByText('Header pressure (bar(g))')).toBeNull()
+    expect(screen.queryByText('Header pressure (barg)')).toBeNull()
   })
 
   it('show the header pressure on a steam bus', () => {
     busCard({ name: 'b', carrier: 'steam' })
-    expect(screen.getByText('Header pressure (bar(g))')).toBeTruthy()
+    expect(screen.getByText('Header pressure (barg)')).toBeTruthy()
     expect(screen.queryByText('Supply temperature (°C)')).toBeNull()
   })
 
@@ -73,7 +73,7 @@ describe('the Link reach rows', () => {
     linkCard(BASE, ['AC', 'heat'])
     expect(screen.getByText('Max supply temperature (°C)')).toBeTruthy()
     expect(screen.getByTestId('asset-no-limit-max_supply_temp_c').textContent).toBe('No limit')
-    expect(screen.queryByText('Max steam pressure (bar(g))')).toBeNull()
+    expect(screen.queryByText('Max steam pressure (barg)')).toBeNull()
   })
 
   it('drop No limit once a reach is set', () => {
@@ -84,6 +84,6 @@ describe('the Link reach rows', () => {
   it('stay hidden on a link between electrical and gas buses', () => {
     linkCard(BASE, ['AC', 'gas'])
     expect(screen.queryByText('Max supply temperature (°C)')).toBeNull()
-    expect(screen.queryByText('Max steam pressure (bar(g))')).toBeNull()
+    expect(screen.queryByText('Max steam pressure (barg)')).toBeNull()
   })
 })

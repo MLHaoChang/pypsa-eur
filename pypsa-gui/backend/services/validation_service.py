@@ -1322,7 +1322,7 @@ class _LevelRule(NamedTuple):
 _LEVEL_RULES = (_LevelRule("temperature_c", "max_supply_temp_c", "heat_level_above_reach", "supply temperature",
                            "max supply temperature", "°C"),
                 _LevelRule("pressure_bar", "max_pressure_bar", "steam_level_above_reach", "header pressure",
-                           "max steam pressure", "bar(g)"))
+                           "max steam pressure", "barg"))
 
 
 def _check_heat_levels(n) -> list[Issue]:
@@ -1348,10 +1348,10 @@ def _check_heat_levels(n) -> list[Issue]:
                 level = buses.at[bus, level_col] if bus in buses.index else None
                 if _is_finite(level) and float(level) > float(reach):
                     out.append(_err(code, "Link", str(name),
-                                    f"Link {name} feeds bus {bus}, {level_label(n, bus)}, but its {reach_label} "
-                                    f"is {float(reach):g} {unit}, below the {bus_label} of the bus: raise the "
-                                    f"{reach_label} if the device reaches {float(level):g} {unit}, or connect the "
-                                    "link to a level it can reach."))
+                                    f"Link \u201c{name}\u201d feeds bus \u201c{bus}\u201d, {level_label(n, bus)}, but its "
+                                    f"{reach_label} is {float(reach):g}\u00a0{unit}, below the {bus_label} of the "
+                                    f"bus: raise the {reach_label} if the device reaches {float(level):g}\u00a0{unit}, "
+                                    "or connect the link to a level it can reach."))
 
     level_buses = [b for b in buses.index
                    if any(c in buses.columns and _is_finite(buses.at[b, c]) for c in LEVEL_COLUMNS)]
@@ -1373,7 +1373,7 @@ def _check_heat_levels(n) -> list[Issue]:
         supplied.update(outs)
     for bus in sorted(demand - supplied):
         out.append(_err("level_without_supplier", "Bus", bus,
-                        f"Bus {bus}, {level_label(n, bus)}, has demand but nothing that can supply it: add a "
+                        f"Bus \u201c{bus}\u201d, {level_label(n, bus)}, has demand but nothing that can supply it: add a "
                         "generator or a link that delivers to it, with capacity above 0."))
     return out
 

@@ -2,7 +2,7 @@
 Heat as a modelled product: temperature and pressure levels (grid-to-process issue 15, design §2.6).
 
 A heat bus states the supply temperature it delivers at (`temperature_c`), a steam bus its header pressure
-(`pressure_bar`, gauge, bar(g)); a device states its reach on the Link (`max_supply_temp_c`, `max_pressure_bar`).
+(`pressure_bar`, gauge, barg); a device states its reach on the Link (`max_supply_temp_c`, `max_pressure_bar`).
 One bus per level; the unit stays MWh (thermal), as the catalogue counts energy. The validator compares the
 numbers (`services/validation_service.py`, `_check_heat_levels`). The LP never reads these columns.
 
@@ -18,6 +18,7 @@ This module holds:
   through the process-unit commitment path (issue 03) and kept as backup;
 * `build_two_level_heat_demo`: the generic two-level network of the issue's acceptance (no refinery template).
 """
+
 from __future__ import annotations
 
 import math
@@ -29,19 +30,45 @@ import numpy as np
 import pandas as pd
 
 # Upper band edges, demo (ledger below). A level at or above an edge is in the next band.
-HEAT_BANDS_C: tuple[tuple[str, float], ...] = (("low", 100.0), ("medium", 400.0), ("high", math.inf))
-STEAM_CLASSES_BAR: tuple[tuple[str, float], ...] = (("LP", 5.0), ("MP", 20.0), ("HP", math.inf))
+HEAT_BANDS_C: tuple[tuple[str, float], ...] = (
+    ("low", 100.0),
+    ("medium", 400.0),
+    ("high", math.inf),
+)
+STEAM_CLASSES_BAR: tuple[tuple[str, float], ...] = (
+    ("LP", 5.0),
+    ("MP", 20.0),
+    ("HP", math.inf),
+)
 
 DEMO_LEDGER: tuple[dict[str, Any], ...] = (
-    {"entity": "heat bands", "field": "edges_c", "value": "low < 100 <= medium < 400 <= high",
-     "unit": "°C", "source": "synthetic", "label": "demo",
-     "note": "Display bands for heat levels; demo edges, not a standard. Replace with the client's own."},
-    {"entity": "steam classes", "field": "edges_bar", "value": "LP < 5 <= MP < 20 <= HP",
-     "unit": "bar(g)", "source": "synthetic", "label": "demo",
-     "note": "Display classes for steam headers; demo edges, not a standard. Replace with the client's own."},
-    {"entity": "two-level heat demo", "field": "all values", "value": "see build_two_level_heat_demo",
-     "unit": "", "source": "synthetic", "label": "demo",
-     "note": "Demands, efficiencies, reaches, prices and commitment of the two-level demo are synthetic."},
+    {
+        "entity": "heat bands",
+        "field": "edges_c",
+        "value": "low < 100 <= medium < 400 <= high",
+        "unit": "°C",
+        "source": "synthetic",
+        "label": "demo",
+        "note": "Display bands for heat levels; demo edges, not a standard. Replace with the client's own.",
+    },
+    {
+        "entity": "steam classes",
+        "field": "edges_bar",
+        "value": "LP < 5 <= MP < 20 <= HP",
+        "unit": "barg",
+        "source": "synthetic",
+        "label": "demo",
+        "note": "Display classes for steam headers; demo edges, not a standard. Replace with the client's own.",
+    },
+    {
+        "entity": "two-level heat demo",
+        "field": "all values",
+        "value": "see build_two_level_heat_demo",
+        "unit": "",
+        "source": "synthetic",
+        "label": "demo",
+        "note": "Demands, efficiencies, reaches, prices and commitment of the two-level demo are synthetic.",
+    },
 )
 
 
@@ -99,11 +126,12 @@ def level_label(n, bus: str) -> str | None:
         return None
     col, v = level
     if col == "temperature_c":
-        return f"{heat_band(v)} band (demo edges) at {v:g} °C"
-    return f"{steam_class(v)} steam (demo edges) at {v:g} bar(g)"
+        return f"{heat_band(v)} band (demo edges) at {v:g}\u00a0°C"
+    return f"{steam_class(v)} steam (demo edges) at {v:g}\u00a0barg"
 
 
 # ── Band-wise heat demand ─────────────────────────────────────────────────────
+
 
 @dataclass(frozen=True)
 class HeatDemand:
@@ -139,53 +167,81 @@ def _snapshot_times(n) -> pd.DatetimeIndex:
     if not isinstance(times, pd.DatetimeIndex):
         raise HeatLevelError("A flat heat demand needs snapshots that are timestamps.")
     if times.tz is not None:
-        raise HeatLevelError("A flat heat demand needs time-zone-naive (UTC) snapshots, as the profile "
-                             f"generator writes them; these are in {times.tz}.")
+        raise HeatLevelError(
+            "A flat heat demand needs time-zone-naive (UTC) snapshots, as the profile "
+            f"generator writes them; these are in {times.tz}."
+        )
     return times
 
 
 def _flat_series(n, row: HeatDemand) -> np.ndarray:
-    from services.profile_gen.load_archetypes import InvalidArchetypeParamsError, generate_frame
+    from services.profile_gen.load_archetypes import (
+        InvalidArchetypeParamsError,
+        generate_frame,
+    )
 
     if (row.peak_mw is None) == (row.annual_mwh is None):
-        raise HeatLevelError(f"Heat demand on {row.bus}: state exactly one of peak MW_th and annual MWh_th.")
+        raise HeatLevelError(
+            f"Heat demand on \u201c{row.bus}\u201d: state exactly one of peak MW_th and annual MWh_th."
+        )
     times = _snapshot_times(n)
-    params = {"shifts": "continuous", "base_share": 0.0, "shutdown_weeks": list(row.shutdown_weeks),
-              "peak_mw": row.peak_mw, "annual_mwh": row.annual_mwh, "noise": 0.0, "seasonal_amplitude": 0.0}
+    params = {
+        "shifts": "continuous",
+        "base_share": 0.0,
+        "shutdown_weeks": list(row.shutdown_weeks),
+        "peak_mw": row.peak_mw,
+        "annual_mwh": row.annual_mwh,
+        "noise": 0.0,
+        "seasonal_amplitude": 0.0,
+    }
     out = np.empty(len(times))
     for year in sorted(set(times.year)):
         try:
             frame, meta = generate_frame(["d"], "industrial", params, int(year))
         except InvalidArchetypeParamsError as exc:
-            raise HeatLevelError(f"Heat demand on {row.bus}: {exc}") from None
+            raise HeatLevelError(
+                f"Heat demand on \u201c{row.bus}\u201d: {exc}"
+            ) from None
         sel = times.year == year
         vals = frame["d"].reindex(times[sel])
         if vals.isna().any():
-            raise HeatLevelError(f"Heat demand on {row.bus}: the snapshots are not on whole hours, so the flat "
-                                 "shape cannot be placed on them. Give the shape as a series instead.")
+            raise HeatLevelError(
+                f"Heat demand on \u201c{row.bus}\u201d: the snapshots are not on whole hours, so the flat "
+                "shape cannot be placed on them. Give the shape as a series instead."
+            )
         out[sel] = vals.to_numpy() * float(meta["scale_mw"])
     return out
 
 
 def _given_series(n, row: HeatDemand) -> np.ndarray:
     if row.peak_mw is not None or row.annual_mwh is not None:
-        raise HeatLevelError(f"Heat demand on {row.bus}: a given series is in MW_th already; leave peak and "
-                             "annual empty.")
+        raise HeatLevelError(
+            f"Heat demand on \u201c{row.bus}\u201d: a given series is in MW_th already; leave peak and "
+            "annual empty."
+        )
     s = row.shape
     if not isinstance(s, pd.Series):
-        raise HeatLevelError(f"Heat demand on {row.bus}: the shape is flat or a series of MW_th per snapshot.")
+        raise HeatLevelError(
+            f"Heat demand on \u201c{row.bus}\u201d: the shape is flat or a series of MW_th per snapshot."
+        )
     idx = s.index
     snaps = n.snapshots
     if str(_tz(idx)) != str(_tz(snaps)):
-        raise HeatLevelError(f"Heat demand on {row.bus}: the series is in time zone {_tz(idx)}, the snapshots "
-                             f"in {_tz(snaps)}. Convert it; it is never shifted silently.")
+        raise HeatLevelError(
+            f"Heat demand on \u201c{row.bus}\u201d: the series is in time zone {_tz(idx)}, the snapshots "
+            f"in {_tz(snaps)}. Convert it; it is never shifted silently."
+        )
     if len(idx) != len(snaps) or not idx.equals(snaps):
-        raise HeatLevelError(f"Heat demand on {row.bus}: the series' index does not match the network's "
-                             f"snapshots exactly ({len(idx)} vs {len(snaps)} entries). It is never reindexed "
-                             "silently; give one value per snapshot.")
+        raise HeatLevelError(
+            f"Heat demand on \u201c{row.bus}\u201d: the series' index does not match the network's "
+            f"snapshots exactly ({len(idx)} vs {len(snaps)} entries). It is never reindexed "
+            "silently; give one value per snapshot."
+        )
     v = pd.to_numeric(s, errors="coerce").to_numpy(dtype=float)
     if not np.isfinite(v).all() or (v < 0).any():
-        raise HeatLevelError(f"Heat demand on {row.bus}: the series must be finite and at least 0 MW_th.")
+        raise HeatLevelError(
+            f"Heat demand on \u201c{row.bus}\u201d: the series must be finite and at least 0 MW_th."
+        )
     return v
 
 
@@ -199,21 +255,43 @@ def add_heat_demand(n, rows: list[HeatDemand]) -> list[str]:
     names = []
     for row in rows:
         if (row.temperature_c is None) == (row.pressure_bar is None):
-            raise HeatLevelError(f"Heat demand on {row.bus}: state exactly one of a supply temperature (°C) and "
-                                 "a header pressure (bar(g)).")
+            raise HeatLevelError(
+                f"Heat demand on \u201c{row.bus}\u201d: state exactly one of a supply temperature (°C) and "
+                "a header pressure (barg)."
+            )
         col = "temperature_c" if row.temperature_c is not None else "pressure_bar"
         try:
-            level = coerce_eh_value("Bus", col, row.temperature_c if col == "temperature_c" else row.pressure_bar)
+            level = coerce_eh_value(
+                "Bus",
+                col,
+                row.temperature_c if col == "temperature_c" else row.pressure_bar,
+            )
         except ValueError as exc:
-            raise HeatLevelError(f"Heat demand on {row.bus}: {exc}") from None
-        p_set = _flat_series(n, row) if isinstance(row.shape, str) and row.shape == "flat" else _given_series(n, row)
+            raise HeatLevelError(
+                f"Heat demand on \u201c{row.bus}\u201d: {exc}"
+            ) from None
+        p_set = (
+            _flat_series(n, row)
+            if isinstance(row.shape, str) and row.shape == "flat"
+            else _given_series(n, row)
+        )
         if row.bus not in n.buses.index:
-            n.add("Bus", row.bus, carrier="heat" if col == "temperature_c" else "steam", unit="MWh")
+            n.add(
+                "Bus",
+                row.bus,
+                carrier="heat" if col == "temperature_c" else "steam",
+                unit="MWh",
+            )
         ensure_eh_column(n, "Bus", col)
         n.buses.loc[row.bus, col] = level
         load = row.load or f"{row.bus} demand"
-        n.add("Load", load, bus=row.bus, carrier=str(n.buses.at[row.bus, "carrier"]),
-              p_set=pd.Series(p_set, index=n.snapshots))
+        n.add(
+            "Load",
+            load,
+            bus=row.bus,
+            carrier=str(n.buses.at[row.bus, "carrier"]),
+            p_set=pd.Series(p_set, index=n.snapshots),
+        )
         names.append(load)
     return names
 
@@ -222,8 +300,18 @@ def add_heat_demand(n, rows: list[HeatDemand]) -> list[str]:
 
 # The demo commitment of a fired gas device. `eh_process` puts it on the issue-03 path (`solver/process_uc.py`
 # reads a committable process unit: linearised plan, binary check, year-base relaxation). Values are demo.
-GAS_DEFAULTS: dict[str, Any] = {"efficiency": 0.9, "eh_process": True, "committable": True, "p_min_pu": 0.3, "min_up_time": 2,
-                                "start_up_cost": 0.0}
+# The flag also makes the boilers process units for results/process_view and the motor-start screen, which
+# GK A accepted (#1142) only while `add_hybrid_supply` and `build_two_level_heat_demo` have no caller outside
+# tests. Before giving either a route, chat tool or template, let process UC plan a committable non-process
+# Link, or keep heat devices out of the process-unit readers.
+GAS_DEFAULTS: dict[str, Any] = {
+    "efficiency": 0.9,
+    "eh_process": True,
+    "committable": True,
+    "p_min_pu": 0.3,
+    "min_up_time": 2,
+    "start_up_cost": 0.0,
+}
 ELECTRIC_DEFAULTS: dict[str, Any] = {"efficiency": 0.99}
 
 
@@ -236,8 +324,15 @@ def _set_reach(n, link: str, attrs: Mapping[str, Any]) -> None:
             n.links.loc[link, col] = coerce_eh_value("Link", col, attrs[col])
 
 
-def add_hybrid_supply(n, level_bus: str, *, gas_bus: str, elec_bus: str, gas: Mapping[str, Any],
-                      electric: Mapping[str, Any]) -> tuple[str, str]:
+def add_hybrid_supply(
+    n,
+    level_bus: str,
+    *,
+    gas_bus: str,
+    elec_bus: str,
+    gas: Mapping[str, Any],
+    electric: Mapping[str, Any],
+) -> tuple[str, str]:
     """A gas Link and an electric Link in parallel onto `level_bus`; returns (gas link, electric link).
 
     `gas` and `electric` are Link attributes plus `name` and an optional reach (`max_supply_temp_c`,
@@ -245,15 +340,28 @@ def add_hybrid_supply(n, level_bus: str, *, gas_bus: str, elec_bus: str, gas: Ma
     commitment path plans it: minimum load and start-up, no fork) and stays as backup. The electric Link is an e-boiler or heater
     (efficiency near 1) or a heat pump: give `bus2` (its low-grade source) with `efficiency2 = -(COP - 1)`."""
     if level_bus not in n.buses.index:
-        raise HeatLevelError(f"Hybrid supply: no bus {level_bus}. Add the level's demand first.")
+        raise HeatLevelError(
+            f"Hybrid supply: no bus \u201c{level_bus}\u201d. Add the level's demand first."
+        )
     out: list[str] = []
     process: list[str] = []
-    for attrs, bus0, defaults in ((gas, gas_bus, GAS_DEFAULTS), (electric, elec_bus, ELECTRIC_DEFAULTS)):
-        a = {**defaults, **{k: v for k, v in attrs.items() if k not in ("name", "max_supply_temp_c",
-                                                                          "max_pressure_bar")}}
+    for attrs, bus0, defaults in (
+        (gas, gas_bus, GAS_DEFAULTS),
+        (electric, elec_bus, ELECTRIC_DEFAULTS),
+    ):
+        a = {
+            **defaults,
+            **{
+                k: v
+                for k, v in attrs.items()
+                if k not in ("name", "max_supply_temp_c", "max_pressure_bar")
+            },
+        }
         name = attrs.get("name")
         if not name:
-            raise HeatLevelError(f"Hybrid supply on {level_bus}: every device needs a name.")
+            raise HeatLevelError(
+                f"Hybrid supply on \u201c{level_bus}\u201d: every device needs a name."
+            )
         if a.pop("eh_process", False):
             process.append(name)
         n.add("Link", name, bus0=bus0, bus1=level_bus, **a)
@@ -273,7 +381,10 @@ def add_hybrid_supply(n, level_bus: str, *, gas_bus: str, elec_bus: str, gas: Ma
 
 # ── The generic two-level demo (acceptance fixture) ──────────────────────────
 
-def build_two_level_heat_demo(hours: int = 24, *, electricity_price: Any = None, gas_price: float = 40.0):
+
+def build_two_level_heat_demo(
+    hours: int = 24, *, electricity_price: Any = None, gas_price: float = 40.0
+):
     """Two heat levels, every value demo (ledger: `DEMO_LEDGER`).
 
     * low band (90 °C, 10 MW_th flat): heat pump (COP 3, reach 120 °C, ambient source bus) plus gas boiler;
@@ -288,24 +399,84 @@ def build_two_level_heat_demo(hours: int = 24, *, electricity_price: Any = None,
     from services.carrier_catalog import ensure_carrier
 
     for c in ("AC", "gas", "heat"):
-        ensure_carrier(n, c)  # the catalogue's CO2 factors, so gas is not counted as zero-carbon
+        ensure_carrier(
+            n, c
+        )  # the catalogue's CO2 factors, so gas is not counted as zero-carbon
     n.add("Bus", "grid", carrier="AC")
     n.add("Bus", "gas", carrier="gas", unit="MWh")
     n.add("Bus", "ambient", carrier="heat", unit="MWh")
     price = 60.0 if electricity_price is None else electricity_price
-    n.add("Generator", "grid supply", bus="grid", carrier="AC", p_nom=1e3,
-          marginal_cost=pd.Series(np.broadcast_to(np.asarray(price, dtype=float), (hours,)).copy(),
-                                  index=n.snapshots))
-    n.add("Generator", "gas supply", bus="gas", carrier="gas", p_nom=1e3, marginal_cost=gas_price)
-    n.add("Generator", "ambient heat", bus="ambient", carrier="heat", p_nom=1e3, marginal_cost=0.0)
-    add_heat_demand(n, [HeatDemand("heat low", temperature_c=90.0, peak_mw=10.0),
-                        HeatDemand("heat high", temperature_c=450.0, peak_mw=5.0)])
-    add_hybrid_supply(n, "heat low", gas_bus="gas", elec_bus="grid",
-                      gas={"name": "gas boiler", "carrier": "gas boiler", "p_nom": 15.0, "max_supply_temp_c": 200.0},
-                      electric={"name": "heat pump", "carrier": "heat pump", "p_nom": 5.0, "efficiency": 3.0,
-                                "bus2": "ambient", "efficiency2": -2.0, "max_supply_temp_c": 120.0})
-    add_hybrid_supply(n, "heat high", gas_bus="gas", elec_bus="grid",
-                      gas={"name": "gas furnace", "carrier": "gas furnace", "p_nom": 8.0, "max_supply_temp_c": 900.0},
-                      electric={"name": "electric heater", "carrier": "electric heater", "p_nom": 8.0,
-                                "max_supply_temp_c": 1000.0})
+    n.add(
+        "Generator",
+        "grid supply",
+        bus="grid",
+        carrier="AC",
+        p_nom=1e3,
+        marginal_cost=pd.Series(
+            np.broadcast_to(np.asarray(price, dtype=float), (hours,)).copy(),
+            index=n.snapshots,
+        ),
+    )
+    n.add(
+        "Generator",
+        "gas supply",
+        bus="gas",
+        carrier="gas",
+        p_nom=1e3,
+        marginal_cost=gas_price,
+    )
+    n.add(
+        "Generator",
+        "ambient heat",
+        bus="ambient",
+        carrier="heat",
+        p_nom=1e3,
+        marginal_cost=0.0,
+    )
+    add_heat_demand(
+        n,
+        [
+            HeatDemand("heat low", temperature_c=90.0, peak_mw=10.0),
+            HeatDemand("heat high", temperature_c=450.0, peak_mw=5.0),
+        ],
+    )
+    add_hybrid_supply(
+        n,
+        "heat low",
+        gas_bus="gas",
+        elec_bus="grid",
+        gas={
+            "name": "gas boiler",
+            "carrier": "gas boiler",
+            "p_nom": 15.0,
+            "max_supply_temp_c": 200.0,
+        },
+        electric={
+            "name": "heat pump",
+            "carrier": "heat pump",
+            "p_nom": 5.0,
+            "efficiency": 3.0,
+            "bus2": "ambient",
+            "efficiency2": -2.0,
+            "max_supply_temp_c": 120.0,
+        },
+    )
+    add_hybrid_supply(
+        n,
+        "heat high",
+        gas_bus="gas",
+        elec_bus="grid",
+        gas={
+            "name": "gas furnace",
+            "carrier": "gas furnace",
+            "p_nom": 8.0,
+            "max_supply_temp_c": 900.0,
+        },
+        electric={
+            "name": "electric heater",
+            "carrier": "electric heater",
+            "p_nom": 8.0,
+            "max_supply_temp_c": 1000.0,
+        },
+    )
     return n

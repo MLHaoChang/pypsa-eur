@@ -427,7 +427,7 @@ LINK: tuple[FieldSpec, ...] = (
               "above it. Empty: no limit.", "°C", "°C"),
     FieldSpec("max_pressure_bar", "performance", "Max steam pressure", "The highest header pressure this steam "
               "device is rated for, gauge. It may not feed a steam bus whose header pressure is above it. Empty: "
-              "no limit.", "bar(g)", "bar(g)"),
+              "no limit.", "barg", "barg"),
     *_outages(with_cf_flag=False),
 )
 
@@ -546,7 +546,7 @@ BUS: tuple[FieldSpec, ...] = (
               "checked.", "°C", "°C"),
     FieldSpec("pressure_bar", "identity", "Header pressure", "For a steam bus: the header pressure it delivers "
               "steam at, gauge. A device feeding it must reach it (its max steam pressure). Empty: no level, the "
-              "bus is not checked.", "bar(g)", "bar(g)"),
+              "bus is not checked.", "barg", "barg"),
     FieldSpec("sub_network", "identity", "Sub-network", "Manual region label for the 'region' clustering mode: buses "
               "sharing it collapse to one node. Empty: determined from the electrical topology.", kind="text"),
     FieldSpec("x", "identity", "Longitude", "Geographic longitude, east positive. Places the bus on the map and "

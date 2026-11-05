@@ -9,7 +9,7 @@ column. Kinds are those of `eh_columns`: "bool", "float_nonneg", "tier" (one of 
 "process_role" (one of PROCESS_GENERATOR_ROLES or ""), "text", "harmonic_source" (one of HARMONIC_SOURCES or "")
 "harmonic_spectrum" (order:% pairs, checked by gridspine's harmonic screen), "fraction" (0..1), "start_method"
 (one of START_METHODS or "") and "float_signed" (finite, any sign). Heat and steam levels (issue 15): a Bus's `temperature_c`
-or `pressure_bar` (bar(g)) and a Link's reach, `max_supply_temp_c` or `max_pressure_bar`; validation and display
+or `pressure_bar` (barg) and a Link's reach, `max_supply_temp_c` or `max_pressure_bar`; validation and display
 only, the LP never reads them.
 """
 from __future__ import annotations
