@@ -103,3 +103,26 @@ The phase line reads `Stage 2: AC PF complete — convergence unknown for u of n
 3. Canvas banner: "AC PF convergence was not reported for this snapshot: its values are not checked." Keep "AC PF" only if the existing banner already uses it.
 4. Picker `?` badge: `aria-label` equal to its title.
 5. Screenshots, in Guided and Expert wherever Load flow renders: KPI at u = n, the mixed case with the muted line, the picker with ✓/✗/?, and the canvas banner on an unknown snapshot.
+
+### 2026-11-05 — GK A (12) plan GO @a58145eb, conditions (binding on the code PR)
+
+1. **Raise scope.** An exception from `n.pf()` itself is still re-raised, as it is today; only a failure while *reading* the result becomes unknown. The "raising" test is named for what it is: a result whose `converged` access or `.all` raises. Add a test that a raising `n.pf` still fails the run and records no counts.
+2. **Strict truth.** A snapshot is `True` only when every sub-network cell is a real boolean `True` (`bool` or `np.bool_`). NaN, `None`, a non-bool value (`1`, `"True"`, object dtype) and an empty row are unknown. Test one non-bool value. This replaces pandas `all(axis=1)`.
+3. **Index match.** Missing-snapshot detection keys on `n.snapshots`, a MultiIndex on multi-period networks, not on the frame's own index. Frame rows outside `n.snapshots` are ignored and never counted. Add a multi-period case.
+4. **Truthiness sweep.** Before coding, list every reader of `ok`, of the legacy `ac_pf_convergence` values and of `ac_pf_converged_count`:
+   - backend: `loadflow_summary` 184/210-212/392, `results` 648/661-664, `simulation` 1606-1611, `run_evidence` 923, `projects` 4292/4336;
+   - frontend: `solveQueue.ts:80`, and the LoadFlow, SnapshotPicker and TopologyCanvas readers.
+
+   Put the list in the PR body, and show that each one maps `None` to unknown. Look hardest at `count == total` comparisons and at `or 0`.
+5. **Mutants**, each with its killing test named in the PR body:
+   - (a) the helper maps unknown to `True`;
+   - (b) the `u>0 → converged_count None` step is dropped;
+   - (c) per snapshot, unknown wins over a known `False`;
+   - (d) the parse `except` is restored to all-`True`;
+   - (e) `/ac_pf/status` `or 0` is restored;
+   - (f) `loadflow_summary` counts unknown as unconverged.
+6. **Back-compat.** A state or pkl written before the fix, with no `unknown_count`, reads as it does today, and runs sealed before the fix are unchanged. Pin both in tests.
+7. **Frontend.** A null `ok` renders as a distinct unknown state, never green or red. Add a vitest, and run `tsc` on the widened types.
+8. **Residual risk** (open): in PyPSA 1.1.2, `_network_prepare_and_run_pf` pre-builds `converged` as `pd.DataFrame(..., dtype=bool)`, so a cell PyPSA never filled reads `True` and cannot be told apart from converged. It is not reachable today, because every sub-network is filled in the loop. Re-check on a PyPSA upgrade. The code PR adds a release-note fragment.
+
+GK B (22) is needed only if the route or harness side grows beyond the `/ac_pf/status` field.
