@@ -19,10 +19,9 @@ from tests.test_answer_assurance import checked  # noqa: F401
 from tests.test_assurance_metrics import NumericalProvider
 from tests.test_capacity_cycles_assurance import PROFILES, answered, ask, solve
 from tests.test_storage_assurance import storage  # noqa: F401
-from tests.test_storage_cost_assurance import (
-    VALUES as STORAGE_VALUES,
-    scope as storage_scope,
-)  # noqa: F401
+from tests.test_storage_cost_assurance import VALUES as STORAGE_VALUES
+from tests.test_storage_cost_assurance import priced  # noqa: F401
+from tests.test_storage_cost_assurance import scope as storage_scope
 from tests.test_workflow_tools import baseline  # noqa: F401
 
 MEANINGS = ["Configured capacity", "Optimized capacity", "Available capacity"]
