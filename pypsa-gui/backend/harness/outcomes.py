@@ -227,3 +227,255 @@ def project(tool: str, args: dict, tool_use_id: str) -> dict:
 def _reset_for_tests() -> None:
     with _LOCK:
         _SUBMISSIONS.clear()
+
+
+# ── S2: requested versus actual for component writes ─────────────────────────
+#
+# `note_write` runs in the dispatch seam after the edit counter's bump and
+# before the handler: it records, per requested item, whether the row existed
+# and (bulk update) the requested value coerced by the bulk path's own column
+# rules. `read_write` reads the live network back under the PyPSA lock,
+# between two reads of the edit counter. `classify_write` is pure. The
+# handler's returned JSON is never read (GK B W1–W7).
+
+WRITE_TOOLS = frozenset(
+    {
+        "bulk_update_components",
+        "batch_create_components",
+        "delete_component",
+        "batch_delete_components",
+    }
+)
+_MAX_PATHS = 5
+
+
+class _Uncomparable:
+    """A requested value the column rules refuse, or an attr with no column (W2)."""
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return "UNCOMPARABLE"
+
+
+UNCOMPARABLE = _Uncomparable()
+
+
+def _static(n, component_class):
+    from services.chat_tools import _GENERIC_CRUD_ATTRS
+
+    attr = (
+        "global_constraints"
+        if component_class == "GlobalConstraint"
+        else _GENERIC_CRUD_ATTRS.get(component_class)
+    )
+    if not attr:
+        raise KeyError(component_class)
+    return getattr(n, attr)
+
+
+def _coerce(df, component_class, attr, value):
+    """`value` as the bulk path would write it into `df[attr]`, or UNCOMPARABLE."""
+    from services.network_bulk import _coerce_bulk_value
+
+    if attr not in df.columns:
+        return UNCOMPARABLE
+    try:
+        coerced = _coerce_bulk_value(df, attr, value, component_class)
+    except Exception:  # noqa: BLE001 - a refused value is not comparable
+        return UNCOMPARABLE
+    return coerced.get(attr, UNCOMPARABLE) if isinstance(coerced, dict) else UNCOMPARABLE
+
+
+def _requested(tool: str, args: dict) -> tuple[str, list[dict]]:
+    """(component_class, items) from the call's own arguments; ValueError when malformed."""
+    cls = args.get("component_class")
+    if not isinstance(cls, str):
+        raise ValueError("component_class")
+    if tool == "bulk_update_components":
+        names, updates = args.get("names"), args.get("updates")
+        if not isinstance(names, list) or not isinstance(updates, dict) or not updates:
+            raise ValueError("bulk_args")
+        return cls, [
+            {"kind": "cell", "name": str(name), "attr": str(attr), "requested": value}
+            for name in names
+            for attr, value in updates.items()
+        ]
+    if tool == "batch_create_components":
+        entries = args.get("components")
+        if not isinstance(entries, list) or not all(
+            isinstance(e, dict) and isinstance(e.get("name"), str) for e in entries
+        ):
+            raise ValueError("create_args")
+        return cls, [
+            {
+                "kind": "create",
+                "name": e["name"],
+                "attrs": {k: v for k, v in e.items() if k != "name"},
+            }
+            for e in entries
+        ]
+    names = (
+        [args.get("name")] if tool == "delete_component" else args.get("names")
+    )
+    if not isinstance(names, list) or not all(isinstance(x, str) for x in names):
+        raise ValueError("delete_args")
+    return cls, [{"kind": "delete", "name": name} for name in names]
+
+
+def note_write(tool: str, args: dict) -> dict | None:
+    """The call's own request and the rows' prior presence, before the handler runs."""
+    if tool not in WRITE_TOOLS:
+        return None
+    from services import dirty_state
+    from services.pypsa_service import PyPSAService
+
+    try:
+        ctx = PyPSAService.get_active_context()
+        cls, items = _requested(tool, args)
+        with PyPSAService.get_lock():
+            df = _static(ctx.network, cls)
+            for item in items:
+                item["before_present"] = item["name"] in df.index
+                if item["kind"] == "cell":
+                    item["expected"] = _coerce(df, cls, item["attr"], item["requested"])
+            revision = dirty_state.revision(ctx)
+    except Exception:  # noqa: BLE001 - no note reads uncertain later
+        return {"tool": tool, "error": True}
+    return {"tool": tool, "ctx": id(ctx), "cls": cls, "items": items, "revision": revision}
+
+
+def read_write(note: dict | None) -> dict:
+    """An independent read of the live rows the call named; never the handler's JSON."""
+    if not note or note.get("error"):
+        return {"error": "no_note"}
+    from services import dirty_state
+    from services.pypsa_service import PyPSAService
+
+    try:
+        ctx = PyPSAService.get_active_context()
+        if id(ctx) != note["ctx"]:
+            return {"error": "other_context"}
+        with PyPSAService.get_lock():
+            start = dirty_state.revision(ctx)
+            df = _static(ctx.network, note["cls"])
+            rows = {}
+            for item in note["items"]:
+                name = item["name"]
+                present = name in df.index
+                row = {"present": present}
+                if present and item["kind"] == "cell":
+                    row["value"] = (
+                        df.at[name, item["attr"]] if item["attr"] in df.columns else UNCOMPARABLE
+                    )
+                elif present and item["kind"] == "create":
+                    row["attrs"] = {
+                        attr: (
+                            _coerce(df, note["cls"], attr, value),
+                            df.at[name, attr] if attr in df.columns else UNCOMPARABLE,
+                        )
+                        for attr, value in item["attrs"].items()
+                    }
+                rows[name if item["kind"] != "cell" else f"{name}/{item['attr']}"] = row
+            end = dirty_state.revision(ctx)
+    except Exception:  # noqa: BLE001 - an unreadable network reads uncertain
+        return {"error": "read_failed"}
+    return {"revision_start": start, "revision_end": end, "rows": rows}
+
+
+def _same(expected, actual) -> bool | None:
+    """True/False, or None when the two cannot be compared."""
+    import math
+
+    if expected is UNCOMPARABLE or actual is UNCOMPARABLE:
+        return None
+    import numbers
+
+    import numpy as np
+
+    if isinstance(expected, (bool, np.bool_)) or isinstance(actual, (bool, np.bool_)):
+        try:
+            return isinstance(expected, (bool, np.bool_)) and isinstance(
+                actual, (bool, np.bool_)
+            ) and bool(expected) == bool(actual)
+        except Exception:  # noqa: BLE001
+            return None
+    if isinstance(expected, numbers.Real):
+        try:
+            a = float(actual)
+        except (TypeError, ValueError):
+            return False
+        e = float(expected)
+        if math.isnan(e) or math.isnan(a):
+            return math.isnan(e) and math.isnan(a)
+        return e == a
+    if isinstance(expected, str):
+        return isinstance(actual, str) and expected == actual
+    if expected is None:
+        return actual is None
+    return None
+
+
+def _path(cls: str, item: dict) -> str:
+    return f"/{cls}/{item['name']}" + (f"/{item['attr']}" if item["kind"] == "cell" else "")
+
+
+def classify_write(note: dict | None, read: dict | None) -> dict:
+    """Pure: completed / partial / failed / uncertain for one write call."""
+
+    def out(outcome, reason=None, **extra):
+        return {"outcome": outcome, "reason": reason, **extra}
+
+    if not note or note.get("error"):
+        return out("uncertain", "no_submission")
+    if not isinstance(read, dict) or "error" in read:
+        return out("uncertain", "read_failed")
+    if read.get("revision_start") != note["revision"] or read.get("revision_end") != note["revision"]:
+        return out("uncertain", "revision_moved")
+    rows = read.get("rows") or {}
+    done, not_done, unknown = [], [], []
+    for item in note["items"]:
+        key = item["name"] if item["kind"] != "cell" else f"{item['name']}/{item['attr']}"
+        row = rows.get(key)
+        if row is None:
+            unknown.append(item)
+            continue
+        if item["kind"] == "delete":
+            (done if item["before_present"] and not row["present"] else not_done).append(item)
+            continue
+        if item["kind"] == "create":
+            if item["before_present"] or not row["present"]:
+                not_done.append(item)
+                continue
+            verdicts = [_same(e, a) for e, a in (row.get("attrs") or {}).values()]
+            if any(v is None for v in verdicts):
+                unknown.append(item)
+            elif all(verdicts):
+                done.append(item)
+            else:
+                not_done.append(item)
+            continue
+        # A cell: the row must have existed, and the value must read as requested.
+        # A requested value equal to the old value counts as changed (GK B (24)).
+        if not item["before_present"] or not row["present"]:
+            not_done.append(item)
+            continue
+        verdict = _same(item.get("expected", UNCOMPARABLE), row.get("value", UNCOMPARABLE))
+        (unknown if verdict is None else done if verdict else not_done).append(item)
+    counts = {
+        "requested": len(note["items"]),
+        "done": len(done),
+        "not_done": len(not_done),
+        "unknown": len(unknown),
+    }
+    paths = [_path(note["cls"], i) for i in not_done[:_MAX_PATHS]]
+    if unknown:
+        return out("uncertain", "not_comparable", counts=counts, paths_not_done=paths)
+    if not not_done:
+        return out("completed", counts=counts, paths_not_done=[])
+    if not done:
+        return out("failed", counts=counts, paths_not_done=paths)
+    return out("partial", counts=counts, paths_not_done=paths)
+
+
+def project_write(note: dict | None) -> dict:
+    """The `_outcome` block for one write tool result (ordinary turns)."""
+    return {"version": VERSION, **classify_write(note, read_write(note))}
