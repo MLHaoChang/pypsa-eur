@@ -275,7 +275,13 @@ def test_an_unsolved_network_answers_the_input_but_not_the_optimum(grid, chat, c
 
 
 @pytest.mark.parametrize(
-    "reply", ["Installed capacity", "nominal", "Total declared-basis cost"]
+    "reply",
+    [
+        "Installed capacity",
+        "nominal",
+        "Total declared-basis cost",
+        "I mean the nameplate capacity please",
+    ],
 )
 def test_a_card_answer_outside_the_three_meanings_is_refused(grid, chat, reply):
     solve(grid)
@@ -355,3 +361,47 @@ def test_the_largest_valid_block_set_keeps_project_run_and_window(priced, checke
     assert (request["start"], request["end"]) == (window["start"], window["end"])
     stored = checked.client.get("/api/chat/answers/" + record["answer_id"]).json()
     assert {b["metric"] for b in stored["blocks"]} == set(STORAGE_VALUES)
+
+
+def test_a_new_complete_request_while_the_card_is_open_is_not_refused(
+    grid, chat, checked
+):
+    solve(grid)
+    chat("What is the capacity of generator G1?")
+    frames, provider = chat("What is the capacity of line L12?")
+    assert "Configured capacity" in asked(frames, provider)
+    values = {"optimal_capacity": 3, "capacity_change": 3}
+    frames, _ = chat("Show the capacity for generator G2.", values)
+    assert answered(checked, frames) == pytest.approx(values)
+
+
+def test_both_figures_each_say_which_capacity_they_are(grid, checked):
+    ctx = solve(grid)
+    values = {"configured_capacity": 0, "optimal_capacity": 3}
+    frames = ask(
+        checked, ctx, "capacity/1", "G2", "Generator", values, metrics=list(values)
+    )
+    text = public_text(frames)
+    assert "The capacity after the solve is the solve's nominal capacity" in text
+    assert "The configured capacity is the input before the solve." in text
+
+
+def test_the_labelled_form_follows_up_with_its_own_class_selected(grid, chat, checked):
+    # The existing "capacity for" form keeps its answer; a selected Line no longer
+    # reads as a changed selection because the scope's own class is compared.
+    solve(grid)
+    ui = {"ui_context": {"selected_component": {"class": "Line", "name": "L12"}}}
+    values = {"optimal_capacity": 8, "capacity_change": 0}
+    frames, _ = chat("Show the capacity for line L12.", values, **ui)
+    assert answered(checked, frames) == pytest.approx(values)
+    frames, _ = chat("Show those results again.", values, **ui)
+    assert answered(checked, frames) == pytest.approx(values)
+
+
+def test_every_retained_pending_reason_survives_the_durable_checkpoint():
+    from typing import get_args
+
+    from harness import assurance_conversation, assurance_recovery
+
+    pending = assurance_recovery.Context.model_fields["pending"].annotation
+    assert set(get_args(get_args(pending)[0])) == assurance_conversation.PENDING

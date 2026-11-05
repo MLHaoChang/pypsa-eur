@@ -8,6 +8,7 @@ import uuid
 from fastapi import HTTPException
 
 from harness import assurance_scope, calculations
+from harness import capacity_calculations as capacity
 from harness.durable import network_guard
 from services import assurance_records as records
 from services.pypsa_service import PyPSAService
@@ -21,9 +22,9 @@ CHOICES = ("Marginal dispatch expenditure", "Total declared-basis cost")
 STORAGE_CHOICES = ("Direct StorageUnit operating expenditure", "Total declared-basis cost")
 # AA03-FREEZE-1 item 3: a bare "capacity" has three meanings; each label maps to one slot.
 CAPACITY_CHOICES = {
-    "Configured capacity": "configured_capacity",
+    "Configured capacity": capacity.CONFIGURED,
     "Optimized capacity": "optimal_capacity",
-    "Available capacity": "available_capacity",
+    "Available capacity": capacity.AVAILABLE,
 }
 CAPACITY_CLASSES = r"(generator|link|line|transformer|storage\s*unit|store)"
 QUESTIONS = {
@@ -131,24 +132,29 @@ def cost_choices(scope):
 
 
 def _capacity(turn, message, pending, state):
-    """The bare capacity form and its card answer; None when the message is neither."""
-    reply = re.sub(r"\s+", " ", message.strip().rstrip(".!?")).lower()
-    if pending == "capacity_meaning_required":
+    """The bare capacity form, or an answer to its card; None when the message is neither."""
+    text = re.sub(r"\s+", " ", message.strip().rstrip(".!?"))
+    bare = re.fullmatch(r"(?:what is|what's|whats) (?:the )?capacity of (.{1,160}?)", text, re.I)
+    if not bare and pending == "capacity_meaning_required":
+        reply = text.lower()
         chosen = {k.lower(): v for k, v in CAPACITY_CHOICES.items()}.get(reply)
         if chosen:
             return assurance_scope.validate({**deepcopy(state["scope"]), "metrics": [chosen]})
-        # A short reply that is not one of the three meanings is refused, never guessed.
-        if re.fullmatch(r"[\w-]+(?: [\w-]+){0,2}", reply):
+        try:
+            fresh = assurance_scope.from_message(message, turn.project_id, None)
+        except ValueError:
+            fresh = None
+        # A short reply, or any reply about capacity, that is neither one of the three
+        # meanings nor a complete new request is refused, never guessed.
+        if fresh is None and (re.fullmatch(r"[\w-]+(?: [\w-]+){0,2}", reply) or re.search(r"\bcapacity\b", reply)):
             return _needs(turn, state["scope"], "capacity_meaning_required")
         return None
-    text = re.sub(r"\s+", " ", message.strip().rstrip(".!?"))
-    bare = re.fullmatch(r"(?:what is|what's|whats) (?:the )?capacity of (.{1,160}?)", text, re.I)
     if not bare:
         return None
     named = re.fullmatch(CAPACITY_CLASSES + r" ([^;?]{1,128})", bare[1].strip(), re.I)
     scope = {
         "version": 1,
-        "profile": "capacity/1",
+        "profile": capacity.PROFILE,
         "project_id": turn.project_id or "unbound",
         "retain": False,
         "metrics": list(CAPACITY_CHOICES.values()),
@@ -173,9 +179,9 @@ def resolve(turn, message, ui, explicit):
     state, state_reason = _state(turn, ui)
     turn.conversation_state = state
     pending = state.get("pending") if state else None
-    capacity = _capacity(turn, message, pending, state)
-    if capacity is not None:
-        return capacity
+    asked = _capacity(turn, message, pending, state)
+    if asked is not None:
+        return asked
     if pending and message.strip().rstrip(".!?").lower() in {
         c.lower() for c in cost_choices(state["scope"])
     }:

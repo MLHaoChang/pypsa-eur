@@ -1366,18 +1366,19 @@ class Turn:
     def clarification_choice(self):
         from harness.assurance_conversation import CAPACITY_CHOICES, cost_choices
 
-        labels = {
+        card = {
             "cost_quantity_required": ("Cost quantity", lambda: cost_choices(self.pending_scope)),
             "capacity_meaning_required": ("Capacity meaning", lambda: tuple(CAPACITY_CHOICES)),
         }.get((self.clarification or {}).get("reason"))
-        if labels is None:
+        if card is None:
             return None
+        title, options = card
         return {
             "tool_use_id": self.turn_id,
             "kind": "choice",
-            "title": labels[0],
+            "title": title,
             "question": self.clarification["question"],
-            "options": [{"label": label} for label in labels[1]()],
+            "options": [{"label": label} for label in options()],
             "allow_free_text": True,
         }
 

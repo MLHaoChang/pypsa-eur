@@ -37,7 +37,7 @@ METRICS = {
         "unit": "MW, MVA or MWh by class",
         "label": "Change from the input capacity",
     },
-    "configured_capacity": {
+    "configured_capacity": {  # CONFIGURED
         "formula_id": "configured-nominal-capacity/1",
         "unit": "MW, MVA or MWh by class",
         "label": "Configured input capacity (before the solve)",
@@ -45,6 +45,7 @@ METRICS = {
 }
 # A request without named metrics gets what capacity/1 always answered (AA-V1-CHANGE-1).
 DEFAULT_METRICS = ("optimal_capacity", "capacity_change")
+CONFIGURED = "configured_capacity"
 # Named, never answered: no availability figure is checked (AA-03 S3, GK B C3).
 AVAILABLE = "available_capacity"
 AVAILABLE_REASON = "available_capacity_not_checked"
@@ -62,9 +63,13 @@ def disclosure(scope):
     from harness.calculations import requested_metrics
 
     metrics = set(requested_metrics(scope))
-    if metrics and metrics <= {"configured_capacity", AVAILABLE}:
+    if CONFIGURED not in metrics:
+        return DISCLOSURE
+    if metrics <= {CONFIGURED, AVAILABLE}:
         return CONFIGURED_DISCLOSURE
-    return DISCLOSURE
+    # Both figures: each sentence names the figure it describes.
+    return DISCLOSURE.replace("The solve's nominal capacity", "The capacity after the solve is the solve's nominal capacity").replace(
+        " Availability limits", " The configured capacity is the input before the solve. Availability limits")
 
 
 def source(ctx, entity, component_class):
@@ -105,9 +110,9 @@ def calculate(raw, scope):
         available = {"optimal_capacity": raw["optimal"], "capacity_change": raw["optimal"] - raw["nominal"]}
     reasons = {m: base for m in METRICS}
     # The input needs no solve: it is what was entered, read from the class's own column.
-    reasons["configured_capacity"] = "invalid_or_missing_capacity"
+    reasons[CONFIGURED] = "invalid_or_missing_capacity"
     if common.finite([raw["nominal"]]) and raw["nominal"] >= 0:
-        available["configured_capacity"] = raw["nominal"]
+        available[CONFIGURED] = raw["nominal"]
     facts, slots = common.facts_and_slots(scope, definitions, available, reasons, 1)
     for slot in slots:
         if slot["metric"] == AVAILABLE:
@@ -123,10 +128,10 @@ def at_upper_bound(raw):
     return abs(x - top) <= (BOUND_TOLERANCE * top if top > 0 else BOUND_TOLERANCE)
 
 
-def notes(raw, scope=None):
+def notes(raw, scope):
     table, nominal, unit, side = CLASSES[raw["component_class"]]
     lines = [f"{raw['component_class']} {nominal} in {unit}: {side}."]
-    if scope is not None and raw["extendable"] and "configured_capacity" in scope.get("metrics", ()):
+    if raw["extendable"] and CONFIGURED in scope.get("metrics", ()):
         lines.append(f"Configured capacity is the input {nominal} before the solve; the solve may build a different capacity.")
     if not raw["extendable"]:
         lines.append("Fixed capacity (not optimised).")
