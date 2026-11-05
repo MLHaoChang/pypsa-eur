@@ -151,3 +151,13 @@ identity. A reloaded transcript has no tool rows (history replays tool uses
 as `[tool: name]`), so no stale line comes back. Shots:
 `frontend/scripts/tool-outcome-shots.mjs`.
 
+GK B (25) plan conditions U1–U5 (no GK gate on the frontend-only PR) and UX (9)
+GO, applied: a job tool's returned result with a missing, malformed or
+non-version-1 `_outcome` reads "outcome unknown — the result could not be
+read", and the handler's `completed`/`status` are never read (U1); a cut
+result's `_outcome` is read strictly from the start of its preview, else
+unknown (U2); supersede only forward, same non-null job id, same project
+(U3); `adapter_pending` and `no_submission` read unknown with their own words
+(U4); the outcome table names all nine (U5). UX: the time gets a date
+("4 Nov 14:02") when it is from an earlier day; Guided keeps the glyph.
+

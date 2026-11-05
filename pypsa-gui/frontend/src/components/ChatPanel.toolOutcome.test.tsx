@@ -56,10 +56,10 @@ async function turn(mode: 'guided' | 'expert') {
   await waitFor(() => expect(vi.mocked(createChatStream)).toHaveBeenCalled())
   emit('session_init', { session_id: 'outcome-session', model: 'synthetic', turn_id: 'turn-1' })
 }
-function call(id: string, tool: string, outcome: string | null, jobId: string | null = 'fg:1') {
+function call(id: string, tool: string, outcome: string | null, jobId: string | null = 'fg:1', reason: string | null = null) {
   emit('tool_request', { tool_use_id: id, tool_name: tool, safety_tier: 'job' })
   emit('tool_result', { tool_use_id: id, tool_name: tool,
-    result: outcome === null ? { ok: true } : { _outcome: { version: 1, outcome, job_id: jobId, reason: null }, status: 'completed' } })
+    result: outcome === null ? { ok: true } : { _outcome: { version: 1, outcome, job_id: jobId, reason }, status: 'completed', completed: true } })
 }
 const rows = () => screen.getAllByTestId('chat-message').filter(r => r.dataset.role === 'tool')
 const at = new Date(2026, 10, 5, 14, 2).getTime()
@@ -122,6 +122,27 @@ describe('chat tool-line outcome marks', () => {
     call('wait', 'wait_for_job', 'failed')
     expect(screen.getAllByTestId('chat-tool-outcome')[0].textContent).toBe('✕run_simulation (failed)')
     expect(screen.queryByText(/\(running/)).toBeNull()
+  })
+
+  it.each([
+    ['a job result without an outcome', { status: 'completed', completed: true }],
+    ['a truncated job result', { _truncated: true, length: 9000, preview: '{"status": "completed", "completed": true' }],
+  ])('fails closed for %s', async (_label, result) => {
+    await turn('expert')
+    emit('tool_request', { tool_use_id: 'j', tool_name: 'run_simulation', safety_tier: 'job' })
+    emit('tool_result', { tool_use_id: 'j', tool_name: 'run_simulation', result })
+    expect(screen.getByTestId('chat-tool-outcome').textContent)
+      .toBe('–run_simulation (outcome unknown — the result could not be read)')
+  })
+
+  it('says why a queue job cannot be checked yet, in both modes', async () => {
+    await turn('expert')
+    call('w', 'wait_for_job', 'uncertain', 'ad:7', 'adapter_pending')
+    expect(screen.getByTestId('chat-tool-outcome').textContent)
+      .toBe('–wait_for_job (outcome unknown — this kind of job cannot be checked yet)')
+    act(() => useUIStore.setState({ uiMode: 'guided' }))
+    expect(screen.getByTestId('chat-tool-label').textContent)
+      .toBe('Outcome unknown: use wait for job — this kind of job cannot be checked yet')
   })
 
   it('leaves a tool without an outcome on its plain ✓ line', async () => {

@@ -8,6 +8,13 @@ export const ACTIVITY_STATUS_WORDS: Record<string, string> = {
   submitted: 'Queued', cancel_requested: 'Stopping', uncertain: 'Outcome unknown', denied: 'Denied',
 }
 
+/** Why a chat tool line reads "outcome unknown", where the reason helps (issue 04, `_outcome.reason`). */
+export const TOOL_OUTCOME_REASON_WORDS: Record<string, string> = {
+  adapter_pending: 'this kind of job cannot be checked yet',
+  no_submission: 'no job from this call was found',
+  unreadable: 'the result could not be read',
+}
+
 export const ACTIVITY_FAMILY_WORDS: Record<string, string> = {
   run: 'Study run', foreground_simulation: 'Simulation', solve_queue: 'Queued solve', gridspine: 'Grid study',
   assistant_task: 'Assistant task', confirmation: 'Confirmation', source_gap: 'Source gap',

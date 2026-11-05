@@ -264,14 +264,14 @@ const ERROR_LINE = /^✗ (\S+)(?: — [^:\s]+(?:: ([\s\S]*))?)?$/
 // call never keeps saying it is working. Cached per messages array.
 const _settledCache = new WeakMap<readonly unknown[], Set<string>>()
 export function guidedSettledToolIds(
-  messages: ReadonlyArray<{ role: string; content: string; tool_use_id?: string; tool_result?: unknown }>,
+  messages: ReadonlyArray<{ role: string; content: string; tool_use_id?: string; tool_name?: string; tool_result?: unknown }>,
 ): Set<string> {
   const hit = _settledCache.get(messages)
   if (hit) return hit
   const out = new Set<string>()
   for (const m of messages) {
     if (m.role === 'tool' && m.tool_use_id
-      && (/^(✓ |✗ |denied: )/.test(m.content) || toolOutcomeOf(m.tool_result))) out.add(m.tool_use_id)
+      && (/^(✓ |✗ |denied: )/.test(m.content) || toolOutcomeOf(m.tool_result, m.tool_name))) out.add(m.tool_use_id)
   }
   _settledCache.set(messages, out)
   return out
@@ -280,7 +280,7 @@ export function guidedSettledToolIds(
 /** Issue 04 (S1b): Guided words for a job tool line with an `_outcome`. */
 function guidedOutcomeLine(tool: string, now: CurrentToolOutcome): GuidedToolLine {
   const word = now.mark.word.charAt(0).toUpperCase() + now.mark.word.slice(1)
-  const asOf = now.mark.inFlight ? `, as of ${outcomeClock(now.ts)}` : ''
+  const asOf = now.mark.inFlight ? `, as of ${outcomeClock(now.ts)}` : now.why ? ` — ${now.why}` : ''
   return { hidden: false, label: `${word}: ${guidedToolPhrase(tool)}${asOf}` }
 }
 
@@ -2317,8 +2317,8 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
               return `${outcome === 'completed' ? '✓' : '…'} ${d.tool_name} (${outcome})`
             }
             // Issue 04 (S1b): the backend's identity-checked job outcome, not a blanket ✓.
-            const outcome = toolOutcomeOf(d.result)
-            return outcome ? toolOutcomeLine(d.tool_name, outcome.outcome) : `✓ ${d.tool_name}`
+            const outcome = toolOutcomeOf(d.result, d.tool_name)
+            return outcome ? toolOutcomeLine(d.tool_name, outcome) : `✓ ${d.tool_name}`
           })(),
           // Checked artifacts/task projections are not implemented in this pilot.
           tool_result: assuranceRef.current.strict ? undefined : d.result,

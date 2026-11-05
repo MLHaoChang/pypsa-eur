@@ -36,17 +36,19 @@ import './index.css'
 const mode = new URLSearchParams(location.search).get('mode') === 'expert' ? 'expert' : 'guided'
 const t0 = new Date(2026, 10, 5, 14, 2).getTime()
 const messages: any[] = [{ id: 'u', role: 'user', content: 'Solve the network and check each job.', ts: t0 }]
-const add = (id: string, tool: string, outcome: string, job: string | null, minute: number) => {
+const add = (id: string, tool: string, outcome: string, job: string | null, minute: number, reason: string | null = null) => {
   const ts = t0 + minute * 60000
   messages.push({ id: id + '-req', role: 'tool', content: '→ ' + tool, tool_use_id: id, tool_name: tool, ts })
-  messages.push({ id, role: 'tool', content: toolOutcomeLine(tool, outcome), tool_use_id: id, tool_name: tool, ts,
-    tool_result: { _outcome: { version: 1, outcome, job_id: job, reason: null } } })
+  messages.push({ id, role: 'tool', content: toolOutcomeLine(tool, { outcome, job_id: job, reason }), tool_use_id: id, tool_name: tool, ts,
+    origin_project: 'Demo', tool_result: { _outcome: { version: 1, outcome, job_id: job, reason } } })
 }
 ;['submitted', 'running', 'cancel_requested', 'completed', 'failed', 'cancelled', 'partial', 'uncertain']
   .forEach((o, i) => add('c' + i, 'run_simulation', o, 'fg:' + i, 0))
 // A running solve later read as done by wait_for_job: the earlier line follows the later read.
 add('s1', 'run_simulation', 'running', 'fg:live', 1)
 add('s2', 'wait_for_job', 'completed', 'fg:live', 7)
+// A queue job the backend cannot check yet.
+add('q1', 'wait_for_job', 'uncertain', 'ad:7', 8, 'adapter_pending')
 useUIStore.setState({ currentProject: 'Demo', projectMismatch: null, assistantDockOpen: true, uiMode: mode } as any)
 useChatStore.setState({ sessionId: 'shot-session', messages, streaming: false, pending: null, error: null } as any)
 createRoot(document.getElementById('root')!).render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}>
