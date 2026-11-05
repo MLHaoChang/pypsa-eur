@@ -112,17 +112,36 @@ def propose(
     basis that is not the gap's."""
     if not isinstance(proposal, dict):
         raise LedgerError("invalid_source_row", "A source row is an object.")
-    value = proposal.get("value")
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not math.isfinite(value)
-    ):
-        raise LedgerError(
-            "invalid_source_row", "A source row's value is a finite number."
-        )
-    unit, basis = proposal.get("unit"), proposal.get("basis")
     want = gap["research"]
+    ranged = want.get("shape") == "range"
+    if ranged:  # issue 29: an explore gap's sourced range (SH-06, GK B E11)
+        bounds = proposal.get("range")
+        if (
+            proposal.get("value") is not None
+            or not isinstance(bounds, dict)
+            or set(bounds) != {"low", "high"}
+            or not all(_finite(bounds[k]) for k in ("low", "high"))
+        ):
+            raise LedgerError(
+                "invalid_source_row",
+                "A range gap's row gives low and high, finite numbers, and no value.",
+            )
+        if bounds["low"] > bounds["high"]:
+            raise LedgerError(
+                "invalid_source_row", "A range's low is at most its high."
+            )
+        value, bounds = (
+            None,
+            {"low": float(bounds["low"]), "high": float(bounds["high"])},
+        )
+    else:
+        value = proposal.get("value")
+        if proposal.get("range") is not None or not _finite(value):
+            raise LedgerError(
+                "invalid_source_row", "A source row's value is a finite number."
+            )
+        value = float(value)
+    unit, basis = proposal.get("unit"), proposal.get("basis")
     if (
         not isinstance(unit, str)
         or unit.strip() != want["unit"]
@@ -162,7 +181,8 @@ def propose(
     row = {
         "id": f"src_{uuid.uuid4().hex[:12]}",
         "for": dict(gap["target"]) | {"gap": gap["key"]},
-        "value": float(value),
+        "value": value,
+        **({"range": bounds} if ranged else {}),
         "unit": want["unit"],
         "basis": want["basis"],
         "url": url,
@@ -186,7 +206,10 @@ def propose(
             "fetched_at": page.fetched_at,
             "content_sha256": page.sha256,
         }
-    if not value_in_quote(row["value"], row["unit"], quote):
+    stated = (
+        [bounds["low"], bounds["high"]] if ranged else [row["value"]]
+    )  # a range is verified only when the quote states both ends
+    if not all(value_in_quote(v, row["unit"], quote) for v in stated):
         return row | {
             "verification": "unverified",
             "verification_reason": "value_not_in_quote",
@@ -200,6 +223,25 @@ def propose(
         "locator": locator,
         **({"title": page.title[:200]} if page.title and not row["title"] else {}),
     }
+
+
+def _finite(value: Any) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and math.isfinite(value)
+    )
+
+
+def ranges(rows: Iterable[dict[str, Any]], gap_key: str) -> list[dict[str, Any]]:
+    """Issue 29: the verified, non-rejected range rows of one explore gap,
+    each with its `status`. Issue 06's case admission keeps only `confirmed`
+    ones, after its own re-read under the run's lock."""
+    return [
+        r
+        for r in for_gap(rows, gap_key)
+        if r.get("range") is not None and sourced(r) and r.get("status") != "rejected"
+    ]
 
 
 def sourced(row: dict[str, Any]) -> bool:
@@ -234,6 +276,7 @@ def card_view(row: dict[str, Any]) -> dict[str, Any]:
     base = {
         "row": row["id"],
         "value": row["value"],
+        **({"range": dict(row["range"])} if row.get("range") is not None else {}),
         "unit": row["unit"],
         "basis": row["basis"],
         "status": row["status"],

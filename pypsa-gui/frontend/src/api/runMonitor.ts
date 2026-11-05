@@ -41,7 +41,9 @@ export type UnattendedBlock = 'runner_off' | 'no_provider' | 'locked' | 'no_noti
  *  `sourced` row carries its page and verbatim quote; an `unverified source`
  *  never does, and can only be rejected. */
 export interface ResearchRow {
-  row: string; gap: string; value: number; unit: string; basis: string
+  row: string; gap: string; unit: string; basis: string
+  /** A point value, or null for an explore gap's sourced range (issue 29). */
+  value: number | null; range?: { low: number; high: number }
   status: 'proposed' | 'confirmed' | 'rejected'; jurisdiction?: string
   /** The server's word: this row may be used (proposed and verified). */
   confirmable: boolean

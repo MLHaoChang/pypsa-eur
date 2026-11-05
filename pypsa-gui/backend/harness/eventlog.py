@@ -476,6 +476,64 @@ def interrupted_turn(owner: Any, ctx: Any, *, live: Any) -> dict[str, Any] | Non
 
 # ── fork ───────────────────────────────────────────────────────────────────
 
+class ReplayRefused(ValueError):
+    """A fork or replay the log refuses, with its error kind."""
+
+    def __init__(self, kind: str, message: str) -> None:
+        super().__init__(message)
+        self.kind = kind
+
+
+def _research_turn(events: list[dict[str, Any]]) -> bool:
+    """A turn's events are a research turn's (issue 09): the runner framed
+    them as one, or a message in them carries a stubbed web result."""
+    def stubbed(value: Any) -> bool:
+        if isinstance(value, dict):
+            return value.get("scrubbed") is True or any(stubbed(v) for v in value.values())
+        return isinstance(value, list) and any(stubbed(v) for v in value)
+
+    return any(
+        (e["type"] == "runner/frame" and e.get("loop") == "research") or stubbed(e.get("message"))
+        for e in events
+    )
+
+
+def research_spans(events: list[dict[str, Any]]) -> list[tuple[int, int]]:
+    """(turn/start seq, last seq) of each research turn, through the history
+    change that cuts it (`research._forget`), or to the end of the log."""
+    spans, i = [], 0
+    while i < len(events):
+        if events[i]["type"] != "turn/start":
+            i += 1
+            continue
+        j = i + 1
+        while j < len(events) and events[j]["type"] not in ("turn/end", "turn/start"):
+            j += 1
+        if j < len(events) and events[j]["type"] == "turn/end":
+            j += 1  # the end belongs to the turn
+        k = j
+        while k < len(events) and events[k]["type"] not in ("turn/start",) and not events[k]["type"].startswith("history/"):
+            k += 1
+        last = events[min(k, len(events) - 1)]["seq"]
+        if _research_turn(events[i:j]):
+            spans.append((events[i]["seq"], last))
+        i = j
+    return spans
+
+
+def refuse_research_turn(events: list[dict[str, Any]], at_seq: int, *, replaying: bool = False) -> None:
+    """Issue 29 (GK B F6): a fork whose prefix ends inside a research turn,
+    or a replay of one, is refused. Its messages are stubs of fetched pages,
+    which no provider history may carry."""
+    for start, last in research_spans(events):
+        if start < at_seq <= last or (replaying and at_seq == start):
+            raise ReplayRefused(
+                "research_turn_not_replayable",
+                f"seq {at_seq} is inside a research turn (seq {start}-{last}); "
+                "fork before it or after the history change that ends it.",
+            )
+
+
 def fork(parent_path: Path, at_seq: int, *, model: str | None = None) -> Any:
     """A new session whose history is the parent's events before `at_seq`.
 
@@ -487,7 +545,9 @@ def fork(parent_path: Path, at_seq: int, *, model: str | None = None) -> Any:
 
     parent_path = Path(parent_path)
     parent_header = read_header(parent_path) or {}
-    prefix = [e for e in read_events(parent_path) if e["seq"] < at_seq]
+    events = read_events(parent_path)
+    refuse_research_turn(events, at_seq)
+    prefix = [e for e in events if e["seq"] < at_seq]
     next_seq = (prefix[-1]["seq"] + 1) if prefix else 1
     child = ChatSession(model=model or "replay",
                         owner_user_id=parent_header.get("owner_user_id"))

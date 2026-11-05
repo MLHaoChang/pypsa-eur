@@ -12,6 +12,8 @@
 
 The provider is scripted (no network); pages are fake."""
 
+# ruff: noqa: F811 -- the imported pytest fixtures are test parameters
+
 import json
 import threading
 import time
@@ -26,7 +28,6 @@ from tests.test_harness_envelope import granted, profile  # noqa: F401 -- pytest
 from tests.test_harness_research import (
     BOOT,
     GAP,
-    PAGE,
     URL,
     Scripted,
     _hold,
@@ -179,23 +180,13 @@ def test_search_titles_and_urls_are_inside_the_fence():
 
 
 def test_a_pause_turn_ends_the_research_turn_with_no_further_send(granted, profile):
-    """F1: a pause_turn is never resumed, so no server block is re-sent."""
-
-    class Pausing(Scripted):
-        def stream(self, request):
-            from harness.protocol import LLMEvent
-
-            self.requests.append(request)
-            yield LLMEvent(
-                type="message_done",
-                blocks=self.turns.pop(0),
-                usage={},
-                stop_reason="pause_turn",
-            )
-
-    base = Pausing([*_search_pair()], [{"type": "text", "text": "never sent"}])
-    _run(granted, profile, base)
+    """F1: a paused response reaches the loop as server blocks with no client
+    tool call (the protocol carries no stop reason), so the turn ends there:
+    no server block is ever re-sent to resume it."""
+    base = Scripted([*_search_pair()], [{"type": "text", "text": "never sent"}])
+    out, _, _ = _run(granted, profile, base)
     assert len(base.requests) == 1
+    assert out["status"] == "done" and out["rows"] == []
 
 
 def test_verification_still_reads_the_retained_page(granted, profile):
@@ -270,18 +261,39 @@ def test_a_failed_cleanup_stops_the_run_and_lists_the_gaps(
     granted, profile, monkeypatch
 ):
     """F7: when the read-back still finds page text, the run stops with
-    research_cleanup_failed under the lease, and the gap is listed."""
+    research_cleanup_failed under the lease, the gap is listed, and no card
+    waits (no later round)."""
     from harness import runner
 
     monkeypatch.setattr(research, "_persisted_page_text", lambda *a, **k: True)
     base = Scripted([*_search_pair(), _row_call()], [{"type": "text", "text": "Done."}])
     out, _, path = _run(granted, profile, base)
-    assert out["status"] == "cleanup_failed"
+    assert out["status"] == "cleanup_failed" and out["waiting"] is None
     run = runner._read(path)["run"]
-    assert run["status"] == "error"
-    assert run["error"]["kind"] == "research_cleanup_failed"
-    assert [g["key"] for g in run["error"]["gaps"]] == ["import_tariff"]
-    assert out["waiting"] is None  # no card, no later round
+    assert (run["status"], run["reason"]) == ("failed", "research_cleanup_failed")
+    step = run["research"]["steps"][-1]
+    assert (step["kind"], step["gaps"]) == (
+        "research_cleanup_failed",
+        ["import_tariff"],
+    )
+
+
+def test_the_read_back_finds_an_unscrubbed_page_on_disk(granted, profile):
+    """The check itself fails closed: a raw web result written to the log
+    after the turn is found."""
+    from harness import eventlog
+
+    base = Scripted([*_search_pair(), _row_call()], [{"type": "text", "text": "Done."}])
+    _, run, _ = _run(granted, profile, base)
+    assert not research._persisted_page_text(run, [])
+    eventlog.record(
+        run,
+        "context/injected",
+        kind="x",
+        text="y",
+        message={"content": [fetch_block()]},
+    )
+    assert research._persisted_page_text(run, [])
 
 
 def test_a_fork_inside_a_research_turn_is_refused(granted, profile):
@@ -293,11 +305,38 @@ def test_a_fork_inside_a_research_turn_is_refused(granted, profile):
     eventlog.flush(run)
     events = eventlog.read_events(eventlog.path_for(run))
     inside = next(
-        e["seq"] for e in events if e["type"] == "runner/frame" and e.get("loop") == "research"
+        e["seq"]
+        for e in events
+        if e["type"] == "runner/frame" and e.get("loop") == "research"
     )
     with pytest.raises(eventlog.ReplayRefused) as err:
-        eventlog.messages_at(events, inside)
+        eventlog.fork(eventlog.path_for(run), inside)
     assert err.value.kind == "research_turn_not_replayable"
+    start = next(e["seq"] for e in events if e["type"] == "turn/start")
+    with pytest.raises(eventlog.ReplayRefused):
+        eventlog.refuse_research_turn(events, start, replaying=True)
+    # Before the research turn, and after the cut that ends it, a fork is fine.
+    eventlog.refuse_research_turn(events, start)
+    eventlog.refuse_research_turn(events, events[-1]["seq"] + 1)
+
+
+def test_the_refusal_is_a_value_error_and_an_ordinary_turn_forks():
+    """F6 base-class mutant: ReplayRefused stays a ValueError (callers that
+    catch ValueError still refuse), and a log with no research turn forks."""
+    from harness import eventlog
+
+    assert issubclass(eventlog.ReplayRefused, ValueError)
+    plain = [
+        {"seq": 1, "type": "turn/start"},
+        {
+            "seq": 2,
+            "type": "assistant/attempt",
+            "message": {"content": [{"type": "text", "text": "hi"}]},
+        },
+        {"seq": 3, "type": "turn/end"},
+    ]
+    assert eventlog.research_spans(plain) == []
+    eventlog.refuse_research_turn(plain, 2)
 
 
 # ── 3. Stage-6 ranges (F9) ───────────────────────────────────────────────────
@@ -398,7 +437,9 @@ def test_a_research_write_waits_for_the_runs_file_lock(granted, profile):  # noq
     other.start()
     assert holding.wait(5)
     writer = threading.Thread(
-        target=research._update, args=(path, change), kwargs={"lease": (BOOT, time.time)}
+        target=research._update,
+        args=(path, change),
+        kwargs={"lease": (BOOT, time.time)},
     )
     writer.start()
     try:
@@ -419,12 +460,57 @@ def test_confirming_a_range_row_adds_no_write(granted, profile):  # noqa: F811
     task, path, _ = granted()
     row = _propose(_range())
     research._update(
-        path, lambda t: t["run"].setdefault("research", {}).setdefault("rows", []).append(row)
+        path,
+        lambda t: (
+            t["run"].setdefault("research", {}).setdefault("rows", []).append(row)
+        ),
     )
     research.settle(path, row["id"], "confirmed", by="user")
     run = runner._read(path)["run"]
     assert [r["status"] for r in run["research"]["rows"]] == ["confirmed"]
     assert not [s for s in run.get("steps", []) if s.get("research_ref") == row["id"]]
-    assert [r["status"] for r in source_ledger.ranges(run["research"]["rows"], "bess_capex")] == [
-        "confirmed"
-    ]
+    assert [
+        r["status"] for r in source_ledger.ranges(run["research"]["rows"], "bess_capex")
+    ] == ["confirmed"]
+
+
+def _chat_path():
+    from harness.history import get_persist_path
+    from services.pypsa_service import PyPSAService
+
+    return get_persist_path(PyPSAService.get_active_context())
+
+
+def test_list_chat_history_returns_no_page_or_research_turn(granted, profile):
+    """F5: the chat-history tool reads chat.jsonl back to the model; after a
+    research turn it carries no page and no research prose."""
+    from services import chat_tools
+
+    base = Scripted(
+        [*_search_pair(), _row_call()], [{"type": "text", "text": "Research prose."}]
+    )
+    _run(granted, profile, base)
+    assert _chat_path() is not None  # a project is bound: a record would land
+    out = json.dumps(chat_tools.list_chat_history())
+    assert INJECTED not in out and "Research prose." not in out
+
+
+def test_a_snapshot_after_a_research_turn_carries_no_page(granted, profile):
+    """F5: a snapshot bundle copies chat.jsonl verbatim (routers/snapshots.py);
+    one made after a research turn holds no page text."""
+    from routers import snapshots
+
+    base = Scripted(
+        [*_search_pair(), _row_call()], [{"type": "text", "text": "Research prose."}]
+    )
+    _run(granted, profile, base)
+    chat = _chat_path()
+    chat.parent.joinpath(chat.name).touch()  # the bundle copies it even when empty
+    snapshots._create_snapshot_internal(
+        chat.parent.name, "t", "m", project_dir=chat.parent
+    )
+    bundled = [p for p in chat.parent.rglob("chat.jsonl*") if p != chat]
+    assert bundled, "the snapshot carried no chat.jsonl"
+    for path in bundled:
+        text = path.read_text(encoding="utf-8")
+        assert INJECTED not in text and "Research prose." not in text

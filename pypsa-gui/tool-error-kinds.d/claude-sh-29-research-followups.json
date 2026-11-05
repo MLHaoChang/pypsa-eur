@@ -1,0 +1,12 @@
+{
+  "kinds": {
+    "research_cleanup_failed": {
+      "surface": "inline",
+      "why": "After a research turn the server read the session's event log and the project's chat.jsonl back and still found a fetched web page or web result there (study harness issue 29). The run stops as failed before any later round, and the step lists the gaps left as the template has them. Nothing fetched reaches a later request."
+    },
+    "research_range_not_applicable": {
+      "surface": "inline",
+      "why": "A sourced range (an explore gap's research row, low and high) was sent to the write path that turns a confirmed value into a Library tariff. A range is read by a case change only and is never divided or written; nothing was changed."
+    }
+  }
+}

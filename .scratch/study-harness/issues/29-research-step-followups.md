@@ -23,15 +23,15 @@ The open items from #1104 ("Not in this PR" in its description, plus a risk no r
 
 ## Acceptance criteria
 
-- [ ] A research turn with a fetched page and a `record_source` call: the second send carries no `web_*_tool_result` block; the page text it carries sits inside the fence, and a closing fence tag inside the page cannot end the fence.
-- [ ] Verification is unchanged: a row's quote is still checked against the retained fetched text of this turn.
-- [ ] After a research turn, neither the session's event log file nor the project's `chat.jsonl` contains the fetched page's text or any `web_*_tool_result` content (test reads the files).
-- [ ] The cleanup fails closed: when the read-back still finds page text (forced in a test), the run stops with an error that lists the gaps, and no later L1/L2 round is sent.
-- [ ] `derive_messages(log) == session.messages` still holds after a research turn (`test_harness_eventlog_truth`).
-- [ ] A range row for an explore gap: verified only when both bounds parse from the quote in the gap's unit; low ≤ high; another unit refused; `source_ledger` exposes it in the shape issue 06 agreed.
-- [ ] Confirming a range row on the research card sets it `confirmed` and adds no write step; the card shows low–high with unit, source and quote.
-- [ ] A test pins the file lock alone (lease check left in place): a mutant without the lock goes red.
-- [ ] Layout test still passes: no vendor word outside `harness/providers`.
+- [x] A research turn with a fetched page and a `record_source` call: the second send carries no `web_*_tool_result` block; the page text it carries sits inside the fence, and a closing fence tag inside the page cannot end the fence.
+- [x] Verification is unchanged: a row's quote is still checked against the retained fetched text of this turn.
+- [x] After a research turn, neither the session's event log file nor the project's `chat.jsonl` contains the fetched page's text or any `web_*_tool_result` content (test reads the files).
+- [x] The cleanup fails closed: when the read-back still finds page text (forced in a test), the run stops with an error that lists the gaps, and no later L1/L2 round is sent.
+- [x] `derive_messages(log) == session.messages` still holds after a research turn (`test_harness_eventlog_truth`).
+- [x] A range row for an explore gap: verified only when both bounds parse from the quote in the gap's unit; low ≤ high; another unit refused; `source_ledger` exposes it in the shape issue 06 agreed.
+- [x] Confirming a range row on the research card sets it `confirmed` and adds no write step; the card shows low–high with unit, source and quote.
+- [x] A test pins the file lock alone (lease check left in place): a mutant without the lock goes red.
+- [x] Layout test still passes: no vendor word outside `harness/providers`.
 
 ## Likely files
 

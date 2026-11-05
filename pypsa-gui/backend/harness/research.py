@@ -32,6 +32,7 @@ admission refuse it). An unverified row is listed, never offered.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import threading
@@ -39,7 +40,8 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from pathlib import Path
 
 from services import source_ledger
 from services.run_envelope import RESEARCH_SOURCE
@@ -62,6 +64,9 @@ READ_TOOLS = frozenset(
 )
 _GAP_KEYS = {"key", "stage", "tool", "target", "unit", "basis", "question"}
 _TOOLS = {"attach_tariff"}  # proposal-first (#970 item 4): gaps with an edit adapter
+# Issue 29 (SH-06, GK B E11): an explore gap may take a sourced range. It has
+# no edit adapter (`tool: null`); issue 06's case admission reads its rows.
+SHAPES = ("point", "range")
 
 
 # The kinds this step reports, as `{"error_kind": ...}` literals for the
@@ -75,6 +80,8 @@ ERROR_KINDS = (
     {"error_kind": "research_lease_lost"},
     {"error_kind": "research_cap_reached"},
     {"error_kind": "research_not_available"},
+    {"error_kind": "research_cleanup_failed"},
+    {"error_kind": "research_range_not_applicable"},
 )
 
 
@@ -95,11 +102,19 @@ def check_block(block: Any) -> dict[str, Any]:
         raise ValueError("A research block is {gaps: [...]}.")
     seen = set()
     for gap in block["gaps"]:
-        if not isinstance(gap, dict) or set(gap) != _GAP_KEYS:
-            raise ValueError(f"A research gap names {sorted(_GAP_KEYS)}.")
+        if not isinstance(gap, dict) or set(gap) - {"shape"} != _GAP_KEYS:
+            raise ValueError(
+                f"A research gap names {sorted(_GAP_KEYS)} (and may name shape)."
+            )
+        shape = gap.get("shape", "point")
         if (
             gap["stage"] not in STAGES
-            or gap["tool"] not in _TOOLS
+            or shape not in SHAPES
+            or (shape == "point" and gap["tool"] not in _TOOLS)
+            or (
+                shape == "range"
+                and (gap["stage"] != "explore" or gap["tool"] is not None)
+            )
             or gap["key"] in seen
         ):
             raise ValueError(
@@ -123,7 +138,11 @@ def gaps_for(profile: dict[str, Any], stage: str) -> list[dict[str, Any]]:
             "tool": g["tool"],
             "target": dict(g["target"]),
             "question": g["question"],
-            "research": {"unit": g["unit"], "basis": g["basis"]},
+            "research": {
+                "unit": g["unit"],
+                "basis": g["basis"],
+                "shape": g.get("shape", "point"),
+            },
         }
         for g in block["gaps"]
         if g["stage"] == stage
@@ -173,9 +192,15 @@ def instruction(gaps: list[dict[str, Any]]) -> str:
         "",
     ]
     for gap in gaps:
+        ranged = gap["research"].get("shape") == "range"
         lines.append(
             f"- {gap['key']}: {gap['question']} Unit {gap['research']['unit']}, "
             f"basis {gap['research']['basis']}."
+            + (
+                " A range: give low and high (no value), both stated in the quote."
+                if ranged
+                else ""
+            )
         )
     return "\n".join(lines)
 
@@ -309,6 +334,13 @@ def research_turn(
         with _TURNS_LOCK:
             _TURNS.pop(session.session_id, None)
         _forget(session, asked)
+        # Issue 29 (GK B Q2, F7): what persists is read back; if any fetched
+        # page is still on disk the run stops here, before any later round.
+        leaked = _persisted_page_text(session, provider.fetched)
+        if leaked:
+            _cleanup_failed(task_path, stage, gaps, lease=lease)
+    if leaked:
+        return {"status": "cleanup_failed", "rows": turn.rows, "waiting": None}
     if provider.cap_reached:
         status = "cap_reached"
     elif provider.refused in capability.NOT_AVAILABLE:
@@ -432,6 +464,99 @@ def _forget(session, asked: str) -> None:
 
 _WEB_RESULT = re.compile(r"web_\w+_tool_result")
 
+# A page window longer than any quote: a quote may persist, a page may not.
+_WINDOW = source_ledger.QUOTE_CHARS + 1
+_STRIDE = 64
+
+
+def _strings(value: Any) -> Iterable[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for v in value.values():
+            yield from _strings(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _strings(v)
+
+
+def _page_windows(pages) -> list[str]:
+    out = []
+    for page in pages:
+        text = source_ledger.normalise(page.text)
+        for start in range(0, max(len(text) - _WINDOW, 0) + 1, _STRIDE):
+            window = text[start : start + _WINDOW]
+            if len(window) == _WINDOW:
+                out.append(window)
+    return out
+
+
+def _persisted_files(session) -> list[Path]:
+    from harness import eventlog
+    from harness.history import get_persist_path
+    from services.pypsa_service import PyPSAService
+
+    files = [eventlog.path_for(session)]
+    chat = get_persist_path(PyPSAService.get_active_context())
+    if chat is not None:
+        files += [chat, chat.with_name(chat.name + ".1")]
+    return files
+
+
+def _persisted_page_text(session, pages) -> bool:
+    """Issue 29 (GK B Q2, F5): True when the session's event log or the
+    project's chat.jsonl (and its rotation) still holds a web result that is
+    not a stub, or a window of a page fetched in this turn. Fails closed: a
+    file that cannot be read or parsed counts as holding one."""
+    from harness import eventlog
+    from harness.providers import research as capability
+
+    try:
+        eventlog.flush(session)
+        windows = _page_windows(pages)
+        for path in _persisted_files(session):
+            if not path.exists():
+                continue
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    value = json.loads(line)
+                except ValueError:
+                    return True
+                if capability.unscrubbed(value):
+                    return True
+                if windows:
+                    text = source_ledger.normalise("\n".join(_strings(value)))
+                    if any(w in text for w in windows):
+                        return True
+    except Exception:  # noqa: BLE001 — an unreadable store is not a clean one
+        logger.exception("research: the persisted history could not be checked")
+        return True
+    return False
+
+
+def _cleanup_failed(task_path, stage, gaps, *, lease) -> None:
+    """F7: the run stops with research_cleanup_failed, its gaps listed, under
+    the run's file lock and this process's lease (`_update`)."""
+    from harness import runner
+
+    def change(task):
+        _research_block(task)["steps"].append(
+            {
+                "stage": stage,
+                "status": "error",
+                "kind": "research_cleanup_failed",
+                "gaps": [g["key"] for g in gaps],
+            }
+        )
+        runner._stop_in(task, "failed", "research_cleanup_failed")
+
+    if not _update(task_path, change, lease=lease):
+        logger.error(
+            "research: %s cleanup failed and the stop was not written", task_path
+        )
+
 
 def _fetched_block(message: dict[str, Any]) -> bool:
     """A provider-run web search or fetch result in a history message."""
@@ -481,6 +606,9 @@ def record_source(
     quote: str,
     title: str = "",
     jurisdiction: str | None = None,
+    *,
+    low: float | None = None,
+    high: float | None = None,
 ) -> dict[str, Any]:
     """Propose one source row for a gap of the running research turn. The
     server verifies it against the pages fetched in this turn."""
@@ -504,6 +632,11 @@ def record_source(
                 "quote": quote,
                 "title": title,
                 "jurisdiction": jurisdiction,
+                **(
+                    {"range": {"low": low, "high": high}}
+                    if (low, high) != (None, None)
+                    else {}
+                ),
             },
             turn.gaps[gap],
             list(turn.provider.fetched),
@@ -536,6 +669,13 @@ def _tariff(row: dict[str, Any], name: str) -> dict[str, Any]:
     from datetime import date
 
     if (
+        row.get("range") is not None or row.get("value") is None
+    ):  # F9: never divided or written
+        raise ResearchError(
+            "research_range_not_applicable",
+            "A sourced range is read by a case change, never written as a tariff.",
+        )
+    if (
         row.get("unit") != TARIFF_UNIT
     ):  # fail closed: the scale below is EUR/MWh → EUR/kWh only
         raise ResearchError(
@@ -565,6 +705,10 @@ def write_steps(task: dict[str, Any], row: dict[str, Any]) -> list[dict[str, Any
     so its gate waits for them. Only `attach_tariff` gaps exist (#970 item 4)."""
     from services import run_profiles
 
+    if (
+        row.get("range") is not None
+    ):  # a range is read by issue 06's case admission, never written
+        return []
     key = row["for"]["gap"]
     gap = next(
         g

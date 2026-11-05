@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The research step fences fetched web pages as untrusted data on every re-send. Pages never persist in the session event log, chat history or snapshots, and the run stops if any remain. An explore gap can now take a sourced range (low and high) that the user confirms on the research card.

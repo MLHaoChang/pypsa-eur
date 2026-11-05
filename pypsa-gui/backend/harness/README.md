@@ -1535,6 +1535,40 @@ rows and adds two run steps, `put_library_item` then `attach_tariff`, each
 carrying `research_ref`, which `run_envelope` never admits: each is the user's
 own card. Rows, verdicts and listed gaps stay in `run.research` for the report.
 
+**Follow-ups (issue 29).**
+
+- **The fence (R3).** A research send that follows a client tool result
+  (`record_source` or a read tool) never re-sends the provider's own search or
+  fetch blocks, or citations, in the assistant role. `ResearchProvider` takes
+  them out and adds one user-side `<untrusted_web_content>` block, built from
+  this turn's retained pages and the search urls and titles. Any tag in the
+  page that could close the fence is escaped (any case, spacing or
+  attributes). A paused response has no client tool call, so the turn ends
+  there and nothing is re-sent.
+- **Nothing fetched persists.** The loop asks the turn's provider what the
+  history keeps (`persistable`). A research turn keeps a stub per web result
+  (`{type, tool_use_id, scrubbed: true}`) and no citations, so the event log
+  never holds a page, even on a flush mid-turn. It also writes no `chat.jsonl`
+  record (`display_record = False`), so `GET /history`, `list_chat_history`
+  and snapshot bundles carry none of it. After the turn,
+  `research._persisted_page_text` reads the event log and `chat.jsonl` (with
+  its rotation) back. If any unstubbed web result or page window is left, or a
+  file cannot be read, the run stops `failed` with `research_cleanup_failed`
+  and lists the gaps, before any later round.
+- **No fork into a research turn.** `eventlog.fork` refuses a seq inside a
+  research turn, up to the history change that cuts it, and `replay.replay`
+  refuses one's own `turn/start`. Both raise `ReplayRefused`, kind
+  `research_turn_not_replayable`.
+- **Sourced ranges (stage 6).** An `explore` gap may declare
+  `shape: "range"` with `tool: null`. Its row has `value: null` and
+  `range: {low, high}` (`record_source` takes `low` and `high`). It is
+  verified only when the quote states both ends in the gap's unit, with
+  low ≤ high. The user confirms it on the same research card. Confirming adds
+  no write: `_tariff` refuses a range (`research_range_not_applicable`).
+  `source_ledger.ranges(rows, gap_key)` returns the verified, non-rejected
+  range rows with their status, for issue 06's case admission, which keeps
+  only `confirmed` ones.
+
 ### Send reservation (study harness issue 24)
 
 `harness/send_reservation.py` writes a durable hold before each model send of a
