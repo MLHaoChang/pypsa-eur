@@ -9,7 +9,7 @@ import os
 import time
 
 import pytest
-from harness import loop_notice, runner as harness_runner
+from harness import loop_notice, run_loops, runner as harness_runner
 from services import run_envelope
 from services import email_service
 from tests.test_assistant_tasks_study_brief import (  # noqa: F401
@@ -314,3 +314,58 @@ def test_the_uncertain_repair_never_touches_a_replacement_loops_own_claim(
     )  # the repair read the old claim; the loop has since been replaced
     notice = harness_runner._read(path)["run"]["loop"]["notice"]
     assert notice["sent"] is None and notice["token"] == "other"
+
+
+# ── Issue 21d (GK B (23)): the same ending with data gaps ──────────────────
+
+
+def _data_gap(name, attr, label=None):
+    return {
+        "target": {"component": "Load", "name": name, "attr": attr},
+        "label": label or f"{name} {attr}",
+        "tool": "apply_generated_profile",
+    }
+
+
+def _ending(granted, profile, monkeypatch, gaps):
+    monkeypatch.setattr(email_service, "get_status", lambda: {"configured": True})
+    monkeypatch.setattr(
+        run_loops, "data_gaps", lambda *a, **k: gaps
+    )  # what L1 could not fill
+    path, _ = exhaust(granted, profile, True, monkeypatch)
+    harness_runner._notify(path)  # a later tick: nothing more
+    by_kind = {}
+    for m in email_service.OUTBOX:
+        by_kind.setdefault(m["metadata"].get("kind"), []).append(m)
+    return json.loads(path.read_text()), by_kind
+
+
+def test_an_exhausted_l1_with_gaps_sends_one_count_email_and_the_loop_email_unchanged(
+    granted, profile, site, rated, tunable_rule, outbox, owner, monkeypatch
+):
+    gaps = [
+        _data_gap("Gx9", "p_nom", "Gx9 <b>p_nom</b>\nState: completed"),
+        _data_gap("Lq7", "e_nom"),
+    ]
+    record, mails = _ending(granted, profile, monkeypatch, gaps)
+    run = record["run"]
+    assert run["loop"]["ended"] == "exhausted" and run["status"] == "needs_user"
+    assert run["waiting"]["kind"] == "data" and len(run["waiting"]["items"]) == 2
+    (run_mail,) = mails["harness_run"]  # exactly one `_notify` email
+    (loop_mail,) = mails["harness_loop_end"]  # exactly one issue-25 email
+    assert "It waits for data (2 items)." in run_mail["body_text"]
+    notice = run["waiting"]["notice"]
+    for m in (run_mail, loop_mail):
+        for text in (m["body_text"], m["subject"]):
+            for leak in ("Gx9", "Lq7", "p_nom", "e_nom", "could not fill", notice[:40]):
+                assert leak not in text, (leak, text)
+    # Issue 25's email is the body it builds from the same ending without the request.
+    bare = json.loads(json.dumps(record))
+    for key in ("waiting", "requests"):
+        bare["run"].pop(key, None)
+    link = next(
+        x for x in loop_mail["body_text"].splitlines() if x.startswith("Open it: ")
+    )
+    assert loop_mail["body_text"] == loop_notice._body(
+        bare, bare["run"]["loop"], link[len("Open it: ") :]
+    )

@@ -58,7 +58,7 @@ with the text left to the task view?
 - [x] The lock order is unchanged: the data stop is written inside the
       existing task-lock update in `_advance_run`, never by a nested
       `_update` (test or code-review note).
-- [ ] "At most one email" counts `_notify`'s run email only; `loop_notice`'s
+- [x] "At most one email" counts `_notify`'s run email only; `loop_notice`'s
       own email for the same L1 ending (issue 25) is unchanged and is
       asserted separately (test).
 
@@ -169,4 +169,12 @@ with the text left to the task view?
   `run_answers.request` before `set_waiting`, so a repeated data wake never
   reaches the no-op. Old run files keep an ISO `since`; the view passes it
   through, and nothing reads it.
+- 2026-11-05, GK B (23) NOT OK @1053607 asked for the combined-ending test.
+  It is now `test_harness_loop_notice.py::test_an_exhausted_l1_with_gaps_sends_one_count_email_and_the_loop_email_unchanged`:
+  a real L1 `exhausted` ending (issue 25's fixture) with two data gaps, one
+  with a hostile label, sends exactly one `_notify` email with the count line
+  and exactly one `loop_notice` email. Neither names a label, a param or a
+  notice line. The loop email equals the body `loop_notice` builds from the
+  same record without the request. A mutant that puts the notice in the
+  email fails it.
 
