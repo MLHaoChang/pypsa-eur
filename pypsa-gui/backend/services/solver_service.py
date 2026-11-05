@@ -643,10 +643,6 @@ def run_simulation(
         )
         tail_thread.start()
         with lock:
-            # Issue 30: readers outside the lock see these inputs, never the
-            # transforms below, until the restore releases them.
-            from services.workflow_tools import hold_solve_inputs
-            release_inputs = hold_solve_inputs(network, lock)
             phase(
                 f"Loading network state — {len(network.buses)} buses, "
                 f"{len(network.snapshots)} snapshots, mode={config.mode}, solver={config.solver_name}"
@@ -807,6 +803,12 @@ def run_simulation(
             # presolve. Cleared in both modes so PF also sees a clean state
             # whenever the user wants to resolve from scratch.
             _clear_dispatch_fix(network, phase)
+            # Issue 30: from here to the restore, readers outside the lock hash
+            # these inputs, never the transient transforms below. Held after
+            # the lasting normalisations above (transformer types, user series,
+            # dynamic indexes, a stale dispatch fix), which the network keeps.
+            from services.workflow_tools import hold_solve_inputs
+            release_inputs = hold_solve_inputs(network, lock)
 
             if config.mode == "lopf":
                 # SCLOPF dispatches to PyPSA's

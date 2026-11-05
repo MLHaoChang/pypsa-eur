@@ -248,25 +248,68 @@ def test_no_snapshot_without_the_owning_contexts_lock(baseline):
     assert not wt._SOLVE_INPUTS
 
 
-def test_a_solve_refused_before_the_lp_releases_the_snapshot(baseline):
-    """An early return under the lock (validation) never reaches the restore:
-    only the outer `finally` releases."""
-    c = ctx()
-    c.network.add(
-        "Generator", "G2", bus="B1", p_nom_extendable=True, capital_cost=1000.0
-    )  # no p_nom_max
-    cfg = SolverConfig()
-    c.solver_state["solver_config"] = cfg
-    status, condition = run_simulation(
+def test_a_solve_that_raises_before_the_lp_releases_the_snapshot(baseline, monkeypatch):
+    """An exception after the hold and before the LP's own restore: only the
+    outer `finally` releases."""
+    from services.adequacy import energization
+
+    cfg = short_horizon_layers(ctx().network)
+    ctx().solver_state["solver_config"] = cfg
+    held = []
+
+    def boom(network):
+        held.append(wt._solve_snapshot(network) is not None)
+        raise RuntimeError("energization failed")
+
+    monkeypatch.setattr(energization, "apply_energization", boom)
+    status, _ = run_simulation(
         cfg,
-        c.network,
-        c.mutation_lock,
+        ctx().network,
+        ctx().mutation_lock,
         threading.Event(),
         queue.SimpleQueue(),
         state_update=lambda **kw: None,
     )
-    assert (status, condition) == ("error", "validation_failed")
+    assert held == [True] and status == "error"
     assert not wt._SOLVE_INPUTS
+
+
+def test_a_lasting_normalisation_is_in_the_snapshot(baseline):
+    """B1: a change the solve keeps (here a stale dispatch fix it clears) is
+    taken before the snapshot, so a mid-solve read equals the post-solve one."""
+    import pandas as pd
+
+    cfg = short_horizon_layers(ctx().network)
+    n = ctx().network
+    n.generators_t.p_set = pd.DataFrame({"G1": [5.0, 5.0]}, index=n.snapshots)
+    ctx().solver_state["solver_config"] = cfg
+    before = identity(ctx())
+    seen = solve_reading_mid_lp(cfg, lambda: identity(ctx()))
+    after = identity(ctx())
+    assert after != before  # the layer was on and lasted
+    assert seen["mid"] == after
+
+
+def test_the_snapshot_outlives_the_restore(baseline, monkeypatch):
+    """B1 ordering: the release follows the modelling restore, never precedes it."""
+    cfg = short_horizon_layers(ctx().network)
+    ctx().solver_state["solver_config"] = cfg
+    before = identity(ctx())
+    original = solver_service._apply_modelling_assumptions
+    at_restore = []
+
+    def wrapped(network, config, phase):
+        restore, captured = original(network, config, phase)
+
+        def restore_reading():
+            at_restore.append(identity(ctx()))  # every transient still applied
+            restore()
+
+        return restore_reading, captured
+
+    monkeypatch.setattr(solver_service, "_apply_modelling_assumptions", wrapped)
+    solve_reading_mid_lp(cfg, lambda: None)
+    assert at_restore and at_restore[0] == before
 
 
 # ── T4: the owner's Done, at the envelope ───────────────────────────────────
