@@ -32,4 +32,4 @@ await p.waitForTimeout(2000)
 if (MODE === 'guided') { await p.getByRole('button', { name: /^Close/ }).first().click(); await p.waitForTimeout(1500) }
 await p.addStyleTag({ content: 'div:has(> div > [role=status]){display:none!important}' })
 console.log(p.url())
-await p.screenshot({ path: `shot-${MODE}-${CONV}${process.env.W?'-wide':''}.png` }); await b.close()
+await p.screenshot({ path: `shot-${MODE}-${CONV}${process.env.W?`-w${process.env.W}`:""}.png` }); await b.close()

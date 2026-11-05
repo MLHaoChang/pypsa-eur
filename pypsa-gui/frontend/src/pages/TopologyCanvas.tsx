@@ -3069,7 +3069,7 @@ export default function TopologyCanvas() {
           <div className="pointer-events-auto bg-warn/95 text-white text-[11px] rounded shadow-lg px-3 py-1.5 flex items-center gap-2 max-w-[640px]">
             <span aria-hidden="true" className="text-base leading-none">⚠</span>
             <span>
-              AC Power Flow did not converge for this snapshot ({currentSnapIso.slice(0, 16).replace('T', ' ')}).
+              AC Power Flow did not converge for this snapshot (<span className="whitespace-nowrap">{currentSnapIso.slice(0, 16).replace('T', ' ')}</span>).
               Showing values from the LP fallback: switch to a converged snapshot or back to LOPF view.
             </span>
           </div>
