@@ -43,6 +43,7 @@ const PW = fs.readFileSync(process.env.HOME + '/.local/share/PyPSA Studio/dev-ad
   const kinds = async () => Object.fromEntries((await (await call('GET', '/projects/E2E%20Prof/profiles/readiness')).json()).generators.map(r => [r.generator, r.profile]))
   console.log('readiness after undo', JSON.stringify(await kinds()))
   await p.getByText('2 ready').waitFor({ timeout: 10000 }) // the Renewables tab re-reads readiness after an undo
+  assert.strictEqual(await p.getByTestId('generate-notice').count(), 0, 'the generated notice goes after an undo')
   await snap('1-undone')
   // 2. one click, chart for g_wind, banner lists the 0/0 generator
   await all()
