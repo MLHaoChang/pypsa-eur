@@ -19,6 +19,13 @@ COMPARE = (
 BASIS = r"(?:use\s+)?price year\s+(\d{4});\s*annual fixed cost fraction\s+(0(?:\.\d+)?|1(?:\.0+)?)"
 CHOICES = ("Marginal dispatch expenditure", "Total declared-basis cost")
 STORAGE_CHOICES = ("Direct StorageUnit operating expenditure", "Total declared-basis cost")
+# AA03-FREEZE-1 item 3: a bare "capacity" has three meanings; each label maps to one slot.
+CAPACITY_CHOICES = {
+    "Configured capacity": "configured_capacity",
+    "Optimized capacity": "optimal_capacity",
+    "Available capacity": "available_capacity",
+}
+CAPACITY_CLASSES = r"(generator|link|line|transformer|storage\s*unit|store)"
 QUESTIONS = {
     "cost_quantity_required": "Which quantity do you mean: Marginal dispatch expenditure or Total declared-basis cost?",
     "explicit_cost_basis_required": "Please provide the EUR price year and annual fixed cost fraction. Reply: Price year YYYY; annual fixed cost fraction F (between 0 and 1).",
@@ -28,7 +35,10 @@ QUESTIONS = {
     "baseline_unavailable": "The selected previous run is unavailable or could not be verified. Please check a compatible baseline again.",
     "unsupported_followup": "That follow-up contains constraints outside the supported scope grammar. Please specify an exact result scope; no constraint has been ignored.",
     "current_run_required": "This selection refers to a retained historical run. Specify the candidate and baseline explicitly to compare historical runs.",
+    "capacity_meaning_required": "Which capacity do you mean: Configured capacity (the input before the solve), Optimized capacity (after the solve) or Available capacity?",
+    "capacity_component_required": "Please name the component class and its name: generator, link, line, transformer, StorageUnit or store, for example: What is the capacity of generator G1?",
 }
+PENDING = {"cost_quantity_required", "explicit_cost_basis_required", "capacity_meaning_required"}
 
 
 def _match(pattern, message):
@@ -56,9 +66,9 @@ def _state(turn, ui):
         scope["profile"] != "network-linear-cost/1"
         and isinstance(selected, dict)
         and (
-            selected.get("class") != (
+            selected.get("class") != scope.get("component_class", (
                 "StorageUnit" if scope["profile"] in calculations.STORAGE_PROFILES else "Generator"
-            )
+            ))
             or selected.get("name") != scope["entity_id"]
         )
     )
@@ -87,7 +97,7 @@ def _needs(turn, scope, reason):
         turn.clarification["question"] = "Which quantity do you mean: Direct StorageUnit operating expenditure or Total declared-basis cost?"
     turn.pending_scope = (
         deepcopy(scope)
-        if reason in {"cost_quantity_required", "explicit_cost_basis_required"}
+        if reason in PENDING
         else None
     )
     return scope or {
@@ -120,6 +130,41 @@ def cost_choices(scope):
     return STORAGE_CHOICES if scope["profile"] in calculations.STORAGE_PROFILES else CHOICES
 
 
+def _capacity(turn, message, pending, state):
+    """The bare capacity form and its card answer; None when the message is neither."""
+    reply = re.sub(r"\s+", " ", message.strip().rstrip(".!?")).lower()
+    if pending == "capacity_meaning_required":
+        chosen = {k.lower(): v for k, v in CAPACITY_CHOICES.items()}.get(reply)
+        if chosen:
+            return assurance_scope.validate({**deepcopy(state["scope"]), "metrics": [chosen]})
+        # A short reply that is not one of the three meanings is refused, never guessed.
+        if re.fullmatch(r"[\w-]+(?: [\w-]+){0,2}", reply):
+            return _needs(turn, state["scope"], "capacity_meaning_required")
+        return None
+    text = re.sub(r"\s+", " ", message.strip().rstrip(".!?"))
+    bare = re.fullmatch(r"(?:what is|what's|whats) (?:the )?capacity of (.{1,160}?)", text, re.I)
+    if not bare:
+        return None
+    named = re.fullmatch(CAPACITY_CLASSES + r" ([^;?]{1,128})", bare[1].strip(), re.I)
+    scope = {
+        "version": 1,
+        "profile": "capacity/1",
+        "project_id": turn.project_id or "unbound",
+        "retain": False,
+        "metrics": list(CAPACITY_CHOICES.values()),
+    }
+    if not named:
+        # No class (or an unknown one): the name could mean several components. Nothing is
+        # retained, and no class is guessed, so this clarification scope is never validated.
+        return _needs(turn, {**scope, "entity_id": "unselected"}, "capacity_component_required")
+    word = re.sub(r"\s+", "", named[1].lower())
+    scope.update(
+        entity_id=named[2].strip(),
+        component_class="StorageUnit" if word == "storageunit" else word.capitalize(),
+    )
+    return _needs(turn, assurance_scope.validate(scope), "capacity_meaning_required")
+
+
 def resolve(turn, message, ui, explicit):
     """Resolve only whole-message forms. Unknown suffixes never lose constraints."""
     if explicit is not None:
@@ -128,6 +173,9 @@ def resolve(turn, message, ui, explicit):
     state, state_reason = _state(turn, ui)
     turn.conversation_state = state
     pending = state.get("pending") if state else None
+    capacity = _capacity(turn, message, pending, state)
+    if capacity is not None:
+        return capacity
     if pending and message.strip().rstrip(".!?").lower() in {
         c.lower() for c in cost_choices(state["scope"])
     }:
