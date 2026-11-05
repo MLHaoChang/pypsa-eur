@@ -230,6 +230,23 @@ def _email_opted_in(path, task_id):
     return isinstance(envelope, dict) and (envelope.get("notify") or {}).get("email") is True
 
 
+def set_waiting(run, kind, ref, since, *, reason=True, **fields):
+    """The one writer of `run.waiting` (issue 21d), a pure change to `run` made
+    inside its caller's own task update: `Runner._wait_for_user` (through
+    `_update`) and `run_loops.data_request` (inside `_advance_run`'s locked
+    update, so nothing nests an `_update` and `_LOCK` stays last). Waiting on
+    the same `ref` already is no change (False). `since` is epoch seconds.
+    `reason=False` keeps `run.reason` as it is: the data stop is a failed
+    stage, resumed by its gate, not a runner stop."""
+    if (run.get("waiting") or {}).get("ref") == ref and run["status"] == "needs_user":
+        return False
+    run["waiting"] = {"kind": kind, "ref": ref, "since": since, **fields}
+    run["status"] = "needs_user"
+    if reason:
+        run["reason"] = "waiting_" + kind
+    return True
+
+
 def _notify(path):
     """One notice per run state change into needs_user, completed, failed or
     paused: an attention record, and an email when the deployment sends
@@ -261,8 +278,10 @@ def _notify(path):
     if task["run"].get("reason") == "access":
         return status  # the owner no longer reaches the project: nothing names it to them
     from harness import attention
-    delivered = attention.run_notice(task["owner_id"], task["project_id"], task["task_id"], status, seq)
-    emailed = _email(path, task, status)
+    items = _data_items(task["run"], status)
+    delivered = attention.run_notice(task["owner_id"], task["project_id"], task["task_id"], status, seq,
+                                     data_items=items)
+    emailed = _email(path, task, status, data_items=items)
 
     def mark(task):
         notices = task["run"].get("notices") or []
@@ -273,6 +292,16 @@ def _notify(path):
             notices.append({"kind": status, "at": time.time(), "channel": "email", "delivered": True})
     _update(path, mark)
     return status
+
+
+def _data_items(run, status):
+    """Owner decision SH21D-NOTICE-1 (count only): the number of items a data
+    stop asks for, as the harness listed them, or None. The notice text,
+    labels and params stay in the task view; no notice carries them."""
+    waiting = run.get("waiting") or {}
+    if status != "needs_user" or waiting.get("kind") != "data" or not isinstance(waiting.get("items"), list):
+        return None
+    return len(waiting["items"]) or None
 
 
 def _owner_contact(task):
@@ -289,7 +318,7 @@ def _owner_contact(task):
     return address, name, f"{get_settings().public_base_url.rstrip('/')}/?project={task['project_id']}&run={task['task_id']}"
 
 
-def _email(path, task, status):
+def _email(path, task, status, data_items=None):
     from services import email_service
     sent = sum(1 for n in task["run"].get("notices") or [] if n["channel"] == "email")
     if sent >= MAX_EMAILS or not email_service.get_status()["configured"] \
@@ -301,8 +330,9 @@ def _email(path, task, status):
     address, name, link = contact
     words = _STATE_WORDS[status]
     # No run title: the model wrote it (criterion 11, no researched value in a mail).
+    waits = f"It waits for data ({data_items} item{'s' if data_items != 1 else ''}).\n" if data_items else ""
     body = (f"Your harness run {words}.\n\nProject: {_plain(name, 120)}\n"
-            f"State: {status}\n\nOpen it: {link}\n")
+            f"State: {status}\n{waits}\nOpen it: {link}\n")
     try:
         email_service.send_email(to=address, subject=f"PyPSA Studio: a harness run {words}", body_text=body,
                                  metadata={"kind": "harness_run", "task_id": task["task_id"], "state": status})
@@ -655,13 +685,9 @@ class Runner:
 
     def _wait_for_user(self, path, kind, ref, envelope_refused=False):
         def change(task):
-            run = task["run"]
-            if (run.get("waiting") or {}).get("ref") == ref and run["status"] == "needs_user":
+            extra = {"envelope_refused": True} if envelope_refused else {}  # the envelope said no: a card only
+            if not set_waiting(task["run"], kind, ref, self.clock(), **extra):
                 return False
-            run["waiting"] = {"kind": kind, "ref": ref, "since": self.clock()}
-            if envelope_refused:
-                run["waiting"]["envelope_refused"] = True  # the envelope said no to this call: a card only
-            run["status"], run["reason"] = "needs_user", "waiting_" + kind
         _update(path, change)
 
     def _go_on(self, path):
