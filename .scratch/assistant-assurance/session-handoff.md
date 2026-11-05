@@ -1003,7 +1003,7 @@ S1 adds `tests/assurance_acceptance/test_p2_failure_modes.py`. Red on master:
 4 cases, the truncated-but-parsing draft certified `passed`. Fix: the
 `LLMEvent.truncated` flag, the loop skipping review, and `Turn.commit` refusing
 the draft. Policy version unchanged (no contract snapshot change). Repair policy pinned at zero
-repairs, pending the owner's freeze AA03-FREEZE-1. Command, from
+repairs, frozen by the owner in AA03-FREEZE-1. Command, from
 `pypsa-gui/backend`:
 
 ```bash
@@ -1011,4 +1011,4 @@ python -m pytest -o addopts='' tests/assurance_acceptance/test_p2_failure_modes.
 ```
 
 Next runnable tracer: S3, ambiguous capacity ("what is G1's capacity") → choice
-card, no checked number. S2, S4 and S5 wait on AA03-FREEZE-1.
+card, no checked number. S2, S4 and S5 are frozen (AA03-FREEZE-1); each sends GK B a plan delta first.

@@ -54,7 +54,7 @@ names the slice that closes it, or its external blocker.
 Slices, one PR each and test-first: S1 failure modes; S2 derived claims
 (`harness/derived.py`); S3 request slots; S4 complete-population predicates
 (`harness/predicates.py`); S5 interpretation markers, surface map and release
-fixtures. S2, S4 and S5 wait on the owner's freeze (AA03-FREEZE-1).
+fixtures. The owner froze S2–S5 scope in AA03-FREEZE-1 (see Comments).
 
 ## Completion and handoff
 
@@ -115,3 +115,19 @@ cases were red on master: a cut-off draft that parsed was certified `passed`.
 raises on `response.incomplete`. The loop then skips review, and `Turn.commit`
 refuses the draft. Mutants killed: commit refusal, loop hand-off, review skip,
 the OpenAI-compatible flag, the Anthropic stop set, the event read.
+
+### Owner freeze AA03-FREEZE-1 (2026-11-05, ~14:45 CET)
+
+Owner answer: "All (a) as listed (Recommended)".
+
+1. Zero repairs: an invalid draft goes straight to the honest limited fallback.
+2. S2 registry: difference, sum, percent_change (denominator named),
+   percentage_point_delta, share_percent (basis named), unit_convert (kW/MW/GW,
+   kWh/MWh; power↔energy refused). Tolerance rel 1e-9 plus a near-zero
+   denominator eps, both owned by the formula.
+3. S3 capacity meanings {configured, optimized, available}. An ambiguous request
+   gets the choice card.
+4. S4 includes every tie at the top-k boundary, labelled with the count. A
+   feasible incumbent reads "feasible, not proven optimal".
+5. S5 marker lists are English only, as listed. Other languages stay pending
+   under ticket 09.
