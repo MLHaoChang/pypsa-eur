@@ -96,12 +96,32 @@ def _open(variants: dict) -> bool:
 FAMILY_JOURNEYS: list[dict] = family_journeys()
 
 # Blockers that stay until a human closes them with evidence; never derived away.
+# LV 08 R4: the voice-only gates stay with issue 05; each pointer must name an open issue file.
+ISSUE_05 = '.scratch/live-voice/issues/05-workflow-validation.md'
+CLOSED_STATUSES = ('done', 'wontfix')
 STANDING_BLOCKERS: list[dict[str, str]] = [
-    {'id': 'ui-local-control-parity-unaudited', 'issue': '08',
+    {'id': 'ui-local-control-parity-unaudited', 'issue': '05', 'pointer': ISSUE_05,
      'summary': 'Client-only panel/subview/filter controls (no backend call) are not mapped to a navigation tool or a declared gap; controls that call the backend are audited in route_parity.'},
-    {'id': 'hosted-gates-pending', 'issue': '05',
-     'summary': 'Hosted profile, device and latency gates and the prolonged mixed-domain conversation are not run; an architecture review does not certify production behavior.'},
+    {'id': 'hosted-gates-pending', 'issue': '05', 'pointer': ISSUE_05,
+     'summary': 'Hosted profile, device and latency gates, the prolonged mixed-domain conversation and spoken navigation acknowledgements are not run; an architecture review does not certify production behavior.'},
 ]
+
+
+def _standing_blocker_problem(blockers) -> str | None:
+    """Each standing blocker is listed and points at an issue file that is still open."""
+    listed = {b.get('id') for b in blockers or [] if isinstance(b, dict)}
+    for blocker in STANDING_BLOCKERS:
+        where = f'standing blocker {blocker["id"]}'
+        if blocker['id'] not in listed:
+            return f'{where} is missing from full_coverage.blockers'
+        path = ROOT / blocker['pointer']
+        if not path.is_file():
+            return f'{where}: pointer {blocker["pointer"]} does not exist'
+        status = re.search(r'^Status:\s*([\w-]+)', path.read_text(encoding='utf-8'), re.M)
+        if status is None or status.group(1).lower() in CLOSED_STATUSES:
+            return (f'{where}: {blocker["pointer"]} is {status.group(1) if status else "without a Status: line"}; '
+                    'close the blocker with evidence or move it to an open issue')
+    return None
 
 
 @functools.cache
@@ -477,7 +497,7 @@ def _full_coverage_problem(matrix: dict) -> str | None:
         return 'full_coverage must be claimed=false/not_established while manifest variants are pending'
     if block.get('journeys_pending') != len(pending):
         return 'full_coverage.journeys_pending disagrees with family_manifest'
-    return None
+    return _standing_blocker_problem(block.get('blockers'))
 
 
 def matrix_problem(matrix: dict) -> str | None:

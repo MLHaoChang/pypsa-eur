@@ -3,7 +3,7 @@
 
 # Whole-application capability, parameter and navigation coverage
 
-Status: ready-for-agent
+Status: done
 Type: task
 
 Read [the plan](../../../docs/superpowers/plans/2026-10-10-live-voice-conversation.md)
@@ -129,3 +129,15 @@ validated anchor; a stale expected_revision is `file_changed_since_read` before 
 which now lists them); `assistant_route_parity.py --check` fails on any needs-tool row and on a held
 route whose issue is missing, does not name it, or is done/wontfix. route-parity: 0 needs-tool.
 Tests: `tests/test_lv08_r2_tools.py`, `tests/test_assistant_route_parity.py`.
+
+2026-11-05: Close-out (session_01G7qCujAwDbhaLNHVsqag1d). R1 (#906) and R2 (#910) merged, with their
+checks in CI (`assistant-control-matrix.yaml`, `assistant-route-parity.yaml`). On master e98226bd1,
+route parity has 490 GUI routes, 0 needs-tool and 106 limitations, and `full_coverage` stays
+`not_established`. R3: LC-32 owned it and closed as done (LC32-CLOSE-1). Its leftover pending rows
+(LC-D20–D23) are still `r3-uncovered:<suite>` blockers that point at issue 32; the fix packages 33
+and 35 take LC-D03 and LC-D24. R4: both standing blockers (`ui-local-control-parity-unaudited` and
+`hosted-gates-pending`) are now owned by issue 05 and point at its file. The hosted blocker names
+spoken navigation acknowledgements as well. `_full_coverage_problem` fails if a standing blocker is
+missing from the matrix, or if its issue file is gone or done/wontfix. Tests:
+`test_r4_voice_only_gates_are_issue_05_blockers`, `test_a_standing_blocker_needs_an_open_issue_file`
+(fails when the pointer rule is removed) and `test_a_standing_blocker_dropped_from_the_matrix_fails_the_guard`.

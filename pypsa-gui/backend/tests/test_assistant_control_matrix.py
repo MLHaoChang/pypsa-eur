@@ -294,3 +294,40 @@ def test_unavailable_variants_are_not_blockers_but_their_pointers_resolve(matrix
     for v in fm.VARIANTS:
         if v['id'] in unavailable:
             assert fm._pointer_problem(v['pointer']) is None, v['id']
+
+
+# LV 08 R4: the voice-only gates stay with issue 05 and stay explicit in full_coverage.
+R4_GATES = ('hosted profile', 'device', 'latency', 'prolonged mixed-domain conversation',
+            'spoken navigation acknowledgements', 'client-only')
+ISSUE_05 = '.scratch/live-voice/issues/05-workflow-validation.md'
+
+
+def test_r4_voice_only_gates_are_issue_05_blockers(matrix):
+    standing = [b for b in matrix['full_coverage']['blockers']
+                if b['id'] in {s['id'] for s in _gen().STANDING_BLOCKERS}]
+    assert standing and all(b['issue'] == '05' and b['pointer'] == ISSUE_05 for b in standing)
+    named = ' '.join(b['summary'].lower() for b in standing)
+    for gate in R4_GATES:
+        assert gate in named, gate
+
+
+def test_a_standing_blocker_needs_an_open_issue_file(matrix, monkeypatch, tmp_path):
+    gen = _gen()
+    assert gen._full_coverage_problem(matrix) is None
+    missing = [dict(b, pointer='.scratch/live-voice/issues/99-gone.md') for b in gen.STANDING_BLOCKERS]
+    monkeypatch.setattr(gen, 'STANDING_BLOCKERS', missing)
+    assert 'does not exist' in gen._full_coverage_problem(matrix)
+    done = tmp_path / '.scratch' / 'live-voice' / 'issues' / '05-workflow-validation.md'
+    done.parent.mkdir(parents=True)
+    done.write_text('# x\n\nStatus: done\n', encoding='utf-8')
+    monkeypatch.setattr(gen, 'ROOT', tmp_path)
+    monkeypatch.setattr(gen, 'STANDING_BLOCKERS', [dict(b, pointer=ISSUE_05) for b in missing])
+    assert 'is done' in gen._full_coverage_problem(matrix)
+
+
+def test_a_standing_blocker_dropped_from_the_matrix_fails_the_guard(matrix):
+    gen = _gen()
+    forged = json.loads(json.dumps(matrix))
+    forged['full_coverage']['blockers'] = [b for b in forged['full_coverage']['blockers']
+                                           if b['id'] != 'hosted-gates-pending']
+    assert 'hosted-gates-pending' in gen._full_coverage_problem(forged)
