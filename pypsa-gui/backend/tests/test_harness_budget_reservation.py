@@ -247,6 +247,8 @@ def test_token_modes_reserve_in_their_own_unit(run, mode):
     with pytest.raises(send_reservation.SendRefused) as refused:
         send_reservation.admit(run, request("t"), boot="boot-a")
     assert refused.value.reason == "no_cap"  # no total-token cap set: refused, not assumed
+    assert "live lease" not in str(refused.value)
+    assert "no total_tokens cap" in str(refused.value)
 
 
 def test_an_unknown_mode_refuses_every_send(run, mode):

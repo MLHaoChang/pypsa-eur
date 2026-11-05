@@ -428,7 +428,7 @@ def _admit(path, request, *, boot, scope, key, clock):
         run = task["run"]
         lease = run.get("runner") or {}
         if lease.get("lease_owner") != boot or not float(lease.get("lease_until") or 0) > clock():
-            out["refused"] = SendRefused("lease_lost", "This process does not hold the run's live lease; "
+            out["refused"] = SendRefused("lease_lost", "This process no longer holds the run; "
                                                        "the send is refused.")
             return False
         if key is not None and any(r.get("key") == key for r in _ledger(run).get("reservations", [])):

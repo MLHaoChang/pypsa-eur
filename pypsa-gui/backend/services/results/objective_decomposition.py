@@ -46,15 +46,16 @@ def _fixed_cost_by_period(n, cfg) -> dict:
     """
     import pandas as pd
 
-    from services.solver_service import SolverConfig, with_periodized_cost_defaults
+    from services.solver_service import SolverConfig
+    from services.solver.periodized_costs import periodized_cost_view
 
     cfg = cfg if cfg is not None else SolverConfig()
     is_mp = isinstance(n.snapshots, pd.MultiIndex)
     periods = list(n.investment_periods) if is_mp else [None]
     out = {p: {"extendable": 0.0, "nonextendable": 0.0} for p in periods}
-    with with_periodized_cost_defaults(n, cfg):
+    with periodized_cost_view(n, cfg) as view:
         for cls, nom in _NOMINAL:
-            comp = n.c[cls]
+            comp = view.c[cls]
             df = comp.static
             if df.empty or f"{nom}_opt" not in df.columns:
                 continue
@@ -69,7 +70,7 @@ def _fixed_cost_by_period(n, cfg) -> dict:
                 if p is None:
                     active = pd.Series(True, index=df.index)
                 else:
-                    active = n.get_active_assets(cls, p).reindex(df.index).fillna(False).astype(bool)
+                    active = view.get_active_assets(cls, p).reindex(df.index).fillna(False).astype(bool)
                 out[p]["extendable"] += float(cost[ext & active].sum())
                 out[p]["nonextendable"] += float(cost[~ext & active].sum())
     return out

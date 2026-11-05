@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Results and cost reports now fill periodized cost defaults on a private copy of the network instead of the live one, so a concurrent fingerprint or freshness check no longer sees horizon-scaled capital and FOM costs mid-request.
