@@ -114,14 +114,16 @@ def test_a_run_advances_with_no_chat_session_through_every_stage(detached, site)
         assert PyPSAService.get_active_context() is front
         assert list(front.network.buses.index) == ['F1', 'F2'] and not front.network_revision
     assert record['run']['status'] == 'completed' and record['status'] == 'completed', record['run']
-    assert [s['id'] for s in record['steps']] == ['inputs.1', 'input_gate.1', 'input_gate.2', 'input_gate.3', 'solve.1']
-    assert all(s['session_id'] == 'run:' + task['task_id'] for s in record['steps'])
+    assert [s['id'] for s in record['steps']] == ['inputs.1', 'input_gate.1', 'input_gate.2', 'input_gate.3', 'solve.1',
+                                                  'report.1', 'handoff.1']  # issue 07: the runner's own steps
+    called_steps = [s for s in record['steps'] if not s.get('native')]
+    assert all(s['session_id'] == 'run:' + task['task_id'] for s in called_steps)
     assert clicks.used == ['solve', 'solve.1']  # the COP-1 Continue and the solve's own card
     log = harness_session.ChatSession(session_id='run:' + task['task_id'], owner_user_id=record['owner_id'])
     events = eventlog.read_events(eventlog.path_for(log))
     called = [b['name'] for e in events if e['type'] == 'assistant/attempt'
               for b in e['message']['content'] if b.get('type') == 'tool_use']
-    assert called == [s['tool'] for s in record['steps']]
+    assert called == [s['tool'] for s in called_steps]
     assert sum(1 for e in events if e['type'] == 'runner/frame' and e['frame'] == 'tool_running') == 5
 
 

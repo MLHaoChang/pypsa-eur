@@ -307,9 +307,8 @@ def run_step(path, ctx, step) -> str:
 
 
 def gaps(task: dict) -> int:
-    """The count of request parts the hand-off found not covered (the
-    completion notice carries the count only)."""
+    """The count of request parts the hand-off found a `gap` (spec item 3:
+    any gap is named; a `partly` part is not counted as not covered). The
+    completion notice carries the count only."""
     rows = ((task.get("run") or {}).get("handoff") or {}).get("coverage") or []
-    return sum(
-        1 for r in rows if isinstance(r, dict) and r.get("status") in (GAP, PARTLY)
-    )
+    return sum(1 for r in rows if isinstance(r, dict) and r.get("status") == GAP)

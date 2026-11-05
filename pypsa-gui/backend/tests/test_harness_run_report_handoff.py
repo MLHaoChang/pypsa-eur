@@ -881,6 +881,35 @@ def test_b1c_a_job_that_does_not_end_done_fails_the_step_and_holds_nothing(
     )  # C4 addendum: nothing left open
 
 
+def test_b1c_a_launch_that_raises_fails_the_step_instead_of_stranding_it(
+    detached, site, fake_report, monkeypatch
+):
+    from routers import report_jobs
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("evidence unreadable")
+
+    monkeypatch.setattr(report_jobs, "_evidence_for", broken)
+    _, root = site
+    task = detached()
+    path = task_path(root, task)
+    record = settle(
+        runner(Clicks()),
+        path,
+        task["task_id"],
+        lambda r: r["run"]["status"] != "running" or r["run"]["stage"] == "handoff",
+    )
+    step = run_report.report_step(record)
+    assert step["status"] == "failed" and step["error"].startswith(
+        "report_start_failed"
+    ), step
+    assert (
+        record["run"]["status"] == "needs_user"
+        and by_stage(record)["report"]["status"] == "failed"
+    )
+    assert by_stage(record)["handoff"]["status"] == "pending"
+
+
 # ── GK B (25) B1-d: neither stage ever applies a change ─────────────────────
 
 

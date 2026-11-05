@@ -130,6 +130,10 @@ def start(path, ctx, step, *, instance) -> str:
         reason = str(detail.get("error_kind") or "report_refused")
         _stop(path, step["id"], reason, str(detail.get("message") or "")[:240])
         return reason
+    except Exception as exc:  # noqa: BLE001 -- B1-c: a launch that did not start fails the step, never strands it running
+        logger.exception("report job launch failed for run %s", task.get("task_id"))
+        _stop(path, step["id"], "report_start_failed", type(exc).__name__)
+        return "report_start_failed"
 
     def wait(t):
         s = next(x for x in t["steps"] if x["id"] == step["id"])
@@ -169,6 +173,7 @@ def settle(path, ctx) -> str | None:
             outcome = "refused"  # C4: a send the run's reservation refused; the report is incomplete
     else:
         outcome, error = "lost", "the job record is gone or another job took the slot"
+        record = None  # another job's record is no evidence about this one
 
     refused = (record or {}).get("refused")
 
