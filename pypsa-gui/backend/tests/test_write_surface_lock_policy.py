@@ -341,6 +341,7 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/durable-conversations/{thread_id}/resume"): (CHAT_SESSION, _R_DURABLE_THREAD),
     ("POST", "/api/durable-conversations/{thread_id}/rebind"): (CHAT_SESSION, _R_DURABLE_THREAD),
     ("POST", "/api/durable-conversations/{thread_id}/profile"): (CHAT_SESSION, _R_DURABLE_THREAD),
+    ("POST", "/api/durable-conversations/{thread_id}/reconcile"): (CHAT_SESSION, _R_DURABLE_THREAD),
     ("POST", "/api/durable-conversations/{thread_id}/speech/start"): (CHAT_SESSION, _R_SPEECH_SESSION),
     ("POST", "/api/durable-conversations/{thread_id}/speech/end"): (CHAT_SESSION, _R_SPEECH_SESSION),
     ("POST", "/api/durable-conversations/{thread_id}/speech/segment"): (CHAT_SESSION, _R_SPEECH_SESSION),

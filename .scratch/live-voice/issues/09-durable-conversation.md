@@ -155,3 +155,52 @@ lifetime and released by the OS when the process dies. A second process gets
 an early refusal (now covering `python -m uvicorn`). Undetected by argv,
 caught by the lock: gunicorn `-c`, `GUNICORN_CMD_ARGS`, `uvicorn.run(workers=N)`.
 Two-process test, red before the lock; the no-lock mutant fails it.
+
+2026-11-05: Close-out plan (session_01G7qCujwuAaFXjANGRDc2pL, from master
+e98226bd1, owner AA-FILL-2). GK B (25) GO WITH CHANGES for two PRs.
+- PR-A reconcile resolution (`claude/lv09-reconcile`):
+  A1 `verified` only when the job owner is the thread owner AND the actor
+  still reads the job's project; foreign, unknown and access-revoked jobs give
+  byte-equal responses and stored entries (no-oracle test).
+  A2 `job` entries are set only by the queue read; a client resolution aimed
+  at one is 422 and writes nothing.
+  A3 all-or-nothing: unknown/duplicate key, invalid resolution or an over-cap
+  list is 422 with the thread file byte-equal.
+  A4 CAS, replica/lease check and write under the same lock as the other
+  controls; stale generation and a lapsed or foreign lease each write nothing.
+  A5 no-replay spy over tool dispatch, solve_queue enqueue and harness turn
+  start, on the route and on resume/takeover.
+  A6 at the trial merge: test_tool_error_kind_manifest,
+  ChatPanel.manifest.test.tsx, the three route policy tests,
+  smoke/assistant_inventory.py --check, assistant_route_parity.py --check.
+  A7 typed-refusal mutant for `reconcile_entry_unknown` turns a test red.
+  No context-seed note in PR-A (a seed edit needs its own harness review).
+- PR-B evidence/ACL revalidation (`claude/lv09-revalidate`), then Status done:
+  B1 `unreadable` stores/returns no fingerprint, revision or reason; missing
+  and forbidden runs give byte-equal stamps.
+  B2 `changed` compares the full stored fingerprint/revision; original ref
+  fields byte-equal after N cycles; the stamp sits in its own field.
+  B3 re-reads bounded by the entry cap; stamping under the A4 lock and CAS.
+  B4 rebind revalidates before the new episode gets the refs;
+  `_hydrate_discussed_refs` honours `unreadable` (tested).
+  B5 each close-out gate names the test or owner decision that holds it; for
+  LiveKit room-token refresh, the exact LC-07 test id.
+
+2026-11-05: PR-A reconcile (`claude/lv09-reconcile`). Each reconcile entry
+carries a stable `key` (`turn:<episode>`, `tool_call:<episode>:<tool_use_id>`,
+`job:<job_id>`; older entries get the same key computed). Rotation and
+`reconcile_effects` re-read unverified jobs through `_job_state`: the actor is
+the thread owner, `routers.solve_queue._visible_job_or_404` (the queue routes'
+ACL) admits it, and the resident or persisted owner is the thread owner. Only
+then is the entry `verified` with `observed_state`; otherwise it stays as it was
+(A1). `POST /api/durable-conversations/{id}/reconcile` resolves turns and tool
+calls (`done|not_done|dismissed`) under `_LOCK`, the store lock, the replica
+lease and the generation CAS. The whole request is checked before any write:
+`reconcile_request_invalid` (shape, duplicate, over the cap), then
+`reconcile_entry_unknown` (not an open entry) and `reconcile_job_not_resolvable`
+(A2/A3). These are durable-route refusals like `thread_not_found`, not tool
+errors, so they stay out of tool-error-kinds.json, whose manifest test rejects
+kinds no tool emits. The route has no GUI caller yet, so parity needs no
+declaration, the same as `/profile`. Tests:
+`tests/test_durable_conversation_reconcile.py` (18 passed); the mutants for
+A1 (owner check, ACL read) and A7 (kind) turn it red.

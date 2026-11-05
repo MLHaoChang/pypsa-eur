@@ -382,6 +382,7 @@ def _rotate_episode(thread: dict[str, Any], *, reason: str, takeover: bool = Fal
         'at': now,
     }], EPISODE_LINEAGE_MAX, keep='newest')
     _bounded_extend(thread, 'reconcile', effects, RECONCILE_MAX, keep='oldest')
+    _verify_jobs(thread)
     thread['updated_at'] = now
     return new_session
 
@@ -488,7 +489,8 @@ def _uncertain_effects(
                   entry.get('tool_use_id'), entry.get('job_id'))
         if marker not in known:
             known.add(marker)
-            found.append({**entry, 'status': 'unverified', 'recorded_at': now})
+            found.append({**entry, 'key': _entry_key(entry),
+                          'status': 'unverified', 'recorded_at': now})
 
     if episode_id:
         path = eventlog.path_for(SimpleNamespace(
@@ -522,6 +524,123 @@ def _uncertain_effects(
         for job_id in thread.get('job_ids') or []:
             add({'kind': 'job', 'job_id': str(job_id)})
     return found
+
+
+def _entry_key(entry: dict[str, Any]) -> str:
+    """A reconcile entry's stable key (entries from before keys were stored too)."""
+    kind = entry.get('kind')
+    if kind == 'job':
+        return f"job:{entry.get('job_id')}"
+    if kind == 'tool_call':
+        return f"tool_call:{entry.get('episode_id')}:{entry.get('tool_use_id')}"
+    return f"{kind}:{entry.get('episode_id')}"
+
+
+def _job_state(job_id: str, owner_id: str) -> str | None:
+    """The job's status, read back only as the thread owner may read it.
+
+    None unless the acting user is the thread owner, still sees the job's
+    project (``_visible_job_or_404``, the queue routes' own ACL) and queued
+    the job. A foreign, unknown or access-revoked job are all just None, so
+    the entry they leave behind says nothing about which it was. Read only:
+    nothing is enqueued, retried or aborted.
+    """
+    from routers import solve_queue as queue_router
+    from services import chat_tools, solve_job_store
+    from services.solve_queue import solve_queue
+
+    try:
+        with chat_tools._acting() as (db, user):
+            if str(user.id) != owner_id:
+                return None
+            job = queue_router._visible_job_or_404(db, user, job_id)
+    except HTTPException:
+        return None
+    queued_by = solve_queue.owners().get(job_id)
+    if queued_by is None:
+        row = solve_job_store.load_job(uuid.UUID(job_id)) or {}
+        queued_by = row.get('enqueued_by_user_id')
+    status = job.get('status')
+    if queued_by is None or str(queued_by) != owner_id or not status:
+        return None
+    return str(status)
+
+
+def _verify_jobs(thread: dict[str, Any]) -> None:
+    """Record the observed state of each unverified job the owner may read.
+
+    At most ``RECONCILE_MAX`` reads (the list's cap). An unreadable job keeps
+    its entry exactly as it was.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    for entry in thread.get('reconcile') or []:
+        if entry.get('kind') != 'job' or entry.get('status') != 'unverified':
+            continue
+        state = _job_state(str(entry.get('job_id')), str(thread['owner_id']))
+        if state is not None:
+            entry.update(status='verified', observed_state=state, verified_at=now)
+
+
+RECONCILE_RESOLUTIONS = frozenset({'done', 'not_done', 'dismissed'})
+
+
+def _open_entries(thread: dict[str, Any], resolutions: Any) -> list[tuple[dict, str]]:
+    """Validate a whole resolution request before anything changes."""
+    def invalid(message: str) -> None:
+        _refuse('reconcile_request_invalid', message, 422)
+
+    if not isinstance(resolutions, list):
+        invalid('resolutions must be a list.')
+    if len(resolutions) > RECONCILE_MAX:
+        invalid(f'At most {RECONCILE_MAX} resolutions per request.')
+    open_by_key = {
+        _entry_key(e): e for e in thread.get('reconcile') or []
+        if e.get('status') == 'unverified'
+    }
+    seen: set[str] = set()
+    picked: list[tuple[dict, str]] = []
+    for item in resolutions:
+        if not isinstance(item, dict) or set(item) != {'key', 'resolution'}:
+            invalid('Each resolution has exactly a key and a resolution.')
+        key, resolution = item['key'], item['resolution']
+        if not isinstance(key, str) or resolution not in RECONCILE_RESOLUTIONS:
+            invalid('resolution must be one of done, not_done, dismissed.')
+        if key in seen:
+            invalid('Each key may be resolved once per request.')
+        seen.add(key)
+        entry = open_by_key.get(key)
+        if entry is None:
+            _refuse('reconcile_entry_unknown',
+                    'No open reconcile entry has that key.', 422)
+        if entry.get('kind') == 'job':
+            _refuse('reconcile_job_not_resolvable',
+                    'A job is reconciled by reading the queue, not by a resolution.', 422)
+        picked.append((entry, resolution))
+    return picked
+
+
+def reconcile_effects(thread_id: str, *, generation: int, resolutions: Any) -> dict[str, Any]:
+    """Resolve the owner's answers for unverified turns and tool calls.
+
+    Re-reads unverified jobs from the queue. Nothing is replayed: no tool is
+    dispatched, no solve enqueued and no turn started. The request applies
+    whole or not at all (generation CAS, replica lease, an in-flight turn and
+    every resolution are checked before anything is written).
+    """
+    with _LOCK:
+        path, thread = _read(thread_id)
+        _require_authoritative_replica(thread)
+        _require_generation(thread, generation)
+        _live_episode(thread)
+        picked = _open_entries(thread, resolutions)
+        now = datetime.now(timezone.utc).isoformat()
+        for entry, resolution in picked:
+            entry.update(status='resolved', resolution=resolution, resolved_at=now)
+        _verify_jobs(thread)
+        thread['checkpoint_rev'] = int(thread.get('checkpoint_rev', 0)) + 1
+        thread['updated_at'] = now
+        _save(path, thread)
+        return _view(thread)
 
 
 def _hydrate_discussed_refs(session, thread: dict[str, Any]) -> None:

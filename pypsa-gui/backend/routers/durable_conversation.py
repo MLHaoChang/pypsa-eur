@@ -1,7 +1,7 @@
 """Thin HTTP surface for durable parent conversation threads (issue 09 / B-I1)."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -40,6 +40,20 @@ class RebindBody(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     generation: int = Field(..., ge=1)
+
+
+class ReconcileResolution(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    key: str = Field(..., min_length=1, max_length=512)
+    resolution: Literal['done', 'not_done', 'dismissed']
+
+
+class ReconcileBody(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    generation: int = Field(..., ge=1)
+    resolutions: list[ReconcileResolution] = Field(
+        default_factory=list, max_length=dc.RECONCILE_MAX,
+    )
 
 
 class ProfileBody(BaseModel):
@@ -84,6 +98,21 @@ def resume_thread(
     _bind_actor(user)
     thread, _session = dc.resume_episode(thread_id, generation=body.generation)
     return thread
+
+
+@router.post('/{thread_id}/reconcile')
+def reconcile_thread(
+    thread_id: str,
+    body: ReconcileBody,
+    user: User = Depends(require_user),
+):
+    """Resolve unverified turns/tool calls and re-read jobs; never replays."""
+    _bind_actor(user)
+    return dc.reconcile_effects(
+        thread_id,
+        generation=body.generation,
+        resolutions=[item.model_dump() for item in body.resolutions],
+    )
 
 
 @router.post('/{thread_id}/rebind')
