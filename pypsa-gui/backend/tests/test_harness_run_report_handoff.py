@@ -20,7 +20,7 @@ from harness import run_handoff, run_report, runner as harness_runner
 from services import assistant_tasks as tasks, run_gates, run_profiles
 from services.reports import report_job
 from tests.test_assistant_tasks_study_brief import (  # noqa: F401
-    baseline, dispatch, helpers_state, session, stored,
+    baseline, dispatch, helpers_state, session, stored, wait_until,
 )
 from tests.test_harness_run_skeleton import BRIEF, drive, native_steps, site, start, stages  # noqa: F401
 from tests.test_harness_runner import Clicks, detached, mail, opt_in, run_records, settle, task_path  # noqa: F401
@@ -144,6 +144,7 @@ def test_a_chat_report_while_a_run_sits_at_stage_7_is_not_strict_and_not_the_run
             explore_turn(root, task)
             continue
         dispatch(session, monkeypatch, step["tool"], step["args"])
+        assert wait_until(lambda: all(s["status"] != "waiting" for s in stored(root, task["task_id"])["steps"]))
     else:
         raise AssertionError("the run never reached the report card")
     tasks.continue_at_card(session, task["task_id"])
@@ -157,7 +158,6 @@ def test_a_chat_report_while_a_run_sits_at_stage_7_is_not_strict_and_not_the_run
     assert not (record["run"].get("budgets") or {}).get("reservations")
     assert not (record["run"].get("budgets") or {}).get("final_charges")
     # The runner then starts the run's own job, strict and bound.
-    from tests.test_harness_runner import wait_until
     assert wait_until(lambda: (path.exists() and _job_idle()), 60)
     native_steps(monkeypatch, root, task)
     assert fake_report[-1] == {"strict": True, "run_binding": (path, "a")}
@@ -183,13 +183,24 @@ def verdict(fact, task, **kw):
     return run_gates.evaluate([rule], env(task, **kw))[0]
 
 
+IDS = {}
+
+
+def rid(name):
+    """A valid report id per test name (the store refuses any other)."""
+    from services.reports import store
+    return IDS.setdefault(name, store.new_report_id())
+
+
 def report_task(outcome="done", report_id="r1", status="completed"):
+    report_id = rid(report_id)
     return {"run": {"profile": "eh_site@1", "stages": {}},
             "steps": [{"id": "report.1", "tool": "generate_report", "native": "report", "status": status,
                        "job": {"kind": "report", "report_id": report_id, "outcome": outcome, "version": 1}}]}
 
 
 def save_report(tmp_path, report_id="r1", chapters=("sizing",), gaps_table=True, harness=True):
+    report_id = rid(report_id)
     from services.reports import store
     from services.reports.assemble import evidence_only_document
     from services.reports.evidence import collect_evidence
@@ -418,7 +429,8 @@ def test_native_steps_are_never_claimed_by_a_chat_call():
 ])
 def test_b1a_a_stage_is_reopened_only_when_its_profile_skipped_it(stored, reopened):
     profile = run_profiles.resolve("eh_site@1")
-    run = {"stage": "solve", "stages": {"handoff": {"status": "pending", "attempts": 0}}}
+    run = {"stage": "solve", "stages": {n: {"status": "pending", "attempts": 0} for n in run_profiles.STAGES
+                                        if n != "report"}}
     if stored is not None:
         run["stages"]["report"] = dict(stored)
     assert tasks._sync_stages(run, profile) is reopened
