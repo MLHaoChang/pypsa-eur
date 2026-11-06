@@ -48,8 +48,9 @@ function payload(over: Partial<Extract<DipsRestart, { inputs: unknown }>> = {}):
       restartUnit('trip', 'crusher', 'fail', { du_pct: 29.63 }),
       { level: 'event', transition: 'trip', unit: 'mill', t_s: 61, event: 'pickup', du_pct: 1.62, verdict: 'pass', note: 'motor start on the PoC' },
       total('trip', { fail_count: 1, unknown_count: 1, lower_bound: true }),
-      restartUnit('island', 'pump', 'unknown'), restartUnit('island', 'mill', 'unknown'),
-      restartUnit('island', 'crusher', 'unknown'),
+      restartUnit('island', 'pump', 'unknown', { note: 'no genset on the island: its short-circuit power is unknown; no input: restart time not set; motor start on the island unknown' }),
+      restartUnit('island', 'mill', 'unknown', { note: 'no genset on the island: its short-circuit power is unknown; motor start on the island unknown' }),
+      restartUnit('island', 'crusher', 'unknown', { note: 'no genset on the island: its short-circuit power is unknown; motor start on the island unknown' }),
       { level: 'event', transition: 'island', unit: 'mill', t_s: 0, event: 'island', note: 'mill trips' },
       total('island', { unknown_count: 3, lower_bound: true }),
     ],
@@ -88,12 +89,14 @@ describe('CampusDipsRestartSection', () => {
     const trip = screen.getByTestId('dips-restart-total-trip').textContent!
     expect(trip).toContain('lower bound')
     expect(trip).toContain('1 motor start fails the voltage-change limit; 1 restart is not known')
-    expect(screen.getByTestId('dips-restart-total-island').textContent).toContain('3 restarts are not known')
+    expect(screen.getByTestId('dips-restart-total-island').textContent).toContain(
+      '3 restarts are not known (1 unit is missing an input; 2 have no verdict: no genset on the island: its short-circuit power is unknown)')
   })
 
   it('labels demo dip statistics demo', () => {
     show('guided')
-    expect(screen.getByTestId('dips-demo').textContent).toContain('demo')
+    expect(screen.getByTestId('dips-demo').textContent).toContain(
+      "The dip counts are demo statistics, not this site's. Ask the grid operator for this site's dip statistics.")
   })
 
   it('a total with nothing unknown has no tag', () => {
@@ -123,9 +126,19 @@ describe('CampusDipsRestartSection', () => {
     expect(nav.inPlace).not.toHaveBeenCalled()
   })
 
-  it('offers no link on an unknown with every field set (the island has no short-circuit power)', () => {
-    show('expert')
+  it('says in words why a restart is unknown when no field of the unit is missing, with no link', () => {
+    show('guided')
     expect(within(screen.getByTestId('dips-island-mill')).queryByRole('button')).toBeNull()
+    expect(screen.getByTestId('dips-reason-island-mill').textContent)
+      .toBe('No genset on the island: its short-circuit power is unknown')
+    // A unit missing its own input gets the link, not the reason.
+    expect(screen.queryByTestId('dips-reason-island-pump')).toBeNull()
+  })
+
+  it('writes the PoC as the grid connection in the timeline', () => {
+    show('expert')
+    expect(screen.getByTestId('dips-timeline-trip').textContent).toContain('motor start on the grid connection')
+    expect(screen.getByTestId('dips-timeline-trip').textContent).not.toContain('PoC')
   })
 
   it('names each link with the form field\'s own label (parity with the asset schema)', () => {

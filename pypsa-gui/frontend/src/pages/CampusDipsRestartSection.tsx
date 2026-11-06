@@ -67,14 +67,41 @@ export function dipTotalReason(total: DipTripRow): string | null {
     : null
 }
 
-/** A restart total in words: "lower bound" with why, or null. */
-export function restartTotalReason(total: RestartRow): string | null {
+/** An engine note in the panel's words: "the PoC" is "the grid connection". */
+export function inWords(note: string | null | undefined): string {
+  return (note ?? '').replace(/\bthe PoC\b/g, 'the grid connection').replace(/\bPoC\b/g, 'grid connection')
+}
+
+/** Why a restart reads unknown when no field of the unit is missing: the note's part that is not about the
+ *  unit's own inputs (the island's or the grid connection's short-circuit power), from a capital. */
+export function unknownReason(note: string | null | undefined): string | null {
+  const parts = inWords(note).split('; ').map(p => p.trim()).filter(Boolean)
+  const cause = parts.find(p => !p.startsWith('no ride-through curve') && !p.startsWith('no input')
+    && !/^motor start on the (grid connection|island) unknown$/.test(p)) ?? parts[0]
+  return cause ? cause[0].toUpperCase() + cause.slice(1) : null
+}
+
+/** A restart total in words: "lower bound" with why, or null. The unknown restarts are split by cause: a unit's
+ *  own input missing, or no short-circuit power to screen the start on (named from the units' notes). */
+export function restartTotalReason(total: RestartRow, units: RestartRow[] = [],
+  inputs: Record<string, DipsRestartInputs> = {}): string | null {
   if (!total.lower_bound) return null
   const parts: string[] = []
   const fails = Number(total.fail_count ?? 0)
   const unknown = Number(total.unknown_count ?? 0)
   if (fails) parts.push(`${count(fails, 'motor start fails', 'motor starts fail')} the voltage-change limit`)
-  if (unknown) parts.push(`${count(unknown, 'restart is', 'restarts are')} not known`)
+  if (unknown) {
+    const unknownUnits = units.filter(u => u.verdict === 'unknown')
+    const missing = unknownUnits.filter(u => missingField(inputs[u.unit ?? ''], RESTART_FIELDS) != null)
+    const other = unknownUnits.filter(u => missingField(inputs[u.unit ?? ''], RESTART_FIELDS) == null)
+    const why: string[] = []
+    if (missing.length) why.push(`${count(missing.length, 'unit is', 'units are')} missing an input`)
+    if (other.length) {
+      const cause = unknownReason(other[0].note)
+      why.push(`${count(other.length, 'has', 'have')} ${cause ? `no verdict: ${cause[0].toLowerCase()}${cause.slice(1)}` : 'no verdict'}`)
+    }
+    parts.push(`${count(unknown, 'restart is', 'restarts are')} not known${why.length ? ` (${why.join('; ')})` : ''}`)
+  }
   return parts.length ? parts.join('; ') : 'a unit is missing its restart time, rate or mass pull'
 }
 
@@ -96,11 +123,16 @@ function RestartCell({ row, unit, inputs, mode }: {
   if (!row) return <span className="text-muted">does not restart</span>
   const v = chipOf(row.start_verdict)
   const field = v === 'unknown' ? missingField(inputs, RESTART_FIELDS) : null
+  // No field of the unit is missing: the cause is elsewhere (no short-circuit power to screen on), said in words.
+  const reason = v === 'unknown' && !field ? unknownReason(row.note) : null
   return (
-    <span className="inline-flex flex-wrap items-center gap-1.5" title={row.note ?? undefined}>
-      <VerdictChip verdict={v} />
-      {row.du_pct != null && <span className="tabular-nums">{figUnit(row.du_pct, '% ΔU')}</span>}
-      {field && <FixLink unit={unit} field={field} mode={mode} />}
+    <span className="inline-flex flex-col gap-0.5">
+      <span className="inline-flex flex-wrap items-center gap-1.5">
+        <VerdictChip verdict={v} />
+        {row.du_pct != null && <span className="tabular-nums">{figUnit(row.du_pct, '% ΔU')}</span>}
+        {field && <FixLink unit={unit} field={field} mode={mode} />}
+      </span>
+      {reason && <span data-testid={`dips-reason-${row.transition}-${unit}`} className="text-[11px] text-muted max-w-[16rem]">{reason}</span>}
     </span>
   )
 }
@@ -143,7 +175,7 @@ function Timeline({ transition, events }: { transition: Transition; events: Rest
                 <td className="pr-3 align-top whitespace-nowrap">{EVENT_LABEL[e.event ?? ''] ?? e.event}</td>
                 <td className="pr-3 align-top whitespace-nowrap tabular-nums">{e.du_pct == null ? '—' : figUnit(e.du_pct, '% ΔU')}</td>
                 <td className="pr-3 align-top">{e.verdict ? <VerdictChip verdict={chipOf(e.verdict)} /> : '—'}</td>
-                <td className="align-top text-[11px] text-muted">{e.note}</td>
+                <td className="align-top text-[11px] text-muted">{inWords(e.note)}</td>
               </tr>
             ))}
           </tbody>
@@ -199,13 +231,13 @@ export default function CampusDipsRestartSection({ dips }: { dips: DipsRestart |
             return tot ? (
               <TotalLine key={t} testId={`dips-restart-total-${t}`} label={`${TRANSITION_LABEL[t]}, lost per event`}
                 value={figUnit(tot.lost_t, 't', 4)} tag={tot.lower_bound ? 'lower bound' : null}
-                reason={restartTotalReason(tot)} />
+                reason={restartTotalReason(tot, restartOf(t).filter(r => r.level === 'unit'), dips.inputs)} />
             ) : null
           })}
           {demo && (
             <div data-testid="dips-demo" className="flex items-baseline gap-1.5 text-[11px] text-muted">
               <Tag tone="warn">demo</Tag>
-              <span>The dip counts are demo statistics, not this site's: the grid operator's govern.</span>
+              <span>The dip counts are demo statistics, not this site's. Ask the grid operator for this site's dip statistics.</span>
             </div>
           )}
         </div>
