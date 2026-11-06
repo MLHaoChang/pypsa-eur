@@ -93,14 +93,15 @@ def _committed_genset(**extra):
 def test_linearised_uc_buys_exactly_the_online_capacity_headroom_needs():
     """10 MW load, the BESS capped at 7 MW. A committed 6 MW genset at
     p_min_pu 0.3 runs at p ≥ 1.8·u, which the import no longer carries, so
-    the step is 10 − p and the row is 7 + 6u − p ≥ 10 − p: u = 1/2, and it
-    burns its minimum load p = 0.3·6·u = 0.9 MW.
+    the step is 10 − p. The genset is credited at min(6u − p, its 50 % step
+    3u: frequency.py:632), so the row is 7 + min(4.2u, 3u) ≥ 10 − 1.8u at
+    p = 1.8u: u = 3/4.8 = 5/8, and it burns its minimum load p = 1.125 MW.
 
     With the event rows the 10 MW load is also E2's step, which the genset's
     running does not shrink, and the genset is credited at min(6u − p, its
     50 % step 3u) = 3u: 7 + 3u ≥ 10, so u = 1 (p = 1.8 MW)."""
     island = _uc(_units(gensets={"g": _committed_genset()}))
-    for event_rows, u in ((False, 0.5), (True, 1.0)):
+    for event_rows, u in ((False, 5 / 8), (True, 1.0)):
         n = _hub(load=10.0, gensets=[("g", 6.0)])
         n.storage_units.at["bess", "p_nom_max"] = 7.0
         n = _solve_uc(n, island, event_rows=event_rows)
@@ -114,7 +115,7 @@ def test_linearised_uc_buys_exactly_the_online_capacity_headroom_needs():
 def test_without_uc_the_genset_must_run_to_cut_the_step():
     """The same case with UC off: the cold genset is not online at 0⁺, so it
     can only help by running 3 MW to cut the import to the 7 MW the BESS
-    covers. UC buys the same cover at 0.9 MW of minimum load, cheaper.
+    covers. UC buys the same cover at 1.125 MW of minimum load, cheaper.
 
     With the event rows the cold case cannot hold E2, the 10 MW load as a
     step: running the genset does not shrink it, and a cold genset gives
@@ -129,8 +130,8 @@ def test_without_uc_the_genset_must_run_to_cut_the_step():
     assert status == "ok"
     assert cold.generators_t.p["g"].to_numpy() == pytest.approx([3.0] * 4, abs=TOL)
     warm = _solve_uc(case(), _uc(_units(gensets={"g": _committed_genset()})), event_rows=False)
-    # 4 h × (3 − 0.9) MW × (1000 − 10) of fuel over import.
-    assert cold.objective - warm.objective == pytest.approx(4 * 2.1 * 990.0, abs=1e-3)
+    # 4 h × (3 − 1.125) MW × (1000 − 10) of fuel over import.
+    assert cold.objective - warm.objective == pytest.approx(4 * 1.875 * 990.0, abs=1e-3)
     hint = _infeasible_hint(case(), _seamless(_units(gensets={"g": _committed_genset()})), uc=False)
     assert "Island-e2-up: the largest load step is 10.00 MW" in hint
     assert "at most 7.00 MW" in hint and "3.00 MW is missing" in hint
@@ -191,7 +192,7 @@ def test_a_committed_genset_takes_its_minimum_load_from_pypsa_not_the_spinning_r
     """UC replaces the spinning flag: no Island-min-load row, and PyPSA's own
     p ≥ u·p_min_pu·p_nom holds instead. With the event rows u = 1, as in
     ``test_linearised_uc_buys_exactly_the_online_capacity_headroom_needs``."""
-    for event_rows, u in ((False, 0.5), (True, 1.0)):
+    for event_rows, u in ((False, 5 / 8), (True, 1.0)):
         n = _hub(load=10.0, gensets=[("g", 6.0)])
         n.storage_units.at["bess", "p_nom_max"] = 7.0
         n = _solve_uc(n, _uc(_units(gensets={"g": _committed_genset(spinning=True)})),
@@ -244,9 +245,9 @@ def test_uc_on_without_a_committed_genset_is_refused_at_the_rows():
 
 def test_a_committed_link_genset_counts_its_electrical_output():
     """A Link genset (fuel → site, η 0.4, p_nom 15 on the fuel side = 6 MW
-    out): u·6 of online output, as for the Generator, so u = 1/2. With the
+    out): u·6 of online output, as for the Generator, so u = 5/8. With the
     event rows E2's 10 MW step against 7 + its 50 % step credit 3u: u = 1."""
-    for event_rows, u in ((False, 0.5), (True, 1.0)):
+    for event_rows, u in ((False, 5 / 8), (True, 1.0)):
         n = _hub(load=10.0)
         n.add("Bus", "fuel")
         n.add("Generator", "diesel", bus="fuel", p_nom=1000.0, marginal_cost=400.0)
@@ -269,7 +270,7 @@ def test_uc_on_rolling_scopf_and_myopic_is_refused_with_a_reason(strategy, sclop
                           island=_uc(_units()))
 
 
-@pytest.mark.parametrize("event_rows, u", [(False, 0.5), (True, 1.0)])
+@pytest.mark.parametrize("event_rows, u", [(False, 5 / 8), (True, 1.0)])
 def test_run_simulation_passes_linearised_uc_and_restores_the_network(monkeypatch, event_rows, u):
     """The run_simulation path; u as in the first linearised-UC toy (1 with the
     event rows). The test seam reaches it through island_extra_functionality's
