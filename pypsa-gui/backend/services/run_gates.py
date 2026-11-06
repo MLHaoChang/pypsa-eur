@@ -25,6 +25,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, UTC
+from pathlib import Path
 from typing import Any
 from collections.abc import Callable
 
@@ -293,6 +294,19 @@ def _report_unsupported_listed(env):
     return run_report.unsupported_listed(env.task, env.project_dir, _profile(env))
 
 
+def _granted_eh_study(env):
+    """The EH study's args the grant froze (envelope mode), so readiness
+    predicts the run the study will make, its granted budget included."""
+    from services import run_envelope
+    task_id = env.task.get("task_id")
+    if env.project_dir is None or not isinstance(task_id, str):
+        return None
+    envelope = run_envelope._load(Path(env.project_dir) / "assistant_tasks" / f"{task_id}.json")
+    if envelope is None or envelope.get("state") != "granted":
+        return None
+    return envelope.get("eh_study") or None
+
+
 def _eh_readiness_ready(env):
     """Issue 07 B2: the EH readiness preflight for the args the study would
     run with, on the run's ctx. Ready only when the pack applies and every
@@ -302,7 +316,7 @@ def _eh_readiness_ready(env):
     if env.ctx is None:
         return None
     profile = _profile(env)
-    frozen = run_eh.freeze(env.ctx, profile, run_eh.solves_cap(profile, None))
+    frozen = _granted_eh_study(env) or run_eh.freeze(env.ctx, profile, run_eh.solves_cap(profile, None))
     args = frozen["args"]
     result = _on(env.ctx, chat_tools.get_eh_readiness, args["archetype"], args["budget_solves"],
                  args.get("stages"), args.get("dtc_attribution"), args.get("pack_overrides") or None)

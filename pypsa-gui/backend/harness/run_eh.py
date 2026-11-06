@@ -253,23 +253,17 @@ def _record(ctx):
                                            "network_revision", "goal_sources", "budget_solves")}
 
 
-def started_at(ctx):
-    """The EH record's `started_at`, read under the solver-state lock right
-    after the step's own call published it (F3)."""
-    record = _record(ctx)
-    return None if record is None else record.get("started_at")
-
-
-def wait(ticket, job_id, session_id, ctx):
+def wait(ticket, job_id, session_id, ctx, begun):
     """The run's EH step waits on its own study job (instead of completing
     on its start receipt) and a follower settles it from that study's
-    record. True when the step now waits."""
+    record: the one whose `started_at` (`begun`) the step's own start
+    receipt names (F3), never one read after the call returned. True when
+    the step now waits."""
     from services import assistant_tasks
     with assistant_tasks._LOCK:
         _, task = assistant_tasks._read(ticket[0])
     if not task.get("run"):
         return False  # a chat plan's step keeps its own rules; only a run's EH step waits here
-    begun = started_at(ctx)
     path = assistant_tasks.await_job(ticket, job_id, session_id)
     if path is None:
         return False

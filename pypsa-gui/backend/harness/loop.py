@@ -4094,7 +4094,8 @@ def _dispatch_real_tool_call(
 
                     # Study harness 07 B2: a run's EH step settles from its own
                     # study record, never from this start receipt (F2, F3).
-                    if run_eh.wait(task_ticket, job_id, session.session_id, active_ctx):
+                    if run_eh.wait(task_ticket, job_id, session.session_id, active_ctx,
+                                   result.get("started_at")):
                         result = {**result, "waiting": True}
         except Exception as exc:  # noqa: BLE001 — enrich is best-effort
             logger.exception(

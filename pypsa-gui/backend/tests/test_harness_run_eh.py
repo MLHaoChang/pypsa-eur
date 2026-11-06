@@ -106,6 +106,17 @@ def test_a_live_envelope_never_covers_the_eh_step(tmp_path, monkeypatch):
     assert run_envelope.covers(path, "solve_queue_enqueue") and not run_envelope.covers(path, "run_eh_study")
 
 
+def test_a_model_turn_is_never_admitted_the_eh_study(tmp_path, monkeypatch):
+    """review-gk (#1123): the harness's own EH step is never a model turn's,
+    even under a live grant with the run's standing in order."""
+    path, task = task_for(tmp_path)
+    grant = envelope(path, runs=[{"tool": "solve_queue_enqueue"}])
+    monkeypatch.setattr(run_envelope, "_standing", lambda *a, **k: None)
+    monkeypatch.setattr(run_envelope, "_names_another_project", lambda *a: False)
+    assert run_envelope._refusal(None, grant, task, "run_eh_study", {"archetype": "weak_flexible"},
+                                 "execution", False, None, None, {}) == "unlisted_tool"
+
+
 # ── The freeze (C1, F1) ──────────────────────────────────────────────────────
 
 
@@ -340,6 +351,23 @@ def test_the_follower_reads_its_own_record_never_a_later_users_study(tmp_path, m
     assert calls[1][3:5] == ("done", "completed")
 
 
+def test_the_step_keeps_the_started_at_its_own_receipt_named(tmp_path, monkeypatch):
+    """F3: the identity is the one the step's own start published (its
+    receipt), never the record read after the call returned: a user's study
+    that replaced it in between is never the step's."""
+    from services import assistant_tasks
+    path, ticket = ticket_task(tmp_path)
+    monkeypatch.setattr(assistant_tasks, "_read", lambda task_id: (path, json.loads(path.read_text())))
+    monkeypatch.setattr(assistant_tasks, "await_job", lambda *a: path)
+    followed = threading.Event()
+    seen = []
+    monkeypatch.setattr(run_eh, "_follow", lambda *a: seen.append(a) or followed.set())
+    ctx = ctx_for(tmp_path, eh_study=record(started=9.0))  # a user's study, already replacing the run's
+    assert run_eh.wait(ticket, "ad:1", "s1", ctx, 1.0)
+    assert followed.wait(5) and seen[0][-1] == 1.0
+    assert json.loads(path.read_text())["steps"][0]["job"]["started_at"] == 1.0
+
+
 def test_a_refused_start_releases_the_reservation(tmp_path):
     """F5: a 409 or 422 spends nothing."""
     path, ticket = ticket_task(tmp_path)
@@ -479,6 +507,21 @@ def test_readiness_reads_the_args_the_study_would_run_with(monkeypatch, tmp_path
     read("eh.readiness.ready", env_for(tmp_path, ctx=ctx_for(tmp_path)))
     assert seen == [("weak_flexible", 2, ["apply_pack", "ens_solve", "mc_certify", "assemble"], "per_load",
                      {"import_p_nom_mw": 40.0})]
+
+
+def test_readiness_reads_the_args_the_grant_froze(monkeypatch, tmp_path):
+    """C1: in envelope mode the input gate predicts the study the grant
+    froze (its granted budget), not one frozen again from the profile."""
+    from services import chat_tools
+    seen = []
+    monkeypatch.setattr(run_gates, "_on", lambda ctx, fn, *args: fn(*args))
+    monkeypatch.setattr(chat_tools, "get_eh_readiness", lambda *a: seen.append(a) or None)
+    env = env_for(tmp_path, ctx=ctx_for(tmp_path))
+    (env.project_dir / "assistant_tasks").mkdir()
+    granted = {"archetype": "strong_grid", "budget_solves": 1, "stages": ["apply_pack", "ens_solve"]}
+    envelope(env.project_dir / "assistant_tasks" / "t1.json", eh_study={"args": granted})
+    read("eh.readiness.ready", env)
+    assert seen == [("strong_grid", 1, ["apply_pack", "ens_solve"], None, None)]
 
 
 @pytest.mark.parametrize("steps, state, expected", [
