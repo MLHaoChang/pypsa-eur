@@ -47,3 +47,5 @@ GK A (15), engine: GO with C1–C9. Q-A1 (a): PUE is stated for the own architec
 - C7: as K1, plus older pins and REDUNDANCY_PACK_VERSION are unaffected. The stage-part efficiency rows load through the unchanged loader, and an unknown part is still rejected.
 - C8: as K8, plus file mtimes are unchanged. An unsaved or missing spec is a typed 422.
 - C9: mutants RED: the in-rack line dropped, own and variant swapped, the weighting dropped, the C3 guard removed, a conditional service passed without storage, and an unset "ac" taking the chain-ledger path.
+
+Amendments, GK A (15): C3 refuses when PUE(T) − 1/η_own < 0; it is checked at create only when the architecture is set. Tests: AC 1.05 is refused, 1.3 passes, and the boundary passes. C7: stage rows have no part and are not_applicable, and a stage-named part is still refused. Services: SST's FFR and FCR are also conditional; DC-bus storage means backup bess or hybrid (assumed). Still to add: a test that a genset-only backup leaves every conditional service unpassed. UX (11): (a) GO. Issue 22 carries the create-form select; the create-form shot is dropped, and the PR body names issue 22.
