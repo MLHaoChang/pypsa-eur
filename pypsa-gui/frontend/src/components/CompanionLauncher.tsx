@@ -33,7 +33,7 @@ type Props = {
   /** LC-07: continuous voice. With the server flag on, "Start voice" sits beside Send (disabled while
    *  `blocked`: no media link) and the voice note is hidden; flag off, the note is master's. */
   speech?: {
-    available: boolean; blocked?: string; caption?: string
+    available: boolean; blocked?: string; caption?: string; notice?: boolean
     state: 'off' | 'starting' | 'listening'; start: () => void; stop: () => void
   }
   children?: ReactNode
@@ -164,7 +164,8 @@ export default function CompanionLauncher({
             </p>
           ) : null}
           {caption ? (
-            <p className="mb-2 text-[11px] leading-snug text-muted" data-testid="companion-live-caption">
+            <p className={`mb-2 text-[11px] leading-snug ${speech?.notice && caption === speech.caption?.trim() ? 'text-warn' : 'text-muted'}`}
+              data-testid="companion-live-caption">
               {caption}
             </p>
           ) : null}

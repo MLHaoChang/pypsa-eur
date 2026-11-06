@@ -27,11 +27,15 @@ export interface LiveSpeech {
   state: SpeechState
   /** The listening line, else the last stop's line; cleared on the next start. */
   caption: string
+  /** True while `caption` is a server notice (shown in the warning tone). */
+  notice: boolean
   start: () => void
   stop: () => void
 }
 
 const NOTICE_POLL_MS = 2000
+/** A notice states a momentary condition: the caption returns to Listening after this. */
+export const NOTICE_SHOW_MS = 8000
 const NOTICE_STATUSES = new Set(['echo_ignored', 'clarify', 'not_an_approval'])
 
 function speechLanguage(): string {
@@ -72,6 +76,7 @@ export function useLiveSpeech(active: boolean): LiveSpeech {
     setNotice('')
     if (state !== 'listening' || !threadId) return
     let live = true
+    let hide = 0
     const poll = () => {
       getSpeechState(threadId).then((r) => {
         if (!live) return
@@ -79,11 +84,16 @@ export function useLiveSpeech(active: boolean): LiveSpeech {
           .filter((n: SpeechNotice) => NOTICE_STATUSES.has(n.status) && typeof n.message === 'string'
             && n.generation === generation && n.seq > seenSeq.current)
           .sort((a, b) => b.seq - a.seq)[0]
-        if (fresh) { seenSeq.current = fresh.seq; setNotice(fresh.message) }
+        if (fresh) {
+          seenSeq.current = fresh.seq
+          setNotice(fresh.message)
+          window.clearTimeout(hide)
+          hide = window.setTimeout(() => setNotice(''), NOTICE_SHOW_MS)
+        }
       }, () => {})
     }
     const id = window.setInterval(poll, NOTICE_POLL_MS)
-    return () => { live = false; window.clearInterval(id) }
+    return () => { live = false; window.clearInterval(id); window.clearTimeout(hide) }
   }, [state, threadId, generation])
   const linked = speechMediaLinkConfigured()
   const available = flagOn && linked
@@ -125,5 +135,9 @@ export function useLiveSpeech(active: boolean): LiveSpeech {
   }, [])
   const stop = useCallback(() => stopWith('ended'), [stopWith])
 
-  return { available, blocked, state, caption: state === 'listening' ? (notice || LISTENING_CAPTION) : caption, start, stop }
+  return {
+    available, blocked, state, start, stop,
+    caption: state === 'listening' ? (notice || LISTENING_CAPTION) : caption,
+    notice: state === 'listening' && !!notice,
+  }
 }

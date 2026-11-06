@@ -370,4 +370,12 @@ describe('useLiveSpeech notices (LC-07c)', () => {
     await act(async () => { useChatStore.setState({ utteranceGeneration: 4 }) })
     expect(result.current.caption).not.toBe('Now.')
   })
+
+  it('returns to Listening after the notice has been shown for a while', { timeout: 20000 }, async () => {
+    const { result } = await listening()
+    api.getSpeechState.mockResolvedValue({ generation: 3, session: null, notices: [notice('clarify', 'Pick one.', 1)] })
+    await waitFor(() => expect(result.current.notice).toBe(true), { timeout: 4000 })
+    await waitFor(() => expect(result.current.caption).toBe(LISTENING_CAPTION), { timeout: 10000 })
+    expect(result.current.notice).toBe(false)
+  })
 })
