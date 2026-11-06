@@ -423,6 +423,7 @@ GET     /api/results/frontier                                                   
 POST    /api/results/frontier                                                      -> post_frontier_api_results_frontier_post
 POST    /api/results/frontier/abort                                                -> post_frontier_abort_api_results_frontier_abort_post
 GET     /api/results/generators                                                    -> get_generator_results_api_results_generators_get
+GET     /api/results/grid_risk_production                                          -> get_grid_risk_production_api_results_grid_risk_production_get
 GET     /api/results/investment_case                                               -> get_investment_case_api_results_investment_case_get
 POST    /api/results/investment_case                                               -> post_investment_case_api_results_investment_case_post
 POST    /api/results/investment_case/abort                                         -> post_investment_case_abort_api_results_investment_case_abort_post
