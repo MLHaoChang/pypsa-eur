@@ -235,3 +235,31 @@ describe('import and export outcomes (issue 04 S3)', () => {
     expect(toolOutcomeReasonWord('partial', 'rows_missing', 'import_network_nc')).toBeNull()
   })
 })
+
+describe('denied outcomes (issue 04 S4a)', () => {
+  it.each([
+    ['confirmation_denied', 'you declined it'],
+    ['confirmation_expired', 'the approval expired'],
+    ['confirmation_revoked', 'the approval was withdrawn'],
+    ['required_guard_failed', 'the request did not pass a required check'],
+    ['confirmation_args_changed', 'the request changed after you approved it'],
+    ['no_progress_stop', 'stopped after repeating the same failing request'],
+    ['aborted', 'the turn was stopped before you answered'],
+    ['user_restriction', 'your saved project rule blocks changes'],
+    ['approval_unavailable', 'the approval could not be recorded'],
+    ['round_change_cap', "this round's changes are used up"],
+    ['unknown_decision', 'the answer to the approval could not be read'],
+  ])('words a refusal of kind %s', (reason, words) => {
+    const block = toolOutcomeOf({ _outcome: { version: 1, outcome: 'denied', reason } }, 'bulk_update_components')!
+    expect(toolOutcomeLine('bulk_update_components', block)).toBe(`– bulk_update_components (denied: ${words})`)
+  })
+
+  it('never marks a denial ✕ and shows no raw key for an unworded kind', () => {
+    const block = toolOutcomeOf({ _outcome: { version: 1, outcome: 'denied', reason: 'some_new_kind' } }, 'delete_component')!
+    expect(toolOutcomeLine('delete_component', block)).toBe('– delete_component (denied)')
+  })
+
+  it.each(['run_simulation', 'import_network_nc'])('words other_context for %s as another project', (tool) => {
+    expect(toolOutcomeReasonWord('uncertain', 'other_context', tool)).toBe('another project was opened while it was being checked')
+  })
+})

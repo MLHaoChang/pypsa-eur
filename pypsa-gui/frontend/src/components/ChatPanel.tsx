@@ -345,6 +345,8 @@ interface ToolErrorFrame {
   tool_name?: string
   error_kind: string
   message: string
+  /** Issue 04 S4a: a refusal before any effect carries `{outcome: 'denied', reason}`. */
+  _outcome?: unknown
 }
 
 interface TurnDoneFrame {
@@ -2394,12 +2396,19 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
           const detail = (d.message || '').trim()
           const short =
             detail.length > 160 ? `${detail.slice(0, 157)}…` : detail
+          // Issue 04 S4a: a refusal's `_outcome` (denied, with its kind) drives
+          // the tool line as a result's does; without one, the ✗ line stays.
+          const tool_result = d._outcome && typeof d._outcome === 'object' ? { _outcome: d._outcome } : undefined
+          const outcome = tool_result && d.tool_name ? toolOutcomeOf(tool_result, d.tool_name) : null
           appendMessage({
             role: 'tool',
-            content: short
+            content: outcome && d.tool_name
+              ? `${toolOutcomeLine(d.tool_name, outcome)}${short ? `\n${short}` : ''}`
+              : short
               ? `✗ ${d.tool_name ?? '?'} — ${d.error_kind}: ${short}`
               : `✗ ${d.tool_name ?? '?'} — ${d.error_kind}`,
             tool_use_id: d.tool_use_id, tool_name: d.tool_name,
+            ...(outcome ? { tool_result, origin_project: streamProjectRef.current } : {}),
           })
         }
         break
@@ -3576,6 +3585,10 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
           if (toolLine?.hidden) return null
           if (toolLine && m.tool_use_id && REQUEST_LINE.test(m.content)
             && guidedSettledToolIds(messages).has(m.tool_use_id)) return null
+          // Issue 04 S4a: the card's own "You declined" line gives way to the
+          // backend's denied line for the same call, which says the same.
+          if (toolLine && m.tool_use_id && DENIED_LINE.test(m.content) && messages.some(o => o !== m && o.role === 'tool'
+            && o.tool_use_id === m.tool_use_id && toolOutcomeOf(o.tool_result, o.tool_name)?.outcome === 'denied')) return null
           const toolLabel = toolLine && !toolLine.hidden ? toolLine.label : null
           const toolMessage = toolLine && !toolLine.hidden ? toolLine.message ?? null : null
           return (

@@ -169,6 +169,68 @@ describe('chat tool-line outcome marks', () => {
     expect(guidedToolPhrase(tool)).toBe(phrase)
   })
 
+  it.each([
+    ['confirmation_denied', 'you declined it'],
+    ['confirmation_expired', 'the approval expired'],
+    ['confirmation_revoked', 'the approval was withdrawn'],
+    ['required_guard_failed', 'the request did not pass a required check'],
+    ['confirmation_args_changed', 'the request changed after you approved it'],
+    ['no_progress_stop', 'stopped after repeating the same failing request'],
+    ['aborted', 'the turn was stopped before you answered'],
+    ['user_restriction', 'your saved project rule blocks changes'],
+    ['approval_unavailable', 'the approval could not be recorded'],
+    ['round_change_cap', "this round's changes are used up"],
+    ['unknown_decision', 'the answer to the approval could not be read'],
+  ])('issue 04 S4a: a tool_error refused as %s reads denied with its reason in both modes', async (kind, words) => {
+    await turn('expert')
+    emit('tool_request', { tool_use_id: 'd', tool_name: 'bulk_update_components', safety_tier: 'write' })
+    emit('tool_error', { tool_use_id: 'd', tool_name: 'bulk_update_components', error_kind: kind,
+      message: "it did not run", _outcome: { version: 1, outcome: 'denied', reason: kind } })
+    const row = rows().at(-1)!
+    const mark = within(row).getByTestId('chat-tool-glyph')
+    expect(mark.textContent).toBe('–')
+    expect(mark.dataset.outcome).toBe('denied')
+    expect(mark.className).toContain('text-muted')
+    expect(within(row).getByTestId('chat-tool-outcome').textContent).toBe(`–bulk_update_components (denied: ${words})`)
+    expect(row.textContent).not.toContain(kind)
+    expect(row.textContent).not.toContain('✕')
+    act(() => useUIStore.setState({ uiMode: 'guided' }))
+    const guidedRows = rows()
+    expect(guidedRows).toHaveLength(1)
+    expect(within(guidedRows[0]).getByTestId('chat-tool-label').textContent).toBe(`Denied: update components (${words})`)
+    expect(within(guidedRows[0]).getByTestId('chat-tool-glyph').textContent).toBe('–')
+    expect(guidedRows[0].textContent).not.toContain(kind)
+  })
+
+  it('issue 04 S4a: a declined card shows the one denied line in Guided', async () => {
+    await turn('guided')
+    emit('tool_request', { tool_use_id: 'd', tool_name: 'delete_component', safety_tier: 'destructive' })
+    act(() => useChatStore.getState().appendMessage({ role: 'tool', content: 'denied: delete_component',
+      tool_use_id: 'd', tool_name: 'delete_component' }))
+    expect(screen.getByTestId('chat-tool-label').textContent).toBe('You declined — nothing was changed.')
+    emit('tool_error', { tool_use_id: 'd', tool_name: 'delete_component', error_kind: 'confirmation_denied',
+      message: "deny on confirmation for 'delete_component'", _outcome: { version: 1, outcome: 'denied', reason: 'confirmation_denied' } })
+    expect(screen.getAllByTestId('chat-tool-label').map(l => l.textContent)).toEqual(['Denied: delete a component (you declined it)'])
+  })
+
+  it('issue 04 S4a: keeps the ✗ error line for a tool_error without an outcome', async () => {
+    await turn('expert')
+    emit('tool_error', { tool_use_id: 'e', tool_name: 'bulk_update_components', error_kind: 'validation_error', message: 'bus Field required' })
+    expect(rows().at(-1)!.textContent).toContain('✗ bulk_update_components — validation_error: bus Field required')
+    expect(within(rows().at(-1)!).queryByTestId('chat-tool-glyph')).toBeNull()
+    expect(useChatStore.getState().messages.at(-1)!.tool_result).toBeUndefined()
+  })
+
+  it('issue 04 S4a: says another project was opened for an other_context read', async () => {
+    await turn('expert')
+    call('o', 'run_simulation', 'uncertain', 'fg:1', 'other_context')
+    expect(screen.getByTestId('chat-tool-outcome').textContent)
+      .toBe('–run_simulation (outcome unknown: another project was opened while it was being checked)')
+    act(() => useUIStore.setState({ uiMode: 'guided' }))
+    expect(screen.getByTestId('chat-tool-label').textContent)
+      .toBe('Outcome unknown: start a solve (another project was opened while it was being checked)')
+  })
+
   it('leaves a tool without an outcome on its plain ✓ line', async () => {
     await turn('expert')
     call('list', 'list_components', null)

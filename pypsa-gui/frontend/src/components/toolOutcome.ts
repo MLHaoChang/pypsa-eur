@@ -4,7 +4,7 @@
  * follows that outcome, never a blanket ✓.
  */
 import {
-  ACTIVITY_STATUS_WORDS, TOOL_OUTCOME_FILE_REASON_WORDS, TOOL_OUTCOME_PARTIAL_REASON_WORDS, TOOL_OUTCOME_REASON_WORDS,
+  ACTIVITY_STATUS_WORDS, TOOL_OUTCOME_DENIED_REASON_WORDS, TOOL_OUTCOME_FILE_REASON_WORDS, TOOL_OUTCOME_PARTIAL_REASON_WORDS, TOOL_OUTCOME_REASON_WORDS,
 } from './activityWords'
 
 /** Every outcome the backend's `_outcome.outcome` may carry (harness/outcomes.py). */
@@ -112,11 +112,12 @@ export function toolOutcomeMark(outcome: string): ToolOutcomeMark {
   return { outcome: known, glyph: '–', word, tone: 'muted', inFlight: false }
 }
 
-/** Plain words for why an outcome is unknown, or null when the reason adds nothing. */
+/** Plain words for why an outcome is unknown, partly done or denied, or null when the reason adds nothing. */
 export function toolOutcomeReasonWord(outcome: string, reason: string | null, tool?: string): string | null {
   if (!reason) return null
   const state = toolOutcomeMark(outcome).outcome
   if (state === 'partial') return TOOL_OUTCOME_PARTIAL_REASON_WORDS[reason] ?? null
+  if (state === 'denied') return TOOL_OUTCOME_DENIED_REASON_WORDS[reason] ?? null
   if (state !== 'uncertain') return null
   if (tool && FILE_TOOLS.has(tool) && reason in TOOL_OUTCOME_FILE_REASON_WORDS) return TOOL_OUTCOME_FILE_REASON_WORDS[reason]
   return TOOL_OUTCOME_REASON_WORDS[reason] ?? null

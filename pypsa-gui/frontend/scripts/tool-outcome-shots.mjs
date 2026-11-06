@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
 // SPDX-License-Identifier: MIT
-/** Dev-only UX-review shots for assurance issue 04 S1b: every chat tool-line
+/** Dev-only UX-review shots for assurance issue 04 (S1b on): every chat tool-line
  * outcome mark in Guided and Expert. Component-level harness (the chat panel
  * with a seeded transcript), all API calls mocked, no model calls.
  * node scripts/tool-outcome-shots.mjs [out-dir]   (default: a new temp dir)
@@ -64,6 +64,14 @@ add('i3', 'import_network_nc', 'partial', null, 11, 'extra_rows', { requested: 1
 add('i4', 'import_excel', 'uncertain', null, 11, 'adapter_pending')
 add('e1', 'export_network_nc', 'completed', null, 12)
 add('e2', 'export_csv_bundle', 'uncertain', null, 12, 'not_as_network')
+// Issue 04 S4a: refusals before any effect (the tool_error frame's \`_outcome\`), and a read in another project.
+add('d1', 'delete_component', 'denied', null, 13, 'confirmation_denied')
+add('d2', 'batch_delete_components', 'denied', null, 13, 'confirmation_expired')
+add('d3', 'bulk_update_components', 'denied', null, 13, 'confirmation_revoked')
+add('d4', 'batch_create_components', 'denied', null, 13, 'required_guard_failed')
+add('d5', 'bulk_update_components', 'denied', null, 13, 'confirmation_args_changed')
+add('d6', 'bulk_update_components', 'denied', null, 13, 'no_progress_stop')
+add('o1', 'run_simulation', 'uncertain', 'fg:9', 14, 'other_context')
 useUIStore.setState({ currentProject: 'Demo', projectMismatch: null, assistantDockOpen: true, uiMode: mode } as any)
 useChatStore.setState({ sessionId: 'shot-session', messages, streaming: false, pending: null, error: null } as any)
 createRoot(document.getElementById('root')!).render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}>
@@ -75,7 +83,7 @@ createRoot(document.getElementById('root')!).render(<QueryClientProvider client=
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] })
   for (const mode of ['guided', 'expert']) {
     {
-      const page = await browser.newPage({ viewport: { width: 420, height: 1600 }, deviceScaleFactor: 2 })
+      const page = await browser.newPage({ viewport: { width: 420, height: 1900 }, deviceScaleFactor: 2 })
       await page.emulateMedia({ reducedMotion: 'reduce' })
       await page.route(url => url.protocol.startsWith('http') && url.hostname !== '127.0.0.1', route => route.abort())
       await page.route(url => url.pathname.startsWith('/api/'), route => {
