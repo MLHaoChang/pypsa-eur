@@ -1240,6 +1240,15 @@
    "type": "object"
   }
  },
+ "checked_tool_input_additions": {
+  "ui_open_panel": {
+   "results_tab": {
+    "enum": [
+     "grid_risk"
+    ]
+   }
+  }
+ },
  "checked_tool_results": {
   "compare_project_runs": {
    "$defs": {
@@ -2643,6 +2652,7 @@
  },
  "directions": {
   "answer_receipt": "returns",
+  "checked_tool_input_additions": "accepts",
   "checked_tool_results": "returns",
   "checked_tools": "returns",
   "computed_draft": "accepts",
