@@ -138,22 +138,25 @@ def test_the_cheapest_candidate_wins():
     assert row["estimate"] == pytest.approx(800.0)
 
 
-def test_a_spinning_gensets_headroom_is_credited_at_its_load_step():
+@pytest.mark.parametrize("p_min_pu, step_pct, coef", [(0.3, 20.0, 0.2), (0.7, 50.0, 0.3)])
+def test_a_spinning_gensets_headroom_is_credited_at_its_load_step(p_min_pu, step_pct, coef):
     """Headroom up on a spinning extendable genset is credited per MW at
     η·min(load_step_max_pct, max p_max_pu − p_min_pu), as the E1 and event
-    rows credit it (frequency.py:632): at a 20 % step, below 1 − 0.3, one MW
-    gives 0.2 MW. The 2 MW shortfall is 10 MW of genset at 10/MW = 100, below
-    the BESS's 200 (at η per MW it would be 2 MW = 20)."""
+    rows credit it (frequency.py:632). At a 20 % step, below 1 − 0.3, the
+    step binds: one MW gives 0.2 MW, so the 2 MW shortfall is 10 MW of genset
+    at 10/MW = 100 (at η per MW, 2 MW = 20). At p_min_pu 0.7 the room binds,
+    1 − 0.7 = 0.3 below the 50 % step: 2/0.3 = 6.67 MW = 66.7 (without the
+    minimum load, 0.5: 4 MW = 40). Both are below the BESS's 200."""
     n = _hub(load=10.0)
     n.add("Generator", "g", bus="site", p_nom_extendable=True, capital_cost=10.0, marginal_cost=1000.0)
-    units = _units(gensets={"g": _genset(spinning=True, p_min_pu=_a(0.3),
-                                         load_step_max_pct=_a(20.0))})
+    units = _units(gensets={"g": _genset(spinning=True, p_min_pu=_a(p_min_pu),
+                                         load_step_max_pct=_a(step_pct))})
     coefs = island_cut_coefficients(n, _seamless(units))["headroom_up"]
-    assert [c for c in coefs if c[0] == "g"] == [("g", "Generator", pytest.approx(0.2))]
+    assert [c for c in coefs if c[0] == "g"] == [("g", "Generator", pytest.approx(coef))]
     row = _estimate({**_cut("headroom_up", 12.0), "current": 10.0}, n=n, units=units)
     assert row["candidate"] == "g"
-    assert row["added_mw"] == pytest.approx(10.0)
-    assert row["estimate"] == pytest.approx(100.0)
+    assert row["added_mw"] == pytest.approx(2.0 / coef)
+    assert row["estimate"] == pytest.approx(10.0 * 2.0 / coef)
 
 
 def test_a_cold_genset_gives_no_inertia_at_the_instant_and_is_no_candidate():
