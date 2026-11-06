@@ -244,3 +244,22 @@ def test_assumed_to_trip_shows_on_the_unit_row_and_the_timeline(tmp_path):
     assert "assumed to trip" in unit["note"] and "assumed: no ride-through curve" in event["note"]
     other = trip[(trip["level"] == "event") & (trip["unit"] == "compressor") & (trip["event"] == "trip")].iloc[0]
     assert "assumed" not in other["note"]
+
+
+def test_mass_pull_converts_an_mwh_bus_by_its_tonne_factor():
+    # GK A on 12b-2: slurry counted in MWh at 0.5 MWh/t, so 1 MWh of slurry is 2 t. Each flotation draws 500 MWh
+    # (1000 t) of slurry per unit of p0 and makes 9.4 t of concentrate: 9.4 / 1000 = 0.0094 t per t.
+    n = _chain()
+    n.buses["mwh_per_t"] = math.nan
+    n.buses.loc["slurry", ["unit", "mwh_per_t"]] = ["MWh", 0.5]
+    mp, _ = pc.mass_pull(n, "mill")
+    assert mp == pytest.approx(0.0094, rel=1e-12)
+
+
+def test_an_extendable_unit_rates_on_p_nom_opt_not_p_nom():
+    n = _chain()
+    n.links.loc["mill", ["p_nom_extendable", "p_nom", "p_nom_opt"]] = [True, 1.0, 8.8]
+    rate, basis = pc.rate_tph(n, "mill")
+    assert rate == pytest.approx(550.0) and basis.startswith("p_nom_opt 8.8 MW")
+    n.links.loc["mill", "p_nom_opt"] = 0.0
+    assert pc.rate_tph(n, "mill") == (None, "unknown: p_nom_opt is not above 0")
