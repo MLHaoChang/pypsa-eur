@@ -1066,3 +1066,21 @@ def test_admits_next_step_only_for_the_same_call_begin_step_admits(monkeypatch):
         session = _task(monkeypatch, steps, status=status)
         assert admits_next_step(session, TOOL, ARGS) is False, (steps, status)
     assert admits_next_step(ChatSession(), TOOL, ARGS) is False
+
+
+def test_an_unreadable_task_admits_nothing_so_the_store_is_read(monkeypatch, store):
+    """U1, fail closed: a task read that fails never skips the store read."""
+    from services import assistant_tasks
+
+    rows, _seen, calls = store
+    _store_row(rows)
+    session = ChatSession()
+    session.task_id = "t1"
+
+    def unreadable(_task_id):
+        raise OSError("disk")
+
+    monkeypatch.setattr(assistant_tasks, "_read", unreadable)
+    assert assistant_tasks.admits_next_step(session, TOOL, ARGS) is False
+    assert job_holds.check(session, TOOL, ARGS, "F")[0] == job_holds.PENDING
+    assert calls == []
