@@ -203,6 +203,7 @@ Named open rows (GK B (26) R1):
 | A3.6 extra edits by a row write (rows the call did not name) | S4 | S2's read-back covers only the named rows; W3 catches other writers only |
 | A3.4 saved/unsaved values | S3 (import/export part) | only the live network is read so far (X7) |
 | import_excel, import_matpower, export_excel, export_matpower | `_pending` (X6) | no independent reader; they read adapter_pending |
+| R3: an outcome on the raise path for the four S2 tools and undo_last | S4 | GK B (26) chose (a): S3 keeps no `_outcome` on raise/timeout. S4 must keep: `failed` only when verified unchanged, never `failed` on a timeout. |
 
 GK B (26) S3 plan: GO WITH CHANGES, conditions X1–X8:
 - X1: load the scratch Network with the loader that apply_undo uses, and test that an undo of a real template network (custom columns, time series) reads completed.
@@ -225,7 +226,7 @@ Built so far (undo_last):
 - A pop count that differs from this call's own pops reads entry_moved.
 - The undo re-imports into a new context object, so undo compares the project binding. S2's row writes now keep the ctx and compare with `is` (R2).
 - `network_digest` costs about 20 ms on ieee39, eh_datacenter, eh_datacenter_staged and eh_ipp_hybrid (8760 snapshots) (X8).
-- Raise and timeout (X3, R3): the loop's error path carries no result dict, so a raising or timed-out write (S2 tools and undo_last) is a tool error with no `_outcome`, never completed or failed. It is tested for bulk_update_components and undo_last, including an orphan that lands after the timeout. Putting an outcome on the error path would change loop.py (held by #1154) and the frontend's error display; that is a question for GK B.
+- Raise and timeout (X3, R3): the loop's error path carries no result dict, so a raising or timed-out write (S2 tools and undo_last) is a tool error with no `_outcome`, never completed or failed. It is tested for bulk_update_components and undo_last, including an orphan that lands after the timeout. Putting an outcome on the error path would change loop.py (held by #1154) and the frontend's error display; GK B (26) answered (a): no outcome on raise/timeout in S3, and R3 moves to S4 (row above). No loop.py error-branch change in S3.
 - Tests: `tests/assurance_acceptance/test_p3_snapshot_outcomes.py`, 37 passed. 14 mutants of classify_undo were killed (before X2; the X2 rows were added to the table after).
 
 Next: import/export (X4, X5, X6, X7). Then a PR with a release note and shots.
