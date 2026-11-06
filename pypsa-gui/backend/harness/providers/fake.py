@@ -34,4 +34,5 @@ class FakeProvider:
             type="message_done",
             blocks=copy.deepcopy(turn.get("blocks", [])),
             usage=dict(turn.get("usage", {})),
+            truncated=bool(turn.get("truncated", False)),
         )

@@ -67,6 +67,10 @@ class LLMEvent:
     # decision 2026-10-12; OpenAI-shaped wires subtract their cached count
     # in harness/providers/usage.py).
     usage: dict[str, int] = field(default_factory=dict)
+    # message_done only: the wire stopped the message early (token limit,
+    # content filter). Its text may still parse, so a checked answer must not
+    # trust it.
+    truncated: bool = False
 
     def __post_init__(self) -> None:
         # M5 — a typo'd/unrecognised event type used to fall through the

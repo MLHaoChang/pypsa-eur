@@ -36,11 +36,12 @@ import './index.css'
 const mode = new URLSearchParams(location.search).get('mode') === 'expert' ? 'expert' : 'guided'
 const t0 = new Date(2026, 10, 5, 14, 2).getTime()
 const messages: any[] = [{ id: 'u', role: 'user', content: 'Solve the network and check each job.', ts: t0 }]
-const add = (id: string, tool: string, outcome: string, job: string | null, minute: number, reason: string | null = null) => {
+const add = (id: string, tool: string, outcome: string, job: string | null, minute: number, reason: string | null = null,
+  counts: { requested: number; done: number } | null = null) => {
   const ts = t0 + minute * 60000
   messages.push({ id: id + '-req', role: 'tool', content: '→ ' + tool, tool_use_id: id, tool_name: tool, ts })
-  messages.push({ id, role: 'tool', content: toolOutcomeLine(tool, { outcome, job_id: job, reason }), tool_use_id: id, tool_name: tool, ts,
-    origin_project: 'Demo', tool_result: { _outcome: { version: 1, outcome, job_id: job, reason } } })
+  messages.push({ id, role: 'tool', content: toolOutcomeLine(tool, { outcome, job_id: job, reason, counts }), tool_use_id: id, tool_name: tool, ts,
+    origin_project: 'Demo', tool_result: { _outcome: { version: 1, outcome, job_id: job, reason, counts } } })
 }
 ;['submitted', 'running', 'cancel_requested', 'completed', 'failed', 'cancelled', 'partial', 'uncertain']
   .forEach((o, i) => add('c' + i, 'run_simulation', o, 'fg:' + i, 0))
@@ -49,6 +50,11 @@ add('s1', 'run_simulation', 'running', 'fg:live', 1)
 add('s2', 'wait_for_job', 'completed', 'fg:live', 7)
 // A queue job the backend cannot check yet.
 add('q1', 'wait_for_job', 'uncertain', 'ad:7', 8, 'adapter_pending')
+// Issue 04 S2: component writes read back requested versus actual.
+add('b1', 'bulk_update_components', 'completed', null, 9, null, { requested: 5, done: 5 })
+add('b2', 'bulk_update_components', 'partial', null, 9, null, { requested: 5, done: 3 })
+add('b3', 'batch_create_components', 'failed', null, 9, null, { requested: 2, done: 0 })
+add('b4', 'delete_component', 'uncertain', null, 9, 'revision_moved')
 useUIStore.setState({ currentProject: 'Demo', projectMismatch: null, assistantDockOpen: true, uiMode: mode } as any)
 useChatStore.setState({ sessionId: 'shot-session', messages, streaming: false, pending: null, error: null } as any)
 createRoot(document.getElementById('root')!).render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}>
@@ -60,7 +66,7 @@ createRoot(document.getElementById('root')!).render(<QueryClientProvider client=
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] })
   for (const mode of ['guided', 'expert']) {
     {
-      const page = await browser.newPage({ viewport: { width: 420, height: 1200 }, deviceScaleFactor: 2 })
+      const page = await browser.newPage({ viewport: { width: 420, height: 1600 }, deviceScaleFactor: 2 })
       await page.emulateMedia({ reducedMotion: 'reduce' })
       await page.route(url => url.protocol.startsWith('http') && url.hostname !== '127.0.0.1', route => route.abort())
       await page.route(url => url.pathname.startsWith('/api/'), route => {
