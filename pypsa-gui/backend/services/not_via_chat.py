@@ -220,6 +220,22 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
     },
     {
+        'id': 'dc_backup',
+        'title': 'Data-centre backup: battery in place of gensets',
+        'disposition': 'unbuilt',
+        'reason': 'The data-centre backup setting (genset, battery or hybrid) and its outage proof and cost delta are not available from chat yet (DC-03). Set and assess it in the Backup section of the Grid study tab.',
+        'page': 'Grid study',
+        'panel': None,
+        'keywords': frozenset({
+            'backup',
+            'genset',
+        }),
+        'routes': frozenset({
+            ('PUT', '/api/campus-electrical/{name}/dc-backup'),
+            ('POST', '/api/campus-electrical/{name}/dc-backup/assess'),
+        }),
+    },
+    {
         'id': 'site_scene',
         'title': 'Site 3D scene: buildings and proposals',
         'disposition': 'unbuilt',

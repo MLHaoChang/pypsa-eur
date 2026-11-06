@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import pathlib
 
 import numpy as np
 import pytest
@@ -396,9 +397,11 @@ def test_backup_mode_network_and_sidecar_agree_and_validate(tid, mode, scale):
     assert island["requirements"]["sustained_h"]["value"] == 4.0
     # Held charge: discharge is off at every snapshot in a normal solve.
     assert (n.storage_units_t.p_max_pu[strings].to_numpy() == 0.0).all()
-    rt = ride_through_batteries(n, validate(island))
+    # site_peak reads the raw sidecar ({value, source} per requirement), as
+    # the screen does; gridspine's validated form flattens them to "values".
+    rt = ride_through_batteries(n, island)
     assert set(strings) <= set(rt["names"])
-    reserve, words = outage_reserve_mwh(n, validate(island))
+    reserve, words = outage_reserve_mwh(n, island)
     assert reserve > 0 and "outage reserve" in words
 
 
@@ -499,3 +502,89 @@ def test_assess_proves_both_legs_and_prices_the_mode():
     c = out["cost"]
     assert c["delta"] == pytest.approx(c["npv_chosen"] - c["npv_genset"])
     assert c["genset_mw"] == dc_backup.genset_fleet_mw(out["sizing"]["critical_peak_mw"], 10.0, "N+1")
+
+
+# ── the routes (GK A ruling 1 / GK B F8) ────────────────────────────────
+
+
+def _stage_dc(tmp_path, monkeypatch, tid):
+    from project_templates import eh_templates as T
+    from routers import projects as projects_router
+
+    src = tmp_path / tid
+    src.mkdir()
+    T.BUILDERS[tid]().export_to_netcdf(str(src / "network.nc"))
+    T.write_sidecars(src, tid)
+    monkeypatch.setattr(projects_router, "_PROJECT_TEMPLATES_DIR", tmp_path)
+    (tmp_path / "eh_templates.py").write_text(
+        (pathlib.Path(T.__file__)).read_text())
+
+
+@pytest.mark.parametrize("change", [
+    {"mode": "hybrid"},                       # valid: stored
+    {"mode": "bess"},                         # refused by the peak check
+    {"mode": "diesel"},                       # refused by the schema
+    {"mode": "bess", "autonomy_h": -1.0},     # refused by a validator
+])
+def test_put_backup_leaves_the_network_fingerprint_and_case_digest(
+        client, tmp_path, monkeypatch, tmp_projects_dir, project_row, session_ctx, change):
+    from routers.results import _ic_current_assumptions
+    from services import project_registry
+    from services.workflow_tools import _network_input_fingerprint
+
+    tid = "eh_datacenter"
+    _stage_dc(tmp_path, monkeypatch, tid)
+    r = client.post(f"/api/projects/from_template/{tid}", params={"name": "dc_bk"},
+                    json={"dc_load": {}})
+    assert r.status_code == 200, r.text
+    name = r.json().get("name", "dc_bk")
+    d = pathlib.Path(project_registry.project_dir(project_row(name)))
+    ctx = session_ctx(client)
+    nc, fp, (ic, why) = (d / "network.nc").read_bytes(), _network_input_fingerprint(ctx), \
+        _ic_current_assumptions()
+    assert ic is not None, why
+
+    r = client.put(f"/api/campus-electrical/{name}/dc-backup", json=change)
+    if change == {"mode": "hybrid"}:
+        assert r.status_code == 200, r.text
+        assert r.json()["mode"] == "hybrid"
+        stored = client.get(f"/api/projects/{name}/eh_template").json()
+        assert stored["dc_load"]["spec"]["backup"]["mode"] == "hybrid"
+    else:
+        assert r.status_code == 422, r.text
+        assert r.json()["detail"]["error_kind"] == "dc_backup_invalid"
+    assert (d / "network.nc").read_bytes() == nc
+    assert _network_input_fingerprint(ctx) == fp
+    assert _ic_current_assumptions()[0] == ic
+
+
+def test_backup_routes_refuse_a_project_without_dc_load(
+        client, tmp_path, monkeypatch, tmp_projects_dir):
+    _stage_dc(tmp_path, monkeypatch, "eh_datacenter")
+    r = client.post("/api/projects/from_template/eh_datacenter", params={"name": "dc_plain"})
+    name = r.json().get("name", "dc_plain")
+    for resp in (client.put(f"/api/campus-electrical/{name}/dc-backup", json={"mode": "hybrid"}),
+                 client.post(f"/api/campus-electrical/{name}/dc-backup/assess", json={})):
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["detail"]["error_kind"] == "dc_backup_invalid"
+    assert client.post(f"/api/campus-electrical/{name}/dc-backup/assess",
+                       json={"mode": "diesel"}).status_code == 422
+
+
+@pytest.mark.live_solve
+def test_assess_route_returns_json_and_writes_nothing(
+        client, tmp_path, monkeypatch, tmp_projects_dir, project_row):
+    from services import project_registry
+
+    _stage_dc(tmp_path, monkeypatch, "eh_datacenter")
+    r = client.post("/api/projects/from_template/eh_datacenter", params={"name": "dc_as"},
+                    json={"dc_load": {}})
+    name = r.json().get("name", "dc_as")
+    d = pathlib.Path(project_registry.project_dir(project_row(name)))
+    before = {f: (d / f).read_bytes() for f in ("network.nc", "eh_template.json")}
+    r = client.post(f"/api/campus-electrical/{name}/dc-backup/assess", json={"mode": "hybrid"})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["mode"] == "hybrid" and out["verdict"] in ("pass", "fail", "not_shown")
+    assert {"genset", "hybrid"} <= set(out["proofs"]) and "delta" in out["cost"]
+    assert {f: (d / f).read_bytes() for f in before} == before
