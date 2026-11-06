@@ -335,7 +335,9 @@ def test_undo_restores_the_network_native_profile():
 
     apply_undo()
     n2 = PyPSAService.get_network()
-    assert KEY not in _user_ts_meta
+    # The generated record is gone; the undo snapshot's backup seeded the
+    # native column, which carries the network's own record (RP-14).
+    assert _user_ts_meta.get(KEY) == {"provenance": "network_native", "source": "network"}
     restored = n2.generators_t.p_max_pu["Solar"]
     assert (restored == 0.42).all(), "the network-native profile must come back"
     # Whatever the store holds after the restore (the undo payload's backup
