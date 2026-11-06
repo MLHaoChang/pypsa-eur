@@ -187,6 +187,8 @@ describe('chat tool-line outcome marks', () => {
     ['unknown_decision', 'your answer to the approval could not be read'],
     ['project_locked', 'another change to this project was in progress'],
     ['project_lock_unavailable', "the project's edit lock could not be checked"],
+    ['operation_pending', 'the same request may still be running'],
+    ['operation_conflict', 'an earlier request may still be running'],
   ])('issue 04 S4a: a tool_error refused as %s reads denied with its reason in both modes', async (kind, words) => {
     await turn('expert')
     emit('tool_request', { tool_use_id: 'd', tool_name: 'bulk_update_components', safety_tier: 'write' })

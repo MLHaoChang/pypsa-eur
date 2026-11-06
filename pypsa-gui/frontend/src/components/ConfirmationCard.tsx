@@ -220,6 +220,27 @@ export function guidedCardSummary(tool: string, args: Record<string, unknown>): 
   return `The assistant wants to use ${tool.replace(/_/g, ' ')}${target ? ` on ${target}` : ''}`
 }
 
+/** Issue 04 S5: the earlier job call a repeat card names (harness/job_holds.py `repeat_card`). */
+export interface RepeatCard { hold_id: string; opened: string; opened_at: number; job_id: string | null }
+
+const REPEAT_OPENED = new Set(['tool_timeout', 'uncertain_raise', 'uncertain_outcome'])
+
+export function repeatCardOf(value: unknown): RepeatCard | null {
+  if (!value || typeof value !== 'object') return null
+  const c = value as Record<string, unknown>
+  if (typeof c.hold_id !== 'string' || !c.hold_id || typeof c.opened !== 'string' || !REPEAT_OPENED.has(c.opened)
+    || typeof c.opened_at !== 'number' || !Number.isFinite(c.opened_at)
+    || (c.job_id != null && typeof c.job_id !== 'string')) return null
+  return { hold_id: c.hold_id, opened: c.opened, opened_at: c.opened_at, job_id: (c.job_id as string | null) ?? null }
+}
+
+/** The repeat card's sentence (UX (11) reviews these words). */
+export function repeatCardWords(card: RepeatCard): string {
+  const at = new Date(card.opened_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return `This repeats the same request from ${at}, whose outcome is unknown: it may still be running. `
+    + 'Approve only if you want it to run again.'
+}
+
 type ReviewedChange = { component_class: string; name: string; attribute: string;
   before: string | number | boolean; after: string | number | boolean; unit: string }
 
@@ -256,10 +277,12 @@ export function ConfirmationCard() {
   const review = completePreview(pending?.args)
   const edit = editCardOf(pending?.edit_card)
   const sweep = sweepCardOf(pending?.sweep_card)
+  const repeat = repeatCardOf(pending?.repeat_card)
   // LC-04: a chat edit's card that arrived malformed is never approvable.
   const reviewUnavailable = (pending?.tool_name === 'apply_project_changes' && !review)
     || (pending?.edit_card !== undefined && !edit)
     || (pending?.sweep_card !== undefined && !sweep)
+    || (pending?.repeat_card !== undefined && !repeat)
 
   // Reset the typed-confirmation field whenever the pending card changes.
   useEffect(() => { setTypedConfirmation('') }, [pending?.confirmation_token])
@@ -399,6 +422,14 @@ export function ConfirmationCard() {
           External tool · MCP server {pending.external.server}
         </div>
       )}
+      {repeat && (
+        <p className="mb-1 text-[11px] text-warn" data-testid="chat-confirmation-repeat">
+          {repeatCardWords(repeat)}
+        </p>
+      )}
+      {pending.repeat_card !== undefined && !repeat && <p role="alert" className="mb-2 text-xs text-warn">
+        The earlier request this repeats is unavailable. Deny it and ask again.
+      </p>}
       {guidedWording?.note && (
         <div className="text-[11px] text-muted mb-1" data-testid="chat-confirmation-note">
           {guidedWording.note}

@@ -53,6 +53,9 @@ export const TOOL_OUTCOME_DENIED_REASON_WORDS: Record<string, string> = {
   // Issue 04 S4b: the edit lock, checked before anything ran.
   project_locked: 'another change to this project was in progress',
   project_lock_unavailable: "the project's edit lock could not be checked",
+  // Issue 04 S5: a job call held while an earlier one's outcome is unknown.
+  operation_pending: 'the same request may still be running',
+  operation_conflict: 'an earlier request may still be running',
 }
 
 /** A refusal's Details text where the backend's own message would mislead or name internals (issue 04 S4a). */

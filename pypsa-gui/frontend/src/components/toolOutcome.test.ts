@@ -251,6 +251,8 @@ describe('denied outcomes (issue 04 S4a)', () => {
     ['unknown_decision', 'your answer to the approval could not be read'],
     ['project_locked', 'another change to this project was in progress'],
     ['project_lock_unavailable', "the project's edit lock could not be checked"],
+    ['operation_pending', 'the same request may still be running'],
+    ['operation_conflict', 'an earlier request may still be running'],
   ])('words a refusal of kind %s', (reason, words) => {
     const block = toolOutcomeOf({ _outcome: { version: 1, outcome: 'denied', reason } }, 'bulk_update_components')!
     expect(toolOutcomeLine('bulk_update_components', block)).toBe(`– bulk_update_components (denied: ${words})`)

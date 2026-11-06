@@ -15,7 +15,7 @@ import ast
 import pathlib
 import re
 
-from harness import guards, outcomes
+from harness import guards, job_holds, outcomes
 
 BACKEND = pathlib.Path(__file__).resolve().parents[2]
 COMPONENTS = BACKEND.parent / "frontend/src/components"
@@ -60,6 +60,7 @@ def _deny_kinds() -> set[str]:
             guards.NO_PROGRESS,
         }
         | guards.LOCK_KINDS
+        | job_holds.KINDS
     )
 
 
