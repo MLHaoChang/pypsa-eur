@@ -252,20 +252,30 @@ def _non_electric(carrier: str) -> bool:
     return bool(words) and (words[0] in NON_ELECTRIC_CARRIERS or "heat" in carrier.lower())
 
 
+def bus_carrier(n, bus) -> str:
+    return str(n.buses.at[bus, "carrier"]) if bus in n.buses.index and "carrier" in n.buses.columns else ""
+
+
+def electric_bus(n, bus) -> bool:
+    """A bus whose power is electric MW: not a product bus
+    (``process_products.is_product_bus``) nor a non-electric energy carrier
+    (``NON_ELECTRIC_CARRIERS``)."""
+    from services.process_products import is_product_bus
+
+    return not (is_product_bus(n, bus) or _non_electric(bus_carrier(n, bus)))
+
+
 def load_split(n) -> tuple[list[str], list[tuple[str, str, str]]]:
     """(electric Loads, left out as ``(load, bus, carrier)``): every Load
     counts except one on a product bus (``process_products.is_product_bus``)
     or on a non-electric energy carrier (``NON_ELECTRIC_CARRIERS``)."""
-    from services.process_products import is_product_bus
-
     electric, out = [], []
     for load in n.loads.index:
         bus = n.loads.at[load, "bus"]
-        carrier = str(n.buses.at[bus, "carrier"]) if bus in n.buses.index and "carrier" in n.buses.columns else ""
-        if is_product_bus(n, bus) or _non_electric(carrier):
-            out.append((str(load), str(bus), carrier))
-        else:
+        if electric_bus(n, bus):
             electric.append(load)
+        else:
+            out.append((str(load), str(bus), bus_carrier(n, bus)))
     return electric, out
 
 

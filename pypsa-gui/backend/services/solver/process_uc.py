@@ -63,10 +63,17 @@ _LIN = {"linearized_unit_commitment": True}
 
 
 def flag_column(df: pd.DataFrame, col: str) -> pd.Series:
-    """A bool column as a clean bool Series (False where absent or NaN)."""
+    """A bool column as a clean bool Series (False where absent or NaN, and
+    for a string that does not read as true: ``"False"``, ``"0"``, ``""``)."""
     if df.empty or col not in df.columns:
         return pd.Series(False, index=df.index)
-    return df[col].fillna(False).astype(bool)
+    return df[col].map(_truthy).astype(bool)
+
+
+def _truthy(v) -> bool:
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "1", "yes")
+    return False if pd.isna(v) else bool(v)
 
 
 def committable_mask(df: pd.DataFrame) -> pd.Series:

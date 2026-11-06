@@ -391,7 +391,40 @@ def test_process_draw_counts_as_load_on_its_bus0():
     # site: the mill's 30 MW × 0.8 peak = 24 MW beats aux's 5 MW; the 500 t/h
     # offtake on 'product' is no MW at all.
     assert [(s["name"], s["confidence"]) for s in crit] == [("site", "medium")]
-    assert "24.0 MW" in crit[0]["reason"]
+    assert "(24.0 MW, including 24.0 MW of rated process draw)" in crit[0]["reason"]
+    # the site's total peak carries the draw too: 24 + 5 MW
+    imp = [s for s in out["suggestions"] if s["kind"] == "import_link"]
+    assert imp and all("peak demand of 29 MW, including 24.0 MW of rated process draw"
+                       in s["reason"] for s in imp)
+
+
+@pytest.mark.parametrize("carrier", ["H2", "urban central heat"])
+def test_a_process_link_on_a_non_electric_bus0_adds_no_mw(carrier):
+    n = _process_site()
+    n.buses.at["site", "carrier"] = carrier
+    out = suggest_eh_setup(n)
+    crit = [s for s in out["suggestions"] if s["kind"] == "critical_bus"]
+    assert [s["name"] for s in crit] == ["aux"]
+    assert "rated process draw" not in " ".join(s["reason"] for s in out["suggestions"])
+
+
+def test_an_eh_process_of_the_string_false_adds_no_mw():
+    n = _process_site()
+    n.links["eh_process"] = n.links["eh_process"].astype(object)
+    n.links.at["mill", "eh_process"] = "False"
+    out = suggest_eh_setup(n)
+    crit = [s for s in out["suggestions"] if s["kind"] == "critical_bus"]
+    assert [s["name"] for s in crit] == ["aux"]
+
+
+def test_an_unsized_extendable_process_unit_is_named_not_counted():
+    n = _process_site()
+    n.links.at["mill", "p_nom"] = 0.0
+    n.links.at["mill", "p_nom_extendable"] = True
+    out = suggest_eh_setup(n)
+    assert any("'mill' is unsized" in note for note in out["notes"])
+    crit = [s for s in out["suggestions"] if s["kind"] == "critical_bus"]
+    assert [s["name"] for s in crit] == ["aux"]
 
 
 def test_no_suggested_mw_figure_includes_a_tonne_load():

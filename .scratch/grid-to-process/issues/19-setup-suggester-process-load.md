@@ -47,3 +47,13 @@ from, and leaves non-electric (tonne) loads out of the MW totals.
 ### 2026-11-05: triage sweep (AA-FILL-2), role ready-for-agent
 
 Was: `needs-triage`. Files: `pypsa-gui/backend/services/adequacy/eh_setup.py`, `tests/test_eh_setup_suggest.py`, the `eh_concentrator_staged` template (drop `process_load: true` and its skip). Blockers: none (owner decision G2P-10-SUGGEST-1 made). Reviewer: GK A. Note open PR #1142 touches `services/adequacy/eh_columns.py`; rebase onto it if it lands first.
+
+### 2026-11-06: plan GO (GK A 14), conditions
+
+1. Reuse: electric Loads from `site_peak.load_split`; process units from `process_uc.process_mask` (a string "False" does not count); one bus predicate, `site_peak.electric_bus`, shared by `load_split` and the suggester.
+2. total_peak is the sum of bus_peak after the process draw is added.
+3. Draw = p_nom × max p_max_pu on bus0, p_nom only; an unsized extendable process unit adds 0 MW and gets a note.
+4. A figure that includes rated process draw says so in its reason.
+5. No criticality_tier keyword (option D is draw only).
+6. Sidecars regenerated; byte-identical for every TEMPLATE_META id except the dropped key.
+7. Red-first tests: tonne Load out of every MW figure; process draw makes bus0 critical; non-electric bus0 adds no MW; "False" adds no MW; concentrator suggests `site`.
