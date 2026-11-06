@@ -31,6 +31,7 @@ Overlap (GK A, 2026-11-06): the lines are expected values over random events wit
 event can sit in two lines (an LP shortfall hour that is also an island hour). The total is Σ of the known lines,
 labelled ``OVERLAP_LABEL``, and ``incomplete`` when any line is missing. Imports no router.
 """
+
 from __future__ import annotations
 
 import csv
@@ -43,6 +44,7 @@ import pandas as pd
 from services import process_products as PP
 from services.adequacy import process_loss as PL
 from services.solver.process_uc import process_mask
+from datetime import UTC
 
 OVERLAP_RULE = "upper_bound"
 OVERLAP_LABEL = "upper bound (lines may overlap)"
@@ -97,7 +99,11 @@ def _rows(path: Path) -> list[dict] | None:
 
 
 def _periods(n) -> list:
-    return list(n.snapshots.get_level_values(0).unique()) if isinstance(n.snapshots, pd.MultiIndex) else [None]
+    return (
+        list(n.snapshots.get_level_values(0).unique())
+        if isinstance(n.snapshots, pd.MultiIndex)
+        else [None]
+    )
 
 
 def _key(p) -> str:
@@ -110,7 +116,13 @@ def _cell(t, eur, eur_flag=None) -> dict:
 
 def _target(section, panel=None, component=None, entity=None, field=None) -> dict:
     """Where the input is set, as the app's flow target (`FlowTarget`)."""
-    return {"section": section, "panel": panel, "component": component, "entity": entity, "field": field}
+    return {
+        "section": section,
+        "panel": panel,
+        "component": component,
+        "entity": entity,
+        "field": field,
+    }
 
 
 #: The campus study's dips and restarts (section 10's campus results); the frontend's word for it.
@@ -123,7 +135,18 @@ def _need(text, word, target) -> tuple:
     return text, word, target
 
 
-def _line(key, *, source_files, stamp=None, stale=False, missing=(), basis="", flags=(), rows=(), by_period=None):
+def _line(
+    key,
+    *,
+    source_files,
+    stamp=None,
+    stale=False,
+    missing=(),
+    basis="",
+    flags=(),
+    rows=(),
+    by_period=None,
+):
     needs = [m if isinstance(m, tuple) else _need(m, None, None) for m in missing]
     missing = [m[0] for m in needs]
     missing_inputs = [{"word": m[1], "target": m[2]} for m in needs]
@@ -132,11 +155,25 @@ def _line(key, *, source_files, stamp=None, stale=False, missing=(), basis="", f
         flags.append(STALE)
     by_period = by_period or {}
     known = any(c["t_per_year"] is not None for c in by_period.values())
-    status = "missing" if missing or not known else ("partial" if LOWER_BOUND in flags else "ok")
-    return {"key": key, "label": LABELS[key], "status": status, "missing": missing,
-            "missing_inputs": missing_inputs, "flags": flags,
-            "basis": basis, "source_files": list(source_files), "stamp": stamp or {}, "stale": bool(stale),
-            "rows": list(rows), "by_period": by_period}
+    status = (
+        "missing"
+        if missing or not known
+        else ("partial" if LOWER_BOUND in flags else "ok")
+    )
+    return {
+        "key": key,
+        "label": LABELS[key],
+        "status": status,
+        "missing": missing,
+        "missing_inputs": missing_inputs,
+        "flags": flags,
+        "basis": basis,
+        "source_files": list(source_files),
+        "stamp": stamp or {},
+        "stale": bool(stale),
+        "rows": list(rows),
+        "by_period": by_period,
+    }
 
 
 def _product_value(n, lost_load) -> tuple[float | None, str | None]:
@@ -160,11 +197,27 @@ def eur_inputs(n, lost_load) -> list[dict]:
     out = []
     for s in PP.shortfalls(n, lost_load):
         if s.source == "generator":
-            out.append({"product": s.bus, "word": "marginal_cost", "set": s.value is not None,
-                        "target": _target("assets", None, "Generator", s.name, "marginal_cost")})
+            out.append(
+                {
+                    "product": s.bus,
+                    "word": "marginal_cost",
+                    "set": s.value is not None,
+                    "target": _target(
+                        "assets", None, "Generator", s.name, "marginal_cost"
+                    ),
+                }
+            )
         else:
-            out.append({"product": s.bus, "word": "lost_production_value", "set": s.value is not None,
-                        "target": _target("assets", None, "Bus", s.bus, "lost_production_value")})
+            out.append(
+                {
+                    "product": s.bus,
+                    "word": "lost_production_value",
+                    "set": s.value is not None,
+                    "target": _target(
+                        "assets", None, "Bus", s.bus, "lost_production_value"
+                    ),
+                }
+            )
     return out
 
 
@@ -207,28 +260,61 @@ def _ride_through(n, campus: CampusRun, per_t, eur_flag, periods) -> dict:
     flags = [f"dip_stats_source:{(total or {}).get('dip_stats_source') or 'unknown'}"]
     if str((total or {}).get("incomplete")).lower() == "true":
         flags.append(LOWER_BOUND)
-    detail = [{"unit": r["unit"], "lost_t_per_year": _num(r.get("lost_t_per_year")), "verdict": r.get("verdict"),
-               "note": r.get("note") or ""} for r in units]
-    stale = campus.stale and bool(set(campus.out_of_date) & {r["unit"] for r in units} or not campus.out_of_date)
+    detail = [
+        {
+            "unit": r["unit"],
+            "lost_t_per_year": _num(r.get("lost_t_per_year")),
+            "verdict": r.get("verdict"),
+            "note": r.get("note") or "",
+        }
+        for r in units
+    ]
+    stale = campus.stale and bool(
+        set(campus.out_of_date) & {r["unit"] for r in units} or not campus.out_of_date
+    )
     if total is None or t is None or not known:
-        missing = [_need(f"ride-through inputs of {r['unit']}", "ride_through_curve",
-                         _target("assets", None, "Link", r["unit"], "ride_through_curve"))
-                   for r in units if r.get("verdict") == "unknown"]
-        return _line("ride_through", source_files=src, stamp=campus.stamp, stale=stale,
-                     missing=missing or [CAMPUS_RUN], flags=flags, rows=detail)
+        missing = [
+            _need(
+                f"ride-through inputs of {r['unit']}",
+                "ride_through_curve",
+                _target("assets", None, "Link", r["unit"], "ride_through_curve"),
+            )
+            for r in units
+            if r.get("verdict") == "unknown"
+        ]
+        return _line(
+            "ride_through",
+            source_files=src,
+            stamp=campus.stamp,
+            stale=stale,
+            missing=missing or [CAMPUS_RUN],
+            flags=flags,
+            rows=detail,
+        )
     eur, ef = _eur(t, per_t, eur_flag)
-    return _line("ride_through", source_files=src, stamp=campus.stamp, stale=stale, flags=flags, rows=detail,
-                 basis="the campus study's ride-through total as it wrote it: trips per year × restart time × rate × "
-                       "mass pull; not recomputed",
-                 by_period={_key(p): _cell(t, eur, ef) for p in periods})
+    return _line(
+        "ride_through",
+        source_files=src,
+        stamp=campus.stamp,
+        stale=stale,
+        flags=flags,
+        rows=detail,
+        basis="the campus study's ride-through total as it wrote it: trips per year × restart time × rate × "
+        "mass pull; not recomputed",
+        by_period={_key(p): _cell(t, eur, ef) for p in periods},
+    )
 
 
 def _island(n, campus: CampusRun, per_t, eur_flag, periods) -> dict:
     src = [RESTART_CSV, NETWORK_FILE]
     try:
         from gridspine.static.restart_sequence import NO_BLOCK
-    except ImportError:                          # a build without gridspine has no restart screen
-        return _line("island", source_files=src, missing=["the gridspine restart screen (not in this build)"])
+    except ImportError:  # a build without gridspine has no restart screen
+        return _line(
+            "island",
+            source_files=src,
+            missing=["the gridspine restart screen (not in this build)"],
+        )
     missing = []
     rows = None if campus.run_dir is None else _rows(campus.run_dir / RESTART_CSV)
     if rows is None:
@@ -241,18 +327,27 @@ def _island(n, campus: CampusRun, per_t, eur_flag, periods) -> dict:
         q, mttr = _outage(n, link)
         if q is None or not mttr or mttr <= 0:
             field = "outage_rate_value" if q is None else "mttr_hours"
-            missing.append(_need(f"outage rate and MTTR of {link}", field,
-                                 _target("assets", None, "Link", link, field)))
+            missing.append(
+                _need(
+                    f"outage rate and MTTR of {link}",
+                    field,
+                    _target("assets", None, "Link", link, field),
+                )
+            )
     if missing:
         return _line("island", source_files=src, missing=missing)
-    units = [r for r in rows if r.get("level") == "unit" and r.get("transition") == "island"]
+    units = [
+        r for r in rows if r.get("level") == "unit" and r.get("transition") == "island"
+    ]
     outside, inside, flags = [], [], [CONSERVATIVE]
     for r in units:
         no_block = not (r.get("block") or "").strip()
         if no_block and NO_BLOCK in (r.get("note") or ""):
             outside.append(r)
         elif no_block or _num(r.get("lost_t")) is None:
-            flags.append(LOWER_BOUND)          # no rated MW, or no restart input: not counted, never 0
+            flags.append(
+                LOWER_BOUND
+            )  # no rated MW, or no restart input: not counted, never 0
             if not no_block:
                 inside.append(r)
         else:
@@ -274,20 +369,44 @@ def _island(n, campus: CampusRun, per_t, eur_flag, periods) -> dict:
         outside_bp[_key(p)] = _cell(t_out, *_eur(t_out, per_t, eur_flag))
         inside_bp[_key(p)] = _cell(t_in, *_eur(t_in, per_t, eur_flag))
         t = t_out + t_in
-        totals[_key(p)] = {**_cell(t, *_eur(t, per_t, eur_flag)), "events_per_year": events}
+        totals[_key(p)] = {
+            **_cell(t, *_eur(t, per_t, eur_flag)),
+            "events_per_year": events,
+        }
     names = {r["unit"] for r in units}
-    stale = campus.stale and bool(set(campus.out_of_date) & names or not campus.out_of_date)
-    detail = [{"key": "outside_blocks", "label": LABELS["outside_blocks"], "units": [r["unit"] for r in outside],
-               "flags": [CONSERVATIVE] + ([LOWER_BOUND] if unknown_out else []), "by_period": outside_bp},
-              {"key": "in_block_restart", "label": LABELS["in_block_restart"], "units": [r["unit"] for r in inside],
-               "flags": [], "by_period": inside_bp}]
-    return _line("island", source_files=src, stamp=campus.stamp, stale=stale, flags=flags, rows=detail,
-                 basis=f"an outage of the grid import link is the island event: events per year = year hours × "
-                       f"outage rate / repair time (rate {q:g}, repair time {mttr:g} h); units outside every pickup "
-                       "block are lost for the repair time at rate × mass pull, with no inventory credit "
-                       "(conservative); units in a block lose their pickup wait and restart per event, as the "
-                       "campus study's restart screen gives it",
-                 by_period=totals)
+    stale = campus.stale and bool(
+        set(campus.out_of_date) & names or not campus.out_of_date
+    )
+    detail = [
+        {
+            "key": "outside_blocks",
+            "label": LABELS["outside_blocks"],
+            "units": [r["unit"] for r in outside],
+            "flags": [CONSERVATIVE] + ([LOWER_BOUND] if unknown_out else []),
+            "by_period": outside_bp,
+        },
+        {
+            "key": "in_block_restart",
+            "label": LABELS["in_block_restart"],
+            "units": [r["unit"] for r in inside],
+            "flags": [],
+            "by_period": inside_bp,
+        },
+    ]
+    return _line(
+        "island",
+        source_files=src,
+        stamp=campus.stamp,
+        stale=stale,
+        flags=flags,
+        rows=detail,
+        basis=f"an outage of the grid import link is the island event: events per year = year hours × "
+        f"outage rate / repair time (rate {q:g}, repair time {mttr:g} h); units outside every pickup "
+        "block are lost for the repair time at rate × mass pull, with no inventory credit "
+        "(conservative); units in a block lose their pickup wait and restart per event, as the "
+        "campus study's restart screen gives it",
+        by_period=totals,
+    )
 
 
 def _site_transformers(n) -> list[str]:
@@ -296,13 +415,20 @@ def _site_transformers(n) -> list[str]:
         return []
     imports = set(_import_link_all(n))
     proc = process_mask(links)
-    carrier = n.buses["carrier"].astype(str) if "carrier" in n.buses.columns else pd.Series(dtype=str)
+    carrier = (
+        n.buses["carrier"].astype(str)
+        if "carrier" in n.buses.columns
+        else pd.Series(dtype=str)
+    )
     out = []
     for name in links.index:
         if str(name) in imports or bool(proc.get(name, False)):
             continue
         b0, b1 = str(links.at[name, "bus0"]), str(links.at[name, "bus1"])
-        if carrier.get(b0) in ELECTRIC_CARRIERS and carrier.get(b1) in ELECTRIC_CARRIERS:
+        if (
+            carrier.get(b0) in ELECTRIC_CARRIERS
+            and carrier.get(b1) in ELECTRIC_CARRIERS
+        ):
             out.append(str(name))
     return out
 
@@ -323,17 +449,38 @@ def _n_1(n, lost_load, periods) -> dict:
             continue
         res = PL.expected_outage_loss(n, link, mttr, q, lost_load=lost_load)
         feeding.append(link)
-        rows.append({"key": link, "label": f"{link} out", "units": res["stopped_units"], "flags": res["flags"],
-                     "by_period": {k: {"occurrence_per_year": v["occurrence_per_year"],
-                                       "outage_hours": v["outage_hours"], "products": v["products"],
-                                       "flags": v["flags"], **({"bound": v["bound"]} if "bound" in v else {})}
-                                   for k, v in res["by_period"].items()}})
+        rows.append(
+            {
+                "key": link,
+                "label": f"{link} out",
+                "units": res["stopped_units"],
+                "flags": res["flags"],
+                "by_period": {
+                    k: {
+                        "occurrence_per_year": v["occurrence_per_year"],
+                        "outage_hours": v["outage_hours"],
+                        "products": v["products"],
+                        "flags": v["flags"],
+                        **({"bound": v["bound"]} if "bound" in v else {}),
+                    }
+                    for k, v in res["by_period"].items()
+                },
+            }
+        )
         flags += res["flags"]
     if not feeding:
-        return _line("n_1", source_files=src,
-                     missing=[_need("a site transformer: an electricity link that feeds the process units, with "
-                                    "an outage rate and a repair time (not the grid import link)", "site_transformer",
-                                    _target("assets", None, "Link"))])
+        return _line(
+            "n_1",
+            source_files=src,
+            missing=[
+                _need(
+                    "a site transformer: an electricity link that feeds the process units, with "
+                    "an outage rate and a repair time (not the grid import link)",
+                    "site_transformer",
+                    _target("assets", None, "Link"),
+                )
+            ],
+        )
     by_period = {}
     for p in periods:
         k = _key(p)
@@ -352,34 +499,61 @@ def _n_1(n, lost_load, periods) -> dict:
             if (r["by_period"].get(k) or {}).get("bound") == "lower":
                 flags.append(LOWER_BOUND)
         by_period[k] = _cell(t, eur if t is not None else None, ef)
-    return _line("n_1", source_files=src, stamp=_solve_stamp(n), flags=flags, rows=rows,
-                 basis="the process-loss screen's expected outage loss per site transformer: events per year = year "
-                       "hours × outage rate / repair time, each event the mean undelivered tonnes over every start "
-                       "hour of the solved dispatch, with inventory credited",
-                 by_period=by_period)
+    return _line(
+        "n_1",
+        source_files=src,
+        stamp=_solve_stamp(n),
+        flags=flags,
+        rows=rows,
+        basis="the process-loss screen's expected outage loss per site transformer: events per year = year "
+        "hours × outage rate / repair time, each event the mean undelivered tonnes over every start "
+        "hour of the solved dispatch, with inventory credited",
+        by_period=by_period,
+    )
 
 
 def _connection(n, lost_load, periods) -> dict:
     src = [NETWORK_FILE]
     shortfalls = PP.shortfalls(n, lost_load)
     if not shortfalls:
-        return _line("connection", source_files=src, missing=[_need("a lost-production value on the product bus", "lost_production_value",
-                                       _target("assets", None, "Bus", None, "lost_production_value"))])
+        return _line(
+            "connection",
+            source_files=src,
+            missing=[
+                _need(
+                    "a lost-production value on the product bus",
+                    "lost_production_value",
+                    _target("assets", None, "Bus", None, "lost_production_value"),
+                )
+            ],
+        )
     wg = n.snapshot_weightings.generators.reindex(n.snapshots)
     flags, rows, missing, stale = [], [], [], False
     by_period = {_key(p): {"t": 0.0, "eur": 0.0, "ef": None} for p in periods}
     for s in shortfalls:
-        src.append(f"{s.name} ({'shortfall Generator' if s.source == 'generator' else 'solve capture'})")
+        src.append(
+            f"{s.name} ({'shortfall Generator' if s.source == 'generator' else 'solve capture'})"
+        )
         if s.flag == "lost_production_capture_stale":
             stale = True
         tpu = PP.t_per_unit(n, s.bus)
         if s.p is None or tpu is None:
             if tpu is None:
-                missing.append(_need(f"lost production of {s.bus} (tonne factor)", "mwh_per_t",
-                                     _target("assets", None, "Bus", s.bus, "mwh_per_t")))
+                missing.append(
+                    _need(
+                        f"lost production of {s.bus} (tonne factor)",
+                        "mwh_per_t",
+                        _target("assets", None, "Bus", s.bus, "mwh_per_t"),
+                    )
+                )
             else:
-                missing.append(_need(f"lost production of {s.bus} (no capture of this solve: run it again)", "run",
-                                     _target("readiness")))
+                missing.append(
+                    _need(
+                        f"lost production of {s.bus} (no capture of this solve: run it again)",
+                        "run",
+                        _target("readiness"),
+                    )
+                )
             continue
         row_bp = {}
         for p in periods:
@@ -389,7 +563,11 @@ def _connection(n, lost_load, periods) -> dict:
             scale = PL._year_hours(p) / span if span > 0 else 0.0
             x = s.p.reindex(sns).clip(lower=0)
             t = float((x * w).sum()) * tpu * scale
-            eur = float((x * s.cost.reindex(sns) * w).sum()) * scale if s.value is not None else None
+            eur = (
+                float((x * s.cost.reindex(sns) * w).sum()) * scale
+                if s.value is not None
+                else None
+            )
             ef = None if s.value is not None else LPV_MISSING
             row_bp[_key(p)] = _cell(t, eur, ef)
             acc = by_period[_key(p)]
@@ -398,14 +576,34 @@ def _connection(n, lost_load, periods) -> dict:
                 acc["eur"], acc["ef"] = None, ef
             elif acc["eur"] is not None:
                 acc["eur"] += eur
-        rows.append({"key": s.bus, "label": s.bus, "flags": [f for f in (s.flag,) if f], "by_period": row_bp})
+        rows.append(
+            {
+                "key": s.bus,
+                "label": s.bus,
+                "flags": [f for f in (s.flag,) if f],
+                "by_period": row_bp,
+            }
+        )
     if missing:
-        return _line("connection", source_files=src, stale=stale, missing=missing, rows=rows,
-                     stamp=_solve_stamp(n))
-    return _line("connection", source_files=src, stamp=_solve_stamp(n), stale=stale, flags=flags, rows=rows,
-                 basis="the solve's own lost production, shown, not recomputed; each period weighted by its year "
-                       "hours over its modelled hours",
-                 by_period={k: _cell(v["t"], v["eur"], v["ef"]) for k, v in by_period.items()})
+        return _line(
+            "connection",
+            source_files=src,
+            stale=stale,
+            missing=missing,
+            rows=rows,
+            stamp=_solve_stamp(n),
+        )
+    return _line(
+        "connection",
+        source_files=src,
+        stamp=_solve_stamp(n),
+        stale=stale,
+        flags=flags,
+        rows=rows,
+        basis="the solve's own lost production, shown, not recomputed; each period weighted by its year "
+        "hours over its modelled hours",
+        by_period={k: _cell(v["t"], v["eur"], v["ef"]) for k, v in by_period.items()},
+    )
 
 
 def _solve_stamp(n) -> dict:
@@ -429,13 +627,18 @@ def _total(lines, periods) -> dict:
             elif eur is not None:
                 eur += c["eur_per_year"]
         by_period[k] = _cell(t, eur, ef)
-    return {"label": OVERLAP_LABEL, "overlap_rule": OVERLAP_RULE,
-            "incomplete": any(ln["status"] == "missing" for ln in lines),
-            "lower_bound_lines": [ln["key"] for ln in lines if ln["status"] == "partial"],
-            "by_period": by_period}
+    return {
+        "label": OVERLAP_LABEL,
+        "overlap_rule": OVERLAP_RULE,
+        "incomplete": any(ln["status"] == "missing" for ln in lines),
+        "lower_bound_lines": [ln["key"] for ln in lines if ln["status"] == "partial"],
+        "by_period": by_period,
+    }
 
 
-def grid_risk_production(n, lost_load=None, *, campus: CampusRun | None = None) -> dict | None:
+def grid_risk_production(
+    n, lost_load=None, *, campus: CampusRun | None = None
+) -> dict | None:
     """The section's payload (module docstring), or None when the network has no process unit."""
     links = getattr(n, "links", None)
     if links is None or links.empty or not process_mask(links).any():
@@ -443,12 +646,22 @@ def grid_risk_production(n, lost_load=None, *, campus: CampusRun | None = None) 
     campus = campus or CampusRun()
     periods = _periods(n)
     per_t, eur_flag = _product_value(n, lost_load)
-    lines = [_ride_through(n, campus, per_t, eur_flag, periods), _island(n, campus, per_t, eur_flag, periods),
-             _n_1(n, lost_load, periods), _connection(n, lost_load, periods)]
-    return {"periods": [_key(p) for p in periods], "unit": "t/yr", "currency": "EUR",
-            "eur_inputs": eur_inputs(n, lost_load),
-            "overlap_rule": OVERLAP_RULE, "overlap_label": OVERLAP_LABEL, "lines": lines,
-            "total": _total(lines, periods)}
+    lines = [
+        _ride_through(n, campus, per_t, eur_flag, periods),
+        _island(n, campus, per_t, eur_flag, periods),
+        _n_1(n, lost_load, periods),
+        _connection(n, lost_load, periods),
+    ]
+    return {
+        "periods": [_key(p) for p in periods],
+        "unit": "t/yr",
+        "currency": "EUR",
+        "eur_inputs": eur_inputs(n, lost_load),
+        "overlap_rule": OVERLAP_RULE,
+        "overlap_label": OVERLAP_LABEL,
+        "lines": lines,
+        "total": _total(lines, periods),
+    }
 
 
 def campus_run_of(project) -> CampusRun:
@@ -457,7 +670,7 @@ def campus_run_of(project) -> CampusRun:
     ride-through or motor field changed (12b-3's ``out_of_date``) and its stamp (the run's network digest and the
     screens' file time). No run: an empty ``CampusRun`` (the campus lines read missing)."""
     import json
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from services import campus_electrical_service as ce, project_registry
 
@@ -473,8 +686,11 @@ def campus_run_of(project) -> CampusRun:
         inputs = json.loads(meta.read_text()).get("inputs")
         if inputs:
             out_of_date = tuple(ce._dips_out_of_date(project, d, inputs))
-    stamp = {"run_at": datetime.fromtimestamp(max(f.stat().st_mtime for f in files), timezone.utc)
-             .isoformat(timespec="seconds")}
+    stamp = {
+        "run_at": datetime.fromtimestamp(
+            max(f.stat().st_mtime for f in files), UTC
+        ).isoformat(timespec="seconds")
+    }
     manifest = run / ce.cs.CAMPUS_MANIFEST if ce.cs is not None else None
     if manifest is not None and manifest.is_file():
         sha = json.loads(manifest.read_text()).get("network_sha256")

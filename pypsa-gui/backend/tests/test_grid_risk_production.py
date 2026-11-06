@@ -6,6 +6,7 @@ process unit, 1 t of concentrate per MWh) → concentrate bus (t) with a deliver
 grid is cut in hour 2, so the solve itself loses tonnes (the connection line). The campus run's two CSVs are written
 by hand in the shape `restart_campus` writes them (12b).
 """
+
 import math
 from pathlib import Path
 
@@ -17,11 +18,11 @@ from gridspine.static.restart_sequence import NO_BLOCK
 from services.results import grid_risk_production as G
 from tests.test_campus_electrical_service import hub, user_and_db  # noqa: F401 - fixtures
 
-LPV = 100.0                       # EUR/t
+LPV = 100.0  # EUR/t
 Q_IMPORT, MTTR_IMPORT = 0.002, 12.0
 Q_TRAFO, MTTR_TRAFO = 0.005, 72.0
-RATE = 5.0                        # t/h, the mill's rated output
-DEMAND = 4.0                      # t/h
+RATE = 5.0  # t/h, the mill's rated output
+DEMAND = 4.0  # t/h
 
 
 def _outage(n, name, q, mttr):
@@ -32,7 +33,7 @@ def _outage(n, name, q, mttr):
     n.links.at[name, "mttr_hours"] = mttr
 
 
-def _network(*, lpv=LPV, periods=None, trafo=True, process=True):
+def _network(*, lpv=LPV, periods=None, trafo=True, process=True, weights=None):
     n = pypsa.Network()
     if periods:
         sns = pd.date_range("2030-01-01", periods=6, freq="h")
@@ -40,56 +41,137 @@ def _network(*, lpv=LPV, periods=None, trafo=True, process=True):
         n.set_investment_periods(periods)
     else:
         n.set_snapshots(pd.date_range("2030-01-01", periods=6, freq="h"))
+    if weights is not None:  # hours each snapshot stands for (a 3-hourly network: 3)
+        n.snapshot_weightings.loc[:, :] = pd.Series(weights, index=n.snapshots).values[
+            :, None
+        ]
     n.add("Carrier", ["AC", "concentrate"])
     n.add("Bus", "grid", carrier="AC")
     n.add("Bus", "site", carrier="AC")
     n.add("Bus", "mill_bus", carrier="AC")
     n.add("Bus", "concentrate", carrier="concentrate", unit="t")
-    n.add("Generator", "grid_supply", bus="grid", carrier="AC", p_nom=100.0, marginal_cost=10.0,
-          p_max_pu=[1, 1, 0, 1, 1, 1] * (len(periods) if periods else 1))
+    n.add(
+        "Generator",
+        "grid_supply",
+        bus="grid",
+        carrier="AC",
+        p_nom=100.0,
+        marginal_cost=10.0,
+        p_max_pu=[1, 1, 0, 1, 1, 1] * (len(periods) if periods else 1),
+    )
     n.add("Link", "grid_import", bus0="grid", bus1="site", carrier="AC", p_nom=50.0)
     n.links["eh_role"] = ""
     n.links.at["grid_import", "eh_role"] = "grid_import"
     _outage(n, "grid_import", Q_IMPORT, MTTR_IMPORT)
     feed = "site"
     if trafo:
-        n.add("Link", "site_trafo", bus0="site", bus1="mill_bus", carrier="AC", p_nom=50.0)
+        n.add(
+            "Link", "site_trafo", bus0="site", bus1="mill_bus", carrier="AC", p_nom=50.0
+        )
         _outage(n, "site_trafo", Q_TRAFO, MTTR_TRAFO)
         feed = "mill_bus"
-    n.add("Link", "mill", bus0=feed, bus1="concentrate", carrier="milling", p_nom=RATE, efficiency=1.0)
+    n.add(
+        "Link",
+        "mill",
+        bus0=feed,
+        bus1="concentrate",
+        carrier="milling",
+        p_nom=RATE,
+        efficiency=1.0,
+    )
     n.links["eh_process"] = False
     n.links.at["mill", "eh_process"] = process
     n.add("Load", "offtake", bus="concentrate", carrier="concentrate", p_set=DEMAND)
-    n.add("Generator", "__lost_concentrate", bus="concentrate", carrier="concentrate", p_nom=1000.0,
-          marginal_cost=lpv if lpv is not None else 0.0)
+    n.add(
+        "Generator",
+        "__lost_concentrate",
+        bus="concentrate",
+        carrier="concentrate",
+        p_nom=1000.0,
+        marginal_cost=lpv if lpv is not None else 0.0,
+    )
     n.generators["process_role"] = ""
     n.generators.at["__lost_concentrate", "process_role"] = "shortfall"
     n.optimize(solver_name="highs")
-    if lpv is None:                       # no lost-production value: the accessor reads None, never 0
+    if lpv is None:  # no lost-production value: the accessor reads None, never 0
         n.generators.at["__lost_concentrate", "marginal_cost"] = float("nan")
     return n
 
 
-def _write_campus(run, *, outside_rate=RATE, in_block_lost_t=3.0, ride_t=7.5, incomplete=False):
+def _write_campus(
+    run, *, outside_rate=RATE, in_block_lost_t=3.0, ride_t=7.5, incomplete=False
+):
     run.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame([
-        {"level": "unit", "unit": "mill", "lost_t_per_year": ride_t, "verdict": "known", "note": ""},
-        {"level": "total", "lost_t_per_year": ride_t, "incomplete": incomplete, "unknown_count": int(incomplete),
-         "known_count": 1, "dip_stats_source": "demo", "note": "demo"},
-    ]).to_csv(run / G.DIP_TRIPS_CSV, index=False)
-    pd.DataFrame([
-        {"level": "unit", "transition": "island", "unit": "mill", "block": None, "rate_tph": outside_rate,
-         "mass_pull": 1.0, "lost_t": None, "verdict": "fail",
-         "note": f"island on gensets; {NO_BLOCK}: 9 MW is above every pickup block"},
-        {"level": "unit", "transition": "island", "unit": "pump", "block": 1, "rate_tph": 2.0, "mass_pull": 1.0,
-         "lost_t": in_block_lost_t, "verdict": "pass", "note": "motor start pass"},
-        # no rated MW: no block either, but not "outside every block": unknown, never counted as lost for the outage
-        {"level": "unit", "transition": "island", "unit": "crusher", "block": None, "rate_tph": 1.0,
-         "mass_pull": 1.0, "lost_t": None, "verdict": "unknown", "note": "no rated MW to place in a pickup block"},
-        # a trip-transition row with no block is not an island unit: never counted in the island line
-        {"level": "unit", "transition": "trip", "unit": "mill", "block": None, "rate_tph": RATE, "mass_pull": 1.0,
-         "lost_t": None, "verdict": "fail", "note": f"{NO_BLOCK}: 9 MW"},
-    ]).to_csv(run / G.RESTART_CSV, index=False)
+    pd.DataFrame(
+        [
+            {
+                "level": "unit",
+                "unit": "mill",
+                "lost_t_per_year": ride_t,
+                "verdict": "known",
+                "note": "",
+            },
+            {
+                "level": "total",
+                "lost_t_per_year": ride_t,
+                "incomplete": incomplete,
+                "unknown_count": int(incomplete),
+                "known_count": 1,
+                "dip_stats_source": "demo",
+                "note": "demo",
+            },
+        ]
+    ).to_csv(run / G.DIP_TRIPS_CSV, index=False)
+    pd.DataFrame(
+        [
+            {
+                "level": "unit",
+                "transition": "island",
+                "unit": "mill",
+                "block": None,
+                "rate_tph": outside_rate,
+                "mass_pull": 1.0,
+                "lost_t": None,
+                "verdict": "fail",
+                "note": f"island on gensets; {NO_BLOCK}: 9 MW is above every pickup block",
+            },
+            {
+                "level": "unit",
+                "transition": "island",
+                "unit": "pump",
+                "block": 1,
+                "rate_tph": 2.0,
+                "mass_pull": 1.0,
+                "lost_t": in_block_lost_t,
+                "verdict": "pass",
+                "note": "motor start pass",
+            },
+            # no rated MW: no block either, but not "outside every block": unknown, never counted as lost for the outage
+            {
+                "level": "unit",
+                "transition": "island",
+                "unit": "crusher",
+                "block": None,
+                "rate_tph": 1.0,
+                "mass_pull": 1.0,
+                "lost_t": None,
+                "verdict": "unknown",
+                "note": "no rated MW to place in a pickup block",
+            },
+            # a trip-transition row with no block is not an island unit: never counted in the island line
+            {
+                "level": "unit",
+                "transition": "trip",
+                "unit": "mill",
+                "block": None,
+                "rate_tph": RATE,
+                "mass_pull": 1.0,
+                "lost_t": None,
+                "verdict": "fail",
+                "note": f"{NO_BLOCK}: 9 MW",
+            },
+        ]
+    ).to_csv(run / G.RESTART_CSV, index=False)
     return G.CampusRun(run_dir=run, stamp={"file": G.RESTART_CSV})
 
 
@@ -116,11 +198,15 @@ def test_every_line_names_its_source_file(net, tmp_path):
     assert files["ride_through"] == [G.DIP_TRIPS_CSV]
     assert G.RESTART_CSV in files["island"] and G.NETWORK_FILE in files["island"]
     assert files["n_1"] == [G.NETWORK_FILE]
-    assert G.NETWORK_FILE in files["connection"] and any("__lost_concentrate" in f for f in files["connection"])
+    assert G.NETWORK_FILE in files["connection"] and any(
+        "__lost_concentrate" in f for f in files["connection"]
+    )
 
 
 def test_ride_through_is_the_csv_total_as_written(net, tmp_path):
-    out = G.grid_risk_production(net, campus=_write_campus(tmp_path / "run", ride_t=7.5))
+    out = G.grid_risk_production(
+        net, campus=_write_campus(tmp_path / "run", ride_t=7.5)
+    )
     rt = _line(out, "ride_through")
     assert rt["status"] == "ok"
     assert rt["by_period"]["_"]["t_per_year"] == 7.5
@@ -128,22 +214,34 @@ def test_ride_through_is_the_csv_total_as_written(net, tmp_path):
 
 
 def test_an_incomplete_ride_through_total_is_partial_and_a_lower_bound(net, tmp_path):
-    rt = _line(G.grid_risk_production(net, campus=_write_campus(tmp_path / "run", incomplete=True)),
-               "ride_through")
+    rt = _line(
+        G.grid_risk_production(
+            net, campus=_write_campus(tmp_path / "run", incomplete=True)
+        ),
+        "ride_through",
+    )
     assert rt["status"] == "partial" and G.LOWER_BOUND in rt["flags"]
 
 
 def test_island_counts_only_the_island_units_outside_every_block(net, tmp_path):
-    out = G.grid_risk_production(net, campus=_write_campus(tmp_path / "run", in_block_lost_t=3.0))
+    out = G.grid_risk_production(
+        net, campus=_write_campus(tmp_path / "run", in_block_lost_t=3.0)
+    )
     isl = _line(out, "island")
     events = _year_hours() * Q_IMPORT / MTTR_IMPORT
     outside, inside = isl["rows"]
     assert outside["units"] == ["mill"] and inside["units"] == ["pump"]
-    assert outside["by_period"]["_"]["t_per_year"] == pytest.approx(RATE * 1.0 * MTTR_IMPORT * events)
+    assert outside["by_period"]["_"]["t_per_year"] == pytest.approx(
+        RATE * 1.0 * MTTR_IMPORT * events
+    )
     assert inside["by_period"]["_"]["t_per_year"] == pytest.approx(3.0 * events)
-    assert isl["by_period"]["_"]["t_per_year"] == pytest.approx((RATE * MTTR_IMPORT + 3.0) * events)
+    assert isl["by_period"]["_"]["t_per_year"] == pytest.approx(
+        (RATE * MTTR_IMPORT + 3.0) * events
+    )
     assert G.CONSERVATIVE in isl["flags"]
-    assert isl["status"] == "partial" and G.LOWER_BOUND in isl["flags"]      # the crusher is unknown
+    assert (
+        isl["status"] == "partial" and G.LOWER_BOUND in isl["flags"]
+    )  # the crusher is unknown
 
 
 def test_island_without_a_campus_run_is_missing_not_zero(net):
@@ -162,7 +260,7 @@ def test_n_1_is_expected_outage_loss_of_the_site_transformer(net):
     ref = expected_outage_loss(net, "site_trafo", MTTR_TRAFO, Q_TRAFO)
     want = sum(p["lost_t_per_year"] for p in ref["by_period"]["_"]["products"])
     assert n1["status"] in ("ok", "partial")
-    assert [r["key"] for r in n1["rows"]] == ["site_trafo"]          # never the PoC import Link
+    assert [r["key"] for r in n1["rows"]] == ["site_trafo"]  # never the PoC import Link
     assert n1["by_period"]["_"]["t_per_year"] == pytest.approx(want)
     assert want > 0
 
@@ -181,28 +279,57 @@ def test_connection_line_is_the_solves_own_lost_tonnes_annualised(net):
     assert con["by_period"]["_"]["eur_per_year"] == pytest.approx(want * LPV)
 
 
+def test_the_connection_line_weights_each_snapshot_by_the_hours_it_stands_for():
+    """GK A: a 3-hourly network (non-unit generator weightings, the cut hour weighted 3): each snapshot's lost
+    tonnes count for its hours, and the year is the weighted span scaled to 8760 h."""
+    weights = [3.0, 3.0, 3.0, 1.0, 1.0, 3.0]
+    n = _network(weights=weights)
+    con = _line(G.grid_risk_production(n), "connection")
+    x = n.generators_t.p["__lost_concentrate"].clip(lower=0)
+    w = n.snapshot_weightings.generators
+    assert list(w) == weights and float(x.iloc[2]) > 0
+    want = float((x * w).sum()) * _year_hours() / sum(weights)
+    assert want != pytest.approx(
+        float(x.sum()) * _year_hours() / sum(weights)
+    )  # the weighting matters here
+    assert con["by_period"]["_"]["t_per_year"] == pytest.approx(want)
+    assert con["by_period"]["_"]["eur_per_year"] == pytest.approx(want * LPV)
+
+
 def test_two_periods_give_per_period_lines_never_a_horizon_sum():
     n = _network(periods=[2030, 2040])
     out = G.grid_risk_production(n)
     assert out["periods"] == ["2030", "2040"]
     con = _line(out, "connection")
-    lost_2030 = float(n.generators_t.p["__lost_concentrate"].loc[2030].clip(lower=0).sum())
-    assert con["by_period"]["2030"]["t_per_year"] == pytest.approx(lost_2030 * 8760.0 / 6.0)
+    lost_2030 = float(
+        n.generators_t.p["__lost_concentrate"].loc[2030].clip(lower=0).sum()
+    )
+    assert con["by_period"]["2030"]["t_per_year"] == pytest.approx(
+        lost_2030 * 8760.0 / 6.0
+    )
     assert con["by_period"]["2040"]["t_per_year"] == pytest.approx(
-        float(n.generators_t.p["__lost_concentrate"].loc[2040].clip(lower=0).sum()) * 8784.0 / 6.0)
+        float(n.generators_t.p["__lost_concentrate"].loc[2040].clip(lower=0).sum())
+        * 8784.0
+        / 6.0
+    )
     assert set(out["total"]["by_period"]) == {"2030", "2040"}
 
 
 def test_the_total_is_the_sum_of_the_lines_labelled_an_upper_bound(net, tmp_path):
     out = G.grid_risk_production(net, campus=_write_campus(tmp_path / "run"))
     tot = out["total"]
-    assert tot["label"] == "upper bound (lines may overlap)" and tot["overlap_rule"] == "upper_bound"
+    assert (
+        tot["label"] == "upper bound (lines may overlap)"
+        and tot["overlap_rule"] == "upper_bound"
+    )
     assert tot["incomplete"] is False
     s = sum(ln["by_period"]["_"]["t_per_year"] for ln in out["lines"])
     assert tot["by_period"]["_"]["t_per_year"] == pytest.approx(s)
 
 
-def test_an_lp_shortfall_hour_that_is_also_an_island_hour_counts_in_both_lines(net, tmp_path):
+def test_an_lp_shortfall_hour_that_is_also_an_island_hour_counts_in_both_lines(
+    net, tmp_path
+):
     """The grid is cut in hour 2: the LP loses that hour's tonnes (connection), and a grid outage is also the island
     event, whose outside-block unit is the same mill. Under the upper-bound rule both lines carry it."""
     out = G.grid_risk_production(net, campus=_write_campus(tmp_path / "run"))
@@ -212,9 +339,12 @@ def test_an_lp_shortfall_hour_that_is_also_an_island_hour_counts_in_both_lines(n
     assert con["by_period"]["_"]["t_per_year"] >= hour2 * _year_hours() / 6.0 - 1e-9
     assert "mill" in isl["rows"][0]["units"] and isl["by_period"]["_"]["t_per_year"] > 0
     tot = out["total"]["by_period"]["_"]["t_per_year"]
-    assert tot == pytest.approx(con["by_period"]["_"]["t_per_year"] + isl["by_period"]["_"]["t_per_year"]
-                                + _line(out, "ride_through")["by_period"]["_"]["t_per_year"]
-                                + _line(out, "n_1")["by_period"]["_"]["t_per_year"])
+    assert tot == pytest.approx(
+        con["by_period"]["_"]["t_per_year"]
+        + isl["by_period"]["_"]["t_per_year"]
+        + _line(out, "ride_through")["by_period"]["_"]["t_per_year"]
+        + _line(out, "n_1")["by_period"]["_"]["t_per_year"]
+    )
     assert out["total"]["label"] == G.OVERLAP_LABEL
 
 
@@ -239,6 +369,7 @@ def test_a_stale_campus_run_flags_its_lines(net, tmp_path):
 
 # ── the real files: a campus run (12b-3) and the two example templates ─────
 
+
 def test_the_file_names_are_the_campus_studys():
     from gridspine.drivers import campus_study as cs
 
@@ -252,13 +383,23 @@ def test_a_real_campus_run_feeds_the_campus_lines(hub):  # noqa: F811
     nc = _with_units(hub)
     _run(hub)
     campus = G.campus_run_of(hub)
-    assert campus.run_dir is not None and not campus.stale and campus.stamp.get("run_at")
+    assert (
+        campus.run_dir is not None and not campus.stale and campus.stamp.get("run_at")
+    )
     n = pypsa.Network(str(nc))
     out = G.grid_risk_production(n, campus=campus)
     rt = _line(out, "ride_through")
-    total = next(r for r in ce.get_state(hub)["results"]["dips_restart"]["dip_trips"] if r["level"] == "total")
-    assert rt["by_period"]["_"]["t_per_year"] == pytest.approx(float(total["lost_t_per_year"]))
-    assert rt["status"] == "partial"                 # the pump has no curve: the total is a lower bound
+    total = next(
+        r
+        for r in ce.get_state(hub)["results"]["dips_restart"]["dip_trips"]
+        if r["level"] == "total"
+    )
+    assert rt["by_period"]["_"]["t_per_year"] == pytest.approx(
+        float(total["lost_t_per_year"])
+    )
+    assert (
+        rt["status"] == "partial"
+    )  # the pump has no curve: the total is a lower bound
     assert rt["source_files"] == [G.DIP_TRIPS_CSV] and rt["stamp"] == campus.stamp
     assert project_registry.project_dir(hub) / ce.SUBDIR / "run" == campus.run_dir
 
@@ -272,7 +413,9 @@ def test_on_a_and_b_every_line_names_its_source_or_its_missing_input(tid):
     import pathlib
     import sys
 
-    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "project_templates"))
+    sys.path.insert(
+        0, str(pathlib.Path(__file__).resolve().parents[1] / "project_templates")
+    )
     import eh_templates as T
 
     out = G.grid_risk_production(T.BUILDERS[tid]())
@@ -293,7 +436,7 @@ def _ts_map(path, name):
     import re
 
     text = path.read_text()
-    body = text[text.index(f"{name}: Record<string, string> = {{"):]
+    body = text[text.index(f"{name}: Record<string, string> = {{") :]
     body = body[: body.index("\n}")]
     return dict(re.findall(r"^\s+(\w+): ('[^']*'|\w+),", body, flags=re.M))
 
@@ -303,13 +446,24 @@ def test_every_missing_word_has_the_forms_word_in_the_frontend(net, tmp_path):
 
     labels = _ts_map(_FRONTEND / "utils" / "fieldLabels.ts", "FIELD_LABELS")
     places = _ts_map(_FRONTEND / "pages" / "results" / "GridRiskTab.tsx", "PLACE_WORDS")
-    words = {G.CAMPUS_RUN[1], "site_transformer", "grid_import", "run", "ride_through_curve", "outage_rate_value",
-             "mttr_hours", "lost_production_value", "mwh_per_t", "marginal_cost"}
+    words = {
+        G.CAMPUS_RUN[1],
+        "site_transformer",
+        "grid_import",
+        "run",
+        "ride_through_curve",
+        "outage_rate_value",
+        "mttr_hours",
+        "lost_production_value",
+        "mwh_per_t",
+        "marginal_cost",
+    }
     # Every word the module can emit (a no-campus run, no site transformer, no value) is among them.
     for n, campus in ((net, None), (_network(trafo=False, lpv=None), None)):
         out = G.grid_risk_production(n, campus=campus)
         emitted = {m["word"] for ln in out["lines"] for m in ln["missing_inputs"]} | {
-            i["word"] for i in out["eur_inputs"]}
+            i["word"] for i in out["eur_inputs"]
+        }
         assert emitted <= words, emitted - words
     form = {}
     for comp in ("Link", "Bus", "Generator"):
@@ -318,5 +472,11 @@ def test_every_missing_word_has_the_forms_word_in_the_frontend(net, tmp_path):
         if w in places:
             continue
         assert w in labels, f"{w}: no word in FIELD_LABELS"
-        if w in ("outage_rate_value", "mttr_hours", "lost_production_value", "ride_through_curve", "mwh_per_t"):
+        if w in (
+            "outage_rate_value",
+            "mttr_hours",
+            "lost_production_value",
+            "ride_through_curve",
+            "mwh_per_t",
+        ):
             assert labels[w].strip("'") == form[w], (w, labels[w], form[w])
