@@ -590,10 +590,6 @@ class DefaultsPack(BaseModel):
             if (pid, version) != (self.pack_id, self.version):
                 return False
         ours = self.pack_tariff(tariff.id)
-        if tariff.currency is None:
-            # A copy made before tariffs carried a currency (gridspine-library-eu 01):
-            # the pack's own currency is what it was priced in.
-            tariff = tariff.model_copy(update={"currency": ours.currency})
         return (tariff.model_dump(mode="json", exclude={"pack_hash"})
                 == ours.model_dump(mode="json", exclude={"pack_hash"}))
 
@@ -1078,15 +1074,6 @@ def _parse_finance(path: Path, keys: set[str]) -> FinanceDefaults:
     return fin
 
 
-def _with_pack_currency(payload: Any, currency: str) -> Any:
-    """`payload` with the currency its pack meta states, when the tariff states none
-    (a `generic` jurisdiction implies none; gridspine-library-eu 01). The raw file, and so
-    the pack hash, is unchanged."""
-    if isinstance(payload, dict) and payload.get("currency") is None:
-        return {**payload, "currency": currency}
-    return payload
-
-
 def _parse_tariffs(path: Path) -> dict[str, PackTariff]:
     from services.library.items import validate_payload
 
@@ -1099,10 +1086,13 @@ def _parse_tariffs(path: Path) -> dict[str, PackTariff]:
             raise DefaultsPackError(f"{where}: pack_hash is stamped by the loader; leave it null")
         try:
             meta = PackTariffMeta.model_validate(entry.get("meta") or {})
-            tariff = validate_payload("tariff", _with_pack_currency(payload, meta.currency))
+            tariff = validate_payload("tariff", payload)
         except (ValueError, ValidationError) as exc:
             raise DefaultsPackError(f"{where}: {exc}") from None
-        if tariff.currency != meta.currency:
+        # A tariff's currency (stated, or its jurisdiction's) is its meta's. A `generic`
+        # tariff keeps none: stamping the meta's onto its copies would move every stored
+        # copy's hash (GK B C3, gridspine-library-eu 01; the gap is issue 03).
+        if tariff.currency is not None and tariff.currency != meta.currency:
             raise DefaultsPackError(f"{where}: the tariff is in {tariff.currency}, its meta in "
                                     f"{meta.currency}")
         items = {i.id: i for i in tariff.items}
@@ -1255,8 +1245,7 @@ def parse_pack_dir(directory: Path) -> DefaultsPack:
     digest = _canonical_hash(canonical_payload(directory))
     raw_tariffs = json.loads((directory / files.get("tariffs", "tariffs.json"))
                              .read_text(encoding="utf-8"))
-    pristine = tuple((e["tariff"]["id"], json.dumps(
-        _with_pack_currency(e["tariff"], e["meta"]["currency"]), sort_keys=True))
+    pristine = tuple((e["tariff"]["id"], json.dumps(e["tariff"], sort_keys=True))
                      for e in raw_tariffs["tariffs"])
     pack = DefaultsPack(pack_id=PACK_ID, version=version,
                         title=str(manifest.get("title") or ""),

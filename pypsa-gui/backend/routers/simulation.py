@@ -332,7 +332,16 @@ _state = _ActiveStateProxy()
 
 @router.get("/solver_config")
 def get_solver_config():
-    return asdict(_state["solver_config"])
+    out = asdict(_state["solver_config"])
+    commercial = out.get("commercial")
+    if isinstance(commercial, dict) and isinstance(commercial.get("import_tariff"), dict):
+        # The stored tariff leaves out a currency its jurisdiction implies; a read states
+        # it (GK B C2, gridspine-library-eu 01). The stored config is not touched.
+        from models.commercial import tariff_payload_resolved
+
+        out["commercial"] = {**commercial,
+                             "import_tariff": tariff_payload_resolved(commercial["import_tariff"])}
+    return out
 
 
 def _bind_commercial(commercial, user, solver_cfg=None, currency=None) -> dict | None:

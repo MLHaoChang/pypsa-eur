@@ -1,0 +1,282 @@
+{
+ "services/library/common_items/tariff/nl-tennet-2026-ehs.json": {
+  "dump": "c1954f3809051325",
+  "lib": "78fc38dd84734834",
+  "stored_cfg": "9ba827e6fe38dd9f",
+  "v1": "47246996aaaff9f8",
+  "v2": "332d3ca81ce1c895"
+ },
+ "services/library/common_items/tariff/nl-tennet-2026-hs.json": {
+  "dump": "8aee1c2559dae1a5",
+  "lib": "b866852dc70e6582",
+  "stored_cfg": "1aa3083575f4e534",
+  "v1": "728695d801d5ee9a",
+  "v2": "aaa11eb361af6958"
+ },
+ "services/library/defaults_pack/versions/2026-10-05/tariffs.json:de_industrial_illustrative": {
+  "dump": "afd48097e670390f",
+  "lib": "4f7661a3628cfe95",
+  "stored_cfg": "b18c0efff456788c",
+  "v1": "38d298e2de56e223",
+  "v2": "446351b04ae7d38f"
+ },
+ "services/library/defaults_pack/versions/2026-10-05/tariffs.json:tou_reference_illustrative": {
+  "dump": "233c454fe15f38c0",
+  "lib": "4de5be12ced2c8c4",
+  "stored_cfg": "4852a6c873612071",
+  "v1": "2c163b5a1f9742da",
+  "v2": "b3d3e95da711f7f1"
+ },
+ "services/library/defaults_pack/versions/2026-10-07/tariffs.json:de_industrial_illustrative": {
+  "dump": "afd48097e670390f",
+  "lib": "4f7661a3628cfe95",
+  "stored_cfg": "b18c0efff456788c",
+  "v1": "38d298e2de56e223",
+  "v2": "446351b04ae7d38f"
+ },
+ "services/library/defaults_pack/versions/2026-10-07/tariffs.json:tou_reference_illustrative": {
+  "dump": "233c454fe15f38c0",
+  "lib": "4de5be12ced2c8c4",
+  "stored_cfg": "4852a6c873612071",
+  "v1": "2c163b5a1f9742da",
+  "v2": "b3d3e95da711f7f1"
+ },
+ "services/library/defaults_pack/versions/2026-10-13/tariffs.json:de_industrial_illustrative": {
+  "dump": "afd48097e670390f",
+  "lib": "4f7661a3628cfe95",
+  "stored_cfg": "b18c0efff456788c",
+  "v1": "38d298e2de56e223",
+  "v2": "446351b04ae7d38f"
+ },
+ "services/library/defaults_pack/versions/2026-10-13/tariffs.json:tou_reference_illustrative": {
+  "dump": "233c454fe15f38c0",
+  "lib": "4de5be12ced2c8c4",
+  "stored_cfg": "4852a6c873612071",
+  "v1": "2c163b5a1f9742da",
+  "v2": "b3d3e95da711f7f1"
+ },
+ "services/library/defaults_pack/versions/2026-10-20/tariffs.json:de_industrial_illustrative": {
+  "dump": "afd48097e670390f",
+  "lib": "4f7661a3628cfe95",
+  "stored_cfg": "b18c0efff456788c",
+  "v1": "38d298e2de56e223",
+  "v2": "446351b04ae7d38f"
+ },
+ "services/library/defaults_pack/versions/2026-10-20/tariffs.json:tou_reference_illustrative": {
+  "dump": "233c454fe15f38c0",
+  "lib": "4de5be12ced2c8c4",
+  "stored_cfg": "4852a6c873612071",
+  "v1": "2c163b5a1f9742da",
+  "v2": "b3d3e95da711f7f1"
+ },
+ "services/library/defaults_pack/versions/2026-10-22/tariffs.json:de_industrial_illustrative": {
+  "dump": "afd48097e670390f",
+  "lib": "4f7661a3628cfe95",
+  "stored_cfg": "b18c0efff456788c",
+  "v1": "38d298e2de56e223",
+  "v2": "446351b04ae7d38f"
+ },
+ "services/library/defaults_pack/versions/2026-10-22/tariffs.json:tou_reference_illustrative": {
+  "dump": "233c454fe15f38c0",
+  "lib": "4de5be12ced2c8c4",
+  "stored_cfg": "4852a6c873612071",
+  "v1": "2c163b5a1f9742da",
+  "v2": "b3d3e95da711f7f1"
+ },
+ "services/library/defaults_pack/versions/2026-10-23/tariffs.json:de_industrial_illustrative": {
+  "dump": "afd48097e670390f",
+  "lib": "4f7661a3628cfe95",
+  "stored_cfg": "b18c0efff456788c",
+  "v1": "38d298e2de56e223",
+  "v2": "446351b04ae7d38f"
+ },
+ "services/library/defaults_pack/versions/2026-10-23/tariffs.json:tou_reference_illustrative": {
+  "dump": "233c454fe15f38c0",
+  "lib": "4de5be12ced2c8c4",
+  "stored_cfg": "4852a6c873612071",
+  "v1": "2c163b5a1f9742da",
+  "v2": "b3d3e95da711f7f1"
+ },
+ "services/library/defaults_pack/versions/2026-10-24/tariffs.json:de_industrial_illustrative": {
+  "dump": "afd48097e670390f",
+  "lib": "4f7661a3628cfe95",
+  "stored_cfg": "b18c0efff456788c",
+  "v1": "38d298e2de56e223",
+  "v2": "446351b04ae7d38f"
+ },
+ "services/library/defaults_pack/versions/2026-10-24/tariffs.json:tou_reference_illustrative": {
+  "dump": "233c454fe15f38c0",
+  "lib": "4de5be12ced2c8c4",
+  "stored_cfg": "4852a6c873612071",
+  "v1": "2c163b5a1f9742da",
+  "v2": "b3d3e95da711f7f1"
+ },
+ "services/library/defaults_pack/versions/2026-10-25/tariffs.json:de_industrial_illustrative": {
+  "dump": "afd48097e670390f",
+  "lib": "4f7661a3628cfe95",
+  "stored_cfg": "b18c0efff456788c",
+  "v1": "38d298e2de56e223",
+  "v2": "446351b04ae7d38f"
+ },
+ "services/library/defaults_pack/versions/2026-10-25/tariffs.json:tou_reference_illustrative": {
+  "dump": "233c454fe15f38c0",
+  "lib": "4de5be12ced2c8c4",
+  "stored_cfg": "4852a6c873612071",
+  "v1": "2c163b5a1f9742da",
+  "v2": "b3d3e95da711f7f1"
+ },
+ "services/library/defaults_pack/versions/2026-10-26/tariffs.json:de_industrial_illustrative": {
+  "dump": "e05a203a4649dc02",
+  "lib": "b37ea8c8c13dd294",
+  "stored_cfg": "61ec7f3d8f5e4096",
+  "v1": "3052e1cf1727b21c",
+  "v2": "43b6d7ae4b5bc08e"
+ },
+ "services/library/defaults_pack/versions/2026-10-26/tariffs.json:tou_reference_illustrative": {
+  "dump": "0f6a553edc7b5451",
+  "lib": "7a0dfd34e785c908",
+  "stored_cfg": "dfb5f62fb658faa6",
+  "v1": "5262e13a15eb1f58",
+  "v2": "6397787ac722121e"
+ },
+ "services/library/defaults_pack/versions/2026-10-30/tariffs.json:de_industrial_illustrative": {
+  "dump": "e05a203a4649dc02",
+  "lib": "b37ea8c8c13dd294",
+  "stored_cfg": "61ec7f3d8f5e4096",
+  "v1": "3052e1cf1727b21c",
+  "v2": "43b6d7ae4b5bc08e"
+ },
+ "services/library/defaults_pack/versions/2026-10-30/tariffs.json:tou_reference_illustrative": {
+  "dump": "0f6a553edc7b5451",
+  "lib": "7a0dfd34e785c908",
+  "stored_cfg": "dfb5f62fb658faa6",
+  "v1": "5262e13a15eb1f58",
+  "v2": "6397787ac722121e"
+ },
+ "tests/fixtures/investment_case/bills/export_and_net.json:tariff": {
+  "dump": "cdf531e1b34a191d",
+  "lib": "55c9ab73f3948e46",
+  "stored_cfg": "ffd24798b89a508f",
+  "v1": "2b9d5251de03f6e2",
+  "v2": "4c845eef391ffbb0"
+ },
+ "tests/fixtures/investment_case/bills/h1_de_rlm.json:tariff": {
+  "dump": "fa7bd3cb7ef6d9ed",
+  "lib": "94fbe063f46a73c0",
+  "stored_cfg": "2854da2436c36842",
+  "v1": "a29fa5dd5f8246ba",
+  "v2": "ef86892f81ac3311"
+ },
+ "tests/fixtures/investment_case/bills/h2_nl_business.json:tariff": {
+  "dump": "7f17c470ba820e6f",
+  "lib": "511b809d66102c0e",
+  "stored_cfg": "15c450f7a3a3b00b",
+  "v1": "be4563e6f649951c",
+  "v2": "9ebef36e2f9e3b76"
+ },
+ "tests/fixtures/investment_case/bills/h3_us_ci.json:tariff": {
+  "dump": "484abb46eca8b952",
+  "lib": "fa70bfaf02a763b0",
+  "stored_cfg": "c914ba9c7c325ce3",
+  "v1": "e63fe85ebb7f8f67",
+  "v2": "e6605ad60e36646f"
+ },
+ "tests/fixtures/investment_case/bills/leap_february_fixed.json:tariff": {
+  "dump": "5e98424f37025a8c",
+  "lib": "ce99c7bd2992187a",
+  "stored_cfg": "2e6c264584290106",
+  "v1": "7fdb824537978f11",
+  "v2": "88ce3a865bff1412"
+ },
+ "tests/fixtures/investment_case/bills/tou_weekday_evening.json:tariff": {
+  "dump": "5c3a11faf705cf25",
+  "lib": "0198778eb3327f98",
+  "stored_cfg": "4e238b3b82c5549d",
+  "v1": "5e70cab0e0e62b8d",
+  "v2": "952679b931954d96"
+ },
+ "tests/fixtures/investment_case/de_tariff_capacity_tou.json:None": {
+  "dump": "3822572a53986944",
+  "lib": "fcb7f3a95e86cdfe",
+  "stored_cfg": "c8f2e738514a6ab2",
+  "v1": "20b324b7363c99ff",
+  "v2": "68c16f8c3066f7e9"
+ },
+ "tests/fixtures/investment_case/hub/v5_energy_hub.json:tariff": {
+  "dump": "6b9ea2046af038fa",
+  "lib": "4ce2824f0a5e616f",
+  "stored_cfg": "872963e233d829ed",
+  "v1": "b51edbf0a957db1e",
+  "v2": "64901ae992e9c46b"
+ },
+ "tests/fixtures/investment_case/oracles/r1_leap_year.tariff.json:None": {
+  "dump": "8d10c0483e2e1193",
+  "lib": "62c38ecc9aded9b7",
+  "stored_cfg": "4493b2b977afddb4",
+  "v1": "fd242610dc3a1be9",
+  "v2": "b417b825d97109bf"
+ },
+ "tests/fixtures/investment_case/oracles/r1_leap_year.urdb.json:urdb": {
+  "dump": "6144074136a74911",
+  "lib": "ce889872f8e890f6",
+  "stored_cfg": "73900d4f9ac875f9",
+  "v1": "0029781eb3cc3a33",
+  "v2": "185d686290a3cdd7"
+ },
+ "tests/fixtures/investment_case/oracles/r2_tiered_tou_demand.tariff.json:None": {
+  "dump": "d43ba5daa35a2023",
+  "lib": "055b0960b6499764",
+  "stored_cfg": "aed85eecf73b9a63",
+  "v1": "2b7fb8d78ca2aada",
+  "v2": "178a2374c3b80fb3"
+ },
+ "tests/fixtures/investment_case/oracles/r2_tiered_tou_demand.urdb.json:urdb": {
+  "dump": "d9aa3b6a8cee1f12",
+  "lib": "be5229fc3441722f",
+  "stored_cfg": "900960289eb3987c",
+  "v1": "b8b20a927a135353",
+  "v2": "089bca320d89f5d7"
+ },
+ "tests/fixtures/investment_case/oracles/r3_case2.tariff.json:None": {
+  "dump": "70da6846d36f7180",
+  "lib": "c2fb6179815948e9",
+  "stored_cfg": "db25013d894b8f2b",
+  "v1": "8c71079425763cad",
+  "v2": "bb7cde8469d30954"
+ },
+ "tests/fixtures/investment_case/oracles/r3_case3.tariff.json:None": {
+  "dump": "4a1845f8c793c6a3",
+  "lib": "ccb31f4c5caaf108",
+  "stored_cfg": "bfd7e01204c46946",
+  "v1": "11f20eea2731bec1",
+  "v2": "68935bf2cba396ec"
+ },
+ "tests/fixtures/investment_case/oracles/r3prime.tariff.json:None": {
+  "dump": "13f135d0673034e0",
+  "lib": "b366e0c45aada103",
+  "stored_cfg": "17674a64c0d2697c",
+  "v1": "f3d661417be74fd8",
+  "v2": "6d778bcec5932e13"
+ },
+ "tests/fixtures/investment_case/oracles/r3prime.urdb.json:urdb": {
+  "dump": "3cc982c75fc83694",
+  "lib": "29c703ee68ccad15",
+  "stored_cfg": "106327f2995c47b0",
+  "v1": "566d17c3fffb9185",
+  "v2": "b46dc4f4c9dd76d2"
+ },
+ "tests/fixtures/investment_case/oracles/r4_blended.tariff.json:None": {
+  "dump": "6757f7d292fa7601",
+  "lib": "451c71413e1b6927",
+  "stored_cfg": "5ffa6678e251dcbe",
+  "v1": "cbdc2728beb26587",
+  "v2": "86824978ae982f65"
+ },
+ "tests/fixtures/investment_case/us_tariff_demand_charge.json:None": {
+  "dump": "aec7d03b59f35a72",
+  "lib": "b030520d9543fb38",
+  "stored_cfg": "5aca20dd76fed626",
+  "v1": "858ba8aed94b0ecf",
+  "v2": "bac81217bde8d5e5"
+ }
+}
