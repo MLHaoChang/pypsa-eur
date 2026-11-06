@@ -164,7 +164,7 @@ export function ReserveSection({ payload }: { payload: ReservesPayload }) {
 function StorageCharts({ storage, snapshots, series }: {
   storage: ReserveStorage; snapshots: string[]; series: Series[]
 }) {
-  const base = useId().replace(/:/g, '')
+  const base = `rh${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
   const floor = storage.floor_mwh
   const energyRows = useMemo(() => snapshots.map((t, i) => ({
     t, soc: storage.soc_mwh?.[i] ?? null, floor: floor ?? null,
