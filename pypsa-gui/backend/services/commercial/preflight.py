@@ -13,6 +13,10 @@ stated before any solver time is spent.
     export price or envelope, a tariff on a non-datetime axis, and the
     refusals that depend on the strategy that will run (demand, tiers or a
     capacity fee with a rolling or multi-period myopic solve).
+  * `commercial.currency_mismatch` (error, gridspine-library-eu 01): the import
+    tariff (inline or resolved from a Library ref) is priced in another currency
+    than the project's finance inputs state. Nothing is converted; an unstated
+    currency on either side is not checked.
   * `commercial.arbitrage_loop` (warning): in some snapshots exporting pays
     more than importing costs, net of the import Link's efficiency, so the LP
     can lower its cost by circulating power through the grid (both PoC Links
@@ -117,11 +121,13 @@ def demand_resolution_warnings(n, cfg) -> list[tuple[str, str]]:
 
 
 def commercial_findings(n, commercial, *, solve_strategy: str = "full",
-                        multi_period: bool = False, dsr: dict | None = None
+                        multi_period: bool = False, dsr: dict | None = None,
+                        currency: str | None = None
                         ) -> list[tuple[str, str, str, str, str]]:
     """`solve_strategy` is the strategy that will RUN
     (`lp_bindings.effective_strategy`), so a refusal that depends on it is
-    stated here too (review #1)."""
+    stated here too (review #1). `currency`: the project's stated currency
+    (`binding.project_currency`)."""
     if not commercial:
         return []
     try:
@@ -149,6 +155,11 @@ def commercial_findings(n, commercial, *, solve_strategy: str = "full",
                 return [("error", code, "", "", str(exc))]
         return [("error", "commercial.binding_invalid", "", "",
                  f"The commercial config cannot bind to this network: {exc}")]
+    from services.commercial.binding import tariff_currency_mismatch
+
+    clash = tariff_currency_mismatch(cfg.import_tariff, currency)
+    if clash:
+        return [("error", "commercial.currency_mismatch", "", "", clash)]
     try:
         return _warnings(n, cfg, adders, price, demand) + _contract_warnings(n, cfg, dsr or {})
     except Exception as exc:  # noqa: BLE001 — preflight never takes validation down

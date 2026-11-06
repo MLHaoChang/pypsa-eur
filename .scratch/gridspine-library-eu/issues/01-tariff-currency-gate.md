@@ -1,6 +1,6 @@
 # 01. A tariff has no currency, so an EUR tariff attaches to a non-EUR project unchecked
 
-Status: ready-for-agent (Q-GS-1 answered 2026-11-05)
+Status: done
 Type: task
 Raised by: the gatekeeper on #521 (P2d, EU-C09 TenneT 2026), 2026-10-21; recorded under the owner's usage pause as a ticket, not work.
 Gated: yes (money semantics; schema change on `models.commercial.Tariff`).

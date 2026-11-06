@@ -55,6 +55,9 @@ FIELDS_AFTER_V1: dict[tuple[str, str], Any] = {
     ("PpaContract", "suspend_on_negative_price"): None,  # IPP ticket 01 (G2)
     ("CommercialConfig", "import_price_ref"): None,      # IPP ticket 07 (G7)
     ("CommercialConfig", "provenance"): {},              # data-to-model slice 2
+    # Its jurisdiction's currency is left out of every hash, not only None (the
+    # `Tariff` serializer, `omit_implied` below; gridspine-library-eu 01).
+    ("Tariff", "currency"): None,                        # gridspine-library-eu 01
 }
 
 
@@ -66,7 +69,8 @@ def _recipe_1(obj: Any) -> Any:
         return [_recipe_1(o) for o in obj]
     if not hasattr(obj, "model_dump"):
         return obj
-    out = obj.model_dump(mode="json")
+    # `omit_implied`: a model drops a field its other fields imply (a tariff's currency).
+    out = obj.model_dump(mode="json", context={"omit_implied": True})
     name = type(obj).__name__
     for field in type(obj).model_fields:
         value = getattr(obj, field)

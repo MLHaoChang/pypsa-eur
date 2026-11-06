@@ -335,7 +335,7 @@ def get_solver_config():
     return asdict(_state["solver_config"])
 
 
-def _bind_commercial(commercial, user, solver_cfg=None) -> dict | None:
+def _bind_commercial(commercial, user, solver_cfg=None, currency=None) -> dict | None:
     """
     Bind a submitted commercial block to the ACTIVE network: a call of
     `services.commercial.binding.bind_commercial_on_context` on the active
@@ -344,7 +344,8 @@ def _bind_commercial(commercial, user, solver_cfg=None) -> dict | None:
     PROJECT's org; the caller's org for an unsaved network) and checks
     everything before any write. The in-flight check is this module's
     `_solver_in_flight_ctx`. Refusals carry `{code, message}`. Returns the
-    plain dict stored on `SolverConfig.commercial`.
+    plain dict stored on `SolverConfig.commercial`. `currency`: the project's
+    stated currency, which a Library tariff ref must match (`currency_mismatch`).
     """
     from fastapi import HTTPException
 
@@ -353,7 +354,8 @@ def _bind_commercial(commercial, user, solver_cfg=None) -> dict | None:
     try:
         return binding.bind_commercial_on_context(
             PyPSAService.get_active_context(), commercial, user=user,
-            in_flight=lambda ctx: _solver_in_flight_ctx(ctx), solver_cfg=solver_cfg)
+            in_flight=lambda ctx: _solver_in_flight_ctx(ctx), solver_cfg=solver_cfg,
+            currency=currency)
     except binding.BindingRefusal as exc:
         raise HTTPException(exc.status, {"code": exc.code, "message": exc.message}) from exc
 
@@ -602,7 +604,11 @@ def update_solver_config(
         # touches nothing (WP1.4 round 3 #6).
         if cfg.commercial is not None:
             _check_site_connection(cfg.commercial, stored_commercial)
-        submitted["commercial"] = _bind_commercial(cfg.commercial, user, solver_view)
+        from services.commercial.binding import project_currency
+
+        submitted["commercial"] = _bind_commercial(
+            cfg.commercial, user, solver_view,
+            currency=project_currency(getattr(stored_cfg, "finance", None)))
         rebound = submitted["commercial"] is not None
     rebind_fca = "commercial" not in submitted and scalers_changed \
         and _is_fca(stored_commercial)

@@ -2770,6 +2770,7 @@ def _capacity_priced_poc(solver_config) -> str | None:
 def _check_commercial(n, solver_config) -> list[Issue]:
     from services.commercial.preflight import commercial_findings
 
+    from services.commercial.binding import project_currency
     from services.commercial.lp_bindings import effective_strategy
 
     if not getattr(solver_config, "commercial", None):
@@ -2787,6 +2788,7 @@ def _check_commercial(n, solver_config) -> list[Issue]:
             for sev, code, cls, name, msg in commercial_findings(
                 n, getattr(solver_config, "commercial", None), solve_strategy=strategy,
                 multi_period=multi,
+                currency=project_currency(getattr(solver_config, "finance", None)),
                 dsr={"buses": list(getattr(solver_config, "dsr_buses", None) or []),
                      "price": float(getattr(solver_config, "dsr_price_eur_per_mwh", 0.0) or 0.0),
                      "share": float(getattr(solver_config, "dsr_share_of_load", 0.0) or 0.0)})]

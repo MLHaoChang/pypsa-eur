@@ -222,6 +222,11 @@ def prepare_item(kind: str, name: str, payload: dict, meta: dict | None = None) 
             f"{kind} {name!r} is a shipped common Library item and cannot be overwritten; "
             "store your own version under another name")
     model = validate_payload(kind, payload)
+    if kind == "tariff" and model.currency is None:
+        # A new Library tariff names its currency (owner Q-GS-1): stated, or implied
+        # by an ISO jurisdiction. Never guessed, so a project's currency gate can read it.
+        raise ValueError(f"invalid tariff: currency: jurisdiction {model.jurisdiction!r} "
+                         "implies no currency; state it (ISO 4217, e.g. EUR)")
     try:
         meta_ok = ItemMeta.model_validate(meta or {})
     except ValidationError as exc:
