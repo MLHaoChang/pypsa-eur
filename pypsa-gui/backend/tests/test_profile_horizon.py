@@ -77,11 +77,33 @@ def test_non_leap_weather_onto_a_leap_target_is_still_refused():
         ap._align_to_snapshots(s, snaps, family="renewable")
 
 
-def test_irregular_steps_are_refused_by_name():
+def test_a_run_with_a_different_step_is_refused_by_name():
     s = _year_series()
-    snaps = pd.DatetimeIndex(["2023-01-01 00:00", "2023-01-01 03:00", "2023-01-01 09:00"])
+    week = lambda start, freq: pd.date_range(start, periods=56 if freq == "3h" else 28, freq=freq)
+    snaps = week("2023-01-02", "3h").append(week("2023-07-03", "6h"))
     with pytest.raises(ap.StepIrregularError):
         ap._align_to_snapshots(s, snaps, family="renewable")
+
+
+def test_two_three_hourly_weeks_take_step_means_over_their_own_hours():
+    s = _year_series()
+    snaps = pd.date_range("2023-01-02", periods=56, freq="3h").append(
+        pd.date_range("2023-07-03", periods=56, freq="3h"))
+    aligned, meta = ap._align_to_snapshots(s, snaps, family="renewable")
+    assert meta["step_hours"] == 3 and meta["window"]["runs"] == 2
+    for t in (snaps[0], snaps[60]):
+        assert aligned[t] == pytest.approx(float(s.loc[t:t + pd.Timedelta(hours=2)].mean()))
+
+
+def test_a_gap_of_exactly_one_step_is_one_run_and_hourly_runs_are_unchanged():
+    s = _year_series()
+    snaps = pd.DatetimeIndex(["2023-01-01 00:00", "2023-01-01 03:00", "2023-01-01 09:00"])
+    _, meta = ap._align_to_snapshots(s, snaps, family="renewable")
+    assert meta["step_hours"] == 3
+    hourly = pd.date_range("2023-01-02", periods=24, freq="h").append(
+        pd.date_range("2023-07-03", periods=24, freq="h"))
+    _, hmeta = ap._align_to_snapshots(s, hourly, family="renewable")
+    assert "step_hours" not in hmeta and hmeta["window"]["runs"] == 2
 
 
 def test_steps_that_are_not_whole_hours_are_refused_by_name():

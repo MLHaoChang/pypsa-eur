@@ -25,8 +25,10 @@ reindexing:
   * a constant whole-hour step k > 1 (3-hourly, …) → each snapshot takes the
     MEAN of the hourly weather series over its own k hours, aligned by the
     rules above (renewable and load families only; weightings play no part);
-    meta ``step_hours``. Refused by name: a step that is not whole hours
-    (``step_not_whole_hours``), steps of unequal length (``step_irregular``),
+    meta ``step_hours``. The step is constant inside each run of a sampled
+    window (two 3-hourly weeks), the gap between runs at least one step.
+    Refused by name: a step that is not whole hours
+    (``step_not_whole_hours``), a run whose own step differs from the others (``step_irregular``),
     a step over the skipped spring hour of a local clock
     (``step_over_dst_gap``), another family or several investment periods
     (``step_aggregation_unsupported``);
@@ -558,7 +560,8 @@ STEP_MEAN_FAMILIES = frozenset({"renewable", "load"})
 
 
 def _step_hours(snapshots) -> int:
-    """The constant whole-hour step k > 1 of multi-hour snapshots, else 1
+    """The constant whole-hour step k > 1 of multi-hour snapshots (per run, gaps
+    between runs at least k), else 1
     (hourly or finer, or a shape the hourly path judges itself)."""
     idx = snapshots.get_level_values(-1) if isinstance(snapshots, pd.MultiIndex) else snapshots
     if (not isinstance(idx, pd.DatetimeIndex) or idx.tz is not None or len(idx) < 2
@@ -577,10 +580,18 @@ def _step_hours(snapshots) -> int:
         raise StepNotWholeHoursError(
             f"snapshot step {d} is not a whole number of hours — generated "
             "profiles are hourly; use hourly or whole-hour steps")
-    if (diffs != d).any():
-        raise StepIrregularError(
-            "snapshot steps are not one constant length (the shortest is "
-            f"{d}) — a multi-hour step needs the same length throughout")
+    # A constant step k inside each run, any gap between runs at least k: a
+    # difference above k is a gap. Two equal such differences in a row are a
+    # run of its own, longer step, refused by name (a lone snapshot between
+    # two gaps has two different differences).
+    for b in blocks:
+        df = b.to_series().diff().dropna().to_numpy()
+        for a, c in zip(df[:-1], df[1:]):
+            if a != d and a == c:
+                raise StepIrregularError(
+                    f"a run of the snapshots steps {pd.Timedelta(a)} while the "
+                    f"others step {d} — a multi-hour step needs the same length "
+                    "in every run")
     return int(d // _ONE_HOUR)
 
 
