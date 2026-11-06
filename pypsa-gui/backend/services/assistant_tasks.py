@@ -1391,26 +1391,34 @@ def is_next_step(session, tool, args) -> bool:
 
 
 def governs(session, tool, args) -> bool:
-    """Whether `begin_step` owns this call: an active task whose next step is
-    this tool with these arguments. Issue 04 S5 (GK B (30) N7): such a call
-    gets only `begin_step`'s own refusal, never a job hold's too. A task that
-    cannot be read counts as owning it, so `begin_step` answers."""
+    """Whether `begin_step` answers this call itself: the task's next step is
+    this tool with these arguments, or the call repeats a completed step
+    (`task_step_already_completed`). Issue 04 S5 (GK B (30) N7): such a call
+    gets only `begin_step`'s refusal, never a job hold's too. A task that
+    cannot be read governs nothing, so the hold check still runs (#1079)."""
     task_id = getattr(session, "task_id", None)
     if not task_id or tool in _CONTROLS:
         return False
     with _LOCK:
         try:
-            _path, task = _read(task_id)
-        except HTTPException as exc:
-            return exc.status_code != 404  # a gone task detaches, as in begin_step
-        except Exception:  # noqa: BLE001 - begin_step reads it again and answers
-            return True
-        if task["status"] in ("cancelled", "completed"):
+            _, task = _read(task_id)
+            if task["status"] in ("cancelled", "completed"):
+                return False
+            step = _next(task)
+            if step is not None and step.get("native"):
+                return False
+            if step is not None and step["tool"] == tool and _same_args(
+                tool, _resolve(step["args"], task["steps"]), args
+            ):
+                return True
+            return any(
+                done["status"] == "completed"
+                and done["tool"] == tool
+                and _same_args(tool, _resolve(done["args"], task["steps"]), args)
+                for done in task["steps"]
+            )
+        except Exception:  # noqa: BLE001 - unreadable: the hold check runs (fail closed)
             return False
-        step = _next(task)
-        if step is None or step.get("native") or step["tool"] != tool:
-            return False
-        return bool(_same_args(tool, _resolve(step["args"], task["steps"]), args))
 
 
 def begin_step(session, tool, args):

@@ -142,10 +142,19 @@ def test_a_held_call_is_denied_before_every_effect_seam(monkeypatch, slow_queue,
         "lock_refusal",
         lambda *a, **k: order.append("lock") or real_lock(*a, **k),
     )
+    from services import solve_queue
+
+    enqueued = []
+    real_enqueue = solve_queue.solve_queue.enqueue_unique
+    monkeypatch.setattr(
+        solve_queue.solve_queue,
+        "enqueue_unique",
+        lambda *a, **k: enqueued.append(1) or real_enqueue(*a, **k),
+    )
     error = _error(_call(monkeypatch, session, TOOL, OTHER))
     assert error["error_kind"] == job_holds.CONFLICT
     assert order == ["lock"]
-    assert seen == [] and began == [] and len(calls) == 1
+    assert seen == [] and began == [] and enqueued == [] and len(calls) == 1
 
 
 def test_a_changed_args_after_approval_gets_g3_not_a_hold(monkeypatch, slow_queue):
@@ -674,3 +683,119 @@ def test_the_job_tools_are_the_execution_tiers():
         "run_mc_study",
     } <= tools
     assert not {"abort_simulation", "wait_for_job", "solve_queue_abort"} & tools
+
+
+# ── governs mirrors begin_step (N7) ──────────────────────────────────────────
+
+
+def _task(monkeypatch, steps, status="running"):
+    from services import assistant_tasks
+
+    task = {"status": status, "steps": steps}
+    monkeypatch.setattr(assistant_tasks, "_read", lambda task_id: ("path", task))
+    session = ChatSession()
+    session.task_id = "t1"
+    return session
+
+
+def _step(status, args, tool=TOOL, **extra):
+    return {
+        "id": uuid.uuid4().hex[:6],
+        "tool": tool,
+        "status": status,
+        "args": args,
+        **extra,
+    }
+
+
+def test_governs_the_next_step_with_the_same_args(monkeypatch):
+    from services.assistant_tasks import governs
+
+    session = _task(monkeypatch, [_step("pending", ARGS)])
+    assert governs(session, TOOL, ARGS) is True
+    assert governs(session, TOOL, OTHER) is False
+    assert governs(session, "run_mc_study", ARGS) is False
+
+
+def test_governs_a_repeat_of_a_completed_step(monkeypatch):
+    """begin_step refuses it task_step_already_completed; the hold stays out."""
+    from services.assistant_tasks import governs
+
+    session = _task(
+        monkeypatch,
+        [_step("completed", ARGS), _step("pending", {}, tool="run_simulation")],
+    )
+    assert governs(session, TOOL, ARGS) is True
+
+
+def test_governs_nothing_for_a_native_step_a_closed_task_or_no_task(monkeypatch):
+    from services.assistant_tasks import governs
+
+    assert (
+        governs(_task(monkeypatch, [_step("pending", ARGS, native=True)]), TOOL, ARGS)
+        is False
+    )
+    assert (
+        governs(
+            _task(monkeypatch, [_step("pending", ARGS)], status="cancelled"), TOOL, ARGS
+        )
+        is False
+    )
+    assert governs(ChatSession(), TOOL, ARGS) is False
+
+
+def test_an_unreadable_task_governs_nothing_so_the_hold_still_applies(monkeypatch):
+    """Fail closed (#1079): a task read that fails leaves the hold check on."""
+    from services import assistant_tasks
+
+    session = ChatSession()
+    session.task_id = "t1"
+
+    def unreadable(_task_id):
+        raise OSError("disk")
+
+    monkeypatch.setattr(assistant_tasks, "_read", unreadable)
+    assert assistant_tasks.governs(session, TOOL, ARGS) is False
+
+
+# ── The store path's resolution and words ────────────────────────────────────
+
+
+def test_a_project_lookup_that_fails_denies(monkeypatch, store):
+    """N4: only the handler's own refusal (an HTTPException) passes through."""
+    from services import project_registry
+
+    _rows, _seen, calls = store
+
+    def broken(*_a):
+        raise OSError("db down")
+
+    monkeypatch.setattr(project_registry, "resolve_project", broken)
+    assert (
+        _error(_call(monkeypatch, ChatSession(), TOOL, ARGS))["error_kind"]
+        == job_holds.PENDING
+    )
+    assert calls == []
+
+
+def test_a_project_the_user_cannot_reach_is_left_to_the_handler(monkeypatch, store):
+    from services import project_registry
+
+    _rows, _seen, calls = store
+
+    def missing(*_a):
+        raise HTTPException(404, "no such project")
+
+    monkeypatch.setattr(project_registry, "resolve_project", missing)
+    assert _error(_call(monkeypatch, ChatSession(), TOOL, ARGS)) is None
+    assert len(calls) == 1
+
+
+def test_a_store_hold_says_the_queue_has_it_not_that_its_outcome_is_unknown(
+    monkeypatch, store
+):
+    rows, _seen, _calls = store
+    rows.append({"id": "j9", "project_key": "org:alpha", "kind": "solve"})
+    message = _error(_call(monkeypatch, ChatSession(), TOOL, ARGS))["message"]
+    assert message.startswith("The solve queue already has this project's solve")
+    assert "unknown" not in message and "confirm the repeat" not in message

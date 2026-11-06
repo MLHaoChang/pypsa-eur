@@ -57,6 +57,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+from fastapi import HTTPException
+
 PENDING = "operation_pending"
 CONFLICT = "operation_conflict"
 KINDS = frozenset({PENDING, CONFLICT})
@@ -304,7 +306,10 @@ def _held(session, tool) -> Hold | None:
 
 def _store_hold(tool, args, fingerprint) -> Hold | None:
     """N1: the solve-queue store's queued or running solve of the project
-    `solve_queue_enqueue` names. Read strictly: a failed read is a hold."""
+    `solve_queue_enqueue` names. Read strictly: a failed read is a hold. The
+    store keeps no fingerprint; the tool's only effective argument is the
+    project (`rerun_current` is ignored by its handler), so a matching row is
+    the same operation and reads pending, never conflict."""
     if tool not in QUEUE_STORE_TOOLS:
         return None
     project = (args or {}).get("project_id")
@@ -317,9 +322,13 @@ def _store_hold(tool, args, fingerprint) -> Hold | None:
             key = project_registry.registry_key(
                 project_registry.resolve_project(db, user, project)
             )
-    except Exception:  # noqa: BLE001 - the handler gives its own refusal
-        return None
+    except HTTPException:
+        return None  # not found or not allowed: the handler gives its own refusal
+    except Exception:  # noqa: BLE001 - a lookup that fails denies (N4)
+        key = None
     try:
+        if key is None:
+            raise LookupError("project unresolved")
         rows = solve_job_store.load_by_status(
             _ACTIVE, project_key_prefix=key, strict=True
         )
@@ -404,17 +413,20 @@ def check(session, tool, args, fingerprint, card: dict | None = None):
     if hold is None:
         return None
     if hold.fingerprint == fingerprint:
-        repeat = ""
-        if not hold.from_store:
-            hold.told = True
-            repeat = (
-                " If the user wants it started again anyway, call it again with "
-                "the same settings: they will be asked to confirm the repeat."
+        if hold.from_store:
+            return PENDING, (
+                f"The solve queue already has this project's solve, queued or "
+                f"running, so it was not queued again. {_pointer(hold)}, or stop "
+                f"it with {_stop(hold)}."
             )
+        with session._lock:
+            hold.told = True
         return PENDING, (
             f"The same {tool} request from earlier may still be running; its "
             f"outcome is unknown, so it was not started again. {_pointer(hold)}, "
-            f"or stop it with {_stop(hold)}.{repeat}"
+            f"or stop it with {_stop(hold)}. If the user wants it started again "
+            f"anyway, call it again with the same settings: they will be asked "
+            f"to confirm the repeat."
         )
     return CONFLICT, (
         f"An earlier {tool} request with other settings may still be running; "

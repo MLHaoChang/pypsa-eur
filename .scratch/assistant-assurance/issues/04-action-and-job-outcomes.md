@@ -356,7 +356,9 @@ is a tool of the `execution` or `execution_long_running` tier (28 tools);
 abort_simulation (destructive) and wait_for_job (read) are not (N2).
 
 - **Open** (ordinary, untasked turn only; a call `assistant_tasks.governs` is
-  left to `begin_step`, N7): `tool_timeout` on the shared pool, carrying the
+  left to `begin_step`, N7: the next step with the same args, or a repeat of
+  a completed step; a task that cannot be read governs nothing, so the hold
+  check still runs): `tool_timeout` on the shared pool, carrying the
   worker future; run_simulation / run_ac_pf_stage on an uncertain raise only
   (a new solve thread alive after it, or the solver state unreadable) since
   they run on the SSE thread and never time out (N9); a returned solve whose
@@ -385,8 +387,14 @@ abort_simulation (destructive) and wait_for_job (read) are not (N2).
 - **N1**: solve_queue_enqueue with no session hold reads the solve-queue
   store's queued/running rows for the resolved project
   (`solve_job_store.load_by_status(..., strict=True)`; a failed read denies).
-  Its args are only the project, so a matching row is the same operation:
-  `operation_pending`, no card (the queue cannot run the project twice).
+  Its args are only the project (`rerun_current` is ignored by its handler),
+  so a matching row is the same operation: `operation_pending`, worded as
+  "the solve queue already has this project's solve", no card (the queue
+  cannot run the project twice). The project lookup in front of it fails
+  closed too; only the handler's own refusal (an HTTPException) passes. This
+  read also runs inside the session that queued the solve, so a chat
+  re-enqueue while the project's solve is queued or running is refused
+  instead of being answered with the existing job.
   Every other tool's cross-session replay: AA04-P9 (ticket 16). A3.2 "timeout
   after possible effect, no replay" and A3.6 "duplicate/conflicting job ops"
   are covered for jobs within one session, and across sessions for
