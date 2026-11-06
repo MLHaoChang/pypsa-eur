@@ -12,6 +12,7 @@ of it (GK A, CL-01 plan GO).
 Every 2026-10-30 row is kept, unchanged and in order; the finance defaults, tariffs and load profiles are the same
 bytes. The new version becomes the default of `load_defaults_pack()` for every caller that names no version.
 """
+
 from __future__ import annotations
 
 import json
@@ -24,8 +25,10 @@ NEW, PREV = "2026-11-06", "2026-10-30"
 FIXTURES = pathlib.Path(__file__).parent / "fixtures" / "defaults_pack"
 REPO = pathlib.Path(__file__).resolve().parents[3]
 CAMPUS_YAML = REPO / "gridspine" / "templates" / "data" / "campus_assets.yaml"
-EI_URL = ("https://ei.se/download/18.61d7efeb18b048db98c4e48/1697184391450/"
-          "Normv%C3%A4rdeslista-2024-2027.xlsx")
+EI_URL = (
+    "https://ei.se/download/18.61d7efeb18b048db98c4e48/1697184391450/"
+    "Normv%C3%A4rdeslista-2024-2027.xlsx"
+)
 #: unit -> (the Ei rows it is priced from, 2025 EUR as shipped)
 UNITS = {
     "TR_220_110_125": (("R-NR-T-8-1", "R-NR-T-8-2"), 3608000.0),
@@ -80,15 +83,27 @@ def test_every_previous_row_is_byte_equal_and_only_the_220_110_rows_are_added():
     assert [line.split(b",", 1)[0].decode() for line in added] == NEW_KEYS
     assert [line for line in cur if line not in added] == old
     # they sit with the other campus transformers, after the last one of 2026-10-30
-    last_tr = max(i for i, line in enumerate(cur) if line.startswith(b"transformer.tr_20_0p4_2p5."))
-    assert cur[last_tr + 1:last_tr + 1 + len(added)] == added
+    last_tr = max(
+        i
+        for i, line in enumerate(cur)
+        if line.startswith(b"transformer.tr_20_0p4_2p5.")
+    )
+    assert cur[last_tr + 1 : last_tr + 1 + len(added)] == added
 
 
 def test_the_other_files_are_the_same_bytes():
     for name in ("finance.yaml", "tariffs.json"):
         assert (_dir(NEW) / name).read_bytes() == (_dir(PREV) / name).read_bytes(), name
-    old_profiles = sorted(p.relative_to(_dir(PREV)) for p in (_dir(PREV) / "load_profiles").rglob("*") if p.is_file())
-    new_profiles = sorted(p.relative_to(_dir(NEW)) for p in (_dir(NEW) / "load_profiles").rglob("*") if p.is_file())
+    old_profiles = sorted(
+        p.relative_to(_dir(PREV))
+        for p in (_dir(PREV) / "load_profiles").rglob("*")
+        if p.is_file()
+    )
+    new_profiles = sorted(
+        p.relative_to(_dir(NEW))
+        for p in (_dir(NEW) / "load_profiles").rglob("*")
+        if p.is_file()
+    )
     assert new_profiles == old_profiles
     for rel in old_profiles:
         assert (_dir(NEW) / rel).read_bytes() == (_dir(PREV) / rel).read_bytes(), rel
@@ -99,9 +114,16 @@ def test_the_manifest_changes_only_the_version_the_campus_pin_and_records_why():
     cur = json.loads((_dir(NEW) / "manifest.json").read_text(encoding="utf-8"))
     why = cur.pop("campus_220_110_transformers")
     assert why["from"] == PREV and why["rows"] == NEW_KEYS and why["source"] == EI_URL
-    seed, old_seed = cur["seeded_from"]["campus_equipment"], old["seeded_from"]["campus_equipment"]
+    seed, old_seed = (
+        cur["seeded_from"]["campus_equipment"],
+        old["seeded_from"]["campus_equipment"],
+    )
     import hashlib
-    assert seed.pop("sha256") == hashlib.sha256(CAMPUS_YAML.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+    assert (
+        seed.pop("sha256")
+        == hashlib.sha256(CAMPUS_YAML.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+    )
     assert seed.pop("entries") == 86 == old_seed.pop("entries") + len(UNITS)
     old_seed.pop("sha256")
     assert cur.pop("version") == NEW
@@ -115,7 +137,11 @@ def test_the_220_110_rows_are_the_library_transcribed_with_their_sources(new):
     for unit, (codes, eur) in UNITS.items():
         e = lib[unit]
         k = f"transformer.{unit.lower()}.investment"
-        capex, life, fom = rows[f"{k}.overnight"], rows[f"{k}.lifetime"], rows[f"{k}.fom_share"]
+        capex, life, fom = (
+            rows[f"{k}.overnight"],
+            rows[f"{k}.lifetime"],
+            rows[f"{k}.fom_share"],
+        )
         assert capex.value == eur == e["capex_eur"]["value"]
         assert life.value == e["lifetime_a"]["value"] == 40
         assert fom.value == e["opex_frac"]["value"] == 0.015
@@ -130,10 +156,28 @@ def test_the_new_rows_are_shaped_as_the_132_33_100_rows(new):
     """Same part, basis, units and DEA sources as the other campus transformers; only the id, value and
     Ei row differ."""
     rows = {r.key: r for r in new.cost_values}
-    keep = ("part", "basis", "capacity_basis", "unit", "original_unit", "domain", "money_year", "currency")
+    keep = (
+        "part",
+        "basis",
+        "capacity_basis",
+        "unit",
+        "original_unit",
+        "domain",
+        "money_year",
+        "currency",
+    )
     for unit in UNITS:
         for p in PARTS:
-            ref, row = rows[f"transformer.tr_132_33_100.investment.{p}"], rows[f"transformer.{unit.lower()}.investment.{p}"]
-            assert {f: getattr(row, f) for f in keep} == {f: getattr(ref, f) for f in keep}, (unit, p)
+            ref, row = (
+                rows[f"transformer.tr_132_33_100.investment.{p}"],
+                rows[f"transformer.{unit.lower()}.investment.{p}"],
+            )
+            assert {f: getattr(row, f) for f in keep} == {
+                f: getattr(ref, f) for f in keep
+            }, (unit, p)
             if p != "overnight":
-                assert (row.source, row.source_url, row.note) == (ref.source, ref.source_url, ref.note)
+                assert (row.source, row.source_url, row.note) == (
+                    ref.source,
+                    ref.source_url,
+                    ref.note,
+                )

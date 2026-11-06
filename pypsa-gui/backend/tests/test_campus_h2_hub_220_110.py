@@ -19,6 +19,7 @@ The N-1 arm is covered by a twin case: `eh_h2_hub` with its PCC drafted as two p
 carries the whole 104.5 MVA, so each unit must be TR_220_110_160 (125.4 MVA with the margin). With N-1 off the
 intact share would let one unit carry the hub.
 """
+
 from __future__ import annotations
 
 import copy
@@ -38,7 +39,10 @@ from gridspine.static.campus_flow import SizingCriteria  # noqa: E402
 
 #: hub -> (the need the least-cost pick reported unresolved on master 103ef4969, intact and with a unit out,
 #: the unit bought, its MVA)
-HUBS = {"eh_h2_hub": (104.5, "TR_220_110_160", 160.0), "eh_h2_hub_staged": (27.3, "TR_220_110_125", 125.0)}
+HUBS = {
+    "eh_h2_hub": (104.5, "TR_220_110_160", 160.0),
+    "eh_h2_hub_staged": (27.3, "TR_220_110_125", 125.0),
+}
 SIZES = (125.0, 160.0, 200.0, 250.0, 315.0)
 MARGIN = SizingCriteria().margin
 
@@ -58,7 +62,9 @@ def _invest(root, spec, nc, method, criteria=SizingCriteria()):
     cs.rank_campus(run)
     cs.invest_campus(run, method=method, criteria=criteria)
     inv = pd.read_csv(run / cs.INVESTMENT_CSV)
-    invested = yaml.safe_load((run / cs.INVESTED_YAML).read_text())["campus"]["transformers"]
+    invested = yaml.safe_load((run / cs.INVESTED_YAML).read_text())["campus"][
+        "transformers"
+    ]
     comp = pd.read_csv(run / "campus_compliance_invested.csv").set_index("check")
     return inv, invested, comp
 
@@ -92,15 +98,26 @@ def test_the_hub_buys_one_cited_220_110_kv_unit(hub, method):
     inv, invested, comp = _invest(root, spec, nc, method)
 
     tr = inv[inv["need"] == "transformer GRID_IMPORT"]
-    assert len(tr) == 1 and (inv["status"] != "unresolved").all(), inv[["need", "status", "reason"]]
+    assert len(tr) == 1 and (inv["status"] != "unresolved").all(), inv[
+        ["need", "status", "reason"]
+    ]
     row = tr.iloc[0]
     assert (row["library_id"], row["units"], row["status"]) == (unit, 1, "chosen")
-    assert invested["GRID_IMPORT"]["library_id"] == unit and invested["GRID_IMPORT"]["sn_mva"]["value"] == unit_mva
+    assert (
+        invested["GRID_IMPORT"]["library_id"] == unit
+        and invested["GRID_IMPORT"]["sn_mva"]["value"] == unit_mva
+    )
     # the smallest R10 unit that carries the intact need with the margin
-    assert unit_mva >= need_mva * (1 + MARGIN) > max([s for s in SIZES if s < unit_mva], default=0.0)
+    assert (
+        unit_mva
+        >= need_mva * (1 + MARGIN)
+        > max([s for s in SIZES if s < unit_mva], default=0.0)
+    )
 
     loading = comp.loc["transformer_loading"]
-    assert loading["status_with_measures"] == "pass" and loading["worst_case"] == "intact"
+    assert (
+        loading["status_with_measures"] == "pass" and loading["worst_case"] == "intact"
+    )
     # the worst intact hour is within the need the library could not meet before, and within the unit
     assert 0 < loading["value"] / 100 * unit_mva <= need_mva
 
@@ -111,9 +128,15 @@ def test_a_parallel_pair_is_sized_for_a_unit_out(twin, method):
     need_mva = HUBS["eh_h2_hub"][0]
     inv, invested, comp = _invest(root, spec, nc, method)
     row = inv[inv["need"] == "transformer PCC_T1+PCC_T2"].iloc[0]
-    assert (row["library_id"], row["units"], row["status"]) == ("TR_220_110_160", 2, "chosen")
-    assert {k: v["library_id"] for k, v in invested.items()} == {"PCC_T1": "TR_220_110_160",
-                                                                  "PCC_T2": "TR_220_110_160"}
+    assert (row["library_id"], row["units"], row["status"]) == (
+        "TR_220_110_160",
+        2,
+        "chosen",
+    )
+    assert {k: v["library_id"] for k, v in invested.items()} == {
+        "PCC_T1": "TR_220_110_160",
+        "PCC_T2": "TR_220_110_160",
+    }
     # a survivor carries the whole need: 125 MVA would hold the intact half but not that
     assert need_mva / 2 * (1 + MARGIN) <= 125.0 < need_mva * (1 + MARGIN) <= 160.0
     assert comp.loc["transformer_loading", "status_with_measures"] == "pass"
@@ -121,7 +144,9 @@ def test_a_parallel_pair_is_sized_for_a_unit_out(twin, method):
 
 def test_without_n_minus_1_the_pair_shrinks_to_one_unit(twin):
     root, spec, nc = twin
-    inv, invested, _ = _invest(root / "no_n1", spec, nc, "least_cost", SizingCriteria(n_minus_1=False))
+    inv, invested, _ = _invest(
+        root / "no_n1", spec, nc, "least_cost", SizingCriteria(n_minus_1=False)
+    )
     row = inv[inv["need"] == "transformer PCC_T1+PCC_T2"].iloc[0]
     assert (row["library_id"], row["units"]) == ("TR_220_110_160", 1)
     assert list(invested) == ["PCC_T1"]
