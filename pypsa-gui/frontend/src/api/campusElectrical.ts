@@ -280,6 +280,8 @@ export interface CampusResults {
   reported_requirements?: ReportedRequirement[]
   /** The harmonic impedance scan from the PCC (DC-SURFACE-1); null for a run from before it was a stage. */
   harmonic_scan?: HarmonicScan | null
+  /** Grid-to-process 12b: dips to trips to lost tonnes, and the restart sequence; null for a run from before. */
+  dips_restart?: DipsRestart | null
   /** Each IBR unit against the per-unit Q curve (DC 15); null when the grid code has no curve. */
   ibr_q_curve?: IbrQCurveRow[] | null
   /** A run from before the table was kept, held to a grid code with the curve: rerun to add it. */
@@ -404,6 +406,72 @@ export type HarmonicScan =
   | { error?: undefined; limit_h: number; limit_source: LimitSource | null; clause: string | null; notes: string[]
       basis: string[]; label: string; resonance: HarmonicResonance[]; envelope: HarmonicEnvelopePoint[] }
 
+/** The restart, ride-through and motor fields of a process unit, as the run read them. */
+export type DipsRestartField = 'ride_through_curve' | 'restart_time_h' | 'motor_kw' | 'start_method' | 'i_start_pu'
+export type DipsRestartInputs = Record<DipsRestartField, string | number | null>
+
+/** One row of `campus_dip_trips.csv` (gridspine `campus_study.restart_campus`): `class` rows per unit and dip
+ *  class, `unit` rows with the expected lost tonnes a year, one `total` row. */
+export interface DipTripRow {
+  level: 'class' | 'unit' | 'total'
+  unit?: string | null
+  depth_pct?: number | null
+  duration_s?: number | null
+  count_per_year?: number | null
+  trips_per_year?: number | null
+  restart_time_h?: number | null
+  rate_tph?: number | null
+  mass_pull?: number | null
+  lost_t_per_trip?: number | null
+  lost_t_per_year?: number | null
+  /** class rows: trips | rides | unknown; unit rows: known | unknown. */
+  verdict?: string | null
+  dip_stats_source?: string | null
+  rate_basis?: string | null
+  mass_pull_basis?: string | null
+  incomplete?: boolean | null
+  unknown_count?: number | null
+  known_count?: number | null
+  note?: string | null
+}
+
+/** One row of `campus_restart.csv`: per `transition` (trip, island), `unit` rows, timeline `event` rows and one
+ *  `total` row. */
+export interface RestartRow {
+  level: 'unit' | 'event' | 'total'
+  transition: 'trip' | 'island'
+  unit?: string | null
+  tier?: string | null
+  block?: number | null
+  pickup_s?: number | null
+  full_rate_s?: number | null
+  t_s?: number | null
+  event?: string | null
+  du_pct?: number | null
+  start_verdict?: string | null
+  lost_wait_t?: number | null
+  lost_restart_t?: number | null
+  lost_t?: number | null
+  /** unit/event rows: ok | fail | unknown. */
+  verdict?: string | null
+  fail_count?: number | null
+  unknown_count?: number | null
+  lower_bound?: boolean | null
+  limit_pct?: number | null
+  limit_clause?: string | null
+  sk_mva_source?: string | null
+  assumed?: boolean | null
+  note?: string | null
+}
+
+/** The dip and restart screens, or `{error}` when they could not run (the run itself still stands). */
+export type DipsRestart =
+  | { error: string }
+  | { error?: undefined; inputs: Record<string, DipsRestartInputs>; dip_label: string; restart_label: string
+      basis: string[]; dip_trips: DipTripRow[]; restart: RestartRow[]
+      /** Units whose restart, ride-through or motor field changed since the run. */
+      out_of_date: string[] }
+
 export interface CampusMilp {
   status: MilpJobRecord | null
   results: MilpResults | null
@@ -444,7 +512,7 @@ export interface CampusState {
 }
 
 /** The run's stages, as the backend names them (`RUN_STAGES`), then `done`. */
-export type CampusRunStage = 'prepare' | 'rank' | 'island_checks' | 'cuts' | 'size' | 'harmonic_scan' | 'voltage_stability' | 'invest'
+export type CampusRunStage = 'prepare' | 'rank' | 'island_checks' | 'cuts' | 'size' | 'harmonic_scan' | 'voltage_stability' | 'dips_restart' | 'invest'
   | 'gfm_settings' | 'done'
 
 /** The campus run's solve-queue job, with the stage it reached. */
