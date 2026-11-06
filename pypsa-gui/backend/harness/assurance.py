@@ -15,12 +15,13 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictBool,
     StrictFloat,
     StrictInt,
     ValidationError,
 )
 
-from harness import derived
+from harness import derived, predicates
 from services import assurance_records as records
 
 
@@ -96,12 +97,43 @@ class Derived(BaseModel):
     unit: str = Field(min_length=1, max_length=16)
 
 
+class PredicateSource(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    tool_use_id: str | None = Field(default=None, min_length=1, max_length=128)
+    evidence_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class Predicate(BaseModel):
+    """A complete-population predicate (AA-03 S4): all, none or top_k of one page."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    kind: Literal["predicate"]
+    quantifier: str = Field(min_length=1, max_length=16)
+    # One evidence record, by its tool call or its id; no path (the whole page).
+    source: PredicateSource
+    metric: str = Field(min_length=1, max_length=64)
+    unit: str = Field(min_length=1, max_length=16)
+    comparator: str | None = Field(default=None, min_length=1, max_length=2)
+    threshold: (
+        Annotated[StrictInt | StrictFloat, Field(allow_inf_nan=False)] | None
+    ) = None
+    holds: StrictBool | None = None
+    k: StrictInt | None = None
+    members: list[Annotated[str, Field(min_length=1, max_length=128)]] | None = Field(
+        default=None, min_length=1, max_length=predicates.MAX_MEMBERS
+    )
+
+
 class Draft(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: StrictInt
     blocks: list[Observed] = Field(min_length=1, max_length=20)
     interpretations: list[Interpretation] = Field(default_factory=list, max_length=2)
     derived: list[Derived] = Field(default_factory=list, max_length=8)
+    predicates: list[Predicate] = Field(
+        default_factory=list, max_length=predicates.MAX_ENTRIES
+    )
 
 
 class Computed(Observed):
@@ -115,6 +147,9 @@ class ProfileDraft(BaseModel):
     blocks: list[Computed] = Field(max_length=20)
     interpretations: list[Interpretation] = Field(default_factory=list, max_length=2)
     derived: list[Derived] = Field(default_factory=list, max_length=8)
+    predicates: list[Predicate] = Field(
+        default_factory=list, max_length=predicates.MAX_ENTRIES
+    )
 
 
 def _object(pairs):
@@ -177,6 +212,7 @@ class Turn:
         self.reviewer_status = "not_required"
         self.interpretations = []
         self.derived = []
+        self.predicates = []
         self.usage_before = dict(session.usage_acc)
         self.effect_pending = False
         self.reservation_nonce = None
@@ -428,7 +464,7 @@ class Turn:
         record = self.request_evidence
         if record is None:
             # Nothing is published to check a derived entry against (GK B (28) ask 1).
-            if draft.blocks or draft.derived:
+            if draft.blocks or draft.derived or draft.predicates:
                 raise ValueError("unavailable request")
             if self.scope_hint is not None:
                 return (
@@ -562,7 +598,9 @@ class Turn:
         shared = derived.scope_key(record)
         published = {b["id"]: (b["value"], b["unit"], shared) for b in public_blocks}
         lines.extend(self._derive(draft, published))
-        return "\n".join(lines), public_blocks, [record["evidence_id"]]
+        evidence_ids = [record["evidence_id"]]
+        lines.extend(self._predicate(draft, published, evidence_ids))
+        return "\n".join(lines), public_blocks, evidence_ids
 
     def history_seed(self, messages):
         seed = []
@@ -1003,7 +1041,12 @@ class Turn:
             draft = ProfileDraft.model_validate(
                 json.loads(text, object_pairs_hook=_object)
             )
-            if draft.schema_version != 1 or draft.blocks or draft.derived:
+            if (
+                draft.schema_version != 1
+                or draft.blocks
+                or draft.derived
+                or draft.predicates
+            ):
                 raise ValueError("unsupported_effect_draft")
             record = operation(self.owner, self.operation_contract["operation_id"])
             if record["outcome"] != "completed" or record[
@@ -1030,7 +1073,12 @@ class Turn:
         data = json.loads(text, object_pairs_hook=_object)
         if self.navigation_actions and data.get("blocks") == []:
             draft = ProfileDraft.model_validate(data)
-            if draft.schema_version != 1 or draft.interpretations or draft.derived:
+            if (
+                draft.schema_version != 1
+                or draft.interpretations
+                or draft.derived
+                or draft.predicates
+            ):
                 raise ValueError("invalid_navigation_draft")
             lines = []
             for action_id in self.navigation_actions:
@@ -1195,7 +1243,11 @@ class Turn:
                 )
                 if note in (notes or {"static"})
             )
-            + "".join("\n" + line for line in self._derive(draft, published)),
+            + "".join("\n" + line for line in self._derive(draft, published))
+            + "".join(
+                "\n" + line
+                for line in self._predicate(draft, published, evidence_ids)
+            ),
             public_blocks,
             evidence_ids,
         )
@@ -1204,6 +1256,40 @@ class Turn:
         """Check the draft's derived entries; their lines carry the software value."""
         self.derived = derived.check(draft.derived, published)
         return [derived.line(entry) for entry in self.derived]
+
+    def _predicate(self, draft, published, evidence_ids):
+        """Check the draft's predicates against pages this turn read (S4, GK B C4).
+
+        Each cited record must be one this turn captured, from this project,
+        and still current in the store; its lines carry the software's truth.
+        Each record joins `evidence_ids`, so commit re-checks it under the lock.
+        """
+
+        def resolve(source):
+            if source.tool_use_id is not None:
+                record = self.sources.get(source.tool_use_id)
+            else:
+                record = next(
+                    (
+                        r
+                        for r in self.sources.values()
+                        if r["evidence_id"] == source.evidence_id
+                    ),
+                    None,
+                )
+            if record is None:
+                return None
+            record = records.evidence(self.owner, record["evidence_id"])
+            if record["project_id"] != self.project_id:
+                raise ValueError("predicate_other_project")
+            return record
+
+        taken = set(published) | {e["id"] for e in self.derived}
+        self.predicates = predicates.check(draft.predicates, resolve, taken)
+        for entry in self.predicates:
+            if entry["evidence_id"] not in evidence_ids:
+                evidence_ids.append(entry["evidence_id"])
+        return [predicates.line(entry, _label) for entry in self.predicates]
 
     def commit(self, blocks, ctx, *, truncated=False):
         from harness.history import _redact_for_persist
@@ -1276,6 +1362,11 @@ class Turn:
                 {k: e[k] for k in ("id", "formula_id", "operands", "value", "unit")}
                 for e in entries
             ]
+        # Predicates (S4) likewise: policy "3", with any derived entries kept (GK B C8).
+        checked = [] if draft_failed else self.predicates
+        if checked:
+            receipt["policy_version"] = records.PREDICATE_POLICY_VERSION
+            receipt["predicates"] = [dict(e) for e in checked]
         if self.operation_contract is not None:
             receipt["operation_ids"] = (
                 [] if draft_failed else [self.operation_contract["operation_id"]]
@@ -1349,6 +1440,7 @@ class Turn:
             "blocks": public_blocks,
             "interpretations": self.interpretations if not draft_failed else [],
             **({"derived": entries} if entries else {}),
+            **({"predicates": checked} if checked else {}),
             "verdict": "limited" if limitations else "passed",
             "receipt": receipt,
             "expires_at": time.time() + records.RETENTION_SECONDS,

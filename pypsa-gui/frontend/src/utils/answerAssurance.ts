@@ -14,7 +14,23 @@ export interface AnswerReceipt {
   navigation?: NavigationEntry[]
   /** Policy "2" only (AA-03 S2): software-recomputed derived claims. */
   derived?: DerivedEntry[]
+  /** Policy "3" only (AA-03 S4): software-decided complete-population predicates. */
+  predicates?: PredicateEntry[]
 }
+
+interface PredicateCommon {
+  id: string
+  evidence_id: string
+  component_class: string
+  metric: string
+  unit: string
+  population: number
+  warnings: string[]
+}
+
+export type PredicateEntry =
+  | (PredicateCommon & { quantifier: 'all' | 'none'; comparator: '>' | '>=' | '<' | '<='; threshold: number; holds: boolean })
+  | (PredicateCommon & { quantifier: 'top_k'; k: number; members: string[] })
 
 export interface DerivedEntry {
   id: string
@@ -51,6 +67,35 @@ function validDerived(entries: unknown): boolean {
       && typeof d.value === 'number' && Number.isFinite(d.value)
       && Array.isArray(d.operands) && d.operands.length >= 1 && d.operands.length <= 8
       && d.operands.every(o => text(o, 4096))
+  })
+}
+
+const PREDICATE_KEYS = ['id', 'quantifier', 'evidence_id', 'component_class', 'metric', 'unit', 'population', 'warnings']
+const QUANTIFIER_KEYS: Record<string, string[]> = {
+  all: ['comparator', 'threshold', 'holds'],
+  none: ['comparator', 'threshold', 'holds'],
+  top_k: ['k', 'members'],
+}
+const COMPARATORS = new Set(['>', '>=', '<', '<='])
+const count = (v: unknown, min: number, max: number) => Number.isInteger(v) && (v as number) >= min && (v as number) <= max
+
+/** Policy "3" carries one to eight predicates, each with exactly its quantifier's fields. */
+function validPredicates(entries: unknown): boolean {
+  return Array.isArray(entries) && entries.length >= 1 && entries.length <= 8 && entries.every(e => {
+    if (!e || typeof e !== 'object' || Array.isArray(e)) return false
+    const p = e as Record<string, unknown>
+    const own = typeof p.quantifier === 'string' ? QUANTIFIER_KEYS[p.quantifier] : undefined
+    if (!own) return false
+    const keys = [...PREDICATE_KEYS, ...own]
+    if (Object.keys(p).length !== keys.length || !keys.every(k => k in p)) return false
+    if (!(text(p.id, 64) && text(p.evidence_id, 128) && text(p.component_class, 64) && text(p.metric, 64)
+      && text(p.unit, 16) && count(p.population, 1, Number.MAX_SAFE_INTEGER)
+      && Array.isArray(p.warnings) && p.warnings.length <= 20 && p.warnings.every(w => typeof w === 'string'))) return false
+    return p.quantifier === 'top_k'
+      ? count(p.k, 1, 20) && Array.isArray(p.members) && p.members.length >= 1 && p.members.length <= 100
+        && p.members.every(m => text(m, 128))
+      : typeof p.comparator === 'string' && COMPARATORS.has(p.comparator) && typeof p.holds === 'boolean'
+        && typeof p.threshold === 'number' && Number.isFinite(p.threshold)
   })
 }
 
@@ -132,8 +177,10 @@ export function parseApproval(value: Record<string, unknown>): ApprovedAnswerFra
     || value.turn_id.length > 128
     || typeof value.verdict !== 'string' || !['passed', 'limited'].includes(value.verdict) || !receipt
     || typeof receipt.content_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(receipt.content_sha256)
-    || !(receipt.policy_version === '1' ? receipt.derived === undefined
-      : receipt.policy_version === '2' && validDerived(receipt.derived))
+    || !(receipt.policy_version === '1' ? receipt.derived === undefined && receipt.predicates === undefined
+      : receipt.policy_version === '2' ? receipt.predicates === undefined && validDerived(receipt.derived)
+      : receipt.policy_version === '3' && validPredicates(receipt.predicates)
+        && (receipt.derived === undefined || validDerived(receipt.derived)))
     || typeof receipt.reviewer_status !== 'string' || !REVIEW_STATUSES.has(receipt.reviewer_status)
     || (receipt.request_complete !== undefined && typeof receipt.request_complete !== 'boolean')
     || (scope !== undefined && (!scope || typeof scope !== 'object' || Array.isArray(scope)

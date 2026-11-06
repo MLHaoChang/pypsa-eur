@@ -4,7 +4,7 @@
 # P2: private drafts and approved answer publication
 
 Status: ready-for-agent
-Progress: S1 merged (#1154), S3 merged (#1171); S2 in progress; S4–S5 planned
+Progress: S1 merged (#1154), S3 merged (#1171), S2 merged (#1186); S4 in progress; S5 planned
 Type: task
 Blocked by: 01, 02
 
@@ -49,7 +49,7 @@ names the slice that closes it, or its external blocker.
 | A2.7 | reviewer without tools; IDs/pairing; abort; generation change; stale ACK | Repair spends 0 tool executions (dispatch spy) → **S1 (passed)** |
 | A2.8 | storage/generator slots, missing basis, wrong run/selection, ambiguous cost, unsupported slots limited, 20/21 blocks | Ambiguous capacity, `request_complete` false while a slot is unmapped → **S3 (passed)**; valid blocks keep scope → **S3 (passed at 12 blocks, the largest valid set; 20 slots pinned by `test_harness_reliability`)**; required warning slots → `_pending`, blocked: no warning disposition in the result-slot contract (ticket 13) |
 | A2.9 | 17 MWh and energy vs objective weights; 51 EUR bridge; window joins; signed baseline; zero denominator | Percentage points, near-zero denominator, rounding cannot widen tolerance, formula DAG refs → **S2 (passed)** |
-| A2.10 | exclusion masks; hostile labels/notes; reviewer spoof | all/none/top-k, ties, feasible incumbent vs optimum → S4; stochastic coverage pending: no checked stochastic profile exists (ticket 10) |
+| A2.10 | exclusion masks; hostile labels/notes; reviewer spoof | all/none/top-k over one complete static_page population, ties at the boundary, hostile labels → **S4 (passed)**; feasible incumbent vs optimum ("feasible, not proven optimal") → `_pending`, blocked: no checked solver-status evidence (ticket 10); stochastic coverage pending: no checked stochastic profile exists (ticket 10) |
 
 Slices, one PR each and test-first: S1 failure modes; S2 derived claims
 (`harness/derived.py`); S3 request slots; S4 complete-population predicates
@@ -190,3 +190,54 @@ GO on (a): receipt policy "2" = policy "1" plus `derived`, because `answer_recei
 - P4. One killed mutant per new guard ("1"+derived accepted, "2" with empty derived accepted, a loose entry check).
 - P5. UX (10) looks only if the frontend hunk renders something new; a parse-only change does not need it.
 - D-6. The hit-rate goes in the PR body and to the coordinator for the owner: 5 of 305 published fixture values (57 distinct) fail at 1–3 decimals, 81 at 0. The 1e-9 tolerance stays.
+
+### GK B (28) S2 review (2026-11-06)
+
+NOT OK @6e790881, then OK @cda279ab (#1186). Ask 1 was met: the effect draft, the navigation draft and validate_profile without request evidence refuse a non-empty `derived`, each with a killed mutant. The clarification turn is accepted as is: it returns its question before any draft is parsed.
+
+### GK B (28) S4 plan verdict (2026-11-06): GO WITH CONDITIONS
+
+Q1 = (a): feasible incumbent stays a pending row; no result-side predicates. Q2 = (a): new receipt policy "3". The plan is `harness/predicates.py` with a registry {all, none, top_k} and check(entries, populations). The draft field `predicates` (max 8) goes on Draft and ProfileDraft; the population is the entity_ids one cited static_page record, read this turn, holds for the metric.
+
+- C1 Completeness. A population is complete only if every one of these holds:
+  - one record;
+  - offset == 0;
+  - has_more is False;
+  - returned == total_count;
+  - distinct entity_ids carrying that metric == returned.
+
+  Each failing leg gets its own test and mutant. This includes returned < total_count with has_more forged false.
+- C2 A zero-entity population is refused for all/none; "all of nothing" never reads true.
+- C3 The software line names the class, N, and "configured static input, transient components excluded, time-series overrides not checked". The predicate keeps the record's validity warnings. Truth is never stated beyond the page.
+- C4 Freshness is checked as for a static_page block claim: owner, project, expiry, and source_sha256 or the page digest. A record the turn did not read is refused, and so is one from another project; both are tested.
+- C5 The threshold unit must equal the metric unit exactly, with no conversion. Comparison is exact, and the boundary is tested on both sides (== threshold under > and >=). The claimed truth is a strict bool; 0, 1 and "true" are refused.
+- C6 top_k:
+  - k is in 1..20, and a k larger than the population N is refused, not clamped (GK B (28) correction).
+  - Ranking is by value, with ties kept at the boundary; entity_id only orders the listing and never breaks a tie.
+  - members must equal the computed set, with no duplicates and no unknown ids.
+  - Test a tie at the boundary and a tie just inside it, and keep the hostile-label test.
+- C7 A predicate's threshold, k or N never makes a prose number acceptable (as S2 D-5).
+- C8 Receipt "3":
+  - `predicates` holds 1..8 entries.
+  - `derived` is absent or holds 1..8 entries, never an empty list.
+  - "1" or "2" carrying `predicates` is refused, and so is "3" without `predicates`.
+  - Each entry is checked field by field, with extra keys forbidden.
+  - Every reader accepts "3": receipt_policy_ok, pilot score, parseApproval, the F1(b) test, and the contract snapshot gaining "3" while "1" and "2" stay byte-equal.
+  - One killed mutant for each guard.
+- C9 The three unchecked paths (S2 ask 1) refuse a non-empty `predicates`, each with a test and a killed mutant.
+- C10 The "feasible, not proven optimal" `_pending` row names ticket 10. A non-static_page population is refused for each other evidence kind with per-entity facts; if there are none, the PR says so.
+
+The PR head goes to GK B when it is green. The S5 plan goes to GK B once S4 merges.
+
+### S4 result
+
+`harness/predicates.py`, `tests/assurance_acceptance/test_p4_population_predicates.py`.
+A draft's `predicates` (max 8, on Draft and ProfileDraft) claim all/none against a
+threshold, or the top k. The population is one static_page record this turn read,
+re-checked in the store, from this project; its evidence id joins the receipt's
+`evidence_ids`, so commit re-checks it under the lock. Every other evidence kind
+is refused (`not_a_population`): get_component, series, aggregate load, run, run
+section, run comparison and scoped results each hold one entity, step, selection
+or run, not per-entity facts of one class. Receipt policy "3" carries the
+predicates and keeps any derived entries. 38 backend and 6 frontend mutants killed.
+"Feasible, not proven optimal" stays `_pending` under ticket 10 (A2.10 row).

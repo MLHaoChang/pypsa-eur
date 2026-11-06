@@ -89,6 +89,22 @@ def test_a_derived_policy_two_receipt_is_supported():
         {"id": "d1", "formula_id": "difference/1", "operands": ["a", "b"], "value": 1, "unit": "MW"}])
     assert "unsupported_policy" not in score(case, frames, answer)["failures"]
 
+def test_a_predicate_policy_three_receipt_is_supported():
+    # AA-03 S4 (GK B C8): policy "3" is policy "1" plus predicates.
+    case = GOLDEN_CASES[0]
+    frames, answer = observation(case)
+    answer["receipt"].update(policy_version="3", predicates=[
+        {"id": "p1", "quantifier": "all", "evidence_id": "E1", "component_class": "Load", "metric": "p_set",
+         "unit": "MW", "population": 2, "warnings": [], "comparator": ">", "threshold": 1, "holds": True}])
+    assert "unsupported_policy" not in score(case, frames, answer)["failures"]
+
+
+def test_a_policy_three_receipt_without_predicates_is_unsupported():
+    case = GOLDEN_CASES[0]
+    frames, answer = observation(case)
+    answer["receipt"].update(policy_version="3")
+    assert "unsupported_policy" in score(case, frames, answer)["failures"]
+
 def passing_results():
     results = []
     for case in CASES:
