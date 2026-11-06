@@ -93,7 +93,7 @@ export default function StorageCycling() {
   // SNAPSHOT INDEX (not a results payload) — same hook Dispatch uses so the
   // storage-dispatch query below can be windowed before any payload exists.
   const { win, winValid, fetchRange } = useResultsWindow(currentProject)
-  const { data: storPowerTS } = useQuery({
+  const { data: storPowerTS, isFetched: dispatchFetched } = useQuery({
     queryKey: nk(currentProject, 'results', 'storage_dispatch', win.from, win.to),
     queryFn: () => resultsApi.getStorageDispatchResults(undefined, fetchRange),
     enabled: winValid,
@@ -299,8 +299,9 @@ export default function StorageCycling() {
         <ResultState state="not_run"
           reason="Cycles come from the solved storage dispatch. Run a solve to count them." />
         {/* Reserve products on the backup storage (DC 06): their products and
-            "not solved" lines are known before a solve. */}
-        <ReserveCommitments />
+            "not solved" lines are known before a solve. While the dispatch
+            still loads this view is replaced, so a scroll request waits. */}
+        <ReserveCommitments settled={dispatchFetched || !winValid} />
       </div>
     )
   }

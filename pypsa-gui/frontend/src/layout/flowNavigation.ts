@@ -93,8 +93,9 @@ function currentOrigin(target: FlowTarget | null, fromSite3D = false): FlowRetur
 
 /** Run a jump and remember where it started. The store's own navigation hooks
  *  clear a pending return, so it is set after the jump. */
-function withReturn(target: FlowTarget | null, jump: () => void, fromSite3D = false): void {
+function withReturn(target: FlowTarget | null, jump: () => void, fromSite3D = false, label?: string): void {
   const origin = currentOrigin(target, fromSite3D)
+  if (origin && label) origin.label = label
   jump()
   if (origin) useUIStore.setState({ flowReturn: origin })
 }
@@ -231,13 +232,15 @@ export function openN1BranchSelector(): void {
 }
 
 /** Show one Results tab from where the user is (the Control tabs' links): the Results panel on
- *  that tab, Back returning to the view it left. Never flips the mode. */
-export function showResultsTab(tab: string): void {
+ *  that tab, Back returning to the view it left. Never flips the mode. `section` asks the tab
+ *  to scroll to one of its blocks once it is on screen (request-then-scroll); `from` names
+ *  the origin on the Back pill when the section label would name another place. */
+export function showResultsTab(tab: string, opts: { section?: string; from?: string } = {}): void {
   withReturn(null, () => {
     const ui = useUIStore.getState()
     ui.setSlidePanel('results')
-    ui.requestResultsTab(tab)
-  })
+    ui.requestResultsTab(tab, opts.section)
+  }, false, opts.from)
 }
 
 /** Show the Grid readiness scorecard ("Readiness › Grid readiness ›"): Issues

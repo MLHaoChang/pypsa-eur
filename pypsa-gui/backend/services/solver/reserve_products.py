@@ -334,8 +334,8 @@ def plan(
             raise ReserveRefusal(
                 kind,
                 (
-                    f"Reserve product \u201c{p.id}\u201d: its capacity price series {why}; save the "
-                    "commercial config again to bind it"
+                    f"Reserve product \u201c{p.id}\u201d: its capacity price series {why}; save "
+                    "Commercial & parties again to pick up the price"
                 ),
             )
         if not np.isfinite(price.to_numpy(dtype=float)).all():
@@ -454,7 +454,7 @@ def add_rows(n, sns, the_plan: dict, emit=lambda _m: None) -> int:
     sns = coord
     names = the_plan["storages"]
     pairs = [(k.id, s) for k in the_plan["products"] for s in the_plan["on"][k.id]]
-    cols = pd.Index([f"{s}{SEP}{k}" for k, s in pairs], name="reserve")
+    cols = pd.Index(planned_columns(the_plan), name="reserve")
     r = m.add_variables(lower=0.0, coords=[coord, cols], name="Reserve-r")
     by = {k.id: k for k in the_plan["products"]}
     eh = n.snapshot_weightings.stores.loc[sns].astype(float)
@@ -553,9 +553,15 @@ class _Record:
     """The commitments of every LP the wrap built (rolling and myopic build one per
     window or period), read from each model before PyPSA drops it."""
 
-    def __init__(self, products: list[str], digest: str | None = None):
+    def __init__(
+        self,
+        products: list[str],
+        digest: str | None = None,
+        columns: list[str] | None = None,
+    ):
         self.products = products
         self.digest = digest
+        self.columns = columns or []
         self.frames: list[pd.DataFrame] = []
         self._pending = None
 
@@ -576,6 +582,34 @@ class _Record:
 
 
 RECORD_ATTR = "_ic_reserve_record"
+
+
+def planned_columns(the_plan: dict) -> list[str]:
+    """The ``<storage>|<product>`` commitments the plan gives the LP (add_rows'
+    ``Reserve-r`` coordinates)."""
+    return [
+        f"{s}{SEP}{k.id}" for k in the_plan["products"] for s in the_plan["on"][k.id]
+    ]
+
+
+def weights_key(n) -> str:
+    """The hours and period weights a settlement multiplies the commitments by,
+    as a key: a weighting change after the solve makes the persisted MW stale
+    (GK B L5). It reads the stored ``snapshot_weightings.objective`` and
+    ``investment_period_weightings.objective``, not ``reserve_weights``, whose
+    period weight follows ``_multi_invest``, a flag only a live solve sets."""
+    import hashlib
+
+    hours = n.snapshot_weightings.objective.astype(float)
+    ipw = n.investment_period_weightings
+    period = (
+        ipw.objective.astype(float) if "objective" in ipw else pd.Series(dtype=float)
+    )
+    payload = {
+        "hours": [repr(float(v)) for v in hours.to_numpy()],
+        "period": {str(k): repr(float(v)) for k, v in period.items()},
+    }
+    return hashlib.sha256(json.dumps(payload).encode()).hexdigest()
 
 
 def clear_solution(n) -> None:
@@ -610,6 +644,8 @@ def persist_solution(n) -> bool:
         "products": rec.products,
         "axis_hash": axis_hash(n.snapshots),
         "inputs": rec.digest,
+        "weights": weights_key(n),
+        "columns": list(rec.columns),
     }
     return True
 
@@ -617,7 +653,9 @@ def persist_solution(n) -> bool:
 def solved(n, digest: str | None = None) -> tuple[pd.DataFrame | None, list[str]]:
     """The persisted commitments (MW, columns ``<storage>|<product>``), or None + why.
     ``digest`` (``inputs_digest`` of the current products and floors): a solve
-    that read other inputs is stale, never read."""
+    that read other inputs, or other hours or period weights, is stale, never
+    read. A frame that lacks a planned commitment column is no solve: an absent
+    column never reads as 0 MW (GK B L5)."""
     from services.commercial.settlement_inputs import axis_hash
 
     meta = (getattr(n, "meta", None) or {}).get(META_KEY)
@@ -630,7 +668,36 @@ def solved(n, digest: str | None = None) -> tuple[pd.DataFrame | None, list[str]
         return None, ["reserve_not_solved"]
     if digest is not None and meta.get("inputs") != digest:
         return None, ["reserve_not_solved", "reserve_inputs_changed_since_solve"]
+    if meta.get("weights") != weights_key(n):
+        return None, ["reserve_not_solved", "reserve_inputs_changed_since_solve"]
+    planned = meta.get("columns")
+    if not planned or not set(planned) <= set(map(str, frame.columns)):
+        return None, ["reserve_not_solved"]
     return frame, []
+
+
+def reserved_energy(
+    n, frame: pd.DataFrame, products: list[ReserveProduct], s: str
+) -> tuple[np.ndarray, np.ndarray]:
+    """(up, down) MWh per snapshot that storage ``s``'s committed products tie up:
+    up = sum_U r d_k / eta_dis, the energy kept above the floor (row 3);
+    down = sum_D r d_k eta_store, the room kept free below the energy capacity
+    (row 4). A column absent from ``frame`` is a product not planned on ``s``."""
+    sns = n.snapshots
+    ed = _dense(n, "efficiency_dispatch", sns, [s])[s].to_numpy(dtype=float)
+    es = _dense(n, "efficiency_store", sns, [s])[s].to_numpy(dtype=float)
+    up = np.zeros(len(sns))
+    down = np.zeros(len(sns))
+    for p in products:
+        col = f"{s}{SEP}{p.id}"
+        if col not in frame.columns:
+            continue
+        r = frame[col].reindex(sns).to_numpy(dtype=float)
+        if p.up:
+            up += r * p.sustain_h / ed
+        if p.down:
+            down += r * p.sustain_h * es
+    return up, down
 
 
 def objective_revenue(n) -> float:
@@ -674,7 +741,11 @@ def _wrap_with_reserve_products(
         return user_fn
     floors, strings = project_backup(network) if backup is _UNSET else backup
     the_plan = plan(network, products, floors, strings)
-    record = _Record([p.id for p in products], inputs_digest(products, floors))
+    record = _Record(
+        [p.id for p in products],
+        inputs_digest(products, floors),
+        planned_columns(the_plan),
+    )
     setattr(network, RECORD_ATTR, record)
 
     def emit(msg: str) -> None:

@@ -33,9 +33,9 @@ _RULES: tuple[tuple[tuple[str, ...], str, str, str], ...] = (
         "reserve_refused",
         "Reserve products refused before solving",
         "The reserve products cannot be built on this network as configured: the "
-        "detail names the product or storage and the reason. Fix it (re-save the "
-        "commercial config to rebind a price, restore a backup string's hold, or "
-        "drop the product), then run again.",
+        "detail names the product or storage and the reason. Save Commercial & "
+        "parties again to pick up the price, restore the backup string's hold, or "
+        "remove the product, then run again.",
     ),
     (
         ("validation_failed",),

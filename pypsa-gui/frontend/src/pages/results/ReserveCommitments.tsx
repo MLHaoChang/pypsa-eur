@@ -1,11 +1,11 @@
-import { useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   ResponsiveContainer, ComposedChart, AreaChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine,
 } from 'recharts'
 import { Lock } from 'lucide-react'
 import {
-  reservesApi, lineProduct, reservesOutOfDate, revenueUnit,
+  RESERVE_SECTION, reservesApi, lineProduct, reservesOutOfDate, revenueUnit,
   type ReserveLine, type ReserveProduct, type ReservesPayload, type ReserveStorage,
 } from '../../api/reserves'
 import { useUIStore } from '../../store/uiStore'
@@ -41,6 +41,8 @@ const PALETTE_INDEX = [2, 3, 4, 7]
 const productColour = (i: number) => colourForCarrier('', PALETTE_INDEX[i])
 const OTHER_COLOUR = colourForCarrier('', 0)
 const SOC_COLOUR = 'var(--color-cat-storage)'
+const HELD_UP_LABEL = 'Held for up-reserve'
+const HELD_DOWN_LABEL = 'Kept free for down-reserve'
 
 /** Hatch angle per direction: up and down variants share a colour. */
 const HATCH: Record<'up' | 'down' | 'symmetric', number> = { up: 45, down: -45, symmetric: 90 }
@@ -103,6 +105,26 @@ function hatches(base: string, series: Series[]) {
   )
 }
 
+/** The SoC colour, hatched: the energy a commitment ties up (up 45°, down −45°).
+ *  A function, not a component, for the same reason as `hatches`. */
+function heldPattern(id: string, angle: number) {
+  return (
+    <pattern key={id} id={id} width={5} height={5} patternUnits="userSpaceOnUse" patternTransform={`rotate(${angle})`}>
+      <rect width={5} height={5} fill={SOC_COLOUR} fillOpacity={0.12} />
+      <line x1={0} y1={0} x2={0} y2={5} stroke={SOC_COLOUR} strokeWidth={1.5} strokeOpacity={0.55} />
+    </pattern>
+  )
+}
+
+function HeldSwatch({ id, angle }: { id: string; angle: number }) {
+  return (
+    <svg width={14} height={10} aria-hidden className="shrink-0">
+      <defs>{heldPattern(id, angle)}</defs>
+      <rect width={14} height={10} rx={2} fill={`url(#${id})`} stroke={SOC_COLOUR} strokeWidth={1} />
+    </svg>
+  )
+}
+
 function Swatch({ base, s }: { base: string; s: Series }) {
   return (
     <svg width={14} height={10} aria-hidden className="shrink-0">
@@ -113,15 +135,26 @@ function Swatch({ base, s }: { base: string; s: Series }) {
 
 const legendRow = 'flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-legend mb-1'
 
-export default function ReserveCommitments() {
+/** `settled`: the host view is in its final layout; a scroll request waits until then,
+ *  or a card the host is about to replace would take it (Storage cycling's not-solved view). */
+export default function ReserveCommitments({ settled = true }: { settled?: boolean }) {
   const project = useUIStore(s => s.currentProject)
   const { data } = useQuery({
     queryKey: nk(project, 'results', 'reserves'),
     queryFn: reservesApi.get,
     retry: false,
   })
+  // Request-then-scroll: a link asked for this card; scroll once it is on screen.
+  const sectionRequest = useUIStore(s => s.resultsSectionRequest)
+  const clearSectionRequest = useUIStore(s => s.clearResultsSectionRequest)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (sectionRequest !== RESERVE_SECTION || !settled || !data || !ref.current) return
+    ref.current.scrollIntoView?.({ block: 'start' })
+    clearSectionRequest()
+  }, [sectionRequest, settled, data, clearSectionRequest])
   if (!data) return null
-  return <ReserveSection payload={data} />
+  return <div ref={ref}><ReserveSection payload={data} /></div>
 }
 
 export function ReserveSection({ payload }: { payload: ReservesPayload }) {
@@ -168,9 +201,22 @@ function StorageCharts({ storage, snapshots, series }: {
 }) {
   const base = `rh${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
   const floor = storage.floor_mwh
-  const energyRows = useMemo(() => snapshots.map((t, i) => ({
-    t, soc: storage.soc_mwh?.[i] ?? null, floor: floor ?? null,
-  })), [snapshots, storage.soc_mwh, floor])
+  const cap = storage.e_cap_mwh
+  const heldUp = floor != null ? storage.reserved_up_mwh ?? null : null
+  const heldDown = cap != null ? storage.reserved_down_mwh ?? null : null
+  // The energy each commitment ties up (rows 3 and 4 of the LP): up-reserve
+  // energy stacked on the floor, down-reserve room hung from the capacity.
+  const energyRows = useMemo(() => snapshots.map((t, i) => {
+    const down = heldDown?.[i] ?? null
+    return {
+      t, soc: storage.soc_mwh?.[i] ?? null, floor: floor ?? null,
+      heldUp: heldUp?.[i] ?? null,
+      downBase: down == null || cap == null ? null : cap - down,
+      heldDown: down,
+    }
+  }), [snapshots, storage.soc_mwh, floor, heldUp, heldDown, cap])
+  const showUp = !!heldUp?.some(v => v != null && v > 0)
+  const showDown = !!heldDown?.some(v => v != null && v > 0)
 
   const committed = storage.committed
   // The series this storage carries (a product limited to other storages is absent).
@@ -211,6 +257,16 @@ function StorageCharts({ storage, snapshots, series }: {
             </span>
             {FLOOR_LABEL}: {floor != null ? fmtMwh(floor) : 'not set'}
           </span>
+          {showUp && (
+            <span className="inline-flex items-center gap-1" data-testid="reserve-held-up-legend">
+              <HeldSwatch id={`${base}-hu`} angle={HATCH.up} />{HELD_UP_LABEL}
+            </span>
+          )}
+          {showDown && (
+            <span className="inline-flex items-center gap-1" data-testid="reserve-held-down-legend">
+              <HeldSwatch id={`${base}-hd`} angle={HATCH.down} />{HELD_DOWN_LABEL}
+            </span>
+          )}
           {storage.soc_mwh && (
             <span className="inline-flex items-center gap-1">
               <span className="inline-block h-[2px] w-[14px]" style={{ background: SOC_COLOUR }} />
@@ -227,9 +283,26 @@ function StorageCharts({ storage, snapshots, series }: {
                 domain={[0, storage.e_cap_mwh ?? 'auto']} allowDataOverflow={false} />
               <Tooltip {...CHART_TOOLTIP} labelFormatter={l => shortStamp(String(l))}
                 formatter={(v: number) => fmtMwh(v)} />
+              <defs>
+                {heldPattern(`${base}-hu-c`, HATCH.up)}
+                {heldPattern(`${base}-hd-c`, HATCH.down)}
+              </defs>
               {floor != null && (
                 <Area type="stepAfter" dataKey="floor" name={FLOOR_LABEL} stroke="var(--color-ink-400)"
-                  strokeWidth={1} fill="var(--color-ink-300)" fillOpacity={0.7} isAnimationActive={false} />
+                  strokeWidth={1} fill="var(--color-ink-300)" fillOpacity={0.7} isAnimationActive={false}
+                  stackId="up" />
+              )}
+              {showUp && (
+                <Area type="stepAfter" dataKey="heldUp" name={HELD_UP_LABEL} stackId="up" stroke={SOC_COLOUR}
+                  strokeWidth={0.5} fill={`url(#${base}-hu-c)`} isAnimationActive={false} />
+              )}
+              {showDown && (
+                <Area type="stepAfter" dataKey="downBase" stackId="down" stroke="none" fill="none"
+                  tooltipType="none" legendType="none" isAnimationActive={false} />
+              )}
+              {showDown && (
+                <Area type="stepAfter" dataKey="heldDown" name={HELD_DOWN_LABEL} stackId="down" stroke={SOC_COLOUR}
+                  strokeWidth={0.5} fill={`url(#${base}-hd-c)`} isAnimationActive={false} />
               )}
               <Line type="monotone" dataKey="soc" name="State of charge" stroke={SOC_COLOUR} strokeWidth={1.5}
                 dot={false} connectNulls={false} isAnimationActive={false} />

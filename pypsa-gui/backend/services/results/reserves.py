@@ -107,6 +107,11 @@ def reserve_view(
     storages = []
     for s in used:
         here = s in n.storage_units.index
+        held = (
+            RP.reserved_energy(n, frame, products, s)
+            if frame is not None and here
+            else None
+        )
         storages.append(
             {
                 "name": s,
@@ -116,6 +121,8 @@ def reserve_view(
                 "soc_mwh": _series(soc[s])
                 if soc is not None and s in soc.columns
                 else None,
+                "reserved_up_mwh": None if held is None else _series(held[0]),
+                "reserved_down_mwh": None if held is None else _series(held[1]),
                 "committed": None
                 if frame is None
                 else {

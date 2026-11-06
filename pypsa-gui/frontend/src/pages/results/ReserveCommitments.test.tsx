@@ -5,7 +5,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, cleanup, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { ReservesPayload } from '../../api/reserves'
+import { RESERVE_SECTION, type ReservesPayload } from '../../api/reserves'
+import { useUIStore } from '../../store/uiStore'
 import ReserveCommitments from './ReserveCommitments'
 
 const api = vi.hoisted(() => ({ get: vi.fn() }))
@@ -83,6 +84,47 @@ describe('ReserveCommitments', () => {
     expect(text(screen.getByTestId('reserve-not-modelled'))).toContain(
       'Activation energy and its price, cycling wear and non-delivery penalties are not modelled')
     expect(text(screen.getByTestId('reserve-revenue-header'))).toBe('Revenue (EUR, 2030 money)')
+  })
+
+  it('shows the energy each commitment ties up between the floor and the capacity', async () => {
+    const p = reservePayload()
+    api.get.mockResolvedValue({ ...p, storages: p.storages.map(s => ({
+      ...s, reserved_up_mwh: [1, 2, 3], reserved_down_mwh: [2, 2, 2] })) })
+    renderIt()
+    await screen.findByTestId('reserve-section')
+    expect(text(screen.getByTestId('reserve-held-up-legend'))).toBe('Held for up-reserve')
+    expect(text(screen.getByTestId('reserve-held-down-legend'))).toBe('Kept free for down-reserve')
+  })
+
+  it('draws no held-energy band without a solve', async () => {
+    api.get.mockResolvedValue(notSolvedPayload())
+    renderIt()
+    await screen.findByTestId('reserve-section')
+    expect(screen.queryByTestId('reserve-held-up-legend')).toBeNull()
+    expect(screen.queryByTestId('reserve-held-down-legend')).toBeNull()
+  })
+
+  it('scrolls to the card when a link asked for it, then clears the request', async () => {
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    useUIStore.setState({ resultsSectionRequest: RESERVE_SECTION })
+    api.get.mockResolvedValue(reservePayload())
+    renderIt()
+    await screen.findByTestId('reserve-section')
+    await waitFor(() => expect(scroll).toHaveBeenCalledWith({ block: 'start' }))
+    expect(useUIStore.getState().resultsSectionRequest).toBeNull()
+  })
+
+  it('leaves the scroll request for the final view while its host is still loading', async () => {
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    useUIStore.setState({ resultsSectionRequest: RESERVE_SECTION })
+    api.get.mockResolvedValue(reservePayload())
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><ReserveCommitments settled={false} /></QueryClientProvider>)
+    await screen.findByTestId('reserve-section')
+    expect(scroll).not.toHaveBeenCalled()
+    expect(useUIStore.getState().resultsSectionRequest).toBe(RESERVE_SECTION)
   })
 
   it('names an unknown currency or money year in the revenue header, never guesses one', async () => {

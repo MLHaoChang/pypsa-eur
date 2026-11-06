@@ -9,9 +9,9 @@ import {
   type DcBackupAssessment, type DcBackupMode, type DcBackupProof, type GridReadinessVerdict,
 } from '../api/campusElectrical'
 import { resultsApi } from '../api/simulation'
-import { reservesApi, reserveRevenue, revenueUnit } from '../api/reserves'
+import { RESERVE_SECTION, reservesApi, reserveRevenue, reservesUseDemo, revenueUnit } from '../api/reserves'
 import { showResultsTab } from '../layout/flowNavigation'
-import { Btn, PageSection, Seg } from '../components/PageKit'
+import { Btn, PageSection, Seg, Tag } from '../components/PageKit'
 import { StatePill } from '../components/ResultState'
 import { VerdictChip } from '../components/gridReadiness/GridReadinessScorecard'
 import { useUIStore } from '../store/uiStore'
@@ -169,14 +169,15 @@ function ReserveLine({ name }: { name: string }) {
     <p className="mt-2 text-[12px]" data-testid="dc-backup-reserves">
       Reserve products: {data.products.length} · revenue{' '}
       {revenue == null ? <span className="text-muted">not solved</span>
-        : <>{revenue < 0 ? '−' : ''}{money(revenue)} <span className="text-muted">({revenueUnit(data)})</span></>}
+        : <>{revenue < 0 ? '−' : ''}{money(revenue)} <span className="text-muted">({revenueUnit(data)})</span>
+          {reservesUseDemo(data) && <> <Tag tone="warn">demo</Tag></>}</>}
       {' · '}headroom{' '}
       {data.headroom_h_per_string == null
         ? <span className="text-muted">not set</span>
         : `${num(data.headroom_h_per_string)}${NBSP}h per string`}
       {' · '}
       <button type="button" className="text-accent hover:underline" data-testid="dc-backup-reserves-open"
-        onClick={() => showResultsTab('storage')}>Storage view ›</button>
+        onClick={() => showResultsTab('storage', { section: RESERVE_SECTION, from: 'Grid study' })}>Storage view ›</button>
     </p>
   )
 }

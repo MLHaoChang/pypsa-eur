@@ -28,6 +28,10 @@ export interface ReserveStorage {
   floor_mwh: number | null
   e_cap_mwh: number | null
   soc_mwh: (number | null)[] | null
+  /** MWh the committed up (and symmetric) products keep above the floor, Σ r·d/η_dis; null when not solved. */
+  reserved_up_mwh?: (number | null)[] | null
+  /** MWh of room the committed down (and symmetric) products keep free below the energy capacity, Σ r·d·η_store. */
+  reserved_down_mwh?: (number | null)[] | null
   /** MW per product id, one value per snapshot; null without a current solve. */
   committed: Record<string, (number | null)[]> | null
 }
@@ -78,10 +82,19 @@ export function reserveRevenue(lines: readonly ReserveLine[]): number | null {
   return known.length ? known.reduce((s, a) => s + a, 0) : null
 }
 
+/** True when a product prices on a demo series: every total that sums its
+ *  revenue carries the DEMO tag (#1174). */
+export const reservesUseDemo = (p: ReservesPayload): boolean =>
+  p.products.some(pr => pr.price_source === 'demo')
+
 /** True when the solve read other products or floors than the project has now. */
 export const reservesOutOfDate = (p: ReservesPayload): boolean =>
   p.flags.includes('reserve_inputs_changed_since_solve')
   || p.lines.some(l => l.flags.includes('reserve_inputs_changed_since_solve'))
+
+/** The `resultsSectionRequest` that scrolls Storage cycling to the Reserve
+ *  products card (Grid study's "Storage view ›"). */
+export const RESERVE_SECTION = 'reserves'
 
 export const reservesApi = {
   /** null when the project has no reserve products (204). A 409 during a

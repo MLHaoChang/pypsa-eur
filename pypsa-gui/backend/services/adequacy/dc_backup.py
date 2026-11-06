@@ -559,6 +559,11 @@ EFFICIENCY_KEY = "gas-genset.investment.efficiency"
 BLANK_IS_ZERO: tuple[str, ...] = ("battery.energy.fom_share",)
 
 #: The honest limits of the comparison, shown with it.
+# GK B L8: the headroom is a cost here and earns only through reserve products.
+HEADROOM_NOTE = (
+    "reserve headroom is costed with no revenue: it earns only through the "
+    "reserve products' settlement, and with no products it earns nothing"
+)
 COST_NOTES: tuple[str, ...] = (
     "real terms in the pack's money year at a real discount rate, no escalation",
     "horizon end: remaining_life_annuity on every purchase of both legs "
@@ -997,7 +1002,7 @@ def backup_cost_delta(
         else npv_chosen - npv_genset,
         "lines": lines,
         "inputs": inputs,
-        "notes": list(COST_NOTES),
+        "notes": list(COST_NOTES) + ([HEADROOM_NOTE] if headroom is not None else []),
         **({"reserve_headroom_mwh": headroom} if headroom is not None else {}),
     }
 

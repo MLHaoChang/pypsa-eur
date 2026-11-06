@@ -682,6 +682,9 @@ def test_headroom_capex_is_priced_once_in_the_energy_lines():
     (s0, c0), (s2, c2) = out[0.0], out[2.0]
     assert "reserve_headroom_mwh" not in c0
     assert not [r for r in c0["inputs"] if r["key"] == "reserve_headroom_mwh"]
+    # GK B L8: headroom is disclosed as a cost with no revenue of its own.
+    assert dc_backup.HEADROOM_NOTE not in c0["notes"]
+    assert dc_backup.HEADROOM_NOTE in c2["notes"]
     head = c2["reserve_headroom_mwh"]
     assert head == pytest.approx(
         s2["strings"] * 5.0 * 2.0 / 0.9 / 0.9
@@ -717,7 +720,7 @@ def _lines(n, products, floors):
     )
 
 
-def test_two_periods_settle_per_period_without_the_period_weight():
+def test_two_periods_settle_per_period_without_the_period_weight(tmp_path):
     """Each period: 4 h x 10/MWh x 5 MW = 200, at period weights 1.0 and 0.5
     (the LP's 300 is the objective's; settlement leaves years to the case)."""
     n = _site()
@@ -748,6 +751,18 @@ def test_two_periods_settle_per_period_without_the_period_weight():
         ("tso", "site", "reserve_capacity", "reserve:fcr")
     }
     assert all(ln.flags == [] for ln in lines)  # symmetric: no activation flag
+    # A saved and reloaded multi-period solve is still current (the key reads the
+    # stored weightings, not the live-solve `_multi_invest` flag) ...
+    path = tmp_path / "n.nc"
+    n.export_to_netcdf(path)
+    m = pypsa.Network(path)
+    assert RP.solved(m)[1] == []
+    # ... and a period weight changed after the solve is stale (GK B L5).
+    m.investment_period_weightings.loc[2035, "objective"] = 0.25
+    assert RP.solved(m) == (
+        None,
+        ["reserve_not_solved", "reserve_inputs_changed_since_solve"],
+    )
 
 
 def test_three_hourly_snapshots_earn_three_hours_each():
@@ -797,6 +812,50 @@ def test_a_stale_solve_settles_to_none(change):
     assert {"reserve_not_solved", "reserve_inputs_changed_since_solve"} <= set(
         line.flags
     )
+
+
+def test_an_hours_change_after_the_solve_is_stale():
+    """GK B L5: the settlement multiplies the persisted MW by the current hours;
+    a solve made under other hours is stale, never re-priced."""
+    n = _site()
+    fcr = _product()
+    floors = {STRING: 20.0}
+    _solve(n, [fcr], floors)
+    n.snapshot_weightings.loc[n.snapshots[0], "objective"] *= 2.0
+    frame, flags = RP.solved(n)
+    assert frame is None
+    assert flags == ["reserve_not_solved", "reserve_inputs_changed_since_solve"]
+    (line,), _ = _lines(n, [fcr], floors)
+    assert line.amount is None and "reserve_not_solved" in line.flags
+
+
+def test_a_missing_planned_column_is_no_solve_never_zero():
+    """GK B L5: a current solve whose frame lacks a planned ``<storage>|<product>``
+    column reads as not solved, never as 0 MW committed."""
+    n = _site()
+    fcr = _product()
+    floors = {STRING: 20.0}
+    _solve(n, [fcr], floors)
+    frame = n.storage_units_t[RP.OUT_FRAME]
+    n.storage_units_t[RP.OUT_FRAME] = frame.drop(columns=[f"{STRING}|fcr"]).assign(
+        other=0.0
+    )
+    assert RP.solved(n) == (None, ["reserve_not_solved"])
+    (line,), _ = _lines(n, [fcr], floors)
+    assert line.amount is None and "reserve_not_solved" in line.flags
+
+
+def test_a_solve_survives_a_netcdf_round_trip(tmp_path):
+    """The weights key reads stored weightings only, so a saved and reloaded
+    solve is still current."""
+    n = _site()
+    fcr = _product()
+    _solve(n, [fcr], {STRING: 20.0})
+    path = tmp_path / "n.nc"
+    n.export_to_netcdf(path)
+    m = pypsa.Network(path)
+    frame, flags = RP.solved(m)
+    assert flags == [] and f"{STRING}|fcr" in frame.columns
 
 
 def test_no_products_settle_nothing():
@@ -1097,6 +1156,23 @@ def test_the_view_shows_floor_energy_soc_and_committed_mw():
         "amount"
     ] == pytest.approx(200.0)
     assert "not modelled" in v["not_modelled"]
+    # UX: the energy an up product ties up above the floor, r d / eta_dis = 5 x 0.5.
+    assert s["reserved_up_mwh"] == pytest.approx([2.5] * 4, abs=1e-6)
+    assert s["reserved_down_mwh"] == pytest.approx([0.0] * 4, abs=1e-9)
+
+
+def test_reserved_energy_follows_rows_3_and_4_with_efficiencies():
+    """Symmetric product, eta 0.9 both ways: up r d / 0.9 above the floor,
+    down r d x 0.9 below the energy capacity, as the LP's rows 3 and 4."""
+    n = _site(eta=0.9)
+    fcr = _product()
+    frame = _solve(n, [fcr], {STRING: 20.0})
+    r = frame[f"{STRING}|fcr"].to_numpy()
+    up, down = RP.reserved_energy(n, frame, [fcr], STRING)
+    assert up == pytest.approx(r * 0.5 / 0.9)
+    assert down == pytest.approx(r * 0.5 * 0.9)
+    soc = n.storage_units_t.state_of_charge[STRING].to_numpy()
+    assert (soc - up >= 20.0 - 1e-6).all() and (soc + down <= 25.0 + 1e-6).all()
 
 
 def test_the_view_never_shows_zero_for_a_missing_solve():
@@ -1109,6 +1185,7 @@ def test_the_view_never_shows_zero_for_a_missing_solve():
         n, _cfg([fcr]), solved=False, backup=({STRING: 20.0}, frozenset({STRING}))
     )
     assert v["storages"][0]["committed"] is None and v["storages"][0]["soc_mwh"] is None
+    assert v["storages"][0]["reserved_up_mwh"] is None
     assert v["flags"] == ["reserve_not_solved"] and v["lines"][0]["amount"] is None
     assert reserve_view(n, _cfg([]), solved=True, backup=({}, frozenset())) is None
 

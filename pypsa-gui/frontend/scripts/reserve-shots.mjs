@@ -37,7 +37,9 @@ const SUS = STRINGS.map(name => ({ name, bus: 'dc', carrier: 'battery', p_nom: 5
   p_nom_extendable: false, efficiency_store: 0.95, efficiency_dispatch: 0.95 }))
 const E_CAP = 20, FLOOR = 8
 const wave = (i, k, a, b) => a + b * (0.5 + 0.5 * Math.sin((i + k) * 2 * Math.PI / 24))
-const soc = k => SNAPS.map((_, i) => +(FLOOR + 2 + wave(i, k, 0, 8)).toFixed(2))
+// Inside the LP's rows 3 and 4: SoC stays above floor + held-up energy and below capacity − held-down room.
+const soc = k => SNAPS.map((_, i) => +(FLOOR + 3 + wave(i, k, 0, 7)).toFixed(2))
+const ETA = 0.95
 const dispatch = { index: SNAPS, columns: STRINGS, data: SNAPS.map((_, i) => STRINGS.map((_, k) => +(2 * Math.sin((i + 3 * k) * 2 * Math.PI / 24)).toFixed(2))) }
 
 const PRODUCTS = [
@@ -53,21 +55,26 @@ const line = (id, amount, flags = []) => ({ period: null, contract_id: `reserve:
 function solved() {
   return {
     products: PRODUCTS, snapshots: SNAPS,
-    storages: STRINGS.map((name, k) => ({
-      name, string: true, floor_mwh: FLOOR, e_cap_mwh: E_CAP, soc_mwh: soc(3 * k),
-      committed: {
+    storages: STRINGS.map((name, k) => {
+      const committed = {
         fcr: SNAPS.map(() => 1),
         afrr_up: SNAPS.map((_, i) => +wave(i, 3 * k, 0, 2).toFixed(2)),
         afrr_down: SNAPS.map((_, i) => +wave(i, 3 * k + 12, 0, 1.5).toFixed(2)),
-      },
-    })),
+      }
+      // reserves.py `reserved_energy`: up Σ r·d/η_dis, down Σ r·d·η_store.
+      const reserved_up_mwh = SNAPS.map((_, i) => +((committed.fcr[i] * 0.5 + committed.afrr_up[i]) / ETA).toFixed(3))
+      const reserved_down_mwh = SNAPS.map((_, i) => +((committed.fcr[i] * 0.5 + committed.afrr_down[i]) * ETA).toFixed(3))
+      return { name, string: true, floor_mwh: FLOOR, e_cap_mwh: E_CAP, soc_mwh: soc(3 * k), committed,
+        reserved_up_mwh, reserved_down_mwh }
+    }),
     lines: [line('fcr', 4200), line('afrr_up', 2650), line('afrr_down', 1380)],
     flags: [], headroom_h_per_string: 1, currency: 'EUR', money_year: 2030, not_modelled: NOT_MODELLED,
   }
 }
 function notSolved() {
   const p = solved()
-  return { ...p, storages: p.storages.map(s => ({ ...s, soc_mwh: null, committed: null })),
+  return { ...p, storages: p.storages.map(s => ({ ...s, soc_mwh: null, committed: null,
+    reserved_up_mwh: null, reserved_down_mwh: null })),
     lines: p.lines.map(l => ({ ...l, amount: null, flags: [...l.flags, 'reserve_not_solved'] })), flags: ['reserve_not_solved'] }
 }
 
@@ -182,7 +189,7 @@ try {
         await page.getByTestId('reserve-section').waitFor(); await page.waitForTimeout(1200)
         await shoot(`${key}-link`)
         // The flow return pill (Guided's Results header has its own "Back to Results").
-        await page.getByRole('button', { name: 'Back to Scenarios & optimisation' }).click()
+        await page.getByRole('button', { name: 'Back to Grid study' }).click()
         await lineEl.waitFor(); await page.waitForTimeout(800)
         await shoot(`${key}-back`)
       }

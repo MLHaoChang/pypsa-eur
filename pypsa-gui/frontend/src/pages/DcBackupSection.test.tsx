@@ -176,7 +176,17 @@ describe('DcBackupSection', () => {
     const el = await screen.findByTestId('dc-backup-reserves')
     expect(text(el)).toBe('Reserve products: 2 · revenue 1.5 k (EUR, 2030 money) · headroom 1.5 h per string · Storage view ›')
     await user.click(screen.getByTestId('dc-backup-reserves-open'))
-    expect(nav.showResultsTab).toHaveBeenCalledWith('storage')
+    expect(nav.showResultsTab).toHaveBeenCalledWith('storage', { section: 'reserves', from: 'Grid study' })
+  })
+
+  it('tags the revenue DEMO when a product prices on a demo series', async () => {
+    results.getEhTemplate.mockResolvedValue(meta('bess'))
+    reserves.get.mockResolvedValue({ products: [{ id: 'fcr', price_source: 'user' }, { id: 'afrr_up', price_source: 'demo' }],
+      snapshots: [], storages: [], flags: [], headroom_h_per_string: 1, currency: 'EUR', money_year: 2030, not_modelled: '',
+      lines: [{ period: null, contract_id: 'reserve:fcr', payer: 'tso', payee: 'site', value_stream: 'reserve_capacity',
+        quantity_mwh: null, amount: 8230, flags: [] }] })
+    renderIt()
+    expect(text(await screen.findByTestId('dc-backup-reserves'))).toContain('8.23 k (EUR, 2030 money) demo ·')
   })
 
   it('says "not solved" when no line has an amount, never 0', async () => {
