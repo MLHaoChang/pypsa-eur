@@ -51,9 +51,15 @@ def _values(arr: np.ndarray) -> list[float | None]:
     return [None if not np.isfinite(v) else float(v) for v in arr]
 
 
-def revenue_by_stream(op) -> dict[str, Any] | None:
+#: What the reserve row states about its escalation (GK B L6a).
+RESERVE_NOTE = "escalates at the export market rate"
+
+
+def revenue_by_stream(op, escalation: dict | None = None) -> dict[str, Any] | None:
     """The rows per axis year from an `Operating` (`cashflow.build_operating`), or None when
-    its operating cash is not established (the reasons are the project section's)."""
+    its operating cash is not established (the reasons are the project section's).
+    ``escalation`` (the case's `FinanceInputs.escalation`): the reserve row names the
+    export rate it escalates at."""
     if (op.status or {}).get("operating") != "ok" or op.revenue is None or op.costs is None:
         return None
     n = op.tl.n
@@ -77,7 +83,10 @@ def revenue_by_stream(op) -> dict[str, Any] | None:
     total = op.revenue - op.costs
     return {
         "years": [int(y) for y in op.tl.years],
-        "rows": [{"id": r, "label": LABELS[r], "values": _values(rows[r])}
+        "rows": [{"id": r, "label": LABELS[r], "values": _values(rows[r]),
+                  **({"note": RESERVE_NOTE, "escalation_class": "export",
+                      "escalation_rate": (escalation or {}).get("export")}
+                     if r == "reserve" else {})}
                  for r in (*ROWS[:-1], *(("reserve",) if has_reserve else ()), ROWS[-1])],
         "total": {"id": "total", "label": LABELS["total"], "values": _values(total)},
         "replacements": {"id": "replacements", "label": LABELS["replacements"],

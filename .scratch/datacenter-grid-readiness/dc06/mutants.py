@@ -18,6 +18,8 @@ M = [
  ("headroom raises the floor", "services/solver/reserve_products.py", 'sizing.get("e_backup_usable_mwh_per_string", sizing.get("e_usable_mwh_per_string"))', 'sizing.get("e_usable_mwh_per_string")'),
  ("headroom bought without capex", "services/adequacy/dc_backup.py", 'nameplate = usable / (b.depth_of_discharge * keep)', 'nameplate = backup_usable / (b.depth_of_discharge * keep)'),
  ("reconciliation without the reserve bridge", "services/commercial/participants.py", 'for s in inputs.reserve:\n                # Earned', 'for s in []:\n                # Earned'),
+ ("reserve row mapping dropped", "services/finance/revenue_streams.py", '    "ancillary": "reserve",\n', ''),
+ ("reserve escalates at another class", "services/finance/cashflow.py", '"ancillary": "export"', '"ancillary": "opex"'),
  ("objective bridge ignores reserve", "services/results/objective_decomposition.py", '"lp_basis_total": lp_basis - reserve', '"lp_basis_total": lp_basis'),
 ]
 tests = sys.argv[1:] or ["tests/test_reserve_products.py"]

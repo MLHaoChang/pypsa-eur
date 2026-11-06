@@ -699,13 +699,71 @@ def test_the_revenue_rows_show_reserve_only_when_the_case_has_it():
         op = SimpleNamespace(status={"operating": "ok"}, revenue=np.zeros(2), costs=np.zeros(2),
                              tl=SimpleNamespace(n=2, years=[2030, 2031]), lines=lines,
                              line_meta=meta, legs={}, replacement=np.zeros(2))
-        return [(r["id"], r["label"], r["values"]) for r in RS.revenue_by_stream(op)["rows"]]
+        out = RS.revenue_by_stream(op, escalation={"export": 0.01})["rows"]
+        rows.last = out
+        return [(r["id"], r["label"], r["values"]) for r in out]
 
     plain = rows(["energy_export"])
     assert [r[0] for r in plain] == list(RS.ROWS)
     got = rows(["energy_export", "ancillary"])
     assert [r[0] for r in got] == [*RS.ROWS[:-1], "reserve", "other"]
     assert ("reserve", "Reserve capacity revenue", [10.0, 10.0]) in got
+    (row,) = [r for r in rows.last if r["id"] == "reserve"]
+    assert (row["note"], row["escalation_class"], row["escalation_rate"]) == (
+        "escalates at the export market rate", "export", 0.01)
+    assert all("note" not in r for r in rows.last if r["id"] != "reserve")
+
+
+def _cash_case(lines, escalation):
+    from tests.test_finance_cashflow import _case
+
+    return _case(lines, fin_over={"escalation": escalation})
+
+
+def test_the_reserve_line_escalates_at_the_export_rate_exactly():
+    """GK B L6b: hand values over the first two operating years (base 2031, COD 2033)."""
+    from services.finance.case import TemplateLine
+    from services.finance.cashflow import build_operating, esc_class_for
+    from services.finance.timeline import build_timeline
+
+    assert esc_class_for("ancillary") == "export"
+    res = TemplateLine("reserve:fcr", "ancillary", 1_000.0, esc_class_for("ancillary"))
+    case = _cash_case([res], {"opex": 0.02, "tariff": 0.03, "export": 0.01, "capex": 0.02})
+    tl = build_timeline(case)
+    op = build_operating(case, tl)
+    assert op.lines["reserve:fcr"][tl.index(2033)] == pytest.approx(1_000.0 * 1.01 ** 2, rel=1e-12)
+    assert op.lines["reserve:fcr"][tl.index(2034)] == pytest.approx(1_000.0 * 1.01 ** 3, rel=1e-12)
+
+
+def test_a_missing_export_rate_never_escalates_the_reserve_line_at_another():
+    from services.finance.case import TemplateLine
+    from services.finance.cashflow import build_operating, esc_class_for
+    from services.finance.timeline import build_timeline
+
+    res = TemplateLine("reserve:fcr", "ancillary", 1_000.0, esc_class_for("ancillary"))
+    case = _cash_case([res], {"opex": 0.02, "tariff": 0.03, "ppa": 0.015, "capex": 0.02})
+    op = build_operating(case, build_timeline(case))
+    assert "escalation_missing:export:reserve:fcr" in op.reasons["operating"]
+    assert op.status["operating"] == "not_established" and op.revenue is None
+
+
+def test_the_owner_generation_split_leaves_a_reserve_line_whole():
+    from services.results import finance_case as FC
+
+    acc = FC._Acc(stream="ancillary", esc_class="export", amount=500.0, source="reserve",
+                  source_id="fcr", counterparty="tso")
+    inputs = SimpleNamespace(export_split={"_": {"export_price": {("Generator", "pv"): 80.0}}})
+    vf = SimpleNamespace(asset_owners=[SimpleNamespace(component="Generator", asset_id="pv",
+                                                       owner="owner")])
+    flags: list[str] = []
+    (ln,) = FC._template_lines({"reserve:fcr": acc}, k="_", year=2030, base_year=2030,
+                               inputs=inputs, vf=vf, owner="owner",
+                               owned={("Generator", "pv")}, owner_gens={"pv"}, contracts={},
+                               fin=None, gen={"pv": 100.0}, site_gens=["pv"], gen_links=[],
+                               flags=flags)
+    assert (ln.key, ln.amount, ln.esc_class, ln.stream, ln.degrades_with) == (
+        "reserve:fcr", 500.0, "export", "ancillary", None)
+    assert flags == []
 
 
 # ── the runners (GK A R5) ────────────────────────────────────────────────────
