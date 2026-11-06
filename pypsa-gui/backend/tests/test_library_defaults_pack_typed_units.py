@@ -16,6 +16,7 @@ import json
 import shutil
 from pathlib import Path
 
+import pandas as pd
 import pypsa
 import pytest
 
@@ -598,6 +599,7 @@ def test_an_ac_pv_row_on_a_generator_is_unscaled_whatever_its_dc_ac_ratio():
 
 
 def test_a_dc_pv_row_is_scaled_by_the_generators_dc_ac_ratio(tmp_path, monkeypatch):
+    from services.asset_schema import provenance
     from services.library.defaults_pack.pricing import price_from_pack
 
     _copy_with(tmp_path, monkeypatch, _solar_rows_dc)
@@ -608,26 +610,57 @@ def test_a_dc_pv_row_is_scaled_by_the_generators_dc_ac_ratio(tmp_path, monkeypat
     assert out["scale"] == pytest.approx(1.25) and out["capacity_basis"] == "output_electric_dc"
     assert n.generators.at["g", "overnight_cost"] == pytest.approx(
         1.25 * _v("solar-utility.investment.overnight"))
+    row = next(r for r in load_defaults_pack(TYPED).cost_values
+               if r.key == "solar-utility.investment.overnight")
+    rec = provenance.get(n, "Generator", "g")["overnight_cost"]
+    assert rec["range"] == pytest.approx([row.range.low * 1.25, row.range.high * 1.25])
+    assert rec["dc_ac_ratio"] == pytest.approx(1.25), "the ratio it was priced with is recorded"
 
 
-@pytest.mark.parametrize("ratio", [None, float("nan")])
-def test_a_dc_pv_row_without_a_dc_ac_ratio_refuses_and_writes_nothing(tmp_path, monkeypatch, ratio):
+@pytest.mark.parametrize("ratio,why", [
+    ("absent", "DC/AC ratio"), (float("nan"), "DC/AC ratio"), (float("inf"), "finite"),
+    (0.0, "above 0"), (-1.0, "above 0"), (3.5, "at most 3"), (125.0, "125 % is 1.25"),
+    ("abc", "expected a DC/AC ratio")])
+def test_a_dc_pv_row_without_a_valid_dc_ac_ratio_refuses_and_writes_nothing(tmp_path, monkeypatch, ratio, why):
     from services.library.defaults_pack.pricing import CapacityBasisMismatch, price_from_pack
 
     _copy_with(tmp_path, monkeypatch, _solar_rows_dc)
     n = _net()
-    if ratio is not None:
-        n.generators["dc_ac_ratio"] = ratio
+    if ratio != "absent":   # stored unchecked, as an import could
+        n.generators["dc_ac_ratio"] = pd.Series([ratio], index=n.generators.index, dtype=object)
     before = n.generators.copy()
-    with pytest.raises(CapacityBasisMismatch, match="DC/AC ratio"):
+    with pytest.raises(CapacityBasisMismatch, match="DC/AC ratio") as exc:
         price_from_pack(n, "generators", "g", "solar-utility", version=TYPED)
-    assert n.generators.equals(before), "a refusal writes nothing"
+    assert why in str(exc.value)
+    assert n.generators.equals(before), "a refusal writes nothing, never prices at 1"
 
 
-@pytest.mark.parametrize("component,name", [("storage_units", "s"), ("links", "fc")])
+@pytest.mark.parametrize("component,name", [("storage_units", "s"), ("links", "fc"), ("stores", "tank")])
 def test_a_dc_pv_row_on_a_class_without_a_dc_rating_refuses(tmp_path, monkeypatch, component, name):
-    from services.library.defaults_pack.pricing import CapacityBasisMismatch, price_from_pack
+    from services.library.defaults_pack.pricing import SCALING_RULES, CapacityBasisMismatch, price_from_pack
 
     _copy_with(tmp_path, monkeypatch, _solar_rows_dc)
+    assert SCALING_RULES[(component, "output_electric_dc")] == "refuse"
     with pytest.raises(CapacityBasisMismatch):
         price_from_pack(_net(), component, name, "solar-utility", version=TYPED)
+
+
+def test_the_scaling_table_has_an_explicit_dc_row_for_every_component():
+    from services.library.defaults_pack.pricing import SCALING_RULES, _rule_basis
+
+    assert _rule_basis("output_electric_ac") == "output_electric"
+    assert _rule_basis("output_electric_dc") == "output_electric_dc"
+    assert {c for c, b in SCALING_RULES if b == "output_electric_dc"} == {
+        "generators", "storage_units", "stores", "links"}
+
+
+def test_a_run_added_redundancy_candidate_never_reaches_a_dc_row():
+    """`redundancy` prices its candidates (gas genset, fuel cell, battery) at
+    `REDUNDANCY_PACK_VERSION`; none is DC-rated, so a candidate without the
+    column can never hit the DC refusal (TC-02 condition 4)."""
+    from services.adequacy.redundancy import REDUNDANCY_PACK_VERSION
+
+    pack = load_defaults_pack(REDUNDANCY_PACK_VERSION)
+    for tech in ("gas-genset", "fuel-cell", "battery"):
+        bases = {r.capacity_basis for r in pack.cost_values if r.key.startswith(f"{tech}.")}
+        assert "output_electric_dc" not in bases, tech

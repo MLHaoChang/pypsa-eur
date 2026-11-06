@@ -10,7 +10,11 @@ What the plan writes, per the class's own pack convention (`price_from_pack`):
 on a Link, `efficiency` when the reference gives one. `capital_cost` and
 `discount_rate` are left as they are (PyPSA annuitises `overnight_cost`). An
 `input_electric` price is per MW of electrical input and is written as it is: it is
-never scaled by the Link's efficiency, before or after.
+never scaled by the Link's efficiency, before or after. The one scaled price is an
+`output_electric_dc` (PV, per MW of DC module rating) one: a Generator's `p_nom` is its
+AC rating, so `overnight_cost` is the reference × the generator's declared `dc_ac_ratio`
+(TC-02), and `fom_cost` follows from it; an undeclared or invalid ratio refuses
+(`dc_ac_ratio_missing`), never assumed 1.
 
 Refusals (`error_kind`): a target class the references do not price
 (`reference_target_unsupported`), an EUR reference beside a pack in another currency
@@ -51,6 +55,23 @@ _ATTR = {"Generator": "generators", "Link": "links"}
 
 def _refuse(kind: str, message: str, status: int = 422, **extra):
     raise HTTPException(status, {"error_kind": kind, "message": message, **extra})
+
+
+def _dc_ac_ratio(frame, name: str) -> float:
+    """The generator's declared DC/AC ratio, checked as every write path checks it; undeclared or
+    invalid is a typed refusal before anything is planned, never 1."""
+    from services.adequacy.eh_columns import dc_ac_ratio
+
+    raw = frame.at[name, "dc_ac_ratio"] if "dc_ac_ratio" in frame.columns else None
+    why = (f"This reference is priced per MW of DC module rating, and {name!r}'s capacity is its AC "
+           f"rating. Set its DC/AC ratio first; nothing is applied.")
+    try:
+        ratio = dc_ac_ratio(raw)
+    except ValueError as exc:
+        _refuse("dc_ac_ratio_missing", f"{why} {exc}")
+    if math.isnan(ratio):
+        _refuse("dc_ac_ratio_missing", why)
+    return ratio
 
 
 def _num(value) -> float | None:
@@ -186,7 +207,9 @@ def plan(n, commercial: Mapping[str, Any] | None, component_class: str, name: st
                 f"the reference is in {ref.currency}. Nothing is converted.")
 
     part = ref.cost_part
-    overnight = part.overnight.value  # per MW of the reference's own capacity basis, never scaled
+    # Per MW of the reference's own capacity basis; a DC price onto the AC p_nom by the DC/AC ratio.
+    ratio = _dc_ac_ratio(frame, name) if ref.capacity_basis_code == "output_electric_dc" else None
+    overnight = part.overnight.value * (ratio or 1.0)
     attrs: dict[str, float] = {"overnight_cost": overnight, "lifetime": part.lifetime.value,
                                "fom_cost": overnight * part.fom_share.value}
     if target == "Link" and part.efficiency is not None:
@@ -217,6 +240,9 @@ def plan(n, commercial: Mapping[str, Any] | None, component_class: str, name: st
 
     period = _asset_period(n, frame, name)
     notes = []
+    if ratio is not None:
+        notes.append(f"The reference is priced per MW of DC module rating; the overnight cost and fixed O&M "
+                     f"are scaled by this generator's DC/AC ratio ({ratio:g}) onto its AC capacity.")
     if period is not None and period != ref.projection_year:
         notes.append(f"The reference is the {ref.projection_year} projection; this asset's period is {period}.")
     if no_money_year:

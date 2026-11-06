@@ -199,7 +199,7 @@ LINK_LAZY_COLUMNS = frozenset({"eh_process", "criticality_tier", "throughput_uni
                                "ride_through_curve", "restart_time_h", "max_supply_temp_c", "max_pressure_bar"})
 BUS_LAZY_COLUMNS = frozenset({"mwh_per_t", "product_value", "lost_production_value", "temperature_c",
                               "pressure_bar"})
-GENERATOR_LAZY_COLUMNS = frozenset({"process_role"})
+GENERATOR_LAZY_COLUMNS = frozenset({"process_role", "dc_ac_ratio"})
 
 
 class LinkCreate(BaseModel):
@@ -340,6 +340,9 @@ class GeneratorCreate(BaseModel):
     p_max_pu_includes_outages: bool | None = None
     # `buy_in` | `shortfall` on a product bus's Generator (ticket 08); written only when sent.
     process_role: str | None = None
+    # A PV generator's DC module rating / p_nom (p_nom is the AC rating); written only when sent, checked by
+    # `eh_columns.dc_ac_ratio` (TC-02). None or blank = not declared.
+    dc_ac_ratio: float | None = None
     bus: str
     carrier: str = ""
     # PyPSA control mode for power flow / unit commitment. PQ = fixed P & Q,

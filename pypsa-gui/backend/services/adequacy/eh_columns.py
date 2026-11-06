@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 
 from models.energy_hub import EH_CUSTOM_COLUMNS, EH_INTERNAL_ROLES, EH_LINK_ROLES
-from models.process_unit import (CRITICALITY_TIERS, HARMONIC_SOURCES, PROCESS_CUSTOM_COLUMNS,
+from models.process_unit import (CRITICALITY_TIERS, DC_AC_RATIO_MAX, HARMONIC_SOURCES, PROCESS_CUSTOM_COLUMNS,
                                  PROCESS_GENERATOR_ROLES, START_METHODS)
 
 _ATTR_OF = {"Bus": "buses", "Link": "links", "Generator": "generators", "Store": "stores"}
@@ -81,6 +81,8 @@ def coerce_eh_value(component_class: str, col: str, value):
         if not math.isfinite(v):
             raise ValueError(f"{col}: must be a finite number, got {v}") from None
         return v
+    if kind == "dc_ac_ratio":
+        return dc_ac_ratio(value, col)
     if kind == "fraction":
         if value is None or value == "":
             return float("nan")
@@ -131,6 +133,26 @@ def coerce_eh_value(component_class: str, col: str, value):
     raise ValueError(f"{col}: unknown kind {kind!r}")  # pragma: no cover
 
 
+def dc_ac_ratio(value, col: str = "dc_ac_ratio") -> float:
+    """A Generator's DC/AC ratio: blank is NaN (not declared, never 1); else finite within (0, DC_AC_RATIO_MAX].
+    One check for every write path and for pricing, which re-checks a stored value an import may have
+    brought in unchecked."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return float("nan")
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{col}: expected a DC/AC ratio (a number such as 1.25), got {value!r}") from None
+    if math.isnan(v):
+        return v
+    if not math.isfinite(v) or v <= 0:
+        raise ValueError(f"{col}: the DC/AC ratio must be a finite number above 0, got {v!r}")
+    if v > DC_AC_RATIO_MAX:
+        raise ValueError(f"{col}: the DC/AC ratio must be at most {DC_AC_RATIO_MAX:g}, got {v:g}; "
+                         f"a percentage is entered as a ratio ({v:g} % is {v / 100:g})")
+    return v
+
+
 def _checked_text(kind: str, value) -> str:
     """A text column gridspine parses (a harmonic spectrum, a ride-through curve), refused when malformed."""
     v = "" if value is None else str(value).strip()
@@ -151,7 +173,7 @@ def _checked_text(kind: str, value) -> str:
 
 
 def _default(kind: str):
-    return {"bool": False, "float_nonneg": float("nan"), "float_signed": float("nan"), "fraction": float("nan"), "role": "", "tier": "",
+    return {"bool": False, "float_nonneg": float("nan"), "dc_ac_ratio": float("nan"), "float_signed": float("nan"), "fraction": float("nan"), "role": "", "tier": "",
             "process_role": "", "text": "", "harmonic_source": "", "harmonic_spectrum": "",
             "start_method": "", "ride_through_curve": ""}[kind]
 
@@ -165,7 +187,7 @@ def ensure_eh_column(n, component_class: str, col: str) -> None:
     kind = eh_columns_for(component_class)[col]
     df[col] = pd.Series(_default(kind), index=df.index,
                         dtype=bool if kind == "bool" else
-                        float if kind in ("float_nonneg", "float_signed", "fraction") else object)
+                        float if kind in ("float_nonneg", "float_signed", "fraction", "dc_ac_ratio") else object)
 
 
 def normalise_eh_columns(n) -> None:
@@ -189,7 +211,7 @@ def normalise_eh_columns(n) -> None:
                         except ValueError:
                             return False
                     df[col] = df[col].map(_b).astype(bool)
-                elif kind in ("float_nonneg", "float_signed", "fraction"):
+                elif kind in ("float_nonneg", "float_signed", "fraction", "dc_ac_ratio"):
                     df[col] = pd.to_numeric(df[col], errors="coerce").astype(float)
                 else:
                     df[col] = df[col].map(

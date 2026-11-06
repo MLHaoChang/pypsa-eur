@@ -15,8 +15,11 @@ an annualised literal.
     A Link's `p_nom` is its input (`bus0`), so a price per kW of electrical OUTPUT (the fuel cell) is
     scaled by the efficiency of the bus that carries the output, a price per kW of electrical INPUT
     (electrolysis) is not, and a price per kW of PRODUCT (Haber-Bosch NH3) is scaled by the product
-    bus's efficiency. A pair that cannot be converted unambiguously raises `CapacityBasisMismatch`
-    before anything is written, never a guess;
+    bus's efficiency. A Generator's `p_nom` is its AC rating, so a price per kW of DC module rating
+    (`output_electric_dc`, PV) is scaled by the Generator's declared `dc_ac_ratio` (TC-02), recorded on
+    the overnight cost's provenance; an undeclared or invalid ratio refuses, never assumed 1. A pair
+    that cannot be converted unambiguously raises `CapacityBasisMismatch` before anything is written,
+    never a guess;
   * a version without typed cost units (`LEGACY_VERSIONS`) cannot price: `LegacyPackVersion`.
 
 Each TYPED field it writes is stamped `default` through `asset_schema.provenance.record` (source
@@ -26,6 +29,7 @@ not describe yet (Link) records everything it writes.
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from services.library.defaults_pack.loader import (
@@ -50,34 +54,39 @@ PRODUCT_CARRIER = {"haber-bosch": "NH3",
                    "electric-boiler-steam": "heat", "industrial-heat-pump-ht": "heat",
                    "electric-process-heater": "heat"}
 
-#: Component x row capacity basis -> how the overnight cost is scaled (or "refuse"). `_ac` / `_dc`
-#: bases follow `output_electric`. A battery is priced through its parts, not through this table.
+#: Component x row capacity basis -> how the overnight cost is scaled (or "refuse"). The `_ac` basis
+#: follows `output_electric`; `_dc` has its own rows: only a Generator declares a DC rating
+#: (`dc_ac_ratio`). A battery is priced through its parts, not through this table.
 SCALING_RULES: dict[tuple[str, str], str] = {
     ("generators", "output_electric"): "unit",
     ("generators", "input_electric"): "refuse",
     ("generators", "output_product"): "unit_on_product_bus",
     ("generators", "storage_energy"): "refuse",
     ("generators", "not_applicable"): "refuse",
+    ("generators", "output_electric_dc"): "dc_ac_ratio",
     ("storage_units", "output_electric"): "unit",
     ("storage_units", "input_electric"): "refuse",
     ("storage_units", "output_product"): "refuse",
     ("storage_units", "storage_energy"): "refuse",
     ("storage_units", "not_applicable"): "refuse",
+    ("storage_units", "output_electric_dc"): "refuse",
     ("stores", "output_electric"): "refuse",
     ("stores", "input_electric"): "refuse",
     ("stores", "output_product"): "refuse",
     ("stores", "storage_energy"): "unit",
     ("stores", "not_applicable"): "refuse",
+    ("stores", "output_electric_dc"): "refuse",
     ("links", "output_electric"): "link_output_electric",
     ("links", "input_electric"): "link_input_electric",
     ("links", "output_product"): "link_output_product",
     ("links", "storage_energy"): "refuse",
     ("links", "not_applicable"): "refuse",
+    ("links", "output_electric_dc"): "refuse",
 }
 
 
 def _rule_basis(capacity_basis: str) -> str:
-    return "output_electric" if capacity_basis.startswith("output_electric") else capacity_basis
+    return "output_electric" if capacity_basis == "output_electric_ac" else capacity_basis
 
 
 def _carrier(n, bus) -> str:
@@ -98,6 +107,23 @@ def _link_outputs(n, df, name) -> list[tuple[str, float]]:
     return out
 
 
+def _dc_ac_ratio(df, name: str, refuse) -> float:
+    """The Generator's declared DC/AC ratio, checked as every write path checks it (an import may
+    have stored it unchecked); undeclared or invalid refuses, never 1."""
+    from services.adequacy.eh_columns import dc_ac_ratio
+
+    raw = df.at[name, "dc_ac_ratio"] if "dc_ac_ratio" in df.columns else None
+    why = ("the row is priced per MW of DC module rating and p_nom is the AC rating; "
+           "set the generator's DC/AC ratio (dc_ac_ratio) first")
+    try:
+        ratio = dc_ac_ratio(raw)
+    except ValueError as exc:
+        refuse(f"{why}. {exc}")
+    if math.isnan(ratio):
+        refuse(why)
+    return ratio
+
+
 def _scale_for(n, component: str, name: str, technology: str, capacity_basis: str) -> float:
     df, basis = getattr(n, component), _rule_basis(capacity_basis)
     rule = SCALING_RULES.get((component, basis), "refuse")
@@ -111,6 +137,8 @@ def _scale_for(n, component: str, name: str, technology: str, capacity_basis: st
         return 1.0
     if rule == "refuse":
         refuse("the component's nominal does not measure what the row's capacity measures")
+    if rule == "dc_ac_ratio":
+        return _dc_ac_ratio(df, name, refuse)
     product = PRODUCT_CARRIER.get(technology)
     if rule == "unit_on_product_bus":
         if product is None or _carrier(n, df.at[name, "bus"]) != product:
@@ -262,6 +290,11 @@ def price_from_pack(n, component: str, name: str, technology: str, *,
             "discount_rate": (None, 1.0)},   # capital_cost: derived on every class
            money=("overnight_cost", "fom_cost"))
     _annotate(n, _CLASS.get(component, component), name, "overnight_cost", over_row)
+    if over_row.capacity_basis == "output_electric_dc":
+        from services.asset_schema import provenance
+
+        # The ratio this price was scaled by, so a later ratio change can be told from it.
+        provenance.annotate(n, _CLASS.get(component, component), name, "overnight_cost", dc_ac_ratio=scale)
     from pypsa.costs import annuity as _annuity   # PyPSA's own; an IC package never imports the solver
 
     # The disclosure states what the LP charges per MW-year: `capital_cost` the annuity alone
