@@ -24,6 +24,33 @@ export const TOOL_OUTCOME_REASON_WORDS: Record<string, string> = {
   not_as_file: 'the network does not match the imported file',
   not_as_network: 'the exported file does not match the network',
   export_file_count: 'the exported file could not be identified',
+  // Issue 04 S4a: a job or file read whose project is no longer the open one.
+  other_context: 'another project was opened while it was being checked',
+}
+
+/**
+ * Why a chat tool line reads "denied" (issue 04 S4a, `_outcome.reason`): every
+ * refusal harness/confirm.py `_deny` and harness/guards.py `denied` emit.
+ * test_p3_denied_words.py fails when the backend has a kind with no words here.
+ */
+export const TOOL_OUTCOME_DENIED_REASON_WORDS: Record<string, string> = {
+  confirmation_denied: 'you declined it',
+  confirmation_expired: 'the approval expired',
+  confirmation_revoked: 'the approval was withdrawn',
+  aborted: 'the request was stopped before you answered',
+  unknown_decision: 'your answer to the approval could not be read',
+  approval_unavailable: 'the approval could not be recorded',
+  user_restriction: 'a rule you set for this project blocks changes',
+  round_change_cap: 'the assistant used up the changes allowed for this request',
+  required_guard_failed: 'the request did not pass a required check',
+  confirmation_args_changed: 'the request changed after you approved it',
+  no_progress_stop: 'stopped after repeating the same failing request',
+}
+
+/** A refusal's Details text where the backend's own message would mislead or name internals (issue 04 S4a). */
+export const TOOL_OUTCOME_DENIED_DETAIL_WORDS: Record<string, string> = {
+  user_restriction: 'A rule you set for this project blocks changes.',
+  approval_unavailable: 'The app could not save the approval: its data folder may be full or not writable.',
 }
 
 /** A file tool's words where they differ from a job's (issue 04 S3: import/export). */

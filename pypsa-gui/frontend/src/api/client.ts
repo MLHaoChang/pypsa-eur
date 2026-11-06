@@ -237,7 +237,7 @@ client.interceptors.response.use(
       const quietKey = code ?? lockRefusalCode(data)
       appLog('ERROR', `${method} ${url} — ${msg}${quietKey ? ` [${quietKey}]` : ''}`)
       if (!quietKey || !QUIET_TOAST_CODES.has(quietKey)) {
-        toast.error(msg)
+        toast.error(msg, { id: msg })
       }
     } else if (!isQuietPoll(url, method)) {
       // P30 (B8): the caller shows this failure itself (`skipErrorToast`),

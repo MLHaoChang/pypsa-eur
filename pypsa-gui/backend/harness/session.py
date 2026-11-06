@@ -252,6 +252,10 @@ class ChatSession:
     # response in flight refused toward the preview.
     turn_single_edit_applied: bool = False
     turn_redirects: dict[str, str] = field(default_factory=dict)
+    # Issue 04 S4a (G7, harness/guards.py): failing calls per (tool, args
+    # fingerprint), this turn and across the session's turns.
+    turn_no_progress: dict = field(default_factory=dict)
+    run_no_progress: dict = field(default_factory=dict)
     # LC-10 — components that successful tool calls named, newest last, as
     # (project key, class, name): the "discussed last" rung. Keyed by project
     # so a switch, by a tool or another tab, never carries a name across.

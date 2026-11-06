@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Pencil } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { saveFailedToast } from '../../utils/toasts'
 import { networkApi } from '../../api/network'
 import type { Bus, ShuntImpedance } from '../../api/types'
 import { useAssetProvenance } from '../../hooks/useAssetProvenance'
@@ -52,7 +53,7 @@ export default function ShuntPanel({ name }: { name: string }) {
       const newName = form.name?.trim() || name
       if (newName !== name) setSelectedComponent({ type: 'ShuntImpedance', name: newName })
     },
-    onError: (e: Error) => toast.error(`Save failed: ${blockerMessage(e)}`),
+    onError: (e: Error) => saveFailedToast(blockerMessage(e)),
   })
 
   if (!shunt) return <p className="p-3 text-xs text-muted">Loading…</p>

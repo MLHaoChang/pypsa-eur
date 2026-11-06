@@ -20,6 +20,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
+from harness import predicates
 from harness.assurance_scope import RequestScope
 
 
@@ -278,6 +279,45 @@ class DerivedEntry(_Closed):
     unit: Annotated[str, Field(min_length=1, max_length=16)]
 
 
+class _PredicateBase(_Closed):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    id: Annotated[str, Field(min_length=1, max_length=64)]
+    evidence_id: Annotated[str, Field(min_length=1, max_length=128)]
+    component_class: Annotated[str, Field(min_length=1, max_length=64)]
+    metric: Annotated[str, Field(min_length=1, max_length=64)]
+    unit: Annotated[str, Field(min_length=1, max_length=16)]
+    # N: every entity of the one complete page, all certified (GK B C1).
+    population: Annotated[int, Field(ge=1)]
+    # The evidence record's validity warnings, kept as they are (GK B C3).
+    warnings: Annotated[list[str], Field(max_length=20)]
+
+
+class ThresholdPredicate(_PredicateBase):
+    """All or none of the population meets the threshold; the software's truth."""
+
+    quantifier: Literal["all", "none"]
+    comparator: Literal[">", ">=", "<", "<="]
+    threshold: Annotated[int | float, Field(allow_inf_nan=False)]
+    holds: bool
+
+
+class TopKPredicate(_PredicateBase):
+    """The top k by value, every tie at the boundary included (owner freeze item 4)."""
+
+    quantifier: Literal["top_k"]
+    k: Annotated[int, Field(ge=1, le=predicates.MAX_K)]
+    members: Annotated[
+        list[Annotated[str, Field(min_length=1, max_length=128)]],
+        Field(min_length=1, max_length=predicates.MAX_MEMBERS),
+    ]
+
+
+# One checked predicate (AA-03 S4); strict field by field.
+PredicateEntry = Annotated[
+    ThresholdPredicate | TopKPredicate, Field(discriminator="quantifier")
+]
+
+
 class Receipt(_Closed):
     policy_version: Literal["1"]
     content_sha256: Annotated[str, Field(pattern="^[0-9a-f]{64}$")]
@@ -307,7 +347,21 @@ class DerivedReceipt(Receipt):
     derived: Annotated[list[DerivedEntry], Field(min_length=1, max_length=8)]
 
 
-RECEIPTS = {"1": Receipt, "2": DerivedReceipt}
+class PredicateReceipt(Receipt):
+    """Policy "3" (AA-03 S4, GK B C8): policy "1" plus at least one predicate,
+    and derived entries only when there are some (absent, never empty or null).
+    """
+
+    policy_version: Literal["3"]
+    predicates: Annotated[
+        list[PredicateEntry], Field(min_length=1, max_length=predicates.MAX_ENTRIES)
+    ]
+    derived: Annotated[  # type: ignore[assignment]  # absent by default, never null
+        list[DerivedEntry], Field(default=None, min_length=1, max_length=8)
+    ]
+
+
+RECEIPTS = {"1": Receipt, "2": DerivedReceipt, "3": PredicateReceipt}
 
 
 # --- Checked tool results, keyed by tool name. ---

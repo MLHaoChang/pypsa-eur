@@ -45,7 +45,7 @@ describe('groupColumnsByUnit', () => {
   it('groups unitless series together under a dash', () => {
     const g = groupColumnsByUnit([c('status', ''), c('start_up', '')])
     expect(g).toHaveLength(1)
-    expect(g[0].unit).toBe('–')
+    expect(g[0].unit).toBe('—')
   })
 
   it('returns nothing for no columns', () => {
