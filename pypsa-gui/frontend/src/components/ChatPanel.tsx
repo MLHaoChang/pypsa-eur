@@ -246,6 +246,12 @@ const GUIDED_TOOL_PHRASE: Record<string, string> = {
   generate_report: 'start writing the project report',
   regenerate_report_section: 'start rewriting one section of the report',
   abort_report_generation: 'ask the report writing to stop',
+  // Issue 04 S2: the component writes whose lines carry a read-back outcome.
+  bulk_update_components: 'update components',
+  batch_create_components: 'add components',
+  delete_component: 'delete a component',
+  batch_delete_components: 'delete components',
+  undo_last: 'undo the last change',
 }
 export function guidedToolPhrase(tool: string): string {
   return Object.prototype.hasOwnProperty.call(GUIDED_TOOL_PHRASE, tool)
@@ -280,7 +286,8 @@ export function guidedSettledToolIds(
 /** Issue 04 (S1b): Guided words for a job tool line with an `_outcome`. */
 function guidedOutcomeLine(tool: string, now: CurrentToolOutcome): GuidedToolLine {
   const word = now.mark.word.charAt(0).toUpperCase() + now.mark.word.slice(1)
-  const asOf = now.mark.inFlight ? `, as of ${outcomeClock(now.ts)}` : now.why ? ` (${now.why})` : ''
+  const asOf = now.mark.inFlight ? `, as of ${outcomeClock(now.ts)}`
+    : now.why ? ` (${now.why})` : now.count ? ` (${now.count.text})` : ''
   return { hidden: false, label: `${word}: ${guidedToolPhrase(tool)}${asOf}` }
 }
 

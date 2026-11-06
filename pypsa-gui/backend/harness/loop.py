@@ -3393,6 +3393,7 @@ def _dispatch_real_tool_call(
         return
 
     task_ticket = None
+    write_note = None
     try:
 
         def require_current_confirmation():
@@ -3498,6 +3499,12 @@ def _dispatch_real_tool_call(
         # tool costs no snapshot. See `_snapshot_for_turn_undo`.
         if effect_fresh and not external:  # an MCP tool edits no project
             _snapshot_for_turn_undo(session, tool_name)
+        # Issue 04 S2: the call's own request and each row's prior presence,
+        # after the edit counter's bump, so a later bump is another writer.
+        if effect_fresh and not external and session.assurance_turn is None:
+            from harness import outcomes as _write_outcomes
+
+            write_note = _write_outcomes.note_write(tool_name, args or {})
 
         # Execute via the chat_tools dispatcher. `handler` was resolved above the
         # confirmation gate — see Improvement #19 there.
@@ -4244,14 +4251,20 @@ def _dispatch_real_tool_call(
 
     if (
         session.assurance_turn is None
-        and tool_name in outcomes.JOB_TOOLS
-        and isinstance(result_for_model, dict)
+        and tool_name in outcomes.JOB_TOOLS | outcomes.WRITE_TOOLS
+        and (
+            isinstance(result_for_model, dict)
+            # delete_component returns nothing; its outcome still needs a home.
+            or (tool_name in outcomes.WRITE_TOOLS and result_for_model is None)
+        )
     ):
-        # Issue 04 (A3.1/A3.3): the outcome from an independent read, never
-        # the handler's own status fields. First, so a truncated preview keeps it.
+        # Issue 04 (A3.1/A3.3/A3.4): the outcome from an independent read, never
+        # the handler's own fields. First, so a truncated preview keeps it.
         result_for_model = {
-            "_outcome": outcomes.project(tool_name, args or {}, tool_use_id),
-            **{k: v for k, v in result_for_model.items() if k != "_outcome"},
+            "_outcome": outcomes.project_write(write_note)
+            if tool_name in outcomes.WRITE_TOOLS
+            else outcomes.project(tool_name, args or {}, tool_use_id),
+            **{k: v for k, v in (result_for_model or {}).items() if k != "_outcome"},
         }
     if session.assurance_turn is not None:
         projection = session.assurance_turn.result_projection(

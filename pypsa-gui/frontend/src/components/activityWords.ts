@@ -13,6 +13,10 @@ export const TOOL_OUTCOME_REASON_WORDS: Record<string, string> = {
   adapter_pending: 'this kind of job cannot be checked yet',
   no_submission: 'no job from this call was found',
   unreadable: 'the result could not be read',
+  // Issue 04 S2: a write's read-back.
+  revision_moved: 'the network changed while it was being checked',
+  readback_failed: 'the network could not be read back',
+  not_comparable: 'some values cannot be checked',
 }
 
 export const ACTIVITY_FAMILY_WORDS: Record<string, string> = {

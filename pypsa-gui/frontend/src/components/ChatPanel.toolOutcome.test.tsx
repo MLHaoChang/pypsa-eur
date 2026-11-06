@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { useChatStore } from '../store/chatStore'
 import { createChatStream, getChatHistory } from '../api/chat'
-import ChatPanel from './ChatPanel'
+import ChatPanel, { guidedToolPhrase } from './ChatPanel'
 
 const speech: { onFinal?: (text: string) => void } = {}
 vi.mock('../api/reliability', () => ({
@@ -143,6 +143,25 @@ describe('chat tool-line outcome marks', () => {
     act(() => useUIStore.setState({ uiMode: 'guided' }))
     expect(screen.getByTestId('chat-tool-label').textContent)
       .toBe('Outcome unknown: use wait for job (this kind of job cannot be checked yet)')
+  })
+
+  it('shows a partly done write with its count in both modes', async () => {
+    await turn('expert')
+    emit('tool_request', { tool_use_id: 'b', tool_name: 'bulk_update_components', safety_tier: 'write' })
+    emit('tool_result', { tool_use_id: 'b', tool_name: 'bulk_update_components', result: {
+      _outcome: { version: 1, outcome: 'partial', reason: null, counts: { requested: 5, done: 3, not_done: 2, unknown: 0 },
+        paths_not_done: ['/Generator/G4/p_nom'] }, updated: 5 } })
+    expect(screen.getByTestId('chat-tool-outcome').textContent).toBe('–bulk_update_components (partly done: 3 of 5 updated)')
+    act(() => useUIStore.setState({ uiMode: 'guided' }))
+    expect(screen.getByTestId('chat-tool-label').textContent).toBe('Partly done: update components (3 of 5)')
+  })
+
+  it.each([
+    ['bulk_update_components', 'update components'], ['batch_create_components', 'add components'],
+    ['delete_component', 'delete a component'], ['batch_delete_components', 'delete components'],
+    ['undo_last', 'undo the last change'],
+  ])('gives %s a plain Guided phrase', (tool, phrase) => {
+    expect(guidedToolPhrase(tool)).toBe(phrase)
   })
 
   it('leaves a tool without an outcome on its plain ✓ line', async () => {
