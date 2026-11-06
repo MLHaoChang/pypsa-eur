@@ -120,6 +120,17 @@ def test_the_freeze_resolves_every_goal_field_the_study_would_read_live(tmp_path
     assert frozen["goal"]["target_lole_h"] == {"value": 2.0, "source": "stored"}
 
 
+def test_the_freeze_pins_default_draws_that_the_study_would_read_live(tmp_path):
+    """F1: a goal left at its defaults still freezes `mc.draws` (the goal
+    merge leaves a default unset, and the study would read it at its start)."""
+    from services import reliability_goal
+    ctx = ctx_for(tmp_path, cfg={})
+    frozen = run_eh.freeze(ctx, PROFILE, 6)
+    goal = run_eh.goal_of(ctx)
+    assert goal["mc_draws"]["source"] == reliability_goal.DEFAULT
+    assert frozen["args"]["mc"] == {"draws": goal["mc_draws"]["value"]}
+
+
 def test_the_freeze_caps_the_budget_at_the_solves_left_and_refuses_none(tmp_path):
     ctx = ctx_for(tmp_path)
     assert run_eh.freeze(ctx, PROFILE, 1)["args"]["budget_solves"] == 1
