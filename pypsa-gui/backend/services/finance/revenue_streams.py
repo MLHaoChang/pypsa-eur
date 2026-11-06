@@ -27,6 +27,7 @@ LABELS: dict[str, str] = {
     "cfd": "CfD top-up or payback",
     "grid_imports": "Grid imports and network charges",
     "om": "Operation & maintenance",
+    "reserve": "Reserve capacity revenue",
     "other": "Other",
     "total": "Operating cash (revenue less operating costs)",
     "replacements": "Replacements",
@@ -41,6 +42,8 @@ ROW_OF_STREAM: dict[str, str] = {
     "network_capacity": "grid_imports", "network_energy": "grid_imports",
     "demand_charge": "grid_imports", "retail_fixed": "grid_imports",
     "fom": "om", "vom": "om",
+    # Reserve products' capacity payments (DC 06, GK B L6); a row only when the case has one.
+    "ancillary": "reserve",
 }
 
 
@@ -54,7 +57,8 @@ def revenue_by_stream(op) -> dict[str, Any] | None:
     if (op.status or {}).get("operating") != "ok" or op.revenue is None or op.costs is None:
         return None
     n = op.tl.n
-    rows = {r: np.zeros(n) for r in ROWS}
+    rows = {r: np.zeros(n) for r in (*ROWS, "reserve")}
+    has_reserve = False
     other_keys: list[str] = []
     for key, arr in sorted(op.lines.items()):
         ln = op.line_meta.get(key)
@@ -68,11 +72,13 @@ def revenue_by_stream(op) -> dict[str, Any] | None:
             continue
         if row == "other" and np.any(arr != 0.0):
             other_keys.append(key)
+        has_reserve = has_reserve or row == "reserve"
         rows[row] += arr
     total = op.revenue - op.costs
     return {
         "years": [int(y) for y in op.tl.years],
-        "rows": [{"id": r, "label": LABELS[r], "values": _values(rows[r])} for r in ROWS],
+        "rows": [{"id": r, "label": LABELS[r], "values": _values(rows[r])}
+                 for r in (*ROWS[:-1], *(("reserve",) if has_reserve else ()), ROWS[-1])],
         "total": {"id": "total", "label": LABELS["total"], "values": _values(total)},
         "replacements": {"id": "replacements", "label": LABELS["replacements"],
                          "values": _values(0.0 - np.asarray(op.replacement, dtype=float))},

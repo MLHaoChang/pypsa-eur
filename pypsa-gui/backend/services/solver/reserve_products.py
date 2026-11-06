@@ -112,7 +112,10 @@ def without_reserves(cfg):
     if not _raw_products(commercial):
         return cfg
     if isinstance(commercial, dict):
-        return dataclasses.replace(cfg, commercial={**commercial, "reserve_products": []})
+        # The config as it reads without products: the key gone, and no config at all
+        # when the products were all it held.
+        rest = {k: v for k, v in commercial.items() if k != "reserve_products"}
+        return dataclasses.replace(cfg, commercial=rest or None)
     return dataclasses.replace(cfg, commercial=commercial.model_copy(update={"reserve_products": []}))
 
 
@@ -151,6 +154,18 @@ def bound_price(n, product) -> tuple[pd.Series | None, list[str]]:
     s, flags = SI._read(n, PRICE_FRAME, price_column(product.id), product.capacity_price,
                         PRICE_MISSING)
     return s, flags
+
+
+def inputs_digest(products: list["ReserveProduct"], floors: dict[str, float]) -> str:
+    """What a reserve solve read: the products (their price refs included) and
+    the floors of the storages they may use. A settlement on a solve whose
+    digest is not the current one is stale (GK A R6, GK B L5)."""
+    import hashlib
+
+    used = {s for p in products for s in (p.storages or floors)}
+    payload = {"products": [p.model_dump(mode="json") for p in products],
+               "floors": {s: repr(float(floors[s])) for s in sorted(used) if s in floors}}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
 # ── the floor (one source: the stored DC-03 spec) ────────────────────────────
@@ -411,8 +426,9 @@ class _Record:
     """The commitments of every LP the wrap built (rolling and myopic build one per
     window or period), read from each model before PyPSA drops it."""
 
-    def __init__(self, products: list[str]):
+    def __init__(self, products: list[str], digest: str | None = None):
         self.products = products
+        self.digest = digest
         self.frames: list[pd.DataFrame] = []
         self._pending = None
 
@@ -461,12 +477,15 @@ def persist_solution(n) -> bool:
     frame = frame[~frame.index.duplicated(keep="last")].reindex(n.snapshots)
     frame.columns = [str(c) for c in frame.columns]
     n.storage_units_t[OUT_FRAME] = frame.astype(float)
-    n.meta[META_KEY] = {"products": rec.products, "axis_hash": axis_hash(n.snapshots)}
+    n.meta[META_KEY] = {"products": rec.products, "axis_hash": axis_hash(n.snapshots),
+                        "inputs": rec.digest}
     return True
 
 
-def solved(n) -> tuple[pd.DataFrame | None, list[str]]:
-    """The persisted commitments (MW, columns ``<storage>|<product>``), or None + why."""
+def solved(n, digest: str | None = None) -> tuple[pd.DataFrame | None, list[str]]:
+    """The persisted commitments (MW, columns ``<storage>|<product>``), or None + why.
+    ``digest`` (``inputs_digest`` of the current products and floors): a solve
+    that read other inputs is stale, never read."""
     from services.commercial.settlement_inputs import axis_hash
 
     meta = (getattr(n, "meta", None) or {}).get(META_KEY)
@@ -475,7 +494,30 @@ def solved(n) -> tuple[pd.DataFrame | None, list[str]]:
         return None, ["reserve_not_solved"]
     if meta.get("axis_hash") != axis_hash(n.snapshots):
         return None, ["reserve_not_solved"]
+    if digest is not None and meta.get("inputs") != digest:
+        return None, ["reserve_not_solved", "reserve_inputs_changed_since_solve"]
     return frame, []
+
+
+def objective_revenue(n) -> float:
+    """The revenue the LP's objective subtracted for the persisted commitments,
+    Σ hours x period_w x price x r (0 without a reserve solve): the objective
+    decomposition's named term, so it never reads as an unexplained gap."""
+    frame, _ = solved(n)
+    meta = (getattr(n, "meta", None) or {}).get(META_KEY) or {}
+    prices = n.buses_t.get(PRICE_FRAME) if hasattr(n.buses_t, "get") else None
+    if frame is None or prices is None:
+        return 0.0
+    hours, period = reserve_weights(n)
+    w = (hours * period).to_numpy(dtype=float)
+    total = 0.0
+    for pid in meta.get("products") or []:
+        cols = [c for c in frame.columns if c.rpartition(SEP)[2] == pid]
+        if not cols or price_column(pid) not in prices.columns:
+            continue
+        pr = prices[price_column(pid)].reindex(n.snapshots).to_numpy(dtype=float)
+        total += float(np.nansum(w * pr * frame[cols].sum(axis=1).to_numpy(dtype=float)))
+    return total
 
 
 # ── the wrap ─────────────────────────────────────────────────────────────────
@@ -492,7 +534,7 @@ def _wrap_with_reserve_products(network: "pypsa.Network", user_fn, cfg, backup=_
         return user_fn
     floors, strings = project_backup(network) if backup is _UNSET else backup
     the_plan = plan(network, products, floors, strings)
-    record = _Record([p.id for p in products])
+    record = _Record([p.id for p in products], inputs_digest(products, floors))
     setattr(network, RECORD_ATTR, record)
 
     def emit(msg: str) -> None:

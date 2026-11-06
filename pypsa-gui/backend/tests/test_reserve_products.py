@@ -219,6 +219,9 @@ def test_the_outage_redispatch_carries_no_reserves():
     cfg.commercial = {"poc_link": "poc", "reserve_products": [_product().model_dump(mode="json")]}
     out = RP.without_reserves(cfg)
     assert RP.products_of(out) == [] and RP.products_of(cfg)[0].id == "fcr"
+    assert out.commercial == {"poc_link": "poc"}  # the config as it reads without products
+    cfg.commercial = {"reserve_products": [_product().model_dump(mode="json")]}
+    assert RP.without_reserves(cfg).commercial is None
     assert cfg.commercial["reserve_products"] and out.commercial["poc_link"] == "poc"
 
 
@@ -535,3 +538,218 @@ def test_headroom_capex_is_priced_once_in_the_energy_lines():
     assert line(c2, "power_capex_and_repurchase") == line(c0, "power_capex_and_repurchase")
     # The remaining-life credit scales with it (20-year life, 1-year horizon).
     assert c2["npv_bess"] - c0["npv_bess"] == pytest.approx(head * 100.0 / 20.0, rel=1e-9)
+
+
+# ── settlement (GK B L1, L3, L5, L7; GK A R6) ────────────────────────────────
+
+
+def _lines(n, products, floors):
+    from services.results import billing as B
+
+    return B.reserve_lines(n, _cfg(products), "site", backup=(floors, frozenset({STRING})))
+
+
+def test_two_periods_settle_per_period_without_the_period_weight():
+    """Each period: 4 h x 10/MWh x 5 MW = 200, at period weights 1.0 and 0.5
+    (the LP's 300 is the objective's; settlement leaves years to the case)."""
+    n = _site()
+    n.set_investment_periods([2030, 2035])
+    n.investment_period_weightings.loc[:, "objective"] = [1.0, 0.5]
+    n.storage_units.at[STRING, "cyclic_state_of_charge_per_period"] = True
+    n.storage_units_t.p_max_pu = pd.DataFrame(0.0, index=n.snapshots, columns=[STRING])
+    fcr = _product()
+    _bind(n, [fcr], {"fcr": 10.0})
+    floors = {STRING: 20.0}
+    fn = RP._wrap_with_reserve_products(n, None, _cfg([fcr]), backup=(floors, frozenset({STRING})))
+    status, _ = n.optimize(solver_name="highs", extra_functionality=fn, multi_investment_periods=True,
+                           include_objective_constant=False)
+    assert status == "ok" and RP.persist_solution(n)
+    lines, flags = _lines(n, [fcr], floors)
+    assert flags == []
+    assert [(ln.period, ln.amount) for ln in lines] == [
+        (2030, pytest.approx(200.0, abs=1e-4)), (2035, pytest.approx(200.0, abs=1e-4))]
+    assert {(ln.payer, ln.payee, ln.value_stream, ln.contract_id) for ln in lines} == {
+        ("tso", "site", "reserve_capacity", "reserve:fcr")}
+    assert all(ln.flags == [] for ln in lines)  # symmetric: no activation flag
+
+
+def test_three_hourly_snapshots_earn_three_hours_each():
+    n = _site(weights=3.0)
+    up = _product("up", kind="secondary", direction="up", sustain_h=0.5)
+    floors = {STRING: 20.0}
+    frame = _solve(n, [up], floors, {"up": 10.0})
+    r = frame[f"{STRING}|up"].to_numpy()
+    (line,), _ = _lines(n, [up], floors)
+    assert r == pytest.approx(np.full(4, 5.0), abs=1e-6)
+    assert line.amount == pytest.approx(float((3.0 * 10.0 * r).sum()), abs=1e-6)  # 600
+    assert line.flags == ["activation_not_valued"]
+
+
+def test_a_solved_product_with_no_mw_settles_to_zero_unflagged():
+    n = _site(energy_mwh=20.0)  # no headroom above the 20 MWh floor
+    up = _product("up", kind="secondary", direction="up", sustain_h=0.5)
+    floors = {STRING: 20.0}
+    _solve(n, [up], floors, {"up": 10.0})
+    (line,), flags = _lines(n, [up], floors)
+    assert (line.amount, flags) == (0.0, [])
+    assert "reserve_not_solved" not in line.flags
+
+
+def test_no_solve_settles_to_none_never_zero():
+    n = _site()
+    fcr = _product()
+    _bind(n, [fcr], {"fcr": 10.0})
+    (line,), flags = _lines(n, [fcr], {STRING: 20.0})
+    assert line.amount is None and "reserve_not_solved" in line.flags
+    assert flags == ["reserve_not_solved"]
+
+
+@pytest.mark.parametrize("change", ["product", "floor"])
+def test_a_stale_solve_settles_to_none(change):
+    n = _site()
+    fcr = _product()
+    floors = {STRING: 20.0}
+    _solve(n, [fcr], floors)
+    now_products, now_floors = [fcr], dict(floors)
+    if change == "product":
+        now_products = [_product(max_commit_mw=1.0)]
+    else:
+        now_floors[STRING] = 21.0  # the DC-03 spec moved since the solve
+    (line,), flags = _lines(n, now_products, now_floors)
+    assert line.amount is None
+    assert {"reserve_not_solved", "reserve_inputs_changed_since_solve"} <= set(line.flags)
+
+
+def test_no_products_settle_nothing():
+    from services.results import billing as B
+
+    assert B.reserve_lines(_site(), _cfg([]), backup=({}, frozenset())) == ([], [])
+
+
+def test_the_objective_revenue_is_the_lps_own_term():
+    n = _site()
+    _solve(n, [_product()], {STRING: 20.0})
+    assert RP.objective_revenue(n) == pytest.approx(-n.objective, abs=1e-6)
+    assert RP.objective_revenue(_site()) == 0.0
+
+
+def test_the_objective_decomposition_names_the_reserve_revenue():
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.results.objective_decomposition import compute_objective_decomposition
+    from services.solver_service import SolverConfig
+
+    n = _site()
+    n.add("Load", "l", bus="site", p_set=1.0)  # 4 MWh at 1/MWh: cost 4
+    _solve(n, [_product()], {STRING: 20.0})
+    cfg = SolverConfig()
+    od = compute_objective_decomposition(n, compute_cost_breakdown(n, cfg), cfg)
+    assert od["reserve_revenue_eur"] == pytest.approx(200.0, abs=1e-6)  # 4 h x 10 x 5 MW
+    assert od["lp_total"] == pytest.approx(4.0 - 200.0, abs=1e-6)
+    assert od["residual_gap_eur"] == pytest.approx(0.0, abs=1e-6)
+    plain = _site()
+    plain.add("Load", "l", bus="site", p_set=1.0)
+    plain.optimize(solver_name="highs")
+    assert "reserve_revenue_eur" not in compute_objective_decomposition(
+        plain, compute_cost_breakdown(plain, cfg), cfg)
+
+
+# ── the ledger and the investment case (GK B L6, L9) ─────────────────────────
+
+
+def _reserve_row(amount, flags=()):
+    return {"period": "_", "contract_id": "reserve:fcr", "payer": "tso", "payee": "site",
+            "value_stream": "reserve_capacity", "quantity_mwh": None, "amount": amount,
+            "flags": list(flags)}
+
+
+def test_a_reserve_payment_is_an_ancillary_line_from_the_counterparty():
+    from services.commercial import participants as P
+    from tests.test_value_flow_ledger import VF, _inputs
+
+    ledger = P.build_ledger(_inputs(reserve=[_reserve_row(30.0, ["activation_not_valued"])]), VF)
+    (ln,) = [x for x in ledger.periods["_"] if x.source == "reserve"]
+    assert (ln.payer, ln.payee, ln.value_stream, ln.source_id, ln.amount) == (
+        "tso", "site", "ancillary", "fcr", 30.0)
+    assert ln.flags == ["activation_not_valued"]
+    none = P.build_ledger(_inputs(reserve=[_reserve_row(None, ["reserve_not_solved"])]), VF)
+    (ln,) = [x for x in none.periods["_"] if x.source == "reserve"]
+    assert ln.amount is None and "reserve_not_solved" in ln.flags
+
+
+def test_the_reconciliation_bridges_the_reserve_payment():
+    from services.commercial import participants as P
+    from tests.test_value_flow_ledger import VF, _inputs
+
+    def rec(inputs):
+        result = P.check_conservation(P.build_ledger(inputs, VF), inputs, VF)
+        (c,) = [c for c in result.periods["_"].checks if c["name"] == "reconciliation"]
+        return c["ok"]
+
+    assert rec(_inputs()) is True
+    assert rec(_inputs(reserve=[_reserve_row(30.0)])) is True
+    assert rec(_inputs(reserve=[_reserve_row(None)])) is None  # unknown, never 0
+
+
+def test_the_revenue_rows_show_reserve_only_when_the_case_has_it():
+    from services.finance import revenue_streams as RS
+
+    def rows(streams):
+        lines = {f"k{i}": np.array([10.0, 10.0]) for i, _ in enumerate(streams)}
+        meta = {f"k{i}": SimpleNamespace(stream=s) for i, s in enumerate(streams)}
+        op = SimpleNamespace(status={"operating": "ok"}, revenue=np.zeros(2), costs=np.zeros(2),
+                             tl=SimpleNamespace(n=2, years=[2030, 2031]), lines=lines,
+                             line_meta=meta, legs={}, replacement=np.zeros(2))
+        return [(r["id"], r["label"], r["values"]) for r in RS.revenue_by_stream(op)["rows"]]
+
+    plain = rows(["energy_export"])
+    assert [r[0] for r in plain] == list(RS.ROWS)
+    got = rows(["energy_export", "ancillary"])
+    assert [r[0] for r in got] == [*RS.ROWS[:-1], "reserve", "other"]
+    assert ("reserve", "Reserve capacity revenue", [10.0, 10.0]) in got
+
+
+# ── the runners (GK A R5) ────────────────────────────────────────────────────
+
+
+def test_the_sizing_loop_names_reserve_products_and_its_chain_carries_the_rows(monkeypatch):
+    """The loop refuses a project with commercial bindings by name (so it never
+    solves without its reserves silently); its LP chain (`_prepare`, the
+    project's `build_lp_chain`) carries the rows all the same."""
+    from services.adequacy import sizing_loop_runner as slr
+    from services.solver_service import SolverConfig
+
+    n = _site()
+    fcr = _product()
+    _bind(n, [fcr], {"fcr": 10.0})
+    cfg = SolverConfig(commercial={"reserve_products": [fcr.model_dump(mode="json")]})
+    assert any("commercial bindings" in r for r in slr.refusals(cfg))
+    monkeypatch.setattr(RP, "project_backup", lambda _n: ({STRING: 20.0}, frozenset({STRING})))
+    undo: list = []
+    status, _ = n.optimize(solver_name="highs", **slr._prepare(n, cfg, undo))
+    slr._restore(undo)
+    assert status == "ok" and RP.persist_solution(n)
+    assert RP.solved(n)[0][f"{STRING}|fcr"].to_numpy() == pytest.approx(np.full(4, 5.0), abs=1e-6)
+
+
+@pytest.mark.live_solve
+def test_dc03_assess_is_byte_equal_with_reserve_products_set():
+    """The DtC proof re-dispatches an outage: the obligations lapse with the grid."""
+    import json
+
+    from project_templates import eh_templates as t
+    from services.adequacy import dc_backup
+    from services.solver_service import SolverConfig
+    from tests.test_dc_backup import _dc, _run
+
+    spec = _dc("bess")
+    genset = spec.model_copy(update={"backup": spec.backup.model_copy(update={"mode": "genset"})})
+    fcr = _product()
+    outs = []
+    for commercial in (None, {"reserve_products": [fcr.model_dump(mode="json")]}):
+        run = _run()
+        run["cfg"] = SolverConfig(voll=500.0, commercial=commercial)
+        outs.append(dc_backup.assess(
+            t.build_eh_datacenter(load_spec=genset), t.island_config("eh_datacenter"), spec,
+            years=20, prices=dc_backup.pack_prices(t.TEMPLATE_PACK_VERSION), **run))
+    assert json.dumps(outs[0], sort_keys=True, default=str) == \
+        json.dumps(outs[1], sort_keys=True, default=str)

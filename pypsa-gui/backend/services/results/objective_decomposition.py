@@ -83,6 +83,7 @@ def _bridge(n, cost_breakdown, cfg) -> dict:
         lp_total = cost_breakdown_total
                    − nonextendable_fixed_cost_eur
                    + period_weighting_adjustment_eur
+                   − reserve_revenue_eur      (DC 06; present only with reserves)
                    + residual_gap_eur
 
       * ``nonextendable_fixed_cost_eur`` — fixed cost of assets the LP could
@@ -134,6 +135,10 @@ def _bridge(n, cost_breakdown, cfg) -> dict:
     from services.solver.pcs_statcom import cost_terms
 
     lp_basis += sum(cost_terms(n).values())
+    # DC 06: reserve capacity revenue is in the objective (negative), in no component.
+    from services.solver.reserve_products import objective_revenue
+
+    reserve = objective_revenue(n)
     cb_total = float(cost_breakdown["total"])
     # U2 WP10 removed the decision study's `demand_charge_eur` term (F1-B4):
     # a site demand charge is an Investment Case commercial term, which
@@ -144,8 +149,9 @@ def _bridge(n, cost_breakdown, cfg) -> dict:
     return {
         "nonextendable_fixed_cost_eur": nonext_reported,
         "period_weighting_adjustment_eur": lp_basis - (cb_total - nonext_reported),
-        "lp_basis_total": lp_basis,
+        "lp_basis_total": lp_basis - reserve,
         "is_multi_period": is_mp,
+        **({"reserve_revenue_eur": reserve} if reserve else {}),
     }
 
 
@@ -245,6 +251,8 @@ def compute_objective_decomposition(n, cost_breakdown, cfg=None):
             out["nonextendable_fixed_cost_eur"] = b["nonextendable_fixed_cost_eur"]
             out["period_weighting_adjustment_eur"] = b["period_weighting_adjustment_eur"]
             out["lp_basis_total"] = b["lp_basis_total"]
+            if "reserve_revenue_eur" in b:
+                out["reserve_revenue_eur"] = b["reserve_revenue_eur"]
             residual = out["lp_total"] - b["lp_basis_total"]
             out["residual_gap_eur"] = residual
             if abs(b["lp_basis_total"]) > 1e-9:

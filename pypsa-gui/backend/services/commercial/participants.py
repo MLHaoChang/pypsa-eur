@@ -373,6 +373,9 @@ class LedgerInputs:
     # The wholesale import cost per period (IPP ticket 07, `import_price_ref`): + the
     # site pays the market; {} when the config prices no import series.
     import_cost: dict[str, float | None] = field(default_factory=dict)
+    # Reserve capacity payments (DC 06, `results.billing.reserve_lines`):
+    # settlement-shaped dicts, period keyed "_"/"<year>"; booked `ancillary`.
+    reserve: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -560,6 +563,13 @@ def _sources(inputs: LedgerInputs, vf: ValueFlowConfig, p: str) -> list[_Source]
         if kind == "other":
             src.flags.append(f"unmapped_stream:{s.get('value_stream')}")
         out.append(src)
+    for r in inputs.reserve:
+        if r.get("period") != p:
+            continue
+        v = r.get("amount")
+        out.append(_Source("reserve", str(r.get("contract_id")).partition(":")[2], "ancillary",
+                           legs=[(r.get("payer"), r.get("payee"), v if _finite(v) else None)],
+                           flags=list(r.get("flags") or [])))
     for cid, reason in inputs.unsettled_contracts:
         # Its parties' money is unknown too (WP3.4 review #4): the leg names
         # them when the contract does, so their totals are null, not numbers.
@@ -952,6 +962,15 @@ def check_conservation(ledger: Ledger, inputs: LedgerInputs,
                     terms.append(s.get("amount"))
                 elif a == "external" and b == "internal":
                     terms.append(None if s.get("amount") is None else -s["amount"])
+            for s in inputs.reserve:
+                # Earned in the LP's objective, outside cost_breakdown (DC 06).
+                if s.get("period") != p:
+                    continue
+                a, b = _side(s.get("payer"), vf), _side(s.get("payee"), vf)
+                if a == "external" and b == "internal":
+                    terms.append(None if s.get("amount") is None else -s["amount"])
+                elif a == "internal" and b == "external":
+                    terms.append(s.get("amount"))
             if p in inputs.export_revenue:
                 v = inputs.export_revenue[p]
                 terms.append(None if v is None else -v)
