@@ -3,7 +3,7 @@
 
 # RP-16 — a generated synthetic solar profile trips the p_max_pu outlier finding
 
-Status: ready-for-agent (Q-RP-16 answered 2026-11-06)
+Status: done
 Type: bug
 Baseline: master after #623 (RP-04b)
 Raised by: the Profiles II session's hand-off, 2026-10-22
