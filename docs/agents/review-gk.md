@@ -53,6 +53,14 @@ A family-manifest PR flips a variant to `_covered` only for what its tests check
 
 A `pytest.raises(Exception)` on a refusal is checked for what actually raises. An incidental library error (#918's pandas `InvalidIndexError`, a 500) is a defect, not a guard.
 
+A plan keyed by a version that readers check for equality needs a test that every reader accepts each contract version (#1132 F1).
+
+An autouse conftest fixture patches through its own `pytest.MonkeyPatch.context()`, never the test's shared `monkeypatch` (#1132).
+
+A redundant guard layer is mutated together with its sibling when the sibling also enforces the rule; a mutant of one layer alone survives and proves nothing (#1127 M10).
+
+A read-back that compares frames after an IO round trip normalises dtype, index names and NaN/None. It is tested on an edited network and an in-memory one, never only on a fixture loaded by the same reader (#1175 E1).
+
 ## Rulings
 
 - `profile_location_missing` skips uploaded and network_native profiles (`readiness.profile_kind`).
@@ -90,6 +98,14 @@ A `pytest.raises(Exception)` on a refusal is checked for what actually raises. A
 - The frontend types a server field from the server's own return shape; a fixture of the wrong type can pin a defect (#1060 `unavailable_member`).
 - An engine loop's solve count is `solves_used` + `probe_solves` + any restore-final re-solve. The h/yr LOLE goal goes through `reliability_goal.loop_goal` with `metrics.horizon_years(n)`, never `eh_study`'s nyears (SH-05).
 - A combined pytest run of the tornado route suites takes ~630 s: run them per file.
+- A registry that changes what an unlocked reader sees registers only when the caller owns the mutation lock, counted re-entrantly by depth (#1133).
+- A name derived from a user-capped name is never truncated: cap the input, or refuse the collision (#1127).
+- Provider stop reasons map to "truncated" through an allow-list, so an unknown reason reads truncated. An echo bound keeps a spoken answer from its start, and a verified-outcome block goes first in a tool result (GK B (25)).
+- A revalidation or outcome stamp that compared nothing never reads current or completed; it gets its own state (#1170, unanchored).
+- A check compares only the fields its independent read supplies, and names the rest as uncompared (#1170, revision).
+- A "done" count includes only rows the call changed, never rows already present or left as they were (#1175 E2, the S2 W1 analogue).
+- A reader of the island sidecar states whether it takes the raw or the validated config, and its caller passes that one (#1172).
+- An adequacy proof and its cost leg describe the same fleet. An extendable candidate with no size reads `not_shown`, never `fail` (#1172).
 
 ## Engineering rules
 
