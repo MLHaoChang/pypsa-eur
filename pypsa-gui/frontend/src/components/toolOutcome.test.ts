@@ -192,3 +192,15 @@ describe('write outcomes (issue 04 S2)', () => {
     expect(toolOutcomeLine('run_ac_pf_stage', block)).toBe('– run_ac_pf_stage (partly done)')
   })
 })
+
+describe('undo outcomes (issue 04 S3)', () => {
+  it.each([
+    ['completed', null, '✓ undo_last (done)'],
+    ['uncertain', 'entry_moved', '– undo_last (outcome unknown: a different step was undone)'],
+    ['uncertain', 'not_restored', '– undo_last (outcome unknown: the network does not match the undone step)'],
+    ['failed', 'nothing_to_undo', '✕ undo_last (failed)'],
+  ])('words an undo that read back %s (%s)', (outcome, reason, line) => {
+    const block = toolOutcomeOf({ _outcome: { version: 1, outcome, reason } }, 'undo_last')!
+    expect(toolOutcomeLine('undo_last', block)).toBe(line)
+  })
+})

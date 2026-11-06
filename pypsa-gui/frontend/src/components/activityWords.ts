@@ -17,6 +17,9 @@ export const TOOL_OUTCOME_REASON_WORDS: Record<string, string> = {
   revision_moved: 'the network changed while it was being checked',
   readback_failed: 'the network could not be read back',
   not_comparable: 'some values cannot be checked',
+  // Issue 04 S3: undo_last's read-back against the step it undid.
+  entry_moved: 'a different step was undone',
+  not_restored: 'the network does not match the undone step',
 }
 
 export const ACTIVITY_FAMILY_WORDS: Record<string, string> = {

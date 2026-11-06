@@ -33,6 +33,7 @@ works even when the user is editing a giant network.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import pickle
@@ -73,6 +74,11 @@ class _UndoState:
     lock: threading.Lock = field(default_factory=threading.Lock)
     coalesce_lock: threading.Lock = field(default_factory=threading.Lock)
     last_push: float = 0.0
+    # Issue 04 S3 (W5): which entry the last pop took, so a read-back can tell
+    # the entry it peeked from one that replaced it. sha256 of the payload,
+    # which holds everything an undo restores (W4).
+    pops: int = 0
+    last_popped_sha: str | None = None
 
 
 def _active() -> _UndoState:
@@ -161,6 +167,8 @@ def pop_entry() -> dict | None:
             return None
         payload, size = u.stack.pop()
         u.total_bytes -= size
+        u.pops += 1
+        u.last_popped_sha = hashlib.sha256(payload).hexdigest()
     data = pickle.loads(payload)
     data.setdefault("template_meta", None)
     return data
@@ -174,6 +182,29 @@ def peek() -> bytes | None:
             return None
         payload = u.stack[-1][0]
     return pickle.loads(payload)["netcdf"]
+
+
+def peek_entry() -> tuple[str, int, dict] | None:
+    """The top entry left on the stack: (payload sha256, pops so far, entry).
+
+    Issue 04 S3: the read-back after ``undo_last`` compares this sha with
+    ``last_pop()`` (W5) and the restored state with this entry (W4).
+    """
+    u = _active()
+    with u.lock:
+        if not u.stack:
+            return None
+        payload, pops = u.stack[-1][0], u.pops
+    entry = pickle.loads(payload)
+    entry.setdefault("template_meta", None)
+    return hashlib.sha256(payload).hexdigest(), pops, entry
+
+
+def last_pop() -> tuple[int, str | None, int]:
+    """(pops so far, sha256 of the last popped payload, depth) for the active stack."""
+    u = _active()
+    with u.lock:
+        return u.pops, u.last_popped_sha, len(u.stack)
 
 
 def depth() -> int:

@@ -238,7 +238,7 @@ def _reset_for_tests() -> None:
 # between two reads of the edit counter. `classify_write` is pure. The
 # handler's returned JSON is never read (GK B W1–W7).
 
-WRITE_TOOLS = frozenset(
+ROW_WRITE_TOOLS = frozenset(
     {
         "bulk_update_components",
         "batch_create_components",
@@ -246,6 +246,10 @@ WRITE_TOOLS = frozenset(
         "batch_delete_components",
     }
 )
+# Issue 04 S3: tools whose read-back compares the whole network with a snapshot.
+SNAPSHOT_TOOLS = frozenset({"undo_last"})
+# Every tool that gets a write `_outcome`; the loop's projection reads this.
+WRITE_TOOLS = ROW_WRITE_TOOLS | SNAPSHOT_TOOLS
 _MAX_PATHS = 5
 
 
@@ -320,7 +324,9 @@ def _requested(tool: str, args: dict) -> tuple[str, list[dict]]:
 
 def note_write(tool: str, args: dict) -> dict | None:
     """The call's own request and the rows' prior presence, before the handler runs."""
-    if tool not in WRITE_TOOLS:
+    if tool == "undo_last":
+        return note_undo()
+    if tool not in ROW_WRITE_TOOLS:
         return None
     from services import dirty_state
     from services.pypsa_service import PyPSAService
@@ -496,4 +502,189 @@ def classify_write(note: dict | None, read: dict | None) -> dict:
 
 def project_write(note: dict | None) -> dict:
     """The `_outcome` block for one write tool result (ordinary turns)."""
+    if note and note.get("tool") == "undo_last":
+        return {"version": VERSION, **classify_undo(note, read_undo(note))}
     return {"version": VERSION, **classify_write(note, read_write(note))}
+
+
+# ── Issue 04 S3: snapshot read-backs (undo_last, network import/export) ────
+
+
+def network_digest(n) -> str | _Uncomparable:
+    """A content hash of the network: snapshots, static and time-varying frames.
+
+    Rows and columns are sorted so order alone never reads as a change. A frame
+    pandas cannot hash (a list in a cell) makes the whole digest UNCOMPARABLE.
+    """
+    import hashlib
+
+    import pandas as pd
+
+    def frame(h, label: str, df) -> None:
+        df = df.sort_index().sort_index(axis=1)
+        h.update(label.encode())
+        h.update(repr(list(df.columns)).encode())
+        h.update(pd.util.hash_pandas_object(df, index=True).values.tobytes())
+
+    h = hashlib.sha256()
+    try:
+        h.update(pd.util.hash_pandas_object(pd.Index(n.snapshots).to_frame(), index=False).values.tobytes())
+        for cls in sorted(n.all_components):
+            static = n.static(cls)
+            if static.empty:
+                continue
+            frame(h, f"{cls}:static", static)
+            for attr, df in sorted(n.dynamic(cls).items()):
+                if not df.empty:
+                    frame(h, f"{cls}:{attr}", df)
+    except TypeError:
+        return UNCOMPARABLE
+    return h.hexdigest()
+
+
+def _binding() -> tuple:
+    """The project the active context is bound to. An undo re-imports into a new
+    context object (`reset_network(carry="same")`), so `id(ctx)` cannot be used."""
+    from services.pypsa_service import PyPSAService
+
+    return (
+        PyPSAService.get_active_context().project_uuid,
+        PyPSAService.get_loaded_project(),
+    )
+
+
+def _load_netcdf(data: bytes):
+    """A scratch Network read from snapshot bytes with the app's own reader."""
+    import pathlib
+    import tempfile
+
+    import pypsa
+
+    from services.pypsa_service import PyPSAService
+
+    with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as handle:
+        path = pathlib.Path(handle.name)
+        handle.write(data)
+    try:
+        n = pypsa.Network()
+        with PyPSAService.get_netcdf_io_lock():
+            PyPSAService.import_network_from_netcdf(n, path)
+        return n
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def note_undo() -> dict:
+    """The entry undo_last should restore (W4/W5) and the state before it."""
+    from services import dirty_state, growth_placeholders, undo_service
+    from services.pypsa_service import PyPSAService
+    from services.user_timeseries import _serialize_user_ts
+
+    try:
+        top = undo_service.peek_entry()
+        expected = None
+        if top is not None:
+            sha, _pops, entry = top
+            expected = {
+                "sha": sha,
+                "digest": network_digest(_load_netcdf(entry["netcdf"])),
+                "user_ts": entry["user_ts"],
+                "template_meta": entry["template_meta"],
+            }
+        with PyPSAService.get_lock():
+            ctx = PyPSAService.get_active_context()
+            pops, _last, depth = undo_service.last_pop()
+            note = {
+                "tool": "undo_last",
+                "binding": _binding(),
+                "revision": dirty_state.revision(ctx),
+                "pops": pops,
+                "depth": depth,
+                "digest_before": network_digest(ctx.network),
+                "meta_before": growth_placeholders.snapshot_meta(),
+                "expected": expected,
+            }
+        note["user_ts_before"] = _serialize_user_ts()
+    except Exception:  # noqa: BLE001 - no note reads uncertain later
+        return {"tool": "undo_last", "error": True}
+    return note
+
+
+def read_undo(note: dict | None) -> dict:
+    """An independent read of the whole live state after undo_last."""
+    if not note or note.get("error"):
+        return {"error": "no_note"}
+    from services import dirty_state, growth_placeholders, undo_service
+    from services.pypsa_service import PyPSAService
+    from services.user_timeseries import _serialize_user_ts
+
+    try:
+        if _binding() != note["binding"]:
+            return {"error": "other_context"}
+        with PyPSAService.get_lock():
+            ctx = PyPSAService.get_active_context()
+            start = dirty_state.revision(ctx)
+            pops, last_sha, depth = undo_service.last_pop()
+            digest = network_digest(ctx.network)
+            meta = growth_placeholders.snapshot_meta()
+            user_ts = _serialize_user_ts()
+            end = dirty_state.revision(ctx)
+    except Exception:  # noqa: BLE001 - an unreadable network reads uncertain
+        return {"error": "readback_failed"}
+    return {
+        "revision_start": start,
+        "revision_end": end,
+        "pops": pops,
+        "last_popped_sha": last_sha,
+        "depth": depth,
+        "digest": digest,
+        "template_meta": meta,
+        "user_ts": user_ts,
+    }
+
+
+def classify_undo(note: dict | None, read: dict | None) -> dict:
+    """Pure: completed / failed / uncertain for one undo_last call (W4/W5)."""
+
+    def out(outcome, reason=None):
+        return {"outcome": outcome, "reason": reason}
+
+    if not note or note.get("error"):
+        return out("uncertain", "no_submission")
+    if not isinstance(read, dict) or "error" in read:
+        return out("uncertain", "readback_failed")
+    if (
+        read.get("revision_start") != note["revision"]
+        or read.get("revision_end") != note["revision"]
+    ):
+        return out("uncertain", "revision_moved")
+    popped = read.get("pops", 0) - note["pops"]
+    if popped == 0:
+        # Nothing was taken off the stack: failed only when nothing changed.
+        unchanged = (
+            read.get("depth") == note["depth"]
+            and read.get("digest") == note["digest_before"]
+            and not isinstance(note["digest_before"], _Uncomparable)
+            and read.get("template_meta") == note["meta_before"]
+            and read.get("user_ts") == note["user_ts_before"]
+        )
+        if not unchanged:
+            return out("uncertain", "not_restored")
+        return out("failed", None if note["expected"] else "nothing_to_undo")
+    expected = note.get("expected")
+    if popped != 1 or not expected or read.get("last_popped_sha") != expected["sha"]:
+        return out("uncertain", "entry_moved")
+    if isinstance(expected["digest"], _Uncomparable) or isinstance(
+        read.get("digest"), _Uncomparable
+    ):
+        return out("uncertain", "not_comparable")
+    if (
+        read.get("digest") != expected["digest"]
+        or read.get("user_ts") != expected["user_ts"]
+        or (
+            expected["template_meta"] is not None
+            and read.get("template_meta") != expected["template_meta"]
+        )
+    ):
+        return out("uncertain", "not_restored")
+    return out("completed")
