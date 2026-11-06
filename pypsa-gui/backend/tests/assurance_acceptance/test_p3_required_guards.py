@@ -399,6 +399,38 @@ def _deny_decision(decision):
     return setup
 
 
+def _deny_user_restriction(monkeypatch):
+    from harness import confirm
+
+    monkeypatch.setattr(confirm, "confirmation_policy", lambda *a, **k: "blocked")
+    return UPDATE, "approve"
+
+
+def _deny_envelope(verdict):
+    def setup(monkeypatch):
+        from services import run_envelope
+
+        monkeypatch.setattr(run_envelope, "admit", lambda *a, **k: verdict)
+        return UPDATE, "approve"
+
+    return setup
+
+
+def _deny_policy_unrecorded(monkeypatch):
+    from harness import approvals, confirm
+
+    monkeypatch.setattr(confirm, "confirmation_policy", lambda *a, **k: "policy")
+    monkeypatch.setattr(approvals, "decided", lambda *a, **k: False)
+    return UPDATE, "approve"
+
+
+def _deny_card_unrecorded(monkeypatch):
+    from harness import approvals
+
+    monkeypatch.setattr(approvals, "asked", lambda *a, **k: False)
+    return UPDATE, "approve"
+
+
 @pytest.mark.parametrize(
     "setup, kind",
     [
@@ -410,6 +442,11 @@ def _deny_decision(decision):
         (_deny_decision("expired"), "confirmation_expired"),
         (_deny_decision("aborted"), "aborted"),
         (_deny_decision("revoked"), "confirmation_revoked"),
+        (_deny_user_restriction, "user_restriction"),
+        (_deny_envelope("round_change_cap"), "round_change_cap"),
+        (_deny_envelope("unavailable"), "approval_unavailable"),
+        (_deny_policy_unrecorded, "approval_unavailable"),
+        (_deny_card_unrecorded, "approval_unavailable"),
     ],
 )
 def test_a_denial_runs_no_effect_seam(monkeypatch, spies, setup, kind):
