@@ -1115,6 +1115,45 @@ def test_the_map_ignores_dtype_index_names_and_negative_zero():
     assert outcomes.changed_paths(before, outcomes.state_map(n, {})) == []
 
 
+def test_a_real_negative_zero_reads_no_change_static_and_series():
+    """H7 (GK B (29)): -0.0 written over 0.0 is no change, in a static cell and
+    in a series value; each half kills its own `+ 0.0` fold mutant."""
+    import numpy as np
+
+    from project_templates.eh_templates import build_eh_datacenter
+
+    n = build_eh_datacenter()
+    name = n.generators.index[0]
+    n.generators.at[name, "marginal_cost"] = 0.0
+    attr, df = next((a, d) for a, d in n.loads_t.items() if not d.empty)
+    df.iloc[0, 0] = 0.0
+    before = outcomes.state_map(n, {})
+
+    n.generators.at[name, "marginal_cost"] = -0.0
+    assert np.signbit(n.generators.at[name, "marginal_cost"])
+    assert outcomes.changed_paths(before, outcomes.state_map(n, {})) == []
+
+    getattr(n.loads_t, attr).iloc[0, 0] = -0.0
+    assert np.signbit(getattr(n.loads_t, attr).iloc[0, 0])
+    assert outcomes.changed_paths(before, outcomes.state_map(n, {})) == []
+
+
+def test_sub_network_rows_are_derived_and_never_a_change():
+    """H7 (GK B (29)): a change to SubNetwork rows alone (DERIVED_CLASSES)
+    reports no path. determine_network_topology also rewrites Bus columns,
+    which are real, so the SubNetwork rows are edited directly."""
+    from project_templates.eh_templates import build_eh_datacenter
+
+    n = build_eh_datacenter()
+    n.determine_network_topology()
+    assert len(n.sub_networks) > 1
+    before = outcomes.state_map(n, {})
+    first = n.sub_networks.index[0]
+    n.sub_networks.at[first, "carrier"] = "renamed"
+    n.sub_networks.drop(n.sub_networks.index[-1], inplace=True)
+    assert outcomes.changed_paths(before, outcomes.state_map(n, {})) == []
+
+
 def test_an_edit_restored_reads_no_change_and_an_edit_reads_one_path():
     from project_templates.eh_templates import build_eh_datacenter
 
