@@ -253,6 +253,10 @@ the defaults an extra asset behaves as before.
 period, on the project solve and on the site-today baseline, per year of the period in the product bus's unit. It is a
 quantity for the report (`counterfactual.lost_product`), never a cash line. Empty without a baseline or a shortfall
 slack, and then left out of the case hash, so other cases keep their hash.
+**Changes (2026-11-06, gridspine-library-eu 01, owner Q-GS-1):** `commercial.binding.bind_commercial` and
+`bind_commercial_on_context` gain the trailing optional keyword `currency: str | None = None` (the project's stated
+finance currency). With it, a Library tariff ref resolved in another currency is refused (409 `currency_mismatch`);
+omitting it binds as before.
 
 ## 7. Coordination protocol
 

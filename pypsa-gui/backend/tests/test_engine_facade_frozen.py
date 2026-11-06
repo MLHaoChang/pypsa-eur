@@ -15,7 +15,8 @@ the G2 additions of `2026-10-07-ic-g1-g2-campus-equipment.md` G-11:
 `FinanceInputs.island_outage`; and campus-IC 02/05 of 2026-10-22:
 `FinanceCase.campus`; and campus-IC 04 of 2026-10-23: `ExtraOwnerAsset.renewals`,
 `service_to` and `existing_renewal`; and grid-to-process 11 of 2026-10-29:
-`FinanceCase.product_shortfall`).
+`FinanceCase.product_shortfall`; and gridspine-library-eu 01 of 2026-11-06: the
+`currency` keyword of `bind_commercial` and `bind_commercial_on_context`).
 
 Every facade name is imported and its call signature pinned with
 `inspect.signature` against the expectation below, so any change — a renamed
@@ -132,8 +133,8 @@ SIGNATURES: dict[str, str] = {
     "services.commercial.binding.bind_commercial":
         "(n, commercial, *, project_dir: 'pathlib.Path | None', "
         "resolve_ref: 'Callable[[object], pd.Series]', lock=None, "
-        "resolve_item: 'Callable[[object], dict] | None' = None, solver_cfg=None)"
-        " -> 'dict | None'",
+        "resolve_item: 'Callable[[object], dict] | None' = None, solver_cfg=None, "
+        "currency: 'str | None' = None) -> 'dict | None'",
     "services.library.series_store.resolve":
         "(db: 'DBSession', org_id: 'UUID', ref: 'PriceSeriesRef', *, root: 'Path | None' = None)"
         " -> 'pd.Series'",
@@ -149,7 +150,7 @@ SIGNATURES: dict[str, str] = {
     # The context-level commercial binding (C, U1 follow-up b; GS Q15).
     "services.commercial.binding.bind_commercial_on_context":
         "(ctx, commercial, *, user=None, in_flight: 'Callable[[object], bool] | None' = None, "
-        "solver_cfg=None) -> 'dict | None'",
+        "solver_cfg=None, currency: 'str | None' = None) -> 'dict | None'",
     # The generic defaults pack (A, U1 follow-up a) and the flat export series (e).
     "services.library.defaults_pack.loader.load_defaults_pack":
         "(version: 'str | None' = None, *, region: 'str | None' = None) -> 'DefaultsPack'",
