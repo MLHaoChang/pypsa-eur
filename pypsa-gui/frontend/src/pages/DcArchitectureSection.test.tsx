@@ -111,6 +111,19 @@ describe('DcArchitectureSection', () => {
     expect(screen.queryByTestId('dc-architecture-price')).toBeNull()
   })
 
+  it('names how a tariff price is weighted and which year the energy is', async () => {
+    const user = userEvent.setup()
+    results.getEhTemplate.mockResolvedValue({ dc_load: { spec: {} } })
+    campus.compareDcArchitecture.mockResolvedValue({
+      ...data, energy_basis: 'the final period, 2035 (full build-out)',
+      price: { ...data.price, source: 'tariff t1: energy items', assumed: false, weighting: undefined },
+    })
+    renderIt()
+    await user.click(await screen.findByTestId('dc-architecture-compare'))
+    expect(text(await screen.findByTestId('dc-architecture-price-used'))).toContain("per MWh, weighted by this project's facility energy (tariff t1")
+    expect(text(screen.getByTestId('dc-architecture-energy-basis'))).toBe('Energy per year: the final period, 2035 (full build-out).')
+  })
+
   it('reads out of date when the stored spec changes after a compare', async () => {
     const user = userEvent.setup()
     results.getEhTemplate.mockResolvedValue({ dc_load: { spec: { backup: { mode: 'genset' } } } })

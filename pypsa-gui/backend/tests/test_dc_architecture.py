@@ -480,6 +480,67 @@ def test_a_genset_only_backup_leaves_every_conditional_service_unpassed():
         assert gated[a] <= set(A.services(a, True)["counted"])
 
 
+def test_the_own_leg_keeps_the_saved_load_at_every_cost_end():
+    n, p = _net()
+    out = _compare(n, _spec())
+    own = next(v for v in out["variants"] if v["own"])
+    assert own["npv"]["low"]["energy"] == own["npv"]["value"]["energy"]
+    assert own["npv"]["high"]["energy"] == own["npv"]["value"]["energy"]
+    other = next(v for v in out["variants"] if v["architecture"] == "dc_800v")
+    assert other["npv"]["low"]["energy"] < other["npv"]["high"]["energy"]
+
+
+def test_a_multi_period_network_counts_the_final_period_once():
+    n, p = _net(weight=365.0)
+    one = _compare(n, _spec())
+    m = pypsa.Network()
+    m.set_snapshots(n.snapshots)
+    m.set_investment_periods([2027, 2030])
+    m.snapshot_weightings.loc[:, ["objective", "generators"]] = 365.0
+    m.add("Bus", "b")
+    early = np.r_[0.5 * p, p]
+    m.add("Load", "it_load", bus="b", p_set=0.75 * early)
+    m.add("Load", "cooling", bus="b", p_set=0.25 * early)
+    two = _compare(m, _spec())
+    assert "2030" in two["energy_basis"] and one["energy_basis"] == "the modelled year"
+    for a, b in zip(one["variants"], two["variants"]):
+        assert b["facility_mwh"] == pytest.approx(a["facility_mwh"])
+        assert b["npv"]["value"]["energy"] == pytest.approx(a["npv"]["value"]["energy"])
+
+
+def test_the_price_follows_the_projects_finance_currency():
+    with pytest.raises(A.DcArchitectureError) as e:
+        _compare(_net()[0], _spec(), finance_currency="USD")
+    assert e.value.kind == "dc_architecture_currency_mismatch"
+    assert _compare(_net()[0], _spec(), finance_currency="EUR")["price"]["currency"] == "EUR"
+
+
+def test_an_unset_architecture_leaves_the_scorecard_as_before(tmp_path, monkeypatch):
+    from project_templates import eh_templates as T
+    from services.adequacy import grid_readiness as G
+
+    def card(name, dc_load):
+        d = tmp_path / name
+        d.mkdir()
+        spec = T.dc_load_spec("eh_datacenter", dc_load)
+        n = T.BUILDERS["eh_datacenter"](load_spec=spec)
+        T.write_sidecars(d, "eh_datacenter")
+        meta = json.loads((d / "eh_template.json").read_text())
+        meta["dc_load"] = T.dc_load_meta("eh_datacenter", spec)
+        (d / "eh_template.json").write_text(json.dumps(meta))
+        return d, n
+
+    d, n = card("unset", {})
+    unset = json.dumps(G.grid_readiness(d, n, "eu_rfg_dcc_ce"), sort_keys=True, default=str)
+    with monkeypatch.context() as mp:
+        mp.setattr(G, "_arch_offer", lambda inp: None)
+        before = json.dumps(G.grid_readiness(d, n, "eu_rfg_dcc_ce"), sort_keys=True, default=str)
+    assert unset == before
+    d, n = card("sst", {"architecture": "sst"})
+    rows = {r["id"]: r for r in G.grid_readiness(d, n, "eu_rfg_dcc_ce")["rows"]}
+    assert A.RMS_CAVEAT in rows["frequency_support"]["note"]
+
+
 def test_without_a_tariff_or_a_price_the_screen_refuses():
     with pytest.raises(A.DcArchitectureError) as e:
         _compare(_net()[0], _spec(), energy_price_per_mwh=None)

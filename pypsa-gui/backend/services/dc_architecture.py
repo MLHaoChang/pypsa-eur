@@ -138,7 +138,7 @@ def chain(architecture: str, pack=None, *, pick: str = "value") -> dict[str, Any
     refused (``dc_architecture_pack_row``)."""
     if architecture not in TECHNOLOGY:
         raise _err(
-            f"architecture: {architecture!r} is not one of {list(ARCHITECTURES)}",
+            f"architecture: {architecture} is not one of {', '.join(ARCHITECTURES)}",
             "invalid",
             "architecture",
         )
@@ -329,7 +329,7 @@ def tariff_energy_rate(
     if cur and cur != finance_currency:
         raise _err(
             f"energy_price: the tariff is in {cur}, the finance case in "
-            f"{finance_currency}; the GS-01 gate refuses a mixed-currency case",
+            f"{finance_currency}; a case in two currencies is refused",
             "currency_mismatch",
             "energy_price_per_mwh",
         )
@@ -513,6 +513,7 @@ def compare(
     energy_price_per_mwh: float | None = None,
     rate_kwargs: dict | None = None,
     island_offered: list[str] | None = None,
+    finance_currency: str | None = None,
 ) -> dict[str, Any]:
     """Every architecture against the project's own on the saved network ``n``
     (read, never changed). See the module docstring for the algebra."""
@@ -539,6 +540,16 @@ def compare(
     own_arch = spec.architecture
     snaps = n.snapshots
     w = n.snapshot_weightings[WEIGHTING].reindex(snaps).to_numpy(dtype=float)
+    # A multi-period network weights each period to a full year: the yearly
+    # figures and the energy cost are the final period's (the full build-out,
+    # as the capex on the final IT MW), never the sum over the periods.
+    in_basis = np.ones(len(snaps), dtype=bool)
+    energy_basis = "the modelled year"
+    if snaps.nlevels > 1:
+        last = snaps.get_level_values(0).max()
+        in_basis = np.asarray(snaps.get_level_values(0) == last)
+        w = np.where(in_basis, w, 0.0)
+        energy_basis = f"the final period, {last} (full build-out)"
     facility_own = (
         (n.loads_t.p_set["it_load"] + n.loads_t.p_set["cooling"])
         .reindex(snaps)
@@ -552,8 +563,8 @@ def compare(
     own = chains["value"][own_arch]
     check_pue(pue_t, own["eta_to_rack"])
 
-    # Energy price (K5).
-    finance_currency = pack.finance.currency
+    # Energy price (K5): in the project's finance-case currency, else the pack's.
+    finance_currency = finance_currency or pack.finance.currency
     if energy_price_per_mwh is not None:
         if not math.isfinite(energy_price_per_mwh) or energy_price_per_mwh < 0:
             raise _err(
@@ -628,7 +639,13 @@ def compare(
             # The low-cost end pairs low capex with high efficiency, and the high-cost end the
             # reverse; every leg starts from the saved (own, central) load.
             eff_pick = {"value": "value", "low": "high", "high": "low"}[pick]
-            fac = variant_facility(facility_own, pue_t, own, chains[eff_pick][a])
+            # The own load is the saved one at the stated PUE (Q-A1): only the
+            # variants move with the efficiency ends.
+            fac = (
+                facility_own
+                if a == own_arch
+                else variant_facility(facility_own, pue_t, own, chains[eff_pick][a])
+            )
             ov = capex[a]["overnight" if pick == "value" else f"overnight_{pick}"]
             legs[pick] = leg_npv(
                 overnight=ov,
@@ -700,12 +717,14 @@ def compare(
         "boundary": BOUNDARY,
         "second_order": SECOND_ORDER,
         "weighting": WEIGHTING,
+        "energy_basis": energy_basis,
         "rms_caveat": RMS_CAVEAT,
         "dc_bus_storage": storage,
         "price": {
             **price,
             "weighted_mean_per_mwh": _price_mean(w, facility_own, rate_t),
-            "time_mean_per_mwh": float(np.mean(rate_t)) if len(rate_t) else None,
+            "weighted_mean_basis": "weighted by this project's facility energy",
+            "time_mean_per_mwh": float(np.mean(np.asarray(rate_t)[in_basis])) if in_basis.any() else None,
             "real": "held constant in real terms at the finance real rate",
             "not_valued": NOT_VALUED,
         },
@@ -812,10 +831,15 @@ def compare_project(
             "invalid",
             "solver_config",
         ) from None
+    finance = getattr(cfg, "finance", None)
     try:
-        rate_kwargs = dc_backup.finance_rate(getattr(cfg, "finance", None))
+        rate_kwargs = dc_backup.finance_rate(finance)
     except dc_backup.DcBackupError as exc:
         raise _err(str(exc), "invalid", exc.field) from None
+    from models.finance import FinanceInputs
+
+    # finance_rate has read the case already, so it validates here.
+    finance_currency = FinanceInputs.model_validate(finance).currency if finance else None
     plan = planning or tpl.NATIVE_PLANNING[tid]
     offered = None
     if isinstance(island, dict):
@@ -847,5 +871,6 @@ def compare_project(
         energy_price_per_mwh=energy_price_per_mwh,
         rate_kwargs=rate_kwargs,
         island_offered=offered,
+        finance_currency=finance_currency,
     )
     return {**out, "basis": dc_backup._basis(nc)}

@@ -59,9 +59,8 @@ SOURCES: dict[str, str] = {
                       "by vendor data (IEC TR 61000-3-7 treats flicker through ΔP and ΔQ)"),
     "idle_hours_per_day": "assumed; illustrative daily restart/maintenance window",
     "pue": "assumed; PUE at or below the design temperature, slope above it",
-    "architecture": ("assumed; conversion-loss chain from defaults pack "
-                     "services.dc_architecture.ARCH_PACK_VERSION (DC 05); the PUE stated is "
-                     "this architecture's"),
+    "architecture": ("assumed; conversion-loss chain from the defaults pack's power-architecture "
+                     "rows; the PUE stated is this architecture's"),
     "ambient": "assumed; temperate (Central European) site, no weather data",
     "rack_kw": "assumed or as entered; carried into the envelope only",
     "load_split": ("as entered or assumed (75 % critical); the template has one critical "

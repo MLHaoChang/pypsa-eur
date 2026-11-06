@@ -135,6 +135,7 @@ function Result({ data, stale, guided }: { data: DcArchitectureCompare; stale: b
         </p>
         <p data-testid="dc-architecture-price-used" className="text-[11px]">
           Energy priced at {p.weighted_mean_per_mwh == null ? '–' : money(p.weighted_mean_per_mwh, cur)} per MWh
+          {p.weighting !== 'flat' && <>, {p.weighted_mean_basis}</>}
           {' '}({p.assumed ? p.source.replace(/ \(assumed\)$/, '') : p.source}){p.assumed && <>{' '}<Assumed /></>}; held constant in real terms.
         </p>
         <div className="overflow-x-auto">
@@ -232,6 +233,7 @@ function Result({ data, stale, guided }: { data: DcArchitectureCompare; stale: b
         <ul className="text-[11px] text-muted list-disc pl-4">
           <li data-testid="dc-architecture-footnote">A screening estimate, with no solve. Outage proof is in Backup.</li>
           <li>{data.boundary}; the stated PUE is this project&apos;s architecture&apos;s.</li>
+          <li data-testid="dc-architecture-energy-basis">Energy per year: {data.energy_basis}.</li>
           <li>Effects not modelled: {data.second_order.replace(/^assumed: /, '')} (assumed).</li>
           <li>{data.rms_caveat}.</li>
           <li>{data.capex_note}; {data.years}{NBSP}years at {num(data.discount_rate * 100)}{NBSP}% real ({data.discount_rate_source}).</li>

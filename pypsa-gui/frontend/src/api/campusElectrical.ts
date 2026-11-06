@@ -1017,8 +1017,12 @@ export interface DcArchitectureVariant {
 export interface DcArchitectureCompare {
   own: DcArchitecture; own_set: boolean; pack_version: string
   boundary: string; second_order: string; weighting: string; rms_caveat: string
+  /** Which year the energy figures are: the modelled year, or a multi-period network's final period. */
+  energy_basis: string
   dc_bus_storage: boolean
   price: { source: string; assumed: boolean; currency: string; weighted_mean_per_mwh: number | null
+           /** Set for a tariff price ("flat" for a request price). */
+           weighting?: string; weighted_mean_basis: string
            time_mean_per_mwh: number | null; real: string; not_valued: string; currency_note?: string | null }
   currency: string; money_year: number; years: number; discount_rate: number
   discount_rate_source: string; it_mw: number; capex_note: string

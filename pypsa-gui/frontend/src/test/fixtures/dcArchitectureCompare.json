@@ -19,7 +19,8 @@
   "source": "request (assumed)",
   "time_mean_per_mwh": 80.0,
   "weighted_mean_per_mwh": 80.0,
-  "weighting": "flat"
+  "weighting": "flat",
+  "weighted_mean_basis": "weighted by this project's facility energy"
  },
  "rms_caveat": "An architecture's grid services are an assumed capability: an RMS study (EMT where the code asks) must show them before they count",
  "second_order": "assumed: the cooling of a variant's changed loss heat is not shifted, and each stage's efficiency is flat over part load",
@@ -524,5 +525,6 @@
   }
  ],
  "weighting": "generators",
- "years": 10
+ "years": 10,
+ "energy_basis": "the modelled year"
 }

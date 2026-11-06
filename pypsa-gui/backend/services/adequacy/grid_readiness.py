@@ -1460,21 +1460,18 @@ def _support_rows(inp: _Inputs) -> list[dict]:
     offered = services["services"] if services else None
     target = _target("assets", None, None, "preset")
     arch = _arch_offer(inp)
+    note = (_no_island_note(inp) if offered is None else
+            f"Control preset: {(services['preset'] or 'none').replace('_', ' ')}; what each "
+            "unit offers follows its control mode")
     if arch is None:
         freq = [s for s in (offered or []) if s in _FREQUENCY_SERVICES]
         verdict = "unknown" if offered is None else ("pass" if freq else "warn")
         value = _services_text(offered) if offered else ("none" if offered is not None else None)
-        note = (_no_island_note(inp) if offered is None else
-                f"Control preset: {(services['preset'] or 'none').replace('_', ' ')}; what each "
-                "unit offers follows its control mode")
     else:
         from services import dc_architecture as A
         got = service_verdict(offered, arch[1]["counted"], conditional=arch[1]["conditional"],
                               architecture=A.LABEL[arch[0]])
         verdict, value = got["verdict"], got["project_value"]
-        note = (_no_island_note(inp) if offered is None else
-                f"Control preset: {(services['preset'] or 'none').replace('_', ' ')}; what each "
-                "unit offers follows its control mode")
         if got["assumed_from_architecture"] or got.get("conditional"):
             note += f". Power architecture {A.LABEL[arch[0]]}: {A.RMS_CAVEAT}"
     rows = [_row("frequency_support", "Frequency support offered by the site's converters",
