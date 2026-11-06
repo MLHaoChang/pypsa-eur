@@ -343,10 +343,11 @@ VARIANTS: list[dict] = [
              B + 'test_lc06_d09_inflow_spill.py::test_a_full_reservoir_spills_its_inflow_less_its_dispatch[inflow10]',
              B + 'test_lc06_d09_inflow_spill.py::test_a_full_reservoir_spills_its_inflow_less_its_dispatch[inflow9]'),
     _covered('LC-D09.inflow', 'the same held-full reservoir: inflow series 10 (or 9) MW each snapshot, inflow_mwh 90 (or 81) '
-             '= dispatch 36 + spilled_mwh 54 (or 45)',
+             '= dispatch 36 + spilled_mwh 54 (or 45); a 10/12/8 MW profile beats a static 5 and gives inflow_mwh 90',
              'run_simulation get_simulation_status get_asset_results',
              B + 'test_lc06_d09_inflow_spill.py::test_the_inflow_is_reported_and_closes_the_water_balance[inflow10]',
-             B + 'test_lc06_d09_inflow_spill.py::test_the_inflow_is_reported_and_closes_the_water_balance[inflow9]'),
+             B + 'test_lc06_d09_inflow_spill.py::test_the_inflow_is_reported_and_closes_the_water_balance[inflow9]',
+             B + 'test_lc06_d09_inflow_spill.py::test_a_time_varying_inflow_profile_overrides_the_static_column'),
     _covered('LC-D10.prices_emissions', 'time-weighted bus price, positive dual of a binding cap, emissions = dispatch / efficiency x factor',
              '',
              B + 'test_result_profiles_assurance.py::test_bus_price_is_time_weighted_and_observed',

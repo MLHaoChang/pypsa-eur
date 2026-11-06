@@ -30,7 +30,7 @@ W, LOAD, E_NOM = 3.0, 4.0, 20.0
 TOL = 1e-9
 
 
-def _solve(ctx, inflow):
+def _solve(ctx, inflow, inflow_t=None):
     n = ctx.network
     n.set_snapshots(pd.date_range("2026-01-01", periods=3, freq="h"))
     n.snapshot_weightings.loc[:, :] = W
@@ -38,6 +38,8 @@ def _solve(ctx, inflow):
     n.loads.at["L1", "p_set"] = LOAD
     n.add("StorageUnit", "hydro", bus="B1", p_nom=10.0, max_hours=2.0, state_of_charge_initial=E_NOM,
           cyclic_state_of_charge=False, inflow=inflow, marginal_cost=1.0)
+    if inflow_t is not None:
+        n.storage_units_t.inflow = pd.DataFrame({"hydro": inflow_t}, index=n.snapshots)
     n.storage_units_t.state_of_charge_set = pd.DataFrame({"hydro": [E_NOM] * 3}, index=n.snapshots)
     assert chat_tools.run_simulation()["status"] == "started"
     deadline = time.time() + 120
@@ -66,5 +68,15 @@ def test_the_inflow_is_reported_and_closes_the_water_balance(baseline, inflow):
     assert out["series"]["inflow"] == pytest.approx([inflow] * 3, abs=TOL)
     assert out["scalars"]["inflow_mwh"] == pytest.approx(inflow * 3 * W, abs=TOL)    # 90, then 81
     # held full: inflow = dispatch + spill (no charge, no change in state of charge)
+    assert out["scalars"]["inflow_mwh"] == pytest.approx(
+        LOAD * 3 * W + out["scalars"]["spilled_mwh"], abs=TOL)
+
+
+def test_a_time_varying_inflow_profile_overrides_the_static_column(baseline):
+    profile = [10.0, 12.0, 8.0]
+    out = _solve(baseline[0], 5.0, inflow_t=profile)      # static 5 must lose to the profile
+    assert out["series"]["inflow"] == pytest.approx(profile, abs=TOL)
+    assert out["scalars"]["inflow_mwh"] == pytest.approx(sum(profile) * W, abs=TOL)    # 90
+    assert out["series"]["spill"] == pytest.approx([p - LOAD for p in profile], abs=TOL)
     assert out["scalars"]["inflow_mwh"] == pytest.approx(
         LOAD * 3 * W + out["scalars"]["spilled_mwh"], abs=TOL)
