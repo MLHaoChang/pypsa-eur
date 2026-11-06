@@ -223,7 +223,7 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         'id': 'dc_backup',
         'title': 'Data-centre backup: battery in place of gensets',
         'disposition': 'unbuilt',
-        'reason': 'The data-centre backup setting (genset, battery or hybrid) and its outage proof and cost delta are not available from chat yet (DC-03). Set and assess it in the Backup section of the Grid study tab.',
+        'reason': 'The data-centre backup setting (genset, battery or hybrid) and its outage proof and cost delta are not available from chat yet. Set and assess it in the Backup section of the Grid study tab.',
         'page': 'Grid study',
         'panel': None,
         'keywords': frozenset({

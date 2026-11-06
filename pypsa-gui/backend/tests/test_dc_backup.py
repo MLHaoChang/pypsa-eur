@@ -637,4 +637,9 @@ def test_assess_route_returns_json_and_writes_nothing(
     out = r.json()
     assert out["mode"] == "hybrid" and out["verdict"] in ("pass", "fail", "not_shown")
     assert {"genset", "hybrid"} <= set(out["proofs"]) and "delta" in out["cost"]
+    # GK A 7: which saved network was read, and what the re-dispatch does not reproduce.
+    import hashlib
+    basis = out["basis"]
+    assert basis["network_sha256"] == hashlib.sha256(before["network.nc"]).hexdigest()[:12]
+    assert basis["network_saved_at"] and basis["not_reproduced"] == list(dc_backup.NOT_REPRODUCED)
     assert {f: (d / f).read_bytes() for f in before} == before

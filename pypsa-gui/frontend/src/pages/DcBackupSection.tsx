@@ -10,17 +10,40 @@ import {
 } from '../api/campusElectrical'
 import { resultsApi } from '../api/simulation'
 import { Btn, PageSection, Seg } from '../components/PageKit'
+import { StatePill } from '../components/ResultState'
 import { VerdictChip } from '../components/gridReadiness/GridReadinessScorecard'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 
+const NBSP = ' '
 const MODE_LABEL: Record<DcBackupMode, string> = { genset: 'Gensets', bess: 'Batteries', hybrid: 'Hybrid' }
 const CHIP: Record<DcBackupProof['verdict'], GridReadinessVerdict> = {
   pass: 'pass', fail: 'fail', not_shown: 'unknown',
 }
+/** The redundancy tier in words (UX: no bare "N+1"). */
+const SPARE: Record<string, string> = { N: 'no spare string', 'N+1': 'one spare string', '2N': 'a full second set' }
+const SYMBOL: Record<string, string> = { EUR: '€', USD: '$', GBP: '£' }
+/** Cost-line words (UX: labels from a word map, never raw keys). */
+const LINE_LABEL: Record<string, string> = {
+  capex_and_repurchase: 'Capex and repurchase', fom: 'Fixed O&M', fuel: 'Fuel',
+  residual_value: 'Residual value (credit)', power_capex_and_repurchase: 'Power capex and repurchase',
+  power_fom: 'Power fixed O&M', energy_capex_and_repurchase: 'Energy capex and repurchase',
+  energy_fom: 'Energy fixed O&M', augmentation: 'Augmentation',
+}
+const lineLabel = (k: string) => LINE_LABEL[k] ?? k.replace(/_/g, ' ')
 
 const num = (v: number | null | undefined, digits = 3) =>
-  v == null || !Number.isFinite(v) ? '–' : v.toLocaleString(undefined, { maximumSignificantDigits: digits })
+  v == null || !Number.isFinite(v) ? '–' : v.toLocaleString('en', { maximumSignificantDigits: digits })
+const qty = (v: number | null | undefined, unit: string, digits = 3) => `${num(v, digits)}${NBSP}${unit}`
+const plural = (n: number, one: string, many: string) => `${n}${NBSP}${n === 1 ? one : many}`
+
+/** Money in short form, unsigned: "€ 1.2 m", "€ 350 k", "€ 900". */
+export function money(v: number, currency?: string | null): string {
+  const cur = currency ? (SYMBOL[currency] ?? currency) : ''
+  const a = Math.abs(v)
+  const body = a >= 1e6 ? `${num(a / 1e6, 2)}${NBSP}m` : a >= 1e3 ? `${num(a / 1e3, 3)}${NBSP}k` : num(a, 3)
+  return cur ? `${cur}${NBSP}${body}` : body
+}
 
 /** The stored backup mode of a data-centre project, or null when it has no `dc_load`. */
 function storedMode(meta: unknown): DcBackupMode | null {
@@ -45,12 +68,13 @@ export default function DcBackupSection({ name }: { name: string }) {
   const save = useMutation({
     mutationFn: (next: DcBackupMode) => campusApi.setDcBackup(name, { mode: next }),
     onMutate: () => { setRefusal(null) },
-    onSuccess: () => { setResult(null); void qc.invalidateQueries({ queryKey: key }) },
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: key }) },
+    // The control shows the stored mode, so a refused one never looks selected.
     onError: e => setRefusal(errorText(e)),
   })
   const assess = useMutation({
     mutationFn: () => campusApi.assessDcBackup(name),
-    onMutate: () => { setAssessError(null) },
+    onMutate: () => { setAssessError(null); setRefusal(null) },
     onSuccess: setResult,
     onError: e => setAssessError(errorText(e)),
   })
@@ -75,78 +99,96 @@ export default function DcBackupSection({ name }: { name: string }) {
         </div>
         {refusal && <p className="mt-1 text-[12px] text-danger" data-testid="dc-backup-refusal">{refusal}</p>}
         {assessError && <p className="mt-1 text-[12px] text-danger" data-testid="dc-backup-error">{assessError}</p>}
-        {result && result.mode === mode && <Assessment result={result} />}
+        {result && <Assessment result={result} stale={result.mode !== mode} />}
       </PageSection>
     </div>
   )
 }
 
-function Assessment({ result }: { result: DcBackupAssessment }) {
+function Assessment({ result, stale }: { result: DcBackupAssessment; stale: boolean }) {
   const guided = useUIStore(s => s.uiMode) === 'guided'
   const { window: w, sizing: s, cost: c } = result
   const legs = (['genset', result.mode] as DcBackupMode[]).filter((m, i, a) => a.indexOf(m) === i)
+  const assumed = c.inputs.filter(i => i.assumed)
   return (
-    <div className="mt-2 space-y-2 text-[12px]" data-testid="dc-backup-result">
-      <p>
-        {num(w.hours)} h outage window from {w.first}, {num(w.energy_mwh)} MWh critical energy.
-      </p>
-      <table className="w-full text-[11px]">
-        <thead className="text-muted">
-          <tr><th className="text-left font-normal">Leg</th><th className="text-left font-normal">Verdict</th>
-            <th className="text-right font-normal">Unserved in window, MWh</th>
-            <th className="text-right font-normal">Unserved outside, MWh</th></tr>
-        </thead>
-        <tbody>
-          {legs.map(m => {
-            const p = result.proofs[m]
-            if (!p) return null
-            return (
-              <tr key={m} data-testid={`dc-backup-proof-${m}`}>
-                <td>{MODE_LABEL[m]}</td>
-                <td>
-                  <VerdictChip verdict={CHIP[p.verdict]} />
-                  {p.verdict === 'not_shown' && p.reason && <span className="ml-1 text-muted">{p.reason}</span>}
-                </td>
-                <td className="text-right tabular-nums">{num(p.window_unserved_mwh)}</td>
-                <td className="text-right tabular-nums">{num(p.on_grid_unserved_mwh)}</td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-      {result.mode !== 'genset' && (
-        <p data-testid="dc-backup-sizing">
-          {s.strings_n} strings × {num(s.string_mw)} MW ({s.redundancy}), {num(s.e_mwh)} MWh usable;{' '}
-          {num(s.shortfall_mw)} MW above firm gensets.
+    <div className="mt-2 space-y-2 text-[12px]" data-testid="dc-backup-result" data-stale={stale}>
+      {stale && (
+        <p className="flex items-center gap-2" data-testid="dc-backup-stale">
+          <StatePill state="stale" />
+          <span className="text-muted">This assessment is for {MODE_LABEL[result.mode]}. Assess again for the stored mode.</span>
         </p>
       )}
-      <CostLine result={result} />
-      {!guided && result.mode !== 'genset' && (
-        <details>
-          <summary className="cursor-pointer text-muted">Cost lines</summary>
-          <table className="w-full text-[11px]" data-testid="dc-backup-lines">
-            <thead className="text-muted">
-              <tr><th className="text-left font-normal">Leg</th><th className="text-left font-normal">Line</th>
-                <th className="text-left font-normal">Unit</th><th className="text-right font-normal">NPV</th></tr>
-            </thead>
-            <tbody>
-              {c.lines.map(l => (
-                <tr key={`${l.leg}-${l.line}`}>
-                  <td>{l.leg}</td><td>{l.line.replace(/_/g, ' ')}</td><td>{l.unit}</td>
-                  <td className="text-right tabular-nums">{num(l.npv, 4)}</td>
+      <div className={stale ? 'opacity-50 space-y-2' : 'space-y-2'}>
+        <p>
+          {qty(w.hours, 'h')} outage window from {w.first}, {qty(w.energy_mwh, 'MWh')} critical energy.
+        </p>
+        <table className="w-full text-[11px]">
+          <thead className="text-muted">
+            <tr><th className="text-left font-normal">Leg</th><th className="text-left font-normal">Verdict</th>
+              <th className="text-right font-normal">Unserved in window, MWh</th>
+              <th className="text-right font-normal">Unserved outside, MWh</th></tr>
+          </thead>
+          <tbody>
+            {legs.map(m => {
+              const p = result.proofs[m]
+              if (!p) return null
+              return (
+                <tr key={m} data-testid={`dc-backup-proof-${m}`}>
+                  <td>{MODE_LABEL[m]}</td>
+                  <td>
+                    <VerdictChip verdict={CHIP[p.verdict]} />
+                    {p.verdict === 'not_shown' && p.reason && <span className="text-muted">: {p.reason}</span>}
+                  </td>
+                  <td className="text-right tabular-nums">{num(p.window_unserved_mwh)}</td>
+                  <td className="text-right tabular-nums">{num(p.on_grid_unserved_mwh)}</td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="mt-1 text-[11px] text-muted">
-            Assumed: {c.inputs.filter(i => i.assumed).map(i => `${i.key.replace(/_/g, ' ')} ${String(i.value)}${i.unit ? ` ${i.unit}` : ''}`).join('; ') || 'none'}.
+              )
+            })}
+          </tbody>
+        </table>
+        {result.mode !== 'genset' && (
+          <p data-testid="dc-backup-sizing">
+            {plural(s.strings_n, 'string', 'strings')} of {qty(s.string_mw, 'MW')} ({SPARE[s.redundancy] ?? s.redundancy}),{' '}
+            {qty(s.strings_n * s.e_usable_mwh_per_string, 'MWh')} usable; {qty(s.shortfall_mw, 'MW')} above the firm gensets.
           </p>
-        </details>
-      )}
-      <ul className="text-[11px] text-muted list-disc pl-4">
-        <li>The batteries' charge at the start of the outage assumes perfect foresight.</li>
-        <li>The strings are unpriced in the solve; their cost is in this delta only.</li>
-      </ul>
+        )}
+        <CostLine result={result} />
+        {result.mode !== 'genset' && assumed.length > 0 && (
+          <p className="text-[11px] text-muted" data-testid="dc-backup-assumed">
+            {assumed.map((i, k) => (
+              <span key={i.key}>{k > 0 && '; '}{i.key.replace(/_/g, ' ')} {String(i.value)}{i.unit ? `${NBSP}${i.unit}` : ''}{' '}
+                <span className="rounded border border-border px-1 text-[10px]">assumed</span></span>
+            ))}
+          </p>
+        )}
+        {!guided && result.mode !== 'genset' && (
+          <details>
+            <summary className="cursor-pointer text-muted">Cost lines</summary>
+            <table className="w-full text-[11px]" data-testid="dc-backup-lines">
+              <thead className="text-muted">
+                <tr><th className="text-left font-normal">Leg</th><th className="text-left font-normal">Line</th>
+                  <th className="text-right font-normal">NPV</th></tr>
+              </thead>
+              <tbody>
+                {c.lines.map(l => (
+                  <tr key={`${l.leg}-${l.line}`}>
+                    <td>{l.leg === 'genset' ? 'Gensets' : 'Batteries'}</td><td>{lineLabel(l.line)}</td>
+                    <td className="text-right tabular-nums">{l.npv < 0 ? '−' : ''}{money(l.npv, l.unit)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
+        )}
+        <ul className="text-[11px] text-muted list-disc pl-4">
+          <li>The batteries' charge at the start of the outage assumes perfect foresight.</li>
+          <li>The strings are unpriced in the solve; their cost is in this comparison only.</li>
+          {result.basis && <>
+            <li data-testid="dc-backup-basis">Read the network saved at {result.basis.network_saved_at.slice(0, 16).replace('T', ' ')} UTC.</li>
+            {result.basis.not_reproduced.map(t => <li key={t}>Not reproduced from a normal solve: {t}.</li>)}
+          </>}
+        </ul>
+      </div>
     </div>
   )
 }
@@ -155,15 +197,16 @@ function CostLine({ result }: { result: DcBackupAssessment }) {
   const c = result.cost
   if (result.mode === 'genset') return null
   if (c.delta == null) {
-    return <p data-testid="dc-backup-cost">The cost difference against the gensets cannot be priced.</p>
+    return <p data-testid="dc-backup-cost">The cost against the gensets cannot be priced.</p>
   }
-  const cur = c.currency ?? ''
-  const word = c.delta > 0 ? 'costs more' : 'saves'
+  const amount = money(c.delta, c.currency)
   return (
     <p data-testid="dc-backup-cost">
-      NPV against gensets: {MODE_LABEL[result.mode]} {word},{' '}
-      <span className="tabular-nums font-medium">{c.delta > 0 ? '+' : '−'}{cur} {num(Math.abs(c.delta), 4)}</span>{' '}
-      over {c.years} y at {num(c.discount_rate * 100)} % real{c.money_year ? ` (${c.money_year} money)` : ''}.
+      Cost over {plural(c.years, 'year', 'years')} vs gensets:{' '}
+      <span className="font-medium">
+        {c.delta > 0 ? `costs ${amount} more` : c.delta < 0 ? `saves ${amount}` : 'costs the same'}
+      </span>{' '}
+      (NPV, {num(c.discount_rate * 100)}{NBSP}% real{c.money_year ? `, ${c.money_year} money` : ''}).
     </p>
   )
 }

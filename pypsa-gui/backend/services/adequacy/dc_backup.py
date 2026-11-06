@@ -86,7 +86,7 @@ def _finite(name: str, *values) -> None:
 
 def _check_years(years) -> None:
     if not isinstance(years, (int, np.integer)) or years < 1:
-        raise DcBackupError(f"analysis_years: the horizon must be at least 1 year, got {years!r}",
+        raise DcBackupError(f"analysis_years: the horizon must be at least 1 year, got {years}",
                             "analysis_years")
 
 
@@ -376,7 +376,7 @@ def pack_prices(version: str, region: str | None = None) -> dict[str, Any]:
             blank.append(key)
             continue
         if row is None or row.value is None:
-            raise DcBackupError(f"defaults pack {pack.version} has no value for {key!r}",
+            raise DcBackupError(f"defaults pack {pack.version} has no value for {key}",
                                 "defaults_pack")
         prices[key] = float(row.value)
     money_year = next((rows[k].money_year for k in PACK_KEYS
@@ -436,7 +436,7 @@ def _part(cost: float, fom: float, life: float, years: int, r: float,
     from services.finance.replacements import annuity, annuity_pv_factor
 
     if not life or life < 1:
-        raise DcBackupError(f"lifetime: a part's lifetime must be at least a year, got {life!r}",
+        raise DcBackupError(f"lifetime: a part's lifetime must be at least a year, got {life}",
                             "defaults_pack")
     t = years + 1
     capex, fom_c, residual = np.zeros(t), np.zeros(t), np.zeros(t)
@@ -474,7 +474,7 @@ def backup_cost_delta(sizing: dict[str, Any], backup: BackupSpec, *, genset_mw: 
     _check_years(years)
     for key in (*PACK_KEYS, "discount_rate"):
         if key not in prices:
-            raise DcBackupError(f"prices: no value for {key!r}", "defaults_pack")
+            raise DcBackupError(f"prices: no value for {key}", "defaults_pack")
     _finite("prices", *(prices[k] for k in PACK_KEYS), prices["discount_rate"])
     _finite("backup cost inputs", genset_mw, heat_rate, run_hours_per_year,
             backup.fuel_price_per_mwh_fuel, sizing["p_mw"], sizing["e_mwh"])
@@ -756,6 +756,27 @@ def assess_project(project_dir, tpl, mode: str | None = None) -> dict[str, Any]:
     plan = planning or tpl.NATIVE_PLANNING[tid]
     prices = pack_prices(tpl.TEMPLATE_PACK_VERSION)
     with PyPSAService.solving_context(ProjectContext(network=n)):
-        return assess(n, island, spec, years=plan.analysis_years, prices=prices,
-                      rate=float(cfg.discount_rate), inflation=float(cfg.inflation_rate or 0.0),
-                      cfg=cfg, lock=PyPSAService.get_lock())
+        out = assess(n, island, spec, years=plan.analysis_years, prices=prices,
+                     rate=float(cfg.discount_rate), inflation=float(cfg.inflation_rate or 0.0),
+                     cfg=cfg, lock=PyPSAService.get_lock())
+    return {**out, "basis": _basis(nc)}
+
+
+#: What the assessment's re-dispatch does not reproduce from a normal solve
+#: (``dtc.run_dtc_stress``), named in the result (GK A condition 7).
+NOT_REPRODUCED = (
+    "extendable capacity is frozen at its solved size (the nameplate on an unsolved network)",
+    "the ENS cap, zone multiple and reserve margin are stripped for the islanded re-dispatch",
+)
+
+
+def _basis(nc: pathlib.Path) -> dict[str, Any]:
+    """Which saved network the assessment read: its save time and a digest,
+    and the pre-solve steps it does not reproduce."""
+    import hashlib
+    from datetime import datetime, timezone
+
+    data = nc.read_bytes()
+    return {"network_saved_at": datetime.fromtimestamp(nc.stat().st_mtime, timezone.utc).isoformat(),
+            "network_sha256": hashlib.sha256(data).hexdigest()[:12],
+            "not_reproduced": list(NOT_REPRODUCED)}

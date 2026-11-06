@@ -25,15 +25,18 @@ const proof = (verdict: 'pass' | 'fail' | 'not_shown', reason: string | null = n
 const assessment = (over: Partial<DcBackupAssessment> = {}): DcBackupAssessment => ({
   mode: 'bess', verdict: 'pass',
   window: { first: '2030-01-14 18:00', hours: 4, snapshots: 4, energy_mwh: 110.4 },
-  sizing: { strings_n: 7, strings: 7, string_mw: 5, redundancy: 'N+1', e_mwh: 145.8, shortfall_mw: 27.6,
+  sizing: { strings_n: 7, strings: 7, string_mw: 5, redundancy: 'N+1', e_mwh: 145.8, e_usable_mwh_per_string: 16, shortfall_mw: 27.6,
     critical_peak_mw: 27.6, firm_genset_mw: 0 },
   proofs: { genset: proof('pass'), bess: proof('pass') },
   cost: { years: 20, discount_rate: 0.07, currency: 'EUR', money_year: 2025, delta: -1_250_000,
     npv_genset: 9e6, npv_chosen: 7.75e6,
     lines: [{ leg: 'bess', line: 'power_capex_and_repurchase', unit: 'EUR', npv: 3e6 }],
     inputs: [{ key: 'fade_per_year', value: 0.02, unit: '1/y', assumed: true }] },
-  notes: [], ...over,
+  notes: [],
+  basis: { network_saved_at: '2026-11-06T01:00:00+00:00', network_sha256: 'abc', not_reproduced: ['x'] }, ...over,
 })
+
+const text = (el: HTMLElement) => (el.textContent ?? '').replace(/\u00a0/g, ' ')
 
 function renderIt() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -73,10 +76,14 @@ describe('DcBackupSection', () => {
     await screen.findByTestId('dc-backup-result')
     expect((screen.getByTestId('dc-backup-proof-genset')).textContent).toContain('Pass')
     expect((screen.getByTestId('dc-backup-proof-bess')).textContent).toContain('could not be read')
-    expect((screen.getByTestId('dc-backup-sizing')).textContent).toContain('7 strings × 5 MW (N+1)')
-    expect((screen.getByTestId('dc-backup-cost')).textContent).toContain('Batteries saves')
-    expect((screen.getByTestId('dc-backup-cost')).textContent).toContain('−EUR 1,250,000')
-    expect(screen.getByTestId('dc-backup-lines')).toBeTruthy()
+    expect(text(screen.getByTestId('dc-backup-proof-bess'))).toContain(': the unserved')
+    expect(text(screen.getByTestId('dc-backup-sizing'))).toContain('7 strings of 5 MW (one spare string)')
+    expect(text(screen.getByTestId('dc-backup-cost'))).toContain('Cost over 20 years vs gensets: saves € 1.3 m')
+    expect(text(screen.getByTestId('dc-backup-cost'))).not.toMatch(/[+−-]€/)
+    expect(text(screen.getByTestId('dc-backup-assumed'))).toContain('fade per year 0.02 1/y assumed')
+    expect(screen.getByTestId('dc-backup-lines').textContent).toContain('Power capex and repurchase')
+    expect(text(screen.getByTestId('dc-backup-sizing'))).toContain('112 MWh usable')
+    expect(text(screen.getByTestId('dc-backup-basis'))).toContain('2026-11-06 01:00 UTC')
   })
 
   it('says when the delta cannot be priced, and Guided drops the lines', async () => {
@@ -91,5 +98,21 @@ describe('DcBackupSection', () => {
     expect((await screen.findByTestId('dc-backup-cost')).textContent).toContain('cannot be priced')
     expect((screen.getByTestId('dc-backup-proof-hybrid')).textContent).toContain('Fail')
     expect(screen.queryByTestId('dc-backup-lines')).toBeNull()
+    expect(screen.getByTestId('dc-backup-assumed')).toBeTruthy()
+  })
+
+  it('says costs more, and marks the result out of date once the stored mode changes', async () => {
+    const user = userEvent.setup()
+    results.getEhTemplate.mockResolvedValueOnce(meta('bess')).mockResolvedValue(meta('hybrid'))
+    campus.setDcBackup.mockResolvedValue({ mode: 'hybrid' })
+    const a = assessment()
+    campus.assessDcBackup.mockResolvedValue({ ...a, cost: { ...a.cost, delta: 400_000 } })
+    renderIt()
+    await user.click(await screen.findByTestId('dc-backup-assess'))
+    expect(text(await screen.findByTestId('dc-backup-cost'))).toContain('costs € 400 k more')
+    expect(screen.queryByTestId('dc-backup-stale')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Hybrid' }))
+    expect(text(await screen.findByTestId('dc-backup-stale'))).toContain('Out of date')
+    expect(screen.getByTestId('dc-backup-result').getAttribute('data-stale')).toBe('true')
   })
 })

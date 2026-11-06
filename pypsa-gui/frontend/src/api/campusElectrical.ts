@@ -894,7 +894,9 @@ export interface DcBackupAssessment {
   window: { first: string; hours: number; snapshots: number; energy_mwh: number }
   sizing: {
     strings_n: number; strings: number; string_mw: number; redundancy: string
-    e_mwh: number; shortfall_mw: number; critical_peak_mw: number; firm_genset_mw: number
+    /** Nameplate MWh (up-sized for fade); usable is per string after the depth-of-discharge window. */
+    e_mwh: number; e_usable_mwh_per_string: number
+    shortfall_mw: number; critical_peak_mw: number; firm_genset_mw: number
   }
   proofs: Partial<Record<DcBackupMode, DcBackupProof>>
   cost: {
@@ -904,6 +906,8 @@ export interface DcBackupAssessment {
     inputs: { key: string; value: unknown; unit?: string; assumed?: boolean }[]
   }
   notes: string[]
+  /** The saved network the assessment read, and what its re-dispatch does not reproduce. */
+  basis?: { network_saved_at: string; network_sha256: string; not_reproduced: string[] }
 }
 
 /** The assessment re-dispatches the campus twice over the outage window. */
