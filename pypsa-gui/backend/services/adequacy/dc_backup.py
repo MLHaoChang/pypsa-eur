@@ -641,7 +641,9 @@ def _repurchase_years(life: float, years: int) -> list[int]:
     return out
 
 
-def _augmentation(backup: BackupSpec, e_mwh: float, years: int) -> np.ndarray:
+def _augmentation(
+    backup: BackupSpec, e_mwh: float, years: int, restarts: Iterable[int] = ()
+) -> np.ndarray:
     """MWh of cells bought each year (index 0..years) to restore fade, on
     the sizing's fade curve (``_kept``, GK B F7): an augmentation after a
     gap of g years buys E·(1 − kept over g). ``restore_to_nameplate`` is
@@ -654,6 +656,9 @@ def _augmentation(backup: BackupSpec, e_mwh: float, years: int) -> np.ndarray:
         last = 0
         for y in sorted(set(b.augmentation_years)):
             if 1 <= y <= years:
+                # An energy repurchase (``restarts``) brings new cells: the
+                # gap counts from it (GK B 27 rider).
+                last = max([last, *(ry for ry in restarts if ry <= y)])
                 out[y] = e_mwh * (1.0 - _kept(backup, y - last))
                 last = y
     return out
@@ -699,9 +704,12 @@ def _part(
             )
     for y, c in extra:
         capex[y] += c
-        remaining = y + life - years
-        # A repurchase after it scraps an extra (augmentation) purchase.
-        if c and remaining > 0 and not any(y < ry for ry in again):
+        # Extra cells (augmentation) end with the block they join: at the
+        # block purchase before them plus its life (GK B 27), so a later
+        # repurchase scraps them and a late buy is credited as the block is.
+        block = max([0, *(ry for ry in again if ry <= y)])
+        remaining = min(y + life, block + life) - years
+        if c and remaining > 0:
             residual[years] -= (
                 c * annuity(r, life) * annuity_pv_factor(r, min(remaining, life))
             )
@@ -733,8 +741,8 @@ def backup_cost_delta(
     Cash runs year 0 (capex, undiscounted) to ``years`` (operation), end of
     year discounting (``services.finance.metrics.npv``) at a real rate: the
     pack's (assumed, real) when ``rate`` is None, else ``rate`` made real
-    with ``inflation`` (the solver config's nominal rate and inflation, as
-    the IC engine does). Each leg's purchases get the remaining-life credit
+    with ``inflation`` (the finance case's nominal wacc and inflation,
+    ``finance_rate``, as the IC engine does; ``rate_is_real``: as given). Each leg's purchases get the remaining-life credit
     at the horizon end (``_part``). Genset leg: ``genset_mw`` × overnight,
     FOM, repurchase at lifetime, fuel = run hours × MW × heat rate
     (MWh_th/MWh_e) × fuel price (per MWh_th). Battery leg: power and energy
@@ -796,7 +804,12 @@ def backup_cost_delta(
     g, fuel_mwh_th, fuel = genset_leg(genset_mw)
     hg, _hburn, hfuel = genset_leg(kept)
     p, e = sizing["p_mw"], sizing["e_mwh"]
-    aug_mwh = _augmentation(backup, e, years)
+    aug_mwh = _augmentation(
+        backup,
+        e,
+        years,
+        restarts=_repurchase_years(prices["battery.energy.lifetime"], years),
+    )
     e_price = prices["battery.energy.overnight"]
     pw = _part(
         p * prices["battery.power.overnight"],

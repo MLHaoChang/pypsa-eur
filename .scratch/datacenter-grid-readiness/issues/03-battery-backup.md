@@ -1,6 +1,6 @@
 # Battery-based backup in place of diesel
 
-Status: ready-for-agent
+Status: done
 Model: Opus
 Type: task
 Blocked by: 01
@@ -101,7 +101,7 @@ Open for the reviewers:
 ### 2026-11-06: DC-03 (3) review fixes (PR #1172)
 
 - GK A 1: `assess_project` validates the sidecar for the contract and hands `assess` the raw one; eh_datacenter sizes on 30 MW firm (N+1). Route test.
-- GK A 2 / GK B K1: `genset_fleets` gives each leg one fleet. All-genset: the solved fleet when solved, else `genset_fleet_mw` on the critical peak (never under the committed fleet), its excess set on the earliest extendable genset in the proof copy; no candidate: `not_shown` "the genset candidate is unsized". Hybrid keeps and prices the committed fleet, candidates at 0. Each proof reports `genset_fleet_mw`.
+- GK A 2 / GK B K1: `genset_fleets` gives each leg one fleet. All-genset: the solved fleet when solved, else `genset_fleet_mw` on the critical peak (never under the committed fleet), its excess set on the earliest extendable genset in the proof copy; no candidate: `not_shown` "the gensets to be built have no size yet". Hybrid keeps and prices the committed fleet, candidates at 0. Each proof reports `genset_fleet_mw`.
 - GK A 3: site_peak's shaving reserve is the whole set's reserve less the in-service strings' deliverable MWh (`shaving_reserve_mwh`). The bess create refusal still holds: the strings never shave, so a peak above the import has nothing to meet it on grid; it was not the reserve artefact.
 - GK A 4: hybrid proves on the largest (P_c − g)⁺ window; `windows` reports both, and the card shows both.
 - GK B K3: the rate is the finance case's `wacc_nominal`, made real with its inflation when nominal, read as given when real; otherwise the pack's real rate, labelled assumed, with the reason.
@@ -110,3 +110,4 @@ Open for the reviewers:
 - GK B riders: half-year repurchases round up; an energy repurchase scraps earlier augmentation cells (no residual); restore_to_nameplate one-year fade test; `pack_prices` refuses rows in different money years.
 - Rulings relayed by the coordinator: GK B F3: a nominal finance rate without inflation is a typed 422 (`finance.inflation`), not the pack fallback. F4: the defaults pack has no fuel-price row; fuel_price stays labelled assumed. F7: augmentation after a gap of g years buys E·(1 − kept over g) on the sizing's compound curve. GK A Q1: a project created with strings carries `dc_load.network_backup_mode`; assess refuses it with a 422 that names PUT /dc-backup, and the card shows that reason with no Assess button. GK A Q2: the strings hold N × string_mw × autonomy_h (spares named `backup_bess_spare_<j>` are not counted); eh_datacenter in bess mode demands 0 of bess_new and shaves as in genset mode.
 - UX (10): the inputs line, time format, out-of-date line and proof reasons are in words; shares read as percentages; shots 4, 5 and 7 (both modes) and 8 (Guided, not_shown) retaken.
+- GK B (27): augmentation cells end with the block they join (its purchase + life), so a late buy is credited as the block is; a fixed_years gap counts from an energy repurchase.

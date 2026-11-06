@@ -507,6 +507,32 @@ def test_augmentation_is_the_sizing_curve_over_each_gap():
     assert fixed[:6].sum() == 0.0
 
 
+def test_late_augmentation_is_credited_as_its_block_is_by_hand():
+    """GK B (27): cells bought after the block's last purchase end with the
+    block (its purchase + life), not their own life: life 25, horizon 20,
+    an extra in year 19 gets the block's credit fraction."""
+    from services.finance.replacements import annuity, annuity_pv_factor
+
+    r = 0.07
+    part = dc_backup._part(100.0, 0.0, 25.0, 20, r, extra=[(19, 10.0)])
+    frac = annuity(r, 25) * annuity_pv_factor(r, 5)
+    assert part["residual"][20] == pytest.approx(-(100.0 + 10.0) * frac)
+
+
+def test_fixed_years_gap_counts_from_an_energy_repurchase():
+    """GK B (27) rider: new cells at a repurchase restart the fade gap."""
+    fade = {"calendar_fade_per_year": 0.03, "cycle_fade_per_full_cycle": 0.0}
+    bk = _bk(
+        bess={**fade, "augmentation_policy": "fixed_years", "augmentation_years": [6]}
+    )
+    none = _bk(bess={**fade, "augmentation_policy": "none"})
+    plain = dc_backup._augmentation(bk, 100.0, 8)
+    reset = dc_backup._augmentation(bk, 100.0, 8, restarts=[4])
+    assert plain[6] == pytest.approx(100 * (1 - dc_backup.retention(none, 6)))
+    assert reset[6] == pytest.approx(100 * (1 - dc_backup.retention(none, 2)))
+    assert dc_backup._augmentation(bk, 100.0, 8, restarts=[6])[6] == 0.0
+
+
 def test_riders_repurchase_rounding_restore_linear_and_scrapped_augmentation():
     # Half-years round up, never banker's (2.5 → 3, not 2).
     assert dc_backup._repurchase_years(2.5, 5) == [3, 5]
