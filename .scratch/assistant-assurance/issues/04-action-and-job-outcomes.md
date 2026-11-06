@@ -322,3 +322,27 @@ Build (AA-04 (7), finished by AA-04 (8)):
 - Mutants, 16/16 killed against test_p3_raise_and_extra.py: classify_raised 6, classify_write extras 4, classify_export extras 2, loop lock pre-check and timeout tier 3, guards.lock_refusal 1. The two that first survived (export with an uncomparable map; timeout outcome leaking into checked turns) got their own tests.
 - The red EH-flag test was a test bug: Generator has no bool EH column; it now uses Bus (eh_poc/eh_critical).
 - Trial merge with master: assistant inventory, control-matrix and route-parity `--check`, test_tool_error_kind_manifest and ChatPanel.manifest all pass.
+
+### 2026-11-06 — S4b merged (#1204); S5 plan: GK B (30) GO with conditions N1–N9
+
+S4b merged as #1204 (0b7677bd). It was reviewed by GK B (29), who killed 10 of 10 mutants including the H7 negative-zero and SubNetwork gaps, and by UX (11). UX's non-blocking follow-up is still open: the lock refusals' Details still name the tool ("so bulk_update_components was not run"); that text is in services/chat_tools._check_foreign_lock.
+
+S5 plan (AA-04 (8)): a job call that ends uncertain in an ordinary, untasked turn opens a hold keyed by project binding + tool, carrying the G3 fingerprint, tool_use_id, any job_id and the worker future.
+- The same fingerprint is then denied `operation_pending`; a different one is denied `operation_conflict`.
+- The hold clears only on independent evidence that the operation is terminal.
+- A repeat the user asks for runs as a new operation once the user approves a card that names the hold.
+
+GK B (30) answers: Q1 (a) key per project binding + tool; Q2 (a) a confirmation card that names the hold; Q3 (a) solve_queue.enqueue_unique silently dropping a different config is out of S5, to be filed as a ticket and cited here.
+
+Conditions, as GK B (30) sent them:
+- N1 Cross-session gap. A hold on ChatSession is in-process and per session; a new chat, another tab, a second replica or a restart replays freely (#1070: fail closed means a cross-process mechanism). Either, per job tool, name the persisted record P2 also reads when the session has no hold (the solve-queue store's non-terminal job with the same project and fingerprint; the alive solve thread is per process) and test the new-session case for queue jobs; or, where no persisted record exists (sweeps?), add a `_pending` row in issue 04 for the cross-session replay, with a ticket. Do not claim A3.2/A3.6 covered beyond what this holds.
+- N2 abort_simulation is exempt from holds: re-aborting is idempotent, a timed-out abort must never block the next abort, and a hold on a run must never block abort_simulation. Test both.
+- N3 Every hold kind lists its clearing evidence. A hold with no job_id and no future (tool_not_started, or a raise read uncertain) clears only on the solve thread or late_receipt evidence, a P4 card, or the end of the session; never on time alone. If tool_not_started really means not started, open no hold for it, and say which with the code path.
+- N4 A store or thread check that cannot read counts as "not terminal" (deny), never as free (#1079). Test it with the store read raising.
+- N5 An operation_conflict outcome names the held operation and points to wait_for_job, the job status, or abort. Whether the P4 card also covers a different-args call is the builder's choice; say which. If it does, the approval is bound to the held hold id and the new call's fingerprint, both fixed when the card is issued (#1072); test that a card approved for fingerprint F leaves a call with F′ still denied.
+- N6 The repeat card runs exactly once; a second identical call after the approved repeat is held by the new hold. Test it.
+- N7 Order: the deny comes after the G3 compare and the lock pre-check, before reserve, begin_step and the handler. The handler, the queue enqueue and the solve thread start are spied with 0 calls. A tasked call gets only begin_step's refusal and is not double-denied.
+- N8 Drop the DERIVED_CLASSES item: that mutant (now outcomes.py:582) is already killed on master by test_p3_file_outcomes::test_the_digest_is_stable_across_loads_after_topology, checked during #1208.
+- N9 Each new error kind goes in its own tool-error-kinds.d fragment. Run test_tool_error_kind_manifest, ChatPanel.manifest.test.tsx and the denied-words parity at the trial merge. Kill one mutant per new branch (pending, conflict, each clearing source, the N4 read-fail, the card binding) and name the killing test for each. Note in issue 04 that run_simulation and run_ac_pf_stage open holds on an uncertain raise only, since they run on the SSE thread and never time out.
+
+GK B: "Send the PR when CI is green."
