@@ -2501,7 +2501,7 @@
       "key": "ride_through_curve",
       "group": "performance",
       "label": "Ride-through curve",
-      "help": "The voltage dips the unit rides through, as depth%:duration_s pairs, e.g. 20:0.5, 40:0.15, 100:0.02: it rides a dip when some pair is at least as deep and as long. Leave empty when unknown: the dip screen then reads unknown, never rides through.",
+      "help": "The voltage dips the unit rides through, as pairs of dip depth in % and duration in s, written depth:duration, such as 20:0.5, 40:0.15, 100:0.02: it rides a dip when some pair is at least as deep and as long. Leave empty when unknown: the dip screen then reads unknown, never rides through.",
       "unit_display": "",
       "unit_storage": "",
       "scale": 1.0,
