@@ -203,7 +203,13 @@ Named open rows (GK B (26) R1):
 | A3.6 extra edits by a row write (rows the call did not name) | S4 | S2's read-back covers only the named rows; W3 catches other writers only |
 | A3.4 saved/unsaved values | S3 (import/export part) done; saved project files: issue 11 | S3 reads the live network: an import lands as an unsaved draft with no saved copy; an export's file is compared with the live network, which is what it writes. A read-back of the project's saved files (save_project, autosave) is not an issue 04 tool; named for issue 11 (X7) |
 | csv_bundle export: float text precision | `_pending` (X5) | a csv bundle stores floats as text, so the export check allows `CSV_RTOL` = 1e-12 relative; a change smaller than that reads completed (test_a_csv_export_sees_no_change_below_its_float_tolerance) |
-| import_excel, import_matpower, export_excel, export_matpower | `_pending` (X6) | no independent reader; they read adapter_pending |
+| import_excel | `_pending` (X6) | no independent Excel reader; reads adapter_pending |
+| import_matpower | `_pending` (X6) | no independent MATPOWER reader; reads adapter_pending |
+| import_uploaded_network with format excel or matpower | `_pending` (X6) | as the two rows above |
+| export_excel | `_pending` (X6) | no independent Excel reader; reads adapter_pending |
+| export_matpower | `_pending` (X6) | no independent MATPOWER reader; reads adapter_pending |
+| export whose bytes equal a non-export upload (e.g. a user upload) | `_pending` (X5) | `add_upload` dedups onto that file, which is not agent_export, so an ordinary export reads `export_file_count` (fails safe) |
+| csv export: EH columns refilled on read | `_pending` (X5) | the read-back applies `normalise_eh_columns`, as the import route does; an EH column the export dropped is refilled with defaults and can match the live values |
 | R3: an outcome on the raise path for the four S2 tools and undo_last | S4 | GK B (26) chose (a): S3 keeps no `_outcome` on raise/timeout. S4 must keep: `failed` only when verified unchanged, never `failed` on a timeout. |
 
 GK B (26) S3 plan: GO WITH CHANGES, conditions X1–X8:
@@ -239,6 +245,8 @@ Import/export build (same branch):
 - X6: import_excel, import_matpower, import_uploaded_network with excel/matpower, export_excel and export_matpower read `uncertain adapter_pending` (tests named `..._pending`). The tool line words it "this file format cannot be checked yet"; a job keeps "this kind of job cannot be checked yet".
 - X7: see the A3.4 row above.
 - X8: `_match` returns UNCOMPARABLE on a TypeError/ValueError and the outcome reads not_comparable (a mutant test). The PyPSA lock is held only for the live read; the scratch read happens outside it.
-- R3: a refused import (an `ic:` bus) and an export with no project are tool errors with no `_outcome`.
-- Tests: `tests/assurance_acceptance/test_p3_file_outcomes.py`, 58 passed. Frontend: 2093 passed (src/components).
+- R3: a refused import (an `ic:` bus) and an export with no project are tool errors with no `_outcome`. A watch set by a note whose handler then raises is never unwatched; it is a per-context list, so it is harmless, and S4 owns the raise path.
+- Review (mp-code-review): the digest and `_match` now compare snapshot and investment-period weightings and `n.meta` (asset provenance), with mutant tests for import and export; `note_undo` reads the user series under the lock; a parity test pins the frontend FILE_TOOLS and import verbs to the backend sets.
+- X8 cost: `_match` 40–55 ms on the four EH templates and 43 ms on eh_ipp_hybrid (8760 snapshots); `network_digest` 20–24 ms.
+- Tests: `tests/assurance_acceptance/test_p3_file_outcomes.py` 63 passed; p3 file + snapshot + write 154 passed. Frontend: 2093 passed (src/components), ChatPanel.toolOutcome + toolOutcome 94 passed.
 
