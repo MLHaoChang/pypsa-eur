@@ -753,3 +753,38 @@ def test_dc03_assess_is_byte_equal_with_reserve_products_set():
             years=20, prices=dc_backup.pack_prices(t.TEMPLATE_PACK_VERSION), **run))
     assert json.dumps(outs[0], sort_keys=True, default=str) == \
         json.dumps(outs[1], sort_keys=True, default=str)
+
+
+# ── the view (UX: storage view, DC backup line) ──────────────────────────────
+
+
+def test_the_view_shows_floor_energy_soc_and_committed_mw():
+    from services.results.reserves import reserve_view
+
+    n = _site()
+    up = _product("up", kind="secondary", direction="up", sustain_h=0.5)
+    floors = {STRING: 20.0}
+    _solve(n, [up], floors, {"up": 10.0})
+    v = reserve_view(n, _cfg([up]), solved=True, backup=(floors, frozenset({STRING})))
+    (s,) = v["storages"]
+    assert (s["name"], s["string"], s["floor_mwh"], s["e_cap_mwh"]) == (STRING, True, 20.0, 25.0)
+    assert s["committed"]["up"] == pytest.approx([5.0] * 4, abs=1e-6)
+    assert len(s["soc_mwh"]) == 4 and v["flags"] == []
+    assert v["products"][0]["direction"] == "up" and v["lines"][0]["amount"] == pytest.approx(200.0)
+    assert "not modelled" in v["not_modelled"]
+
+
+def test_the_view_never_shows_zero_for_a_missing_solve():
+    from services.results.reserves import reserve_view
+
+    n = _site()
+    fcr = _product()
+    _bind(n, [fcr], {"fcr": 10.0})
+    v = reserve_view(n, _cfg([fcr]), solved=False, backup=({STRING: 20.0}, frozenset({STRING})))
+    assert v["storages"][0]["committed"] is None and v["storages"][0]["soc_mwh"] is None
+    assert v["flags"] == ["reserve_not_solved"] and v["lines"][0]["amount"] is None
+    assert reserve_view(n, _cfg([]), solved=True, backup=({}, frozenset())) is None
+
+
+def test_the_reserves_route_is_204_without_products(client):
+    assert client.get("/api/results/reserves").status_code == 204
