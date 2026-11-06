@@ -65,8 +65,8 @@ def _dc_ac_ratio(frame, name: str) -> float:
     try:
         return declared_dc_ac_ratio(frame, name)
     except ValueError as exc:
-        _refuse("dc_ac_ratio_missing", f"This reference is priced per MW of DC module rating, and {name!r}'s "
-                f"capacity is its AC rating. Set its DC/AC ratio first ({exc}); nothing is applied.")
+        _refuse("dc_ac_ratio_missing", "This cost is priced per MW of DC module rating, and Capacity is the AC "
+                f"rating: set the generator's DC/AC ratio first ({exc}).")
 
 
 def _num(value) -> float | None:

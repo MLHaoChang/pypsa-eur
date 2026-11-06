@@ -531,6 +531,9 @@ def test_the_routes_and_the_chat_card_refuse_a_dc_reference_without_a_ratio_type
     with pytest.raises(HTTPException) as exc:
         edit_card.preview("apply_library_reference", dict(pv))
     assert exc.value.detail["error_kind"] == "dc_ac_ratio_missing"
+    said = exc.value.detail["message"]
+    assert said == ("This cost is priced per MW of DC module rating, and Capacity is the AC rating: "
+                    "set the generator's DC/AC ratio first (not declared).")
     for r in (client.post(PREVIEW, json=pv), client.post(f"{ROUTE}/apply", json={**pv, "digest": "x"})):
         assert r.status_code == 422 and r.json()["detail"]["error_kind"] == "dc_ac_ratio_missing", r.text
     assert n.generators.equals(before)

@@ -82,7 +82,7 @@ def coerce_eh_value(component_class: str, col: str, value):
             raise ValueError(f"{col}: must be a finite number, got {v}") from None
         return v
     if kind == "dc_ac_ratio":
-        return dc_ac_ratio(value, col)
+        return dc_ac_ratio(value)
     if kind == "fraction":
         if value is None or value == "":
             return float("nan")
@@ -133,22 +133,24 @@ def coerce_eh_value(component_class: str, col: str, value):
     raise ValueError(f"{col}: unknown kind {kind!r}")  # pragma: no cover
 
 
-def dc_ac_ratio(value, col: str = "dc_ac_ratio") -> float:
+def dc_ac_ratio(value, label: str | None = "DC/AC ratio") -> float:
     """A Generator's DC/AC ratio: blank is NaN (not declared, never 1); else finite within (0, DC_AC_RATIO_MAX].
     One check for every write path and for pricing, which re-checks a stored value an import may have
-    brought in unchecked."""
+    brought in unchecked. The message opens with the field's label, as the harmonic source's does; None
+    leaves the bare reason, for a caller that names the field itself."""
+    pre = f"{label}: " if label else ""
     if value is None or (isinstance(value, str) and not value.strip()):
         return float("nan")
     try:
         v = float(value)
     except (TypeError, ValueError):
-        raise ValueError(f"{col}: expected a DC/AC ratio (a number such as 1.25), got {value!r}") from None
+        raise ValueError(f"{pre}expected a number such as 1.25, got “{value}”") from None
     if math.isnan(v):
         return v
     if not math.isfinite(v) or v <= 0:
-        raise ValueError(f"{col}: the DC/AC ratio must be a finite number above 0, got {v!r}")
+        raise ValueError(f"{pre}must be a finite number above 0, got {v:g}")
     if v > DC_AC_RATIO_MAX:
-        raise ValueError(f"{col}: the DC/AC ratio must be at most {DC_AC_RATIO_MAX:g}, got {v:g}; "
+        raise ValueError(f"{pre}must be at most {DC_AC_RATIO_MAX:g}, got {v:g}; "
                          f"a percentage is entered as a ratio ({v:g} % is {v / 100:g})")
     return v
 
@@ -157,9 +159,9 @@ def declared_dc_ac_ratio(frame, name: str) -> float:
     """The DC/AC ratio `frame` (a Generator frame) declares for `name`. ValueError names why there
     is none to price with: not declared (no column, or blank), or invalid as stored."""
     raw = frame.at[name, "dc_ac_ratio"] if "dc_ac_ratio" in frame.columns else None
-    ratio = dc_ac_ratio(raw)
+    ratio = dc_ac_ratio(raw, None)
     if math.isnan(ratio):
-        raise ValueError("dc_ac_ratio: not declared")
+        raise ValueError("not declared")
     return ratio
 
 

@@ -58,7 +58,7 @@ def test_the_single_edit_refuses_an_invalid_ratio(client, net, bad):
 
 
 @pytest.mark.parametrize(
-    "bad,why", [(4, "at most 3"), ("abc", "DC/AC ratio"), (125, "125 % is 1.25")]
+    "bad,why", [(4, "at most 3"), ("abc", "got “abc”"), (125, "125 % is 1.25")]
 )
 def test_the_bulk_edit_refuses_an_invalid_ratio_and_writes_nothing(
     client, net, bad, why

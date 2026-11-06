@@ -114,7 +114,7 @@ def _dc_ac_ratio(df, name: str, refuse) -> float:
     try:
         return declared_dc_ac_ratio(df, name)
     except ValueError as exc:
-        refuse("the row is priced per MW of DC module rating and p_nom is the AC rating; "
+        refuse("the row is priced per MW of DC module rating, and Capacity is the AC rating: "
                f"set the generator's DC/AC ratio first ({exc})")
 
 
