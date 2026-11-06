@@ -788,3 +788,33 @@ def test_the_view_never_shows_zero_for_a_missing_solve():
 
 def test_the_reserves_route_is_204_without_products(client):
     assert client.get("/api/results/reserves").status_code == 204
+
+
+# ── the run fingerprint (GK A R4, GK B L4) ───────────────────────────────────
+
+
+def test_the_floors_enter_the_fingerprint_only_with_products(tmp_path):
+    """A spec edit moves the floors without touching the network: with
+    products it is a new run identity; without, the fingerprint is unchanged
+    (a config without products adds nothing to it)."""
+    from project_templates import eh_templates as t
+    from services.adequacy import dc_backup
+    from services.solver_service import SolverConfig
+    from services.workflow_tools import _network_input_fingerprint
+
+    n = _dc_project(tmp_path, {"mode": "hybrid"})
+    s = _strings(n)[0]
+    plain = SolverConfig()
+    with_products = SolverConfig(commercial={"reserve_products": [
+        _product(storages=[s]).model_dump(mode="json")]})
+
+    def fp(cfg):
+        return _network_input_fingerprint(SimpleNamespace(
+            network=n, solver_state={"solver_config": cfg}, user_ts={}, storage_dir=str(tmp_path)))
+
+    before = (fp(plain), fp(with_products))
+    assert before[0] != before[1]
+    dc_backup.save_backup(tmp_path, t, {"mode": "hybrid", "autonomy_h": 8.0})
+    after = (fp(plain), fp(with_products))
+    assert after[0] == before[0]
+    assert after[1] != before[1]

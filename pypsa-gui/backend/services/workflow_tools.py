@@ -561,6 +561,23 @@ def _network_input_fingerprint(ctx, *, exact=False):
         if tags is not None:
             parts.append(label)
             parts.append(_exact_frame_json(tags) if exact else tags.to_json())
+    # DC 06: the reserve rows read floors from the saved DC spec, outside the network
+    # and the config; appended only when the config has reserve products.
+    from services.solver import reserve_products as _rp
+    try:
+        products = _rp.products_of(ctx.solver_state["solver_config"])
+    except ValueError:
+        products, invalid = [], True
+    else:
+        invalid = False
+    if products or invalid:
+        parts.append("reserve-products/1")
+        if invalid:
+            parts.append("invalid")
+        else:
+            floors, strings = _rp.derive_backup(n, getattr(ctx, "storage_dir", None))
+            parts.append(json.dumps({"inputs": _rp.inputs_digest(products, floors),
+                                     "strings": sorted(strings)}, sort_keys=True))
     parts.extend(str(key) + (encode(series.to_frame()) if exact else series.to_json(date_format="iso"))
                  for key, series in sorted(ctx.user_ts.items()))
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()
