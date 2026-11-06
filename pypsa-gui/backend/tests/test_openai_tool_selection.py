@@ -186,3 +186,17 @@ def test_intent_map_names_existing_read_tools():
         for name in names:
             assert name in known
             assert safety_tier_for(name) == "read"
+
+
+def test_spelled_out_words_find_a_tool_named_by_their_compound():
+    """OJ09: "load flow" must reach get_loadflow_summary past generic matches.
+
+    Each distractor's description shares four query words; the summary's own
+    description shares three, so only its name (`loadflow`) can lift it."""
+    distractors = [{"name": f"distractor_{i}", "description": "Open the project and show its view.",
+                    "input_schema": {"type": "object", "properties": {}}} for i in range(128)]
+    tools = distractors + list(TOOLS)
+    selected = wiring._bounded_tools(tools, "Open project oj-grid-copy and show me its load flow.")
+    assert "get_loadflow_summary" in {t["name"] for t in selected}
+    assert len(selected) == 128
+    assert [t for t in tools if t in selected] == selected
