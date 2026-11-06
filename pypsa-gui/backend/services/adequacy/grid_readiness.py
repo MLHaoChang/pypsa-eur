@@ -1166,6 +1166,7 @@ def _motor_start_rows(inp: _Inputs) -> list[dict]:
 GENERIC_PV_MARGIN_PCT = 5.0
 GENERIC_QV_MARGIN_MVAR = 0.0
 _VS_PLACEHOLDER = "planning practice placeholder, not a requirement of this project's grid code"
+_VS_SCREENING = "A screening estimate: an RMS study gives the binding answer."
 _VS_NO_NOSE = "the sweep did not reach the nose"
 _VS_NO_QMIN = "the sweep did not reach the Q–V minimum"
 #: Why both rows leave the scorecard on an off-grid project.
@@ -1265,7 +1266,7 @@ def _vs_rows(inp: _Inputs) -> list[dict]:
                       section="connection", target=target)
         if reason is not None:
             rows.append(_row(rid, spec["req"], project_value=None, verdict="unknown",
-                             note=f"{reason}.", **common))
+                             note=f"{reason}. {_VS_SCREENING}", **common))
             continue
         # A flag read back as anything but True/False (a blank cell) is no answer, never a bound.
         blank = [int(r["period"]) for _, r in frame.iterrows()
@@ -1275,7 +1276,7 @@ def _vs_rows(inp: _Inputs) -> list[dict]:
         if blank:
             gap = _vs_blank_reason(rid, frame[frame["period"] == blank[0]].iloc[0])
             rows.append(_row(rid, spec["req"], project_value=None, verdict="unknown",
-                             note=f"Period {blank[0]}: {gap}.", **common))
+                             note=f"Period {blank[0]}: {gap}. {_VS_SCREENING}", **common))
             continue
         verdict, (period, value, bound) = judge_bounded(periods, limit, spec["rule"])
         shown = f"≥ {value:.4g}" if bound else f"{value:.4g}"
@@ -1283,7 +1284,7 @@ def _vs_rows(inp: _Inputs) -> list[dict]:
                  "unknown": spec["no_bound"]}[verdict]
         r = frame[frame["period"] == period].iloc[0]
         note = (f"Worst period {period}: {shown} {spec['unit']}, {words}; planned load {r['planned_mw']:.4g} MW "
-                f"({r['note']}).")
+                f"({r['note']}). {_VS_SCREENING}")
         row = _row(rid, spec["req"], project_value=round(value, 4), verdict=verdict, note=note, **common)
         row["project_value_is_lower_bound"] = bound
         row["period"] = period

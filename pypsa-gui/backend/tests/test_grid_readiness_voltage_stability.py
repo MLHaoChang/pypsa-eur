@@ -65,7 +65,7 @@ def test_both_rows_show_a_margin_a_limit_and_its_source(tmp_path):
     assert (qv["verdict"], qv["project_value"], qv["limit"]) == ("pass", 120.0, 0.0)
     for r in (pv, qv):
         assert r["section"] == "connection" and r["assumed"] is True
-        assert "binding answer" not in r["note"]  # the stage's own basis says it once (UIP-01)
+        assert "A screening estimate: an RMS study gives the binding answer." in r["note"]
         assert "within the screening margin" in r["note"] and "Worst period 2030" in r["note"]
         assert "planned load 50 MW" in r["note"] and "binds" in r["note"]
 
