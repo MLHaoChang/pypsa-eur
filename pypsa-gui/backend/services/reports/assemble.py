@@ -94,6 +94,7 @@ _CATEGORY_OF_SECTION = {
     "target": "reliability", "certification": "reliability", "frontier": "reliability",
     "dtc": "reliability", "fmea_top": "reliability", "multi_energy": "reliability",
     "gates": "operation", "island": "operation", "grid_readiness": "grid_plan",
+    "grid_risk": "reliability",
     # The network-study chapters (LC-21, ``network_chapters``).
     "headline_results": "investment", "capacity": "investment", "prices_costs": "investment",
     "model_summary": "operation", "dispatch": "operation", "emissions": "operation",
@@ -376,7 +377,7 @@ def _chapter_section(evidence: Evidence, section_id: str) -> Section | None:
         return _not_established_section(section_id, heading, section)
     blocks: list[Block] = [TableRef(table_id=t) for t in _tables_for(evidence, section_id)]
     notes = {C.INVESTMENT: C.investment_disclosures, C.ISLAND: C.island_disclosures,
-             C.GRID_READINESS: C.grid_readiness_disclosures,
+             C.GRID_READINESS: C.grid_readiness_disclosures, C.GRID_RISK: C.grid_risk_disclosures,
              C.TEMPLATE_LEDGER: C.template_ledger_disclosures}[section_id](section.payload)
     blocks.extend(Callout(kind="disclosure", text=n) for n in notes)
     return Section(section_id=section_id, heading=heading, source="code", status="ok",
@@ -427,6 +428,8 @@ def evidence_only_document(evidence: Evidence, *, title: str, report_id: str,
         sections.append(isl)
     if (gr := _chapter_section(evidence, C.GRID_READINESS)) is not None:
         sections.append(gr)
+    if (risk := _chapter_section(evidence, C.GRID_RISK)) is not None:
+        sections.append(risk)
     ledger = _chapter_section(evidence, C.TEMPLATE_LEDGER)
     sections.append(ledger if ledger is not None else Section(
         section_id=C.TEMPLATE_LEDGER, heading=C.TITLES[C.TEMPLATE_LEDGER], source="code",

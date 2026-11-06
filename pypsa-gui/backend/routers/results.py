@@ -488,7 +488,6 @@ def grid_risk_production_payload(project_id: str | None = None) -> dict:
     the project ACL before any file is read. `available` false before a solve; `omitted` when the network has no
     process unit. See `services.results.grid_risk_production`."""
     from services import chat_tools, project_registry
-    from services.results.grid_risk_production import campus_run_of, grid_risk_production
 
     active = PyPSAService.get_active_context().project_uuid
     project_id = str(project_id or active or "")
@@ -505,6 +504,14 @@ def grid_risk_production_payload(project_id: str | None = None) -> dict:
         except HTTPException:
             raise HTTPException(404, {"error_kind": "not_authorized",
                                       "message": "The open project is not one you may read."}) from None
+    return grid_risk_production_of(project, project_id)
+
+
+def grid_risk_production_of(project, project_id: str) -> dict:
+    """The section for a project already resolved through the ACL and open in this session (the route above, and
+    the report's chapter source in `routers.reports`)."""
+    from services.results.grid_risk_production import campus_run_of, grid_risk_production
+
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
         return {"available": False, "project_id": project_id, "omitted": None}

@@ -1,6 +1,6 @@
 # Coupling report: ride-through, island and N-1 to lost tonnes and EUR
 
-Status: ready-for-agent (triage 2026-10-28: still blocked by 12; gated, plan to GK A first)
+Status: done (2026-11-06: built on claude/g2p-13-grid-risk-production; tab, chat tool and report chapter)
 Type: task
 Blocked by: 08, 12
 Gated: **yes** (it reads gridspine and adequacy results)

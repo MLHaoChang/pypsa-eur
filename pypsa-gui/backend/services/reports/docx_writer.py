@@ -88,6 +88,7 @@ SECTION_TITLES: dict[str, str] = {
     "investment_case": "Investment case",
     "island": "Islanding and control",
     "grid_readiness": "Grid readiness (screening)",
+    "grid_risk": "Grid risk to production",
     "template_ledger": "Template assumptions",
 }
 
