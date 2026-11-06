@@ -995,7 +995,7 @@ def genset_fleets(
         ),
     )
     if need > 1e-9 and not by_year:
-        out["unsized"] = "the genset candidate is unsized"
+        out["unsized"] = "the gensets to be built have no size yet"
     cand = dict(zero)
     if need > 1e-9 and by_year:
         cand[by_year[0]] = need
@@ -1070,7 +1070,7 @@ def _proof(
         return {**base, "verdict": "not_shown", "reason": unsized}
     if not crit or not links:
         missing = (
-            "the island sidecar names no critical load in the network"
+            "no critical load is marked in this project's network"
             if not crit
             else "the network has no grid import link to cut for the outage"
         )

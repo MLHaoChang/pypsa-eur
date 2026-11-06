@@ -417,7 +417,7 @@ def test_genset_fleets_price_and_prove_one_fleet_or_say_unsized():
     assert set(f["hybrid"]["candidate_mw"].values()) == {0.0}
     n.remove("Generator", "genset_new")
     bare = dc_backup.genset_fleets(n, island, 51.1, 10.0, "N+1")
-    assert bare["unsized"] == "the genset candidate is unsized"
+    assert bare["unsized"] == "the gensets to be built have no size yet"
     sizing = dc_backup.size_bess(
         [51.1],
         firm_genset_mw=30.0,
