@@ -105,6 +105,7 @@ try {
     const page = await ctx.newPage()
     page.setDefaultTimeout(15000)
     page.on('pageerror', e => problems.push(`${mode}/${key}: page error: ${(e.stack || e.message).split('\n').slice(0, 4).join(' / ')}`))
+    if (process.env.DEBUG) page.on('console', m => { if (m.type() === 'error') console.log(`${mode}/${key} console: ${m.text().slice(0, 600)}`) })
     const unmocked = new Set()
     await page.route(u => u.pathname.startsWith('/api/'), r => {
       const p = new URL(r.request().url()).pathname, m = r.request().method()
