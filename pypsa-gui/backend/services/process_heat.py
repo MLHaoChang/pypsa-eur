@@ -119,6 +119,14 @@ def bus_level(n, bus: str) -> tuple[str, float] | None:
     return None
 
 
+def served_sink_c(n, link: str) -> float | None:
+    """Supply temperature (°C) of the heat band a Link's `bus1` delivers to; None when it serves no heat band."""
+    if link not in n.links.index:
+        return None
+    level = bus_level(n, str(n.links.at[link, "bus1"]))
+    return level[1] if level and level[0] == "temperature_c" else None
+
+
 def level_label(n, bus: str) -> str | None:
     """The derived label of a level bus, e.g. "high band (demo edges) at 450 °C"; None when it has no level."""
     level = bus_level(n, bus)

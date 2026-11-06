@@ -47,10 +47,12 @@ import { SiteConnectionEditor } from './economics/SiteConnectionLink'
 import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
 import IntentComparisonSection from './IntentComparisonSection'
 import CampusInvestmentSection, { TableScroll, formatEur, iterationsText } from './CampusInvestmentSection'
+import CampusDipsRestartSection from './CampusDipsRestartSection'
 import CampusHarmonicScanSection from './CampusHarmonicScanSection'
 import CampusUnitQCurveSection from './CampusUnitQCurveSection'
 import { GRID_CODE_CHANGED } from '../components/gridReadiness/GridReadinessScorecard'
 import CampusIslandSection, { ISLAND_REPORT_KEY } from './CampusIslandSection'
+import DcBackupSection from './DcBackupSection'
 import CampusLibrarySection from './CampusLibrarySection'
 import { useCampusMilpJob } from './useCampusMilpJob'
 import { elapsed, failureLine, stageLabel, stepText, useTick } from './campusRunProgress'
@@ -265,6 +267,7 @@ function CampusView({ name, part }: { name: string; part: CampusPart }) {
           </PageSection>
         )}
         <CampusIslandSection name={name} />
+        <DcBackupSection name={name} />
         <IntentComparisonSection name={name} gridCode={state.data.settings?.profile ?? null} />
       </>)}
       {part === 'results' && (state.data.results
@@ -732,6 +735,8 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
       {grid && <CampusUnitQCurveSection rows={r.ibr_q_curve} notComputed={r.ibr_q_curve_not_computed} />}
 
       {grid && <CampusHarmonicScanSection scan={r.harmonic_scan} />}
+
+      {grid && <CampusDipsRestartSection dips={r.dips_restart} />}
 
       {design && <>
       <PageSection title="Transformers" hint="worst selected hour, intact and N-1, with the design margin">

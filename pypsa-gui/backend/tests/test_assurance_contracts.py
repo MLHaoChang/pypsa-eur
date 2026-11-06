@@ -264,11 +264,15 @@ def test_the_build_ships_the_snapshot_where_the_route_reads_it():
 def test_every_adapter_receipt_and_checked_tool_has_a_returned_shape(live):
     """Issue 02: evidence identity, the receipt and tool results are frozen."""
     from harness.assurance import CHECKED_TOOLS
-    from services.assurance_records import INPUT_ADAPTERS, POLICY_VERSION
+    from services.assurance_records import (
+        DERIVED_POLICY_VERSION,
+        INPUT_ADAPTERS,
+        POLICY_VERSION,
+    )
 
     assert set(INPUT_ADAPTERS.values()) <= set(live["evidence_identity"])
     assert {"scoped_result", "calculated_result"} <= set(live["evidence_identity"])
-    assert set(live["answer_receipt"]) == {POLICY_VERSION}
+    assert set(live["answer_receipt"]) == {POLICY_VERSION, DERIVED_POLICY_VERSION}
     assert set(live["checked_tool_results"]) == CHECKED_TOOLS
     for key in ("evidence_identity", "answer_receipt", "checked_tool_results"):
         assert live["directions"][key] == "returns"
@@ -304,7 +308,7 @@ def test_a_new_returned_field_breaks_and_a_new_version_is_additive(frozen):
         "$.evidence_identity.static-input/1 changed",
     ]
     added = copy.deepcopy(frozen)
-    added["answer_receipt"]["2"] = {"type": "object"}
+    added["answer_receipt"]["3"] = {"type": "object"}
     added["evidence_identity"]["static-input/2"] = {"type": "object"}
     added["checked_tool_results"]["new_tool"] = {"type": "object"}
     assert breaking_changes(frozen, added) == []

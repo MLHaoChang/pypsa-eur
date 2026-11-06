@@ -25,8 +25,10 @@ reindexing:
   * a constant whole-hour step k > 1 (3-hourly, …) → each snapshot takes the
     MEAN of the hourly weather series over its own k hours, aligned by the
     rules above (renewable and load families only; weightings play no part);
-    meta ``step_hours``. Refused by name: a step that is not whole hours
-    (``step_not_whole_hours``), steps of unequal length (``step_irregular``),
+    meta ``step_hours``. The step is constant inside each run of a sampled
+    window (two 3-hourly weeks), the gap between runs at least one step.
+    Refused by name: a step that is not whole hours
+    (``step_not_whole_hours``), a run whose own step differs from the others (``step_irregular``),
     a step over the skipped spring hour of a local clock
     (``step_over_dst_gap``), another family or several investment periods
     (``step_aggregation_unsupported``);
@@ -61,6 +63,7 @@ from services.profile_gen.engine import ProfileGenError
 from services.profile_gen.families import family_of, get_family
 from services.pypsa_service import PyPSAService
 from services.user_timeseries import (
+    NETWORK_NATIVE,
     _reapply_user_ts_to_network,
     _user_ts_lock,
 )
@@ -557,7 +560,8 @@ STEP_MEAN_FAMILIES = frozenset({"renewable", "load"})
 
 
 def _step_hours(snapshots) -> int:
-    """The constant whole-hour step k > 1 of multi-hour snapshots, else 1
+    """The constant whole-hour step k > 1 of multi-hour snapshots (per run, gaps
+    between runs at least k), else 1
     (hourly or finer, or a shape the hourly path judges itself)."""
     idx = snapshots.get_level_values(-1) if isinstance(snapshots, pd.MultiIndex) else snapshots
     if (not isinstance(idx, pd.DatetimeIndex) or idx.tz is not None or len(idx) < 2
@@ -576,10 +580,24 @@ def _step_hours(snapshots) -> int:
         raise StepNotWholeHoursError(
             f"snapshot step {d} is not a whole number of hours — generated "
             "profiles are hourly; use hourly or whole-hour steps")
-    if (diffs != d).any():
-        raise StepIrregularError(
-            "snapshot steps are not one constant length (the shortest is "
-            f"{d}) — a multi-hour step needs the same length throughout")
+    # A constant step k inside each run, any gap between runs at least k (a
+    # difference of at least 2k; k itself continues the run): a longer difference is a gap. Two equal such differences in a row are a
+    # run of its own, longer step, refused by name (a lone snapshot between
+    # two gaps has two different differences).
+    for b in blocks:
+        df = b.to_series().diff().dropna().to_numpy()
+        short = df[(df != d) & (df < 2 * d)]
+        if len(short):
+            raise StepIrregularError(
+                f"a gap of {pd.Timedelta(short[0]) - d} between runs is shorter "
+                f"than the {d} step — runs of a window need a gap of at least "
+                "one step (or none, to continue the run)")
+        for a, c in zip(df[:-1], df[1:]):
+            if a != d and a == c:
+                raise StepIrregularError(
+                    f"a run of the snapshots steps {pd.Timedelta(a)} while the "
+                    f"others step {d} — a multi-hour step needs the same length "
+                    "in every run")
     return int(d // _ONE_HOUR)
 
 
@@ -1011,7 +1029,9 @@ def _replaced_series(ctx, key: tuple[str, str, str], family: str,
     say so; never compose silently)."""
     component_type, attribute, component = key
     previous_meta = ctx.user_ts_meta.get(key)
-    if previous_meta is not None:
+    if previous_meta is not None and previous_meta.get("provenance") == NETWORK_NATIVE:
+        what, same = "network series", False   # seeded from the network (RP-14)
+    elif previous_meta is not None:
         prev_family = family_of(previous_meta)
         what = f"{prev_family} profile"
         # Regenerating the same kind replaces quietly; another kind of the

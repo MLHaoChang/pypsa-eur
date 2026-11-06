@@ -2,8 +2,9 @@
 
 Coordinates are the bus's (spec R1; `network_geometry._bus_coord` is the one
 missing-coordinates rule). The profile state reads the same stores the
-editors do: `ctx.user_ts` + `ctx.user_ts_meta` (an entry with no record, or a
-measured one, is `uploaded`; any other is `generated`), then the network's own
+editors do: `ctx.user_ts` + `ctx.user_ts_meta` (an entry the project seeded
+from the network is `network_native`; one with no record, or a measured one,
+is `uploaded`; any other is `generated`), then the network's own
 `generators_t.p_max_pu` (`network_native`).
 
 A generated profile is stale when its bus moved since generation (the
@@ -18,6 +19,7 @@ from typing import Any
 import pandas as pd
 
 from services.network_geometry import _bus_coord
+from services.profile_gen.defaults import is_measured, is_network_native
 
 # Same bound the apply route warns at (routers/profiles.py apply_profile).
 BUS_MOVED_DEG = 0.5
@@ -47,7 +49,9 @@ def profile_kind(ctx, name: str) -> str:
     if ctx.user_ts.get(key) is None:
         return "network_native" if name in ctx.network.generators_t.p_max_pu.columns else "none"
     meta = ctx.user_ts_meta.get(key) or {}
-    if not meta or str(meta.get("provenance") or "").startswith("measured"):
+    if is_network_native(meta):
+        return "network_native"   # seeded from the network's own column (RP-14)
+    if is_measured(meta):
         return "uploaded"
     return "generated"
 

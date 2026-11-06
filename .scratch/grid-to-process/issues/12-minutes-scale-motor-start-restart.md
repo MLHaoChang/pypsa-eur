@@ -1,6 +1,6 @@
 # 12b: minutes-scale dips, the process restart sequence and lost tonnes
 
-Status: ready-for-agent (owner G2P-12-SPLIT, 2026-10-28: this file is 12b; 12a is issue 18 and starts now)
+Status: done (12b-3, the results section, built 2026-11-06; owner G2P-12-SPLIT, 2026-10-28: this file is 12b, 12a is issue 18)
 Type: task
 Blocked by: 10, 18 (12a: the motor fields and the ΔU check)
 Gated: **yes** (gridspine)
@@ -100,3 +100,7 @@ On the B template:
 - B: the mills carry ledgered demo data. A DOL start reads 29.63 % and fails 3 %; a VFD start reads 1.62 % and passes. The restart's lost tonnes equal 3 × 4 h × 550 t/h × mass pull.
 - GK carry-overs done: a negative rated MW is refused, `TIER_ORDER` is pinned to `CRITICALITY_TIERS`, and the ledger wording is now "tier order, first fit".
 - Next: 12b-3, the results section.
+
+**12b-3 built (session_01G7qCun54agEf4hNKJ2qYp3, 2026-11-06).**
+- The campus run calls `restart_campus` after the P–V/Q–V screen (stage `dips_restart`); a failure is shown, never fails the run. The results payload carries `dips_restart`: both CSVs' rows, the units' restart, ride-through and motor inputs as run, the basis, and `out_of_date` (units whose field changed since, read only when the network changed).
+- "Dips and restarts" sits after the harmonic scan in section 10's campus results: one table in Guided and Expert, the timeline Expert-only. Unknown rows link to the missing field (the form's word + ›) through `openFlowTargetInPlace` / `openFlowTarget`. Shots: `.scratch/grid-to-process/shots/g2p-12b3-dips-*.png`.

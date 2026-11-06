@@ -13,7 +13,7 @@
  * durable thread throughout.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getSpeechState } from '../api/durableConversations'
+import { getSpeechState, type SpeechNotice } from '../api/durableConversations'
 import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import {
@@ -27,9 +27,16 @@ export interface LiveSpeech {
   state: SpeechState
   /** The listening line, else the last stop's line; cleared on the next start. */
   caption: string
+  /** True while `caption` is a server notice (shown in the warning tone). */
+  notice: boolean
   start: () => void
   stop: () => void
 }
+
+const NOTICE_POLL_MS = 2000
+/** A notice states a momentary condition: the caption returns to Listening after this. */
+export const NOTICE_SHOW_MS = 8000
+const NOTICE_STATUSES = new Set(['echo_ignored', 'clarify', 'not_an_approval'])
 
 function speechLanguage(): string {
   const tag = typeof navigator !== 'undefined' ? navigator.language : ''
@@ -43,6 +50,9 @@ export function useLiveSpeech(active: boolean): LiveSpeech {
   const [state, setState] = useState<SpeechState>('off')
   const [caption, setCaption] = useState('')
   const [flagOn, setFlagOn] = useState(false)
+  // LC-07c: the newest unseen server notice (fixed message, never transcript text).
+  const [notice, setNotice] = useState('')
+  const seenSeq = useRef(-1)
   const session = useRef<LiveSpeechSession | null>(null)
   if (!session.current) {
     session.current = new LiveSpeechSession({
@@ -60,6 +70,31 @@ export function useLiveSpeech(active: boolean): LiveSpeech {
     getSpeechState(threadId).then(() => { if (live) setFlagOn(true) }, () => {})
     return () => { live = false }
   }, [active, threadId])
+  // Notices: polled only while listening; each seq shows once; cleared with the session.
+  useEffect(() => {
+    seenSeq.current = -1
+    setNotice('')
+    if (state !== 'listening' || !threadId) return
+    let live = true
+    let hide = 0
+    const poll = () => {
+      getSpeechState(threadId).then((r) => {
+        if (!live) return
+        const fresh = (r.notices ?? [])
+          .filter((n: SpeechNotice) => NOTICE_STATUSES.has(n.status) && typeof n.message === 'string'
+            && n.generation === generation && n.seq > seenSeq.current)
+          .sort((a, b) => b.seq - a.seq)[0]
+        if (fresh) {
+          seenSeq.current = fresh.seq
+          setNotice(fresh.message)
+          window.clearTimeout(hide)
+          hide = window.setTimeout(() => setNotice(''), NOTICE_SHOW_MS)
+        }
+      }, () => {})
+    }
+    const id = window.setInterval(poll, NOTICE_POLL_MS)
+    return () => { live = false; window.clearInterval(id); window.clearTimeout(hide) }
+  }, [state, threadId, generation])
   const linked = speechMediaLinkConfigured()
   const available = flagOn && linked
   const blocked = flagOn && !linked
@@ -100,5 +135,9 @@ export function useLiveSpeech(active: boolean): LiveSpeech {
   }, [])
   const stop = useCallback(() => stopWith('ended'), [stopWith])
 
-  return { available, blocked, state, caption: state === 'listening' ? LISTENING_CAPTION : caption, start, stop }
+  return {
+    available, blocked, state, start, stop,
+    caption: state === 'listening' ? (notice || LISTENING_CAPTION) : caption,
+    notice: state === 'listening' && !!notice,
+  }
 }

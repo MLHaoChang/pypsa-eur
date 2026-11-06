@@ -148,6 +148,44 @@ def deliverable_mwh(n, u: str, entries: dict | None = None) -> float:
     return d * e
 
 
+#: The DC-03 backup strings' name prefix (``services.adequacy.dc_backup``).
+BACKUP_STRING_PREFIX = "backup_bess_"
+#: The redundant backup strings' prefix (beyond the N the rule needs).
+BACKUP_SPARE_PREFIX = f"{BACKUP_STRING_PREFIX}spare_"
+
+
+def without_backup(island: dict | None) -> dict | None:
+    """``island`` with the backup strings (``BACKUP_STRING_PREFIX``) taken out
+    of the ride-through set: they hold their charge for an outage and never
+    shave the site peak (DC-03, GK A ruling 3); the reserve the shaving
+    batteries keep is net of the strings' own deliverable energy
+    (``backup_strings_mwh``, GK A 3). The sidecar itself keeps them for the
+    island study."""
+    if not island:
+        return island
+    req = island.get("requirements") or {}
+    names = req.get("ride_through_storage")
+    if names is None:
+        names = [u for u, d in (island.get("units") or {}).items() if d.get("kind") == "bess"]
+    kept = [u for u in names if not str(u).startswith(BACKUP_STRING_PREFIX)]
+    if len(kept) == len(names) and "ride_through_storage" in req:
+        return island
+    return {**island, "requirements": {**req, "ride_through_storage": kept}}
+
+
+def backup_strings_mwh(n, island: dict | None, year: int | None = None) -> float:
+    """The outage energy the backup strings hold for the island (GK A Q2):
+    the N strings in the ride-through set and in service in ``year`` (not
+    the spares, ``BACKUP_SPARE_PREFIX``) × their MW × the sustained time."""
+    rt = ride_through_batteries(n, island, year)
+    strings = [u for u in rt["names"] if str(u).startswith(BACKUP_STRING_PREFIX)
+               and not str(u).startswith(BACKUP_SPARE_PREFIX)]
+    if not strings or not rt["sustained_h"]:
+        return 0.0
+    entries = _storages(n)
+    return sum(storage_sizes(n, u, entries)[0] for u in strings) * rt["sustained_h"]
+
+
 def ride_through_batteries(n, island: dict | None, year: int | None = None) -> dict:
     """The committed ride-through batteries in service in ``year``:
     ``{names, unsized, p_mw, e_mwh, eta_store, eta_dispatch, sustained_h,
@@ -220,6 +258,19 @@ def outage_reserve_mwh(n, island: dict | None, mask=None, delivered=None,
             r += b
             words += f" plus {b:.3g} MWh seamless bridge ({joins:g} s until the gensets join)"
     return r, words
+
+
+def shaving_reserve_mwh(n, island: dict | None, mask=None, delivered=None,
+                        year: int | None = None) -> tuple[float, str]:
+    """The outage reserve the shaving batteries keep: the whole set's
+    (``outage_reserve_mwh``, backup strings included) net of the in-service
+    backup strings' own deliverable energy (GK A 3), and the words."""
+    reserve, words = outage_reserve_mwh(n, island, mask, delivered, year)
+    held = backup_strings_mwh(n, island, year)
+    if held > 0:
+        reserve = max(0.0, reserve - held)
+        words += f", less {held:.4g} MWh held in the backup strings"
+    return reserve, words
 
 
 def _shave(short: np.ndarray, spare: np.ndarray, rt: dict, reserve: float, hours: float) -> np.ndarray:
@@ -387,14 +438,15 @@ def peak_check(n, island: dict | None, *, unset: dict[str, list[str]] | None = N
     not_electric = [f"{l} on {b} ({c})" for l, b, c in load_split(n)[1]]
     snaps = list(n.snapshots)
     out = []
+    shaving = without_backup(island)
     for label, mask in _periods(n):
         idx = np.flatnonzero(mask)
         if not idx.size:
             continue
         shave = np.zeros(idx.size)
-        rt = ride_through_batteries(n, island, period_year(label))
+        rt = ride_through_batteries(n, shaving, period_year(label))
         if rt["names"]:
-            reserve, words = outage_reserve_mwh(n, island, mask, delivered, period_year(label))
+            reserve, words = shaving_reserve_mwh(n, island, mask, delivered, period_year(label))
             free = max(0.0, rt["e_mwh"] - reserve)
             shave = _shave(load[idx] - cap0[idx], cap0[idx] - load[idx], rt, reserve, hours)
             bess_rule = (f"{rt['p_mw']:g} MW / {rt['e_mwh']:.4g} MWh, {free:.4g} MWh above the "

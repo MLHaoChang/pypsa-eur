@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from models.commercial import CommercialConfig, ValueFlowConfig
+from models.commercial import RESOLVED_CURRENCY, CommercialConfig, ValueFlowConfig
 from tests.fixtures.investment_case.edge_15min import build_edge_15min
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "investment_case"
@@ -399,13 +399,15 @@ def test_hub_members_are_unique_and_contracted_capacity_needs_every_member_mw():
 def test_p1_and_p2_configs_round_trip_through_the_route_unchanged(client, install_network,
                                                                   commercial):
     """#2: every earlier shape binds and comes back as it went in, with only
-    `value_flows: null` added."""
+    `value_flows: null` added; the tariff reads back with the currency its
+    jurisdiction implies (an API read states it, gridspine-library-eu 01 C2)."""
     install_network(build_edge_15min(), name="vf_rt")
     r = client.put("/api/simulation/solver_config", json={"commercial": commercial})
     assert r.status_code == 200, r.text
     back = client.get("/api/simulation/solver_config").json()["commercial"]
     assert back["value_flows"] is None
-    want = CommercialConfig.model_validate(commercial).model_dump(mode="json")
+    want = CommercialConfig.model_validate(commercial).model_dump(mode="json",
+                                                                  context=RESOLVED_CURRENCY)
     assert {k: v for k, v in back.items() if k != "value_flows"} == \
         {k: v for k, v in want.items() if k != "value_flows"}
 

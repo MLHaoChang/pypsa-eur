@@ -62,6 +62,7 @@ def test_the_issue_rows_are_declared():
         'solve_queue_instance_controls': ('out of chat', 'solveQueue'), 'map_layout_and_sites': ('manual', 'map'),
         'site_scene': ('unbuilt', 'map'),
         'intent_comparison': ('unbuilt', None),
+        'dc_backup': ('unbuilt', None),
         'library_uploads_and_tariff_edit': ('manual', 'library'),
         'power_trace_spectrum': ('unbuilt', None),
     }

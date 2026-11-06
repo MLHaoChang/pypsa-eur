@@ -17,6 +17,8 @@ import threading
 from pathlib import Path
 from typing import Any, Callable
 
+import numpy as np
+
 from models.energy_hub import DtcConfig
 
 logger = logging.getLogger("pypsa_gui.dtc")
@@ -73,16 +75,19 @@ def load_dtc_config(path: str | Path) -> DtcConfig:
 
 
 def apply_islanding_contingency(
-    n, link_id: str,
+    n, link_id: str, window: tuple[int, int] | None = None,
 ) -> tuple[Callable[[], None], dict[str, Any]]:
     """Zero import Link availability (Class-B p_*_pu); return undo + mutation.
 
     Undo restores both static and time-series ``p_max_pu`` / ``p_min_pu``
     (assessor P4a-B1). Prefer calling on a copy when the caller will discard
-    the network anyway.
+    the network anyway. ``window`` ``(start, hours)`` (DC 03) zeroes only
+    those snapshot positions, as a time series over the static value.
     """
     if n.links is None or link_id not in n.links.index:
         raise DtcStressError(f"islanding contingency Link {link_id!r} not found")
+    if window is not None:
+        return _island_window(n, link_id, *window)
     snap_static = n.links.copy(deep=True)
     snap_t: dict[str, Any] = {}
     if "p_max_pu" not in n.links.columns:
@@ -110,6 +115,61 @@ def apply_islanding_contingency(
         "method": "p_max_pu_p_min_pu_zero",
         "restored_time_series": sorted(snap_t.keys()),
     }
+
+
+def _island_window(n, link_id: str, start: int, hours: int
+                   ) -> tuple[Callable[[], None], dict[str, Any]]:
+    """Zero ``link_id``'s p_max_pu / p_min_pu on snapshot positions
+    ``start .. start + hours - 1`` only (DC 03 outage window)."""
+    if start + hours > len(n.snapshots):
+        raise DtcStressError(
+            f"outage window {start}+{hours} h runs past the {len(n.snapshots)} snapshots")
+    snap_t: dict[str, Any] = {}
+    for attr, default in (("p_max_pu", 1.0), ("p_min_pu", 0.0)):
+        ts = n.links_t[attr]
+        had = link_id in ts.columns
+        snap_t[attr] = ts[link_id].copy() if had else None
+        static = n.links.at[link_id, attr] if attr in n.links.columns else default
+        col = (ts[link_id].to_numpy(dtype=float).copy() if had
+               else np.full(len(n.snapshots), float(static)))
+        col[start:start + hours] = 0.0
+        ts[link_id] = col
+
+    def undo() -> None:
+        for attr, series in snap_t.items():
+            ts = n.links_t[attr]
+            if series is None:
+                ts.drop(columns=[link_id], inplace=True)
+            else:
+                ts[link_id] = series
+
+    return undo, {
+        "action": "island_import",
+        "link": str(link_id),
+        "method": "p_max_pu_p_min_pu_zero_window",
+        "window": {"start": int(start), "hours": int(hours),
+                   "first": str(n.snapshots[start]), "last": str(n.snapshots[start + hours - 1])},
+        "restored_time_series": sorted(k for k, v in snap_t.items() if v is not None),
+    }
+
+
+def _window_unserved(n, sink: dict, window: tuple[int, int], crit_loads: set[str]
+                     ) -> dict[str, Any]:
+    """DC 03: the critical Loads' unserved MWh inside the outage window and
+    outside it, in physical hours (``stores`` weighting, not the objective's
+    annualising weight), from the Load-keyed ``lost_load_t`` capture. None
+    when the capture has none."""
+    lost = ((sink or {}).get("last_lost_load") or {}).get("lost_load_t")
+    if lost is None:
+        return {"critical_unserved_window_mwh": None,
+                "critical_unserved_outside_window_mwh": None}
+    cols = [c for c in lost.columns if str(c) in crit_loads]
+    hours = n.snapshot_weightings["stores"].reindex(lost.index).fillna(0.0)
+    mwh = (lost[cols].clip(lower=0).sum(axis=1) * hours).reindex(n.snapshots).fillna(0.0)
+    start, k = window
+    inside = float(mwh.iloc[start:start + k].sum())
+    return {"critical_unserved_window_mwh": inside,
+            "critical_unserved_outside_window_mwh": float(mwh.sum()) - inside}
 
 
 def _critical_buses(n, dtc: DtcConfig) -> set[str]:
@@ -390,7 +450,9 @@ def run_dtc_stress(
             break
         _detach_solver_model(network)
         nn = network.copy()
-        undo, mutation = apply_islanding_contingency(nn, str(link_id))
+        window = (None if dtc.outage_start is None
+                  else (dtc.outage_start, dtc.outage_snapshots))
+        undo, mutation = apply_islanding_contingency(nn, str(link_id), window)
         if not network.is_solved:
             _plan_is_nameplate(nn)
         unfreeze = freeze_capacities(nn)
@@ -449,6 +511,9 @@ def run_dtc_stress(
                     "noncritical_unserved_mwh": _bus_unserved_mwh(
                         nn, noncritical, sink=sink),
                 })
+            if window is not None and status in ("ok", "optimal"):
+                row.update(_window_unserved(nn, sink, window, crit_loads if per_load else {
+                    lid for lid, b in _load_to_bus(nn).items() if b in critical}))
             if status in ("ok", "optimal"):
                 # Grid-to-process ticket 08b: the stress re-solve's own lost
                 # production per product (the LP curtails the process units
@@ -485,6 +550,11 @@ def run_dtc_stress(
         "comparable_solved": len(solved),
         "critical_buses": sorted(critical),
     }
+    if dtc.outage_start is not None:
+        # DC 03: the import is out for the window only; the storage's state
+        # of charge entering it is the re-dispatch's own choice.
+        out["outage_window"] = {"start": dtc.outage_start, "snapshots": dtc.outage_snapshots}
+        out["honesty_notes"].append("outage_window_soc_is_perfect_foresight")
     if per_load:
         exact, lossy, line_losses = _priority_caveats(
             network, cfg, exclude={str(x) for x in dtc.islanding_contingencies})
