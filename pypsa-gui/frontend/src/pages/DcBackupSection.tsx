@@ -9,7 +9,7 @@ import {
   type DcBackupAssessment, type DcBackupMode, type DcBackupProof, type GridReadinessVerdict,
 } from '../api/campusElectrical'
 import { resultsApi } from '../api/simulation'
-import { reservesApi, reserveRevenue } from '../api/reserves'
+import { reservesApi, reserveRevenue, revenueUnit } from '../api/reserves'
 import { showResultsTab } from '../layout/flowNavigation'
 import { Btn, PageSection, Seg } from '../components/PageKit'
 import { StatePill } from '../components/ResultState'
@@ -165,11 +165,11 @@ function ReserveLine({ name }: { name: string }) {
   })
   if (!data) return null
   const revenue = reserveRevenue(data.lines)
-  // TODO(DC06-CURRENCY): the revenue's currency and money year once the payload carries them.
   return (
     <p className="mt-2 text-[12px]" data-testid="dc-backup-reserves">
       Reserve products: {data.products.length} · revenue{' '}
-      {revenue == null ? <span className="text-muted">not solved</span> : `${revenue < 0 ? '−' : ''}${money(revenue)}`}
+      {revenue == null ? <span className="text-muted">not solved</span>
+        : <>{revenue < 0 ? '−' : ''}{money(revenue)} <span className="text-muted">({revenueUnit(data)})</span></>}
       {' · '}headroom{' '}
       {data.headroom_h_per_string == null
         ? <span className="text-muted">not set</span>

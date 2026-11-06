@@ -62,7 +62,7 @@ function solved() {
       },
     })),
     lines: [line('fcr', 4200), line('afrr_up', 2650), line('afrr_down', 1380)],
-    flags: [], headroom_h_per_string: 1, not_modelled: NOT_MODELLED,
+    flags: [], headroom_h_per_string: 1, currency: 'EUR', money_year: 2030, not_modelled: NOT_MODELLED,
   }
 }
 function notSolved() {

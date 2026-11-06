@@ -171,10 +171,10 @@ describe('DcBackupSection', () => {
     const line = (amount: number | null) => ({ period: null, contract_id: 'reserve:fcr', payer: 'tso', payee: 'site',
       value_stream: 'reserve_capacity', quantity_mwh: null, amount, flags: [] })
     reserves.get.mockResolvedValue({ products: [{ id: 'fcr' }, { id: 'afrr_up' }], snapshots: [], storages: [],
-      lines: [line(1500), line(null)], flags: [], headroom_h_per_string: 1.5, not_modelled: '' })
+      lines: [line(1500), line(null)], flags: [], headroom_h_per_string: 1.5, currency: 'EUR', money_year: 2030, not_modelled: '' })
     renderIt()
     const el = await screen.findByTestId('dc-backup-reserves')
-    expect(text(el)).toBe('Reserve products: 2 · revenue 1.5 k · headroom 1.5 h per string · Storage view ›')
+    expect(text(el)).toBe('Reserve products: 2 · revenue 1.5 k (EUR, 2030 money) · headroom 1.5 h per string · Storage view ›')
     await user.click(screen.getByTestId('dc-backup-reserves-open'))
     expect(nav.showResultsTab).toHaveBeenCalledWith('storage')
   })
@@ -184,7 +184,7 @@ describe('DcBackupSection', () => {
     reserves.get.mockResolvedValue({ products: [{ id: 'fcr' }], snapshots: [], storages: [],
       lines: [{ period: null, contract_id: 'reserve:fcr', payer: 'tso', payee: 'site', value_stream: 'reserve_capacity',
         quantity_mwh: null, amount: null, flags: ['reserve_not_solved'] }],
-      flags: ['reserve_not_solved'], headroom_h_per_string: null, not_modelled: '' })
+      flags: ['reserve_not_solved'], headroom_h_per_string: null, currency: null, money_year: null, not_modelled: '' })
     renderIt()
     expect(text(await screen.findByTestId('dc-backup-reserves')))
       .toBe('Reserve products: 1 · revenue not solved · headroom not set · Storage view ›')

@@ -5,7 +5,7 @@ import {
 } from 'recharts'
 import { Lock } from 'lucide-react'
 import {
-  reservesApi, lineProduct, reservesOutOfDate,
+  reservesApi, lineProduct, reservesOutOfDate, revenueUnit,
   type ReserveLine, type ReserveProduct, type ReservesPayload, type ReserveStorage,
 } from '../../api/reserves'
 import { useUIStore } from '../../store/uiStore'
@@ -325,8 +325,9 @@ function ReserveSummary({ payload }: { payload: ReservesPayload }) {
           <th className="py-1 text-right font-normal">Sustain</th>
           <th className="py-1 text-left font-normal pl-3">Source</th>
           <th className="py-1 text-right font-normal">Committed MW, average · max</th>
-          {/* TODO(DC06-CURRENCY): name the currency and money year once the payload carries them. */}
-          <th className="py-1 text-right font-normal">{perPeriod ? 'Revenue per period' : 'Revenue'}</th>
+          <th className="py-1 text-right font-normal" data-testid="reserve-revenue-header">
+            {perPeriod ? 'Revenue per period' : 'Revenue'} ({revenueUnit(payload)})
+          </th>
         </tr>
       </thead>
       <tbody>

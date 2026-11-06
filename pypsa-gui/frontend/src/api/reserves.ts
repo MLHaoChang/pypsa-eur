@@ -55,8 +55,17 @@ export interface ReservesPayload {
   lines: ReserveLine[]
   flags: string[]
   headroom_h_per_string: number | null
+  /** The revenue's currency (the project's, else the bound prices'); null when unknown. */
+  currency: string | null
+  /** The money year the investment case books these lines in; null when unread. */
+  money_year: number | null
   /** What the capacity payments leave out, in words. */
   not_modelled: string
+}
+
+/** "GBP, 2030 money": the revenue header's unit, naming what is not known. */
+export function revenueUnit(p: Pick<ReservesPayload, 'currency' | 'money_year'>): string {
+  return `${p.currency ?? 'currency not stated'}, ${p.money_year != null ? `${p.money_year} money` : 'money year not known'}`
 }
 
 /** The product id a line pays for (`reserve:<id>`). */

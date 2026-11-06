@@ -400,7 +400,7 @@ describe('StorageCycling: reserve products (DC 06)', () => {
         committed: { fcr: [10] } }],
       lines: [{ period: null, contract_id: 'reserve:fcr', payer: 'tso', payee: 'site', value_stream: 'reserve_capacity',
         quantity_mwh: null, amount: 500, flags: [] }],
-      flags: [], headroom_h_per_string: 0.5, not_modelled: 'x',
+      flags: [], headroom_h_per_string: 0.5, currency: 'EUR', money_year: 2030, not_modelled: 'x',
     })
     renderPage()
     expect(await screen.findByTestId('reserve-section')).toBeTruthy()

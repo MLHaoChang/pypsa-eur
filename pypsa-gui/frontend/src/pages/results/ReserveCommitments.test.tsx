@@ -36,6 +36,8 @@ function reservePayload(over: Partial<ReservesPayload> = {}): ReservesPayload {
     ],
     flags: [],
     headroom_h_per_string: 1,
+    currency: 'EUR',
+    money_year: 2030,
     not_modelled: NOT_MODELLED,
     ...over,
   }
@@ -80,7 +82,15 @@ describe('ReserveCommitments', () => {
     expect(text(screen.getByTestId('reserve-source-afrr_down'))).toBe('user price series')
     expect(text(screen.getByTestId('reserve-not-modelled'))).toContain(
       'Activation energy and its price, cycling wear and non-delivery penalties are not modelled')
-    expect(screen.getByText('Revenue')).toBeTruthy()
+    expect(text(screen.getByTestId('reserve-revenue-header'))).toBe('Revenue (EUR, 2030 money)')
+  })
+
+  it('names an unknown currency or money year in the revenue header, never guesses one', async () => {
+    api.get.mockResolvedValue({ ...reservePayload(), currency: null, money_year: null })
+    renderIt()
+    await screen.findByTestId('reserve-section')
+    expect(text(screen.getByTestId('reserve-revenue-header')))
+      .toBe('Revenue (currency not stated, money year not known)')
   })
 
   it('reads "not solved", never 0, without a solve', async () => {

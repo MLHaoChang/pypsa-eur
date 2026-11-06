@@ -222,3 +222,29 @@ def test_the_preflight_catches_a_finance_currency_changed_after_binding():
     # A price bound where its currency was not read is not guessed.
     n.meta[RP.CURRENCY_META] = {"fcr": None}
     assert codes("GBP") == []
+
+
+# ── the investment case's staleness key (GK A R4, GK B L3/L4) ──────────────
+
+
+def _ic_digest(stored):
+    from services.finance.investment_case_runner import assumptions_digest
+
+    return assumptions_digest(finance={"currency": "EUR"}, commercial=stored, dispatch=None, packs={})
+
+
+def test_without_products_the_ic_digest_is_masters():
+    """Pinned on master 33028f86 with the same bound config (no products)."""
+    stored = _bind(_net(), M.CommercialConfig(poc_link="import", timezone="Europe/Amsterdam"))
+    h, parts = _ic_digest(stored)
+    assert parts["commercial"] == "11496092cfbcd746ded5a5b5355aa5fb"
+    assert h == "a1ec2cfba17637325f25f239fb0dd178"
+
+
+def test_with_products_the_ic_digest_carries_the_price_series_hash():
+    base = _ic_digest(_bind(_net(), M.CommercialConfig(poc_link="import")))[1]["commercial"]
+    one = _ic_digest(_bind(_net(), _cfg(_product())))[1]["commercial"]
+    other_series = _product()
+    other_series["capacity_price"] = {**other_series["capacity_price"], "hash": "hash-fcr-1111"}
+    two = _ic_digest(_bind(_net(), _cfg(other_series)))[1]["commercial"]
+    assert len({base, one, two}) == 3

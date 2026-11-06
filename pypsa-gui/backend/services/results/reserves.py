@@ -46,6 +46,28 @@ def _headroom_h(storage_dir) -> float | None:
     return float(spec.backup.reserve_headroom_h)
 
 
+def _money(n, cfg) -> tuple[str | None, int | None]:
+    """(currency, money year) the revenue lines are in: the project's stated currency,
+    else the one currency the bound prices were recorded in (None when unknown); the
+    investment case's base year for them (the first period's year, or a flat
+    horizon's weight-majority year; `finance_case`), None when it cannot be read."""
+    from services.commercial.binding import project_currency
+    from services.results.finance_case import _period_year_and_hours
+    from services.solver import reserve_products as RP
+
+    currency = project_currency(getattr(cfg, "finance", None))
+    if currency is None:
+        bound = {v for v in ((getattr(n, "meta", None) or {}).get(RP.CURRENCY_META) or {}).values() if v}
+        currency = bound.pop() if len(bound) == 1 else None
+    try:
+        multi = isinstance(n.snapshots, pd.MultiIndex)
+        first = n.investment_periods[0] if multi and len(n.investment_periods) else None
+        year = _period_year_and_hours(n, first)[0]
+    except Exception:  # noqa: BLE001 — a header never fails the view
+        year = None
+    return currency, year
+
+
 def reserve_view(n, cfg, *, solved: bool, backup=None, storage_dir=None) -> dict[str, Any] | None:
     from services.results.billing import RESERVE_NOT_MODELLED, reserve_lines
     from services.solver import reserve_products as RP
@@ -78,6 +100,7 @@ def reserve_view(n, cfg, *, solved: bool, backup=None, storage_dir=None) -> dict
                 else [0.0] * len(n.snapshots)
                 for p in products if (not p.storages or s in p.storages)},
         })
+    currency, money_year = _money(n, cfg)
     sns = n.snapshots
     times = sns.get_level_values(-1) if isinstance(sns, pd.MultiIndex) else sns
     return {
@@ -89,5 +112,7 @@ def reserve_view(n, cfg, *, solved: bool, backup=None, storage_dir=None) -> dict
         "lines": [asdict(ln) for ln in lines],
         "flags": sorted(set(flags)),
         "headroom_h_per_string": _headroom_h(storage_dir),
+        "currency": currency,
+        "money_year": money_year,
         "not_modelled": RESERVE_NOT_MODELLED,
     }

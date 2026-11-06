@@ -844,6 +844,23 @@ def test_the_view_never_shows_zero_for_a_missing_solve():
     assert reserve_view(n, _cfg([]), solved=True, backup=({}, frozenset())) is None
 
 
+def test_the_view_names_its_currency_and_money_year():
+    """UX: the revenue header names the currency and money year (the investment
+    case's base year for these lines: a flat horizon's weight-majority year)."""
+    from services.results.reserves import reserve_view
+
+    n = _site()
+    fcr = _product()
+    _bind(n, [fcr], {"fcr": 10.0})
+    backup = ({STRING: 20.0}, frozenset({STRING}))
+    stated = SimpleNamespace(commercial=SimpleNamespace(reserve_products=[fcr]), finance={"currency": "gbp"})
+    v = reserve_view(n, stated, solved=False, backup=backup)
+    assert (v["currency"], v["money_year"]) == ("GBP", 2030)
+    assert reserve_view(n, _cfg([fcr]), solved=False, backup=backup)["currency"] is None
+    n.meta[RP.CURRENCY_META] = {"fcr": "EUR"}
+    assert reserve_view(n, _cfg([fcr]), solved=False, backup=backup)["currency"] == "EUR"
+
+
 def test_the_reserves_route_is_204_without_products(client):
     assert client.get("/api/results/reserves").status_code == 204
 
