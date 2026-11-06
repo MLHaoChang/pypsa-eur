@@ -188,8 +188,12 @@ GENERATOR: tuple[FieldSpec, ...] = (
     FieldSpec("process_role", "identity", "Process role", "Marks a generator on a product bus: buy_in is bought "
               "product, shortfall is the priced lost-production slack. Empty for an ordinary generator.",
               kind="enum", options=("buy_in", "shortfall")),
-    FieldSpec("p_nom", "size", "Capacity", "Installed active-power capacity. With extendable ticked, the existing "
-              "capacity the optimiser starts from.", "MW", "MW", key_param=True),
+    FieldSpec("p_nom", "size", "Capacity", "Installed active-power capacity: the AC rating, what the generator can "
+              "inject at its bus. With extendable ticked, the existing capacity the optimiser starts from.", "MW", "MW",
+              key_param=True),
+    FieldSpec("dc_ac_ratio", "size", "DC/AC ratio", "PV only: the DC module rating as a multiple of the AC capacity "
+              "(1.25 for 125 MWp on 100 MW). A cost priced per MW of DC is scaled by it; empty means not declared, "
+              "and such a cost is refused rather than assumed 1."),
     *_size_bounds(),
     _money_per_mw("overnight_cost", "investment", "Overnight cost", "Upfront cost per unit of capacity, as if built "
                   "at once without financing. Annualised over the lifetime at the discount rate.", key_param=True),
@@ -625,6 +629,7 @@ _EMPTY_BY_CLASS = {"Bus": {"country", "sub_network", "unit"}, "Carrier": {"nice_
                    "Link": {"bus2", "bus3", "bus4", "criticality_tier", "harmonic_source", "harmonic_spectrum",
                             "start_method", "ride_through_curve"}}
 _CLEAR_BY_CLASS = {"GlobalConstraint": {"carrier_attribute", "carrier", "investment_period"},
+                   "Generator": {"dc_ac_ratio"},
                    "Bus": {"mwh_per_t", "product_value", "lost_production_value", "temperature_c", "pressure_bar"},
                    "Link": {"rated_mva", "flicker_step_mva", "flicker_changes_per_min",
                             "single_phase_share", "motor_kw", "i_start_pu", "restart_time_h", "max_supply_temp_c", "max_pressure_bar"}}

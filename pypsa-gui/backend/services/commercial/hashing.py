@@ -55,6 +55,9 @@ FIELDS_AFTER_V1: dict[tuple[str, str], Any] = {
     ("PpaContract", "suspend_on_negative_price"): None,  # IPP ticket 01 (G2)
     ("CommercialConfig", "import_price_ref"): None,      # IPP ticket 07 (G7)
     ("CommercialConfig", "provenance"): {},              # data-to-model slice 2
+    # A currency its jurisdiction implies is left out of every dump too (the `Tariff`
+    # serializer, gridspine-library-eu 01), so it never reaches a hash.
+    ("Tariff", "currency"): None,                        # gridspine-library-eu 01
 }
 
 

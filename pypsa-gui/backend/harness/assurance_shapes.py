@@ -267,6 +267,17 @@ class Navigation(_Closed):
     window: ViewWindow | None = None
 
 
+class DerivedEntry(_Closed):
+    """One software-recomputed derived claim (AA-03 S2); strict field by field."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    id: Annotated[str, Field(min_length=1, max_length=64)]
+    formula_id: Annotated[str, Field(min_length=1, max_length=64)]
+    operands: Annotated[list[str], Field(min_length=1, max_length=8)]
+    value: Annotated[int | float, Field(allow_inf_nan=False)]
+    unit: Annotated[str, Field(min_length=1, max_length=16)]
+
+
 class Receipt(_Closed):
     policy_version: Literal["1"]
     content_sha256: Annotated[str, Field(pattern="^[0-9a-f]{64}$")]
@@ -286,7 +297,17 @@ class Receipt(_Closed):
     navigation: Annotated[list[Navigation], Field(max_length=20)] | None = None
 
 
-RECEIPTS = {"1": Receipt}
+class DerivedReceipt(Receipt):
+    """Policy "2" (AA-03 S2, GK B P1/P2): policy "1" plus at least one derived entry.
+
+    Emitted only for an answer with derived entries; every other answer stays "1".
+    """
+
+    policy_version: Literal["2"]
+    derived: Annotated[list[DerivedEntry], Field(min_length=1, max_length=8)]
+
+
+RECEIPTS = {"1": Receipt, "2": DerivedReceipt}
 
 
 # --- Checked tool results, keyed by tool name. ---

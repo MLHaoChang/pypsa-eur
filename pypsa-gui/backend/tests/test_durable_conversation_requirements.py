@@ -154,7 +154,7 @@ def test_preserve_horizon_refuses_assistant_writers_and_marks_a_manual_change_st
 
     _, cards, errors = _confirm(thread.session, {'kind': 'preserve_horizon', 'v': 1})
     assert errors == [] and _active(thread.id)[0]['predicate']['digest']
-    for tool, args in (('set_snapshots', {'snapshots': ['2030-01-01 00:00']}),
+    for tool, args in (('set_snapshots', {'start': '2030-01-01 00:00', 'end': '2030-01-02 00:00', 'freq': 'h'}),
 
                        ('reset_network', {})):
         _, cards, errors = _dispatch(thread.session, tool, args)
@@ -168,6 +168,21 @@ def test_preserve_horizon_refuses_assistant_writers_and_marks_a_manual_change_st
     assert '<untrusted_data>' in text and 'not instructions' in text
     assert _active(thread.id)[0]['last_evaluation']['state'] == 'stale'
     assert _active(thread.id)[0]['last_evaluation']['reason'] == 'horizon_changed'
+
+
+def test_a_malformed_writer_call_is_refused_by_the_schema_guard_first(thread, monkeypatch):
+    """Order (S4a G2 vs AA-03, GK B (29)): a call that does not match the
+    tool's schema is denied required_guard_failed before any requirement is
+    evaluated, and no handler is called; a well-formed one then meets the
+    requirement (the preserve_horizon test above)."""
+    _confirm(thread.session, {'kind': 'preserve_horizon', 'v': 1})
+    called = []
+    monkeypatch.setitem(chat_tools.DISPATCHERS, 'set_snapshots', lambda **kw: called.append(kw))
+    frames, cards, errors = _dispatch(thread.session, 'set_snapshots', {'snapshots': ['2030-01-01 00:00']})
+    assert errors == ['required_guard_failed'] and cards == [] and called == []
+    (error,) = [d for e, d in frames if e == 'tool_error']
+    assert error['_outcome']['outcome'] == 'denied'
+    assert len(PyPSAService.get_network().snapshots) == 4
 
 
 def test_unconfirmed_or_unit_less_proposals_never_become_active(thread):

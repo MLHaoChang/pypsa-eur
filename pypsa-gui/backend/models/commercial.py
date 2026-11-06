@@ -15,7 +15,7 @@ import math
 from datetime import date
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import AfterValidator, BaseModel, Field, model_validator
+from pydantic import AfterValidator, BaseModel, Field, model_serializer, model_validator
 
 # ------------------------------------------------------------------ enums
 
@@ -361,6 +361,48 @@ class TariffItem(BaseModel):
         return self
 
 
+#: The ISO 4217 currency a jurisdiction's tariffs are priced in, by the ISO 3166
+#: alpha-2 code that starts the jurisdiction (`NL`, `US-CA`, `GB`); `EU` names the euro
+#: area. A jurisdiction outside it (e.g. `generic`) implies no currency.
+#: FROZEN (GK B C1, gridspine-library-eu 01): a stored tariff that states no currency
+#: reads as the one this map implies, and an implied currency is left out of its hash, so
+#: changing an entry changes what stored items mean. It is a hash-recipe change, never an
+#: in-place edit; `tests/test_tariff_currency_gate.py` pins the map.
+JURISDICTION_CURRENCY: dict[str, str] = {
+    **{c: "EUR" for c in ("AT", "BE", "CY", "DE", "EE", "ES", "FI", "FR", "GR", "HR", "IE",
+                          "IT", "LT", "LU", "LV", "MT", "NL", "PT", "SI", "SK", "EU")},
+    "GB": "GBP", "UK": "GBP", "US": "USD", "CA": "CAD", "CH": "CHF", "AU": "AUD",
+    "NZ": "NZD", "DK": "DKK", "SE": "SEK", "NO": "NOK", "PL": "PLN", "CZ": "CZK",
+    "HU": "HUF", "RO": "RON", "JP": "JPY",
+}
+#: A jurisdiction that changed currency: (the date it changed, before, from then on).
+#: Read on the tariff's `valid_from`. Bulgaria joined the euro on 2026-01-01.
+JURISDICTION_CURRENCY_CHANGES: dict[str, tuple[date, str, str]] = {
+    "BG": (date(2026, 1, 1), "BGN", "EUR"),
+}
+
+
+def jurisdiction_currency(jurisdiction: str | None, valid_from: date | str | None = None
+                          ) -> str | None:
+    """The currency `jurisdiction` implies (`NL` -> `EUR`, `US-CA` -> `USD`) for a tariff
+    valid from `valid_from`, or None. A changeover jurisdiction without a date is None."""
+    code = str(jurisdiction or "").strip().upper().replace("_", "-").split("-", 1)[0]
+    if code in JURISDICTION_CURRENCY_CHANGES:
+        on, before, after = JURISDICTION_CURRENCY_CHANGES[code]
+        try:
+            start = valid_from if isinstance(valid_from, date) else date.fromisoformat(
+                str(valid_from))
+        except ValueError:
+            return None
+        return after if start >= on else before
+    return JURISDICTION_CURRENCY.get(code)
+
+
+#: The serialization context that keeps an implied currency in a dump (an API read).
+RESOLVED_CURRENCY_KEY = "resolved_currency"
+RESOLVED_CURRENCY = {RESOLVED_CURRENCY_KEY: True}
+
+
 class Tariff(BaseModel):
     id: str = Field(min_length=1)
     name: str
@@ -373,6 +415,34 @@ class Tariff(BaseModel):
     # URDB fields a partial import could not map (P2 WP2.4b-i): the engine
     # bills the rest and flags `tariff_incomplete` with `total = None`.
     unsupported_fields: list[str] = Field(default_factory=list)
+    # The ISO 4217 currency every rate is in (gridspine-library-eu 01, owner Q-GS-1).
+    # Unstated, it is the jurisdiction's (`jurisdiction_currency`); None only when the
+    # jurisdiction implies none (`generic`), and then nothing guesses it. A Library
+    # write refuses a tariff whose currency stays None (`items.validate_payload`).
+    # Outside the hash (GK B C2/C3): every dump leaves out a currency the jurisdiction
+    # implies, so each stored, hashed or fingerprinted form (the Library canonical bytes,
+    # hash recipes 1 and 2, the stored commercial config) is byte-identical to before;
+    # one that differs from it is content. An API read states it: dump with
+    # `context=RESOLVED_CURRENCY`, or `tariff_payload_resolved`.
+    currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _currency_from_jurisdiction(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("currency") is None:
+            implied = jurisdiction_currency(data.get("jurisdiction"), data.get("valid_from"))
+            if implied is not None:
+                data = {**data, "currency": implied}
+        return data
+
+    @model_serializer(mode="wrap")
+    def _omit_implied_currency(self, handler, info):
+        out = handler(self)
+        if isinstance(out, dict) and "currency" in out \
+                and not (info.context or {}).get(RESOLVED_CURRENCY_KEY) \
+                and self.currency == jurisdiction_currency(self.jurisdiction, self.valid_from):
+            out.pop("currency")
+        return out
 
     @model_validator(mode="after")
     def _unique_item_ids(self) -> "Tariff":
@@ -382,6 +452,19 @@ class Tariff(BaseModel):
         if self.valid_to is not None and self.valid_to < self.valid_from:
             raise ValueError("valid_to must not precede valid_from")
         return self
+
+
+def tariff_payload_resolved(payload: Any) -> Any:
+    """A stored tariff payload with the currency it reads as (an API read, GK B C2);
+    anything that is not a valid tariff is returned unchanged."""
+    if not isinstance(payload, dict):
+        return payload
+    try:
+        cur = Tariff.model_validate(payload).currency
+    except ValueError:
+        return payload
+    return {**payload, "currency": cur} if cur is not None and "currency" not in payload \
+        else payload
 
 
 # ------------------------------------------------------------------ connection

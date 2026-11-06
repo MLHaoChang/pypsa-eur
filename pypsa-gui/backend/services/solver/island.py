@@ -60,7 +60,8 @@ X_u enters only rows a larger X loosens, so it settles at min(L_it, p_nom_u).
 By scenario (the plan's matrix): every scenario gets the steady-island GFM
 MVA row (GFM s_nom plus every genset's) and the spinning minimum load
 p_g ≥ p_min_pu·p_nom_g. ``seamless`` adds upward headroom (GFM storage plus
-spinning gensets ≥ ΔP⁺), downward power (GFM p_s + p_nom ≥ ΔP⁻), SoC room
+spinning gensets, each at min(its headroom, its load step) ≥ ΔP⁺),
+downward power (GFM p_s + p_nom ≥ ΔP⁻), SoC room
 (GFM max_hours·p_nom − e(t−1) ≥ ΔP⁻·t_curt/3600, t_curt from the ``gfl_fw``
 units; none, and the exporting hours are reported by
 ``not_islandable_hours`` instead), the GFM MVA at 0⁺ (GFM plus spinning
@@ -95,9 +96,9 @@ a unit that cannot run (p_nom 0, not extendable) cannot trip. In these rows a
 genset is credited at min(its (b↑) share, its load step,
 load_step_max_pct·P_n: gridspine frequency.py:632, ``step_mw``), what it
 gives inside I6's window; its ramp after the step is not credited
-(conservative). **Known gap:** E1's own rows still credit a genset's full
-headroom, so a spinning genset counts for more at the islanding step than in
-the event rows (``.scratch/guided-smoke-2026-10-16/issues/04-e1-genset-credit.md``).
+(conservative). E1's own up row (Island-headroom-up) credits a genset the
+same way, so a spinning genset counts the same at the islanding step as in
+the event rows.
 
 **Ledgered:** PV is left out (conservative); the site is a copperplate (the
 hub's one-way site transformer is not seen here; I4 catches it at the island
@@ -986,7 +987,9 @@ def _cut_coefficients(n, island) -> dict:
     extendable units and what one MW of each adds to the quantity a cut
     bounds, as the I2b rows count it (M: a droop GFM's τ_f/(2R), a VSM's
     H_v/pf, a spinning genset's H/cos φ·η; ΣK: 1/(R·f0), ·η for a genset;
-    headroom: 1 for GFM storage, η for a spinning genset upward)."""
+    headroom: 1 for GFM storage; upward, a spinning genset's credit per MW,
+    η·min(max p_max_pu − p_min_pu, load_step_max_pct/100), as the rows
+    credit it)."""
     from services.adequacy.island_config import GFM_CONTROLS
 
     units, f0 = island["units"], _f0(island)
@@ -1010,7 +1013,7 @@ def _cut_coefficients(n, island) -> dict:
                 out["droop_gain"].append((name, comp, eta / (v["droop_pct"] / 100.0 * f0)))
             if u.get("spinning"):                    # online at 0⁺
                 out["inertia"].append((name, comp, v["H_s"] / v["cos_phi_r"] * eta))
-                out["headroom_up"].append((name, comp, eta))
+                out["headroom_up"].append((name, comp, _genset_credit_per_mw(n, name, v)))
     return out
 
 
@@ -1342,7 +1345,7 @@ def _seamless_rows(n, m, sns, sns_p, coord, tag, *, units, gensets, spinning, gf
 
     def headroom_up(without=None, credit=None):
         """(b↑) less ``without``'s own share; ``credit``: a genset's share
-        replaced (the event rows' step credit)."""
+        replaced by its step credit (E1's up row and the event rows)."""
         up = _Lin(sns_p)
         for s in gfm:
             if s == without:
@@ -1355,13 +1358,14 @@ def _seamless_rows(n, m, sns, sns_p, coord, tag, *, units, gensets, spinning, gf
             up.add(credit[g] if credit is not None else genset_room(g))
         return up
 
-    # The event rows credit a genset at min(its (b↑) share, its load step):
-    # inside I6's window a joined genset gives at most its step,
-    # load_step_max_pct·P_n (gridspine frequency.py:632, ``step_mw``), before
-    # its ramp (not credited). x_g ≤ both and enters only rows a larger x_g
-    # loosens, so it settles at the min (as Island-ups-relief does).
+    # Every up row (E1's and the event rows) credits a genset at min(its (b↑)
+    # share, its load step): inside I6's window a joined genset gives at most
+    # its step, load_step_max_pct·P_n (gridspine frequency.py:632,
+    # ``step_mw``), before its ramp (not credited). x_g ≤ both and enters only
+    # rows a larger x_g loosens, so it settles at the min (as
+    # Island-ups-relief does).
     credit = {}
-    for g in (online + spinning) if event_rows else ():
+    for g in online + spinning:
         x = m.add_variables(lower=0.0, coords=[coord], name=f"Island-event-genset-credit-{g}{tag}")
         _row(m, genset_room(g), _Lin(sns_p).var(x), f"Island-event-genset-room-{g}{tag}", coord)
         _row(m, on_out(_Lin(sns_p), g, spec(g)["load_step_max_pct"] / 100.0), _Lin(sns_p).var(x),
@@ -1378,7 +1382,7 @@ def _seamless_rows(n, m, sns, sns_p, coord, tag, *, units, gensets, spinning, gf
             p_store(down, s, 1.0)
         return down
 
-    up, down = headroom_up(), headroom_down()
+    up, down = headroom_up(credit=credit), headroom_down()
     _row(m, up, dp_up, f"Island-headroom-up{tag}", coord, facts=facts)
     _row(m, down, dp_down, f"Island-headroom-down{tag}", coord, facts=facts)
     if event_rows:
@@ -1467,15 +1471,22 @@ def _rating_max(n, comp, name) -> float:
     return float(static.at[name, "p_nom"])
 
 
-def _genset_credit_max(n, g, values) -> float:
-    """The most a genset's event credit can be (the infeasibility hint's
-    bound): min(its room at full commitment and its minimum load, its load
-    step), at its largest rating and availability."""
+def _genset_credit_per_mw(n, g, values) -> float:
+    """The most one MW of a genset's rating adds to its up credit (E1 and the
+    event rows), on the delivered side: η·min(its room at full commitment
+    and its minimum load, max p_max_pu − p_min_pu; its load step,
+    load_step_max_pct/100), at its largest availability."""
     comp, eta = _genset_out(n, g)
-    p_nom = _rating_max(n, comp, g) * eta
     avail = float(_dense(n, comp, "p_max_pu", n.snapshots, [g])[g].max())
-    room = p_nom * (avail - float(values.get("p_min_pu", 0.0) or 0.0))
-    return max(0.0, min(room, p_nom * values["load_step_max_pct"] / 100.0))
+    room = avail - float(values.get("p_min_pu", 0.0) or 0.0)
+    return max(0.0, eta * min(room, values["load_step_max_pct"] / 100.0))
+
+
+def _genset_credit_max(n, g, values) -> float:
+    """The most a genset's up credit can be (the infeasibility hint's bound):
+    its credit per MW at its largest rating."""
+    comp, _ = _genset_out(n, g)
+    return _rating_max(n, comp, g) * _genset_credit_per_mw(n, g, values)
 
 
 def _event_rows(n, m, sns_p, coord, tag, *, units, gfm, gensets, active, period, p_out, p_store,

@@ -171,7 +171,9 @@ def test_from_template_binds_the_commercial_block_and_the_finance_inputs(
     assert r.json().get("solver_config_issues", []) == []
     cfg = client.get("/api/simulation/solver_config").json()
     want = T.solver_config(TID)
-    assert cfg["commercial"] == want["commercial"]
+    # An API read states the tariff's currency (`DE` → EUR; gridspine-library-eu 01 C2).
+    tariff = {**want["commercial"]["import_tariff"], "currency": "EUR"}
+    assert cfg["commercial"] == {**want["commercial"], "import_tariff": tariff}
     fin = client.get("/api/simulation/finance").json()
     assert fin["status"] == "ok" and fin["finance"] == want["finance"]
     vf = client.get("/api/simulation/commercial/value_flows").json()

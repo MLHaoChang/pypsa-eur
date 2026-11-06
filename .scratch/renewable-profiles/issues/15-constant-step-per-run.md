@@ -3,7 +3,7 @@
 
 # RP-15 — a constant step per run (sampled multi-hour windows)
 
-Status: ready-for-agent (Q-RP-15 answered 2026-11-06)
+Status: done (RP-15 PR, Q-RP-15 answered 2026-11-06)
 Type: task
 Baseline: master after #606 (RP-03)
 Raised by: the engine gatekeeper, reviewing #606, 2026-10-22

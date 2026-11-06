@@ -99,6 +99,7 @@ def test_a_cut_of_an_unknown_kind_is_refused():
 # ── the primal estimate (Q6): the cheapest candidate that meets the cut ─────
 
 
+from services.solver.island import _cut_coefficients as island_cut_coefficients  # noqa: E402
 from services.solver.island import cut_estimates  # noqa: E402
 from tests.test_island_rows import _a, _genset  # noqa: E402
 
@@ -135,6 +136,27 @@ def test_the_cheapest_candidate_wins():
     assert row["candidate"] == "g"
     assert row["added_mw"] == pytest.approx(12.5 / 1.875)
     assert row["estimate"] == pytest.approx(800.0)
+
+
+@pytest.mark.parametrize("p_min_pu, step_pct, coef", [(0.3, 20.0, 0.2), (0.7, 50.0, 0.3)])
+def test_a_spinning_gensets_headroom_is_credited_at_its_load_step(p_min_pu, step_pct, coef):
+    """Headroom up on a spinning extendable genset is credited per MW at
+    η·min(load_step_max_pct, max p_max_pu − p_min_pu), as the E1 and event
+    rows credit it (frequency.py:632). At a 20 % step, below 1 − 0.3, the
+    step binds: one MW gives 0.2 MW, so the 2 MW shortfall is 10 MW of genset
+    at 10/MW = 100 (at η per MW, 2 MW = 20). At p_min_pu 0.7 the room binds,
+    1 − 0.7 = 0.3 below the 50 % step: 2/0.3 = 6.67 MW = 66.7 (without the
+    minimum load, 0.5: 4 MW = 40). Both are below the BESS's 200."""
+    n = _hub(load=10.0)
+    n.add("Generator", "g", bus="site", p_nom_extendable=True, capital_cost=10.0, marginal_cost=1000.0)
+    units = _units(gensets={"g": _genset(spinning=True, p_min_pu=_a(p_min_pu),
+                                         load_step_max_pct=_a(step_pct))})
+    coefs = island_cut_coefficients(n, _seamless(units))["headroom_up"]
+    assert [c for c in coefs if c[0] == "g"] == [("g", "Generator", pytest.approx(coef))]
+    row = _estimate({**_cut("headroom_up", 12.0), "current": 10.0}, n=n, units=units)
+    assert row["candidate"] == "g"
+    assert row["added_mw"] == pytest.approx(2.0 / coef)
+    assert row["estimate"] == pytest.approx(10.0 * 2.0 / coef)
 
 
 def test_a_cold_genset_gives_no_inertia_at_the_instant_and_is_no_candidate():
@@ -205,9 +227,10 @@ def test_the_bundle_carries_the_applied_cuts_and_a_template_ships_none():
 def _spinning_genset_hub():
     """The hand hub with a fixed 5 MW spinning genset at 1000/MWh, minimum
     load 0.3 (1.5 MW), and a BESS that cannot charge. The genset cuts the
-    10 MW import step to 8.5 and gives 5 − 1.5 = 3.5 MW of upward headroom
-    (a constant: its p_nom is fixed), none downward. So the seamless step
-    alone buys a 5 MW BESS."""
+    10 MW import step to 8.5 and has 5 − 1.5 = 3.5 MW of upward headroom,
+    credited at its 50 % load step, 2.5 MW (frequency.py:632; a constant: its
+    p_nom is fixed), none downward. So the seamless step alone buys a 6 MW
+    BESS."""
     n = _hub(load=10.0, gensets=[("g", 5.0)])
     n.storage_units.at["bess", "p_min_pu"] = 0.0
     island = _seamless(_units(gensets={"g": _genset(spinning=True, p_min_pu=_a(0.3))}))
@@ -215,12 +238,13 @@ def _spinning_genset_hub():
 
 
 @pytest.mark.parametrize("kind, p_nom, with_events", [
-    (None, 5.0, 7.5), ("headroom_up", 8.5, 8.5), ("headroom_down", 12.0, 12.0)])
+    (None, 6.0, 7.5), ("headroom_up", 9.5, 9.5), ("headroom_down", 12.0, 12.0)])
 def test_upward_and_downward_headroom_are_told_apart(kind, p_nom, with_events):
-    """A 12 MW cut: upward, the genset's 3.5 MW counts, so the BESS needs
-    8.5; downward only the BESS absorbs, so it needs 12. With no cut and the
-    event rows, the 10 MW load is E2's step against the genset's 50 % step
-    credit, 2.5 MW: the BESS needs 7.5 (the cuts still bind above it)."""
+    """A 12 MW cut: upward, the genset's 2.5 MW credit counts, so the BESS
+    needs 9.5; downward only the BESS absorbs, so it needs 12. With no cut
+    and the event rows, the 10 MW load is E2's step against the genset's
+    50 % step credit, 2.5 MW: the BESS needs 7.5 (the cuts still bind above
+    it)."""
     for event_rows, want in ((False, p_nom), (True, with_events)):
         n, island = _spinning_genset_hub()
         island["cuts"] = [] if kind is None else [_cut(kind, 12.0, hour=1)]

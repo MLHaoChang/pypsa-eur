@@ -332,10 +332,19 @@ _state = _ActiveStateProxy()
 
 @router.get("/solver_config")
 def get_solver_config():
-    return asdict(_state["solver_config"])
+    out = asdict(_state["solver_config"])
+    commercial = out.get("commercial")
+    if isinstance(commercial, dict) and isinstance(commercial.get("import_tariff"), dict):
+        # The stored tariff leaves out a currency its jurisdiction implies; a read states
+        # it (GK B C2, gridspine-library-eu 01). The stored config is not touched.
+        from models.commercial import tariff_payload_resolved
+
+        out["commercial"] = {**commercial,
+                             "import_tariff": tariff_payload_resolved(commercial["import_tariff"])}
+    return out
 
 
-def _bind_commercial(commercial, user, solver_cfg=None) -> dict | None:
+def _bind_commercial(commercial, user, solver_cfg=None, currency=None) -> dict | None:
     """
     Bind a submitted commercial block to the ACTIVE network: a call of
     `services.commercial.binding.bind_commercial_on_context` on the active
@@ -344,7 +353,8 @@ def _bind_commercial(commercial, user, solver_cfg=None) -> dict | None:
     PROJECT's org; the caller's org for an unsaved network) and checks
     everything before any write. The in-flight check is this module's
     `_solver_in_flight_ctx`. Refusals carry `{code, message}`. Returns the
-    plain dict stored on `SolverConfig.commercial`.
+    plain dict stored on `SolverConfig.commercial`. `currency`: the project's
+    stated currency, which a Library tariff ref must match (`currency_mismatch`).
     """
     from fastapi import HTTPException
 
@@ -353,7 +363,8 @@ def _bind_commercial(commercial, user, solver_cfg=None) -> dict | None:
     try:
         return binding.bind_commercial_on_context(
             PyPSAService.get_active_context(), commercial, user=user,
-            in_flight=lambda ctx: _solver_in_flight_ctx(ctx), solver_cfg=solver_cfg)
+            in_flight=lambda ctx: _solver_in_flight_ctx(ctx), solver_cfg=solver_cfg,
+            currency=currency)
     except binding.BindingRefusal as exc:
         raise HTTPException(exc.status, {"code": exc.code, "message": exc.message}) from exc
 
@@ -602,7 +613,18 @@ def update_solver_config(
         # touches nothing (WP1.4 round 3 #6).
         if cfg.commercial is not None:
             _check_site_connection(cfg.commercial, stored_commercial)
-        submitted["commercial"] = _bind_commercial(cfg.commercial, user, solver_view)
+        from services.commercial.binding import project_currency
+
+        # The currency gate is for a ref this PUT attaches or changes: a client echoing the
+        # stored ref (saveCommercial, saveSiteConnection) after a finance-currency change
+        # must still save, and preflight's `commercial.currency_mismatch` flags it (GK B).
+        new_ref = cfg.commercial is not None and cfg.commercial.import_tariff_ref is not None \
+            and cfg.commercial.import_tariff_ref.model_dump(mode="json") != (
+                stored_commercial.get("import_tariff_ref")
+                if isinstance(stored_commercial, dict) else None)
+        submitted["commercial"] = _bind_commercial(
+            cfg.commercial, user, solver_view,
+            currency=project_currency(getattr(stored_cfg, "finance", None)) if new_ref else None)
         rebound = submitted["commercial"] is not None
     rebind_fca = "commercial" not in submitted and scalers_changed \
         and _is_fca(stored_commercial)
@@ -648,7 +670,7 @@ def update_solver_config(
         # sink, so the HTTP route and the chat tool both cross it.
         from services import dirty_state
         dirty_state.bump_revision()
-        return asdict(_state["solver_config"])
+        return get_solver_config()   # the read form: a tariff states its currency (GK B C2)
 
 
 class ValueFlowsIn(BaseModel):

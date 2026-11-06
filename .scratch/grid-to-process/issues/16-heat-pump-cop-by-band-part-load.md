@@ -3,7 +3,7 @@
 
 # Heat-pump COP against the served band's sink temperature, plus part-load
 
-Status: ready-for-agent (owner 2026-10-23, Q16: demo eta + reach from the #679 rows; still blocked by 15)
+Status: done (heat-pump COP reads the served band's sink via `sink_c_by_id`, `sink_c` stays the fallback; part-load stays on the Link fields, refusal reworded; validator tie-in already met by issue 15's reach rule)
 Type: task
 Blocked by: 15
 Gated: no
