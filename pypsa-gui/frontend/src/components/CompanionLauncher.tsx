@@ -165,7 +165,7 @@ export default function CompanionLauncher({
           ) : null}
           {caption ? (
             <p className={`mb-2 text-[11px] leading-snug ${speech?.notice && caption === speech.caption?.trim() ? 'text-warn' : 'text-muted'}`}
-              data-testid="companion-live-caption">
+              role="status" data-testid="companion-live-caption">
               {caption}
             </p>
           ) : null}
