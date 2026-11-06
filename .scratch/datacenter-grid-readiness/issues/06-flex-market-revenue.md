@@ -1,6 +1,6 @@
 # Flexibility-market revenue from reserved BESS/UPS headroom
 
-Status: ready-for-agent
+Status: done
 Model: Opus
 Type: task
 Blocked by: 03
@@ -66,3 +66,12 @@ GK A (15), engine: GO WITH CONDITIONS. Q1 (a) CommercialConfig, bound like refer
 The audit found that only `cashflow.STREAM_CLASS["ancillary"] = "export"` touches an `ancillary` line. The REFERENCE_CLASS CfD leg, the `energy_export`-only owner_gens split, the participants export_split and the lp_bindings/preflight/tariff_engine export rules never see settlement lines. GK B chose option (a): reserve capacity revenue escalates at the export market rate. Conditions:
 - L6a: the IC row "Reserve capacity revenue" says it "escalates at the export market rate" and names the rate (`revenue_streams` row: `note`, `escalation_class`, `escalation_rate`).
 - L6b: tests cover the exact two-year hand value, `escalation_missing:export` when the rate is missing, the owner_gens split leaving the line whole, and the row mapping. Mutants on the row mapping and the class are killed.
+
+### 2026-11-06: DC-06 (3) build notes
+
+- `CommercialConfig.reserve_products` (the `ReserveProduct` model now sits in `models/commercial.py`; `models/reserve_products.py` re-exports it). An empty list dumps and hashes as before (a serializer drops it; `FIELDS_AFTER_V1`), so every stored config, fingerprint and IC digest without products equals master. The IC digest is pinned on master 33028f86.
+- `bind_commercial` writes each price to `buses_t["ic_reserve_price"]` (`ic:reserve:<id>`, `SI.write_reference_series`): full coverage or 422 `reserve_price_coverage`; a product that leaves the config loses its column; clearing drops them all.
+- L2: the price series' currency comes from its Library meta `unit` (`EUR/MW/h` gives EUR; no unit is the stored EUR default). A currency other than the project's stated one is 409 `currency_mismatch` before any write. A stated currency with no meta reader is refused rather than left unchecked. The binding records each price's currency on the network, and the preflight raises `commercial.currency_mismatch` when the finance currency changes later.
+- R8: every write path (the solver-config PUT, the bulk project import, the document-values preview) validates through `CommercialConfig`, so `sustain_h > 0` and `max_commit_mw >= 0` hold on each one (tested through `SolverConfigSchema`).
+- Typed refusals: `POST /run` runs the solve's own `plan` under the lock and answers each `RP.KINDS` kind as 422 `{code, error_kind, message}` before a worker starts (`tool-error-kinds.d/claude-dc06-flex-revenue.json`). A refusal that still reaches the worker becomes a `reserve_refused` failure card, not a traceback.
+- The reserves payload carries `currency` and `money_year` (the IC's base year for these lines). The summary header and the DC backup line name both, or say which is unknown.
