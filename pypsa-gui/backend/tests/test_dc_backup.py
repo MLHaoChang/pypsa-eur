@@ -349,6 +349,23 @@ def test_window_counts_hours_by_weighting_and_stays_in_its_period():
     assert w["start"] in (0, 2) and w["energy_mwh"] == 6.0
 
 
+@pytest.mark.parametrize("tid", ["eh_datacenter", "eh_datacenter_staged"])
+def test_template_window_counts_stores_hours_not_annualised_ones(tid):
+    from project_templates import eh_templates as t
+    from services.adequacy.site_peak import named_load
+
+    spec, n, island = _built(tid, "genset", 1.0)
+    w = n.snapshot_weightings
+    # The template annualises with "generators"; a window counted with it
+    # would be one snapshot long.
+    assert (w["generators"] != w["stores"]).any()
+    step = float(w["stores"].iloc[0])
+    critical = named_load(n, dc_backup.critical_loads(island))
+    window = dc_backup.network_window(n, critical, spec.backup.autonomy_h)
+    assert window["snapshots"] == math.ceil(spec.backup.autonomy_h / step)
+    assert window["hours"] == pytest.approx(window["snapshots"] * step)
+
+
 def test_window_longer_than_the_horizon_is_refused():
     with pytest.raises(dc_backup.DcBackupError, match="longer than the modelled horizon"):
         dc_backup.outage_window(np.ones(3), np.ones(3), 4.0)
@@ -403,6 +420,39 @@ def test_backup_mode_network_and_sidecar_agree_and_validate(tid, mode, scale):
     assert set(strings) <= set(rt["names"])
     reserve, words = outage_reserve_mwh(n, island)
     assert reserve > 0 and "outage reserve" in words
+
+
+@pytest.mark.parametrize("tid", ["eh_datacenter", "eh_datacenter_staged"])
+def test_site_peak_shaves_the_same_with_or_without_the_backup_strings(tid):
+    """GK A ruling 3: the strings hold their charge for an outage; site_peak's
+    shaving never counts them."""
+    import copy
+
+    from services.adequacy.site_peak import import_links, peak_check, without_backup
+
+    _spec, n, island = _built(tid, "bess", 0.6)
+    # An import just under the peak, so the peak binds for a few hours and a
+    # battery free above its reserve would shave it.
+    top = max(peak_check(n, island), key=lambda r: r["peak_mw"])
+    links = import_links(n)
+    n.links.loc[links, "p_nom"] *= 0.97 * top["peak_mw"] / top["delivered_mw"]
+    strings = [s for s in n.storage_units.index if s.startswith(dc_backup.STRING_PREFIX)]
+    bare, bare_island = n.copy(), copy.deepcopy(island)
+    bare.remove("StorageUnit", strings)
+    for s in strings:
+        bare_island["units"].pop(s)
+    bare_island["requirements"]["ride_through_storage"] = [
+        u for u in bare_island["requirements"]["ride_through_storage"] if u not in strings]
+
+    def shaving(rows):
+        return [(r["period"], r["binding_snapshot"], r["firm"][1]["mw"], r["cap_mw"])
+                for r in rows]
+
+    with_strings, without = peak_check(n, island), peak_check(bare, bare_island)
+    assert any(r["headroom_mw"] < 0 for r in with_strings)        # the check binds
+    assert shaving(with_strings) == shaving(without)
+    assert not set(strings) & set(without_backup(island)["requirements"]["ride_through_storage"])
+    assert set(strings) <= set(island["requirements"]["ride_through_storage"])   # untouched
 
 
 def test_bess_mode_above_the_import_is_refused_at_create():

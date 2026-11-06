@@ -63,3 +63,18 @@ GK B (25), finance: GO WITH CHANGES, option (a). A standalone `backup_cost_delta
 - F6 Hybrid legs count only their own share; the parts sum to the whole.
 - F7 `none` puts the up-sized MWh in capex and buys nothing later. restore and fixed_years are hand-tested on the same fade curve.
 - F8 BackupSpec fields that are not LP inputs stay out of `_network_input_fingerprint`, with a test; agreed with GK A.
+
+### 2026-11-06: GK A (13) rulings after the plan verdicts
+
+1. F8 agreed, with a stronger test. Changing `dc_load.backup` through the PUT, valid or invalid, leaves all three byte-equal: `_network_input_fingerprint`, the investment-case digest and network.nc. A project created with backup=bess needs no extra pin.
+2. Window hours (corrects condition 2): elapsed hours are counted with `snapshot_weightings.stores`, never `generators` (the annualising 52× in the DC templates). A DC-template test checks the window holds exactly ceil(autonomy_h / stores weight) snapshots.
+3. site_peak shaving excludes the `backup_bess_*` strings, and every storage the sidecar lists as backup, from its shaving term; they count only toward the outage reserve. Test: the DC template in bess mode shaves the same as with the strings removed. This site_peak change is allowed for this purpose only.
+
+### 2026-11-06: DC-03 (2) progress (session_01G7qCuia7CuUNr1UaxfxeSd)
+
+- The 4 failing sidecar tests passed gridspine's validated form (values flattened into `requirements.values`) to `site_peak`, which reads the raw `{value, source}` sidecar as the screen does. The test now passes the raw sidecar; no code change.
+- Routes: `PUT /api/campus-electrical/{name}/dc-backup` and `POST .../dc-backup/assess`, both lock-checked; 422 `{error_kind: dc_backup_invalid, field}`. Chat disposition `dc_backup` in `services/not_via_chat.py` (unbuilt).
+- Ruling 1: route test over a valid and three invalid PUTs asserts fingerprint, IC digest (`_ic_current_assumptions`) and network.nc byte-equal.
+- Ruling 2: `dc_backup.network_window` is the one place the window reads weightings (`stores`); tested on both DC templates.
+- Ruling 3: `site_peak.without_backup` drops the strings from the shaving set only; the sidecar keeps them in `ride_through_storage`. The test tightens the import to 97 % of the peak so the check binds; the mutant (shaving on the raw sidecar) turns it RED.
+- GK A 6: `write_sidecars` per `TEMPLATE_META` id against `project_templates/<id>/`: 9 templates, 40 files, 0 mismatches.

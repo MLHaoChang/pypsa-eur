@@ -51,6 +51,7 @@ import CampusHarmonicScanSection from './CampusHarmonicScanSection'
 import CampusUnitQCurveSection from './CampusUnitQCurveSection'
 import { GRID_CODE_CHANGED } from '../components/gridReadiness/GridReadinessScorecard'
 import CampusIslandSection, { ISLAND_REPORT_KEY } from './CampusIslandSection'
+import DcBackupSection from './DcBackupSection'
 import CampusLibrarySection from './CampusLibrarySection'
 import { useCampusMilpJob } from './useCampusMilpJob'
 import { elapsed, failureLine, stageLabel, stepText, useTick } from './campusRunProgress'
@@ -265,6 +266,7 @@ function CampusView({ name, part }: { name: string; part: CampusPart }) {
           </PageSection>
         )}
         <CampusIslandSection name={name} />
+        <DcBackupSection name={name} />
         <IntentComparisonSection name={name} gridCode={state.data.settings?.profile ?? null} />
       </>)}
       {part === 'results' && (state.data.results

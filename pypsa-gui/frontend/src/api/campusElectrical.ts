@@ -874,6 +874,41 @@ export interface GridReadiness {
   basis: string
 }
 
+/** The data-centre backup setting (DC 03): `eh_template.json` `dc_load.spec.backup`. */
+export type DcBackupMode = 'genset' | 'bess' | 'hybrid'
+export interface DcBackupSetting { mode: DcBackupMode; autonomy_h?: number; [k: string]: unknown }
+
+/** One leg's outage proof: the islanded re-dispatch over the window. */
+export interface DcBackupProof {
+  verdict: 'pass' | 'fail' | 'not_shown'
+  reason?: string | null
+  strings_in_service: number
+  window_unserved_mwh: number | null
+  on_grid_unserved_mwh: number | null
+}
+
+/** POST /campus-electrical/{name}/dc-backup/assess: sizing, window, both proofs, cost delta. */
+export interface DcBackupAssessment {
+  mode: DcBackupMode
+  verdict: DcBackupProof['verdict']
+  window: { first: string; hours: number; snapshots: number; energy_mwh: number }
+  sizing: {
+    strings_n: number; strings: number; string_mw: number; redundancy: string
+    e_mwh: number; shortfall_mw: number; critical_peak_mw: number; firm_genset_mw: number
+  }
+  proofs: Partial<Record<DcBackupMode, DcBackupProof>>
+  cost: {
+    years: number; discount_rate: number; currency?: string | null; money_year?: number | null
+    delta: number | null; npv_genset: number | null; npv_chosen: number | null
+    lines: { leg: string; line: string; unit: string; npv: number }[]
+    inputs: { key: string; value: unknown; unit?: string; assumed?: boolean }[]
+  }
+  notes: string[]
+}
+
+/** The assessment re-dispatches the campus twice over the outage window. */
+export const DC_BACKUP_ASSESS_TIMEOUT_MS = 300_000
+
 export const CAMPUS_RUN_TIMEOUT_MS = 900_000
 /** Drafting loads the whole saved network, as a bundle download does: its 180 s. */
 export const CAMPUS_DRAFT_TIMEOUT_MS = 180_000
@@ -934,6 +969,16 @@ export const campusApi = {
   /** Reset the limit to the template's value or the generic placeholder. */
   resetGridLimit: (project: string, item: GridLimitItem) =>
     client.delete(`${base(project)}/grid-readiness/limits/${item}`, quiet).then(r => r.data),
+
+  /** Store the backup setting (DC 03). 422 `{error_kind: dc_backup_invalid, message, field}`;
+   *  the network and the investment case are untouched. */
+  setDcBackup: (project: string, backup: DcBackupSetting) =>
+    client.put<DcBackupSetting>(`${base(project)}/dc-backup`, backup, quiet).then(r => r.data),
+
+  /** Size, prove and price the stored backup mode. Read only. */
+  assessDcBackup: (project: string) =>
+    client.post<DcBackupAssessment>(`${base(project)}/dc-backup/assess`, {},
+      { ...quiet, timeout: DC_BACKUP_ASSESS_TIMEOUT_MS }).then(r => r.data),
 
   /** The island sidecar as written and the last island study (null each when absent). */
   island: (project: string) =>

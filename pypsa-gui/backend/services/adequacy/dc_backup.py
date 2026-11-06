@@ -36,6 +36,7 @@ from typing import Any, Iterable
 import numpy as np
 
 from models.flex_archetypes import BackupSpec, RedundancyTier
+from services.adequacy.site_peak import BACKUP_STRING_PREFIX as STRING_PREFIX
 
 #: Where each assumed default comes from (generic engineering; labelled
 #: "assumed" in every row until the project replaces it).
@@ -233,7 +234,15 @@ def outage_window(critical: np.ndarray, hours: np.ndarray, autonomy_h: float,
 
 # ── The network and island sidecar in the chosen mode ───────────────────
 
-STRING_PREFIX = "backup_bess_"
+
+def network_window(n, critical: np.ndarray, autonomy_h: float) -> dict[str, Any]:
+    """``outage_window`` on network ``n``: elapsed hours are the ``stores``
+    weightings (1 h per snapshot in the DC templates), never ``generators``,
+    which annualise a representative week (GK A ruling 2)."""
+    window = outage_window(critical, n.snapshot_weightings["stores"].to_numpy(dtype=float),
+                           autonomy_h, _periods(n))
+    window["first"] = str(n.snapshots[window["start"]])
+    return window
 
 
 def critical_loads(island: dict | None) -> list[str]:
@@ -617,9 +626,7 @@ def assess(n, island: dict, spec, *, years: int, prices: dict[str, Any],
     sizing = size_bess(critical, firm_genset_mw=g, backup=backup,
                        redundancy=spec.redundancy, years=years)
     sizing["firm_genset_rule"] = g_rule
-    window = outage_window(critical, n.snapshot_weightings["stores"].to_numpy(dtype=float),
-                           backup.autonomy_h, _periods(n))
-    window["first"] = str(n.snapshots[window["start"]])
+    window = network_window(n, critical, backup.autonomy_h)
     run = {"cfg": cfg, "lock": lock or threading.Lock(),
            "stop_event": stop_event or threading.Event(),
            "log_queue": log_queue or queue.SimpleQueue()}
