@@ -62,15 +62,52 @@ def _role(n, link: str) -> str:
     return "" if v is None or (isinstance(v, float) and math.isnan(v)) else str(v)
 
 
+def _electric_bus(n, bus: str) -> bool:
+    """Not a product bus (tonnes, a catalogued product) nor a non-electric
+    energy carrier: the same rule as ``site_peak.load_split``."""
+    from services.adequacy.site_peak import _non_electric
+    from services.process_products import is_product_bus
+
+    carrier = (str(n.buses.at[bus, "carrier"])
+               if bus in n.buses.index and "carrier" in n.buses.columns else "")
+    return not (is_product_bus(n, bus) or _non_electric(carrier))
+
+
 def _peaks(n) -> dict[str, float]:
-    """peak(load) = max of ``loads_t.p_set[name]`` if present, else ``p_set``."""
+    """peak(load) = max of ``loads_t.p_set[name]`` if present, else ``p_set``,
+    for the electric Loads only (``site_peak.load_split``): a tonne offtake is
+    not MW."""
+    from services.adequacy.site_peak import electric_loads
+
     ts = n.loads_t.p_set if hasattr(n.loads_t, "p_set") else None
     out: dict[str, float] = {}
-    for name in n.loads.index:
+    for name in electric_loads(n):
         if ts is not None and name in ts.columns and len(ts):
             out[name] = _f(ts[name].max())
         else:
             out[name] = _f(n.loads.at[name, "p_set"]) if "p_set" in n.loads.columns else 0.0
+    return out
+
+
+def _process_draw(n) -> dict[str, float]:
+    """Peak electrical draw (bus0 power, MW) of each process Link
+    (``eh_process``) on an electric bus0: p_nom × max p_max_pu."""
+    links = n.links
+    out: dict[str, float] = {}
+    if "eh_process" not in links.columns:
+        return out
+    ts = n.links_t.p_max_pu if hasattr(n.links_t, "p_max_pu") else None
+    for name in links.index:
+        if not _flag(links, name, "eh_process"):
+            continue
+        b0 = str(links.at[name, "bus0"])
+        if not _electric_bus(n, b0):
+            continue
+        if ts is not None and name in ts.columns and len(ts):
+            pu = _f(ts[name].max())
+        else:
+            pu = _f(links.at[name, "p_max_pu"]) if "p_max_pu" in links.columns else 1.0
+        out[str(name)] = _f(links.at[name, "p_nom"]) * pu
     return out
 
 
@@ -90,6 +127,8 @@ def _supply(n) -> dict[str, float]:
     # not supply: counted, a staged template's zero-cost candidates moved the
     # median and dropped the real grid supply out of the cheaper half.
     gens = gens[gens["p_nom"].map(_f) > 0] if "p_nom" in gens.columns else gens
+    # A source on a tonne / non-electric bus (a mine's ore feed) is not MW.
+    gens = gens[[_electric_bus(n, str(b)) for b in gens["bus"]]]
     if gens.empty:
         return out
     mc = gens["marginal_cost"].map(_f) if "marginal_cost" in gens.columns else None
@@ -167,10 +206,14 @@ def suggest_eh_setup(n, archetype: str | None = None) -> dict[str, Any]:
                       "critical_buses": already_crit}
 
     peaks = _peaks(n)
-    total_peak = sum(peaks.values())
+    draw = _process_draw(n)
+    total_peak = sum(peaks.values()) + sum(draw.values())
     bus_peak: dict[str, float] = defaultdict(float)
     for name, p in peaks.items():
         bus_peak[str(n.loads.at[name, "bus"])] += p
+    # A process unit's electrical draw is load on the bus it draws from.
+    for name, p in draw.items():
+        bus_peak[str(links.at[name, "bus0"])] += p
     load_buses = set(bus_peak)
     supply = _supply(n)
     adj: dict[str, list[tuple[str, str]]] = defaultdict(list)
@@ -261,7 +304,7 @@ def suggest_eh_setup(n, archetype: str | None = None) -> dict[str, Any]:
 
     # ── critical buses ─────────────────────────────────────────────────────
     matched: dict[str, str] = {}
-    for name in n.loads.index:
+    for name in peaks:  # electric Loads only
         b = str(n.loads.at[name, "bus"])
         lc = str(n.loads.at[name, "carrier"]) if "carrier" in n.loads.columns else ""
         for label, text in (("bus", b), ("load", str(name)), ("load carrier", lc)):

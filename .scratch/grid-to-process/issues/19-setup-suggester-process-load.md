@@ -3,7 +3,7 @@
 
 # The setup suggester ignores process-link draw and reads tonne loads as MW
 
-Status: ready-for-agent
+Status: done
 Model: Opus
 Type: task
 Blocked by: none
