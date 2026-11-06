@@ -1,6 +1,6 @@
 # `output_electric_ac` vs `output_electric_dc` rows: price onto the right rating
 
-Status: needs-info
+Status: ready-for-agent (Q-TC-2 answered 2026-11-06)
 Type: bug (latent)
 Found in: GS-2b (typed cost units) review by the engine gatekeeper, 2026-10-21.
 
@@ -18,3 +18,5 @@ Needs the engine gatekeeper's call on where the rating lives.
 ### 2026-11-05: triage sweep (AA-FILL-2), role needs-info
 
 Was: `needs-triage`. Owner question Q-TC-2 (GK A decides where the rating lives). Latent: every shipped PV row is AC. (1, Recommended) Refuse `output_electric_dc` rows in `pricing.SCALING_RULES` until the asset schema carries the rating: a few lines, a clear message, no schema change. (2) Add a DC/AC ratio field on the asset and scale by it: correct for DC rows, but a schema change across the generator model. (3) Leave it until a DC row ships: no work now, the risk stays silent. Once answered (1): ready-for-agent, Sonnet, file `pricing.py` and its tests, reviewer GK A.
+
+2026-11-06, owner answer Q-TC-2 (coordinator card): "Add DC/AC ratio field": the asset carries a DC/AC ratio and DC rows scale by it. Role ready-for-agent; Opus (schema change), reviewer GK A (where the rating lives).
