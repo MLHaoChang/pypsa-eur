@@ -18,3 +18,7 @@ Frontend only. Defects the UX reviewers logged while reviewing other PRs.
 ## Acceptance
 
 - Unit tests for 1, 2 and 3; before/after shots in Guided and Expert.
+
+## Shots
+
+`.scratch/ui-polish/shots/uip01-{guided,expert}-{1-before-read-only-and-year,2-after-fix-link-field,3-after-refused-save-one-toast}.png`, from `pypsa-gui/frontend/scripts/ui-polish-shots.mjs` (the real PropertiesPanel, FieldDrawer and ToasterHost; API routes mocked). "Before" is the read-only card the link used to open; the harness caught that the interceptor toast lingered until removed, so `saveFailedToast` now uses `toast.remove`.

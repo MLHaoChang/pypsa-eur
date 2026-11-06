@@ -11,7 +11,7 @@ describe('saveFailedToast', () => {
       toast.error('A study is running: wait for it', { id: 'A study is running: wait for it' }) // the interceptor's
       saveFailedToast('A study is running: wait for it')
     })
-    const live = result.current.toasts.filter(t => t.visible)
+    const live = result.current.toasts
     expect(live.map(t => t.message)).toEqual(['Save failed: A study is running: wait for it'])
     expect(live[0].position).toBe('top-center')
   })

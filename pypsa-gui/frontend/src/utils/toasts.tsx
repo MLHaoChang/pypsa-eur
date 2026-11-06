@@ -224,6 +224,6 @@ export function showUndoToast(
  * drawer, where a bottom-right toast covered it.
  */
 export function saveFailedToast(sentence: string): void {
-  toast.dismiss(sentence)
+  toast.remove(sentence)
   toast.error(`Save failed: ${sentence}`, { id: 'save-failed', position: 'top-center' })
 }
