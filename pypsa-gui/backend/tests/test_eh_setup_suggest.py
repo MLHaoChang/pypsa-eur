@@ -400,11 +400,12 @@ def test_no_suggested_mw_figure_includes_a_tonne_load():
     n.links.loc[["feeder", "aux_feed"], "p_nom"] = 1000.0
     n.generators.at["supply", "p_nom"] = 1000.0
     out = suggest_eh_setup(n)
-    text = " ".join(s["reason"] for s in out["suggestions"])
+    # without the process flag the only electric load is aux's 5 MW; the
+    # 500 t/h offtake is neither a load bus nor part of any MW figure
     assert "product" not in [s["name"] for s in out["suggestions"]]
-    # without the process flag the only MW is aux's 5 MW
-    assert re.findall(r"peak demand of ([0-9.]+) MW", text) in ([], ["5"])
-    assert "500" not in text and "505" not in text
+    mw = [float(x) for s in out["suggestions"]
+          for x in re.findall(r"([0-9.]+) MW", s["reason"])]
+    assert mw == [1000.0, 5.0, 5.0]
 
 
 def test_the_concentrator_suggests_its_site_bus_as_critical():
