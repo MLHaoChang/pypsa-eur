@@ -71,6 +71,8 @@ PRICE_PREFIX = "ic:reserve:"
 #: The solved commitments (``storage_units_t``), columns ``<storage>|<product>``.
 OUT_FRAME = "ic_reserve_mw"
 META_KEY = "ic_reserve"
+#: Each bound price's currency, {product id: ISO code or None} (binding, for the preflight).
+CURRENCY_META = "ic_reserve_price_currency"
 SEP = "|"
 TOL = 1e-6
 

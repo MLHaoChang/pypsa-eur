@@ -58,6 +58,7 @@ FIELDS_AFTER_V1: dict[tuple[str, str], Any] = {
     # A currency its jurisdiction implies is left out of every dump too (the `Tariff`
     # serializer, gridspine-library-eu 01), so it never reaches a hash.
     ("Tariff", "currency"): None,                        # gridspine-library-eu 01
+    ("CommercialConfig", "reserve_products"): [],        # DC grid readiness 06
 }
 
 

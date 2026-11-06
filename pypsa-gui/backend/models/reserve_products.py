@@ -8,49 +8,9 @@ nothing market-specific ships with the app.
 """
 from __future__ import annotations
 
-from typing import Literal
+from models.commercial import ReserveDirection, ReserveKind, ReserveProduct
 
-from pydantic import BaseModel, Field, model_validator
-
-from models.commercial import PriceSeriesRef
-
-ReserveKind = Literal["fast_symmetric", "secondary", "tertiary"]
-ReserveDirection = Literal["symmetric", "up", "down"]
-
-
-class ReserveProduct(BaseModel):
-    """One reserve product the eligible backup storage may commit to.
-
-    ``sustain_h`` is how long each committed MW must be deliverable (the
-    energy it reserves is MW × ``sustain_h``); there is no default, the user
-    states it. ``storages`` empty means every eligible storage."""
-
-    id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
-    kind: ReserveKind
-    direction: ReserveDirection
-    sustain_h: float = Field(gt=0, le=24, allow_inf_nan=False)
-    capacity_price: PriceSeriesRef
-    max_commit_mw: float | None = Field(default=None, ge=0, allow_inf_nan=False)
-    storages: list[str] = Field(default_factory=list)
-    counterparty: str = Field(default="tso", min_length=1)
-
-    @model_validator(mode="after")
-    def _direction_fits_kind(self) -> "ReserveProduct":
-        if self.kind == "fast_symmetric" and self.direction != "symmetric":
-            raise ValueError("reserve product: a fast_symmetric product is symmetric")
-        if self.kind != "fast_symmetric" and self.direction == "symmetric":
-            raise ValueError(f"reserve product: a {self.kind} product is up or down, not symmetric")
-        if len(set(self.storages)) != len(self.storages):
-            raise ValueError("reserve product: a storage is named twice")
-        return self
-
-    @property
-    def up(self) -> bool:
-        return self.direction in ("symmetric", "up")
-
-    @property
-    def down(self) -> bool:
-        return self.direction in ("symmetric", "down")
+__all__ = ["ReserveDirection", "ReserveKind", "ReserveProduct", "check_unique"]
 
 
 def check_unique(products: list[ReserveProduct]) -> list[ReserveProduct]:
