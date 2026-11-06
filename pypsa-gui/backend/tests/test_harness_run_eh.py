@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from fastapi import HTTPException
 
 from harness import run_eh, runner as harness_runner
 from services import flow_service, run_envelope, run_gates, run_profiles
@@ -337,6 +338,29 @@ def test_a_refused_start_releases_the_reservation(tmp_path):
     assert not run_eh.release(path, "a1", 0, task)  # once
 
 
+@pytest.mark.parametrize("result, error", [
+    (None, HTTPException(409, {"error_kind": "study_busy", "message": "a study is running"})),
+    (None, HTTPException(422, {"error_kind": "bad_request", "message": "invalid"})),
+    ({"status": "refused", "error_kind": "campaign_cap"}, None),
+])
+def test_a_refused_start_through_dispatch_fails_the_step_and_releases(tmp_path, monkeypatch, result, error):
+    """F5, through `finish_step`: a start that never ran settles failed, its
+    reservation released, and nothing is charged or retried."""
+    from services import assistant_tasks
+    path, ticket = ticket_task(tmp_path)
+    task = json.loads(path.read_text())
+    del task["steps"][0]["job"]  # the start's own receipt, before any job is followed
+    task.update(owner_id="u1", title="Own site study")
+    path.write_text(json.dumps(task))
+    monkeypatch.setattr(assistant_tasks, "_path", lambda task_id: (path, PROJECT, "u1"))
+    monkeypatch.setattr(assistant_tasks, "_view", lambda task, *a, **k: None)  # the reply, not under test
+    assistant_tasks.finish_step(ticket, result=result, error=error)
+    after = json.loads(path.read_text())
+    assert after["steps"][0]["status"] == "failed"
+    assert eh_row(path)["solves"] == 0
+    assert harness_runner._budget(after)["used"]["solves"] == 1
+
+
 # ── The facts (C3, F2, F3, F6, F7, F8) ───────────────────────────────────────
 
 
@@ -382,7 +406,8 @@ def fact_gate(monkeypatch, rules, values):
         monkeypatch.setitem(run_gates.FACTS, name, run_gates.Fact(real.reads, real.key, real.unit,
                                                                   (lambda v: lambda env: v)(value)))
     env = Env(task={"task_id": "t1", "steps": [], "run": {}}, ctx=None, project=None, project_dir=None)
-    return run_gates.gate(rules, env)
+    results = run_gates.evaluate(rules, env)  # gate()'s own verdict, without its context pinning
+    return {"rules": results, "passed": run_gates.passed(results)}
 
 
 @pytest.mark.parametrize("fact, missing", [
@@ -589,14 +614,28 @@ def test_a_run_stored_past_solve_entry_resolves_and_never_passes_the_new_rules(t
 # ── F10: no project write ────────────────────────────────────────────────────
 
 
-def test_the_eh_study_runs_on_a_private_copy():
-    """F10: `run_eh_study` copies the network before it changes anything, so
-    the step writes nothing to the project and adds no ledger row."""
-    import inspect
+def test_the_eh_study_runs_on_a_private_copy(monkeypatch):
+    """F10: `run_eh_study` copies the network, under its lock, before any
+    stage reads or changes it, so the step writes nothing to the project and
+    adds no ledger row."""
+    import pypsa
 
     from services.adequacy import eh_study
-    source = inspect.getsource(eh_study.run_eh_study)
-    assert "_private_copy(" in source.split("apply_archetype_pack")[0]
+
+    class Seen(Exception):
+        pass
+
+    def first_read(pack, *, network, dsr_buses):
+        raise Seen(network)
+
+    monkeypatch.setattr(eh_study.arch, "solver_config_patch_with_preflight", first_read)
+    shared = pypsa.Network()
+    shared.add("Bus", "b")
+    with pytest.raises(Seen) as seen:
+        eh_study.run_eh_study(shared, None, None, lock=threading.Lock(), stop_event=threading.Event(),
+                               stages=["apply_pack", "ens_solve"])
+    assert seen.value.args[0] is not shared
+    assert list(seen.value.args[0].buses.index) == ["b"]
     assert not run_profiles.NATIVE_STEPS.get("solve")
 
 

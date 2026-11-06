@@ -49,7 +49,7 @@ from tests.test_harness_run_loops import (  # noqa: F401
     say,
     stopped,
 )
-from tests.test_harness_run_skeleton import site, start  # noqa: F401
+from tests.test_harness_run_skeleton import site, start, without_eh_study  # noqa: F401
 from tests.test_harness_runner import detached, fake_report_provider, settle, task_path  # noqa: F401
 
 FACT = "adequacy.loop.converged"
@@ -81,7 +81,7 @@ def engine_rule(
 def with_rules(monkeypatch, *rules, solves=12, runs=None):
     """eh_site@1's edit shapes, its result gate carrying `rules` after the
     core rules, and an envelope of `solves` solves."""
-    base = run_profiles.PROFILES["eh_site@1"]
+    base = without_eh_study(run_profiles.PROFILES["eh_site@1"])
     block = dict(ATOMIC, budget={"solves": solves, "rounds": 6, "wall_time_h": 8.0})
     if runs is not None:
         block["runs"] = runs

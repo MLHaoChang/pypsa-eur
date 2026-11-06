@@ -393,7 +393,7 @@ def _kpi_unserved_mwh(env):
                 raw = lost_load.source(env.ctx, "network")
             except ValueError as exc:
                 return NoEvidence(str(exc), f"{exc}: unserved energy cannot be read")
-        facts, _ = lost_load.calculate(raw, {"entity_id": "network", "metrics": ["lost_load_energy"]})
+        facts, _ = lost_load.calculate(raw, {"profile": lost_load.PROFILE, "entity_id": "network", "metrics": ["lost_load_energy"]})
         return facts[0]["value"] if facts else None
     return _on(env.ctx, read)
 
