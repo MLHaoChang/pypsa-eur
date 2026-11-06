@@ -4,7 +4,7 @@
  * follows that outcome, never a blanket ✓.
  */
 import {
-  ACTIVITY_STATUS_WORDS, TOOL_OUTCOME_DENIED_REASON_WORDS, TOOL_OUTCOME_FILE_REASON_WORDS, TOOL_OUTCOME_PARTIAL_REASON_WORDS, TOOL_OUTCOME_REASON_WORDS,
+  ACTIVITY_STATUS_WORDS, TOOL_OUTCOME_DENIED_DETAIL_WORDS, TOOL_OUTCOME_DENIED_REASON_WORDS, TOOL_OUTCOME_FILE_REASON_WORDS, TOOL_OUTCOME_PARTIAL_REASON_WORDS, TOOL_OUTCOME_REASON_WORDS,
 } from './activityWords'
 
 /** Every outcome the backend's `_outcome.outcome` may carry (harness/outcomes.py). */
@@ -125,12 +125,14 @@ export function toolOutcomeReasonWord(outcome: string, reason: string | null, to
 
 /**
  * A refusal's backend message as plain Details text (issue 04 S4a), or null.
+ * A kind in TOOL_OUTCOME_DENIED_DETAIL_WORDS always reads its fixed text.
  * Python repr quotes around a name are dropped ('names' → names). A message
  * that still names a refusal kind, or is the confirmation gate's echo of the
  * raw decision ("deny on confirmation for …"), is withheld whole: its reason
  * is already on the line in words.
  */
 export function refusalDetail(message: string | null | undefined, kind: string): string | null {
+  if (Object.prototype.hasOwnProperty.call(TOOL_OUTCOME_DENIED_DETAIL_WORDS, kind)) return TOOL_OUTCOME_DENIED_DETAIL_WORDS[kind]
   const text = (message ?? '').trim().replace(/'([\w.[\]]+)'/g, '$1')
   if (!text || /\bon confirmation for\b/.test(text)) return null
   const words = new Set(text.match(/\w+/g))

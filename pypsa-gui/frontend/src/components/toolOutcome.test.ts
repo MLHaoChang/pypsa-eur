@@ -273,6 +273,9 @@ describe('refusal details (issue 04 S4a)', () => {
     ['blocked: confirmation_expired', 'confirmation_expired', null],
     ['refused as no_progress_stop', 'required_guard_failed', null],
     ['  ', 'aborted', null],
+    ['Your saved project rule blocks non-read tools.', 'user_restriction', 'A rule you set for this project blocks changes.'],
+    ["approval for 'delete_component' could not be recorded", 'approval_unavailable',
+      'The app could not save the approval: its data folder may be full or not writable.'],
     [undefined, 'aborted', null],
   ])('%s → %s', (message, kind, detail) => {
     expect(refusalDetail(message, kind)).toBe(detail)

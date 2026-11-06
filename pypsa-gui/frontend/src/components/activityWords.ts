@@ -47,6 +47,12 @@ export const TOOL_OUTCOME_DENIED_REASON_WORDS: Record<string, string> = {
   no_progress_stop: 'stopped after repeating the same failing request',
 }
 
+/** A refusal's Details text where the backend's own message would mislead or name internals (issue 04 S4a). */
+export const TOOL_OUTCOME_DENIED_DETAIL_WORDS: Record<string, string> = {
+  user_restriction: 'A rule you set for this project blocks changes.',
+  approval_unavailable: 'The app could not save the approval: its data folder may be full or not writable.',
+}
+
 /** A file tool's words where they differ from a job's (issue 04 S3: import/export). */
 export const TOOL_OUTCOME_FILE_REASON_WORDS: Record<string, string> = {
   adapter_pending: 'this file format cannot be checked yet',

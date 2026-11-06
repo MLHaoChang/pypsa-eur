@@ -35,7 +35,7 @@ import { acknowledgeMountedView, type NavigationAcknowledgement } from '../utils
 import { CheckedEvidenceCard } from './CheckedEvidenceCard'
 import { CheckedChart } from './CheckedChart'
 import { CheckedAnswerControl } from './CheckedAnswerControl'
-import ChatAccess from './ChatAccess'
+import ChatAccess, { openChatAccess } from './ChatAccess'
 import { SourceGapFollowupCard } from './SourceGapFollowupCard'
 import type { HarnessTurn, SourceGapDraft } from '../store/chatStore'
 import { shortMcpToolName } from '../api/mcpSettings'
@@ -3598,6 +3598,12 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
           if (toolLine && m.tool_use_id && DENIED_LINE.test(m.content) && messages.some(o => o !== m && o.role === 'tool'
             && o.tool_use_id === m.tool_use_id && toolOutcomeOf(o.tool_result, o.tool_name)?.outcome === 'denied')) return null
           const toolLabel = toolLine && !toolLine.hidden ? toolLine.label : null
+          // Issue 04 S4a: a call your project rule blocked links to where that rule is set.
+          const accessLink = outcomeNow?.mark.outcome === 'denied'
+            && toolOutcomeOf(m.tool_result, m.tool_name)?.reason === 'user_restriction' ? (
+              <button type="button" className="ml-2 font-sans text-[11px] text-accent hover:underline"
+                onClick={openChatAccess} data-testid="chat-tool-access-link">Access and approvals ›</button>
+            ) : null
           const toolMessage = toolLine && !toolLine.hidden ? toolLine.message ?? null : null
           return (
           <div
@@ -3636,6 +3642,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
                 <>
                   {outcomeNow && <OutcomeGlyph mark={outcomeNow.mark} />}
                   <span className="font-sans text-[12px] text-text" data-testid="chat-tool-label">{toolLabel}</span>
+                  {accessLink}
                   {toolMessage && (
                     <span className="block font-sans text-[12px] text-text whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
                       data-testid="chat-tool-message">{toolMessage}</span>
@@ -3651,6 +3658,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
                   <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]" data-testid="chat-tool-outcome">
                     <OutcomeGlyph mark={outcomeNow.mark} />{`${m.tool_name} (${toolOutcomeWords(outcomeNow)})`}
                   </span>
+                  {accessLink}
                   {/* Issue 04 S4a: a refusal's message, collapsed as in Guided. */}
                   {outcomeNow.mark.outcome === 'denied' && m.content.includes('\n') && (
                     <details className="mt-0.5" data-testid="chat-tool-details">

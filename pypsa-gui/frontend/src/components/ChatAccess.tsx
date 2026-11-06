@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getChatAccess } from '../api/chatAccess'
 import { useChatStore } from '../store/chatStore'
@@ -18,9 +18,21 @@ const blockers: Record<string, string> = {
   requested_checks_unavailable: 'Requested answer checks are unavailable on this server.',
 }
 
+// Issue 04 S4a: a denied line ("a rule you set for this project blocks
+// changes") opens this same section from the transcript.
+const openers = new Set<() => void>()
+/** Open the "Access and approvals" section, as its own toggle does. */
+export function openChatAccess(): void { openers.forEach(open => open()) }
+
 export default function ChatAccess({ checked, companion = false }: { checked: boolean; companion?: boolean }) {
   const [open, setOpen] = useState(false)
   const regionId = useId()
+  const toggle = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    const open = () => { setOpen(true); if (!companion) toggle.current?.focus() }
+    openers.add(open)
+    return () => { openers.delete(open) }
+  }, [companion])
   const project = useUIStore(s => s.currentProject)
   const mode = useUIStore(s => s.uiMode)
   const dockOpen = useUIStore(s => s.assistantDockOpen)
@@ -62,7 +74,7 @@ export default function ChatAccess({ checked, companion = false }: { checked: bo
       </>}
       {refresh}
     </section>}
-    <button type="button" className="underline text-muted" aria-expanded={open} aria-controls={regionId}
+    <button ref={toggle} type="button" className="underline text-muted" aria-expanded={open} aria-controls={regionId}
       onClick={() => setOpen(value => !value)}>Access and approvals</button>
     {open && <section id={regionId} aria-label="Current access and approvals"
       className="mt-2 max-h-64 overflow-auto space-y-2">

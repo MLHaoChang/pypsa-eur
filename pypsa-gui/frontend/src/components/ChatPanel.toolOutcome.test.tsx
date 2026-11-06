@@ -61,6 +61,10 @@ function call(id: string, tool: string, outcome: string | null, jobId: string | 
   emit('tool_result', { tool_use_id: id, tool_name: tool,
     result: outcome === null ? { ok: true } : { _outcome: { version: 1, outcome, job_id: jobId, reason }, status: 'completed', completed: true } })
 }
+const DETAILS: Record<string, string> = {
+  user_restriction: 'A rule you set for this project blocks changes.',
+  approval_unavailable: 'The app could not save the approval: its data folder may be full or not writable.',
+}
 const rows = () => screen.getAllByTestId('chat-message').filter(r => r.dataset.role === 'tool')
 const at = new Date(2026, 10, 5, 14, 2).getTime()
 
@@ -192,7 +196,9 @@ describe('chat tool-line outcome marks', () => {
     expect(mark.dataset.outcome).toBe('denied')
     expect(mark.className).toContain('text-muted')
     expect(within(row).getByTestId('chat-tool-outcome').textContent).toBe(`–bulk_update_components (denied: ${words})`)
-    expect(within(row).getByTestId('chat-tool-message').textContent).toBe('it did not run')
+    expect(within(row).getByTestId('chat-tool-message').textContent).toBe(DETAILS[kind] ?? 'it did not run')
+    if (kind === 'user_restriction') expect(within(row).getByTestId('chat-tool-access-link')).toBeTruthy()
+    else expect(within(row).queryByTestId('chat-tool-access-link')).toBeNull()
     expect(row.textContent).not.toContain(kind)
     expect(row.textContent).not.toContain('✕')
     act(() => useUIStore.setState({ uiMode: 'guided' }))
@@ -235,6 +241,25 @@ describe('chat tool-line outcome marks', () => {
       emit('tool_error', { tool_use_id: 'y', tool_name: 'delete_component', error_kind: kind, message: 'it did not run' })
       expect(screen.getByTestId('chat-error-banner').dataset.errorKind).toBe(kind)
     })
+
+  it.each(['expert', 'guided'] as const)('issue 04 S4a: in %s, a rule-blocked line links to Access and approvals, and only that line', async (mode) => {
+    await turn(mode)
+    emit('tool_error', { tool_use_id: 'r', tool_name: 'delete_component', error_kind: 'user_restriction',
+      message: 'Your saved project rule blocks non-read tools.', _outcome: { version: 1, outcome: 'denied', reason: 'user_restriction' } })
+    emit('tool_error', { tool_use_id: 's', tool_name: 'delete_component', error_kind: 'confirmation_expired',
+      message: 'expired on confirmation for x', _outcome: { version: 1, outcome: 'denied', reason: 'confirmation_expired' } })
+    const links = screen.getAllByTestId('chat-tool-access-link')
+    expect(links).toHaveLength(1)
+    expect(links[0].textContent).toBe('Access and approvals ›')
+    expect(rows().find(r => r.contains(links[0]))!.textContent).toContain('a rule you set for this project blocks changes')
+    expect(screen.queryByText(/non-read tools/)).toBeNull()
+    const toggle = screen.getByRole('button', { name: 'Access and approvals' })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(links[0])
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByRole('region', { name: 'Current access and approvals' })).toBeTruthy()
+    expect(document.activeElement).toBe(toggle)
+  })
 
   it('issue 04 S4a: keeps the ✗ error line for a tool_error without an outcome', async () => {
     await turn('expert')
