@@ -11,3 +11,6 @@ Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sh
 - <how to review a delta after a base-branch merge>
 - <known environment-only failures>
 - <rulings made in earlier reviews>
+
+- You may start from the PR body's survivor list and the project's mutant runner (`scripts/coord/mutants.py <src> <test>`). It does not replace mutating the guards the PR changes and checking which test kills each.
+- A plan GO for work over one reviewer area or about 1,500 changed lines (excluding generated files, screenshots and fixtures) names the slices, one PR each.
