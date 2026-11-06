@@ -827,3 +827,166 @@ def test_an_admitted_task_step_still_meets_the_hold(monkeypatch, slow_queue):
     error = _error(_call(monkeypatch, session, TOOL, ARGS))
     assert error["error_kind"] == job_holds.PENDING, error
     assert began == [] and enqueued == [] and len(calls) == 1
+
+
+# ── mutants.py survivors (RETRO-SPEED-1) ─────────────────────────────────────
+
+
+def test_a_hold_refuses_only_its_own_tool_on_its_own_binding(monkeypatch):
+    binding = {"now": "P1"}
+    monkeypatch.setattr(job_holds, "_binding", lambda: binding["now"])
+    session = ChatSession()
+    job_holds._open(session, "run_simulation", "F", "tu", "x", worker=_Thread())
+    assert job_holds.check(session, "run_simulation", {}, "F")[0] == job_holds.PENDING
+    assert job_holds.check(session, "run_ac_pf_stage", {}, "F") is None
+    binding["now"] = "P2"
+    assert job_holds.check(session, "run_simulation", {}, "F") is None
+
+
+def test_an_unreadable_binding_matches_every_hold(monkeypatch):
+    """N4: when either side's binding cannot be read, the hold applies."""
+    binding = {"now": "P1"}
+
+    def read():
+        if binding["now"] is None:
+            raise OSError("unreadable")
+        return binding["now"]
+
+    monkeypatch.setattr(job_holds, "_binding", read)
+    session = ChatSession()
+    job_holds._open(session, "run_simulation", "F", "tu", "x", worker=_Thread())
+    binding["now"] = None
+    assert job_holds.check(session, "run_simulation", {}, "F")[0] == job_holds.PENDING
+    other = ChatSession()
+    job_holds._open(other, "run_simulation", "F", "tu", "x", worker=_Thread())
+    binding["now"] = "P2"
+    assert job_holds.check(other, "run_simulation", {}, "F")[0] == job_holds.PENDING
+
+
+def test_job_terminal_reads_each_job_kind_from_its_own_source(monkeypatch):
+    import contextlib
+
+    from harness import job_adapters as ja
+    from routers import solve_queue as queue_router
+    from services.solve_queue import _TERMINAL
+
+    for kind in ("foreground", "study", "report"):
+        monkeypatch.setattr(
+            ja, f"is_{kind}_job_id", lambda j, kind=kind: j.startswith(kind)
+        )
+    read = []
+
+    def waiter(kind):
+        def wait(job_id, *_a, **_k):
+            read.append(kind)
+            return {"terminal": job_id.endswith("done")}
+
+        return wait
+
+    for kind in ("foreground", "study", "report"):
+        monkeypatch.setattr(ja, f"wait_{kind}_job", waiter(kind))
+    monkeypatch.setattr(chat_tools, "acting_user_id", lambda: 1)
+    for kind in ("foreground", "study", "report"):
+        assert job_holds.job_terminal(f"{kind}-done") is True
+        assert job_holds.job_terminal(f"{kind}-live") is False
+    assert read == ["foreground"] * 2 + ["study"] * 2 + ["report"] * 2
+
+    status = {"q-done": next(iter(_TERMINAL)), "q-live": "running"}
+    monkeypatch.setattr(
+        chat_tools, "_acting", lambda: contextlib.nullcontext((None, None))
+    )
+    monkeypatch.setattr(
+        queue_router,
+        "_visible_job_or_404",
+        lambda db, user, job_id: {"status": status[job_id]},
+    )
+    assert job_holds.job_terminal("q-done") is True
+    assert job_holds.job_terminal("q-live") is False
+    assert len(read) == 6
+
+
+def test_a_cancelled_future_clears_the_hold():
+    session = ChatSession()
+    future = concurrent.futures.Future()
+    hold = job_holds._open(session, TOOL, "F", "tu", "tool_timeout", future=future)
+    assert future.cancel()
+    assert job_holds.terminal(hold) is True
+
+
+def test_an_approval_whose_hold_has_cleared_admits_the_call():
+    card = {"hold_id": "gone", "fingerprint": "F"}
+    assert job_holds.check(ChatSession(), "run_simulation", {}, "F", card=card) is None
+
+
+def test_an_other_args_call_never_gets_a_repeat_card():
+    session = ChatSession()
+    hold = job_holds._open(session, TOOL, "F", "tu", "x", future=_NeverDone())
+    hold.told = True
+    assert job_holds.repeat_card(session, TOOL, ARGS, "F2") is None
+    assert job_holds.repeat_card(session, TOOL, ARGS, "F")["hold_id"] == hold.id
+
+
+def test_a_tool_whose_tier_cannot_be_read_is_no_job_call(monkeypatch):
+    from harness import catalogue
+
+    def broken(tool):
+        raise KeyError(tool)
+
+    monkeypatch.setattr(catalogue, "safety_tier_for", broken)
+    assert job_holds.is_job_tool(TOOL) is False
+
+
+def test_a_late_result_names_its_job_only_by_a_non_empty_string_id():
+    assert job_holds._job_id_in("x", {"job": {"id": "j1"}}) == "j1"
+    assert job_holds._job_id_in("x", {"job": {"id": 5}}) is None
+    assert job_holds._job_id_in("x", {"job_id": ""}) is None
+    assert job_holds._job_id_in("x", {"job_id": 7}) is None
+
+
+def test_a_returned_pool_job_tool_opens_no_hold_on_its_outcome():
+    outcome = {"outcome": "uncertain", "job_id": "j"}
+    assert job_holds.open_on_outcome(ChatSession(), TOOL, "F", "tu", outcome) is None
+
+
+def test_only_a_named_project_of_the_queue_tool_reads_the_store(monkeypatch):
+    def no_read():
+        raise AssertionError("the store was read")
+
+    monkeypatch.setattr(chat_tools, "_acting", no_read)
+    assert job_holds._store_hold("run_simulation", ARGS, "F") is None
+    for args in (None, {}, {"project_id": ""}, {"project_id": 5}):
+        assert job_holds._store_hold(TOOL, args, "F") is None, args
+
+
+def test_a_held_solve_points_to_its_status_and_abort_simulation():
+    session = ChatSession()
+    job_holds._open(session, "run_simulation", "F", "tu", "x", worker=_Thread())
+    message = job_holds.check(session, "run_simulation", {}, "F")[1]
+    assert "Check the solve's status" in message and "abort_simulation" in message
+
+
+def test_a_store_hold_names_the_queued_job(monkeypatch, store):
+    rows, _seen, _calls = store
+    rows.append({"id": "j9", "project_key": "org:alpha", "kind": "solve"})
+    message = _error(_call(monkeypatch, ChatSession(), TOOL, ARGS))["message"]
+    assert "job j9" in message
+
+
+def test_governs_a_completed_repeat_when_no_step_is_next(monkeypatch):
+    from services.assistant_tasks import governs
+
+    session = _task(monkeypatch, [_step("completed", ARGS)])
+    assert governs(session, TOOL, ARGS) is True
+
+
+def test_governs_no_repeat_of_a_step_that_did_not_complete(monkeypatch):
+    from services.assistant_tasks import governs
+
+    session = _task(
+        monkeypatch,
+        [
+            _step("failed", ARGS, superseded=True),
+            _step("pending", {}, tool="run_simulation"),
+        ],
+    )
+    assert governs(session, TOOL, ARGS) is False
