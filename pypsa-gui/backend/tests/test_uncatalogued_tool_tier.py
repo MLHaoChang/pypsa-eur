@@ -7,7 +7,8 @@ confirmation card in every mode, never to `read`.
 catalogue entry today (the parity tests), so nothing reached that default;
 but a handler without a declaration (a registration slip, or a tool that
 arrives at runtime, such as an MCP server's) would have run unconfirmed.
-Unknown now means `destructive`: a card in Expert and Guided, and the
+Unknown now means `destructive`: in Expert and Guided it is refused before
+any card (issue 04 S4a: it has no required guard), and it gets the
 parallel-destructive refusal. A tool that IS in the catalogue keeps the tier
 its marker states (`test_every_tool_safety_marker_resolves_to_known_tier`).
 """
@@ -42,7 +43,9 @@ def test_a_catalogued_tool_keeps_its_marker():
 
 
 @pytest.mark.parametrize("guided", [False, True], ids=["expert", "guided"])
-def test_a_handler_without_a_declaration_waits_for_the_card(monkeypatch, guided):
+def test_a_handler_without_a_declaration_is_denied_before_any_card(monkeypatch, guided):
+    # Issue 04 S4a (G1): a destructive tool with no required guard is refused
+    # before its card, so it can never be confirmed into running.
     from harness.loop import _dispatch_real_tool_call
     from harness.session import ChatSession
     from services import chat_tools
@@ -51,17 +54,14 @@ def test_a_handler_without_a_declaration_waits_for_the_card(monkeypatch, guided)
     monkeypatch.setitem(chat_tools.DISPATCHERS, UNKNOWN, lambda **kw: ran.append(kw) or {"ok": True})
     session = ChatSession(model="m", owner_user_id="u1")
     tu = {"type": "tool_use", "id": "tu_1", "name": UNKNOWN, "input": {"x": 1}}
-    frames = _dispatch_real_tool_call(session, tu, [], guided=guided)
-    seen = []
-    for event, payload in frames:
-        seen.append((event, payload))
-        if event == "tool_pending_confirmation":
-            break
-    frames.close()
+    seen = list(_dispatch_real_tool_call(session, tu, [], guided=guided))
     kinds = [e for e, _ in seen]
     assert kinds[0] == "tool_request" and seen[0][1]["safety_tier"] == "destructive"
-    assert kinds[-1] == "tool_pending_confirmation"
-    assert seen[-1][1]["safety_tier"] == "destructive"
+    assert "tool_pending_confirmation" not in kinds
+    (error,) = [p for e, p in seen if e == "tool_error"]
+    assert error["error_kind"] == "required_guard_failed"
+    assert error["_outcome"] == {"version": 1, "outcome": "denied",
+                                 "reason": "required_guard_failed"}
     assert ran == []
 
 
