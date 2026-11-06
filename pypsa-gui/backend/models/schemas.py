@@ -196,7 +196,7 @@ LINK_LAZY_COLUMNS = frozenset({"eh_process", "criticality_tier", "throughput_uni
                                "rated_mva", "harmonic_source", "harmonic_spectrum", "spectrum_post_filter",
                                "flicker_step_mva", "flicker_changes_per_min",
                                "single_phase_share", "motor_kw", "start_method", "i_start_pu",
-                               "max_supply_temp_c", "max_pressure_bar"})
+                               "ride_through_curve", "restart_time_h", "max_supply_temp_c", "max_pressure_bar"})
 BUS_LAZY_COLUMNS = frozenset({"mwh_per_t", "product_value", "lost_production_value", "temperature_c",
                               "pressure_bar"})
 GENERATOR_LAZY_COLUMNS = frozenset({"process_role"})
@@ -286,6 +286,9 @@ class LinkCreate(BaseModel):
     motor_kw: float | None = None
     start_method: str | None = None
     i_start_pu: float | None = None
+    # The ride-through and restart screen's inputs (grid-to-process issue 12b), lazy the same way.
+    ride_through_curve: str | None = None
+    restart_time_h: float | None = None
     # A heat or steam device's reach (issue 15), lazy the same way: °C and barg.
     max_supply_temp_c: float | None = None
     max_pressure_bar: float | None = None

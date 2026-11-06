@@ -1,6 +1,6 @@
 # LC-07c: show speech notices in the Live caption
 
-Status: ready-for-agent
+Status: done
 Type: task
 Dependencies: LC-07 PR4 (`claude/lc07-echo-guard`)
 Review: UX reviewer (UI gate), GK B

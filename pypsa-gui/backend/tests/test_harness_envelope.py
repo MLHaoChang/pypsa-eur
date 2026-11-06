@@ -18,7 +18,7 @@ from tests.test_assistant_tasks_study_brief import (  # noqa: F401
     baseline, dispatch, edit, helpers_state, session, wait_until,
 )
 from tests.test_harness_run_skeleton import site, start  # noqa: F401
-from tests.test_harness_runner import detached, frames_of, settle, task_path  # noqa: F401
+from tests.test_harness_runner import detached, fake_report_provider, frames_of, settle, task_path  # noqa: F401
 
 # The baseline project has Bus B1, Generator G1 (p_nom 20, marginal_cost 10)
 # and Load L1; the test profile's envelope names them.
@@ -27,7 +27,8 @@ BLOCK = {
                "bounds": {"min": 0.0, "rel": 0.5}},
               {"tool": "update_component", "target": {"component": "Generator", "name": "G*", "attr": "marginal_cost"},
                "bounds": {"min": 0.0, "max": 100.0}}],
-    "runs": [{"tool": "solve_queue_enqueue"}],
+    # Issue 07: as eh_site@1, the grant covers the stage-7 report card.
+    "runs": [{"tool": "solve_queue_enqueue"}, {"tool": "generate_report"}],
     "budget": {"solves": 2, "rounds": 6, "wall_time_h": 8.0},
 }
 
@@ -106,7 +107,9 @@ def test_a_listed_edit_within_bounds_runs_without_a_card_and_the_run_completes(g
     assert {r["tool"] for r in decided} == {"update_component", "continue_at_card", "solve_queue_enqueue"}
     assert all(r["by"] == "envelope:" + envelope["id"] and r["envelope_id"] == envelope["id"] for r in decided)
     used = [a for a in envelope_of(path)["audit"] if a["event"] == "used"]
-    assert [a["tool"] for a in used] == ["update_component", "continue_at_card", "solve_queue_enqueue"]
+    # Issue 07: the second card crossed is stage 7's report card, which the grant lists.
+    assert [a["tool"] for a in used] == ["update_component", "continue_at_card", "solve_queue_enqueue",
+                                         "continue_at_card"]
 
 
 def test_the_grant_is_the_users_card_decision_with_the_envelope_id(granted, session):

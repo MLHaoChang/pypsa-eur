@@ -141,8 +141,10 @@ def _state() -> Any:
 # ── evidence ────────────────────────────────────────────────────────────────
 
 
-def _evidence_for(project: AuthorizedProject):
-    """The session's evidence and WP4's figures, as the evidence-only POST reads them."""
+def _evidence_for(project: AuthorizedProject, *, harness_run: dict | None = None):
+    """The session's evidence and WP4's figures, as the evidence-only POST reads them.
+    `harness_run` (a run's harness chapter source) is passed only by the
+    harness's stage-7 launch (`harness/run_report.py`), never by a route."""
     from services.adequacy.worksheet import load_worksheet
     from services.reports.evidence import collect_evidence
 
@@ -150,11 +152,13 @@ def _evidence_for(project: AuthorizedProject):
     study_report = _current_study_report()
     worksheet = load_worksheet(project.directory)
     evidence = collect_evidence(study_report=study_report, eh_report=eh_report,
-                                worksheet=worksheet, **_current_chapter_sources(project))
+                                worksheet=worksheet, harness_run=harness_run,
+                                **_current_chapter_sources(project))
     # Screening, template assumptions and the model summary alone are not
     # evidence to report on; a current solve's network chapters are (LC-21).
     if not any(s.status == "ok" for s in evidence.sections.values()
-               if s.kind not in ("grid_readiness", "template_ledger") and s.section_id != "model_summary"):
+               if s.kind not in ("grid_readiness", "template_ledger", "harness_run")
+               and s.section_id != "model_summary"):
         raise HTTPException(400, {
             "error_kind": "no_evidence",
             "message": "Nothing to report on: no current solve, no Energy Hub reference "

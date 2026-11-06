@@ -36,7 +36,14 @@ from tests.test_harness_envelope_atomic import ATOMIC, eh, writer  # noqa: F401
 from tests.test_harness_immutable_solve import held_queue  # noqa: F401
 from tests.test_harness_run_loops import Script, call, go, rated, say, stopped  # noqa: F401
 from tests.test_harness_run_skeleton import site, start  # noqa: F401
-from tests.test_harness_runner import Clicks, detached, frames_of, settle, task_path  # noqa: F401
+from tests.test_harness_runner import (  # noqa: F401
+    Clicks,
+    detached,
+    fake_report_provider,
+    frames_of,
+    settle,
+    task_path,
+)
 
 # ── A profile with explore levers on the test network's shapes ──────────────
 
@@ -656,7 +663,8 @@ def explore_run(eh, monkeypatch):
     }
     prof["envelope"] = dict(
         ATOMIC,
-        runs=[{"tool": "solve_queue_enqueue"}],  # issue 08: never the sweep
+        # Issue 08: never the sweep; issue 07: the stage-7 report card, as eh_site@1.
+        runs=[{"tool": "solve_queue_enqueue"}, {"tool": "generate_report"}],
         budget={"solves": 8, "rounds": 6, "wall_time_h": 8.0},
     )
     monkeypatch.setitem(run_profiles.PROFILES, "eh_site@1", prof)

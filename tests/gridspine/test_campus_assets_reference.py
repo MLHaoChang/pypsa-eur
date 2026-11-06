@@ -119,9 +119,15 @@ def test_it_is_in_2025_euro_and_keeps_the_library_discount_rate():
     assert LIB["discount_rate"]["source"] == "assumed"
 
 
+#: Entries the shipped library gained after the proposal, which stays the record of 2026-10-12: the
+#: 220/110 kV transformers of campus-library-gaps 01 (research doc addendum 2026-11-06).
+ADDED_SINCE = ("TR_220_110_125", "TR_220_110_160", "TR_220_110_200", "TR_220_110_250", "TR_220_110_315")
+
+
 def test_the_same_entries_and_ratings_as_the_shipped_library_only_the_costs_differ():
     mine, theirs = entries(LIB), entries(SHIPPED)
-    assert list(mine) == list(theirs)
+    assert [eid for eid in theirs if eid not in ADDED_SINCE] == list(mine)
+    assert all(theirs[eid][0] == "transformers" for eid in ADDED_SINCE)
     for eid, (kind, e) in mine.items():
         s = theirs[eid][1]
         for f in REQUIRED[kind]:

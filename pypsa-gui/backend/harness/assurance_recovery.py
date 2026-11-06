@@ -27,7 +27,14 @@ class Context(BaseModel):
     version: StrictInt
     scope: assurance_scope.RequestScope
     entries: list[Reference] = Field(max_length=2)
-    pending: Literal["cost_quantity_required", "explicit_cost_basis_required"] | None
+    pending: (
+        Literal[
+            "cost_quantity_required",
+            "explicit_cost_basis_required",
+            "capacity_meaning_required",
+        ]
+        | None
+    )
     anchor: str = Field(min_length=36, max_length=36)
     expires_at: float = Field(allow_inf_nan=False)
 

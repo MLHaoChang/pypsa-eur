@@ -3,6 +3,11 @@
 The observed `*_nom_opt` of one component of a named class, its change from
 `*_nom`, and whether it was built to its upper bound (a disclosed line, not a
 number). Per-unit availability limits (s_max_pu, p_max_pu) are not applied.
+
+AA-03 S3 adds, only when asked for by name, the configured input `*_nom`
+(`configured_capacity`) and an `available_capacity` slot that is always
+unavailable: no availability figure is checked, so none is ever derived from
+p_max_pu, s_max_pu or any derate.
 """
 
 import math
@@ -32,11 +37,39 @@ METRICS = {
         "unit": "MW, MVA or MWh by class",
         "label": "Change from the input capacity",
     },
+    "configured_capacity": {  # CONFIGURED
+        "formula_id": "configured-nominal-capacity/1",
+        "unit": "MW, MVA or MWh by class",
+        "label": "Configured input capacity (before the solve)",
+    },
 }
+# A request without named metrics gets what capacity/1 always answered (AA-V1-CHANGE-1).
+DEFAULT_METRICS = ("optimal_capacity", "capacity_change")
+CONFIGURED = "configured_capacity"
+# Named, never answered: no availability figure is checked (AA-03 S3, GK B C3).
+AVAILABLE = "available_capacity"
+AVAILABLE_REASON = "available_capacity_not_checked"
 DISCLOSURE = (
     "The solve's nominal capacity (p_nom, e_nom or s_nom, optimised when extendable). Availability "
     "limits (s_max_pu, p_max_pu) are not applied to the figure."
 )
+CONFIGURED_DISCLOSURE = (
+    "The configured input nominal capacity (p_nom, e_nom or s_nom) as entered, before any solve. "
+    "Availability limits (s_max_pu, p_max_pu) are not applied to the figure."
+)
+
+
+def disclosure(scope):
+    from harness.calculations import requested_metrics
+
+    metrics = set(requested_metrics(scope))
+    if CONFIGURED not in metrics:
+        return DISCLOSURE
+    if metrics <= {CONFIGURED, AVAILABLE}:
+        return CONFIGURED_DISCLOSURE
+    # Both figures: each sentence names the figure it describes.
+    return DISCLOSURE.replace("The solve's nominal capacity", "The capacity after the solve is the solve's nominal capacity").replace(
+        " Availability limits", " The configured capacity is the input before the solve. Availability limits")
 
 
 def source(ctx, entity, component_class):
@@ -75,7 +108,16 @@ def calculate(raw, scope):
     base = "unverified_solve" if not raw["valid_solve"] else "invalid_or_missing_capacity"
     if raw["valid_solve"] and common.finite([raw["nominal"], raw["optimal"]]) and raw["optimal"] >= 0:
         available = {"optimal_capacity": raw["optimal"], "capacity_change": raw["optimal"] - raw["nominal"]}
-    return common.facts_and_slots(scope, definitions, available, {m: base for m in METRICS}, 1)
+    reasons = {m: base for m in METRICS}
+    # The input needs no solve: it is what was entered, read from the class's own column.
+    reasons[CONFIGURED] = "invalid_or_missing_capacity"
+    if common.finite([raw["nominal"]]) and raw["nominal"] >= 0:
+        available[CONFIGURED] = raw["nominal"]
+    facts, slots = common.facts_and_slots(scope, definitions, available, reasons, 1)
+    for slot in slots:
+        if slot["metric"] == AVAILABLE:
+            slot.update(disposition="unavailable", reason=AVAILABLE_REASON)
+    return facts, slots
 
 
 def at_upper_bound(raw):
@@ -86,9 +128,11 @@ def at_upper_bound(raw):
     return abs(x - top) <= (BOUND_TOLERANCE * top if top > 0 else BOUND_TOLERANCE)
 
 
-def notes(raw):
+def notes(raw, scope):
     table, nominal, unit, side = CLASSES[raw["component_class"]]
     lines = [f"{raw['component_class']} {nominal} in {unit}: {side}."]
+    if raw["extendable"] and CONFIGURED in scope.get("metrics", ()):
+        lines.append(f"Configured capacity is the input {nominal} before the solve; the solve may build a different capacity.")
     if not raw["extendable"]:
         lines.append("Fixed capacity (not optimised).")
     elif raw["valid_solve"] and at_upper_bound(raw):

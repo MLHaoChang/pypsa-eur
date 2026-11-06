@@ -30,6 +30,7 @@ from services.profile_gen.apply import (
     _hourly_window,
     current_digest,
 )
+from services.profile_gen.defaults import is_network_native
 
 FAMILY_BY_ATTRIBUTE = {
     "p_set": "load", "p_max_pu": "availability", "p_min_pu": "availability",
@@ -76,7 +77,9 @@ def describe_current(ctx, component_type: str, attribute: str, component: str) -
     stamps = pd.DatetimeIndex(idx.get_level_values(-1) if isinstance(idx, pd.MultiIndex) else idx)
     return {
         "exists": True,
-        "provenance": meta.get("provenance") or ("uploaded" if not meta else "synthetic/assumed"),
+        # The network's own series reads "network", the editors' word for it (RP-14).
+        "provenance": ("network" if is_network_native(meta) else
+                       meta.get("provenance") or ("uploaded" if not meta else "synthetic/assumed")),
         "family": meta.get("family"),
         "source": meta.get("source") or ("upload" if not meta else None),
         "kind": meta.get("kind") or meta.get("archetype"),

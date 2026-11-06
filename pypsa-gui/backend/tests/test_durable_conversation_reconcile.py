@@ -213,6 +213,30 @@ def test_reconcile_rereads_jobs_once_access_returns(monkeypatch, queue, no_repla
     assert no_replay == []
 
 
+def test_a_job_verified_while_running_is_read_again(monkeypatch, queue, no_replay):
+    """GK B (26): ``running`` is not final; the next pass reads the job again."""
+    tid, resumed = _taken_over(monkeypatch, [OWN_JOB])
+    assert _entries(resumed, "job")[0]["observed_state"] == "running"
+    queue.visible[OWN_JOB] = "completed"
+    after = dc.reconcile_effects(tid, generation=resumed["generation"], resolutions=[])
+    [job] = _entries(after, "job")
+    assert (job["status"], job["observed_state"]) == ("verified", "completed")
+
+    # A terminal state is final: it is not read again, nor overwritten.
+    queue.visible[OWN_JOB] = "failed"
+    again = dc.reconcile_effects(tid, generation=after["generation"], resolutions=[])
+    assert _entries(again, "job")[0] == job
+    assert no_replay == []
+
+
+def test_a_running_job_that_turns_unreadable_keeps_its_entry(monkeypatch, queue):
+    tid, resumed = _taken_over(monkeypatch, [OWN_JOB])
+    [before] = _entries(resumed, "job")
+    del queue.visible[OWN_JOB]
+    after = dc.reconcile_effects(tid, generation=resumed["generation"], resolutions=[])
+    assert _entries(after, "job") == [before]
+
+
 # ── owner resolutions for turns and tool calls ──────────────────────────────
 
 

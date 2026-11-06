@@ -50,7 +50,8 @@ BEYOND = "beyond the 4 h window"
 NO_BLOCK = "no block fits"
 LEDGER = (
     f"pickups start {T_FIRST_S:g} s after the event, one block every {PICKUP_INTERVAL_S:g} s (demo, assumed)",
-    "units come back in criticality-tier order, safety first; a unit with no tier last (assumed)",
+    "units are assigned to the pickup blocks in criticality-tier order, safety first, first fit: each into the "
+    "earliest block with room for its rated MW; a unit with no tier last (assumed)",
     "a unit reaches full rate its restart time after its pickup, and production is lost from the event until "
     "full rate (assumed; conservative)",
     "after an island transition each motor start is screened on the island's short-circuit power, after a grid "
@@ -79,7 +80,12 @@ def _order(units: pd.DataFrame) -> tuple[list[dict], dict]:
 
 
 def _blocks_of(ordered: list[dict], blocks) -> dict:
-    """``{unit: block index or None}``: first fit by rated MW in pickup order, or one unit per step."""
+    """``{unit: block index or None}``: first fit by rated MW in pickup order, or one unit per step. A negative
+    rated MW is refused, never read as "no rated MW"."""
+    for r in ordered:
+        mw = _num(r.get("rated_mw"))
+        if mw is not None and mw < 0:
+            raise ContractError(f"{r['unit']}: rated MW must be 0 or more, got {mw:g}.")
     if not blocks:
         return {r["unit"]: i for i, r in enumerate(ordered)}
     room = [float(b) for b in blocks]
@@ -88,7 +94,7 @@ def _blocks_of(ordered: list[dict], blocks) -> dict:
     out = {}
     for r in ordered:
         mw = _num(r.get("rated_mw"))
-        if mw is None or mw < 0:
+        if mw is None:
             out[r["unit"]] = None
             continue
         k = next((i for i, left in enumerate(room) if left >= mw - TOLERANCE), None)

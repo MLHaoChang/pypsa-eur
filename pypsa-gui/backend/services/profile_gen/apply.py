@@ -61,6 +61,7 @@ from services.profile_gen.engine import ProfileGenError
 from services.profile_gen.families import family_of, get_family
 from services.pypsa_service import PyPSAService
 from services.user_timeseries import (
+    NETWORK_NATIVE,
     _reapply_user_ts_to_network,
     _user_ts_lock,
 )
@@ -1011,7 +1012,9 @@ def _replaced_series(ctx, key: tuple[str, str, str], family: str,
     say so; never compose silently)."""
     component_type, attribute, component = key
     previous_meta = ctx.user_ts_meta.get(key)
-    if previous_meta is not None:
+    if previous_meta is not None and previous_meta.get("provenance") == NETWORK_NATIVE:
+        what, same = "network series", False   # seeded from the network (RP-14)
+    elif previous_meta is not None:
         prev_family = family_of(previous_meta)
         what = f"{prev_family} profile"
         # Regenerating the same kind replaces quietly; another kind of the

@@ -35,7 +35,8 @@
   "permissions": {
     "allow": [
       "Bash(DO_NOT_TRACK=1 npx --yes impeccable@4.7.0 detect:*)",
-      "Bash(git push origin *:claude/campus-ic-02-05-shots)"
+      "Bash(git push origin *:claude/campus-ic-02-05-shots)",
+      "mcp__claude-code-remote__archive_session"
     ]
   }
 }

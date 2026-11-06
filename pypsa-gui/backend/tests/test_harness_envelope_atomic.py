@@ -33,7 +33,8 @@ ATOMIC = {
                "bounds": {"min": 0.0, "rel": 0.5}},
               {"tool": "update_component", "target": {"component": "StorageUnit", "name": "S*", "attr": "max_hours"},
                "bounds": {"min": 1.0, "max": 8.0}}],
-    "runs": [{"tool": "solve_queue_enqueue"}],
+    # Issue 07: as eh_site@1, the grant covers the stage-7 report card.
+    "runs": [{"tool": "solve_queue_enqueue"}, {"tool": "generate_report"}],
     "budget": {"solves": 2, "rounds": 6, "wall_time_h": 8.0},
 }
 SHAPES = [("Generator", "G1", "p_nom_max", 45.0), ("StorageUnit", "S1", "p_nom_max", 12.0),
@@ -350,6 +351,9 @@ def test_eh_site_envelope_and_tunables_are_unchanged():
     # Issue 09 (GK B Q1, in place): eh_site@1 now allows research under the €2 cap. The rest is pinned.
     assert envelope["research"] == {"allowed": True, "cost_cap_eur": 2.0}
     envelope["research"] = {"allowed": False, "cost_cap_eur": 2.0}
+    # Issue 07 (B1-b): eh_site@1 now lists the stage-7 report run, last. The rest is pinned.
+    assert envelope["runs"] == [{"tool": "solve_queue_enqueue"}, {"tool": "generate_report"}]
+    envelope["runs"] = envelope["runs"][:1]
     block = json.dumps({"envelope": envelope, "tunable": run_profiles.EH_SITE["tunable"]}, sort_keys=True)
     assert hashlib.sha256(block.encode()).hexdigest() == PINNED_EH_SITE
 

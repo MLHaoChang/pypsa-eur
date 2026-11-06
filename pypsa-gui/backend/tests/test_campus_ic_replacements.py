@@ -29,8 +29,10 @@ from tests.test_finance_case_extra_assets import HASH, _ext, _hash_fixture, _par
 
 AMOUNT = 2_000.0                        # 2 units × 1,000 a unit, unescalated
 R_CAPEX = 0.02
-# master 8b4bae14 on the shipped 03B library (2025 EUR); was ddb1b7615306745c on the placeholders (a27d8b67, before 04)
-PURCHASE_ROWS_HASH = "eb24d85ef773ee4b"
+# campus-library-gaps 01: the shipped library gained the 220/110 kV units, and the source hash covers the
+# run's copy of it (campus_assets_used.yaml); was eb24d85ef773ee4b on master 8b4bae14 (03B library, 2025 EUR)
+# and ddb1b7615306745c on the placeholders (a27d8b67, before 04)
+PURCHASE_ROWS_HASH = "e31f2d5edfee0754"
 
 
 def _renewal(build_year, *, part="investment", amount=AMOUNT, name=None, service_to=None):

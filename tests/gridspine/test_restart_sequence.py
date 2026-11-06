@@ -144,3 +144,14 @@ def test_full_rate_exactly_at_four_hours_is_inside_the_window():
     assert table.iloc[0]["full_rate_s"] == pytest.approx(rs.HORIZON_S) and rs.BEYOND not in table.iloc[0]["note"]
     later, _, _ = _seq(_units(_vfd("A", restart=rs.HORIZON_S / 3600.0)))
     assert rs.BEYOND in later.iloc[0]["note"]
+
+
+@pytest.mark.parametrize("blocks", [None, [8.0]])
+def test_a_negative_rated_mw_is_refused_not_read_as_missing(blocks):
+    # GK A carry-over (12b-2): -5 MW is an input error, never "no rated MW" nor "above every block".
+    with pytest.raises(ContractError, match="rated MW"):
+        _seq(_units(_vfd("Mill", mw=-5.0)), pickup_blocks=blocks)
+
+
+def test_the_ledger_says_blocks_are_assigned_in_tier_order_first_fit():
+    assert any("in criticality-tier order" in row and "first fit" in row for row in rs.LEDGER)

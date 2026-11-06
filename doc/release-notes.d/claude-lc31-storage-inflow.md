@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant can now read a StorageUnit's inflow back: `get_asset_results` reports an `inflow` series and an `inflow_mwh` scalar, so a reservoir's water balance can be checked (LC-31).

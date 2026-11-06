@@ -1,6 +1,6 @@
 # 12b: minutes-scale dips, the process restart sequence and lost tonnes
 
-Status: ready-for-agent (owner G2P-12-SPLIT, 2026-10-28: this file is 12b; 12a is issue 18 and starts now)
+Status: done (12b-3, the results section, built 2026-11-06; owner G2P-12-SPLIT, 2026-10-28: this file is 12b, 12a is issue 18)
 Type: task
 Blocked by: 10, 18 (12a: the motor fields and the ΔU check)
 Gated: **yes** (gridspine)
@@ -92,3 +92,15 @@ On the B template:
 - Q3: tonnes are counted to full rate with the note "beyond the 4 h window"; no cap.
 - 12b-1 conditions: EN 50160 classes converted explicitly (depth = 100 − u; worst corner = lowest residual, longest duration; u < 5 % is depth 100); boundary, non-monotone and too-deep hand tests; the parser refuses depth outside (0, 100], duration ≤ 0 and malformed pairs; every row carries `dip_stats_source`, and a total from the demo statistics is labelled demo; a unit missing curve, restart time, rate or mass pull is unknown and the total `incomplete`; an island restart screens on the island source only (S_sc via `motor_start.short_circuit_power`), unknown without one; a unit bigger than every pickup block is `fail` ("no block fits"); no tier goes last with a note; blocks fill in tier order, then greedily.
 - 12b-2 conditions: rate from the existing `throughput_unit` / `mwh_per_t` path with its basis stated; mass pull through the persisted `shortfall` Generator, per-port factors, unknown on branching, cycles, time-varying efficiency or several product buses; both fields registered end to end, outside the LP fingerprint and the investment digest (tested); B's diff only the new data, ledgered, with byte identity for every other template; the heat-demo units read unknown; the CSV write via `_write_text_atomic` and `_screen_inputs`.
+
+**12b-2 built (session_01G7qCukEkBtZ5K6tqsErpY1, 2026-11-06).**
+- Fields: `ride_through_curve` (new kind, checked by `ride_through.parse_curve`) and `restart_time_h` on Link, end to end. Neither changes the LP fingerprint nor the investment digest (tested).
+- `gridspine/drivers/process_chain.py` reads rate and mass pull from the flowsheet, each with its basis. The walk treats parallel consumers with the same output bus and factor as one path.
+- `restart_campus(run_dir)` writes `campus_dip_trips.csv` and `campus_restart.csv`.
+- B: the mills carry ledgered demo data. A DOL start reads 29.63 % and fails 3 %; a VFD start reads 1.62 % and passes. The restart's lost tonnes equal 3 × 4 h × 550 t/h × mass pull.
+- GK carry-overs done: a negative rated MW is refused, `TIER_ORDER` is pinned to `CRITICALITY_TIERS`, and the ledger wording is now "tier order, first fit".
+- Next: 12b-3, the results section.
+
+**12b-3 built (session_01G7qCun54agEf4hNKJ2qYp3, 2026-11-06).**
+- The campus run calls `restart_campus` after the P–V/Q–V screen (stage `dips_restart`); a failure is shown, never fails the run. The results payload carries `dips_restart`: both CSVs' rows, the units' restart, ride-through and motor inputs as run, the basis, and `out_of_date` (units whose field changed since, read only when the network changed).
+- "Dips and restarts" sits after the harmonic scan in section 10's campus results: one table in Guided and Expert, the timeline Expert-only. Unknown rows link to the missing field (the form's word + ›) through `openFlowTargetInPlace` / `openFlowTarget`. Shots: `.scratch/grid-to-process/shots/g2p-12b3-dips-*.png`.

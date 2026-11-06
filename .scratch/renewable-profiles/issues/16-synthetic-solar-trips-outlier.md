@@ -3,7 +3,7 @@
 
 # RP-16 — a generated synthetic solar profile trips the p_max_pu outlier finding
 
-Status: needs-info
+Status: done
 Type: bug
 Baseline: master after #623 (RP-04b)
 Raised by: the Profiles II session's hand-off, 2026-10-22
@@ -25,3 +25,5 @@ series is still flagged.
 ### 2026-11-05: triage sweep (AA-FILL-2), role needs-info
 
 Was: `needs-triage`. Owner question Q-RP-16. Which fix for the false `p_max_pu` outlier on synthetic solar? (1, Recommended) The outlier rule's median skips near-zero hours: fixes every solar and wind series with night or calm hours, and a real outlier is still flagged. (2) Synthetic night values become exactly zero: fixes our own generator only, a measured series with tiny night values would still trip. (3) Skip solar in the rule: simplest, but a real solar spike goes unflagged. Once answered: ready-for-agent, Sonnet, files the section-6 outlier rule and the synthetic solar generator, reviewer GK B.
+
+2026-11-06, owner answer Q-RP-16 (coordinator card): "Median skips near-zero (Recommended)": the outlier median skips near-zero hours. Role ready-for-agent.
