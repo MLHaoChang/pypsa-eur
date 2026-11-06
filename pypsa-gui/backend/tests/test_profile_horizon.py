@@ -95,6 +95,19 @@ def test_two_three_hourly_weeks_take_step_means_over_their_own_hours():
         assert aligned[t] == pytest.approx(float(s.loc[t:t + pd.Timedelta(hours=2)].mean()))
 
 
+@pytest.mark.parametrize("nxt,ok", [("10:00", False), ("11:00", False), ("12:00", True)])
+def test_a_gap_between_runs_must_be_at_least_one_step(nxt, ok):
+    s = _year_series()
+    snaps = pd.DatetimeIndex(["2023-01-01 00:00", "2023-01-01 03:00", "2023-01-01 06:00",
+                              f"2023-01-01 {nxt}", f"2023-01-01 {int(nxt[:2]) + 3}:00"])
+    if ok:
+        _, meta = ap._align_to_snapshots(s, snaps, family="renewable")
+        assert meta["step_hours"] == 3
+    else:
+        with pytest.raises(ap.StepIrregularError):
+            ap._align_to_snapshots(s, snaps, family="renewable")
+
+
 def test_a_gap_of_exactly_one_step_is_one_run_and_hourly_runs_are_unchanged():
     s = _year_series()
     snaps = pd.DatetimeIndex(["2023-01-01 00:00", "2023-01-01 03:00", "2023-01-01 09:00"])

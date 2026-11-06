@@ -580,12 +580,18 @@ def _step_hours(snapshots) -> int:
         raise StepNotWholeHoursError(
             f"snapshot step {d} is not a whole number of hours — generated "
             "profiles are hourly; use hourly or whole-hour steps")
-    # A constant step k inside each run, any gap between runs at least k: a
-    # difference above k is a gap. Two equal such differences in a row are a
+    # A constant step k inside each run, any gap between runs at least k (a
+    # difference of at least 2k; k itself continues the run): a longer difference is a gap. Two equal such differences in a row are a
     # run of its own, longer step, refused by name (a lone snapshot between
     # two gaps has two different differences).
     for b in blocks:
         df = b.to_series().diff().dropna().to_numpy()
+        short = df[(df != d) & (df < 2 * d)]
+        if len(short):
+            raise StepIrregularError(
+                f"a gap of {pd.Timedelta(short[0]) - d} between runs is shorter "
+                f"than the {d} step — runs of a window need a gap of at least "
+                "one step (or none, to continue the run)")
         for a, c in zip(df[:-1], df[1:]):
             if a != d and a == c:
                 raise StepIrregularError(
