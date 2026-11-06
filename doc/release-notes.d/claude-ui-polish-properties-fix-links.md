@@ -1,1 +1,1 @@
-* Fix(pypsa-gui): A fix link to a Link field opens the editable form at that field, a year in Properties no longer gets a thousands separator or a doubled unit word, a refused Properties save shows one toast clear of Save, and "no value" is always "—".
+* Fix(pypsa-gui): A fix link to a Link field opens the editable form at that field, a year in Properties no longer gets a thousands separator or a doubled unit word, a refused Properties save shows one toast clear of Save, "no value" is always "—", and the dips and restart card shows its two basis labels on two lines.
