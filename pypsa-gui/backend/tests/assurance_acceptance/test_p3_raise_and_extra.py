@@ -835,9 +835,7 @@ def test_an_export_that_also_edits_the_network_reads_partial_extra_edits(
     assert block["counts"]["extra"] == 1
 
 
-def test_an_export_with_an_uncomparable_state_is_never_completed(
-    baseline, monkeypatch
-):
+def test_an_export_with_an_uncomparable_state_is_never_completed(baseline, monkeypatch):
     """Mutant guard: the export's extras check needs a comparable map."""
     monkeypatch.setattr(outcomes, "state_map", lambda *a: outcomes.UNCOMPARABLE)
     block = _result(_frames(monkeypatch, "export_network_nc", {}))["_outcome"]
@@ -874,9 +872,7 @@ def test_an_effect_tool_outside_the_write_set_times_out_uncertain(
     assert errors[0]["_outcome"]["reason"] == "tool_timeout"
 
 
-def test_a_timeout_in_a_checked_turn_gets_no_ordinary_outcome(
-    baseline, monkeypatch
-):
+def test_a_timeout_in_a_checked_turn_gets_no_ordinary_outcome(baseline, monkeypatch):
     """H6 is for ordinary turns: a checked turn has its own projection, so
     the loop adds no `_outcome` to its timeout frame."""
     import threading

@@ -52,11 +52,15 @@ def _confirm_deny_kinds() -> set[str]:
 
 
 def _deny_kinds() -> set[str]:
-    return _confirm_deny_kinds() | {
-        guards.GUARD_FAILED,
-        guards.ARGS_CHANGED,
-        guards.NO_PROGRESS,
-    } | guards.LOCK_KINDS
+    return (
+        _confirm_deny_kinds()
+        | {
+            guards.GUARD_FAILED,
+            guards.ARGS_CHANGED,
+            guards.NO_PROGRESS,
+        }
+        | guards.LOCK_KINDS
+    )
 
 
 def test_the_frontend_outcomes_match_the_backend():
