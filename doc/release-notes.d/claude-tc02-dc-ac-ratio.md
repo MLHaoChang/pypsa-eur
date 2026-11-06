@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A generator carries an optional DC/AC ratio (`dc_ac_ratio`, the DC module rating as a multiple of its AC `p_nom`). A PV cost priced per MW of DC (`output_electric_dc`) is scaled by it when priced from the defaults pack or applied from a cost reference, and refused when the ratio is not declared, never assumed 1. AC-priced rows are unchanged.
