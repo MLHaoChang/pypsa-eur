@@ -342,8 +342,11 @@ VARIANTS: list[dict] = [
              'run_simulation get_simulation_status get_asset_results',
              B + 'test_lc06_d09_inflow_spill.py::test_a_full_reservoir_spills_its_inflow_less_its_dispatch[inflow10]',
              B + 'test_lc06_d09_inflow_spill.py::test_a_full_reservoir_spills_its_inflow_less_its_dispatch[inflow9]'),
-    _unavailable('LC-D09.inflow', 'no tool reports a StorageUnit inflow; spill is its only native water output (ticket 31)',
-                 'pypsa-gui/backend/services/asset_results/registry.py spilled_mwh'),
+    _covered('LC-D09.inflow', 'the same held-full reservoir: inflow series 10 (or 9) MW each snapshot, inflow_mwh 90 (or 81) '
+             '= dispatch 36 + spilled_mwh 54 (or 45)',
+             'run_simulation get_simulation_status get_asset_results',
+             B + 'test_lc06_d09_inflow_spill.py::test_the_inflow_is_reported_and_closes_the_water_balance[inflow10]',
+             B + 'test_lc06_d09_inflow_spill.py::test_the_inflow_is_reported_and_closes_the_water_balance[inflow9]'),
     _covered('LC-D10.prices_emissions', 'time-weighted bus price, positive dual of a binding cap, emissions = dispatch / efficiency x factor',
              '',
              B + 'test_result_profiles_assurance.py::test_bus_price_is_time_weighted_and_observed',

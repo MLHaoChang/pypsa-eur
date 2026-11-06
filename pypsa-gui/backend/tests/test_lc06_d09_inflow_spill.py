@@ -48,7 +48,7 @@ def _solve(ctx, inflow):
         time.sleep(0.2)
     assert (status["status"], status["condition"]) == ("completed", "optimal"), status
     return chat_tools.get_asset_results("StorageUnit", "hydro", category="dispatch",
-                                        metrics=["spill", "p_dispatch", "spilled_mwh"], resolution="raw")
+                                        metrics=["spill", "p_dispatch", "spilled_mwh", "inflow", "inflow_mwh"], resolution="raw")
 
 
 @pytest.mark.parametrize("inflow, spill", [(10.0, 6.0), (9.0, 5.0)], ids=["inflow10", "inflow9"])
@@ -58,3 +58,13 @@ def test_a_full_reservoir_spills_its_inflow_less_its_dispatch(baseline, inflow, 
     assert out["series"]["p_dispatch"] == pytest.approx([LOAD] * 3, abs=TOL)
     assert out["series"]["spill"] == pytest.approx([spill] * 3, abs=TOL)
     assert out["scalars"]["spilled_mwh"] == pytest.approx(spill * 3 * W, abs=TOL)    # 54, then 45
+
+
+@pytest.mark.parametrize("inflow", [10.0, 9.0], ids=["inflow10", "inflow9"])
+def test_the_inflow_is_reported_and_closes_the_water_balance(baseline, inflow):
+    out = _solve(baseline[0], inflow)
+    assert out["series"]["inflow"] == pytest.approx([inflow] * 3, abs=TOL)
+    assert out["scalars"]["inflow_mwh"] == pytest.approx(inflow * 3 * W, abs=TOL)    # 90, then 81
+    # held full: inflow = dispatch + spill (no charge, no change in state of charge)
+    assert out["scalars"]["inflow_mwh"] == pytest.approx(
+        LOAD * 3 * W + out["scalars"]["spilled_mwh"], abs=TOL)

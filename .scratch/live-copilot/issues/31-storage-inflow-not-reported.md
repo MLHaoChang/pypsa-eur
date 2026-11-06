@@ -3,7 +3,7 @@
 
 # LC-31 — no copilot tool reports a StorageUnit's inflow
 
-Status: ready-for-agent
+Status: done
 Model: Sonnet
 
 Found by LC-06 (7) while building S13 (LC-D09). A hydro StorageUnit's `inflow`
