@@ -181,7 +181,8 @@ try {
         await page.getByTestId('dc-backup-reserves-open').click()
         await page.getByTestId('reserve-section').waitFor(); await page.waitForTimeout(1200)
         await shoot(`${key}-link`)
-        await page.getByRole('button', { name: /^Back to/ }).first().click()
+        // The flow return pill (Guided's Results header has its own "Back to Results").
+        await page.getByRole('button', { name: 'Back to Scenarios & optimisation' }).click()
         await lineEl.waitFor(); await page.waitForTimeout(800)
         await shoot(`${key}-back`)
       }
