@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session as DBSession
 from db.models import Organization, User
 from db.session import get_db
 from deps import require_user
-from models.commercial import LibraryItemRef, PriceSeriesRef
+from models.commercial import LibraryItemRef, PriceSeriesRef, tariff_payload_resolved
 from services import library_acl
 from services.library import items as I
 from services.library import series_io
@@ -317,8 +317,17 @@ def put_item(kind: ItemKind, name: str, body: ItemIn, org_id: UUID | None = None
                           created_by=user.id)
     except I.LibraryItemCommonReadonly as exc:
         raise HTTPException(409, {"code": "library_item_common_readonly", "message": str(exc)}) from exc
+    except I.TariffCurrencyRequired as exc:
+        raise HTTPException(422, _currency_required(exc)) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+def _currency_required(exc) -> dict:
+    """The typed 422 (GK B C4): `errors` in the field-error shape the tariff builder
+    shows beside its jurisdiction input."""
+    return {"code": exc.code, "message": str(exc),
+            "errors": [{"loc": ["jurisdiction"], "msg": str(exc)}]}
 
 
 @router.get("/items/{kind}/{name}", response_model=ItemOut)
@@ -339,6 +348,10 @@ def get_item(kind: ItemKind, name: str, version: int | None = None,
         raise HTTPException(404, str(exc)) from exc
     except S.LibraryRefStale as exc:
         raise HTTPException(409, {"code": "library_ref_stale", "message": str(exc)}) from exc
+    if kind == ItemKind.tariff:
+        # The stored form leaves out a currency the jurisdiction implies; a read states it
+        # (GK B C2, gridspine-library-eu 01).
+        payload = tariff_payload_resolved(payload)
     return ItemOut(ref=ref, payload=payload, meta=I.item_meta(db, org, ref))
 
 
@@ -364,6 +377,8 @@ def import_urdb(body: UrdbImportIn, org_id: UUID | None = None,
     try:
         ref = I.put_item(db, org, "tariff", name, tariff.model_dump(mode="json"), meta,
                          created_by=user.id)
+    except I.TariffCurrencyRequired as exc:
+        raise HTTPException(422, _currency_required(exc)) from exc
     except ValueError as exc:
         raise HTTPException(422, {"code": "urdb_invalid", "message": str(exc)}) from exc
     return UrdbImportOut(ref=ref, notes=notes, refusals=refusals,
