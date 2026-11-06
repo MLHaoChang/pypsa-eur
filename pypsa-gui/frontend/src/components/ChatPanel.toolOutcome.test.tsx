@@ -64,6 +64,8 @@ function call(id: string, tool: string, outcome: string | null, jobId: string | 
 const DETAILS: Record<string, string> = {
   user_restriction: 'A rule you set for this project blocks changes.',
   approval_unavailable: 'The app could not save the approval: its data folder may be full or not writable.',
+  operation_pending: 'An earlier request with the same settings may still be running, so it was not started again. Ask the assistant to check it or stop it.',
+  operation_conflict: 'An earlier request with other settings may still be running, so this one was not started. Ask the assistant to check it or stop it first.',
 }
 const rows = () => screen.getAllByTestId('chat-message').filter(r => r.dataset.role === 'tool')
 const at = new Date(2026, 10, 5, 14, 2).getTime()

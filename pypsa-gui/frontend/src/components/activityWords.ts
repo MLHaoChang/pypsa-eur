@@ -62,6 +62,9 @@ export const TOOL_OUTCOME_DENIED_REASON_WORDS: Record<string, string> = {
 export const TOOL_OUTCOME_DENIED_DETAIL_WORDS: Record<string, string> = {
   user_restriction: 'A rule you set for this project blocks changes.',
   approval_unavailable: 'The app could not save the approval: its data folder may be full or not writable.',
+  // Issue 04 S5 (UX (12)): no tool ids; the backend message stays for the model.
+  operation_pending: 'An earlier request with the same settings may still be running, so it was not started again. Ask the assistant to check it or stop it.',
+  operation_conflict: 'An earlier request with other settings may still be running, so this one was not started. Ask the assistant to check it or stop it first.',
 }
 
 /** A file tool's words where they differ from a job's (issue 04 S3: import/export). */

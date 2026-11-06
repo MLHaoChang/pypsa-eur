@@ -281,6 +281,12 @@ describe('refusal details (issue 04 S4a)', () => {
     ["approval for 'delete_component' could not be recorded", 'approval_unavailable',
       'The app could not save the approval: its data folder may be full or not writable.'],
     [undefined, 'aborted', null],
+    ["The same solve_queue_enqueue request from earlier may still be running; its outcome is unknown.", 'operation_pending',
+      'An earlier request with the same settings may still be running, so it was not started again. Ask the assistant to check it or stop it.'],
+    ["The solve queue already has this project's solve, queued or running, so it was not queued again.", 'operation_pending',
+      'An earlier request with the same settings may still be running, so it was not started again. Ask the assistant to check it or stop it.'],
+    ["An earlier run_simulation request with other settings may still be running.", 'operation_conflict',
+      'An earlier request with other settings may still be running, so this one was not started. Ask the assistant to check it or stop it first.'],
   ])('%s → %s', (message, kind, detail) => {
     expect(refusalDetail(message, kind)).toBe(detail)
   })
