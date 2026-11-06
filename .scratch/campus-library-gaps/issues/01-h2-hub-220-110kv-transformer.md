@@ -3,7 +3,7 @@
 
 # The H2 hub's MILP invest finds no 220/110 kV transformer in the library
 
-Status: ready-for-agent (Q-CL-1 answered 2026-11-05: add cited 220/110 kV units)
+Status: done (#1173; losses check open, issue 02)
 Type: task
 Blocked by: None
 
