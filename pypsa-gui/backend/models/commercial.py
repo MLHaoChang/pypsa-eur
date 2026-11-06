@@ -399,7 +399,8 @@ def jurisdiction_currency(jurisdiction: str | None, valid_from: date | str | Non
 
 
 #: The serialization context that keeps an implied currency in a dump (an API read).
-RESOLVED_CURRENCY = {"resolved_currency": True}
+RESOLVED_CURRENCY_KEY = "resolved_currency"
+RESOLVED_CURRENCY = {RESOLVED_CURRENCY_KEY: True}
 
 
 class Tariff(BaseModel):
@@ -438,7 +439,7 @@ class Tariff(BaseModel):
     def _omit_implied_currency(self, handler, info):
         out = handler(self)
         if isinstance(out, dict) and "currency" in out \
-                and not (info.context or {}).get("resolved_currency") \
+                and not (info.context or {}).get(RESOLVED_CURRENCY_KEY) \
                 and self.currency == jurisdiction_currency(self.jurisdiction, self.valid_from):
             out.pop("currency")
         return out

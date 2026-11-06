@@ -663,7 +663,7 @@ def update_solver_config(
         # sink, so the HTTP route and the chat tool both cross it.
         from services import dirty_state
         dirty_state.bump_revision()
-        return asdict(_state["solver_config"])
+        return get_solver_config()   # the read form: a tariff states its currency (GK B C2)
 
 
 class ValueFlowsIn(BaseModel):

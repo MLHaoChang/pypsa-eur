@@ -158,14 +158,14 @@ def commercial_findings(n, commercial, *, solve_strategy: str = "full",
     from services.commercial.binding import tariff_currency_mismatch
 
     clash = tariff_currency_mismatch(cfg.import_tariff, currency)
-    if clash:
-        return [("error", "commercial.currency_mismatch", "", "", clash)]
+    found = [("error", "commercial.currency_mismatch", "", "", clash)] if clash else []
     try:
-        return _warnings(n, cfg, adders, price, demand) + _contract_warnings(n, cfg, dsr or {})
+        return found + _warnings(n, cfg, adders, price, demand) \
+            + _contract_warnings(n, cfg, dsr or {})
     except Exception as exc:  # noqa: BLE001 — preflight never takes validation down
-        return [("warning", "commercial.preflight_incomplete", "", "",
-                 f"Some commercial preflight checks could not run ({type(exc).__name__}: "
-                 f"{exc}); the solve applies its own checks.")]
+        return found + [("warning", "commercial.preflight_incomplete", "", "",
+                         f"Some commercial preflight checks could not run "
+                         f"({type(exc).__name__}: {exc}); the solve applies its own checks.")]
 
 
 def _connection_double_count(n, fee) -> list[tuple[str, str, str, str, str]]:

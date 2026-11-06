@@ -268,6 +268,10 @@ def test_a_no_op_echo_of_the_read_config_keeps_the_fingerprint(
     fp = _network_input_fingerprint(ctx)
     read = chat_tools.DISPATCHERS["get_solver_config"]()["commercial"]
     assert read["import_tariff"]["currency"] == "EUR"
+    # The PUT answers in the read form too.
+    assert chat_tools.DISPATCHERS["update_solver_config"](partial={"voll": 10_000.0})[
+        "commercial"]["import_tariff"]["currency"] == "EUR"
+    fp = _network_input_fingerprint(ctx)
     read.pop("value_flows", None)
     chat_tools.DISPATCHERS["update_solver_config"](partial={"commercial": read})
     assert ctx.solver_state["solver_config"].commercial["import_tariff"] == stored
@@ -298,6 +302,9 @@ def test_preflight_refuses_an_inline_eur_tariff_on_a_gbp_project():
     codes = _codes("GBP", _nl())
     assert codes["commercial.currency_mismatch"].severity == "error"
     assert "EUR" in codes["commercial.currency_mismatch"].message
+    # The other findings still run beside it.
+    late = _codes("GBP", _nl(valid_from="2099-01-01"))
+    assert {"commercial.currency_mismatch", "commercial.tariff_out_of_validity"} <= set(late)
 
 
 @pytest.mark.parametrize("currency,tariff", [
