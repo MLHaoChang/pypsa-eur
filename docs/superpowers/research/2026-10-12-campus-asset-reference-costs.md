@@ -280,3 +280,35 @@ Every path to adopting these values touches investment-case files: `services/lib
 - **Ground type.** Ground type is the biggest single cost driver for cables. The choice of rural normal ground is a judgement; a campus in town would be about twice as dear.
 - **Short-circuit rating.** Ei does not distinguish switchgear by rating, so only the lowest rating at each voltage is cited.
 - **Compensation.** Reactors and STATCOMs at MV, and all compensation lifetimes, have no source here. A future pass could look for a DSO's unit-cost list that covers MV compensation, for example Ofgem's RIIO-ED2 unit costs, which were not reached in this pass.
+
+## Addendum 2026-11-06: 220/110 kV transformers (campus-library-gaps 01)
+
+The H2 hub's PCC transformer is 220/110 kV, a pair the library did not cover (owner decision Q-CL-1: add cited
+units). Ei's Normvärdeslista (the same xlsx, sheet "NVL RP4", column "Normvärde 2022 [SEK]") has five rows at
+245/123-145 kV. Each one becomes a unit, read and converted as above, with nothing interpolated or extrapolated.
+
+| id | Ei row | size | SEK (2022) | EUR (2025), rounded to 100 |
+|---|---|---|---:|---:|
+| TR_220_110_120 | R-NR-T-8-1 | 120 MVA | 33,884,380 | 3,516,500 |
+| TR_220_110_150 | R-NR-T-8-2 | 150 MVA | 38,992,520 | 4,046,600 |
+| TR_220_110_200 | R-NR-T-8-3 | 200 MVA | 46,654,733 | 4,841,800 |
+| TR_220_110_250 | R-NR-T-8-4 | 250 MVA | 51,762,875 | 5,371,900 |
+| TR_220_110_315 | R-NR-T-8-5 | 315 MVA | 56,871,016 | 5,902,000 |
+
+The factor is 1 SEK (2022) = 119.8 / 108.6 / 10.6296 = 0.103779 EUR (2025). It reproduces TR_132_33_20: R-NR-T-5-2's
+12,632,363 SEK x 0.103779 = 1,310,985, rounded to the shipped 1,311,000 EUR. Fixed O&M (1.5 %, [DEA-TRANS] Table 13)
+and lifetime (40 a, [DEA-DIST]) are the citations every other transformer carries.
+
+- **Scope.** The T-8 rows' description names a line span ("linspann") where the 123-145 kV rows name a cable joint
+  ("kabelförband"). The connection's scope differs slightly, and each capex note says so.
+- **Sizes.** 120 and 150 MVA are not in the R10 series of `STANDARD_MVA`. They are kept because a size is read
+  from its cost row, never interpolated. Nothing smaller is published at this voltage pair.
+- **Ratings, impedance and losses have no public source.** The voltages and size are the Ei row's and are tagged
+  `assumed` (a rating may not be `literature`). `vk_percent` 12.5 is IEC 60076-5:2006 Table 1's *minimum* for
+  more than 100 MVA, not a typical value. `vkr_percent` 0.3, `pfe_kw` (1 kW per MVA) and `i0_percent` 0.1 are
+  `producers/campus.py`'s class rule, tagged `assumed` with the note "no public source". The EU Ecodesign Tier 2
+  peak efficiency index (Reg. 548/2014 as amended by 2019/1783) bounds only the combined loss. It is the check
+  still to do (`.scratch/campus-library-gaps/issues/02-220-110-kv-losses.md`).
+
+The defaults pack version 2026-11-06 transcribes the five units' rows and pins the library's new sha256. Every
+2026-10-30 row is unchanged.

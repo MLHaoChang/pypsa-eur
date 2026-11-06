@@ -83,13 +83,14 @@ def test_every_entry_carries_every_field_tagged():
                 assert set(e[f]) >= {"value", "source"}, (e["id"], f)
 
 
-#: sha256 of the shipped library: the defaults pack 2026-10-23 manifest pins the same bytes.
-SHIPPED_SHA256 = "97ce51fbc297140e4a1946b1d56f9e715038652413a117d5f0e51fb623582c97"
+#: sha256 of the shipped library: the defaults pack 2026-11-06 manifest pins the same bytes
+#: (2026-10-23 .. 2026-10-30 pinned the library before the 220/110 kV units).
+SHIPPED_SHA256 = "c94a057685ebaafb54dafd382e8b42933cbc09dbff84c5973905411a6d6d554a"
 #: How many cost fields of each kind are cited reference values (tag literature).
 LITERATURE_COUNTS = {
-    ("transformers", "capex_eur"): 24,
-    ("transformers", "opex_frac"): 29,
-    ("transformers", "lifetime_a"): 29,
+    ("transformers", "capex_eur"): 29,
+    ("transformers", "opex_frac"): 34,
+    ("transformers", "lifetime_a"): 34,
     ("cables", "capex_eur_per_km"): 11,
     ("cables", "opex_frac"): 12,
     ("cables", "lifetime_a"): 12,
@@ -124,7 +125,7 @@ def test_only_a_cost_is_a_cited_reference_value_and_each_names_its_row():
                     assert e[f].get("note", "").strip(), (e["id"], f)
                     counts[(kind, f)] = counts.get((kind, f), 0) + 1
     assert counts == LITERATURE_COUNTS
-    assert tags == {"literature": 175, "assumed": 455}
+    assert tags == {"literature": 190, "assumed": 490}
     header = DEFAULT_PATH.read_text().split("\n\n")[0].lower()
     assert "reference values, not quotes" in header and "vendor quotes" in header
 
@@ -133,8 +134,12 @@ def test_transformers_cover_the_four_voltage_pairs_in_r10_sizes():
     pairs = {}
     for t in LIB["transformers"]:
         pairs.setdefault((value(t["hv_kv"]), value(t["lv_kv"])), []).append(value(t["s_mva"]))
-        assert value(t["s_mva"]) in STANDARD_MVA
-    assert set(pairs) == {(132.0, 33.0), (110.0, 20.0), (33.0, 11.0), (20.0, 0.4)}
+        if (value(t["hv_kv"]), value(t["lv_kv"])) != (220.0, 110.0):
+            assert value(t["s_mva"]) in STANDARD_MVA
+    assert set(pairs) == {(220.0, 110.0), (132.0, 33.0), (110.0, 20.0), (33.0, 11.0), (20.0, 0.4)}
+    # The 220/110 kV units are the sizes of their cited cost rows (Ei R-NR-T-8-1..5), 120 and 150 MVA
+    # among them although outside R10: a size is read, never interpolated (campus-library-gaps 01).
+    assert pairs[(220.0, 110.0)] == [120.0, 150.0, 200.0, 250.0, 315.0]
     assert pairs[(132.0, 33.0)] == [20.0, 25.0, 31.5, 40.0, 50.0, 63.0, 80.0, 100.0]
     assert all(len(v) >= 4 for v in pairs.values())
 
@@ -661,3 +666,33 @@ def test_vector_group_and_tap_are_transformer_fields_only(tmp_path):
     c = entry(d, "cables")
     c["vector_group"] = {"value": "Dyn11", "source": "assumed"}
     refused(tmp_path, d, rf"cables\[{c['id']}\].*vector_group")
+
+
+#: campus-library-gaps 01: the 220/110 kV units and their Ei rows (245/123-145 kV), SEK of 2022.
+EI_220_110 = {120.0: ("R-NR-T-8-1", 33884380), 150.0: ("R-NR-T-8-2", 38992520),
+              200.0: ("R-NR-T-8-3", 46654733), 250.0: ("R-NR-T-8-4", 51762875),
+              315.0: ("R-NR-T-8-5", 56871016)}
+
+
+def test_the_220_110_kv_units_are_their_ei_rows_with_the_class_rule_for_what_has_no_source():
+    """Each cost is its Ei row at the file's factor (ECB 2022 SEK/EUR, C27.1 PPI 2022 -> 2025), which
+    reproduces TR_132_33_20 too; impedance and losses are the producers' class rule, tagged assumed
+    with a note saying no public source gives them, so the library and the rule cannot drift."""
+    factor = 119.8 / 108.6 / 10.6296
+    tr20 = next(e for e in LIB["transformers"] if e["id"] == "TR_132_33_20")
+    assert value(tr20["capex_eur"]) == round(12632363 * factor, -2)
+    units = library_entries(LIB, "transformers", hv_kv=220.0, lv_kv=110.0)
+    assert [value(t["s_mva"]) for t in units] == sorted(EI_220_110)
+    for t in units:
+        s = value(t["s_mva"])
+        code, sek = EI_220_110[s]
+        assert t["id"] == f"TR_220_110_{s:g}"
+        assert value(t["capex_eur"]) == round(sek * factor, -2)
+        assert t["capex_eur"]["source"] == "literature" and f"[EI-NVL] {code}," in t["capex_eur"]["note"]
+        vk, vkr = _trafo_class(s)
+        assert (value(t["vk_percent"]), value(t["vkr_percent"])) == (vk, vkr) == (12.5, 0.3)
+        assert "IEC 60076-5" in t["vk_percent"]["note"] and "minimum" in t["vk_percent"]["note"]
+        assert value(t["pfe_kw"]) == pytest.approx(PFE_KW_PER_MVA * s) and value(t["i0_percent"]) == I0_PERCENT
+        for f in ("vkr_percent", "pfe_kw", "i0_percent"):
+            assert t[f] == {"value": t[f]["value"], "source": "assumed",
+                            "note": "no public source; producers/campus.py class rule"}, (t["id"], f)
