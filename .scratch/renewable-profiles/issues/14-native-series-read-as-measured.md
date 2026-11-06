@@ -3,7 +3,7 @@
 
 # RP-14 — a network-native series is read as measured
 
-Status: ready-for-agent (Q-RP-14 answered 2026-11-06)
+Status: done
 Type: bug
 Baseline: master after #605 (RP-09)
 Raised by: the engine gatekeeper, reviewing #605, 2026-10-22

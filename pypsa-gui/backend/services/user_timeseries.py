@@ -403,6 +403,11 @@ def _annual_hourly_reference():
 
 _META_KEY = "$meta"
 
+# The record `_backup_network_ts_to_user_ts` gives a column it seeds from the
+# network's own `_t` tables (RP-14, Q-RP-14 = 1).
+NETWORK_NATIVE = "network_native"
+NETWORK_NATIVE_META = {"provenance": NETWORK_NATIVE, "source": "network"}
+
 
 def _serialize_user_ts(store: dict | None = None, meta_store: dict | None = None) -> dict:
     """
@@ -642,6 +647,11 @@ def _backup_network_ts_to_user_ts(n=None, store: dict | None = None) -> None:
     """
     if n is None:
         n = PyPSAService.get_network()
+    # The paired provenance channel (RP-14): a seeded column is the network's
+    # own series, recorded as such so it is not read as a measured upload
+    # (`defaults.is_measured`: an entry with no record is an upload).
+    meta_store = (_user_ts_meta if (store is None or store is _user_ts)
+                  else _meta_store_for(store))
     if store is None:
         store = _user_ts
     for comp in _TS_COMPONENTS:
@@ -692,6 +702,8 @@ def _backup_network_ts_to_user_ts(n=None, store: dict | None = None) -> None:
                     existing = store.get(key)
                     if existing is None or existing.isna().all():
                         store[key] = series.copy()
+                        if meta_store is not None:
+                            meta_store[key] = dict(NETWORK_NATIVE_META)
 
 
 def _rebase_flat_user_ts(new_idx: pd.DatetimeIndex) -> int:
