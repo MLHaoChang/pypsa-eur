@@ -2850,6 +2850,18 @@ def _forget_turn_undo(session: ChatSession) -> None:
     ]
 
 
+def _timeout_outcome(effect: bool, kind: str) -> dict:
+    """Issue 04 S4b (G5, GK B (28) H6): a write- or destructive-tier call in an
+    ordinary turn that timed out or never started reads uncertain, never read
+    back, as the frame's `_outcome`. A read, and a checked turn (its own
+    projection), get none."""
+    if not effect:
+        return {}
+    from harness import outcomes as _write_outcomes
+
+    return {"_outcome": _write_outcomes.timed_out(kind)}
+
+
 def dispatch_tool_call(
     session: ChatSession,
     tu: dict[str, Any],
@@ -3441,6 +3453,14 @@ def _dispatch_real_tool_call(
                 "The action's arguments changed after its confirmation; request "
                 "and review it again.", tool_results_collector)
             return
+        # Issue 04 S4b (G4): the edit-lock check before any effect seam, so a
+        # lock refusal reads `denied` only while nothing has run. The handler's
+        # own check stays; a lock taken after this one is a raise (G5).
+        lock_refusal = guards.lock_refusal(tool_name, args)
+        if lock_refusal is not None:
+            yield from guards.denied(tool_use_id, tool_name, *lock_refusal,
+                tool_results_collector)
+            return
         effect_fresh = True
         if session.assurance_turn is not None and tool_name == "update_component":
             from harness.effects import reserve
@@ -3532,6 +3552,7 @@ def _dispatch_real_tool_call(
             from harness import outcomes as _write_outcomes
 
             write_note = _write_outcomes.note_write(tool_name, args or {})
+        timeout_effect = tier in guards.EFFECT_TIERS and session.assurance_turn is None
 
         # Execute via the chat_tools dispatcher. `handler` was resolved above the
         # confirmation gate — see Improvement #19 there.
@@ -3688,6 +3709,7 @@ def _dispatch_real_tool_call(
                                 f"busy for {harness_budget.PER_TOOL_TIMEOUT_SECONDS:g}s. "
                                 f"It was cancelled rather than left queued to run later."
                             ),
+                            **_timeout_outcome(timeout_effect, "tool_not_started"),
                         },
                     )
                     tool_results_collector.append(
@@ -3784,6 +3806,7 @@ def _dispatch_real_tool_call(
                             f"tool {tool_name!r} exceeded the "
                             f"{harness_budget.PER_TOOL_TIMEOUT_SECONDS:g}s execution deadline"
                         ),
+                        **_timeout_outcome(timeout_effect, "tool_timeout"),
                     },
                 )
                 tool_results_collector.append(
@@ -3796,10 +3819,14 @@ def _dispatch_real_tool_call(
                 )
                 return
     except Exception as exc:  # noqa: BLE001 — surface as tool_error
+        raised_outcome = None
         if write_note is not None:
-            # Issue 04 S3: a raise or timeout reads no outcome; stop the note's watch.
+            # Issue 04 S4b (G5): `failed` only when the note's read-back found
+            # the state unchanged, else uncertain; imports and exports read no
+            # outcome on a raise (AA04-P9). Then stop the note's watch.
             from harness import outcomes as _write_outcomes
 
+            raised_outcome = _write_outcomes.project_raised(write_note)
             _write_outcomes.release_note(write_note)
         # v4-MAJOR-1 / v6-F1 + v4-MINOR-1: structured error_kind propagates
         # from the tool's HTTPException detail dict so the frontend can
@@ -3839,6 +3866,7 @@ def _dispatch_real_tool_call(
                 "tool_name": tool_name,
                 "error_kind": error_kind,
                 "message": msg,
+                **({"_outcome": raised_outcome} if raised_outcome else {}),
             },
         )
         tool_results_collector.append(

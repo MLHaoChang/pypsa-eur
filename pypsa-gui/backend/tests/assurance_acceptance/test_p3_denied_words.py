@@ -56,7 +56,7 @@ def _deny_kinds() -> set[str]:
         guards.GUARD_FAILED,
         guards.ARGS_CHANGED,
         guards.NO_PROGRESS,
-    }
+    } | guards.LOCK_KINDS
 
 
 def test_the_frontend_outcomes_match_the_backend():
@@ -92,3 +92,19 @@ def test_every_deny_kind_has_frontend_words():
     ).group(1)
     worded = set(re.findall(r"^\s*(\w+):", words, re.M))
     assert sorted(kinds - worded) == []
+
+
+def _words(const: str) -> set[str]:
+    block = re.search(
+        rf"export const {const}: Record<string, string> = {{(.*?)\n}}",
+        _ts("activityWords.ts"),
+        re.S,
+    )
+    return set(re.findall(r"^\s*(\w+):", block.group(1), re.M))
+
+
+def test_every_s4b_reason_has_frontend_words():
+    """Issue 04 S4b: the raise path, the timeout and extra edits."""
+    uncertain = set(outcomes.RAISE_REASONS) | {"not_as_requested"}
+    assert uncertain <= _words("TOOL_OUTCOME_REASON_WORDS")
+    assert "extra_edits" in _words("TOOL_OUTCOME_PARTIAL_REASON_WORDS")

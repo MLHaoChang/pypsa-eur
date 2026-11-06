@@ -366,6 +366,9 @@ def note_write(tool: str, args: dict) -> dict | None:
                 if item["kind"] == "cell":
                     item["expected"] = _coerce(df, cls, item["attr"], item["requested"])
             revision = dirty_state.revision(ctx)
+            state = _live_state(ctx)  # S4b: the whole state before (G5/G6)
+            carriers = sorted(str(c) for c in ctx.network.carriers.index)
+            list_name = ctx.network.components[cls].list_name
     except Exception:  # noqa: BLE001 - no note reads uncertain later
         return {"tool": tool, "error": True}
     return {
@@ -374,6 +377,9 @@ def note_write(tool: str, args: dict) -> dict | None:
         "cls": cls,
         "items": items,
         "revision": revision,
+        "state": state,
+        "carriers_before": carriers,
+        "list_name": list_name,  # the user series key of `cls` ("generators")
     }
 
 
@@ -403,6 +409,8 @@ def read_write(note: dict | None) -> dict:
                         else UNCOMPARABLE
                     )
                 elif present and item["kind"] == "create":
+                    if "carrier" in df.columns:
+                        row["carrier"] = str(df.at[name, "carrier"])
                     row["attrs"] = {
                         attr: (
                             _coerce(df, note["cls"], attr, value),
@@ -411,10 +419,11 @@ def read_write(note: dict | None) -> dict:
                         for attr, value in item["attrs"].items()
                     }
                 rows[name if item["kind"] != "cell" else f"{name}/{item['attr']}"] = row
+            state = _live_state(ctx)
             end = dirty_state.revision(ctx)
     except Exception:  # noqa: BLE001 - an unreadable network reads uncertain
         return {"error": "readback_failed"}
-    return {"revision_start": start, "revision_end": end, "rows": rows}
+    return {"revision_start": start, "revision_end": end, "rows": rows, "state": state}
 
 
 def _same(expected, actual) -> bool | None:
@@ -518,11 +527,309 @@ def classify_write(note: dict | None, read: dict | None) -> dict:
     paths = [_path(note["cls"], i) for i in not_done[:_MAX_PATHS]]
     if unknown:
         return out("uncertain", "not_comparable", counts=counts, paths_not_done=paths)
+    # S4b: the whole-state diff. A path the call did not name is an extra edit
+    # (G6); `failed` needs nothing changed at all (G5).
+    diff = changed_paths(
+        note.get("state", UNCOMPARABLE), read.get("state", UNCOMPARABLE)
+    )
+    if isinstance(diff, _Uncomparable):
+        return out("uncertain", "not_comparable", counts=counts, paths_not_done=paths)
+    if not done and not_done:
+        # Nothing as asked: failed only when nothing changed at all (H8).
+        if diff:
+            return out(
+                "uncertain", "not_as_requested", counts=counts, paths_not_done=paths
+            )
+        return out("failed", counts=counts, paths_not_done=paths)
+    carriers = _new_carriers(note, read)
+    extra = [p for p in diff if not _allowed(note, p, carriers)]
+    if extra:
+        return out(
+            "partial",
+            "extra_edits",
+            counts={**counts, "extra": len(extra)},
+            paths_not_done=paths,
+            paths_extra=extra[:_MAX_PATHS],
+        )
     if not not_done:
         return out("completed", counts=counts, paths_not_done=[])
-    if not done:
-        return out("failed", counts=counts, paths_not_done=paths)
     return out("partial", counts=counts, paths_not_done=paths)
+
+
+# ── Issue 04 S4b: the whole-state map (G6) and the raise path (G5) ─────────
+#
+# `state_map` hashes every static cell, every series column, the snapshots,
+# both weightings, `n.meta` and each user series, keyed by path. Two maps are
+# compared path by path: a path only one side has reads as the missing value,
+# so a column added with nothing in it on other rows is no change. A row write
+# may change only the paths of what it named; any other changed path is an
+# extra edit (partial `extra_edits`). On a raise, `failed` needs the map equal.
+
+_MISSING = "-"
+
+
+def _flag(column: str, value) -> bool:
+    """A flag cell as the app's normaliser reads it (unparseable: False):
+    occurrence.flag_is_set for the outage flag, eh_columns._as_bool otherwise."""
+    from services.adequacy.eh_columns import _as_bool
+    from services.adequacy.occurrence import FLAG_COL, flag_is_set
+
+    try:
+        return bool(flag_is_set(value) if column == FLAG_COL else _as_bool(value))
+    except ValueError:
+        return False
+
+
+def _cell_hashes(s) -> list[str]:
+    """One identity per cell of a static column (`_canon_col`), `_MISSING` for
+    a missing value."""
+    import numpy as np
+
+    c = _canon_col(s)
+    if c.dtype == float:
+        # The float's own bits are its identity (+0.0 folds -0.0).
+        values = c.to_numpy() + 0.0
+        bits = values.view(np.uint64)
+        return [
+            _MISSING if v != v else format(int(b), "x")
+            for v, b in zip(values.tolist(), bits.tolist())
+        ]
+    return [_MISSING if v is None else f"{type(v).__name__}:{v}" for v in c.tolist()]
+
+
+def _tree_paths(out: dict, prefix: str, value: Any, levels: int) -> None:
+    """A nested dict by path, `levels` keys deep (`n.meta` down to
+    /meta/<store>/<class>/<name>, user series down to /user_ts/<list>/<attr>/<name>).
+    An empty container or None is the missing value: a store created empty is
+    no change."""
+    import hashlib
+    import json
+
+    if isinstance(value, dict) and levels > 0:
+        for key, item in value.items():
+            _tree_paths(out, f"{prefix}/{key}", item, levels - 1)
+        return
+    if value is None or (isinstance(value, (dict, list, str)) and not value):
+        return
+    out[prefix] = hashlib.sha256(
+        json.dumps(value, sort_keys=True, default=str).encode()
+    ).hexdigest()
+
+
+def state_map(n, user_ts: dict | None) -> dict | _Uncomparable:
+    """Path -> hash of the whole live state a row write could touch (G6)."""
+    import hashlib
+
+    import numpy as np
+    import pandas as pd
+
+    def floats(df) -> np.ndarray:
+        # Canonical values (GK B (28) H7): float, +0.0 folds -0.0, one NaN.
+        values = df.to_numpy(dtype=float) + 0.0
+        values[np.isnan(values)] = np.nan
+        return values
+
+    def frame_hash(df) -> str:
+        # The values by column name; the index is the snapshots' own path.
+        df = df.sort_index(axis=1)
+        return hashlib.sha256(
+            repr([str(c) for c in df.columns]).encode()
+            + np.ascontiguousarray(floats(df)).tobytes()
+        ).hexdigest()
+
+    from services.adequacy.eh_columns import _all_columns
+    from services.adequacy.occurrence import FLAG_COL
+
+    eh_kinds = _all_columns()
+    out: dict[str, str] = {}
+    try:
+        out["/snapshots"] = hashlib.sha256(
+            pd.util.hash_pandas_object(pd.Index(n.snapshots).to_frame(), index=False)
+            .to_numpy()
+            .tobytes()
+        ).hexdigest()
+        out["/snapshot_weightings"] = frame_hash(n.snapshot_weightings)
+        out["/investment_period_weightings"] = frame_hash(
+            n.investment_period_weightings
+        )
+        _tree_paths(out, "/meta", n.meta or {}, 3)
+        for cls in sorted(set(n.all_components) - DERIVED_CLASSES):
+            static = n.static(cls)
+            names = [str(x) for x in static.index]
+            flags = {c for c, kind in eh_kinds.get(cls, {}).items() if kind == "bool"}
+            if cls == "Generator":
+                flags.add(FLAG_COL)
+            for attr in static.columns:
+                column = static[attr]
+                if attr in flags:
+                    # A flag reads as the app's normalisers write it
+                    # (normalise_eh_columns, normalise_flag_column at every
+                    # export and create): missing is False, its default.
+                    column = column.map(lambda v: True if _flag(attr, v) else None)
+                for name, h in zip(names, _cell_hashes(column)):
+                    if h != _MISSING:
+                        out[f"/{cls}/{name}/{attr}"] = h
+            for attr, df in n.dynamic(cls).items():
+                if df.empty:
+                    continue
+                # One digest per component's column, straight from the float
+                # array (a per-column pandas hash costs ~0.1 ms each).
+                columns = np.ascontiguousarray(floats(df).T)
+                for name, column in zip(df.columns, columns):
+                    out[f"/{cls}/{name}/{attr}@series"] = hashlib.blake2b(
+                        column.tobytes(), digest_size=16
+                    ).hexdigest()
+        for key, value in (user_ts or {}).items():
+            # {list: {attr: {name: series}}}, and "$meta" one level deeper.
+            _tree_paths(out, f"/user_ts/{key}", value, 3 if key == "$meta" else 2)
+    except (TypeError, ValueError):
+        return UNCOMPARABLE
+    return out
+
+
+def changed_paths(before, after) -> list[str] | _Uncomparable:
+    """Sorted paths whose hash differs; an absent path is the missing value."""
+    if isinstance(before, _Uncomparable) or isinstance(after, _Uncomparable):
+        return UNCOMPARABLE
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return UNCOMPARABLE
+    return sorted(
+        p
+        for p in set(before) | set(after)
+        if before.get(p, _MISSING) != after.get(p, _MISSING)
+    )
+
+
+def _new_carriers(note: dict, read: dict) -> set[str]:
+    """Carriers a create added for its own rows: absent before, named after by a
+    created row (pypsa adds a Bus's "AC" carrier). The only implied rows (G6)."""
+    named = {
+        row["carrier"]
+        for row in (read.get("rows") or {}).values()
+        if row.get("present") and row.get("carrier")
+    }
+    return named - set(note.get("carriers_before") or ())
+
+
+def _allowed(note: dict, path: str, carriers: set[str] = frozenset()) -> bool:
+    """A path the call named: a cell write its cell, a create/delete its rows,
+    and a create's new carriers (`_new_carriers`)."""
+    cls = note["cls"]
+    for carrier in carriers:
+        head = f"/Carrier/{carrier}/"
+        if path.startswith(head) and "/" not in path[len(head) :]:
+            return True
+    for item in note["items"]:
+        if item["kind"] == "cell":
+            if path == f"/{cls}/{item['name']}/{item['attr']}":
+                return True
+        elif path.startswith("/meta/") and path.split("/", 3)[3:] == [
+            f"{cls}/{item['name']}"
+        ]:
+            return True  # its own entry in a per-asset meta store
+        elif path.startswith("/user_ts/") and _own_series(note, item, path):
+            return True
+        elif path.startswith(f"/{cls}/{item['name']}/"):
+            rest = path[len(f"/{cls}/{item['name']}/") :]
+            if "/" not in rest:
+                return True
+    return False
+
+
+def _own_series(note: dict, item: dict, path: str) -> bool:
+    """/user_ts/<list>/<attr>/<name> or /user_ts/$meta/<list>/<attr>/<name> of the row."""
+    parts = path.split("/")[2:]
+    if parts[:1] == ["$meta"]:
+        parts = parts[1:]
+    return (
+        len(parts) == 3
+        and parts[0] == note.get("list_name")
+        and parts[2] == item["name"]
+    )
+
+
+def _live_state(ctx) -> dict | _Uncomparable:
+    """`state_map` of the context's network and the active user series; the
+    caller holds the PyPSA lock."""
+    from services.user_timeseries import _serialize_user_ts
+
+    return state_map(ctx.network, _serialize_user_ts())
+
+
+def read_state(note: dict | None) -> dict:
+    """The live state map between two edit-counter reads, for a note that holds
+    `ctx`, `revision` and `state` (an import on the raise path)."""
+    if not note or note.get("error") or "state" not in note:
+        return {"error": "no_note"}
+    from services import dirty_state
+    from services.pypsa_service import PyPSAService
+
+    try:
+        ctx = PyPSAService.get_active_context()
+        if ctx is not note["ctx"]:
+            return {"error": "other_context"}
+        with PyPSAService.get_lock():
+            start = dirty_state.revision(ctx)
+            state = _live_state(ctx)
+            end = dirty_state.revision(ctx)
+    except Exception:  # noqa: BLE001 - an unreadable network reads uncertain
+        return {"error": "readback_failed"}
+    return {"revision_start": start, "revision_end": end, "state": state}
+
+
+RAISE_REASONS = ("changed_before_error", "tool_timeout", "tool_not_started")
+
+
+def timed_out(kind: str) -> dict:
+    """A timeout or a call that never started: never read back, always uncertain (G5)."""
+    return {"version": VERSION, "outcome": "uncertain", "reason": kind}
+
+
+def classify_raised(note: dict | None, read: dict | None) -> dict:
+    """Pure: a write whose handler raised reads failed only when its note's
+    read-back compared the state before and after and found them equal (G5)."""
+
+    def out(outcome, reason=None):
+        return {"outcome": outcome, "reason": reason}
+
+    if note and note.get("pending"):
+        return out("uncertain", "adapter_pending")
+    if not note or note.get("error"):
+        return out("uncertain", "no_submission")
+    if note.get("tool") == "undo_last":
+        verdict = classify_undo(note, read)
+        if verdict["outcome"] in ("failed", "uncertain"):
+            return verdict
+        return out("uncertain", "changed_before_error")
+    if not isinstance(read, dict) or "error" in read:
+        other = isinstance(read, dict) and read["error"] == "other_context"
+        return out("uncertain", "other_context" if other else "readback_failed")
+    if (
+        read.get("revision_start") != note["revision"]
+        or read.get("revision_end") != note["revision"]
+    ):
+        return out("uncertain", "revision_moved")
+    diff = changed_paths(note.get("state"), read.get("state"))
+    if isinstance(diff, _Uncomparable):
+        return out("uncertain", "not_comparable")
+    if diff:
+        return out("uncertain", "changed_before_error")
+    return out("failed")
+
+
+def project_raised(note: dict | None) -> dict | None:
+    """The `_outcome` of a write whose handler raised, or None for an export,
+    which changes no project state and has no proof yet (AA04-P9)."""
+    if not isinstance(note, dict):
+        return None
+    tool = note.get("tool")
+    if tool == "undo_last":
+        return {"version": VERSION, **classify_raised(note, read_undo(note))}
+    if tool in ROW_WRITE_TOOLS:
+        return {"version": VERSION, **classify_raised(note, read_write(note))}
+    if tool in IMPORT_TOOLS:
+        return {"version": VERSION, **classify_raised(note, read_state(note))}
+    return None
 
 
 def project_write(note: dict | None) -> dict:
@@ -993,6 +1300,7 @@ def note_import(tool: str, args: dict) -> dict:
             revision = dirty_state.revision(ctx)
             digest = network_digest(ctx.network)
             already = set(_rows_already_equal(ctx.network, expected))
+            state = _live_state(ctx)  # S4b (H5): the raise path's before
     except Exception:  # noqa: BLE001 - no note reads uncertain later
         return {"tool": tool, "error": True}
     return {
@@ -1002,6 +1310,8 @@ def note_import(tool: str, args: dict) -> dict:
         "binding": binding,
         "revision": revision,
         "digest_before": digest,
+        "ctx": ctx,
+        "state": state,
         # The rows this import must change: the file's rows not already equal.
         "need": sorted(
             (cls, name)
@@ -1162,12 +1472,16 @@ def note_export(tool: str) -> dict:
         if store is None:
             raise ValueError("no_project")  # the handler refuses it too
         ctx = PyPSAService.get_active_context()
+        with PyPSAService.get_lock():
+            revision = dirty_state.revision(ctx)
+            state = _live_state(ctx)  # S4b (H8): an export edits nothing
         note = {
             "tool": tool,
             "format": fmt,
             "store": store,
             "ctx": ctx,
-            "revision": dirty_state.revision(ctx),
+            "revision": revision,
+            "state": state,
         }
         # Last, so a failed note leaves no watch behind (as note_undo).
         note["own"], note["watch"] = upload_service.watch_uploads()
@@ -1205,6 +1519,7 @@ def read_export(note: dict | None) -> dict:
             ctx = PyPSAService.get_active_context()
             start = dirty_state.revision(ctx)
             match = _match(ctx.network, exported, rtol=rtol)
+            state = _live_state(ctx)
             end = dirty_state.revision(ctx)
     except Exception:  # noqa: BLE001 - an unreadable file reads uncertain
         return {"error": "readback_failed"}
@@ -1214,6 +1529,7 @@ def read_export(note: dict | None) -> dict:
         "revision_start": start,
         "revision_end": end,
         "match": match,
+        "state": state,
     }
 
 
@@ -1243,4 +1559,17 @@ def classify_export(note: dict | None, read: dict | None) -> dict:
         return out("uncertain", "not_comparable")
     if read.get("match") is not True:
         return out("uncertain", "not_as_network")
+    # S4b (H8): an export changes nothing in the live state; any change is extra.
+    diff = changed_paths(
+        note.get("state", UNCOMPARABLE), read.get("state", UNCOMPARABLE)
+    )
+    if isinstance(diff, _Uncomparable):
+        return out("uncertain", "not_comparable")
+    if diff:
+        return {
+            "outcome": "partial",
+            "reason": "extra_edits",
+            "counts": {"requested": 1, "done": 1, "extra": len(diff)},
+            "paths_extra": diff[:_MAX_PATHS],
+        }
     return out("completed")
