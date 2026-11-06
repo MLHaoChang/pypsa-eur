@@ -14,6 +14,7 @@ export const STAGE_LABEL: Record<CampusRunStage, string> = {
   size: 'sizing the transformers, the compensation and the short circuit',
   harmonic_scan: 'the harmonic impedance scan from the PCC',
   voltage_stability: 'the P–V/Q–V voltage-stability margin at the PCC',
+  dips_restart: 'the dips, trips and restarts of the process units',
   invest: 'buying the assets from the library, re-checked by AC load flow',
   gfm_settings: 'recommending grid-forming settings from the island hours',
   done: 'finishing',
@@ -25,6 +26,7 @@ const STAGE_NAME: Record<CampusRunStage, string> = {
   island_checks: 'the island checks (frequency sweep)', cuts: 'the frequency cuts', size: 'sizing',
   harmonic_scan: 'the harmonic scan',
   voltage_stability: 'the P–V/Q–V screen',
+  dips_restart: 'the dip and restart screens',
   invest: 'the investment step', gfm_settings: 'the grid-forming settings', done: 'finishing',
 }
 
