@@ -55,6 +55,15 @@ add('b1', 'bulk_update_components', 'completed', null, 9, null, { requested: 5, 
 add('b2', 'bulk_update_components', 'partial', null, 9, null, { requested: 5, done: 3 })
 add('b3', 'batch_create_components', 'failed', null, 9, null, { requested: 2, done: 0 })
 add('b4', 'delete_component', 'uncertain', null, 9, 'revision_moved')
+// Issue 04 S3: undo, network import and export read back against their snapshot or file.
+add('u1', 'undo_last', 'completed', null, 10)
+add('u2', 'undo_last', 'uncertain', null, 10, 'entry_moved')
+add('i1', 'import_network_nc', 'completed', null, 11, null, { requested: 17, done: 17 })
+add('i2', 'import_csv_bundle', 'partial', null, 11, 'rows_missing', { requested: 17, done: 15 })
+add('i3', 'import_network_nc', 'partial', null, 11, 'extra_rows', { requested: 17, done: 17 })
+add('i4', 'import_excel', 'uncertain', null, 11, 'adapter_pending')
+add('e1', 'export_network_nc', 'completed', null, 12)
+add('e2', 'export_csv_bundle', 'uncertain', null, 12, 'not_as_network')
 useUIStore.setState({ currentProject: 'Demo', projectMismatch: null, assistantDockOpen: true, uiMode: mode } as any)
 useChatStore.setState({ sessionId: 'shot-session', messages, streaming: false, pending: null, error: null } as any)
 createRoot(document.getElementById('root')!).render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}>

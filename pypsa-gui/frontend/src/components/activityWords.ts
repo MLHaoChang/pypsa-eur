@@ -20,6 +20,20 @@ export const TOOL_OUTCOME_REASON_WORDS: Record<string, string> = {
   // Issue 04 S3: undo_last's read-back against the change it undid.
   entry_moved: 'a different change was undone',
   not_restored: 'the network does not match its state before that change',
+  // Issue 04 S3: a network import or export read back against its file.
+  not_as_file: 'the network does not match the imported file',
+  not_as_network: 'the exported file does not match the network',
+  export_file_count: 'the exported file could not be identified',
+}
+
+/** A file tool's words where they differ from a job's (issue 04 S3: import/export). */
+export const TOOL_OUTCOME_FILE_REASON_WORDS: Record<string, string> = {
+  adapter_pending: 'this file format cannot be checked yet',
+}
+
+/** Why a write reads "partly done" when its count alone would mislead (issue 04 S3). */
+export const TOOL_OUTCOME_PARTIAL_REASON_WORDS: Record<string, string> = {
+  extra_rows: 'the network has rows the file does not have',
 }
 
 export const ACTIVITY_FAMILY_WORDS: Record<string, string> = {

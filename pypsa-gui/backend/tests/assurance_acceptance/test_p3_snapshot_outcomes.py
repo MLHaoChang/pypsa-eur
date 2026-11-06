@@ -35,7 +35,11 @@ def _edit(harness, value=61.5):
     _stream(
         harness,
         "bulk_update_components",
-        {"component_class": "Generator", "names": ["G1"], "updates": {"marginal_cost": value}},
+        {
+            "component_class": "Generator",
+            "names": ["G1"],
+            "updates": {"marginal_cost": value},
+        },
     )
     assert undo_service.depth() >= 1
     return before
@@ -51,7 +55,9 @@ def test_an_undo_that_restores_the_peeked_entry_is_completed(baseline, harness):
     assert _gens().at["G1", "marginal_cost"] == before
 
 
-def test_an_undo_that_pops_a_different_entry_is_uncertain(baseline, harness, monkeypatch):
+def test_an_undo_that_pops_a_different_entry_is_uncertain(
+    baseline, harness, monkeypatch
+):
     _edit(harness)
     real_pop = undo_service.pop_entry
 
@@ -67,7 +73,9 @@ def test_an_undo_that_pops_a_different_entry_is_uncertain(baseline, harness, mon
     assert result["_outcome"]["reason"] == "entry_moved"
 
 
-def test_an_undo_whose_restored_network_differs_is_uncertain(baseline, harness, monkeypatch):
+def test_an_undo_whose_restored_network_differs_is_uncertain(
+    baseline, harness, monkeypatch
+):
     from services import network_undo
 
     _edit(harness)
@@ -83,7 +91,9 @@ def test_an_undo_whose_restored_network_differs_is_uncertain(baseline, harness, 
     assert result["_outcome"]["reason"] == "not_restored"
 
 
-def test_a_refused_undo_is_a_tool_error_and_keeps_the_stack(baseline, harness, monkeypatch):
+def test_a_refused_undo_is_a_tool_error_and_keeps_the_stack(
+    baseline, harness, monkeypatch
+):
     # A handler that raises reaches the model as a tool error, which carries no
     # `_outcome` (as in S2), so it never reads completed.
     import uuid
@@ -103,7 +113,10 @@ def test_a_refused_undo_is_a_tool_error_and_keeps_the_stack(baseline, harness, m
     monkeypatch.setenv("PYPSA_GUI_ANSWER_ASSURANCE_MODE", "disabled")
     session, collector, results = ChatSession(), [], []
     for event, data in dispatch_tool_call(
-        session, {"id": uuid.uuid4().hex, "name": "undo_last", "input": {}}, collector, guided=True
+        session,
+        {"id": uuid.uuid4().hex, "name": "undo_last", "input": {}},
+        collector,
+        guided=True,
     ):
         if event == "tool_pending_confirmation":
             session.record_decision(data["confirmation_token"], "approve")
@@ -157,11 +170,18 @@ def test_an_undo_on_a_real_template_network_is_completed(baseline, harness):
     _stream(
         harness,
         "bulk_update_components",
-        {"component_class": "Generator", "names": [name], "updates": {"marginal_cost": before + 7}},
+        {
+            "component_class": "Generator",
+            "names": [name],
+            "updates": {"marginal_cost": before + 7},
+        },
     )
     result = _stream(harness, "undo_last", {})
     assert result["_outcome"] == {"version": 1, "outcome": "completed", "reason": None}
-    assert PyPSAService.get_active_context().network.generators.at[name, "marginal_cost"] == before
+    assert (
+        PyPSAService.get_active_context().network.generators.at[name, "marginal_cost"]
+        == before
+    )
 
 
 def test_a_pop_by_another_session_reads_uncertain(baseline, harness, monkeypatch):
@@ -225,7 +245,12 @@ def _note(**kw):
         "digest_before": "d-before",
         "meta_before": b"m0",
         "user_ts_before": {"a": 1},
-        "expected": {"sha": "s1", "digest": "d-snap", "user_ts": {"a": 0}, "template_meta": b"m1"},
+        "expected": {
+            "sha": "s1",
+            "digest": "d-snap",
+            "user_ts": {"a": 0},
+            "template_meta": b"m1",
+        },
     }
     note.update(kw)
     return note
@@ -246,8 +271,14 @@ def _read(**kw):
     return read
 
 
-UNCHANGED = {"pops": 4, "own_pops": [], "depth": 2, "digest": "d-before",
-             "template_meta": b"m0", "user_ts": {"a": 1}}
+UNCHANGED = {
+    "pops": 4,
+    "own_pops": [],
+    "depth": 2,
+    "digest": "d-before",
+    "template_meta": b"m0",
+    "user_ts": {"a": 1},
+}
 
 
 @pytest.mark.parametrize(
@@ -263,23 +294,40 @@ UNCHANGED = {"pops": 4, "own_pops": [], "depth": 2, "digest": "d-before",
         (_note(expected=None), _read(**UNCHANGED), "failed", "nothing_to_undo"),
         (_note(), _read(**{**UNCHANGED, "depth": 1}), "uncertain", "not_restored"),
         (_note(), _read(**{**UNCHANGED, "digest": "x"}), "uncertain", "not_restored"),
-        (_note(), _read(**{**UNCHANGED, "template_meta": b"x"}), "uncertain", "not_restored"),
+        (
+            _note(),
+            _read(**{**UNCHANGED, "template_meta": b"x"}),
+            "uncertain",
+            "not_restored",
+        ),
         (_note(), _read(**{**UNCHANGED, "user_ts": {}}), "uncertain", "not_restored"),
-        (_note(digest_before=outcomes.UNCOMPARABLE),
-         _read(**{**UNCHANGED, "digest": outcomes.UNCOMPARABLE}), "uncertain", "not_restored"),
+        (
+            _note(digest_before=outcomes.UNCOMPARABLE),
+            _read(**{**UNCHANGED, "digest": outcomes.UNCOMPARABLE}),
+            "uncertain",
+            "not_restored",
+        ),
         (_note(), _read(pops=6), "uncertain", "entry_moved"),
         (_note(), _read(**{**UNCHANGED, "pops": 5}), "uncertain", "entry_moved"),
         (_note(), _read(pops=6, own_pops=["s1", "s0"]), "uncertain", "entry_moved"),
         (_note(expected=None), _read(), "uncertain", "entry_moved"),
         (_note(), _read(own_pops=["s2"]), "uncertain", "entry_moved"),
-        (_note(expected={**_note()["expected"], "digest": outcomes.UNCOMPARABLE}),
-         _read(), "uncertain", "not_comparable"),
+        (
+            _note(expected={**_note()["expected"], "digest": outcomes.UNCOMPARABLE}),
+            _read(),
+            "uncertain",
+            "not_comparable",
+        ),
         (_note(), _read(digest=outcomes.UNCOMPARABLE), "uncertain", "not_comparable"),
         (_note(), _read(digest="other"), "uncertain", "not_restored"),
         (_note(), _read(user_ts={"a": 9}), "uncertain", "not_restored"),
         (_note(), _read(template_meta=b"x"), "uncertain", "not_restored"),
-        (_note(expected={**_note()["expected"], "template_meta": None}),
-         _read(template_meta=b"anything"), "completed", None),
+        (
+            _note(expected={**_note()["expected"], "template_meta": None}),
+            _read(template_meta=b"anything"),
+            "completed",
+            None,
+        ),
         (_note(), _read(), "completed", None),
     ],
 )
@@ -306,7 +354,10 @@ def _frames(harness, tool, args):
     harness.monkeypatch.setenv("PYPSA_GUI_ANSWER_ASSURANCE_MODE", "disabled")
     session, collector, frames = ChatSession(), [], []
     for event, data in dispatch_tool_call(
-        session, {"id": uuid.uuid4().hex, "name": tool, "input": args}, collector, guided=True
+        session,
+        {"id": uuid.uuid4().hex, "name": tool, "input": args},
+        collector,
+        guided=True,
     ):
         if event == "tool_pending_confirmation":
             session.record_decision(data["confirmation_token"], "approve")
@@ -314,11 +365,19 @@ def _frames(harness, tool, args):
     return frames, collector
 
 
-_BULK = {"component_class": "Generator", "names": ["G1"], "updates": {"marginal_cost": 61.5}}
+_BULK = {
+    "component_class": "Generator",
+    "names": ["G1"],
+    "updates": {"marginal_cost": 61.5},
+}
 
 
-@pytest.mark.parametrize("tool, args", [("bulk_update_components", _BULK), ("undo_last", {})])
-def test_a_raising_write_is_a_tool_error_with_no_outcome(baseline, harness, monkeypatch, tool, args):
+@pytest.mark.parametrize(
+    "tool, args", [("bulk_update_components", _BULK), ("undo_last", {})]
+)
+def test_a_raising_write_is_a_tool_error_with_no_outcome(
+    baseline, harness, monkeypatch, tool, args
+):
     from fastapi import HTTPException
 
     if tool == "undo_last":
@@ -329,12 +388,16 @@ def test_a_raising_write_is_a_tool_error_with_no_outcome(baseline, harness, monk
 
     monkeypatch.setitem(chat_tools.DISPATCHERS, tool, boom)
     frames, collector = _frames(harness, tool, args)
-    assert [d.get("error_kind") for e, d in frames if e == "tool_error"] == ["tool_error"]
+    assert [d.get("error_kind") for e, d in frames if e == "tool_error"] == [
+        "tool_error"
+    ]
     assert not [d for e, d in frames if e == "tool_result"]
     assert all("_outcome" not in str(c) for c in collector), collector
 
 
-def test_a_write_that_times_out_never_reads_completed_or_failed(baseline, harness, monkeypatch):
+def test_a_write_that_times_out_never_reads_completed_or_failed(
+    baseline, harness, monkeypatch
+):
     import threading
 
     from harness import budget as harness_budget
@@ -356,6 +419,8 @@ def test_a_write_that_times_out_never_reads_completed_or_failed(baseline, harnes
     finally:
         release.set()
     assert landed.wait(10)
-    assert [d.get("error_kind") for e, d in frames if e == "tool_error"] == ["tool_timeout"]
+    assert [d.get("error_kind") for e, d in frames if e == "tool_error"] == [
+        "tool_timeout"
+    ]
     assert not [d for e, d in frames if e == "tool_result"]
     assert all("_outcome" not in str(c) for c in collector), collector

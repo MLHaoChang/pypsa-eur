@@ -4241,6 +4241,9 @@ def _dispatch_real_tool_call(
 
     from harness import outcomes
 
+    if tool_name in outcomes.WRITE_TOOLS and hasattr(result_for_model, "model_dump"):
+        # The import routes return an ImportSummary model; its outcome needs a dict.
+        result_for_model = result_for_model.model_dump(mode="json")
     if (
         session.assurance_turn is None
         and tool_name in outcomes.JOB_TOOLS | outcomes.WRITE_TOOLS

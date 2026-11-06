@@ -201,7 +201,8 @@ Named open rows (GK B (26) R1):
 | Case | Owner | Note |
 |------|-------|------|
 | A3.6 extra edits by a row write (rows the call did not name) | S4 | S2's read-back covers only the named rows; W3 catches other writers only |
-| A3.4 saved/unsaved values | S3 (import/export part) | only the live network is read so far (X7) |
+| A3.4 saved/unsaved values | S3 (import/export part) done; saved project files: issue 11 | S3 reads the live network: an import lands as an unsaved draft with no saved copy; an export's file is compared with the live network, which is what it writes. A read-back of the project's saved files (save_project, autosave) is not an issue 04 tool; named for issue 11 (X7) |
+| csv_bundle export: float text precision | `_pending` (X5) | a csv bundle stores floats as text, so the export check allows `CSV_RTOL` = 1e-12 relative; a change smaller than that reads completed (test_a_csv_export_sees_no_change_below_its_float_tolerance) |
 | import_excel, import_matpower, export_excel, export_matpower | `_pending` (X6) | no independent reader; they read adapter_pending |
 | R3: an outcome on the raise path for the four S2 tools and undo_last | S4 | GK B (26) chose (a): S3 keeps no `_outcome` on raise/timeout. S4 must keep: `failed` only when verified unchanged, never `failed` on a timeout. |
 
@@ -230,3 +231,14 @@ Built so far (undo_last):
 - Tests: `tests/assurance_acceptance/test_p3_snapshot_outcomes.py`, 37 passed. 14 mutants of classify_undo were killed (before X2; the X2 rows were added to the table after).
 
 Next: import/export (X4, X5, X6, X7). Then a PR with a release note and shots.
+
+Import/export build (same branch):
+- Tool sets: `IMPORT_TOOLS` (the four imports and import_uploaded_network) and `EXPORT_TOOLS` (the four exports) join `SNAPSHOT_TOOLS`. The loop dumps a pydantic result (ImportSummary) to a dict for a write tool, so the projection has a home; no other loop.py change.
+- X4: `note_import` reads the call's own bytes (b64 args, or the upload by file_id with its sha256 re-checked) into a scratch Network with the route's reader steps (netcdf: `import_network_from_netcdf`; csv: safe_extract, `_unescape_formula`, `import_from_csv_folder`, `normalise_eh_columns`). `read_import` reads, under the PyPSA lock between two edit-counter reads, the live rows per class, the extras, the values on the file's rows (`_match`: `pd.testing.assert_frame_equal`, order ignored, exact), and the user series (an import clears them). `classify_import`: completed; partial `rows_missing` (count "n of m imported") or `extra_rows`; uncertain `not_as_file`, `not_comparable`, `revision_moved`, `readback_failed`, `no_submission`. `IMPORT_EXTRAS` is a closed frozenset in code, measured empty: the routes add columns but no rows on ieee39 and the EH templates. A test shows an extra row reads partial, and reads completed with the row named in `counts.allowed_extras` once allow-listed.
+- X5: uploads are content-addressed, so a second export of an unchanged network lands on the first file (a dedup hit) and "one NEW upload" read uncertain on an ordinary repeat. `upload_service.watch_uploads` records, per call context as X2's pop watch does, the file_id of each upload this call adds, dedup hits included. The read-back needs exactly one, still listed as agent_export in the project's store, re-checks its sha256, reads it with the same reader, and compares it with the live network (exact for nc, `CSV_RTOL` for csv). Tests: completed for nc and csv on eh_datacenter; a repeat export completed; two files by one call, none, and another session's export into the same store all read `export_file_count`; a file unlike the network reads `not_as_network`.
+- X6: import_excel, import_matpower, import_uploaded_network with excel/matpower, export_excel and export_matpower read `uncertain adapter_pending` (tests named `..._pending`). The tool line words it "this file format cannot be checked yet"; a job keeps "this kind of job cannot be checked yet".
+- X7: see the A3.4 row above.
+- X8: `_match` returns UNCOMPARABLE on a TypeError/ValueError and the outcome reads not_comparable (a mutant test). The PyPSA lock is held only for the live read; the scratch read happens outside it.
+- R3: a refused import (an `ic:` bus) and an export with no project are tool errors with no `_outcome`.
+- Tests: `tests/assurance_acceptance/test_p3_file_outcomes.py`, 58 passed. Frontend: 2093 passed (src/components).
+
