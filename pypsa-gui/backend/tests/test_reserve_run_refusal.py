@@ -3,6 +3,7 @@ GK A R8, GK B L10): `POST /api/simulation/run` answers each `RP.KINDS` kind as
 `{code, error_kind, message}` before it starts a worker, and a refusal that still
 reaches the worker is a `reserve_refused` failure card, not a traceback.
 """
+
 from __future__ import annotations
 
 import json
@@ -19,8 +20,11 @@ from services.failure_taxonomy import classify_failure  # noqa: E402
 from services.solver import reserve_products as RP  # noqa: E402
 from tests.test_reserve_products import STRING, _bind, _cfg, _product, _site  # noqa: E402
 
-FRAGMENT = (pathlib.Path(__file__).resolve().parents[2] / "tool-error-kinds.d"
-            / "claude-dc06-flex-revenue.json")
+FRAGMENT = (
+    pathlib.Path(__file__).resolve().parents[2]
+    / "tool-error-kinds.d"
+    / "claude-dc06-flex-revenue.json"
+)
 
 
 def test_every_kind_has_a_literal_emitter_and_a_fragment_entry():
@@ -43,14 +47,17 @@ def test_a_buildable_config_is_no_refusal(monkeypatch):
     assert _refusal(_site(), [_product()], {STRING: 20.0}, monkeypatch) is None
 
 
-@pytest.mark.parametrize("case, kind", [
-    ("no_floor", RP.NOT_ELIGIBLE),
-    ("floor_above", RP.FLOOR_EXCEEDS),
-    ("unbound", RP.PRICE_MISSING),
-    ("stale", RP.PRICE_STALE),
-    ("initial_soc", RP.INITIAL_SOC),
-    ("hold_edited", RP.STRING_AVAIL),
-])
+@pytest.mark.parametrize(
+    "case, kind",
+    [
+        ("no_floor", RP.NOT_ELIGIBLE),
+        ("floor_above", RP.FLOOR_EXCEEDS),
+        ("unbound", RP.PRICE_MISSING),
+        ("stale", RP.PRICE_STALE),
+        ("initial_soc", RP.INITIAL_SOC),
+        ("hold_edited", RP.STRING_AVAIL),
+    ],
+)
 def test_each_refusal_is_typed(case, kind, monkeypatch):
     n = _site()
     p = _product()
@@ -66,7 +73,13 @@ def test_each_refusal_is_typed(case, kind, monkeypatch):
     elif case == "stale":
         _bind(n, [p], {"fcr": 1.0})
         bind = False
-        products = [p.model_copy(update={"capacity_price": p.capacity_price.model_copy(update={"version": 2})})]
+        products = [
+            p.model_copy(
+                update={
+                    "capacity_price": p.capacity_price.model_copy(update={"version": 2})
+                }
+            )
+        ]
     elif case == "initial_soc":
         n.storage_units.at[STRING, "cyclic_state_of_charge"] = False
         n.storage_units.at[STRING, "state_of_charge_initial"] = 5.0
@@ -80,8 +93,14 @@ def test_each_refusal_is_typed(case, kind, monkeypatch):
 
 def test_the_run_route_refuses_before_starting_a_worker(monkeypatch):
     calls = []
-    monkeypatch.setattr(SIM, "_reserve_refusal", lambda n, cfg: (
-        calls.append(1) or {"error_kind": RP.NOT_ELIGIBLE, "code": RP.NOT_ELIGIBLE, "message": "m"}))
+    monkeypatch.setattr(
+        SIM,
+        "_reserve_refusal",
+        lambda n, cfg: (
+            calls.append(1)
+            or {"error_kind": RP.NOT_ELIGIBLE, "code": RP.NOT_ELIGIBLE, "message": "m"}
+        ),
+    )
     monkeypatch.setattr(SIM._study_state, "blocking_study_detail", lambda: None)
     started = []
     monkeypatch.setattr(SIM.threading, "Thread", lambda *a, **k: started.append(1))
@@ -93,6 +112,8 @@ def test_the_run_route_refuses_before_starting_a_worker(monkeypatch):
 
 
 def test_a_refusal_in_the_worker_is_a_typed_failure_card():
-    card = classify_failure("error", f"reserve_refused: {RP.PRICE_STALE}: reserve product 'fcr': …")
+    card = classify_failure(
+        "error", f"reserve_refused: {RP.PRICE_STALE}: reserve product 'fcr': …"
+    )
     assert card["category"] == "reserve_refused"
     assert RP.PRICE_STALE in card["detail"]

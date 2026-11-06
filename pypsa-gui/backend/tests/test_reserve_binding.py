@@ -7,6 +7,7 @@ price series in another currency than the project's (409 `currency_mismatch`). A
 series with no unit is the stored EUR default. The preflight re-checks the currency
 the binding recorded, so a later finance-currency change is caught before the solve.
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -29,12 +30,20 @@ from services.solver import reserve_products as RP  # noqa: E402
 
 
 def _ref(pid: str) -> M.PriceSeriesRef:
-    return M.PriceSeriesRef(id=f"series-{pid}", version=1, hash=f"hash-{pid}-0000", source="user")
+    return M.PriceSeriesRef(
+        id=f"series-{pid}", version=1, hash=f"hash-{pid}-0000", source="user"
+    )
 
 
 def _product(pid="fcr", **kw) -> dict:
-    return {"id": pid, "kind": "fast_symmetric", "direction": "symmetric", "sustain_h": 0.5,
-            "capacity_price": _ref(pid).model_dump(mode="json"), **kw}
+    return {
+        "id": pid,
+        "kind": "fast_symmetric",
+        "direction": "symmetric",
+        "sustain_h": 0.5,
+        "capacity_price": _ref(pid).model_dump(mode="json"),
+        **kw,
+    }
 
 
 def _cfg(*products) -> M.CommercialConfig:
@@ -60,9 +69,15 @@ def _series(n, value=10.0, gap=False) -> pd.Series:
 def _bind(n, cfg, *, currency=None, units=None, gap=False, meta=True):
     units = units or {}
     return B.bind_commercial(
-        n, cfg, project_dir=None, resolve_ref=lambda ref: _series(n, gap=gap),
+        n,
+        cfg,
+        project_dir=None,
+        resolve_ref=lambda ref: _series(n, gap=gap),
         currency=currency,
-        series_meta=(lambda ref: {"unit": units[ref.id]} if ref.id in units else {}) if meta else None)
+        series_meta=(lambda ref: {"unit": units[ref.id]} if ref.id in units else {})
+        if meta
+        else None,
+    )
 
 
 # ── the field and its hashing (GK A R4, GK B L4) ────────────────────────────
@@ -91,12 +106,21 @@ def test_the_goal_free_config_carries_the_products_only_when_set():
 
     bare = SolverConfigSchema(commercial={"poc_link": "import"}).model_dump(mode="json")
     assert "reserve_products" not in goal_free_config(bare)["commercial"]
-    with_p = SolverConfigSchema(commercial=_cfg(_product()).model_dump(mode="json")).model_dump(mode="json")
+    with_p = SolverConfigSchema(
+        commercial=_cfg(_product()).model_dump(mode="json")
+    ).model_dump(mode="json")
     assert goal_free_config(with_p)["commercial"]["reserve_products"][0]["id"] == "fcr"
 
 
-@pytest.mark.parametrize("bad", [{"sustain_h": 0}, {"sustain_h": -1}, {"max_commit_mw": -0.1},
-                                 {"sustain_h": float("nan")}])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"sustain_h": 0},
+        {"sustain_h": -1},
+        {"max_commit_mw": -0.1},
+        {"sustain_h": float("nan")},
+    ],
+)
 def test_every_write_path_refuses_a_bad_product(bad):
     """R8: the solver-config schema (PUT, bulk import, the document-values preview)
     validates through CommercialConfig."""
@@ -117,13 +141,17 @@ def test_a_product_id_twice_is_refused():
 
 def test_the_binding_writes_each_price_fully_covered():
     n = _net()
-    stored = _bind(n, _cfg(_product("fcr"), _product("afrr", kind="secondary", direction="up")))
+    stored = _bind(
+        n, _cfg(_product("fcr"), _product("afrr", kind="secondary", direction="up"))
+    )
     frame = n.buses_t[RP.PRICE_FRAME]
     assert sorted(frame.columns) == ["ic:reserve:afrr", "ic:reserve:fcr"]
     assert (frame["ic:reserve:fcr"] == 10.0).all()
     assert [p["id"] for p in stored["reserve_products"]] == ["fcr", "afrr"]
     # The solve reads it back as bound (not missing, not stale).
-    s, flags = SI._read(n, RP.PRICE_FRAME, "ic:reserve:fcr", _ref("fcr"), RP.PRICE_MISSING)
+    s, flags = SI._read(
+        n, RP.PRICE_FRAME, "ic:reserve:fcr", _ref("fcr"), RP.PRICE_MISSING
+    )
     assert flags == [] and s is not None
 
 
@@ -161,9 +189,18 @@ def test_without_products_the_binding_writes_nothing_new():
 # ── the currency gate (GK B L2) ──────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("unit, have", [("EUR/MW/h", "EUR"), ("gbp/MW/h", "GBP"), ("USD", "USD"),
-                                        (None, "EUR"), ("", "EUR"), ("share", None),
-                                        ("MW", None)])
+@pytest.mark.parametrize(
+    "unit, have",
+    [
+        ("EUR/MW/h", "EUR"),
+        ("gbp/MW/h", "GBP"),
+        ("USD", "USD"),
+        (None, "EUR"),
+        ("", "EUR"),
+        ("share", None),
+        ("MW", None),
+    ],
+)
 def test_a_series_currency_is_read_from_its_unit(unit, have):
     assert B.series_currency({"unit": unit} if unit is not None else {}) == have
 
@@ -180,7 +217,9 @@ def test_a_price_in_another_currency_is_refused_before_any_write():
 def test_the_stored_eur_default_is_refused_in_a_gbp_project_and_binds_in_a_eur_one():
     with pytest.raises(B.BindingRefusal) as exc:
         _bind(_net(), _cfg(_product()), currency="GBP")
-    assert exc.value.code == "currency_mismatch" and "priced in EUR" in exc.value.message
+    assert (
+        exc.value.code == "currency_mismatch" and "priced in EUR" in exc.value.message
+    )
     n = _net()
     _bind(n, _cfg(_product()), currency="EUR")
     assert n.meta[RP.CURRENCY_META] == {"fcr": "EUR"}
@@ -213,8 +252,13 @@ def test_the_preflight_catches_a_finance_currency_changed_after_binding():
     commercial = cfg.model_dump(mode="json")
 
     def codes(currency):
-        return [(sev, code) for sev, code, *_ in PF.commercial_findings(n, commercial, currency=currency)
-                if code == "commercial.currency_mismatch"]
+        return [
+            (sev, code)
+            for sev, code, *_ in PF.commercial_findings(
+                n, commercial, currency=currency
+            )
+            if code == "commercial.currency_mismatch"
+        ]
 
     assert codes("EUR") == []
     assert codes(None) == []
@@ -230,21 +274,30 @@ def test_the_preflight_catches_a_finance_currency_changed_after_binding():
 def _ic_digest(stored):
     from services.finance.investment_case_runner import assumptions_digest
 
-    return assumptions_digest(finance={"currency": "EUR"}, commercial=stored, dispatch=None, packs={})
+    return assumptions_digest(
+        finance={"currency": "EUR"}, commercial=stored, dispatch=None, packs={}
+    )
 
 
 def test_without_products_the_ic_digest_is_masters():
     """Pinned on master 33028f86 with the same bound config (no products)."""
-    stored = _bind(_net(), M.CommercialConfig(poc_link="import", timezone="Europe/Amsterdam"))
+    stored = _bind(
+        _net(), M.CommercialConfig(poc_link="import", timezone="Europe/Amsterdam")
+    )
     h, parts = _ic_digest(stored)
     assert parts["commercial"] == "11496092cfbcd746ded5a5b5355aa5fb"
     assert h == "a1ec2cfba17637325f25f239fb0dd178"
 
 
 def test_with_products_the_ic_digest_carries_the_price_series_hash():
-    base = _ic_digest(_bind(_net(), M.CommercialConfig(poc_link="import")))[1]["commercial"]
+    base = _ic_digest(_bind(_net(), M.CommercialConfig(poc_link="import")))[1][
+        "commercial"
+    ]
     one = _ic_digest(_bind(_net(), _cfg(_product())))[1]["commercial"]
     other_series = _product()
-    other_series["capacity_price"] = {**other_series["capacity_price"], "hash": "hash-fcr-1111"}
+    other_series["capacity_price"] = {
+        **other_series["capacity_price"],
+        "hash": "hash-fcr-1111",
+    }
     two = _ic_digest(_bind(_net(), _cfg(other_series)))[1]["commercial"]
     assert len({base, one, two}) == 3

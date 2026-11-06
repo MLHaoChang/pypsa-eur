@@ -6,6 +6,7 @@ Generic product shapes only (SAGC-1: no market names, no shipped prices):
 user Library series (per MW per hour committed, in the project's currency);
 nothing market-specific ships with the app.
 """
+
 from __future__ import annotations
 
 from models.commercial import ReserveDirection, ReserveKind, ReserveProduct

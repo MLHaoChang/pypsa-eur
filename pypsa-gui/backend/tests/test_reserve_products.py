@@ -4,6 +4,7 @@ Hand cases on a one-bus site: a DC-03 string ``backup_bess_1`` (5 MW, its
 discharge held by a p_max_pu series of 0), a free supply and no load, so the
 only thing the LP can earn is the reserve.
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -27,31 +28,61 @@ STRING = "backup_bess_1"
 
 
 def _ref(pid: str) -> PriceSeriesRef:
-    return PriceSeriesRef(id=f"series-{pid}", version=1, hash=f"hash-{pid}-0000", source="user")
+    return PriceSeriesRef(
+        id=f"series-{pid}", version=1, hash=f"hash-{pid}-0000", source="user"
+    )
 
 
-def _product(pid="fcr", kind="fast_symmetric", direction="symmetric", sustain_h=0.5, **kw) -> ReserveProduct:
-    return ReserveProduct(id=pid, kind=kind, direction=direction, sustain_h=sustain_h,
-                          capacity_price=_ref(pid), **kw)
+def _product(
+    pid="fcr", kind="fast_symmetric", direction="symmetric", sustain_h=0.5, **kw
+) -> ReserveProduct:
+    return ReserveProduct(
+        id=pid,
+        kind=kind,
+        direction=direction,
+        sustain_h=sustain_h,
+        capacity_price=_ref(pid),
+        **kw,
+    )
 
 
-def _site(snaps=4, energy_mwh=25.0, p_nom=5.0, hold=True, eta=1.0, weights=1.0) -> pypsa.Network:
+def _site(
+    snaps=4, energy_mwh=25.0, p_nom=5.0, hold=True, eta=1.0, weights=1.0
+) -> pypsa.Network:
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2030-01-01", periods=snaps, freq="h"))
     n.snapshot_weightings.loc[:, :] = weights
     n.add("Bus", "site")
     n.add("Generator", "supply", bus="site", p_nom=100.0, marginal_cost=1.0)
-    n.add("StorageUnit", STRING, bus="site", p_nom=p_nom, max_hours=energy_mwh / p_nom,
-          efficiency_store=eta, efficiency_dispatch=eta, cyclic_state_of_charge=True)
+    n.add(
+        "StorageUnit",
+        STRING,
+        bus="site",
+        p_nom=p_nom,
+        max_hours=energy_mwh / p_nom,
+        efficiency_store=eta,
+        efficiency_dispatch=eta,
+        cyclic_state_of_charge=True,
+    )
     if hold:
-        n.storage_units_t.p_max_pu = pd.DataFrame(0.0, index=n.snapshots, columns=[STRING])
+        n.storage_units_t.p_max_pu = pd.DataFrame(
+            0.0, index=n.snapshots, columns=[STRING]
+        )
     return n
 
 
 def _bind(n, products, prices) -> None:
     SI.write_reference_series(
-        n, {RP.price_column(p.id): (pd.Series(prices[p.id], index=n.snapshots, dtype=float), p.capacity_price)
-            for p in products}, frame=RP.PRICE_FRAME)
+        n,
+        {
+            RP.price_column(p.id): (
+                pd.Series(prices[p.id], index=n.snapshots, dtype=float),
+                p.capacity_price,
+            )
+            for p in products
+        },
+        frame=RP.PRICE_FRAME,
+    )
 
 
 def _cfg(products):
@@ -61,8 +92,12 @@ def _cfg(products):
 def _solve(n, products, floors, prices=None):
     prices = prices or {p.id: 10.0 for p in products}
     _bind(n, products, prices)
-    fn = RP._wrap_with_reserve_products(n, None, _cfg(products), backup=(floors, frozenset({STRING})))
-    status, _ = n.optimize(solver_name="highs", extra_functionality=fn, include_objective_constant=False)
+    fn = RP._wrap_with_reserve_products(
+        n, None, _cfg(products), backup=(floors, frozenset({STRING}))
+    )
+    status, _ = n.optimize(
+        solver_name="highs", extra_functionality=fn, include_objective_constant=False
+    )
     assert status == "ok"
     assert RP.persist_solution(n)
     frame, flags = RP.solved(n)
@@ -78,7 +113,9 @@ def test_hand_case_symmetric_product_sits_the_soc_between_its_bands():
     p = _product()
     frame = _solve(n, [p], {STRING: 20.0})
     assert frame[f"{STRING}|fcr"].to_numpy() == pytest.approx([5.0] * 4, abs=TOL)
-    assert n.storage_units_t.state_of_charge[STRING].to_numpy() == pytest.approx([22.5] * 4, abs=TOL)
+    assert n.storage_units_t.state_of_charge[STRING].to_numpy() == pytest.approx(
+        [22.5] * 4, abs=TOL
+    )
     assert n.objective == pytest.approx(-200.0, abs=1e-4)
     # The DC-03 hold stays: no scheduled discharge.
     assert (n.storage_units_t.p_dispatch[STRING].abs() <= TOL).all()
@@ -110,10 +147,14 @@ def test_up_power_reads_availability_on_a_non_string_storage():
     availability: at 0.4 in one snapshot it commits 2 MW there."""
     n = _site(hold=False)
     n.storage_units.rename(index={STRING: "ups_battery"}, inplace=True)
-    n.storage_units_t.p_max_pu = pd.DataFrame({"ups_battery": [1.0, 0.4, 1.0, 1.0]}, index=n.snapshots)
+    n.storage_units_t.p_max_pu = pd.DataFrame(
+        {"ups_battery": [1.0, 0.4, 1.0, 1.0]}, index=n.snapshots
+    )
     up = _product("afrr_up", kind="secondary", direction="up", sustain_h=1.0)
     frame = _solve(n, [up], {"ups_battery": 15.0})
-    assert frame["ups_battery|afrr_up"].to_numpy() == pytest.approx([5.0, 2.0, 5.0, 5.0], abs=TOL)
+    assert frame["ups_battery|afrr_up"].to_numpy() == pytest.approx(
+        [5.0, 2.0, 5.0, 5.0], abs=TOL
+    )
 
 
 def test_a_product_cap_binds():
@@ -125,7 +166,7 @@ def test_a_product_cap_binds():
 def test_weights_are_objective_hours():
     """A snapshot of weight 3 earns 3 h × price × r in the objective."""
     n = _site()
-    n.snapshot_weightings["objective"] = 3.0   # generators and stores stay 1
+    n.snapshot_weightings["objective"] = 3.0  # generators and stores stay 1
     _solve(n, [_product()], {STRING: 20.0})
     assert n.objective == pytest.approx(-3 * 200.0, abs=1e-4)
 
@@ -133,8 +174,15 @@ def test_weights_are_objective_hours():
 def test_no_products_leaves_the_chain_untouched():
     n = _site()
     fn = object()
-    assert RP._wrap_with_reserve_products(n, fn, _cfg([]), backup=({}, frozenset())) is fn
-    assert RP._wrap_with_reserve_products(n, fn, SimpleNamespace(), backup=({}, frozenset())) is fn
+    assert (
+        RP._wrap_with_reserve_products(n, fn, _cfg([]), backup=({}, frozenset())) is fn
+    )
+    assert (
+        RP._wrap_with_reserve_products(
+            n, fn, SimpleNamespace(), backup=({}, frozenset())
+        )
+        is fn
+    )
 
 
 # ── refusals before the solve (R8) ──────────────────────────────────────────
@@ -143,14 +191,19 @@ def test_no_products_leaves_the_chain_untouched():
 def _refused(n, products, floors):
     _bind(n, [p for p in products], {p.id: 1.0 for p in products})
     with pytest.raises(RP.ReserveRefusal) as exc:
-        RP._wrap_with_reserve_products(n, None, _cfg(products), backup=(floors, frozenset({STRING})))
+        RP._wrap_with_reserve_products(
+            n, None, _cfg(products), backup=(floors, frozenset({STRING}))
+        )
     return exc.value.kind
 
 
 def test_a_storage_without_a_floor_is_not_eligible():
     assert _refused(_site(), [_product()], {}) == RP.NOT_ELIGIBLE
     assert _refused(_site(), [_product()], {STRING: float("nan")}) == RP.NOT_ELIGIBLE
-    assert _refused(_site(), [_product(storages=["other"])], {STRING: 20.0}) == RP.NOT_ELIGIBLE
+    assert (
+        _refused(_site(), [_product(storages=["other"])], {STRING: 20.0})
+        == RP.NOT_ELIGIBLE
+    )
 
 
 def test_a_floor_above_the_usable_energy_is_refused():
@@ -161,12 +214,18 @@ def test_an_unbound_or_stale_price_is_refused():
     n = _site()
     p = _product()
     with pytest.raises(RP.ReserveRefusal) as exc:
-        RP._wrap_with_reserve_products(n, None, _cfg([p]), backup=({STRING: 20.0}, frozenset({STRING})))
+        RP._wrap_with_reserve_products(
+            n, None, _cfg([p]), backup=({STRING: 20.0}, frozenset({STRING}))
+        )
     assert exc.value.kind == RP.PRICE_MISSING
     _bind(n, [p], {"fcr": 1.0})
-    newer = p.model_copy(update={"capacity_price": p.capacity_price.model_copy(update={"version": 2})})
+    newer = p.model_copy(
+        update={"capacity_price": p.capacity_price.model_copy(update={"version": 2})}
+    )
     with pytest.raises(RP.ReserveRefusal) as exc:
-        RP._wrap_with_reserve_products(n, None, _cfg([newer]), backup=({STRING: 20.0}, frozenset({STRING})))
+        RP._wrap_with_reserve_products(
+            n, None, _cfg([newer]), backup=({STRING: 20.0}, frozenset({STRING}))
+        )
     assert exc.value.kind == RP.PRICE_STALE
 
 
@@ -191,13 +250,24 @@ def test_the_initial_soc_path_bounds_the_first_snapshot():
 # ── the model ──────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("kw", [
-    {"kind": "fast_symmetric", "direction": "up"},
-    {"kind": "secondary", "direction": "symmetric"},
-    {"sustain_h": 0.0}, {"sustain_h": float("nan")}, {"max_commit_mw": -1.0},
-])
+@pytest.mark.parametrize(
+    "kw",
+    [
+        {"kind": "fast_symmetric", "direction": "up"},
+        {"kind": "secondary", "direction": "symmetric"},
+        {"sustain_h": 0.0},
+        {"sustain_h": float("nan")},
+        {"max_commit_mw": -1.0},
+    ],
+)
 def test_the_product_model_refuses_bad_shapes(kw):
-    base = {"id": "x", "kind": "secondary", "direction": "up", "sustain_h": 1.0, "capacity_price": _ref("x")}
+    base = {
+        "id": "x",
+        "kind": "secondary",
+        "direction": "up",
+        "sustain_h": 1.0,
+        "capacity_price": _ref("x"),
+    }
     with pytest.raises(ValueError):
         ReserveProduct(**{**base, **kw})
 
@@ -216,22 +286,31 @@ def test_the_outage_redispatch_carries_no_reserves():
     out = RP.without_reserves(cfg)
     assert RP.products_of(out) == [] and RP.products_of(cfg) != []
     # The solve's own form: a plain dict.
-    cfg.commercial = {"poc_link": "poc", "reserve_products": [_product().model_dump(mode="json")]}
+    cfg.commercial = {
+        "poc_link": "poc",
+        "reserve_products": [_product().model_dump(mode="json")],
+    }
     out = RP.without_reserves(cfg)
     assert RP.products_of(out) == [] and RP.products_of(cfg)[0].id == "fcr"
-    assert out.commercial == {"poc_link": "poc"}  # the config as it reads without products
+    assert out.commercial == {
+        "poc_link": "poc"
+    }  # the config as it reads without products
     cfg.commercial = {"reserve_products": [_product().model_dump(mode="json")]}
     assert RP.without_reserves(cfg).commercial is None
     assert cfg.commercial["reserve_products"] and out.commercial["poc_link"] == "poc"
 
 
-@pytest.mark.parametrize("direction, sustain_h, want", [("up", 1.0, 4.5), ("down", 2.0, 5.0 / 1.8)])
+@pytest.mark.parametrize(
+    "direction, sustain_h, want", [("up", 1.0, 4.5), ("down", 2.0, 5.0 / 1.8)]
+)
 def test_efficiencies_sit_on_the_right_side(direction, sustain_h, want):
     """η 0.9 each way, floor 20, energy 25. Up: soc − r·1/0.9 ≥ 20 at soc 25
     gives r = 4.5. Down: the floor holds (soc ≥ 20) and soc + r·2·0.9 ≤ 25
     gives r = 5/1.8 (η misplaced, 5/(2/0.9) = 2.25)."""
     n = _site(eta=0.9)
-    p = _product(f"x_{direction}", kind="secondary", direction=direction, sustain_h=sustain_h)
+    p = _product(
+        f"x_{direction}", kind="secondary", direction=direction, sustain_h=sustain_h
+    )
     frame = _solve(n, [p], {STRING: 20.0})
     assert frame.iloc[:, 0].to_numpy() == pytest.approx([want] * 4, abs=1e-5)
     assert (n.storage_units_t.state_of_charge[STRING] >= 20.0 - TOL).all()
@@ -248,9 +327,15 @@ def test_two_investment_periods_weight_revenue_by_the_period_weight():
     n.storage_units.at[STRING, "cyclic_state_of_charge_per_period"] = True
     n.storage_units_t.p_max_pu = pd.DataFrame(0.0, index=n.snapshots, columns=[STRING])
     _bind(n, [_product()], {"fcr": 10.0})
-    fn = RP._wrap_with_reserve_products(n, None, _cfg([_product()]), backup=({STRING: 20.0}, frozenset({STRING})))
-    status, _ = n.optimize(solver_name="highs", extra_functionality=fn, multi_investment_periods=True,
-                           include_objective_constant=False)
+    fn = RP._wrap_with_reserve_products(
+        n, None, _cfg([_product()]), backup=({STRING: 20.0}, frozenset({STRING}))
+    )
+    status, _ = n.optimize(
+        solver_name="highs",
+        extra_functionality=fn,
+        multi_investment_periods=True,
+        include_objective_constant=False,
+    )
     assert status == "ok"
     assert n.objective == pytest.approx(-300.0, abs=1e-4)
     hours, period = RP.reserve_weights(n)
@@ -277,14 +362,22 @@ def test_a_storage_merely_named_like_a_string_reads_its_series():
     backup_bess_x outside that set takes p_max_pu(t), 0.4 in one snapshot."""
     n = _site(hold=False)
     n.storage_units.rename(index={STRING: "backup_bess_x"}, inplace=True)
-    n.storage_units_t.p_max_pu = pd.DataFrame({"backup_bess_x": [1.0, 0.4, 1.0, 1.0]}, index=n.snapshots)
+    n.storage_units_t.p_max_pu = pd.DataFrame(
+        {"backup_bess_x": [1.0, 0.4, 1.0, 1.0]}, index=n.snapshots
+    )
     up = _product("afrr_up", kind="secondary", direction="up", sustain_h=1.0)
     _bind(n, [up], {"afrr_up": 10.0})
-    fn = RP._wrap_with_reserve_products(n, None, _cfg([up]), backup=({"backup_bess_x": 15.0}, frozenset({STRING})))
-    n.optimize(solver_name="highs", extra_functionality=fn, include_objective_constant=False)
+    fn = RP._wrap_with_reserve_products(
+        n, None, _cfg([up]), backup=({"backup_bess_x": 15.0}, frozenset({STRING}))
+    )
+    n.optimize(
+        solver_name="highs", extra_functionality=fn, include_objective_constant=False
+    )
     RP.persist_solution(n)
     frame, _ = RP.solved(n)
-    assert frame["backup_bess_x|afrr_up"].to_numpy() == pytest.approx([5.0, 2.0, 5.0, 5.0], abs=TOL)
+    assert frame["backup_bess_x|afrr_up"].to_numpy() == pytest.approx(
+        [5.0, 2.0, 5.0, 5.0], abs=TOL
+    )
 
 
 def test_a_string_whose_hold_was_edited_is_refused():
@@ -312,7 +405,9 @@ def test_the_previous_soc_follows_pypsa_with_standing_loss_and_weighted_hours():
     r = frame[f"{STRING}|afrr_up"]
     assert r.iloc[0] == pytest.approx(4.0, abs=1e-5)
     soc = n.storage_units_t.state_of_charge[STRING]
-    prev = pd.concat([pd.Series([24.0]), soc.iloc[:-1].reset_index(drop=True)]).to_numpy()
+    prev = pd.concat(
+        [pd.Series([24.0]), soc.iloc[:-1].reset_index(drop=True)]
+    ).to_numpy()
     assert (prev - r.to_numpy() >= 20.0 - 1e-5).all()
 
 
@@ -329,12 +424,15 @@ def _dc_project(tmp_path, backup: dict, tid: str = "eh_datacenter"):
     from project_templates import eh_templates as t
     from services.adequacy import dc_backup
 
-    spec = DataCentreLoadSpec.model_validate({**t.dc_load_preset(tid), "backup": backup})
+    spec = DataCentreLoadSpec.model_validate(
+        {**t.dc_load_preset(tid), "backup": backup}
+    )
     n = t.BUILDERS[tid](load_spec=spec)
     island = t.island_config(tid, None, load_spec=spec)
     (tmp_path / "island_config.json").write_text(json.dumps(island))
     (tmp_path / dc_backup.META_FILE).write_text(
-        json.dumps({"id": tid, "dc_load": {"spec": spec.model_dump(mode="json")}}))
+        json.dumps({"id": tid, "dc_load": {"spec": spec.model_dump(mode="json")}})
+    )
     return n
 
 
@@ -352,7 +450,9 @@ def test_the_floor_of_a_saved_hybrid_project_is_each_strings_sized_energy(tmp_pa
     su = n.storage_units
     for s in built:
         # No headroom: each string is built holding exactly its usable backup energy.
-        assert floors[s] == pytest.approx(su.at[s, "p_nom"] * su.at[s, "max_hours"], rel=1e-12)
+        assert floors[s] == pytest.approx(
+            su.at[s, "p_nom"] * su.at[s, "max_hours"], rel=1e-12
+        )
 
 
 def test_a_spec_edit_moves_the_floor_and_a_stale_network_is_refused(tmp_path):
@@ -386,7 +486,8 @@ def test_headroom_raises_the_energy_but_never_the_floor(tmp_path):
         floor = b.string_mw * (b.autonomy_h + b.ride_through_s / 3600.0) / eta
         assert floors[s] == pytest.approx(floor, rel=1e-12)
         assert su.at[s, "p_nom"] * su.at[s, "max_hours"] == pytest.approx(
-            floor + b.string_mw * 1.0 / eta, rel=1e-12)
+            floor + b.string_mw * 1.0 / eta, rel=1e-12
+        )
 
 
 def test_a_project_without_a_saved_spec_has_nothing_eligible(tmp_path):
@@ -409,18 +510,40 @@ def _ups_site(tmp_path, energy_mwh: float, ride_through_s=600.0, eta=0.9, crit_m
     n.set_snapshots(pd.date_range("2030-01-01", periods=4, freq="h"))
     n.add("Bus", "site")
     n.add("Generator", "supply", bus="site", p_nom=100.0, marginal_cost=1.0)
-    n.add("Load", "crit", bus="site", p_set=pd.Series([crit_mw * 0.5, crit_mw, crit_mw * 0.8, 0.0],
-                                                       index=n.snapshots))
-    n.add("StorageUnit", "ups", bus="site", p_nom=5.0, max_hours=energy_mwh / 5.0,
-          efficiency_store=eta, efficiency_dispatch=eta, cyclic_state_of_charge=True)
-    island = {"units": {"crit": {"kind": "load", "critical": True}},
-              "requirements": {"ride_through_storage": ["ups"]}}
+    n.add(
+        "Load",
+        "crit",
+        bus="site",
+        p_set=pd.Series(
+            [crit_mw * 0.5, crit_mw, crit_mw * 0.8, 0.0], index=n.snapshots
+        ),
+    )
+    n.add(
+        "StorageUnit",
+        "ups",
+        bus="site",
+        p_nom=5.0,
+        max_hours=energy_mwh / 5.0,
+        efficiency_store=eta,
+        efficiency_dispatch=eta,
+        cyclic_state_of_charge=True,
+    )
+    island = {
+        "units": {"crit": {"kind": "load", "critical": True}},
+        "requirements": {"ride_through_storage": ["ups"]},
+    }
     spec = DataCentreLoadSpec.model_validate(
-        {**t.dc_load_preset("eh_datacenter"),
-         "backup": {"mode": "genset", "ride_through_s": ride_through_s}})
+        {
+            **t.dc_load_preset("eh_datacenter"),
+            "backup": {"mode": "genset", "ride_through_s": ride_through_s},
+        }
+    )
     (tmp_path / "island_config.json").write_text(json.dumps(island))
     (tmp_path / dc_backup.META_FILE).write_text(
-        json.dumps({"id": "eh_datacenter", "dc_load": {"spec": spec.model_dump(mode="json")}}))
+        json.dumps(
+            {"id": "eh_datacenter", "dc_load": {"spec": spec.model_dump(mode="json")}}
+        )
+    )
     return n
 
 
@@ -436,8 +559,9 @@ def test_ups_floor_by_hand_at_and_just_above(tmp_path, above, want_mw):
     up = _product("up", kind="secondary", direction="up", sustain_h=0.5)
     _bind(n, [up], {"up": 10.0})
     fn = RP._wrap_with_reserve_products(n, None, _cfg([up]), backup=(floors, strings))
-    status, _ = n.optimize(solver_name="highs", extra_functionality=fn,
-                           include_objective_constant=False)
+    status, _ = n.optimize(
+        solver_name="highs", extra_functionality=fn, include_objective_constant=False
+    )
     assert status == "ok"
     assert RP.persist_solution(n)
     frame, _ = RP.solved(n)
@@ -470,9 +594,14 @@ def test_a_ups_without_its_efficiency_or_critical_load_is_not_eligible(tmp_path)
 def _hbk(**kw):
     from models.flex_archetypes import BackupSpec
 
-    bess = {"power_mw": 1.0, "energy_mwh": 1.0, "round_trip_efficiency": 0.81,
-            "depth_of_discharge": 0.9, "calendar_fade_per_year": 0.0,
-            "cycle_fade_per_full_cycle": 0.0}
+    bess = {
+        "power_mw": 1.0,
+        "energy_mwh": 1.0,
+        "round_trip_efficiency": 0.81,
+        "depth_of_discharge": 0.9,
+        "calendar_fade_per_year": 0.0,
+        "cycle_fade_per_full_cycle": 0.0,
+    }
     return BackupSpec(mode="bess", bess=bess, **kw)
 
 
@@ -482,9 +611,16 @@ def test_no_headroom_dumps_and_sizes_as_before():
     for spec in (_hbk(), _hbk(reserve_headroom_h=0.0)):
         assert "reserve_headroom_h" not in spec.model_dump(mode="json")
         assert "reserve_headroom_h" not in spec.model_dump(exclude_unset=True)
-    plain = dc_backup.size_bess([10.0], firm_genset_mw=0.0, backup=_hbk(), redundancy="N+1", years=10)
-    zero = dc_backup.size_bess([10.0], firm_genset_mw=0.0, backup=_hbk(reserve_headroom_h=0.0),
-                               redundancy="N+1", years=10)
+    plain = dc_backup.size_bess(
+        [10.0], firm_genset_mw=0.0, backup=_hbk(), redundancy="N+1", years=10
+    )
+    zero = dc_backup.size_bess(
+        [10.0],
+        firm_genset_mw=0.0,
+        backup=_hbk(reserve_headroom_h=0.0),
+        redundancy="N+1",
+        years=10,
+    )
     assert plain == zero
     assert not {k for k in plain if "headroom" in k or "backup_usable" in k}
     assert "reserve_headroom_h" in _hbk(reserve_headroom_h=2.0).model_dump()
@@ -497,26 +633,46 @@ def test_headroom_adds_usable_energy_at_the_backup_energys_dod():
     plain = dc_backup.size_bess([10.0], backup=_hbk(), **kw)
     more = dc_backup.size_bess([10.0], backup=_hbk(reserve_headroom_h=2.0), **kw)
     eta = 0.9
-    assert more["e_backup_usable_mwh_per_string"] == pytest.approx(plain["e_usable_mwh_per_string"])
+    assert more["e_backup_usable_mwh_per_string"] == pytest.approx(
+        plain["e_usable_mwh_per_string"]
+    )
     assert more["e_headroom_usable_mwh_per_string"] == pytest.approx(5.0 * 2.0 / eta)
     assert more["e_usable_mwh_per_string"] == pytest.approx(
-        plain["e_usable_mwh_per_string"] + 5.0 * 2.0 / eta)
-    assert more["e_mwh_per_string"] == pytest.approx(more["e_usable_mwh_per_string"] / 0.9)
+        plain["e_usable_mwh_per_string"] + 5.0 * 2.0 / eta
+    )
+    assert more["e_mwh_per_string"] == pytest.approx(
+        more["e_usable_mwh_per_string"] / 0.9
+    )
     assert (more["strings"], more["p_mw"]) == (plain["strings"], plain["p_mw"])
-    assert {"key": "reserve_headroom_h", "value": 2.0, "unit": "h", "assumed": False,
-            "source": dc_backup.SET_SOURCE} in more["inputs"]
+    assert {
+        "key": "reserve_headroom_h",
+        "value": 2.0,
+        "unit": "h",
+        "assumed": False,
+        "source": dc_backup.SET_SOURCE,
+    } in more["inputs"]
 
 
 def test_headroom_capex_is_priced_once_in_the_energy_lines():
     from services.adequacy import dc_backup
 
-    prices = {"gas-genset.investment.overnight": 0.0, "gas-genset.investment.fom_share": 0.0,
-              "gas-genset.investment.lifetime": 20.0, "battery.power.overnight": 0.0,
-              "battery.power.fom_share": 0.0, "battery.power.lifetime": 20.0,
-              "battery.energy.overnight": 100.0, "battery.energy.fom_share": 0.0,
-              "battery.energy.lifetime": 20.0, "discount_rate": 0.0, "currency": "EUR"}
+    prices = {
+        "gas-genset.investment.overnight": 0.0,
+        "gas-genset.investment.fom_share": 0.0,
+        "gas-genset.investment.lifetime": 20.0,
+        "battery.power.overnight": 0.0,
+        "battery.power.fom_share": 0.0,
+        "battery.power.lifetime": 20.0,
+        "battery.energy.overnight": 100.0,
+        "battery.energy.fom_share": 0.0,
+        "battery.energy.lifetime": 20.0,
+        "discount_rate": 0.0,
+        "currency": "EUR",
+    }
     prices = {k: prices.get(k, 0.0) for k in (*dc_backup.PACK_KEYS, *prices)}
-    args = dict(genset_mw=0.0, heat_rate=2.8, run_hours_per_year=0.0, years=1, prices=prices)
+    args = dict(
+        genset_mw=0.0, heat_rate=2.8, run_hours_per_year=0.0, years=1, prices=prices
+    )
     kw = dict(firm_genset_mw=0.0, redundancy="N+1", years=1)
     out = {}
     for h in (0.0, 2.0):
@@ -527,17 +683,27 @@ def test_headroom_capex_is_priced_once_in_the_energy_lines():
     assert "reserve_headroom_mwh" not in c0
     assert not [r for r in c0["inputs"] if r["key"] == "reserve_headroom_mwh"]
     head = c2["reserve_headroom_mwh"]
-    assert head == pytest.approx(s2["strings"] * 5.0 * 2.0 / 0.9 / 0.9)  # usable / DoD, no fade
+    assert head == pytest.approx(
+        s2["strings"] * 5.0 * 2.0 / 0.9 / 0.9
+    )  # usable / DoD, no fade
     assert head == pytest.approx(s2["e_mwh"] - s0["e_mwh"])
+
     # Exactly once: the extra energy's capex is its MWh x price, in the energy line only.
     def line(c, name):
-        return next(r["npv"] for r in c["lines"] if (r["leg"], r["line"]) == ("bess", name))
+        return next(
+            r["npv"] for r in c["lines"] if (r["leg"], r["line"]) == ("bess", name)
+        )
 
-    assert line(c2, "energy_capex_and_repurchase") - line(c0, "energy_capex_and_repurchase") \
-        == pytest.approx(head * 100.0, rel=1e-9)
-    assert line(c2, "power_capex_and_repurchase") == line(c0, "power_capex_and_repurchase")
+    assert line(c2, "energy_capex_and_repurchase") - line(
+        c0, "energy_capex_and_repurchase"
+    ) == pytest.approx(head * 100.0, rel=1e-9)
+    assert line(c2, "power_capex_and_repurchase") == line(
+        c0, "power_capex_and_repurchase"
+    )
     # The remaining-life credit scales with it (20-year life, 1-year horizon).
-    assert c2["npv_bess"] - c0["npv_bess"] == pytest.approx(head * 100.0 / 20.0, rel=1e-9)
+    assert c2["npv_bess"] - c0["npv_bess"] == pytest.approx(
+        head * 100.0 / 20.0, rel=1e-9
+    )
 
 
 # ── settlement (GK B L1, L3, L5, L7; GK A R6) ────────────────────────────────
@@ -546,7 +712,9 @@ def test_headroom_capex_is_priced_once_in_the_energy_lines():
 def _lines(n, products, floors):
     from services.results import billing as B
 
-    return B.reserve_lines(n, _cfg(products), "site", backup=(floors, frozenset({STRING})))
+    return B.reserve_lines(
+        n, _cfg(products), "site", backup=(floors, frozenset({STRING}))
+    )
 
 
 def test_two_periods_settle_per_period_without_the_period_weight():
@@ -560,16 +728,25 @@ def test_two_periods_settle_per_period_without_the_period_weight():
     fcr = _product()
     _bind(n, [fcr], {"fcr": 10.0})
     floors = {STRING: 20.0}
-    fn = RP._wrap_with_reserve_products(n, None, _cfg([fcr]), backup=(floors, frozenset({STRING})))
-    status, _ = n.optimize(solver_name="highs", extra_functionality=fn, multi_investment_periods=True,
-                           include_objective_constant=False)
+    fn = RP._wrap_with_reserve_products(
+        n, None, _cfg([fcr]), backup=(floors, frozenset({STRING}))
+    )
+    status, _ = n.optimize(
+        solver_name="highs",
+        extra_functionality=fn,
+        multi_investment_periods=True,
+        include_objective_constant=False,
+    )
     assert status == "ok" and RP.persist_solution(n)
     lines, flags = _lines(n, [fcr], floors)
     assert flags == []
     assert [(ln.period, ln.amount) for ln in lines] == [
-        (2030, pytest.approx(200.0, abs=1e-4)), (2035, pytest.approx(200.0, abs=1e-4))]
+        (2030, pytest.approx(200.0, abs=1e-4)),
+        (2035, pytest.approx(200.0, abs=1e-4)),
+    ]
     assert {(ln.payer, ln.payee, ln.value_stream, ln.contract_id) for ln in lines} == {
-        ("tso", "site", "reserve_capacity", "reserve:fcr")}
+        ("tso", "site", "reserve_capacity", "reserve:fcr")
+    }
     assert all(ln.flags == [] for ln in lines)  # symmetric: no activation flag
 
 
@@ -617,7 +794,9 @@ def test_a_stale_solve_settles_to_none(change):
         now_floors[STRING] = 21.0  # the DC-03 spec moved since the solve
     (line,), flags = _lines(n, now_products, now_floors)
     assert line.amount is None
-    assert {"reserve_not_solved", "reserve_inputs_changed_since_solve"} <= set(line.flags)
+    assert {"reserve_not_solved", "reserve_inputs_changed_since_solve"} <= set(
+        line.flags
+    )
 
 
 def test_no_products_settle_nothing():
@@ -643,35 +822,54 @@ def test_the_objective_decomposition_names_the_reserve_revenue():
     _solve(n, [_product()], {STRING: 20.0})
     cfg = SolverConfig()
     od = compute_objective_decomposition(n, compute_cost_breakdown(n, cfg), cfg)
-    assert od["reserve_revenue_eur"] == pytest.approx(200.0, abs=1e-6)  # 4 h x 10 x 5 MW
+    assert od["reserve_revenue_eur"] == pytest.approx(
+        200.0, abs=1e-6
+    )  # 4 h x 10 x 5 MW
     assert od["lp_total"] == pytest.approx(4.0 - 200.0, abs=1e-6)
     assert od["residual_gap_eur"] == pytest.approx(0.0, abs=1e-6)
     plain = _site()
     plain.add("Load", "l", bus="site", p_set=1.0)
     plain.optimize(solver_name="highs")
     assert "reserve_revenue_eur" not in compute_objective_decomposition(
-        plain, compute_cost_breakdown(plain, cfg), cfg)
+        plain, compute_cost_breakdown(plain, cfg), cfg
+    )
 
 
 # ── the ledger and the investment case (GK B L6, L9) ─────────────────────────
 
 
 def _reserve_row(amount, flags=()):
-    return {"period": "_", "contract_id": "reserve:fcr", "payer": "tso", "payee": "site",
-            "value_stream": "reserve_capacity", "quantity_mwh": None, "amount": amount,
-            "flags": list(flags)}
+    return {
+        "period": "_",
+        "contract_id": "reserve:fcr",
+        "payer": "tso",
+        "payee": "site",
+        "value_stream": "reserve_capacity",
+        "quantity_mwh": None,
+        "amount": amount,
+        "flags": list(flags),
+    }
 
 
 def test_a_reserve_payment_is_an_ancillary_line_from_the_counterparty():
     from services.commercial import participants as P
     from tests.test_value_flow_ledger import VF, _inputs
 
-    ledger = P.build_ledger(_inputs(reserve=[_reserve_row(30.0, ["activation_not_valued"])]), VF)
+    ledger = P.build_ledger(
+        _inputs(reserve=[_reserve_row(30.0, ["activation_not_valued"])]), VF
+    )
     (ln,) = [x for x in ledger.periods["_"] if x.source == "reserve"]
     assert (ln.payer, ln.payee, ln.value_stream, ln.source_id, ln.amount) == (
-        "tso", "site", "ancillary", "fcr", 30.0)
+        "tso",
+        "site",
+        "ancillary",
+        "fcr",
+        30.0,
+    )
     assert ln.flags == ["activation_not_valued"]
-    none = P.build_ledger(_inputs(reserve=[_reserve_row(None, ["reserve_not_solved"])]), VF)
+    none = P.build_ledger(
+        _inputs(reserve=[_reserve_row(None, ["reserve_not_solved"])]), VF
+    )
     (ln,) = [x for x in none.periods["_"] if x.source == "reserve"]
     assert ln.amount is None and "reserve_not_solved" in ln.flags
 
@@ -696,9 +894,16 @@ def test_the_revenue_rows_show_reserve_only_when_the_case_has_it():
     def rows(streams):
         lines = {f"k{i}": np.array([10.0, 10.0]) for i, _ in enumerate(streams)}
         meta = {f"k{i}": SimpleNamespace(stream=s) for i, s in enumerate(streams)}
-        op = SimpleNamespace(status={"operating": "ok"}, revenue=np.zeros(2), costs=np.zeros(2),
-                             tl=SimpleNamespace(n=2, years=[2030, 2031]), lines=lines,
-                             line_meta=meta, legs={}, replacement=np.zeros(2))
+        op = SimpleNamespace(
+            status={"operating": "ok"},
+            revenue=np.zeros(2),
+            costs=np.zeros(2),
+            tl=SimpleNamespace(n=2, years=[2030, 2031]),
+            lines=lines,
+            line_meta=meta,
+            legs={},
+            replacement=np.zeros(2),
+        )
         out = RS.revenue_by_stream(op, escalation={"export": 0.01})["rows"]
         rows.last = out
         return [(r["id"], r["label"], r["values"]) for r in out]
@@ -710,7 +915,10 @@ def test_the_revenue_rows_show_reserve_only_when_the_case_has_it():
     assert ("reserve", "Reserve capacity revenue", [10.0, 10.0]) in got
     (row,) = [r for r in rows.last if r["id"] == "reserve"]
     assert (row["note"], row["escalation_class"], row["escalation_rate"]) == (
-        "escalates at the export market rate", "export", 0.01)
+        "escalates at the export market rate",
+        "export",
+        0.01,
+    )
     assert all("note" not in r for r in rows.last if r["id"] != "reserve")
 
 
@@ -728,11 +936,17 @@ def test_the_reserve_line_escalates_at_the_export_rate_exactly():
 
     assert esc_class_for("ancillary") == "export"
     res = TemplateLine("reserve:fcr", "ancillary", 1_000.0, esc_class_for("ancillary"))
-    case = _cash_case([res], {"opex": 0.02, "tariff": 0.03, "export": 0.01, "capex": 0.02})
+    case = _cash_case(
+        [res], {"opex": 0.02, "tariff": 0.03, "export": 0.01, "capex": 0.02}
+    )
     tl = build_timeline(case)
     op = build_operating(case, tl)
-    assert op.lines["reserve:fcr"][tl.index(2033)] == pytest.approx(1_000.0 * 1.01 ** 2, rel=1e-12)
-    assert op.lines["reserve:fcr"][tl.index(2034)] == pytest.approx(1_000.0 * 1.01 ** 3, rel=1e-12)
+    assert op.lines["reserve:fcr"][tl.index(2033)] == pytest.approx(
+        1_000.0 * 1.01**2, rel=1e-12
+    )
+    assert op.lines["reserve:fcr"][tl.index(2034)] == pytest.approx(
+        1_000.0 * 1.01**3, rel=1e-12
+    )
 
 
 def test_a_missing_export_rate_never_escalates_the_reserve_line_at_another():
@@ -741,7 +955,9 @@ def test_a_missing_export_rate_never_escalates_the_reserve_line_at_another():
     from services.finance.timeline import build_timeline
 
     res = TemplateLine("reserve:fcr", "ancillary", 1_000.0, esc_class_for("ancillary"))
-    case = _cash_case([res], {"opex": 0.02, "tariff": 0.03, "ppa": 0.015, "capex": 0.02})
+    case = _cash_case(
+        [res], {"opex": 0.02, "tariff": 0.03, "ppa": 0.015, "capex": 0.02}
+    )
     op = build_operating(case, build_timeline(case))
     assert "escalation_missing:export:reserve:fcr" in op.reasons["operating"]
     assert op.status["operating"] == "not_established" and op.revenue is None
@@ -750,26 +966,56 @@ def test_a_missing_export_rate_never_escalates_the_reserve_line_at_another():
 def test_the_owner_generation_split_leaves_a_reserve_line_whole():
     from services.results import finance_case as FC
 
-    acc = FC._Acc(stream="ancillary", esc_class="export", amount=500.0, source="reserve",
-                  source_id="fcr", counterparty="tso")
-    inputs = SimpleNamespace(export_split={"_": {"export_price": {("Generator", "pv"): 80.0}}})
-    vf = SimpleNamespace(asset_owners=[SimpleNamespace(component="Generator", asset_id="pv",
-                                                       owner="owner")])
+    acc = FC._Acc(
+        stream="ancillary",
+        esc_class="export",
+        amount=500.0,
+        source="reserve",
+        source_id="fcr",
+        counterparty="tso",
+    )
+    inputs = SimpleNamespace(
+        export_split={"_": {"export_price": {("Generator", "pv"): 80.0}}}
+    )
+    vf = SimpleNamespace(
+        asset_owners=[
+            SimpleNamespace(component="Generator", asset_id="pv", owner="owner")
+        ]
+    )
     flags: list[str] = []
-    (ln,) = FC._template_lines({"reserve:fcr": acc}, k="_", year=2030, base_year=2030,
-                               inputs=inputs, vf=vf, owner="owner",
-                               owned={("Generator", "pv")}, owner_gens={"pv"}, contracts={},
-                               fin=None, gen={"pv": 100.0}, site_gens=["pv"], gen_links=[],
-                               flags=flags)
+    (ln,) = FC._template_lines(
+        {"reserve:fcr": acc},
+        k="_",
+        year=2030,
+        base_year=2030,
+        inputs=inputs,
+        vf=vf,
+        owner="owner",
+        owned={("Generator", "pv")},
+        owner_gens={"pv"},
+        contracts={},
+        fin=None,
+        gen={"pv": 100.0},
+        site_gens=["pv"],
+        gen_links=[],
+        flags=flags,
+    )
     assert (ln.key, ln.amount, ln.esc_class, ln.stream, ln.degrades_with) == (
-        "reserve:fcr", 500.0, "export", "ancillary", None)
+        "reserve:fcr",
+        500.0,
+        "export",
+        "ancillary",
+        None,
+    )
     assert flags == []
 
 
 # ── the runners (GK A R5) ────────────────────────────────────────────────────
 
 
-def test_the_sizing_loop_names_reserve_products_and_its_chain_carries_the_rows(monkeypatch):
+def test_the_sizing_loop_names_reserve_products_and_its_chain_carries_the_rows(
+    monkeypatch,
+):
     """The loop refuses a project with commercial bindings by name (so it never
     solves without its reserves silently); its LP chain (`_prepare`, the
     project's `build_lp_chain`) carries the rows all the same."""
@@ -781,12 +1027,16 @@ def test_the_sizing_loop_names_reserve_products_and_its_chain_carries_the_rows(m
     _bind(n, [fcr], {"fcr": 10.0})
     cfg = SolverConfig(commercial={"reserve_products": [fcr.model_dump(mode="json")]})
     assert any("commercial bindings" in r for r in slr.refusals(cfg))
-    monkeypatch.setattr(RP, "project_backup", lambda _n: ({STRING: 20.0}, frozenset({STRING})))
+    monkeypatch.setattr(
+        RP, "project_backup", lambda _n: ({STRING: 20.0}, frozenset({STRING}))
+    )
     undo: list = []
     status, _ = n.optimize(solver_name="highs", **slr._prepare(n, cfg, undo))
     slr._restore(undo)
     assert status == "ok" and RP.persist_solution(n)
-    assert RP.solved(n)[0][f"{STRING}|fcr"].to_numpy() == pytest.approx(np.full(4, 5.0), abs=1e-6)
+    assert RP.solved(n)[0][f"{STRING}|fcr"].to_numpy() == pytest.approx(
+        np.full(4, 5.0), abs=1e-6
+    )
 
 
 @pytest.mark.live_solve
@@ -800,17 +1050,27 @@ def test_dc03_assess_is_byte_equal_with_reserve_products_set():
     from tests.test_dc_backup import _dc, _run
 
     spec = _dc("bess")
-    genset = spec.model_copy(update={"backup": spec.backup.model_copy(update={"mode": "genset"})})
+    genset = spec.model_copy(
+        update={"backup": spec.backup.model_copy(update={"mode": "genset"})}
+    )
     fcr = _product()
     outs = []
     for commercial in (None, {"reserve_products": [fcr.model_dump(mode="json")]}):
         run = _run()
         run["cfg"] = SolverConfig(voll=500.0, commercial=commercial)
-        outs.append(dc_backup.assess(
-            t.build_eh_datacenter(load_spec=genset), t.island_config("eh_datacenter"), spec,
-            years=20, prices=dc_backup.pack_prices(t.TEMPLATE_PACK_VERSION), **run))
-    assert json.dumps(outs[0], sort_keys=True, default=str) == \
-        json.dumps(outs[1], sort_keys=True, default=str)
+        outs.append(
+            dc_backup.assess(
+                t.build_eh_datacenter(load_spec=genset),
+                t.island_config("eh_datacenter"),
+                spec,
+                years=20,
+                prices=dc_backup.pack_prices(t.TEMPLATE_PACK_VERSION),
+                **run,
+            )
+        )
+    assert json.dumps(outs[0], sort_keys=True, default=str) == json.dumps(
+        outs[1], sort_keys=True, default=str
+    )
 
 
 # ── the view (UX: storage view, DC backup line) ──────────────────────────────
@@ -825,10 +1085,17 @@ def test_the_view_shows_floor_energy_soc_and_committed_mw():
     _solve(n, [up], floors, {"up": 10.0})
     v = reserve_view(n, _cfg([up]), solved=True, backup=(floors, frozenset({STRING})))
     (s,) = v["storages"]
-    assert (s["name"], s["string"], s["floor_mwh"], s["e_cap_mwh"]) == (STRING, True, 20.0, 25.0)
+    assert (s["name"], s["string"], s["floor_mwh"], s["e_cap_mwh"]) == (
+        STRING,
+        True,
+        20.0,
+        25.0,
+    )
     assert s["committed"]["up"] == pytest.approx([5.0] * 4, abs=1e-6)
     assert len(s["soc_mwh"]) == 4 and v["flags"] == []
-    assert v["products"][0]["direction"] == "up" and v["lines"][0]["amount"] == pytest.approx(200.0)
+    assert v["products"][0]["direction"] == "up" and v["lines"][0][
+        "amount"
+    ] == pytest.approx(200.0)
     assert "not modelled" in v["not_modelled"]
 
 
@@ -838,7 +1105,9 @@ def test_the_view_never_shows_zero_for_a_missing_solve():
     n = _site()
     fcr = _product()
     _bind(n, [fcr], {"fcr": 10.0})
-    v = reserve_view(n, _cfg([fcr]), solved=False, backup=({STRING: 20.0}, frozenset({STRING})))
+    v = reserve_view(
+        n, _cfg([fcr]), solved=False, backup=({STRING: 20.0}, frozenset({STRING}))
+    )
     assert v["storages"][0]["committed"] is None and v["storages"][0]["soc_mwh"] is None
     assert v["flags"] == ["reserve_not_solved"] and v["lines"][0]["amount"] is None
     assert reserve_view(n, _cfg([]), solved=True, backup=({}, frozenset())) is None
@@ -853,12 +1122,16 @@ def test_the_view_names_its_currency_and_money_year():
     fcr = _product()
     _bind(n, [fcr], {"fcr": 10.0})
     backup = ({STRING: 20.0}, frozenset({STRING}))
-    stated = SimpleNamespace(commercial=SimpleNamespace(reserve_products=[fcr]), finance={"currency": "gbp"})
+    stated = SimpleNamespace(
+        commercial=SimpleNamespace(reserve_products=[fcr]), finance={"currency": "gbp"}
+    )
     v = reserve_view(n, stated, solved=False, backup=backup)
     assert (v["currency"], v["money_year"]) == ("GBP", 2030)
     assert reserve_view(n, _cfg([fcr]), solved=False, backup=backup)["currency"] is None
     n.meta[RP.CURRENCY_META] = {"fcr": "EUR"}
-    assert reserve_view(n, _cfg([fcr]), solved=False, backup=backup)["currency"] == "EUR"
+    assert (
+        reserve_view(n, _cfg([fcr]), solved=False, backup=backup)["currency"] == "EUR"
+    )
 
 
 def test_the_reserves_route_is_204_without_products(client):
@@ -880,12 +1153,21 @@ def test_the_floors_enter_the_fingerprint_only_with_products(tmp_path):
     n = _dc_project(tmp_path, {"mode": "hybrid"})
     s = _strings(n)[0]
     plain = SolverConfig()
-    with_products = SolverConfig(commercial={"reserve_products": [
-        _product(storages=[s]).model_dump(mode="json")]})
+    with_products = SolverConfig(
+        commercial={
+            "reserve_products": [_product(storages=[s]).model_dump(mode="json")]
+        }
+    )
 
     def fp(cfg):
-        return _network_input_fingerprint(SimpleNamespace(
-            network=n, solver_state={"solver_config": cfg}, user_ts={}, storage_dir=str(tmp_path)))
+        return _network_input_fingerprint(
+            SimpleNamespace(
+                network=n,
+                solver_state={"solver_config": cfg},
+                user_ts={},
+                storage_dir=str(tmp_path),
+            )
+        )
 
     before = (fp(plain), fp(with_products))
     assert before[0] != before[1]

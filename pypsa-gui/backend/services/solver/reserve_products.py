@@ -46,6 +46,7 @@ frame ``ic_reserve_mw`` (columns ``<storage>|<product>``), with
 
 Pure service: imports neither routers nor ``solver_service``.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -83,7 +84,14 @@ PRICE_MISSING = "reserve_price_missing"
 PRICE_STALE = "reserve_price_stale"
 INITIAL_SOC = "reserve_initial_soc_below_floor"
 STRING_AVAIL = "reserve_string_availability_edited"
-KINDS = (NOT_ELIGIBLE, FLOOR_EXCEEDS, PRICE_MISSING, PRICE_STALE, INITIAL_SOC, STRING_AVAIL)
+KINDS = (
+    NOT_ELIGIBLE,
+    FLOOR_EXCEEDS,
+    PRICE_MISSING,
+    PRICE_STALE,
+    INITIAL_SOC,
+    STRING_AVAIL,
+)
 
 _UNSET = object()
 
@@ -99,12 +107,15 @@ class ReserveRefusal(ValueError):
 # ── inputs ───────────────────────────────────────────────────────────────────
 
 
-def products_of(cfg) -> list["ReserveProduct"]:
+def products_of(cfg) -> list[ReserveProduct]:
     """The config's reserve products (``SolverConfig.commercial.reserve_products``)."""
     from models.reserve_products import ReserveProduct
 
     raw = _raw_products(getattr(cfg, "commercial", None))
-    return [p if isinstance(p, ReserveProduct) else ReserveProduct.model_validate(p) for p in raw]
+    return [
+        p if isinstance(p, ReserveProduct) else ReserveProduct.model_validate(p)
+        for p in raw
+    ]
 
 
 def without_reserves(cfg):
@@ -118,7 +129,9 @@ def without_reserves(cfg):
         # when the products were all it held.
         rest = {k: v for k, v in commercial.items() if k != "reserve_products"}
         return dataclasses.replace(cfg, commercial=rest or None)
-    return dataclasses.replace(cfg, commercial=commercial.model_copy(update={"reserve_products": []}))
+    return dataclasses.replace(
+        cfg, commercial=commercial.model_copy(update={"reserve_products": []})
+    )
 
 
 def _raw_products(commercial) -> list:
@@ -142,7 +155,9 @@ def reserve_weights(n, sns=None) -> tuple[pd.Series, pd.Series]:
     hours = n.snapshot_weightings.objective.loc[sns].astype(float)
     if isinstance(sns, pd.MultiIndex) and getattr(n, "_multi_invest", False):
         ipw = n.investment_period_weightings.objective
-        period = pd.Series(ipw.loc[sns.get_level_values(0)].to_numpy(dtype=float), index=sns)
+        period = pd.Series(
+            ipw.loc[sns.get_level_values(0)].to_numpy(dtype=float), index=sns
+        )
     else:
         period = pd.Series(1.0, index=sns)
     return hours, period
@@ -153,20 +168,23 @@ def bound_price(n, product) -> tuple[pd.Series | None, list[str]]:
     from another ref version, another snapshot axis, a gap)."""
     from services.commercial import settlement_inputs as SI
 
-    s, flags = SI._read(n, PRICE_FRAME, price_column(product.id), product.capacity_price,
-                        PRICE_MISSING)
+    s, flags = SI._read(
+        n, PRICE_FRAME, price_column(product.id), product.capacity_price, PRICE_MISSING
+    )
     return s, flags
 
 
-def inputs_digest(products: list["ReserveProduct"], floors: dict[str, float]) -> str:
+def inputs_digest(products: list[ReserveProduct], floors: dict[str, float]) -> str:
     """What a reserve solve read: the products (their price refs included) and
     the floors of the storages they may use. A settlement on a solve whose
     digest is not the current one is stale (GK A R6, GK B L5)."""
     import hashlib
 
     used = {s for p in products for s in (p.storages or floors)}
-    payload = {"products": [p.model_dump(mode="json") for p in products],
-               "floors": {s: repr(float(floors[s])) for s in sorted(used) if s in floors}}
+    payload = {
+        "products": [p.model_dump(mode="json") for p in products],
+        "floors": {s: repr(float(floors[s])) for s in sorted(used) if s in floors},
+    }
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
@@ -200,18 +218,31 @@ def derive_backup(n, project_dir) -> tuple[dict[str, float], frozenset[str]]:
     if backup.mode != "genset":
         plan = planning or tpl.NATIVE_PLANNING[tid]
         try:
-            sizing = dc_backup.size_bess(critical, firm_genset_mw=_firm(n, island), backup=backup,
-                                         redundancy=spec.redundancy, years=plan.analysis_years)
+            sizing = dc_backup.size_bess(
+                critical,
+                firm_genset_mw=_firm(n, island),
+                backup=backup,
+                redundancy=spec.redundancy,
+                years=plan.analysis_years,
+            )
         except dc_backup.DcBackupError:
             sizing = None
         if sizing is not None:
-            strings = [s for s in dc_backup.string_names(sizing) if s in n.storage_units.index]
-            e = sizing.get("e_backup_usable_mwh_per_string", sizing.get("e_usable_mwh_per_string"))
+            strings = [
+                s for s in dc_backup.string_names(sizing) if s in n.storage_units.index
+            ]
+            e = sizing.get(
+                "e_backup_usable_mwh_per_string", sizing.get("e_usable_mwh_per_string")
+            )
             if e is not None and math.isfinite(float(e)) and float(e) >= 0:
                 out.update({s: float(e) for s in strings})
     # No critical load in the network: P_crit is unknown, so no UPS floor (never 0).
     named = [x for x in dc_backup.critical_loads(island) if x in n.loads.index]
-    peak = float(np.max(np.asarray(critical, dtype=float))) if named and np.size(critical) else math.nan
+    peak = (
+        float(np.max(np.asarray(critical, dtype=float)))
+        if named and np.size(critical)
+        else math.nan
+    )
     ride = float(backup.ride_through_s)
     for s in (island.get("requirements") or {}).get("ride_through_storage") or []:
         if s in out or s not in n.storage_units.index or s in strings:
@@ -245,7 +276,9 @@ def project_backup(n) -> tuple[dict[str, float], frozenset[str]]:
 def _static(n, name: str, attr: str, default: float) -> float:
     df = n.storage_units
     v = df.at[name, attr] if attr in df.columns else default
-    return default if v is None or (isinstance(v, float) and math.isnan(v)) else float(v)
+    return (
+        default if v is None or (isinstance(v, float) and math.isnan(v)) else float(v)
+    )
 
 
 def _names(names: list[str]) -> str:
@@ -253,64 +286,116 @@ def _names(names: list[str]) -> str:
     return ", ".join(f"\u201c{s}\u201d" for s in names)
 
 
-def plan(n, products: list["ReserveProduct"], floors: dict[str, float],
-         strings: frozenset[str] = frozenset()) -> dict[str, Any]:
+def plan(
+    n,
+    products: list[ReserveProduct],
+    floors: dict[str, float],
+    strings: frozenset[str] = frozenset(),
+) -> dict[str, Any]:
     """Check the products against ``n`` and the floors; return what the rows need.
     Raises ``ReserveRefusal`` (typed) on anything the rows cannot hold."""
     from models.reserve_products import check_unique
 
     check_unique(products)
-    eligible = {s: f for s, f in floors.items()
-                if s in n.storage_units.index and isinstance(f, (int, float)) and math.isfinite(f) and f >= 0}
+    eligible = {
+        s: f
+        for s, f in floors.items()
+        if s in n.storage_units.index
+        and isinstance(f, (int, float))
+        and math.isfinite(f)
+        and f >= 0
+    }
     on: dict[str, list[str]] = {}
     prices: dict[str, pd.Series] = {}
     for p in products:
         named = list(p.storages) or sorted(eligible)
         bad = [s for s in named if s not in eligible]
         if bad or not named:
-            raise ReserveRefusal(NOT_ELIGIBLE, (
-                f"Reserve product \u201c{p.id}\u201d: {_names(bad) or 'no storage'} cannot carry reserves. Only backup "
-                "storage with a readable backup floor can: the battery strings of a battery or hybrid "
-                "project, or a storage its island sidecar lists as ride-through storage"))
+            raise ReserveRefusal(
+                NOT_ELIGIBLE,
+                (
+                    f"Reserve product \u201c{p.id}\u201d: {_names(bad) or 'no storage'} cannot carry reserves. Only backup "
+                    "storage with a readable backup floor can: the battery strings of a battery or hybrid "
+                    "project, or a storage its island sidecar lists as ride-through storage"
+                ),
+            )
         price, flags = bound_price(n, p)
         if price is None:
-            kind = PRICE_STALE if "reference_changed_since_binding" in flags else PRICE_MISSING
-            why = ("changed since it was bound" if kind == PRICE_STALE
-                   else "is not bound to this network")
-            raise ReserveRefusal(kind, (
-                f"Reserve product \u201c{p.id}\u201d: its capacity price series {why}; save the "
-                "commercial config again to bind it"))
+            kind = (
+                PRICE_STALE
+                if "reference_changed_since_binding" in flags
+                else PRICE_MISSING
+            )
+            why = (
+                "changed since it was bound"
+                if kind == PRICE_STALE
+                else "is not bound to this network"
+            )
+            raise ReserveRefusal(
+                kind,
+                (
+                    f"Reserve product \u201c{p.id}\u201d: its capacity price series {why}; save the "
+                    "commercial config again to bind it"
+                ),
+            )
         if not np.isfinite(price.to_numpy(dtype=float)).all():
-            raise ReserveRefusal(PRICE_MISSING, f"Reserve product \u201c{p.id}\u201d: its price has a gap")
+            raise ReserveRefusal(
+                PRICE_MISSING,
+                f"Reserve product \u201c{p.id}\u201d: its price has a gap",
+            )
         on[p.id] = named
         prices[p.id] = price
     used = sorted({s for names in on.values() for s in names})
     for s in used:
         floor = eligible[s]
         ext = bool(n.storage_units.at[s, "p_nom_extendable"])
-        p_cap = _static(n, s, "p_nom_max", math.inf) if ext else _static(n, s, "p_nom", 0.0)
+        p_cap = (
+            _static(n, s, "p_nom_max", math.inf) if ext else _static(n, s, "p_nom", 0.0)
+        )
         e_cap = _static(n, s, "max_hours", 0.0) * p_cap
         if floor > e_cap + TOL:
-            raise ReserveRefusal(FLOOR_EXCEEDS, (
-                f"Storage \u201c{s}\u201d holds at most {e_cap:.3f} MWh but its backup floor is {floor:.3f} MWh: "
-                "it cannot keep its backup energy, let alone commit a reserve"))
+            raise ReserveRefusal(
+                FLOOR_EXCEEDS,
+                (
+                    f"Storage \u201c{s}\u201d holds at most {e_cap:.3f} MWh but its backup floor is {floor:.3f} MWh: "
+                    "it cannot keep its backup energy, let alone commit a reserve"
+                ),
+            )
         cyclic = bool(n.storage_units.at[s, "cyclic_state_of_charge"])
-        per_period = bool(n.storage_units.at[s, "cyclic_state_of_charge_per_period"]) \
-            if "cyclic_state_of_charge_per_period" in n.storage_units.columns else False
+        per_period = (
+            bool(n.storage_units.at[s, "cyclic_state_of_charge_per_period"])
+            if "cyclic_state_of_charge_per_period" in n.storage_units.columns
+            else False
+        )
         if not (cyclic or per_period):
             init = _static(n, s, "state_of_charge_initial", 0.0)
             if init < floor - TOL:
-                raise ReserveRefusal(INITIAL_SOC, (
-                    f"Storage \u201c{s}\u201d starts at {init:.3f} MWh, below its backup floor of {floor:.3f} MWh: "
-                    "raise its initial state of charge or make it cyclic"))
+                raise ReserveRefusal(
+                    INITIAL_SOC,
+                    (
+                        f"Storage \u201c{s}\u201d starts at {init:.3f} MWh, below its backup floor of {floor:.3f} MWh: "
+                        "raise its initial state of charge or make it cyclic"
+                    ),
+                )
         series = n.storage_units_t.p_max_pu.get(s) if s in strings else None
-        if s in strings and (series is None or (series.to_numpy(dtype=float) != 0.0).any()):
-            raise ReserveRefusal(STRING_AVAIL, (
-                f"Backup string \u201c{s}\u201d: its availability series is not the backup dispatch hold (0 in every "
-                "snapshot), so its availability for a reserve is unknown; restore the hold"))
-    return {"products": products, "on": on, "prices": prices,
-            "floors": {s: eligible[s] for s in used}, "storages": used,
-            "strings": frozenset(s for s in used if s in strings)}
+        if s in strings and (
+            series is None or (series.to_numpy(dtype=float) != 0.0).any()
+        ):
+            raise ReserveRefusal(
+                STRING_AVAIL,
+                (
+                    f"Backup string \u201c{s}\u201d: its availability series is not the backup dispatch hold (0 in every "
+                    "snapshot), so its availability for a reserve is unknown; restore the hold"
+                ),
+            )
+    return {
+        "products": products,
+        "on": on,
+        "prices": prices,
+        "floors": {s: eligible[s] for s in used},
+        "storages": used,
+        "strings": frozenset(s for s in used if s in strings),
+    }
 
 
 # ── the rows ─────────────────────────────────────────────────────────────────
@@ -322,9 +407,14 @@ def _dense(n, attr: str, sns, names) -> pd.DataFrame:
 
 def _da(frame: pd.DataFrame | pd.Series, coord) -> xr.DataArray:
     if isinstance(frame, pd.Series):
-        return xr.DataArray(frame.to_numpy(dtype=float), coords=[coord], dims=["snapshot"])
-    return xr.DataArray(frame.to_numpy(dtype=float), coords=[coord, list(frame.columns)],
-                        dims=["snapshot", "name"])
+        return xr.DataArray(
+            frame.to_numpy(dtype=float), coords=[coord], dims=["snapshot"]
+        )
+    return xr.DataArray(
+        frame.to_numpy(dtype=float),
+        coords=[coord, list(frame.columns)],
+        dims=["snapshot", "name"],
+    )
 
 
 def _p_nom(m, n, s: str):
@@ -343,7 +433,10 @@ def _initial_at(n, s: str, sns) -> pd.Series:
     flag = lambda col: bool(df.at[s, col]) if col in df.columns else False  # noqa: E731
     out = pd.Series(0.0, index=sns)
     multi = getattr(n, "_multi_invest", False) and isinstance(sns, pd.MultiIndex)
-    if multi and (flag("cyclic_state_of_charge_per_period") or flag("state_of_charge_initial_per_period")):
+    if multi and (
+        flag("cyclic_state_of_charge_per_period")
+        or flag("state_of_charge_initial_per_period")
+    ):
         if flag("cyclic_state_of_charge_per_period"):
             return out
         firsts = ~pd.Series(sns.get_level_values(0), index=sns).duplicated()
@@ -378,26 +471,47 @@ def add_rows(n, sns, the_plan: dict, emit=lambda _m: None) -> int:
     for s in names:
         up = [f"{s}{SEP}{k}" for k, b in pairs if b == s and by[k].up]
         dn = [f"{s}{SEP}{k}" for k, b in pairs if b == s and by[k].down]
-        d_up = xr.DataArray([by[c.split(SEP)[1]].sustain_h for c in up], coords=[pd.Index(up, name="reserve")])
-        d_dn = xr.DataArray([by[c.split(SEP)[1]].sustain_h for c in dn], coords=[pd.Index(dn, name="reserve")])
+        d_up = xr.DataArray(
+            [by[c.split(SEP)[1]].sustain_h for c in up],
+            coords=[pd.Index(up, name="reserve")],
+        )
+        d_dn = xr.DataArray(
+            [by[c.split(SEP)[1]].sustain_h for c in dn],
+            coords=[pd.Index(dn, name="reserve")],
+        )
         p_nom = _p_nom(m, n, s)
-        dis, sto = m["StorageUnit-p_dispatch"].sel(name=s), m["StorageUnit-p_store"].sel(name=s)
+        dis, sto = (
+            m["StorageUnit-p_dispatch"].sel(name=s),
+            m["StorageUnit-p_store"].sel(name=s),
+        )
         soc = soc_all.sel(name=s)
         ed, es = _da(eff_d[s], coord), _da(eff_s[s], coord)
         # soc(t-1) through PyPSA's own balance (module docstring). Where PyPSA
         # starts from state_of_charge_initial, it applies no standing loss to it.
-        keep = ((1.0 - _da(stand[s], coord)) ** eh_da).where(~_da(_initial_at(n, s, sns), coord).astype(bool), 1.0)
-        prev = (soc + eh_da / ed * dis - eh_da * es * sto - eh_da * _da(inflow[s], coord)
-                + (eh_da * m["StorageUnit-spill"].sel(name=s) if s in spill_names else 0)) / keep
+        keep = ((1.0 - _da(stand[s], coord)) ** eh_da).where(
+            ~_da(_initial_at(n, s, sns), coord).astype(bool), 1.0
+        )
+        prev = (
+            soc
+            + eh_da / ed * dis
+            - eh_da * es * sto
+            - eh_da * _da(inflow[s], coord)
+            + (eh_da * m["StorageUnit-spill"].sel(name=s) if s in spill_names else 0)
+        ) / keep
         e_max = float(n.storage_units.at[s, "max_hours"]) * p_nom
         floor = the_plan["floors"][s]
         need = 0
         if up:
             r_up = r.sel(reserve=up)
-            avail = (pd.Series(_static(n, s, "p_max_pu", 1.0), index=sns)
-                     if s in the_plan["strings"] else p_max[s])
-            m.add_constraints(dis - sto + r_up.sum("reserve") - p_nom * _da(avail, coord) <= 0,
-                              name=f"Reserve-up-power-{s}")
+            avail = (
+                pd.Series(_static(n, s, "p_max_pu", 1.0), index=sns)
+                if s in the_plan["strings"]
+                else p_max[s]
+            )
+            m.add_constraints(
+                dis - sto + r_up.sum("reserve") - p_nom * _da(avail, coord) <= 0,
+                name=f"Reserve-up-power-{s}",
+            )
             need = (r_up * d_up).sum("reserve") / ed
             added += 1
         # The floor holds on every committing storage, a down-only one too.
@@ -406,11 +520,15 @@ def add_rows(n, sns, the_plan: dict, emit=lambda _m: None) -> int:
         added += 2
         if dn:
             r_dn = r.sel(reserve=dn)
-            m.add_constraints(sto - dis + r_dn.sum("reserve") + p_nom * _da(p_min[s], coord) <= 0,
-                              name=f"Reserve-down-power-{s}")
+            m.add_constraints(
+                sto - dis + r_dn.sum("reserve") + p_nom * _da(p_min[s], coord) <= 0,
+                name=f"Reserve-down-power-{s}",
+            )
             room = (r_dn * d_dn).sum("reserve") * es
             m.add_constraints(soc + room - e_max <= 0, name=f"Reserve-down-energy-{s}")
-            m.add_constraints(prev + room - e_max <= 0, name=f"Reserve-down-energy-prev-{s}")
+            m.add_constraints(
+                prev + room - e_max <= 0, name=f"Reserve-down-energy-prev-{s}"
+            )
             added += 3
     hours, period = reserve_weights(n, sns)
     w = hours * period
@@ -463,7 +581,9 @@ RECORD_ATTR = "_ic_reserve_record"
 def clear_solution(n) -> None:
     """Drop a previous run's commitments (before a solve). The record this run's
     wrap set at LP-chain build stays: the chain is built before this runs."""
-    frame = n.storage_units_t.get(OUT_FRAME) if hasattr(n.storage_units_t, "get") else None
+    frame = (
+        n.storage_units_t.get(OUT_FRAME) if hasattr(n.storage_units_t, "get") else None
+    )
     if frame is not None:
         del n.storage_units_t[OUT_FRAME]
     if isinstance(getattr(n, "meta", None), dict):
@@ -486,8 +606,11 @@ def persist_solution(n) -> bool:
     frame = frame[~frame.index.duplicated(keep="last")].reindex(n.snapshots)
     frame.columns = [str(c) for c in frame.columns]
     n.storage_units_t[OUT_FRAME] = frame.astype(float)
-    n.meta[META_KEY] = {"products": rec.products, "axis_hash": axis_hash(n.snapshots),
-                        "inputs": rec.digest}
+    n.meta[META_KEY] = {
+        "products": rec.products,
+        "axis_hash": axis_hash(n.snapshots),
+        "inputs": rec.digest,
+    }
     return True
 
 
@@ -498,7 +621,9 @@ def solved(n, digest: str | None = None) -> tuple[pd.DataFrame | None, list[str]
     from services.commercial.settlement_inputs import axis_hash
 
     meta = (getattr(n, "meta", None) or {}).get(META_KEY)
-    frame = n.storage_units_t.get(OUT_FRAME) if hasattr(n.storage_units_t, "get") else None
+    frame = (
+        n.storage_units_t.get(OUT_FRAME) if hasattr(n.storage_units_t, "get") else None
+    )
     if not meta or frame is None or frame.empty:
         return None, ["reserve_not_solved"]
     if meta.get("axis_hash") != axis_hash(n.snapshots):
@@ -525,20 +650,26 @@ def objective_revenue(n) -> float:
         if not cols or price_column(pid) not in prices.columns:
             continue
         pr = prices[price_column(pid)].reindex(n.snapshots).to_numpy(dtype=float)
-        total += float(np.nansum(w * pr * frame[cols].sum(axis=1).to_numpy(dtype=float)))
+        total += float(
+            np.nansum(w * pr * frame[cols].sum(axis=1).to_numpy(dtype=float))
+        )
     return total
 
 
 # ── the wrap ─────────────────────────────────────────────────────────────────
 
 
-def _wrap_with_reserve_products(network: "pypsa.Network", user_fn, cfg, backup=_UNSET, log_queue=None):
+def _wrap_with_reserve_products(
+    network: pypsa.Network, user_fn, cfg, backup=_UNSET, log_queue=None
+):
     """Chain the reserve rows after ``user_fn``; ``user_fn`` unchanged when the config
     has no reserve products. Raises ``ReserveRefusal`` before the solve. ``backup``
     defaults to the solving project's ``(floors, strings)``."""
     products = products_of(cfg)
     if hasattr(network, RECORD_ATTR):
-        delattr(network, RECORD_ATTR)  # a failed run's record never reaches this run's persist
+        delattr(
+            network, RECORD_ATTR
+        )  # a failed run's record never reaches this run's persist
     if not products:
         return user_fn
     floors, strings = project_backup(network) if backup is _UNSET else backup

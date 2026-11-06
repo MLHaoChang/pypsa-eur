@@ -10,6 +10,7 @@ and what they leave out. A solve that is missing or read other inputs gives
 None (the route's 204) without reserve products. Pure service: imports neither
 routers nor `solver_service`.
 """
+
 from __future__ import annotations
 
 import math
@@ -21,13 +22,19 @@ import pandas as pd
 
 
 def _series(values) -> list[float | None]:
-    return [None if not math.isfinite(float(v)) else float(v) for v in np.asarray(values, dtype=float)]
+    return [
+        None if not math.isfinite(float(v)) else float(v)
+        for v in np.asarray(values, dtype=float)
+    ]
 
 
 def _e_cap(n, s: str) -> float | None:
     df = n.storage_units
-    p = df.at[s, "p_nom_opt"] if bool(df.at[s, "p_nom_extendable"]) and "p_nom_opt" in df.columns \
+    p = (
+        df.at[s, "p_nom_opt"]
+        if bool(df.at[s, "p_nom_extendable"]) and "p_nom_opt" in df.columns
         else df.at[s, "p_nom"]
+    )
     v = float(p) * float(df.at[s, "max_hours"])
     return v if math.isfinite(v) else None
 
@@ -57,7 +64,13 @@ def _money(n, cfg) -> tuple[str | None, int | None]:
 
     currency = project_currency(getattr(cfg, "finance", None))
     if currency is None:
-        bound = {v for v in ((getattr(n, "meta", None) or {}).get(RP.CURRENCY_META) or {}).values() if v}
+        bound = {
+            v
+            for v in (
+                (getattr(n, "meta", None) or {}).get(RP.CURRENCY_META) or {}
+            ).values()
+            if v
+        }
         currency = bound.pop() if len(bound) == 1 else None
     try:
         multi = isinstance(n.snapshots, pd.MultiIndex)
@@ -68,7 +81,9 @@ def _money(n, cfg) -> tuple[str | None, int | None]:
     return currency, year
 
 
-def reserve_view(n, cfg, *, solved: bool, backup=None, storage_dir=None) -> dict[str, Any] | None:
+def reserve_view(
+    n, cfg, *, solved: bool, backup=None, storage_dir=None
+) -> dict[str, Any] | None:
     from services.results.billing import RESERVE_NOT_MODELLED, reserve_lines
     from services.solver import reserve_products as RP
 
@@ -83,30 +98,50 @@ def reserve_view(n, cfg, *, solved: bool, backup=None, storage_dir=None) -> dict
         frame, flags = None, ["reserve_not_solved"]
     soc = n.storage_units_t.get("state_of_charge") if solved else None
     commercial = getattr(cfg, "commercial", None)
-    site = (commercial.get("site_party") if isinstance(commercial, dict)
-            else getattr(commercial, "site_party", None)) or "site"
+    site = (
+        commercial.get("site_party")
+        if isinstance(commercial, dict)
+        else getattr(commercial, "site_party", None)
+    ) or "site"
     lines, _ = reserve_lines(n, cfg, site, backup=(floors, strings))
     storages = []
     for s in used:
         here = s in n.storage_units.index
-        storages.append({
-            "name": s,
-            "string": s in strings,
-            "floor_mwh": floors.get(s),
-            "e_cap_mwh": _e_cap(n, s) if here else None,
-            "soc_mwh": _series(soc[s]) if soc is not None and s in soc.columns else None,
-            "committed": None if frame is None else {
-                p.id: _series(frame[f"{s}{RP.SEP}{p.id}"]) if f"{s}{RP.SEP}{p.id}" in frame.columns
-                else [0.0] * len(n.snapshots)
-                for p in products if (not p.storages or s in p.storages)},
-        })
+        storages.append(
+            {
+                "name": s,
+                "string": s in strings,
+                "floor_mwh": floors.get(s),
+                "e_cap_mwh": _e_cap(n, s) if here else None,
+                "soc_mwh": _series(soc[s])
+                if soc is not None and s in soc.columns
+                else None,
+                "committed": None
+                if frame is None
+                else {
+                    p.id: _series(frame[f"{s}{RP.SEP}{p.id}"])
+                    if f"{s}{RP.SEP}{p.id}" in frame.columns
+                    else [0.0] * len(n.snapshots)
+                    for p in products
+                    if (not p.storages or s in p.storages)
+                },
+            }
+        )
     currency, money_year = _money(n, cfg)
     sns = n.snapshots
     times = sns.get_level_values(-1) if isinstance(sns, pd.MultiIndex) else sns
     return {
-        "products": [{"id": p.id, "kind": p.kind, "direction": p.direction,
-                      "sustain_h": p.sustain_h, "counterparty": p.counterparty,
-                      "price_source": p.capacity_price.source} for p in products],
+        "products": [
+            {
+                "id": p.id,
+                "kind": p.kind,
+                "direction": p.direction,
+                "sustain_h": p.sustain_h,
+                "counterparty": p.counterparty,
+                "price_source": p.capacity_price.source,
+            }
+            for p in products
+        ],
         "snapshots": [str(t) for t in times],
         "storages": storages,
         "lines": [asdict(ln) for ln in lines],
