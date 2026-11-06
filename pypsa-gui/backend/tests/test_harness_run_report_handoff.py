@@ -771,7 +771,7 @@ def test_b1b_the_report_card_is_crossed_only_on_a_grant_that_lists_it(
     from services import run_envelope
     from tests.test_harness_envelope import BLOCK
 
-    runs = BLOCK["runs"] + ([{"tool": "generate_report"}] if lists_report else [])
+    runs = [{"tool": "solve_queue_enqueue"}] + ([{"tool": "generate_report"}] if lists_report else [])
     tunable = [
         {"component": "Generator", "attr": a} for a in ("p_nom", "marginal_cost")
     ]
@@ -1103,3 +1103,24 @@ def test_b1d_no_apply_project_changes_in_the_report_or_the_hand_off(
     path, record = completed_run(detached, site)
     assert record["run"]["status"] == "completed" and applied == []
     assert "revert" in record["run"]["handoff"]
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        {"status": "skipped", "reason": "Exploring cases is not part of a run yet."},
+        {"status": "skipped", "reason": "anything", "by": "profile"},
+    ],
+)
+def test_b1a_explore_stays_as_the_run_started_it(stored):
+    """Issue 06 E3 against C8: the sync picks up the report and hand-off
+    stages only; an explore stage the run started without is never reopened.
+    Mutant: drop the `_SYNCED_STAGES` filter in `_sync_stages`."""
+    profile = run_profiles.resolve("eh_site@1")
+    run = {
+        "stage": "solve",
+        "stages": {n: {"status": "pending", "attempts": 0} for n in run_profiles.STAGES},
+    }
+    run["stages"]["explore"] = dict(stored)
+    assert tasks._sync_stages(run, profile) is False
+    assert run["stages"]["explore"] == stored

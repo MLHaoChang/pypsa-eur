@@ -50,7 +50,7 @@ from tests.test_harness_run_loops import (  # noqa: F401
     stopped,
 )
 from tests.test_harness_run_skeleton import site, start  # noqa: F401
-from tests.test_harness_runner import detached, settle, task_path  # noqa: F401
+from tests.test_harness_runner import detached, fake_report_provider, settle, task_path  # noqa: F401
 
 FACT = "adequacy.loop.converged"
 STUDY = {"run_margin_loop": "margin_loop", "run_coupling_loop": "coupling_loop"}
@@ -557,6 +557,7 @@ def test_restore_final_runs_when_the_grant_covers_it(granted, ok, loops, monkeyp
         runs=[
             {"tool": "solve_queue_enqueue"},
             {"tool": "run_margin_loop", "restore": "final"},
+            {"tool": "generate_report"},  # issue 07: the stage-7 card, as eh_site@1
         ],
     )
     task, path, _ = granted()
@@ -576,6 +577,7 @@ def test_a_final_hold_joins_the_chain_with_a_ledger_row_naming_the_engine_rule(
         runs=[
             {"tool": "solve_queue_enqueue"},
             {"tool": "run_margin_loop", "restore": "final"},
+            {"tool": "generate_report"},  # issue 07: the stage-7 card, as eh_site@1
         ],
     )
     loops.finish_with(status="met", lever_star=0.2, solves_used=2, probe_solves=1)
@@ -602,6 +604,7 @@ def test_a_user_edit_while_the_loop_runs_settles_not_applied(
         runs=[
             {"tool": "solve_queue_enqueue"},
             {"tool": "run_margin_loop", "restore": "final"},
+            {"tool": "generate_report"},  # issue 07: the stage-7 card, as eh_site@1
         ],
     )
     loops.hold()
@@ -1168,6 +1171,7 @@ def test_a_user_edit_after_the_loops_own_hold_settles_not_applied(
         runs=[
             {"tool": "solve_queue_enqueue"},
             {"tool": "run_margin_loop", "restore": "final"},
+            {"tool": "generate_report"},  # issue 07: the stage-7 card, as eh_site@1
         ],
     )
     loops.hold()
@@ -1298,6 +1302,7 @@ def test_the_held_settings_old_value_is_read_before_the_loop_starts(
         runs=[
             {"tool": "solve_queue_enqueue"},
             {"tool": "run_margin_loop", "restore": "final"},
+            {"tool": "generate_report"},  # issue 07: the stage-7 card, as eh_site@1
         ],
     )
     before = ctx().solver_state["solver_config"].reserve_margin

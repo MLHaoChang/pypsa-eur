@@ -308,9 +308,12 @@ def _carded(step):
     return step.get("native") != "handoff" and _effectful(step["tool"])
 
 
-# The skip reasons the generic profile gave before issue 07 (§9.2): a record
-# stored before `by` existed was skipped by its profile when it carries one.
-_PROFILE_SKIPS = frozenset({"The run report is not part of a run yet.", "Exploring cases is not part of a run yet."})
+# The skip reason the generic profile gave the report before issue 07 (§9.2):
+# a record stored before `by` existed was skipped by its profile when it carries it.
+_PROFILE_SKIPS = frozenset({"The run report is not part of a run yet."})
+# The stages an in-flight run picks up from its profile (C8): issue 07's own.
+# Explore stays as the run started it (issue 06 E3: frozen at start).
+_SYNCED_STAGES = ("report", "handoff")
 
 
 def _skipped_by_profile(stored):
@@ -320,7 +323,8 @@ def _skipped_by_profile(stored):
 
 def _sync_stages(run, profile):
     """Issue 07 (GK B C8, B1-a): the profile is read by id, so a run started
-    before its profile gained a stage goes on to it. A later stage the stored
+    before its profile gained a report or hand-off stage goes on to it
+    (explore stays as started, issue 06 E3). A later stage the stored
     record lacks, or skipped only because its profile did, becomes pending
     when the profile now runs it; a stage skipped for any other reason stays
     skipped, and a stage the run already reached is never reopened. True
@@ -328,6 +332,8 @@ def _sync_stages(run, profile):
     from services.run_profiles import STAGES
     changed = False
     for name in STAGES[STAGES.index(run["stage"]) + 1:]:
+        if name not in _SYNCED_STAGES:
+            continue
         stage = profile["stages"][name]
         stored = run["stages"].get(name)
         if "skip" in stage:
