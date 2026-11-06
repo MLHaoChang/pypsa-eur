@@ -93,6 +93,19 @@ describe('CampusDipsRestartSection', () => {
       '3 restarts are not known (1 unit is missing an input; 2 have no verdict: no genset on the island: its short-circuit power is unknown)')
   })
 
+  // UIP-01: the two gridspine labels each carry "the binding answer"; one joined line said it twice.
+  it.each(['guided', 'expert'] as const)('shows the basis as two lines, each caveat once (%s)', (mode) => {
+    show(mode, payload({
+      dip_label: "screening estimate; the binding answer is the operator's dip statistics and the units' tested curves",
+      restart_label: 'event model, not dynamics; the binding answer is an RMS study of the restart',
+    }))
+    const dips = screen.getByTestId('dips-basis-dips').textContent!
+    const restart = screen.getByTestId('dips-basis-restart').textContent!
+    expect(dips).toBe("Dips basis: screening estimate; the binding answer is the operator's dip statistics and the units' tested curves")
+    expect(restart).toBe('Restart basis: event model, not dynamics; the binding answer is an RMS study of the restart')
+    for (const line of [dips, restart]) expect(line.match(/the binding answer/g)).toHaveLength(1)
+  })
+
   it('labels demo dip statistics demo', () => {
     show('guided')
     expect(screen.getByTestId('dips-demo').textContent).toContain(

@@ -1,0 +1,1 @@
+{"kinds": {"dc_ac_ratio_missing": {"surface": "inline", "why": "preview_library_reference / apply_library_reference refuse a PV reference priced per MW of DC module rating on a generator with no valid DC/AC ratio (p_nom is the AC rating; the ratio is never assumed 1). The assistant asks for the generator's DC/AC ratio (dc_ac_ratio, e.g. 1.25) and previews again."}}}

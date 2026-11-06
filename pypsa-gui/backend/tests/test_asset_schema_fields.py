@@ -33,7 +33,8 @@ CUSTOM_COLUMNS = {
 CUSTOM_BY_CLASS = {"Bus": {"country", "mwh_per_t", "product_value", "lost_production_value",
                            # Grid-to-process issue 15: the heat and steam level.
                            "temperature_c", "pressure_bar"}, "Carrier": {"unit"},
-                   "Generator": {"process_role"},
+                   # Typed-cost-units issue 02: the declared DC/AC ratio (models/process_unit.py).
+                   "Generator": {"process_role", "dc_ac_ratio"},
                    "GlobalConstraint": {"carrier"},
                    # Grid-to-process ticket 02: the process-unit columns (models/energy_hub.py EH_CUSTOM_COLUMNS).
                    "Link": {"eh_process", "criticality_tier", "throughput_unit", "specific_energy_kwh_per_t",

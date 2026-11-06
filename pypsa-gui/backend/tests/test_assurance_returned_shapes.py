@@ -77,6 +77,22 @@ def test_every_frozen_receipt_version_is_accepted_by_both_readers(served):
                     "unit": "MW",
                 }
             ]
+        if version == assurance_records.PREDICATE_POLICY_VERSION:
+            # Policy "3" always carries predicates (GK B C8).
+            receipt["predicates"] = [
+                {
+                    "id": "p1",
+                    "quantifier": "top_k",
+                    "evidence_id": "E1",
+                    "component_class": "Load",
+                    "metric": "p_set",
+                    "unit": "MW",
+                    "population": 2,
+                    "warnings": [],
+                    "k": 1,
+                    "members": ["L1"],
+                }
+            ]
         rewritten = {**stored, "receipt": receipt}
         # Answer records are immutable, so each version is stored under its own id.
         answer_id = str(uuid.uuid4())

@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant checks every write and destructive tool call against its input schema before anything runs, binds a confirmation to the exact arguments the user approved, and stops retrying a call that keeps failing on the same arguments; each refusal reads "denied" in the activity list.

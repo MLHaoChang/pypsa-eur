@@ -67,6 +67,9 @@ def _ctx(name: str):
     return ctx
 
 
+_VALID_INPUT = {"activate_project": {"project_id": "B"}, "import_network_nc": {"bytes_b64": ""}}
+
+
 def _switching_tool(target):
     def _tool(**_kwargs):
         PyPSAService._publish_active(target)
@@ -91,7 +94,9 @@ def _turn_app(start_ctx, tool_name: str, *, bind_cell: bool) -> FastAPI:
         def _gen():
             session = chat_service.ChatSession()
             for _ev, _p in chat_service._dispatch_real_tool_call(
-                session, {"id": "tu-1", "name": tool_name, "input": {}}, [],
+                # Schema-valid input: the required guard (issue 04 S4a) refuses
+                # a call missing a required argument before any handler.
+                session, {"id": "tu-1", "name": tool_name, "input": _VALID_INPUT[tool_name]}, [],
             ):
                 yield b"."
             yield (PyPSAService.get_active_context().loaded_project or "<unbound>").encode()

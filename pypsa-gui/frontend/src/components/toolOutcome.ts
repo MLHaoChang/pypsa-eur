@@ -4,7 +4,7 @@
  * follows that outcome, never a blanket ✓.
  */
 import {
-  ACTIVITY_STATUS_WORDS, TOOL_OUTCOME_FILE_REASON_WORDS, TOOL_OUTCOME_PARTIAL_REASON_WORDS, TOOL_OUTCOME_REASON_WORDS,
+  ACTIVITY_STATUS_WORDS, TOOL_OUTCOME_DENIED_DETAIL_WORDS, TOOL_OUTCOME_DENIED_REASON_WORDS, TOOL_OUTCOME_FILE_REASON_WORDS, TOOL_OUTCOME_PARTIAL_REASON_WORDS, TOOL_OUTCOME_REASON_WORDS,
 } from './activityWords'
 
 /** Every outcome the backend's `_outcome.outcome` may carry (harness/outcomes.py). */
@@ -112,14 +112,31 @@ export function toolOutcomeMark(outcome: string): ToolOutcomeMark {
   return { outcome: known, glyph: '–', word, tone: 'muted', inFlight: false }
 }
 
-/** Plain words for why an outcome is unknown, or null when the reason adds nothing. */
+/** Plain words for why an outcome is unknown, partly done or denied, or null when the reason adds nothing. */
 export function toolOutcomeReasonWord(outcome: string, reason: string | null, tool?: string): string | null {
   if (!reason) return null
   const state = toolOutcomeMark(outcome).outcome
   if (state === 'partial') return TOOL_OUTCOME_PARTIAL_REASON_WORDS[reason] ?? null
+  if (state === 'denied') return TOOL_OUTCOME_DENIED_REASON_WORDS[reason] ?? null
   if (state !== 'uncertain') return null
   if (tool && FILE_TOOLS.has(tool) && reason in TOOL_OUTCOME_FILE_REASON_WORDS) return TOOL_OUTCOME_FILE_REASON_WORDS[reason]
   return TOOL_OUTCOME_REASON_WORDS[reason] ?? null
+}
+
+/**
+ * A refusal's backend message as plain Details text (issue 04 S4a), or null.
+ * A kind in TOOL_OUTCOME_DENIED_DETAIL_WORDS always reads its fixed text.
+ * Python repr quotes around a name are dropped ('names' → names). A message
+ * that still names a refusal kind, or is the confirmation gate's echo of the
+ * raw decision ("deny on confirmation for …"), is withheld whole: its reason
+ * is already on the line in words.
+ */
+export function refusalDetail(message: string | null | undefined, kind: string): string | null {
+  if (Object.prototype.hasOwnProperty.call(TOOL_OUTCOME_DENIED_DETAIL_WORDS, kind)) return TOOL_OUTCOME_DENIED_DETAIL_WORDS[kind]
+  const text = (message ?? '').trim().replace(/'([\w.[\]]+)'/g, '$1')
+  if (!text || /\bon confirmation for\b/.test(text)) return null
+  const words = new Set(text.match(/\w+/g))
+  return [kind, ...Object.keys(TOOL_OUTCOME_DENIED_REASON_WORDS)].some(k => words.has(k)) ? null : text
 }
 
 /** "3 of 5" for a partly done write that carries its counts, else null. */

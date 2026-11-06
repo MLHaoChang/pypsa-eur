@@ -63,7 +63,7 @@ const AUTONOMY_DEFAULT_H = 4
 const AUTONOMY_MAX_H = 720 // the backend's ceiling (0 < h <= 720)
 const autonomyOk = (s: string) => { const v = Number(s); return s.trim() !== '' && v > 0 && v <= AUTONOMY_MAX_H }
 const num = (s: string) => (s.trim() === '' ? NaN : Number(s))
-const fmt = (v: number | null | undefined, d = 1) => (v == null ? '–' : v.toLocaleString(undefined, { maximumFractionDigits: d }))
+const fmt = (v: number | null | undefined, d = 1) => (v == null ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: d }))
 /** The loop's last round is not a final answer unless it converged: its sizes are shown muted, marked as such. */
 const isFinal = (r: IntentRow) => r.status === 'converged'
 const notRun = (r: IntentRow) => r.checks.filter(c => c.state === 'not_run').length

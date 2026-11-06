@@ -323,6 +323,14 @@ export function openSiteBoundaryDraw(at: { lat: number; lng: number } | null): v
   })
 }
 
+/** A fix link that names a Link field opens the editable form at that field
+ *  (focused, highlighted), not the read-only card at its top. The card takes the
+ *  request once it is the selected Link's detail view. */
+function requestLinkFieldEdit(target: FlowTarget): void {
+  if (target.component !== 'Link' || !target.entity || !target.field) return
+  useUIStore.getState().requestPropertiesEdit({ type: 'Link', name: target.entity, field: target.field })
+}
+
 /** Show one flow item's field in Expert: its panel, or the component's own
  *  Properties. An item with no known field opens its section. */
 export function openFlowTarget(target: FlowTarget): void {
@@ -344,6 +352,7 @@ function openFlowTargetNow(target: FlowTarget): void {
     ui.openRightPanel()
     ui.setSlidePanel(null)
     ui.setActiveSection(target.section)
+    requestLinkFieldEdit(target)
     return
   }
   openSectionInExpert(target.section)
@@ -366,6 +375,7 @@ function openFlowTargetInPlaceNow(target: FlowTarget): void {
     // The item's own section, not the component class's: a Link on the site
     // fence is Connection & grid, not Assets.
     ui.setActiveSection(target.section)
+    requestLinkFieldEdit(target)
     return
   }
   if (target.panel) { ui.setFieldDrawer(target); return }

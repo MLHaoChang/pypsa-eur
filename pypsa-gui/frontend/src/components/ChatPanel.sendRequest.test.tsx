@@ -577,13 +577,13 @@ describe('P26: a declined card in Guided', () => {
   ] })
   const toolRows = () => screen.queryAllByTestId('chat-message').filter(m => m.getAttribute('data-role') === 'tool')
 
-  it('Guided: one line "You declined — nothing was changed.", the raw line under Details', async () => {
+  it('Guided: one line "You declined. Nothing was changed.", the raw line under Details', async () => {
     seed()
     renderPanel()
     await waitFor(() => expect(toolRows()).toHaveLength(1))
     const row = toolRows()[0]
     expect(row.querySelector('[data-testid="chat-tool-label"]')!.textContent)
-      .toBe('You declined — nothing was changed.')
+      .toBe('You declined. Nothing was changed.')
     const details = row.querySelector('details') as HTMLDetailsElement
     expect(details.open).toBe(false)
     expect(details.textContent).toContain('denied: run_eh_study')
@@ -595,7 +595,7 @@ describe('P26: a declined card in Guided', () => {
     renderPanel()
     await act(async () => { (await screen.findByTestId('chat-confirm-deny')).click() })
     await waitFor(() => expect(screen.getByTestId('chat-tool-label').textContent)
-      .toBe('You declined — nothing was changed.'))
+      .toBe('You declined. Nothing was changed.'))
   })
 
   it('Expert is unchanged: both raw lines, no label', async () => {
@@ -813,7 +813,7 @@ describe('P29: Guided tool lines', () => {
     ] })
     renderPanel()
     await waitFor(() => expect(labels()).toEqual([
-      'You declined — nothing was changed.', 'Working: list what is in the network…']))
+      'You declined. Nothing was changed.', 'Working: list what is in the network…']))
   })
 
   it.each<[string, string]>([

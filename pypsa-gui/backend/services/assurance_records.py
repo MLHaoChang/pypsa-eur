@@ -54,6 +54,8 @@ MAX_AGGREGATE_ARG_CHARS = 1024
 POLICY_VERSION = "1"
 # Policy "1" plus derived entries (AA-03 S2); only an answer with derived entries uses it.
 DERIVED_POLICY_VERSION = "2"
+# Policy "1" plus complete-population predicates, with any derived entries (AA-03 S4).
+PREDICATE_POLICY_VERSION = "3"
 INPUT_ADAPTERS = {
     "static": "static-input/1",
     "static_page": "static-input-page/1",
@@ -1952,23 +1954,41 @@ def public(record):
     }
 
 
-def receipt_policy_ok(receipt):
-    """Policy "1" never carries derived entries; "2" always does, each checked (GK B P1/P2)."""
+def _entries_ok(entries, adapter):
+    """One to eight entries, each strict field by field."""
     from pydantic import ValidationError
 
-    from harness.assurance_shapes import DerivedEntry
-
-    if receipt.get("policy_version") == POLICY_VERSION:
-        return "derived" not in receipt
-    entries = receipt.get("derived")
-    if receipt.get("policy_version") != DERIVED_POLICY_VERSION or not isinstance(entries, list) or not 1 <= len(entries) <= 8:
+    if not isinstance(entries, list) or not 1 <= len(entries) <= 8:
         return False
     try:
         for entry in entries:
-            DerivedEntry.model_validate(entry)
+            adapter.validate_python(entry)
     except ValidationError:
         return False
     return True
+
+
+def receipt_policy_ok(receipt):
+    """Each policy carries exactly its own entries (GK B P1/P2, S4 C8).
+
+    "1" carries none; "2" carries derived entries; "3" carries predicates and,
+    optionally, derived entries (absent, never an empty list).
+    """
+    from pydantic import TypeAdapter
+
+    from harness.assurance_shapes import DerivedEntry, PredicateEntry
+
+    derived, predicates = TypeAdapter(DerivedEntry), TypeAdapter(PredicateEntry)
+    version = receipt.get("policy_version")
+    if version == POLICY_VERSION:
+        return "derived" not in receipt and "predicates" not in receipt
+    if version == DERIVED_POLICY_VERSION:
+        return "predicates" not in receipt and _entries_ok(receipt.get("derived"), derived)
+    if version == PREDICATE_POLICY_VERSION:
+        return _entries_ok(receipt.get("predicates"), predicates) and (
+            "derived" not in receipt or _entries_ok(receipt["derived"], derived)
+        )
+    return False
 
 
 def answer(owner, answer_id):

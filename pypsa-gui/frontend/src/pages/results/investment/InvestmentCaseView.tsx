@@ -345,7 +345,7 @@ function Cashflows({ report }: { report: InvestmentCaseReportPayload }) {
                              title="a line in this cell is not established">{NOT_ESTABLISHED}</td>
                 }
                 return <td key={c} className="text-right" title={v === undefined ? 'no line' : undefined}>
-                  {v === undefined ? '–' : fmtAmount(v)}</td>
+                  {v === undefined ? '—' : fmtAmount(v)}</td>
               })}
               <td className="text-right" data-established={totals[y] !== null}>
                 {totals[y] === null ? NOT_ESTABLISHED : fmtAmount(totals[y] as number)}</td>

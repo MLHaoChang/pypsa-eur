@@ -3,7 +3,7 @@
 
 # 32 — Solve-path copies and in-place fills (SP-1)
 
-Status: ready-for-agent
+Status: done (#1144)
 Type: bug
 Gated: yes (GK B)
 Model tier: opus
