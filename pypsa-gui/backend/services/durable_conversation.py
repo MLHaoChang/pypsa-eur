@@ -28,6 +28,10 @@ _LOCK = threading.RLock()
 EPISODE_LINEAGE_MAX = 32
 # Unverified effects awaiting reconciliation; the overflow is counted.
 RECONCILE_MAX = 64
+# Evidence entries re-read per revalidation; the rest are counted, not read.
+REVALIDATE_MAX = 64
+# A solve job in one of these states cannot change again.
+JOB_TERMINAL_STATES = frozenset({'completed', 'failed', 'aborted', 'interrupted'})
 
 
 def _wall_clock() -> float:
@@ -324,10 +328,10 @@ def resume_episode(thread_id: str, *, generation: int):
     """Mint a new ChatSession episode; drop the prior episode and its approvals.
 
     Rehydrates ``discussed_refs`` from durable ``refs.discussed`` so a restart
-    can still export or continue the discussed run without rebinding. Live
-    evidence fields (status/mode/fingerprint) are refreshed when the run is
-    still readable under the current ACL; otherwise the durable identifiers
-    alone are restored.
+    can still export or continue the discussed run without rebinding. The
+    rotation revalidates every evidence entry and run ref under the current
+    ACL first; live fields (status/mode/fingerprint) come from that stamp,
+    and an ``unreadable`` run restores the durable identifiers alone.
     """
     with _LOCK:
         path, thread = _read(thread_id)
@@ -362,6 +366,7 @@ def _rotate_episode(thread: dict[str, Any], *, reason: str, takeover: bool = Fal
     from services import chat_service
 
     _live_episode(thread)
+    stamps = _revalidate_evidence(thread, trigger=reason)
     # LC-07: the speech session belongs to the old episode; settle it once.
     from services import live_speech
     live_speech.close_in(thread, 'restart' if takeover else 'stale_generation')
@@ -383,6 +388,7 @@ def _rotate_episode(thread: dict[str, Any], *, reason: str, takeover: bool = Fal
     }], EPISODE_LINEAGE_MAX, keep='newest')
     _bounded_extend(thread, 'reconcile', effects, RECONCILE_MAX, keep='oldest')
     _verify_jobs(thread)
+    _store_revalidation(thread, stamps)
     thread['updated_at'] = now
     return new_session
 
@@ -567,14 +573,21 @@ def _job_state(job_id: str, owner_id: str) -> str | None:
 
 
 def _verify_jobs(thread: dict[str, Any]) -> None:
-    """Record the observed state of each unverified job the owner may read.
+    """Record the observed state of each job the owner may read.
 
-    At most ``RECONCILE_MAX`` reads (the list's cap). An unreadable job keeps
-    its entry exactly as it was.
+    Re-reads unverified jobs and jobs last seen in a non-terminal state (a
+    ``running`` job may have finished since). At most ``RECONCILE_MAX`` reads
+    (the list's cap). An unreadable job keeps its entry exactly as it was.
     """
     now = datetime.now(timezone.utc).isoformat()
     for entry in thread.get('reconcile') or []:
-        if entry.get('kind') != 'job' or entry.get('status') != 'unverified':
+        if entry.get('kind') != 'job':
+            continue
+        settled = (
+            entry.get('status') == 'verified'
+            and entry.get('observed_state') in JOB_TERMINAL_STATES
+        )
+        if entry.get('status') not in ('unverified', 'verified') or settled:
             continue
         state = _job_state(str(entry.get('job_id')), str(thread['owner_id']))
         if state is not None:
@@ -645,7 +658,128 @@ def reconcile_effects(thread_id: str, *, generation: int, resolutions: Any) -> d
         return _view(thread)
 
 
+# Stored fields a revalidation compares, in full, against the run as read now.
+_REVALIDATE_ANCHORS = ('fingerprint', 'revision', 'status', 'mode')
+# Live evidence fields a stamp refreshes on the episode's discussed refs.
+_LIVE_EVIDENCE_FIELDS = (
+    'status', 'mode', 'fingerprint', 'revision', 'evidence_available',
+    'section_status', 'section_reason',
+)
+
+
+def _observe_run(thread: dict[str, Any], ref: dict[str, Any]) -> dict[str, Any] | None:
+    """The run as the acting user may read it now; None when it cannot.
+
+    The read is ``run_evidence.get_run_evidence``, the run routes' own ACL
+    (the active project, rechecked on every read). A ref to another project
+    is not read. A missing run and a run the actor may no longer read are
+    both None, so the stamp they leave says nothing about which it was.
+    """
+    run_id = ref.get('run_id')
+    project_id = ref.get('project_id')
+    if not isinstance(run_id, str) or not run_id:
+        return None
+    if project_id is not None and project_id != thread.get('project_id'):
+        return None
+    from services import run_evidence as re_
+
+    try:
+        summary = re_.get_run_evidence(run_id)
+    except HTTPException:
+        # Every refusal (missing, revoked, another project) reads the same.
+        # Anything else is an outage and propagates before a write.
+        return None
+    if not isinstance(summary, dict) or summary.get('run_id') != run_id:
+        return None
+    observed = {key: summary[key] for key in _REVALIDATE_ANCHORS if key in summary}
+    observed['evidence_available'] = bool(summary.get('evidence_available'))
+    return observed
+
+
+def _revalidate_evidence(thread: dict[str, Any], *, trigger: str) -> dict[str, Any]:
+    """Stamp each evidence entry and run ref as ``current|changed|unreadable``.
+
+    The caller holds ``_LOCK`` and has checked the lease and generation. It
+    reads before any side effect, so an outage changes nothing, then stores
+    the result as ``thread['revalidation']`` (``_store_revalidation``) once
+    the generation is bumped, and saves. The entries and refs themselves are
+    never rewritten. ``changed`` means a stored anchor
+    (fingerprint, revision, status, mode) differs from the run as read now.
+    An ``unreadable`` stamp is the run id and the state alone. At most
+    ``REVALIDATE_MAX`` entries are read, plus the two refs; one run is read
+    once per pass.
+    """
+    seen: dict[str, dict[str, Any] | None] = {}
+
+    def stamp(ref: Any) -> dict[str, Any]:
+        ref = ref if isinstance(ref, dict) else {}
+        run_id = ref.get('run_id')
+        key = json.dumps([run_id, ref.get('project_id')], default=str)
+        if key not in seen:
+            seen[key] = _observe_run(thread, ref)
+        observed = seen[key]
+        out: dict[str, Any] = {'run_id': run_id} if isinstance(run_id, str) else {}
+        if observed is None:
+            out['state'] = 'unreadable'
+            return out
+        changed = any(
+            name in ref and ref[name] != observed.get(name)
+            for name in _REVALIDATE_ANCHORS
+        )
+        out['state'] = 'changed' if changed else 'current'
+        out['observed'] = copy.deepcopy(observed)
+        return out
+
+    entries = thread.get('evidence_revisions')
+    entries = entries if isinstance(entries, list) else []
+    refs = thread.get('refs') if isinstance(thread.get('refs'), dict) else {}
+    ref_stamps = {}
+    for name in ('current', 'discussed'):
+        ref = refs.get(name)
+        if isinstance(ref, dict) and ref.get('run_id') is not None:
+            ref_stamps[name] = stamp(ref)
+    return {
+        'trigger': trigger,
+        'at': datetime.now(timezone.utc).isoformat(),
+        'evidence': [stamp(entry) for entry in entries[:REVALIDATE_MAX]],
+        'evidence_unchecked': max(0, len(entries) - REVALIDATE_MAX),
+        'refs': ref_stamps,
+    }
+
+
+def _store_revalidation(thread: dict[str, Any], stamps: dict[str, Any]) -> None:
+    """Keep the stamps under the generation they were made for."""
+    thread['revalidation'] = {'generation': int(thread.get('generation', 1)), **stamps}
+
+
+def _apply_stamp(refs: dict[str, Any], stamp: dict[str, Any] | None) -> None:
+    """Refresh live evidence fields from a revalidation stamp, in place."""
+    for key in _LIVE_EVIDENCE_FIELDS:
+        refs.pop(key, None)
+    if stamp is None or stamp.get('run_id') != refs.get('run_id'):
+        # Not revalidated under this generation: identifiers only.
+        refs['revalidation'] = 'unreadable'
+        return
+    refs['revalidation'] = stamp['state']
+    if stamp['state'] == 'unreadable':
+        return
+    refs.update(copy.deepcopy(stamp.get('observed') or {}))
+
+
+def _discussed_stamp(thread: dict[str, Any]) -> dict[str, Any] | None:
+    revalidation = thread.get('revalidation') or {}
+    if int(revalidation.get('generation', -1)) != int(thread.get('generation', 1)):
+        return None
+    return (revalidation.get('refs') or {}).get('discussed')
+
+
 def _hydrate_discussed_refs(session, thread: dict[str, Any]) -> None:
+    """Give the episode the durable discussed run, as last revalidated.
+
+    Reads nothing itself: the live fields come from this generation's
+    revalidation stamp, and an ``unreadable`` (or missing) stamp restores
+    the identifiers alone, never an invented evidence status.
+    """
     discussed = dict((thread.get('refs') or {}).get('discussed') or {})
     run_id = discussed.get('run_id')
     if not isinstance(run_id, str) or not run_id:
@@ -657,16 +791,7 @@ def _hydrate_discussed_refs(session, thread: dict[str, Any]) -> None:
     for key in ('section', 'source', 'baseline_run_id', 'window', 'asset_id'):
         if discussed.get(key) is not None:
             hydrated[key] = discussed[key]
-    try:
-        from services import run_evidence as re_
-
-        summary = re_.get_run_evidence(run_id)
-        hydrated['status'] = summary.get('status')
-        hydrated['mode'] = summary.get('mode')
-        hydrated['fingerprint'] = summary.get('fingerprint')
-        hydrated['evidence_available'] = bool(summary.get('evidence_available'))
-    except HTTPException:
-        pass
+    _apply_stamp(hydrated, _discussed_stamp(thread))
     session.discussed_refs = hydrated
 
 
@@ -718,6 +843,9 @@ def rebind_scope(thread_id: str, *, generation: int) -> dict[str, Any]:
         path, thread = _read(thread_id)
         _require_authoritative_replica(thread)
         _require_generation(thread, generation)
+        # B4: the evidence is re-read under the actor's ACL first; the bound
+        # episode's discussed refs are refreshed from it after the save.
+        stamps = _revalidate_evidence(thread, trigger='rebind')
         _revoke_checked_episode(thread)
         # LC-07: rebind rotates the media credential: the speech session closes
         # and settles; a new start mints a new grant at the new generation.
@@ -728,7 +856,9 @@ def rebind_scope(thread_id: str, *, generation: int) -> dict[str, Any]:
         thread['updated_at'] = datetime.now(timezone.utc).isoformat()
         creds = _mint_bridge_credentials(thread)
         thread['bridge_credentials'] = creds
+        _store_revalidation(thread, stamps)
         episode_id = thread.get('episode_id')
+        sess = None
         if episode_id:
             sess = chat_service.get_session(episode_id)
             if sess is not None:
@@ -737,6 +867,15 @@ def rebind_scope(thread_id: str, *, generation: int) -> dict[str, Any]:
                 sess.revoke_confirmations()
             ua._DEFAULT.bump_generation(session_id=episode_id)
         _save(path, thread)
+        if sess is not None:
+            with sess._lock:
+                refs = sess.discussed_refs
+                stamp = _discussed_stamp(thread)
+                # Only the run the thread holds as discussed is restamped.
+                if isinstance(refs, dict) and stamp and refs.get('run_id') == stamp.get('run_id'):
+                    refreshed = dict(refs)
+                    _apply_stamp(refreshed, stamp)
+                    sess.discussed_refs = refreshed
         view = _view(thread)
         # Return credentials once; disk retains them for authorize_bridge_credentials.
         return {

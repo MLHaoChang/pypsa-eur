@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Durable voice conversations re-read their evidence and run references under the user's current access on resume, takeover, profile switch and rebind. Each reference is stamped current, changed or unreadable without rewriting it, a run the user can no longer read looks the same as a missing one, and solve jobs last seen running are read again until they finish.
