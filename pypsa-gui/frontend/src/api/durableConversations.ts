@@ -117,9 +117,17 @@ export interface SpeechStartResult {
   reconcile: unknown[]
 }
 
+/** A transcript-free server notice for a final that was not admitted (LC-07c). */
+export interface SpeechNotice {
+  status: 'echo_ignored' | 'clarify' | 'not_an_approval'
+  message: string
+  seq: number
+  generation: number
+}
+
 export async function getSpeechState(
   threadId: string,
-): Promise<{ generation: number; session: SpeechSessionView | null }> {
+): Promise<{ generation: number; session: SpeechSessionView | null; notices?: SpeechNotice[] }> {
   const r = await client.get(`/durable-conversations/${threadId}/speech`)
   return r.data
 }
