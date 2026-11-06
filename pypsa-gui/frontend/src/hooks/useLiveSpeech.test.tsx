@@ -337,3 +337,45 @@ describe('stopCaption: one plain line per exit reason', () => {
     expect(line).toBe(`Voice stopped: the voice service did not start. ${TYPED_FALLBACK}`)
   })
 })
+
+describe('useLiveSpeech notices (LC-07c)', () => {
+  const tick = () => act(async () => { await new Promise((r) => setTimeout(r, 2300)) })
+  const notice = (status: string, message: string, seq: number, generation = 3) =>
+    ({ status, message, seq, generation })
+
+  it.each([
+    ['echo_ignored', 'Ignored: that matched the answer being read out.'],
+    ['clarify', 'Say one number at a time.'],
+    ['not_an_approval', 'Speech never approves a card; use the card.'],
+  ])('shows the %s message in the caption, once per seq, and not the transcript', async (status, message) => {
+    const { result } = await listening()
+    api.getSpeechState.mockResolvedValue({
+      generation: 3, session: null,
+      notices: [{ ...notice(status, message, 1), transcript: 'secret words' }],
+    })
+    await tick()
+    await waitFor(() => expect(result.current.caption).toBe(message), { timeout: 4000 })
+    expect(result.current.caption).not.toContain('secret words')
+    api.getSpeechState.mockResolvedValue({ generation: 3, session: null, notices: [notice('clarify', 'Newer.', 2)] })
+    await waitFor(() => expect(result.current.caption).toBe('Newer.'), { timeout: 4000 })
+  })
+
+  it('ignores other generations and clears on rebind', { timeout: 15000 }, async () => {
+    const { result } = await listening()
+    api.getSpeechState.mockResolvedValue({ generation: 3, session: null, notices: [notice('clarify', 'Old.', 5, 2)] })
+    await tick()
+    expect(result.current.caption).toBe(LISTENING_CAPTION)
+    api.getSpeechState.mockResolvedValue({ generation: 3, session: null, notices: [notice('clarify', 'Now.', 1)] })
+    await waitFor(() => expect(result.current.caption).toBe('Now.'), { timeout: 4000 })
+    await act(async () => { useChatStore.setState({ utteranceGeneration: 4 }) })
+    expect(result.current.caption).not.toBe('Now.')
+  })
+
+  it('returns to Listening after the notice has been shown for a while', { timeout: 20000 }, async () => {
+    const { result } = await listening()
+    api.getSpeechState.mockResolvedValue({ generation: 3, session: null, notices: [notice('clarify', 'Pick one.', 1)] })
+    await waitFor(() => expect(result.current.notice).toBe(true), { timeout: 4000 })
+    await waitFor(() => expect(result.current.caption).toBe(LISTENING_CAPTION), { timeout: 10000 })
+    expect(result.current.notice).toBe(false)
+  })
+})
