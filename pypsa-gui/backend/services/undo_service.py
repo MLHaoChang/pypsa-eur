@@ -33,6 +33,7 @@ works even when the user is editing a giant network.
 """
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import logging
 import os
@@ -74,11 +75,9 @@ class _UndoState:
     lock: threading.Lock = field(default_factory=threading.Lock)
     coalesce_lock: threading.Lock = field(default_factory=threading.Lock)
     last_push: float = 0.0
-    # Issue 04 S3 (W5): which entry the last pop took, so a read-back can tell
-    # the entry it peeked from one that replaced it. sha256 of the payload,
-    # which holds everything an undo restores (W4).
+    # Issue 04 S3 (W5): every pop counts, so a read-back can tell its own pop
+    # from another session's (see `watch_pops`).
     pops: int = 0
-    last_popped_sha: str | None = None
 
 
 def _active() -> _UndoState:
@@ -168,7 +167,9 @@ def pop_entry() -> dict | None:
         payload, size = u.stack.pop()
         u.total_bytes -= size
         u.pops += 1
-        u.last_popped_sha = hashlib.sha256(payload).hexdigest()
+        watch = _POP_WATCH.get()
+        if watch is not None:
+            watch.append(hashlib.sha256(payload).hexdigest())
     data = pickle.loads(payload)
     data.setdefault("template_meta", None)
     return data
@@ -188,7 +189,7 @@ def peek_entry() -> tuple[str, int, dict] | None:
     """The top entry left on the stack: (payload sha256, pops so far, entry).
 
     Issue 04 S3: the read-back after ``undo_last`` compares this sha with
-    ``last_pop()`` (W5) and the restored state with this entry (W4).
+    the shas ``watch_pops`` records (W5) and the restored state with this entry (W4).
     """
     u = _active()
     with u.lock:
@@ -200,11 +201,32 @@ def peek_entry() -> tuple[str, int, dict] | None:
     return hashlib.sha256(payload).hexdigest(), pops, entry
 
 
-def last_pop() -> tuple[int, str | None, int]:
-    """(pops so far, sha256 of the last popped payload, depth) for the active stack."""
+def pops_and_depth() -> tuple[int, int]:
+    """(pops so far, depth) for the active stack, read together."""
     u = _active()
     with u.lock:
-        return u.pops, u.last_popped_sha, len(u.stack)
+        return u.pops, len(u.stack)
+
+
+# Issue 04 S3 (W5, GK B (26) X2): the sha256 of each payload popped in THIS
+# call's context, so a pop by another session never stands in for this one's.
+_POP_WATCH: contextvars.ContextVar[list | None] = contextvars.ContextVar(
+    "undo_pop_watch", default=None
+)
+
+
+def watch_pops() -> tuple[list, contextvars.Token]:
+    """Start recording the payload shas this context pops; returns (list, token)."""
+    watched: list = []
+    return watched, _POP_WATCH.set(watched)
+
+
+def unwatch_pops(token: contextvars.Token) -> None:
+    """Stop recording; a token from another context is ignored."""
+    try:
+        _POP_WATCH.reset(token)
+    except ValueError:
+        _POP_WATCH.set(None)
 
 
 def depth() -> int:

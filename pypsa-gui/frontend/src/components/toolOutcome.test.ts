@@ -196,8 +196,8 @@ describe('write outcomes (issue 04 S2)', () => {
 describe('undo outcomes (issue 04 S3)', () => {
   it.each([
     ['completed', null, '✓ undo_last (done)'],
-    ['uncertain', 'entry_moved', '– undo_last (outcome unknown: a different step was undone)'],
-    ['uncertain', 'not_restored', '– undo_last (outcome unknown: the network does not match the undone step)'],
+    ['uncertain', 'entry_moved', '– undo_last (outcome unknown: a different change was undone)'],
+    ['uncertain', 'not_restored', '– undo_last (outcome unknown: the network does not match its state before that change)'],
     ['failed', 'nothing_to_undo', '✕ undo_last (failed)'],
   ])('words an undo that read back %s (%s)', (outcome, reason, line) => {
     const block = toolOutcomeOf({ _outcome: { version: 1, outcome, reason } }, 'undo_last')!

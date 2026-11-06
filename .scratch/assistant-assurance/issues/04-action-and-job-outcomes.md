@@ -191,3 +191,41 @@ the request after the edit counter's bump and projects `_outcome` beside S1's
 job outcome (a `None` result from delete_component gets one too). undo_last
 moves to S3 with import/export: all three are snapshot read-backs that share
 W4/W5. Shots: `.scratch/assistant-assurance/shots/aa04-s2-tool-outcome-{guided,expert}.png`.
+
+### 2026-11-06 — S2 OKs; S3 plan verdicts and undo_last build (branch `claude/aa04-s3-snapshot-outcomes`)
+
+#1161 (S2) has GK OK and UX OK @fc9732f83a129ee2710840b7ad76d577fdb14f66.
+
+Named open rows (GK B (26) R1):
+
+| Case | Owner | Note |
+|------|-------|------|
+| A3.6 extra edits by a row write (rows the call did not name) | S4 | S2's read-back covers only the named rows; W3 catches other writers only |
+| A3.4 saved/unsaved values | S3 (import/export part) | only the live network is read so far (X7) |
+| import_excel, import_matpower, export_excel, export_matpower | `_pending` (X6) | no independent reader; they read adapter_pending |
+
+GK B (26) S3 plan: GO WITH CHANGES, conditions X1–X8:
+- X1: load the scratch Network with the loader that apply_undo uses, and test that an undo of a real template network (custom columns, time series) reads completed.
+- X2: match peek and pop per call, never through a context-global last-popped sha. Test that another session's pop between note and read-back gives uncertain.
+- X3: a raise may give `failed` only when nothing changed. A tool_timeout never gives failed; it gives uncertain or no outcome. Test both.
+- X4: import extras use a closed allow-list in code (the classes and names the router adds), with a test. Any other extra row reads partial, and counts name the allowed extras.
+- X5: an export needs exactly one new agent_export upload, else uncertain. Show completed for nc and csv_bundle on a realistic template. A csv round-trip limit becomes a named `_pending` row, never a silent always-uncertain.
+- X6: excel and matpower read adapter_pending, each with a named `_pending` row.
+- X7: say whether S3 covers saved/unsaved, or name its owner.
+- X8: hold the PyPSA lock only for the read. State the digest's cost in the PR. A frame that cannot be hashed reads not_comparable, with a mutant.
+
+Riders: R2, keep the ctx object and compare with `is`; R3, the raise-path rule covers the S2 write tools too.
+
+UX (9) GO for the undo_last lines: entry_moved → "a different change was undone"; not_restored → "the network does not match its state before that change". Done, failed and no count are fine.
+
+Built so far (undo_last):
+- `undo_service` counts pops. `watch_pops` records, in this call's context only, the sha256 of each payload this call pops (X2).
+- `harness/outcomes.py` `note_undo` / `read_undo` / pure `classify_undo`. The note holds the peeked entry's sha (W4: payload = netcdf + user_ts + template_meta) and its network digest, loaded with `PyPSAService.import_network_from_netcdf`, the loader apply_undo uses (X1).
+- The read-back compares the live `network_digest`, user series and template meta, between two reads of the edit counter.
+- A pop count that differs from this call's own pops reads entry_moved.
+- The undo re-imports into a new context object, so undo compares the project binding. S2's row writes now keep the ctx and compare with `is` (R2).
+- `network_digest` costs about 20 ms on ieee39, eh_datacenter, eh_datacenter_staged and eh_ipp_hybrid (8760 snapshots) (X8).
+- Raise and timeout (X3, R3): the loop's error path carries no result dict, so a raising or timed-out write (S2 tools and undo_last) is a tool error with no `_outcome`, never completed or failed. It is tested for bulk_update_components and undo_last, including an orphan that lands after the timeout. Putting an outcome on the error path would change loop.py (held by #1154) and the frontend's error display; that is a question for GK B.
+- Tests: `tests/assurance_acceptance/test_p3_snapshot_outcomes.py`, 37 passed. 14 mutants of classify_undo were killed (before X2; the X2 rows were added to the table after).
+
+Next: import/export (X4, X5, X6, X7). Then a PR with a release note and shots.

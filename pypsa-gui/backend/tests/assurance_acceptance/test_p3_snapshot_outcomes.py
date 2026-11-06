@@ -125,9 +125,69 @@ def test_a_handler_supplied_outcome_is_dropped(baseline, harness, monkeypatch):
         return {**real(), "_outcome": {"version": 1, "outcome": "completed"}}
 
     monkeypatch.setattr(network_router, "undo_last", forged)
-    monkeypatch.setattr(undo_service, "last_pop", lambda: (0, None, 0))
+    monkeypatch.setattr(undo_service, "pops_and_depth", lambda: (0, 0))
     result = _stream(harness, "undo_last", {})
     assert result["_outcome"]["outcome"] == "uncertain", result
+
+
+def _install_template():
+    """The datacenter template (custom columns, time series) via the app's own import."""
+    import base64
+    import pathlib
+    import tempfile
+
+    from project_templates.eh_templates import build_eh_datacenter
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "network.nc"
+        build_eh_datacenter().export_to_netcdf(path)
+        data = base64.b64encode(path.read_bytes()).decode()
+    chat_tools.import_network_nc(data, "network.nc")
+    n = PyPSAService.get_active_context().network
+    assert len(n.snapshots) > 2 and any(not df.empty for df in n.generators_t.values())
+    return n
+
+
+def test_an_undo_on_a_real_template_network_is_completed(baseline, harness):
+    # GK B (26) X1: the read-back loads the entry with the loader apply_undo
+    # uses, so a template's custom columns and series do not read as a change.
+    n = _install_template()
+    name = n.generators.index[0]
+    before = n.generators.at[name, "marginal_cost"]
+    _stream(
+        harness,
+        "bulk_update_components",
+        {"component_class": "Generator", "names": [name], "updates": {"marginal_cost": before + 7}},
+    )
+    result = _stream(harness, "undo_last", {})
+    assert result["_outcome"] == {"version": 1, "outcome": "completed", "reason": None}
+    assert PyPSAService.get_active_context().network.generators.at[name, "marginal_cost"] == before
+
+
+def test_a_pop_by_another_session_reads_uncertain(baseline, harness, monkeypatch):
+    # GK B (26) X2: another session's undo between the note and the read-back
+    # (its pop runs outside this call's context) never stands in for this one's.
+    import contextvars
+
+    from routers import network as network_router
+
+    _edit(harness)
+    top = undo_service.peek_entry()
+    undo_service.push(top[2]["netcdf"], top[2]["user_ts"], top[2]["template_meta"])
+    real = network_router.undo_last
+
+    def other_session():
+        undo_service._POP_WATCH.set(None)  # the same project, not this call
+        return undo_service.pop_entry()
+
+    def raced():
+        assert contextvars.copy_context().run(other_session) is not None
+        return real()
+
+    monkeypatch.setattr(network_router, "undo_last", raced)
+    result = _stream(harness, "undo_last", {})
+    assert result["_outcome"]["outcome"] == "uncertain"
+    assert result["_outcome"]["reason"] == "entry_moved"
 
 
 # ── The digest ───────────────────────────────────────────────────────────
@@ -176,7 +236,7 @@ def _read(**kw):
         "revision_start": 3,
         "revision_end": 3,
         "pops": 5,
-        "last_popped_sha": "s1",
+        "own_pops": ["s1"],
         "depth": 1,
         "digest": "d-snap",
         "template_meta": b"m1",
@@ -186,7 +246,7 @@ def _read(**kw):
     return read
 
 
-UNCHANGED = {"pops": 4, "last_popped_sha": None, "depth": 2, "digest": "d-before",
+UNCHANGED = {"pops": 4, "own_pops": [], "depth": 2, "digest": "d-before",
              "template_meta": b"m0", "user_ts": {"a": 1}}
 
 
@@ -208,8 +268,10 @@ UNCHANGED = {"pops": 4, "last_popped_sha": None, "depth": 2, "digest": "d-before
         (_note(digest_before=outcomes.UNCOMPARABLE),
          _read(**{**UNCHANGED, "digest": outcomes.UNCOMPARABLE}), "uncertain", "not_restored"),
         (_note(), _read(pops=6), "uncertain", "entry_moved"),
+        (_note(), _read(**{**UNCHANGED, "pops": 5}), "uncertain", "entry_moved"),
+        (_note(), _read(pops=6, own_pops=["s1", "s0"]), "uncertain", "entry_moved"),
         (_note(expected=None), _read(), "uncertain", "entry_moved"),
-        (_note(), _read(last_popped_sha="s2"), "uncertain", "entry_moved"),
+        (_note(), _read(own_pops=["s2"]), "uncertain", "entry_moved"),
         (_note(expected={**_note()["expected"], "digest": outcomes.UNCOMPARABLE}),
          _read(), "uncertain", "not_comparable"),
         (_note(), _read(digest=outcomes.UNCOMPARABLE), "uncertain", "not_comparable"),
@@ -230,3 +292,70 @@ def test_undo_last_is_a_write_tool_and_not_a_row_write():
     assert "undo_last" in outcomes.WRITE_TOOLS
     assert "undo_last" not in outcomes.ROW_WRITE_TOOLS
     assert not outcomes.WRITE_TOOLS & outcomes.JOB_TOOLS
+
+
+# ── Raise and timeout paths (GK B (26) R3/X3) ────────────────────────────
+
+
+def _frames(harness, tool, args):
+    import uuid
+
+    from harness.loop import dispatch_tool_call
+    from harness.session import ChatSession
+
+    harness.monkeypatch.setenv("PYPSA_GUI_ANSWER_ASSURANCE_MODE", "disabled")
+    session, collector, frames = ChatSession(), [], []
+    for event, data in dispatch_tool_call(
+        session, {"id": uuid.uuid4().hex, "name": tool, "input": args}, collector, guided=True
+    ):
+        if event == "tool_pending_confirmation":
+            session.record_decision(data["confirmation_token"], "approve")
+        frames.append((event, data))
+    return frames, collector
+
+
+_BULK = {"component_class": "Generator", "names": ["G1"], "updates": {"marginal_cost": 61.5}}
+
+
+@pytest.mark.parametrize("tool, args", [("bulk_update_components", _BULK), ("undo_last", {})])
+def test_a_raising_write_is_a_tool_error_with_no_outcome(baseline, harness, monkeypatch, tool, args):
+    from fastapi import HTTPException
+
+    if tool == "undo_last":
+        _edit(harness)
+
+    def boom(**_kw):
+        raise HTTPException(409, "refused")
+
+    monkeypatch.setitem(chat_tools.DISPATCHERS, tool, boom)
+    frames, collector = _frames(harness, tool, args)
+    assert [d.get("error_kind") for e, d in frames if e == "tool_error"] == ["tool_error"]
+    assert not [d for e, d in frames if e == "tool_result"]
+    assert all("_outcome" not in str(c) for c in collector), collector
+
+
+def test_a_write_that_times_out_never_reads_completed_or_failed(baseline, harness, monkeypatch):
+    import threading
+
+    from harness import budget as harness_budget
+
+    real = chat_tools.DISPATCHERS["bulk_update_components"]
+    release, landed = threading.Event(), threading.Event()
+
+    def late(**kw):
+        release.wait(10)
+        try:
+            return real(**kw)  # the orphan still lands after the timeout
+        finally:
+            landed.set()
+
+    monkeypatch.setitem(chat_tools.DISPATCHERS, "bulk_update_components", late)
+    monkeypatch.setattr(harness_budget, "PER_TOOL_TIMEOUT_SECONDS", 0.2)
+    try:
+        frames, collector = _frames(harness, "bulk_update_components", _BULK)
+    finally:
+        release.set()
+    assert landed.wait(10)
+    assert [d.get("error_kind") for e, d in frames if e == "tool_error"] == ["tool_timeout"]
+    assert not [d for e, d in frames if e == "tool_result"]
+    assert all("_outcome" not in str(c) for c in collector), collector

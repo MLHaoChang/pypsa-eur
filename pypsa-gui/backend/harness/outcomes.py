@@ -345,7 +345,7 @@ def note_write(tool: str, args: dict) -> dict | None:
         return {"tool": tool, "error": True}
     return {
         "tool": tool,
-        "ctx": id(ctx),
+        "ctx": ctx,  # the object, compared with `is` (GK B (26) R2)
         "cls": cls,
         "items": items,
         "revision": revision,
@@ -361,7 +361,7 @@ def read_write(note: dict | None) -> dict:
 
     try:
         ctx = PyPSAService.get_active_context()
-        if id(ctx) != note["ctx"]:
+        if ctx is not note["ctx"]:
             return {"error": "other_context"}
         with PyPSAService.get_lock():
             start = dirty_state.revision(ctx)
@@ -593,7 +593,7 @@ def note_undo() -> dict:
             }
         with PyPSAService.get_lock():
             ctx = PyPSAService.get_active_context()
-            pops, _last, depth = undo_service.last_pop()
+            pops, depth = undo_service.pops_and_depth()
             note = {
                 "tool": "undo_last",
                 "binding": _binding(),
@@ -605,6 +605,8 @@ def note_undo() -> dict:
                 "expected": expected,
             }
         note["user_ts_before"] = _serialize_user_ts()
+        # Last, so a failed note leaves no watch behind (X2: per call, not global).
+        note["own_pops"], note["watch"] = undo_service.watch_pops()
     except Exception:  # noqa: BLE001 - no note reads uncertain later
         return {"tool": "undo_last", "error": True}
     return note
@@ -618,13 +620,14 @@ def read_undo(note: dict | None) -> dict:
     from services.pypsa_service import PyPSAService
     from services.user_timeseries import _serialize_user_ts
 
+    undo_service.unwatch_pops(note["watch"])
     try:
         if _binding() != note["binding"]:
             return {"error": "other_context"}
         with PyPSAService.get_lock():
             ctx = PyPSAService.get_active_context()
             start = dirty_state.revision(ctx)
-            pops, last_sha, depth = undo_service.last_pop()
+            pops, depth = undo_service.pops_and_depth()
             digest = network_digest(ctx.network)
             meta = growth_placeholders.snapshot_meta()
             user_ts = _serialize_user_ts()
@@ -635,7 +638,7 @@ def read_undo(note: dict | None) -> dict:
         "revision_start": start,
         "revision_end": end,
         "pops": pops,
-        "last_popped_sha": last_sha,
+        "own_pops": list(note["own_pops"]),
         "depth": depth,
         "digest": digest,
         "template_meta": meta,
@@ -658,8 +661,11 @@ def classify_undo(note: dict | None, read: dict | None) -> dict:
         or read.get("revision_end") != note["revision"]
     ):
         return out("uncertain", "revision_moved")
-    popped = read.get("pops", 0) - note["pops"]
-    if popped == 0:
+    own = read.get("own_pops") or []
+    if read.get("pops", 0) - note["pops"] != len(own):
+        # Another session popped between the note and the read-back (X2).
+        return out("uncertain", "entry_moved")
+    if not own:
         # Nothing was taken off the stack: failed only when nothing changed.
         unchanged = (
             read.get("depth") == note["depth"]
@@ -672,7 +678,7 @@ def classify_undo(note: dict | None, read: dict | None) -> dict:
             return out("uncertain", "not_restored")
         return out("failed", None if note["expected"] else "nothing_to_undo")
     expected = note.get("expected")
-    if popped != 1 or not expected or read.get("last_popped_sha") != expected["sha"]:
+    if len(own) != 1 or not expected or own[0] != expected["sha"]:
         return out("uncertain", "entry_moved")
     if isinstance(expected["digest"], _Uncomparable) or isinstance(
         read.get("digest"), _Uncomparable
