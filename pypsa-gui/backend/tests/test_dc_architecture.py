@@ -335,6 +335,17 @@ def _leg(total_v, total_lo, total_hi):
     }
 
 
+def test_an_interval_ending_exactly_at_zero_is_not_distinguishable():
+    """K9: an interval end at exactly 0 still spans zero."""
+    own = _leg(100.0, 90.0, 110.0)
+    low_at_zero = A.delta_interval(_leg(120.0, 110.0, 130.0), own)
+    assert (low_at_zero["low"], low_at_zero["high"]) == (0.0, 40.0)
+    assert low_at_zero["verdict"] == "not_distinguishable"
+    high_at_zero = A.delta_interval(_leg(80.0, 70.0, 90.0), own)
+    assert (high_at_zero["low"], high_at_zero["high"]) == (-40.0, 0.0)
+    assert high_at_zero["verdict"] == "not_distinguishable"
+
+
 def test_an_interval_that_spans_zero_names_no_cheaper_architecture():
     own = _leg(100.0, 90.0, 110.0)
     assert (
