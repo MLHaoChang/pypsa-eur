@@ -3,8 +3,8 @@
 
 # P2: private drafts and approved answer publication
 
-Status: ready-for-agent
-Progress: S1 merged (#1154), S3 merged (#1171), S2 merged (#1186), S4 merged (#1197); S5 in review
+Status: done
+Progress: S1 merged (#1154), S3 merged (#1171), S2 merged (#1186), S4 merged (#1197); S5 merged (#1208)
 Type: task
 Blocked by: 01, 02
 
@@ -267,5 +267,5 @@ with its receipt policy. Each of the 21 fault variants is refused for its own
 reason and differs from its golden in one field. Computed profiles stay with
 the pilot goldens (`tests/test_pilot_evaluation.py`).
 
-Tests: `tests/assurance_acceptance/test_p5_interpretation_markers.py`,
+Merged as #1208 (GK B (30) OK @0a0a4782). Tests: `tests/assurance_acceptance/test_p5_interpretation_markers.py`,
 `test_p5_surface_map.py`, `test_p5_release_goldens.py`.
