@@ -116,7 +116,9 @@ def test_a_revoked_card_is_recorded_and_released_at_once():
     assert out["proceed"] is False
     assert ("tool_error", {"tool_use_id": "tu-7", "tool_name": "delete_project",
             "error_kind": "confirmation_revoked",
-            "message": "revoked on confirmation for 'delete_project'"}) in frames
+            "message": "revoked on confirmation for 'delete_project'",
+            "_outcome": {"version": 1, "outcome": "denied",
+                         "reason": "confirmation_revoked"}}) in frames
     assert (_records(session)[-1]["outcome"], _records(session)[-1]["by"]) == ("revoked", "system")
 
 

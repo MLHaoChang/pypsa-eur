@@ -70,6 +70,11 @@ def probes(monkeypatch):
         entries.append({"name": name, "description": f"Test probe. Safety: {tier}",
                         "input_schema": {"type": "object", "properties": {}, "required": []}})
     monkeypatch.setattr(catalogue, "TOOLS", [*catalogue.TOOLS, *entries])
+    # Issue 04 S4a: a declared effectful tool also needs its required guard.
+    from harness import guards
+    for entry in entries:
+        monkeypatch.setitem(guards.REQUIRED_GUARDS, entry["name"],
+                            guards.schema_guards(entry["input_schema"]))
     return calls
 
 

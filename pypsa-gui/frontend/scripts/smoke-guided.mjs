@@ -1903,8 +1903,8 @@ async function p26Template(browser, tpl) {
       // P26 item 6: one plain line; the technical ones are under Details / hidden.
       // P29 (B1): every tool line now has a Guided label, so the declined
       // line is one of the labels, not necessarily the first.
-      check((await byId('chat-tool-label').allTextContents()).includes('You declined — nothing was changed.'),
-        'transcript: "You declined — nothing was changed."')
+      check((await byId('chat-tool-label').allTextContents()).includes('You declined. Nothing was changed.'),
+        'transcript: "You declined. Nothing was changed."')
       const visible = await byId('chat-messages').innerText()
       check(!visible.includes('confirmation_denied') && !/^denied: /m.test(visible),
         'no confirmation_denied / "denied:" line visible')

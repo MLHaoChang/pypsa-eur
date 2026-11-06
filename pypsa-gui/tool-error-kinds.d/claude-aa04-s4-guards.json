@@ -1,0 +1,5 @@
+{"kinds": {
+  "required_guard_failed": {"surface": "inline", "why": "A write or destructive tool's required guard (harness/guards.py: its input schema at least) found a problem, raised, or the tool has no guard at all. Nothing ran and no card was shown; the result reads denied and the assistant corrects the arguments the message names."},
+  "confirmation_args_changed": {"surface": "inline", "why": "The arguments of an approved action no longer match the fingerprint the confirmation bound (harness/guards.py). Nothing ran; the result reads denied and the assistant asks for the action again so the user reviews the new arguments."},
+  "no_progress_stop": {"surface": "inline", "why": "The same tool kept failing on the same arguments, so the call that would be the third failure in a turn, or the fifth in the chat, was refused before dispatch (harness/budget.py). Nothing ran; the assistant corrects the arguments or tells the user what blocks it."}
+}}

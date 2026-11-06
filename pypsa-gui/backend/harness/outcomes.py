@@ -31,6 +31,7 @@ OUTCOMES = (
     "failed",
     "cancel_requested",
     "cancelled",
+    "denied",
     "uncertain",
 )
 
@@ -64,6 +65,11 @@ def note_submission(job_id: str, ctx: Any, token: dict | None) -> None:
         _SUBMISSIONS[job_id] = record
         while len(_SUBMISSIONS) > _MAX:
             _SUBMISSIONS.popitem(last=False)
+
+
+def denied(kind: str) -> dict:
+    """The `_outcome` of a pre-effect refusal (S4a): nothing ran, `reason` is its kind."""
+    return {"version": VERSION, "outcome": "denied", "reason": kind}
 
 
 def submission(job_id: Any) -> dict | None:
