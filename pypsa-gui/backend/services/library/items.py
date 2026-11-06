@@ -209,10 +209,11 @@ class TariffCurrencyRequired(ValueError):
     code = "tariff_currency_required"
 
     def __init__(self, jurisdiction: str):
+        # Words: UX (10), 2026-11-06. The builder lists it as "jurisdiction: …" and has no
+        # currency input yet, so it names only the fix it offers (issue 02 adds the other).
         super().__init__(
-            f"Jurisdiction {jurisdiction!r} names no country, so the tariff's currency is "
-            "unknown. Use the country's ISO code (e.g. NL, GB, US), or state the currency "
-            "(ISO 4217, e.g. EUR).")
+            f"\u201c{jurisdiction}\u201d names no country, so the tariff's currency is unknown. "
+            "Use the country's two-letter code, such as NL, GB or US.")
 
 
 class PreparedItem(NamedTuple):

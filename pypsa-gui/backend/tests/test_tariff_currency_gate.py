@@ -182,11 +182,26 @@ def test_a_library_tariff_with_no_currency_is_refused_until_it_states_one(client
     assert detail["code"] == "tariff_currency_required"
     # C4: under the field the tariff builder can fix, in words naming the currency.
     assert detail["errors"] == [{"loc": ["jurisdiction"], "msg": detail["message"]}]
-    assert "currency" in detail["message"] and "'generic'" in detail["message"]
+    assert detail["message"] == ("\u201cgeneric\u201d names no country, so the tariff's "
+                                 "currency is unknown. Use the country's two-letter code, "
+                                 "such as NL, GB or US.")
     r = client.put("/api/library/items/tariff/g", json={"payload": {**GENERIC, "currency": "EUR"}})
     assert r.status_code == 200, r.text
     got = client.get("/api/library/items/tariff/g").json()
     assert got["payload"]["currency"] == "EUR"
+
+
+def test_the_chat_tool_refusal_is_typed_and_names_the_currency_too(
+        client, install_network, tmp_projects_dir):
+    _project(install_network, tmp_projects_dir, None)
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.DISPATCHERS["put_library_item"](kind="tariff", name="g", payload=GENERIC)
+    assert exc.value.status_code == 422
+    assert exc.value.detail["error_kind"] == "tariff_currency_required"
+    assert "payload.currency" in exc.value.detail["message"]
+    out = chat_tools.DISPATCHERS["put_library_item"](
+        kind="tariff", name="g", payload={**GENERIC, "currency": "EUR"})
+    assert out["id"] == "g"
 
 
 def test_an_implied_currency_is_not_stored_twice_and_reads_back(client):

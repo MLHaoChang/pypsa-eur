@@ -13,6 +13,8 @@ Since issue 01, a Library tariff needs a currency, stated or implied by an ISO j
 
 - A currency input (ISO 4217) in the builder, defaulted from the jurisdiction, sent as `payload.currency`.
 - The `tariff_currency_required` field error shown on that input too.
+- With the input, the `tariff_currency_required` message gets back its second half ("or state the currency"); UX (10) dropped it from issue 01's text because the builder had nothing to state it in.
+- The builder's field-error list shows the raw key ("jurisdiction: …"); UX (10) asks for the form's label word instead (`TariffBuilder.tsx`, the list beside `Errors`).
 - UX review of where the input sits in the workflow.
 
 ## Pointers
