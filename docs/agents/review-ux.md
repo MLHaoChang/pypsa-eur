@@ -38,6 +38,13 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - A component-level harness shot (no app chrome) is fine for copy-only states (#1053).
 - A read-only line at the top of a tab is the visible reason for every disabled control in that tab; don't repeat it per control (#1064).
 - Text the backend builds and a card renders follows the same wording rules (#1053 `not_kept`, #1072 plan-review rows).
+- A transient, actionable notice goes in a `role="status"` region.
+- A notice clears when its condition ends; it never outlives the state it describes.
+- One link per destination per tile or row, worded "Missing: <input word> ›".
+- Expert never shows less than Guided.
+- The fix action sits on the refusal's own line, not in a separate block.
+- A demo-data label appears wherever a total uses demo data.
+- Engine identifiers appear only in a Source column.
 
 ## Master merges
 
