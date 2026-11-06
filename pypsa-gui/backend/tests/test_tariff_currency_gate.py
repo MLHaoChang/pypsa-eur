@@ -229,7 +229,8 @@ def _shipped_and_fixture_tariffs() -> dict[str, M.Tariff]:
 
 def test_every_stored_and_shipped_form_is_byte_identical_to_master():
     """C3: the dump, the Library hash, hash recipes 1 and 2 and the stored commercial
-    config of every shipped and fixture tariff equal master's (pins made on dc6223c9e)."""
+    config of every shipped and fixture tariff equal master's (pins made on dc6223c9e;
+    the 2026-11-06 pack added on 482bb6e1)."""
     pins = json.loads(
         (Path(__file__).parent / "fixtures/tariff_currency_pins.json").read_text()
     )
