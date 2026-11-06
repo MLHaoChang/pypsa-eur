@@ -3,7 +3,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import type { GridRiskLine, GridRiskProduction } from '../../api/types'
 import { GridRiskBody, fmtEurShort, fmtTonnesYear, flagWords, missingWord } from './GridRiskTab'
 
-const nav = vi.hoisted(() => ({ openFlowTarget: vi.fn(), openFlowTargetInPlace: vi.fn() }))
+const nav = vi.hoisted(() => ({ openFlowTarget: vi.fn(), openFlowTargetInPlace: vi.fn(), showResultsTab: vi.fn() }))
 vi.mock('../../layout/flowNavigation', () => nav)
 
 const cell = (t: number | null, eur: number | null, eur_flag: string | null = null) =>
@@ -30,7 +30,7 @@ function data(lines: GridRiskLine[], over: Partial<GridRiskProduction> = {}): Gr
 
 const ALL = () => [line('ride_through'), line('island'), line('n_1'), line('connection')]
 
-beforeEach(() => { nav.openFlowTarget.mockReset(); nav.openFlowTargetInPlace.mockReset() })
+beforeEach(() => { nav.openFlowTarget.mockReset(); nav.openFlowTargetInPlace.mockReset(); nav.showResultsTab.mockReset() })
 
 describe('Grid risk to production (G2P-13)', () => {
   it('formats tonnes and money with non-breaking spaces', () => {
@@ -77,7 +77,17 @@ describe('Grid risk to production (G2P-13)', () => {
     render(<GridRiskBody data={data([missing])} mode="expert" />)
     expect(screen.getByTestId('grid-risk-island').textContent).toContain('Missing:Dips and restarts ›')
     fireEvent.click(screen.getByTestId('grid-risk-island-missing-0'))
-    expect(nav.openFlowTarget).toHaveBeenCalledWith(expect.objectContaining({ panel: 'campusResults' }))
+    // The campus results are a Results tab: the Control tabs' jump, which keeps Back (the alias would drop it).
+    expect(nav.showResultsTab).toHaveBeenCalledWith('grid_code')
+    expect(nav.openFlowTarget).not.toHaveBeenCalled()
+  })
+
+  it('Expert opens a field input in its Properties', () => {
+    const missing = line('n_1', { status: 'missing', by_period: {},
+      missing_inputs: [{ word: 'mttr_hours', target: { section: 'assets', panel: null, component: 'Link', entity: 'trafo', field: 'mttr_hours' } }] })
+    render(<GridRiskBody data={data([missing])} mode="expert" />)
+    fireEvent.click(screen.getByTestId('grid-risk-n_1-missing-0'))
+    expect(nav.openFlowTarget).toHaveBeenCalledWith(expect.objectContaining({ entity: 'trafo', field: 'mttr_hours' }))
   })
 
   it('EUR without a lost-production value reads Unavailable with a link to the value', () => {

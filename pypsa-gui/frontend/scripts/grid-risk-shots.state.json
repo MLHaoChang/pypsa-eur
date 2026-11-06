@@ -1,0 +1,1765 @@
+{
+ "states": {
+  "1-all": {
+   "available": true,
+   "project_id": "p",
+   "omitted": null,
+   "periods": [
+    "_"
+   ],
+   "unit": "t/yr",
+   "currency": "EUR",
+   "eur_inputs": [
+    {
+     "product": "concentrate",
+     "word": "marginal_cost",
+     "set": true,
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Generator",
+      "entity": "__lost_concentrate",
+      "field": "marginal_cost"
+     }
+    }
+   ],
+   "overlap_rule": "upper_bound",
+   "overlap_label": "upper bound (lines may overlap)",
+   "lines": [
+    {
+     "key": "ride_through",
+     "label": "Ride-through (voltage dips)",
+     "status": "ok",
+     "missing": [],
+     "missing_inputs": [],
+     "flags": [
+      "dip_stats_source:demo"
+     ],
+     "basis": "campus_dip_trips.csv total row as written: \u03a3 trips per year \u00d7 restart time \u00d7 rate \u00d7 mass pull (12b); not recomputed",
+     "source_files": [
+      "campus_dip_trips.csv"
+     ],
+     "stamp": {
+      "run_at": "2026-11-06T09:12:00+00:00",
+      "network_sha256": "3fa91c0de2b4"
+     },
+     "stale": false,
+     "rows": [
+      {
+       "unit": "mill",
+       "lost_t_per_year": 7.5,
+       "verdict": "known",
+       "note": ""
+      }
+     ],
+     "by_period": {
+      "_": {
+       "t_per_year": 7.5,
+       "eur_per_year": 750.0,
+       "eur_flag": null
+      }
+     }
+    },
+    {
+     "key": "island",
+     "label": "Island (grid outage)",
+     "status": "ok",
+     "missing": [],
+     "missing_inputs": [],
+     "flags": [
+      "no_inventory_credit"
+     ],
+     "basis": "the grid outage of grid_import is the island event: events per year = year hours \u00d7 q / MTTR (q 0.002, MTTR 12 h); units outside every pickup block lost for the MTTR at rate \u00d7 mass pull with no inventory credit (conservative); in-block units lose their pickup wait and restart (campus_restart.csv lost_t) per event",
+     "source_files": [
+      "campus_restart.csv",
+      "network.nc"
+     ],
+     "stamp": {
+      "run_at": "2026-11-06T09:12:00+00:00",
+      "network_sha256": "3fa91c0de2b4"
+     },
+     "stale": false,
+     "rows": [
+      {
+       "key": "outside_blocks",
+       "label": "Units outside the pickup blocks, lost for the outage",
+       "units": [
+        "mill"
+       ],
+       "flags": [
+        "no_inventory_credit"
+       ],
+       "by_period": {
+        "_": {
+         "t_per_year": 87.6,
+         "eur_per_year": 8760.0,
+         "eur_flag": null
+        }
+       }
+      },
+      {
+       "key": "in_block_restart",
+       "label": "In-block units' restart loss",
+       "units": [
+        "pump"
+       ],
+       "flags": [],
+       "by_period": {
+        "_": {
+         "t_per_year": 4.38,
+         "eur_per_year": 438.0,
+         "eur_flag": null
+        }
+       }
+      }
+     ],
+     "by_period": {
+      "_": {
+       "t_per_year": 91.97999999999999,
+       "eur_per_year": 9197.999999999998,
+       "eur_flag": null,
+       "events_per_year": 1.46
+      }
+     }
+    },
+    {
+     "key": "n_1",
+     "label": "N-1 (site transformer)",
+     "status": "ok",
+     "missing": [],
+     "missing_inputs": [],
+     "flags": [],
+     "basis": "process_loss.expected_outage_loss per site transformer: occurrence = year hours \u00d7 q / MTTR, each event the mean undelivered tonnes over every start hour on the solved dispatch, inventory credited",
+     "source_files": [
+      "network.nc"
+     ],
+     "stamp": {},
+     "stale": false,
+     "rows": [
+      {
+       "key": "site_trafo",
+       "label": "site_trafo out",
+       "units": [
+        "mill"
+       ],
+       "flags": [],
+       "by_period": {
+        "_": {
+         "occurrence_per_year": 10.950000000000001,
+         "outage_hours": 4.0,
+         "products": [
+          {
+           "product": "concentrate",
+           "undelivered_t_per_event": 16.0,
+           "lost_t_per_year": 175.20000000000002,
+           "lost_eur_per_year": 17520.000000000004,
+           "flag": null
+          }
+         ],
+         "flags": []
+        }
+       }
+      }
+     ],
+     "by_period": {
+      "_": {
+       "t_per_year": 175.20000000000002,
+       "eur_per_year": 17520.000000000004,
+       "eur_flag": null
+      }
+     }
+    },
+    {
+     "key": "connection",
+     "label": "Connection curtailment",
+     "status": "ok",
+     "missing": [],
+     "missing_inputs": [],
+     "flags": [],
+     "basis": "the solve's own lost production (shortfall dispatch), shown not recomputed; per period annualised by the period's year hours over its weighted hours (snapshot_weightings.generators)",
+     "source_files": [
+      "network.nc",
+      "__lost_concentrate (shortfall Generator)"
+     ],
+     "stamp": {},
+     "stale": false,
+     "rows": [
+      {
+       "key": "concentrate",
+       "label": "concentrate",
+       "flags": [],
+       "by_period": {
+        "_": {
+         "t_per_year": 5840.0,
+         "eur_per_year": 584000.0,
+         "eur_flag": null
+        }
+       }
+      }
+     ],
+     "by_period": {
+      "_": {
+       "t_per_year": 5840.0,
+       "eur_per_year": 584000.0,
+       "eur_flag": null
+      }
+     }
+    }
+   ],
+   "total": {
+    "label": "upper bound (lines may overlap)",
+    "overlap_rule": "upper_bound",
+    "incomplete": false,
+    "lower_bound_lines": [],
+    "by_period": {
+     "_": {
+      "t_per_year": 6114.68,
+      "eur_per_year": 611468.0,
+      "eur_flag": null
+     }
+    }
+   }
+  },
+  "2-partial": {
+   "available": true,
+   "project_id": "p",
+   "omitted": null,
+   "periods": [
+    "_"
+   ],
+   "unit": "t/yr",
+   "currency": "EUR",
+   "eur_inputs": [
+    {
+     "product": "concentrate",
+     "word": "marginal_cost",
+     "set": true,
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Generator",
+      "entity": "__lost_concentrate",
+      "field": "marginal_cost"
+     }
+    }
+   ],
+   "overlap_rule": "upper_bound",
+   "overlap_label": "upper bound (lines may overlap)",
+   "lines": [
+    {
+     "key": "ride_through",
+     "label": "Ride-through (voltage dips)",
+     "status": "partial",
+     "missing": [],
+     "missing_inputs": [],
+     "flags": [
+      "dip_stats_source:demo",
+      "lower_bound"
+     ],
+     "basis": "campus_dip_trips.csv total row as written: \u03a3 trips per year \u00d7 restart time \u00d7 rate \u00d7 mass pull (12b); not recomputed",
+     "source_files": [
+      "campus_dip_trips.csv"
+     ],
+     "stamp": {
+      "file": "campus_restart.csv"
+     },
+     "stale": false,
+     "rows": [
+      {
+       "unit": "mill",
+       "lost_t_per_year": 7.5,
+       "verdict": "known",
+       "note": ""
+      }
+     ],
+     "by_period": {
+      "_": {
+       "t_per_year": 7.5,
+       "eur_per_year": 750.0,
+       "eur_flag": null
+      }
+     }
+    },
+    {
+     "key": "island",
+     "label": "Island (grid outage)",
+     "status": "partial",
+     "missing": [],
+     "missing_inputs": [],
+     "flags": [
+      "no_inventory_credit",
+      "lower_bound"
+     ],
+     "basis": "the grid outage of grid_import is the island event: events per year = year hours \u00d7 q / MTTR (q 0.002, MTTR 12 h); units outside every pickup block lost for the MTTR at rate \u00d7 mass pull with no inventory credit (conservative); in-block units lose their pickup wait and restart (campus_restart.csv lost_t) per event",
+     "source_files": [
+      "campus_restart.csv",
+      "network.nc"
+     ],
+     "stamp": {
+      "file": "campus_restart.csv"
+     },
+     "stale": false,
+     "rows": [
+      {
+       "key": "outside_blocks",
+       "label": "Units outside the pickup blocks, lost for the outage",
+       "units": [
+        "mill"
+       ],
+       "flags": [
+        "no_inventory_credit"
+       ],
+       "by_period": {
+        "_": {
+         "t_per_year": 87.6,
+         "eur_per_year": 8760.0,
+         "eur_flag": null
+        }
+       }
+      },
+      {
+       "key": "in_block_restart",
+       "label": "In-block units' restart loss",
+       "units": [
+        "pump"
+       ],
+       "flags": [],
+       "by_period": {
+        "_": {
+         "t_per_year": 4.38,
+         "eur_per_year": 438.0,
+         "eur_flag": null
+        }
+       }
+      }
+     ],
+     "by_period": {
+      "_": {
+       "t_per_year": 91.97999999999999,
+       "eur_per_year": 9197.999999999998,
+       "eur_flag": null,
+       "events_per_year": 1.46
+      }
+     }
+    },
+    {
+     "key": "n_1",
+     "label": "N-1 (site transformer)",
+     "status": "ok",
+     "missing": [],
+     "missing_inputs": [],
+     "flags": [],
+     "basis": "process_loss.expected_outage_loss per site transformer: occurrence = year hours \u00d7 q / MTTR, each event the mean undelivered tonnes over every start hour on the solved dispatch, inventory credited",
+     "source_files": [
+      "network.nc"
+     ],
+     "stamp": {},
+     "stale": false,
+     "rows": [
+      {
+       "key": "site_trafo",
+       "label": "site_trafo out",
+       "units": [
+        "mill"
+       ],
+       "flags": [],
+       "by_period": {
+        "_": {
+         "occurrence_per_year": 10.950000000000001,
+         "outage_hours": 4.0,
+         "products": [
+          {
+           "product": "concentrate",
+           "undelivered_t_per_event": 16.0,
+           "lost_t_per_year": 175.20000000000002,
+           "lost_eur_per_year": 17520.000000000004,
+           "flag": null
+          }
+         ],
+         "flags": []
+        }
+       }
+      }
+     ],
+     "by_period": {
+      "_": {
+       "t_per_year": 175.20000000000002,
+       "eur_per_year": 17520.000000000004,
+       "eur_flag": null
+      }
+     }
+    },
+    {
+     "key": "connection",
+     "label": "Connection curtailment",
+     "status": "ok",
+     "missing": [],
+     "missing_inputs": [],
+     "flags": [],
+     "basis": "the solve's own lost production (shortfall dispatch), shown not recomputed; per period annualised by the period's year hours over its weighted hours (snapshot_weightings.generators)",
+     "source_files": [
+      "network.nc",
+      "__lost_concentrate (shortfall Generator)"
+     ],
+     "stamp": {},
+     "stale": false,
+     "rows": [
+      {
+       "key": "concentrate",
+       "label": "concentrate",
+       "flags": [],
+       "by_period": {
+        "_": {
+         "t_per_year": 5840.0,
+         "eur_per_year": 584000.0,
+         "eur_flag": null
+        }
+       }
+      }
+     ],
+     "by_period": {
+      "_": {
+       "t_per_year": 5840.0,
+       "eur_per_year": 584000.0,
+       "eur_flag": null
+      }
+     }
+    }
+   ],
+   "total": {
+    "label": "upper bound (lines may overlap)",
+    "overlap_rule": "upper_bound",
+    "incomplete": false,
+    "lower_bound_lines": [
+     "ride_through",
+     "island"
+    ],
+    "by_period": {
+     "_": {
+      "t_per_year": 6114.68,
+      "eur_per_year": 611468.0,
+      "eur_flag": null
+     }
+    }
+   }
+  },
+  "3-missing": {
+   "available": true,
+   "project_id": "p",
+   "omitted": null,
+   "periods": [
+    "_"
+   ],
+   "unit": "t/yr",
+   "currency": "EUR",
+   "eur_inputs": [
+    {
+     "product": "concentrate",
+     "word": "marginal_cost",
+     "set": true,
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Generator",
+      "entity": "__lost_concentrate",
+      "field": "marginal_cost"
+     }
+    }
+   ],
+   "overlap_rule": "upper_bound",
+   "overlap_label": "upper bound (lines may overlap)",
+   "lines": [
+    {
+     "key": "ride_through",
+     "label": "Ride-through (voltage dips)",
+     "status": "missing",
+     "missing": [
+      "campus study run (dips and restarts)"
+     ],
+     "missing_inputs": [
+      {
+       "word": "campus_run",
+       "target": {
+        "section": "results",
+        "panel": "campusResults",
+        "component": null,
+        "entity": null,
+        "field": null
+       }
+      }
+     ],
+     "flags": [],
+     "basis": "",
+     "source_files": [
+      "campus_dip_trips.csv"
+     ],
+     "stamp": {},
+     "stale": false,
+     "rows": [],
+     "by_period": {}
+    },
+    {
+     "key": "island",
+     "label": "Island (grid outage)",
+     "status": "missing",
+     "missing": [
+      "campus study run (dips and restarts)"
+     ],
+     "missing_inputs": [
+      {
+       "word": "campus_run",
+       "target": {
+        "section": "results",
+        "panel": "campusResults",
+        "component": null,
+        "entity": null,
+        "field": null
+       }
+      }
+     ],
+     "flags": [],
+     "basis": "",
+     "source_files": [
+      "campus_restart.csv",
+      "network.nc"
+     ],
+     "stamp": {},
+     "stale": false,
+     "rows": [],
+     "by_period": {}
+    },
+    {
+     "key": "n_1",
+     "label": "N-1 (site transformer)",
+     "status": "missing",
+     "missing": [
+      "site transformer: an electricity Link feeding process units, with outage rate and MTTR (not the PoC import)"
+     ],
+     "missing_inputs": [
+      {
+       "word": "site_transformer",
+       "target": {
+        "section": "assets",
+        "panel": null,
+        "component": "Link",
+        "entity": null,
+        "field": null
+       }
+      }
+     ],
+     "flags": [],
+     "basis": "",
+     "source_files": [
+      "network.nc"
+     ],
+     "stamp": {},
+     "stale": false,
+     "rows": [],
+     "by_period": {}
+    },
+    {
+     "key": "connection",
+     "label": "Connection curtailment",
+     "status": "ok",
+     "missing": [],
+     "missing_inputs": [],
+     "flags": [],
+     "basis": "the solve's own lost production (shortfall dispatch), shown not recomputed; per period annualised by the period's year hours over its weighted hours (snapshot_weightings.generators)",
+     "source_files": [
+      "network.nc",
+      "__lost_concentrate (shortfall Generator)"
+     ],
+     "stamp": {},
+     "stale": false,
+     "rows": [
+      {
+       "key": "concentrate",
+       "label": "concentrate",
+       "flags": [],
+       "by_period": {
+        "_": {
+         "t_per_year": 5840.0,
+         "eur_per_year": 584000.0,
+         "eur_flag": null
+        }
+       }
+      }
+     ],
+     "by_period": {
+      "_": {
+       "t_per_year": 5840.0,
+       "eur_per_year": 584000.0,
+       "eur_flag": null
+      }
+     }
+    }
+   ],
+   "total": {
+    "label": "upper bound (lines may overlap)",
+    "overlap_rule": "upper_bound",
+    "incomplete": true,
+    "lower_bound_lines": [],
+    "by_period": {
+     "_": {
+      "t_per_year": 5840.0,
+      "eur_per_year": 584000.0,
+      "eur_flag": null
+     }
+    }
+   }
+  },
+  "4-eur-unavailable": {
+   "available": true,
+   "project_id": "p",
+   "omitted": null,
+   "periods": [
+    "_"
+   ],
+   "unit": "t/yr",
+   "currency": "EUR",
+   "eur_inputs": [
+    {
+     "product": "concentrate",
+     "word": "marginal_cost",
+     "set": false,
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Generator",
+      "entity": "__lost_concentrate",
+      "field": "marginal_cost"
+     }
+    }
+   ],
+   "overlap_rule": "upper_bound",
+   "overlap_label": "upper bound (lines may overlap)",
+   "lines": [
+    {
+     "key": "ride_through",
+     "label": "Ride-through (voltage dips)",
+     "status": "ok",
+     "missing": [],
+     "missing_inputs": [],
+     "flags": [
+      "dip_stats_source:demo"
+     ],
+     "basis": "campus_dip_trips.csv total row as written: \u03a3 trips per year \u00d7 restart time \u00d7 rate \u00d7 mass pull (12b); not recomputed",
+     "source_files": [
+      "campus_dip_trips.csv"
+     ],
+     "stamp": {
+      "run_at": "2026-11-06T09:12:00+00:00",
+      "network_sha256": "3fa91c0de2b4"
+     },
+     "stale": false,
+     "rows": [
+      {
+       "unit": "mill",
+       "lost_t_per_year": 7.5,
+       "verdict": "known",
+       "note": ""
+      }
+     ],
+     "by_period": {
+      "_": {
+       "t_per_year": 7.5,
+       "eur_per_year": null,
+       "eur_flag": "lost_production_value_missing"
+      }
+     }
+    },
+    {
+     "key": "island",
+     "label": "Island (grid outage)",
+     "status": "ok",
+     "missing": [],
+     "missing_inputs": [],
+     "flags": [
+      "no_inventory_credit"
+     ],
+     "basis": "the grid outage of grid_import is the island event: events per year = year hours \u00d7 q / MTTR (q 0.002, MTTR 12 h); units outside every pickup block lost for the MTTR at rate \u00d7 mass pull with no inventory credit (conservative); in-block units lose their pickup wait and restart (campus_restart.csv lost_t) per event",
+     "source_files": [
+      "campus_restart.csv",
+      "network.nc"
+     ],
+     "stamp": {
+      "run_at": "2026-11-06T09:12:00+00:00",
+      "network_sha256": "3fa91c0de2b4"
+     },
+     "stale": false,
+     "rows": [
+      {
+       "key": "outside_blocks",
+       "label": "Units outside the pickup blocks, lost for the outage",
+       "units": [
+        "mill"
+       ],
+       "flags": [
+        "no_inventory_credit"
+       ],
+       "by_period": {
+        "_": {
+         "t_per_year": 87.6,
+         "eur_per_year": null,
+         "eur_flag": "lost_production_value_missing"
+        }
+       }
+      },
+      {
+       "key": "in_block_restart",
+       "label": "In-block units' restart loss",
+       "units": [
+        "pump"
+       ],
+       "flags": [],
+       "by_period": {
+        "_": {
+         "t_per_year": 4.38,
+         "eur_per_year": null,
+         "eur_flag": "lost_production_value_missing"
+        }
+       }
+      }
+     ],
+     "by_period": {
+      "_": {
+       "t_per_year": 91.97999999999999,
+       "eur_per_year": null,
+       "eur_flag": "lost_production_value_missing",
+       "events_per_year": 1.46
+      }
+     }
+    },
+    {
+     "key": "n_1",
+     "label": "N-1 (site transformer)",
+     "status": "ok",
+     "missing": [],
+     "missing_inputs": [],
+     "flags": [],
+     "basis": "process_loss.expected_outage_loss per site transformer: occurrence = year hours \u00d7 q / MTTR, each event the mean undelivered tonnes over every start hour on the solved dispatch, inventory credited",
+     "source_files": [
+      "network.nc"
+     ],
+     "stamp": {},
+     "stale": false,
+     "rows": [
+      {
+       "key": "site_trafo",
+       "label": "site_trafo out",
+       "units": [
+        "mill"
+       ],
+       "flags": [],
+       "by_period": {
+        "_": {
+         "occurrence_per_year": 10.950000000000001,
+         "outage_hours": 4.0,
+         "products": [
+          {
+           "product": "concentrate",
+           "undelivered_t_per_event": 16.0,
+           "lost_t_per_year": 175.20000000000002,
+           "lost_eur_per_year": null,
+           "flag": "lost_production_value_missing"
+          }
+         ],
+         "flags": []
+        }
+       }
+      }
+     ],
+     "by_period": {
+      "_": {
+       "t_per_year": 175.20000000000002,
+       "eur_per_year": null,
+       "eur_flag": "lost_production_value_missing"
+      }
+     }
+    },
+    {
+     "key": "connection",
+     "label": "Connection curtailment",
+     "status": "ok",
+     "missing": [],
+     "missing_inputs": [],
+     "flags": [],
+     "basis": "the solve's own lost production (shortfall dispatch), shown not recomputed; per period annualised by the period's year hours over its weighted hours (snapshot_weightings.generators)",
+     "source_files": [
+      "network.nc",
+      "__lost_concentrate (shortfall Generator)"
+     ],
+     "stamp": {},
+     "stale": false,
+     "rows": [
+      {
+       "key": "concentrate",
+       "label": "concentrate",
+       "flags": [],
+       "by_period": {
+        "_": {
+         "t_per_year": 35040.0,
+         "eur_per_year": null,
+         "eur_flag": "lost_production_value_missing"
+        }
+       }
+      }
+     ],
+     "by_period": {
+      "_": {
+       "t_per_year": 35040.0,
+       "eur_per_year": null,
+       "eur_flag": "lost_production_value_missing"
+      }
+     }
+    }
+   ],
+   "total": {
+    "label": "upper bound (lines may overlap)",
+    "overlap_rule": "upper_bound",
+    "incomplete": false,
+    "lower_bound_lines": [],
+    "by_period": {
+     "_": {
+      "t_per_year": 35314.68,
+      "eur_per_year": null,
+      "eur_flag": "lost_production_value_missing"
+     }
+    }
+   }
+  },
+  "5-out-of-date": {
+   "available": true,
+   "project_id": "p",
+   "omitted": null,
+   "periods": [
+    "_"
+   ],
+   "unit": "t/yr",
+   "currency": "EUR",
+   "eur_inputs": [
+    {
+     "product": "concentrate",
+     "word": "marginal_cost",
+     "set": true,
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Generator",
+      "entity": "__lost_concentrate",
+      "field": "marginal_cost"
+     }
+    }
+   ],
+   "overlap_rule": "upper_bound",
+   "overlap_label": "upper bound (lines may overlap)",
+   "lines": [
+    {
+     "key": "ride_through",
+     "label": "Ride-through (voltage dips)",
+     "status": "ok",
+     "missing": [],
+     "missing_inputs": [],
+     "flags": [
+      "dip_stats_source:demo",
+      "stale"
+     ],
+     "basis": "campus_dip_trips.csv total row as written: \u03a3 trips per year \u00d7 restart time \u00d7 rate \u00d7 mass pull (12b); not recomputed",
+     "source_files": [
+      "campus_dip_trips.csv"
+     ],
+     "stamp": {
+      "run_at": "2026-11-06T09:12:00+00:00",
+      "network_sha256": "3fa91c0de2b4"
+     },
+     "stale": true,
+     "rows": [
+      {
+       "unit": "mill",
+       "lost_t_per_year": 7.5,
+       "verdict": "known",
+       "note": ""
+      }
+     ],
+     "by_period": {
+      "_": {
+       "t_per_year": 7.5,
+       "eur_per_year": 750.0,
+       "eur_flag": null
+      }
+     }
+    },
+    {
+     "key": "island",
+     "label": "Island (grid outage)",
+     "status": "ok",
+     "missing": [],
+     "missing_inputs": [],
+     "flags": [
+      "no_inventory_credit",
+      "stale"
+     ],
+     "basis": "the grid outage of grid_import is the island event: events per year = year hours \u00d7 q / MTTR (q 0.002, MTTR 12 h); units outside every pickup block lost for the MTTR at rate \u00d7 mass pull with no inventory credit (conservative); in-block units lose their pickup wait and restart (campus_restart.csv lost_t) per event",
+     "source_files": [
+      "campus_restart.csv",
+      "network.nc"
+     ],
+     "stamp": {
+      "run_at": "2026-11-06T09:12:00+00:00",
+      "network_sha256": "3fa91c0de2b4"
+     },
+     "stale": true,
+     "rows": [
+      {
+       "key": "outside_blocks",
+       "label": "Units outside the pickup blocks, lost for the outage",
+       "units": [
+        "mill"
+       ],
+       "flags": [
+        "no_inventory_credit"
+       ],
+       "by_period": {
+        "_": {
+         "t_per_year": 87.6,
+         "eur_per_year": 8760.0,
+         "eur_flag": null
+        }
+       }
+      },
+      {
+       "key": "in_block_restart",
+       "label": "In-block units' restart loss",
+       "units": [
+        "pump"
+       ],
+       "flags": [],
+       "by_period": {
+        "_": {
+         "t_per_year": 4.38,
+         "eur_per_year": 438.0,
+         "eur_flag": null
+        }
+       }
+      }
+     ],
+     "by_period": {
+      "_": {
+       "t_per_year": 91.97999999999999,
+       "eur_per_year": 9197.999999999998,
+       "eur_flag": null,
+       "events_per_year": 1.46
+      }
+     }
+    },
+    {
+     "key": "n_1",
+     "label": "N-1 (site transformer)",
+     "status": "ok",
+     "missing": [],
+     "missing_inputs": [],
+     "flags": [],
+     "basis": "process_loss.expected_outage_loss per site transformer: occurrence = year hours \u00d7 q / MTTR, each event the mean undelivered tonnes over every start hour on the solved dispatch, inventory credited",
+     "source_files": [
+      "network.nc"
+     ],
+     "stamp": {},
+     "stale": false,
+     "rows": [
+      {
+       "key": "site_trafo",
+       "label": "site_trafo out",
+       "units": [
+        "mill"
+       ],
+       "flags": [],
+       "by_period": {
+        "_": {
+         "occurrence_per_year": 10.950000000000001,
+         "outage_hours": 4.0,
+         "products": [
+          {
+           "product": "concentrate",
+           "undelivered_t_per_event": 16.0,
+           "lost_t_per_year": 175.20000000000002,
+           "lost_eur_per_year": 17520.000000000004,
+           "flag": null
+          }
+         ],
+         "flags": []
+        }
+       }
+      }
+     ],
+     "by_period": {
+      "_": {
+       "t_per_year": 175.20000000000002,
+       "eur_per_year": 17520.000000000004,
+       "eur_flag": null
+      }
+     }
+    },
+    {
+     "key": "connection",
+     "label": "Connection curtailment",
+     "status": "ok",
+     "missing": [],
+     "missing_inputs": [],
+     "flags": [],
+     "basis": "the solve's own lost production (shortfall dispatch), shown not recomputed; per period annualised by the period's year hours over its weighted hours (snapshot_weightings.generators)",
+     "source_files": [
+      "network.nc",
+      "__lost_concentrate (shortfall Generator)"
+     ],
+     "stamp": {},
+     "stale": false,
+     "rows": [
+      {
+       "key": "concentrate",
+       "label": "concentrate",
+       "flags": [],
+       "by_period": {
+        "_": {
+         "t_per_year": 5840.0,
+         "eur_per_year": 584000.0,
+         "eur_flag": null
+        }
+       }
+      }
+     ],
+     "by_period": {
+      "_": {
+       "t_per_year": 5840.0,
+       "eur_per_year": 584000.0,
+       "eur_flag": null
+      }
+     }
+    }
+   ],
+   "total": {
+    "label": "upper bound (lines may overlap)",
+    "overlap_rule": "upper_bound",
+    "incomplete": false,
+    "lower_bound_lines": [],
+    "by_period": {
+     "_": {
+      "t_per_year": 6114.68,
+      "eur_per_year": 611468.0,
+      "eur_flag": null
+     }
+    }
+   }
+  },
+  "6-multi-period": {
+   "available": true,
+   "project_id": "p",
+   "omitted": null,
+   "periods": [
+    "2030",
+    "2040"
+   ],
+   "unit": "t/yr",
+   "currency": "EUR",
+   "eur_inputs": [
+    {
+     "product": "concentrate",
+     "word": "marginal_cost",
+     "set": true,
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Generator",
+      "entity": "__lost_concentrate",
+      "field": "marginal_cost"
+     }
+    }
+   ],
+   "overlap_rule": "upper_bound",
+   "overlap_label": "upper bound (lines may overlap)",
+   "lines": [
+    {
+     "key": "ride_through",
+     "label": "Ride-through (voltage dips)",
+     "status": "ok",
+     "missing": [],
+     "missing_inputs": [],
+     "flags": [
+      "dip_stats_source:demo"
+     ],
+     "basis": "campus_dip_trips.csv total row as written: \u03a3 trips per year \u00d7 restart time \u00d7 rate \u00d7 mass pull (12b); not recomputed",
+     "source_files": [
+      "campus_dip_trips.csv"
+     ],
+     "stamp": {
+      "run_at": "2026-11-06T09:12:00+00:00",
+      "network_sha256": "3fa91c0de2b4"
+     },
+     "stale": false,
+     "rows": [
+      {
+       "unit": "mill",
+       "lost_t_per_year": 7.5,
+       "verdict": "known",
+       "note": ""
+      }
+     ],
+     "by_period": {
+      "2030": {
+       "t_per_year": 7.5,
+       "eur_per_year": 750.0,
+       "eur_flag": null
+      },
+      "2040": {
+       "t_per_year": 7.5,
+       "eur_per_year": 750.0,
+       "eur_flag": null
+      }
+     }
+    },
+    {
+     "key": "island",
+     "label": "Island (grid outage)",
+     "status": "ok",
+     "missing": [],
+     "missing_inputs": [],
+     "flags": [
+      "no_inventory_credit"
+     ],
+     "basis": "the grid outage of grid_import is the island event: events per year = year hours \u00d7 q / MTTR (q 0.002, MTTR 12 h); units outside every pickup block lost for the MTTR at rate \u00d7 mass pull with no inventory credit (conservative); in-block units lose their pickup wait and restart (campus_restart.csv lost_t) per event",
+     "source_files": [
+      "campus_restart.csv",
+      "network.nc"
+     ],
+     "stamp": {
+      "run_at": "2026-11-06T09:12:00+00:00",
+      "network_sha256": "3fa91c0de2b4"
+     },
+     "stale": false,
+     "rows": [
+      {
+       "key": "outside_blocks",
+       "label": "Units outside the pickup blocks, lost for the outage",
+       "units": [
+        "mill"
+       ],
+       "flags": [
+        "no_inventory_credit"
+       ],
+       "by_period": {
+        "2030": {
+         "t_per_year": 87.6,
+         "eur_per_year": 8760.0,
+         "eur_flag": null
+        },
+        "2040": {
+         "t_per_year": 87.84000000000002,
+         "eur_per_year": 8784.000000000002,
+         "eur_flag": null
+        }
+       }
+      },
+      {
+       "key": "in_block_restart",
+       "label": "In-block units' restart loss",
+       "units": [
+        "pump"
+       ],
+       "flags": [],
+       "by_period": {
+        "2030": {
+         "t_per_year": 4.38,
+         "eur_per_year": 438.0,
+         "eur_flag": null
+        },
+        "2040": {
+         "t_per_year": 4.392,
+         "eur_per_year": 439.20000000000005,
+         "eur_flag": null
+        }
+       }
+      }
+     ],
+     "by_period": {
+      "2030": {
+       "t_per_year": 91.97999999999999,
+       "eur_per_year": 9197.999999999998,
+       "eur_flag": null,
+       "events_per_year": 1.46
+      },
+      "2040": {
+       "t_per_year": 92.23200000000001,
+       "eur_per_year": 9223.2,
+       "eur_flag": null,
+       "events_per_year": 1.4640000000000002
+      }
+     }
+    },
+    {
+     "key": "n_1",
+     "label": "N-1 (site transformer)",
+     "status": "ok",
+     "missing": [],
+     "missing_inputs": [],
+     "flags": [],
+     "basis": "process_loss.expected_outage_loss per site transformer: occurrence = year hours \u00d7 q / MTTR, each event the mean undelivered tonnes over every start hour on the solved dispatch, inventory credited",
+     "source_files": [
+      "network.nc"
+     ],
+     "stamp": {},
+     "stale": false,
+     "rows": [
+      {
+       "key": "site_trafo",
+       "label": "site_trafo out",
+       "units": [
+        "mill"
+       ],
+       "flags": [],
+       "by_period": {
+        "2030": {
+         "occurrence_per_year": 10.950000000000001,
+         "outage_hours": 4.0,
+         "products": [
+          {
+           "product": "concentrate",
+           "undelivered_t_per_event": 16.0,
+           "lost_t_per_year": 175.20000000000002,
+           "lost_eur_per_year": 17520.000000000004,
+           "flag": null
+          }
+         ],
+         "flags": []
+        },
+        "2040": {
+         "occurrence_per_year": 10.98,
+         "outage_hours": 4.0,
+         "products": [
+          {
+           "product": "concentrate",
+           "undelivered_t_per_event": 16.0,
+           "lost_t_per_year": 175.67999999999998,
+           "lost_eur_per_year": 17568.0,
+           "flag": null
+          }
+         ],
+         "flags": []
+        }
+       }
+      }
+     ],
+     "by_period": {
+      "2030": {
+       "t_per_year": 175.20000000000002,
+       "eur_per_year": 17520.000000000004,
+       "eur_flag": null
+      },
+      "2040": {
+       "t_per_year": 175.67999999999998,
+       "eur_per_year": 17568.0,
+       "eur_flag": null
+      }
+     }
+    },
+    {
+     "key": "connection",
+     "label": "Connection curtailment",
+     "status": "ok",
+     "missing": [],
+     "missing_inputs": [],
+     "flags": [],
+     "basis": "the solve's own lost production (shortfall dispatch), shown not recomputed; per period annualised by the period's year hours over its weighted hours (snapshot_weightings.generators)",
+     "source_files": [
+      "network.nc",
+      "__lost_concentrate (shortfall Generator)"
+     ],
+     "stamp": {},
+     "stale": false,
+     "rows": [
+      {
+       "key": "concentrate",
+       "label": "concentrate",
+       "flags": [],
+       "by_period": {
+        "2030": {
+         "t_per_year": 5840.0,
+         "eur_per_year": 584000.0,
+         "eur_flag": null
+        },
+        "2040": {
+         "t_per_year": 5856.0,
+         "eur_per_year": 585600.0,
+         "eur_flag": null
+        }
+       }
+      }
+     ],
+     "by_period": {
+      "2030": {
+       "t_per_year": 5840.0,
+       "eur_per_year": 584000.0,
+       "eur_flag": null
+      },
+      "2040": {
+       "t_per_year": 5856.0,
+       "eur_per_year": 585600.0,
+       "eur_flag": null
+      }
+     }
+    }
+   ],
+   "total": {
+    "label": "upper bound (lines may overlap)",
+    "overlap_rule": "upper_bound",
+    "incomplete": false,
+    "lower_bound_lines": [],
+    "by_period": {
+     "2030": {
+      "t_per_year": 6114.68,
+      "eur_per_year": 611468.0,
+      "eur_flag": null
+     },
+     "2040": {
+      "t_per_year": 6131.412,
+      "eur_per_year": 613141.2,
+      "eur_flag": null
+     }
+    }
+   }
+  }
+ },
+ "report": {
+  "schema_version": 1,
+  "report_id": "r_gridrisk01",
+  "version": 1,
+  "title": "Grid risk shots",
+  "language": "en",
+  "created_at": "2026-11-06T09:10:46.492939+00:00",
+  "evidence_hash": "7f925057335cc372985cba0140e8cda6578b936f870f6b2e432c4f136268f4f3",
+  "profile_id": null,
+  "model": null,
+  "mode": "evidence_only",
+  "template_file_id": null,
+  "sections": [
+   {
+    "section_id": "executive_summary",
+    "heading": "Executive summary",
+    "source": "code",
+    "status": "not_established",
+    "blocks": [
+     {
+      "type": "callout",
+      "kind": "disclosure",
+      "text": "Grid risk to production \u2014 each grid risk as lost tonnes, then EUR, per year: expected values, not a forecast. The total is an upper bound: the lines may overlap (the same event can sit in two lines)."
+     },
+     {
+      "type": "callout",
+      "kind": "not_established",
+      "text": "no headline results: no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert)."
+     }
+    ],
+    "note": null,
+    "audit": {
+     "unverified": [],
+     "verified": []
+    },
+    "pending_instruction": null,
+    "comments": [],
+    "category": null
+   },
+   {
+    "section_id": "cost",
+    "heading": "Cost at target",
+    "source": "code",
+    "status": "not_established",
+    "blocks": [
+     {
+      "type": "callout",
+      "kind": "not_established",
+      "text": "this section was not established (no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert))."
+     }
+    ],
+    "note": "no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert)",
+    "audit": {
+     "unverified": [],
+     "verified": []
+    },
+    "pending_instruction": null,
+    "comments": [],
+    "category": "investment"
+   },
+   {
+    "section_id": "sizing",
+    "heading": "Sizing of the least-cost plan",
+    "source": "code",
+    "status": "not_established",
+    "blocks": [
+     {
+      "type": "callout",
+      "kind": "not_established",
+      "text": "this section was not established (no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert))."
+     }
+    ],
+    "note": "no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert)",
+    "audit": {
+     "unverified": [],
+     "verified": []
+    },
+    "pending_instruction": null,
+    "comments": [],
+    "category": "investment"
+   },
+   {
+    "section_id": "redundancy",
+    "heading": "Redundancy options",
+    "source": "code",
+    "status": "not_established",
+    "blocks": [
+     {
+      "type": "callout",
+      "kind": "not_established",
+      "text": "this section was not established (no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert))."
+     }
+    ],
+    "note": "no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert)",
+    "audit": {
+     "unverified": [],
+     "verified": []
+    },
+    "pending_instruction": null,
+    "comments": [],
+    "category": "investment"
+   },
+   {
+    "section_id": "levers",
+    "heading": "Optimisation levers",
+    "source": "code",
+    "status": "not_established",
+    "blocks": [
+     {
+      "type": "callout",
+      "kind": "not_established",
+      "text": "this section was not established (no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert))."
+     }
+    ],
+    "note": "no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert)",
+    "audit": {
+     "unverified": [],
+     "verified": []
+    },
+    "pending_instruction": null,
+    "comments": [],
+    "category": "investment"
+   },
+   {
+    "section_id": "tea",
+    "heading": "Techno-economic summary (LCOE / LCOH)",
+    "source": "code",
+    "status": "not_established",
+    "blocks": [
+     {
+      "type": "callout",
+      "kind": "not_established",
+      "text": "this section was not established (no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert))."
+     }
+    ],
+    "note": "no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert)",
+    "audit": {
+     "unverified": [],
+     "verified": []
+    },
+    "pending_instruction": null,
+    "comments": [],
+    "category": "investment"
+   },
+   {
+    "section_id": "target",
+    "heading": "Availability target and achieved adequacy",
+    "source": "code",
+    "status": "not_established",
+    "blocks": [
+     {
+      "type": "callout",
+      "kind": "not_established",
+      "text": "this section was not established (no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert))."
+     }
+    ],
+    "note": "no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert)",
+    "audit": {
+     "unverified": [],
+     "verified": []
+    },
+    "pending_instruction": null,
+    "comments": [],
+    "category": "reliability"
+   },
+   {
+    "section_id": "certification",
+    "heading": "Certification (sequential Monte Carlo)",
+    "source": "code",
+    "status": "not_established",
+    "blocks": [
+     {
+      "type": "callout",
+      "kind": "not_established",
+      "text": "this section was not established (no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert))."
+     }
+    ],
+    "note": "no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert)",
+    "audit": {
+     "unverified": [],
+     "verified": []
+    },
+    "pending_instruction": null,
+    "comments": [],
+    "category": "reliability"
+   },
+   {
+    "section_id": "frontier",
+    "heading": "Cost-vs-availability frontier",
+    "source": "code",
+    "status": "not_established",
+    "blocks": [
+     {
+      "type": "callout",
+      "kind": "not_established",
+      "text": "this section was not established (no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert))."
+     }
+    ],
+    "note": "no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert)",
+    "audit": {
+     "unverified": [],
+     "verified": []
+    },
+    "pending_instruction": null,
+    "comments": [],
+    "category": "reliability"
+   },
+   {
+    "section_id": "dtc",
+    "heading": "Critical-load (DtC) stress",
+    "source": "code",
+    "status": "not_established",
+    "blocks": [
+     {
+      "type": "callout",
+      "kind": "not_established",
+      "text": "this section was not established (no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert))."
+     }
+    ],
+    "note": "no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert)",
+    "audit": {
+     "unverified": [],
+     "verified": []
+    },
+    "pending_instruction": null,
+    "comments": [],
+    "category": "reliability"
+   },
+   {
+    "section_id": "fmea_top",
+    "heading": "Residual failure modes (FMEA top-N)",
+    "source": "code",
+    "status": "not_established",
+    "blocks": [
+     {
+      "type": "callout",
+      "kind": "not_established",
+      "text": "this section was not established (no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert))."
+     }
+    ],
+    "note": "no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert)",
+    "audit": {
+     "unverified": [],
+     "verified": []
+    },
+    "pending_instruction": null,
+    "comments": [],
+    "category": "reliability"
+   },
+   {
+    "section_id": "multi_energy",
+    "heading": "Multi-energy adequacy",
+    "source": "code",
+    "status": "not_established",
+    "blocks": [
+     {
+      "type": "callout",
+      "kind": "not_established",
+      "text": "this section was not established (no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert))."
+     }
+    ],
+    "note": "no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert)",
+    "audit": {
+     "unverified": [],
+     "verified": []
+    },
+    "pending_instruction": null,
+    "comments": [],
+    "category": "reliability"
+   },
+   {
+    "section_id": "grid_risk",
+    "heading": "Grid risk to production",
+    "source": "code",
+    "status": "ok",
+    "blocks": [
+     {
+      "type": "table_ref",
+      "table_id": "grid_risk",
+      "caption": null
+     },
+     {
+      "type": "callout",
+      "kind": "disclosure",
+      "text": "Grid risk to production \u2014 each grid risk as lost tonnes, then EUR, per year: expected values, not a forecast. The total is an upper bound: the lines may overlap (the same event can sit in two lines)."
+     }
+    ],
+    "note": "expected values per year; the total is an upper bound (the lines may overlap)",
+    "audit": {
+     "unverified": [],
+     "verified": []
+    },
+    "pending_instruction": null,
+    "comments": [],
+    "category": "reliability"
+   },
+   {
+    "section_id": "gates",
+    "heading": "Dynamics gates",
+    "source": "code",
+    "status": "not_established",
+    "blocks": [
+     {
+      "type": "callout",
+      "kind": "not_established",
+      "text": "this section was not established (no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert))."
+     }
+    ],
+    "note": "no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert)",
+    "audit": {
+     "unverified": [],
+     "verified": []
+    },
+    "pending_instruction": null,
+    "comments": [],
+    "category": "operation"
+   },
+   {
+    "section_id": "template_ledger",
+    "heading": "Template assumptions",
+    "source": "code",
+    "status": "not_established",
+    "blocks": [
+     {
+      "type": "callout",
+      "kind": "not_established",
+      "text": "no template ledger for this project"
+     }
+    ],
+    "note": null,
+    "audit": {
+     "unverified": [],
+     "verified": []
+    },
+    "pending_instruction": null,
+    "comments": [],
+    "category": null
+   },
+   {
+    "section_id": "pipeline",
+    "heading": "Study pipeline",
+    "source": "code",
+    "status": "not_established",
+    "blocks": [
+     {
+      "type": "callout",
+      "kind": "not_established",
+      "text": "no study pipeline was recorded in this session: no Energy Hub ReferenceDesignReport has been stored \u2014 run the study first (the Goal step in Guided, Results \u2192 Reliability in Expert)."
+     }
+    ],
+    "note": null,
+    "audit": {
+     "unverified": [],
+     "verified": []
+    },
+    "pending_instruction": null,
+    "comments": [],
+    "category": null
+   }
+  ],
+  "tables": {
+   "grid_risk": {
+    "table_id": "grid_risk",
+    "columns": [
+     "Line",
+     "t/yr",
+     "EUR/yr",
+     "Status",
+     "Notes",
+     "Source"
+    ],
+    "rows": [
+     [
+      "Ride-through (voltage dips)",
+      "7.5\u00a0t/yr",
+      "\u20ac\u00a0750/yr",
+      "ok",
+      "demo dip statistics",
+      "campus_dip_trips.csv (run 2026-11-06 09:12:00 UTC, network 3fa91c0de2b4)"
+     ],
+     [
+      "Island (grid outage)",
+      "92\u00a0t/yr",
+      "\u20ac\u00a09.2\u00a0k/yr",
+      "ok",
+      "no inventory credit, so it is conservative",
+      "campus_restart.csv, network.nc (run 2026-11-06 09:12:00 UTC, network 3fa91c0de2b4)"
+     ],
+     [
+      "\u2013 Units outside the pickup blocks, lost for the outage",
+      "87.6\u00a0t/yr",
+      "\u20ac\u00a08.76\u00a0k/yr",
+      "",
+      "no inventory credit, so it is conservative",
+      ""
+     ],
+     [
+      "\u2013 In-block units' restart loss",
+      "4.38\u00a0t/yr",
+      "\u20ac\u00a0438/yr",
+      "",
+      "",
+      ""
+     ],
+     [
+      "N-1 (site transformer)",
+      "175\u00a0t/yr",
+      "\u20ac\u00a017.5\u00a0k/yr",
+      "ok",
+      "",
+      "network.nc"
+     ],
+     [
+      "Connection curtailment",
+      "5.84\u00a0kt/yr",
+      "\u20ac\u00a0584\u00a0k/yr",
+      "ok",
+      "",
+      "network.nc, __lost_concentrate (shortfall Generator)"
+     ],
+     [
+      "Total",
+      "6.11\u00a0kt/yr",
+      "\u20ac\u00a0611\u00a0k/yr",
+      "upper bound",
+      "the lines may overlap",
+      ""
+     ]
+    ],
+    "caption": "Grid risk to production: lost tonnes, then EUR, per year",
+    "source_path": "/sections/grid_risk/payload/lines"
+   }
+  },
+  "figures": {}
+ }
+}

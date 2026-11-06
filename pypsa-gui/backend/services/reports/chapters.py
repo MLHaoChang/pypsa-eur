@@ -576,7 +576,7 @@ def grid_risk_table(payload: dict, source_path: str):
             if ln["key"] == "island" and missing is None:
                 for r in ln["rows"]:
                     rt, reur = _grid_risk_values(r["by_period"].get(p))
-                    rows.append([*lead, f"  {r['label']}", rt, reur, "",
+                    rows.append([*lead, f"– {r['label']}", rt, reur, "",
                                  "; ".join(grid_risk_flag_words(f) for f in r["flags"]), ""])
         tt, teur = _grid_risk_values(payload["total"]["by_period"].get(p))
         status = "upper bound" + (", incomplete" if payload["total"]["incomplete"] else "")

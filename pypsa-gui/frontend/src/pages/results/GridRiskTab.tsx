@@ -11,7 +11,7 @@ import type { FlowTarget } from '../../api/flow'
 import type { GridRiskCell, GridRiskLine, GridRiskLineKey, GridRiskProduction, GridRiskTarget } from '../../api/types'
 import { PageSection, Tag } from '../../components/PageKit'
 import { StatePill } from '../../components/ResultState'
-import { openFlowTarget, openFlowTargetInPlace } from '../../layout/flowNavigation'
+import { openFlowTarget, openFlowTargetInPlace, showResultsTab } from '../../layout/flowNavigation'
 import { useUIStore } from '../../store/uiStore'
 import { FIELD_LABELS } from '../../utils/fieldLabels'
 import { nk } from '../../utils/queryKeys'
@@ -91,8 +91,11 @@ function GoLink({ target, label, testId, mode }: {
   const t = toFlow(target)
   return (
     <button type="button" data-testid={testId}
-      onClick={() => (mode === 'guided' ? openFlowTargetInPlace(t) : openFlowTarget(t))}
-      className="text-[11px] text-accent hover:underline whitespace-nowrap">
+      onClick={() => (mode === 'guided' ? openFlowTargetInPlace(t)
+        // Expert: the campus results are a Results tab. `openFlowTarget` would route through the campusResults alias,
+        // whose own panel switch drops the Back; `showResultsTab` keeps it (the Control tabs' links).
+        : t.panel === 'campusResults' ? showResultsTab('grid_code') : openFlowTarget(t))}
+      className="self-start text-[11px] text-accent hover:underline whitespace-nowrap">
       {label} ›
     </button>
   )

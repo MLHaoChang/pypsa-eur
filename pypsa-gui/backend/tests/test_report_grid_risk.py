@@ -35,7 +35,7 @@ def _collect(**kw):
 
 def _rows(ev):
     t = ev.tables[C.GRID_RISK]
-    return t, {r[t.columns.index("Line")].strip(): r for r in t.rows}
+    return t, {r[t.columns.index("Line")].removeprefix("– "): r for r in t.rows}
 
 
 def test_without_the_section_there_is_no_chapter_and_the_hash_holds():
@@ -53,7 +53,7 @@ def test_the_chapter_has_one_row_per_line_the_island_rows_and_the_upper_bound_to
     for key in G.LINE_KEYS:
         assert G.LABELS[key] in rows, key
     for key in ("outside_blocks", "in_block_restart"):
-        assert rows[G.LABELS[key]][0].startswith("  "), key            # the island's two rows, indented
+        assert rows[G.LABELS[key]][0].startswith("– "), key           # the island's two rows, marked
     total = rows["Total"]
     assert total[3] == "upper bound" and total[4] == "the lines may overlap"
     # The total row is the payload's sum, in the tab's format.
