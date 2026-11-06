@@ -517,3 +517,20 @@ def test_an_ac_reference_ignores_a_declared_ratio_and_still_asks_dc_ac():
     declared = A.plan(n, {}, "Generator", "pv", "solar-utility", 2030)
     assert declared["attrs"] == plain["attrs"] and declared["needs"] == plain["needs"]
     assert "dc_ac" in declared["missing"]
+
+
+def test_the_routes_and_the_chat_card_refuse_a_dc_reference_without_a_ratio_typed(
+        client, install_network, dc_solar):
+    """Fail-closed at each catching site: the typed 422 reaches the route and the tool, nothing written."""
+    from harness import edit_card
+
+    n = install_network(_net())
+    before = n.generators.copy()
+    pv = {"component_class": "Generator", "name": "pv", "technology": "solar-utility",
+          "projection_year": 2030, "confirm": list(A.CONFIRMATIONS)}
+    with pytest.raises(HTTPException) as exc:
+        edit_card.preview("apply_library_reference", dict(pv))
+    assert exc.value.detail["error_kind"] == "dc_ac_ratio_missing"
+    for r in (client.post(PREVIEW, json=pv), client.post(f"{ROUTE}/apply", json={**pv, "digest": "x"})):
+        assert r.status_code == 422 and r.json()["detail"]["error_kind"] == "dc_ac_ratio_missing", r.text
+    assert n.generators.equals(before)

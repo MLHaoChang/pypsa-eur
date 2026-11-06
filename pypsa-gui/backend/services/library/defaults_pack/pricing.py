@@ -29,7 +29,6 @@ not describe yet (Link) records everything it writes.
 """
 from __future__ import annotations
 
-import math
 from typing import Any
 
 from services.library.defaults_pack.loader import (
@@ -110,18 +109,13 @@ def _link_outputs(n, df, name) -> list[tuple[str, float]]:
 def _dc_ac_ratio(df, name: str, refuse) -> float:
     """The Generator's declared DC/AC ratio, checked as every write path checks it (an import may
     have stored it unchecked); undeclared or invalid refuses, never 1."""
-    from services.adequacy.eh_columns import dc_ac_ratio
+    from services.adequacy.eh_columns import declared_dc_ac_ratio
 
-    raw = df.at[name, "dc_ac_ratio"] if "dc_ac_ratio" in df.columns else None
-    why = ("the row is priced per MW of DC module rating and p_nom is the AC rating; "
-           "set the generator's DC/AC ratio (dc_ac_ratio) first")
     try:
-        ratio = dc_ac_ratio(raw)
+        return declared_dc_ac_ratio(df, name)
     except ValueError as exc:
-        refuse(f"{why}. {exc}")
-    if math.isnan(ratio):
-        refuse(why)
-    return ratio
+        refuse("the row is priced per MW of DC module rating and p_nom is the AC rating; "
+               f"set the generator's DC/AC ratio first ({exc})")
 
 
 def _scale_for(n, component: str, name: str, technology: str, capacity_basis: str) -> float:

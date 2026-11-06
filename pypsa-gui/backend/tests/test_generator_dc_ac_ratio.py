@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 
+import pandas as pd
 import pytest
 
 from tests.conftest import build_network
@@ -93,3 +94,33 @@ def test_it_round_trips_through_netcdf(tmp_path):
     back = pypsa.Network(tmp_path / "n.nc")
     assert back.generators.at["solar", "dc_ac_ratio"] == 1.3
     assert math.isnan(back.generators.at["gas", "dc_ac_ratio"])
+
+
+def _csv_zip(n, folder) -> bytes:
+    import io
+    import zipfile
+
+    folder.mkdir(parents=True)
+    n.export_to_csv_folder(folder)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for f in folder.iterdir():
+            zf.write(f, f.name)
+    return buf.getvalue()
+
+
+def test_an_import_keeps_a_valid_ratio_and_clears_an_invalid_one(client, install_network, session_ctx, tmp_path):
+    """An import is not refused for a ratio, but 4 or "abc" is never stored: cleared to not
+    declared, so a DC-priced row refuses rather than pricing with it."""
+    install_network(build_network())
+    n = build_network()
+    n.add("Generator", "pv2", bus="B1", carrier="solar", p_nom=50.0)
+    n.add("Generator", "pv3", bus="B1", carrier="solar", p_nom=50.0)
+    n.generators["dc_ac_ratio"] = pd.Series({"solar": 1.3, "pv2": 4.0, "pv3": "abc"}, dtype=object)
+    r = client.post("/api/io/import/csv", files={
+        "file": ("n.zip", _csv_zip(n, tmp_path / "csv"), "application/zip")})
+    assert r.status_code == 200, r.text
+    gens = session_ctx(client).network.generators
+    assert gens.at["solar", "dc_ac_ratio"] == 1.3
+    assert math.isnan(gens.at["pv2", "dc_ac_ratio"]) and math.isnan(gens.at["pv3", "dc_ac_ratio"])
+    assert math.isnan(gens.at["gas", "dc_ac_ratio"])

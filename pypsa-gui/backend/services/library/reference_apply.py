@@ -60,18 +60,13 @@ def _refuse(kind: str, message: str, status: int = 422, **extra):
 def _dc_ac_ratio(frame, name: str) -> float:
     """The generator's declared DC/AC ratio, checked as every write path checks it; undeclared or
     invalid is a typed refusal before anything is planned, never 1."""
-    from services.adequacy.eh_columns import dc_ac_ratio
+    from services.adequacy.eh_columns import declared_dc_ac_ratio
 
-    raw = frame.at[name, "dc_ac_ratio"] if "dc_ac_ratio" in frame.columns else None
-    why = (f"This reference is priced per MW of DC module rating, and {name!r}'s capacity is its AC "
-           f"rating. Set its DC/AC ratio first; nothing is applied.")
     try:
-        ratio = dc_ac_ratio(raw)
+        return declared_dc_ac_ratio(frame, name)
     except ValueError as exc:
-        _refuse("dc_ac_ratio_missing", f"{why} {exc}")
-    if math.isnan(ratio):
-        _refuse("dc_ac_ratio_missing", why)
-    return ratio
+        _refuse("dc_ac_ratio_missing", f"This reference is priced per MW of DC module rating, and {name!r}'s "
+                f"capacity is its AC rating. Set its DC/AC ratio first ({exc}); nothing is applied.")
 
 
 def _num(value) -> float | None:

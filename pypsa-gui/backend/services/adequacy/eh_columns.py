@@ -153,6 +153,16 @@ def dc_ac_ratio(value, col: str = "dc_ac_ratio") -> float:
     return v
 
 
+def declared_dc_ac_ratio(frame, name: str) -> float:
+    """The DC/AC ratio `frame` (a Generator frame) declares for `name`. ValueError names why there
+    is none to price with: not declared (no column, or blank), or invalid as stored."""
+    raw = frame.at[name, "dc_ac_ratio"] if "dc_ac_ratio" in frame.columns else None
+    ratio = dc_ac_ratio(raw)
+    if math.isnan(ratio):
+        raise ValueError("dc_ac_ratio: not declared")
+    return ratio
+
+
 def _checked_text(kind: str, value) -> str:
     """A text column gridspine parses (a harmonic spectrum, a ride-through curve), refused when malformed."""
     v = "" if value is None else str(value).strip()
@@ -211,7 +221,16 @@ def normalise_eh_columns(n) -> None:
                         except ValueError:
                             return False
                     df[col] = df[col].map(_b).astype(bool)
-                elif kind in ("float_nonneg", "float_signed", "fraction", "dc_ac_ratio"):
+                elif kind == "dc_ac_ratio":
+                    # An import is not refused for it, but an invalid ratio is cleared (not
+                    # declared), so pricing refuses rather than reading 4 or "abc" (TC-02).
+                    def _r(v):
+                        try:
+                            return dc_ac_ratio(v)
+                        except ValueError:
+                            return float("nan")
+                    df[col] = df[col].map(_r).astype(float)
+                elif kind in ("float_nonneg", "float_signed", "fraction"):
                     df[col] = pd.to_numeric(df[col], errors="coerce").astype(float)
                 else:
                     df[col] = df[col].map(
