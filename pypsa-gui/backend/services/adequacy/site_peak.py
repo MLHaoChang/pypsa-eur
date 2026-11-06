@@ -155,8 +155,10 @@ BACKUP_STRING_PREFIX = "backup_bess_"
 def without_backup(island: dict | None) -> dict | None:
     """``island`` with the backup strings (``BACKUP_STRING_PREFIX``) taken out
     of the ride-through set: they hold their charge for an outage and never
-    shave the site peak (DC-03, GK A ruling 3). The sidecar itself keeps
-    them for the island study."""
+    shave the site peak (DC-03, GK A ruling 3); the reserve the shaving
+    batteries keep is net of the strings' own deliverable energy
+    (``backup_strings_mwh``, GK A 3). The sidecar itself keeps them for the
+    island study."""
     if not island:
         return island
     req = island.get("requirements") or {}
@@ -167,6 +169,17 @@ def without_backup(island: dict | None) -> dict | None:
     if len(kept) == len(names) and "ride_through_storage" in req:
         return island
     return {**island, "requirements": {**req, "ride_through_storage": kept}}
+
+
+def backup_strings_mwh(n, island: dict | None, year: int | None = None) -> float:
+    """The deliverable MWh of the backup strings (``BACKUP_STRING_PREFIX``)
+    in the ride-through set and in service in ``year``."""
+    names = ride_through_batteries(n, island, year)["names"]
+    strings = [u for u in names if str(u).startswith(BACKUP_STRING_PREFIX)]
+    if not strings:
+        return 0.0
+    entries = _storages(n)
+    return sum(deliverable_mwh(n, u, entries) for u in strings)
 
 
 def ride_through_batteries(n, island: dict | None, year: int | None = None) -> dict:
@@ -241,6 +254,19 @@ def outage_reserve_mwh(n, island: dict | None, mask=None, delivered=None,
             r += b
             words += f" plus {b:.3g} MWh seamless bridge ({joins:g} s until the gensets join)"
     return r, words
+
+
+def shaving_reserve_mwh(n, island: dict | None, mask=None, delivered=None,
+                        year: int | None = None) -> tuple[float, str]:
+    """The outage reserve the shaving batteries keep: the whole set's
+    (``outage_reserve_mwh``, backup strings included) net of the in-service
+    backup strings' own deliverable energy (GK A 3), and the words."""
+    reserve, words = outage_reserve_mwh(n, island, mask, delivered, year)
+    held = backup_strings_mwh(n, island, year)
+    if held > 0:
+        reserve = max(0.0, reserve - held)
+        words += f", less {held:.4g} MWh held in the backup strings"
+    return reserve, words
 
 
 def _shave(short: np.ndarray, spare: np.ndarray, rt: dict, reserve: float, hours: float) -> np.ndarray:
@@ -406,7 +432,7 @@ def peak_check(n, island: dict | None, *, unset: dict[str, list[str]] | None = N
         shave = np.zeros(idx.size)
         rt = ride_through_batteries(n, shaving, period_year(label))
         if rt["names"]:
-            reserve, words = outage_reserve_mwh(n, shaving, mask, delivered, period_year(label))
+            reserve, words = shaving_reserve_mwh(n, island, mask, delivered, period_year(label))
             free = max(0.0, rt["e_mwh"] - reserve)
             shave = _shave(load[idx] - cap0[idx], cap0[idx] - load[idx], rt, reserve, hours)
             bess_rule = (f"{rt['p_mw']:g} MW / {rt['e_mwh']:.4g} MWh, {free:.4g} MWh above the "

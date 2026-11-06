@@ -108,6 +108,19 @@ class BackupSpec(BaseModel):
     genset_run_hours_per_year: float = Field(default=50.0, ge=0, le=8760)
     fuel_price_per_mwh_fuel: float = Field(default=45.0, ge=0)
 
+    @model_validator(mode="after")
+    def _fade_given(self) -> "BackupSpec":
+        """A ``bess`` the spec gives must give both fades: BessSpec's own
+        default (0) would read as no fade (GK B K5). Without a ``bess`` the
+        labelled assumed defaults apply."""
+        if "bess" in self.model_fields_set:
+            missing = [k for k in ("calendar_fade_per_year", "cycle_fade_per_full_cycle")
+                       if k not in self.bess.model_fields_set]
+            if missing:
+                raise ValueError(f"backup.bess: give {' and '.join(missing)} (a missing fade "
+                                 "is not read as 0; omit bess for the assumed defaults)")
+        return self
+
 
 class DataCentreLoadSpec(BaseModel):
     phases: list[DcPhase] = Field(min_length=1)

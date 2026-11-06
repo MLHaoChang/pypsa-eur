@@ -24,14 +24,16 @@ const proof = (verdict: 'pass' | 'fail' | 'not_shown', reason: string | null = n
 })
 const assessment = (over: Partial<DcBackupAssessment> = {}): DcBackupAssessment => ({
   mode: 'bess', verdict: 'pass',
-  window: { first: '2030-01-14 18:00', hours: 4, snapshots: 4, energy_mwh: 110.4 },
+  window: { first: '2030-01-14 18:00:00', hours: 4, snapshots: 4, energy_mwh: 110.4 },
   sizing: { strings_n: 7, strings: 7, string_mw: 5, redundancy: 'N+1', e_mwh: 145.8, e_usable_mwh_per_string: 16, shortfall_mw: 27.6,
     critical_peak_mw: 27.6, firm_genset_mw: 0 },
   proofs: { genset: proof('pass'), bess: proof('pass') },
   cost: { years: 20, discount_rate: 0.07, currency: 'EUR', money_year: 2025, delta: -1_250_000,
     npv_genset: 9e6, npv_chosen: 7.75e6,
     lines: [{ leg: 'bess', line: 'power_capex_and_repurchase', unit: 'EUR', npv: 3e6 }],
-    inputs: [{ key: 'fade_per_year', value: 0.02, unit: '1/y', assumed: true }] },
+    inputs: [{ key: 'run_hours_per_year', value: 50, unit: 'h/year', assumed: true },
+      { key: 'heat_rate', value: 2.8, unit: 'MWh_th/MWh_e', assumed: true },
+      { key: 'retention', value: 0.912345678, unit: 'per unit', assumed: true }] },
   notes: [],
   basis: { network_saved_at: '2026-11-06T01:00:00+00:00', network_sha256: 'abc', not_reproduced: ['x'] }, ...over,
 })
@@ -80,10 +82,33 @@ describe('DcBackupSection', () => {
     expect(text(screen.getByTestId('dc-backup-sizing'))).toContain('7 strings of 5 MW (one spare string)')
     expect(text(screen.getByTestId('dc-backup-cost'))).toContain('Cost over 20 years vs gensets: saves € 1.3 m')
     expect(text(screen.getByTestId('dc-backup-cost'))).not.toMatch(/[+−-]€/)
-    expect(text(screen.getByTestId('dc-backup-assumed'))).toContain('fade per year 0.02 1/y assumed')
+    const assumedLine = text(screen.getByTestId('dc-backup-assumed'))
+    expect(assumedLine).toContain('Genset run hours: 50 h a year assumed')
+    expect(assumedLine).toContain('Heat rate: 2.8 MWh fuel per MWh assumed')
+    expect(assumedLine).toContain('Capacity kept at end of horizon: 0.912 assumed')
+    expect(assumedLine).not.toMatch(/_/)
     expect(screen.getByTestId('dc-backup-lines').textContent).toContain('Power capex and repurchase')
     expect(text(screen.getByTestId('dc-backup-sizing'))).toContain('112 MWh usable')
     expect(text(screen.getByTestId('dc-backup-basis'))).toContain('2026-11-06 01:00 UTC')
+  })
+
+  it('shows the hybrid shortfall window beside the critical one, and the kept gensets line', async () => {
+    const user = userEvent.setup()
+    results.getEhTemplate.mockResolvedValue(meta('hybrid'))
+    const crit = { first: '2030-01-14 18:00', hours: 4, snapshots: 4, energy_mwh: 204.4 }
+    const short = { first: '2030-01-15 02:00', hours: 4, snapshots: 4, energy_mwh: 12.5 }
+    const base = assessment()
+    campus.assessDcBackup.mockResolvedValue(assessment({
+      mode: 'hybrid', window: short, windows: { critical: crit, shortfall: short },
+      proofs: { genset: proof('pass'), hybrid: proof('pass') },
+      cost: { ...base.cost, lines: [{ leg: 'hybrid_genset', line: 'fom', unit: 'EUR', npv: 1e5 }] } }))
+    renderIt()
+    await user.click(await screen.findByTestId('dc-backup-assess'))
+    const res = await screen.findByTestId('dc-backup-result')
+    expect(text(res)).toContain('outage window from 2030-01-14 18:00, 204 MWh critical energy')
+    expect(text(screen.getByTestId('dc-backup-shortfall-window')))
+      .toContain('window from 2030-01-15 02:00, 12.5 MWh above the firm gensets')
+    expect(screen.getByTestId('dc-backup-lines').textContent).toContain('Gensets kept')
   })
 
   it('says when the delta cannot be priced, and Guided drops the lines', async () => {
@@ -113,6 +138,7 @@ describe('DcBackupSection', () => {
     expect(screen.queryByTestId('dc-backup-stale')).toBeNull()
     await user.click(screen.getByRole('button', { name: 'Hybrid' }))
     expect(text(await screen.findByTestId('dc-backup-stale'))).toContain('Out of date')
+    expect(text(screen.getByTestId('dc-backup-stale'))).toContain('This assessment is for batteries. Assess again for hybrid.')
     expect(screen.getByTestId('dc-backup-result').getAttribute('data-stale')).toBe('true')
   })
 })

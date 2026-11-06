@@ -97,3 +97,14 @@ Open for the reviewers:
 - GK A: a project *created* with backup=bess has the strings in network.nc, so assess refuses it ("assess a campus in genset form"). A PUT changes only the stored mode, and network.nc stays genset form; that is the path assess serves.
 - GK A ruling 3: gridspine's island schema rejects a backup list (unknown field in requirements and in units), so the `backup_bess_` name prefix is the only backup marker. site_peak drops the strings from both the shaving set and its reserve figure, which matches the ruling's test (the same shaving as with the strings removed).
 - GK B: F3: a missing `inflation_rate` is passed as 0, so the rate reads as real; the IC engine flags this case instead. F4: there is no pack fuel row today, and none is looked up. F6: the hybrid genset leg is the full fleet on the critical peak, so the delta is the strings alone. F7: retention compounds and augmentation is linear.
+
+### 2026-11-06: DC-03 (3) review fixes (PR #1172)
+
+- GK A 1: `assess_project` validates the sidecar for the contract and hands `assess` the raw one; eh_datacenter sizes on 30 MW firm (N+1). Route test.
+- GK A 2 / GK B K1: `genset_fleets` gives each leg one fleet. All-genset: the solved fleet when solved, else `genset_fleet_mw` on the critical peak (never under the committed fleet), its excess set on the earliest extendable genset in the proof copy; no candidate: `not_shown` "the genset candidate is unsized". Hybrid keeps and prices the committed fleet, candidates at 0. Each proof reports `genset_fleet_mw`.
+- GK A 3: site_peak's shaving reserve is the whole set's reserve less the in-service strings' deliverable MWh (`shaving_reserve_mwh`). The bess create refusal still holds: the strings never shave, so a peak above the import has nothing to meet it on grid; it was not the reserve artefact.
+- GK A 4: hybrid proves on the largest (P_c − g)⁺ window; `windows` reports both, and the card shows both.
+- GK B K3: the rate is the finance case's `wacc_nominal`, made real with its inflation when nominal, read as given when real; otherwise the pack's real rate, labelled assumed, with the reason.
+- GK B K4: heat rate is 1 / the pack's gas-genset efficiency when no genset spec gives one.
+- GK B K5: a given `bess` without both fades is refused; a set value's source is the spec; only set backup values are stored, so defaults reload as assumed.
+- GK B riders: half-year repurchases round up; an energy repurchase scraps earlier augmentation cells (no residual); restore_to_nameplate one-year fade test; `pack_prices` refuses rows in different money years.

@@ -885,13 +885,20 @@ export interface DcBackupProof {
   strings_in_service: number
   window_unserved_mwh: number | null
   on_grid_unserved_mwh: number | null
+  /** The genset MW this proof dispatched (the fleet its cost leg prices). */
+  genset_fleet_mw?: number
 }
+
+export interface DcBackupWindow { first: string; hours: number; snapshots: number; energy_mwh: number }
 
 /** POST /campus-electrical/{name}/dc-backup/assess: sizing, window, both proofs, cost delta. */
 export interface DcBackupAssessment {
   mode: DcBackupMode
   verdict: DcBackupProof['verdict']
-  window: { first: string; hours: number; snapshots: number; energy_mwh: number }
+  /** The chosen mode's proof window (hybrid: the shortfall window). */
+  window: DcBackupWindow
+  /** Both windows: the critical load's, and in hybrid the (critical − firm gensets)⁺ one. */
+  windows?: { critical: DcBackupWindow; shortfall?: DcBackupWindow }
   sizing: {
     strings_n: number; strings: number; string_mw: number; redundancy: string
     /** Nameplate MWh (up-sized for fade); usable is per string after the depth-of-discharge window. */

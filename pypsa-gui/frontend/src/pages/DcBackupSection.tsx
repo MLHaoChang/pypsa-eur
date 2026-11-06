@@ -30,7 +30,34 @@ const LINE_LABEL: Record<string, string> = {
   power_fom: 'Power fixed O&M', energy_capex_and_repurchase: 'Energy capex and repurchase',
   energy_fom: 'Energy fixed O&M', augmentation: 'Augmentation',
 }
-const lineLabel = (k: string) => LINE_LABEL[k] ?? k.replace(/_/g, ' ')
+const lineLabel = (k: string) => LINE_LABEL[k] ?? k
+/** Assessment input words (UX 10: sentence case, never raw keys). Every key
+ *  the backend can mark assumed has one (backend parity test). */
+export const INPUT_LABEL: Record<string, string> = {
+  autonomy_h: 'Autonomy', ride_through_s: 'Ride-through', string_mw: 'String size',
+  test_cycles_per_year: 'Test discharges', round_trip_efficiency: 'Round-trip efficiency',
+  depth_of_discharge: 'Depth of discharge', calendar_fade_per_year: 'Calendar fade',
+  cycle_fade_per_full_cycle: 'Fade per full cycle', augmentation_policy: 'Augmentation',
+  redundancy: 'Redundancy', retention: 'Capacity kept at end of horizon',
+  genset_mw: 'Genset fleet', hybrid_genset_mw: 'Gensets kept in hybrid',
+  run_hours_per_year: 'Genset run hours', heat_rate: 'Heat rate', fuel_price: 'Fuel price',
+  discount_rate: 'Discount rate (real)',
+}
+const UNIT_WORDS: [RegExp, string][] = [
+  [/MWh_th\/MWh_e/, 'MWh fuel per MWh'], [/\/MWh_th/, ' per MWh fuel'], [/h\/year/, 'h a year'],
+  [/full cycles\/year/, 'a year'], [/share of nameplate\/year/, 'of nameplate a year'],
+  [/share of nameplate\/full cycle/, 'of nameplate per cycle'], [/^per unit$/, ''],
+  [/^real, per year$/, ''],
+]
+const unitWords = (u?: string) => UNIT_WORDS.reduce((acc, [re, w]) => acc.replace(re, w), u ?? '').trim()
+const POLICY_WORDS: Record<string, string> = {
+  none: 'none', restore_to_nameplate: 'restored to nameplate yearly', fixed_years: 'in fixed years',
+}
+const inputValue = (v: unknown) =>
+  typeof v === 'number' ? num(v) : typeof v === 'string' ? (POLICY_WORDS[v] ?? v) : String(v)
+/** "2030-07-07 13:00" from an ISO or "YYYY-MM-DD HH:MM:SS" timestamp (UX 10). */
+const minute = (t: string) => t.slice(0, 16).replace('T', ' ')
+const MODE_WORD: Record<DcBackupMode, string> = { genset: 'gensets', bess: 'batteries', hybrid: 'hybrid' }
 
 const num = (v: number | null | undefined, digits = 3) =>
   v == null || !Number.isFinite(v) ? '–' : v.toLocaleString('en', { maximumSignificantDigits: digits })
@@ -99,15 +126,21 @@ export default function DcBackupSection({ name }: { name: string }) {
         </div>
         {refusal && <p className="mt-1 text-[12px] text-danger" data-testid="dc-backup-refusal">{refusal}</p>}
         {assessError && <p className="mt-1 text-[12px] text-danger" data-testid="dc-backup-error">{assessError}</p>}
-        {result && <Assessment result={result} stale={result.mode !== mode} />}
+        {result && <Assessment result={result} stale={result.mode !== mode} stored={mode} />}
       </PageSection>
     </div>
   )
 }
 
-function Assessment({ result, stale }: { result: DcBackupAssessment; stale: boolean }) {
+const LEG_LABEL: Record<string, string> = {
+  genset: 'Gensets', hybrid_genset: 'Gensets kept', bess: 'Batteries',
+}
+
+function Assessment({ result, stale, stored }: { result: DcBackupAssessment; stale: boolean; stored: DcBackupMode | null }) {
   const guided = useUIStore(s => s.uiMode) === 'guided'
   const { window: w, sizing: s, cost: c } = result
+  const crit = result.windows?.critical ?? w
+  const short = result.windows?.shortfall
   const legs = (['genset', result.mode] as DcBackupMode[]).filter((m, i, a) => a.indexOf(m) === i)
   const assumed = c.inputs.filter(i => i.assumed)
   return (
@@ -115,13 +148,18 @@ function Assessment({ result, stale }: { result: DcBackupAssessment; stale: bool
       {stale && (
         <p className="flex items-center gap-2" data-testid="dc-backup-stale">
           <StatePill state="stale" />
-          <span className="text-muted">This assessment is for {MODE_LABEL[result.mode]}. Assess again for the stored mode.</span>
+          <span className="text-muted">This assessment is for {MODE_WORD[result.mode]}. Assess again for {stored ? MODE_WORD[stored] : 'the stored mode'}.</span>
         </p>
       )}
       <div className={stale ? 'opacity-50 space-y-2' : 'space-y-2'}>
         <p>
-          {qty(w.hours, 'h')} outage window from {w.first}, {qty(w.energy_mwh, 'MWh')} critical energy.
+          {qty(crit.hours, 'h')} outage window from {minute(crit.first)}, {qty(crit.energy_mwh, 'MWh')} critical energy.
         </p>
+        {short && (
+          <p data-testid="dc-backup-shortfall-window">
+            Batteries&apos; window from {minute(short.first)}, {qty(short.energy_mwh, 'MWh')} above the firm gensets.
+          </p>
+        )}
         <table className="w-full text-[11px]">
           <thead className="text-muted">
             <tr><th className="text-left font-normal">Leg</th><th className="text-left font-normal">Verdict</th>
@@ -156,7 +194,7 @@ function Assessment({ result, stale }: { result: DcBackupAssessment; stale: bool
         {result.mode !== 'genset' && assumed.length > 0 && (
           <p className="text-[11px] text-muted" data-testid="dc-backup-assumed">
             {assumed.map((i, k) => (
-              <span key={i.key}>{k > 0 && '; '}{i.key.replace(/_/g, ' ')} {String(i.value)}{i.unit ? `${NBSP}${i.unit}` : ''}{' '}
+              <span key={i.key}>{k > 0 && '; '}{INPUT_LABEL[i.key] ?? i.key}: {inputValue(i.value)}{unitWords(i.unit) ? `${NBSP}${unitWords(i.unit)}` : ''}{' '}
                 <span className="rounded border border-border px-1 text-[10px]">assumed</span></span>
             ))}
           </p>
@@ -172,7 +210,7 @@ function Assessment({ result, stale }: { result: DcBackupAssessment; stale: bool
               <tbody>
                 {c.lines.map(l => (
                   <tr key={`${l.leg}-${l.line}`}>
-                    <td>{l.leg === 'genset' ? 'Gensets' : 'Batteries'}</td><td>{lineLabel(l.line)}</td>
+                    <td>{LEG_LABEL[l.leg] ?? l.leg}</td><td>{lineLabel(l.line)}</td>
                     <td className="text-right tabular-nums">{l.npv < 0 ? '−' : ''}{money(l.npv, l.unit)}</td>
                   </tr>
                 ))}
@@ -184,7 +222,7 @@ function Assessment({ result, stale }: { result: DcBackupAssessment; stale: bool
           <li>The batteries' charge at the start of the outage assumes perfect foresight.</li>
           <li>The strings are unpriced in the solve; their cost is in this comparison only.</li>
           {result.basis && <>
-            <li data-testid="dc-backup-basis">Read the network saved at {result.basis.network_saved_at.slice(0, 16).replace('T', ' ')} UTC.</li>
+            <li data-testid="dc-backup-basis">Read the network saved at {minute(result.basis.network_saved_at)} UTC.</li>
             {result.basis.not_reproduced.map(t => <li key={t}>Not reproduced from a normal solve: {t}.</li>)}
           </>}
         </ul>
