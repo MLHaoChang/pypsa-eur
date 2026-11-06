@@ -9,6 +9,8 @@ import {
   type DcBackupAssessment, type DcBackupMode, type DcBackupProof, type GridReadinessVerdict,
 } from '../api/campusElectrical'
 import { resultsApi } from '../api/simulation'
+import { reservesApi, reserveRevenue } from '../api/reserves'
+import { showResultsTab } from '../layout/flowNavigation'
 import { Btn, PageSection, Seg } from '../components/PageKit'
 import { StatePill } from '../components/ResultState'
 import { VerdictChip } from '../components/gridReadiness/GridReadinessScorecard'
@@ -146,8 +148,36 @@ export default function DcBackupSection({ name }: { name: string }) {
         {refusal && <p className="mt-1 text-[12px] text-danger" data-testid="dc-backup-refusal">{refusal}</p>}
         {assessError && <p className="mt-1 text-[12px] text-danger" data-testid="dc-backup-error">{assessError}</p>}
         {result && <Assessment result={result} stale={result.mode !== mode} stored={mode} />}
+        <ReserveLine name={name} />
       </PageSection>
     </div>
+  )
+}
+
+/** One line on the reserve products this backup carries (DC 06), only when
+ *  the project has some (`/results/reserves` answers 200). The link opens the
+ *  Results storage tab; Back returns here. */
+function ReserveLine({ name }: { name: string }) {
+  const { data } = useQuery({
+    queryKey: nk(name, 'results', 'reserves'),
+    queryFn: reservesApi.get,
+    retry: false,
+  })
+  if (!data) return null
+  const revenue = reserveRevenue(data.lines)
+  // TODO(DC06-CURRENCY): the revenue's currency and money year once the payload carries them.
+  return (
+    <p className="mt-2 text-[12px]" data-testid="dc-backup-reserves">
+      Reserve products: {data.products.length} · revenue{' '}
+      {revenue == null ? <span className="text-muted">not solved</span> : `${revenue < 0 ? '−' : ''}${money(revenue)}`}
+      {' · '}headroom{' '}
+      {data.headroom_h_per_string == null
+        ? <span className="text-muted">not set</span>
+        : `${num(data.headroom_h_per_string)}${NBSP}h per string`}
+      {' · '}
+      <button type="button" className="text-accent hover:underline" data-testid="dc-backup-reserves-open"
+        onClick={() => showResultsTab('storage')}>Storage view ›</button>
+    </p>
   )
 }
 

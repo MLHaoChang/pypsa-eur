@@ -16,6 +16,7 @@ import { resolveRange, useResultsFilter } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
 import ResultState from '../../components/ResultState'
 import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableTable'
+import ReserveCommitments from './ReserveCommitments'
 
 // ── Storage cycling result tab ──────────────────────────────────────────────
 // Per-storage-unit cycle count (Σ |p| × Δt ÷ (2 × p_nom_opt × max_hours))
@@ -294,9 +295,12 @@ export default function StorageCycling() {
   if (!storPowerTS || units.length === 0) {
     if (!unitsLoaded) return null
     return (
-      <div className="p-6">
+      <div className="p-6 flex flex-col gap-4">
         <ResultState state="not_run"
           reason="Cycles come from the solved storage dispatch. Run a solve to count them." />
+        {/* Reserve products on the backup storage (DC 06): their products and
+            "not solved" lines are known before a solve. */}
+        <ReserveCommitments />
       </div>
     )
   }
@@ -345,6 +349,9 @@ export default function StorageCycling() {
       </section>
 
       <PerUnitCyclingSection units={units} />
+
+      {/* Reserve products on the backup storage (DC 06); nothing without them. */}
+      <ReserveCommitments />
 
     </div>
   )

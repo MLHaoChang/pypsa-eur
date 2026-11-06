@@ -15,6 +15,13 @@ vi.mock('../api/campusElectrical', async () => {
 })
 const results = vi.hoisted(() => ({ getEhTemplate: vi.fn() }))
 vi.mock('../api/simulation', () => ({ resultsApi: results }))
+const reserves = vi.hoisted(() => ({ get: vi.fn() }))
+vi.mock('../api/reserves', async () => {
+  const real = await vi.importActual<typeof import('../api/reserves')>('../api/reserves')
+  return { ...real, reservesApi: reserves }
+})
+const nav = vi.hoisted(() => ({ showResultsTab: vi.fn() }))
+vi.mock('../layout/flowNavigation', () => nav)
 const ui = vi.hoisted(() => ({ uiMode: 'expert' as 'expert' | 'guided' }))
 vi.mock('../store/uiStore', () => ({ useUIStore: (sel: (s: typeof ui) => unknown) => sel(ui) }))
 
@@ -46,7 +53,7 @@ function renderIt() {
 }
 
 describe('DcBackupSection', () => {
-  beforeEach(() => { vi.resetAllMocks(); ui.uiMode = 'expert' })
+  beforeEach(() => { vi.resetAllMocks(); ui.uiMode = 'expert'; reserves.get.mockResolvedValue(null) })
   afterEach(cleanup)
 
   it('shows nothing on a project without a dc_load', async () => {
@@ -148,5 +155,38 @@ describe('DcBackupSection', () => {
     expect(text(await screen.findByTestId('dc-backup-stale'))).toContain('Out of date')
     expect(text(screen.getByTestId('dc-backup-stale'))).toContain('This assessment is for batteries. Assess again for hybrid.')
     expect(screen.getByTestId('dc-backup-result').getAttribute('data-stale')).toBe('true')
+  })
+
+  it('shows no reserve line without reserve products (204)', async () => {
+    results.getEhTemplate.mockResolvedValue(meta('bess'))
+    renderIt()
+    await screen.findByTestId('dc-backup')
+    await waitFor(() => expect(reserves.get).toHaveBeenCalled())
+    expect(screen.queryByTestId('dc-backup-reserves')).toBeNull()
+  })
+
+  it('shows the reserve line and opens the Results storage tab through the shared opener', async () => {
+    const user = userEvent.setup()
+    results.getEhTemplate.mockResolvedValue(meta('bess'))
+    const line = (amount: number | null) => ({ period: null, contract_id: 'reserve:fcr', payer: 'tso', payee: 'site',
+      value_stream: 'reserve_capacity', quantity_mwh: null, amount, flags: [] })
+    reserves.get.mockResolvedValue({ products: [{ id: 'fcr' }, { id: 'afrr_up' }], snapshots: [], storages: [],
+      lines: [line(1500), line(null)], flags: [], headroom_h_per_string: 1.5, not_modelled: '' })
+    renderIt()
+    const el = await screen.findByTestId('dc-backup-reserves')
+    expect(text(el)).toBe('Reserve products: 2 · revenue 1.5 k · headroom 1.5 h per string · Storage view ›')
+    await user.click(screen.getByTestId('dc-backup-reserves-open'))
+    expect(nav.showResultsTab).toHaveBeenCalledWith('storage')
+  })
+
+  it('says "not solved" when no line has an amount, never 0', async () => {
+    results.getEhTemplate.mockResolvedValue(meta('bess'))
+    reserves.get.mockResolvedValue({ products: [{ id: 'fcr' }], snapshots: [], storages: [],
+      lines: [{ period: null, contract_id: 'reserve:fcr', payer: 'tso', payee: 'site', value_stream: 'reserve_capacity',
+        quantity_mwh: null, amount: null, flags: ['reserve_not_solved'] }],
+      flags: ['reserve_not_solved'], headroom_h_per_string: null, not_modelled: '' })
+    renderIt()
+    expect(text(await screen.findByTestId('dc-backup-reserves')))
+      .toBe('Reserve products: 1 · revenue not solved · headroom not set · Storage view ›')
   })
 })
