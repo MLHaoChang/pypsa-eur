@@ -193,10 +193,18 @@ def admit(path, task, step, args, ctx):
 
 def release(path, call_id, solves=0, task=None):
     """Settle the call's reservation to `solves` (0: refused before the study
-    started, F5; else what it charged, F4). `task`: the caller's in-memory
-    task, whose solve count is set too (it saves it). No-op without one."""
+    started, F5; else what it charged, F4; None: unknown, so the whole
+    reservation, C4). No reservation stays open past the step. `task`: the
+    caller's in-memory task, whose solve count is set too (it saves it).
+    No-op without a row."""
     from harness import runner
     from services import run_envelope
+    if solves is None:
+        row = next((a for a in (run_envelope._load(path) or {}).get("audit", [])
+                    if a["event"] == STUDY and a.get("call_id") == call_id), None)
+        if row is None:
+            return False
+        solves = int(row.get("reserved") or 0)
     settled = run_envelope.settle_engine_solves(path, call_id, solves, event=STUDY)
     envelope = run_envelope._load(path)
     if settled and task is not None and envelope is not None:
@@ -291,6 +299,10 @@ def _follow(path, ticket, job_id, ctx, begun):
         settle(path, ticket, job_id, record, begun)
     except Exception:  # noqa: BLE001 — a lost settlement leaves the step waiting, never re-runs
         logger.exception("run EH study %s could not be settled", job_id)
+        try:
+            release(path, ticket[2], None)  # C4: closed at the whole reservation
+        except Exception:  # noqa: BLE001
+            logger.exception("run EH study %s: its reservation could not be closed", job_id)
 
 
 def _alive(record):
@@ -303,8 +315,7 @@ def settle(path, ticket, job_id, record, begun):
     from services import assistant_tasks
     native, status, error = outcome(record, begun)
     spent = charged(record) if native != "unknown" else None
-    if spent is not None:
-        release(path, ticket[2], spent)  # F4: what it charged, never capped down
+    release(path, ticket[2], spent)  # F4: what it charged, never capped down; unknown: all it reserved
     result = {"study": STUDY, "started_at": begun, "solves": spent} if status == "completed" else None
     view = assistant_tasks.settle_job(path, ticket, job_id, native, status, result)
     if view is not None and error:

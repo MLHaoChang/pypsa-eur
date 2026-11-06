@@ -440,6 +440,8 @@ def _eh_study_reads_the_run_project(run_ctx, project_id, monkeypatch):
         return {"status": "running"}
 
     monkeypatch.setattr(eh_study_runner, "start_eh_study", start)
+    from routers import results  # the sweep's own queued solve may still hold the mesh
+    monkeypatch.setattr(results, "_refuse_if_mesh_busy", lambda study: None)
     _on_ctx(run_ctx, chat_tools.run_eh_study)
     return seen == [str(project_id)]
 

@@ -1511,6 +1511,7 @@ def finish_step(ticket, result=None, error=None):
                 step["status"] = "failed"
                 message = f"The Energy Hub study did not start ({run_eh.REFUSED_KIND}): {str(error or result)[:200]}"
             else:
+                run_eh.release(path, ticket[2], None, task)  # C4: unfollowed, so its whole reservation
                 step["status"] = "uncertain"
                 message = "The Energy Hub study started, but its record is not followed; inspect it before going on."
         if task.get("run") and error is None and _retryable_read(step["tool"]):

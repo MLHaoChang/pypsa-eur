@@ -323,14 +323,41 @@ def test_an_unreadable_count_keeps_the_whole_reservation(tmp_path, monkeypatch):
     path, ticket = ticket_task(tmp_path)
     settled(monkeypatch)
     run_eh.settle(path, ticket, "ad:1", record(stages=[{"stage": "ens_solve", "status": "run"}]), 1.0)
-    assert "solves" not in eh_row(path) and run_envelope.solves_used(run_envelope._load(path)) == 3
+    assert eh_row(path)["solves"] == 2 and run_envelope.solves_used(run_envelope._load(path)) == 3  # C4: closed
 
 
 def test_a_replaced_record_settles_uncertain_and_keeps_the_reservation(tmp_path, monkeypatch):
     path, ticket = ticket_task(tmp_path)
     calls = settled(monkeypatch)
     run_eh.settle(path, ticket, "ad:1", record(started=5.0), 1.0)
-    assert calls[0][3:5] == ("unknown", "uncertain") and "solves" not in eh_row(path)
+    assert calls[0][3:5] == ("unknown", "uncertain") and eh_row(path)["solves"] == 2  # C4: closed in full
+
+
+def open_reservations(path):
+    return [a for a in run_envelope._load(path)["audit"] if a["event"] == "eh_study" and "solves" not in a]
+
+
+@pytest.mark.parametrize("rec, solves", [
+    (record(), 1),  # done: what it charged
+    (record(status="failed"), 1),  # failed: what it charged
+    (record(stages=[{"stage": "ens_solve", "status": "run"}]), 2),  # unreadable count: in full
+    (record(started=5.0), 2),  # replaced: in full
+    (None, 2),  # gone: in full
+])
+def test_no_reservation_stays_open_after_a_settle(tmp_path, monkeypatch, rec, solves):
+    """C4 addendum: done, failed, unknown."""
+    path, ticket = ticket_task(tmp_path)
+    settled(monkeypatch)
+    run_eh.settle(path, ticket, "ad:1", rec, 1.0)
+    assert not open_reservations(path) and eh_row(path)["solves"] == solves
+
+
+def test_a_settle_that_raises_closes_the_reservation_in_full(tmp_path, monkeypatch):
+    """C4 addendum: a raise in the follower."""
+    path, ticket = ticket_task(tmp_path)
+    monkeypatch.setattr(run_eh, "settle", lambda *a: 1 / 0)
+    run_eh._follow(path, ticket, "ad:1", ctx_for(tmp_path), 1.0)
+    assert not open_reservations(path) and eh_row(path)["solves"] == 2
 
 
 @pytest.mark.parametrize("bindings", [True, False])
@@ -396,8 +423,24 @@ def test_a_refused_start_through_dispatch_fails_the_step_and_releases(tmp_path, 
     assistant_tasks.finish_step(ticket, result=result, error=error)
     after = json.loads(path.read_text())
     assert after["steps"][0]["status"] == "failed"
-    assert eh_row(path)["solves"] == 0
+    assert eh_row(path)["solves"] == 0 and not open_reservations(path)  # C4
     assert harness_runner._budget(after)["used"]["solves"] == 1
+
+
+def test_a_start_left_unfollowed_closes_its_reservation_in_full(tmp_path, monkeypatch):
+    """C4 addendum: a started study whose record is not followed settles
+    uncertain, charged its whole reservation."""
+    from services import assistant_tasks
+    path, ticket = ticket_task(tmp_path)
+    task = json.loads(path.read_text())
+    del task["steps"][0]["job"]
+    task.update(owner_id="u1", title="Own site study")
+    path.write_text(json.dumps(task))
+    monkeypatch.setattr(assistant_tasks, "_path", lambda task_id: (path, PROJECT, "u1"))
+    monkeypatch.setattr(assistant_tasks, "_view", lambda task, *a, **k: None)
+    assistant_tasks.finish_step(ticket, result={"status": "running", "started_at": 1.0})
+    assert json.loads(path.read_text())["steps"][0]["status"] == "uncertain"
+    assert not open_reservations(path) and eh_row(path)["solves"] == 2
 
 
 # ── The facts (C3, F2, F3, F6, F7, F8) ───────────────────────────────────────
@@ -565,6 +608,14 @@ def test_a_review_that_cannot_be_read_whole_is_none(tmp_path, monkeypatch, out):
     assert read("eh.review.blockers", env) is None
 
 
+def test_a_study_record_without_a_report_reads_no_review(tmp_path, monkeypatch):
+    """F8, fail closed: the own record carries no report to review."""
+    from services.adequacy import eh_review
+    monkeypatch.setattr(eh_review, "review_report", lambda *a: {"findings": []})
+    env = env_for(tmp_path, ctx=ctx_for(tmp_path, eh_study=record(report=False)), steps=[eh_done()])
+    assert read("eh.review.blockers", env) is None
+
+
 def lost_load_env(tmp_path, monkeypatch, *, job, weights=(2.0, 2.0, 3.0), shed=(0.0, 1.5, 0.5), exact="x1"):
     """A three-snapshot network with non-unit generator weightings and the
     solve's lost-load capture; the run's own solve job is `job`."""
@@ -619,6 +670,13 @@ def test_a_stale_solve_reads_no_unserved_energy(tmp_path, monkeypatch):
     env = lost_load_env(tmp_path, monkeypatch, job=DONE_JOB)
     monkeypatch.setattr(calculations, "solve_matches_inputs", lambda c: False)
     assert read("kpi.unserved_mwh", env) is None
+
+
+def test_a_solve_without_its_lost_load_capture_reads_no_evidence(tmp_path, monkeypatch):
+    """F6, fail closed: the source cannot be built (here: no capture)."""
+    env = lost_load_env(tmp_path, monkeypatch, job=DONE_JOB)
+    env.ctx.solver_state.pop("last_lost_load")
+    assert read("kpi.unserved_mwh", env).value == "no_lost_load_capture"
 
 
 def test_unserved_energy_never_reads_without_the_runs_context(tmp_path):
