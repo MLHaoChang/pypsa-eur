@@ -20,9 +20,21 @@ RUN = {'profile': 'eh_site@1', 'mode': 'stepwise'}
 BRIEF = {'objective': 'Size the own site supply through 2035.', 'cards': ['capacity']}
 
 
+def without_eh_study(profile):
+    """eh_site@1 without issue 07 B2's Energy Hub study and rules: the
+    baseline network is no Energy Hub site, so its readiness, its study and
+    the LOLE loop never pass there. `tests/test_harness_run_eh.py` drives the
+    shipped profile."""
+    stages = {**profile["stages"], **{k: copy.deepcopy(run_profiles.GENERIC[k])
+                                      for k in ("input_gate", "solve", "result_gate")}}
+    return {k: v for k, v in {**profile, "stages": stages}.items() if k != "eh_study"}
+
+
 @pytest.fixture
-def site(baseline):
-    """The baseline project, stamped as an eh_site project (its template file)."""
+def site(baseline, monkeypatch):
+    """The baseline project, stamped as an eh_site project (its template file).
+    The run mechanics run on eh_site@1 without its EH study (`without_eh_study`)."""
+    monkeypatch.setitem(run_profiles.PROFILES, 'eh_site@1', without_eh_study(run_profiles.EH_SITE))
     _, project_id, root = baseline
     (root / flow_service.TEMPLATE_FILE).write_text(json.dumps({'id': 'eh_site', 'site_type': 'industrial'}))
     return project_id, root

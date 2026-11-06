@@ -293,6 +293,111 @@ def _report_unsupported_listed(env):
     return run_report.unsupported_listed(env.task, env.project_dir, _profile(env))
 
 
+def _eh_readiness_ready(env):
+    """Issue 07 B2: the EH readiness preflight for the args the study would
+    run with, on the run's ctx. Ready only when the pack applies and every
+    requested stage is predicted to run; anything else (and no read) is not."""
+    from harness import run_eh
+    from services import chat_tools
+    if env.ctx is None:
+        return None
+    profile = _profile(env)
+    frozen = run_eh.freeze(env.ctx, profile, run_eh.solves_cap(profile, None))
+    args = frozen["args"]
+    result = _on(env.ctx, chat_tools.get_eh_readiness, args["archetype"], args["budget_solves"],
+                 args.get("stages"), args.get("dtc_attribution"), args.get("pack_overrides") or None)
+    rows = result.get("stages") if isinstance(result, dict) else None
+    if not isinstance(rows, list) or result.get("truncated") or not (result.get("import") or {}).get("applied"):
+        return None if not isinstance(rows, list) or result.get("truncated") else False
+    requested = [r for r in rows if isinstance(r, dict) and r.get("prediction") != "not_requested"]
+    return bool(requested) and all(r.get("prediction") == "run" for r in requested)
+
+
+def _eh_energization_min_mw(env):
+    """F7: the least MW the connection is energized with over the growth
+    stages (the template's `energization[].available_import_mw`, one per
+    stage year); a stage without a finite number (missing, NaN, text) makes
+    it None."""
+    from harness import run_eh
+    from services.flow_service import read_template
+    template = read_template(env.project_dir) if env.project_dir is not None else None
+    stages = template.get("energization") if isinstance(template, dict) else None
+    if not isinstance(stages, list) or not stages:
+        return None
+    values = [run_eh.finite_number(s.get("available_import_mw")) if isinstance(s, dict) else None for s in stages]
+    return None if any(v is None for v in values) else min(values)
+
+
+def _eh_record(env):
+    from harness import run_eh
+    record = run_eh.own_record(env.task, env.ctx)
+    if record is None:
+        return NoEvidence("not_own", "the run's own EH study record is missing or was replaced")
+    return record
+
+
+def _eh_study_status(env):
+    """F2, F3: `done` with every requested stage run, from the record the
+    run's own step settled from; another or a replaced record is no evidence."""
+    from harness import run_eh
+    record = _eh_record(env)
+    if isinstance(record, NoEvidence):
+        return record
+    if record.get("status") == "done" and run_eh.skipped(record):
+        return NoEvidence("stage_skipped", "; ".join(run_eh.skipped(record))[:240])
+    return record.get("status")
+
+
+def _eh_review_blockers(env):
+    """F3, F8: the high-severity findings of the review of the run's own
+    record (never the process's latest). A review that errors or is cut
+    short reads None."""
+    from services.adequacy.eh_review import review_report
+    record = _eh_record(env)
+    if isinstance(record, NoEvidence):
+        return record
+    report = record.get("report")
+    if not isinstance(report, dict):
+        return None
+    out = review_report(report, record)
+    findings = out.get("findings") if isinstance(out, dict) else None
+    if not isinstance(findings, list) or out.get("truncated"):
+        return None
+    return sorted(str(f.get("id")) for f in findings if isinstance(f, dict) and f.get("severity") == "high")
+
+
+def _kpi_unserved_mwh(env):
+    """F6: unserved energy of the run's own solve, on the run's ctx: the
+    solve job's capture is applied and its exact input identity is the one
+    the live results were solved from, and those results match the inputs
+    (`solve_matches_inputs`). Energy uses the solve's snapshot weightings."""
+    from harness import lost_load_calculations as lost_load
+    from harness.durable import network_guard
+    if env.ctx is None or env.case is not None:
+        return None
+    job = _solve_job(env)
+    if job is None or job["status"] != "completed":
+        return None
+    refused = _not_applied(job)
+    if refused is not None:
+        return refused
+    exact = (job.get("capture") or {}).get("exact")
+    if not exact:
+        return NoEvidence("no_capture", "the run's solve recorded no input identity")
+
+    def read():
+        with network_guard():
+            if (getattr(env.ctx.network, "meta", None) or {}).get("assistant_solve_exact_input_fingerprint") != exact:
+                return NoEvidence("other_solve", "the live results are not the run's own solve")
+            try:
+                raw = lost_load.source(env.ctx, "network")
+            except ValueError as exc:
+                return NoEvidence(str(exc), f"{exc}: unserved energy cannot be read")
+        facts, _ = lost_load.calculate(raw, {"entity_id": "network", "metrics": ["lost_load_energy"]})
+        return facts[0]["value"] if facts else None
+    return _on(env.ctx, read)
+
+
 def _handoff_kpis_read(env):
     """Issue 07 (C14): every headline KPI read back natively, on the run's context."""
     from harness import run_handoff
@@ -330,6 +435,14 @@ FACTS: dict[str, Fact] = {
     "report.unsupported_listed": Fact("harness.run_report.unsupported_listed", "listed", None,
                                       _report_unsupported_listed),
     "handoff.kpis_read": Fact("harness.run_handoff.kpis_read", "read", None, _handoff_kpis_read),
+    # Issue 07 B2 (GK B C3, GK B (31) F2-F8): the eh_site input and result facts.
+    "eh.readiness.ready": Fact("services.chat_tools.get_eh_readiness", "stages", None, _eh_readiness_ready),
+    "eh.energization.min_mw": Fact("services.flow_service.read_template", "energization", "MW",
+                                   _eh_energization_min_mw),
+    "eh.study.status": Fact("harness.run_eh.own_record", "status", None, _eh_study_status),
+    "eh.review.blockers": Fact("services.adequacy.eh_review.review_report", "findings", None, _eh_review_blockers),
+    "kpi.unserved_mwh": Fact("harness.lost_load_calculations.calculate", "lost_load_energy", "MWh",
+                             _kpi_unserved_mwh),
 }
 
 

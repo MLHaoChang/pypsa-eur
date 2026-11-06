@@ -740,12 +740,13 @@ lists what blocks the profile from running unattended end to end today.
 - Inputs: weather, tariff (`import_urdb_tariff`/`attach_tariff`), `fetch_site_context`. Researchable: tariff level, genset fuel price.
 - Input rules: the core rules plus:
   - `eh.readiness.ready`;
-  - `eh.review.blockers empty` (`review_eh_study`);
   - for each stage, `energization_mw ≥ 0`.
+  - `eh.review.blockers empty` moved to the result rules (issue 07 B2, GK B (31) F8): the review reads the EH study, so before the run's first study it has no source and would fail every input gate.
 - Solve: the multi-period EH solve (the investment card), then `run_eh_study` (reliability).
 - Result rules: the core rules plus:
   - `adequacy.lole_h_per_year ≤ goal` (h/yr basis; the engine loop gets `goal × horizon years`, §6.2);
-  - `kpi.unserved_mwh == 0` in normal operation.
+  - `kpi.unserved_mwh == 0` in normal operation;
+  - `eh.study.status == done` (solve stage) and `eh.review.blockers empty`, both read from the run's own study record (issue 07 B2).
 - Loop: L2 uses an engine loop for the LOLE rule (`run_margin_loop` for a firm-capacity lever, `run_coupling_loop` for an ENS-cap lever; §6.2), and the agent loop for the other rules. The two never run on the same rule.
 - Tunable: candidate `max_mw` (genset, bess, pv), BESS hours. `connection_mw` is the user's to change.
 - Explore: connection size against BESS against genset, ≤4 cases.

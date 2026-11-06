@@ -84,6 +84,23 @@ C1–C3, C7, C8 and C11–C14 carry over. B1 = stages 7/8 in place; B2 = the EH 
 - B1-d (hand-off). Neither run_handoff nor run_report ever calls apply_project_changes; assert it with a spy over both steps. preview_stale is the C7 stale check, named in the PR.
 - B1-e (ReservingProvider.close). Fold it in only if #1154 and #1150 don't touch send_reservation.py at the trial merge; otherwise its own follow-up.
 
+### GK B (31): B2 plan verdict, GO WITH CHANGES (F1–F12, in substance)
+
+GK B (26)'s E1–E9 were not recorded anywhere; F1–F12 replace them. Q1 = A (eh.review.blockers in the result gate), Q2 = A (step-by-step mode freezes at solve-stage entry), Q3 = A (run_margin_loop).
+
+- F1. Freeze the goal fully: archetype, pack_overrides with the goal's LOLE/ENS targets, and mc.draws, all covered by the digest and the card. Test: edit the goal after the freeze, then dispatch → the frozen values run as "override", or the step stops with needs_user eh_args.
+- F2. Only "done" passes eh.study.status. A "done" study that skipped a requested stage ("not run: …") fails the rule and names the stage; test a budget that runs out mid-pipeline.
+- F3. The settle, eh.study.status and eh.review.blockers use the record the step's own dispatch published (started_at captured under the solver-state lock; review on that record, never "latest"). A replaced record reads not_evaluated. Tests: a user-started study after the run's own, with and without the activity bindings.
+- F4. The actual count is the sum of report.pipeline.stages[].solves_charged. Missing or unreadable keeps the whole reservation; actual > reserved charges the actual. Name _campaign_gated's campaign charge in the PR; a campaign refusal settles refused and releases the reservation.
+- F5. run_eh_study dispatches only after the solve job settled completed. A 409 or 422 settles refused and releases the reservation, with no spending retry.
+- F6. kpi.unserved_mwh reads the run's own solve (bound ctx, its project, that solve's revision); unsolved, stale or foreground-only data reads not_evaluated. Add a non-unit snapshot_weightings test.
+- F7. energization_mw: NaN or non-numeric reads None. Test that not_evaluated at the input gate blocks, for this fact and eh.readiness.ready.
+- F8. Record the Q1 deviation in design.md §9.3. A review that errors or is truncated fails the rule.
+- F9. The existing LOOP_FACT engine path with restore base. Test target = goal h/yr × horizon_years(n) on a horizon that is not 1 year. The gate's LOLE verdict comes from the loop record only.
+- F10. The step leaves the project's network revision and the run ledger unchanged (the study runs on a private copy).
+- F11. Hand-mutate and name the killing test: the args digest compare, the zero-left budget check, the F3 identity check, the F2 status map, the F1 goal freeze, and the envelope refusal of run_eh_study.
+- F12. C8 tests as planned; eh_args and eh_budget only in the branch's tool-error-kinds.d fragment.
+
 ## Folded from #970
 
 Owner decision HARNESS-970-1 (3 Nov). Three items from #970 land here, all after the pilot works. None changes the acceptance criteria above.

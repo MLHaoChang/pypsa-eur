@@ -342,14 +342,20 @@ def test_an_engine_rule_is_refused_outside_the_result_gate():
         )
 
 
-def test_eh_site_carries_no_engine_rule_yet():
-    """Option A (GK A (11)): mechanism only; the reliability rule joins with issue 07."""
+def test_eh_site_carries_the_issue_07_lole_rule_only():
+    """Option A (GK A (11)) kept the mechanism alone; issue 07 B2 (F9) adds
+    eh_site's one reliability rule: the margin loop, restore base, in the
+    result gate, and no other rule reads the loop fact."""
     loaded = run_profiles.resolve("eh_site@1")
-    assert not [
-        r
-        for s in loaded["stages"].values()
+    engine = [
+        (name, r)
+        for name, s in loaded["stages"].items()
         for r in s.get("rules", [])
         if "engine" in r or r["fact"] == FACT
+    ]
+    assert [(name, r["id"], r["engine"]) for name, r in engine] == [
+        ("result_gate", "eh.adequacy.lole",
+         {"tool": "run_margin_loop", "max_solves": 3, "restore": "base"})
     ]
 
 
