@@ -483,7 +483,7 @@
       "key": "p_nom",
       "group": "size",
       "label": "Capacity",
-      "help": "Installed active-power capacity. With extendable ticked, the existing capacity the optimiser starts from.",
+      "help": "Installed active-power capacity: the AC rating, what the generator can inject at its bus. With extendable ticked, the existing capacity the optimiser starts from.",
       "unit_display": "MW",
       "unit_storage": "MW",
       "scale": 1.0,
@@ -496,6 +496,24 @@
       "part": null,
       "blank": "keep",
       "technical_name": "p_nom"
+     },
+     {
+      "key": "dc_ac_ratio",
+      "group": "size",
+      "label": "DC/AC ratio",
+      "help": "PV only: the DC module rating as a multiple of the AC capacity (1.25 for 125 MWp on 100 MW). A cost priced per MW of DC is scaled by it; empty means not declared, and such a cost is refused rather than assumed 1.",
+      "unit_display": "",
+      "unit_storage": "",
+      "scale": 1.0,
+      "kind": "number",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "clear",
+      "technical_name": "dc_ac_ratio"
      },
      {
       "key": "p_nom_extendable",

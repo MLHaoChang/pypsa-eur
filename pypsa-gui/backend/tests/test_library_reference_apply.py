@@ -9,6 +9,7 @@ convention; only the chosen asset's fields are named.
 """
 from __future__ import annotations
 
+import pandas as pd
 import pypsa
 import pytest
 from fastapi import HTTPException
@@ -464,3 +465,75 @@ def test_the_apply_is_still_an_edit_that_clears_results(client, install_network,
     assert client.get("/api/network/undo/info").json()["depth"] == depth + 1
     assert session_ctx(client).network_revision > revision
     assert dispatch_status(n) == "none"
+
+
+# ── TC-02: a DC-rated PV reference prices onto p_nom (the AC rating) by the DC/AC ratio ─
+
+@pytest.fixture
+def dc_solar(monkeypatch):
+    """No shipped reference is DC: the AC solar reference, re-labelled per MW of DC."""
+    real = R.load_europe_technology_reference
+
+    def load(technology, projection_year):
+        ref = real(technology, projection_year)
+        if technology == "solar-utility":
+            ref = ref.model_copy(update={"capacity_basis_code": "output_electric_dc"})
+        return ref
+    monkeypatch.setattr(R, "load_europe_technology_reference", load)
+    return real("solar-utility", 2030)
+
+
+def test_a_dc_reference_writes_overnight_times_the_ratio_and_fom_from_it(dc_solar):
+    n = _net()
+    n.generators["dc_ac_ratio"] = float("nan")
+    n.generators.at["pv", "dc_ac_ratio"] = 1.3
+    p = A.plan(n, {}, "Generator", "pv", "solar-utility", 2030, confirm=["money_year", "grid_connection"])
+    over = dc_solar.cost_part.overnight.value * 1.3
+    assert p["attrs"]["overnight_cost"] == pytest.approx(over, rel=1e-12)
+    assert p["attrs"]["fom_cost"] == pytest.approx(over * dc_solar.cost_part.fom_share.value, rel=1e-12)
+    assert "dc_ac" not in p["missing"], "the declared ratio makes a DC price exact"
+    assert any("DC/AC ratio (1.3)" in note for note in p["notes"])
+
+
+@pytest.mark.parametrize("ratio", ["absent", float("nan"), 4.0, "abc"])
+def test_a_dc_reference_without_a_valid_ratio_is_a_typed_refusal_and_writes_nothing(dc_solar, ratio):
+    n = _net()
+    if ratio != "absent":
+        n.generators["dc_ac_ratio"] = pd.Series(ratio, index=n.generators.index, dtype=object)
+    before = n.generators.copy()
+    with pytest.raises(HTTPException) as exc:
+        A.plan(n, {}, "Generator", "pv", "solar-utility", 2030, confirm=list(A.CONFIRMATIONS))
+    assert exc.value.status_code == 422
+    assert exc.value.detail["error_kind"] == "dc_ac_ratio_missing"
+    assert "DC/AC ratio" in exc.value.detail["message"]
+    assert n.generators.equals(before)
+
+
+def test_an_ac_reference_ignores_a_declared_ratio_and_still_asks_dc_ac():
+    n = _net()
+    plain = A.plan(n, {}, "Generator", "pv", "solar-utility", 2030)
+    n.generators["dc_ac_ratio"] = float("nan")
+    n.generators.at["pv", "dc_ac_ratio"] = 1.3
+    declared = A.plan(n, {}, "Generator", "pv", "solar-utility", 2030)
+    assert declared["attrs"] == plain["attrs"] and declared["needs"] == plain["needs"]
+    assert "dc_ac" in declared["missing"]
+
+
+def test_the_routes_and_the_chat_card_refuse_a_dc_reference_without_a_ratio_typed(
+        client, install_network, dc_solar):
+    """Fail-closed at each catching site: the typed 422 reaches the route and the tool, nothing written."""
+    from harness import edit_card
+
+    n = install_network(_net())
+    before = n.generators.copy()
+    pv = {"component_class": "Generator", "name": "pv", "technology": "solar-utility",
+          "projection_year": 2030, "confirm": list(A.CONFIRMATIONS)}
+    with pytest.raises(HTTPException) as exc:
+        edit_card.preview("apply_library_reference", dict(pv))
+    assert exc.value.detail["error_kind"] == "dc_ac_ratio_missing"
+    said = exc.value.detail["message"]
+    assert said == ("This cost is priced per MW of DC module rating, and Capacity is the AC rating: "
+                    "set the generator's DC/AC ratio first (not declared).")
+    for r in (client.post(PREVIEW, json=pv), client.post(f"{ROUTE}/apply", json={**pv, "digest": "x"})):
+        assert r.status_code == 422 and r.json()["detail"]["error_kind"] == "dc_ac_ratio_missing", r.text
+    assert n.generators.equals(before)
