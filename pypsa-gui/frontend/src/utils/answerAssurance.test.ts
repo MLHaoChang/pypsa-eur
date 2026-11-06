@@ -103,6 +103,40 @@ describe('receipt policy "2" (AA-03 S2 derived claims)', () => {
   })
 })
 
+describe('receipt policy "3" (AA-03 S4 complete-population predicates)', () => {
+  const common = { id: 'p1', evidence_id: 'E1', component_class: 'Load', metric: 'p_set', unit: 'MW', population: 3, warnings: ['w'] }
+  const all = { ...common, quantifier: 'all', comparator: '>=', threshold: 5, holds: true }
+  const top = { ...common, id: 'p2', quantifier: 'top_k', k: 1, members: ['L3'] }
+  const derived = { id: 'd1', formula_id: 'difference/1', operands: ['a', 'b'], value: 1, unit: 'MW' }
+
+  it('accepts policy "3" with predicates, with or without derived entries', () => {
+    const parsed = parseApproval(frame({ receipt: receipt({ policy_version: '3', predicates: [all, top] }) }))
+    expect(parsed?.receipt.predicates).toEqual([all, top])
+    expect(parseApproval(frame({ receipt: receipt({ policy_version: '3', predicates: [top], derived: [derived] }) }))).not.toBeNull()
+  })
+
+  it.each([
+    ['policy "1" carrying predicates', receipt({ predicates: [all] })],
+    ['policy "2" carrying predicates', receipt({ policy_version: '2', derived: [derived], predicates: [all] })],
+    ['policy "3" without predicates', receipt({ policy_version: '3' })],
+    ['policy "3" with empty predicates', receipt({ policy_version: '3', predicates: [] })],
+    ['policy "3" with empty derived', receipt({ policy_version: '3', predicates: [all], derived: [] })],
+    ['policy "3" with null derived', receipt({ policy_version: '3', predicates: [all], derived: null })],
+    ['nine predicates', receipt({ policy_version: '3', predicates: Array.from({ length: 9 }, (_, i) => ({ ...all, id: `p${i}` })) })],
+    ['an unknown key', receipt({ policy_version: '3', predicates: [{ ...all, note: 'x' }] })],
+    ['a numeric truth', receipt({ policy_version: '3', predicates: [{ ...all, holds: 1 }] })],
+    ['a string threshold', receipt({ policy_version: '3', predicates: [{ ...all, threshold: '5' }] })],
+    ['an unknown comparator', receipt({ policy_version: '3', predicates: [{ ...all, comparator: '==' }] })],
+    ['an empty population', receipt({ policy_version: '3', predicates: [{ ...all, population: 0 }] })],
+    ['top_k with a threshold', receipt({ policy_version: '3', predicates: [{ ...top, threshold: 5 }] })],
+    ['k out of range', receipt({ policy_version: '3', predicates: [{ ...top, k: 21 }] })],
+    ['an unknown quantifier', receipt({ policy_version: '3', predicates: [{ ...all, quantifier: 'some' }] })],
+    ['policy "4"', receipt({ policy_version: '4', predicates: [all] })],
+  ])('rejects %s', (_label, value) => {
+    expect(parseApproval(frame({ receipt: value }))).toBeNull()
+  })
+})
+
 describe('verifyApprovedText', () => {
   const previous = globalThis.crypto
   afterEach(() => {

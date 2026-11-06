@@ -4,7 +4,7 @@
 # P2: private drafts and approved answer publication
 
 Status: ready-for-agent
-Progress: S1 merged (#1154), S3 merged (#1171); S2 in progress; S4–S5 planned
+Progress: S1 merged (#1154), S3 merged (#1171), S2 merged (#1186); S4 in progress; S5 planned
 Type: task
 Blocked by: 01, 02
 
@@ -49,7 +49,7 @@ names the slice that closes it, or its external blocker.
 | A2.7 | reviewer without tools; IDs/pairing; abort; generation change; stale ACK | Repair spends 0 tool executions (dispatch spy) → **S1 (passed)** |
 | A2.8 | storage/generator slots, missing basis, wrong run/selection, ambiguous cost, unsupported slots limited, 20/21 blocks | Ambiguous capacity, `request_complete` false while a slot is unmapped → **S3 (passed)**; valid blocks keep scope → **S3 (passed at 12 blocks, the largest valid set; 20 slots pinned by `test_harness_reliability`)**; required warning slots → `_pending`, blocked: no warning disposition in the result-slot contract (ticket 13) |
 | A2.9 | 17 MWh and energy vs objective weights; 51 EUR bridge; window joins; signed baseline; zero denominator | Percentage points, near-zero denominator, rounding cannot widen tolerance, formula DAG refs → **S2 (passed)** |
-| A2.10 | exclusion masks; hostile labels/notes; reviewer spoof | all/none/top-k, ties, feasible incumbent vs optimum → S4; stochastic coverage pending: no checked stochastic profile exists (ticket 10) |
+| A2.10 | exclusion masks; hostile labels/notes; reviewer spoof | all/none/top-k over one complete static_page population, ties at the boundary, hostile labels → **S4 (passed)**; feasible incumbent vs optimum ("feasible, not proven optimal") → `_pending`, blocked: no checked solver-status evidence (ticket 10); stochastic coverage pending: no checked stochastic profile exists (ticket 10) |
 
 Slices, one PR each and test-first: S1 failure modes; S2 derived claims
 (`harness/derived.py`); S3 request slots; S4 complete-population predicates
@@ -228,3 +228,16 @@ Q1 = (a): feasible incumbent stays a pending row; no result-side predicates. Q2 
 - C10 The "feasible, not proven optimal" `_pending` row names ticket 10. A non-static_page population is refused for each other evidence kind with per-entity facts; if there are none, the PR says so.
 
 The PR head goes to GK B when it is green. The S5 plan goes to GK B once S4 merges.
+
+### S4 result
+
+`harness/predicates.py`, `tests/assurance_acceptance/test_p4_population_predicates.py`.
+A draft's `predicates` (max 8, on Draft and ProfileDraft) claim all/none against a
+threshold, or the top k. The population is one static_page record this turn read,
+re-checked in the store, from this project; its evidence id joins the receipt's
+`evidence_ids`, so commit re-checks it under the lock. Every other evidence kind
+is refused (`not_a_population`): get_component, series, aggregate load, run, run
+section, run comparison and scoped results each hold one entity, step, selection
+or run, not per-entity facts of one class. Receipt policy "3" carries the
+predicates and keeps any derived entries. 38 backend and 6 frontend mutants killed.
+"Feasible, not proven optimal" stays `_pending` under ticket 10 (A2.10 row).

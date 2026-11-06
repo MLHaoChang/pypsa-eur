@@ -686,6 +686,556 @@
     "derived"
    ],
    "type": "object"
+  },
+  "3": {
+   "$defs": {
+    "DerivedEntry": {
+     "additionalProperties": false,
+     "properties": {
+      "formula_id": {
+       "maxLength": 64,
+       "minLength": 1,
+       "type": "string"
+      },
+      "id": {
+       "maxLength": 64,
+       "minLength": 1,
+       "type": "string"
+      },
+      "operands": {
+       "items": {
+        "type": "string"
+       },
+       "maxItems": 8,
+       "minItems": 1,
+       "type": "array"
+      },
+      "unit": {
+       "maxLength": 16,
+       "minLength": 1,
+       "type": "string"
+      },
+      "value": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        }
+       ]
+      }
+     },
+     "required": [
+      "id",
+      "formula_id",
+      "operands",
+      "value",
+      "unit"
+     ],
+     "type": "object"
+    },
+    "Navigation": {
+     "additionalProperties": false,
+     "properties": {
+      "action_id": {
+       "type": "string"
+      },
+      "outcome": {
+       "type": "string"
+      },
+      "reason": {
+       "anyOf": [
+        {
+         "enum": [
+          "window_differs",
+          "source_not_lopf",
+          "inputs_changed",
+          "fingerprint_basis_unknown",
+          "project_differs"
+         ],
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "shows": {
+       "anyOf": [
+        {
+         "enum": [
+          "checked_evidence",
+          "different_view",
+          "not_confirmed"
+         ],
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "window": {
+       "anyOf": [
+        {
+         "$ref": "#/$defs/ViewWindow"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      }
+     },
+     "required": [
+      "action_id",
+      "outcome"
+     ],
+     "type": "object"
+    },
+    "Slot": {
+     "additionalProperties": false,
+     "properties": {
+      "disposition": {
+       "enum": [
+        "answered",
+        "unavailable",
+        "needs_clarification"
+       ],
+       "type": "string"
+      },
+      "excluded_indices": {
+       "anyOf": [
+        {
+         "items": {
+          "type": "string"
+         },
+         "type": "array"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "metric": {
+       "type": "string"
+      },
+      "partial_value": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "reason": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "requested_snapshots": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "valid_snapshots": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      }
+     },
+     "required": [
+      "metric",
+      "disposition"
+     ],
+     "type": "object"
+    },
+    "ThresholdPredicate": {
+     "additionalProperties": false,
+     "properties": {
+      "comparator": {
+       "enum": [
+        ">",
+        ">=",
+        "<",
+        "<="
+       ],
+       "type": "string"
+      },
+      "component_class": {
+       "maxLength": 64,
+       "minLength": 1,
+       "type": "string"
+      },
+      "evidence_id": {
+       "maxLength": 128,
+       "minLength": 1,
+       "type": "string"
+      },
+      "holds": {
+       "type": "boolean"
+      },
+      "id": {
+       "maxLength": 64,
+       "minLength": 1,
+       "type": "string"
+      },
+      "metric": {
+       "maxLength": 64,
+       "minLength": 1,
+       "type": "string"
+      },
+      "population": {
+       "minimum": 1,
+       "type": "integer"
+      },
+      "quantifier": {
+       "enum": [
+        "all",
+        "none"
+       ],
+       "type": "string"
+      },
+      "threshold": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        }
+       ]
+      },
+      "unit": {
+       "maxLength": 16,
+       "minLength": 1,
+       "type": "string"
+      },
+      "warnings": {
+       "items": {
+        "type": "string"
+       },
+       "maxItems": 20,
+       "type": "array"
+      }
+     },
+     "required": [
+      "id",
+      "evidence_id",
+      "component_class",
+      "metric",
+      "unit",
+      "population",
+      "warnings",
+      "quantifier",
+      "comparator",
+      "threshold",
+      "holds"
+     ],
+     "type": "object"
+    },
+    "TopKPredicate": {
+     "additionalProperties": false,
+     "properties": {
+      "component_class": {
+       "maxLength": 64,
+       "minLength": 1,
+       "type": "string"
+      },
+      "evidence_id": {
+       "maxLength": 128,
+       "minLength": 1,
+       "type": "string"
+      },
+      "id": {
+       "maxLength": 64,
+       "minLength": 1,
+       "type": "string"
+      },
+      "k": {
+       "maximum": 20,
+       "minimum": 1,
+       "type": "integer"
+      },
+      "members": {
+       "items": {
+        "type": "string"
+       },
+       "maxItems": 100,
+       "minItems": 1,
+       "type": "array"
+      },
+      "metric": {
+       "maxLength": 64,
+       "minLength": 1,
+       "type": "string"
+      },
+      "population": {
+       "minimum": 1,
+       "type": "integer"
+      },
+      "quantifier": {
+       "const": "top_k",
+       "type": "string"
+      },
+      "unit": {
+       "maxLength": 16,
+       "minLength": 1,
+       "type": "string"
+      },
+      "warnings": {
+       "items": {
+        "type": "string"
+       },
+       "maxItems": 20,
+       "type": "array"
+      }
+     },
+     "required": [
+      "id",
+      "evidence_id",
+      "component_class",
+      "metric",
+      "unit",
+      "population",
+      "warnings",
+      "quantifier",
+      "k",
+      "members"
+     ],
+     "type": "object"
+    },
+    "ViewWindow": {
+     "additionalProperties": false,
+     "properties": {
+      "end": {
+       "type": "string"
+      },
+      "start": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "start",
+      "end"
+     ],
+     "type": "object"
+    }
+   },
+   "additionalProperties": false,
+   "properties": {
+    "chart": {
+     "anyOf": [
+      {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "checked_block_ids": {
+     "items": {
+      "type": "string"
+     },
+     "maxItems": 20,
+     "type": "array"
+    },
+    "content_sha256": {
+     "pattern": "^[0-9a-f]{64}$",
+     "type": "string"
+    },
+    "derived": {
+     "default": null,
+     "items": {
+      "$ref": "#/$defs/DerivedEntry"
+     },
+     "maxItems": 8,
+     "minItems": 1,
+     "type": "array"
+    },
+    "evidence_ids": {
+     "items": {
+      "type": "string"
+     },
+     "maxItems": 20,
+     "type": "array"
+    },
+    "limitations": {
+     "items": {
+      "type": "string"
+     },
+     "maxItems": 20,
+     "type": "array"
+    },
+    "navigation": {
+     "anyOf": [
+      {
+       "items": {
+        "$ref": "#/$defs/Navigation"
+       },
+       "maxItems": 20,
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "operation_ids": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "policy_version": {
+     "const": "3",
+     "type": "string"
+    },
+    "predicates": {
+     "items": {
+      "discriminator": {
+       "mapping": {
+        "all": "#/$defs/ThresholdPredicate",
+        "none": "#/$defs/ThresholdPredicate",
+        "top_k": "#/$defs/TopKPredicate"
+       },
+       "propertyName": "quantifier"
+      },
+      "oneOf": [
+       {
+        "$ref": "#/$defs/ThresholdPredicate"
+       },
+       {
+        "$ref": "#/$defs/TopKPredicate"
+       }
+      ]
+     },
+     "maxItems": 8,
+     "minItems": 1,
+     "type": "array"
+    },
+    "request_complete": {
+     "anyOf": [
+      {
+       "type": "boolean"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "request_scope": {
+     "anyOf": [
+      {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "result_slots": {
+     "anyOf": [
+      {
+       "items": {
+        "$ref": "#/$defs/Slot"
+       },
+       "maxItems": 20,
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "reviewed_claim_ids": {
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "reviewer_status": {
+     "enum": [
+      "not_required",
+      "passed",
+      "failed",
+      "unavailable",
+      "withheld",
+      "withheld_budget",
+      "withheld_disabled",
+      "withheld_invalid_draft",
+      "withheld_limit",
+      "withheld_tool_attempt",
+      "withheld_usage",
+      "withheld_schema",
+      "withheld_incomplete",
+      "withheld_failure",
+      "withheld_timeout"
+     ],
+     "type": "string"
+    }
+   },
+   "required": [
+    "policy_version",
+    "content_sha256",
+    "evidence_ids",
+    "checked_block_ids",
+    "limitations",
+    "reviewer_status",
+    "reviewed_claim_ids",
+    "predicates"
+   ],
+   "type": "object"
   }
  },
  "checked_tool_results": {
@@ -1842,6 +2392,160 @@
     "title": "Interpretation",
     "type": "object"
    },
+   "Predicate": {
+    "additionalProperties": false,
+    "description": "A complete-population predicate (AA-03 S4): all, none or top_k of one page.",
+    "properties": {
+     "comparator": {
+      "anyOf": [
+       {
+        "maxLength": 2,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Comparator"
+     },
+     "holds": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Holds"
+     },
+     "id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "title": "Id",
+      "type": "string"
+     },
+     "k": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "K"
+     },
+     "kind": {
+      "const": "predicate",
+      "title": "Kind",
+      "type": "string"
+     },
+     "members": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "maxItems": 100,
+        "minItems": 1,
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Members"
+     },
+     "metric": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Metric",
+      "type": "string"
+     },
+     "quantifier": {
+      "maxLength": 16,
+      "minLength": 1,
+      "title": "Quantifier",
+      "type": "string"
+     },
+     "source": {
+      "$ref": "#/$defs/PredicateSource"
+     },
+     "threshold": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Threshold"
+     },
+     "unit": {
+      "maxLength": 16,
+      "minLength": 1,
+      "title": "Unit",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "kind",
+     "quantifier",
+     "source",
+     "metric",
+     "unit"
+    ],
+    "title": "Predicate",
+    "type": "object"
+   },
+   "PredicateSource": {
+    "additionalProperties": false,
+    "properties": {
+     "evidence_id": {
+      "anyOf": [
+       {
+        "maxLength": 128,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Evidence Id"
+     },
+     "tool_use_id": {
+      "anyOf": [
+       {
+        "maxLength": 128,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Tool Use Id"
+     }
+    },
+    "title": "PredicateSource",
+    "type": "object"
+   },
    "Source": {
     "additionalProperties": false,
     "properties": {
@@ -1911,6 +2615,14 @@
     },
     "maxItems": 2,
     "title": "Interpretations",
+    "type": "array"
+   },
+   "predicates": {
+    "items": {
+     "$ref": "#/$defs/Predicate"
+    },
+    "maxItems": 8,
+    "title": "Predicates",
     "type": "array"
    },
    "schema_version": {
@@ -4359,6 +5071,160 @@
     "title": "Observed",
     "type": "object"
    },
+   "Predicate": {
+    "additionalProperties": false,
+    "description": "A complete-population predicate (AA-03 S4): all, none or top_k of one page.",
+    "properties": {
+     "comparator": {
+      "anyOf": [
+       {
+        "maxLength": 2,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Comparator"
+     },
+     "holds": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Holds"
+     },
+     "id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "title": "Id",
+      "type": "string"
+     },
+     "k": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "K"
+     },
+     "kind": {
+      "const": "predicate",
+      "title": "Kind",
+      "type": "string"
+     },
+     "members": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "maxItems": 100,
+        "minItems": 1,
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Members"
+     },
+     "metric": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Metric",
+      "type": "string"
+     },
+     "quantifier": {
+      "maxLength": 16,
+      "minLength": 1,
+      "title": "Quantifier",
+      "type": "string"
+     },
+     "source": {
+      "$ref": "#/$defs/PredicateSource"
+     },
+     "threshold": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Threshold"
+     },
+     "unit": {
+      "maxLength": 16,
+      "minLength": 1,
+      "title": "Unit",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "kind",
+     "quantifier",
+     "source",
+     "metric",
+     "unit"
+    ],
+    "title": "Predicate",
+    "type": "object"
+   },
+   "PredicateSource": {
+    "additionalProperties": false,
+    "properties": {
+     "evidence_id": {
+      "anyOf": [
+       {
+        "maxLength": 128,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Evidence Id"
+     },
+     "tool_use_id": {
+      "anyOf": [
+       {
+        "maxLength": 128,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Tool Use Id"
+     }
+    },
+    "title": "PredicateSource",
+    "type": "object"
+   },
    "Source": {
     "additionalProperties": false,
     "properties": {
@@ -4429,6 +5295,14 @@
     },
     "maxItems": 2,
     "title": "Interpretations",
+    "type": "array"
+   },
+   "predicates": {
+    "items": {
+     "$ref": "#/$defs/Predicate"
+    },
+    "maxItems": 8,
+    "title": "Predicates",
     "type": "array"
    },
    "schema_version": {
