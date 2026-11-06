@@ -1391,9 +1391,9 @@ def is_next_step(session, tool, args) -> bool:
 
 
 def governs(session, tool, args) -> bool:
-    """Whether `begin_step` answers this call itself: the task's next step is
-    this tool with these arguments, or the call repeats a completed step
-    (`task_step_already_completed`). Issue 04 S5 (GK B (30) N7): such a call
+    """Whether `begin_step` refuses this call itself: the task's next step is
+    this tool with these arguments and is waiting, running or uncertain, or
+    the call repeats a completed step (`task_step_already_completed`). Issue 04 S5 (GK B (30) N7): such a call
     gets only `begin_step`'s refusal, never a job hold's too. A task that
     cannot be read governs nothing, so the hold check still runs (#1079)."""
     task_id = getattr(session, "task_id", None)
@@ -1410,7 +1410,9 @@ def governs(session, tool, args) -> bool:
             if step is not None and step["tool"] == tool and _same_args(
                 tool, _resolve(step["args"], task["steps"]), args
             ):
-                return True
+                # Only a step begin_step refuses; one it admits still meets
+                # the hold check (GK B (30) T1: no tasked replay of a held call).
+                return step["status"] in ("waiting", "running", "uncertain")
             return any(
                 done["status"] == "completed"
                 and done["tool"] == tool

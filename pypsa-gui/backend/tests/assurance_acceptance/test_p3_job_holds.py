@@ -708,12 +708,16 @@ def _step(status, args, tool=TOOL, **extra):
     }
 
 
-def test_governs_the_next_step_with_the_same_args(monkeypatch):
+def test_governs_only_a_next_step_begin_step_refuses(monkeypatch):
     from services.assistant_tasks import governs
 
+    for status in ("waiting", "running", "uncertain"):
+        session = _task(monkeypatch, [_step(status, ARGS)])
+        assert governs(session, TOOL, ARGS) is True
+    # A step begin_step admits is not governed: the hold check still runs (T1).
     session = _task(monkeypatch, [_step("pending", ARGS)])
-    assert governs(session, TOOL, ARGS) is True
-    assert governs(session, TOOL, OTHER) is False
+    assert governs(session, TOOL, ARGS) is False
+    assert governs(_task(monkeypatch, [_step("uncertain", ARGS)]), TOOL, OTHER) is False
     assert governs(session, "run_mc_study", ARGS) is False
 
 
@@ -799,3 +803,27 @@ def test_a_store_hold_says_the_queue_has_it_not_that_its_outcome_is_unknown(
     message = _error(_call(monkeypatch, ChatSession(), TOOL, ARGS))["message"]
     assert message.startswith("The solve queue already has this project's solve")
     assert "unknown" not in message and "confirm the repeat" not in message
+
+
+def test_an_admitted_task_step_still_meets_the_hold(monkeypatch, slow_queue):
+    """GK B (30) T1: an untasked timed-out call, then a task whose next step is
+    the same call, which begin_step would admit: denied, nothing started."""
+    from services import assistant_tasks, solve_queue
+
+    _release, calls, _ = slow_queue
+    session = ChatSession()
+    _timed_out(monkeypatch, session)
+    session.task_id = "t1"
+    task = {"status": "running", "steps": [_step("pending", ARGS)]}
+    monkeypatch.setattr(assistant_tasks, "_read", lambda task_id: ("path", task))
+    began, enqueued = [], []
+    monkeypatch.setattr(
+        assistant_tasks, "begin_step", lambda *a: began.append(1) or ("t1", "s", "a")
+    )
+    monkeypatch.setattr(
+        solve_queue.solve_queue, "enqueue_unique", lambda *a, **k: enqueued.append(1)
+    )
+    assert assistant_tasks.governs(session, TOOL, ARGS) is False
+    error = _error(_call(monkeypatch, session, TOOL, ARGS))
+    assert error["error_kind"] == job_holds.PENDING, error
+    assert began == [] and enqueued == [] and len(calls) == 1
