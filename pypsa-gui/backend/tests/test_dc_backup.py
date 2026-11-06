@@ -1123,7 +1123,12 @@ def test_assess_route_sizes_on_the_raw_sidecar_and_proves_the_priced_fleets(
 
     _served(monkeypatch)
     d = _dc_project(client, tmp_path, monkeypatch, project_row, "dc_fleet")
-    out = dc_backup.assess_project(d, t, "hybrid")
+    # Through the route (GK A 1): POST /dc-backup/assess.
+    r = client.post(
+        f"/api/campus-electrical/{d.name}/dc-backup/assess", json={"mode": "hybrid"}
+    )
+    assert r.status_code == 200, r.text
+    out = r.json()
     sz, c = out["sizing"], out["cost"]
     assert sz["firm_genset_mw"] == 30.0 and "N+1" in sz["firm_genset_rule"]
     assert out["proofs"]["genset"]["genset_fleet_mw"] == c["genset_mw"]
