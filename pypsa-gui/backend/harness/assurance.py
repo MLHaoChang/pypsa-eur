@@ -501,7 +501,7 @@ class Turn:
         if profile == assurance_metrics.curtailment.PROFILE:
             lines.extend(assurance_metrics.curtailment.notes(record["raw"], self.request_scope, _label))
         if profile == assurance_metrics.capacity.PROFILE:
-            lines.extend(assurance_metrics.capacity.notes(record["raw"]))
+            lines.extend(assurance_metrics.capacity.notes(record["raw"], self.request_scope))
         if profile == assurance_metrics.cycles.PROFILE:
             lines.extend(assurance_metrics.cycles.notes(record["raw"]))
         if profile == assurance_metrics.balance.PROFILE:
@@ -1364,19 +1364,21 @@ class Turn:
                 self.session.assurance_context = None
 
     def clarification_choice(self):
-        if (
-            not self.clarification
-            or self.clarification["reason"] != "cost_quantity_required"
-        ):
-            return None
-        from harness.assurance_conversation import cost_choices
+        from harness.assurance_conversation import CAPACITY_CHOICES, cost_choices
 
+        card = {
+            "cost_quantity_required": ("Cost quantity", lambda: cost_choices(self.pending_scope)),
+            "capacity_meaning_required": ("Capacity meaning", lambda: tuple(CAPACITY_CHOICES)),
+        }.get((self.clarification or {}).get("reason"))
+        if card is None:
+            return None
+        title, options = card
         return {
             "tool_use_id": self.turn_id,
             "kind": "choice",
-            "title": "Cost quantity",
+            "title": title,
             "question": self.clarification["question"],
-            "options": [{"label": label} for label in cost_choices(self.pending_scope)],
+            "options": [{"label": label} for label in options()],
             "allow_free_text": True,
         }
 

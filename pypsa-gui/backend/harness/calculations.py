@@ -103,7 +103,7 @@ PROFILES = {
     emissions.GENERATOR_PROFILE: tuple(emissions.GENERATOR_METRICS),
     emissions.NETWORK_PROFILE: tuple(emissions.NETWORK_METRICS),
     curtailment.PROFILE: tuple(curtailment.METRICS),
-    capacity.PROFILE: tuple(capacity.METRICS),
+    capacity.PROFILE: capacity.DEFAULT_METRICS,
     cycles.PROFILE: tuple(cycles.METRICS),
     balance.PROFILE: tuple(balance.METRICS),
     site_import.PROFILE: tuple(site_import.METRICS),
@@ -724,7 +724,7 @@ def disclosure(scope):
     if scope["profile"] == curtailment.PROFILE:
         return curtailment.DISCLOSURE
     if scope["profile"] == capacity.PROFILE:
-        return capacity.DISCLOSURE
+        return capacity.disclosure(scope)
     if scope["profile"] == cycles.PROFILE:
         return cycles.DISCLOSURE
     if scope["profile"] == balance.PROFILE:
