@@ -72,7 +72,7 @@ def flag_column(df: pd.DataFrame, col: str) -> pd.Series:
 
 def _truthy(v) -> bool:
     if isinstance(v, str):
-        return v.strip().lower() in ("true", "1", "yes")
+        return v.strip().lower() in ("true", "1", "1.0", "yes")
     return False if pd.isna(v) else bool(v)
 
 

@@ -449,3 +449,19 @@ def test_the_concentrator_suggests_its_site_bus_as_critical():
     for s in out["suggestions"]:
         for mw in re.findall(r"([0-9.]+) MW", s["reason"]):
             assert abs(float(mw) - tonnes) > 1.0, s["reason"]
+
+
+def test_a_source_on_a_tonne_bus_is_not_mw_of_supply():
+    """A mine's ore feed (t/h) on a product bus is neither a PoC nor MW of supply."""
+    n = _process_site()
+    n.add("Bus", "ore", carrier="ore", unit="t")
+    n.add("Generator", "mine", bus="ore", p_nom=5000.0)
+    n.links.loc[["feeder", "aux_feed"], "p_nom"] = 1000.0
+    out = suggest_eh_setup(n)
+    assert "ore" not in [s["name"] for s in out["suggestions"]]
+    imp = [s for s in out["suggestions"] if s["kind"] == "import_link"]
+    assert imp and all(s["reason"].startswith("Bus 'grid' holds 200 MW of supply") for s in imp)
+    # no import link: the PoC fallback still never picks the ore bus
+    n.links.drop(["feeder", "aux_feed"], inplace=True)
+    out = suggest_eh_setup(n)
+    assert [s["name"] for s in out["suggestions"] if s["kind"] == "poc_bus"] == ["grid"]
