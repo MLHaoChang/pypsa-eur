@@ -224,9 +224,10 @@ def test_the_bundle_carries_the_applied_cuts_and_a_template_ships_none():
 def _spinning_genset_hub():
     """The hand hub with a fixed 5 MW spinning genset at 1000/MWh, minimum
     load 0.3 (1.5 MW), and a BESS that cannot charge. The genset cuts the
-    10 MW import step to 8.5 and gives 5 − 1.5 = 3.5 MW of upward headroom
-    (a constant: its p_nom is fixed), none downward. So the seamless step
-    alone buys a 5 MW BESS."""
+    10 MW import step to 8.5 and has 5 − 1.5 = 3.5 MW of upward headroom,
+    credited at its 50 % load step, 2.5 MW (frequency.py:632; a constant: its
+    p_nom is fixed), none downward. So the seamless step alone buys a 6 MW
+    BESS."""
     n = _hub(load=10.0, gensets=[("g", 5.0)])
     n.storage_units.at["bess", "p_min_pu"] = 0.0
     island = _seamless(_units(gensets={"g": _genset(spinning=True, p_min_pu=_a(0.3))}))
@@ -234,10 +235,10 @@ def _spinning_genset_hub():
 
 
 @pytest.mark.parametrize("kind, p_nom, with_events", [
-    (None, 5.0, 7.5), ("headroom_up", 8.5, 8.5), ("headroom_down", 12.0, 12.0)])
+    (None, 6.0, 7.5), ("headroom_up", 9.5, 9.5), ("headroom_down", 12.0, 12.0)])
 def test_upward_and_downward_headroom_are_told_apart(kind, p_nom, with_events):
-    """A 12 MW cut: upward, the genset's 3.5 MW counts, so the BESS needs
-    8.5; downward only the BESS absorbs, so it needs 12. With no cut and the
+    """A 12 MW cut: upward, the genset's 2.5 MW credit counts, so the BESS
+    needs 9.5; downward only the BESS absorbs, so it needs 12. With no cut and the
     event rows, the 10 MW load is E2's step against the genset's 50 % step
     credit, 2.5 MW: the BESS needs 7.5 (the cuts still bind above it)."""
     for event_rows, want in ((False, p_nom), (True, with_events)):
