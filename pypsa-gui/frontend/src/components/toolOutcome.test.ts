@@ -249,6 +249,8 @@ describe('denied outcomes (issue 04 S4a)', () => {
     ['approval_unavailable', 'the approval could not be recorded'],
     ['round_change_cap', 'the assistant used up the changes allowed for this request'],
     ['unknown_decision', 'your answer to the approval could not be read'],
+    ['project_locked', 'another change to this project was in progress'],
+    ['project_lock_unavailable', "the project's edit lock could not be checked"],
   ])('words a refusal of kind %s', (reason, words) => {
     const block = toolOutcomeOf({ _outcome: { version: 1, outcome: 'denied', reason } }, 'bulk_update_components')!
     expect(toolOutcomeLine('bulk_update_components', block)).toBe(`– bulk_update_components (denied: ${words})`)
@@ -279,5 +281,53 @@ describe('refusal details (issue 04 S4a)', () => {
     [undefined, 'aborted', null],
   ])('%s → %s', (message, kind, detail) => {
     expect(refusalDetail(message, kind)).toBe(detail)
+  })
+})
+
+describe('raise, timeout and extra edits (issue 04 S4b)', () => {
+  const line = (tool: string, outcome: Record<string, unknown>) =>
+    toolOutcomeLine(tool, toolOutcomeOf({ _outcome: { version: 1, ...outcome } }, tool)!)
+
+  it('puts the extra count first', () => {
+    expect(line('bulk_update_components', { outcome: 'partial', reason: 'extra_edits',
+      counts: { requested: 1, done: 1, not_done: 0, unknown: 0, extra: 2 } }))
+      .toBe('– bulk_update_components (partly done: 2 extra changes it was not asked to make)')
+    expect(line('bulk_update_components', { outcome: 'partial', reason: 'extra_edits',
+      counts: { requested: 1, done: 1, extra: 1 } }))
+      .toBe('– bulk_update_components (partly done: 1 extra change it was not asked to make)')
+  })
+
+  it('keeps the short count beside the extra count', () => {
+    expect(line('bulk_update_components', { outcome: 'partial', reason: 'extra_edits',
+      counts: { requested: 5, done: 3, extra: 2 } }))
+      .toBe('– bulk_update_components (partly done: 3 of 5 updated · 2 extra changes)')
+  })
+
+  it('words extra edits without a count', () => {
+    expect(line('bulk_update_components', { outcome: 'partial', reason: 'extra_edits' }))
+      .toBe('– bulk_update_components (partly done: it also changed things it was not asked to)')
+    expect(line('bulk_update_components', { outcome: 'partial', reason: 'extra_edits',
+      counts: { requested: 1, done: 1, extra: -1 } }))
+      .toBe('– bulk_update_components (partly done: it also changed things it was not asked to)')
+  })
+
+  it.each([
+    ['tool_timeout', 'no answer in time'],
+    ['tool_not_started', 'no answer in time'],
+    ['changed_before_error', 'it stopped with an error after changing the network'],
+    ['not_as_requested', 'it changed the values, but not to what was asked'],
+  ])('words an unknown outcome of reason %s', (reason, words) => {
+    expect(line('bulk_update_components', { outcome: 'uncertain', reason }))
+      .toBe(`– bulk_update_components (outcome unknown: ${words})`)
+  })
+
+  it('marks a write proven unchanged after a raise as failed', () => {
+    expect(line('undo_last', { outcome: 'failed', reason: null })).toBe('✕ undo_last (failed)')
+  })
+
+  it('says the same in the current-outcome words Guided uses', () => {
+    const msg = { id: 'a', role: 'tool', tool_name: 'bulk_update_components', ts: 0,
+      tool_result: { _outcome: { version: 1, outcome: 'partial', reason: 'extra_edits', counts: { requested: 1, done: 1, extra: 2 } } } }
+    expect(currentToolOutcome([msg], 0)!.why).toBe('2 extra changes it was not asked to make')
   })
 })

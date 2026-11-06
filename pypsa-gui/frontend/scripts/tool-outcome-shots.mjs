@@ -37,7 +37,7 @@ const mode = new URLSearchParams(location.search).get('mode') === 'expert' ? 'ex
 const t0 = new Date(2026, 10, 5, 14, 2).getTime()
 const messages: any[] = [{ id: 'u', role: 'user', content: 'Solve the network and check each job.', ts: t0 }]
 const add = (id: string, tool: string, outcome: string, job: string | null, minute: number, reason: string | null = null,
-  counts: { requested: number; done: number } | null = null) => {
+  counts: { requested: number; done: number; extra?: number } | null = null) => {
   const ts = t0 + minute * 60000
   messages.push({ id: id + '-req', role: 'tool', content: '→ ' + tool, tool_use_id: id, tool_name: tool, ts })
   messages.push({ id, role: 'tool', content: toolOutcomeLine(tool, { outcome, job_id: job, reason, counts }), tool_use_id: id, tool_name: tool, ts,
@@ -81,8 +81,26 @@ deny('d9', 'delete_component', 'approval_unavailable', 'The app could not save t
 deny('d10', 'bulk_update_components', 'round_change_cap')
 deny('d11', 'delete_component', 'unknown_decision')
 add('o1', 'run_simulation', 'uncertain', 'fg:9', 14, 'other_context')
+// Issue 04 S4b: the edit lock before anything ran, extra edits, the raise path and timeouts.
+deny('l1', 'bulk_update_components', 'project_locked', 'This project is being edited by another user, so bulk_update_components was not run. Their edit lock must expire or be released first.')
+deny('l2', 'delete_component', 'project_lock_unavailable', "Could not verify this project's edit lock, so delete_component was not run. Retry in a moment.")
+add('x1', 'bulk_update_components', 'partial', null, 15, 'extra_edits', { requested: 1, done: 1, extra: 2 })
+add('x2', 'bulk_update_components', 'partial', null, 15, 'extra_edits', { requested: 5, done: 3, extra: 2 })
+add('x3', 'export_network_nc', 'partial', null, 15, 'extra_edits')
+const raised = (id: string, tool: string, outcome: string, reason: string | null, detail: string) => {
+  add(id, tool, outcome, null, 16, reason)
+  messages[messages.length - 1].content += '\\n' + detail
+}
+raised('r1', 'bulk_update_components', 'failed', null, 'Generator G9 not found')
+raised('r2', 'undo_last', 'uncertain', 'changed_before_error', 'the undo snapshot could not be saved')
+raised('r3', 'bulk_update_components', 'uncertain', 'tool_timeout', 'It ran longer than 30 s and was stopped; it may have changed the project.')
+raised('r4', 'delete_component', 'uncertain', 'tool_not_started', 'It never started: all 8 tool slots were busy for 30 s, so it was cancelled rather than queued.')
+add('r5', 'bulk_update_components', 'uncertain', null, 16, 'not_as_requested', { requested: 1, done: 0 })
 useUIStore.setState({ currentProject: 'Demo', projectMismatch: null, assistantDockOpen: true, uiMode: mode } as any)
-useChatStore.setState({ sessionId: 'shot-session', messages, streaming: false, pending: null, error: null } as any)
+// ?only=s4b keeps the issue 04 S4b states (l*, x*, r*), so one shot per mode shows them all (UX (11)).
+const only = new URLSearchParams(location.search).get('only') === 's4b'
+const shown = only ? messages.filter(m => m.role === 'user' || /^[lxr]\\d/.test(m.tool_use_id ?? '')) : messages
+useChatStore.setState({ sessionId: 'shot-session', messages: shown, streaming: false, pending: null, error: null } as any)
 createRoot(document.getElementById('root')!).render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}>
   <div style={{display:'flex',height:'100vh'}}><ChatPanel/></div></QueryClientProvider>)
 `)
@@ -90,9 +108,9 @@ createRoot(document.getElementById('root')!).render(<QueryClientProvider client=
     server: { host: '127.0.0.1', port: 0 } })
   await server.listen()
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] })
-  for (const mode of ['guided', 'expert']) {
+  for (const [mode, only] of [['guided', ''], ['expert', ''], ['guided', 's4b'], ['expert', 's4b']]) {
     {
-      const page = await browser.newPage({ viewport: { width: 420, height: 3400 }, deviceScaleFactor: 2 })
+      const page = await browser.newPage({ viewport: { width: 420, height: 4400 }, deviceScaleFactor: 2 })
       await page.emulateMedia({ reducedMotion: 'reduce' })
       await page.route(url => url.protocol.startsWith('http') && url.hostname !== '127.0.0.1', route => route.abort())
       await page.route(url => url.pathname.startsWith('/api/'), route => {
@@ -101,17 +119,24 @@ createRoot(document.getElementById('root')!).render(<QueryClientProvider client=
           bound_project: 'Demo', history_gap: 0, pending_turn: null } })
         return route.fulfill({ json: {} })
       })
-      await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/${entry}.html?mode=${mode}`)
+      await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/${entry}.html?mode=${mode}${only ? '&only=' + only : ''}`)
       await page.getByText('Solve the network and check each job.').waitFor()
       // Open the refusal messages' Details (issue 04 S4a) so the shot shows them.
       await page.evaluate(() => document.querySelectorAll('[data-testid=chat-tool-details]').forEach(d => {
-        if (/did not run|arguments changed|rule you set|could not save/.test(d.textContent ?? '')) d.open = true
+        if (/did not run|arguments changed|rule you set|could not save|was not run|not found|ran longer|never started|snapshot/.test(d.textContent ?? '')) d.open = true
       }))
       await page.waitForTimeout(500)
-      const file = path.join(out, `tool-outcome-${mode}.png`)
-      await page.screenshot({ path: file, fullPage: true })
+      const file = path.join(out, only ? `aa04-${only}-tool-outcome-${mode}.png` : `tool-outcome-${mode}.png`)
+      if (only) {
+        // Every S4b row fits in the panel; crop below the last one (all states, no empty panel).
+        const bottom = await page.evaluate(() => Math.max(...[...document.querySelectorAll('[data-testid=chat-message]')]
+          .map(e => e.getBoundingClientRect().bottom)))
+        await page.screenshot({ path: file, clip: { x: 0, y: 0, width: 420, height: Math.ceil(bottom) + 16 } })
+      } else {
+        await page.screenshot({ path: file, fullPage: true })
+      }
       console.log(file)
-      if (mode === 'guided') {
+      if (mode === 'guided' && !only) {
         // Issue 04 S4a: the rule-blocked line with its Access and approvals link.
         const row = page.getByTestId('chat-message').filter({ has: page.getByTestId('chat-tool-access-link') })
         const linkShot = path.join(out, 'user-restriction-link.png')

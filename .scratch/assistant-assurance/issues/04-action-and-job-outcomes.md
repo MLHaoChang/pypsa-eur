@@ -281,3 +281,44 @@ Plan: a required-guard path (`harness/guards.py`, REQUIRED_GUARDS) separate from
 - G7 No-progress stop: "failing" means a tool_error or the outcome failed/denied, keyed on the tool plus the G3 fingerprint. The per-run count lives on the session across turns, and a success on the key resets it. The kind goes only in its own tool-error-kinds.d fragment. Run test_tool_error_kind_manifest.py and ChatPanel.manifest.test.tsx at the trial merge.
 - G8: one killed mutant per new branch, each test targeting its own guard.
 Scope: stay out of harness/runner.py and services/assistant_tasks.py (#1163); PRE_DISPATCH_VALIDATORS untouched.
+
+### 2026-11-06 — S4b plan verdicts and build (branch `claude/aa04-s4b-raise-extra`)
+
+GK B (28) plan verdict, verbatim:
+
+> GK B (28) plan verdict, AA-04 S4b (G4 lock order, G5, G6): GO WITH CONDITIONS H1–H9.
+>
+> I checked against #1193 c09c2b63: _check_foreign_lock is check-only; note_write runs after the loop's own bump_revision, so "revision equals the note's" is the right test; reserve() and begin_step() run before mark_dirty.
+>
+> - H1 Lock pre-check placement. Put it right after the G3 fingerprint compare, BEFORE reserve() and assistant_tasks.begin_step(), not merely before mark_dirty. G4 says denied means nothing ran, and the spies fixture must include reserve and begin_step for this case.
+> - H2 Lock pre-check identity. _check_foreign_lock returns silently when _ACTING_USER_ID is unset or no project is bound. The pre-check must run under the same acting identity and active context the handler gets. Test it with a real foreign lock (not a monkeypatched _check_foreign_lock): denied, handler not called. Cover the harness-run hold (harness_locks.refuses_active) too: whatever kind it raises is denied with that kind, and the kind is classified in the fragment and the denied-words parity test. A 503 project_lock_unavailable is denied the same way.
+> - H3 Order test as planned: a lock that appears only after mark_dirty is never denied, and reads through G5. Keep the handler's own check.
+> - H4 G5 row writes as planned (ctx `is` the note's, revision equal at both reads, state map equal → failed; else uncertain with the named reasons). Add one test: a handler that raises having changed nothing reads failed, which shows the loop's own bump does not make it uncertain. Add another: a concurrent bump (another writer) between note and read reads uncertain.
+> - H5 Imports on raise: not a plain error. An import mutates the network, so it uses the same whole-state compare: failed only when the state map equals the note's, else uncertain. Exports keep the plain error line as _pending AA04-P9 with its ticket, since an export changes no project state.
+> - H6 Timeouts: uncertain tool_timeout / tool_not_started for every write- or destructive-tier call in an ordinary turn, not only WRITE_TOOLS. Name in the PR any effect tool that gets no _outcome on these paths, and why. Never read back. Keep the "forced through the classifier" mutant.
+> - H7 State map.
+>   - Canonicalise before hashing (the #1175 E1 rule): int vs float, -0.0, dtype, index names, NaN/None/"" to one sentinel. Test on an edited network and on an in-memory one, never only a fixture loaded by the same reader.
+>   - A series may be hashed per column (path /cls/name/attr@series) rather than per cell, if the per-cell cost is too high. Report the cost on the EH templates and eh_ipp_hybrid at 8760 either way.
+>   - List DERIVED_CLASSES in the PR.
+> - H8 One rule, both ways.
+>   - extras > 0 with completed/partial → partial extra_edits (done and requested kept).
+>   - failed with ANY changed path (named or extra) → uncertain not_as_requested, never partial; your two statements conflict, and this resolves it.
+>   - Uncertain stays uncertain.
+>   - Include exports in the extras check (same map), so an export that edits the live network reads partial extra_edits.
+>   - Table test, and a killed mutant per branch.
+> - H9 New kinds and words: each in its own tool-error-kinds.d fragment. Run test_tool_error_kind_manifest and ChatPanel.manifest at the trial merge. If the activity words render something new, UX (11) session_01G7qCumdnJRMrYcDA7MJudB takes a look.
+>
+> S5: send the plan once S4b merges.
+
+UX (11): GO with changes, all applied but one. extra_edits reads "2 extra changes it was not asked to make", or "3 of 5 updated · 2 extra changes"; lock and timeout words as UX proposed; details on a failed or uncertain tool_error line show in Expert, repr quotes stripped. Not applied: tool_not_started stays "outcome unknown: no answer in time", not "not run", because the dirty mark, revision bump and undo snapshot run before the cancel, so nothing proves the project unchanged (UX told by AA-04 (8)).
+
+Build (AA-04 (7), finished by AA-04 (8)):
+- H1/H2: `guards.lock_refusal` runs right after the G3 fingerprint, before reserve and begin_step, under the handler's own identity; tests use a real foreign-user DB lock, the harness-run hold and a 503.
+- H4/H5: `outcomes.classify_raised`; imports use the state compare on a raise, exports keep `_pending` AA04-P9.
+- H6: every write/destructive-tier call in an ordinary turn reads uncertain on timeout and not_started; no effect tool is left without `_outcome` on those paths. Checked turns get none from the loop (their own projection), guarded by a test.
+- H7: canonical whole-state map, series per column (`@series`); DERIVED_CLASSES = {SubNetwork}. Cost 30–37 ms per map on the EH templates and on eh_ipp_hybrid at 8760.
+- H8: failed with any changed path reads uncertain not_as_requested; exports are in the extras check.
+- H9: no new error_kind (project_locked and project_lock_unavailable were already in tool-error-kinds.json), so no fragment.
+- Mutants, 16/16 killed against test_p3_raise_and_extra.py: classify_raised 6, classify_write extras 4, classify_export extras 2, loop lock pre-check and timeout tier 3, guards.lock_refusal 1. The two that first survived (export with an uncomparable map; timeout outcome leaking into checked turns) got their own tests.
+- The red EH-flag test was a test bug: Generator has no bool EH column; it now uses Bus (eh_poc/eh_critical).
+- Trial merge with master: assistant inventory, control-matrix and route-parity `--check`, test_tool_error_kind_manifest and ChatPanel.manifest all pass.

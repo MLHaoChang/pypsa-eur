@@ -375,7 +375,7 @@ _BULK = {
 @pytest.mark.parametrize(
     "tool, args", [("bulk_update_components", _BULK), ("undo_last", {})]
 )
-def test_a_raising_write_is_a_tool_error_with_no_outcome(
+def test_a_raising_write_gives_the_model_no_outcome(
     baseline, harness, monkeypatch, tool, args
 ):
     from fastapi import HTTPException

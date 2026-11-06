@@ -605,7 +605,8 @@ def test_classify_import_names_allowed_extras():
 
 
 def _enote():
-    return {"tool": "export_network_nc", "format": "netcdf", "revision": 3}
+    # S4b: the live state map; an export changes nothing (test_p3_raise_and_extra).
+    return {"tool": "export_network_nc", "format": "netcdf", "revision": 3, "state": {}}
 
 
 def _eread(**kw):
@@ -615,6 +616,7 @@ def _eread(**kw):
         "revision_start": 3,
         "revision_end": 3,
         "match": True,
+        "state": {},
         **kw,
     }
 
