@@ -427,7 +427,8 @@ class Turn:
             raise ValueError("invalid profile draft")
         record = self.request_evidence
         if record is None:
-            if draft.blocks:
+            # Nothing is published to check a derived entry against (GK B (28) ask 1).
+            if draft.blocks or draft.derived:
                 raise ValueError("unavailable request")
             if self.scope_hint is not None:
                 return (
@@ -1002,7 +1003,7 @@ class Turn:
             draft = ProfileDraft.model_validate(
                 json.loads(text, object_pairs_hook=_object)
             )
-            if draft.schema_version != 1 or draft.blocks:
+            if draft.schema_version != 1 or draft.blocks or draft.derived:
                 raise ValueError("unsupported_effect_draft")
             record = operation(self.owner, self.operation_contract["operation_id"])
             if record["outcome"] != "completed" or record[
@@ -1029,7 +1030,7 @@ class Turn:
         data = json.loads(text, object_pairs_hook=_object)
         if self.navigation_actions and data.get("blocks") == []:
             draft = ProfileDraft.model_validate(data)
-            if draft.schema_version != 1 or draft.interpretations:
+            if draft.schema_version != 1 or draft.interpretations or draft.derived:
                 raise ValueError("invalid_navigation_draft")
             lines = []
             for action_id in self.navigation_actions:

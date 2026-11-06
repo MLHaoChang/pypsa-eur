@@ -5,6 +5,7 @@ GK B S2 verdict (issue 03, D-1 to D-8) and owner freeze AA03-FREEZE-1 item 2.
 
 # ruff: noqa: F811 -- imported shared fixtures.
 import json
+import uuid
 
 import pytest
 from pydantic import ValidationError
@@ -551,3 +552,53 @@ def test_only_an_answer_with_derived_entries_uses_policy_two(grid, checked, valu
     assert stored(checked, with_derived)["receipt"]["policy_version"] == "2"
     plain = ask(checked, grid, values, lambda ids: [])
     assert approval(plain)["receipt"]["policy_version"] == "1"
+
+
+def bare_turn(**state):
+    """A Turn on a path that publishes no checked value to derive from."""
+    from types import SimpleNamespace
+
+    from harness.assurance import Turn
+
+    turn = Turn(
+        SimpleNamespace(owner_user_id=str(uuid.uuid4()), usage_acc={}),
+        SimpleNamespace(project_uuid="P"),
+    )
+    for key, value in state.items():
+        setattr(turn, key, value)
+    return turn
+
+
+DERIVED_ONLY = {
+    "schema_version": 1,
+    "blocks": [],
+    "derived": [
+        {
+            "id": "d1",
+            "kind": "derived",
+            "formula_id": "difference/1",
+            "operands": ["a", "b"],
+            "value": 1.0,
+            "unit": "MW",
+        }
+    ],
+}
+
+
+@pytest.mark.parametrize(
+    "state,reason",
+    [
+        ({"operation_contract": {"operation_id": "x"}}, "unsupported_effect_draft"),
+        ({"navigation_actions": [str(uuid.uuid4())]}, "invalid_navigation_draft"),
+        (
+            {"request_scope": {"profile": "p", "entity_id": "e"}},
+            "unavailable request",
+        ),
+    ],
+    ids=["effect", "navigation", "no-request-evidence"],
+)
+def test_derived_entries_on_a_path_that_never_checks_them_are_refused(state, reason):
+    """GK B (28) ask 1: an entry no path checks is refused, never dropped as policy "1"."""
+    turn = bare_turn(**state)
+    with pytest.raises(ValueError, match=reason):
+        turn.validate([{"type": "text", "text": json.dumps(DERIVED_ONLY)}])
