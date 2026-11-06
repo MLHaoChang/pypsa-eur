@@ -4,7 +4,7 @@
 # P2: private drafts and approved answer publication
 
 Status: ready-for-agent
-Progress: audit 2026-11-05 (master ad12e8c7) below; S1 failure-mode pins in progress, S2–S5 planned
+Progress: S1 merged (#1154), S3 merged (#1171); S2 in progress; S4–S5 planned
 Type: task
 Blocked by: 01, 02
 
@@ -162,3 +162,20 @@ S3 plan (from the delta sent to GK B):
 - Fail-closed: an ambiguous or unmapped slot becomes clarification or unavailable, never a number.
 
 Code pointers: harness/assurance_conversation.py (`_needs`, `QUESTIONS`, `cost_choices`, the `resolve` pending branch), harness/assurance_scope.py (the `sized` capacity grammar, about line 225), harness/capacity_calculations.py (`METRICS`), harness/assurance.py (result_slots/request_complete, about lines 1270–1295), tests/test_capacity_cycles_assurance.py, tests/test_conversation_scope.py.
+
+### S3 result
+
+Merged as #1171. `tests/assurance_acceptance/test_p2_request_slots.py`, 30 cases: the bare capacity form gets the choice card; configured (`configured_capacity`), optimized and available (always `available_capacity_not_checked`) each map to their own slot; 16 mutants killed. Warning slots stay `_pending` under ticket 13.
+
+### GK B S2 verdict (2026-11-06, GK B (26)): GO WITH CHANGES
+
+Q answered (a): one run per derived entry; a cross-run difference stays with cost_delta. Test: operands from two runs give mixed_scope.
+
+- D-1 Stored format: a draft or record without `derived` serializes byte-equal to master (omit the empty list on dump, or strip it on read), with a pin test, as for the run manifest MAC rule. Master's p2 tests running unedited is necessary but not enough.
+- D-2 Operands: only blocks that were published as a checked number, or earlier derived entries. A block whose slot is unavailable, needs_clarification or uncertain is operand_not_published. Test it.
+- D-3 Denominator and basis: percent_change's denominator must be one of its two operands (the baseline). share_percent's basis must share the part's unit and scope. Any other id is refused. Test a denominator that is published but a third block.
+- D-4 Unit kinds: unit_convert only within one dimension and kind. MW↔MVA and MWh↔MW are refused (apparent versus active power; capacity/1 emits MVA for lines). difference/1 or sum/1 on two % operands is refused, since percentage_point_delta is the only percent-on-percent formula. Test each.
+- D-5 Prose: every number in the prose traces to a published value, now also to derived entries by id. A prose number that matches neither is still refused, and a derived value can't legitimise a different number in the prose. Test a sentence that quotes a model-rounded value instead of the software value.
+- D-6 Tolerance: strict (1e-9 relative, rounding not widened); the PR says a rounded model claim limits the draft. Count how often the existing assurance acceptance fixtures would hit it and report the number. No rule change without an owner decision.
+- D-7 Receipt: derived entries show in the receipt with formula_id, operand ids and the software value. A truncated receipt keeps the derived block or marks the draft limited, never drops it silently (#927 / `_assurance` first).
+- D-8 Every refusal has its own test and a mutant it kills. Add one mutant on the DAG order check (a forward reference accepted) and one on the scope comparison (window ignored).
