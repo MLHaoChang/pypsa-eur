@@ -236,6 +236,23 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
     },
     {
+        'id': 'dc_architecture',
+        'title': 'Data-centre power architecture comparison',
+        'disposition': 'unbuilt',
+        'reason': 'The data-centre power-architecture comparison (AC, MV UPS, 800 VDC, solid-state transformer) is not available from chat yet. Run it in the Power architecture section of the Grid study tab.',
+        'page': 'Grid study',
+        'panel': None,
+        'keywords': frozenset({
+            'architecture',
+            'vdc',
+            'sst',
+            'transformer',
+        }),
+        'routes': frozenset({
+            ('POST', '/api/campus-electrical/{name}/dc-architecture/compare'),
+        }),
+    },
+    {
         'id': 'site_scene',
         'title': 'Site 3D scene: buildings and proposals',
         'disposition': 'unbuilt',

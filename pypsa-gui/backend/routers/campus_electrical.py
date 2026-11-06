@@ -58,7 +58,7 @@ from types import SimpleNamespace
 from typing import Literal
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session as DBSession
 from starlette.concurrency import run_in_threadpool
 
@@ -377,6 +377,39 @@ async def assess_dc_backup(
         return await run_in_threadpool(dc_backup.assess_project, project_dir, tpl, body.mode)
     except dc_backup.DcBackupError as exc:
         raise _dc_backup_error(exc) from exc
+
+
+class DcArchitectureCompareBody(BaseModel):
+    """The power-architecture screen's one input (DC 05): the price per MWh of
+    facility energy. None reads the project's tariff energy component."""
+
+    model_config = ConfigDict(extra="forbid")
+    energy_price_per_mwh: float | None = None
+
+
+@router.post("/{name}/dc-architecture/compare")
+async def compare_dc_architecture(
+    body: DcArchitectureCompareBody,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Screen the four power architectures (AC, MV UPS, 800 VDC, SST) against
+    the project's own on the saved network: energy, effective PUE, peak within
+    the import limit, capex and the NPV delta at the range ends, and the grid
+    services each can offer with the scorecard's verdicts. No solve; writes
+    nothing. 422 with a ``dc_architecture_*`` error kind for each refusal."""
+    from services import dc_architecture, project_registry
+
+    _check_lock(proj, db, user)
+    project_dir = project_registry.project_dir(_row(proj, db))
+    tpl = _eh_templates()
+    try:
+        return await run_in_threadpool(dc_architecture.compare_project, project_dir, tpl,
+                                       energy_price_per_mwh=body.energy_price_per_mwh)
+    except dc_architecture.DcArchitectureError as exc:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": exc.kind, "message": str(exc), "field": exc.field}) from exc
 
 
 # ── the island sidecar and study (campus island plan, I9a) ──────────────────

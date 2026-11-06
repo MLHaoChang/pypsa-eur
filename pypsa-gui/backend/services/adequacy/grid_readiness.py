@@ -1414,21 +1414,71 @@ def _reactive_row(inp: _Inputs) -> dict:
                 section="assets", target=target)
 
 
+def service_verdict(offered, arch_counted=(), *, wanted=None, conditional=(),
+                    architecture: str | None = None) -> dict:
+    """The support rule (DC 05, shared with the architecture compare): a
+    service the island's units offer passes; one only the power architecture
+    can offer is assumed and reads warn, never pass on that alone (GK A C6);
+    a service waiting for DC-bus storage is listed as conditional and never
+    counts. ``wanted`` defaults to the frequency services. ``offered`` None
+    (no island) with nothing from the architecture is unknown."""
+    wanted = tuple(wanted or _FREQUENCY_SERVICES)
+    arch = [x for x in (arch_counted or ()) if x not in (offered or [])]
+    have = [x for x in (offered or []) if x in wanted]
+    arch_have = [x for x in arch if x in wanted]
+    cond = [x for x in (conditional or ()) if x in wanted]
+    if offered is None and not arch and not cond:
+        return {"verdict": "unknown", "project_value": None, "assumed_from_architecture": []}
+    parts = [_services_text(offered)] if offered else []
+    if arch:
+        parts.append(f"{_services_text(arch)} (assumed, {architecture or 'architecture'})")
+    if cond:
+        parts.append(f"{_services_text(cond)} (conditional on DC-bus storage)")
+    value = "; ".join(parts) if parts else "none"
+    return {"verdict": "pass" if have else "warn", "project_value": value,
+            "assumed_from_architecture": arch_have, "conditional": cond}
+
+
+def _arch_offer(inp: _Inputs):
+    """The services an explicitly set power architecture offers (DC 05); None
+    when the stored spec names none, so an unset project reads as before."""
+    from services import dc_architecture as A
+
+    raw = inp.dc_spec
+    if not A.is_set(raw):
+        return None
+    from models.flex_archetypes import DataCentreLoadSpec
+    try:
+        spec = DataCentreLoadSpec.model_validate(raw)
+        return spec.architecture, A.services(spec.architecture, A.dc_bus_storage(spec))
+    except (ValueError, A.DcArchitectureError):
+        return None
+
+
 def _support_rows(inp: _Inputs) -> list[dict]:
     services = _services(inp)
     offered = services["services"] if services else None
     target = _target("assets", None, None, "preset")
-    freq = [s for s in (offered or []) if s in _FREQUENCY_SERVICES]
+    arch = _arch_offer(inp)
+    note = (_no_island_note(inp) if offered is None else
+            f"Control preset: {(services['preset'] or 'none').replace('_', ' ')}; what each "
+            "unit offers follows its control mode")
+    if arch is None:
+        freq = [s for s in (offered or []) if s in _FREQUENCY_SERVICES]
+        verdict = "unknown" if offered is None else ("pass" if freq else "warn")
+        value = _services_text(offered) if offered else ("none" if offered is not None else None)
+    else:
+        from services import dc_architecture as A
+        got = service_verdict(offered, arch[1]["counted"], conditional=arch[1]["conditional"],
+                              architecture=A.LABEL[arch[0]])
+        verdict, value = got["verdict"], got["project_value"]
+        if got["assumed_from_architecture"] or got.get("conditional"):
+            note += f". Power architecture {A.LABEL[arch[0]]}: {A.RMS_CAVEAT}"
     rows = [_row("frequency_support", "Frequency support offered by the site's converters",
                  limit="at least one of " + _services_text(_FREQUENCY_SERVICES), unit=None,
                  source="Assumed: the scorecard's own expectation for a large connection; the grid "
-                        "code sets no limit", project_value=_services_text(offered) if offered else
-                 ("none" if offered is not None else None),
-                 verdict="unknown" if offered is None else ("pass" if freq else "warn"),
-                 assumed=True,
-                 note=_no_island_note(inp) if offered is None else
-                 f"Control preset: {(services['preset'] or 'none').replace('_', ' ')}; what each unit "
-                 "offers follows its control mode", section="assets", target=target)]
+                        "code sets no limit", project_value=value,
+                 verdict=verdict, assumed=True, note=note, section="assets", target=target)]
     for r in (inp.profile or {}).get("dynamic_requirements") or []:
         rows.append(_row(f"dynamic:{r['id']}", r["requirement"], limit=r["value"], unit=None,
                          source=f"{_profile_title(inp)}: {r['clause']}",

@@ -988,6 +988,51 @@ export interface DcBackupAssessment {
 /** The assessment re-dispatches the campus twice over the outage window. */
 export const DC_BACKUP_ASSESS_TIMEOUT_MS = 300_000
 
+/** The data-centre power architecture (DC 05): set when the project is created. */
+export type DcArchitecture = 'ac' | 'mv_ups' | 'dc_800v' | 'sst'
+export interface DcArchitectureStage {
+  stage: string; label: string; efficiency: number; range: [number, number] | null; source: string
+}
+export interface DcArchitectureServiceVerdict {
+  verdict: GridReadinessVerdict; project_value: string | null
+  assumed_from_architecture: string[]; conditional?: string[]
+}
+export interface DcArchitectureNpv { capex: number; fom: number; energy: number; total: number }
+export interface DcArchitectureVariant {
+  architecture: DcArchitecture; label: string; own: boolean
+  eta_to_rack: number; eta_rack: number; stages: DcArchitectureStage[]
+  effective_pue: number | null; facility_mwh: number; it_mwh: number; loss_mwh: number
+  peak_mw: number | null
+  peak: { verdict: GridReadinessVerdict; min_headroom_mw?: number | null; note?: string | null }
+  capex: { overnight_per_mw: number; range_per_mw: [number, number]; total: number
+           lifetime: number; fom_share: number }
+  npv: { value: DcArchitectureNpv; low: DcArchitectureNpv; high: DcArchitectureNpv }
+  npv_delta: { central: number; low: number; high: number
+               verdict: 'cheaper' | 'dearer' | 'not_distinguishable' }
+  services: { counted: string[]; conditional: string[] }
+  services_why: string
+  verdicts: { frequency_support: DcArchitectureServiceVerdict; voltage_control: DcArchitectureServiceVerdict }
+}
+/** POST /campus-electrical/{name}/dc-architecture/compare: the four architectures, no solve. */
+export interface DcArchitectureCompare {
+  own: DcArchitecture; own_set: boolean; pack_version: string
+  boundary: string; second_order: string; weighting: string; rms_caveat: string
+  /** Which year the energy figures are: the modelled year, or a multi-period network's final period. */
+  energy_basis: string
+  dc_bus_storage: boolean
+  price: { source: string; assumed: boolean; currency: string; weighted_mean_per_mwh: number | null
+           /** Set for a tariff price ("flat" for a request price). */
+           weighting?: string; weighted_mean_basis: string
+           time_mean_per_mwh: number | null; real: string; not_valued: string; currency_note?: string | null }
+  currency: string; money_year: number; years: number; discount_rate: number
+  discount_rate_source: string; it_mw: number; capex_note: string
+  /** Which inputs the cost ends range; lifetime and fixed O&M stay central. */
+  range_note: string
+  variants: DcArchitectureVariant[]
+  summary: { cheapest: DcArchitecture | null; cheapest_text: string
+             most_services: DcArchitecture[]; most_services_text: string }
+}
+
 export const CAMPUS_RUN_TIMEOUT_MS = 900_000
 /** Drafting loads the whole saved network, as a bundle download does: its 180 s. */
 export const CAMPUS_DRAFT_TIMEOUT_MS = 180_000
@@ -1057,6 +1102,12 @@ export const campusApi = {
   /** Size, prove and price the stored backup mode. Read only. */
   assessDcBackup: (project: string) =>
     client.post<DcBackupAssessment>(`${base(project)}/dc-backup/assess`, {},
+      { ...quiet, timeout: DC_BACKUP_ASSESS_TIMEOUT_MS }).then(r => r.data),
+
+  /** The power-architecture screen (DC 05): reads the saved network, writes nothing. */
+  compareDcArchitecture: (project: string, energyPricePerMwh?: number | null) =>
+    client.post<DcArchitectureCompare>(`${base(project)}/dc-architecture/compare`,
+      energyPricePerMwh == null ? {} : { energy_price_per_mwh: energyPricePerMwh },
       { ...quiet, timeout: DC_BACKUP_ASSESS_TIMEOUT_MS }).then(r => r.data),
 
   /** The island sidecar as written and the last island study (null each when absent). */
