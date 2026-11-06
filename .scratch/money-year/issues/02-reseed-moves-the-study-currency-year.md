@@ -1,6 +1,6 @@
 # A re-seed onto a newer pack leaves the study's currency year behind
 
-Status: ready-for-agent
+Status: done
 Model: Opus
 Model tier: opus
 Size: S

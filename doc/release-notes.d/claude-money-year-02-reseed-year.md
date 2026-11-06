@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Re-seeding a study's ledger onto the current defaults pack now moves the study's currency year to the pack's year when it matched the old ledger's money rows, so the study runs and its case reads without a separate settings change; a year the user set to something else is left alone.
