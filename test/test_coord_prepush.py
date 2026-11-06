@@ -139,3 +139,45 @@ def test_repr_guard_failure_fails_the_run(repo):
     r = prepush(repo, env={"PREPUSH_PYTHON": "/nonexistent/python"})
     assert "FAIL repr guard" in r.stdout
     assert r.returncode == 1
+
+
+def _fake_tool(path, code):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"#!/bin/sh\nexit {code}\n")
+    path.chmod(0o755)
+
+
+def test_a_failing_step_in_every_subshell_fails_the_run(repo):
+    """Steps run in ``( cd ... && run ... )``; their failures must reach the exit code."""
+    for tool in ("tsc", "vitest"):
+        _fake_tool(repo / "pypsa-gui/frontend/node_modules/.bin" / tool, 1)
+    _fake_tool(repo / "fakepython", 1)
+    commit(
+        repo,
+        {
+            "pypsa-gui/frontend/src/components/Kpi.tsx": "export {}\n",
+            "pypsa-gui/backend/services/costs.py": "x = 1\n",
+        },
+    )
+    r = prepush(repo, env={"PREPUSH_PYTHON": str(repo / "fakepython")})
+    for step in (
+        "tsc",
+        "mapped backend tests",
+        "mapped frontend tests",
+        "contract: pytest",
+        "contract: route parity",
+        "contract: control matrix",
+        "contract: vitest",
+    ):
+        assert f"FAIL {step}" in r.stdout, (step, r.stdout)
+    assert "PREPUSH: FAIL" in r.stdout and "PREPUSH: PASS" not in r.stdout
+    assert r.returncode == 1
+
+
+def test_every_step_passing_exits_zero(repo):
+    for tool in ("tsc", "vitest"):
+        _fake_tool(repo / "pypsa-gui/frontend/node_modules/.bin" / tool, 0)
+    _fake_tool(repo / "fakepython", 0)
+    commit(repo, {"pypsa-gui/frontend/src/components/Kpi.tsx": "export {}\n"})
+    r = prepush(repo, env={"PREPUSH_PYTHON": str(repo / "fakepython")})
+    assert "PREPUSH: PASS" in r.stdout and r.returncode == 0, r.stdout

@@ -42,12 +42,12 @@ backend=pypsa-gui/backend
 frontend=pypsa-gui/frontend
 log=$(mktemp -d)/prepush
 mkdir -p "$log"
-fails=0 skips=0
+results="$log/results" # steps run in subshells, so counts live in a file
+: >"$results"
 
 result() { # name status detail
   printf '%-4s %s%s\n' "$2" "$1" "${3:+ ($3)}"
-  [ "$2" = FAIL ] && fails=$((fails + 1))
-  [ "$2" = SKIP ] && skips=$((skips + 1))
+  echo "$2" >>"$results"
   return 0
 }
 missing() { # name what: FAIL (or SKIP) because a tool is absent
@@ -137,5 +137,6 @@ else run "repr guard" python3 "$here/repr_guard.py" "$base"; fi
 
 [ "$plan" = 1 ] && exit 0
 echo
+fails=$(grep -c '^FAIL$' "$results" || true) skips=$(grep -c '^SKIP$' "$results" || true)
 if [ "$fails" -gt 0 ]; then echo "PREPUSH: FAIL ($fails failing, $skips skipped)"; exit 1; fi
 echo "PREPUSH: PASS ($skips skipped)"

@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "coord"))
 
 import mutants  # noqa: E402
+import pytest  # noqa: E402
 
 SRC = """\
 import hashlib, json
@@ -161,3 +162,100 @@ def test_timeout_kills_the_process_group(tmp_path):
     finally:
         mutants.REPO = old
     assert status == "TIMEOUT"
+
+
+COMMENTED = """\
+# keep: header comment
+def f(x, w):
+    if x  <  0:   # odd   spacing stays
+        return False
+    return x*w
+"""
+
+
+def test_mutants_splice_only_the_mutated_segment():
+    out = list(mutants.mutants(COMMENTED, {3, 5}))
+    assert out
+    for ln, _, _, text in out:
+        assert "# keep: header comment" in text and "# odd   spacing stays" in text
+        diff = [
+            i
+            for i, (a, b) in enumerate(zip(COMMENTED.splitlines(), text.splitlines()))
+            if a != b
+        ]
+        assert diff == [ln - 1]  # only the mutated line differs
+
+
+def test_comment_reading_target_does_not_kill_every_mutant(tmp_path, monkeypatch):
+    git = _repo(tmp_path)
+    git("init", "-q", "-b", "master")
+    (tmp_path / "m.py").write_text("x = 1\n")
+    git("add", ".")
+    git("commit", "-qm", "base")
+    git("checkout", "-qb", "feat")
+    body = COMMENTED
+    (tmp_path / "m.py").write_text(body)
+    # reads the source text, as test_investment_case_tripwires does
+    (tmp_path / "test_m.py").write_text(
+        "from pathlib import Path\n\n"
+        "def test_src():\n"
+        "    assert '# odd   spacing stays' in Path(__file__).with_name('m.py').read_text()\n"
+    )
+    git("add", ".")
+    git("commit", "-qm", "change")
+    monkeypatch.setattr(mutants, "REPO", tmp_path)
+    monkeypatch.setattr(
+        mutants, "run_target", lambda t, to, python=None: _run(tmp_path, t, to)
+    )
+    assert mutants.main([str(tmp_path / "m.py"), "test_m.py", "--base", "master"]) == 1
+    assert (tmp_path / "m.py").read_text() == body
+
+
+def test_hash_literal_held_in_a_variable():
+    src = (
+        "import json, hashlib\n"
+        "def key(a, b):\n"
+        '    payload = {"period": a, "weights": b}\n'
+        "    return hashlib.sha256(json.dumps(payload).encode()).hexdigest()\n"
+    )
+    out = [m for m in mutants.mutants(src, {3}) if "dropped" in m[2]]
+    assert len(out) == 2
+    assert all('"period"' not in m[3] or '"weights"' not in m[3] for m in out)
+
+
+def test_backup_that_differs_from_head_is_refused(tmp_path, monkeypatch, capsys):
+    git = _repo(tmp_path)
+    git("init", "-q", "-b", "master")
+    (tmp_path / "m.py").write_text("x = 1\n")
+    git("add", ".")
+    git("commit", "-qm", "base")
+    (tmp_path / "m.py.mutants.bak").write_text("x = 'not head'\n")
+    monkeypatch.setattr(mutants, "REPO", tmp_path)
+    assert mutants.main([str(tmp_path / "m.py"), "t.py", "--base", "master"]) == 2
+    assert "differs from HEAD" in capsys.readouterr().err
+    assert (tmp_path / "m.py").read_text() == "x = 1\n"
+    assert (tmp_path / "m.py.mutants.bak").exists()
+
+
+def test_interrupt_kills_the_pytest_group(monkeypatch):
+    killed = []
+
+    class FakeProc:
+        pid = 4242
+        returncode = None
+
+        def poll(self):
+            return None
+
+        def communicate(self, timeout=None):
+            if not killed:
+                raise KeyboardInterrupt
+            return "", None
+
+    monkeypatch.setattr(mutants.subprocess, "Popen", lambda *a, **k: FakeProc())
+    monkeypatch.setattr(
+        mutants.os, "killpg", lambda pid, sig: killed.append((pid, sig))
+    )
+    with pytest.raises(KeyboardInterrupt):
+        mutants.run_target("t.py", 5, python=sys.executable)
+    assert killed and killed[0][0] == 4242

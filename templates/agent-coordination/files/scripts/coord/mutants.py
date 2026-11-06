@@ -103,11 +103,26 @@ def _reassigns_itself(node):
 def _hash_literals(tree):
     """Dict/List/Set literals inside a hash-like call: ``(node, element_index)``."""
     seen = set()
+    held = {}  # name -> literals assigned to it (``payload = {...}``)
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Assign)
+            and isinstance(node.value, (ast.Dict, ast.List, ast.Set))
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+        ):
+            held.setdefault(node.targets[0].id, []).append(node.value)
     for call in ast.walk(tree):
         if isinstance(call, ast.Call) and HASH_CALL_RE.search(
             _dotted(call.func).rsplit(".", 1)[-1]
         ):
-            for lit in ast.walk(call):
+            inner, names = list(ast.walk(call)), set()
+            for n in inner:
+                if isinstance(n, ast.Name) and n.id not in names:
+                    names.add(n.id)
+                    for lit in held.get(n.id, []):
+                        inner.extend(ast.walk(lit))
+            for lit in inner:
                 if (
                     isinstance(lit, (ast.Dict, ast.List, ast.Set))
                     and id(lit) not in seen
@@ -174,66 +189,99 @@ def _replace(tree, node, new):
 
 
 def apply(tree, site):
-    """Mutate ``tree`` in place at ``site``; return ``(original_text, mutant_text)``."""
+    """
+    Mutate ``tree`` in place at ``site``.
+
+    Returns ``(original_text, mutant_text, target, replacement, is_stmt)``: the
+    labels for the report, and the original node whose source segment the
+    mutant replaces with the ``replacement`` text.
+    """
     nodes = list(ast.walk(tree))
     idx, kind, arg, _ = site
     node = nodes[idx]
     before = ast.unparse(node)
+    target, repl, is_stmt = node, None, False
     if kind == "cmp":
         k, new = arg
         node.ops[k] = new()
-        after = ast.unparse(node)
+        after = repl = ast.unparse(node)
     elif kind == "drop_factor":
         keep = node.right if arg == "left" else node.left
         _replace(tree, node, keep)
-        after = ast.unparse(keep)
+        after = repl = ast.unparse(keep)
     elif kind in ("negate_if", "guard_false"):
         before = f"if {ast.unparse(node.test)}:"
+        target = node.test
         node.test = (
             ast.UnaryOp(op=ast.Not(), operand=node.test)
             if kind == "negate_if"
             else ast.Constant(value=False)
         )
-        after = f"if {ast.unparse(node.test)}:"
+        repl = ast.unparse(node.test)
+        after = f"if {repl}:"
     elif kind == "boolop_swap":
         node.op = ast.Or() if isinstance(node.op, ast.And) else ast.And()
-        after = ast.unparse(node)
+        after = repl = ast.unparse(node)
     elif kind == "drop_operand":
         del node.values[arg]
-        after = ast.unparse(node.values[0] if len(node.values) == 1 else node)
+        after = repl = ast.unparse(node.values[0] if len(node.values) == 1 else node)
         if len(node.values) == 1:
             _replace(tree, node, node.values[0])
     elif kind == "delete_stmt":
         _replace(tree, node, ast.Pass())
-        after = "pass"
+        after, repl, is_stmt = "pass", "pass", True
     elif kind == "return_bool":
+        target = node.value
         node.value = ast.Constant(value=not node.value.value)
+        repl = ast.unparse(node.value)
         after = ast.unparse(node)
     elif kind == "raise_pass":
         _replace(tree, node, ast.Pass())
-        after = "pass"
+        after, repl, is_stmt = "pass", "pass", True
     elif kind == "drop_element":
         if isinstance(node, ast.Dict):
             del node.keys[arg], node.values[arg]
         else:
             del node.elts[arg]
+        repl = ast.unparse(node)
         after = f"{before.splitlines()[0][:40]} … (element {arg} dropped)"
     else:
         raise ValueError(kind)
-    return before.splitlines()[0], after.splitlines()[0]
+    return before.splitlines()[0], after.splitlines()[0], target, repl, is_stmt
+
+
+def _span(raw, starts, node):
+    """Byte offsets of ``node``'s source segment in ``raw``."""
+    return (
+        starts[node.lineno - 1] + node.col_offset,
+        starts[node.end_lineno - 1] + node.end_col_offset,
+    )
 
 
 def mutants(source, lines):
-    """Yield ``(lineno, original, mutant, mutated_source)`` for each mutant of ``source``."""
+    """
+    Yield ``(lineno, original, mutant, mutated_source)`` for each mutant.
+
+    The mutant replaces only the mutated node's source segment, so comments,
+    formatting and everything else stay byte-identical (a target that reads the
+    source text sees the same file).
+    """
+    raw = source.encode("utf-8")
+    starts = [0]
+    for line in raw.splitlines(keepends=True):
+        starts.append(starts[-1] + len(line))
     tree0 = ast.parse(source)
     for site in sites(tree0, lines):
         tree = ast.parse(source)
         try:
-            orig, mut = apply(tree, site)
-            text = ast.unparse(ast.fix_missing_locations(tree)) + "\n"
-        except (LookupError, ValueError):
+            orig, mut, target, repl, is_stmt = apply(tree, site)
+            lo, hi = _span(raw, starts, target)
+            text = repl if is_stmt else f"({repl})"
+            new = (raw[:lo] + text.encode("utf-8") + raw[hi:]).decode("utf-8")
+            ast.parse(new)
+        except (LookupError, ValueError, SyntaxError):
             continue
-        yield site[3], orig, mut, text
+        yield site[3], orig, mut, new
 
 
 def test_python():
@@ -280,10 +328,11 @@ def run_target(target, timeout, python=None):
     try:
         out, _ = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        os.killpg(proc.pid, signal.SIGKILL)
-        proc.communicate()
         return "TIMEOUT", ""
-    finally:
+    finally:  # timeout, Ctrl-C or any other exception: no stray pytest group
+        if proc.poll() is None:
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.communicate()
         shutil.rmtree(env["PYTHONPYCACHEPREFIX"], ignore_errors=True)
     if proc.returncode == 0:
         return "PASS", ""
@@ -305,6 +354,16 @@ def main(argv=None):
     rel = src.relative_to(REPO)
     bak = src.with_name(src.name + ".mutants.bak")
     if bak.exists():  # an earlier run was killed mid-mutant
+        head = subprocess.run(
+            ["git", "show", f"HEAD:{rel}"], capture_output=True, cwd=REPO
+        )
+        if head.returncode != 0 or head.stdout != bak.read_bytes():
+            print(
+                f"refusing: {bak.name} differs from HEAD:{rel}; inspect it and "
+                "delete it or restore the file by hand",
+                file=sys.stderr,
+            )
+            return 2
         shutil.copyfile(bak, src)
         bak.unlink()
         print(f"restored {rel} from an earlier interrupted run")
