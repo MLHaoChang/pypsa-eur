@@ -364,10 +364,12 @@ def _dips_restart(run: Path, profile: str, profile_dirs, nc: Path) -> None:
 
     clear()
     try:
-        cs.restart_campus(run, profile, profile_dirs)
+        # The inputs first: restart_campus then refuses a network changed since the run was prepared, so an
+        # edit landing between the two fails the screens instead of recording new inputs beside old rows.
         with _netcdf_lock():
             n = pypsa.Network(str(nc))
         inputs = _dips_restart_inputs(n)
+        cs.restart_campus(run, profile, profile_dirs)
     except Exception as exc:  # noqa: BLE001 - a screen failure is shown with the results, never a failed run
         if not isinstance(exc, ContractError):
             logger.exception("campus run: the dip and restart screens failed in %s", run)
