@@ -986,7 +986,9 @@ def _cut_coefficients(n, island) -> dict:
     extendable units and what one MW of each adds to the quantity a cut
     bounds, as the I2b rows count it (M: a droop GFM's τ_f/(2R), a VSM's
     H_v/pf, a spinning genset's H/cos φ·η; ΣK: 1/(R·f0), ·η for a genset;
-    headroom: 1 for GFM storage, η for a spinning genset upward)."""
+    headroom: 1 for GFM storage; upward, a spinning genset's credit per MW,
+    η·min(max p_max_pu − p_min_pu, load_step_max_pct/100), as the rows
+    credit it)."""
     from services.adequacy.island_config import GFM_CONTROLS
 
     units, f0 = island["units"], _f0(island)
@@ -1010,7 +1012,7 @@ def _cut_coefficients(n, island) -> dict:
                 out["droop_gain"].append((name, comp, eta / (v["droop_pct"] / 100.0 * f0)))
             if u.get("spinning"):                    # online at 0⁺
                 out["inertia"].append((name, comp, v["H_s"] / v["cos_phi_r"] * eta))
-                out["headroom_up"].append((name, comp, eta))
+                out["headroom_up"].append((name, comp, _genset_credit_per_mw(n, name, v)))
     return out
 
 
@@ -1468,15 +1470,22 @@ def _rating_max(n, comp, name) -> float:
     return float(static.at[name, "p_nom"])
 
 
-def _genset_credit_max(n, g, values) -> float:
-    """The most a genset's event credit can be (the infeasibility hint's
-    bound): min(its room at full commitment and its minimum load, its load
-    step), at its largest rating and availability."""
+def _genset_credit_per_mw(n, g, values) -> float:
+    """The most one MW of a genset's rating adds to its up credit (E1 and the
+    event rows), on the delivered side: η·min(its room at full commitment
+    and its minimum load, max p_max_pu − p_min_pu; its load step,
+    load_step_max_pct/100), at its largest availability."""
     comp, eta = _genset_out(n, g)
-    p_nom = _rating_max(n, comp, g) * eta
     avail = float(_dense(n, comp, "p_max_pu", n.snapshots, [g])[g].max())
-    room = p_nom * (avail - float(values.get("p_min_pu", 0.0) or 0.0))
-    return max(0.0, min(room, p_nom * values["load_step_max_pct"] / 100.0))
+    room = avail - float(values.get("p_min_pu", 0.0) or 0.0)
+    return max(0.0, eta * min(room, values["load_step_max_pct"] / 100.0))
+
+
+def _genset_credit_max(n, g, values) -> float:
+    """The most a genset's up credit can be (the infeasibility hint's bound):
+    its credit per MW at its largest rating."""
+    comp, _ = _genset_out(n, g)
+    return _rating_max(n, comp, g) * _genset_credit_per_mw(n, g, values)
 
 
 def _event_rows(n, m, sns_p, coord, tag, *, units, gfm, gensets, active, period, p_out, p_store,

@@ -99,6 +99,7 @@ def test_a_cut_of_an_unknown_kind_is_refused():
 # ── the primal estimate (Q6): the cheapest candidate that meets the cut ─────
 
 
+from services.solver.island import _cut_coefficients as island_cut_coefficients  # noqa: E402
 from services.solver.island import cut_estimates  # noqa: E402
 from tests.test_island_rows import _a, _genset  # noqa: E402
 
@@ -135,6 +136,24 @@ def test_the_cheapest_candidate_wins():
     assert row["candidate"] == "g"
     assert row["added_mw"] == pytest.approx(12.5 / 1.875)
     assert row["estimate"] == pytest.approx(800.0)
+
+
+def test_a_spinning_gensets_headroom_is_credited_at_its_load_step():
+    """Headroom up on a spinning extendable genset is credited per MW at
+    η·min(load_step_max_pct, max p_max_pu − p_min_pu), as the E1 and event
+    rows credit it (frequency.py:632): at a 20 % step, below 1 − 0.3, one MW
+    gives 0.2 MW. The 2 MW shortfall is 10 MW of genset at 10/MW = 100, below
+    the BESS's 200 (at η per MW it would be 2 MW = 20)."""
+    n = _hub(load=10.0)
+    n.add("Generator", "g", bus="site", p_nom_extendable=True, capital_cost=10.0, marginal_cost=1000.0)
+    units = _units(gensets={"g": _genset(spinning=True, p_min_pu=_a(0.3),
+                                         load_step_max_pct=_a(20.0))})
+    coefs = island_cut_coefficients(n, _seamless(units))["headroom_up"]
+    assert [c for c in coefs if c[0] == "g"] == [("g", "Generator", pytest.approx(0.2))]
+    row = _estimate({**_cut("headroom_up", 12.0), "current": 10.0}, n=n, units=units)
+    assert row["candidate"] == "g"
+    assert row["added_mw"] == pytest.approx(10.0)
+    assert row["estimate"] == pytest.approx(100.0)
 
 
 def test_a_cold_genset_gives_no_inertia_at_the_instant_and_is_no_candidate():
