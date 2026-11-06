@@ -53,8 +53,11 @@ const unitWords = (u?: string) => UNIT_WORDS.reduce((acc, [re, w]) => acc.replac
 const POLICY_WORDS: Record<string, string> = {
   none: 'none', restore_to_nameplate: 'restored to nameplate yearly', fixed_years: 'in fixed years',
 }
-const inputValue = (v: unknown) =>
-  typeof v === 'number' ? num(v) : typeof v === 'string' ? (POLICY_WORDS[v] ?? v) : String(v)
+/** Shares (per unit, share of nameplate) read as percentages. */
+const isShare = (u?: string) => u === 'per unit' || (u ?? '').startsWith('share of nameplate')
+const inputValue = (v: unknown, unit?: string) =>
+  typeof v === 'number' ? (isShare(unit) ? `${num(v * 100)}${NBSP}%` : num(v))
+    : typeof v === 'string' ? (POLICY_WORDS[v] ?? v) : String(v)
 /** "2030-07-07 13:00" from an ISO or "YYYY-MM-DD HH:MM:SS" timestamp (UX 10). */
 const minute = (t: string) => t.slice(0, 16).replace('T', ' ')
 const MODE_WORD: Record<DcBackupMode, string> = { genset: 'gensets', bess: 'batteries', hybrid: 'hybrid' }
@@ -194,7 +197,7 @@ function Assessment({ result, stale, stored }: { result: DcBackupAssessment; sta
         {result.mode !== 'genset' && assumed.length > 0 && (
           <p className="text-[11px] text-muted" data-testid="dc-backup-assumed">
             {assumed.map((i, k) => (
-              <span key={i.key}>{k > 0 && '; '}{INPUT_LABEL[i.key] ?? i.key}: {inputValue(i.value)}{unitWords(i.unit) ? `${NBSP}${unitWords(i.unit)}` : ''}{' '}
+              <span key={i.key}>{k > 0 && '; '}{INPUT_LABEL[i.key] ?? i.key}: {inputValue(i.value, i.unit)}{unitWords(i.unit) ? `${NBSP}${unitWords(i.unit)}` : ''}{' '}
                 <span className="rounded border border-border px-1 text-[10px]">assumed</span></span>
             ))}
           </p>

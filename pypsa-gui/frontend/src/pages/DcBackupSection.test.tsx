@@ -85,7 +85,7 @@ describe('DcBackupSection', () => {
     const assumedLine = text(screen.getByTestId('dc-backup-assumed'))
     expect(assumedLine).toContain('Genset run hours: 50 h a year assumed')
     expect(assumedLine).toContain('Heat rate: 2.8 MWh fuel per MWh assumed')
-    expect(assumedLine).toContain('Capacity kept at end of horizon: 0.912 assumed')
+    expect(assumedLine).toContain('Capacity kept at end of horizon: 91.2 % assumed')
     expect(assumedLine).not.toMatch(/_/)
     expect(screen.getByTestId('dc-backup-lines').textContent).toContain('Power capex and repurchase')
     expect(text(screen.getByTestId('dc-backup-sizing'))).toContain('112 MWh usable')
