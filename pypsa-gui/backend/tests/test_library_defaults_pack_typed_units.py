@@ -24,7 +24,7 @@ from services.library.defaults_pack.loader import (
     CAPACITY_BASES, LEGACY_VERSIONS, DefaultsPackError, LegacyPackVersion, load_defaults_pack)
 
 TYPED = "2026-10-22"
-LATEST = "2026-10-30"      # AS-02: the split-storage technologies
+LATEST = "2026-11-06"      # campus-library-gaps 01: the 220/110 kV campus transformers
 LATEST_REGIONAL = "2026-10-26"      # money-year 01: the seed tariffs converted to 2025 money
 FIXTURES = Path(__file__).parent / "fixtures" / "defaults_pack"
 
