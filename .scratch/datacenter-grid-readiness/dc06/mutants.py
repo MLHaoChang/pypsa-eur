@@ -3,7 +3,7 @@ M = [
  ("floor term dropped", "services/solver/reserve_products.py", '- need >= floor', '>= floor'),
  ("soc(t-1) side dropped", "services/solver/reserve_products.py", '        m.add_constraints(prev - need >= floor, name=f"Reserve-floor-prev-{s}")\n', ''),
  ("p_max_pu dropped from (1)", "services/solver/reserve_products.py", 'p_nom * _da(avail, coord) <= 0', 'p_nom <= 0'),
- ("symmetric counted up only", "models/reserve_products.py", 'return self.direction in ("symmetric", "down")', 'return self.direction in ("down",)'),
+ ("symmetric counted up only", "models/commercial.py", 'return self.direction in ("symmetric", "down")', 'return self.direction in ("down",)'),
  ("string up row reads p_max_pu(t)", "services/solver/reserve_products.py", 'if s in the_plan["strings"] else p_max[s])', 'if False else p_max[s])'),
  ("non-string reads the static bound", "services/solver/reserve_products.py", 'if s in the_plan["strings"] else p_max[s])', 'if True else p_max[s])'),
  ("initial soc decayed (hand-rolled roll)", "services/solver/reserve_products.py", '.where(~_da(_initial_at(n, s, sns), coord).astype(bool), 1.0)', ''),
@@ -21,8 +21,19 @@ M = [
  ("reserve row mapping dropped", "services/finance/revenue_streams.py", '    "ancillary": "reserve",\n', ''),
  ("reserve escalates at another class", "services/finance/cashflow.py", '"ancillary": "export"', '"ancillary": "opex"'),
  ("objective bridge ignores reserve", "services/results/objective_decomposition.py", '"lp_basis_total": lp_basis - reserve', '"lp_basis_total": lp_basis'),
+ # DC-06 (3): binding, currency gate, guards, typed refusals
+ ("currency gate dropped", "services/commercial/binding.py", '        clash = reserve_price_currency_mismatch(p, have, currency)', '        clash = None'),
+ ("no unit is not the stored EUR default", "services/commercial/binding.py", '    if not unit:\n        return "EUR"', '    if not unit:\n        return None'),
+ ("unread currency left unchecked", "services/commercial/binding.py", '            if currency:\n                raise BindingRefusal(409, CURRENCY_MISMATCH, (', '            if False:\n                raise BindingRefusal(409, CURRENCY_MISMATCH, ('),
+ ("preflight currency re-check dropped", "services/commercial/preflight.py", '    found += _reserve_currency_findings(n, cfg, currency)', '    pass'),
+ ("coverage gap accepted", "services/commercial/binding.py", '        if values.isna().any():\n            raise BindingRefusal(422, code,', '        if False:\n            raise BindingRefusal(422, code,'),
+ ("prices not written", "services/commercial/binding.py", '        _write_reserve_prices(n, reserve_prices, reserve_currency)', '        pass'),
+ ("sustain_h > 0 dropped", "models/commercial.py", 'sustain_h: float = Field(gt=0, le=24', 'sustain_h: float = Field(le=24'),
+ ("empty products dumped", "models/commercial.py", '            out.pop("reserve_products", None)', '            pass'),
+ ("stale floor after a spec edit", "services/solver/reserve_products.py", '    backup = spec.backup\n', '    backup = derive_backup.__dict__.setdefault(str(project_dir), spec.backup)\n'),
+ ("run starts despite a refusal", "routers/simulation.py", '        if _refusal:\n            raise HTTPException(422, _refusal)', '        pass'),
 ]
-tests = sys.argv[1:] or ["tests/test_reserve_products.py"]
+tests = sys.argv[1:] or ["tests/test_reserve_products.py", "tests/test_reserve_binding.py", "tests/test_reserve_run_refusal.py"]
 for name, f, a, b in M:
     p = pathlib.Path(f); src = p.read_text()
     if src.count(a) < 1:

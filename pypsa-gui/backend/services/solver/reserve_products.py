@@ -248,6 +248,11 @@ def _static(n, name: str, attr: str, default: float) -> float:
     return default if v is None or (isinstance(v, float) and math.isnan(v)) else float(v)
 
 
+def _names(names: list[str]) -> str:
+    """Storage names as user copy: each in curly quotes, comma-separated."""
+    return ", ".join(f"\u201c{s}\u201d" for s in names)
+
+
 def plan(n, products: list["ReserveProduct"], floors: dict[str, float],
          strings: frozenset[str] = frozenset()) -> dict[str, Any]:
     """Check the products against ``n`` and the floors; return what the rows need.
@@ -264,17 +269,19 @@ def plan(n, products: list["ReserveProduct"], floors: dict[str, float],
         bad = [s for s in named if s not in eligible]
         if bad or not named:
             raise ReserveRefusal(NOT_ELIGIBLE, (
-                f"reserve product {p.id!r}: {bad or 'no storage'} cannot carry reserves. Only backup "
-                "storage with a readable backup floor can: the DC-03 strings of a bess or hybrid "
+                f"Reserve product \u201c{p.id}\u201d: {_names(bad) or 'no storage'} cannot carry reserves. Only backup "
+                "storage with a readable backup floor can: the battery strings of a battery or hybrid "
                 "project, or a storage its island sidecar lists as ride-through storage"))
         price, flags = bound_price(n, p)
         if price is None:
             kind = PRICE_STALE if "reference_changed_since_binding" in flags else PRICE_MISSING
+            why = ("changed since it was bound" if kind == PRICE_STALE
+                   else "is not bound to this network")
             raise ReserveRefusal(kind, (
-                f"reserve product {p.id!r}: its capacity price series is not bound to this network "
-                f"({', '.join(flags)}); save the commercial config again to bind it"))
+                f"Reserve product \u201c{p.id}\u201d: its capacity price series {why}; save the "
+                "commercial config again to bind it"))
         if not np.isfinite(price.to_numpy(dtype=float)).all():
-            raise ReserveRefusal(PRICE_MISSING, f"reserve product {p.id!r}: its price has a gap")
+            raise ReserveRefusal(PRICE_MISSING, f"Reserve product \u201c{p.id}\u201d: its price has a gap")
         on[p.id] = named
         prices[p.id] = price
     used = sorted({s for names in on.values() for s in names})
@@ -285,7 +292,7 @@ def plan(n, products: list["ReserveProduct"], floors: dict[str, float],
         e_cap = _static(n, s, "max_hours", 0.0) * p_cap
         if floor > e_cap + TOL:
             raise ReserveRefusal(FLOOR_EXCEEDS, (
-                f"storage {s!r} holds at most {e_cap:.3f} MWh but its backup floor is {floor:.3f} MWh: "
+                f"Storage \u201c{s}\u201d holds at most {e_cap:.3f} MWh but its backup floor is {floor:.3f} MWh: "
                 "it cannot keep its backup energy, let alone commit a reserve"))
         cyclic = bool(n.storage_units.at[s, "cyclic_state_of_charge"])
         per_period = bool(n.storage_units.at[s, "cyclic_state_of_charge_per_period"]) \
@@ -294,12 +301,12 @@ def plan(n, products: list["ReserveProduct"], floors: dict[str, float],
             init = _static(n, s, "state_of_charge_initial", 0.0)
             if init < floor - TOL:
                 raise ReserveRefusal(INITIAL_SOC, (
-                    f"storage {s!r} starts at {init:.3f} MWh, below its backup floor of {floor:.3f} MWh: "
-                    "raise state_of_charge_initial or make it cyclic"))
+                    f"Storage \u201c{s}\u201d starts at {init:.3f} MWh, below its backup floor of {floor:.3f} MWh: "
+                    "raise its initial state of charge or make it cyclic"))
         series = n.storage_units_t.p_max_pu.get(s) if s in strings else None
         if s in strings and (series is None or (series.to_numpy(dtype=float) != 0.0).any()):
             raise ReserveRefusal(STRING_AVAIL, (
-                f"backup string {s!r}: its p_max_pu series is not DC-03's dispatch hold (0 in every "
+                f"Backup string \u201c{s}\u201d: its availability series is not the backup dispatch hold (0 in every "
                 "snapshot), so its availability for a reserve is unknown; restore the hold"))
     return {"products": products, "on": on, "prices": prices,
             "floors": {s: eligible[s] for s in used}, "storages": used,
