@@ -394,6 +394,9 @@ def _current_chapter_sources(project: AuthorizedProject) -> dict[str, Any]:
         except Exception as exc:                            # noqa: BLE001 - stated as not established
             logger.info("reports: grid readiness not read: %s", exc)
             out["grid_readiness"] = {}
+    risk = _grid_risk_source(project, d)
+    if risk is not None:
+        out["grid_risk"] = risk
     from services.reports import network_chapters
 
     try:
@@ -404,6 +407,34 @@ def _current_chapter_sources(project: AuthorizedProject) -> dict[str, Any]:
     if network is not None:
         out["network"] = network
     return out
+
+
+def _grid_risk_source(project: AuthorizedProject, d: pathlib.Path) -> dict | None:
+    """The grid risk to production section (grid-to-process 13) when ``project`` is the open one (its network is
+    the session's): the payload, or None (another project open, or no process unit: no chapter). The project is
+    already authorized (``ProjectAccessDep``)."""
+    from types import SimpleNamespace
+
+    from routers.results import grid_risk_production_of
+    from services.pypsa_service import PyPSAService
+    from services.solver.process_uc import process_mask
+
+    try:
+        if str(PyPSAService.get_active_context().project_uuid or "") != str(project.uuid):
+            return None
+        links = getattr(PyPSAService.get_network(), "links", None)
+    except Exception:                                       # noqa: BLE001 - no open project: no chapter
+        return None
+    if links is None or links.empty or not process_mask(links).any():
+        return None                                         # no process unit: the section is omitted
+    row = SimpleNamespace(name=project.name, storage_path=str(d), project_kind=None,
+                          org_id=project.org_id, id=project.uuid)
+    try:
+        out = grid_risk_production_of(row, str(project.uuid))
+    except Exception as exc:                                # noqa: BLE001 - stated as not established
+        logger.info("reports: grid risk to production not read: %s", exc)
+        return {}
+    return None if out.get("omitted") == "no_process_unit" else out
 
 
 def _current_evidence(project: AuthorizedProject) -> tuple[Evidence, dict | None]:

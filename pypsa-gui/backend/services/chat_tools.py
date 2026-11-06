@@ -1468,6 +1468,14 @@ def get_process_view() -> dict:
     return _h()
 
 
+def get_grid_risk_production(project_id: str | None = None) -> dict:
+    """`GET /api/results/grid_risk_production` for the acting user: the open project only, resolved through the
+    project ACL before any file is read (`routers.results.grid_risk_production_payload`)."""
+    from routers.results import grid_risk_production_payload as _h
+
+    return _h(project_id)
+
+
 # ── Snapshots (4) ───────────────────────────────────────────────────────────
 
 
@@ -9803,6 +9811,7 @@ DISPATCHERS.update({
     "get_site_anchor": get_site_anchor,
     "set_site_anchor": set_site_anchor,
     "get_process_view": get_process_view,
+    "get_grid_risk_production": get_grid_risk_production,
     "campus_save_campus": campus_save_campus,
     "campus_milp_status": campus_milp_status,
     "campus_start_milp": campus_start_milp,

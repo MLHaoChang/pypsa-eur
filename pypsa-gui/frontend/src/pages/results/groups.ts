@@ -8,7 +8,7 @@ export type ResultsTab =
   | 'summary' | 'overview' | 'capex' | 'dispatch' | 'loadflow' | 'prices' | 'emissions'
   | 'economics' | 'curtailment' | 'lostload' | 'adequacy' | 'storage'
   | 'asset' | 'fmea' | 'investment' | 'flows' | 'loadshape' | 'grid_code' | 'electrical_design'
-  | 'island' | 'grid_forming'
+  | 'island' | 'grid_forming' | 'grid_risk'
 
 export type ResultsGroup = 'summary' | 'investment' | 'grid_plan' | 'reliability' | 'operation'
 
@@ -25,7 +25,7 @@ export const RESULT_GROUPS: ReadonlyArray<{
   { id: 'grid_plan', label: 'Grid plan', question: 'Whether the network and the connection carry it',
     tabs: ['loadflow', 'grid_code', 'electrical_design'] },
   { id: 'reliability', label: 'Reliability', question: 'Whether the critical load stays on',
-    tabs: ['adequacy', 'lostload', 'fmea'] },
+    tabs: ['adequacy', 'lostload', 'fmea', 'grid_risk'] },
   { id: 'operation', label: 'Operation', question: 'How it runs hour by hour',
     tabs: ['dispatch', 'flows', 'loadshape', 'storage', 'curtailment', 'emissions'] },
 ]
@@ -87,6 +87,8 @@ export const CARD_GROUPS: readonly CardGroup[] = [
     tabs: [
       { id: 'adequacy', label: 'Adequacy', views: ['adequacy'] },
       { id: 'stress_fmea', label: 'Stress & FMEA', views: ['fmea'] },
+      // G2P-13: shown only on a network with process units (`processOnly` in Results' TABS).
+      { id: 'grid_risk', label: 'Grid risk to production', views: ['grid_risk'] },
     ] },
   { id: 'commercial', label: 'Commercial & finance', question: 'What it costs and earns',
     tabs: [{ id: 'investment_case', label: 'Investment case', views: ['investment'] }] },

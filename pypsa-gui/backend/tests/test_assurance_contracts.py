@@ -339,3 +339,60 @@ def test_a_result_outside_its_shape_is_refused():
         assurance_shapes.validate_tool_result(
             "ui_open_panel", {"_assurance": {**meta, "outcome": "maybe"}}
         )
+
+
+def _ui_open_panel_with_enum(monkeypatch, enum):
+    """Swap ui_open_panel's results_tab enum in the catalogue for this test only."""
+    tools = copy.deepcopy(catalogue.TOOLS)
+    tool = next(t for t in tools if t["name"] == "ui_open_panel")
+    tool["input_schema"]["properties"]["results_tab"]["enum"] = enum
+    monkeypatch.setattr(catalogue, "TOOLS", tools)
+
+
+def test_a_listed_input_addition_keeps_the_frozen_hash(live, frozen):
+    """AA-V1-CHANGE-1: a checked tool accepting a listed new enum member is additive."""
+    added = contracts.V1_INPUT_ADDITIONS["ui_open_panel"]["results_tab"]
+    tool = next(t for t in catalogue.TOOLS if t["name"] == "ui_open_panel")
+    assert set(added) <= set(tool["input_schema"]["properties"]["results_tab"]["enum"])
+    assert (
+        live["checked_tools"]["ui_open_panel"]
+        == frozen["checked_tools"]["ui_open_panel"]
+    )
+    assert live["checked_tool_input_additions"]["ui_open_panel"]["results_tab"] == {
+        "enum": list(added)
+    }
+
+
+def test_an_unlisted_enum_addition_still_breaks(monkeypatch, frozen):
+    _ui_open_panel_with_enum(monkeypatch, [*catalogue.RESULTS_TAB_ENUM, "not_listed"])
+    assert breaking_changes(frozen, contracts.build()) == [
+        "$.checked_tools.ui_open_panel changed"
+    ]
+
+
+def test_dropping_a_listed_addition_breaks(monkeypatch, frozen):
+    gone = contracts.V1_INPUT_ADDITIONS["ui_open_panel"]["results_tab"][0]
+    _ui_open_panel_with_enum(
+        monkeypatch, [t for t in catalogue.RESULTS_TAB_ENUM if t != gone]
+    )
+    monkeypatch.setattr(contracts, "V1_INPUT_ADDITIONS", {})
+    assert breaking_changes(frozen, contracts.build()) == [
+        "$.checked_tool_input_additions.ui_open_panel removed"
+    ]
+
+
+@pytest.mark.parametrize(
+    "additions, match",
+    [
+        ({"ui_open_panel": {"results_tab": ["no_such_tab"]}}, "no_such_tab"),
+        ({"ui_open_panel": {"panel_id_missing": ["x"]}}, "panel_id_missing"),
+        ({"ui_open_panel": {"window_from": [1]}}, "window_from"),
+        ({"not_a_checked_tool": {"results_tab": ["x"]}}, "not_a_checked_tool"),
+    ],
+)
+def test_a_listed_addition_the_live_schema_lacks_refuses_to_build(
+    monkeypatch, additions, match
+):
+    monkeypatch.setattr(contracts, "V1_INPUT_ADDITIONS", additions)
+    with pytest.raises(ValueError, match=match):
+        contracts.build()

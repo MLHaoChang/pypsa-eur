@@ -186,3 +186,40 @@ def test_intent_map_names_existing_read_tools():
         for name in names:
             assert name in known
             assert safety_tier_for(name) == "read"
+
+
+def test_spelled_out_words_find_a_tool_named_by_their_compound():
+    """OJ09: "load flow" must reach get_loadflow_summary past generic matches.
+
+    Each distractor's description shares four query words; the summary's own
+    description shares three, so only its name (`loadflow`) can lift it."""
+    distractors = [{"name": f"distractor_{i}", "description": "Open the project and show its view.",
+                    "input_schema": {"type": "object", "properties": {}}} for i in range(128)]
+    tools = distractors + list(TOOLS)
+    selected = wiring._bounded_tools(tools, "Open project oj-grid-copy and show me its load flow.")
+    assert "get_loadflow_summary" in {t["name"] for t in selected}
+    assert len(selected) == 128
+    assert [t for t in tools if t in selected] == selected
+
+
+def _probe_selection(query, probe_name, probe_description):
+    """128 distractors that match no query word, ahead of one probe tool that loses every tie.
+
+    The probe is offered only if it scores above zero."""
+    distractors = [{"name": f"distractor_{i}", "description": "unrelated",
+                    "input_schema": {"type": "object", "properties": {}}} for i in range(128)]
+    probe = {"name": probe_name, "description": probe_description,
+             "input_schema": {"type": "object", "properties": {}}}
+    return probe in wiring._bounded_tools(distractors + [probe], query)
+
+
+def test_only_adjacent_query_words_form_a_compound():
+    """GK B K1: "load ... flow" apart is not the compound `loadflow`."""
+    assert _probe_selection("Show its load flow.", "probe_loadflow", "")
+    assert not _probe_selection("Load the project, then show its flow.", "probe_loadflow", "")
+
+
+def test_a_compound_scores_names_only_never_descriptions():
+    """GK B K2: a compound found only in a description adds nothing."""
+    assert not _probe_selection("Show its load flow.", "probe_tool", "loadflow")
+    assert _probe_selection("Show its load flow.", "probe_tool", "show load flow")

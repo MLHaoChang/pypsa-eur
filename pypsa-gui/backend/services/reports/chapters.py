@@ -24,12 +24,14 @@ from services.reports import formatting as F
 INVESTMENT = "investment_case"
 ISLAND = "island"
 GRID_READINESS = "grid_readiness"
+GRID_RISK = "grid_risk"
 TEMPLATE_LEDGER = "template_ledger"
 
 TITLES = {
     INVESTMENT: "Investment case",
     ISLAND: "Islanding and control",
     GRID_READINESS: "Grid readiness (screening)",
+    GRID_RISK: "Grid risk to production",
     TEMPLATE_LEDGER: "Template assumptions",
 }
 
@@ -42,6 +44,7 @@ NO_TEMPLATE_LEDGER = "no template ledger for this project"
 NO_INVESTMENT = ("no investment case has been stored for this project: run it from the "
                  "Investment tab")
 NO_GRID_READINESS = ("no grid-readiness scorecard for this project: it needs a saved network")
+NO_GRID_RISK = ("no grid risk to production for this project: it needs a solve of the open project")
 NO_ISLAND = ("no island check and no grid-forming recommendation for this project: run the "
              "campus study with island requirements")
 
@@ -405,3 +408,207 @@ def template_ledger_table(payload: dict, source_path: str):
 def template_ledger_disclosures(payload: dict) -> list[str]:
     return ["Template assumptions are input metadata, not measured or validated results.",
             *payload.get("integrity", [])]
+
+
+# ── Grid risk to production (grid-to-process ticket 13) ─────────────────────
+#
+# The same words as the Results tab (`pages/results/GridRiskTab.tsx`, UX 9): the line labels, "out of date" (never
+# "stale"), "upper bound" + "the lines may overlap", "Missing: <form word>", "Unavailable: no lost-production value",
+# the flags in plain words, "€ 1.2 m" and "350 t/yr" with non-breaking spaces. `test_grid_risk_report` pins the
+# parity with the tab's maps.
+
+_NBSP = " "
+GRID_RISK_PLACE_WORDS = {"campus_run": "campus study run", "site_transformer": "Site transformer",
+                         "grid_import": "Grid connection", "run": "Run"}
+GRID_RISK_FLAG_WORDS = {
+    "no_inventory_credit": "no inventory credit, so it is conservative",
+    "lower_bound": "some units are not known, so this is a lower bound",
+    "stale": "out of date",
+    "lost_production_value_missing": "no lost-production value",
+    "several_shortfall_products": "several products, so the EUR cannot be given one value",
+    "outage_longer_than_period": "the outage is longer than the period, so this is a lower bound",
+    "feedstock_inventory_not_credited": "feedstock tanks are not credited",
+    "mttr_missing": "no mean time to repair",
+    "lost_production_capture_stale": "the network changed since the solve",
+    "role_from_name": "the shortfall is read from its name",
+}
+
+
+def grid_risk_flag_words(flag: str) -> str:
+    """A flag in plain words, never a key (the tab's `flagWords`)."""
+    if flag.startswith("dip_stats_source:"):
+        src = flag.split(":")[1]
+        return {"demo": "demo dip statistics", "user": "the operator's dip statistics"}.get(
+            src, "dip statistics of unknown source")
+    if flag.startswith("tier_unset:"):
+        return f"no criticality tier on {flag.split(':')[1]}"
+    return GRID_RISK_FLAG_WORDS.get(flag, flag.replace("_", " "))
+
+
+def _form_labels() -> dict[str, str]:
+    try:
+        from services.asset_schema.fields import fields_for
+    except ImportError:                          # pragma: no cover - the schema ships with the backend
+        return {}
+    out: dict[str, str] = {}
+    for comp in ("Link", "Bus", "Generator"):
+        out.update({f.key: f.label for f in fields_for(comp)})
+    return out
+
+
+def grid_risk_missing_word(word: str | None, labels: dict[str, str] | None = None) -> str:
+    """The form's own word for a missing input: its field label, else the place's name (the tab's `missingWord`)."""
+    if not word:
+        return "input"
+    labels = _form_labels() if labels is None else labels
+    return labels.get(word) or GRID_RISK_PLACE_WORDS.get(word) or word.replace("_", " ")
+
+
+def _sig3(v: float) -> str:
+    return f"{float(f'{v:.3g}'):g}"
+
+
+def fmt_tonnes_year(t: float) -> str:
+    """"1.2 kt/yr", "350 t/yr" (the tab's `fmtTonnesYear`)."""
+    a = abs(t)
+    v, u = (t / 1e6, "Mt") if a >= 1e6 else (t / 1e3, "kt") if a >= 1e3 else (t, "t")
+    return f"{_sig3(v)}{_NBSP}{u}/yr"
+
+
+def fmt_eur_short(eur: float) -> str:
+    """"€ 1.2 m", "€ 350 k" (the tab's `fmtEurShort`)."""
+    a = abs(eur)
+    v, u = ((eur / 1e9, "bn") if a >= 1e9 else (eur / 1e6, "m") if a >= 1e6
+            else (eur / 1e3, "k") if a >= 1e3 else (eur, ""))
+    return f"€{_NBSP}{_sig3(v)}{f'{_NBSP}{u}' if u else ''}"
+
+
+def _grid_risk_cell(c: Any) -> dict:
+    c = c if isinstance(c, dict) else {}
+    return {"t_per_year": _num(c.get("t_per_year")), "eur_per_year": _num(c.get("eur_per_year")),
+            "eur_flag": c.get("eur_flag")}
+
+
+def grid_risk_payload(source: dict | None) -> dict | None:
+    """The chapter's facts from `routers.results.grid_risk_production_of`: the lines (label, status, the missing
+    inputs in the form's words, flags, basis, source files and stamp, per period), the island's two rows and the
+    upper-bound total; None when there is no section (no solve)."""
+    if not isinstance(source, dict) or not source.get("available") or not isinstance(source.get("lines"), list):
+        return None
+    labels = _form_labels()
+    lines = []
+    for ln in source["lines"]:
+        lines.append({
+            "key": ln.get("key"), "label": ln.get("label"), "status": ln.get("status"),
+            "stale": bool(ln.get("stale")),
+            "missing_words": [grid_risk_missing_word(m.get("word"), labels) for m in ln.get("missing_inputs") or []],
+            "missing": list(ln.get("missing") or []), "flags": list(ln.get("flags") or []),
+            "basis": ln.get("basis") or "", "source_files": list(ln.get("source_files") or []),
+            "stamp": dict(ln.get("stamp") or {}),
+            "by_period": {k: _grid_risk_cell(c) for k, c in (ln.get("by_period") or {}).items()},
+            "rows": [{"key": r.get("key"), "label": r.get("label"), "flags": list(r.get("flags") or []),
+                      "by_period": {k: _grid_risk_cell(c) for k, c in (r.get("by_period") or {}).items()}}
+                     for r in ln.get("rows") or []],
+        })
+    total = source.get("total") or {}
+    return {"periods": list(source.get("periods") or ["_"]), "unit": source.get("unit", "t/yr"),
+            "overlap_label": source.get("overlap_label"), "lines": lines,
+            "total": {"incomplete": bool(total.get("incomplete")),
+                      "lower_bound_lines": list(total.get("lower_bound_lines") or []),
+                      "by_period": {k: _grid_risk_cell(c) for k, c in (total.get("by_period") or {}).items()}}}
+
+
+def _grid_risk_status(line: dict) -> str:
+    """The tab's `statusWords`: never a raw key."""
+    if line["stale"]:
+        return "out of date"
+    return {"missing": "missing", "partial": "partial"}.get(line["status"], "complete")
+
+
+def _grid_risk_values(c: dict | None, missing_words: list[str] | None = None) -> tuple[str, str]:
+    if missing_words is not None:
+        return ("Missing: " + "; ".join(missing_words or ["input"]), "—")
+    if not c or c["t_per_year"] is None:
+        return ("—", "—")
+    if c["eur_per_year"] is not None:
+        eur = f"{fmt_eur_short(c['eur_per_year'])}/yr"
+    elif c["eur_flag"] == "several_shortfall_products":
+        eur = "Unavailable: several products, so the EUR cannot be given one value"
+    else:
+        eur = "Unavailable: no lost-production value"
+    return fmt_tonnes_year(c["t_per_year"]), eur
+
+
+def _stamp_words(stamp: dict) -> str:
+    parts = []
+    if stamp.get("run_at"):
+        parts.append(f"run {str(stamp['run_at']).replace('T', ' ').replace('+00:00', ' UTC')}")
+    if stamp.get("solved_at"):
+        parts.append(f"solved {str(stamp['solved_at']).replace('T', ' ')}")
+    if stamp.get("network_sha256"):
+        parts.append(f"network {stamp['network_sha256']}")
+    if stamp.get("revision"):
+        parts.append(f"revision {stamp['revision']}")
+    return ", ".join(parts)
+
+
+def _period_word(p: str) -> str:
+    return "" if p == "_" else str(p)
+
+
+def grid_risk_table(payload: dict, source_path: str):
+    from services.reports.evidence import EvidenceTable
+
+    periods = payload["periods"]
+    multi = len(periods) > 1
+    rows = []
+    for p in periods:
+        lead = [_period_word(p)] if multi else []
+        for ln in payload["lines"]:
+            cell = ln["by_period"].get(p)
+            missing = ln["missing_words"] if ln["status"] == "missing" or not cell or cell["t_per_year"] is None \
+                else None
+            t, eur = _grid_risk_values(cell, missing)
+            source = ", ".join(ln["source_files"])
+            if ln["stamp"]:
+                source = f"{source} ({_stamp_words(ln['stamp'])})"
+            notes = "; ".join(grid_risk_flag_words(f) for f in ln["flags"] if f != "stale")
+            rows.append([*lead, F.fmt_text(ln["label"]), t, eur, _grid_risk_status(ln), notes, source])
+            if ln["key"] == "island" and missing is None:
+                for r in ln["rows"]:
+                    rt, reur = _grid_risk_values(r["by_period"].get(p))
+                    rows.append([*lead, f"– {r['label']}", rt, reur, "",
+                                 "; ".join(grid_risk_flag_words(f) for f in r["flags"]), ""])
+        tt, teur = _grid_risk_values(payload["total"]["by_period"].get(p))
+        status = "upper bound" + (", incomplete" if payload["total"]["incomplete"] else "")
+        rows.append([*lead, "Total", tt, teur, status, "the lines may overlap", ""])
+    columns = [*(["Period"] if multi else []), "Line", "t/yr", "EUR/yr", "Status", "Notes", "Source"]
+    return EvidenceTable(table_id=GRID_RISK, columns=columns, rows=rows,
+                         caption="Grid risk to production: lost tonnes, then EUR, per year",
+                         source_path=f"{source_path}/lines")
+
+
+def grid_risk_disclosures(payload: dict) -> list[str]:
+    head = "Grid risk to production"
+    lines = payload["lines"]
+    out = [f"{head} — each grid risk as lost tonnes, then EUR, per year: expected values, not a forecast. "
+           "The total is an upper bound: the lines may overlap (the same event can sit in two lines)."]
+    missing = [ln for ln in lines if ln["status"] == "missing"]
+    if missing:
+        n = len(missing)
+        out.append(f"{head} — incomplete: {n} {'line is' if n == 1 else 'lines are'} missing ("
+                   + "; ".join(f"{ln['label']}: Missing: {', '.join(ln['missing_words'] or ['input'])}"
+                               for ln in missing) + "). A missing line is not 0.")
+    partial = [ln["label"] for ln in lines if ln["status"] == "partial"]
+    if partial:
+        out.append(f"{head} — lower bound: {', '.join(partial)} (some units are not known).")
+    stale = [ln["label"] for ln in lines if ln["stale"]]
+    if stale:
+        out.append(f"{head} — out of date: {', '.join(stale)} (the inputs changed since the run).")
+    if any(c["t_per_year"] is not None and c["eur_per_year"] is None
+           for ln in lines for c in ln["by_period"].values()):
+        out.append(f"{head} — EUR is unavailable where no lost-production value is set; the tonnes stand.")
+    if len(payload["periods"]) > 1:
+        out.append(f"{head} — one row set per period; a period's figures are per year of that period, "
+                   "never a horizon total.")
+    return out

@@ -120,7 +120,8 @@ TOOLS_BY_FAMILY: dict[str, frozenset[str]] = {f: frozenset(names.split()) for f,
         compare_project_runs discuss_project_run get_asset_results get_curtailment_by_cause get_energy_flows
         get_load_shape get_loadflow_summary get_project_results_bundle get_project_results_summary
         get_project_statistics get_project_compare_state get_results get_run_evidence get_vintage_results
-        list_project_runs list_result_assets list_result_views read_result get_process_view""",
+        list_project_runs list_result_assets list_result_views read_result get_process_view
+        get_grid_risk_production""",
     'reliability-adequacy': """
         abort_adequacy_study get_adequacy_results get_asset_health record_asset_health get_fmea_worksheet
         save_fmea_worksheet run_fmea_sweep get_reliability_goal get_stress_scenarios put_stress_scenarios

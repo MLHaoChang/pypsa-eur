@@ -395,6 +395,8 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         # Grid-to-process 03: the binary operational check, one row per
         # period (cost gap, extra shortfall, flag) and its ledger.
         "/process_uc_check",
+        # Grid-to-process 13: grid risk to production, one row per product.
+        "/grid_risk_production",
     }
 
     # Typed native projections do not use index/columns/data or from/to:

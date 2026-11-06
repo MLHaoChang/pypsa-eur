@@ -1,6 +1,6 @@
 import client from './client'
 import type { SiteParams } from '../pages/hubDesign/genericSite'
-import type { SolverConfig, SimulationStatus, PreflightResult, ProcessView } from './types'
+import type { SolverConfig, SimulationStatus, PreflightResult, ProcessView, GridRiskProduction } from './types'
 
 export const simulationApi = {
   getSolverConfig: () => client.get<SolverConfig>('/simulation/solver_config').then(r => r.data),
@@ -1691,6 +1691,9 @@ export const resultsApi = {
       .then(r => r.data as { packs: StressProfilePack[] }),
   // Process view (ticket 04): products and process units; both lists empty on a network with neither.
   getProcessView: () => client.get<ProcessView>('/results/process_view').then(r => r.data),
+  // Grid risk to production (ticket 13): the open project's grid risks in t/yr and EUR/yr.
+  getGridRiskProduction: () =>
+    client.get<GridRiskProduction>('/results/grid_risk_production', { skipErrorToast: true }).then(r => r.data),
   getLostLoad: (range?: TSRange) => client.get<{
     index: string[]; columns: string[]; data: number[][];
     // null when the capture lacks them, or VoLL was not in the solve; a

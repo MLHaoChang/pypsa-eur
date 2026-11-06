@@ -66,8 +66,8 @@ def adequacy_section_id(study_id: str) -> str:
 ADEQUACY_SECTION_IDS: tuple[str, ...] = tuple(
     adequacy_section_id(s) for s in SECTION_ORDER)
 
-SectionKind = Literal["eh", "adequacy", "worksheet", "investment", "island", "grid_readiness", "template_ledger",
-                      "network", "harness_run"]
+SectionKind = Literal["eh", "adequacy", "worksheet", "investment", "island", "grid_readiness", "grid_risk",
+                      "template_ledger", "network", "harness_run"]
 SectionStatus = Literal["ok", "not_established", "skipped"]
 
 SECTION_TITLES: dict[str, str] = {
@@ -99,6 +99,7 @@ SECTION_TITLES: dict[str, str] = {
     "investment_case": "Investment case",
     "island": "Islanding and control",
     "grid_readiness": "Grid readiness (screening)",
+    "grid_risk": "Grid risk to production",
     "template_ledger": "Template assumptions",
     # The network-study chapters (LC-21 option A, ``network_chapters``).
     "model_summary": "Model summary",
@@ -721,7 +722,8 @@ def _tables(sections: dict[str, EvidenceSection], headline: dict[str, Any],
 # ── entry points ─────────────────────────────────────────────────────────
 
 
-def _chapter_sections(ic_report, ic_stale, island, grid_readiness=None, template_ledger=None) -> dict[str, EvidenceSection]:
+def _chapter_sections(ic_report, ic_stale, island, grid_readiness=None, template_ledger=None,
+                      grid_risk=None) -> dict[str, EvidenceSection]:
     """The investment-case, island and grid-readiness chapters
     (``services/reports/chapters``), each only when its source was passed."""
     from services.reports import chapters as C
@@ -751,6 +753,14 @@ def _chapter_sections(ic_report, ic_stale, island, grid_readiness=None, template
                 section_id=C.GRID_READINESS, title=SECTION_TITLES[C.GRID_READINESS],
                 kind="grid_readiness", status="ok", source=source, engine="grid_readiness",
                 payload=payload, note="advisory screening; never blocks a run")
+    if grid_risk is not None:
+        payload = C.grid_risk_payload(grid_risk)
+        source = "grid risk to production (services.results.grid_risk_production)"
+        out[C.GRID_RISK] = _missing(C.GRID_RISK, "grid_risk", C.NO_GRID_RISK, source=source) \
+            if payload is None else EvidenceSection(
+                section_id=C.GRID_RISK, title=SECTION_TITLES[C.GRID_RISK], kind="grid_risk", status="ok",
+                source=source, engine="grid_risk_production", payload=payload,
+                note="expected values per year; the total is an upper bound (the lines may overlap)")
     if template_ledger is not None:
         payload = C.template_ledger_payload(template_ledger)
         source = "eh_template.json (template ledger)"
@@ -816,6 +826,9 @@ def _chapter_tables(sections: dict[str, EvidenceSection]) -> dict[str, EvidenceT
     gr = sections.get(C.GRID_READINESS)
     if gr is not None and gr.status == "ok" and gr.payload:
         out[C.GRID_READINESS] = C.grid_readiness_table(gr.payload, f"/sections/{C.GRID_READINESS}/payload")
+    risk = sections.get(C.GRID_RISK)
+    if risk is not None and risk.status == "ok" and risk.payload:
+        out[C.GRID_RISK] = C.grid_risk_table(risk.payload, f"/sections/{C.GRID_RISK}/payload")
     ledger = sections.get(C.TEMPLATE_LEDGER)
     if ledger is not None and ledger.status == "ok" and ledger.payload:
         out[C.TEMPLATE_LEDGER] = C.template_ledger_table(ledger.payload, f"/sections/{C.TEMPLATE_LEDGER}/payload")
@@ -834,6 +847,9 @@ def _chapter_disclosures(sections: dict[str, EvidenceSection]) -> list[str]:
     gr = sections.get(C.GRID_READINESS)
     if gr is not None and gr.status == "ok" and gr.payload:
         out += C.grid_readiness_disclosures(gr.payload)
+    risk = sections.get(C.GRID_RISK)
+    if risk is not None and risk.status == "ok" and risk.payload:
+        out += C.grid_risk_disclosures(risk.payload)
     ledger = sections.get(C.TEMPLATE_LEDGER)
     if ledger is not None and ledger.payload:
         out += C.template_ledger_disclosures(ledger.payload)
@@ -844,7 +860,7 @@ def collect_evidence(*, study_report: dict | None, eh_report: dict | None,
                      worksheet: dict | None, ic_report: dict | None = None,
                      ic_stale: bool | None = None, island: dict | None = None,
                      grid_readiness: dict | None = None, template_ledger: dict | None = None,
-                     network: dict | None = None, harness_run: dict | None = None) -> Evidence:
+                     grid_risk: dict | None = None, network: dict | None = None, harness_run: dict | None = None) -> Evidence:
     """
     Union the adequacy write-up, the EH reference design and the worksheet.
 
@@ -855,7 +871,8 @@ def collect_evidence(*, study_report: dict | None, eh_report: dict | None,
     ``ic_report`` (the stored investment case report, ``ic_stale`` its
     staleness) and ``island`` (``{report, gfm}``) add the investment and
     island chapters when passed (``chapters``), and ``grid_readiness`` (the
-    scorecard, DC grid readiness 02) its chapter; None leaves them out.
+    scorecard, DC grid readiness 02) its chapter, ``grid_risk`` (the grid risk to
+    production payload, grid-to-process 13) its; None leaves them out.
     ``network`` (``network_chapters.read_sources``) adds the network-study
     chapters (LC-21); None, a network never solved, adds none.
     ``harness_run`` (``{task, envelope, chapters, coverage}``, a harness
@@ -868,7 +885,7 @@ def collect_evidence(*, study_report: dict | None, eh_report: dict | None,
     sections.update(_eh_sections(eh_report))
     sections.update(_adequacy_sections(study_report))
     sections[WORKSHEET_SECTION] = _worksheet_section(worksheet)
-    sections.update(_chapter_sections(ic_report, ic_stale, island, grid_readiness, template_ledger))
+    sections.update(_chapter_sections(ic_report, ic_stale, island, grid_readiness, template_ledger, grid_risk))
     network_payloads = _network_sections(network, sections)
     harness_tables = _harness_section(harness_run, sections)
 

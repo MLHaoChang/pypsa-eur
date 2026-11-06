@@ -1390,3 +1390,28 @@ export interface ProcessProduct {
   inventory: ProcessInventory[]
 }
 export interface ProcessView { products: ProcessProduct[]; process_units: { name: string }[] }
+
+// Grid-to-process ticket 13: "Grid risk to production" (GET /results/grid_risk_production).
+export interface GridRiskTarget {
+  section: string; panel: string | null; component: string | null; entity: string | null; field: string | null
+}
+/** One figure of one period: t/yr and EUR/yr; null is unknown, never 0. */
+export interface GridRiskCell { t_per_year: number | null; eur_per_year: number | null; eur_flag: string | null }
+export interface GridRiskRow {
+  key: string; label: string; units?: string[]; flags: string[]; by_period: Record<string, Partial<GridRiskCell> & Record<string, unknown>>
+}
+export type GridRiskLineKey = 'ride_through' | 'island' | 'n_1' | 'connection'
+export interface GridRiskLine {
+  key: GridRiskLineKey; label: string; status: 'ok' | 'partial' | 'missing'
+  missing: string[]; missing_inputs: { word: string | null; target: GridRiskTarget | null }[]
+  flags: string[]; basis: string; source_files: string[]; stamp: Record<string, string>; stale: boolean
+  rows: GridRiskRow[]; by_period: Record<string, GridRiskCell>
+}
+export interface GridRiskProduction {
+  available: boolean; project_id?: string; omitted: 'no_process_unit' | null
+  periods?: string[]; unit?: string; currency?: string
+  eur_inputs?: { product: string; word: string; set: boolean; target: GridRiskTarget }[]
+  overlap_rule?: string; overlap_label?: string; lines?: GridRiskLine[]
+  total?: { label: string; overlap_rule: string; incomplete: boolean; lower_bound_lines: string[];
+            by_period: Record<string, GridRiskCell> }
+}

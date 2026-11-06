@@ -25,6 +25,7 @@ new profile version (``x/2``) beside the old one, or a protocol version bump.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -57,6 +58,16 @@ DIRECTIONS = {
     "evidence_identity": "returns",
     "answer_receipt": "returns",
     "checked_tool_results": "returns",
+    "checked_tool_input_additions": "accepts",
+}
+
+# Enum members a checked tool's input accepted after v1 froze its hash
+# (AA-V1-CHANGE-1: accepting more is additive). `checked_tools` hashes the
+# input schema without them, so the frozen hash holds; the list itself is an
+# `accepts` contract, so dropping a member later breaks. Only enum members of
+# top-level properties may be listed; any other input change moves the hash.
+V1_INPUT_ADDITIONS: dict[str, dict[str, list[str]]] = {
+    "ui_open_panel": {"results_tab": ["grid_risk"]},  # G2P-13 (#1194)
 }
 _META = {"version", "pending", "directions"}
 
@@ -69,6 +80,22 @@ _NOTES = {"title", "description", "default"}
 
 def _schema_sha256(schema) -> str:
     return hashlib.sha256(json.dumps(schema, sort_keys=True).encode()).hexdigest()
+
+
+def _v1_input_schema(name: str, schema: dict, additions: dict) -> dict:
+    """`schema` without the enum members `additions` lists; raise on a stale entry."""
+    schema = copy.deepcopy(schema)
+    for field, members in additions.items():
+        prop = schema.get("properties", {}).get(field)
+        if not isinstance(prop, dict) or not isinstance(prop.get("enum"), list):
+            raise ValueError(f"V1_INPUT_ADDITIONS: {name}.{field} is not an enum input")
+        absent = [m for m in members if m not in prop["enum"]]
+        if absent:
+            raise ValueError(
+                f"V1_INPUT_ADDITIONS: {name}.{field} lacks {', '.join(map(str, absent))}"
+            )
+        prop["enum"] = [v for v in prop["enum"] if v not in members]
+    return schema
 
 
 def build() -> dict:
@@ -108,6 +135,11 @@ def build() -> dict:
         raise ValueError(
             "Checked tools absent from the catalogue: " + ", ".join(missing)
         )
+    stray = sorted(set(V1_INPUT_ADDITIONS) - CHECKED_TOOLS)
+    if stray:
+        raise ValueError(
+            "V1_INPUT_ADDITIONS names unchecked tools: " + ", ".join(stray)
+        )
     unshaped = sorted(
         (set(INPUT_ADAPTERS.values()) - set(shapes.EVIDENCE))
         | (CHECKED_TOOLS ^ set(shapes.TOOL_RESULTS))
@@ -123,8 +155,16 @@ def build() -> dict:
         "effect_guard": EffectContract.model_json_schema(),
         "profiles": profiles,
         "checked_tools": {
-            name: _schema_sha256(tools[name]["input_schema"])
+            name: _schema_sha256(
+                _v1_input_schema(
+                    name, tools[name]["input_schema"], V1_INPUT_ADDITIONS.get(name, {})
+                )
+            )
             for name in sorted(CHECKED_TOOLS)
+        },
+        "checked_tool_input_additions": {
+            name: {field: {"enum": list(members)} for field, members in fields.items()}
+            for name, fields in sorted(V1_INPUT_ADDITIONS.items())
         },
         "evidence_identity": {
             key: shapes.schema(model) for key, model in shapes.EVIDENCE.items()

@@ -337,7 +337,10 @@ def _bounded_tools(tools: list[dict[str, Any]], query: str = "", history=None) -
     if len(tools) <= _OPENAI_TOOL_LIMIT:
         return tools
     query = query.lower()[:8000]
-    words = {w for w in re.findall(r"[a-z0-9]+", query) if len(w) > 2} - _SELECTION_STOP_WORDS
+    tokens = re.findall(r"[a-z0-9]+", query)
+    words = {w for w in tokens if len(w) > 2} - _SELECTION_STOP_WORDS
+    # A name may join two spelled-out words ("load flow" -> get_loadflow_summary).
+    compounds = {a + b for a, b in zip(tokens, tokens[1:])}
     intent = {name for triggers, names in _SELECTION_INTENTS if words & triggers for name in names}
     recent = []
     for message in list(history or [])[-32:]:
@@ -362,7 +365,7 @@ def _bounded_tools(tools: list[dict[str, Any]], query: str = "", history=None) -
         explicit = bool(re.search(r"(?<![a-z0-9_])" + re.escape(name) + r"(?![a-z0-9_])", query))
         name_words, description_words = _tool_vocabulary(name, tool.get("description", ""))
         return (int(name in _HARNESS_TOOL_NAMES), int(name in task_tools), int(name in discovered), int(explicit), int(name in intent), int(name in recent),
-                4 * len(words & name_words) + len(words & description_words), -index)
+                4 * len((words | compounds) & name_words) + len(words & description_words), -index)
     chosen = {i for i, _ in sorted(enumerate(tools), key=rank, reverse=True)[:_OPENAI_TOOL_LIMIT]}
     return [tool for i, tool in enumerate(tools) if i in chosen]
 

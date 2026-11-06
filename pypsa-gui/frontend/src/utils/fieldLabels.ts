@@ -26,6 +26,11 @@ export const FIELD_LABELS: Record<string, string> = {
   i_start_pu: 'Start current multiple',
   ride_through_curve: 'Ride-through curve',
   restart_time_h: 'Restart time',
+  // Grid risk to production (G2P-13): the asset form's words (services/asset_schema/fields.py).
+  outage_rate_value: 'Forced-outage rate',
+  mttr_hours: 'Mean time to repair',
+  lost_production_value: 'Lost-production value',
+  mwh_per_t: 'Energy per tonne',
   single_phase_share: 'Single-phase share',
   temperature_c: 'Supply temperature',
   pressure_bar: 'Header pressure',

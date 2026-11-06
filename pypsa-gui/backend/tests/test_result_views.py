@@ -52,7 +52,7 @@ def test_load_flow_is_the_only_view_that_proves_displayed_data_today():
 
 def test_guided_labels_follow_guided_tabs():
     guided = {v.tab for v in rv.RESULT_VIEWS if v.guided_label}
-    assert guided == {'summary', 'adequacy', 'fmea', 'flows', 'loadshape'}
+    assert guided == {'summary', 'adequacy', 'fmea', 'flows', 'loadshape', 'grid_risk'}
 
 
 def test_gated_views_wait_for_their_tools():
@@ -94,7 +94,7 @@ CARD_TABS = {
     'capacity': {'build', 'operation', 'curtailment', 'costs_prices'},
     'grid': {'load_flow', 'grid_code', 'electrical_design', 'n1_security'},
     'control': {'island', 'grid_forming', 'dynamics'},
-    'reliability': {'adequacy', 'outage_screening', 'stress_fmea'},
+    'reliability': {'adequacy', 'outage_screening', 'stress_fmea', 'grid_risk'},
     'commercial': {'bill', 'contracts_revenue', 'investment_case', 'parties'},
     'handoff': {'reports', 'exports', 'specialist_packet'},
 }
@@ -128,6 +128,7 @@ BY_CARD = {
     'grid_forming': ('control', 'presets', 'grid_forming'),
     'adequacy': ('reliability', 'goal_study', 'adequacy'),
     'fmea': ('reliability', 'stress', 'stress_fmea'),
+    'grid_risk': ('reliability', 'goal_study', 'grid_risk'),  # G2P-13
     'investment': ('commercial', 'investment_case', 'investment_case'),
     'asset': (None, None, None),
 }
