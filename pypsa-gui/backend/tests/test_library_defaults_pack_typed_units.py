@@ -618,7 +618,7 @@ def test_a_dc_pv_row_is_scaled_by_the_generators_dc_ac_ratio(tmp_path, monkeypat
 
 
 @pytest.mark.parametrize("ratio,why", [
-    ("absent", "DC/AC ratio"), (float("nan"), "DC/AC ratio"), (float("inf"), "finite"),
+    ("absent", "(not declared)"), (float("nan"), "(not declared)"), (float("inf"), "finite"),
     (0.0, "above 0"), (-1.0, "above 0"), (3.5, "at most 3"), (125.0, "125 % is 1.25"),
     ("abc", "expected a number")])
 def test_a_dc_pv_row_without_a_valid_dc_ac_ratio_refuses_and_writes_nothing(tmp_path, monkeypatch, ratio, why):
