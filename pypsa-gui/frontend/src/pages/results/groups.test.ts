@@ -6,7 +6,7 @@ import { CARD_GROUPS, RESULT_GROUPS, cardPlaceOf, groupOf, type ResultsTab } fro
 const ALL_TABS: ResultsTab[] = [
   'summary', 'overview', 'capex', 'dispatch', 'loadflow', 'prices', 'emissions',
   'economics', 'curtailment', 'lostload', 'adequacy', 'storage', 'asset', 'fmea', 'investment', 'flows', 'loadshape',
-  'grid_code', 'electrical_design', 'island', 'grid_forming',
+  'grid_code', 'electrical_design', 'island', 'grid_forming', 'grid_risk',
 ]
 
 describe('Results groups (UX overhaul S3, owner decisions D1a / D2a)', () => {
@@ -66,6 +66,6 @@ describe('Results card groups (W10 R1)', () => {
       expect({ id: m[1], ...place }).toEqual({ id: m[1], group: card, cardTab })
       seen++
     }
-    expect(seen).toBe(19)
+    expect(seen).toBe(20)
   })
 })

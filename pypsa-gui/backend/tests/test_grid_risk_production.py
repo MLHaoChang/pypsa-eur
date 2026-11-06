@@ -7,6 +7,7 @@ grid is cut in hour 2, so the solve itself loses tonnes (the connection line). T
 by hand in the shape `restart_campus` writes them (12b).
 """
 import math
+from pathlib import Path
 
 import pandas as pd
 import pypsa
@@ -281,3 +282,41 @@ def test_on_a_and_b_every_line_names_its_source_or_its_missing_input(tid):
         assert ln["status"] != "missing" or ln["missing"], ln["key"]
     # Neither example has a site transformer Link: N-1 names the missing input (GK A, Q2).
     assert "site transformer" in _line(out, "n_1")["missing"][0]
+
+
+# ── the frontend's words (UX 10, condition 5): parity with the asset form ─────
+
+_FRONTEND = Path(__file__).resolve().parents[2] / "frontend" / "src"
+
+
+def _ts_map(path, name):
+    import re
+
+    text = path.read_text()
+    body = text[text.index(f"{name}: Record<string, string> = {{"):]
+    body = body[: body.index("\n}")]
+    return dict(re.findall(r"^\s+(\w+): ('[^']*'|\w+),", body, flags=re.M))
+
+
+def test_every_missing_word_has_the_forms_word_in_the_frontend(net, tmp_path):
+    from services.asset_schema.fields import fields_for
+
+    labels = _ts_map(_FRONTEND / "utils" / "fieldLabels.ts", "FIELD_LABELS")
+    places = _ts_map(_FRONTEND / "pages" / "results" / "GridRiskTab.tsx", "PLACE_WORDS")
+    words = {G.CAMPUS_RUN[1], "site_transformer", "grid_import", "run", "ride_through_curve", "outage_rate_value",
+             "mttr_hours", "lost_production_value", "mwh_per_t", "marginal_cost"}
+    # Every word the module can emit (a no-campus run, no site transformer, no value) is among them.
+    for n, campus in ((net, None), (_network(trafo=False, lpv=None), None)):
+        out = G.grid_risk_production(n, campus=campus)
+        emitted = {m["word"] for ln in out["lines"] for m in ln["missing_inputs"]} | {
+            i["word"] for i in out["eur_inputs"]}
+        assert emitted <= words, emitted - words
+    form = {}
+    for comp in ("Link", "Bus", "Generator"):
+        form.update({f.key: f.label for f in fields_for(comp)})
+    for w in sorted(words):
+        if w in places:
+            continue
+        assert w in labels, f"{w}: no word in FIELD_LABELS"
+        if w in ("outage_rate_value", "mttr_hours", "lost_production_value", "ride_through_curve", "mwh_per_t"):
+            assert labels[w].strip("'") == form[w], (w, labels[w], form[w])
