@@ -1027,7 +1027,10 @@ def test_a_tasked_session_whose_next_step_is_another_call_still_reads_the_store(
     """U2c: a task merely exists; this call is not its next step."""
     rows, seen, calls = store
     _store_row(rows)
-    for step in (_step("pending", OTHER), _step("pending", ARGS, tool="run_simulation")):
+    for step in (
+        _step("pending", OTHER),
+        _step("pending", ARGS, tool="run_simulation"),
+    ):
         session = _task(monkeypatch, [step])
         error = _error(_call(monkeypatch, session, TOOL, ARGS))
         assert error["error_kind"] == job_holds.PENDING, (step, error)
