@@ -1018,15 +1018,40 @@ def test_a_reset_row_on_an_older_ledger_comes_back_in_its_own_money_year(
     for k in keys:
         want = next(r for r in pin.rows if r.key == k)
         assert (rows[k]["value"], rows[k]["currency_year"]) == (want.value, want.currency_year), k
-    # The study stays in 2020 (follow-up issue): its case is refused, and the
-    # refusal names the setting that fixes it (GK B, money-year 01).
+    # Money-year 02: the study year followed the 2020 ledger, so the re-seed
+    # moves it to the pin's 2025 and the case reads.
+    assert not any(n.startswith("study_currency_year_") for n in led["honesty_notes"])
+    got = client.get(f"/api/projects/reset-1005/studies/{sid}").json()
+    assert got["currency_year"] == 2025
     assert client.post(f"/api/projects/reset-1005/studies/{sid}/run", json={}).status_code == 202
     assert wait_run(client, "reset-1005", sid)["status"] == "done"
     case = client.get(f"/api/projects/reset-1005/studies/{sid}/options/bess_2h/case")
-    assert case.status_code == 422, case.text
-    detail = case.json()["detail"]
-    assert detail["error_kind"] == "currency_year_mixed"
-    assert "set the study's currency year to 2025 in its settings" in detail["message"]
+    assert case.status_code == 200, case.text
+
+
+def test_a_reseed_leaves_a_study_year_the_user_set_apart_from_the_ledger(
+        client, api_project, studies_on, fake, project_storage_dir):
+    """
+    Money-year issue 02: a study year that differed from the old ledger's
+    money rows was the user's choice; the re-seed leaves it, and the ledger
+    names the difference (BC-S2-4).
+    """
+    from services.study import library as L
+    from services.study import questions as Q
+    from services.study import store
+
+    sid = _setup(client, api_project, "reseed-kept")
+    base = project_storage_dir("reseed-kept")
+    study = store.load_study(base, sid)
+    old = L.seed_ledger(Q.get_question(study.question_id), study.intake,
+                        L.load_defaults(L.WP0_PACK_VERSION))
+    store.save_study(base, study.model_copy(update={
+        "ledger": old, "ledger_version": old.ledger_version, "currency_year": 2023}))
+    r = client.put(f"/api/projects/reseed-kept/studies/{sid}/ledger", json={"reseed": True})
+    assert r.status_code == 200, r.text
+    assert client.get(f"/api/projects/reseed-kept/studies/{sid}").json()["currency_year"] == 2023
+    assert any(n.startswith("study_currency_year_2023_differs")
+               for n in r.json()["ledger"]["honesty_notes"])
 
 
 def test_a_ledger_naming_an_unshipped_pack_is_refused_never_read_on_the_pin(

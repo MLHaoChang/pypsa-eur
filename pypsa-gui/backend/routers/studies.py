@@ -1117,6 +1117,13 @@ def put_ledger(study_id: str, body: LedgerPut,
     with _WRITE_LOCK:
         study = _load(project, study_id)
         ledger, _stored = _current_ledger(study)
+        if body.reseed and study.currency_year is not None \
+                and study_ledger.money_years(ledger) == [study.currency_year]:
+            # Money-year 02: a study year that followed the old ledger's
+            # money rows follows the re-seed onto the pin; a year the user
+            # set to something else stays (BC-S2-4 then names it).
+            study = study.model_copy(update={
+                "currency_year": int(_library_or_500().finance["currency_year"])})
         try:
             ledger = _ledger_after(study, ledger, body, str(user.id) if user is not None else None, _now())
         except (study_ledger.LedgerEditError, study_library.LibraryError) as exc:

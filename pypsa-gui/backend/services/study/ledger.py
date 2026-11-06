@@ -52,6 +52,7 @@ __all__ = [
     "apply_user_row", "diff_against_defaults", "key_driver_rows",
     "ledger_rows_from_csv", "ledger_to_csv", "load_provenance",
     "maturity_from_ledger", "refresh_derived", "reseed_ledger", "reset_rows",
+    "money_years",
     "with_study_currency_year",
 ]
 
@@ -295,6 +296,12 @@ def reset_rows(ledger: AssumptionsLedger, keys: Iterable[str],
 _STUDY_YEAR_NOTE = "study_currency_year_"
 
 
+def money_years(ledger: AssumptionsLedger) -> list[int]:
+    """The sorted currency years of the ledger's money rows (a ``EUR/...`` unit)."""
+    return sorted({r.currency_year for r in ledger.rows
+                   if r.currency_year is not None and r.unit.startswith("EUR")})
+
+
 def with_study_currency_year(ledger: AssumptionsLedger,
                              study_year: int | None) -> AssumptionsLedger:
     """
@@ -303,8 +310,7 @@ def with_study_currency_year(ledger: AssumptionsLedger,
     Nothing is converted. Idempotent; a matching or unset year leaves no note.
     """
     notes = [n for n in ledger.honesty_notes if not n.startswith(_STUDY_YEAR_NOTE)]
-    years = sorted({r.currency_year for r in ledger.rows
-                    if r.currency_year is not None and r.unit.startswith("EUR")})
+    years = money_years(ledger)
     if study_year is not None and years and years != [study_year]:
         notes.append(f"{_STUDY_YEAR_NOTE}{study_year}_differs_from_ledger_"
                      f"{'_'.join(map(str, years))}_nothing_converted")
