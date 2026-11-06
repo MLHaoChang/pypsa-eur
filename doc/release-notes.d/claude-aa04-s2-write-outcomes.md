@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant checks its component edits against the network. Updating, adding or deleting components through the chat reads the rows back afterwards and marks the call done, partly done (with a count such as "3 of 5 updated"), failed or outcome unknown, instead of trusting the handler's reply.

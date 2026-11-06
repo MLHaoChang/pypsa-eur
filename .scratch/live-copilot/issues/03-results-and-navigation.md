@@ -694,3 +694,5 @@ GK B (25) plan GO (P1–P5, Comments). Branch `claude/lc03-t10-generation-race`,
 - Not covered in the browser: pending speech/highlight and filter/entity/time controls on a
   past run; speech is only reachable with live LiveKit and the past-run view is a read-only
   retained-evidence render with no selection controls, so selection is covered at the ACK level.
+
+2026-11-05, UX (9) ruling relayed by the LC-03 builder: a past-run view (discussedRun) stays on screen after a new chat. "UX (9): option 1, leave it. The user opened that past run, and a new chat is about the conversation, not the view, so it shouldn't move what's on screen. That's the same principle as "a run never jumps panels on its own". The view is labelled as a past run and has its own "back to latest", so it isn't a stale answer. No ticket needed."

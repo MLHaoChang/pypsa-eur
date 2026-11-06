@@ -445,6 +445,8 @@ class _StreamOutcome:
     # normalised `message_done` event instead and travel as plain data.
     final_blocks: list[dict[str, Any]] = field(default_factory=list)
     final_usage: dict[str, int] = field(default_factory=dict)
+    # The wire stopped before the model finished (token limit or filter).
+    final_truncated: bool = False
     stop_turn: bool = False
     # Threaded through rather than owned here: see the note in
     # `_stream_assistant_message`. One downgrade per TURN, and this helper is
@@ -517,6 +519,7 @@ def _stream_assistant_message(
         emitted_this_attempt = False
         final_blocks: list[dict[str, Any]] = []
         final_usage: dict[str, int] = {}
+        final_truncated = False
         # Drain the streamed events purely for their SSE side-effects (token /
         # thinking / tool_preparing frames). The blocks that get replayed to
         # the provider next turn are read from the `message_done` event below,
@@ -557,6 +560,7 @@ def _stream_assistant_message(
                 elif ev.type == "message_done":
                     final_blocks = ev.blocks
                     final_usage = ev.usage
+                    final_truncated = ev.truncated
                 # "ping": abort-check only, no frame — every other upstream
                 # event surfaces here so the per-event abort check above keeps
                 # its latency.
@@ -662,6 +666,7 @@ def _stream_assistant_message(
     return _StreamOutcome(
         final_blocks=final_blocks,
         final_usage=final_usage,
+        final_truncated=final_truncated,
         model_fallback_used=model_fallback_used,
     )
 
@@ -2313,6 +2318,7 @@ def _run_turn_body(
         # once per assistant STEP — see its docstring.
         if clarifying_scope:
             final_blocks, final_usage = [], {}
+            final_truncated = False
         else:
             stream_outcome = yield from _stream_assistant_message(
                 session,
@@ -2326,6 +2332,7 @@ def _run_turn_body(
                 return
             final_blocks = stream_outcome.final_blocks
             final_usage = stream_outcome.final_usage
+            final_truncated = stream_outcome.final_truncated
             task_rounds += 1
 
         if final_usage:
@@ -2373,11 +2380,12 @@ def _run_turn_body(
                 from services.assurance_records import AccessRevoked, ProjectDeleted
 
                 try:
-                    session.assurance_turn.review_interpretations(
-                        assistant_blocks, provider, session.model, turn_ctx
-                    )
+                    if not final_truncated:
+                        session.assurance_turn.review_interpretations(
+                            assistant_blocks, provider, session.model, turn_ctx
+                        )
                     assistant_blocks = session.assurance_turn.commit(
-                        assistant_blocks, turn_ctx
+                        assistant_blocks, turn_ctx, truncated=final_truncated
                     )
                 except ProjectDeleted:
                     logger.warning("checked answer withdrawn: the project was deleted")
@@ -3385,6 +3393,7 @@ def _dispatch_real_tool_call(
         return
 
     task_ticket = None
+    write_note = None
     try:
 
         def require_current_confirmation():
@@ -3490,6 +3499,12 @@ def _dispatch_real_tool_call(
         # tool costs no snapshot. See `_snapshot_for_turn_undo`.
         if effect_fresh and not external:  # an MCP tool edits no project
             _snapshot_for_turn_undo(session, tool_name)
+        # Issue 04 S2: the call's own request and each row's prior presence,
+        # after the edit counter's bump, so a later bump is another writer.
+        if effect_fresh and not external and session.assurance_turn is None:
+            from harness import outcomes as _write_outcomes
+
+            write_note = _write_outcomes.note_write(tool_name, args or {})
 
         # Execute via the chat_tools dispatcher. `handler` was resolved above the
         # confirmation gate — see Improvement #19 there.
@@ -4236,14 +4251,20 @@ def _dispatch_real_tool_call(
 
     if (
         session.assurance_turn is None
-        and tool_name in outcomes.JOB_TOOLS
-        and isinstance(result_for_model, dict)
+        and tool_name in outcomes.JOB_TOOLS | outcomes.WRITE_TOOLS
+        and (
+            isinstance(result_for_model, dict)
+            # delete_component returns nothing; its outcome still needs a home.
+            or (tool_name in outcomes.WRITE_TOOLS and result_for_model is None)
+        )
     ):
-        # Issue 04 (A3.1/A3.3): the outcome from an independent read, never
-        # the handler's own status fields. First, so a truncated preview keeps it.
+        # Issue 04 (A3.1/A3.3/A3.4): the outcome from an independent read, never
+        # the handler's own fields. First, so a truncated preview keeps it.
         result_for_model = {
-            "_outcome": outcomes.project(tool_name, args or {}, tool_use_id),
-            **{k: v for k, v in result_for_model.items() if k != "_outcome"},
+            "_outcome": outcomes.project_write(write_note)
+            if tool_name in outcomes.WRITE_TOOLS
+            else outcomes.project(tool_name, args or {}, tool_use_id),
+            **{k: v for k, v in (result_for_model or {}).items() if k != "_outcome"},
         }
     if session.assurance_turn is not None:
         projection = session.assurance_turn.result_projection(

@@ -1502,6 +1502,24 @@ def su_spilled(ctx: Ctx):
     return _wsum(ctx, series_for(ctx, "spill"))
 
 
+def su_inflow(ctx: Ctx):
+    """
+    Natural inflow. Time-varying when `storage_units_t.inflow` carries a
+    profile, otherwise the static column broadcast across the horizon.
+    """
+    import pandas as pd
+
+    s = series_for(ctx, "inflow")
+    if s is not None:
+        return s
+    v = _static(ctx, "inflow")
+    return None if v is None else pd.Series(v, index=ctx.sns)
+
+
+def su_inflow_mwh(ctx: Ctx):
+    return _wsum(ctx, su_inflow(ctx))
+
+
 def su_round_trip_efficiency(ctx: Ctx):
     """
     Realised, not nameplate: energy out ÷ energy in over the horizon. Includes

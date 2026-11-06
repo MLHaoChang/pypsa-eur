@@ -78,14 +78,14 @@ describe('tool outcome marks', () => {
     const full = { _outcome: { version: 1, outcome: 'running', job_id: 'fg:"x}', reason: null }, log: 'y'.repeat(5000), status: 'completed' }
     const preview = JSON.stringify(full, null, 0).replace(/^\{"_outcome":/, '{"_outcome": ').slice(0, 4000) + '...'
     expect(toolOutcomeOf({ _truncated: true, length: 9000, preview }, 'run_simulation'))
-      .toEqual({ outcome: 'running', job_id: 'fg:"x}', reason: null })
+      .toEqual({ outcome: 'running', job_id: 'fg:"x}', reason: null, counts: null })
   })
 
   it('reads the outcome, job id and reason; an empty job id is none', () => {
     expect(toolOutcomeOf({ _outcome: { version: 1, outcome: 'running', job_id: 'fg:1' } }))
-      .toEqual({ outcome: 'running', job_id: 'fg:1', reason: null })
+      .toEqual({ outcome: 'running', job_id: 'fg:1', reason: null, counts: null })
     expect(toolOutcomeOf({ _outcome: { version: 1, outcome: 'uncertain', job_id: '', reason: 'adapter_pending' } }))
-      .toEqual({ outcome: 'uncertain', job_id: null, reason: 'adapter_pending' })
+      .toEqual({ outcome: 'uncertain', job_id: null, reason: 'adapter_pending', counts: null })
   })
 })
 
@@ -156,5 +156,39 @@ describe('current tool outcome', () => {
     expect(currentToolOutcome([{ id: 'a', role: 'tool', ts: 0, tool_name: 'list_components', tool_result: { ok: true } }], 0)).toBeNull()
     expect(currentToolOutcome([{ id: 'a', role: 'tool', ts: 0, tool_name: 'run_simulation' }], 0)).toBeNull()
     expect(currentToolOutcome([{ id: 'a', role: 'assistant', ts: 0, tool_result: { _outcome: { outcome: 'running' } } }], 0)).toBeNull()
+  })
+})
+
+describe('write outcomes (issue 04 S2)', () => {
+  const write = (tool: string, outcome: string, counts: unknown) => ({
+    id: 'w', role: 'tool', ts: at(14, 2), tool_name: tool, origin_project: 'Demo',
+    tool_result: { _outcome: { version: 1, outcome, reason: null, counts } },
+  })
+
+  it.each([
+    ['bulk_update_components', '– bulk_update_components (partly done: 3 of 5 updated)'],
+    ['batch_create_components', '– batch_create_components (partly done: 3 of 5 added)'],
+    ['delete_component', '– delete_component (partly done: 3 of 5 deleted)'],
+    ['batch_delete_components', '– batch_delete_components (partly done: 3 of 5 deleted)'],
+  ])('puts the count on a partly done %s line', (tool, line) => {
+    const block = toolOutcomeOf({ _outcome: { version: 1, outcome: 'partial', counts: { requested: 5, done: 3 } } }, tool)!
+    expect(toolOutcomeLine(tool, block)).toBe(line)
+    expect(toolOutcomeWords(currentToolOutcome([write(tool, 'partial', { requested: 5, done: 3 })], 0)!))
+      .toBe(line.slice(line.indexOf('(') + 1, -1))
+  })
+
+  it.each([
+    ['completed', { requested: 5, done: 5 }, 'done'],
+    ['partial', null, 'partly done'],
+    ['partial', { requested: 5 }, 'partly done'],
+    ['partial', { requested: 2, done: 3 }, 'partly done'],
+    ['partial', { requested: 5, done: -1 }, 'partly done'],
+  ])('keeps the bare word for %s with counts %j', (outcome, counts, words) => {
+    expect(toolOutcomeWords(currentToolOutcome([write('bulk_update_components', outcome, counts)], 0)!)).toBe(words)
+  })
+
+  it('never counts a job tool', () => {
+    const block = toolOutcomeOf({ _outcome: { version: 1, outcome: 'partial', counts: { requested: 5, done: 3 } } }, 'run_ac_pf_stage')!
+    expect(toolOutcomeLine('run_ac_pf_stage', block)).toBe('– run_ac_pf_stage (partly done)')
   })
 })

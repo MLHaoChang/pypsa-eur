@@ -3,7 +3,7 @@
 
 # 21d — Deliver the L1 data request's notice through `runner._wait_for_user`
 
-Status: ready-for-agent
+Status: done (#1136, b3b94cc6)
 Type: task
 Blocked by: #1127 (holds `harness/runner.py`; issue 21 has merged, #1100)
 Gated: yes (GK B)

@@ -353,10 +353,12 @@ def expire_engine(task_path, ticket, *, instance, now, lapsed_ok=False) -> bool:
         deadline = (step.get("job") or {}).get("deadline_at")
         if not isinstance(deadline, (int, float)) or now < deadline:
             return False
+        # The loop must not hold `restore="final"` after its step settled: stop it
+        # (GK A (12)). Stopped BEFORE the settle, so a reader that sees the step
+        # settled `timed_out` always sees the loop stopped.
+        tasks._abort_engine(task, step)
         if tasks.settle_engine(task_path, ticket, None, "timed_out") is None:
             return False
-    # The loop must not hold `restore="final"` after its step settled: stop it (GK A (12)).
-    tasks._abort_engine(task, step)
     return True
 
 
