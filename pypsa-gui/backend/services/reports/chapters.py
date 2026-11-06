@@ -418,7 +418,7 @@ def template_ledger_disclosures(payload: dict) -> list[str]:
 # parity with the tab's maps.
 
 _NBSP = " "
-GRID_RISK_PLACE_WORDS = {"campus_run": "Dips and restarts", "site_transformer": "Site transformer",
+GRID_RISK_PLACE_WORDS = {"campus_run": "campus study run", "site_transformer": "Site transformer",
                          "grid_import": "Grid connection", "run": "Run"}
 GRID_RISK_FLAG_WORDS = {
     "no_inventory_credit": "no inventory credit, so it is conservative",
@@ -519,9 +519,10 @@ def grid_risk_payload(source: dict | None) -> dict | None:
 
 
 def _grid_risk_status(line: dict) -> str:
+    """The tab's `statusWords`: never a raw key."""
     if line["stale"]:
         return "out of date"
-    return {"missing": "missing", "partial": "lower bound"}.get(line["status"], "ok")
+    return {"missing": "missing", "partial": "partial"}.get(line["status"], "complete")
 
 
 def _grid_risk_values(c: dict | None, missing_words: list[str] | None = None) -> tuple[str, str]:

@@ -23,7 +23,7 @@ const NBSP = ' '
 
 /** The places a missing input can be that are not a form field, in the app's words. */
 const PLACE_WORDS: Record<string, string> = {
-  campus_run: DIPS_TITLE,
+  campus_run: 'campus study run',
   site_transformer: 'Site transformer',
   grid_import: 'Grid connection',
   run: 'Run',
@@ -54,6 +54,17 @@ const FLAG_WORDS: Record<string, string> = {
   mttr_missing: 'no mean time to repair',
   lost_production_capture_stale: 'the network changed since the solve',
   role_from_name: 'the shortfall is read from its name',
+}
+
+/** A line that rests on demo dip statistics (GK A 12b-3: the demo label stays visible). */
+export function isDemo(line: GridRiskLine): boolean {
+  return line.flags.includes('dip_stats_source:demo')
+}
+
+/** The Expert table's status, in the tile's words (never a raw key). */
+export function statusWords(line: GridRiskLine): string {
+  if (line.stale) return 'out of date'
+  return line.status === 'missing' ? 'missing' : line.status === 'partial' ? 'partial' : 'complete'
 }
 
 /** A flag in plain words, never a key. */
@@ -156,7 +167,9 @@ function LineTile({ line, period, eurTarget, mode }: {
         </>
       )}
       <span className="text-[11px] text-muted">{SOURCE_WORDS[line.key]}</span>
-      {(line.key === 'ride_through' || line.key === 'island') && (
+      {isDemo(line) && <span data-testid={`${id}-demo`}><Tag tone="warn">demo</Tag></span>}
+      {/* One link per destination: a missing line's "Missing: campus study run ›" already goes there. */}
+      {(line.key === 'ride_through' || line.key === 'island') && line.status !== 'missing' && (
         <GoLink target={CAMPUS_LINK} label={DIPS_TITLE} testId={`${id}-dips`} mode={mode} />
       )}
     </div>
@@ -180,6 +193,12 @@ function TotalTile({ data, period, eurTarget, mode }: {
         <Tag tone="warn">upper bound</Tag>
         <span className="text-[11px] text-muted">the lines may overlap</span>
       </span>
+      {(data.lines ?? []).some(l => l.status !== 'missing' && isDemo(l)) && (
+        <span data-testid="grid-risk-total-demo" className="inline-flex flex-wrap items-baseline gap-1.5">
+          <Tag tone="warn">demo</Tag>
+          <span className="text-[11px] text-muted">includes demo dip statistics</span>
+        </span>
+      )}
       {total.incomplete && (
         <span data-testid="grid-risk-total-incomplete" className="inline-flex flex-wrap items-baseline gap-1.5">
           <Tag tone="warn">incomplete</Tag>
@@ -234,8 +253,7 @@ function ExpertTable({ lines, period }: { lines: GridRiskLine[]; period: string 
                 <td className={`${td} ${sub ? 'pl-5 text-muted' : 'font-medium'}`}>{label}</td>
                 <td className={`${td} tabular-nums whitespace-nowrap`}>{t}</td>
                 <td className={`${td} tabular-nums whitespace-nowrap`}>{eur}</td>
-                <td className={td}>{sub ? '' : (line.stale ? 'out of date' : line.status === 'missing' ? 'missing'
-                  : line.status === 'partial' ? 'lower bound' : 'ok')}</td>
+                <td className={td}>{sub ? '' : statusWords(line)}</td>
                 <td className={`${td} max-w-[22rem] text-muted`}>{sub ? '' : (line.basis || line.missing.join('; '))}</td>
                 <td className={`${td} text-muted`}>{flags.filter(f => f !== 'stale').map(flagWords).join('; ')}</td>
                 <td className={`${td} text-muted`}>

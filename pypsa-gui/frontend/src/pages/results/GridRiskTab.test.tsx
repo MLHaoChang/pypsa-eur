@@ -75,7 +75,7 @@ describe('Grid risk to production (G2P-13)', () => {
     const missing = line('island', { status: 'missing', by_period: {},
       missing_inputs: [{ word: 'campus_run', target: { section: 'results', panel: 'campusResults', component: null, entity: null, field: null } }] })
     render(<GridRiskBody data={data([missing])} mode="expert" />)
-    expect(screen.getByTestId('grid-risk-island').textContent).toContain('Missing:Dips and restarts ›')
+    expect(screen.getByTestId('grid-risk-island').textContent).toContain('Missing:campus study run ›')
     fireEvent.click(screen.getByTestId('grid-risk-island-missing-0'))
     // The campus results are a Results tab: the Control tabs' jump, which keeps Back (the alias would drop it).
     expect(nav.showResultsTab).toHaveBeenCalledWith('grid_code')
@@ -117,6 +117,27 @@ describe('Grid risk to production (G2P-13)', () => {
     expect(screen.queryByTestId('grid-risk-n_1-dips')).toBeNull()
   })
 
+  it('a missing campus line links once, from its Missing input', () => {
+    const missing = line('ride_through', { status: 'missing', by_period: {},
+      missing_inputs: [{ word: 'campus_run', target: { section: 'results', panel: 'campusResults', component: null, entity: null, field: null } }] })
+    render(<GridRiskBody data={data([missing])} mode="guided" />)
+    expect(screen.getByTestId('grid-risk-ride_through').textContent).toContain('Missing:campus study run ›')
+    expect(screen.queryByTestId('grid-risk-ride_through-dips')).toBeNull()
+  })
+
+  it('a line on demo dip statistics carries a demo Tag, and so does the total, in both modes', () => {
+    for (const mode of ['guided', 'expert'] as const) {
+      const { unmount } = render(<GridRiskBody data={data([line('ride_through', { flags: ['dip_stats_source:demo'] }),
+        line('n_1')])} mode={mode} />)
+      expect(screen.getByTestId('grid-risk-ride_through-demo').textContent).toBe('demo')
+      expect(screen.queryByTestId('grid-risk-n_1-demo')).toBeNull()
+      expect(screen.getByTestId('grid-risk-total-demo').textContent).toContain('demo')
+      unmount()
+    }
+    render(<GridRiskBody data={data([line('n_1')])} mode="guided" />)
+    expect(screen.queryByTestId('grid-risk-total-demo')).toBeNull()
+  })
+
   it('multi-period: one selector, the period named, never a horizon sum', () => {
     const l = line('connection', { by_period: { '2030': cell(10, 1000), '2040': cell(20, 2000) } })
     const d = data([l], { periods: ['2030', '2040'] })
@@ -148,6 +169,15 @@ describe('Grid risk to production (G2P-13)', () => {
     expect(table.textContent).toContain('run 2026-11-06 08:00:00 UTC')
     expect(screen.getByTestId('grid-risk-row-island-outside_blocks').textContent).toContain('no inventory credit, so it is conservative')
     expect(table.textContent).not.toContain('no_inventory_credit')
+    expect(screen.getByTestId('grid-risk-row-island').textContent).toContain('complete')
+  })
+
+  it("Expert's status column uses the tile's words, never a raw key", () => {
+    render(<GridRiskBody data={data([line('ride_through'), line('island', { status: 'partial', flags: ['lower_bound'] }),
+      line('n_1', { status: 'missing', by_period: {} }), line('connection', { stale: true, flags: ['stale'] })])} mode="expert" />)
+    const status = (k: string) => screen.getByTestId(`grid-risk-row-${k}`).children[3].textContent
+    expect([status('ride_through'), status('island'), status('n_1'), status('connection')])
+      .toEqual(['complete', 'partial', 'missing', 'out of date'])
   })
 
   it('names flags and inputs in words', () => {

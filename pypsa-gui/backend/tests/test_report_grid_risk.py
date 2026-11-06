@@ -73,7 +73,7 @@ def test_a_missing_line_reads_missing_with_the_forms_word_never_zero(net):
     table, rows = _rows(ev)
     for key in ("ride_through", "island"):
         r = rows[G.LABELS[key]]
-        assert r[1] == "Missing: Dips and restarts" and r[2] == "—" and r[3] == "missing", r
+        assert r[1] == "Missing: campus study run" and r[2] == "—" and r[3] == "missing", r
     assert rows["Total"][3] == "upper bound, incomplete"
     assert G.LABELS["outside_blocks"] not in rows                       # no island rows without the line
     text = " ".join(ev.required_disclosures)
@@ -95,6 +95,7 @@ def test_an_out_of_date_line_says_so_never_stale(net, tmp_path):
     ev = _collect(grid_risk=_section(net, campus))
     table, rows = _rows(ev)
     assert rows[G.LABELS["island"]][3] == "out of date"
+    assert rows[G.LABELS["connection"]][3] == "complete"
     flat = " ".join(" ".join(r) for r in table.rows) + " ".join(ev.required_disclosures)
     assert "stale" not in flat and "out of date" in " ".join(ev.required_disclosures)
 
@@ -135,13 +136,10 @@ def test_the_words_are_the_tabs():
     assert f"GRID_RISK_TITLE = '{C.TITLES[C.GRID_RISK]}'" in text
     flags = {k: v.strip("'\"") for k, v in _ts_map(_TAB, "FLAG_WORDS").items()}
     assert flags == C.GRID_RISK_FLAG_WORDS
-    places = _ts_map(_TAB, "PLACE_WORDS")
-    assert {k for k in places} == set(C.GRID_RISK_PLACE_WORDS)
-    for k, v in places.items():
-        assert v == "DIPS_TITLE" or v.strip("'") == C.GRID_RISK_PLACE_WORDS[k], k
-    assert "DIPS_TITLE = 'Dips and restarts'" in (_TAB.parent.parent / "CampusDipsRestartSection.tsx").read_text()
+    places = {k: v.strip("'") for k, v in _ts_map(_TAB, "PLACE_WORDS").items()}
+    assert places == C.GRID_RISK_PLACE_WORDS
     for s in ("Unavailable:", "no lost-production value", "upper bound", "the lines may overlap", "out of date",
-              "lower bound", "Missing:"):
+              "lower bound", "Missing:", "'complete'", "'partial'"):
         assert s in text, s
 
 

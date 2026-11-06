@@ -114,7 +114,7 @@ def _target(section, panel=None, component=None, entity=None, field=None) -> dic
 
 
 #: The campus study's dips and restarts (section 10's campus results); the frontend's word for it.
-CAMPUS_RUN = ("campus study run (dips and restarts)", "campus_run", _target("results", "campusResults"))
+CAMPUS_RUN = ("campus study run", "campus_run", _target("results", "campusResults"))
 
 
 def _need(text, word, target) -> tuple:
@@ -218,8 +218,8 @@ def _ride_through(n, campus: CampusRun, per_t, eur_flag, periods) -> dict:
                      missing=missing or [CAMPUS_RUN], flags=flags, rows=detail)
     eur, ef = _eur(t, per_t, eur_flag)
     return _line("ride_through", source_files=src, stamp=campus.stamp, stale=stale, flags=flags, rows=detail,
-                 basis="campus_dip_trips.csv total row as written: Σ trips per year × restart time × rate × mass "
-                       "pull (12b); not recomputed",
+                 basis="the campus study's ride-through total as it wrote it: trips per year × restart time × rate × "
+                       "mass pull; not recomputed",
                  by_period={_key(p): _cell(t, eur, ef) for p in periods})
 
 
@@ -282,10 +282,11 @@ def _island(n, campus: CampusRun, per_t, eur_flag, periods) -> dict:
               {"key": "in_block_restart", "label": LABELS["in_block_restart"], "units": [r["unit"] for r in inside],
                "flags": [], "by_period": inside_bp}]
     return _line("island", source_files=src, stamp=campus.stamp, stale=stale, flags=flags, rows=detail,
-                 basis=f"the grid outage of {link} is the island event: events per year = year hours × q / MTTR "
-                       f"(q {q:g}, MTTR {mttr:g} h); units outside every pickup block lost for the MTTR at rate × "
-                       "mass pull with no inventory credit (conservative); in-block units lose their pickup wait "
-                       "and restart (campus_restart.csv lost_t) per event",
+                 basis=f"an outage of the grid import link is the island event: events per year = year hours × "
+                       f"outage rate / repair time (rate {q:g}, repair time {mttr:g} h); units outside every pickup "
+                       "block are lost for the repair time at rate × mass pull, with no inventory credit "
+                       "(conservative); units in a block lose their pickup wait and restart per event, as the "
+                       "campus study's restart screen gives it",
                  by_period=totals)
 
 
@@ -330,8 +331,8 @@ def _n_1(n, lost_load, periods) -> dict:
         flags += res["flags"]
     if not feeding:
         return _line("n_1", source_files=src,
-                     missing=[_need("site transformer: an electricity Link feeding process units, with outage "
-                                    "rate and MTTR (not the PoC import)", "site_transformer",
+                     missing=[_need("a site transformer: an electricity link that feeds the process units, with "
+                                    "an outage rate and a repair time (not the grid import link)", "site_transformer",
                                     _target("assets", None, "Link"))])
     by_period = {}
     for p in periods:
@@ -352,9 +353,9 @@ def _n_1(n, lost_load, periods) -> dict:
                 flags.append(LOWER_BOUND)
         by_period[k] = _cell(t, eur if t is not None else None, ef)
     return _line("n_1", source_files=src, stamp=_solve_stamp(n), flags=flags, rows=rows,
-                 basis="process_loss.expected_outage_loss per site transformer: occurrence = year hours × q / MTTR, "
-                       "each event the mean undelivered tonnes over every start hour on the solved dispatch, "
-                       "inventory credited",
+                 basis="the process-loss screen's expected outage loss per site transformer: events per year = year "
+                       "hours × outage rate / repair time, each event the mean undelivered tonnes over every start "
+                       "hour of the solved dispatch, with inventory credited",
                  by_period=by_period)
 
 
@@ -402,8 +403,8 @@ def _connection(n, lost_load, periods) -> dict:
         return _line("connection", source_files=src, stale=stale, missing=missing, rows=rows,
                      stamp=_solve_stamp(n))
     return _line("connection", source_files=src, stamp=_solve_stamp(n), stale=stale, flags=flags, rows=rows,
-                 basis="the solve's own lost production (shortfall dispatch), shown not recomputed; per period "
-                       "annualised by the period's year hours over its weighted hours (snapshot_weightings.generators)",
+                 basis="the solve's own lost production, shown, not recomputed; each period weighted by its year "
+                       "hours over its modelled hours",
                  by_period={k: _cell(v["t"], v["eur"], v["ef"]) for k, v in by_period.items()})
 
 

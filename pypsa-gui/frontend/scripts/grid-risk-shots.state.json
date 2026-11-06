@@ -35,7 +35,7 @@
      "flags": [
       "dip_stats_source:demo"
      ],
-     "basis": "campus_dip_trips.csv total row as written: \u03a3 trips per year \u00d7 restart time \u00d7 rate \u00d7 mass pull (12b); not recomputed",
+     "basis": "the campus study's ride-through total as it wrote it: trips per year \u00d7 restart time \u00d7 rate \u00d7 mass pull; not recomputed",
      "source_files": [
       "campus_dip_trips.csv"
      ],
@@ -69,7 +69,7 @@
      "flags": [
       "no_inventory_credit"
      ],
-     "basis": "the grid outage of grid_import is the island event: events per year = year hours \u00d7 q / MTTR (q 0.002, MTTR 12 h); units outside every pickup block lost for the MTTR at rate \u00d7 mass pull with no inventory credit (conservative); in-block units lose their pickup wait and restart (campus_restart.csv lost_t) per event",
+     "basis": "an outage of the grid import link is the island event: events per year = year hours \u00d7 outage rate / repair time (rate 0.002, repair time 12 h); units outside every pickup block are lost for the repair time at rate \u00d7 mass pull, with no inventory credit (conservative); units in a block lose their pickup wait and restart per event, as the campus study's restart screen gives it",
      "source_files": [
       "campus_restart.csv",
       "network.nc"
@@ -129,7 +129,7 @@
      "missing": [],
      "missing_inputs": [],
      "flags": [],
-     "basis": "process_loss.expected_outage_loss per site transformer: occurrence = year hours \u00d7 q / MTTR, each event the mean undelivered tonnes over every start hour on the solved dispatch, inventory credited",
+     "basis": "the process-loss screen's expected outage loss per site transformer: events per year = year hours \u00d7 outage rate / repair time, each event the mean undelivered tonnes over every start hour of the solved dispatch, with inventory credited",
      "source_files": [
       "network.nc"
      ],
@@ -176,7 +176,7 @@
      "missing": [],
      "missing_inputs": [],
      "flags": [],
-     "basis": "the solve's own lost production (shortfall dispatch), shown not recomputed; per period annualised by the period's year hours over its weighted hours (snapshot_weightings.generators)",
+     "basis": "the solve's own lost production, shown, not recomputed; each period weighted by its year hours over its modelled hours",
      "source_files": [
       "network.nc",
       "__lost_concentrate (shortfall Generator)"
@@ -256,7 +256,7 @@
       "dip_stats_source:demo",
       "lower_bound"
      ],
-     "basis": "campus_dip_trips.csv total row as written: \u03a3 trips per year \u00d7 restart time \u00d7 rate \u00d7 mass pull (12b); not recomputed",
+     "basis": "the campus study's ride-through total as it wrote it: trips per year \u00d7 restart time \u00d7 rate \u00d7 mass pull; not recomputed",
      "source_files": [
       "campus_dip_trips.csv"
      ],
@@ -290,7 +290,7 @@
       "no_inventory_credit",
       "lower_bound"
      ],
-     "basis": "the grid outage of grid_import is the island event: events per year = year hours \u00d7 q / MTTR (q 0.002, MTTR 12 h); units outside every pickup block lost for the MTTR at rate \u00d7 mass pull with no inventory credit (conservative); in-block units lose their pickup wait and restart (campus_restart.csv lost_t) per event",
+     "basis": "an outage of the grid import link is the island event: events per year = year hours \u00d7 outage rate / repair time (rate 0.002, repair time 12 h); units outside every pickup block are lost for the repair time at rate \u00d7 mass pull, with no inventory credit (conservative); units in a block lose their pickup wait and restart per event, as the campus study's restart screen gives it",
      "source_files": [
       "campus_restart.csv",
       "network.nc"
@@ -349,7 +349,7 @@
      "missing": [],
      "missing_inputs": [],
      "flags": [],
-     "basis": "process_loss.expected_outage_loss per site transformer: occurrence = year hours \u00d7 q / MTTR, each event the mean undelivered tonnes over every start hour on the solved dispatch, inventory credited",
+     "basis": "the process-loss screen's expected outage loss per site transformer: events per year = year hours \u00d7 outage rate / repair time, each event the mean undelivered tonnes over every start hour of the solved dispatch, with inventory credited",
      "source_files": [
       "network.nc"
      ],
@@ -396,7 +396,7 @@
      "missing": [],
      "missing_inputs": [],
      "flags": [],
-     "basis": "the solve's own lost production (shortfall dispatch), shown not recomputed; per period annualised by the period's year hours over its weighted hours (snapshot_weightings.generators)",
+     "basis": "the solve's own lost production, shown, not recomputed; each period weighted by its year hours over its modelled hours",
      "source_files": [
       "network.nc",
       "__lost_concentrate (shortfall Generator)"
@@ -474,7 +474,7 @@
      "label": "Ride-through (voltage dips)",
      "status": "missing",
      "missing": [
-      "campus study run (dips and restarts)"
+      "campus study run"
      ],
      "missing_inputs": [
       {
@@ -503,7 +503,7 @@
      "label": "Island (grid outage)",
      "status": "missing",
      "missing": [
-      "campus study run (dips and restarts)"
+      "campus study run"
      ],
      "missing_inputs": [
       {
@@ -533,7 +533,7 @@
      "label": "N-1 (site transformer)",
      "status": "missing",
      "missing": [
-      "site transformer: an electricity Link feeding process units, with outage rate and MTTR (not the PoC import)"
+      "a site transformer: an electricity link that feeds the process units, with an outage rate and a repair time (not the grid import link)"
      ],
      "missing_inputs": [
       {
@@ -564,7 +564,7 @@
      "missing": [],
      "missing_inputs": [],
      "flags": [],
-     "basis": "the solve's own lost production (shortfall dispatch), shown not recomputed; per period annualised by the period's year hours over its weighted hours (snapshot_weightings.generators)",
+     "basis": "the solve's own lost production, shown, not recomputed; each period weighted by its year hours over its modelled hours",
      "source_files": [
       "network.nc",
       "__lost_concentrate (shortfall Generator)"
@@ -643,7 +643,7 @@
      "flags": [
       "dip_stats_source:demo"
      ],
-     "basis": "campus_dip_trips.csv total row as written: \u03a3 trips per year \u00d7 restart time \u00d7 rate \u00d7 mass pull (12b); not recomputed",
+     "basis": "the campus study's ride-through total as it wrote it: trips per year \u00d7 restart time \u00d7 rate \u00d7 mass pull; not recomputed",
      "source_files": [
       "campus_dip_trips.csv"
      ],
@@ -677,7 +677,7 @@
      "flags": [
       "no_inventory_credit"
      ],
-     "basis": "the grid outage of grid_import is the island event: events per year = year hours \u00d7 q / MTTR (q 0.002, MTTR 12 h); units outside every pickup block lost for the MTTR at rate \u00d7 mass pull with no inventory credit (conservative); in-block units lose their pickup wait and restart (campus_restart.csv lost_t) per event",
+     "basis": "an outage of the grid import link is the island event: events per year = year hours \u00d7 outage rate / repair time (rate 0.002, repair time 12 h); units outside every pickup block are lost for the repair time at rate \u00d7 mass pull, with no inventory credit (conservative); units in a block lose their pickup wait and restart per event, as the campus study's restart screen gives it",
      "source_files": [
       "campus_restart.csv",
       "network.nc"
@@ -737,7 +737,7 @@
      "missing": [],
      "missing_inputs": [],
      "flags": [],
-     "basis": "process_loss.expected_outage_loss per site transformer: occurrence = year hours \u00d7 q / MTTR, each event the mean undelivered tonnes over every start hour on the solved dispatch, inventory credited",
+     "basis": "the process-loss screen's expected outage loss per site transformer: events per year = year hours \u00d7 outage rate / repair time, each event the mean undelivered tonnes over every start hour of the solved dispatch, with inventory credited",
      "source_files": [
       "network.nc"
      ],
@@ -784,7 +784,7 @@
      "missing": [],
      "missing_inputs": [],
      "flags": [],
-     "basis": "the solve's own lost production (shortfall dispatch), shown not recomputed; per period annualised by the period's year hours over its weighted hours (snapshot_weightings.generators)",
+     "basis": "the solve's own lost production, shown, not recomputed; each period weighted by its year hours over its modelled hours",
      "source_files": [
       "network.nc",
       "__lost_concentrate (shortfall Generator)"
@@ -864,7 +864,7 @@
       "dip_stats_source:demo",
       "stale"
      ],
-     "basis": "campus_dip_trips.csv total row as written: \u03a3 trips per year \u00d7 restart time \u00d7 rate \u00d7 mass pull (12b); not recomputed",
+     "basis": "the campus study's ride-through total as it wrote it: trips per year \u00d7 restart time \u00d7 rate \u00d7 mass pull; not recomputed",
      "source_files": [
       "campus_dip_trips.csv"
      ],
@@ -899,7 +899,7 @@
       "no_inventory_credit",
       "stale"
      ],
-     "basis": "the grid outage of grid_import is the island event: events per year = year hours \u00d7 q / MTTR (q 0.002, MTTR 12 h); units outside every pickup block lost for the MTTR at rate \u00d7 mass pull with no inventory credit (conservative); in-block units lose their pickup wait and restart (campus_restart.csv lost_t) per event",
+     "basis": "an outage of the grid import link is the island event: events per year = year hours \u00d7 outage rate / repair time (rate 0.002, repair time 12 h); units outside every pickup block are lost for the repair time at rate \u00d7 mass pull, with no inventory credit (conservative); units in a block lose their pickup wait and restart per event, as the campus study's restart screen gives it",
      "source_files": [
       "campus_restart.csv",
       "network.nc"
@@ -959,7 +959,7 @@
      "missing": [],
      "missing_inputs": [],
      "flags": [],
-     "basis": "process_loss.expected_outage_loss per site transformer: occurrence = year hours \u00d7 q / MTTR, each event the mean undelivered tonnes over every start hour on the solved dispatch, inventory credited",
+     "basis": "the process-loss screen's expected outage loss per site transformer: events per year = year hours \u00d7 outage rate / repair time, each event the mean undelivered tonnes over every start hour of the solved dispatch, with inventory credited",
      "source_files": [
       "network.nc"
      ],
@@ -1006,7 +1006,7 @@
      "missing": [],
      "missing_inputs": [],
      "flags": [],
-     "basis": "the solve's own lost production (shortfall dispatch), shown not recomputed; per period annualised by the period's year hours over its weighted hours (snapshot_weightings.generators)",
+     "basis": "the solve's own lost production, shown, not recomputed; each period weighted by its year hours over its modelled hours",
      "source_files": [
       "network.nc",
       "__lost_concentrate (shortfall Generator)"
@@ -1086,7 +1086,7 @@
      "flags": [
       "dip_stats_source:demo"
      ],
-     "basis": "campus_dip_trips.csv total row as written: \u03a3 trips per year \u00d7 restart time \u00d7 rate \u00d7 mass pull (12b); not recomputed",
+     "basis": "the campus study's ride-through total as it wrote it: trips per year \u00d7 restart time \u00d7 rate \u00d7 mass pull; not recomputed",
      "source_files": [
       "campus_dip_trips.csv"
      ],
@@ -1125,7 +1125,7 @@
      "flags": [
       "no_inventory_credit"
      ],
-     "basis": "the grid outage of grid_import is the island event: events per year = year hours \u00d7 q / MTTR (q 0.002, MTTR 12 h); units outside every pickup block lost for the MTTR at rate \u00d7 mass pull with no inventory credit (conservative); in-block units lose their pickup wait and restart (campus_restart.csv lost_t) per event",
+     "basis": "an outage of the grid import link is the island event: events per year = year hours \u00d7 outage rate / repair time (rate 0.002, repair time 12 h); units outside every pickup block are lost for the repair time at rate \u00d7 mass pull, with no inventory credit (conservative); units in a block lose their pickup wait and restart per event, as the campus study's restart screen gives it",
      "source_files": [
       "campus_restart.csv",
       "network.nc"
@@ -1201,7 +1201,7 @@
      "missing": [],
      "missing_inputs": [],
      "flags": [],
-     "basis": "process_loss.expected_outage_loss per site transformer: occurrence = year hours \u00d7 q / MTTR, each event the mean undelivered tonnes over every start hour on the solved dispatch, inventory credited",
+     "basis": "the process-loss screen's expected outage loss per site transformer: events per year = year hours \u00d7 outage rate / repair time, each event the mean undelivered tonnes over every start hour of the solved dispatch, with inventory credited",
      "source_files": [
       "network.nc"
      ],
@@ -1267,7 +1267,7 @@
      "missing": [],
      "missing_inputs": [],
      "flags": [],
-     "basis": "the solve's own lost production (shortfall dispatch), shown not recomputed; per period annualised by the period's year hours over its weighted hours (snapshot_weightings.generators)",
+     "basis": "the solve's own lost production, shown, not recomputed; each period weighted by its year hours over its modelled hours",
      "source_files": [
       "network.nc",
       "__lost_concentrate (shortfall Generator)"
@@ -1333,8 +1333,8 @@
   "version": 1,
   "title": "Grid risk shots",
   "language": "en",
-  "created_at": "2026-11-06T09:10:46.492939+00:00",
-  "evidence_hash": "7f925057335cc372985cba0140e8cda6578b936f870f6b2e432c4f136268f4f3",
+  "created_at": "2026-11-06T09:26:16.000224+00:00",
+  "evidence_hash": "d543f78816dd3d934128194c45e74fce4962bc0f003bb97405291a428be6adb7",
   "profile_id": null,
   "model": null,
   "mode": "evidence_only",
@@ -1703,7 +1703,7 @@
       "Ride-through (voltage dips)",
       "7.5\u00a0t/yr",
       "\u20ac\u00a0750/yr",
-      "ok",
+      "complete",
       "demo dip statistics",
       "campus_dip_trips.csv (run 2026-11-06 09:12:00 UTC, network 3fa91c0de2b4)"
      ],
@@ -1711,7 +1711,7 @@
       "Island (grid outage)",
       "92\u00a0t/yr",
       "\u20ac\u00a09.2\u00a0k/yr",
-      "ok",
+      "complete",
       "no inventory credit, so it is conservative",
       "campus_restart.csv, network.nc (run 2026-11-06 09:12:00 UTC, network 3fa91c0de2b4)"
      ],
@@ -1735,7 +1735,7 @@
       "N-1 (site transformer)",
       "175\u00a0t/yr",
       "\u20ac\u00a017.5\u00a0k/yr",
-      "ok",
+      "complete",
       "",
       "network.nc"
      ],
@@ -1743,7 +1743,7 @@
       "Connection curtailment",
       "5.84\u00a0kt/yr",
       "\u20ac\u00a0584\u00a0k/yr",
-      "ok",
+      "complete",
       "",
       "network.nc, __lost_concentrate (shortfall Generator)"
      ],
