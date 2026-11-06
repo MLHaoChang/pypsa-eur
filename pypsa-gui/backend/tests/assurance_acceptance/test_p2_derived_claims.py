@@ -472,11 +472,11 @@ def test_nine_derived_entries_limit_the_draft_instead_of_dropping_one(
     assert data["verdict"] == "limited" and "derived" not in data["receipt"]
 
 
-def test_the_receipt_shape_admits_derived_entries():
+def test_only_the_policy_two_receipt_shape_admits_derived_entries():
     from harness.assurance_shapes import RECEIPTS
 
     receipt = {
-        "policy_version": "1",
+        "policy_version": "2",
         "content_sha256": "0" * 64,
         "evidence_ids": [],
         "checked_block_ids": [],
@@ -493,4 +493,61 @@ def test_the_receipt_shape_admits_derived_entries():
             }
         ],
     }
-    RECEIPTS["1"].model_validate(json.loads(json.dumps(receipt)))
+    RECEIPTS["2"].model_validate(json.loads(json.dumps(receipt)))
+    with pytest.raises(ValidationError):
+        RECEIPTS["1"].model_validate({**receipt, "policy_version": "1"})
+    with pytest.raises(ValidationError):
+        RECEIPTS["2"].model_validate({**receipt, "derived": []})
+
+
+# ── receipt policy "2" (GK B P1-P3) ──────────────────────────────────────
+
+ENTRY = {
+    "id": "d1",
+    "formula_id": "difference/1",
+    "operands": ["a", "b"],
+    "value": 1,
+    "unit": "MW",
+}
+
+
+@pytest.mark.parametrize(
+    "receipt",
+    [
+        {"policy_version": "1", "derived": [ENTRY]},  # P1: "1" never carries derived
+        {"policy_version": "2"},  # P2: "2" always does
+        {"policy_version": "2", "derived": []},
+        {"policy_version": "2", "derived": [ENTRY] * 9},
+        {"policy_version": "2", "derived": [{**ENTRY, "expression": "a - b"}]},
+        {"policy_version": "2", "derived": [{**ENTRY, "value": "1"}]},
+        {
+            "policy_version": "2",
+            "derived": [{k: v for k, v in ENTRY.items() if k != "unit"}],
+        },
+        {"policy_version": "3", "derived": [ENTRY]},
+    ],
+)
+def test_the_server_refuses_a_receipt_whose_policy_and_derived_entries_disagree(
+    receipt,
+):
+    from services import assurance_records as records
+
+    assert records.receipt_policy_ok(receipt) is False
+
+
+def test_the_server_admits_policy_one_without_and_two_with_derived_entries():
+    from services import assurance_records as records
+
+    assert records.receipt_policy_ok({"policy_version": "1"}) is True
+    assert (
+        records.receipt_policy_ok({"policy_version": "2", "derived": [ENTRY]}) is True
+    )
+
+
+def test_only_an_answer_with_derived_entries_uses_policy_two(grid, checked, values):
+    expected = values["optimal_capacity"] - values["configured_capacity"]
+    with_derived = ask(checked, grid, values, lambda ids: change(ids, expected))
+    assert approval(with_derived)["receipt"]["policy_version"] == "2"
+    assert stored(checked, with_derived)["receipt"]["policy_version"] == "2"
+    plain = ask(checked, grid, values, lambda ids: [])
+    assert approval(plain)["receipt"]["policy_version"] == "1"

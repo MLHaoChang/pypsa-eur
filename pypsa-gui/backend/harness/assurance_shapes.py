@@ -268,11 +268,14 @@ class Navigation(_Closed):
 
 
 class DerivedEntry(_Closed):
-    id: str
-    formula_id: str
-    operands: Annotated[list[str], Field(max_length=8)]
-    value: float
-    unit: str
+    """One software-recomputed derived claim (AA-03 S2); strict field by field."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    id: Annotated[str, Field(min_length=1, max_length=64)]
+    formula_id: Annotated[str, Field(min_length=1, max_length=64)]
+    operands: Annotated[list[str], Field(min_length=1, max_length=8)]
+    value: Annotated[int | float, Field(allow_inf_nan=False)]
+    unit: Annotated[str, Field(min_length=1, max_length=16)]
 
 
 class Receipt(_Closed):
@@ -292,11 +295,19 @@ class Receipt(_Closed):
     # The chart's own shape is not frozen yet (see PENDING).
     chart: dict | None = None
     navigation: Annotated[list[Navigation], Field(max_length=20)] | None = None
-    # AA-03 S2: present only when the draft named derived entries.
-    derived: Annotated[list[DerivedEntry], Field(max_length=8)] | None = None
 
 
-RECEIPTS = {"1": Receipt}
+class DerivedReceipt(Receipt):
+    """Policy "2" (AA-03 S2, GK B P1/P2): policy "1" plus at least one derived entry.
+
+    Emitted only for an answer with derived entries; every other answer stays "1".
+    """
+
+    policy_version: Literal["2"]
+    derived: Annotated[list[DerivedEntry], Field(min_length=1, max_length=8)]
+
+
+RECEIPTS = {"1": Receipt, "2": DerivedReceipt}
 
 
 # --- Checked tool results, keyed by tool name. ---

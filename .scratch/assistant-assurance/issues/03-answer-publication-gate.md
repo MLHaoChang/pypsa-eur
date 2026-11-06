@@ -179,3 +179,14 @@ Q answered (a): one run per derived entry; a cross-run difference stays with cos
 - D-6 Tolerance: strict (1e-9 relative, rounding not widened); the PR says a rounded model claim limits the draft. Count how often the existing assurance acceptance fixtures would hit it and report the number. No rule change without an owner decision.
 - D-7 Receipt: derived entries show in the receipt with formula_id, operand ids and the software value. A truncated receipt keeps the derived block or marks the draft limited, never drops it silently (#927 / `_assurance` first).
 - D-8 Every refusal has its own test and a mutant it kills. Add one mutant on the DAG order check (a forward reference accepted) and one on the scope comparison (window ignored).
+
+### GK B (27) S2 D-7 ruling (2026-11-06): receipt policy "2"
+
+GO on (a): receipt policy "2" = policy "1" plus `derived`, because `answer_receipt` is a returns contract (AA-V1-CHANGE-1). Conditions:
+
+- P1. Policy "1" is unchanged; "2" is a new entry written by `--write`. An answer with no derived entries emits "1", byte-equal to master (D-1), pinned by a test. A "1" receipt carrying `derived` is refused by the server check and by `parseApproval`.
+- P2. "2" is strict both ways: without or with an empty `derived` it is refused; each entry is checked field by field (unknown keys and wrong types refused); `parseApproval` rejects any version but "1" and "2".
+- P3. Every receipt reader accepts "2": list them in the PR and test each with a "2" receipt; run the contract check and `assistant_inventory --check` at the trial merge.
+- P4. One killed mutant per new guard ("1"+derived accepted, "2" with empty derived accepted, a loose entry check).
+- P5. UX (10) looks only if the frontend hunk renders something new; a parse-only change does not need it.
+- D-6. The hit-rate goes in the PR body and to the coordinator for the owner: 5 of 305 published fixture values (57 distinct) fail at 1–3 decimals, 81 at 0. The 1e-9 tolerance stays.

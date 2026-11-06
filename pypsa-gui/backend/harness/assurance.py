@@ -1270,6 +1270,7 @@ class Turn:
         # so a record without them is stored exactly as before (GK B D-1, D-7).
         entries = [] if draft_failed else self.derived
         if entries:
+            receipt["policy_version"] = records.DERIVED_POLICY_VERSION
             receipt["derived"] = [
                 {k: e[k] for k in ("id", "formula_id", "operands", "value", "unit")}
                 for e in entries

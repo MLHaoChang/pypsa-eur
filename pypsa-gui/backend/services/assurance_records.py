@@ -52,6 +52,8 @@ MAX_AGGREGATE_ARG_CHARS = 1024
 # The checked-answer policy and the current-input adapters this server applies.
 # A record written under another one is not re-read as checked (A1.4).
 POLICY_VERSION = "1"
+# Policy "1" plus derived entries (AA-03 S2); only an answer with derived entries uses it.
+DERIVED_POLICY_VERSION = "2"
 INPUT_ADAPTERS = {
     "static": "static-input/1",
     "static_page": "static-input-page/1",
@@ -1950,12 +1952,31 @@ def public(record):
     }
 
 
+def receipt_policy_ok(receipt):
+    """Policy "1" never carries derived entries; "2" always does, each checked (GK B P1/P2)."""
+    from pydantic import ValidationError
+
+    from harness.assurance_shapes import DerivedEntry
+
+    if receipt.get("policy_version") == POLICY_VERSION:
+        return "derived" not in receipt
+    entries = receipt.get("derived")
+    if receipt.get("policy_version") != DERIVED_POLICY_VERSION or not isinstance(entries, list) or not 1 <= len(entries) <= 8:
+        return False
+    try:
+        for entry in entries:
+            DerivedEntry.model_validate(entry)
+    except ValidationError:
+        return False
+    return True
+
+
 def answer(owner, answer_id):
     record = load(owner, answer_id, "answer")
     try:
         current = (
             record["version"] == 1
-            and record["receipt"]["policy_version"] == POLICY_VERSION
+            and receipt_policy_ok(record["receipt"])
             and hashlib.sha256(record["text"].encode()).hexdigest()
             == record["receipt"]["content_sha256"]
             and isinstance(record["receipt"]["evidence_ids"], list)
