@@ -236,6 +236,17 @@ def test_the_digest_ignores_order_and_sees_values_and_series(baseline):
 # ── The pure classifier: one row per branch (W7 style) ────────────────
 
 
+def test_the_digest_ignores_sub_network_rows(baseline):
+    """SubNetwork is derived (DERIVED_CLASSES): an edit to its rows alone
+    leaves the digest unchanged (GK B (29), S4b review)."""
+    n = PyPSAService.get_active_context().network.copy()
+    n.determine_network_topology()
+    assert not n.sub_networks.empty
+    base = outcomes.network_digest(n)
+    n.sub_networks.at[n.sub_networks.index[0], "carrier"] = "renamed"
+    assert outcomes.network_digest(n) == base
+
+
 def _note(**kw):
     note = {
         "tool": "undo_last",
