@@ -212,7 +212,7 @@ Q1 = (a): feasible incumbent stays a pending row; no result-side predicates. Q2 
 - C4 Freshness is checked as for a static_page block claim: owner, project, expiry, and source_sha256 or the page digest. A record the turn did not read is refused, and so is one from another project; both are tested.
 - C5 The threshold unit must equal the metric unit exactly, with no conversion. Comparison is exact, and the boundary is tested on both sides (== threshold under > and >=). The claimed truth is a strict bool; 0, 1 and "true" are refused.
 - C6 top_k:
-  - k > N is refused, not clamped (k ≤ 20).
+  - k is in 1..20, and a k larger than the population N is refused, not clamped (GK B (28) correction).
   - Ranking is by value, with ties kept at the boundary; entity_id only orders the listing and never breaks a tie.
   - members must equal the computed set, with no duplicates and no unknown ids.
   - Test a tie at the boundary and a tie just inside it, and keep the hostile-label test.
