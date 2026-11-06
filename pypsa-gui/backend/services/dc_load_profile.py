@@ -59,6 +59,9 @@ SOURCES: dict[str, str] = {
                       "by vendor data (IEC TR 61000-3-7 treats flicker through ΔP and ΔQ)"),
     "idle_hours_per_day": "assumed; illustrative daily restart/maintenance window",
     "pue": "assumed; PUE at or below the design temperature, slope above it",
+    "architecture": ("assumed; conversion-loss chain from defaults pack "
+                     "services.dc_architecture.ARCH_PACK_VERSION (DC 05); the PUE stated is "
+                     "this architecture's"),
     "ambient": "assumed; temperate (Central European) site, no weather data",
     "rack_kw": "assumed or as entered; carried into the envelope only",
     "load_split": ("as entered or assumed (75 % critical); the template has one critical "
@@ -208,9 +211,10 @@ def ledger(spec: DataCentreLoadSpec, timezone: str | None) -> list[dict]:
          f"{spec.pue_at_design:g} at or below {spec.pue_design_temp_c:g} °C, "
          f"+{spec.pue_temperature_slope_per_k:g} per K above; UPS and distribution losses "
          "inside PUE", "pue"),
-        ("UPS and distribution losses",
-         f"ups_distribution_loss_share {spec.ups_distribution_loss_share:g} is not added: the "
-         "losses are inside PUE", "pue"),
+        *(_architecture_rows(spec) if "architecture" in spec.model_fields_set else [
+            ("UPS and distribution losses",
+             f"ups_distribution_loss_share {spec.ups_distribution_loss_share:g} is not added: "
+             "the losses are inside PUE", "pue")]),
         ("ambient temperature",
          f"{spec.ambient_annual_mean_c:g} °C mean, ±{spec.ambient_seasonal_amplitude_k:g} K "
          f"seasonal (peak day 200), ±{spec.ambient_diurnal_amplitude_k:g} K diurnal (peak "
@@ -227,9 +231,20 @@ def ledger(spec: DataCentreLoadSpec, timezone: str | None) -> list[dict]:
             for item, value, key in rows]
 
 
+def _architecture_rows(spec: DataCentreLoadSpec) -> list[tuple[str, str, str]]:
+    """The power architecture's chain lines (DC 05), only when it was set."""
+    from services.dc_architecture import ledger_rows
+
+    return ledger_rows(spec)
+
+
 def meta_block(spec: DataCentreLoadSpec, timezone: str | None) -> dict:
-    """What a project's ``eh_template.json`` carries under ``META_KEY``."""
-    return {"spec": spec.model_dump(mode="json"), "time_basis": time_basis(timezone),
+    """What a project's ``eh_template.json`` carries under ``META_KEY``. An
+    unset architecture is not stored, so it reloads as "ac", assumed (DC 05)."""
+    dump = spec.model_dump(mode="json")
+    if "architecture" not in spec.model_fields_set:
+        dump.pop("architecture", None)
+    return {"spec": dump, "time_basis": time_basis(timezone),
             "envelope": dynamic_envelope(spec), "ledger": ledger(spec, timezone)}
 
 

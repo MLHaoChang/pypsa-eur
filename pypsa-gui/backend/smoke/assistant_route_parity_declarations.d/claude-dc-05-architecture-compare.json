@@ -1,0 +1,10 @@
+{
+ "limitations": [
+  {
+   "method": "POST",
+   "path": "/api/campus-electrical/{name}/dc-architecture/compare",
+   "reason": "held-by-spec",
+   "issue": ".scratch/datacenter-grid-readiness/issues/21-dc-architecture-chat-tool.md"
+  }
+ ]
+}

@@ -1,0 +1,528 @@
+{
+ "basis": null,
+ "boundary": "IT is metered at the rack input (The Green Grid PUE category 3): a PUE measured at the UPS output would put the distribution stages inside IT",
+ "capex_note": "capex on the final IT MW, bought in year 0 on every leg; boundary MV bus to rack input, the in-rack conversion inside",
+ "currency": "EUR",
+ "dc_bus_storage": false,
+ "discount_rate": 0.07,
+ "discount_rate_source": "pack discount rate (real, assumed)",
+ "it_mw": 100.0,
+ "money_year": 2025,
+ "own": "ac",
+ "own_set": false,
+ "pack_version": "2026-11-07",
+ "price": {
+  "assumed": true,
+  "currency": "EUR",
+  "not_valued": "demand, capacity, fixed and connection charges and tax or levy items are not valued: only the tariff's energy component prices the facility energy",
+  "real": "held constant in real terms at the finance real rate",
+  "source": "request (assumed)",
+  "time_mean_per_mwh": 80.0,
+  "weighted_mean_per_mwh": 80.0,
+  "weighting": "flat"
+ },
+ "rms_caveat": "An architecture's grid services are an assumed capability: an RMS study (EMT where the code asks) must show them before they count",
+ "second_order": "assumed: the cooling of a variant's changed loss heat is not shifted, and each stage's efficiency is flat over part load",
+ "summary": {
+  "cheapest": null,
+  "cheapest_text": "Cheapest over the horizon: not distinguishable on the assumed costs",
+  "most_services": [
+   "mv_ups"
+  ],
+  "most_services_text": "Most grid services: MV UPS"
+ },
+ "variants": [
+  {
+   "architecture": "ac",
+   "capex": {
+    "fom_share": 0.02,
+    "lifetime": 15.0,
+    "overnight_per_mw": 1600000.0,
+    "range_per_mw": [
+     1000000.0,
+     2400000.0
+    ],
+    "total": 160000000.0
+   },
+   "effective_pue": 1.3186808615135162,
+   "eta_rack": 0.96,
+   "eta_to_rack": 0.9312682499999999,
+   "facility_mwh": 1138800.0,
+   "it_mwh": 863590.299394307,
+   "label": "AC (LV UPS)",
+   "loss_mwh": 98280.42739967917,
+   "npv": {
+    "high": {
+     "capex": 185076359.84246695,
+     "energy": 667498977.605548,
+     "fom": 33713191.39647648,
+     "total": 886288528.8444915
+    },
+    "low": {
+     "capex": 77115149.93436122,
+     "energy": 623416169.3385127,
+     "fom": 14047163.081865199,
+     "total": 714578482.3547388
+    },
+    "value": {
+     "capex": 123384239.89497796,
+     "energy": 639876372.7051237,
+     "fom": 22475460.93098432,
+     "total": 785736073.531086
+    }
+   },
+   "npv_delta": {
+    "central": 0.0,
+    "high": 171710046.48975265,
+    "low": -171710046.48975265,
+    "verdict": "not_distinguishable"
+   },
+   "own": true,
+   "peak": {
+    "min_headroom_mw": null,
+    "rows": [],
+    "verdict": "unknown"
+   },
+   "peak_mw": 140.0,
+   "services": {
+    "conditional": [],
+    "counted": []
+   },
+   "services_why": "the LV UPS rectifiers are unidirectional power-factor-corrected front ends",
+   "stages": [
+    {
+     "efficiency": 0.985,
+     "key": "dc-arch-ac.stage.mv_lv_transformer.efficiency",
+     "label": "MV/LV transformer and LV feeders",
+     "range": [
+      0.98,
+      0.99
+     ],
+     "source": "assumed; Commission Regulation (EU) No 548/2014 (Ecodesign, power transformers, Tier 2)",
+     "stage": "mv_lv_transformer"
+    },
+    {
+     "efficiency": 0.955,
+     "key": "dc-arch-ac.stage.ups.efficiency",
+     "label": "LV double-conversion UPS",
+     "range": [
+      0.94,
+      0.97
+     ],
+     "source": "assumed; IEC 62040-3 (UPS performance and efficiency classes)",
+     "stage": "ups"
+    },
+    {
+     "efficiency": 0.99,
+     "key": "dc-arch-ac.stage.lv_distribution.efficiency",
+     "label": "LV switchboard and PDU",
+     "range": [
+      0.985,
+      0.995
+     ],
+     "source": "assumed; LBNL, Ton, Fortenbery and Tschudi, DC Power for Improved Data Center Efficiency (2008); Schneider Electric White Paper 127, A Quantitative Comparison of High Efficiency AC vs. DC Power Distribution for Data Centers",
+     "stage": "lv_distribution"
+    },
+    {
+     "efficiency": 0.96,
+     "key": "dc-arch-ac.stage.rack.efficiency",
+     "label": "Server AC power supply (in rack)",
+     "range": [
+      0.94,
+      0.965
+     ],
+     "source": "assumed; Commission Regulation (EU) 2019/424 (Ecodesign, servers and data storage, PSU efficiency); 80 PLUS Titanium",
+     "stage": "rack"
+    }
+   ],
+   "verdicts": {
+    "frequency_support": {
+     "assumed_from_architecture": [],
+     "project_value": null,
+     "verdict": "unknown"
+    },
+    "voltage_control": {
+     "assumed_from_architecture": [],
+     "project_value": null,
+     "verdict": "unknown"
+    }
+   }
+  },
+  {
+   "architecture": "mv_ups",
+   "capex": {
+    "fom_share": 0.02,
+    "lifetime": 15.0,
+    "overnight_per_mw": 1500000.0,
+    "range_per_mw": [
+     900000.0,
+     2300000.0
+    ],
+    "total": 150000000.0
+   },
+   "effective_pue": 1.2912878906035419,
+   "eta_rack": 0.96,
+   "eta_to_rack": 0.9556469999999999,
+   "facility_mwh": 1115143.696050556,
+   "it_mwh": 863590.299394307,
+   "label": "MV UPS",
+   "loss_mwh": 74624.12345023494,
+   "npv": {
+    "high": {
+     "capex": 177364844.84903082,
+     "energy": 650607831.7853098,
+     "fom": 32308475.08828996,
+     "total": 860281151.7226306
+    },
+    "low": {
+     "capex": 69403634.9409251,
+     "energy": 615722645.3950255,
+     "fom": 12642446.773678679,
+     "total": 697768727.1096293
+    },
+    "value": {
+     "capex": 115672724.90154183,
+     "energy": 626584214.3254429,
+     "fom": 21070744.6227978,
+     "total": 763327683.8497827
+    }
+   },
+   "npv_delta": {
+    "central": -22408389.681303263,
+    "high": 145702669.3678918,
+    "low": -188519801.7348622,
+    "verdict": "not_distinguishable"
+   },
+   "own": false,
+   "peak": {
+    "min_headroom_mw": null,
+    "rows": [],
+    "verdict": "unknown"
+   },
+   "peak_mw": 137.0499877481566,
+   "services": {
+    "conditional": [],
+    "counted": [
+     "frequency_containment",
+     "fast_frequency_response",
+     "voltage_control"
+    ]
+   },
+   "services_why": "a bidirectional MV inverter with its own UPS storage",
+   "stages": [
+    {
+     "efficiency": 0.98,
+     "key": "dc-arch-mv-ups.stage.ups.efficiency",
+     "label": "MV UPS",
+     "range": [
+      0.97,
+      0.985
+     ],
+     "source": "assumed; IEC 62040-3 (UPS performance and efficiency classes)",
+     "stage": "ups"
+    },
+    {
+     "efficiency": 0.985,
+     "key": "dc-arch-mv-ups.stage.mv_lv_transformer.efficiency",
+     "label": "MV/LV transformer and LV feeders",
+     "range": [
+      0.98,
+      0.99
+     ],
+     "source": "assumed; Commission Regulation (EU) No 548/2014 (Ecodesign, power transformers, Tier 2)",
+     "stage": "mv_lv_transformer"
+    },
+    {
+     "efficiency": 0.99,
+     "key": "dc-arch-mv-ups.stage.lv_distribution.efficiency",
+     "label": "LV switchboard and PDU",
+     "range": [
+      0.985,
+      0.995
+     ],
+     "source": "assumed; LBNL, Ton, Fortenbery and Tschudi, DC Power for Improved Data Center Efficiency (2008); Schneider Electric White Paper 127, A Quantitative Comparison of High Efficiency AC vs. DC Power Distribution for Data Centers",
+     "stage": "lv_distribution"
+    },
+    {
+     "efficiency": 0.96,
+     "key": "dc-arch-mv-ups.stage.rack.efficiency",
+     "label": "Server AC power supply (in rack)",
+     "range": [
+      0.94,
+      0.965
+     ],
+     "source": "assumed; Commission Regulation (EU) 2019/424 (Ecodesign, servers and data storage, PSU efficiency); 80 PLUS Titanium",
+     "stage": "rack"
+    }
+   ],
+   "verdicts": {
+    "frequency_support": {
+     "assumed_from_architecture": [
+      "frequency_containment",
+      "fast_frequency_response"
+     ],
+     "conditional": [],
+     "project_value": "frequency containment, fast frequency response, voltage control (assumed, MV UPS)",
+     "verdict": "warn"
+    },
+    "voltage_control": {
+     "assumed_from_architecture": [
+      "voltage_control"
+     ],
+     "conditional": [],
+     "project_value": "frequency containment, fast frequency response, voltage control (assumed, MV UPS)",
+     "verdict": "warn"
+    }
+   }
+  },
+  {
+   "architecture": "dc_800v",
+   "capex": {
+    "fom_share": 0.02,
+    "lifetime": 15.0,
+    "overnight_per_mw": 1450000.0,
+    "range_per_mw": [
+     900000.0,
+     2400000.0
+    ],
+    "total": 145000000.0
+   },
+   "effective_pue": 1.291368788283384,
+   "eta_rack": 0.975,
+   "eta_to_rack": 0.955573125,
+   "facility_mwh": 1098056.4268328478,
+   "it_mwh": 850304.2947882407,
+   "label": "800 VDC",
+   "loss_mwh": 60790.283235323644,
+   "npv": {
+    "high": {
+     "capex": 185076359.84246695,
+     "energy": 633806670.5609101,
+     "fom": 33713191.39647648,
+     "total": 852596221.7998534
+    },
+    "low": {
+     "capex": 69403634.9409251,
+     "energy": 604825675.3130003,
+     "fom": 12642446.773678679,
+     "total": 686871757.0276041
+    },
+    "value": {
+     "capex": 111816967.40482378,
+     "energy": 616983108.0324479,
+     "fom": 20368386.46870454,
+     "total": 749168461.9059762
+    }
+   },
+   "npv_delta": {
+    "central": -36567611.62510979,
+    "high": 138017739.4451146,
+    "low": -199416771.81688738,
+    "verdict": "not_distinguishable"
+   },
+   "own": false,
+   "peak": {
+    "min_headroom_mw": null,
+    "rows": [],
+    "verdict": "unknown"
+   },
+   "peak_mw": 134.95010442435523,
+   "services": {
+    "conditional": [
+     "fast_frequency_response"
+    ],
+    "counted": [
+     "voltage_control"
+    ]
+   },
+   "services_why": "an active-front-end rectifier; frequency response needs storage on the DC bus",
+   "stages": [
+    {
+     "efficiency": 0.985,
+     "key": "dc-arch-dc-800v.stage.mv_lv_transformer.efficiency",
+     "label": "MV/LV transformer and LV feeders",
+     "range": [
+      0.98,
+      0.99
+     ],
+     "source": "assumed; Commission Regulation (EU) No 548/2014 (Ecodesign, power transformers, Tier 2)",
+     "stage": "mv_lv_transformer"
+    },
+    {
+     "efficiency": 0.975,
+     "key": "dc-arch-dc-800v.stage.rectifier.efficiency",
+     "label": "Central AC/800 VDC rectifier",
+     "range": [
+      0.965,
+      0.985
+     ],
+     "source": "assumed; NVIDIA, 800 VDC architecture for AI factories (public technical note, 2025); LBNL, Ton, Fortenbery and Tschudi, DC Power for Improved Data Center Efficiency (2008)",
+     "stage": "rectifier"
+    },
+    {
+     "efficiency": 0.995,
+     "key": "dc-arch-dc-800v.stage.dc_busway.efficiency",
+     "label": "800 VDC busway",
+     "range": [
+      0.99,
+      0.998
+     ],
+     "source": "assumed; NVIDIA, 800 VDC architecture for AI factories (public technical note, 2025)",
+     "stage": "dc_busway"
+    },
+    {
+     "efficiency": 0.975,
+     "key": "dc-arch-dc-800v.stage.rack.efficiency",
+     "label": "800 VDC to 54 VDC shelf (in rack)",
+     "range": [
+      0.965,
+      0.98
+     ],
+     "source": "assumed; NVIDIA, 800 VDC architecture for AI factories (public technical note, 2025)",
+     "stage": "rack"
+    }
+   ],
+   "verdicts": {
+    "frequency_support": {
+     "assumed_from_architecture": [],
+     "conditional": [
+      "fast_frequency_response"
+     ],
+     "project_value": "voltage control (assumed, 800 VDC); fast frequency response (conditional on DC-bus storage)",
+     "verdict": "warn"
+    },
+    "voltage_control": {
+     "assumed_from_architecture": [
+      "voltage_control"
+     ],
+     "conditional": [],
+     "project_value": "voltage control (assumed, 800 VDC)",
+     "verdict": "warn"
+    }
+   }
+  },
+  {
+   "architecture": "sst",
+   "capex": {
+    "fom_share": 0.03,
+    "lifetime": 15.0,
+    "overnight_per_mw": 1900000.0,
+    "range_per_mw": [
+     1200000.0,
+     3400000.0
+    ],
+    "total": 190000000.0
+   },
+   "effective_pue": 1.2756714024867712,
+   "eta_rack": 0.975,
+   "eta_to_rack": 0.970125,
+   "facility_mwh": 1084708.87227304,
+   "it_mwh": 850304.2947882407,
+   "label": "Solid-state transformer",
+   "loss_mwh": 47442.72867551577,
+   "npv": {
+    "high": {
+     "capex": 262191509.77682817,
+     "energy": 626126400.1429799,
+     "fom": 71640531.71751252,
+     "total": 959958441.6373203
+    },
+    "low": {
+     "capex": 92538179.92123348,
+     "energy": 599941406.4542863,
+     "fom": 25284893.547357358,
+     "total": 717764479.9228773
+    },
+    "value": {
+     "capex": 146518784.87528634,
+     "energy": 609483297.0066193,
+     "fom": 40034414.78331582,
+     "total": 796036496.6652216
+    }
+   },
+   "npv_delta": {
+    "central": 10300423.134135604,
+    "high": 245379959.28258145,
+    "low": -168524048.92161417,
+    "verdict": "not_distinguishable"
+   },
+   "own": false,
+   "peak": {
+    "min_headroom_mw": null,
+    "rows": [],
+    "verdict": "unknown"
+   },
+   "peak_mw": 133.28562422627652,
+   "services": {
+    "conditional": [
+     "grid_forming",
+     "synthetic_inertia",
+     "frequency_containment",
+     "fast_frequency_response"
+    ],
+    "counted": [
+     "voltage_control"
+    ]
+   },
+   "services_why": "a fully controllable MV converter; active-power services need storage on the DC bus",
+   "stages": [
+    {
+     "efficiency": 0.975,
+     "key": "dc-arch-sst.stage.sst.efficiency",
+     "label": "Solid-state transformer, MV AC to 800 VDC",
+     "range": [
+      0.96,
+      0.985
+     ],
+     "source": "assumed; Huber and Kolar, Solid-State Transformers: On the Origins and Evolution of Key Concepts, IEEE Industrial Electronics Magazine (2016)",
+     "stage": "sst"
+    },
+    {
+     "efficiency": 0.995,
+     "key": "dc-arch-sst.stage.dc_busway.efficiency",
+     "label": "800 VDC busway",
+     "range": [
+      0.99,
+      0.998
+     ],
+     "source": "assumed; NVIDIA, 800 VDC architecture for AI factories (public technical note, 2025)",
+     "stage": "dc_busway"
+    },
+    {
+     "efficiency": 0.975,
+     "key": "dc-arch-sst.stage.rack.efficiency",
+     "label": "800 VDC to 54 VDC shelf (in rack)",
+     "range": [
+      0.965,
+      0.98
+     ],
+     "source": "assumed; NVIDIA, 800 VDC architecture for AI factories (public technical note, 2025)",
+     "stage": "rack"
+    }
+   ],
+   "verdicts": {
+    "frequency_support": {
+     "assumed_from_architecture": [],
+     "conditional": [
+      "grid_forming",
+      "synthetic_inertia",
+      "frequency_containment",
+      "fast_frequency_response"
+     ],
+     "project_value": "voltage control (assumed, Solid-state transformer); grid forming, synthetic inertia, frequency containment, fast frequency response (conditional on DC-bus storage)",
+     "verdict": "warn"
+    },
+    "voltage_control": {
+     "assumed_from_architecture": [
+      "voltage_control"
+     ],
+     "conditional": [],
+     "project_value": "voltage control (assumed, Solid-state transformer)",
+     "verdict": "warn"
+    }
+   }
+  }
+ ],
+ "weighting": "generators",
+ "years": 10
+}

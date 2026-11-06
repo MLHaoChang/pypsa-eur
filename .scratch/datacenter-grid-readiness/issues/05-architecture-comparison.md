@@ -1,6 +1,6 @@
 # Power-architecture comparison: AC / MV UPS / 800 VDC / SST
 
-Status: ready-for-agent
+Status: done
 Model: Opus
 Type: task
 Blocked by: 03
@@ -36,3 +36,14 @@ GK B (28), finance: GO with K1–K9. Q-B1 (a), Q-B2 (a).
 - K9: each new guard has a test and a mutant that the test kills.
 
 GK A (14) handed off at 300k before verdict; plan re-sent to GK A (15).
+
+GK A (15), engine: GO with C1–C9. Q-A1 (a): PUE is stated for the own architecture; Facility_v = IT_v·(PUE − 1/η_own + 1/η_v), IT_v = IT_own·η_rack(own)/η_rack(v). Q-A2 (a), in this PR (#1195 no longer touches grid_readiness.py).
+- C1: unset (assumed "ac") is byte-equal to master in the sidecars, fingerprint, investment-case digest, ledger (the ups_distribution_loss_share line kept verbatim) and scorecard. Chain stages appear in the ledger only when the architecture is set explicitly. Scorecard equality is tested.
+- C2: the metering boundary (IT at the rack input, Green Grid PUE category 3) is stated in the ledger and the compare.
+- C3: PUE(T) − 1/η_chain(own) < 1 at any snapshot gives a typed 422 with its own kind and fragment. No clipping; tested.
+- C4: assumed second-order effects are stated: the cooling of the shifted loss heat is not modelled, and stage η is flat over part load.
+- C5: MWh and the energy-weighted PUE use snapshot weightings (named), with a non-unit weight test. The peak is per snapshot, unweighted.
+- C6: SERVICES is imported from gridspine. An architecture-sourced service reads assumed and never passes alone. GFM and inertia on SST, and FFR on 800 VDC, count only with declared DC-bus storage (otherwise conditional, never pass). The RMS caveat appears once per surface, positive test.
+- C7: as K1, plus older pins and REDUNDANCY_PACK_VERSION are unaffected. The stage-part efficiency rows load through the unchanged loader, and an unknown part is still rejected.
+- C8: as K8, plus file mtimes are unchanged. An unsaved or missing spec is a typed 422.
+- C9: mutants RED: the in-rack line dropped, own and variant swapped, the weighting dropped, the C3 guard removed, a conditional service passed without storage, and an unset "ac" taking the chain-ledger path.
