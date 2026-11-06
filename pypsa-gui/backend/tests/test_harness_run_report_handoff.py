@@ -771,7 +771,9 @@ def test_b1b_the_report_card_is_crossed_only_on_a_grant_that_lists_it(
     from services import run_envelope
     from tests.test_harness_envelope import BLOCK
 
-    runs = [{"tool": "solve_queue_enqueue"}] + ([{"tool": "generate_report"}] if lists_report else [])
+    runs = [{"tool": "solve_queue_enqueue"}] + (
+        [{"tool": "generate_report"}] if lists_report else []
+    )
     tunable = [
         {"component": "Generator", "attr": a} for a in ("p_nom", "marginal_cost")
     ]
@@ -1119,7 +1121,9 @@ def test_b1a_explore_stays_as_the_run_started_it(stored):
     profile = run_profiles.resolve("eh_site@1")
     run = {
         "stage": "solve",
-        "stages": {n: {"status": "pending", "attempts": 0} for n in run_profiles.STAGES},
+        "stages": {
+            n: {"status": "pending", "attempts": 0} for n in run_profiles.STAGES
+        },
     }
     run["stages"]["explore"] = dict(stored)
     assert tasks._sync_stages(run, profile) is False

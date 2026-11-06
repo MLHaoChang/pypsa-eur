@@ -36,7 +36,14 @@ from tests.test_harness_envelope_atomic import ATOMIC, eh, writer  # noqa: F401
 from tests.test_harness_immutable_solve import held_queue  # noqa: F401
 from tests.test_harness_run_loops import Script, call, go, rated, say, stopped  # noqa: F401
 from tests.test_harness_run_skeleton import site, start  # noqa: F401
-from tests.test_harness_runner import Clicks, detached, fake_report_provider, frames_of, settle, task_path  # noqa: F401
+from tests.test_harness_runner import (  # noqa: F401
+    Clicks,
+    detached,
+    fake_report_provider,
+    frames_of,
+    settle,
+    task_path,
+)
 
 # ── A profile with explore levers on the test network's shapes ──────────────
 
