@@ -3,7 +3,7 @@
 
 # SC-03 — hourly native results on buildings and process groups
 
-Status: ready-for-agent
+Status: done (#1057, #1060; follow-up wording #1087)
 Model: Opus
 Type: task
 Dependencies: SC-02
@@ -63,3 +63,7 @@ GK A leanings on the owner choices: A backend route, B vintage rows unavailable 
 ### 2026-11-05: triage sweep (AA-FILL-2), role ready-for-agent
 
 Was: `needs-triage — specification proposed; not implemented`. The D07 plan has a GK A GO with six binding conditions (see Comments in the file); the owner choices A/B/C are GK A's leanings (backend route, vintage rows unavailable in SC-03, unavailable after an AC PF) and are taken as the default unless the owner objects. Files: a backend projection route in `pypsa-gui/backend/routers/`, `services/dispatch_status.dispatch_digest` use, `solve_matches_inputs` gate, tests with hand oracles. Blockers: 03 (SC-02; backend, UI and detach all merged, issue still marked in-progress). Reviewers: GK A and UX.
+
+### 2026-11-06: Status corrected to done
+
+SC-03 was already merged before the 2026-11-05 sweep set `ready-for-agent`: the backend route and D07 registry in #1057 (GK OK @8769e87a4fee54f4b5a4853b431a1eab3083b6bf), the Site 3D overlay and timeline playback in #1060 (GK OK and UX OK @2e93d6839c6bdd030af04af8576b78e77cfcbdd4), and the "All carriers" wording in #1087 (GK OK and UX OK @b10ad9c1908e2e29bb4b1f02d7eac7f732117f16). Code: `services/site_scene/results.py`, `routers/site_scene.py` (`GET …/scene/results`), `tests/test_site_scene_results.py`; deviations from the draft are in [d07/plan.md §8](../d07/plan.md). No new build.
