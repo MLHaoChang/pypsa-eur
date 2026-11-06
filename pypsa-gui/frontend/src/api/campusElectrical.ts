@@ -942,6 +942,52 @@ export interface GridReadiness {
   basis: string
 }
 
+/** The data-centre backup setting (DC 03): `eh_template.json` `dc_load.spec.backup`. */
+export type DcBackupMode = 'genset' | 'bess' | 'hybrid'
+export interface DcBackupSetting { mode: DcBackupMode; autonomy_h?: number; [k: string]: unknown }
+
+/** One leg's outage proof: the islanded re-dispatch over the window. */
+export interface DcBackupProof {
+  verdict: 'pass' | 'fail' | 'not_shown'
+  reason?: string | null
+  strings_in_service: number
+  window_unserved_mwh: number | null
+  on_grid_unserved_mwh: number | null
+  /** The genset MW this proof dispatched (the fleet its cost leg prices). */
+  genset_fleet_mw?: number
+}
+
+export interface DcBackupWindow { first: string; hours: number; snapshots: number; energy_mwh: number }
+
+/** POST /campus-electrical/{name}/dc-backup/assess: sizing, window, both proofs, cost delta. */
+export interface DcBackupAssessment {
+  mode: DcBackupMode
+  verdict: DcBackupProof['verdict']
+  /** The chosen mode's proof window (hybrid: the shortfall window). */
+  window: DcBackupWindow
+  /** Both windows: the critical load's, and in hybrid the (critical − firm gensets)⁺ one. */
+  windows?: { critical: DcBackupWindow; shortfall?: DcBackupWindow }
+  sizing: {
+    strings_n: number; strings: number; string_mw: number; redundancy: string
+    /** Nameplate MWh (up-sized for fade); usable is per string after the depth-of-discharge window. */
+    e_mwh: number; e_usable_mwh_per_string: number
+    shortfall_mw: number; critical_peak_mw: number; firm_genset_mw: number
+  }
+  proofs: Partial<Record<DcBackupMode, DcBackupProof>>
+  cost: {
+    years: number; discount_rate: number; currency?: string | null; money_year?: number | null
+    delta: number | null; npv_genset: number | null; npv_chosen: number | null
+    lines: { leg: string; line: string; unit: string; npv: number }[]
+    inputs: { key: string; value: unknown; unit?: string; assumed?: boolean }[]
+  }
+  notes: string[]
+  /** The saved network the assessment read, and what its re-dispatch does not reproduce. */
+  basis?: { network_saved_at: string; network_sha256: string; not_reproduced: string[] }
+}
+
+/** The assessment re-dispatches the campus twice over the outage window. */
+export const DC_BACKUP_ASSESS_TIMEOUT_MS = 300_000
+
 export const CAMPUS_RUN_TIMEOUT_MS = 900_000
 /** Drafting loads the whole saved network, as a bundle download does: its 180 s. */
 export const CAMPUS_DRAFT_TIMEOUT_MS = 180_000
@@ -1002,6 +1048,16 @@ export const campusApi = {
   /** Reset the limit to the template's value or the generic placeholder. */
   resetGridLimit: (project: string, item: GridLimitItem) =>
     client.delete(`${base(project)}/grid-readiness/limits/${item}`, quiet).then(r => r.data),
+
+  /** Store the backup setting (DC 03). 422 `{error_kind: dc_backup_invalid, message, field}`;
+   *  the network and the investment case are untouched. */
+  setDcBackup: (project: string, backup: DcBackupSetting) =>
+    client.put<DcBackupSetting>(`${base(project)}/dc-backup`, backup, quiet).then(r => r.data),
+
+  /** Size, prove and price the stored backup mode. Read only. */
+  assessDcBackup: (project: string) =>
+    client.post<DcBackupAssessment>(`${base(project)}/dc-backup/assess`, {},
+      { ...quiet, timeout: DC_BACKUP_ASSESS_TIMEOUT_MS }).then(r => r.data),
 
   /** The island sidecar as written and the last island study (null each when absent). */
   island: (project: string) =>

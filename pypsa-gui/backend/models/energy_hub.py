@@ -173,9 +173,16 @@ class DtcConfig(BaseModel):
     islanding_contingencies: list[str] = Field(default_factory=list)
     attribution: Literal["bus_aggregate_not_per_load", "per_load"] = (
         "bus_aggregate_not_per_load")
+    #: DC 03: island only ``outage_snapshots`` snapshots from position
+    #: ``outage_start`` (the proof that a backup of N hours serves the
+    #: critical load). Both None (the default): island the whole horizon.
+    outage_start: int | None = Field(default=None, ge=0)
+    outage_snapshots: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def _require_targets(self) -> "DtcConfig":
+        if (self.outage_start is None) != (self.outage_snapshots is None):
+            raise ValueError("DtC config needs both outage_start and outage_snapshots, or neither")
         if not self.critical_bus_ids and not self.critical_load_ids:
             raise ValueError("DtC config needs critical_bus_ids and/or critical_load_ids")
         if not self.islanding_contingencies:
