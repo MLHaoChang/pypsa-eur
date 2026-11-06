@@ -238,9 +238,10 @@ def _spinning_genset_hub():
     (None, 6.0, 7.5), ("headroom_up", 9.5, 9.5), ("headroom_down", 12.0, 12.0)])
 def test_upward_and_downward_headroom_are_told_apart(kind, p_nom, with_events):
     """A 12 MW cut: upward, the genset's 2.5 MW credit counts, so the BESS
-    needs 9.5; downward only the BESS absorbs, so it needs 12. With no cut and the
-    event rows, the 10 MW load is E2's step against the genset's 50 % step
-    credit, 2.5 MW: the BESS needs 7.5 (the cuts still bind above it)."""
+    needs 9.5; downward only the BESS absorbs, so it needs 12. With no cut
+    and the event rows, the 10 MW load is E2's step against the genset's
+    50 % step credit, 2.5 MW: the BESS needs 7.5 (the cuts still bind above
+    it)."""
     for event_rows, want in ((False, p_nom), (True, with_events)):
         n, island = _spinning_genset_hub()
         island["cuts"] = [] if kind is None else [_cut(kind, 12.0, hour=1)]

@@ -60,7 +60,8 @@ X_u enters only rows a larger X loosens, so it settles at min(L_it, p_nom_u).
 By scenario (the plan's matrix): every scenario gets the steady-island GFM
 MVA row (GFM s_nom plus every genset's) and the spinning minimum load
 p_g ≥ p_min_pu·p_nom_g. ``seamless`` adds upward headroom (GFM storage plus
-spinning gensets, each at min(its headroom, its load step) ≥ ΔP⁺), downward power (GFM p_s + p_nom ≥ ΔP⁻), SoC room
+spinning gensets, each at min(its headroom, its load step) ≥ ΔP⁺),
+downward power (GFM p_s + p_nom ≥ ΔP⁻), SoC room
 (GFM max_hours·p_nom − e(t−1) ≥ ΔP⁻·t_curt/3600, t_curt from the ``gfl_fw``
 units; none, and the exporting hours are reported by
 ``not_islandable_hours`` instead), the GFM MVA at 0⁺ (GFM plus spinning
@@ -1344,7 +1345,7 @@ def _seamless_rows(n, m, sns, sns_p, coord, tag, *, units, gensets, spinning, gf
 
     def headroom_up(without=None, credit=None):
         """(b↑) less ``without``'s own share; ``credit``: a genset's share
-        replaced (the event rows' step credit)."""
+        replaced by its step credit (E1's up row and the event rows)."""
         up = _Lin(sns_p)
         for s in gfm:
             if s == without:
