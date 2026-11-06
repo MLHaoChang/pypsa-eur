@@ -21,8 +21,14 @@ NOW = "2026-01-01T00:00:00+00:00"
 
 
 def _gen(params, ids=("X",)):
-    return generate_profile(points=list(ids), technology="cop", params=params, year=2023,
-                            now=NOW, family="series")
+    return generate_profile(
+        points=list(ids),
+        technology="cop",
+        params=params,
+        year=2023,
+        now=NOW,
+        family="series",
+    )
 
 
 def test_cop_at_45_is_todays_and_at_90_follows_the_carnot_formula():
@@ -36,11 +42,16 @@ def test_cop_at_45_is_todays_and_at_90_follows_the_carnot_formula():
 
 
 def test_two_heat_pumps_on_two_bands_get_two_series():
-    res = _gen({**_GROUND, "sink_c_by_id": {"hp_lo": 60.0, "hp_hi": 120.0}}, ids=("hp_lo", "hp_hi", "hp_none"))
+    res = _gen(
+        {**_GROUND, "sink_c_by_id": {"hp_lo": 60.0, "hp_hi": 120.0}},
+        ids=("hp_lo", "hp_hi", "hp_none"),
+    )
     s = res.series
     assert s["hp_lo"].iloc[0] == pytest.approx(0.45 * 333.15 / 50.0, abs=1e-9)
     assert s["hp_hi"].iloc[0] == pytest.approx(0.45 * 393.15 / 110.0, abs=1e-9)
-    assert s["hp_none"].iloc[0] == pytest.approx(0.45 * 318.15 / 35.0, abs=1e-9)  # no band: sink_c fallback
+    assert s["hp_none"].iloc[0] == pytest.approx(
+        0.45 * 318.15 / 35.0, abs=1e-9
+    )  # no band: sink_c fallback
     assert res.meta["sink_c_by_id"] == {"hp_lo": 60.0, "hp_hi": 120.0}
 
 
@@ -60,8 +71,14 @@ def test_served_sink_reads_the_band_bus_and_none_off_a_band():
 
 def test_part_load_stays_a_refusal_that_points_at_the_link_fields():
     with pytest.raises(PartLoadNotASeriesError, match="p_min_pu"):
-        generate_profile(points=["X"], technology="part_load", params={}, year=2023, now=NOW,
-                         family="series")
+        generate_profile(
+            points=["X"],
+            technology="part_load",
+            params={},
+            year=2023,
+            now=NOW,
+            family="series",
+        )
 
 
 def test_a_committable_heat_pump_is_off_or_at_its_minimum():
@@ -73,12 +90,30 @@ def test_a_committable_heat_pump_is_off_or_at_its_minimum():
     n.add("Bus", "h", carrier="heat")
     n.add("Generator", "grid", bus="e", p_nom=100.0, marginal_cost=10.0)
     n.add("Generator", "shed", bus="h", p_nom=100.0, marginal_cost=1000.0)
-    n.add("Link", "hp", bus0="e", bus1="h", p_nom=10.0, efficiency=cop, committable=True, p_min_pu=0.3)
+    n.add(
+        "Link",
+        "hp",
+        bus0="e",
+        bus1="h",
+        p_nom=10.0,
+        efficiency=cop,
+        committable=True,
+        p_min_pu=0.3,
+    )
     n.add("Load", "d", bus="h", p_set=[1.0, 20.0, 1.0, 20.0, 1.0, 20.0])
-    status, cond = n.optimize(solver_name="highs", solver_options={"output_flag": False})
+    status, cond = n.optimize(
+        solver_name="highs", solver_options={"output_flag": False}
+    )
     assert status == "ok", cond
     p0 = n.links_t.p0["hp"].to_numpy()
     on = p0 > 1e-6
     assert (p0[on] >= 0.3 * 10.0 - 1e-6).all()  # never below the minimum load
-    assert on.tolist() == [False, True, False, True, False, True]  # 1 MW of demand sits under the minimum
+    assert on.tolist() == [
+        False,
+        True,
+        False,
+        True,
+        False,
+        True,
+    ]  # 1 MW of demand sits under the minimum
     assert n.generators_t.p["shed"].iloc[0] == pytest.approx(1.0)
