@@ -228,7 +228,9 @@ def test_from_template_builds_the_site_from_the_body_and_binds_its_blocks(
     p = S.site_params(body)
     cfg = client.get("/api/simulation/solver_config").json()
     want = S.solver_config(p)
-    assert cfg["commercial"] == want["commercial"]
+    # An API read states the tariff's currency (`DE` → EUR; gridspine-library-eu 01 C2).
+    tariff = {**want["commercial"]["import_tariff"], "currency": "EUR"}
+    assert cfg["commercial"] == {**want["commercial"], "import_tariff": tariff}
     assert client.get("/api/simulation/finance").json()["finance"] == want["finance"]
     meta = client.get("/api/projects/clinic/eh_template")
     assert meta.status_code == 200, meta.text
