@@ -214,9 +214,12 @@ cross-wire profile switch and rebind re-read each `evidence_revisions` entry
 and the current/discussed run ref through `run_evidence.get_run_evidence`
 under the actor's ACL. The result is a separate `revalidation` field
 (`trigger`, `generation`, `evidence[]`, `evidence_unchecked`, `refs`). Each
-stamp is `current|changed|unreadable`; the entries and refs are never
-rewritten (B2). `changed` means a stored anchor (fingerprint, revision,
-status, mode) differs in full from the run as read now. An `unreadable` stamp
+stamp is `current|changed|unanchored|unreadable`; the entries and refs are
+never rewritten (B2). Only the anchors (fingerprint, revision, status, mode)
+that the entry stores and the read supplies are compared, in full: `changed`
+when one differs, `current` when all match, `unanchored` when none could be
+compared (GK B (26) N1/N2; `get_run_evidence` supplies no revision). A
+readable stamp names the stored anchors left uncompared. An `unreadable` stamp
 is `{run_id, state}` alone. A missing run, a run whose project the actor lost
 and a ref to another project (not read at all) give byte-equal stamps (B1).
 At most `REVALIDATE_MAX` (64) entries are read plus the two refs, each run once
@@ -230,7 +233,7 @@ episode's discussed run (B4). GK extra: `_verify_jobs` re-reads jobs verified
 in a non-terminal state until they reach completed/failed/aborted/interrupted.
 Tests: `tests/test_durable_conversation_revalidate.py` (16) and two in
 `tests/test_durable_conversation_reconcile.py`. Mutants (prefix fingerprint
-match, no project check, no cap, no rebind read, no field strip, a swallowed
+match, unanchored read as current, comparing an unsupplied anchor, no project check, no cap, no rebind read, no field strip, a swallowed
 outage, the old job condition, a stale-generation stamp) each turn one red.
 
 Close-out gates (B5), each with what holds it:

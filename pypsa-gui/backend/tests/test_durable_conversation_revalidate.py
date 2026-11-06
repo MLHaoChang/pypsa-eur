@@ -4,7 +4,7 @@ GK B (25) conditions B1-B4: on resume, takeover, profile switch and rebind
 each ``evidence_revisions`` entry and the current/discussed run ref is read
 again through ``run_evidence.get_run_evidence`` as the acting user may read
 it. The result is a separate ``revalidation`` stamp
-(``current|changed|unreadable``); the entries and refs are never rewritten.
+(``current|changed|unanchored|unreadable``); the entries and refs are never rewritten.
 An ``unreadable`` stamp carries no fingerprint, revision or reason, so a
 missing run and a forbidden run leave byte-equal stamps. Reads are bounded,
 run under ``_LOCK`` after the lease and generation checks, and a rebind
@@ -173,14 +173,35 @@ def test_changed_compares_the_full_stored_fingerprint(acl):
         {"run_id": "run-a", "fingerprint": FP},
         {"run_id": "run-a", "fingerprint": FP[:-1]},  # a prefix is not a match
         {"run_id": "run-a", "fingerprint": FP, "status": "running"},
-        {"run_id": "run-a"},
     ]
     tid, gen = _with_facts(evidence, {"current": {}, "discussed": {}})
     view, _ = dc.resume_episode(tid, generation=gen)
     states = [s["state"] for s in view["revalidation"]["evidence"]]
-    assert states == ["current", "changed", "changed", "current"]
+    assert states == ["current", "changed", "changed"]
     observed = view["revalidation"]["evidence"][0]["observed"]
     assert observed["fingerprint"] == FP and observed["status"] == "completed"
+
+
+def test_only_anchors_the_read_supplies_are_compared(acl):
+    """N1/N2: nothing compared is ``unanchored``; a revision the read lacks is named."""
+    _publish(acl.root, "run-a")
+    evidence = [
+        {"run_id": "run-a"},
+        {"run_id": "run-a", "revision": 4},
+        {"run_id": "run-a", "fingerprint": FP, "revision": 4},
+        {"run_id": "run-a", "fingerprint": "fp-other", "revision": 4},
+    ]
+    tid, gen = _with_facts(evidence, {"current": {}, "discussed": {}})
+    view, _ = dc.resume_episode(tid, generation=gen)
+    stamps = view["revalidation"]["evidence"]
+    assert [(s["state"], s["uncompared"]) for s in stamps] == [
+        ("unanchored", []),
+        ("unanchored", ["revision"]),
+        ("current", ["revision"]),
+        ("changed", ["revision"]),
+    ]
+    assert all(s["observed"]["fingerprint"] == FP for s in stamps)
+    assert "revision" not in stamps[2]["observed"]
 
 
 def test_entries_and_refs_are_byte_equal_after_many_cycles(acl, monkeypatch):
@@ -311,13 +332,13 @@ def _discussed_episode(acl):
     return tid, view, session
 
 
-def test_resume_hydrates_live_fields_from_a_current_stamp(acl):
+def test_resume_hydrates_live_fields_from_a_readable_stamp(acl):
     _, view, session = _discussed_episode(acl)
-    assert view["revalidation"]["refs"]["discussed"]["state"] == "current"
+    assert view["revalidation"]["refs"]["discussed"]["state"] == "unanchored"
     refs = session.discussed_refs
     assert (refs["run_id"], refs["revalidation"], refs["fingerprint"]) == (
         "run-a",
-        "current",
+        "unanchored",
         FP,
     )
     assert refs["status"] == "completed" and refs["section"] == "summary"
@@ -353,7 +374,7 @@ def test_rebind_after_access_is_lost_strips_the_episodes_live_fields(acl):
 
     acl.run_ok = True
     again = dc.rebind_scope(tid, generation=out["generation"])
-    assert again["revalidation"]["refs"]["discussed"]["state"] == "current"
+    assert again["revalidation"]["refs"]["discussed"]["state"] == "unanchored"
     assert session.discussed_refs["fingerprint"] == FP
 
 

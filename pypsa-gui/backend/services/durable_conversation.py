@@ -697,14 +697,17 @@ def _observe_run(thread: dict[str, Any], ref: dict[str, Any]) -> dict[str, Any] 
 
 
 def _revalidate_evidence(thread: dict[str, Any], *, trigger: str) -> dict[str, Any]:
-    """Stamp each evidence entry and run ref as ``current|changed|unreadable``.
+    """Stamp each evidence entry and run ref as ``current|changed|unanchored|unreadable``.
 
     The caller holds ``_LOCK`` and has checked the lease and generation. It
     reads before any side effect, so an outage changes nothing, then stores
     the result as ``thread['revalidation']`` (``_store_revalidation``) once
     the generation is bumped, and saves. The entries and refs themselves are
-    never rewritten. ``changed`` means a stored anchor
-    (fingerprint, revision, status, mode) differs from the run as read now.
+    never rewritten. Only the anchors (fingerprint, revision, status, mode)
+    that both the entry stores and the read supplies are compared, in full:
+    ``changed`` when one differs, ``current`` when all match, ``unanchored``
+    when none could be compared. A readable stamp names the stored anchors
+    the read did not supply in ``uncompared``.
     An ``unreadable`` stamp is the run id and the state alone. At most
     ``REVALIDATE_MAX`` entries are read, plus the two refs; one run is read
     once per pass.
@@ -722,12 +725,16 @@ def _revalidate_evidence(thread: dict[str, Any], *, trigger: str) -> dict[str, A
         if observed is None:
             out['state'] = 'unreadable'
             return out
-        changed = any(
-            name in ref and ref[name] != observed.get(name)
-            for name in _REVALIDATE_ANCHORS
-        )
-        out['state'] = 'changed' if changed else 'current'
+        stored = [name for name in _REVALIDATE_ANCHORS if name in ref]
+        compared = [name for name in stored if name in observed]
+        if not compared:
+            out['state'] = 'unanchored'
+        elif any(ref[name] != observed[name] for name in compared):
+            out['state'] = 'changed'
+        else:
+            out['state'] = 'current'
         out['observed'] = copy.deepcopy(observed)
+        out['uncompared'] = [name for name in stored if name not in observed]
         return out
 
     entries = thread.get('evidence_revisions')
