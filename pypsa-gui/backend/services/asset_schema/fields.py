@@ -423,7 +423,8 @@ LINK: tuple[FieldSpec, ...] = (
               "multiple of rated current, when the maker states it. Leave empty to use the start method's default "
               "(6, 3 or 1).", "× rated", "pu", reveal_when={"eh_process": True}),
     FieldSpec("ride_through_curve", "performance", "Ride-through curve", "The voltage dips the unit rides through, "
-              "as depth%:duration_s pairs, e.g. 20:0.5, 40:0.15, 100:0.02: it rides a dip when some pair is at least "
+              "as pairs of dip depth in % and duration in s, written depth:duration, such as 20:0.5, 40:0.15, 100:0.02: "
+              "it rides a dip when some pair is at least "
               "as deep and as long. Leave empty when unknown: the dip screen then reads unknown, never rides "
               "through.", kind="text", reveal_when={"eh_process": True}),
     FieldSpec("restart_time_h", "performance", "Restart time", "Hours from a trip until the unit is back at full "

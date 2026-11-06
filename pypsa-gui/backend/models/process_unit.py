@@ -8,8 +8,8 @@ the same lazy-column machinery (`services/adequacy/eh_columns.py`): a project th
 column. Kinds are those of `eh_columns`: "bool", "float_nonneg", "tier" (one of CRITICALITY_TIERS or ""),
 "process_role" (one of PROCESS_GENERATOR_ROLES or ""), "text", "harmonic_source" (one of HARMONIC_SOURCES or "")
 "harmonic_spectrum" (order:% pairs, checked by gridspine's harmonic screen), "fraction" (0..1), "start_method"
-(one of START_METHODS or ""), "ride_through_curve" (depth%:duration_s pairs, checked by gridspine's ride-through
-screen) and "float_signed" (finite, any sign). Heat and steam levels (issue 15): a Bus's `temperature_c`
+(one of START_METHODS or ""), "ride_through_curve" (pairs of dip depth % and duration s, written
+depth:duration, checked by gridspine's ride-through screen) and "float_signed" (finite, any sign). Heat and steam levels (issue 15): a Bus's `temperature_c`
 or `pressure_bar` (barg) and a Link's reach, `max_supply_temp_c` or `max_pressure_bar`; validation and display
 only, the LP never reads them.
 """

@@ -66,6 +66,8 @@ LEDGER = (
 )
 
 CURVE_LABEL, RESTART_LABEL = "Ride-through curve", "Restart time"
+#: The curve's form in the user's words, shared by the refusal and the field help (no code notation).
+PAIRS_IN_WORDS = ("pairs of dip depth in % and duration in s, written depth:duration, such as 20:0.5, 40:0.15")
 TRIP_COLUMNS = ("unit", "u_min_pct", "u_max_pct", "t_min_s", "t_max_s", "depth_pct", "duration_s",
                 "count_per_year", "verdict", "dip_stats_source", "note")
 LOST_COLUMNS = ("unit", "trips_per_year", "restart_time_h", "rate_tph", "mass_pull", "lost_t_per_trip",
@@ -85,16 +87,16 @@ def parse_curve(text) -> tuple[tuple[float, float], ...]:
     for part in str(text).split(","):
         part = part.strip()
         if part.count(":") != 1:
-            raise ContractError(f"{CURVE_LABEL}: expected depth%:duration_s pairs such as 40:0.15, got {part!r}.")
+            raise ContractError(f"{CURVE_LABEL}: expected {PAIRS_IN_WORDS}, got \u201c{part}\u201d.")
         d, t = (s.strip() for s in part.split(":"))
         try:
             depth, dur = float(d), float(t)
         except ValueError:
-            raise ContractError(f"{CURVE_LABEL}: {part!r} is not a pair of numbers.") from None
+            raise ContractError(f"{CURVE_LABEL}: \u201c{part}\u201d is not a pair of numbers.") from None
         if not 0.0 < depth <= 100.0:   # also refuses nan and inf
-            raise ContractError(f"{CURVE_LABEL}: depth {d!r} must be above 0 and at most 100 %.")
+            raise ContractError(f"{CURVE_LABEL}: depth {depth:g} must be above 0 and at most 100 %.")
         if not math.isfinite(dur) or dur <= 0.0:
-            raise ContractError(f"{CURVE_LABEL}: duration {t!r} at depth {depth:g} % must be above 0 s.")
+            raise ContractError(f"{CURVE_LABEL}: duration {dur:g} at depth {depth:g} % must be above 0 s.")
         if depth in out:
             raise ContractError(f"{CURVE_LABEL}: depth {depth:g} % appears twice.")
         out[depth] = dur
