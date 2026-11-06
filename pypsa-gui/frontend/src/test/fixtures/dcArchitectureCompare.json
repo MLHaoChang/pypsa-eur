@@ -30,7 +30,7 @@
   "most_services": [
    "mv_ups"
   ],
-  "most_services_text": "Most grid services: MV UPS"
+  "most_services_text": "Most grid services without added storage: MV UPS"
  },
  "variants": [
   {
@@ -82,7 +82,8 @@
    "peak": {
     "min_headroom_mw": null,
     "rows": [],
-    "verdict": "unknown"
+    "verdict": "unknown",
+    "note": "the network has no import connection to check"
    },
    "peak_mw": 140.0,
    "services": {
@@ -198,7 +199,8 @@
    "peak": {
     "min_headroom_mw": null,
     "rows": [],
-    "verdict": "unknown"
+    "verdict": "unknown",
+    "note": "the network has no import connection to check"
    },
    "peak_mw": 137.0499877481566,
    "services": {
@@ -325,7 +327,8 @@
    "peak": {
     "min_headroom_mw": null,
     "rows": [],
-    "verdict": "unknown"
+    "verdict": "unknown",
+    "note": "the network has no import connection to check"
    },
    "peak_mw": 134.95010442435523,
    "services": {
@@ -451,7 +454,8 @@
    "peak": {
     "min_headroom_mw": null,
     "rows": [],
-    "verdict": "unknown"
+    "verdict": "unknown",
+    "note": "the network has no import connection to check"
    },
    "peak_mw": 133.28562422627652,
    "services": {

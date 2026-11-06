@@ -546,6 +546,17 @@ def test_without_a_tariff_or_a_price_the_screen_refuses():
     with pytest.raises(A.DcArchitectureError) as e:
         _compare(_net()[0], _spec(), energy_price_per_mwh=None)
     assert e.value.kind == "dc_architecture_no_energy_price"
+    assert str(e.value).startswith("Energy price: ") and "Enter a price per MWh" in str(e.value)
+
+
+def test_the_screen_says_what_it_counts_and_why_a_peak_is_unknown():
+    out = _compare(_net()[0], _spec())
+    assert out["summary"]["most_services_text"].startswith(
+        "Most grid services without added storage: "
+    )
+    for v in out["variants"]:
+        assert v["peak"]["verdict"] == "unknown"
+        assert v["peak"]["note"] == "the network has no import connection to check"
 
 
 def _tou(currency=None):

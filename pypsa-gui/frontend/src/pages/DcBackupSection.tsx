@@ -22,7 +22,7 @@ const CHIP: Record<DcBackupProof['verdict'], GridReadinessVerdict> = {
 }
 /** The redundancy tier in words (UX: no bare "N+1"). */
 const SPARE: Record<string, string> = { N: 'no spare string', 'N+1': 'one spare string', '2N': 'a full second set' }
-const SYMBOL: Record<string, string> = { EUR: '€', USD: '$', GBP: '£' }
+export const SYMBOL: Record<string, string> = { EUR: '€', USD: '$', GBP: '£' }
 /** Cost-line words (UX: labels from a word map, never raw keys). */
 const LINE_LABEL: Record<string, string> = {
   capex_and_repurchase: 'Capex and repurchase', fom: 'Fixed O&M', fuel: 'Fuel',

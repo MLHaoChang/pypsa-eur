@@ -52,7 +52,11 @@ describe('DcArchitectureSection', () => {
       .toBe(`${data.summary.cheapest_text} · ${data.summary.most_services_text}`)
     for (const v of data.variants) expect(screen.getByTestId(`dc-architecture-row-${v.architecture}`)).toBeTruthy()
     expect(screen.getByText('Efficiency to rack')).toBeTruthy()
-    expect(screen.getByText(`NPV vs this project (M ${data.currency}, ${data.money_year})`)).toBeTruthy()
+    expect(text(screen.getByText(/^NPV vs this project/))).toBe(`NPV vs this project (€ m, ${data.money_year})`)
+    expect(text(screen.getByText(/^Capex \(/))).toBe('Capex (€ m)')
+    expect(text(screen.getByTestId('dc-architecture-chip-key'))).toContain('a dashed chip needs storage on the DC bus')
+    expect(screen.getAllByTestId('dc-architecture-peak-why').map(text))
+      .toEqual(['Peak within import limit: unknown, the network has no import connection to check.'])
     expect(screen.getByText('Peak within import limit')).toBeTruthy()
     expect(screen.getAllByTitle(SERVICE_CHIP.voltage_control.full).length).toBeGreaterThan(0)
     expect(text(screen.getByTestId('dc-architecture-footnote'))).toBe('A screening estimate, with no solve. Outage proof is in Backup.')
@@ -70,7 +74,7 @@ describe('DcArchitectureSection', () => {
     results.getEhTemplate.mockResolvedValue({ dc_load: { spec: {} } })
     campus.compareDcArchitecture.mockResolvedValue(data)
     renderIt()
-    expect(text(await screen.findByTestId('dc-architecture-own'))).toBe('AC (LV UPS) (set when the project is created), assumed')
+    expect(text(await screen.findByTestId('dc-architecture-own'))).toBe('AC (LV UPS) (set when the project is created) assumed')
     expect(screen.queryByTestId('dc-architecture-price')).toBeNull()
     await user.click(screen.getByTestId('dc-architecture-compare'))
     expect(campus.compareDcArchitecture).toHaveBeenCalledWith('DC A', null)
@@ -86,16 +90,16 @@ describe('DcArchitectureSection', () => {
     results.getEhTemplate.mockResolvedValue({ dc_load: { spec: {} } })
     campus.compareDcArchitecture.mockRejectedValueOnce({ response: { status: 422, data: { detail: {
       error_kind: 'dc_architecture_no_energy_price',
-      message: 'energy_price_per_mwh: the project has no readable tariff energy component; give a price per MWh',
+      message: "Energy price: the project's tariff has no energy rate. Enter a price per MWh above.",
     } } } })
     campus.compareDcArchitecture.mockResolvedValueOnce(data)
     renderIt()
     await user.click(await screen.findByTestId('dc-architecture-compare'))
-    expect(text(await screen.findByTestId('dc-architecture-error'))).toContain('give a price per MWh')
+    expect(text(await screen.findByTestId('dc-architecture-error'))).toContain('Enter a price per MWh above.')
     await user.type(screen.getByTestId('dc-architecture-price'), '80')
     await user.click(screen.getByTestId('dc-architecture-compare'))
     expect(campus.compareDcArchitecture).toHaveBeenLastCalledWith('DC A', 80)
-    expect(text(await screen.findByTestId('dc-architecture-price-used'))).toMatch(/\(request\) assumed/)
+    expect(text(await screen.findByTestId('dc-architecture-price-used'))).toMatch(/\(entered above\) assumed/)
   })
 
   it('Guided keeps the price field hidden after any other refusal', async () => {
@@ -120,7 +124,7 @@ describe('DcArchitectureSection', () => {
     })
     renderIt()
     await user.click(await screen.findByTestId('dc-architecture-compare'))
-    expect(text(await screen.findByTestId('dc-architecture-price-used'))).toContain("per MWh, weighted by this project's facility energy (tariff t1")
+    expect(text(await screen.findByTestId('dc-architecture-price-used'))).toContain("per MWh, weighted by this project's facility energy (project tariff); held")
     expect(text(screen.getByTestId('dc-architecture-energy-basis'))).toBe('Energy per year: the final period, 2035 (full build-out).')
     expect(text(screen.getByTestId('dc-architecture-range-note'))).toContain('lifetime and fixed O&M are held at their central values')
   })
@@ -135,7 +139,8 @@ describe('DcArchitectureSection', () => {
     expect(screen.queryByTestId('dc-architecture-stale')).toBeNull()
     results.getEhTemplate.mockResolvedValue({ dc_load: { spec: { backup: { mode: 'hybrid' } } } })
     await client.refetchQueries()
-    expect(await screen.findByTestId('dc-architecture-stale')).toBeTruthy()
+    expect(text(await screen.findByTestId('dc-architecture-stale'))).toContain('The project changed since this comparison. Compare again.')
+    expect(text(screen.getByTestId('dc-architecture-stale'))).not.toContain('Out of date:')
     expect(screen.getByTestId('dc-architecture').getAttribute('data-complete')).toBe('false')
   })
 
@@ -143,7 +148,7 @@ describe('DcArchitectureSection', () => {
     const user = userEvent.setup()
     results.getEhTemplate.mockResolvedValue({ dc_load: { spec: {} } })
     campus.compareDcArchitecture.mockRejectedValue({ response: { data: { detail: {
-      error_kind: 'dc_architecture_no_energy_price', message: 'energy_price_per_mwh: give a price per MWh' } } } })
+      error_kind: 'dc_architecture_no_energy_price', message: 'Energy price: enter a price per MWh.' } } } })
     renderIt()
     await user.click(await screen.findByTestId('dc-architecture-compare'))
     expect(await screen.findByTestId('dc-architecture-error')).toBeTruthy()

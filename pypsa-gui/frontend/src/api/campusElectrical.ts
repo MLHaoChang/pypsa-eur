@@ -1003,7 +1003,7 @@ export interface DcArchitectureVariant {
   eta_to_rack: number; eta_rack: number; stages: DcArchitectureStage[]
   effective_pue: number | null; facility_mwh: number; it_mwh: number; loss_mwh: number
   peak_mw: number | null
-  peak: { verdict: GridReadinessVerdict; min_headroom_mw?: number | null; note?: string }
+  peak: { verdict: GridReadinessVerdict; min_headroom_mw?: number | null; note?: string | null }
   capex: { overnight_per_mw: number; range_per_mw: [number, number]; total: number
            lifetime: number; fom_share: number }
   npv: { value: DcArchitectureNpv; low: DcArchitectureNpv; high: DcArchitectureNpv }

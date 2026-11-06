@@ -661,7 +661,8 @@ def dc_load_spec(template_id: str, raw: dict | None, planning: Planning | None =
             check_pue([spec.pue_at_design], chain(spec.architecture)["eta_to_rack"],
                       field="dc_load.pue_at_design")
         except DcArchitectureError as exc:
-            raise DcLoadError(str(exc), exc.field) from None
+            # The create form names its fields (dc_load.*), as its other refusals do.
+            raise DcLoadError(f"{exc.field}: {str(exc).removeprefix('PUE: ')}", exc.field) from None
     if template_id == "eh_datacenter_staged":
         expected = list(_dc_plan(planning).planning.years)
         got = [p.cod.year for p in spec.phases]

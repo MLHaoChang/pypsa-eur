@@ -18,7 +18,7 @@ import { StatePill } from '../components/ResultState'
 import { VerdictChip } from '../components/gridReadiness/GridReadinessScorecard'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
-import { money } from './DcBackupSection'
+import { money, SYMBOL } from './DcBackupSection'
 
 const NBSP = ' '
 export const ARCH_LABEL: Record<DcArchitecture, string> = {
@@ -39,6 +39,13 @@ const DELTA_WORDS: Record<DcArchitectureVariant['npv_delta']['verdict'], string>
 const num = (v: number | null | undefined, digits = 3) =>
   v == null || !Number.isFinite(v) ? '–' : v.toLocaleString('en', { maximumSignificantDigits: digits })
 const gwh = (mwh: number) => num(mwh / 1000, 3)
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+/** Where the price came from, in the panel's words (UX 11): never the request's internals. */
+function priceSource(source: string): string {
+  if (source.startsWith('request')) return 'entered above'
+  if (source.startsWith('tariff')) return 'project tariff'
+  return source.replace(/ \(assumed\)$/, '')
+}
 const signedM = (v: number) => `${v < 0 ? '−' : v > 0 ? '+' : ''}${num(Math.abs(v) / 1e6, 3)}`
 
 interface DcMeta { dc_load?: { spec?: { architecture?: DcArchitecture; backup?: unknown } } }
@@ -92,7 +99,7 @@ export default function DcArchitectureSection({ name }: { name: string }) {
       <PageSection
         title="Power architecture"
         hint={<span data-testid="dc-architecture-own">
-          {ARCH_LABEL[own.arch]} (set when the project is created){own.set ? '' : ', assumed'}
+          {ARCH_LABEL[own.arch]} (set when the project is created){!own.set && <>{' '}<Assumed /></>}
         </span>}
         right={<Btn onClick={() => compare.mutate()} disabled={compare.isPending}>
           <span data-testid="dc-architecture-compare">{compare.isPending ? 'Comparing…' : 'Compare'}</span>
@@ -121,12 +128,14 @@ function Result({ data, stale, guided }: { data: DcArchitectureCompare; stale: b
   const [open, setOpen] = useState<DcArchitecture | null>(null)
   const cur = data.currency
   const p = data.price
+  const unitM = `${SYMBOL[cur] ?? cur}${NBSP}m`
+  const peakWhy = [...new Set(data.variants.flatMap(v => (v.peak.verdict === 'unknown' && v.peak.note ? [v.peak.note] : [])))]
   return (
     <div className="mt-2 space-y-2 text-[12px]" data-testid="dc-architecture-result" data-stale={stale}>
       {stale && (
         <p className="flex items-center gap-2" data-testid="dc-architecture-stale">
           <StatePill state="stale" />
-          <span className="text-muted">Out of date: the project changed since this comparison. Compare again.</span>
+          <span className="text-muted">The project changed since this comparison. Compare again.</span>
         </p>
       )}
       <div className={stale ? 'opacity-50 space-y-2' : 'space-y-2'}>
@@ -136,7 +145,7 @@ function Result({ data, stale, guided }: { data: DcArchitectureCompare; stale: b
         <p data-testid="dc-architecture-price-used" className="text-[11px]">
           Energy priced at {p.weighted_mean_per_mwh == null ? '–' : money(p.weighted_mean_per_mwh, cur)} per MWh
           {p.weighting !== 'flat' && <>, {p.weighted_mean_basis}</>}
-          {' '}({p.assumed ? p.source.replace(/ \(assumed\)$/, '') : p.source}){p.assumed && <>{' '}<Assumed /></>}; held constant in real terms.
+          {' '}({priceSource(p.source)}){p.assumed && <>{' '}<Assumed /></>}; held constant in real terms.
         </p>
         <div className="overflow-x-auto">
           <table className="w-full text-[11px] [&_td]:px-2 [&_td]:py-0.5 [&_th]:px-2 [&_th]:align-bottom" data-testid="dc-architecture-table">
@@ -148,8 +157,8 @@ function Result({ data, stale, guided }: { data: DcArchitectureCompare; stale: b
                 <th className="text-right font-normal">Facility energy (GWh/yr)</th>
                 {!guided && <th className="text-right font-normal">Loss energy (GWh/yr)</th>}
                 {!guided && <th className="text-left font-normal">Peak within import limit</th>}
-                {!guided && <th className="text-right font-normal">Capex (M {cur})</th>}
-                <th className="text-right font-normal">NPV vs this project (M {cur}, {data.money_year})</th>
+                {!guided && <th className="text-right font-normal">Capex ({unitM})</th>}
+                <th className="text-right font-normal">NPV vs this project ({unitM}, {data.money_year})</th>
                 {!guided && <th className="text-left font-normal">Grid services</th>}
                 <th className="text-left font-normal">Frequency support</th>
                 <th className="text-left font-normal">Voltage control offered</th>
@@ -230,15 +239,25 @@ function Result({ data, stale, guided }: { data: DcArchitectureCompare; stale: b
             </tbody>
           </table>
         </div>
+        {!guided && (
+          <p className="text-[11px] text-muted" data-testid="dc-architecture-chip-key">
+            Grid services: a solid chip is offered as built (assumed); a dashed chip needs storage on the DC bus.
+          </p>
+        )}
+        {!guided && peakWhy.map(why => (
+          <p key={why} className="text-[11px] text-muted" data-testid="dc-architecture-peak-why">
+            Peak within import limit: unknown, {why}.
+          </p>
+        ))}
         <ul className="text-[11px] text-muted list-disc pl-4">
           <li data-testid="dc-architecture-footnote">A screening estimate, with no solve. Outage proof is in Backup.</li>
           <li>{data.boundary}; the stated PUE is this project&apos;s architecture&apos;s.</li>
           <li data-testid="dc-architecture-energy-basis">Energy per year: {data.energy_basis}.</li>
           <li>Effects not modelled: {data.second_order.replace(/^assumed: /, '')} (assumed).</li>
           <li>{data.rms_caveat}.</li>
-          <li>{data.capex_note}; {data.years}{NBSP}years at {num(data.discount_rate * 100)}{NBSP}% real ({data.discount_rate_source}).</li>
+          <li>{cap(data.capex_note)}; {data.years}{NBSP}years at {num(data.discount_rate * 100)}{NBSP}% real ({data.discount_rate_source}).</li>
           <li data-testid="dc-architecture-range-note">Range: {data.range_note}.</li>
-          <li>{p.not_valued}.</li>
+          <li>{cap(p.not_valued)}.</li>
           <li data-testid="dc-architecture-source">Source: defaults pack {data.pack_version}.</li>
         </ul>
       </div>

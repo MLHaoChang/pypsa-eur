@@ -143,7 +143,7 @@ def chain(architecture: str, pack=None, *, pick: str = "value") -> dict[str, Any
     refused (``dc_architecture_pack_row``)."""
     if architecture not in TECHNOLOGY:
         raise _err(
-            f"architecture: {architecture} is not one of {', '.join(ARCHITECTURES)}",
+            f"Architecture: {architecture} is not one of {', '.join(ARCHITECTURES)}",
             "invalid",
             "architecture",
         )
@@ -161,7 +161,7 @@ def chain(architecture: str, pack=None, *, pick: str = "value") -> dict[str, Any
         )
         if val is None or not math.isfinite(val) or not 0 < val <= 1:
             raise _err(
-                f"defaults pack {pack.version}: {r.key} has no usable {pick}",
+                f"Defaults pack {pack.version}: {r.key} has no usable {pick}",
                 "pack_row",
                 "defaults_pack",
             )
@@ -182,7 +182,7 @@ def chain(architecture: str, pack=None, *, pick: str = "value") -> dict[str, Any
     to_rack = [s for s in stages if s["stage"] != RACK_STAGE]
     if len(rack) != 1 or not to_rack:
         raise _err(
-            f"defaults pack {pack.version}: {tech} needs stage rows up to the rack and "
+            f"Defaults pack {pack.version}: {tech} needs stage rows up to the rack and "
             "one rack stage",
             "pack_row",
             "defaults_pack",
@@ -219,7 +219,7 @@ def services(architecture: str, storage: bool) -> dict[str, list[str]]:
     unknown = set(offer) - set(SERVICES)
     if SERVICES and unknown:
         raise _err(
-            f"architecture services {sorted(unknown)} are not gridspine services",
+            f"Architecture services {', '.join(sorted(unknown))} are not gridspine services",
             "invalid",
             "architecture",
         )
@@ -261,7 +261,7 @@ def check_pue(pue_series, eta_own: float, field: str = "pue_at_design") -> None:
     pue_min = float(np.min(np.asarray(pue_series, dtype=float)))
     if pue_min - 1.0 / eta_own < -1e-12:
         raise _err(
-            f"{field}: a PUE of {pue_min:g} cannot include the architecture's own "
+            f"PUE: a PUE of {pue_min:g} cannot include the architecture's own "
             f"conversion losses (1/{eta_own:.4f} = {1.0 / eta_own:.4f}) plus a "
             "non-negative overhead",
             "pue_infeasible",
@@ -333,7 +333,7 @@ def tariff_energy_rate(
     cur = getattr(tariff, "currency", None)
     if cur and cur != finance_currency:
         raise _err(
-            f"energy_price: the tariff is in {cur}, the finance case in "
+            f"Energy price: the tariff is in {cur}, the finance case in "
             f"{finance_currency}; a case in two currencies is refused",
             "currency_mismatch",
             "energy_price_per_mwh",
@@ -385,13 +385,13 @@ def capex_rows(architecture: str, pack=None) -> dict[str, Any]:
         r = rows.get(key)
         if r is None or r.value is None or not math.isfinite(r.value):
             raise _err(
-                f"defaults pack {pack.version} has no value for {key}",
+                f"Defaults pack {pack.version} has no value for {key}",
                 "pack_row",
                 "defaults_pack",
             )
         if r.price_basis != "real":
             raise _err(
-                f"defaults pack {pack.version}: {key} is not real money",
+                f"Defaults pack {pack.version}: {key} is not real money",
                 "pack_row",
                 "defaults_pack",
             )
@@ -399,7 +399,7 @@ def capex_rows(architecture: str, pack=None) -> dict[str, Any]:
         if p == "overnight":
             if r.range is None:
                 raise _err(
-                    f"defaults pack {pack.version}: {key} has no range",
+                    f"Defaults pack {pack.version}: {key} has no range",
                     "pack_row",
                     "defaults_pack",
                 )
@@ -416,8 +416,8 @@ def _check_money_years(legs: dict[str, dict]) -> tuple[str, int]:
     curs = {c["currency"] for c in legs.values()}
     if len(years) != 1 or len(curs) != 1:
         raise _err(
-            f"the architecture capex rows are in different money years {sorted(years)} "
-            f"or currencies {sorted(curs)}",
+            f"The architecture capex rows are in different money years "
+            f"({', '.join(map(str, sorted(years)))}) or currencies ({', '.join(sorted(curs))})",
             "pack_row",
             "defaults_pack",
         )
@@ -468,7 +468,7 @@ def delta_interval(c: dict, o: dict) -> dict[str, Any]:
     return {"central": central, "low": low, "high": high, "verdict": verdict}
 
 
-def summary(variants: list[dict]) -> dict[str, Any]:
+def summary(variants: list[dict], storage: bool = False) -> dict[str, Any]:
     """The "Cheapest over the horizon · most grid services" line. A cheapest
     architecture is named only when it is distinguishably cheaper than every
     other one on the ranges (K4)."""
@@ -492,7 +492,13 @@ def summary(variants: list[dict]) -> dict[str, Any]:
             else "Cheapest over the horizon: not distinguishable on the assumed costs"
         ),
         "most_services": [v["architecture"] for v in ties],
-        "most_services_text": "Most grid services: "
+        # What it counts: the services an architecture offers as the project is
+        # backed; those waiting for DC-bus storage count only with that storage.
+        "most_services_text": (
+            "Most grid services with the declared DC-bus storage: "
+            if storage
+            else "Most grid services without added storage: "
+        )
         + ", ".join(v["label"] for v in ties),
     }
 
@@ -537,7 +543,7 @@ def compare(
     for name in ("it_load", "cooling"):
         if name not in n.loads_t.p_set.columns:
             raise _err(
-                f"network: the saved network has no {name} load series",
+                f"Network: the saved network has no {name} load series",
                 "invalid",
                 "network",
             )
@@ -573,7 +579,7 @@ def compare(
     if energy_price_per_mwh is not None:
         if not math.isfinite(energy_price_per_mwh) or energy_price_per_mwh < 0:
             raise _err(
-                "energy_price_per_mwh: must be a finite price ≥ 0",
+                "Energy price: enter a price of 0 or more per MWh",
                 "invalid",
                 "energy_price_per_mwh",
             )
@@ -588,8 +594,8 @@ def compare(
         tr = tariff_energy_rate(commercial, snaps, finance_currency)
         if tr is None:
             raise _err(
-                "energy_price_per_mwh: the project has no readable tariff energy "
-                "component; give a price per MWh",
+                "Energy price: the project's tariff has no energy rate. Enter a price "
+                "per MWh above.",
                 "no_energy_price",
                 "energy_price_per_mwh",
             )
@@ -622,7 +628,7 @@ def compare(
         )
     if not math.isfinite(r) or r <= -1.0:
         raise _err(
-            f"discount_rate: the real rate {r:g} is not usable",
+            f"Discount rate: the real rate {r:g} is not usable",
             "invalid",
             "discount_rate",
         )
@@ -631,7 +637,7 @@ def compare(
     currency, money_year = _check_money_years(capex)
     if price["currency"] != currency:
         raise _err(
-            f"energy_price: the price is in {price['currency']}, the capex rows in "
+            f"Energy price: the price is in {price['currency']}, the architecture costs in "
             f"{currency}",
             "currency_mismatch",
             "energy_price_per_mwh",
@@ -745,7 +751,7 @@ def compare(
         ),
         "range_note": RANGE_NOTE,
         "variants": variants,
-        "summary": summary(variants),
+        "summary": summary(variants, storage),
     }
 
 
@@ -767,18 +773,25 @@ def _peak(n, island, facility, spec, unset, peak_check) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - the screen reports, never fails, on a peak read
         return {
             "verdict": "unknown",
-            "note": f"peak check not read ({exc})",
+            "note": f"the peak check could not be read ({exc})",
             "rows": [],
         }
     heads = [r["headroom_mw"] for r in rows if r.get("headroom_mw") is not None]
+    note = None
     if not heads:
         verdict = "unknown"
+        note = (
+            "the network has no import connection to check"
+            if not rows
+            else "the energization date of a period is not set"
+        )
     elif min(heads) < -1e-9:
         verdict = "fail"
     else:
         verdict = "pass"
     return {
         "verdict": verdict,
+        "note": note,
         "min_headroom_mw": min(heads) if heads else None,
         "rows": [
             {
@@ -810,14 +823,14 @@ def compare_project(
         tid, spec, planning = dc_backup.project_spec(d, tpl)
     except dc_backup.DcBackupError as exc:
         raise _err(
-            str(exc).replace("backup:", "architecture:"), "no_spec", "dc_load"
+            str(exc).replace("backup:", "Power architecture:"), "no_spec", "dc_load"
         ) from None
     meta = dc_backup._meta(d)
     raw = (meta.get("dc_load") or {}).get("spec")
     nc = d / "network.nc"
     if not nc.exists():
         raise _err(
-            "architecture: the project has no saved network", "no_spec", "network"
+            "Network: the project has no saved network", "no_spec", "network"
         )
     n = pypsa.Network()
     with PyPSAService.get_netcdf_io_lock():
@@ -833,7 +846,7 @@ def compare_project(
         )
     except (TypeError, ValueError) as exc:
         raise _err(
-            f"solver_config: the project's saved solver settings cannot be used ({exc})",
+            f"Solver settings: the project's saved settings cannot be used ({exc})",
             "invalid",
             "solver_config",
         ) from None
