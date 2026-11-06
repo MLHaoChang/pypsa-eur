@@ -26,6 +26,7 @@ This module owns the parts a plain rolling run does not have:
 
 A plain rolling run (sizing on) takes none of these paths.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -53,8 +54,12 @@ PIN_TOL = 1e-5
 
 #: The capacity columns that make a component sizeable.
 _EXTENDABLE = (
-    ("Generator", "p_nom"), ("StorageUnit", "p_nom"), ("Store", "e_nom"),
-    ("Link", "p_nom"), ("Line", "s_nom"), ("Transformer", "s_nom"),
+    ("Generator", "p_nom"),
+    ("StorageUnit", "p_nom"),
+    ("Store", "e_nom"),
+    ("Link", "p_nom"),
+    ("Line", "s_nom"),
+    ("Transformer", "s_nom"),
 )
 
 
@@ -71,7 +76,8 @@ class OperationalWindowFailed(RuntimeError):
             f"Operational run: window {window['index'] + 1} "
             f"({window['first']} to {window['last']}) did not solve "
             f"({window['status']}/{window['condition']}). Its dispatch and every "
-            "later window's are not solved.")
+            "later window's are not solved."
+        )
 
 
 def _get(cfg, key: str, default):
@@ -83,8 +89,10 @@ def _get(cfg, key: str, default):
 def is_operational(cfg) -> bool:
     """True for a rolling run with sizing off: the operational run. Takes the
     solver config as a model or as its dict."""
-    return (_get(cfg, "solve_strategy", "full") == "rolling"
-            and (_get(cfg, "fixed_sizes", "off") or "off") != "off")
+    return (
+        _get(cfg, "solve_strategy", "full") == "rolling"
+        and (_get(cfg, "fixed_sizes", "off") or "off") != "off"
+    )
 
 
 def sizes_digest(n, cfg) -> str | None:
@@ -95,6 +103,7 @@ def sizes_digest(n, cfg) -> str | None:
     if not is_operational(cfg) or _get(cfg, "fixed_sizes", "off") != "capacity_run":
         return None
     from services.solver.fixed_sizes import META_RECORD
+
     rec = n.meta.get(META_RECORD) if isinstance(n.meta, dict) else None
     return str(rec.get("sha256")) if isinstance(rec, dict) else "missing"
 
@@ -113,24 +122,46 @@ def issues(n, cfg) -> list[tuple[str, str, str, str]]:
         return []
     out = []
     from services.solver.envelope_floors import _capped
+
     for g in sorted(_capped(n)):
-        out.append(("error", "operational_rolling_run_hours", g,
-                    f"{g} has a run-hour cap, which is an annual budget: a rolling "
-                    "run would prorate it per window with nothing carried between "
-                    "windows. Remove the cap or use the full strategy."))
+        out.append(
+            (
+                "error",
+                "operational_rolling_run_hours",
+                g,
+                f"{g} has a run-hour cap, which is an annual budget: a rolling "
+                "run would prorate it per window with nothing carried between "
+                "windows. Remove the cap or use the full strategy.",
+            )
+        )
     from services.solver.pcs_statcom import pcs_statcom_tags
+
     stores, links = pcs_statcom_tags(n)
-    for name in [*(stores.index if stores is not None else []),
-                 *(links.index if links is not None else [])]:
-        out.append(("error", "operational_rolling_pcs_sizing", str(name),
-                    f"{name} carries a PCS/STATCOM tag: its converter is sized in the "
-                    "LP, and a rolling run would size it again in every window. Use "
-                    "the full strategy."))
+    for name in [
+        *(stores.index if stores is not None else []),
+        *(links.index if links is not None else []),
+    ]:
+        out.append(
+            (
+                "error",
+                "operational_rolling_pcs_sizing",
+                str(name),
+                f"{name} carries a PCS/STATCOM tag: its converter is sized in the "
+                "LP, and a rolling run would size it again in every window. Use "
+                "the full strategy.",
+            )
+        )
     if (getattr(cfg, "extra_functionality_code", None) or "").strip():
-        out.append(("warning", "operational_rolling_user_code", "",
-                    "Your extra_functionality code runs in every window of the "
-                    "operational run and sees only that window's snapshots. A row "
-                    "that sums over the year is applied per window."))
+        out.append(
+            (
+                "warning",
+                "operational_rolling_user_code",
+                "",
+                "Your extra_functionality code runs in every window of the "
+                "operational run and sees only that window's snapshots. A row "
+                "that sums over the year is applied per window.",
+            )
+        )
     return out
 
 
@@ -152,12 +183,14 @@ def fallback_refusal(cfg, *, sclopf: bool) -> None:
         raise OperationalRefused(
             "operational_rolling_multi_period",
             "An operational (rolling) run on fixed sizes cannot span several investment "
-            "periods. Solve one period, or use the full strategy.")
+            "periods. Solve one period, or use the full strategy.",
+        )
     if sclopf:
         raise OperationalRefused(
             "operational_rolling_sclopf",
             "An operational (rolling) run on fixed sizes cannot run N-1 (SCLOPF). Turn "
-            "N-1 off, or use the full strategy.")
+            "N-1 off, or use the full strategy.",
+        )
 
 
 def still_sizeable(n) -> list[str]:
@@ -173,13 +206,26 @@ def still_sizeable(n) -> list[str]:
         mask = df[ext].astype(bool)
         if not mask.any():
             continue
-        lo = pd.to_numeric(df.get(f"{nom}_min"), errors="coerce") if f"{nom}_min" in df else None
-        hi = pd.to_numeric(df.get(f"{nom}_max"), errors="coerce") if f"{nom}_max" in df else None
+        lo = (
+            pd.to_numeric(df.get(f"{nom}_min"), errors="coerce")
+            if f"{nom}_min" in df
+            else None
+        )
+        hi = (
+            pd.to_numeric(df.get(f"{nom}_max"), errors="coerce")
+            if f"{nom}_max" in df
+            else None
+        )
         for name in df.index[mask]:
             a = None if lo is None else lo.get(name)
             b = None if hi is None else hi.get(name)
-            pinned = (a is not None and b is not None and math.isfinite(a)
-                      and math.isfinite(b) and b - a <= PIN_TOL)
+            pinned = (
+                a is not None
+                and b is not None
+                and math.isfinite(a)
+                and math.isfinite(b)
+                and b - a <= PIN_TOL
+            )
             if not pinned:
                 out.append(f"{comp}/{name}")
     return out
@@ -217,16 +263,22 @@ def non_cyclic(n) -> Iterator[list[str]]:
             live.loc[keep, col] = values.loc[keep]
 
 
-def windows(snapshots: pd.Index, horizon: int, overlap: int) -> list[tuple[int, int, int]]:
+def windows(
+    snapshots: pd.Index, horizon: int, overlap: int
+) -> list[tuple[int, int, int]]:
     """``(index, start, stop)`` of each window, as PyPSA's rolling loop cuts
     them: a window starts every ``horizon - overlap`` snapshots and runs for
     ``horizon`` snapshots, the last one clipped to the horizon's end."""
     if horizon < 1 or not 0 <= overlap < horizon:
-        raise ValueError(f"rolling_overlap ({overlap}) must be < rolling_horizon ({horizon}).")
+        raise ValueError(
+            f"rolling_overlap ({overlap}) must be < rolling_horizon ({horizon})."
+        )
     step = horizon - overlap
     count = len(snapshots)
-    return [(i, start, min(count, start + horizon))
-            for i, start in enumerate(range(0, count, step))]
+    return [
+        (i, start, min(count, start + horizon))
+        for i, start in enumerate(range(0, count, step))
+    ]
 
 
 def _blank_from(n, snapshots: pd.Index) -> None:
@@ -236,9 +288,12 @@ def _blank_from(n, snapshots: pd.Index) -> None:
         if component.static.empty and not component.dynamic:
             continue
         defaults = component.defaults
-        outputs = [a for a in defaults.index
-                   if str(defaults.at[a, "status"]).startswith("Output")
-                   and bool(defaults.at[a, "varying"])]
+        outputs = [
+            a
+            for a in defaults.index
+            if str(defaults.at[a, "status"]).startswith("Output")
+            and bool(defaults.at[a, "varying"])
+        ]
         for attr in outputs:
             frame = component.dynamic.get(attr)
             if frame is None or frame.empty:
@@ -263,10 +318,17 @@ def run_windows(n, *, horizon: int, overlap: int, **optimize_kwargs) -> list[dic
                 static = n.components[comp].static
                 if not static.empty:
                     static[INITIAL_ATTR[comp]] = (
-                        n.components[comp].dynamic[state].loc[snapshots[start - 1]])
+                        n.components[comp].dynamic[state].loc[snapshots[start - 1]]
+                    )
         status, condition = n.optimize(sns, **optimize_kwargs)
-        record = {"index": index, "first": str(sns[0]), "last": str(sns[-1]),
-                  "snapshots": len(sns), "status": str(status), "condition": str(condition)}
+        record = {
+            "index": index,
+            "first": str(sns[0]),
+            "last": str(sns[-1]),
+            "snapshots": len(sns),
+            "status": str(status),
+            "condition": str(condition),
+        }
         records.append(record)
         if status != "ok":
             _blank_from(n, snapshots[start:])
@@ -290,8 +352,10 @@ def report(n, cfg, window_records: list[dict], cyclic_off: list[str]) -> dict:
     storages whose cyclic flags were off, and the stitched opex (C4)."""
     return {
         "version": 1,
-        "label": (f"operational (rolling {int(_get(cfg, 'rolling_horizon', 168))}/"
-                  f"{int(_get(cfg, 'rolling_overlap', 24))}) on plan sizes"),
+        "label": (
+            f"operational (rolling {int(_get(cfg, 'rolling_horizon', 168))}/"
+            f"{int(_get(cfg, 'rolling_overlap', 24))}) on plan sizes"
+        ),
         "sizes_source": _get(cfg, "fixed_sizes", "off"),
         "sizes_digest": sizes_digest(n, cfg),
         "horizon": int(_get(cfg, "rolling_horizon", 168)),
@@ -299,8 +363,9 @@ def report(n, cfg, window_records: list[dict], cyclic_off: list[str]) -> dict:
         "windows": window_records,
         "cyclic_off": list(cyclic_off),
         "opex": stitched_opex(n),
-        "opex_basis": ("stitched dispatch x objective snapshot weightings over the full "
-                       "horizon (marginal and storage costs); window objectives are not "
-                       "summed"),
+        "opex_basis": (
+            "stitched dispatch x objective snapshot weightings over the full "
+            "horizon (marginal and storage costs); window objectives are not "
+            "summed"
+        ),
     }
-
