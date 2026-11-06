@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import { ACTIVITY_STATUS_WORDS } from './activityWords'
 import {
-  TOOL_OUTCOMES, currentToolOutcome, outcomeClock, toolOutcomeLine, toolOutcomeMark, toolOutcomeOf, toolOutcomeReasonWord, toolOutcomeWords,
+  TOOL_OUTCOMES, currentToolOutcome, outcomeClock, refusalDetail, toolOutcomeLine, toolOutcomeMark, toolOutcomeOf, toolOutcomeReasonWord, toolOutcomeWords,
 } from './toolOutcome'
 
 const block = (outcome: string, job_id: string | null = 'fg:1', reason: string | null = null) => ({ outcome, job_id, reason })
@@ -244,11 +244,11 @@ describe('denied outcomes (issue 04 S4a)', () => {
     ['required_guard_failed', 'the request did not pass a required check'],
     ['confirmation_args_changed', 'the request changed after you approved it'],
     ['no_progress_stop', 'stopped after repeating the same failing request'],
-    ['aborted', 'the turn was stopped before you answered'],
-    ['user_restriction', 'your saved project rule blocks changes'],
+    ['aborted', 'the request was stopped before you answered'],
+    ['user_restriction', 'a rule you set for this project blocks changes'],
     ['approval_unavailable', 'the approval could not be recorded'],
-    ['round_change_cap', "this round's changes are used up"],
-    ['unknown_decision', 'the answer to the approval could not be read'],
+    ['round_change_cap', 'the assistant used up the changes allowed for this request'],
+    ['unknown_decision', 'your answer to the approval could not be read'],
   ])('words a refusal of kind %s', (reason, words) => {
     const block = toolOutcomeOf({ _outcome: { version: 1, outcome: 'denied', reason } }, 'bulk_update_components')!
     expect(toolOutcomeLine('bulk_update_components', block)).toBe(`– bulk_update_components (denied: ${words})`)
@@ -261,5 +261,20 @@ describe('denied outcomes (issue 04 S4a)', () => {
 
   it.each(['run_simulation', 'import_network_nc'])('words other_context for %s as another project', (tool) => {
     expect(toolOutcomeReasonWord('uncertain', 'other_context', tool)).toBe('another project was opened while it was being checked')
+  })
+})
+
+describe('refusal details (issue 04 S4a)', () => {
+  it.each([
+    ["'bulk_update_components' did not run: updates.p_nom: missing required 'names'.", 'required_guard_failed',
+      'bulk_update_components did not run: updates.p_nom: missing required names.'],
+    ["this round's changes are spent; 'x' did not run", 'round_change_cap', "this round's changes are spent; x did not run"],
+    ["deny on confirmation for 'delete_component'", 'confirmation_denied', null],
+    ['blocked: confirmation_expired', 'confirmation_expired', null],
+    ['refused as no_progress_stop', 'required_guard_failed', null],
+    ['  ', 'aborted', null],
+    [undefined, 'aborted', null],
+  ])('%s → %s', (message, kind, detail) => {
+    expect(refusalDetail(message, kind)).toBe(detail)
   })
 })

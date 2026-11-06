@@ -65,12 +65,21 @@ add('i4', 'import_excel', 'uncertain', null, 11, 'adapter_pending')
 add('e1', 'export_network_nc', 'completed', null, 12)
 add('e2', 'export_csv_bundle', 'uncertain', null, 12, 'not_as_network')
 // Issue 04 S4a: refusals before any effect (the tool_error frame's \`_outcome\`), and a read in another project.
-add('d1', 'delete_component', 'denied', null, 13, 'confirmation_denied')
-add('d2', 'batch_delete_components', 'denied', null, 13, 'confirmation_expired')
-add('d3', 'bulk_update_components', 'denied', null, 13, 'confirmation_revoked')
-add('d4', 'batch_create_components', 'denied', null, 13, 'required_guard_failed')
-add('d5', 'bulk_update_components', 'denied', null, 13, 'confirmation_args_changed')
-add('d6', 'bulk_update_components', 'denied', null, 13, 'no_progress_stop')
+const deny = (id: string, tool: string, reason: string, detail: string | null = null) => {
+  add(id, tool, 'denied', null, 13, reason)
+  if (detail) messages[messages.length - 1].content += '\\n' + detail
+}
+deny('d1', 'delete_component', 'confirmation_denied')
+deny('d2', 'batch_delete_components', 'confirmation_expired')
+deny('d3', 'bulk_update_components', 'confirmation_revoked')
+deny('d4', 'batch_create_components', 'required_guard_failed', 'batch_create_components did not run: components[0]: missing required name.')
+deny('d5', 'bulk_update_components', 'confirmation_args_changed', "The action's arguments changed after its confirmation; request and review it again.")
+deny('d6', 'bulk_update_components', 'no_progress_stop')
+deny('d7', 'delete_component', 'aborted')
+deny('d8', 'delete_component', 'user_restriction', 'Your saved project rule blocks non-read tools.')
+deny('d9', 'delete_component', 'approval_unavailable')
+deny('d10', 'bulk_update_components', 'round_change_cap')
+deny('d11', 'delete_component', 'unknown_decision')
 add('o1', 'run_simulation', 'uncertain', 'fg:9', 14, 'other_context')
 useUIStore.setState({ currentProject: 'Demo', projectMismatch: null, assistantDockOpen: true, uiMode: mode } as any)
 useChatStore.setState({ sessionId: 'shot-session', messages, streaming: false, pending: null, error: null } as any)
@@ -83,7 +92,7 @@ createRoot(document.getElementById('root')!).render(<QueryClientProvider client=
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] })
   for (const mode of ['guided', 'expert']) {
     {
-      const page = await browser.newPage({ viewport: { width: 420, height: 1900 }, deviceScaleFactor: 2 })
+      const page = await browser.newPage({ viewport: { width: 420, height: 3300 }, deviceScaleFactor: 2 })
       await page.emulateMedia({ reducedMotion: 'reduce' })
       await page.route(url => url.protocol.startsWith('http') && url.hostname !== '127.0.0.1', route => route.abort())
       await page.route(url => url.pathname.startsWith('/api/'), route => {
@@ -94,6 +103,10 @@ createRoot(document.getElementById('root')!).render(<QueryClientProvider client=
       })
       await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/${entry}.html?mode=${mode}`)
       await page.getByText('Solve the network and check each job.').waitFor()
+      // Open the refusal messages' Details (issue 04 S4a) so the shot shows them.
+      await page.evaluate(() => document.querySelectorAll('[data-testid=chat-tool-details]').forEach(d => {
+        if (/did not run|arguments changed|rule blocks/.test(d.textContent ?? '')) d.open = true
+      }))
       await page.waitForTimeout(500)
       const file = path.join(out, `tool-outcome-${mode}.png`)
       await page.screenshot({ path: file, fullPage: true })

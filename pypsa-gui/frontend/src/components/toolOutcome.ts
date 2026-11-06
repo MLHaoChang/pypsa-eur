@@ -123,6 +123,20 @@ export function toolOutcomeReasonWord(outcome: string, reason: string | null, to
   return TOOL_OUTCOME_REASON_WORDS[reason] ?? null
 }
 
+/**
+ * A refusal's backend message as plain Details text (issue 04 S4a), or null.
+ * Python repr quotes around a name are dropped ('names' → names). A message
+ * that still names a refusal kind, or is the confirmation gate's echo of the
+ * raw decision ("deny on confirmation for …"), is withheld whole: its reason
+ * is already on the line in words.
+ */
+export function refusalDetail(message: string | null | undefined, kind: string): string | null {
+  const text = (message ?? '').trim().replace(/'([\w.[\]]+)'/g, '$1')
+  if (!text || /\bon confirmation for\b/.test(text)) return null
+  const words = new Set(text.match(/\w+/g))
+  return [kind, ...Object.keys(TOOL_OUTCOME_DENIED_REASON_WORDS)].some(k => words.has(k)) ? null : text
+}
+
 /** "3 of 5" for a partly done write that carries its counts, else null. */
 export function toolOutcomeCount(tool: string, block: ToolOutcomeBlock): string | null {
   if (toolOutcomeMark(block.outcome).outcome !== 'partial' || !block.counts || !(tool in WRITE_VERBS)) return null

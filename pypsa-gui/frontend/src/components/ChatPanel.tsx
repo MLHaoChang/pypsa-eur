@@ -87,7 +87,7 @@ import { UploadProgressToast } from './UploadProgressToast'
 import { ConfirmationCard } from './ConfirmationCard'
 import ExternalAgentStrip from './ExternalAgentStrip'
 import {
-  type CurrentToolOutcome, type ToolOutcomeMark, currentToolOutcome, outcomeClock, toolOutcomeLine, toolOutcomeOf, toolOutcomeWords,
+  type CurrentToolOutcome, type ToolOutcomeMark, currentToolOutcome, outcomeClock, refusalDetail, toolOutcomeLine, toolOutcomeOf, toolOutcomeWords,
 } from './toolOutcome'
 export { guidedCardSummary } from './ConfirmationCard'
 
@@ -313,7 +313,7 @@ export type GuidedToolLine =
 
 export function guidedToolLine(content: string): GuidedToolLine {
   if (DENIED_ERROR_LINE.test(content)) return { hidden: true }
-  if (DENIED_LINE.test(content)) return { hidden: false, label: 'You declined — nothing was changed.' }
+  if (DENIED_LINE.test(content)) return { hidden: false, label: 'You declined. Nothing was changed.' }
   if (PREPARING_LINE.test(content)) return { hidden: true }
   let m = REQUEST_LINE.exec(content)
   if (m) return { hidden: false, label: `Working: ${guidedToolPhrase(m[1])}…` }
@@ -836,6 +836,9 @@ export const KIND_COPY: Record<
  * or a stale rename fails loudly instead of silently falling through to
  * the raw kind.
  */
+/** Banner kinds whose banner only repeats a denied line's reason (issue 04 S4a). */
+const DENIED_LINE_ONLY_KINDS: ReadonlySet<string> = new Set(['confirmation_expired', 'approval_unavailable', 'user_restriction'])
+
 export const TOOL_ERROR_BANNER_KINDS = new Set([
   'project_exists', 'descendants_exist',
   'confirmation_expired', 'approval_unavailable', 'rate_limited',
@@ -2387,7 +2390,11 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
         // v4-MAJOR-1 / v4-MINOR-1 / v6-F1 + Phase D upload errors — route
         // structured error_kinds into the ErrorBanner so the user sees a
         // typed banner instead of a gray tool-line buried in the message list.
-        if (TOOL_ERROR_BANNER_KINDS.has(d.error_kind)) {
+        // Issue 04 S4a: a denied line already gives these kinds' reason, and
+        // their banners offer no action (no retry, settings or re-approve).
+        const deniedLine = d._outcome && typeof d._outcome === 'object'
+          && (d._outcome as { outcome?: unknown }).outcome === 'denied'
+        if (TOOL_ERROR_BANNER_KINDS.has(d.error_kind) && !(deniedLine && DENIED_LINE_ONLY_KINDS.has(d.error_kind))) {
           setError({ error_kind: d.error_kind, message: d.message })
         }
         {
@@ -2400,10 +2407,11 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
           // the tool line as a result's does; without one, the ✗ line stays.
           const tool_result = d._outcome && typeof d._outcome === 'object' ? { _outcome: d._outcome } : undefined
           const outcome = tool_result && d.tool_name ? toolOutcomeOf(tool_result, d.tool_name) : null
+          const why = outcome ? refusalDetail(short, d.error_kind) : null
           appendMessage({
             role: 'tool',
             content: outcome && d.tool_name
-              ? `${toolOutcomeLine(d.tool_name, outcome)}${short ? `\n${short}` : ''}`
+              ? `${toolOutcomeLine(d.tool_name, outcome)}${why ? `\n${why}` : ''}`
               : short
               ? `✗ ${d.tool_name ?? '?'} — ${d.error_kind}: ${short}`
               : `✗ ${d.tool_name ?? '?'} — ${d.error_kind}`,
@@ -3639,9 +3647,19 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
                 </>
               )
               : outcomeNow && m.tool_name ? (
-                <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]" data-testid="chat-tool-outcome">
-                  <OutcomeGlyph mark={outcomeNow.mark} />{`${m.tool_name} (${toolOutcomeWords(outcomeNow)})`}
-                </span>
+                <>
+                  <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]" data-testid="chat-tool-outcome">
+                    <OutcomeGlyph mark={outcomeNow.mark} />{`${m.tool_name} (${toolOutcomeWords(outcomeNow)})`}
+                  </span>
+                  {/* Issue 04 S4a: a refusal's message, collapsed as in Guided. */}
+                  {outcomeNow.mark.outcome === 'denied' && m.content.includes('\n') && (
+                    <details className="mt-0.5" data-testid="chat-tool-details">
+                      <summary className="cursor-pointer select-none font-sans">Details</summary>
+                      <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
+                        data-testid="chat-tool-message">{m.content.slice(m.content.indexOf('\n') + 1)}</span>
+                    </details>
+                  )}
+                </>
               )
               : <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.content}</span>}
             {m.role === 'assistant' && m.answer_id && m.receipt && <CheckedEvidenceCard answerId={m.answer_id} receipt={m.receipt} />}
