@@ -130,11 +130,26 @@ try {
     try { await projectsApi.createFromTemplate(tid, name); return 'made' } catch (e) { return `failed: ${e.message}` }
   }, { tid: TEMPLATE, name: PROJECT })
   if (made.startsWith('failed')) problems.push(`create: ${made}`)
+  // The B template leaves AC power flow & grid's sub-options empty. The section needs its Grid code &
+  // electrical design option: "Add AC power flow & grid" would add only Load flow, which opening the
+  // project drops again (it follows the solver config), so the card falls back out of scope on reload.
+  const scoped = await login.evaluate(async ({ name }) => {
+    const { getFlowScope, putFlowScope } = await import('/src/api/flow.ts')
+    const { scope } = await getFlowScope(name)
+    const grid = scope.options.grid ?? []
+    if (scope.groups.includes('grid') && grid.includes('grid_code')) return 'in scope'
+    try {
+      await putFlowScope(name, { ...scope, groups: [...scope.groups.filter(g => g !== 'grid'), 'grid'],
+        options: { ...scope.options, grid: [...grid, 'grid_code'] } })
+      return 'added'
+    } catch (e) { return `failed: ${e.message}` }
+  }, { name: PROJECT })
+  if (scoped.startsWith('failed')) problems.push(`scope: ${scoped}`)
   const auth = await owner.storageState()
   await owner.close()
 
   for (const mode of ['guided', 'expert']) {
-    const ctx = await browser.newContext({ storageState: auth, viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' })
+    const ctx = await browser.newContext({ storageState: auth, viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 2, reducedMotion: 'reduce' })
     await ctx.route(u => ['http:', 'https:'].includes(u.protocol) && u.hostname !== '127.0.0.1', r => r.abort())
     await ctx.addInitScript(({ mode, project }) => {
       localStorage.setItem('network-diagram:current-project', project)
@@ -165,17 +180,30 @@ try {
     const section = () => page.getByText('Dips and restarts', { exact: true }).first()
     const showResults = async () => {
       await page.evaluate(async () => { const { showResultsTab } = await import('/src/layout/flowNavigation.ts'); showResultsTab('grid_code') })
-      // The B template leaves AC power flow & grid out of the project's scope: add it once (a real change).
-      const add = page.getByRole('button', { name: 'Add AC power flow & grid' })
-      await Promise.race([section().waitFor(), add.waitFor()])
-      if (await add.isVisible()) { await add.click(); await page.waitForTimeout(2500) }
       await section().waitFor(); await page.waitForTimeout(800)
     }
     const shotSection = async (key) => {
       await section().scrollIntoViewIfNeeded()
-      const box = page.locator('section, div').filter({ has: page.getByText('Dips and restarts', { exact: true }) }).last()
+      const box = page.locator('section').filter({ has: page.getByText('Dips and restarts', { exact: true }) }).last()
       const file = path.join(OUT, `g2p-12b3-${mode}-${key}.png`)
+      // A section near the window's height would run under the status bar: grow the window for the crop.
+      const view = page.viewportSize()
+      const tall = (await box.boundingBox())?.height ?? 0
+      if (tall + 600 > view.height) { await page.setViewportSize({ ...view, height: Math.ceil(tall) + 600 }); await page.waitForTimeout(500); await section().scrollIntoViewIfNeeded() }
+      // The floating chat dock, assistant button and "Back to …" pill sit over the section: hide fixed overlays
+      // outside it for the crop only.
+      const hidden = await box.evaluate(el => {
+        const out = []
+        for (const n of document.body.querySelectorAll('*')) {
+          if (el.contains(n) || n.contains(el)) continue
+          if ((getComputedStyle(n).position === 'fixed' || n.matches('[data-testid="companion-launcher"]')) && n.style.visibility !== 'hidden') { n.style.visibility = 'hidden'; out.push(n) }
+        }
+        window.__dipsHidden = out
+        return out.length
+      })
       await box.screenshot({ path: file }).catch(async () => page.screenshot({ path: file }))
+      if (hidden) await page.evaluate(() => { for (const n of window.__dipsHidden ?? []) n.style.visibility = '' })
+      if (page.viewportSize().height !== view.height) await page.setViewportSize(view)
       written.push(path.basename(file))
     }
 
