@@ -200,3 +200,26 @@ def test_spelled_out_words_find_a_tool_named_by_their_compound():
     assert "get_loadflow_summary" in {t["name"] for t in selected}
     assert len(selected) == 128
     assert [t for t in tools if t in selected] == selected
+
+
+def _probe_selection(query, probe_name, probe_description):
+    """128 distractors that match no query word, ahead of one probe tool that loses every tie.
+
+    The probe is offered only if it scores above zero."""
+    distractors = [{"name": f"distractor_{i}", "description": "unrelated",
+                    "input_schema": {"type": "object", "properties": {}}} for i in range(128)]
+    probe = {"name": probe_name, "description": probe_description,
+             "input_schema": {"type": "object", "properties": {}}}
+    return probe in wiring._bounded_tools(distractors + [probe], query)
+
+
+def test_only_adjacent_query_words_form_a_compound():
+    """GK B K1: "load ... flow" apart is not the compound `loadflow`."""
+    assert _probe_selection("Show its load flow.", "probe_loadflow", "")
+    assert not _probe_selection("Load the project, then show its flow.", "probe_loadflow", "")
+
+
+def test_a_compound_scores_names_only_never_descriptions():
+    """GK B K2: a compound found only in a description adds nothing."""
+    assert not _probe_selection("Show its load flow.", "probe_tool", "loadflow")
+    assert _probe_selection("Show its load flow.", "probe_tool", "show load flow")
