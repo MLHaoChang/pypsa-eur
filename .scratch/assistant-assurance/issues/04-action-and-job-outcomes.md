@@ -260,3 +260,10 @@ GK B (26) accepted the X5 reading (a per-call upload record, dedup hits included
 - E5: M12 (a dedup onto a user upload of the same bytes reads export_file_count), M14 (the digest sees `meta`) and M15 (a tampered stored blob reads readback_failed) each have a killing test, run as mutants.
 - Riders: `release_note` stops the note's watch in the loop's error branch (test: a raising export leaves no upload watch); the X3 timeout test is parametrised over bulk_update_components, undo_last and import_network_nc; the `_pending` rows carry ids AA04-P1..P8; the csv tolerance test stands as row AA04-P8. The X2 HTTP-route test is not added; the route pops through the same `undo_service.pop`, so it would test the same seam.
 
+
+### 2026-11-06 — S3 GK NOT OK @94baa63c (GK B (27)) and fixes
+
+GK B (27) met E1 (it probed: "" vs "x", 2 vs 2.5, None vs 0.0 and "1" vs 1.0 all still differ), E4 and E5, and accepted skipping the X2 HTTP-route rider. Two asks are fixed:
+- E3: `note_import` records `_binding()`. A landed import publishes an unbound context (`routers.io._unbind_session`), so `read_import` accepts only the note's binding (the import did not land) or unbound; any other binding reads uncertain `other_context`, whatever the revision. Test: a project switch between the handler and the read-back, with an equal revision.
+- E2: `done` counts the needed rows the live network holds equal to the file at the read-back (`_rows_already_equal` ∩ `need`, less the missing rows), not every needed row that is present. Tests: pure need {a, b, l} → done 1; route drops one Load and spoils one Generator → done = requested − 2.
+- The format-only `loop.py` edits are reverted. Master's loop.py is already unformatted, so the ruff guard exempts it.

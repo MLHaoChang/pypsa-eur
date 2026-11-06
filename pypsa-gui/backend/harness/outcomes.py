@@ -586,6 +586,9 @@ def network_digest(n) -> str | _Uncomparable:
     return h.hexdigest()
 
 
+_UNBOUND = (None, None)  # `_binding()` of a context no saved project owns
+
+
 def _binding() -> tuple:
     """The project the active context is bound to. An undo re-imports into a new
     context object (`reset_network(carry="same")`), so `id(ctx)` cannot be used."""
@@ -976,6 +979,9 @@ def note_import(tool: str, args: dict) -> dict:
             raise ValueError(fmt)
         expected = _read_file(fmt, data)
         want = _rows(expected)
+        # Imports keep the revision counter, so the revision alone cannot tell
+        # two projects apart (GK B (27) E3): bind the project, as note_undo does.
+        binding = _binding()
         with PyPSAService.get_lock():
             ctx = PyPSAService.get_active_context()
             revision = dirty_state.revision(ctx)
@@ -987,6 +993,7 @@ def note_import(tool: str, args: dict) -> dict:
         "tool": tool,
         "format": fmt,
         "expected": expected,
+        "binding": binding,
         "revision": revision,
         "digest_before": digest,
         # The rows this import must change: the file's rows not already equal.
@@ -1011,6 +1018,11 @@ def read_import(note: dict | None) -> dict:
     expected = note["expected"]
     want = _rows(expected)
     try:
+        # A landed import publishes an UNBOUND context (`routers.io._unbind_session`);
+        # one that did not land leaves the note's own binding. Any other is
+        # another project, whatever its revision (GK B (27) E3).
+        if _binding() not in (note.get("binding"), _UNBOUND):
+            return {"error": "other_context"}
         with PyPSAService.get_lock():
             ctx = PyPSAService.get_active_context()
             start = dirty_state.revision(ctx)
@@ -1026,6 +1038,8 @@ def read_import(note: dict | None) -> dict:
                 for name in names - have.get(cls, set())
             )
             match = _match(ctx.network, expected, drop=extras) if not missing else False
+            # The file's rows the live network now holds equal (GK B (27) E2).
+            equal = _rows_already_equal(ctx.network, expected)
             digest = network_digest(ctx.network)
             user_ts = _serialize_user_ts()
             end = dirty_state.revision(ctx)
@@ -1036,6 +1050,7 @@ def read_import(note: dict | None) -> dict:
         "revision_end": end,
         "missing": missing,
         "extras": extras,
+        "equal": equal,
         "match": match,
         "digest": digest,
         "user_ts": user_ts,
@@ -1059,6 +1074,8 @@ def classify_import(note: dict | None, read: dict | None, allowed=None) -> dict:
     if not note or note.get("error"):
         return out("uncertain", "no_submission")
     if not isinstance(read, dict) or "error" in read:
+        if isinstance(read, dict) and read["error"] == "other_context":
+            return out("uncertain", "other_context")
         return out("uncertain", "readback_failed")
     if (
         read.get("revision_start") != note["revision"]
@@ -1067,12 +1084,14 @@ def classify_import(note: dict | None, read: dict | None, allowed=None) -> dict:
         return out("uncertain", "revision_moved")
     need = {tuple(x) for x in note.get("need") or []}
     missing = {tuple(x) for x in read.get("missing") or []}
+    # Done: a needed row the live network now holds equal to the file (E2).
+    equal = {tuple(x) for x in read.get("equal") or []}
     extras = [tuple(x) for x in read.get("extras") or []]
     named = [f"{cls}/{name}" for cls, name in extras if (cls, name) in allowed]
     unexpected = [f"{cls}/{name}" for cls, name in extras if (cls, name) not in allowed]
     counts = {
         "requested": len(need),
-        "done": len(need - missing),
+        "done": len((need & equal) - missing),
         "extra": len(unexpected),
         "allowed_extras": named[:_MAX_PATHS],
     }

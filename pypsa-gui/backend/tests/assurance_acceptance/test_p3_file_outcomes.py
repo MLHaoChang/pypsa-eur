@@ -103,6 +103,26 @@ def test_an_edit_between_import_and_read_back_reads_uncertain(
     assert (out["outcome"], out["reason"]) == ("uncertain", "revision_moved")
 
 
+def test_a_project_switch_with_an_equal_revision_reads_other_context(
+    baseline, harness, monkeypatch
+):
+    # GK B (27) E3: imports keep the revision counter, so two projects can both
+    # read the same revision; the note binds the project, as note_undo does.
+    real = outcomes.read_import
+
+    def switched(note):
+        monkeypatch.setattr(
+            PyPSAService, "get_loaded_project", classmethod(lambda cls: "another")
+        )
+        return real(note)
+
+    monkeypatch.setattr(outcomes, "read_import", switched)
+    out = _stream(harness, "import_network_nc", {"bytes_b64": _b64(_template_bytes())})[
+        "_outcome"
+    ]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "other_context")
+
+
 def test_a_csv_bundle_import_of_a_template_is_completed(baseline, harness):
     from routers.io import _export_csv_zip_bytes
 
@@ -182,6 +202,22 @@ def test_a_row_missing_after_import_reads_partial(baseline, harness, monkeypatch
     ]
     assert (out["outcome"], out["reason"]) == ("partial", "rows_missing")
     assert out["counts"]["done"] == out["counts"]["requested"] - 1
+
+
+def test_a_needed_row_left_at_its_old_values_is_not_done(
+    baseline, harness, monkeypatch
+):
+    # GK B (27) E2: a needed row that is present but unlike the file is not done.
+    def drop_one_and_spoil_one(n):
+        n.remove("Load", n.loads.index[0])
+        n.generators.loc[n.generators.index[0], "p_nom"] += 12345.0
+
+    _route_also(monkeypatch, drop_one_and_spoil_one)
+    out = _stream(harness, "import_network_nc", {"bytes_b64": _b64(_template_bytes())})[
+        "_outcome"
+    ]
+    assert (out["outcome"], out["reason"]) == ("partial", "rows_missing")
+    assert out["counts"]["done"] == out["counts"]["requested"] - 2
 
 
 def test_a_value_unlike_the_file_reads_uncertain(baseline, harness, monkeypatch):
@@ -467,6 +503,7 @@ def _iread(**kw):
         "revision_end": 3,
         "missing": [],
         "extras": [],
+        "equal": _NEED,
         "match": True,
         "digest": "after",
         "user_ts": {},
@@ -492,6 +529,7 @@ def _iread(**kw):
             "adapter_pending",
         ),
         (_inote(), {"error": "readback_failed"}, "uncertain", "readback_failed"),
+        (_inote(), {"error": "other_context"}, "uncertain", "other_context"),
         (_inote(), None, "uncertain", "readback_failed"),
         (_inote(), _iread(revision_end=4), "uncertain", "revision_moved"),
         (
@@ -536,6 +574,21 @@ def test_classify_import_counts_only_rows_it_had_to_change():
         _inote(), _iread(missing=[("Bus", "a"), ("LineType", "x")])
     )
     assert out["counts"]["requested"] == 4 and out["counts"]["done"] == 3
+
+
+def test_classify_import_counts_a_present_row_with_old_values_as_not_done():
+    # GK B (27) E2: need {a, b, l}; a written, b dropped, l left as it was.
+    out = outcomes.classify_import(
+        _inote(need=_NEED[:3]),
+        _iread(missing=[("Bus", "b")], equal=[("Bus", "a"), ("Generator", "g")]),
+    )
+    assert (out["outcome"], out["reason"]) == ("partial", "rows_missing")
+    assert out["counts"]["requested"] == 3 and out["counts"]["done"] == 1
+
+
+def test_classify_import_without_an_equal_list_counts_nothing_done():
+    out = outcomes.classify_import(_inote(), _iread(equal=None, missing=[("Bus", "a")]))
+    assert out["counts"]["done"] == 0
 
 
 def test_classify_import_names_allowed_extras():
