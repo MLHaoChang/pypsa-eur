@@ -105,6 +105,9 @@ from services.solver.island import solve_uc as _island_solve_uc
 from services.solver.split_storage import _wrap_with_split_storage
 from services.solver.envelope_floors import _wrap_with_envelope_floors
 from services.solver.pcs_statcom import _wrap_with_pcs_statcom
+from services.solver.reserve_products import _wrap_with_reserve_products
+from services.solver.reserve_products import clear_solution as _clear_reserves
+from services.solver.reserve_products import persist_solution as _persist_reserves
 from services.solver.sizing_cuts import _wrap_with_sizing_cuts
 from services.solver.pcs_statcom import persist_solution as _persist_pcs_statcom
 from services.solver.pcs_statcom import clear_solution as _clear_pcs_statcom
@@ -563,6 +566,8 @@ def build_lp_chain(network, config, log_queue):
     extra_fn = _wrap_with_envelope_floors(network, extra_fn, config, log_queue=log_queue)
     extra_fn = _wrap_with_pcs_statcom(network, extra_fn, log_queue=log_queue)  # AS-05 PCS/STATCOM rows
     extra_fn = _wrap_with_sizing_cuts(network, extra_fn, log_queue=log_queue)  # AS-06 sizing-loop cuts
+    # Reserve products on backup storage (DC 06): headroom above the backup floor. No-op without products.
+    extra_fn = _wrap_with_reserve_products(network, extra_fn, config, log_queue=log_queue)
     # Edge Investment Case LP-level commercial terms (peaks, ratchets,
     # tiers, group caps; spec §5.1). After the reserve margin, before the
     # objective scale, which must stay last.
@@ -696,6 +701,7 @@ def run_simulation(
                     pass
             # AS-12: likewise the PCS/STATCOM sizes; a success persists this run's after the solve.
             _clear_pcs_statcom(network)
+            _clear_reserves(network)  # DC 06: likewise the reserve commitments
             t_solve = time.time()
             # Clean up stale `transformer.type` strings that don't match any
             # row in n.transformer_types. The GUI's presets are display
@@ -1352,6 +1358,7 @@ def run_simulation(
                     for _warning in _persist_pcs_statcom(
                             network, basis=_PQ_MAX_BASIS if (use_rolling or use_myopic) else _PQ_HORIZON_BASIS):
                         phase(f"[PQ] WARN: {_warning}")
+                    _persist_reserves(network)  # DC 06: the committed reserve MW
                     # A sizing solve records its sizes: the fixed-size run's
                     # "capacity_run" source (F1). Never an operational one.
                     if (getattr(config, "fixed_sizes", "off") == "off"

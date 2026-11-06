@@ -462,6 +462,9 @@ def run_dtc_stress(
                 cfg if cfg is not None else SolverConfig(),
                 ens_cap_permyriad=None, ens_zone_cap_multiple=None,
                 reserve_margin=None)
+            # Reserve obligations lapse with the grid (DC 06).
+            from services.solver.reserve_products import without_reserves
+            cfg_i = without_reserves(cfg_i)
             if float(getattr(cfg_i, "voll", 0.0) or 0.0) <= 0:
                 cfg_i.voll = 500.0
             solves += 1
