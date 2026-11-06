@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A heat-pump COP series reads the sink temperature of the heat band each pump serves (falling back to `sink_c`), and the part-load refusal now points at the Link's committable fields.

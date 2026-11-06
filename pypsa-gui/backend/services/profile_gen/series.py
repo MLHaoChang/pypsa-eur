@@ -59,7 +59,10 @@ _DEFAULTS: dict[str, dict[str, Any]] = {
             "currency_year": None, "component_type": "generators"},
     "inflow": {"annual_mwh": None, "shape": None, "monthly": None},
     "cop": {"source": "air", "sink_c": 45.0, "source_c": 10.0, "eta": 0.45,
-            "cop_max": 7.0, **dict.fromkeys(_AMBIENT)},
+            "cop_max": 7.0, **dict.fromkeys(_AMBIENT),
+            # id -> sink °C of the band each heat pump serves (grid-to-process issue 16);
+            # an id absent from it, or no map, uses `sink_c`.
+            "sink_c_by_id": None},
 }
 _COMMON = {"timezone": None}
 
@@ -217,7 +220,8 @@ def _inflow(local: pd.DatetimeIndex, p: Mapping[str, Any]) -> tuple[np.ndarray, 
                           "scale_mw": annual / len(local)}
 
 
-def _cop(idx: pd.DatetimeIndex, p: Mapping[str, Any], timezone) -> tuple[np.ndarray, dict]:
+def _cop(idx: pd.DatetimeIndex, p: Mapping[str, Any], timezone,
+         sink_c: float | None = None) -> tuple[np.ndarray, dict]:
     from services.dc_load_profile import ambient_c
 
     source = p["source"]
@@ -227,7 +231,8 @@ def _cop(idx: pd.DatetimeIndex, p: Mapping[str, Any], timezone) -> tuple[np.ndar
     if eta == 0.0:
         raise InvalidSeriesParamsError("eta must be in (0, 1]")
     cop_max = _num(p, "cop_max", 1.0, 20.0)
-    sink = _num(p, "sink_c", 0.0, 120.0) + 273.15
+    sink = (_num(p, "sink_c", 0.0, 120.0) if sink_c is None
+            else _num({"s": sink_c}, "s", 0.0, 120.0)) + 273.15
     extra: dict[str, Any] = {}
     if source == "air":
         stated = [k for k in _AMBIENT if p[k] is not None]
@@ -273,8 +278,9 @@ def generate_frame(ids: list[str], kind: str, params: Mapping[str, Any],
     if kind == "part_load":
         raise PartLoadNotASeriesError(
             "a part-load efficiency curve depends on the dispatch, which the "
-            "linear LP cannot take as a time series; it needs a piecewise or "
-            "committable formulation")
+            "linear LP cannot take as a time series; a heat pump's minimum load is "
+            "set on the Link instead: committable, p_min_pu (minimum load), "
+            "start_up_cost, shut_down_cost and min_up_time")
     if kind not in _DEFAULTS:
         raise UnknownSeriesKindError(
             f"unknown series kind {kind!r}; available: {', '.join(KINDS)}")
@@ -298,9 +304,27 @@ def generate_frame(ids: list[str], kind: str, params: Mapping[str, Any],
         values, extra = _inflow(local, p)
         target = _TARGETS[kind]
     else:
+        by_id = p["sink_c_by_id"]
+        if by_id is not None and not isinstance(by_id, Mapping):
+            raise InvalidSeriesParamsError("sink_c_by_id must map a component to its sink °C")
+        by_id = dict(by_id or {})
         values, extra = _cop(idx, p, tz)
         target = _TARGETS[kind]
-    frame = pd.DataFrame({i: values for i in ids}, index=idx)
+        if by_id:
+            cols, floored, warns = {}, 0, []
+            for i in ids:
+                v, e = _cop(idx, p, tz, by_id.get(i))
+                cols[i] = v
+                floored += e["cop_floored_hours"]
+                warns += [w for w in e.get("warnings", []) if w not in warns]
+            extra = {**extra, "cop_floored_hours": floored, "sink_c_by_id": by_id}
+            if warns:
+                extra["warnings"] = warns
+            else:
+                extra.pop("warnings", None)
+            frame = pd.DataFrame(cols, index=idx)
+    if kind != "cop" or not p["sink_c_by_id"]:
+        frame = pd.DataFrame({i: values for i in ids}, index=idx)
     stored = {k: v for k, v in p.items() if v is not None}
     meta = {"kind": kind, "params": stored, "target": target,
             "provenance": PROVENANCE,

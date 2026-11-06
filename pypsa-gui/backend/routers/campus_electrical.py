@@ -57,13 +57,14 @@ import uuid
 from types import SimpleNamespace
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DBSession
 from starlette.concurrency import run_in_threadpool
 
 from db.models import Project, User
 from db.session import get_db
+from models.flex_archetypes import BackupMode
 from deps import optional_user
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from services import campus_electrical_service as ce
@@ -307,6 +308,75 @@ def delete_grid_readiness_limit(
     except grid_limits.LimitError as exc:
         raise _limit_error(exc) from exc
     return {"item": item, "cleared": cleared}
+
+
+# ── the data-centre backup (DC grid readiness 03) ───────────────────────────
+
+class DcBackupAssessBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    #: None assesses the stored mode; a mode here is a what-if, never stored.
+    mode: BackupMode | None = None
+
+
+def _dc_backup_error(exc: Exception) -> HTTPException:
+    return HTTPException(status_code=422, detail={
+        "error_kind": "dc_backup_invalid", "message": str(exc), "field": exc.field})
+
+
+def _eh_templates():
+    from routers.projects import _eh_templates_module
+
+    tpl = _eh_templates_module()
+    if tpl is None:
+        raise HTTPException(status_code=503, detail="the Energy Hub templates are not shipped")
+    return tpl
+
+
+@router.put("/{name}/dc-backup")
+def save_dc_backup(
+    body: dict = Body(...),
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Store the data-centre project's backup setting (``mode`` genset, bess
+    or hybrid, and the BESS assumptions) after the create body's checks;
+    returns the stored backup. Writes ``eh_template.json`` only: the saved
+    network and the investment case are untouched. 422 ``dc_backup_invalid``
+    for a refused setting or a project that is not a data centre."""
+    from services import project_registry
+    from services.adequacy import dc_backup
+
+    _check_lock(proj, db, user)
+    try:
+        return dc_backup.save_backup(project_registry.project_dir(_row(proj, db)),
+                                     _eh_templates(), body)
+    except dc_backup.DcBackupError as exc:
+        raise _dc_backup_error(exc) from exc
+
+
+@router.post("/{name}/dc-backup/assess")
+async def assess_dc_backup(
+    body: DcBackupAssessBody,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Size the backup in ``mode`` (default: the stored one), prove it over
+    the outage window and price it against the genset fleet: ``{sizing,
+    window, proof, cost_delta, ...}``. Read only: solves run on a private
+    copy of the saved network. Lock-checked as the island study is."""
+    from services import project_registry
+    from services.adequacy import dc_backup
+
+    _check_lock(proj, db, user)
+    project_dir = project_registry.project_dir(_row(proj, db))
+    tpl = _eh_templates()
+    try:
+        return await run_in_threadpool(dc_backup.assess_project, project_dir, tpl, body.mode)
+    except dc_backup.DcBackupError as exc:
+        raise _dc_backup_error(exc) from exc
 
 
 # ── the island sidecar and study (campus island plan, I9a) ──────────────────

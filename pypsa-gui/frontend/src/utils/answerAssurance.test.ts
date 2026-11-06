@@ -76,6 +76,33 @@ describe('parseApproval', () => {
   })
 })
 
+describe('receipt policy "2" (AA-03 S2 derived claims)', () => {
+  const entry = { id: 'built', formula_id: 'difference/1', operands: ['a', 'b'], value: -13, unit: 'MW' }
+
+  it('accepts policy "2" with one to eight derived entries', () => {
+    const one = parseApproval(frame({ receipt: receipt({ policy_version: '2', derived: [entry] }) }))
+    expect(one?.receipt.derived).toEqual([entry])
+    const eight = Array.from({ length: 8 }, (_, i) => ({ ...entry, id: `d${i}` }))
+    expect(parseApproval(frame({ receipt: receipt({ policy_version: '2', derived: eight }) }))).not.toBeNull()
+  })
+
+  it.each([
+    ['policy "1" carrying derived', receipt({ derived: [entry] })],
+    ['policy "2" without derived', receipt({ policy_version: '2' })],
+    ['policy "2" with empty derived', receipt({ policy_version: '2', derived: [] })],
+    ['nine derived entries', receipt({ policy_version: '2', derived: Array.from({ length: 9 }, (_, i) => ({ ...entry, id: `d${i}` })) })],
+    ['an unknown key', receipt({ policy_version: '2', derived: [{ ...entry, expression: 'a - b' }] })],
+    ['a missing key', receipt({ policy_version: '2', derived: [{ id: 'built', formula_id: 'difference/1', operands: ['a'], value: 1 }] })],
+    ['a string value', receipt({ policy_version: '2', derived: [{ ...entry, value: '-13' }] })],
+    ['a non-finite value', receipt({ policy_version: '2', derived: [{ ...entry, value: Infinity }] })],
+    ['no operands', receipt({ policy_version: '2', derived: [{ ...entry, operands: [] }] })],
+    ['a non-string operand', receipt({ policy_version: '2', derived: [{ ...entry, operands: [1] }] })],
+    ['policy "3"', receipt({ policy_version: '3', derived: [entry] })],
+  ])('rejects %s', (_label, value) => {
+    expect(parseApproval(frame({ receipt: value }))).toBeNull()
+  })
+})
+
 describe('verifyApprovedText', () => {
   const previous = globalThis.crypto
   afterEach(() => {

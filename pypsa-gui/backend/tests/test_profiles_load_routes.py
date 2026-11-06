@@ -418,6 +418,22 @@ def test_a_cop_series_generates_and_applies_to_the_links_efficiency(
     assert float(eff.iloc[0]) == pytest.approx(0.45 * 308.15 / 30.0)
 
 
+def test_a_cop_series_reads_the_sink_temperature_of_the_served_band(client, install_network):
+    n = _load_network()
+    n.buses.loc["B1", "carrier"] = "AC"
+    n.add("Bus", "Hhot", carrier="heat", temperature_c=90.0)
+    n.add("Link", "hp_hot", bus0="B1", bus1="Hhot", p_nom=5.0)
+    n.add("Bus", "Hplain", carrier="heat")
+    n.add("Link", "hp_plain", bus0="B1", bus1="Hplain", p_nom=5.0)
+    install_network(n)
+    assert client.post("/api/projects/Band Site",
+                       params={"force": True, "rebind": True}).status_code == 200
+    gen = _series(client, "Band Site", kind="cop", components=["hp_hot", "hp_plain"],
+                  params={"source": "ground", "source_c": 10.0})
+    assert gen.status_code == 200, gen.text
+    assert gen.json()["sink_c_by_id"] == {"hp_hot": 90.0}
+
+
 def test_an_inflow_series_reports_its_energy(client, heat_project):
     body = _series(client, heat_project, kind="inflow", components=["dam"],
                    params={"annual_mwh": 1000.0, "shape": "flat"}).json()
