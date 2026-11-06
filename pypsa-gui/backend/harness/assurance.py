@@ -21,7 +21,8 @@ from pydantic import (
     ValidationError,
 )
 
-from harness import derived, predicates
+from harness import derived, interpretation_markers, predicates
+from harness.assurance_coverage import FRAME_PROJECTIONS
 from services import assurance_records as records
 
 
@@ -266,6 +267,11 @@ class Turn:
                     raise ValueError(
                         "quantitative_interpretation_requires_computed_block"
                     )
+                # AA-03 S5: population, causal and optimality wording is
+                # withheld before any reviewer call; no checked evidence
+                # supports it (a population claim is an S4 predicate).
+                if interpretation_markers.find(prose):
+                    raise ValueError("interpretation_marker")
             if (
                 len(candidates) > 2
                 or len({c["id"] for c in candidates}) != len(candidates)
@@ -1576,6 +1582,10 @@ class Turn:
                              *navigation.LOADFLOW_KEYS}
                 },
             }
+        # AA-03 S5: fail closed. An event the surface map does not name, or
+        # names as dropped, never reaches the client of a checked turn.
+        if FRAME_PROJECTIONS.get(event, "dropped") == "dropped":
+            return None
         return payload
 
 
@@ -1595,4 +1605,16 @@ claims of completed effects or unsupported calculations. When this turn supplies
 a generator-dispatch computed ledger, return exactly its computed blocks instead
 of observed blocks; their formula IDs and source pointers must match. Unsupported requests
 must not invent facts. Existing authorization and confirmations still apply.
+Optional "derived": [{"id","kind":"derived","formula_id","operands","value","unit"}]
+uses only a registered formula_id (difference/1, sum/1, percent_change/1 with a
+"denominator", percentage_point_delta/1, share_percent/1 with a "basis",
+unit_convert/1 with a "to_unit"); operands are ids of published blocks or earlier
+derived entries; the software recomputes the value and refuses any mismatch.
+Optional "predicates": [{"id","kind":"predicate","quantifier":"all"|"none"|"top_k",
+"source":{"tool_use_id"},"metric","unit",...}] claim all/none (with "comparator",
+"threshold", "holds") or the top "k" "members" over one list_components page
+that holds every row of its class; only a predicate states a whole-class claim.
+Optional "interpretations" must not use population wording (all, every, none,
+top, largest...), causal wording (because, due to, leads to...) or optimality
+wording (optimal, best, cheapest...); such an interpretation is withheld.
 """
