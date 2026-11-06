@@ -3,7 +3,7 @@
 
 # Durable prolonged conversations and authoritative deployment ownership
 
-Status: ready-for-agent
+Status: done
 Type: task
 
 Implement persistence/deployment in steps 1, 3 and 5 of
@@ -208,3 +208,43 @@ loose, so the HTTP path also gets the typed kinds. `_job_state` reads any failur
 `_job_state` on the real `_acting` / `_visible_job_or_404` / `owners` path:
 own, foreign, other-org, unknown and malformed jobs. Mutants for A1 (dropping
 the owner check, bypassing the ACL read) and A7 (the kind) each turn it red.
+
+2026-11-06: PR-B revalidation (`claude/lv09-revalidate`). Resume, takeover,
+cross-wire profile switch and rebind re-read each `evidence_revisions` entry
+and the current/discussed run ref through `run_evidence.get_run_evidence`
+under the actor's ACL. The result is a separate `revalidation` field
+(`trigger`, `generation`, `evidence[]`, `evidence_unchecked`, `refs`). Each
+stamp is `current|changed|unanchored|unreadable`; the entries and refs are
+never rewritten (B2). Only the anchors (fingerprint, revision, status, mode)
+that the entry stores and the read supplies are compared, in full: `changed`
+when one differs, `current` when all match, `unanchored` when none could be
+compared (GK B (26) N1/N2; `get_run_evidence` supplies no revision). A
+readable stamp names the stored anchors left uncompared. An `unreadable` stamp
+is `{run_id, state}` alone. A missing run, a run whose project the actor lost
+and a ref to another project (not read at all) give byte-equal stamps (B1).
+At most `REVALIDATE_MAX` (64) entries are read plus the two refs, each run once
+per pass, under `_LOCK` after the lease and generation CAS. The reads run
+before any side effect, so a stale generation, a foreign lease or an evidence
+outage (which propagates, as before) reads or writes nothing (B3).
+`_hydrate_discussed_refs` reads nothing itself; it takes the live fields from
+this generation's stamp, and an `unreadable` or stale stamp restores the
+identifiers alone. Rebind revalidates first, then restamps the bound
+episode's discussed run (B4). GK extra: `_verify_jobs` re-reads jobs verified
+in a non-terminal state until they reach completed/failed/aborted/interrupted.
+Tests: `tests/test_durable_conversation_revalidate.py` (16) and two in
+`tests/test_durable_conversation_reconcile.py`. Mutants (prefix fingerprint
+match, unanchored read as current, comparing an unsupplied anchor, no project check, no cap, no rebind read, no field strip, a swallowed
+outage, the old job condition, a stale-generation stamp) each turn one red.
+
+Close-out gates (B5), each with what holds it:
+1. LiveKit room-token refresh on rebind:
+   `tests/test_live_speech_session_lc07.py::test_rebind_closes_the_session_and_settles_once`
+   (rebind closes the room and a new start mints a new grant and bridge token)
+   and `::test_session_outgrown_by_its_thread_settles_as_stale_generation`
+   (the stale-generation reap). `live_speech.py` is unchanged.
+2. Hosted audio worker provisioning and load, paid STT/TTS and the deployed
+   smoke run: owner/deployment gates, run per
+   `pypsa-gui/docs/live-voice-deployment-smoke.md`; not built here.
+3. Multi-worker stays refused: `tests/test_durable_conversation_one_worker.py`
+   (`test_multi_worker_refuses_every_durable_control`,
+   `test_second_process_on_the_same_store_is_refused`).

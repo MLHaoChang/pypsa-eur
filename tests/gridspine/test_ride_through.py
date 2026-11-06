@@ -54,8 +54,8 @@ def test_dip_deeper_than_every_point_trips():
     ("-5:0.5", "above 0 and at most 100"),
     ("50:0", "must be above 0 s"),
     ("50:-1", "must be above 0 s"),
-    ("50", "depth%:duration_s pairs"),
-    ("50:1:2", "depth%:duration_s pairs"),
+    ("50", "pairs of dip depth in % and duration in s"),
+    ("50:1:2", "pairs of dip depth in % and duration in s"),
     ("a:1", "not a pair of numbers"),
     ("50:1, 50:2", "appears twice"),
     ("nan:1", "above 0 and at most 100"),
@@ -66,6 +66,15 @@ def test_dip_deeper_than_every_point_trips():
 def test_parser_refuses_bad_curves(text, match):
     with pytest.raises(ContractError, match=match):
         rt.parse_curve(text)
+
+
+@pytest.mark.parametrize("text", ["50", "a:1", "0:0.5", "50:-1", "20-0.5"])
+def test_refusals_read_as_words_not_code(text):
+    """UX on #1168: no Python-repr quotes and no ``depth%:duration_s`` notation in what the user reads."""
+    with pytest.raises(ContractError) as e:
+        rt.parse_curve(text)
+    msg = str(e.value)
+    assert "'" not in msg and "depth%" not in msg and "duration_s" not in msg, msg
 
 
 def test_parser_accepts_the_edges():

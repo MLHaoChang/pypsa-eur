@@ -43,6 +43,8 @@ CUSTOM_BY_CLASS = {"Bus": {"country", "mwh_per_t", "product_value", "lost_produc
                             "single_phase_share",
                             # Grid-to-process issue 18: the motor-start screen's columns.
                             "motor_kw", "start_method", "i_start_pu",
+                            # Grid-to-process issue 12b: the dip and restart screens' columns.
+                            "ride_through_curve", "restart_time_h",
                             # Grid-to-process issue 15: a heat or steam device's reach.
                             "max_supply_temp_c", "max_pressure_bar",
                             # PyPSA registers extra ports on first use (`pypsa.constants.RE_PORTS_GE_2`).
