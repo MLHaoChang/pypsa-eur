@@ -2498,6 +2498,46 @@
       "technical_name": "i_start_pu"
      },
      {
+      "key": "ride_through_curve",
+      "group": "performance",
+      "label": "Ride-through curve",
+      "help": "The voltage dips the unit rides through, as pairs of dip depth in % and duration in s, written depth:duration, such as 20:0.5, 40:0.15, 100:0.02: it rides a dip when some pair is at least as deep and as long. Leave empty when unknown: the dip screen then reads unknown, never rides through.",
+      "unit_display": "",
+      "unit_storage": "",
+      "scale": 1.0,
+      "kind": "text",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": {
+       "eh_process": true
+      },
+      "part": null,
+      "blank": "empty",
+      "technical_name": "ride_through_curve"
+     },
+     {
+      "key": "restart_time_h",
+      "group": "performance",
+      "label": "Restart time",
+      "help": "Hours from a trip until the unit is back at full rate, for the dip and restart screens' lost tonnes. Display and screens only: the solve reads Min down time, not this. Leave empty when unknown: the lost tonnes then read unknown.",
+      "unit_display": "h",
+      "unit_storage": "h",
+      "scale": 1.0,
+      "kind": "number",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": {
+       "eh_process": true
+      },
+      "part": null,
+      "blank": "clear",
+      "technical_name": "restart_time_h"
+     },
+     {
       "key": "max_supply_temp_c",
       "group": "performance",
       "label": "Max supply temperature",

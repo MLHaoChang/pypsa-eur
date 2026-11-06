@@ -124,28 +124,36 @@ def coerce_eh_value(component_class: str, col: str, value):
         if v and v not in START_METHODS:
             raise ValueError(f"Start method: {v!r} is not one of {', '.join(START_METHODS)}.")
         return v
-    if kind == "harmonic_spectrum":
-        v = "" if value is None else str(value).strip()
-        try:
-            from gridspine.schema.contracts import ContractError
-            from gridspine.static.harmonics import parse_spectrum
-        except ImportError:  # pragma: no cover - build-shape branch
-            # Stored unchecked; the scorecard reads a malformed spectrum as unknown on its unit.
-            return v
-        try:
-            parse_spectrum(v)
-        except ContractError as exc:  # already names the field by its label
-            raise ValueError(str(exc)) from None
-        return v
+    if kind in ("harmonic_spectrum", "ride_through_curve"):
+        return _checked_text(kind, value)
     if kind == "text":
         return "" if value is None else str(value).strip()
     raise ValueError(f"{col}: unknown kind {kind!r}")  # pragma: no cover
 
 
+def _checked_text(kind: str, value) -> str:
+    """A text column gridspine parses (a harmonic spectrum, a ride-through curve), refused when malformed."""
+    v = "" if value is None else str(value).strip()
+    try:
+        from gridspine.schema.contracts import ContractError
+        if kind == "harmonic_spectrum":
+            from gridspine.static.harmonics import parse_spectrum as parse
+        else:
+            from gridspine.static.ride_through import parse_curve as parse
+    except ImportError:  # pragma: no cover - build-shape branch
+        # Stored unchecked; the screens read a malformed value as unknown on its unit.
+        return v
+    try:
+        parse(v)
+    except ContractError as exc:  # already names the field by its label
+        raise ValueError(str(exc)) from None
+    return v
+
+
 def _default(kind: str):
     return {"bool": False, "float_nonneg": float("nan"), "float_signed": float("nan"), "fraction": float("nan"), "role": "", "tier": "",
             "process_role": "", "text": "", "harmonic_source": "", "harmonic_spectrum": "",
-            "start_method": ""}[kind]
+            "start_method": "", "ride_through_curve": ""}[kind]
 
 
 def ensure_eh_column(n, component_class: str, col: str) -> None:

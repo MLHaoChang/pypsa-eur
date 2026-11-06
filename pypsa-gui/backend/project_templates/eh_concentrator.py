@@ -68,6 +68,12 @@ MILL_P_MIN_PU = 0.6
 MILL_MIN_UP_H = 12
 MILL_MIN_DOWN_H = 4
 FLOT_P_MIN_PU = 0.5
+#: The minutes-scale screens' mill data (grid-to-process issue 12b): the largest motor of a mill line, its start,
+#: the restart to full rate and a contactor-fed drive's ride-through curve (depth %:duration s). Demo values.
+MILL_MOTOR_KW = 6000.0
+MILL_START_METHOD = "dol"
+MILL_RESTART_H = 4.0
+MILL_RIDE_THROUGH = "15:1, 30:0.2, 50:0.05"
 #: Flotation lines (t/h of slurry) and the year each enters service: one for the first two mill lines,
 #: one with the third.
 FLOTATION = {"flotation": (2 * MILL_TPH, YEARS[0]), "flotation_2035": (MILL_TPH, 2035)}
@@ -184,6 +190,10 @@ def _set_columns(n) -> None:
     n.links["criticality_tier"] = ""
     n.links["throughput_unit"] = ""
     n.links["specific_energy_kwh_per_t"] = float("nan")
+    n.links["motor_kw"] = float("nan")
+    n.links["start_method"] = ""
+    n.links["restart_time_h"] = float("nan")
+    n.links["ride_through_curve"] = ""
     n.stores["delivery_interval_h"] = 0.0
 
 
@@ -252,6 +262,8 @@ def build_eh_concentrator_staged(T, *, years=YEARS, time_base: str = "year") -> 
                  committable=True, p_min_pu=MILL_P_MIN_PU, min_up_time=MILL_MIN_UP_H,
                  min_down_time=MILL_MIN_DOWN_H, start_up_cost=0.0, shut_down_cost=0.0,
                  up_time_before=0, down_time_before=MILL_MIN_DOWN_H)
+        n.links.loc[mill, ["motor_kw", "start_method", "restart_time_h", "ride_through_curve"]] = [
+            MILL_MOTOR_KW, MILL_START_METHOD, MILL_RESTART_H, MILL_RIDE_THROUGH]
     for flot, (tph, build_year) in FLOTATION.items():
         _process(n, flot, FLOT_KWH_T, "process_critical", bus1="concentrate", bus2="slurry",
                  carrier="flotation", p_nom=tph * FLOT_KWH_T / 1000.0, build_year=build_year,
@@ -322,11 +334,11 @@ def build_eh_concentrator_staged(T, *, years=YEARS, time_base: str = "year") -> 
     n.links["eh_process"] = n.links["eh_process"].eq(True)
     for c in ("eh_poc", "eh_critical"):
         n.buses[c] = n.buses[c].eq(True)
-    for c in ("eh_role", "criticality_tier", "throughput_unit"):
+    for c in ("eh_role", "criticality_tier", "throughput_unit", "start_method", "ride_through_curve"):
         n.links[c] = n.links[c].fillna("")
     n.generators["process_role"] = n.generators["process_role"].fillna("")
     for frame, cols in ((n.buses, ("mwh_per_t", "product_value", "eh_sk_mva", "eh_ibr_mva")),
-                        (n.links, ("specific_energy_kwh_per_t",)),
+                        (n.links, ("specific_energy_kwh_per_t", "motor_kw", "restart_time_h")),
                         (n.stores, ("delivery_interval_h",))):
         for c in cols:
             frame[c] = pd.to_numeric(frame[c], errors="coerce").astype(float)
@@ -440,6 +452,17 @@ def _ledger() -> list[dict]:
                  "preset's"},
         {"item": "PoC fault level", "value": f"{FAULT_LEVEL_MVA:g} MVA (SCR about 6 against 25 MW)",
          "source": "demo", "note": "weak, so the motor-start check bites"},
+        {"item": "mill motor and start", "value": f"{MILL_MOTOR_KW:,.0f} kW per mill line, "
+                                                  f"{MILL_START_METHOD.upper()} start",
+         "source": "demo",
+         "note": "the line's largest motor, for the motor-start screen: direct on line it fails the 3 % limit on "
+                 "150 MVA, a variable-speed drive passes; the maker's data govern"},
+        {"item": "mill restart time and ride-through curve",
+         "value": f"{MILL_RESTART_H:g} h to full rate; curve {MILL_RIDE_THROUGH} (depth %:duration s)",
+         "source": "demo",
+         "note": "for the dip and restart screens only (the LP reads min down time): the curve is of the order of "
+                 "a contactor-fed drive with no ride-through support; the unit's tested curve governs. The "
+                 "crusher and flotation carry none, so they read unknown"},
         {"item": "PV, BESS candidates", "value": "pack prices (solar-utility, battery)", "source": "sourced",
          "note": f"defaults pack {T_PACK}; per period, PV up to {PV_MAX_MW:g} MW, BESS up to "
                  f"{BESS_MAX_MW:g} MW × {BESS_HOURS:g} h"},

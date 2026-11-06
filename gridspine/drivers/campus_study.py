@@ -1001,6 +1001,144 @@ def flicker_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> 
     return out
 
 
+# --- dips to trips and the restart sequence (grid-to-process issue 12b) -----
+
+DIP_TRIPS_CSV = "campus_dip_trips.csv"
+RESTART_CSV = "campus_restart.csv"
+#: The driver's own assumptions, beside ``ride_through.LEDGER`` and ``restart_sequence.LEDGER``.
+RESTART_LEDGER = (
+    "after a grid dip, the units that restart are those any dip class trips (with the EN 50160 classes, the "
+    "worst class's set); a unit with no ride-through curve is assumed to trip (conservative)",
+    "an island transition trips every process unit (assumed: no ride-through bridge; conservative)",
+    "the island's pickup blocks order the restart after an island transition; after a grid dip the grid is back "
+    "and the units are picked up one per step",
+    "the island's minimum short-circuit power is its gensets' sum of s_mva / xd_pp (subtransient) less the "
+    "genset_redundancy_n largest (N+k, as the firm genset MW), divided by c_min at the gensets' bus voltage; a "
+    "genset missing s_mva or xd_pp makes it unknown; grid-forming storage support is not counted (conservative)",
+    "rate and mass pull come from the project network (rate_basis, mass_pull_basis); stores and loads on the "
+    "product path are not branches (assumed)",
+)
+
+
+def _island_source(campus: Campus):
+    """``(island Source or None, note, pickup blocks or None)`` of a built campus.
+
+    The island's minimum case is its genset fleet less the ``genset_redundancy_n`` units with the largest
+    S_k'' (the N+k rule of ``site_peak.firm_genset_mw``), each s_mva / xd_pp, given as ``sk_min_mva`` so
+    ``motor_start.short_circuit_power`` divides by c_min at the gensets' bus voltage. A genset missing s_mva or
+    xd_pp makes the source unknown: a partial sum is never used."""
+    from gridspine.static import motor_start as ms
+
+    req = (campus.island or {}).get("requirements") or {}
+    values = req.get("values") or {}
+    blocks = values.get("pickup_blocks") or None
+    gensets = list(campus.units.index[campus.units["kind"] == "genset"])
+    if not gensets:
+        return None, "no genset on the island: its short-circuit power is unknown", blocks
+    p = campus.params
+    sks, kvs = [], []
+    for uid in gensets:
+        xd = p.loc[(p["element"] == uid) & (p["param"] == "xd_pp"), "value"]
+        s_mva = _num_or_none(campus.units.at[uid, "s_mva"])
+        x = _num_or_none(xd.iloc[0]) if len(xd) else None
+        if s_mva is None or s_mva <= 0 or x is None or x <= 0:
+            return None, f"genset {uid} has no s_mva or xd_pp: the island's short-circuit power is unknown", blocks
+        sks.append(s_mva / x)
+        bus = campus.units.at[uid, "bus"]
+        kv = campus.net.bus.loc[campus.net.bus["name"] == bus, "vn_kv"]
+        if len(kv):
+            kvs.append(float(kv.iloc[0]))
+    k = int(_num_or_none(values.get("genset_redundancy_n")) or 0)
+    kept = sorted(sks, reverse=True)[k:]
+    if not kept:
+        return None, f"genset N+{k} leaves no genset: the island's short-circuit power is unknown", blocks
+    # Several bus voltages: the highest, whose c_min (1.0 above 1 kV) gives the smaller S_sc.
+    vn = max(kvs) if kvs else None
+    note = (f"island: {len(kept)} of {len(sks)} gensets (N+{k}), S_k'' {sum(kept):g} MVA"
+            + ("" if vn is not None else "; no bus voltage, so c is 1.0"))
+    return ms.Source(sk_min_mva=sum(kept), vn_kv=vn), note, blocks
+
+
+def _num_or_none(v) -> float | None:
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def _stamp(df: pd.DataFrame, level: str, **cols) -> pd.DataFrame:
+    df = df.copy()
+    df.insert(0, "level", level)
+    for k, v in cols.items():
+        df[k] = v
+    return df
+
+
+def restart_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The dip and restart screens of a prepared run (``static/ride_through.py``,
+    ``static/restart_sequence.py``), written to ``campus_dip_trips.csv`` and ``campus_restart.csv``.
+
+    ``campus_dip_trips.csv``: one ``class`` row per process unit and dip class (trips, rides or unknown), one
+    ``unit`` row per unit with its expected lost tonnes a year, and one ``total`` row. The dip statistics are the
+    demo's, and every row says so (``dip_stats_source``).
+
+    ``campus_restart.csv``: per ``transition`` (``trip``, ``island``), one ``unit`` row per restarted unit, one
+    ``event`` row per timeline event and one ``total`` row. A grid trip screens each motor start on the PCC's
+    minimum case, an island transition on the island's gensets (``RESTART_LEDGER``). The unit inputs are read
+    from the project network the run was prepared from, which must be unchanged since."""
+    from gridspine.drivers.process_chain import restart_units
+    from gridspine.static import motor_start as ms
+    from gridspine.static import restart_sequence as rs
+    from gridspine.static import ride_through as rt
+
+    run_dir = Path(run_dir)
+    campus, n, code = _screen_inputs(run_dir, profile, profile_dirs)
+    limit, clause = ms.limit_from_profile(code)
+    lim = (code or {}).get("rvc_limit_pct")
+    limit_assumed = limit is None or not isinstance(lim, dict) or lim.get("source") != "code"
+    pcc = campus["campus"]["pcc"]
+    sk_source, typical = _sk_source(campus, n)
+    poc_source = ms.Source(sk_min_mva=_pcc_sk_min(pcc), vn_kv=float(pcc["vn_kv"]))
+    island_source, island_note, blocks = _island_source(build_campus(campus))
+
+    units = restart_units(n)
+    bases = units.set_index("unit")[["rate_basis", "mass_pull_basis"]]
+    trips = rt.trip_table(units)
+    lost = rt.lost_tonnes_table(units).join(bases, on="unit")
+    total = rt.lost_tonnes_total(lost)
+    dip = pd.concat([_stamp(trips, "class"), _stamp(lost, "unit"),
+                     _stamp(pd.DataFrame([total]), "total")], ignore_index=True)
+    dip["profile"] = profile
+    _write_text_atomic(run_dir / DIP_TRIPS_CSV, dip.to_csv(index=False))
+
+    tripped = set(trips.loc[trips["verdict"].isin(("trips", "unknown")), "unit"])
+    frames = []
+    for transition, chosen, kw in (
+            ("trip", units[units["unit"].isin(tripped)], {"poc_source": poc_source}),
+            ("island", units, {"island_source": island_source, "pickup_blocks": blocks})):
+        table, timeline, tot = rs.restart_sequence(chosen, transition, limit_pct=limit, **kw)
+        table = table.join(bases, on="unit")
+        if transition == "trip":
+            no_curve = set(units.loc[units["ride_through_curve"].isna(), "unit"])
+            table["note"] = [f"no ride-through curve: assumed to trip; {s}" if u in no_curve else s
+                             for u, s in zip(table["unit"], table["note"])]
+            timeline["note"] = [f"{s} (assumed: no ride-through curve)" if u in no_curve and ev == "trip" else s
+                                for u, ev, s in zip(timeline["unit"], timeline["event"], timeline["note"])]
+        else:
+            table["note"] = [f"{island_note}; {s}" for s in table["note"]]
+        src = sk_source if transition == "trip" else ("island gensets" if island_source else "none")
+        assumed = limit_assumed or (typical if transition == "trip" else True)
+        frames += [_stamp(table, "unit", transition=transition, sk_mva_source=src, assumed=assumed),
+                   _stamp(timeline, "event", transition=transition),
+                   _stamp(pd.DataFrame([tot]), "total", sk_mva_source=src, assumed=assumed,
+                          limit_pct=limit, limit_clause=clause)]
+    restart = pd.concat(frames, ignore_index=True)
+    restart["profile"] = profile
+    _write_text_atomic(run_dir / RESTART_CSV, restart.to_csv(index=False))
+    return dip, restart
+
+
 # --- the current-distortion screen (datacenter readiness 12, part 1) --------
 
 TDD_CSV = "campus_tdd.csv"
