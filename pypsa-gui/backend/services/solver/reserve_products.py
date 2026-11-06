@@ -66,14 +66,19 @@ if TYPE_CHECKING:
 
     from models.reserve_products import ReserveProduct
 
-#: The bound price frame (``buses_t``) and its column per product.
-PRICE_FRAME = "ic_reserve_price"
-PRICE_PREFIX = "ic:reserve:"
+# The bound price frame, its columns and the currency meta key are shared with
+# the binding: they live in models.reserve_products (the IC package never
+# imports the solver).
+from models.reserve_products import (  # noqa: F401 (re-exported for the solver side)
+    CURRENCY_META,
+    PRICE_FRAME,
+    PRICE_PREFIX,
+    price_column,
+)
+
 #: The solved commitments (``storage_units_t``), columns ``<storage>|<product>``.
 OUT_FRAME = "ic_reserve_mw"
 META_KEY = "ic_reserve"
-#: Each bound price's currency, {product id: ISO code or None} (binding, for the preflight).
-CURRENCY_META = "ic_reserve_price_currency"
 SEP = "|"
 TOL = 1e-6
 
@@ -139,10 +144,6 @@ def _raw_products(commercial) -> list:
     if isinstance(commercial, dict):
         return list(commercial.get("reserve_products") or [])
     return list(getattr(commercial, "reserve_products", None) or [])
-
-
-def price_column(product_id: str) -> str:
-    return f"{PRICE_PREFIX}{product_id}"
 
 
 def reserve_weights(n, sns=None) -> tuple[pd.Series, pd.Series]:

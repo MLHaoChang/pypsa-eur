@@ -11,7 +11,28 @@ from __future__ import annotations
 
 from models.commercial import ReserveDirection, ReserveKind, ReserveProduct
 
-__all__ = ["ReserveDirection", "ReserveKind", "ReserveProduct", "check_unique"]
+__all__ = [
+    "CURRENCY_META",
+    "PRICE_FRAME",
+    "PRICE_PREFIX",
+    "ReserveDirection",
+    "ReserveKind",
+    "ReserveProduct",
+    "check_unique",
+    "price_column",
+]
+
+# The names the binding (investment case) and the solver share; they live here so
+# the IC package never imports the solver (test_investment_case_tripwires).
+#: The bound price frame (``buses_t``) and its column per product.
+PRICE_FRAME = "ic_reserve_price"
+PRICE_PREFIX = "ic:reserve:"
+#: Each bound price's currency, {product id: ISO code or None} (binding, for the preflight).
+CURRENCY_META = "ic_reserve_price_currency"
+
+
+def price_column(product_id: str) -> str:
+    return f"{PRICE_PREFIX}{product_id}"
 
 
 def check_unique(products: list[ReserveProduct]) -> list[ReserveProduct]:

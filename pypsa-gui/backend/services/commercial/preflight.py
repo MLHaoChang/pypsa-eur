@@ -174,7 +174,7 @@ def _reserve_currency_findings(n, cfg, currency: str | None) -> list[tuple[str, 
     finance currency changed (DC grid readiness 06, GK B L2): the currency the
     binding recorded on the network."""
     from services.commercial.binding import reserve_price_currency_mismatch
-    from services.solver import reserve_products as RP
+    from models import reserve_products as RP
 
     if not currency or not cfg.reserve_products:
         return []

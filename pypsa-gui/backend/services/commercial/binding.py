@@ -243,7 +243,7 @@ def bind_commercial(n, commercial, *, project_dir: pathlib.Path | None,
                                              c.reference_price)
                   for c in commercial.contracts
                   if getattr(c, "reference_price", None) is not None}
-    from services.solver import reserve_products as RP
+    from models import reserve_products as RP
 
     # Reserve capacity prices (DC grid readiness 06, GK B L3): fully covered only.
     reserve_prices = {RP.price_column(p.id): (aligned(p.capacity_price, "reserve_price_coverage"),
@@ -321,7 +321,7 @@ def _write_reserve_prices(n, prices: dict, currencies: dict[str, str | None]) ->
     records each price's currency for the preflight (`commercial.currency_mismatch`):
     an ISO code, "" for a unit naming none, None when it was not read."""
     from services.commercial import settlement_inputs as SI
-    from services.solver import reserve_products as RP
+    from models import reserve_products as RP
 
     SI.write_reference_series(n, prices, frame=RP.PRICE_FRAME, keep=set(prices))
     meta = getattr(n, "meta", None)
