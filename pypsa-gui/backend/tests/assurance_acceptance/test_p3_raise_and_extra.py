@@ -725,6 +725,42 @@ def test_a_real_foreign_user_lock_is_denied_before_any_seam(
     assert files() == before
 
 
+def test_a_real_lock_check_that_breaks_reads_denied_unavailable(
+    monkeypatch,
+    spies,  # noqa: F811
+    baseline,
+    _auth_db,
+    second_identity,
+):
+    """H2's 503 through the real `_check_foreign_lock`: the lock read raises,
+    the check fails closed, and the call is denied before any seam."""
+    from services import project_locks
+
+    seen, files = spies
+    called = []
+    monkeypatch.setitem(
+        chat_tools.DISPATCHERS,
+        "bulk_update_components",
+        lambda **kw: called.append(1),
+    )
+
+    def broken(*_a, **_k):
+        raise RuntimeError("lock table unavailable")
+
+    monkeypatch.setattr(project_locks, "get_lock", broken)
+    before = files()
+    seen.clear()
+    error = _error(_frames(monkeypatch, "bulk_update_components", UPDATE)[0])
+    assert error["error_kind"] == "project_lock_unavailable"
+    assert error["_outcome"] == {
+        "version": 1,
+        "outcome": "denied",
+        "reason": "project_lock_unavailable",
+    }
+    assert called == [] and seen == []
+    assert files() == before
+
+
 def test_the_harness_run_hold_is_denied_with_its_kind(
     monkeypatch,
     spies,  # noqa: F811

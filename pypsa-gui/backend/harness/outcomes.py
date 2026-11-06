@@ -777,7 +777,19 @@ def read_state(note: dict | None) -> dict:
     return {"revision_start": start, "revision_end": end, "state": state}
 
 
-RAISE_REASONS = ("changed_before_error", "tool_timeout", "tool_not_started")
+# Every uncertain reason the raise and timeout paths emit (classify_raised,
+# timed_out); test_p3_denied_words checks each has its words.
+RAISE_REASONS = (
+    "adapter_pending",
+    "no_submission",
+    "other_context",
+    "readback_failed",
+    "revision_moved",
+    "not_comparable",
+    "changed_before_error",
+    "tool_timeout",
+    "tool_not_started",
+)
 
 
 def timed_out(kind: str) -> dict:

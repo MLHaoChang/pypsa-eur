@@ -3822,8 +3822,9 @@ def _dispatch_real_tool_call(
         raised_outcome = None
         if write_note is not None:
             # Issue 04 S4b (G5): `failed` only when the note's read-back found
-            # the state unchanged, else uncertain; imports and exports read no
-            # outcome on a raise (AA04-P9). Then stop the note's watch.
+            # the state unchanged, else uncertain; an import uses the same
+            # state compare, an export reads no outcome on a raise (AA04-P9).
+            # Then stop the note's watch.
             from harness import outcomes as _write_outcomes
 
             raised_outcome = _write_outcomes.project_raised(write_note)
