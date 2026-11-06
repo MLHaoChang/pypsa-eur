@@ -100,10 +100,13 @@ from services.gridspine_service import CAPACITY_EXPANSION, kind_of
 # instead of 500ing three frames down.
 try:
     from gridspine.drivers import campus_study as cs
+    from gridspine.drivers import process_chain
     from gridspine.drivers.campus_study import SizingCriteria
     from gridspine.schema.contracts import ContractError
     from gridspine.static import harmonic_scan as hs
     from gridspine.static import parallel
+    from gridspine.static import restart_sequence as rs
+    from gridspine.static import ride_through as rt
     from gridspine.static.parallel import Stopped
 
     CAMPUS_AVAILABLE = True
@@ -111,7 +114,7 @@ try:
 except ImportError as exc:                      # pragma: no cover - build-shape branch
     CAMPUS_AVAILABLE = False
     CAMPUS_IMPORT_ERROR = str(exc)
-    cs = SizingCriteria = parallel = hs = None
+    cs = SizingCriteria = parallel = hs = process_chain = rs = rt = None
 
     class ContractError(Exception):
         """Stand-in so the `except ContractError` clauses below still parse."""
@@ -330,9 +333,7 @@ def _voltage_stability(run: Path, profile: str, profile_dirs) -> None:
 def _dips_restart_inputs(n) -> dict:
     """``{unit: {field: value as stored, or None}}`` over ``DIPS_RESTART_FIELDS``, for every process unit of
     ``n`` (``process_chain.restart_units``)."""
-    from gridspine.drivers.process_chain import restart_units
-
-    units = restart_units(n)
+    units = process_chain.restart_units(n)
     return {str(r["unit"]): {f: _plain(r[f]) for f in DIPS_RESTART_FIELDS} for _, r in units.iterrows()}
 
 
@@ -353,8 +354,6 @@ def _dips_restart(run: Path, profile: str, profile_dirs, nc: Path) -> None:
     the sizing, as the harmonic scan: its failure never fails the run, the reason goes to
     ``DIPS_RESTART_ERROR`` and no screen file stays."""
     import pypsa
-    from gridspine.static import restart_sequence as rs
-    from gridspine.static import ride_through as rt
 
     files = (cs.DIP_TRIPS_CSV, cs.RESTART_CSV, DIPS_RESTART_META, DIPS_RESTART_ERROR)
 
