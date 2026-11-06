@@ -231,7 +231,8 @@ def test_a_gbp_project_refuses_the_tennet_tariff_at_attach(client, install_netwo
         chat_tools.DISPATCHERS["attach_tariff"](name=HS)
     assert exc.value.status_code == 409
     assert exc.value.detail["error_kind"] == "currency_mismatch"
-    assert "EUR" in exc.value.detail["message"] and "GBP" in exc.value.detail["message"]
+    assert exc.value.detail["message"].startswith(f"Tariff \u201c{HS}\u201d is priced in EUR; ")
+    assert "GBP" in exc.value.detail["message"]
     assert chat_tools.DISPATCHERS["get_solver_config"]()["commercial"].get(
         "import_tariff_ref") is None                # nothing stored
 

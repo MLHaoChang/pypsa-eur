@@ -92,7 +92,7 @@ def tariff_currency_mismatch(tariff, currency: str | None) -> str | None:
     have = getattr(tariff, "currency", None)
     if not currency or not have or have == currency:
         return None
-    return (f"Tariff {getattr(tariff, 'id', '')!r} is priced in {have}; the project's finance "
+    return (f"Tariff \u201c{getattr(tariff, 'id', '')}\u201d is priced in {have}; the project's finance "
             f"inputs are in {currency}. Nothing is converted: use a {currency} tariff, or "
             "change the project's currency.")
 
