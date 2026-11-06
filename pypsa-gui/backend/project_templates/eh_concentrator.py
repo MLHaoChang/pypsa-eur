@@ -531,7 +531,6 @@ def _meta(T) -> dict:
                          for y in YEARS],
         "period_years": {str(y): S_py[y] for y in YEARS},
         "time_base": "year",
-        "process_load": True,
         "ledger": _ledger(),
         "study_notes": [
             "Each period is one chronological year of hours, so the concentrate shed fills over 21 "
