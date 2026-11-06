@@ -1,0 +1,1 @@
+* Feat(gridspine): The campus asset library ships five 220/110 kV transformers in R10 sizes (125-315 MVA), costed from cited Ei Normvärdeslista rows, so the H2 hub templates' campus investment completes with both the least-cost and the MILP method. Defaults pack version 2026-11-06 transcribes their rows and pins the new library.

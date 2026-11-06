@@ -1,0 +1,650 @@
+{
+ "owner_assets_count": 0,
+ "owner_assets_unresolved": 0,
+ "owner_assets_method": null,
+ "campus_yaml": "campus:\n  name: UNNAMED_NETW\n  f_hz: 50\n  pcc:\n    bus: GRID\n    vn_kv: 110.0\n    pypsa_name: grid\n    vm_pu:\n      value: 1.0\n      source: assumed\n    sk_max_mva:\n      value: 2000.0\n      source: assumed\n    sk_min_mva:\n      value: 2000.0\n      source: assumed\n    rx_max:\n      value: 0.1\n      source: assumed\n    rx_min:\n      value: 0.1\n      source: assumed\n  buses:\n    MV:\n      vn_kv: 20.0\n      pypsa_name: mv\n  transformers:\n    GRID_IMPORT:\n      hv_bus: GRID\n      lv_bus: MV\n      pypsa_name: grid_import\n      sn_mva:\n        value: 80.0\n        source: assumed\n      vn_hv_kv:\n        value: 110.0\n        source: assumed\n      vn_lv_kv:\n        value: 20.0\n        source: assumed\n      vk_percent:\n        value: 12.5\n        source: assumed\n      vkr_percent:\n        value: 0.35\n        source: assumed\n      pfe_kw:\n        value: 80.0\n        source: assumed\n      i0_percent:\n        value: 0.1\n        source: assumed\n  units:\n    MILL:\n      kind: load\n      bus: MV\n      pypsa_name: mill\n      p_mw:\n        value: 2.0\n        source: assumed\n      pf:\n        value: 0.98\n        source: assumed\n    PUMP:\n      kind: load\n      bus: MV\n      pypsa_name: pump\n      p_mw:\n        value: 2.0\n        source: assumed\n      pf:\n        value: 0.98\n        source: assumed\n    PV:\n      kind: pv\n      bus: MV\n      pypsa_name: pv\n      p_mw:\n        value: 20.0\n        source: assumed\n      s_mva:\n        value: 21.05263157894737\n        source: assumed\n      k_sc:\n        value: 1.2\n        source: assumed\n      rx_sc:\n        value: 0.1\n        source: assumed\n    BESS:\n      kind: bess\n      bus: MV\n      pypsa_name: bess\n      p_mw:\n        value: 10.0\n        source: assumed\n      e_mwh:\n        value: 20.0\n        source: assumed\n      s_mva:\n        value: 10.526315789473685\n        source: assumed\n      k_sc:\n        value: 1.2\n        source: assumed\n      rx_sc:\n        value: 0.1\n        source: assumed\n    DC_LOAD:\n      kind: load\n      bus: MV\n      pypsa_name: dc_load\n      p_mw:\n        value: 40.0\n        source: assumed\n      pf:\n        value: 0.98\n        source: assumed\n",
+ "skipped": [
+  "f_hz 50 assumed (no frequency on the network)",
+  "generator __lost_ore: on non-electrical bus ore"
+ ],
+ "profiles": {
+  "eu_rfg_dcc_ce": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe",
+  "generic_assumed": "Generic assumed limits (placeholder until a real grid code is supplied)",
+  "us_ieee2800_nerc": "US: IEEE 2800-2022 (on-site IBR) and NERC PRC-029-1 / PRC-024-3, with the site's own range assumed"
+ },
+ "settings": {
+  "k": 1,
+  "pf": null,
+  "profile": "generic_assumed",
+  "margin": 0.2,
+  "n_minus_1": true,
+  "invest": false,
+  "pcc_switchgear_by_operator": false,
+  "pcc_tap_control": "campus"
+ },
+ "results": {
+  "selection": [
+   {
+    "period": 2030,
+    "hour": 0,
+    "reasons": [
+     "max_import_mw",
+     "max_consumption_mw",
+     "max_trafo_GRID_IMPORT_mw"
+    ]
+   },
+   {
+    "period": 2030,
+    "hour": 6,
+    "reasons": [
+     "max_renewable_mw"
+    ]
+   }
+  ],
+  "transformers": [
+   {
+    "group": "GRID_IMPORT",
+    "units": 1,
+    "unit_rating_mva": 80.0,
+    "max_s_intact_mva": 46.6169452259751,
+    "max_s_n1_mva": 0.0,
+    "required_unit_mva": 55.94033427117012,
+    "recommended_unit_mva": 63.0,
+    "adequate": true,
+    "utilisation": 0.6992541783896266,
+    "worst_unit": "GRID_IMPORT",
+    "worst_period": 2030,
+    "worst_hour": 0,
+    "unconverged_hours": 0,
+    "margin": 0.2,
+    "n_minus_1": false
+   }
+  ],
+  "compensation": [
+   {
+    "direction": "capacitive",
+    "required_mvar": 0.0,
+    "recommended_mvar": 0.0,
+    "worst_period": null,
+    "worst_hour": null,
+    "margin": 0.2
+   },
+   {
+    "direction": "inductive",
+    "required_mvar": 0.0,
+    "recommended_mvar": 0.0,
+    "worst_period": null,
+    "worst_hour": null,
+    "margin": 0.2
+   }
+  ],
+  "short_circuit": [
+   {
+    "bus": "GRID",
+    "vn_kv": 110.0,
+    "ikss_max_ka": 10.696173408144643,
+    "ip_max_ka": 26.201363772176745,
+    "ikss_min_ka": 10.497277621629555,
+    "rated_ka": null,
+    "rating_source": null,
+    "adequate": null,
+    "detail": "no switchgear rating given",
+    "period": 2030
+   },
+   {
+    "bus": "MV",
+    "vn_kv": 20.0,
+    "ikss_max_ka": 16.44972841103293,
+    "ip_max_ka": 42.17633663900085,
+    "ikss_min_ka": 14.30521653518814,
+    "rated_ka": null,
+    "rating_source": null,
+    "adequate": null,
+    "detail": "no switchgear rating given",
+    "period": 2030
+   }
+  ],
+  "compliance": [
+   {
+    "check": "pcc_reactive",
+    "status_as_is": "pass",
+    "status_with_measures": "pass",
+    "value": 11.510912093930756,
+    "limit": 14.954545454545457,
+    "unit": "Mvar",
+    "worst_period": 2030.0,
+    "worst_hour": 0.0,
+    "clause": "generic placeholder until a real code is supplied: power factor 0.95 at the connection point, +/-tan(acos 0.95) of P_ref",
+    "source": "assumed",
+    "detail": "inverters supply up to 0.0 Mvar; compensation recommended: 0 Mvar capacitive, 0 Mvar inductive",
+    "worst_case": null,
+    "limit_min": null,
+    "limit_max": null
+   },
+   {
+    "check": "pcc_voltage",
+    "status_as_is": "pass",
+    "status_with_measures": "pass",
+    "value": 1.0,
+    "limit": 0.9,
+    "unit": "pu",
+    "worst_period": 2030.0,
+    "worst_hour": 0.0,
+    "clause": "generic placeholder until a real code is supplied: +/-10 % at every voltage",
+    "source": "assumed",
+    "detail": "worst at GRID (intact); code band at the connection point; band 0.9-1.1 pu",
+    "worst_case": "intact",
+    "limit_min": 0.9,
+    "limit_max": 1.1
+   },
+   {
+    "check": "campus_voltage",
+    "status_as_is": "pass",
+    "status_with_measures": "pass",
+    "value": 0.9825448472529834,
+    "limit": 0.95,
+    "unit": "pu",
+    "worst_period": 2030.0,
+    "worst_hour": 0.0,
+    "clause": "generic placeholder until a real code is supplied: 0.95-1.05 pu design band for buses inside the campus",
+    "source": "assumed",
+    "detail": "worst at MV (intact); the profile's campus design band; band 0.95-1.05 pu",
+    "worst_case": "intact",
+    "limit_min": 0.95,
+    "limit_max": 1.05
+   },
+   {
+    "check": "transformer_loading",
+    "status_as_is": "pass",
+    "status_with_measures": "pass",
+    "value": 58.27118153246887,
+    "limit": 100.0,
+    "unit": "%",
+    "worst_period": 2030.0,
+    "worst_hour": 0.0,
+    "clause": "equipment rating (not a grid-code clause)",
+    "source": "assumed",
+    "detail": "worst GRID_IMPORT (intact)",
+    "worst_case": "intact",
+    "limit_min": null,
+    "limit_max": null
+   },
+   {
+    "check": "switchgear",
+    "status_as_is": "not_rated",
+    "status_with_measures": "not_rated",
+    "value": 16.44972841103293,
+    "limit": null,
+    "unit": "kA",
+    "worst_period": 2030.0,
+    "worst_hour": null,
+    "clause": "equipment rating (IEC 62271-1 peak ratio, assumed)",
+    "source": "assumed",
+    "detail": "no rating for ['GRID', 'MV']",
+    "worst_case": null,
+    "limit_min": null,
+    "limit_max": null
+   },
+   {
+    "check": "pcc_q_band",
+    "status_as_is": "unknown",
+    "status_with_measures": "unknown",
+    "value": null,
+    "limit": null,
+    "unit": "Mvar",
+    "worst_period": null,
+    "worst_hour": null,
+    "clause": null,
+    "source": "assumed",
+    "detail": "The grid code sets no limit for this.",
+    "worst_case": null,
+    "limit_min": null,
+    "limit_max": null
+   },
+   {
+    "check": "pcc_power_factor",
+    "status_as_is": "unknown",
+    "status_with_measures": "unknown",
+    "value": null,
+    "limit": null,
+    "unit": null,
+    "worst_period": null,
+    "worst_hour": null,
+    "clause": null,
+    "source": "assumed",
+    "detail": "The grid code sets no limit for this.",
+    "worst_case": null,
+    "limit_min": null,
+    "limit_max": null
+   }
+  ],
+  "reactive": [
+   {
+    "period": 2030,
+    "hour": 0,
+    "converged": true,
+    "q0_mvar": 11.510912093930756,
+    "q_final_mvar": 11.510912093930756,
+    "q_inverters_mvar": 0.0,
+    "q_comp_mvar": 0.0,
+    "compliant_without": true
+   },
+   {
+    "period": 2030,
+    "hour": 6,
+    "converged": true,
+    "q0_mvar": 9.23727813804362,
+    "q_final_mvar": 9.23727813804362,
+    "q_inverters_mvar": 0.0,
+    "q_comp_mvar": 0.0,
+    "compliant_without": true
+   }
+  ],
+  "ibr_q_curve": null,
+  "ibr_q_curve_not_computed": false,
+  "requirement": {
+   "q_limit_mvar": 14.954545454545455,
+   "clause": "generic placeholder until a real code is supplied: power factor 0.95 at the connection point, +/-tan(acos 0.95) of P_ref",
+   "source": "assumed",
+   "profile": "generic_assumed",
+   "pf": null,
+   "p_ref_mw": 45.45454545454545,
+   "p_ref_from": "peak |import| over every hour of the prepared periods"
+  },
+  "reported_requirements": [],
+  "investment": null,
+  "cost": null,
+  "compliance_invested": null,
+  "history": null,
+  "unresolved": null,
+  "taps": null,
+  "tap_hours_moved": null,
+  "scope": null,
+  "cost_basis": null,
+  "harmonic_scan": {
+   "limit_h": 0.5,
+   "limit_source": null,
+   "clause": null,
+   "notes": [
+    "The normal case is not scanned: no normal short-circuit level is entered"
+   ],
+   "basis": [
+    "loads, converters and gensets are left out: no damping, so a peak's height is conservative, and no detuning by motor or load reactance, so its frequency is approximate",
+    "a resonance peak counts when |Z| stands at least 1.5 times above the higher of its neighbouring minima (PEAK_RATIO)",
+    "each cable is one lumped pi, valid while it is short against a quarter wavelength at h_max * f0; a cable longer than 0.4 of that is named in a note (PI_FRACTION)",
+    "R rises with sqrt(h) (skin effect) on cables, transformers and the grid; X with h",
+    "the grid is IEC 60909's equivalent source c Un^2 / S_sc (c = 1.1 in the max case, 1.0 in the min case above 1 kV, as island_sc_seq.c_factor), so h_r = sqrt(S_sc / (c Q_c)); the normal case takes c = 1.0 (assumed)",
+    "transformers at their rated ratio (no off-nominal correction where a bus's kV differs from the winding's), without the magnetising branch",
+    "a peak at or above h_max is not reported (the scan has no point beyond it)"
+   ],
+   "label": "screening; filter design and the binding answer are a harmonic study with the grid's own impedance loci",
+   "resonance": [],
+   "envelope": [
+    {
+     "h": 1,
+     "z_max_ohm": 9.96601361385209,
+     "x_min_ohm": 6.019975000770435,
+     "x_max_ohm": 9.93295875127122
+    },
+    {
+     "h": 2,
+     "z_max_ohm": 16.58800807081506,
+     "x_min_ohm": 9.029962501155651,
+     "x_max_ohm": 16.554931252118692
+    },
+    {
+     "h": 3,
+     "z_max_ohm": 23.20998999929399,
+     "x_min_ohm": 15.049937501926085,
+     "x_max_ohm": 23.17690375296618
+    },
+    {
+     "h": 4,
+     "z_max_ohm": 29.83196774235967,
+     "x_min_ohm": 21.06991250269652,
+     "x_max_ohm": 29.79887625381365
+    },
+    {
+     "h": 5,
+     "z_max_ohm": 36.4539435808941,
+     "x_min_ohm": 27.089887503466954,
+     "x_max_ohm": 36.42084875466114
+    },
+    {
+     "h": 6,
+     "z_max_ohm": 43.07591839323676,
+     "x_min_ohm": 33.10986250423739,
+     "x_max_ohm": 43.04282125550861
+    },
+    {
+     "h": 7,
+     "z_max_ohm": 49.69789258959114,
+     "x_min_ohm": 39.12983750500784,
+     "x_max_ohm": 49.66479375635611
+    },
+    {
+     "h": 8,
+     "z_max_ohm": 56.31986638723709,
+     "x_min_ohm": 45.14981250577826,
+     "x_max_ohm": 56.28676625720357
+    },
+    {
+     "h": 9,
+     "z_max_ohm": 62.94183991201641,
+     "x_min_ohm": 51.16978750654869,
+     "x_max_ohm": 62.90873875805105
+    },
+    {
+     "h": 10,
+     "z_max_ohm": 69.5638132418539,
+     "x_min_ohm": 57.18976250731914,
+     "x_max_ohm": 69.53071125889853
+    },
+    {
+     "h": 11,
+     "z_max_ohm": 76.18578642758183,
+     "x_min_ohm": 63.20973750808957,
+     "x_max_ohm": 76.15268375974601
+    },
+    {
+     "h": 12,
+     "z_max_ohm": 82.8077595037727,
+     "x_min_ohm": 69.22971250886002,
+     "x_max_ohm": 82.7746562605935
+    },
+    {
+     "h": 13,
+     "z_max_ohm": 89.42973249475904,
+     "x_min_ohm": 75.24968750963043,
+     "x_max_ohm": 89.39662876144097
+    },
+    {
+     "h": 14,
+     "z_max_ohm": 96.05170541816337,
+     "x_min_ohm": 81.26966251040086,
+     "x_max_ohm": 96.01860126228846
+    },
+    {
+     "h": 15,
+     "z_max_ohm": 102.6736782870618,
+     "x_min_ohm": 87.2896375111713,
+     "x_max_ohm": 102.64057376313596
+    },
+    {
+     "h": 16,
+     "z_max_ohm": 109.2956511113614,
+     "x_min_ohm": 93.30961251194174,
+     "x_max_ohm": 109.26254626398335
+    },
+    {
+     "h": 17,
+     "z_max_ohm": 115.91762389870568,
+     "x_min_ohm": 99.3295875127122,
+     "x_max_ohm": 115.88451876483084
+    },
+    {
+     "h": 18,
+     "z_max_ohm": 122.53959665508572,
+     "x_min_ohm": 105.3495625134826,
+     "x_max_ohm": 122.50649126567836
+    },
+    {
+     "h": 19,
+     "z_max_ohm": 129.16156938526396,
+     "x_min_ohm": 111.36953751425304,
+     "x_max_ohm": 129.1284637665258
+    },
+    {
+     "h": 20,
+     "z_max_ohm": 135.78354209307398,
+     "x_min_ohm": 117.3895125150235,
+     "x_max_ohm": 135.75043626737332
+    },
+    {
+     "h": 21,
+     "z_max_ohm": 142.40551478163607,
+     "x_min_ohm": 123.40948751579394,
+     "x_max_ohm": 142.37240876822074
+    },
+    {
+     "h": 22,
+     "z_max_ohm": 149.0274874535162,
+     "x_min_ohm": 129.42946251656437,
+     "x_max_ohm": 148.99438126906827
+    },
+    {
+     "h": 23,
+     "z_max_ohm": 155.64946011084345,
+     "x_min_ohm": 135.44943751733484,
+     "x_max_ohm": 155.61635376991578
+    },
+    {
+     "h": 24,
+     "z_max_ohm": 162.27143275539936,
+     "x_min_ohm": 141.46941251810523,
+     "x_max_ohm": 162.2383262707632
+    },
+    {
+     "h": 25,
+     "z_max_ohm": 168.89340538868632,
+     "x_min_ohm": 147.48938751887567,
+     "x_max_ohm": 168.8602987716107
+    },
+    {
+     "h": 26,
+     "z_max_ohm": 175.51537801197972,
+     "x_min_ohm": 153.5093625196461,
+     "x_max_ohm": 175.4822712724582
+    },
+    {
+     "h": 27,
+     "z_max_ohm": 182.13735062636957,
+     "x_min_ohm": 159.52933752041653,
+     "x_max_ohm": 182.10424377330563
+    },
+    {
+     "h": 28,
+     "z_max_ohm": 188.7593232327929,
+     "x_min_ohm": 165.54931252118695,
+     "x_max_ohm": 188.7262162741531
+    },
+    {
+     "h": 29,
+     "z_max_ohm": 195.3812958320598,
+     "x_min_ohm": 171.56928752195745,
+     "x_max_ohm": 195.34818877500064
+    },
+    {
+     "h": 30,
+     "z_max_ohm": 202.00326842487397,
+     "x_min_ohm": 177.58926252272784,
+     "x_max_ohm": 201.97016127584803
+    },
+    {
+     "h": 31,
+     "z_max_ohm": 208.62524101185,
+     "x_min_ohm": 183.6092375234983,
+     "x_max_ohm": 208.5921337766956
+    },
+    {
+     "h": 32,
+     "z_max_ohm": 215.24721359352657,
+     "x_min_ohm": 189.62921252426875,
+     "x_max_ohm": 215.21410627754307
+    },
+    {
+     "h": 33,
+     "z_max_ohm": 221.86918617037816,
+     "x_min_ohm": 195.64918752503917,
+     "x_max_ohm": 221.8360787783905
+    },
+    {
+     "h": 34,
+     "z_max_ohm": 228.49115874282444,
+     "x_min_ohm": 201.6691625258096,
+     "x_max_ohm": 228.458051279238
+    },
+    {
+     "h": 35,
+     "z_max_ohm": 235.11313131123768,
+     "x_min_ohm": 207.68913752658,
+     "x_max_ohm": 235.08002378008555
+    },
+    {
+     "h": 36,
+     "z_max_ohm": 241.735103875949,
+     "x_min_ohm": 213.70911252735044,
+     "x_max_ohm": 241.70199628093297
+    },
+    {
+     "h": 37,
+     "z_max_ohm": 248.3570764372548,
+     "x_min_ohm": 219.72908752812089,
+     "x_max_ohm": 248.3239687817804
+    },
+    {
+     "h": 38,
+     "z_max_ohm": 254.9790489954202,
+     "x_min_ohm": 225.7490625288914,
+     "x_max_ohm": 254.9459412826279
+    },
+    {
+     "h": 39,
+     "z_max_ohm": 261.6010215506839,
+     "x_min_ohm": 231.76903752966183,
+     "x_max_ohm": 261.5679137834754
+    },
+    {
+     "h": 40,
+     "z_max_ohm": 268.2229941032607,
+     "x_min_ohm": 237.78901253043225,
+     "x_max_ohm": 268.1898862843229
+    },
+    {
+     "h": 41,
+     "z_max_ohm": 274.8449666533449,
+     "x_min_ohm": 243.80898753120272,
+     "x_max_ohm": 274.8118587851704
+    },
+    {
+     "h": 42,
+     "z_max_ohm": 281.4669392011122,
+     "x_min_ohm": 249.82896253197308,
+     "x_max_ohm": 281.43383128601783
+    },
+    {
+     "h": 43,
+     "z_max_ohm": 288.0889117467226,
+     "x_min_ohm": 255.84893753274343,
+     "x_max_ohm": 288.05580378686534
+    },
+    {
+     "h": 44,
+     "z_max_ohm": 294.71088429032136,
+     "x_min_ohm": 261.86891253351394,
+     "x_max_ohm": 294.6777762877128
+    },
+    {
+     "h": 45,
+     "z_max_ohm": 301.3328568320412,
+     "x_min_ohm": 267.8888875342844,
+     "x_max_ohm": 301.2997487885603
+    },
+    {
+     "h": 46,
+     "z_max_ohm": 307.95482937200336,
+     "x_min_ohm": 273.9088625350548,
+     "x_max_ohm": 307.92172128940786
+    },
+    {
+     "h": 47,
+     "z_max_ohm": 314.57680191031847,
+     "x_min_ohm": 279.92883753582527,
+     "x_max_ohm": 314.5436937902552
+    },
+    {
+     "h": 48,
+     "z_max_ohm": 321.1987744470889,
+     "x_min_ohm": 285.9488125365956,
+     "x_max_ohm": 321.1656662911027
+    },
+    {
+     "h": 49,
+     "z_max_ohm": 327.820746982408,
+     "x_min_ohm": 291.9687875373661,
+     "x_max_ohm": 327.78763879195014
+    },
+    {
+     "h": 50,
+     "z_max_ohm": 331.13173324955045,
+     "x_min_ohm": 297.9887625381366,
+     "x_max_ohm": 331.09862504237384
+    }
+   ]
+  },
+  "voltage_stability": {
+   "ledger": [
+    "P\u2013V nose: the PoC load is stepped at the set power factor (lagging), balanced as a connection-capacity trial (committed units pro-rata to headroom, the slack takes the rest); the last converged and first failing steps bracket the nose and bisection narrows it to tol_mw",
+    "every P\u2013V and Q\u2013V load flow enforces generator Q limits",
+    "a failing point is retried once from a flat start with more iterations before it counts as past the nose; a rescued P\u2013V point whose PoC voltage does not rise at a slightly lower load is on the low-voltage branch and is rejected; the row records retries, rescues and rejections per sweep",
+    "margin = nose MW - planned MW, and as a % of the planned MW; a nose not reached by cap_mw is reported at the cap as a lower bound, never extrapolated",
+    "Q\u2013V: a fictitious PV source at the PoC, Q never clipped, swept over its voltage set-point with the planned load connected; the Q margin is minus the curve's minimum Q (positive is margin), a bound when the minimum is on the sweep's edge; dQ/dV is a central difference at the operating point",
+    "cases: intact plus the worst N-1 branch and unit outages of the contingency set by PoC voltage with the planned load connected, up to max_cases; an outage that islands or does not converge with the planned load is always listed, not_solved",
+    "every row is 'screening; binding answer is the RMS study': static load flow only, no dynamics, controls or protection",
+    "grid-side equivalent: source behind Z = c_min\u00b7Un\u00b2/S_k''min (IEC 60909 c_min) with the PCC's rx_min; intact only, as S_k''min is the weakest grid state entered",
+    "planned load per period: the larger of the largest converged PCC import and the rated import; power factor from the max-import hour (lagging), else the default",
+    "source EMF: 1.0 pu, or the period's lowest converged PCC voltage when lower"
+   ],
+   "notes": [
+    "S_k''min 2000 MVA, R/X 0.1, c_min 1 at 110 kV: Z = c\u00b7Un\u00b2/S_k''min = 6.05 \u03a9",
+    "period 2030: planned load 45.17 MW: the largest converged PCC import (hour 0) binds; probe power factor 0.969 lagging, from hour 0; E = 1.0 pu: no converged PCC voltage of the period is lower"
+   ],
+   "basis": "screening; binding answer is the RMS study",
+   "sk_min_mva": 2000.0,
+   "rx_min": 0.1,
+   "c": 1.0,
+   "vn_kv": 110.0,
+   "rows": [
+    {
+     "period": 2030,
+     "verdict": "solved",
+     "planned_mw": 45.17342675697032,
+     "hour": 0,
+     "pf": 0.9690344688608972,
+     "e_pu": 1.0,
+     "nose_mw": 721.953125,
+     "nose_is_lower_bound": false,
+     "margin_mw": 676.7796982430297,
+     "margin_pct": 1498.1810033674317,
+     "nose_below_planned": false,
+     "q_margin_mvar": 486.45489251613617,
+     "qmin_at_sweep_edge": true,
+     "v_poc_pu": 0.9917151255777488,
+     "sk_min_mva": 2000.0,
+     "rx_min": 0.1,
+     "c": 1.0,
+     "vn_kv": 110.0,
+     "basis": "screening; binding answer is the RMS study",
+     "note": "planned load 45.17 MW: the largest converged PCC import (hour 0) binds; probe power factor 0.969 lagging, from hour 0; E = 1.0 pu: no converged PCC voltage of the period is lower",
+     "engine_note": null
+    }
+   ]
+  },
+  "dips_restart": null
+ },
+ "stale": false,
+ "grid_code_changed": false,
+ "hub_cost": {
+  "basis": "single_period",
+  "per_period": null,
+  "total": 16404.24589
+ },
+ "hub_cost_reason": null,
+ "milp": {
+  "status": null,
+  "results": null,
+  "stale": false
+ },
+ "run_in_progress": false,
+ "run_job": null
+}

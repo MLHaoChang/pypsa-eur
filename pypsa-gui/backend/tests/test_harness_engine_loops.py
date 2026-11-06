@@ -50,7 +50,7 @@ from tests.test_harness_run_loops import (  # noqa: F401
     stopped,
 )
 from tests.test_harness_run_skeleton import site, start  # noqa: F401
-from tests.test_harness_runner import detached, settle, task_path  # noqa: F401
+from tests.test_harness_runner import detached, fake_report_provider, settle, task_path  # noqa: F401
 
 FACT = "adequacy.loop.converged"
 STUDY = {"run_margin_loop": "margin_loop", "run_coupling_loop": "coupling_loop"}
@@ -571,6 +571,7 @@ def test_restore_final_runs_when_the_grant_covers_it(granted, ok, loops, monkeyp
         runs=[
             {"tool": "solve_queue_enqueue"},
             {"tool": "run_margin_loop", "restore": "final"},
+            {"tool": "generate_report"},  # issue 07: the stage-7 card, as eh_site@1
         ],
     )
     task, path, _ = granted()
@@ -590,6 +591,7 @@ def test_a_final_hold_joins_the_chain_with_a_ledger_row_naming_the_engine_rule(
         runs=[
             {"tool": "solve_queue_enqueue"},
             {"tool": "run_margin_loop", "restore": "final"},
+            {"tool": "generate_report"},  # issue 07: the stage-7 card, as eh_site@1
         ],
     )
     loops.finish_with(status="met", lever_star=0.2, solves_used=2, probe_solves=1)
@@ -616,6 +618,7 @@ def test_a_user_edit_while_the_loop_runs_settles_not_applied(
         runs=[
             {"tool": "solve_queue_enqueue"},
             {"tool": "run_margin_loop", "restore": "final"},
+            {"tool": "generate_report"},  # issue 07: the stage-7 card, as eh_site@1
         ],
     )
     loops.hold()
@@ -1182,6 +1185,7 @@ def test_a_user_edit_after_the_loops_own_hold_settles_not_applied(
         runs=[
             {"tool": "solve_queue_enqueue"},
             {"tool": "run_margin_loop", "restore": "final"},
+            {"tool": "generate_report"},  # issue 07: the stage-7 card, as eh_site@1
         ],
     )
     loops.hold()
@@ -1252,6 +1256,26 @@ def test_a_model_turn_never_starts_an_engine_loop_under_the_grant(
     assert not loops.calls
 
 
+def test_a_model_turn_never_starts_the_report_under_a_grant_that_lists_it(
+    granted, ok, monkeypatch, seeded_identity
+):
+    """Study harness 07 (B1-b): a grant whose `runs` lists the report covers
+    the stage-7 card only, never a chat `generate_report`.
+    Mutant: drop the REPORT_TOOLS refusal in `run_envelope._refusal`."""
+    with_rules(
+        monkeypatch,
+        runs=[{"tool": "solve_queue_enqueue"}, {"tool": "generate_report"}],
+    )
+    task, path, _ = granted()
+    assert not run_envelope.covers(path, "generate_report")
+    from services import chat_tools
+
+    chat_tools.set_acting_user(seeded_identity["user_id"])
+    with on_run(task, path) as run:
+        assert ask(run, "generate_report", {}) is None
+    assert run_envelope.last_refusal(path) == "unlisted_tool"
+
+
 # ── C8: identity after a restart ────────────────────────────────────────────
 
 
@@ -1292,6 +1316,7 @@ def test_the_held_settings_old_value_is_read_before_the_loop_starts(
         runs=[
             {"tool": "solve_queue_enqueue"},
             {"tool": "run_margin_loop", "restore": "final"},
+            {"tool": "generate_report"},  # issue 07: the stage-7 card, as eh_site@1
         ],
     )
     before = ctx().solver_state["solver_config"].reserve_margin

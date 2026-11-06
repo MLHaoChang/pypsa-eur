@@ -21,7 +21,7 @@ from tests.test_assistant_tasks_study_brief import (  # noqa: F401
 )
 from tests.test_harness_envelope import BLOCK, envelope_of, granted, on_run, profile  # noqa: F401
 from tests.test_harness_run_skeleton import site, start  # noqa: F401
-from tests.test_harness_runner import detached, frames_of, settle, task_path  # noqa: F401
+from tests.test_harness_runner import detached, fake_report_provider, frames_of, settle, task_path  # noqa: F401
 
 SHAPE = {"kind": "load_generator", "archetype": "industrial", "year": 2023, "energy": "fixture_energy"}
 WEATHER = {"kind": "weather_choices", "choices": [{"source": "synthetic", "year": 2023}]}

@@ -8,7 +8,8 @@ the same lazy-column machinery (`services/adequacy/eh_columns.py`): a project th
 column. Kinds are those of `eh_columns`: "bool", "float_nonneg", "tier" (one of CRITICALITY_TIERS or ""),
 "process_role" (one of PROCESS_GENERATOR_ROLES or ""), "text", "harmonic_source" (one of HARMONIC_SOURCES or "")
 "harmonic_spectrum" (order:% pairs, checked by gridspine's harmonic screen), "fraction" (0..1), "start_method"
-(one of START_METHODS or "") and "float_signed" (finite, any sign). Heat and steam levels (issue 15): a Bus's `temperature_c`
+(one of START_METHODS or ""), "ride_through_curve" (pairs of dip depth % and duration s, written
+depth:duration, checked by gridspine's ride-through screen) and "float_signed" (finite, any sign). Heat and steam levels (issue 15): a Bus's `temperature_c`
 or `pressure_bar` (barg) and a Link's reach, `max_supply_temp_c` or `max_pressure_bar`; validation and display
 only, the LP never reads them.
 """
@@ -45,7 +46,8 @@ PROCESS_CUSTOM_COLUMNS: dict[str, dict[str, str]] = {
              "spectrum_post_filter": "bool", "flicker_step_mva": "float_nonneg",
              "flicker_changes_per_min": "float_nonneg",
              "single_phase_share": "fraction", "motor_kw": "float_nonneg", "start_method": "start_method",
-             "i_start_pu": "float_nonneg", "max_supply_temp_c": "float_signed", "max_pressure_bar": "float_nonneg"},
+             "i_start_pu": "float_nonneg", "ride_through_curve": "ride_through_curve",
+             "restart_time_h": "float_nonneg", "max_supply_temp_c": "float_signed", "max_pressure_bar": "float_nonneg"},
 }
 
 

@@ -27,6 +27,12 @@ const OUT = path.resolve(process.argv[2] || path.join(frontend, '..', '..', '.sc
 const SCHEMAS = JSON.parse(await fs.readFile(path.join(frontend, 'src', 'test', 'fixtures', 'assetSchema.json'), 'utf8'))
 const PROJECT = 'Live speech shots'
 const THREAD = { thread_id: 't-shot', generation: 1 }
+// LC-07c: the fixed server messages (backend live_speech.py), served by the GET /speech route mock.
+const NOTICE_KINDS = [
+  ['echo_ignored', 'That matched the answer being read out, so it was not used. Type it, or say it again after playback.'],
+  ['clarify', 'I heard two different numbers. Which value did you mean?'],
+  ['not_an_approval', 'Speech does not approve changes. Use Confirm on the card.'],
+]
 
 async function ensureStub() {
   const up = await fetch('http://127.0.0.1:8000/api/health').then(r => r.ok).catch(() => false)
@@ -40,6 +46,7 @@ await fs.mkdir(OUT, { recursive: true })
 const stub = await ensureStub()
 const browser = await chromium.launch()
 const problems = [], written = []
+let notices = []
 try {
   for (const mode of ['guided', 'expert']) for (const variant of ['on', 'off', 'no-link']) {
     const flagOn = variant !== 'off'
@@ -80,7 +87,7 @@ try {
       if (p === '/api/simulation/queue') return ok({ jobs: [], running: [], paused: false })
       if (p === '/api/projects/' || p === '/api/projects') return ok([{ name: PROJECT, bus_count: 2, snapshot_count: 24, has_results: false, created_at: '2026-01-01T00:00:00Z', is_root: true, parent: null }])
       if (p === '/api/durable-conversations' && m === 'POST') return ok(THREAD)
-      if (p.endsWith('/speech') && m === 'GET') return flagOn ? ok({ generation: 1, session: null })
+      if (p.endsWith('/speech') && m === 'GET') return flagOn ? ok({ generation: 1, session: null, notices })
         : r.fulfill({ status: 503, json: { detail: { error_kind: 'speech_disabled', message: 'Continuous speech is not enabled on this server. Type your message instead.' } } })
       if (p.endsWith('/speech/start')) return ok({ session: { session_id: 'sp-shot', state: 'open', expires_at: new Date(Date.now() + 600_000).toISOString() },
         generation: 1, media: { url: 'wss://media.invalid/room', token: 'shot-token', expires_at: Date.now() / 1000 + 300 }, reconcile: [] })
@@ -174,6 +181,18 @@ try {
       await inside('companion-voice-toggle')
       await inside('companion-live-composer')
       await shot('2-listening')
+    })
+    // LC-07c: each notice kind in the caption (warning tone), then the line after it clears.
+    await step('2n-notices', async () => {
+      let seq = 0
+      for (const [status, message] of NOTICE_KINDS) {
+        notices = [{ status, message, seq: ++seq, generation: 1 }]
+        await page.getByTestId('companion-live-caption').filter({ hasText: message }).waitFor({ timeout: 6000 })
+        await inside('companion-live-composer')
+        await shot(`2n-${status}`)
+      }
+      await page.getByTestId('companion-live-caption').filter({ hasText: 'Listening' }).waitFor({ timeout: 12000 })
+      await shot('2c-notice-cleared')
     })
     await step('3-stopped-hidden', async () => {
       await page.evaluate(() => {

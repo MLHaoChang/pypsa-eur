@@ -141,6 +141,18 @@
       "value": "150 MVA (SCR about 6 against 25 MW)"
     },
     {
+      "item": "mill motor and start",
+      "note": "the line's largest motor, for the motor-start screen: direct on line it fails the 3 % limit on 150 MVA, a variable-speed drive passes; the maker's data govern",
+      "source": "demo",
+      "value": "6,000 kW per mill line, DOL start"
+    },
+    {
+      "item": "mill restart time and ride-through curve",
+      "note": "for the dip and restart screens only (the LP reads min down time): the curve is of the order of a contactor-fed drive with no ride-through support; the unit's tested curve governs. The crusher and flotation carry none, so they read unknown",
+      "source": "demo",
+      "value": "4 h to full rate; curve 15:1, 30:0.2, 50:0.05 (depth %:duration s)"
+    },
+    {
       "item": "PV, BESS candidates",
       "note": "defaults pack 2026-10-26; per period, PV up to 40 MW, BESS up to 20 MW \u00d7 4 h",
       "source": "sourced",

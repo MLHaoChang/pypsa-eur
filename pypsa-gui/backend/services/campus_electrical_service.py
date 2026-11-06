@@ -100,10 +100,13 @@ from services.gridspine_service import CAPACITY_EXPANSION, kind_of
 # instead of 500ing three frames down.
 try:
     from gridspine.drivers import campus_study as cs
+    from gridspine.drivers import process_chain
     from gridspine.drivers.campus_study import SizingCriteria
     from gridspine.schema.contracts import ContractError
     from gridspine.static import harmonic_scan as hs
     from gridspine.static import parallel
+    from gridspine.static import restart_sequence as rs
+    from gridspine.static import ride_through as rt
     from gridspine.static.parallel import Stopped
 
     CAMPUS_AVAILABLE = True
@@ -111,7 +114,7 @@ try:
 except ImportError as exc:                      # pragma: no cover - build-shape branch
     CAMPUS_AVAILABLE = False
     CAMPUS_IMPORT_ERROR = str(exc)
-    cs = SizingCriteria = parallel = hs = None
+    cs = SizingCriteria = parallel = hs = process_chain = rs = rt = None
 
     class ContractError(Exception):
         """Stand-in so the `except ContractError` clauses below still parse."""
@@ -137,6 +140,13 @@ HARMONIC_SCAN_META = "campus_harmonic_scan.json"
 HARMONIC_SCAN_ERROR = "harmonic_scan_error.json"
 VOLTAGE_STABILITY_META = "campus_voltage_stability.json"
 VOLTAGE_STABILITY_ERROR = "voltage_stability_error.json"
+#: The dip and restart screens (grid-to-process issue 12b): each process unit's restart, ride-through and motor
+#: inputs as the run read them, so a field changed since marks that unit out of date; or, when the screens could
+#: not run, why.
+DIPS_RESTART_META = "campus_dips_restart.json"
+DIPS_RESTART_ERROR = "dips_restart_error.json"
+#: The unit fields whose change since the run makes that unit's rows out of date (UX on 12b-3).
+DIPS_RESTART_FIELDS = ("ride_through_curve", "restart_time_h", "motor_kw", "start_method", "i_start_pu")
 SOLVER_CONFIG_FILE = "solver_config.json"
 MAX_CAMPUS_BYTES = 1_000_000
 MAX_LIBRARY_BYTES = 1_000_000
@@ -320,6 +330,96 @@ def _voltage_stability(run: Path, profile: str, profile_dirs) -> None:
     (run / VOLTAGE_STABILITY_META).write_text(json.dumps(summary))
 
 
+def _dips_restart_inputs(n) -> dict:
+    """``{unit: {field: value as stored, or None}}`` over ``DIPS_RESTART_FIELDS``, for every process unit of
+    ``n`` (``process_chain.restart_units``)."""
+    units = process_chain.restart_units(n)
+    return {str(r["unit"]): {f: _plain(r[f]) for f in DIPS_RESTART_FIELDS} for _, r in units.iterrows()}
+
+
+def _plain(v):
+    if v is None or (isinstance(v, float) and not math.isfinite(v)):
+        return None
+    try:
+        if pd.isna(v):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return v.item() if hasattr(v, "item") else v
+
+
+def _dips_restart(run: Path, profile: str, profile_dirs, nc: Path) -> None:
+    """The dip-to-trips and restart screens of the prepared run in ``run`` (grid-to-process issue 12b,
+    ``campus_study.restart_campus``), with the units' inputs as read in ``DIPS_RESTART_META``. A screen beside
+    the sizing, as the harmonic scan: its failure never fails the run, the reason goes to
+    ``DIPS_RESTART_ERROR`` and no screen file stays."""
+    import pypsa
+
+    files = (cs.DIP_TRIPS_CSV, cs.RESTART_CSV, DIPS_RESTART_META, DIPS_RESTART_ERROR)
+
+    def clear():
+        for name in files:
+            (run / name).unlink(missing_ok=True)
+
+    clear()
+    try:
+        # The inputs first: restart_campus then refuses a network changed since the run was prepared, so an
+        # edit landing between the two fails the screens instead of recording new inputs beside old rows.
+        with _netcdf_lock():
+            n = pypsa.Network(str(nc))
+        inputs = _dips_restart_inputs(n)
+        cs.restart_campus(run, profile, profile_dirs)
+    except Exception as exc:  # noqa: BLE001 - a screen failure is shown with the results, never a failed run
+        if not isinstance(exc, ContractError):
+            logger.exception("campus run: the dip and restart screens failed in %s", run)
+        clear()
+        (run / DIPS_RESTART_ERROR).write_text(json.dumps({"error": str(exc) or type(exc).__name__}))
+        return
+    meta = {"inputs": inputs, "dip_label": rt.LABEL, "restart_label": rs.LABEL,
+            "basis": [*rt.LEDGER, *rs.LEDGER, *cs.RESTART_LEDGER]}
+    (run / DIPS_RESTART_META).write_text(json.dumps(meta))
+
+
+def _dips_restart_results(run: Path) -> dict | None:
+    """The screens for ``get_state``: ``{error}`` when they could not run, else the meta with the rows of
+    ``campus_dip_trips.csv`` (``dip_trips``) and ``campus_restart.csv`` (``restart``); None for a run from
+    before they were a stage. ``out_of_date`` is filled by ``get_state``."""
+    error = run / DIPS_RESTART_ERROR
+    if error.is_file():
+        return json.loads(error.read_text())
+    meta = run / DIPS_RESTART_META
+    if not meta.is_file():
+        return None
+    return {**json.loads(meta.read_text()), "dip_trips": _read_csv(run / cs.DIP_TRIPS_CSV) or [],
+            "restart": _read_csv(run / cs.RESTART_CSV) or [], "out_of_date": []}
+
+
+_DIPS_INPUTS_CACHE: dict = {}
+
+
+def _dips_out_of_date(project, d: Path, as_run: dict) -> list[str]:
+    """The process units whose restart, ride-through or motor field differs now from the run's (or that are
+    gone, or new): read from the saved network only when it changed since the run, memoised on its digest."""
+    nc = project_registry.project_dir(project) / NETWORK_FILE
+    if not nc.is_file():
+        return []
+    key = (str(nc), _file_digest(nc))
+    now = _DIPS_INPUTS_CACHE.get(key)
+    if now is None:
+        import pypsa
+
+        try:
+            with _netcdf_lock():
+                n = pypsa.Network(str(nc))
+            now = _dips_restart_inputs(n)
+        except Exception:  # noqa: BLE001 - an unreadable network leaves the whole-run stale banner to say it
+            logger.exception("campus state: could not read the process units of %s", nc)
+            return []
+        _DIPS_INPUTS_CACHE.clear()
+        _DIPS_INPUTS_CACHE[key] = now
+    return sorted(u for u in set(as_run) | set(now) if as_run.get(u) != now.get(u))
+
+
 def _voltage_stability_results(run: Path) -> dict | None:
     """The screen for ``get_state``: ``{error}`` when it could not run, else its
     meta with one row per period; None for a run from before it was a stage."""
@@ -462,6 +562,8 @@ def _results(run: Path):
         "harmonic_scan": _harmonic_scan_results(run),
         # Study harness 18: the P–V/Q–V margin at the PCC (``_voltage_stability_results``).
         "voltage_stability": _voltage_stability_results(run),
+        # Grid-to-process 12b: dips to trips to lost tonnes, and the restart sequence (``_dips_restart_results``).
+        "dips_restart": _dips_restart_results(run),
     }
 
 
@@ -724,6 +826,10 @@ def get_state(project) -> dict:
     cost, reason = hub_cost(project) if results else (None, "no study has run yet")
     method, source = _owner_source(project)
     owner_assets = _owner_assets(method, source)
+    stale = bool(results) and _stale(project, d)
+    dips = (results or {}).get("dips_restart")
+    if stale and dips and "inputs" in dips:
+        dips["out_of_date"] = _dips_out_of_date(project, d, dips["inputs"])
     return {
         "owner_assets_count": len(owner_assets),
         "owner_assets_unresolved": len(_owner_unresolved(source)),
@@ -733,7 +839,7 @@ def get_state(project) -> dict:
         "profiles": profiles(project),
         "settings": json.loads(settings.read_text()) if settings.is_file() else None,
         "results": results,
-        "stale": bool(results) and _stale(project, d),
+        "stale": stale,
         # SCORECARD-STALE-1: the run's grid-code profile was published again with other content since.
         "grid_code_changed": bool(results) and _grid_code_changed(project, d),
         "hub_cost": cost,
@@ -1526,7 +1632,8 @@ def _aborted_on_stop(stage):
 
 #: The run's stages, in order, as its progress names them (the queue log's
 #: ``campus <stage> <done>/<total>`` lines and ``get_state``'s ``run_job``).
-RUN_STAGES = ("prepare", "rank", "island_checks", "cuts", "size", "harmonic_scan", "voltage_stability", "invest")
+RUN_STAGES = ("prepare", "rank", "island_checks", "cuts", "size", "harmonic_scan", "voltage_stability",
+              "dips_restart", "invest")
 
 
 class CampusRunAborted(Exception):
@@ -1637,6 +1744,8 @@ def run(project, settings: dict, *, progress=None, should_stop=None) -> dict:
                 _harmonic_scan(work, s["profile"], profile_dirs)
                 stage("voltage_stability")
                 _voltage_stability(work, s["profile"], profile_dirs)
+                stage("dips_restart")
+                _dips_restart(work, s["profile"], profile_dirs, nc)
             except ContractError as exc:
                 raise _unprocessable(exc)
             _publish_run(work, published)

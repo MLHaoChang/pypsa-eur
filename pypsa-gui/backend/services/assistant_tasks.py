@@ -301,6 +301,49 @@ def _effectful(tool):
     return safety_tier_for(tool) != "read"
 
 
+def _carded(step):
+    """COP-1: a stage pauses at its card before a step that writes or runs.
+    The hand-off's native read-back writes nothing to the project (issue 07);
+    its revert preview is a stored proposal the user applies on a card."""
+    return step.get("native") != "handoff" and _effectful(step["tool"])
+
+
+# The skip reason the generic profile gave the report before issue 07 (§9.2):
+# a record stored before `by` existed was skipped by its profile when it carries it.
+_PROFILE_SKIPS = frozenset({"The run report is not part of a run yet."})
+# The stages an in-flight run picks up from its profile (C8): issue 07's own.
+# Explore stays as the run started it (issue 06 E3: frozen at start).
+_SYNCED_STAGES = ("report", "handoff")
+
+
+def _skipped_by_profile(stored):
+    return stored.get("status") == "skipped" and (
+        stored.get("by") == "profile" or ("by" not in stored and stored.get("reason") in _PROFILE_SKIPS))
+
+
+def _sync_stages(run, profile):
+    """Issue 07 (GK B C8, B1-a): the profile is read by id, so a run started
+    before its profile gained a report or hand-off stage goes on to it
+    (explore stays as started, issue 06 E3). A later stage the stored
+    record lacks, or skipped only because its profile did, becomes pending
+    when the profile now runs it; a stage skipped for any other reason stays
+    skipped, and a stage the run already reached is never reopened. True
+    when the record changed."""
+    from services.run_profiles import STAGES
+    changed = False
+    for name in STAGES[STAGES.index(run["stage"]) + 1:]:
+        if name not in _SYNCED_STAGES:
+            continue
+        stage = profile["stages"][name]
+        stored = run["stages"].get(name)
+        if "skip" in stage:
+            if stored is None:
+                run["stages"][name], changed = {"status": "skipped", "reason": stage["skip"], "by": "profile"}, True
+        elif stored is None or _skipped_by_profile(stored):
+            run["stages"][name], changed = {"status": "pending", "attempts": 0}, True
+    return changed
+
+
 # LC-19 triage reads a failed run step's fix is drafted from. They are offered,
 # never run: the fix is an ordinary edit card and the plan goes on only
 # through resolve_task_step(retry) with its confirmation.
@@ -356,10 +399,12 @@ def _view(task, fresh=False, current=None):
             out["brief_stale"] = "inputs_changed_outside_plan"
     if step and state != "cancelled":
         out["next_step"] = {"id": step["id"], "tool": step["tool"], "status": step["status"]}
+        if step.get("native"):
+            out["next_step"]["native"] = True  # issue 07: the runner runs it; a chat call never claims it
         if step.get("retries", 0) > 0:
             out["next_step"]["retries"] = step["retries"]
         if step["status"] == "waiting":
-            out["next_step"]["job_id"] = step["job"]["job_id"]
+            out["next_step"]["job_id"] = step["job"].get("job_id") or step["job"].get("report_id")
         elif step["status"] != "uncertain":
             try:
                 resolved = _resolve(step["args"], task["steps"])
@@ -537,7 +582,7 @@ def _start_run(session, title, request_id, run, profile, brief, *, origin=None, 
             fingerprint = _fingerprint()
             if fingerprint is None:
                 _refuse("brief_inputs_unreadable", "The project's inputs cannot be read, so the brief cannot be kept current.")
-            stages = {name: {"status": "skipped", "reason": stage["skip"]} if "skip" in stage else
+            stages = {name: {"status": "skipped", "reason": stage["skip"], "by": "profile"} if "skip" in stage else
                       {"status": "pending", "attempts": 0} for name, stage in profile["stages"].items()}
             task = {"version": 3, "task_id": task_id, "owner_id": owner, "project_id": project,
                     "title": title.strip(), "status": "ready", "steps": [], "brief": brief, "fingerprint": fingerprint,
@@ -653,7 +698,7 @@ def _inputs_moved(task, current):
     gate = (run["stages"].get("input_gate") or {}).get("gate")
     pending = [s for s in task["steps"] if s["id"].startswith(stage + ".") and s["status"] == "pending"]
     return (stage != "input_gate" and run["stages"].get("input_gate", {}).get("status") == "passed"
-            and gate is not None and any(_effectful(s["tool"]) for s in pending) and gate["fingerprint"] != current)
+            and gate is not None and any(_carded(s) for s in pending) and gate["fingerprint"] != current)
 
 
 def _back_to_input_gate(task):
@@ -702,6 +747,8 @@ def _advance_run(path, ctx=None):
             if str(ctx.project_uuid) != task["project_id"] or not _may_write(task):
                 return  # another project's context, or no edit right: the view shows the gate as due
             profile = run_profiles.resolve(run["profile"])
+            if _sync_stages(run, profile):
+                _save(path, task)
             name = run["stage"]
             stage = run["stages"][name]
             if stage["status"] == "pending":
@@ -716,7 +763,7 @@ def _advance_run(path, ctx=None):
                                                            start=start + len(planned))
                 stage.update(status="active", entered_at=_now())
                 task["steps"].extend(steps)
-                if any(_effectful(s["tool"]) for s in steps):
+                if any(_carded(s) for s in steps):
                     # COP-1: the plan pauses before each stage that writes or runs.
                     task["status"], task["pause"] = "paused_at_card", {"card": name, "after": None}
                 _save(path, task)
@@ -1046,6 +1093,12 @@ def resolve_task_step(task_id: str, outcome: str, result: dict | None = None) ->
     return _view(task, fresh=True)
 
 
+def _job_ref(job):
+    """The id a waiting step's job is known by: a queue or solve job's
+    `job_id`, a run's report job's `report_id` (issue 07)."""
+    return job.get("job_id") or job.get("report_id") or "?"
+
+
 def _native_evidence(path, task, step):
     """(found, result) for a failed or uncertain step, from native records only."""
     if "late_receipt" in step:
@@ -1058,6 +1111,19 @@ def _native_evidence(path, task, step):
             return False, None  # no verdict now; the user can reconcile again
         return (True, {"job_id": step["job"]["job_id"], "final_status": "completed", **result}) \
             if status == "completed" else (False, None)
+    if (step.get("job") or {}).get("kind") == "report":
+        # Issue 07 (GK B): only the run's own report job that ended `done` and
+        # whose document reads back; a failed, refused or lost one never.
+        from harness import run_report
+        job = step["job"]
+        if job.get("outcome") != "done":
+            return False, None
+        try:
+            from services.reports import store
+            store.load_report(path.parent.parent, job["report_id"], job.get("version"))
+        except Exception:  # noqa: BLE001 — an unreadable report is no evidence (C3)
+            return False, None
+        return True, {"kind": run_report.KIND, "report_id": job["report_id"], "version": job.get("version")}
     if step.get("job"):
         from services import run_evidence
         job_id = step["job"]["job_id"]
@@ -1106,7 +1172,7 @@ def admit(session, tool, args):
                 continue
             if later is step and step["status"] == "waiting":
                 raise HTTPException(409, {"error_kind": "task_step_waiting", "message":
-                                          f"Step {step['id']} is waiting on job {step['job']['job_id']}; "
+                                          f"Step {step['id']} is waiting on job {_job_ref(step['job'])}; "
                                           "the conversation continues when it ends."})
             if later is not step:
                 raise HTTPException(409, {"error_kind": "task_step_out_of_order", "message":
@@ -1175,7 +1241,7 @@ def settle_job(path, ticket, job_id, native_status, step_status, result=None):
             return None
         step = next((s for s in task["steps"] if s["id"] == ticket[1]), None)
         if (task.get("task_id") != ticket[0] or step is None or step.get("attempt_id") != ticket[2]
-                or step["status"] != "waiting" or step["job"]["job_id"] != job_id):
+                or step["status"] != "waiting" or step["job"].get("job_id") != job_id):
             return None
         _settle(task, step, native_status, step_status, result)
         _save(Path(path), task)
@@ -1233,8 +1299,10 @@ def _reconcile_lost(path, task):
     from harness import job_adapters
     changed = False
     for step in task["steps"]:
-        if step["status"] != "waiting" or step["job"].get("kind") == "engine":
-            continue  # an engine step: the runner's recover reads its loop's own record (issue 05 PR C)
+        if step["status"] != "waiting" or step["job"].get("kind") in ("engine", "report"):
+            # An engine step: the runner's recover reads its loop's own record (issue 05 PR C);
+            # a run's report job: the runner settles it from its job record (issue 07).
+            continue
         if step["job"].get("kind") == "queue":
             # Followed by a thread of this process, or lost with a restart (SC-09).
             # A cancelled plan's job runs on and is reported as it is (SC-13).
@@ -1339,6 +1407,8 @@ def begin_step(session, tool, args):
             session.task_id = None
             return None
         step = _next(task)
+        if step is not None and step.get("native"):
+            return None  # issue 07: the runner's own step; a chat call is an unrelated one (GK B stage-7 ruling)
         expected = _resolve(step["args"], task["steps"]) if step and step["tool"] == tool else None
         if step is None or step["tool"] != tool or not _same_args(tool, expected, args):  # a run at a failed gate has none
             # Discovery and unrelated reads remain useful while a task is paused.

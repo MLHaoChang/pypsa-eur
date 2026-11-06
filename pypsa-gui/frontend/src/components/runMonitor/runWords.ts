@@ -38,6 +38,9 @@ export const FACT_WORDS: Record<string, string> = {
   'adequacy.loop.converged': 'The plan meets the reliability goal',
   'explore.unsettled': 'Every what-if case has a result',
   'explore.study.status': 'The decision study finished',
+  'report.status': 'The report is saved',
+  'report.unsupported_listed': 'The report names every chapter it cannot back up',
+  'handoff.kpis_read': 'Every headline result was read back from the model',
 }
 
 /** The unit a counted gate fact is read in, when the rule sends none,
@@ -82,6 +85,7 @@ export const FIELD_WORDS: Record<string, { words: string; unit: string }> = {
 /** The runs an envelope can cover. */
 export const RUN_WORDS: Record<string, string> = {
   solve_queue_enqueue: 'Queued solves', run_simulation: 'Solves', run_ac_pf_stage: 'Load-flow checks',
+  generate_report: 'Study reports',
 }
 
 const number = (x: number) => (Number.isInteger(x) ? String(x) : x.toFixed(2).replace(/\.?0+$/, ''))
